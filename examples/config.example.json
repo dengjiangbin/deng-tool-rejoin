@@ -1,0 +1,23 @@
+{
+  "agent_version": "1.0.0",
+  "auto_rejoin_enabled": false,
+  "android_release": "13",
+  "android_sdk": "33",
+  "backoff_max_seconds": 300,
+  "backoff_min_seconds": 10,
+  "created_at": "2026-01-01T00:00:00+00:00",
+  "device_name": "termux-android",
+  "download_dir": "/sdcard/Download",
+  "foreground_grace_seconds": 30,
+  "health_check_interval_seconds": 30,
+  "launch_mode": "app",
+  "launch_url": "",
+  "log_level": "INFO",
+  "max_fast_failures": 3,
+  "reconnect_delay_seconds": 8,
+  "roblox_package": "com.roblox.client",
+  "root_available": false,
+  "root_mode_enabled": false,
+  "termux_boot_enabled": false,
+  "updated_at": "2026-01-01T00:00:00+00:00"
+}
