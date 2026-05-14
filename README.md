@@ -70,7 +70,7 @@ deng-rejoin-reset
 
 Setup is a guided Termux menu, not a raw JSON editor. First-time setup walks through Roblox packages, Roblox public/private link, optional Discord webhook, optional snapshot, webhook interval, safe post-launch action, auto resize/window layout, and Save And Start.
 
-The Roblox Package screen scans Android for Roblox-related packages, marks `com.roblox.client` as recommended when found, lets you choose detected packages, and also supports manual package entry for app clones.
+The Roblox Package screen scans Android for Roblox-related packages, marks `com.roblox.client` as recommended when found, lets you choose detected packages, and also supports manual package entry for app clones. It also uses configurable detection hints such as `roblox`, `rblx`, `blox`, and `moons`, so clone packages like `com.moons.*` can be found even when the package name does not contain `roblox`.
 
 Advanced direct commands:
 

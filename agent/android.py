@@ -11,9 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from .config import is_valid_package_name, validate_package_name
+from .config import ConfigError, is_valid_package_name, normalize_package_detection_hint, validate_package_name
 from .constants import (
     DEFAULT_ROBLOX_PACKAGE,
+    DEFAULT_ROBLOX_PACKAGE_HINTS,
     PROCESS_TIMEOUT_SECONDS,
     ROOT_TIMEOUT_SECONDS,
 )
@@ -141,10 +142,27 @@ def list_packages() -> list[str]:
     return sorted(set(packages))
 
 
-def find_roblox_packages() -> list[str]:
+def _safe_detection_hints(hints: Iterable[str] | None = None) -> list[str]:
+    source = hints or DEFAULT_ROBLOX_PACKAGE_HINTS
+    validated: list[str] = []
+    for hint in source:
+        try:
+            cleaned = normalize_package_detection_hint(str(hint))
+        except ConfigError:
+            continue
+        if cleaned not in validated:
+            validated.append(cleaned)
+    return validated or list(DEFAULT_ROBLOX_PACKAGE_HINTS)
+
+
+def find_roblox_packages(hints: Iterable[str] | None = None) -> list[str]:
     packages = list_packages()
-    found = [pkg for pkg in packages if "roblox" in pkg.lower()]
-    if DEFAULT_ROBLOX_PACKAGE in packages and DEFAULT_ROBLOX_PACKAGE not in found:
+    detection_hints = _safe_detection_hints(hints)
+    found = [pkg for pkg in packages if any(hint in pkg.lower() for hint in detection_hints)]
+    if DEFAULT_ROBLOX_PACKAGE in found:
+        found.remove(DEFAULT_ROBLOX_PACKAGE)
+        found.insert(0, DEFAULT_ROBLOX_PACKAGE)
+    elif DEFAULT_ROBLOX_PACKAGE in packages:
         found.insert(0, DEFAULT_ROBLOX_PACKAGE)
     return found
 

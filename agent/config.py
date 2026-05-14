@@ -23,6 +23,7 @@ from .constants import (
     DEFAULT_MAX_FAST_FAILURES,
     DEFAULT_RECONNECT_DELAY_SECONDS,
     DEFAULT_ROBLOX_PACKAGE,
+    DEFAULT_ROBLOX_PACKAGE_HINTS,
     LAUNCH_MODES,
     MAX_BACKOFF_SECONDS,
     MIN_BACKOFF_SECONDS,
@@ -65,6 +66,7 @@ def default_config() -> dict[str, Any]:
         "agent_version": VERSION,
         "roblox_package": DEFAULT_ROBLOX_PACKAGE,
         "roblox_packages": [DEFAULT_ROBLOX_PACKAGE],
+        "package_detection_hints": list(DEFAULT_ROBLOX_PACKAGE_HINTS),
         "selected_package_mode": "single",
         "launch_mode": "app",
         "launch_url": "",
@@ -132,6 +134,35 @@ def validate_package_names(package_names: list[str] | tuple[str, ...]) -> list[s
     return validated
 
 
+def normalize_package_detection_hint(value: str) -> str:
+    """Normalize a safe package-name fragment used for clone detection."""
+    cleaned = str(value or "").strip().lower()
+    if cleaned.startswith("package:"):
+        cleaned = cleaned[len("package:") :].strip()
+    cleaned = cleaned.rstrip("*").strip()
+    cleaned = cleaned.strip()
+    if not re.fullmatch(r"[a-z0-9_.]{2,64}", cleaned or ""):
+        raise ConfigError("package detection hints may only use letters, numbers, underscores, and dots")
+    if len(cleaned.replace(".", "").replace("_", "")) < 2:
+        raise ConfigError("package detection hints must include at least two letters or numbers")
+    return cleaned
+
+
+def validate_package_detection_hints(hints: Any) -> list[str]:
+    if hints is None or hints == "":
+        hints = DEFAULT_ROBLOX_PACKAGE_HINTS
+    if not isinstance(hints, (list, tuple)):
+        raise ConfigError("package_detection_hints must be a list of safe package fragments")
+    validated: list[str] = []
+    for hint in hints:
+        cleaned = normalize_package_detection_hint(str(hint))
+        if cleaned not in validated:
+            validated.append(cleaned)
+    if not validated:
+        validated = list(DEFAULT_ROBLOX_PACKAGE_HINTS)
+    return validated
+
+
 def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -173,6 +204,7 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     if len(merged["roblox_packages"]) > 1:
         selected_package_mode = "multiple"
     merged["selected_package_mode"] = selected_package_mode
+    merged["package_detection_hints"] = validate_package_detection_hints(merged.get("package_detection_hints"))
 
     launch_mode = str(merged.get("launch_mode", "app")).strip().lower()
     if launch_mode not in LAUNCH_MODES:

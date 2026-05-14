@@ -25,9 +25,11 @@ Choose **Setup / Edit Config** to change one section later without redoing every
 
 ## Roblox Package Setup
 
-The package screen automatically scans Android for Roblox-related packages.
+The package screen automatically scans Android for Roblox-related packages. It uses safe package-name hints such as `roblox`, `rblx`, `blox`, and `moons`, so cloned packages like `com.moons.*` can be detected even when the package name does not contain `roblox`.
 
 If packages are found, DENG shows them in a numbered list and marks `com.roblox.client` as recommended. Choose one or more packages to use them, including cloned packages.
+
+If your clone uses another prefix, open **Detection hints for cloned package names** and add a safe fragment from the package name. For example, add `moons` for `com.moons.myroblox` or `com.moons.` for a whole prefix.
 
 You can also choose **Enter package name manually**. Manual package names are validated and must look like a normal Android package, for example:
 
@@ -35,7 +37,7 @@ You can also choose **Enter package name manually**. Manual package names are va
 com.roblox.client
 ```
 
-If no package is detected, install Roblox, reopen DENG, and rescan. Some cloud-phone builds use regional package names, so manual entry remains available.
+If no package is detected, install Roblox, add a clone detection hint, reopen DENG, and rescan. Android package names do not always reveal the original app identity, so manual entry remains available for unusual clone tools.
 
 ## Discord Webhook
 

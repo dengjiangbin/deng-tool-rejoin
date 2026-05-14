@@ -1,6 +1,6 @@
 import unittest
 
-from agent.config import ConfigError, default_config, is_valid_package_name, validate_config
+from agent.config import ConfigError, default_config, is_valid_package_name, normalize_package_detection_hint, validate_config
 
 
 class ConfigTests(unittest.TestCase):
@@ -56,6 +56,7 @@ class ConfigTests(unittest.TestCase):
         validated = validate_config(cfg)
         self.assertEqual(validated["selected_package_mode"], "multiple")
         self.assertEqual(len(validated["roblox_packages"]), 2)
+        self.assertIn("moons", validated["package_detection_hints"])
 
     def test_rejects_invalid_multiple_package_name(self):
         cfg = default_config()
@@ -74,6 +75,13 @@ class ConfigTests(unittest.TestCase):
         cfg["webhook_interval_seconds"] = 10
         with self.assertRaises(ConfigError):
             validate_config(cfg)
+
+    def test_package_detection_hint_validation(self):
+        cfg = default_config()
+        cfg["package_detection_hints"] = ["com.moons.*", "Roblox", "bad;rm"]
+        with self.assertRaises(ConfigError):
+            validate_config(cfg)
+        self.assertEqual(normalize_package_detection_hint("com.moons.*"), "com.moons.")
 
 
 if __name__ == "__main__":

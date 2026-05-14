@@ -18,6 +18,12 @@
   "last_layout_preview": [],
   "log_level": "INFO",
   "max_fast_failures": 3,
+  "package_detection_hints": [
+    "roblox",
+    "rblx",
+    "blox",
+    "moons"
+  ],
   "post_launch_action": "none",
   "reconnect_delay_seconds": 8,
   "roblox_package": "com.roblox.client",

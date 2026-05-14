@@ -15,11 +15,23 @@ from typing import Any
 
 from . import android, db
 from .banner import print_banner
-from .config import ConfigError, default_config, ensure_app_dirs, load_config, safe_config_view, save_config, validate_config, validate_package_name
+from .config import (
+    ConfigError,
+    default_config,
+    ensure_app_dirs,
+    load_config,
+    normalize_package_detection_hint,
+    safe_config_view,
+    save_config,
+    validate_config,
+    validate_package_detection_hints,
+    validate_package_name,
+)
 from .constants import (
     CONFIG_PATH,
     DB_PATH,
     DEFAULT_ROBLOX_PACKAGE,
+    DEFAULT_ROBLOX_PACKAGE_HINTS,
     GITHUB_REMOTE,
     LOCK_PATH,
     LOG_PATH,
@@ -124,6 +136,25 @@ def _package_list_label(packages: list[str]) -> str:
     return ", ".join(packages) if packages else "Not set"
 
 
+def _hint_list_label(hints: list[str]) -> str:
+    return ", ".join(hints) if hints else "Default"
+
+
+def _safe_detection_hints(config_data: dict[str, Any] | None = None) -> list[str]:
+    source = None
+    if config_data:
+        source = config_data.get("package_detection_hints")
+    if source is None:
+        try:
+            source = load_config().get("package_detection_hints")
+        except ConfigError:
+            source = DEFAULT_ROBLOX_PACKAGE_HINTS
+    try:
+        return validate_package_detection_hints(source)
+    except ConfigError:
+        return list(DEFAULT_ROBLOX_PACKAGE_HINTS)
+
+
 def _safe_url_label(value: str | None) -> str:
     if not value:
         return "Not set"
@@ -147,6 +178,7 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print()
     print("Roblox")
     print(f"  Packages: {_package_list_label(cfg['roblox_packages'])}")
+    print(f"  Detection hints: {_hint_list_label(cfg['package_detection_hints'])}")
     print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
     print(f"  Launch URL: {_safe_url_label(cfg['launch_url'])}")
     print(f"  Post-launch action: {_post_launch_action_label(cfg['post_launch_action'])}")
@@ -185,8 +217,8 @@ def _choose_package() -> str:
     return _choose_package_menu(DEFAULT_ROBLOX_PACKAGE)
 
 
-def _ordered_roblox_packages() -> list[str]:
-    packages = android.find_roblox_packages()
+def _ordered_roblox_packages(package_detection_hints: list[str] | None = None) -> list[str]:
+    packages = android.find_roblox_packages(package_detection_hints or _safe_detection_hints())
     ordered: list[str] = []
     if DEFAULT_ROBLOX_PACKAGE in packages:
         ordered.append(DEFAULT_ROBLOX_PACKAGE)
@@ -209,8 +241,9 @@ def _prompt_manual_package(default: str = DEFAULT_ROBLOX_PACKAGE) -> str | None:
             print("That does not look like a safe Android package name. Use a format like com.roblox.client.")
 
 
-def _choose_package_menu(current_package: str = DEFAULT_ROBLOX_PACKAGE) -> str:
-    packages = _ordered_roblox_packages()
+def _choose_package_menu(current_package: str = DEFAULT_ROBLOX_PACKAGE, package_detection_hints: list[str] | None = None) -> str:
+    hints = _safe_detection_hints({"package_detection_hints": package_detection_hints})
+    packages = _ordered_roblox_packages(hints)
     if not _is_interactive():
         if DEFAULT_ROBLOX_PACKAGE in packages:
             return DEFAULT_ROBLOX_PACKAGE
@@ -221,8 +254,9 @@ def _choose_package_menu(current_package: str = DEFAULT_ROBLOX_PACKAGE) -> str:
         print("--------------------------------")
         print("Roblox Package Setup")
         print("--------------------------------")
-        packages = _ordered_roblox_packages()
+        packages = _ordered_roblox_packages(hints)
         if packages:
+            print(f"Detection hints: {_hint_list_label(hints)}")
             print("Detected packages:")
             for idx, package in enumerate(packages, start=1):
                 marker = " (Recommended)" if package == DEFAULT_ROBLOX_PACKAGE else ""
@@ -230,7 +264,8 @@ def _choose_package_menu(current_package: str = DEFAULT_ROBLOX_PACKAGE) -> str:
                 print(f"{idx}. {package}{marker}{selected}")
         else:
             print("No Roblox package was detected yet.")
-            print("You can enter the package manually now, or install Roblox and rescan later.")
+            print(f"Current detection hints: {_hint_list_label(hints)}")
+            print("You can enter the package manually now, add a clone hint like moons, or install Roblox and rescan later.")
         print()
         print("M. Enter package name manually")
         print("R. Rescan packages")
@@ -253,10 +288,14 @@ def _choose_package_menu(current_package: str = DEFAULT_ROBLOX_PACKAGE) -> str:
         print("Please choose a package number, M, R, or 0.")
 
 
-def _choose_packages_menu(current_packages: list[str] | None = None) -> list[str]:
+def _choose_packages_menu(
+    current_packages: list[str] | None = None,
+    package_detection_hints: list[str] | None = None,
+) -> tuple[list[str], list[str]]:
     selected = list(current_packages or [DEFAULT_ROBLOX_PACKAGE])
+    hints = _safe_detection_hints({"package_detection_hints": package_detection_hints})
     if not _is_interactive():
-        return selected
+        return selected, hints
 
     while True:
         print()
@@ -266,16 +305,19 @@ def _choose_packages_menu(current_packages: list[str] | None = None) -> list[str
         print("1. Auto-detect Roblox packages")
         print("2. Enter package manually")
         print("3. View selected packages")
+        print("H. Detection hints for cloned package names")
         print("0. Back")
         choice = _prompt("Choose option", "1").strip().lower()
         if choice == "0":
-            return selected
+            return selected, hints
         if choice == "1":
-            detected = _ordered_roblox_packages()
+            detected = _ordered_roblox_packages(hints)
             print()
+            print(f"Detection hints: {_hint_list_label(hints)}")
             if not detected:
                 print("No Roblox package was detected yet.")
-                print("You can enter package names manually now, or install Roblox and rescan later.")
+                print("If your clone uses names like com.moons.*, add the detection hint moons.")
+                print("You can also enter package names manually now, or install Roblox and rescan later.")
                 continue
             print("Detected packages:")
             for idx, package in enumerate(detected, start=1):
@@ -316,8 +358,31 @@ def _choose_packages_menu(current_packages: list[str] | None = None) -> list[str
             print("Selected packages:")
             for idx, package in enumerate(selected, start=1):
                 print(f"  {idx}. {package}")
+        elif choice == "h":
+            print()
+            print("Detection Hints")
+            print("Hints are safe package-name fragments used only for local package scanning.")
+            print(f"Current hints: {_hint_list_label(hints)}")
+            print("Example for com.moons.* clones: moons")
+            print("Example for a prefix: com.moons.")
+            print("1. Add hint")
+            print("2. Reset to defaults")
+            print("0. Back")
+            hint_choice = _prompt("Choose option", "1").strip().lower()
+            if hint_choice == "1":
+                raw_hint = _prompt("Detection hint", "moons").strip()
+                try:
+                    hint = normalize_package_detection_hint(raw_hint)
+                    if hint not in hints:
+                        hints.append(hint)
+                    print(f"Detection hint saved for this setup: {hint}")
+                except ConfigError as exc:
+                    print(f"That hint is not safe: {exc}")
+            elif hint_choice == "2":
+                hints = list(DEFAULT_ROBLOX_PACKAGE_HINTS)
+                print("Detection hints reset to defaults.")
         else:
-            print("Please choose 1, 2, 3, or 0.")
+            print("Please choose 1, 2, 3, H, or 0.")
 
 
 def _choose_launch_settings() -> tuple[str, str]:
@@ -552,7 +617,12 @@ def _run_guided_config_menu(config_data: dict[str, Any], args: argparse.Namespac
             print("Give this phone/cloud-phone a simple name for status screens.")
             draft["device_name"] = _prompt("Device name", str(draft.get("device_name") or "Termux Android")).strip() or "Termux Android"
         elif choice == "2":
-            draft["roblox_package"] = _choose_package_menu(str(draft.get("roblox_package") or DEFAULT_ROBLOX_PACKAGE))
+            draft["roblox_package"] = _choose_package_menu(
+                str(draft.get("roblox_package") or DEFAULT_ROBLOX_PACKAGE),
+                list(draft.get("package_detection_hints") or DEFAULT_ROBLOX_PACKAGE_HINTS),
+            )
+            draft["roblox_packages"] = [draft["roblox_package"]]
+            draft["selected_package_mode"] = "single"
         elif choice == "3":
             draft["launch_mode"] = _choose_launch_mode(str(draft.get("launch_mode") or "app"))
             if draft["launch_mode"] == "app":
@@ -613,7 +683,12 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     print("This wizard sets the important first-run options in a safe order.")
     print()
     print("Step 1 of 8: Roblox Package Setup")
-    draft["roblox_packages"] = _choose_packages_menu(list(draft.get("roblox_packages") or [draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE)]))
+    packages, hints = _choose_packages_menu(
+        list(draft.get("roblox_packages") or [draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE)]),
+        list(draft.get("package_detection_hints") or DEFAULT_ROBLOX_PACKAGE_HINTS),
+    )
+    draft["roblox_packages"] = packages
+    draft["package_detection_hints"] = hints
     draft["roblox_package"] = draft["roblox_packages"][0]
     draft["selected_package_mode"] = "multiple" if len(draft["roblox_packages"]) > 1 else "single"
     print("\nStep 2 of 8: Roblox Public / Private Server Link")
@@ -690,7 +765,12 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
             print("No changes saved.")
             return None, False
         if choice == "1":
-            draft["roblox_packages"] = _choose_packages_menu(list(draft.get("roblox_packages") or [draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE)]))
+            packages, hints = _choose_packages_menu(
+                list(draft.get("roblox_packages") or [draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE)]),
+                list(draft.get("package_detection_hints") or DEFAULT_ROBLOX_PACKAGE_HINTS),
+            )
+            draft["roblox_packages"] = packages
+            draft["package_detection_hints"] = hints
             draft["roblox_package"] = draft["roblox_packages"][0]
             draft["selected_package_mode"] = "multiple" if len(draft["roblox_packages"]) > 1 else "single"
         elif choice == "2":
@@ -842,6 +922,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print()
     print("Roblox")
     print(f"  Selected packages: {_package_list_label(cfg['roblox_packages'])}")
+    print(f"  Detection hints: {_hint_list_label(cfg['package_detection_hints'])}")
     print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
     print(f"  Launch URL: {_safe_url_label(cfg.get('launch_url'))}")
     print()

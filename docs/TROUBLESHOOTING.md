@@ -8,7 +8,9 @@ python agent/deng_tool_rejoin.py --doctor
 
 ## Roblox Package Not Detected
 
-Install the official Roblox Android app, then run setup again. If your cloud phone uses a regional package name, set it manually:
+Install the official Roblox Android app, then run setup again. DENG detects package names that match safe hints such as `roblox`, `rblx`, `blox`, and `moons`, including clones like `com.moons.*`.
+
+If your clone uses a different prefix, open Roblox Package Setup, choose **Detection hints for cloned package names**, add a safe fragment from the package name, then rescan. You can also set the package manually:
 
 ```sh
 python agent/deng_tool_rejoin.py --config
