@@ -40,8 +40,9 @@ SLASH_GROUP       = "license_panel"
 SLASH_SET_CHANNEL = "set_channel"
 SLASH_POST        = "post"
 SLASH_REFRESH     = "refresh"
-SLASH_STATUS      = "status"
-SLASH_CLEAR       = "clear"
+SLASH_STATUS        = "status"
+SLASH_CLEAR         = "clear"
+SLASH_ADMIN_STATUS  = "admin_status"
 
 
 # ── Panel embed builder ────────────────────────────────────────────────────────
@@ -347,6 +348,13 @@ def get_slash_command_specs() -> list[dict[str, Any]]:
             "group": SLASH_GROUP,
             "name": SLASH_CLEAR,
             "description": "Remove the saved panel config without deleting the message.",
+            "owner_only": True,
+            "options": [],
+        },
+        {
+            "group": SLASH_GROUP,
+            "name": SLASH_ADMIN_STATUS,
+            "description": "Show panel config and store stats (owner only).",
             "owner_only": True,
             "options": [],
         },

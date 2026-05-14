@@ -5,6 +5,10 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Secrets — never commit
+.env
+*.env.local
+
 config.json
 data/
 logs/

@@ -416,5 +416,102 @@ class TestSecurity(unittest.IsolatedAsyncioTestCase):
         self.assertIn("DENG-", desc)
 
 
+# ── Admin status command ──────────────────────────────────────────────────────
+
+class TestAdminStatusCommand(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.store = _make_store(self._tmp.name)
+        self.bot = _fake_bot()
+
+    async def asyncTearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _make_cog(self) -> "LicensePanelCog":
+        return LicensePanelCog(self.bot, self.store)
+
+    def _get_admin_status_cmd(self, cog: "LicensePanelCog"):
+        return next(
+            c for c in cog._panel_group.commands if c.name == "admin_status"
+        )
+
+    async def test_admin_status_registered(self) -> None:
+        cog = self._make_cog()
+        names = [c.name for c in cog._panel_group.commands]
+        self.assertIn("admin_status", names)
+
+    async def test_admin_status_owner_only(self) -> None:
+        """Non-owner should get owner-denied embed."""
+        cog = self._make_cog()
+        cmd = self._get_admin_status_cmd(cog)
+        with patch.dict(os.environ, {"LICENSE_OWNER_DISCORD_IDS": "999"}):
+            inter = _fake_interaction(user=_fake_user(uid=111))  # not 999
+            await cmd.callback(inter)
+        inter.response.send_message.assert_called_once()
+        _, kwargs = inter.response.send_message.call_args
+        embed = kwargs.get("embed")
+        self.assertIsNotNone(embed)
+        self.assertIn("Unauthorized", embed.title)
+        self.assertTrue(kwargs.get("ephemeral"))
+
+    async def test_admin_status_shows_store_info(self) -> None:
+        """Owner should see store backend and user/key counts."""
+        # Create some data
+        self.store.get_or_create_user("111")
+        self.store.create_key_for_user("111")
+
+        cog = self._make_cog()
+        cmd = self._get_admin_status_cmd(cog)
+
+        with patch.dict(os.environ, {"LICENSE_OWNER_DISCORD_IDS": "555"}):
+            inter = _fake_interaction(user=_fake_user(uid=555))
+            # Patch guild.get_channel to return None (no real channel)
+            inter.guild.get_channel = MagicMock(return_value=None)
+            await cmd.callback(inter)
+
+        inter.response.defer.assert_called_once_with(ephemeral=True)
+        inter.followup.send.assert_called_once()
+        _, kwargs = inter.followup.send.call_args
+        embed = kwargs["embed"]
+        self.assertIn("Admin Status", embed.title)
+        # Check store field is present
+        field_names = [f.name for f in embed.fields]
+        self.assertIn("License Store", field_names)
+        self.assertTrue(kwargs.get("ephemeral"))
+
+    async def test_admin_status_shows_panel_config_when_set(self) -> None:
+        """When panel config exists, embed should show it."""
+        self.store.save_panel_config("12345", "9999", "8888", "555")
+
+        cog = self._make_cog()
+        cmd = self._get_admin_status_cmd(cog)
+
+        with patch.dict(os.environ, {"LICENSE_OWNER_DISCORD_IDS": "555"}):
+            inter = _fake_interaction(user=_fake_user(uid=555), guild_id=12345)
+            inter.guild.get_channel = MagicMock(return_value=None)
+            await cmd.callback(inter)
+
+        _, kwargs = inter.followup.send.call_args
+        embed = kwargs["embed"]
+        panel_field = next(f for f in embed.fields if f.name == "Panel Config")
+        self.assertIn("9999", panel_field.value)  # channel ID
+        self.assertIn("8888", panel_field.value)  # message ID
+
+    async def test_admin_status_no_panel_config(self) -> None:
+        """Without panel config, a helpful message is shown."""
+        cog = self._make_cog()
+        cmd = self._get_admin_status_cmd(cog)
+
+        with patch.dict(os.environ, {"LICENSE_OWNER_DISCORD_IDS": "555"}):
+            inter = _fake_interaction(user=_fake_user(uid=555), guild_id=99999)
+            inter.guild.get_channel = MagicMock(return_value=None)
+            await cmd.callback(inter)
+
+        _, kwargs = inter.followup.send.call_args
+        embed = kwargs["embed"]
+        panel_field = next(f for f in embed.fields if f.name == "Panel Config")
+        self.assertIn("no panel configured", panel_field.value)
+
+
 if __name__ == "__main__":
     unittest.main()

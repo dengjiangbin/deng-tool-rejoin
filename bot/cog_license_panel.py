@@ -2,11 +2,12 @@
 
 Slash commands
 --------------
-  /license_panel set_channel  — owner-only; sets channel for the panel embed
-  /license_panel post         — owner-only; posts the embed + buttons
-  /license_panel refresh      — owner-only; edits the embed in-place
-  /license_panel status       — any user; shows own key status (ephemeral)
-  /license_panel clear        — owner-only; clears saved panel config
+  /license_panel set_channel   — owner-only; sets channel for the panel embed
+  /license_panel post          — owner-only; posts the embed + buttons
+  /license_panel refresh       — owner-only; edits the embed in-place
+  /license_panel status        — any user; shows own key status (ephemeral)
+  /license_panel clear         — owner-only; clears saved panel config
+  /license_panel admin_status  — owner-only; shows panel config + store stats
 
 Button handlers
 ---------------
@@ -488,6 +489,92 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                 "Run `/license_panel set_channel` + `/license_panel post` to recreate.",
                 ephemeral=True,
             )
+
+        # /license_panel admin_status ────────────────────────────────────────
+
+        @self._panel_group.command(
+            name="admin_status",
+            description="Show panel config and store stats (owner only).",
+        )
+        async def cmd_admin_status(interaction: discord.Interaction) -> None:
+            if not _is_owner(interaction.user):
+                await interaction.response.send_message(
+                    embed=self._owner_denied(), ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+
+            guild_id = str(interaction.guild_id)
+            cfg = store.get_panel_config(guild_id)
+
+            # ── Panel config section ──
+            if cfg:
+                ch_id = cfg.get("channel_id", "—")
+                msg_id = cfg.get("message_id", "—")
+                updated_by = cfg.get("updated_by", "—")
+                updated_at = cfg.get("updated_at", "—")
+
+                # Verify message still reachable
+                msg_exists = "unknown"
+                if ch_id and msg_id and ch_id != "—" and msg_id != "—":
+                    try:
+                        ch = interaction.guild.get_channel(int(ch_id))
+                        if ch and isinstance(ch, discord.TextChannel):
+                            try:
+                                await ch.fetch_message(int(msg_id))
+                                msg_exists = "✅ reachable"
+                            except discord.NotFound:
+                                msg_exists = "❌ deleted"
+                            except discord.Forbidden:
+                                msg_exists = "⚠️ no access"
+                        else:
+                            msg_exists = "❌ channel not found"
+                    except (ValueError, TypeError):
+                        msg_exists = "⚠️ bad ID"
+
+                panel_lines = (
+                    f"**Channel:** <#{ch_id}> (`{ch_id}`)\n"
+                    f"**Message ID:** `{msg_id}`\n"
+                    f"**Message:** {msg_exists}\n"
+                    f"**Set by:** `{updated_by}`\n"
+                    f"**Updated:** `{updated_at}`"
+                )
+            else:
+                panel_lines = "*(no panel configured — run `/license_panel set_channel`)*"
+
+            # ── Store stats section ──
+            store_type = type(store).__name__
+            try:
+                db = store._load()  # type: ignore[attr-defined]
+                total_users = len(db.get("users", {}))
+                all_keys = db.get("keys", {})
+                active_keys = sum(
+                    1 for k in all_keys.values() if k.get("status") == "active"
+                )
+                total_keys = len(all_keys)
+                audit_entries = len(db.get("audit_logs", []))
+                store_path = str(store._path)  # type: ignore[attr-defined]
+                store_lines = (
+                    f"**Backend:** `{store_type}`\n"
+                    f"**File:** `{store_path}`\n"
+                    f"**Users:** {total_users}\n"
+                    f"**Keys (active / total):** {active_keys} / {total_keys}\n"
+                    f"**Audit log entries:** {audit_entries}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                store_lines = f"**Backend:** `{store_type}`\n⚠️ Could not read store: {exc}"
+
+            embed = discord.Embed(
+                title="🛠️ License Panel — Admin Status",
+                color=0x2F80ED,
+                timestamp=datetime.now(timezone.utc),
+            )
+            embed.add_field(name="Panel Config", value=panel_lines, inline=False)
+            embed.add_field(name="License Store", value=store_lines, inline=False)
+            embed.set_footer(text=f"Guild: {guild_id}")
+
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ── Persistent view restoration ───────────────────────────────────────────
 
