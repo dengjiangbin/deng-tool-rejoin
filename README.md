@@ -26,7 +26,7 @@ wget -O install.sh https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejo
 deng-rejoin
 ```
 
-5. Choose **Setup / Edit Config**.
+5. Choose **Setup or Change Settings**.
 6. Choose **One-Time Rejoin Test**.
 
 ## What To Prepare
@@ -50,7 +50,7 @@ deng-rejoin
 
 Menu options:
 
-- Setup / Edit Config
+- Setup or Change Settings
 - Start Auto Rejoin
 - Stop Auto Rejoin
 - One-Time Rejoin Test
@@ -72,6 +72,12 @@ deng-rejoin-logs
 deng-rejoin-update
 deng-rejoin-reset
 ```
+
+## Setup Experience
+
+Setup is a guided Termux menu, not a raw JSON editor. It shows friendly settings such as Device Name, Roblox Package, Launch Mode, Launch URL / Private Server URL, Auto Rejoin, Reconnect Delay, Root Mode, and Health Check Interval.
+
+The Roblox Package screen scans Android for Roblox-related packages, marks `com.roblox.client` as recommended when found, lets you choose a detected package by number, and also supports manual package entry.
 
 Advanced direct commands:
 

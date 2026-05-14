@@ -15,7 +15,7 @@ from typing import Any
 
 from . import android, db
 from .banner import print_banner
-from .config import ConfigError, default_config, ensure_app_dirs, load_config, safe_config_view, save_config, validate_config
+from .config import ConfigError, default_config, ensure_app_dirs, load_config, safe_config_view, save_config, validate_config, validate_package_name
 from .constants import (
     CONFIG_PATH,
     DB_PATH,
@@ -96,21 +96,141 @@ def _print_json(data: dict[str, Any]) -> None:
     print(json.dumps(data, indent=2, sort_keys=True))
 
 
+def _yes_no(value: bool) -> str:
+    return "Enabled" if value else "Disabled"
+
+
+def _launch_mode_label(value: str) -> str:
+    return {
+        "app": "Open Roblox app only",
+        "deeplink": "Roblox deep link",
+        "web_url": "Roblox web/private-server URL",
+    }.get(value, value)
+
+
+def _safe_url_label(value: str | None) -> str:
+    if not value:
+        return "Not set"
+    return safe_config_view({"launch_url": value}).get("launch_url") or "Not set"
+
+
+def _refresh_detected_fields(config_data: dict[str, Any]) -> dict[str, Any]:
+    config_data["root_available"] = android.detect_root().available
+    config_data["android_release"] = get_android_release()
+    config_data["android_sdk"] = get_android_sdk()
+    config_data["download_dir"] = detect_public_download_dir()
+    return config_data
+
+
+def _print_config_summary(config_data: dict[str, Any]) -> None:
+    cfg = safe_config_view(validate_config(config_data))
+    print("Device")
+    print(f"  Device name: {cfg['device_name']}")
+    print(f"  Android: {cfg['android_release']} (SDK {cfg['android_sdk']})")
+    print(f"  Download folder: {cfg['download_dir'] or 'Not detected'}")
+    print()
+    print("Roblox")
+    print(f"  Package: {cfg['roblox_package']}")
+    print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
+    print(f"  Launch URL: {_safe_url_label(cfg['launch_url'])}")
+    print()
+    print("Rejoin Settings")
+    print(f"  Auto rejoin: {_yes_no(cfg['auto_rejoin_enabled'])}")
+    print(f"  Reconnect delay: {cfg['reconnect_delay_seconds']} seconds")
+    print(f"  Health check interval: {cfg['health_check_interval_seconds']} seconds")
+    print(f"  Foreground grace: {cfg['foreground_grace_seconds']} seconds")
+    print(f"  Root mode: {_yes_no(cfg['root_mode_enabled'])}")
+
+
+def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejoin Setup") -> None:
+    cfg = safe_config_view(validate_config(config_data))
+    print("--------------------------------")
+    print(title)
+    print("--------------------------------")
+    print(f"1. Device Name: {cfg['device_name']}")
+    print(f"2. Roblox Package: {cfg['roblox_package']}")
+    print(f"3. Launch Mode: {_launch_mode_label(cfg['launch_mode'])}")
+    print(f"4. Launch URL / Private Server URL: {_safe_url_label(cfg['launch_url'])}")
+    print(f"5. Auto Rejoin: {_yes_no(cfg['auto_rejoin_enabled'])}")
+    print(f"6. Reconnect Delay: {cfg['reconnect_delay_seconds']} seconds")
+    print(f"7. Root Mode: {_yes_no(cfg['root_mode_enabled'])}")
+    print(f"8. Health Check Interval: {cfg['health_check_interval_seconds']} seconds")
+    print("9. Save and Finish")
+    print("A. Advanced Info")
+    print("0. Cancel")
+    print("--------------------------------")
+
+
 def _choose_package() -> str:
+    return _choose_package_menu(DEFAULT_ROBLOX_PACKAGE)
+
+
+def _ordered_roblox_packages() -> list[str]:
     packages = android.find_roblox_packages()
+    ordered: list[str] = []
     if DEFAULT_ROBLOX_PACKAGE in packages:
-        return DEFAULT_ROBLOX_PACKAGE
+        ordered.append(DEFAULT_ROBLOX_PACKAGE)
+    for package in packages:
+        if package not in ordered:
+            ordered.append(package)
+    return ordered
+
+
+def _prompt_manual_package(default: str = DEFAULT_ROBLOX_PACKAGE) -> str | None:
+    print("\nEnter Roblox package name")
+    print("Example: com.roblox.client")
+    while True:
+        value = _prompt("Package name", default).strip()
+        if not value:
+            return None
+        try:
+            return validate_package_name(value)
+        except ConfigError:
+            print("That does not look like a safe Android package name. Use a format like com.roblox.client.")
+
+
+def _choose_package_menu(current_package: str = DEFAULT_ROBLOX_PACKAGE) -> str:
+    packages = _ordered_roblox_packages()
     if not _is_interactive():
-        return packages[0] if packages else DEFAULT_ROBLOX_PACKAGE
-    if packages:
-        print("Detected Roblox-like packages:")
-        for idx, package in enumerate(packages, start=1):
-            print(f"  {idx}. {package}")
-        choice = _prompt("Choose package number or enter package name", "1")
-        if choice.isdigit() and 1 <= int(choice) <= len(packages):
-            return packages[int(choice) - 1]
-        return choice
-    return _prompt("Roblox package was not auto-detected. Enter package name", DEFAULT_ROBLOX_PACKAGE)
+        if DEFAULT_ROBLOX_PACKAGE in packages:
+            return DEFAULT_ROBLOX_PACKAGE
+        return packages[0] if packages else current_package
+
+    while True:
+        print()
+        print("--------------------------------")
+        print("Roblox Package Setup")
+        print("--------------------------------")
+        packages = _ordered_roblox_packages()
+        if packages:
+            print("Detected packages:")
+            for idx, package in enumerate(packages, start=1):
+                marker = " (Recommended)" if package == DEFAULT_ROBLOX_PACKAGE else ""
+                selected = " [Current]" if package == current_package else ""
+                print(f"{idx}. {package}{marker}{selected}")
+        else:
+            print("No Roblox package was detected yet.")
+            print("You can enter the package manually now, or install Roblox and rescan later.")
+        print()
+        print("M. Enter package name manually")
+        print("R. Rescan packages")
+        print("0. Back")
+        choice = _prompt("Choose package", "1" if packages else "M").strip().lower()
+        if choice == "0":
+            return current_package
+        if choice == "r":
+            print("Rescanning Android packages...")
+            continue
+        if choice == "m":
+            manual = _prompt_manual_package(current_package or DEFAULT_ROBLOX_PACKAGE)
+            if manual:
+                return manual
+            continue
+        if choice.isdigit() and packages:
+            index = int(choice)
+            if 1 <= index <= len(packages):
+                return packages[index - 1]
+        print("Please choose a package number, M, R, or 0.")
 
 
 def _choose_launch_settings() -> tuple[str, str]:
@@ -146,6 +266,43 @@ def _choose_launch_settings() -> tuple[str, str]:
                 print(f"Invalid URL: {exc}")
 
 
+def _choose_launch_mode(current_mode: str) -> str:
+    if not _is_interactive():
+        return current_mode
+    print()
+    print("Launch Mode")
+    print("1. Open Roblox app only")
+    print("2. Roblox deep link")
+    print("3. Roblox web/private-server URL")
+    while True:
+        choice = _prompt("Choose launch mode", {"app": "1", "deeplink": "2", "web_url": "3"}.get(current_mode, "1"))
+        mode = {"1": "app", "2": "deeplink", "3": "web_url"}.get(choice, choice.strip().lower())
+        if mode in {"app", "deeplink", "web_url"}:
+            return mode
+        print("Choose 1, 2, or 3.")
+
+
+def _prompt_launch_url(current_url: str, launch_mode: str) -> str:
+    if launch_mode == "app":
+        print("App-only mode does not need a URL. DENG will open Roblox normally.")
+        return ""
+    print()
+    print("Paste a Roblox link.")
+    if launch_mode == "deeplink":
+        print("Example: roblox://experiences/start?placeId=123")
+    else:
+        print("Example: https://www.roblox.com/games/123/name?privateServerLinkCode=...")
+    while True:
+        value = _prompt("Launch URL", current_url).strip()
+        try:
+            result = validate_launch_url(value, launch_mode, allow_uncertain=True)
+            if result.warning:
+                print(f"Note: {result.warning}")
+            return value
+        except UrlValidationError as exc:
+            print(f"That URL cannot be used yet: {exc}")
+
+
 def _write_termux_boot_script() -> None:
     TERMUX_BOOT_SCRIPT.parent.mkdir(parents=True, exist_ok=True)
     script = """#!/data/data/com.termux/files/usr/bin/sh
@@ -158,58 +315,105 @@ sh scripts/start-agent.sh >> "$APP_HOME/logs/agent.log" 2>&1
     TERMUX_BOOT_SCRIPT.chmod(0o755)
 
 
+def _run_guided_config_menu(config_data: dict[str, Any], args: argparse.Namespace, *, title: str) -> tuple[dict[str, Any] | None, bool]:
+    """Edit config through a public-friendly menu.
+
+    Returns `(config, saved)`; `config is None` means the user cancelled.
+    """
+    draft = _refresh_detected_fields(dict(config_data))
+    if not _is_interactive():
+        _print_setup_menu(draft, title=title)
+        print("\nCurrent settings:")
+        _print_config_summary(draft)
+        print("\nRun this command in an interactive Termux session to edit settings.")
+        return draft, False
+
+    while True:
+        print_banner(use_color=not args.no_color)
+        if "Setup" in title:
+            print("Welcome. This setup uses simple choices; you do not need to edit code or JSON.")
+            print()
+        _print_setup_menu(draft, title=title)
+        try:
+            choice = input("Choose an option [9]: ").strip().lower() or "9"
+        except EOFError:
+            print("\nNo interactive input was available. Run this command in Termux to edit settings.")
+            print("\nCurrent settings:")
+            _print_config_summary(draft)
+            return draft, False
+        if choice == "0":
+            print("Setup cancelled. No changes were saved.")
+            return None, False
+        if choice == "1":
+            print("Give this phone/cloud-phone a simple name for status screens.")
+            draft["device_name"] = _prompt("Device name", str(draft.get("device_name") or "Termux Android")).strip() or "Termux Android"
+        elif choice == "2":
+            draft["roblox_package"] = _choose_package_menu(str(draft.get("roblox_package") or DEFAULT_ROBLOX_PACKAGE))
+        elif choice == "3":
+            draft["launch_mode"] = _choose_launch_mode(str(draft.get("launch_mode") or "app"))
+            if draft["launch_mode"] == "app":
+                draft["launch_url"] = ""
+        elif choice == "4":
+            draft["launch_url"] = _prompt_launch_url(str(draft.get("launch_url") or ""), str(draft.get("launch_mode") or "app"))
+        elif choice == "5":
+            print("Auto rejoin lets DENG watch Roblox locally and relaunch when it appears closed or unhealthy.")
+            draft["auto_rejoin_enabled"] = _prompt_yes_no("Enable auto rejoin?", bool(draft.get("auto_rejoin_enabled")))
+        elif choice == "6":
+            print("Reconnect delay is how long DENG waits after closing Roblox before reopening it.")
+            draft["reconnect_delay_seconds"] = _prompt_int("Reconnect delay (seconds)", int(draft["reconnect_delay_seconds"]), 5)
+        elif choice == "7":
+            root_info = android.detect_root()
+            draft["root_available"] = root_info.available
+            print("Root is optional.")
+            print("With root, DENG can force-close Roblox before reopening it.")
+            print("Without root, DENG can still open Roblox, but restart power is limited.")
+            if root_info.available:
+                print(f"Root detected via {root_info.tool}.")
+            else:
+                print("Root was not detected or permission was not granted.")
+            draft["root_mode_enabled"] = _prompt_yes_no("Use root mode if available?", bool(draft.get("root_mode_enabled")) and root_info.available)
+        elif choice == "8":
+            print("Health check interval controls how often the auto-rejoin supervisor checks Roblox.")
+            draft["health_check_interval_seconds"] = _prompt_int("Health check interval (seconds)", int(draft["health_check_interval_seconds"]), 10)
+        elif choice == "9":
+            try:
+                saved = save_config(draft)
+            except ConfigError as exc:
+                print(f"Config could not be saved: {exc}")
+                input("Press Enter to continue...")
+                continue
+            print("\nSettings saved.")
+            _print_config_summary(saved)
+            return saved, True
+        elif choice == "a":
+            print("\nAdvanced Info")
+            _print_json(safe_config_view(draft))
+            input("\nPress Enter to return to setup...")
+        else:
+            print("Please choose 1-9, A, or 0.")
+            input("Press Enter to continue...")
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
-    print_banner(use_color=not args.no_color)
     ensure_app_dirs()
     db.init_db(DB_PATH)
 
-    print("Preparing local Termux agent directories...")
-    print(f"App directory: {CONFIG_PATH.parent}")
-    print(f"Android release: {get_android_release()}")
-    print(f"Android SDK: {get_android_sdk()}")
-    print(f"Termux detected: {str(android.is_termux()).lower()}")
-    print(f"Storage permission: {str(android.has_storage_permission()).lower()}")
-    print(f"Download directory: {detect_public_download_dir() or 'not detected'}")
-
-    root_info = android.detect_root()
-    print(f"Root availability: {'available via ' + str(root_info.tool) if root_info.available else root_info.detail}")
-    termux_boot_detected = android.package_installed("com.termux.boot")
-    print(f"Termux:Boot detected: {str(termux_boot_detected).lower()}")
-
-    cfg = default_config()
-    cfg["roblox_package"] = _choose_package()
-    cfg["root_available"] = root_info.available
-    cfg["android_release"] = get_android_release()
-    cfg["android_sdk"] = get_android_sdk()
-    cfg["download_dir"] = detect_public_download_dir()
-
-    launch_mode, launch_url = _choose_launch_settings()
-    cfg["launch_mode"] = launch_mode
-    cfg["launch_url"] = launch_url
-
-    if _is_interactive():
-        cfg["reconnect_delay_seconds"] = _prompt_int("Reconnect delay seconds", cfg["reconnect_delay_seconds"], 5)
-        cfg["health_check_interval_seconds"] = _prompt_int("Health check interval seconds", cfg["health_check_interval_seconds"], 10)
-        cfg["auto_rejoin_enabled"] = _prompt_yes_no("Enable auto rejoin supervisor", False)
-        if root_info.available:
-            cfg["root_mode_enabled"] = _prompt_yes_no("Enable root mode for safe force-stop before launch", True)
-        if cfg["auto_rejoin_enabled"]:
-            cfg["termux_boot_enabled"] = _prompt_yes_no("Prepare Termux:Boot startup script", termux_boot_detected)
-    else:
-        print("Non-interactive setup detected; using safe defaults.")
-
     try:
-        saved = save_config(cfg)
-    except ConfigError as exc:
-        print(f"Setup failed: {exc}")
-        return 2
+        cfg = load_config()
+    except ConfigError:
+        cfg = default_config()
+    saved, did_save = _run_guided_config_menu(cfg, args, title="DENG Tool: Rejoin Setup")
+    if saved is None:
+        return 0
+    if not did_save:
+        return 0
 
     if saved.get("termux_boot_enabled"):
         try:
             _write_termux_boot_script()
             print(f"Termux:Boot script created: {TERMUX_BOOT_SCRIPT}")
-            if not termux_boot_detected:
-                print("Termux:Boot app was not detected. Install Termux:Boot, then Android will run this script after boot.")
+            if not android.package_installed("com.termux.boot"):
+                print("Termux:Boot app was not detected. Install Termux:Boot, open it once, then Android will run this script after boot.")
         except OSError as exc:
             print(f"Warning: could not create Termux:Boot script: {exc}")
 
@@ -249,11 +453,27 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def _print_latest(label: str, row: dict[str, Any] | None) -> None:
     if not row:
-        print(f"{label}: none")
+        print(f"  {label}: none")
         return
-    safe = {key: mask_urls_in_text(str(value)) if value is not None else None for key, value in row.items()}
-    print(f"{label}:")
-    _print_json(safe)
+    ts = row.get("ts", "unknown time")
+    if "status" in row:
+        print(f"  {label}: {row.get('status')} at {ts}")
+        return
+    if "success" in row:
+        result = "success" if row.get("success") else "failed"
+        package = row.get("package", "unknown package")
+        mode = _launch_mode_label(str(row.get("launch_mode", "")))
+        url = _safe_url_label(str(row.get("masked_launch_url") or ""))
+        print(f"  {label}: {result} at {ts}")
+        print(f"    Package: {package}")
+        print(f"    Launch mode: {mode}")
+        if url != "Not set":
+            print(f"    URL: {url}")
+        if row.get("error"):
+            print(f"    Error: {mask_urls_in_text(str(row.get('error')))}")
+        return
+    message = row.get("message") or row.get("type") or "event"
+    print(f"  {label}: {mask_urls_in_text(str(message))} at {ts}")
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -270,23 +490,36 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     manager = LockManager()
     running = manager.is_running()
-    print(f"Agent running: {str(running).lower()}")
-    print(f"Roblox package: {cfg['roblox_package']}")
-    print(f"Auto rejoin: {'enabled' if cfg['auto_rejoin_enabled'] else 'disabled'}")
-    print(f"Root available: {str(root_info.available).lower()} ({root_info.tool or 'no tool'})")
-    print(f"Android release: {platform_info.android_release}")
-    print(f"Android SDK: {platform_info.android_sdk}")
-    print(f"Download directory: {platform_info.download_dir or 'not detected'}")
-    print("\nConfig:")
-    _print_json(safe)
-
+    print("Device")
+    print(f"  Name: {safe['device_name']}")
+    print(f"  Install path: {CONFIG_PATH.parent}")
+    print()
+    print("Android")
+    print(f"  Release: {platform_info.android_release}")
+    print(f"  SDK: {platform_info.android_sdk}")
+    print(f"  Download folder: {platform_info.download_dir or 'Not detected'}")
+    print(f"  Root available: {'Yes' if root_info.available else 'No'} ({root_info.tool or 'no tool'})")
+    print()
+    print("Roblox")
+    print(f"  Package: {cfg['roblox_package']}")
+    print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
+    print(f"  Launch URL: {_safe_url_label(cfg.get('launch_url'))}")
+    print()
+    print("Rejoin Settings")
+    print(f"  Auto rejoin: {_yes_no(cfg['auto_rejoin_enabled'])}")
+    print(f"  Reconnect delay: {cfg['reconnect_delay_seconds']} seconds")
+    print(f"  Health check interval: {cfg['health_check_interval_seconds']} seconds")
+    print(f"  Root mode: {_yes_no(cfg['root_mode_enabled'])}")
+    print()
+    print("Runtime State")
+    print(f"  Agent running: {'Yes' if running else 'No'}")
     _print_latest("Latest heartbeat", db.latest_row("heartbeats"))
     _print_latest("Latest rejoin attempt", db.latest_row("rejoin_attempts"))
     latest_event = db.latest_row("events")
     if latest_event and latest_event.get("level") == "ERROR":
         _print_latest("Latest error", latest_event)
     else:
-        print("Latest error: none")
+        print("  Latest error: none")
     return 0
 
 
@@ -348,35 +581,10 @@ def cmd_reset(args: argparse.Namespace) -> int:
 
 
 def cmd_config(args: argparse.Namespace) -> int:
-    print_banner(use_color=not args.no_color)
     cfg = load_config()
-    print("Current safe config:")
-    _print_json(safe_config_view(cfg))
-    if not _is_interactive():
+    saved, _did_save = _run_guided_config_menu(cfg, args, title="DENG Tool: Rejoin Settings")
+    if saved is None:
         return 0
-
-    if not _prompt_yes_no("Edit config", False):
-        return 0
-
-    editable = dict(cfg)
-    editable["roblox_package"] = _prompt("Roblox package", editable["roblox_package"])
-    launch_mode, launch_url = _choose_launch_settings()
-    editable["launch_mode"] = launch_mode
-    editable["launch_url"] = launch_url
-    editable["reconnect_delay_seconds"] = _prompt_int("Reconnect delay seconds", editable["reconnect_delay_seconds"], 5)
-    editable["health_check_interval_seconds"] = _prompt_int("Health check interval seconds", editable["health_check_interval_seconds"], 10)
-    editable["foreground_grace_seconds"] = _prompt_int("Foreground grace seconds", editable["foreground_grace_seconds"], 10)
-    editable["auto_rejoin_enabled"] = _prompt_yes_no("Enable auto rejoin", editable["auto_rejoin_enabled"])
-    root_info = android.detect_root()
-    editable["root_available"] = root_info.available
-    editable["root_mode_enabled"] = _prompt_yes_no("Enable root mode", editable["root_mode_enabled"] and root_info.available)
-    try:
-        saved = save_config(editable)
-    except ConfigError as exc:
-        print(f"Config not saved: {exc}")
-        return 2
-    print("Config saved:")
-    _print_json(safe_config_view(saved))
     return 0
 
 
@@ -401,7 +609,7 @@ def cmd_logs(args: argparse.Namespace) -> int:
 
 
 def cmd_version(args: argparse.Namespace) -> int:
-    print(f"{PRODUCT_NAME} v{VERSION}")
+    print_banner(use_color=not args.no_color)
     return 0
 
 

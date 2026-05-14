@@ -198,9 +198,13 @@ def summarize(items: list[DoctorItem]) -> dict[str, int]:
 
 
 def print_doctor(items: list[DoctorItem]) -> None:
+    print("Doctor checks your Termux, Android, Roblox, and DENG setup.")
+    print("PASS means OK. WARN means usable but needs attention. FAIL means a feature cannot work yet.")
+    print()
     for item in items:
         print(f"[{item.status}] {item.name}: {item.detail}")
         if item.suggestion and item.status != "PASS":
             print(f"       Suggestion: {item.suggestion}")
     summary = summarize(items)
+    print()
     print(f"Summary: PASS={summary['PASS']} WARN={summary['WARN']} FAIL={summary['FAIL']}")

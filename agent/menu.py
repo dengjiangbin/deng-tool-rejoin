@@ -11,12 +11,12 @@ from .banner import print_banner
 Handler = Callable[[argparse.Namespace], int]
 
 MENU_ITEMS = (
-    ("1", "Setup / Edit Config", "config"),
+    ("1", "Setup or Change Settings", "config"),
     ("2", "Start Auto Rejoin", "start"),
     ("3", "Stop Auto Rejoin", "stop"),
-    ("4", "One-Time Rejoin Test", "once"),
-    ("5", "Status", "status"),
-    ("6", "Logs", "logs"),
+    ("4", "Run One-Time Rejoin Test", "once"),
+    ("5", "Check Status", "status"),
+    ("6", "View Recent Logs", "logs"),
     ("7", "Doctor / Fix Problems", "doctor"),
     ("8", "Enable Termux:Boot", "enable-boot"),
     ("9", "Update", "update"),
@@ -32,6 +32,8 @@ def _is_interactive() -> bool:
 def print_menu(use_color: bool = True) -> None:
     print_banner(use_color=use_color)
     print()
+    print("Local Roblox reconnect helper")
+    print("--------------------------------")
     for number, label, _command in MENU_ITEMS:
         print(f"{number}. {label}")
 

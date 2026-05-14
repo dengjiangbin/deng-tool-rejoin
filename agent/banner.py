@@ -7,15 +7,30 @@ import sys
 
 from .constants import PRODUCT_NAME, VERSION
 
-PINK = "\033[95m"
+RED = "\033[31m"
+BRIGHT_RED = "\033[91m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
 RESET = "\033[0m"
 
 ASCII_DENG = r"""
-DDDDD   EEEEE  N   N   GGGG
-D    D  E      NN  N  G
-D    D  EEEE   N N N  G  GG
-D    D  E      N  NN  G   G
-DDDDD   EEEEE  N   N   GGG
+########   ########  ##    ##   ######
+##     ##  ##        ###   ##  ##    ##
+##     ##  ##        ####  ##  ##
+##     ##  ######    ## ## ##  ##   ####
+##     ##  ##        ##  ####  ##    ##
+##     ##  ##        ##   ###  ##    ##
+########   ########  ##    ##   ######
+""".strip("\n")
+
+ASCII_DENG_SHADOW = r"""
+  ::::::::    ::::::::   ::    ::    ::::::
+  ::     ::   ::         :::   ::   ::    ::
+  ::     ::   ::         ::::  ::   ::
+  ::     ::   ::::::     :: :: ::   ::   ::::
+  ::     ::   ::         ::  ::::   ::    ::
+  ::     ::   ::         ::   :::   ::    ::
+  ::::::::    ::::::::   ::    ::    ::::::
 """.strip("\n")
 
 
@@ -29,10 +44,16 @@ def supports_color() -> bool:
 
 
 def banner_text(use_color: bool | None = None) -> str:
-    """Build the DENG banner with optional ANSI pink color."""
+    """Build the DENG banner with optional ANSI red styling."""
     if use_color is None:
         use_color = supports_color()
-    logo = f"{PINK}{ASCII_DENG}{RESET}" if use_color else ASCII_DENG
+    if use_color:
+        primary = ASCII_DENG.splitlines()
+        shadow = ASCII_DENG_SHADOW.splitlines()
+        logo_lines = [f"{DIM}{RED}{shadow_line}{RESET}\n{BOLD}{BRIGHT_RED}{line}{RESET}" for line, shadow_line in zip(primary, shadow)]
+        logo = "\n".join(logo_lines)
+    else:
+        logo = ASCII_DENG
     return f"{logo}\n{PRODUCT_NAME.replace('DENG Tool: ', 'Tool: ')} v{VERSION}"
 
 
