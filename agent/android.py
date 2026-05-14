@@ -226,6 +226,14 @@ def launch_url(package: str, url: str, launch_mode: str) -> CommandResult:
     )
 
 
+def launch_url_generic(url: str, launch_mode: str) -> CommandResult:
+    validate_launch_url(url, launch_mode, allow_uncertain=True)
+    return run_command(
+        ["am", "start", "-a", "android.intent.action.VIEW", "-d", url],
+        timeout=PROCESS_TIMEOUT_SECONDS,
+    )
+
+
 def is_process_running(package: str) -> bool:
     package = validate_package_name(package)
     result = run_command(["pidof", package], timeout=PROCESS_TIMEOUT_SECONDS)

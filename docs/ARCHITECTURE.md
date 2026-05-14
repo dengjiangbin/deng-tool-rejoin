@@ -34,7 +34,7 @@ Public install creates global Termux wrappers in `$PREFIX/bin` and a market-styl
 
 Config lives at `~/.deng-tool/rejoin/config.json` and is mirrored into the SQLite `config` table. Every save validates package names, launch mode, URLs, booleans, numeric limits, and log level.
 
-Config also stores detected `android_release`, `android_sdk`, and `download_dir` for status and diagnostics. New configs use `roblox_packages` for one or more Roblox packages; old `roblox_package` values migrate into the list. Package auto-detection uses configurable `package_detection_hints` such as `roblox`, `rblx`, `blox`, and `moons` so App Cloner or cloud-phone packages like `com.moons.*` can be found without relaxing Android package validation.
+Config also stores detected `android_release`, `android_sdk`, and `download_dir` for status and diagnostics. New configs use `roblox_packages` as objects with `package`, `label`, and `enabled`; old `roblox_package` strings and old `roblox_packages` string lists migrate into that object list. Labels are user-entered friendly names only. Package auto-detection uses configurable `package_detection_hints` such as `roblox`, `rblx`, `blox`, and `moons` so App Cloner or cloud-phone packages like `com.moons.*` can be found without relaxing Android package validation.
 
 ## Private Test Update Flow
 

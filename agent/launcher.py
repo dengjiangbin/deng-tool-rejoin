@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import android, db
-from .config import validate_config
+from .config import enabled_package_entries, validate_config
 from .logger import configure_logging, log_event
 from .url_utils import mask_launch_url, mask_urls_in_text
 
@@ -58,6 +58,11 @@ def perform_rejoin(config_data: dict[str, Any], *, reason: str = "manual") -> Re
             result = android.launch_app(package)
         else:
             result = android.launch_url(package, launch_url, launch_mode)
+            if not result.ok:
+                fallback = android.launch_url_generic(launch_url, launch_mode)
+                if fallback.ok:
+                    warning = f"{warning + '; ' if warning else ''}package-specific URL launch failed; generic Android VIEW launch succeeded"
+                    result = fallback
 
         if not result.ok:
             error = mask_urls_in_text(result.summary or "Android launch command failed")
@@ -99,13 +104,13 @@ def perform_rejoin(config_data: dict[str, Any], *, reason: str = "manual") -> Re
 def launch_configured_packages(config_data: dict[str, Any], *, reason: str = "start") -> list[RejoinResult]:
     """Launch all configured Roblox packages safely, one package at a time."""
     cfg = validate_config(config_data)
-    packages = cfg.get("roblox_packages") or [cfg["roblox_package"]]
+    packages = [entry["package"] for entry in enabled_package_entries(cfg)]
     results: list[RejoinResult] = []
     delay = max(5, int(cfg.get("reconnect_delay_seconds", 8)))
     for index, package in enumerate(packages):
         package_cfg = dict(cfg)
         package_cfg["roblox_package"] = package
-        package_cfg["roblox_packages"] = [package]
+        package_cfg["roblox_packages"] = [{"package": package, "label": "", "enabled": True}]
         result = perform_rejoin(package_cfg, reason=reason)
         results.append(result)
         if index < len(packages) - 1:

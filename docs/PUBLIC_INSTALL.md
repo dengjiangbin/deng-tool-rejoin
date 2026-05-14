@@ -33,7 +33,7 @@ deng-rejoin
 
 Choose **First Time Setup Config**, then choose **Start**.
 
-Setup uses a guided public menu. You will choose Roblox packages, launch link, optional Discord webhook, optional snapshot, webhook interval, post-launch action, and optional auto resize/window layout through simple prompts.
+Setup uses a guided public menu. You will choose Roblox packages/account labels, launch link, optional Discord webhook, and optional snapshot/webhook interval only when webhook is enabled. Window layout is automatic at Start when multiple packages are selected.
 
 ## Android 10
 

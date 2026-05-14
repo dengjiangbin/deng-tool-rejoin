@@ -15,10 +15,8 @@ Choose **First Time Setup Config** for a new device. Setup is a guided menu, not
 - Roblox Package Setup
 - Roblox Public / Private Server Link
 - Discord Webhook Setup
-- Phone Snapshot For Webhook
-- Webhook Info Interval
-- Post-Launch Action
-- Auto Resize / Window Layout Setup
+- Phone Snapshot For Webhook, only when webhook is enabled
+- Webhook Info Interval, only when webhook is enabled
 - Save And Start
 
 Choose **Setup / Edit Config** to change one section later without redoing everything.
@@ -28,6 +26,8 @@ Choose **Setup / Edit Config** to change one section later without redoing every
 The package screen automatically scans Android for Roblox-related packages. It uses safe package-name hints such as `roblox`, `rblx`, `blox`, and `moons`, so cloned packages like `com.moons.*` can be detected even when the package name does not contain `roblox`.
 
 If packages are found, DENG shows them in a numbered list and marks `com.roblox.client` as recommended. Choose one or more packages to use them, including cloned packages.
+
+Each selected package can have a friendly label such as `Main`, `Alt 1`, or `MyCloud1`. DENG does not read Roblox usernames, credentials, cookies, or private session files. If you want a username-like label, type it yourself.
 
 If your clone uses another prefix, open **Detection hints for cloned package names** and add a safe fragment from the package name. For example, add `moons` for `com.moons.myroblox` or `com.moons.` for a whole prefix.
 
@@ -47,11 +47,7 @@ Snapshots are optional and may show private screen information. Enable snapshots
 
 ## Window Layout
 
-Auto resize can preview a grid for multiple Roblox packages. When App Cloner preference XML is accessible, DENG backs it up and updates only known window position keys. If root/file access is unavailable, DENG warns and continues normal launch.
-
-## Post-Launch Actions
-
-Safe actions are: none, open Roblox, open configured Roblox link, send webhook update, or show a running status table. DENG does not run Roblox scripts, executors, anti-AFK, farming, macro, captcha bypass, memory, packet, or exploit logic.
+Window layout is automatic during Start when more than one package is selected. DENG calculates a layout from the package count and display size/DPI. When App Cloner preference XML is accessible, DENG backs it up and updates only known window position keys. If root/file access is unavailable, DENG warns and continues normal launch.
 
 ## Private Server URL
 
@@ -63,7 +59,7 @@ privateServerLinkCode=***MASKED***
 
 ## Start
 
-Choose **Start**. If first-time setup is not complete, DENG will guide you into setup first. After setup, Start applies any enabled window layout, opens selected Roblox packages, opens the configured link when selected, sends webhook status when enabled, and starts the supervisor only if auto rejoin is enabled.
+Choose **Start**. If first-time setup is not complete, DENG will guide you into setup first. After setup, Start shows a package/account table, runs a safe cache check that preserves app data, applies automatic layout when useful, opens selected Roblox packages, opens the configured link when selected, sends webhook status when enabled, and starts the supervisor only if auto rejoin is enabled.
 
 ## Auto Rejoin
 
@@ -81,4 +77,4 @@ Logs include event type, package, root usage, success/failure, and masked URLs.
 
 ## Status
 
-Status shows config, running state, latest heartbeat, latest rejoin attempt, latest error, Android release/SDK, root availability, Roblox package, and detected Download path.
+Status shows first-time setup state, selected Roblox packages and labels, masked launch link, webhook/snapshot state, automatic layout state, Android release/SDK, root availability, latest heartbeat, latest rejoin attempt, and latest error.

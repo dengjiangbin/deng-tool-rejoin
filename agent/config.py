@@ -42,7 +42,6 @@ class ConfigError(ValueError):
 
 SELECTED_PACKAGE_MODES = {"single", "multiple"}
 WEBHOOK_MODES = {"new_message", "edit_message"}
-POST_LAUNCH_ACTIONS = {"none", "open_app", "open_link", "send_webhook", "show_running_log"}
 AUTO_RESIZE_MODES = {"off", "auto", "preview"}
 
 
@@ -65,7 +64,7 @@ def default_config() -> dict[str, Any]:
         "device_name": device_name,
         "agent_version": VERSION,
         "roblox_package": DEFAULT_ROBLOX_PACKAGE,
-        "roblox_packages": [DEFAULT_ROBLOX_PACKAGE],
+        "roblox_packages": [{"package": DEFAULT_ROBLOX_PACKAGE, "label": "Main", "enabled": True}],
         "package_detection_hints": list(DEFAULT_ROBLOX_PACKAGE_HINTS),
         "selected_package_mode": "single",
         "launch_mode": "app",
@@ -81,7 +80,6 @@ def default_config() -> dict[str, Any]:
         "webhook_last_message_id": "",
         "snapshot_max_age_seconds": 300,
         "snapshot_temp_path": "",
-        "post_launch_action": "none",
         "auto_resize_enabled": False,
         "auto_resize_mode": "off",
         "window_gap_px": 8,
@@ -121,17 +119,71 @@ def validate_package_name(package_name: str) -> str:
     return cleaned
 
 
-def validate_package_names(package_names: list[str] | tuple[str, ...]) -> list[str]:
-    if not isinstance(package_names, (list, tuple)):
-        raise ConfigError("roblox_packages must be a list of package names")
-    validated: list[str] = []
-    for package in package_names:
-        cleaned = validate_package_name(str(package))
-        if cleaned not in validated:
-            validated.append(cleaned)
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def validate_package_label(label: Any) -> str:
+    cleaned = str(label or "").strip()
+    if len(cleaned) > 80:
+        raise ConfigError("package label must be 80 characters or fewer")
+    if any(ord(char) < 32 for char in cleaned):
+        raise ConfigError("package label cannot contain control characters")
+    return cleaned
+
+
+def package_entry(package: str, label: str = "", enabled: bool = True) -> dict[str, Any]:
+    return {"package": validate_package_name(package), "label": validate_package_label(label), "enabled": bool(enabled)}
+
+
+def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
+    if not isinstance(package_entries, (list, tuple)):
+        raise ConfigError("roblox_packages must be a list of package entries")
+    validated: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_entry in package_entries:
+        if isinstance(raw_entry, str):
+            entry = package_entry(raw_entry, "", True)
+        elif isinstance(raw_entry, dict):
+            entry = package_entry(
+                str(raw_entry.get("package") or ""),
+                str(raw_entry.get("label") or ""),
+                _as_bool(raw_entry.get("enabled", True)),
+            )
+        else:
+            raise ConfigError("each Roblox package entry must be a package string or object")
+        if entry["package"] in seen:
+            continue
+        seen.add(entry["package"])
+        validated.append(entry)
     if not validated:
         raise ConfigError("at least one Roblox package must be configured")
     return validated
+
+
+def validate_package_names(package_names: list[str] | tuple[str, ...]) -> list[str]:
+    return [entry["package"] for entry in validate_package_entries(package_names)]
+
+
+def enabled_package_entries(config_data: dict[str, Any]) -> list[dict[str, Any]]:
+    entries = validate_package_entries(config_data.get("roblox_packages") or [config_data.get("roblox_package", DEFAULT_ROBLOX_PACKAGE)])
+    return [entry for entry in entries if entry.get("enabled", True)]
+
+
+def enabled_package_names(config_data: dict[str, Any]) -> list[str]:
+    return [entry["package"] for entry in enabled_package_entries(config_data)]
+
+
+def package_display_name(entry: dict[str, Any], *, include_package: bool = True) -> str:
+    label = validate_package_label(entry.get("label", ""))
+    package = validate_package_name(str(entry.get("package") or ""))
+    if label and include_package:
+        return f"{label} ({package})"
+    return label or package
 
 
 def normalize_package_detection_hint(value: str) -> str:
@@ -163,14 +215,6 @@ def validate_package_detection_hints(hints: Any) -> list[str]:
     return validated
 
 
-def _as_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-    return bool(value)
-
-
 def _as_int(name: str, value: Any, minimum: int | None = None, maximum: int | None = None) -> int:
     try:
         number = int(value)
@@ -195,13 +239,17 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged["download_dir"] = str(merged.get("download_dir") or detect_public_download_dir())
     migrated_package = str(merged.get("roblox_package") or DEFAULT_ROBLOX_PACKAGE)
     if not source_has_packages:
-        merged["roblox_packages"] = [migrated_package]
-    merged["roblox_packages"] = validate_package_names(merged["roblox_packages"])
-    merged["roblox_package"] = validate_package_name(str(merged["roblox_packages"][0]))
+        migrated_label = str(merged.get("roblox_package_label") or "Main")
+        merged["roblox_packages"] = [package_entry(migrated_package, migrated_label, True)]
+    merged["roblox_packages"] = validate_package_entries(merged["roblox_packages"])
+    active_entries = [entry for entry in merged["roblox_packages"] if entry["enabled"]]
+    if not active_entries:
+        raise ConfigError("at least one Roblox package must be enabled")
+    merged["roblox_package"] = validate_package_name(str(active_entries[0]["package"]))
     selected_package_mode = str(merged.get("selected_package_mode", "single")).strip().lower()
     if selected_package_mode not in SELECTED_PACKAGE_MODES:
         raise ConfigError("selected_package_mode must be single or multiple")
-    if len(merged["roblox_packages"]) > 1:
+    if len(active_entries) > 1:
         selected_package_mode = "multiple"
     merged["selected_package_mode"] = selected_package_mode
     merged["package_detection_hints"] = validate_package_detection_hints(merged.get("package_detection_hints"))
@@ -233,6 +281,9 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged["webhook_send_snapshot"] = _as_bool(merged.get("webhook_send_snapshot") or merged.get("webhook_snapshot_enabled"))
     merged["auto_resize_enabled"] = _as_bool(merged.get("auto_resize_enabled"))
     merged["first_setup_completed"] = _as_bool(merged.get("first_setup_completed"))
+    if not merged["webhook_enabled"]:
+        merged["webhook_snapshot_enabled"] = False
+        merged["webhook_send_snapshot"] = False
 
     webhook_mode = str(merged.get("webhook_mode", "new_message")).strip().lower()
     if webhook_mode not in WEBHOOK_MODES:
@@ -247,15 +298,16 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged["webhook_message_id"] = str(merged.get("webhook_message_id") or "").strip()
     merged["webhook_last_message_id"] = str(merged.get("webhook_last_message_id") or "").strip()
     merged["webhook_last_sent_at"] = merged.get("webhook_last_sent_at") or 0
-    try:
-        merged["webhook_interval_seconds"] = validate_webhook_interval(merged.get("webhook_interval_seconds", 300))
-    except ValueError as exc:
-        raise ConfigError(str(exc)) from exc
-
-    post_launch_action = str(merged.get("post_launch_action", "none")).strip().lower()
-    if post_launch_action not in POST_LAUNCH_ACTIONS:
-        raise ConfigError("post_launch_action must be one of the safe supported actions")
-    merged["post_launch_action"] = post_launch_action
+    if merged["webhook_enabled"]:
+        try:
+            merged["webhook_interval_seconds"] = validate_webhook_interval(merged.get("webhook_interval_seconds", 300))
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+    else:
+        try:
+            merged["webhook_interval_seconds"] = int(merged.get("webhook_interval_seconds", 300))
+        except (TypeError, ValueError):
+            merged["webhook_interval_seconds"] = 300
 
     auto_resize_mode = str(merged.get("auto_resize_mode", "off")).strip().lower()
     if auto_resize_mode not in AUTO_RESIZE_MODES:

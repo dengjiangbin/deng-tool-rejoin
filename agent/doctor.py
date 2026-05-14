@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from . import android, db
-from .config import ConfigError, ensure_app_dirs, load_config
+from .config import ConfigError, enabled_package_entries, ensure_app_dirs, load_config
 from .constants import APP_HOME, CONFIG_PATH, DB_PATH, LOG_DIR, LOG_PATH
 from .launcher_file import LAUNCHER_FILENAME
 from .lockfile import LockManager, read_pid
@@ -139,8 +139,9 @@ def run_doctor(config_data: dict[str, Any] | None = None) -> list[DoctorItem]:
         cfg = {}
         items.append(_item("FAIL", "Config", str(exc), "Run setup or config and fix invalid values."))
 
-    packages = cfg.get("roblox_packages") or ([cfg.get("roblox_package")] if cfg else [])
-    if packages:
+    entries = enabled_package_entries(cfg) if cfg else []
+    packages = [entry["package"] for entry in entries]
+    if entries:
         missing = [package for package in packages if not android.package_installed(package)]
         items.append(
             _item(
@@ -148,6 +149,15 @@ def run_doctor(config_data: dict[str, Any] | None = None) -> list[DoctorItem]:
                 "Selected Roblox packages",
                 ", ".join(packages) if not missing else f"missing: {', '.join(missing)}",
                 "Install Roblox/clones or set the correct package names in config.",
+            )
+        )
+        unlabeled = [entry["package"] for entry in entries if not entry.get("label")]
+        items.append(
+            _item(
+                "PASS" if not unlabeled else "WARN",
+                "Package labels",
+                "all selected packages have labels" if not unlabeled else f"label not set: {', '.join(unlabeled)}",
+                "Labels are optional, but adding Main/Alt names makes the start table easier to read.",
             )
         )
     else:
@@ -162,7 +172,7 @@ def run_doctor(config_data: dict[str, Any] | None = None) -> list[DoctorItem]:
     else:
         items.append(_item("PASS", "Discord webhook", "disabled", ""))
 
-    if cfg.get("webhook_snapshot_enabled"):
+    if cfg.get("webhook_enabled") and cfg.get("webhook_snapshot_enabled"):
         items.append(
             _item(
                 "PASS" if android.command_exists("screencap") else "WARN",
@@ -172,25 +182,25 @@ def run_doctor(config_data: dict[str, Any] | None = None) -> list[DoctorItem]:
             )
         )
 
-    if cfg.get("auto_resize_enabled") or cfg.get("auto_resize_mode") == "preview":
-        size_result = android.run_command(["wm", "size"], timeout=5)
-        density_result = android.run_command(["wm", "density"], timeout=5)
-        items.append(
-            _item(
-                "PASS" if size_result.ok else "WARN",
-                "Display size",
-                size_result.stdout or size_result.summary or "wm size unavailable",
-                "Auto layout uses a safe fallback if wm size is unavailable.",
-            )
+    size_result = android.run_command(["wm", "size"], timeout=5)
+    density_result = android.run_command(["wm", "density"], timeout=5)
+    items.append(
+        _item(
+            "PASS" if size_result.ok else "WARN",
+            "Display size",
+            size_result.stdout or size_result.summary or "wm size unavailable",
+            "Automatic layout uses a safe fallback if wm size is unavailable.",
         )
-        items.append(
-            _item(
-                "PASS" if density_result.ok else "WARN",
-                "Display density",
-                density_result.stdout or density_result.summary or "wm density unavailable",
-                "Auto layout uses a safe fallback if wm density is unavailable.",
-            )
+    )
+    items.append(
+        _item(
+            "PASS" if density_result.ok else "WARN",
+            "Display density",
+            density_result.stdout or density_result.summary or "wm density unavailable",
+            "Automatic layout uses a safe fallback if wm density is unavailable.",
         )
+    )
+    if len(packages) > 1:
         root = android.detect_root()
         if not root.available:
             items.append(
@@ -198,7 +208,7 @@ def run_doctor(config_data: dict[str, Any] | None = None) -> list[DoctorItem]:
                     "WARN",
                     "App Cloner XML access",
                     "root/file access unavailable",
-                    "Auto resize can preview layout, but App Cloner preference writes need root/file access.",
+                    "Automatic layout can calculate positions, but App Cloner preference writes need root/file access.",
                 )
             )
         else:

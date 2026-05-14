@@ -24,11 +24,14 @@
     "blox",
     "moons"
   ],
-  "post_launch_action": "none",
   "reconnect_delay_seconds": 8,
   "roblox_package": "com.roblox.client",
   "roblox_packages": [
-    "com.roblox.client"
+    {
+      "enabled": true,
+      "label": "Main",
+      "package": "com.roblox.client"
+    }
   ],
   "root_available": false,
   "root_mode_enabled": false,

@@ -76,7 +76,15 @@ def should_send_webhook(config_data: dict[str, Any], *, now: float | None = None
 
 
 def build_status_message(config_data: dict[str, Any], *, event: str = "status", error: str | None = None) -> str:
-    packages = config_data.get("roblox_packages") or [config_data.get("roblox_package", "unknown")]
+    raw_packages = config_data.get("roblox_packages") or [config_data.get("roblox_package", "unknown")]
+    packages = []
+    for entry in raw_packages:
+        if isinstance(entry, dict):
+            package = str(entry.get("package") or "unknown")
+            label = str(entry.get("label") or "").strip()
+            packages.append(f"{label} ({package})" if label else package)
+        else:
+            packages.append(str(entry))
     launch_url = mask_launch_url(config_data.get("launch_url")) or "not set"
     lines = [
         f"DENG Tool: Rejoin v{config_data.get('agent_version', '1.0.0')}",
@@ -87,7 +95,7 @@ def build_status_message(config_data: dict[str, Any], *, event: str = "status", 
         f"Launch link: {launch_url}",
         f"Auto rejoin: {'enabled' if config_data.get('auto_rejoin_enabled') else 'disabled'}",
         f"Root: available={config_data.get('root_available')} enabled={config_data.get('root_mode_enabled')}",
-        f"Auto resize: {'enabled' if config_data.get('auto_resize_enabled') else 'disabled'}",
+        "Auto resize: automatic",
     ]
     if error:
         lines.append(f"Last error: {error}")
