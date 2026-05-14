@@ -125,6 +125,55 @@ class TestDeployCliValidation(unittest.TestCase):
         args = self._parse(["--clear-guild", str(TARGET_GUILD_ID)])
         self.assertEqual(args.clear_guild, TARGET_GUILD_ID)
 
+    def test_has_list_global_argument(self) -> None:
+        """--list-global should be accepted without a guild argument."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--list-global", action="store_true")
+        args = parser.parse_args(["--list-global"])
+        self.assertTrue(args.list_global)
+
+    def test_has_list_guild_argument(self) -> None:
+        """--list-guild should accept the target guild ID."""
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--list-guild", type=int, default=None)
+        args = parser.parse_args(["--list-guild", str(TARGET_GUILD_ID)])
+        self.assertEqual(args.list_guild, TARGET_GUILD_ID)
+
+    def test_list_global_accepted_without_guild(self) -> None:
+        """--list-global flag must work without --guild (no guild required)."""
+        with patch("sys.argv", ["deploy_commands", "--list-global"]):
+            with patch.dict("os.environ", {"DISCORD_BOT_TOKEN": "fake-token"}):
+                with patch.object(
+                    deploy_mod, "_list_global", new=lambda token: None
+                ):
+                    with patch("asyncio.run", side_effect=lambda coro: None):
+                        try:
+                            deploy_mod.main()
+                        except SystemExit as exc:
+                            self.fail(f"--list-global raised SystemExit: {exc}")
+
+    def test_list_guild_target_accepted(self) -> None:
+        """--list-guild with target guild ID must not raise an error."""
+        with patch("sys.argv", ["deploy_commands", "--list-guild", str(TARGET_GUILD_ID)]):
+            with patch.dict("os.environ", {"DISCORD_BOT_TOKEN": "fake-token"}):
+                with patch("asyncio.run", side_effect=lambda coro: None):
+                    try:
+                        deploy_mod.main()
+                    except SystemExit as exc:
+                        self.fail(f"--list-guild raised SystemExit: {exc}")
+
+    def test_list_guild_wrong_id_rejected(self) -> None:
+        """--list-guild with wrong guild ID must fail."""
+        with patch("sys.argv", ["deploy_commands", "--list-guild", "9999999999999999999"]):
+            with patch("sys.stderr", new_callable=StringIO):
+                with self.assertRaises(SystemExit) as ctx:
+                    deploy_mod.main()
+        self.assertEqual(ctx.exception.code, 2)
+
     def test_wrong_guild_id_rejected(self) -> None:
         """A guild ID other than the target must fail."""
         with patch("sys.argv", ["deploy_commands", "--guild", "9999999999999999999"]):
@@ -254,6 +303,104 @@ class TestDeployGuildAsync(unittest.IsolatedAsyncioTestCase):
         call_kwargs = mock_bot.tree.clear_commands.call_args
         self.assertIn("guild", call_kwargs.kwargs)
         self.assertIsNotNone(call_kwargs.kwargs["guild"])
+
+    async def test_list_global_calls_http_get_global_commands(self) -> None:
+        """_list_global must call http.get_global_commands with the app ID."""
+        mock_bot = MagicMock()
+        mock_bot.user.id = 123456789
+        mock_bot.http.get_global_commands = AsyncMock(return_value=[])
+        mock_bot.close = AsyncMock()
+        mock_bot.login = AsyncMock()
+
+        with patch.object(deploy_mod, "_login_only", new=AsyncMock(return_value=mock_bot)):
+            await deploy_mod._list_global("fake-token")
+
+        mock_bot.http.get_global_commands.assert_called_once_with(mock_bot.user.id)
+
+    async def test_list_global_displays_commands(self) -> None:
+        """_list_global must log each command's id, name, type, and description."""
+        mock_bot = MagicMock()
+        mock_bot.user.id = 123456789
+        mock_bot.http.get_global_commands = AsyncMock(
+            return_value=[
+                {"id": "111", "name": "license_panel", "type": 1, "description": "Manage licenses"}
+            ]
+        )
+        mock_bot.close = AsyncMock()
+        mock_bot.login = AsyncMock()
+
+        with patch.object(deploy_mod, "_login_only", new=AsyncMock(return_value=mock_bot)):
+            with self.assertLogs("deng.rejoin.deploy", level="INFO") as cm:
+                await deploy_mod._list_global("fake-token")
+
+        combined = "\n".join(cm.output)
+        self.assertIn("license_panel", combined)
+        self.assertIn("111", combined)
+
+    async def test_list_guild_calls_http_get_guild_commands(self) -> None:
+        """_list_guild must call http.get_guild_commands with app ID and guild ID."""
+        mock_bot = MagicMock()
+        mock_bot.user.id = 123456789
+        mock_bot.http.get_guild_commands = AsyncMock(return_value=[])
+        mock_bot.close = AsyncMock()
+        mock_bot.login = AsyncMock()
+
+        with patch.object(deploy_mod, "_login_only", new=AsyncMock(return_value=mock_bot)):
+            await deploy_mod._list_guild("fake-token", TARGET_GUILD_ID)
+
+        mock_bot.http.get_guild_commands.assert_called_once_with(
+            mock_bot.user.id, TARGET_GUILD_ID
+        )
+
+    async def test_list_guild_displays_commands(self) -> None:
+        """_list_guild must log each command's id, name, type, and description."""
+        mock_bot = MagicMock()
+        mock_bot.user.id = 123456789
+        mock_bot.http.get_guild_commands = AsyncMock(
+            return_value=[
+                {"id": "222", "name": "license_panel", "type": 1, "description": "Manage licenses"}
+            ]
+        )
+        mock_bot.close = AsyncMock()
+        mock_bot.login = AsyncMock()
+
+        with patch.object(deploy_mod, "_login_only", new=AsyncMock(return_value=mock_bot)):
+            with self.assertLogs("deng.rejoin.deploy", level="INFO") as cm:
+                await deploy_mod._list_guild("fake-token", TARGET_GUILD_ID)
+
+        combined = "\n".join(cm.output)
+        self.assertIn("license_panel", combined)
+        self.assertIn("222", combined)
+
+    async def test_list_global_does_not_print_token(self) -> None:
+        """_list_global must never log the token."""
+        mock_bot = MagicMock()
+        mock_bot.user.id = 123456789
+        mock_bot.http.get_global_commands = AsyncMock(return_value=[])
+        mock_bot.close = AsyncMock()
+        mock_bot.login = AsyncMock()
+
+        with patch.object(deploy_mod, "_login_only", new=AsyncMock(return_value=mock_bot)):
+            with self.assertLogs("deng.rejoin.deploy", level="INFO") as cm:
+                await deploy_mod._list_global("super-secret-token")
+
+        combined = "\n".join(cm.output)
+        self.assertNotIn("super-secret-token", combined)
+
+    async def test_list_guild_does_not_print_token(self) -> None:
+        """_list_guild must never log the token."""
+        mock_bot = MagicMock()
+        mock_bot.user.id = 123456789
+        mock_bot.http.get_guild_commands = AsyncMock(return_value=[])
+        mock_bot.close = AsyncMock()
+        mock_bot.login = AsyncMock()
+
+        with patch.object(deploy_mod, "_login_only", new=AsyncMock(return_value=mock_bot)):
+            with self.assertLogs("deng.rejoin.deploy", level="INFO") as cm:
+                await deploy_mod._list_guild("super-secret-token", TARGET_GUILD_ID)
+
+        combined = "\n".join(cm.output)
+        self.assertNotIn("super-secret-token", combined)
 
 
 if __name__ == "__main__":

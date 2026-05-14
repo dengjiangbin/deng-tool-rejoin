@@ -14,6 +14,10 @@ Usage
     # Clear all guild commands without re-registering:
     python -m bot.deploy_commands --clear-guild 1435142398647734396
 
+    # Diagnostics — list registered commands:
+    python -m bot.deploy_commands --list-global
+    python -m bot.deploy_commands --list-guild 1435142398647734396
+
 Running without any flag is an error. Global deployment is not supported.
 
 Environment variables
@@ -117,6 +121,52 @@ async def _clear_guild(token: str, guild_id: int) -> None:
         await bot.close()
 
 
+async def _list_global(token: str) -> None:
+    """List all globally registered slash commands (diagnostic)."""
+    bot = await _login_only(token)
+    try:
+        app_id = bot.user.id
+        log.info("Application ID: %s", app_id)
+        cmds = await bot.http.get_global_commands(app_id)
+        log.info("Global commands (%d):", len(cmds))
+        if cmds:
+            for cmd in cmds:
+                log.info(
+                    "  id=%-20s  name=%-20s  type=%s  desc=%s",
+                    cmd.get("id", "?"),
+                    cmd.get("name", "?"),
+                    cmd.get("type", "?"),
+                    cmd.get("description", "")[:80],
+                )
+        else:
+            log.info("  (none — global command list is empty, as expected)")
+    finally:
+        await bot.close()
+
+
+async def _list_guild(token: str, guild_id: int) -> None:
+    """List all guild-specific slash commands (diagnostic)."""
+    bot = await _login_only(token)
+    try:
+        app_id = bot.user.id
+        log.info("Application ID: %s", app_id)
+        cmds = await bot.http.get_guild_commands(app_id, guild_id)
+        log.info("Guild %s commands (%d):", guild_id, len(cmds))
+        if cmds:
+            for cmd in cmds:
+                log.info(
+                    "  id=%-20s  name=%-20s  type=%s  desc=%s",
+                    cmd.get("id", "?"),
+                    cmd.get("name", "?"),
+                    cmd.get("type", "?"),
+                    cmd.get("description", "")[:80],
+                )
+        else:
+            log.info("  (none — guild command list is empty)")
+    finally:
+        await bot.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -128,7 +178,9 @@ def main() -> None:
             "Examples:\n"
             f"  python -m bot.deploy_commands --guild {TARGET_GUILD_ID}\n"
             "  python -m bot.deploy_commands --clear-global\n"
-            f"  python -m bot.deploy_commands --clear-guild {TARGET_GUILD_ID}"
+            f"  python -m bot.deploy_commands --clear-guild {TARGET_GUILD_ID}\n"
+            "  python -m bot.deploy_commands --list-global\n"
+            f"  python -m bot.deploy_commands --list-guild {TARGET_GUILD_ID}"
         ),
     )
     parser.add_argument(
@@ -150,6 +202,18 @@ def main() -> None:
         metavar="GUILD_ID",
         help=f"Clear all commands from this guild (must be {TARGET_GUILD_ID}).",
     )
+    parser.add_argument(
+        "--list-global",
+        action="store_true",
+        help="List all globally registered commands (diagnostic).",
+    )
+    parser.add_argument(
+        "--list-guild",
+        type=int,
+        default=None,
+        metavar="GUILD_ID",
+        help=f"List all commands for this guild (must be {TARGET_GUILD_ID}).",
+    )
     args = parser.parse_args()
 
     # ── Validate: exactly one operation must be specified ────────────────────
@@ -157,17 +221,24 @@ def main() -> None:
         args.guild is not None,
         args.clear_global,
         args.clear_guild is not None,
+        args.list_global,
+        args.list_guild is not None,
     ]
     if not any(ops):
         parser.error(
             "This bot is guild-only. Specify an operation:\n"
             f"  --guild {TARGET_GUILD_ID}            (deploy commands)\n"
             "  --clear-global                       (remove accidental global commands)\n"
-            f"  --clear-guild {TARGET_GUILD_ID}      (clear guild commands)"
+            f"  --clear-guild {TARGET_GUILD_ID}      (clear guild commands)\n"
+            "  --list-global                        (list global commands — diagnostic)\n"
+            f"  --list-guild {TARGET_GUILD_ID}       (list guild commands — diagnostic)"
         )
 
     if sum(ops) > 1:
-        parser.error("Specify only one of --guild, --clear-global, or --clear-guild.")
+        parser.error(
+            "Specify only one of --guild, --clear-global, --clear-guild, "
+            "--list-global, or --list-guild."
+        )
 
     # ── Validate guild IDs against the allowed target ────────────────────────
     if args.guild is not None and args.guild != TARGET_GUILD_ID:
@@ -179,6 +250,11 @@ def main() -> None:
         parser.error(
             f"Unknown guild {args.clear_guild}. "
             f"Use --clear-guild {TARGET_GUILD_ID}."
+        )
+    if args.list_guild is not None and args.list_guild != TARGET_GUILD_ID:
+        parser.error(
+            f"Unknown guild {args.list_guild}. "
+            f"Use --list-guild {TARGET_GUILD_ID}."
         )
 
     token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
@@ -192,6 +268,10 @@ def main() -> None:
         asyncio.run(_clear_global(token))
     elif args.clear_guild is not None:
         asyncio.run(_clear_guild(token, args.clear_guild))
+    elif args.list_global:
+        asyncio.run(_list_global(token))
+    elif args.list_guild is not None:
+        asyncio.run(_list_guild(token, args.list_guild))
 
 
 if __name__ == "__main__":
