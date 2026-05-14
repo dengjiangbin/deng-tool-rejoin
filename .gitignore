@@ -7,6 +7,8 @@ htmlcov/
 
 # Secrets — never commit
 .env
+*.env
+.env.*
 *.env.local
 
 config.json

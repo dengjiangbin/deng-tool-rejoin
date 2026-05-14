@@ -581,7 +581,16 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
     async def restore_persistent_views(self) -> None:
         """Re-attach PanelView for every guild so buttons survive restarts."""
         for guild in self.bot.guilds:
-            cfg = self._store.get_panel_config(str(guild.id))
+            try:
+                cfg = self._store.get_panel_config(str(guild.id))
+            except Exception as exc:
+                log.warning(
+                    "Could not read panel config for guild %s (store error: %s). "
+                    "If using Supabase, apply the migration first.",
+                    guild.id,
+                    exc,
+                )
+                continue
             if not cfg or not cfg.get("message_id"):
                 continue
             try:

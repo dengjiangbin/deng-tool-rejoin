@@ -55,30 +55,28 @@ async def _deploy(token: str, guild_id: int | None) -> None:
     cog = LicensePanelCog(bot, store)
     await bot.add_cog(cog)
 
-    async with bot:
-        await bot.login(token)
-        await bot.connect(reconnect=False)
+    # Login over HTTP (sets bot.application_id).
+    # Command syncing uses REST only — no gateway connection needed.
+    await bot.login(token)
+    try:
+        if guild_id is not None:
+            target = discord.Object(id=guild_id)
+            bot.tree.copy_global_to(guild=target)
+            synced = await bot.tree.sync(guild=target)
+            log.info(
+                "Synced %d command(s) to guild %s.", len(synced), guild_id
+            )
+        else:
+            synced = await bot.tree.sync()
+            log.info(
+                "Synced %d command(s) globally (may take up to 1 hour to propagate).",
+                len(synced),
+            )
 
-        try:
-            if guild_id is not None:
-                target = discord.Object(id=guild_id)
-                # Copy global commands to guild for instant propagation
-                bot.tree.copy_global_to(guild=target)
-                synced = await bot.tree.sync(guild=target)
-                log.info(
-                    "Synced %d command(s) to guild %s.", len(synced), guild_id
-                )
-            else:
-                synced = await bot.tree.sync()
-                log.info(
-                    "Synced %d command(s) globally (may take up to 1 hour to propagate).",
-                    len(synced),
-                )
-
-            for cmd in synced:
-                log.info("  /%s — %s", cmd.name, cmd.description)
-        finally:
-            await bot.close()
+        for cmd in synced:
+            log.info("  /%s — %s", cmd.name, cmd.description)
+    finally:
+        await bot.close()
 
 
 def main() -> None:
