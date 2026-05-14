@@ -1,0 +1,24 @@
+{
+  "apps": [
+    {
+      "name": "deng-rejoin-panel",
+      "script": "python",
+      "args": "-m bot.main",
+      "cwd": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin",
+      "interpreter": "none",
+      "watch": false,
+      "autorestart": true,
+      "max_restarts": 10,
+      "restart_delay": 5000,
+      "max_memory_restart": "300M",
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONPATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin"
+      },
+      "log_date_format": "YYYY-MM-DD HH:mm:ss",
+      "error_file": "C:\\Users\\Administrator\\.pm2\\logs\\deng-rejoin-panel-error.log",
+      "out_file": "C:\\Users\\Administrator\\.pm2\\logs\\deng-rejoin-panel-out.log",
+      "merge_logs": false
+    }
+  ]
+}

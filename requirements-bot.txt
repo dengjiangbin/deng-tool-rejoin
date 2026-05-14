@@ -1,0 +1,5 @@
+# DENG Tool: Rejoin — Discord License Panel Bot requirements
+# Install: pip install -r requirements-bot.txt
+
+discord.py>=2.3.2
+python-dotenv>=1.0.0
