@@ -31,9 +31,9 @@ wget -O install.sh https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejo
 deng-rejoin
 ```
 
-Choose **Setup or Change Settings**, then choose **One-Time Rejoin Test**.
+Choose **First Time Setup Config**, then choose **Start**.
 
-Setup uses a guided public menu. You will choose the Roblox package, launch mode, optional Roblox link, delay, auto rejoin, and root mode through simple prompts.
+Setup uses a guided public menu. You will choose Roblox packages, launch link, optional Discord webhook, optional snapshot, webhook interval, post-launch action, and optional auto resize/window layout through simple prompts.
 
 ## Android 10
 

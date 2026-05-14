@@ -11,16 +11,9 @@ from .banner import print_banner
 Handler = Callable[[argparse.Namespace], int]
 
 MENU_ITEMS = (
-    ("1", "Setup or Change Settings", "config"),
-    ("2", "Start Auto Rejoin", "start"),
-    ("3", "Stop Auto Rejoin", "stop"),
-    ("4", "Run One-Time Rejoin Test", "once"),
-    ("5", "Check Status", "status"),
-    ("6", "View Recent Logs", "logs"),
-    ("7", "Doctor / Fix Problems", "doctor"),
-    ("8", "Enable Termux:Boot", "enable-boot"),
-    ("9", "Update", "update"),
-    ("10", "Reset", "reset"),
+    ("1", "First Time Setup Config", "first-setup"),
+    ("2", "Setup / Edit Config", "config"),
+    ("3", "Start", "start"),
     ("0", "Exit", "exit"),
 )
 

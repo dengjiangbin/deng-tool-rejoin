@@ -8,6 +8,9 @@
 - `constants.py`: version, paths, limits, regexes
 - `platform_detect.py`: Android release, SDK, Termux prefix, and Download path detection
 - `launcher_file.py`: generated `/sdcard/Download/deng-rejoin.py` launcher support
+- `webhook.py`: safe Discord webhook status updates with URL masking
+- `snapshot.py`: optional Android screencap snapshots for webhook use
+- `window_layout.py`: display-aware grid layout and safe App Cloner XML updates
 - `banner.py`: pink ASCII Termux banner
 - `logger.py`: local rotating logs with URL masking
 - `db.py`: SQLite schema and storage helpers
@@ -31,7 +34,20 @@ Public install creates global Termux wrappers in `$PREFIX/bin` and a market-styl
 
 Config lives at `~/.deng-tool/rejoin/config.json` and is mirrored into the SQLite `config` table. Every save validates package names, launch mode, URLs, booleans, numeric limits, and log level.
 
-Config also stores detected `android_release`, `android_sdk`, and `download_dir` for status and diagnostics.
+Config also stores detected `android_release`, `android_sdk`, and `download_dir` for status and diagnostics. New configs use `roblox_packages` for one or more Roblox packages; old `roblox_package` values migrate into the list.
+
+## Private Test Update Flow
+
+During v1.0.0 private testing, `deng-rejoin-update` updates from GitHub `main`.
+
+For public release-stage updates, the planned architecture is a channel-aware updater:
+
+- stable tags such as `v1.0.0`, `v1.0.1`, `v1.1.0`
+- beta tags such as `v1.0.1-beta.1`
+- channels: `stable`, `beta`, `dev/main`
+- user choices: latest stable, specific stable, beta, dev/main, or stay current
+
+Public users should default to stable tags. Testers can use dev/main. Do not create public release tags until release is explicitly requested.
 
 ## Rejoin State Machine
 

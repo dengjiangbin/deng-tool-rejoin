@@ -30,16 +30,18 @@ from .constants import (
     VERSION,
 )
 from .doctor import print_doctor, run_doctor
-from .launcher import perform_rejoin
+from .launcher import launch_configured_packages, perform_rejoin
 from .launcher_file import create_market_launchers
 from .lockfile import LockManager, stop_running_agent
 from .menu import run_menu
 from .platform_detect import detect_public_download_dir, get_android_release, get_android_sdk, get_platform_info
 from .supervisor import Supervisor
+from . import snapshot, webhook, window_layout
 from .url_utils import UrlValidationError, detect_launch_mode_from_url, mask_urls_in_text, validate_launch_url
 
 COMMANDS = {
     "setup",
+    "first-setup",
     "doctor",
     "status",
     "once",
@@ -108,6 +110,20 @@ def _launch_mode_label(value: str) -> str:
     }.get(value, value)
 
 
+def _post_launch_action_label(value: str) -> str:
+    return {
+        "none": "None",
+        "open_app": "Open Roblox app only",
+        "open_link": "Open configured Roblox link",
+        "send_webhook": "Send Discord webhook update after launch",
+        "show_running_log": "Show running status table after launch",
+    }.get(value, value)
+
+
+def _package_list_label(packages: list[str]) -> str:
+    return ", ".join(packages) if packages else "Not set"
+
+
 def _safe_url_label(value: str | None) -> str:
     if not value:
         return "Not set"
@@ -130,9 +146,10 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print(f"  Download folder: {cfg['download_dir'] or 'Not detected'}")
     print()
     print("Roblox")
-    print(f"  Package: {cfg['roblox_package']}")
+    print(f"  Packages: {_package_list_label(cfg['roblox_packages'])}")
     print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
     print(f"  Launch URL: {_safe_url_label(cfg['launch_url'])}")
+    print(f"  Post-launch action: {_post_launch_action_label(cfg['post_launch_action'])}")
     print()
     print("Rejoin Settings")
     print(f"  Auto rejoin: {_yes_no(cfg['auto_rejoin_enabled'])}")
@@ -140,6 +157,9 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print(f"  Health check interval: {cfg['health_check_interval_seconds']} seconds")
     print(f"  Foreground grace: {cfg['foreground_grace_seconds']} seconds")
     print(f"  Root mode: {_yes_no(cfg['root_mode_enabled'])}")
+    print(f"  Webhook: {_yes_no(cfg['webhook_enabled'])} ({cfg['webhook_mode']})")
+    print(f"  Snapshot: {_yes_no(cfg['webhook_snapshot_enabled'])}")
+    print(f"  Auto resize: {_yes_no(cfg['auto_resize_enabled'])} ({cfg['auto_resize_mode']})")
 
 
 def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejoin Setup") -> None:
@@ -233,6 +253,73 @@ def _choose_package_menu(current_package: str = DEFAULT_ROBLOX_PACKAGE) -> str:
         print("Please choose a package number, M, R, or 0.")
 
 
+def _choose_packages_menu(current_packages: list[str] | None = None) -> list[str]:
+    selected = list(current_packages or [DEFAULT_ROBLOX_PACKAGE])
+    if not _is_interactive():
+        return selected
+
+    while True:
+        print()
+        print("--------------------------------")
+        print("Roblox Package Setup")
+        print("--------------------------------")
+        print("1. Auto-detect Roblox packages")
+        print("2. Enter package manually")
+        print("3. View selected packages")
+        print("0. Back")
+        choice = _prompt("Choose option", "1").strip().lower()
+        if choice == "0":
+            return selected
+        if choice == "1":
+            detected = _ordered_roblox_packages()
+            print()
+            if not detected:
+                print("No Roblox package was detected yet.")
+                print("You can enter package names manually now, or install Roblox and rescan later.")
+                continue
+            print("Detected packages:")
+            for idx, package in enumerate(detected, start=1):
+                marker = " (Recommended)" if package == DEFAULT_ROBLOX_PACKAGE else ""
+                already = " [Selected]" if package in selected else ""
+                print(f"{idx}. {package}{marker}{already}")
+            print("A. Select all detected packages")
+            print("0. Back")
+            raw = _prompt("Choose one or more numbers separated by commas", "1").strip().lower()
+            if raw == "0":
+                continue
+            if raw == "a":
+                selected = detected
+                continue
+            choices = [part.strip() for part in raw.split(",") if part.strip()]
+            new_selection: list[str] = []
+            for part in choices:
+                if not part.isdigit():
+                    continue
+                index = int(part)
+                if 1 <= index <= len(detected):
+                    package = detected[index - 1]
+                    if package not in new_selection:
+                        new_selection.append(package)
+            if new_selection:
+                selected = new_selection
+            else:
+                print("No valid package numbers were selected.")
+        elif choice == "2":
+            while True:
+                manual = _prompt_manual_package(selected[0] if selected else DEFAULT_ROBLOX_PACKAGE)
+                if manual and manual not in selected:
+                    selected.append(manual)
+                    print(f"Added: {manual}")
+                if not _prompt_yes_no("Add another package?", False):
+                    break
+        elif choice == "3":
+            print("Selected packages:")
+            for idx, package in enumerate(selected, start=1):
+                print(f"  {idx}. {package}")
+        else:
+            print("Please choose 1, 2, 3, or 0.")
+
+
 def _choose_launch_settings() -> tuple[str, str]:
     if not _is_interactive():
         return "app", ""
@@ -301,6 +388,123 @@ def _prompt_launch_url(current_url: str, launch_mode: str) -> str:
             return value
         except UrlValidationError as exc:
             print(f"That URL cannot be used yet: {exc}")
+
+
+def _setup_launch_link(draft: dict[str, Any]) -> None:
+    print()
+    print("Roblox Launch Link")
+    print("1. App only, no link")
+    print("2. Public Roblox game URL")
+    print("3. Private server URL")
+    print("4. Roblox deeplink")
+    choice = _prompt("Choose launch link type", "1").strip()
+    if choice == "1":
+        draft["launch_mode"] = "app"
+        draft["launch_url"] = ""
+        return
+    if choice in {"2", "3"}:
+        draft["launch_mode"] = "web_url"
+        draft["launch_url"] = _prompt_launch_url(str(draft.get("launch_url") or ""), "web_url")
+        return
+    if choice == "4":
+        draft["launch_mode"] = "deeplink"
+        draft["launch_url"] = _prompt_launch_url(str(draft.get("launch_url") or ""), "deeplink")
+        return
+    print("Unknown choice. Keeping the current launch link settings.")
+
+
+def _setup_webhook(draft: dict[str, Any]) -> None:
+    print()
+    print("Discord Webhook Setup")
+    print("DENG can send safe status updates to Discord. The webhook URL is stored locally and masked in screens/logs.")
+    print("1. No")
+    print("2. Yes, send new messages")
+    print("3. Yes, edit one existing status message when possible")
+    choice = _prompt("Choose webhook mode", "1").strip()
+    if choice == "1":
+        draft["webhook_enabled"] = False
+        return
+    draft["webhook_enabled"] = True
+    draft["webhook_mode"] = "new_message" if choice == "2" else "edit_message"
+    while True:
+        value = _prompt("Discord webhook URL", str(draft.get("webhook_url") or "")).strip()
+        try:
+            draft["webhook_url"] = webhook.validate_webhook_url(value)
+            break
+        except ValueError as exc:
+            print(f"Webhook URL is not valid: {exc}")
+    if draft["webhook_mode"] == "edit_message":
+        draft["webhook_message_id"] = _prompt("Existing message ID (optional)", str(draft.get("webhook_message_id") or ""))
+
+
+def _setup_snapshot(draft: dict[str, Any]) -> None:
+    print()
+    print("Phone Snapshot For Webhook")
+    print("A snapshot may include private information visible on screen. Only enable it on your own phone/cloud phone.")
+    print("1. No")
+    print("2. Yes, attach snapshot")
+    enabled = _prompt("Choose snapshot option", "1").strip() == "2"
+    draft["webhook_snapshot_enabled"] = enabled
+    draft["webhook_send_snapshot"] = enabled
+
+
+def _setup_webhook_interval(draft: dict[str, Any]) -> None:
+    print()
+    print("Webhook Info Interval")
+    print("Short intervals can spam Discord or hit rate limits. Minimum is 30 seconds.")
+    choices = {"1": 30, "2": 60, "3": 300, "4": 600}
+    print("1. 30 seconds")
+    print("2. 1 minute")
+    print("3. 5 minutes")
+    print("4. 10 minutes")
+    print("5. Custom")
+    choice = _prompt("Choose interval", "3").strip()
+    if choice in choices:
+        draft["webhook_interval_seconds"] = choices[choice]
+        return
+    while True:
+        value = _prompt_int("Webhook interval seconds", int(draft.get("webhook_interval_seconds", 300)), 30)
+        try:
+            draft["webhook_interval_seconds"] = webhook.validate_webhook_interval(value)
+            return
+        except ValueError as exc:
+            print(exc)
+
+
+def _setup_post_launch_action(draft: dict[str, Any]) -> None:
+    print()
+    print("Post-Launch Action")
+    print("DENG does not run Roblox scripts, executors, anti-AFK, farming, or gameplay automation.")
+    print("1. None")
+    print("2. Open Roblox app only")
+    print("3. Open configured Roblox link")
+    print("4. Send Discord webhook update after launch")
+    print("5. Show running status table after launch")
+    mapping = {"1": "none", "2": "open_app", "3": "open_link", "4": "send_webhook", "5": "show_running_log"}
+    draft["post_launch_action"] = mapping.get(_prompt("Choose action", "1").strip(), "none")
+
+
+def _setup_auto_resize(draft: dict[str, Any]) -> None:
+    print()
+    print("Auto Resize / Window Layout Setup")
+    print("For cloned Roblox packages, DENG can calculate a safe window grid and update App Cloner window preferences only when accessible.")
+    print("1. No")
+    print("2. Yes, auto layout based on package count")
+    print("3. Preview layout only")
+    choice = _prompt("Choose auto resize option", "1").strip()
+    packages = draft.get("roblox_packages") or [draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE)]
+    if choice == "1":
+        draft["auto_resize_enabled"] = False
+        draft["auto_resize_mode"] = "off"
+        return
+    draft["auto_resize_enabled"] = choice == "2"
+    draft["auto_resize_mode"] = "auto" if choice == "2" else "preview"
+    draft["window_gap_px"] = _prompt_int("Window gap pixels", int(draft.get("window_gap_px", 8)), 0)
+    preview = window_layout.build_layout_preview(packages, gap=int(draft["window_gap_px"]))
+    draft["last_layout_preview"] = preview
+    print("Layout preview:")
+    for line in preview:
+        print(f"  {line}")
 
 
 def _write_termux_boot_script() -> None:
@@ -394,6 +598,131 @@ def _run_guided_config_menu(config_data: dict[str, Any], args: argparse.Namespac
             input("Press Enter to continue...")
 
 
+def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Namespace, *, start_after_save: bool = False) -> tuple[dict[str, Any] | None, bool]:
+    draft = _refresh_detected_fields(dict(config_data))
+    if not _is_interactive():
+        print_banner(use_color=not args.no_color)
+        print("First Time Setup Config")
+        print("Run this command in interactive Termux to complete setup.")
+        print()
+        _print_config_summary(draft)
+        return draft, False
+
+    print_banner(use_color=not args.no_color)
+    print("First Time Setup Config")
+    print("This wizard sets the important first-run options in a safe order.")
+    print()
+    print("Step 1 of 8: Roblox Package Setup")
+    draft["roblox_packages"] = _choose_packages_menu(list(draft.get("roblox_packages") or [draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE)]))
+    draft["roblox_package"] = draft["roblox_packages"][0]
+    draft["selected_package_mode"] = "multiple" if len(draft["roblox_packages"]) > 1 else "single"
+    print("\nStep 2 of 8: Roblox Public / Private Server Link")
+    _setup_launch_link(draft)
+    print("\nStep 3 of 8: Discord Webhook Setup")
+    _setup_webhook(draft)
+    print("\nStep 4 of 8: Phone Snapshot For Webhook")
+    _setup_snapshot(draft)
+    print("\nStep 5 of 8: Webhook Info Interval")
+    _setup_webhook_interval(draft)
+    print("\nStep 6 of 8: Post-Launch Action")
+    _setup_post_launch_action(draft)
+    print("\nStep 7 of 8: Auto Resize / Window Layout Setup")
+    _setup_auto_resize(draft)
+    print("\nStep 8 of 8: Save And Start")
+    draft["first_setup_completed"] = True
+    try:
+        saved = save_config(draft)
+    except ConfigError as exc:
+        print(f"Setup could not be saved: {exc}")
+        return None, False
+    print("First-time setup saved.")
+    _print_config_summary(saved)
+    if start_after_save or _prompt_yes_no("Start DENG now?", True):
+        cmd_start(args)
+    return saved, True
+
+
+def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace) -> tuple[dict[str, Any] | None, bool]:
+    draft = _refresh_detected_fields(dict(config_data))
+    if not _is_interactive():
+        print_banner(use_color=not args.no_color)
+        print("--------------------------------")
+        print("DENG Tool: Rejoin Config")
+        print("--------------------------------")
+        print("1. Roblox Package Setup")
+        print("2. Roblox Launch Link")
+        print("3. Discord Webhook Setup")
+        print("4. Phone Snapshot For Webhook")
+        print("5. Webhook Info Interval")
+        print("6. Post-Launch Action")
+        print("7. Auto Resize / Window Layout Setup")
+        print("8. Save and Finish")
+        print("0. Cancel")
+        print("--------------------------------")
+        print("\nCurrent settings:")
+        _print_config_summary(draft)
+        return draft, False
+
+    while True:
+        print_banner(use_color=not args.no_color)
+        print("--------------------------------")
+        print("DENG Tool: Rejoin Config")
+        print("--------------------------------")
+        print("1. Roblox Package Setup")
+        print("2. Roblox Launch Link")
+        print("3. Discord Webhook Setup")
+        print("4. Phone Snapshot For Webhook")
+        print("5. Webhook Info Interval")
+        print("6. Post-Launch Action")
+        print("7. Auto Resize / Window Layout Setup")
+        print("8. Save and Finish")
+        print("A. Advanced Info")
+        print("0. Cancel")
+        print("--------------------------------")
+        try:
+            choice = input("Choose setting [8]: ").strip().lower() or "8"
+        except EOFError:
+            print("\nNo interactive input was available. Run this command in Termux to edit settings.")
+            print("\nCurrent settings:")
+            _print_config_summary(draft)
+            return draft, False
+        if choice == "0":
+            print("No changes saved.")
+            return None, False
+        if choice == "1":
+            draft["roblox_packages"] = _choose_packages_menu(list(draft.get("roblox_packages") or [draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE)]))
+            draft["roblox_package"] = draft["roblox_packages"][0]
+            draft["selected_package_mode"] = "multiple" if len(draft["roblox_packages"]) > 1 else "single"
+        elif choice == "2":
+            _setup_launch_link(draft)
+        elif choice == "3":
+            _setup_webhook(draft)
+        elif choice == "4":
+            _setup_snapshot(draft)
+        elif choice == "5":
+            _setup_webhook_interval(draft)
+        elif choice == "6":
+            _setup_post_launch_action(draft)
+        elif choice == "7":
+            _setup_auto_resize(draft)
+        elif choice == "8":
+            try:
+                saved = save_config(draft)
+            except ConfigError as exc:
+                print(f"Config could not be saved: {exc}")
+                input("Press Enter to continue...")
+                continue
+            print("Config saved.")
+            return saved, True
+        elif choice == "a":
+            print("\nAdvanced Info")
+            _print_json(safe_config_view(draft))
+            input("\nPress Enter to continue...")
+        else:
+            print("Please choose 1-8, A, or 0.")
+            input("Press Enter to continue...")
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     ensure_app_dirs()
     db.init_db(DB_PATH)
@@ -402,7 +731,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         cfg = load_config()
     except ConfigError:
         cfg = default_config()
-    saved, did_save = _run_guided_config_menu(cfg, args, title="DENG Tool: Rejoin Setup")
+    saved, did_save = _run_first_time_setup_wizard(cfg, args)
     if saved is None:
         return 0
     if not did_save:
@@ -430,6 +759,17 @@ def cmd_setup(args: argparse.Namespace) -> int:
     print("  python agent/deng_tool_rejoin.py --start")
     print("  python agent/deng_tool_rejoin.py --status")
     print("  deng-rejoin")
+    return 0
+
+
+def cmd_first_setup(args: argparse.Namespace) -> int:
+    ensure_app_dirs()
+    db.init_db(DB_PATH)
+    try:
+        cfg = load_config()
+    except ConfigError:
+        cfg = default_config()
+    _run_first_time_setup_wizard(cfg, args)
     return 0
 
 
@@ -501,15 +841,31 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"  Root available: {'Yes' if root_info.available else 'No'} ({root_info.tool or 'no tool'})")
     print()
     print("Roblox")
-    print(f"  Package: {cfg['roblox_package']}")
+    print(f"  Selected packages: {_package_list_label(cfg['roblox_packages'])}")
     print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
     print(f"  Launch URL: {_safe_url_label(cfg.get('launch_url'))}")
     print()
     print("Rejoin Settings")
+    print(f"  First setup completed: {'Yes' if cfg['first_setup_completed'] else 'No'}")
     print(f"  Auto rejoin: {_yes_no(cfg['auto_rejoin_enabled'])}")
     print(f"  Reconnect delay: {cfg['reconnect_delay_seconds']} seconds")
     print(f"  Health check interval: {cfg['health_check_interval_seconds']} seconds")
     print(f"  Root mode: {_yes_no(cfg['root_mode_enabled'])}")
+    print(f"  Post-launch action: {_post_launch_action_label(cfg['post_launch_action'])}")
+    print()
+    print("Webhook")
+    print(f"  Status updates: {_yes_no(cfg['webhook_enabled'])}")
+    print(f"  Mode: {cfg['webhook_mode']}")
+    print(f"  Snapshot: {_yes_no(cfg['webhook_snapshot_enabled'])}")
+    print(f"  Interval: {cfg['webhook_interval_seconds']} seconds")
+    print(f"  URL: {safe.get('webhook_url') or 'Not set'}")
+    print()
+    print("Window Layout")
+    print(f"  Auto resize: {_yes_no(cfg['auto_resize_enabled'])}")
+    print(f"  Mode: {cfg['auto_resize_mode']}")
+    print(f"  Gap: {cfg['window_gap_px']} px")
+    display = window_layout.detect_display_info()
+    print(f"  Detected display: {display.width}x{display.height} density={display.density}")
     print()
     print("Runtime State")
     print(f"  Agent running: {'Yes' if running else 'No'}")
@@ -539,7 +895,52 @@ def cmd_once(args: argparse.Namespace) -> int:
 def cmd_start(args: argparse.Namespace) -> int:
     print_banner(use_color=not args.no_color)
     try:
-        Supervisor().run_forever()
+        cfg = load_config()
+        if not cfg.get("first_setup_completed"):
+            print("First-time setup is required before starting.")
+            if _is_interactive():
+                _run_first_time_setup_wizard(cfg, args, start_after_save=True)
+                return 0
+            print("Run: deng-rejoin and choose First Time Setup Config.")
+            return 2
+
+        packages = cfg.get("roblox_packages") or [cfg["roblox_package"]]
+        if cfg.get("auto_resize_mode") in {"auto", "preview"}:
+            write_xml = bool(cfg.get("auto_resize_enabled") and cfg.get("auto_resize_mode") == "auto")
+            messages, preview = window_layout.apply_layout_to_packages(packages, gap=int(cfg.get("window_gap_px", 8)), write_xml=write_xml)
+            cfg["last_layout_preview"] = preview
+            save_config(cfg)
+            print("Window layout:")
+            for message in messages:
+                print(f"  {message}")
+
+        results = launch_configured_packages(cfg, reason="start")
+        if cfg.get("post_launch_action") == "show_running_log":
+            print("Roblox launch table:")
+            print("Package | Result | Root Used | Error")
+            for package, result in zip(packages, results):
+                print(f"{package} | {'OK' if result.success else 'FAIL'} | {str(result.root_used).lower()} | {result.error or ''}")
+
+        snapshot_path = None
+        if cfg.get("webhook_snapshot_enabled"):
+            snapshot.cleanup_old_snapshots(int(cfg.get("snapshot_max_age_seconds", 300)))
+            snapshot_path, snap_message = snapshot.capture_snapshot()
+            print(f"Snapshot: {snap_message}")
+            if snapshot_path:
+                cfg["snapshot_temp_path"] = str(snapshot_path)
+
+        if cfg.get("webhook_enabled"):
+            ok, message, message_id = webhook.send_webhook_update(cfg, event="start", snapshot_path=snapshot_path, force=cfg.get("post_launch_action") == "send_webhook")
+            print(f"Webhook: {message}")
+            if ok:
+                cfg["webhook_last_sent_at"] = datetime.now(timezone.utc).timestamp()
+                if message_id:
+                    cfg["webhook_last_message_id"] = message_id
+                save_config(cfg)
+
+        if cfg.get("auto_rejoin_enabled"):
+            print("Auto rejoin is enabled. Starting supervisor loop.")
+            Supervisor().run_forever()
         return 0
     except Exception as exc:  # noqa: BLE001 - command boundary.
         print(f"Agent start failed: {exc}")
@@ -582,7 +983,7 @@ def cmd_reset(args: argparse.Namespace) -> int:
 
 def cmd_config(args: argparse.Namespace) -> int:
     cfg = load_config()
-    saved, _did_save = _run_guided_config_menu(cfg, args, title="DENG Tool: Rejoin Settings")
+    saved, _did_save = _run_edit_config_menu(cfg, args)
     if saved is None:
         return 0
     return 0
@@ -716,6 +1117,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="deng_tool_rejoin.py", description=f"{PRODUCT_NAME} local Termux reconnect helper")
     parser.add_argument("command", nargs="?", choices=sorted(COMMANDS), help="command to run")
     parser.add_argument("--setup", action="store_true")
+    parser.add_argument("--first-setup", action="store_true")
     parser.add_argument("--doctor", action="store_true")
     parser.add_argument("--status", action="store_true")
     parser.add_argument("--once", action="store_true")
@@ -734,6 +1136,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     flag_to_command = {
         "setup": ns.setup,
+        "first-setup": ns.first_setup,
         "doctor": ns.doctor,
         "status": ns.status,
         "once": ns.once,
@@ -767,6 +1170,7 @@ def main(argv: list[str] | None = None) -> int:
 def _handlers() -> dict[str, Any]:
     return {
         "setup": cmd_setup,
+        "first-setup": cmd_first_setup,
         "doctor": cmd_doctor,
         "status": cmd_status,
         "once": cmd_once,

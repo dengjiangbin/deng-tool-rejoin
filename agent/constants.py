@@ -30,6 +30,8 @@ RUN_DIR = APP_HOME / "run"
 LOCK_PATH = RUN_DIR / "agent.lock"
 PID_PATH = RUN_DIR / "agent.pid"
 LAUNCHER_DIR = APP_HOME / "launcher"
+CACHE_DIR = APP_HOME / "cache"
+SNAPSHOT_DIR = CACHE_DIR / "snapshots"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AGENT_DIR = PROJECT_ROOT / "agent"
@@ -76,4 +78,4 @@ SENSITIVE_URL_PARAM_NAMES = {
     "token",
 }
 
-APP_DIRS = (APP_HOME, DATA_DIR, LOG_DIR, RUN_DIR, LAUNCHER_DIR)
+APP_DIRS = (APP_HOME, DATA_DIR, LOG_DIR, RUN_DIR, LAUNCHER_DIR, CACHE_DIR, SNAPSHOT_DIR)

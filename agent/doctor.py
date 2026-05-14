@@ -14,6 +14,7 @@ from .constants import APP_HOME, CONFIG_PATH, DB_PATH, LOG_DIR, LOG_PATH
 from .launcher_file import LAUNCHER_FILENAME
 from .lockfile import LockManager, read_pid
 from .platform_detect import detect_public_download_dir, fallback_launcher_path, get_platform_info
+from . import webhook, window_layout
 
 
 @dataclass(frozen=True)
@@ -138,19 +139,71 @@ def run_doctor(config_data: dict[str, Any] | None = None) -> list[DoctorItem]:
         cfg = {}
         items.append(_item("FAIL", "Config", str(exc), "Run setup or config and fix invalid values."))
 
-    package = cfg.get("roblox_package") if cfg else None
-    if package:
-        installed = android.package_installed(package)
+    packages = cfg.get("roblox_packages") or ([cfg.get("roblox_package")] if cfg else [])
+    if packages:
+        missing = [package for package in packages if not android.package_installed(package)]
         items.append(
             _item(
-                "PASS" if installed else "FAIL",
-                "Roblox package",
-                f"{package} installed" if installed else f"{package} not detected",
-                "Install Roblox or set the correct package in config.",
+                "PASS" if not missing else "FAIL",
+                "Selected Roblox packages",
+                ", ".join(packages) if not missing else f"missing: {', '.join(missing)}",
+                "Install Roblox/clones or set the correct package names in config.",
             )
         )
     else:
-        items.append(_item("FAIL", "Roblox package", "not configured", "Run setup."))
+        items.append(_item("FAIL", "Selected Roblox packages", "not configured", "Run first-time setup."))
+
+    if cfg.get("webhook_enabled"):
+        try:
+            webhook.validate_webhook_url(cfg.get("webhook_url"))
+            items.append(_item("PASS", "Discord webhook", "URL format looks valid", ""))
+        except ValueError as exc:
+            items.append(_item("FAIL", "Discord webhook", str(exc), "Open config and fix or disable the webhook."))
+    else:
+        items.append(_item("PASS", "Discord webhook", "disabled", ""))
+
+    if cfg.get("webhook_snapshot_enabled"):
+        items.append(
+            _item(
+                "PASS" if android.command_exists("screencap") else "WARN",
+                "Snapshot command",
+                "screencap available" if android.command_exists("screencap") else "screencap not found",
+                "Snapshots are optional. Disable snapshot or use an Android image with screencap.",
+            )
+        )
+
+    if cfg.get("auto_resize_enabled") or cfg.get("auto_resize_mode") == "preview":
+        size_result = android.run_command(["wm", "size"], timeout=5)
+        density_result = android.run_command(["wm", "density"], timeout=5)
+        items.append(
+            _item(
+                "PASS" if size_result.ok else "WARN",
+                "Display size",
+                size_result.stdout or size_result.summary or "wm size unavailable",
+                "Auto layout uses a safe fallback if wm size is unavailable.",
+            )
+        )
+        items.append(
+            _item(
+                "PASS" if density_result.ok else "WARN",
+                "Display density",
+                density_result.stdout or density_result.summary or "wm density unavailable",
+                "Auto layout uses a safe fallback if wm density is unavailable.",
+            )
+        )
+        root = android.detect_root()
+        if not root.available:
+            items.append(
+                _item(
+                    "WARN",
+                    "App Cloner XML access",
+                    "root/file access unavailable",
+                    "Auto resize can preview layout, but App Cloner preference writes need root/file access.",
+                )
+            )
+        else:
+            readable = [str(window_layout.app_cloner_prefs_path(package)) for package in packages if window_layout.app_cloner_prefs_path(package).exists()]
+            items.append(_item("PASS" if readable else "WARN", "App Cloner XML access", ", ".join(readable) if readable else "no preference XML found", "Missing XML is OK; DENG will still launch apps."))
 
     launch_tools = android.command_exists("am") and android.command_exists("monkey")
     items.append(

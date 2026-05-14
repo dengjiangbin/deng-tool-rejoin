@@ -28,6 +28,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("android_release", validated)
         self.assertIn("android_sdk", validated)
         self.assertIn("download_dir", validated)
+        self.assertEqual(validated["roblox_packages"], ["com.roblox.client"])
 
     def test_rejects_bad_launch_mode(self):
         cfg = default_config()
@@ -38,6 +39,39 @@ class ConfigTests(unittest.TestCase):
     def test_rejects_too_fast_delay(self):
         cfg = default_config()
         cfg["reconnect_delay_seconds"] = 1
+        with self.assertRaises(ConfigError):
+            validate_config(cfg)
+
+    def test_migrates_roblox_package_to_roblox_packages(self):
+        cfg = default_config()
+        cfg.pop("roblox_packages")
+        cfg["roblox_package"] = "com.roblox.client.clone1"
+        validated = validate_config(cfg)
+        self.assertEqual(validated["roblox_packages"], ["com.roblox.client.clone1"])
+        self.assertEqual(validated["roblox_package"], "com.roblox.client.clone1")
+
+    def test_validates_multiple_package_names(self):
+        cfg = default_config()
+        cfg["roblox_packages"] = ["com.roblox.client", "com.roblox.client.clone1"]
+        validated = validate_config(cfg)
+        self.assertEqual(validated["selected_package_mode"], "multiple")
+        self.assertEqual(len(validated["roblox_packages"]), 2)
+
+    def test_rejects_invalid_multiple_package_name(self):
+        cfg = default_config()
+        cfg["roblox_packages"] = ["com.roblox.client", "bad package; rm -rf /"]
+        with self.assertRaises(ConfigError):
+            validate_config(cfg)
+
+    def test_rejects_script_execution_post_launch_action(self):
+        cfg = default_config()
+        cfg["post_launch_action"] = "script_injection"
+        with self.assertRaises(ConfigError):
+            validate_config(cfg)
+
+    def test_webhook_interval_validation(self):
+        cfg = default_config()
+        cfg["webhook_interval_seconds"] = 10
         with self.assertRaises(ConfigError):
             validate_config(cfg)
 

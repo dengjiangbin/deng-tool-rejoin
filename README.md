@@ -26,8 +26,8 @@ wget -O install.sh https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejo
 deng-rejoin
 ```
 
-5. Choose **Setup or Change Settings**.
-6. Choose **One-Time Rejoin Test**.
+5. Choose **First Time Setup Config**.
+6. Choose **Start**.
 
 ## What To Prepare
 
@@ -50,16 +50,9 @@ deng-rejoin
 
 Menu options:
 
-- Setup or Change Settings
-- Start Auto Rejoin
-- Stop Auto Rejoin
-- One-Time Rejoin Test
-- Status
-- Logs
-- Doctor / Fix Problems
-- Enable Termux:Boot
-- Update
-- Reset
+- First Time Setup Config
+- Setup / Edit Config
+- Start
 
 ## Manual Commands
 
@@ -75,9 +68,9 @@ deng-rejoin-reset
 
 ## Setup Experience
 
-Setup is a guided Termux menu, not a raw JSON editor. It shows friendly settings such as Device Name, Roblox Package, Launch Mode, Launch URL / Private Server URL, Auto Rejoin, Reconnect Delay, Root Mode, and Health Check Interval.
+Setup is a guided Termux menu, not a raw JSON editor. First-time setup walks through Roblox packages, Roblox public/private link, optional Discord webhook, optional snapshot, webhook interval, safe post-launch action, auto resize/window layout, and Save And Start.
 
-The Roblox Package screen scans Android for Roblox-related packages, marks `com.roblox.client` as recommended when found, lets you choose a detected package by number, and also supports manual package entry.
+The Roblox Package screen scans Android for Roblox-related packages, marks `com.roblox.client` as recommended when found, lets you choose detected packages, and also supports manual package entry for app clones.
 
 Advanced direct commands:
 
@@ -118,6 +111,10 @@ If public storage is unavailable, DENG also creates:
 - Opens Roblox
 - Opens Roblox deep links or Roblox web/private-server URLs
 - Optionally force-stops Roblox first when root is enabled
+- Launches one or more configured Roblox packages
+- Optionally sends safe Discord webhook status updates
+- Optionally attaches phone snapshots when explicitly enabled
+- Optionally previews/applies App Cloner window layout values when accessible
 - Runs a local auto-rejoin supervisor
 - Records rejoin attempts, heartbeats, and events in SQLite
 - Writes readable local logs

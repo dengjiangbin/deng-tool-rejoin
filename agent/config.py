@@ -11,6 +11,7 @@ from typing import Any
 
 from . import db
 from .platform_detect import detect_public_download_dir, get_android_release, get_android_sdk
+from .webhook import mask_webhook_url, validate_webhook_interval, validate_webhook_url
 from .constants import (
     APP_DIRS,
     CONFIG_PATH,
@@ -38,6 +39,12 @@ class ConfigError(ValueError):
     """Raised when config input is invalid."""
 
 
+SELECTED_PACKAGE_MODES = {"single", "multiple"}
+WEBHOOK_MODES = {"new_message", "edit_message"}
+POST_LAUNCH_ACTIONS = {"none", "open_app", "open_link", "send_webhook", "show_running_log"}
+AUTO_RESIZE_MODES = {"off", "auto", "preview"}
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -57,8 +64,27 @@ def default_config() -> dict[str, Any]:
         "device_name": device_name,
         "agent_version": VERSION,
         "roblox_package": DEFAULT_ROBLOX_PACKAGE,
+        "roblox_packages": [DEFAULT_ROBLOX_PACKAGE],
+        "selected_package_mode": "single",
         "launch_mode": "app",
         "launch_url": "",
+        "webhook_enabled": False,
+        "webhook_url": "",
+        "webhook_mode": "new_message",
+        "webhook_message_id": "",
+        "webhook_interval_seconds": 300,
+        "webhook_snapshot_enabled": False,
+        "webhook_send_snapshot": False,
+        "webhook_last_sent_at": 0,
+        "webhook_last_message_id": "",
+        "snapshot_max_age_seconds": 300,
+        "snapshot_temp_path": "",
+        "post_launch_action": "none",
+        "auto_resize_enabled": False,
+        "auto_resize_mode": "off",
+        "window_gap_px": 8,
+        "last_layout_preview": [],
+        "first_setup_completed": False,
         "auto_rejoin_enabled": False,
         "reconnect_delay_seconds": DEFAULT_RECONNECT_DELAY_SECONDS,
         "health_check_interval_seconds": DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS,
@@ -93,6 +119,19 @@ def validate_package_name(package_name: str) -> str:
     return cleaned
 
 
+def validate_package_names(package_names: list[str] | tuple[str, ...]) -> list[str]:
+    if not isinstance(package_names, (list, tuple)):
+        raise ConfigError("roblox_packages must be a list of package names")
+    validated: list[str] = []
+    for package in package_names:
+        cleaned = validate_package_name(str(package))
+        if cleaned not in validated:
+            validated.append(cleaned)
+    if not validated:
+        raise ConfigError("at least one Roblox package must be configured")
+    return validated
+
+
 def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -114,14 +153,26 @@ def _as_int(name: str, value: Any, minimum: int | None = None, maximum: int | No
 
 
 def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool = True) -> dict[str, Any]:
+    input_config = input_config or {}
+    source_has_packages = bool(input_config.get("roblox_packages"))
     merged = default_config()
-    merged.update(input_config or {})
+    merged.update(input_config)
 
     merged["agent_version"] = VERSION
     merged["android_release"] = str(merged.get("android_release") or get_android_release())
     merged["android_sdk"] = str(merged.get("android_sdk") or get_android_sdk())
     merged["download_dir"] = str(merged.get("download_dir") or detect_public_download_dir())
-    merged["roblox_package"] = validate_package_name(str(merged.get("roblox_package", "")))
+    migrated_package = str(merged.get("roblox_package") or DEFAULT_ROBLOX_PACKAGE)
+    if not source_has_packages:
+        merged["roblox_packages"] = [migrated_package]
+    merged["roblox_packages"] = validate_package_names(merged["roblox_packages"])
+    merged["roblox_package"] = validate_package_name(str(merged["roblox_packages"][0]))
+    selected_package_mode = str(merged.get("selected_package_mode", "single")).strip().lower()
+    if selected_package_mode not in SELECTED_PACKAGE_MODES:
+        raise ConfigError("selected_package_mode must be single or multiple")
+    if len(merged["roblox_packages"]) > 1:
+        selected_package_mode = "multiple"
+    merged["selected_package_mode"] = selected_package_mode
 
     launch_mode = str(merged.get("launch_mode", "app")).strip().lower()
     if launch_mode not in LAUNCH_MODES:
@@ -145,6 +196,39 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged["root_mode_enabled"] = _as_bool(merged.get("root_mode_enabled"))
     merged["root_available"] = _as_bool(merged.get("root_available"))
     merged["termux_boot_enabled"] = _as_bool(merged.get("termux_boot_enabled"))
+    merged["webhook_enabled"] = _as_bool(merged.get("webhook_enabled"))
+    merged["webhook_snapshot_enabled"] = _as_bool(merged.get("webhook_snapshot_enabled"))
+    merged["webhook_send_snapshot"] = _as_bool(merged.get("webhook_send_snapshot") or merged.get("webhook_snapshot_enabled"))
+    merged["auto_resize_enabled"] = _as_bool(merged.get("auto_resize_enabled"))
+    merged["first_setup_completed"] = _as_bool(merged.get("first_setup_completed"))
+
+    webhook_mode = str(merged.get("webhook_mode", "new_message")).strip().lower()
+    if webhook_mode not in WEBHOOK_MODES:
+        raise ConfigError("webhook_mode must be new_message or edit_message")
+    merged["webhook_mode"] = webhook_mode
+    merged["webhook_url"] = str(merged.get("webhook_url") or "").strip()
+    if merged["webhook_enabled"]:
+        try:
+            merged["webhook_url"] = validate_webhook_url(merged["webhook_url"])
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+    merged["webhook_message_id"] = str(merged.get("webhook_message_id") or "").strip()
+    merged["webhook_last_message_id"] = str(merged.get("webhook_last_message_id") or "").strip()
+    merged["webhook_last_sent_at"] = merged.get("webhook_last_sent_at") or 0
+    try:
+        merged["webhook_interval_seconds"] = validate_webhook_interval(merged.get("webhook_interval_seconds", 300))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+
+    post_launch_action = str(merged.get("post_launch_action", "none")).strip().lower()
+    if post_launch_action not in POST_LAUNCH_ACTIONS:
+        raise ConfigError("post_launch_action must be one of the safe supported actions")
+    merged["post_launch_action"] = post_launch_action
+
+    auto_resize_mode = str(merged.get("auto_resize_mode", "off")).strip().lower()
+    if auto_resize_mode not in AUTO_RESIZE_MODES:
+        raise ConfigError("auto_resize_mode must be off, auto, or preview")
+    merged["auto_resize_mode"] = auto_resize_mode
 
     merged["reconnect_delay_seconds"] = _as_int(
         "reconnect_delay_seconds", merged.get("reconnect_delay_seconds"), MIN_RECONNECT_DELAY_SECONDS
@@ -158,6 +242,8 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged["max_fast_failures"] = _as_int("max_fast_failures", merged.get("max_fast_failures"), 1)
     merged["backoff_min_seconds"] = _as_int("backoff_min_seconds", merged.get("backoff_min_seconds"), MIN_BACKOFF_SECONDS)
     merged["backoff_max_seconds"] = _as_int("backoff_max_seconds", merged.get("backoff_max_seconds"), MIN_BACKOFF_SECONDS, MAX_BACKOFF_SECONDS)
+    merged["window_gap_px"] = _as_int("window_gap_px", merged.get("window_gap_px"), 0)
+    merged["snapshot_max_age_seconds"] = _as_int("snapshot_max_age_seconds", merged.get("snapshot_max_age_seconds"), 30)
     if merged["backoff_max_seconds"] < merged["backoff_min_seconds"]:
         raise ConfigError("backoff_max_seconds must be greater than or equal to backoff_min_seconds")
 
@@ -169,6 +255,9 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     if not merged.get("created_at"):
         merged["created_at"] = utc_now()
     merged["updated_at"] = utc_now()
+    if not isinstance(merged.get("last_layout_preview"), list):
+        merged["last_layout_preview"] = []
+    merged["snapshot_temp_path"] = str(merged.get("snapshot_temp_path") or "")
     return {key: merged[key] for key in default_config().keys()}
 
 
@@ -197,4 +286,5 @@ def save_config(config_data: dict[str, Any], config_path: Path = CONFIG_PATH) ->
 def safe_config_view(config_data: dict[str, Any]) -> dict[str, Any]:
     view = dict(config_data)
     view["launch_url"] = mask_launch_url(view.get("launch_url")) or ""
+    view["webhook_url"] = mask_webhook_url(view.get("webhook_url"))
     return view
