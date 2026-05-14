@@ -27,7 +27,7 @@ The package screen automatically scans Android for Roblox-related packages. It u
 
 If packages are found, DENG shows them in a numbered list and marks `com.roblox.client` as recommended. Choose one or more packages to use them, including cloned packages.
 
-Each selected package can have a friendly label such as `Main`, `Alt 1`, or `MyCloud1`. DENG does not read Roblox usernames, credentials, cookies, or private session files. If you want a username-like label, type it yourself.
+Each selected package can have a Roblox username/account name such as `deng1629`, `AltAccount1`, or `MyCloud1`. DENG uses this only to make the Start table easy to read. DENG may use a safe Android app label or allowlisted display-name preference key when available, but it never reads Roblox credentials, cookies, tokens, or private session files. If it cannot safely detect a name, type one yourself or leave it as `Username not set`.
 
 If your clone uses another prefix, open **Detection hints for cloned package names** and add a safe fragment from the package name. For example, add `moons` for `com.moons.myroblox` or `com.moons.` for a whole prefix.
 
@@ -77,4 +77,4 @@ Logs include event type, package, root usage, success/failure, and masked URLs.
 
 ## Status
 
-Status shows first-time setup state, selected Roblox packages and labels, masked launch link, webhook/snapshot state, automatic layout state, Android release/SDK, root availability, latest heartbeat, latest rejoin attempt, and latest error.
+Status shows first-time setup state, selected Roblox packages and account names, masked launch link, webhook/snapshot state, automatic layout state, Android release/SDK, root availability, latest heartbeat, latest rejoin attempt, and latest error.

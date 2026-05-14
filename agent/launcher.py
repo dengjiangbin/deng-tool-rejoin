@@ -110,7 +110,7 @@ def launch_configured_packages(config_data: dict[str, Any], *, reason: str = "st
     for index, package in enumerate(packages):
         package_cfg = dict(cfg)
         package_cfg["roblox_package"] = package
-        package_cfg["roblox_packages"] = [{"package": package, "label": "", "enabled": True}]
+        package_cfg["roblox_packages"] = [{"package": package, "account_username": "", "enabled": True, "username_source": "not_set"}]
         result = perform_rejoin(package_cfg, reason=reason)
         results.append(result)
         if index < len(packages) - 1:

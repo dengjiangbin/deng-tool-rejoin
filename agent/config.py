@@ -64,7 +64,14 @@ def default_config() -> dict[str, Any]:
         "device_name": device_name,
         "agent_version": VERSION,
         "roblox_package": DEFAULT_ROBLOX_PACKAGE,
-        "roblox_packages": [{"package": DEFAULT_ROBLOX_PACKAGE, "label": "Main", "enabled": True}],
+        "roblox_packages": [
+            {
+                "package": DEFAULT_ROBLOX_PACKAGE,
+                "account_username": "Main",
+                "enabled": True,
+                "username_source": "manual",
+            }
+        ],
         "package_detection_hints": list(DEFAULT_ROBLOX_PACKAGE_HINTS),
         "selected_package_mode": "single",
         "launch_mode": "app",
@@ -127,17 +134,40 @@ def _as_bool(value: Any) -> bool:
     return bool(value)
 
 
-def validate_package_label(label: Any) -> str:
-    cleaned = str(label or "").strip()
+USERNAME_SOURCES = {"manual", "detected_safe_pref", "android_app_label", "not_set"}
+
+
+def validate_account_username(username: Any) -> str:
+    cleaned = str(username or "").strip()
     if len(cleaned) > 80:
-        raise ConfigError("package label must be 80 characters or fewer")
+        raise ConfigError("account username must be 80 characters or fewer")
     if any(ord(char) < 32 for char in cleaned):
-        raise ConfigError("package label cannot contain control characters")
+        raise ConfigError("account username cannot contain control characters")
     return cleaned
 
 
-def package_entry(package: str, label: str = "", enabled: bool = True) -> dict[str, Any]:
-    return {"package": validate_package_name(package), "label": validate_package_label(label), "enabled": bool(enabled)}
+def validate_username_source(source: Any, username: str = "") -> str:
+    cleaned = str(source or "").strip().lower()
+    if cleaned not in USERNAME_SOURCES:
+        cleaned = "manual" if username else "not_set"
+    if cleaned != "not_set" and not username:
+        return "not_set"
+    return cleaned
+
+
+def package_entry(
+    package: str,
+    account_username: str = "",
+    enabled: bool = True,
+    username_source: str = "manual",
+) -> dict[str, Any]:
+    username = validate_account_username(account_username)
+    return {
+        "package": validate_package_name(package),
+        "account_username": username,
+        "enabled": bool(enabled),
+        "username_source": validate_username_source(username_source, username),
+    }
 
 
 def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
@@ -149,10 +179,16 @@ def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
         if isinstance(raw_entry, str):
             entry = package_entry(raw_entry, "", True)
         elif isinstance(raw_entry, dict):
+            username = raw_entry.get("account_username")
+            source = raw_entry.get("username_source")
+            if username is None and raw_entry.get("label") is not None:
+                username = raw_entry.get("label")
+                source = source or "manual"
             entry = package_entry(
                 str(raw_entry.get("package") or ""),
-                str(raw_entry.get("label") or ""),
+                str(username or ""),
                 _as_bool(raw_entry.get("enabled", True)),
+                str(source or ""),
             )
         else:
             raise ConfigError("each Roblox package entry must be a package string or object")
@@ -179,11 +215,13 @@ def enabled_package_names(config_data: dict[str, Any]) -> list[str]:
 
 
 def package_display_name(entry: dict[str, Any], *, include_package: bool = True) -> str:
-    label = validate_package_label(entry.get("label", ""))
+    username = validate_account_username(entry.get("account_username", ""))
     package = validate_package_name(str(entry.get("package") or ""))
-    if label and include_package:
-        return f"{label} ({package})"
-    return label or package
+    if username and include_package:
+        return f"{username} ({package})"
+    if username:
+        return username
+    return f"Username not set ({package})" if include_package else "Username not set"
 
 
 def normalize_package_detection_hint(value: str) -> str:

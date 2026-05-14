@@ -81,8 +81,8 @@ def build_status_message(config_data: dict[str, Any], *, event: str = "status", 
     for entry in raw_packages:
         if isinstance(entry, dict):
             package = str(entry.get("package") or "unknown")
-            label = str(entry.get("label") or "").strip()
-            packages.append(f"{label} ({package})" if label else package)
+            username = str(entry.get("account_username") or entry.get("label") or "").strip()
+            packages.append(f"{username} ({package})" if username else f"Username not set ({package})")
         else:
             packages.append(str(entry))
     launch_url = mask_launch_url(config_data.get("launch_url")) or "not set"

@@ -151,13 +151,13 @@ def run_doctor(config_data: dict[str, Any] | None = None) -> list[DoctorItem]:
                 "Install Roblox/clones or set the correct package names in config.",
             )
         )
-        unlabeled = [entry["package"] for entry in entries if not entry.get("label")]
+        missing_usernames = [entry["package"] for entry in entries if not entry.get("account_username")]
         items.append(
             _item(
-                "PASS" if not unlabeled else "WARN",
-                "Package labels",
-                "all selected packages have labels" if not unlabeled else f"label not set: {', '.join(unlabeled)}",
-                "Labels are optional, but adding Main/Alt names makes the start table easier to read.",
+                "PASS" if not missing_usernames else "WARN",
+                "Account names",
+                "all selected packages have account names" if not missing_usernames else f"username not set: {', '.join(missing_usernames)}",
+                "Account names are optional, but adding usernames or Main/Alt names makes the start table easier to read.",
             )
         )
     else:

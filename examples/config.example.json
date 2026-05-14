@@ -28,9 +28,10 @@
   "roblox_package": "com.roblox.client",
   "roblox_packages": [
     {
+      "account_username": "Main",
       "enabled": true,
-      "label": "Main",
-      "package": "com.roblox.client"
+      "package": "com.roblox.client",
+      "username_source": "manual"
     }
   ],
   "root_available": false,

@@ -36,7 +36,8 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("android_sdk", validated)
         self.assertIn("download_dir", validated)
         self.assertEqual(enabled_package_names(validated), ["com.roblox.client"])
-        self.assertEqual(validated["roblox_packages"][0]["label"], "Main")
+        self.assertEqual(validated["roblox_packages"][0]["account_username"], "Main")
+        self.assertEqual(validated["roblox_packages"][0]["username_source"], "manual")
 
     def test_rejects_bad_launch_mode(self):
         cfg = default_config()
@@ -55,8 +56,18 @@ class ConfigTests(unittest.TestCase):
         cfg.pop("roblox_packages")
         cfg["roblox_package"] = "com.roblox.client.clone1"
         validated = validate_config(cfg)
-        self.assertEqual(validated["roblox_packages"], [{"package": "com.roblox.client.clone1", "label": "Main", "enabled": True}])
+        self.assertEqual(
+            validated["roblox_packages"],
+            [{"package": "com.roblox.client.clone1", "account_username": "Main", "enabled": True, "username_source": "manual"}],
+        )
         self.assertEqual(validated["roblox_package"], "com.roblox.client.clone1")
+
+    def test_migrates_label_to_account_username(self):
+        cfg = default_config()
+        cfg["roblox_packages"] = [{"package": "com.roblox.client", "label": "Alt Label", "enabled": True}]
+        validated = validate_config(cfg)
+        self.assertEqual(validated["roblox_packages"][0]["account_username"], "Alt Label")
+        self.assertEqual(validated["roblox_packages"][0]["username_source"], "manual")
 
     def test_migrates_package_string_list_to_package_objects(self):
         cfg = default_config()
@@ -65,21 +76,21 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             validated["roblox_packages"],
             [
-                {"package": "com.roblox.client", "label": "", "enabled": True},
-                {"package": "com.roblox.client.clone1", "label": "", "enabled": True},
+                {"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"},
+                {"package": "com.roblox.client.clone1", "account_username": "", "enabled": True, "username_source": "not_set"},
             ],
         )
 
     def test_validates_multiple_package_names(self):
         cfg = default_config()
         cfg["roblox_packages"] = [
-            {"package": "com.roblox.client", "label": "Main", "enabled": True},
-            {"package": "com.roblox.client.clone1", "label": "Alt 1", "enabled": True},
+            {"package": "com.roblox.client", "account_username": "Main", "enabled": True, "username_source": "manual"},
+            {"package": "com.roblox.client.clone1", "account_username": "Alt 1", "enabled": True, "username_source": "manual"},
         ]
         validated = validate_config(cfg)
         self.assertEqual(validated["selected_package_mode"], "multiple")
         self.assertEqual(len(validated["roblox_packages"]), 2)
-        self.assertEqual(validated["roblox_packages"][1]["label"], "Alt 1")
+        self.assertEqual(validated["roblox_packages"][1]["account_username"], "Alt 1")
         self.assertIn("moons", validated["package_detection_hints"])
 
     def test_rejects_invalid_multiple_package_name(self):

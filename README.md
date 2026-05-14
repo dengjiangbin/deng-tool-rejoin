@@ -68,9 +68,9 @@ deng-rejoin-reset
 
 ## Setup Experience
 
-Setup is a guided Termux menu, not a raw JSON editor. First-time setup walks through Roblox packages/account labels, Roblox public/private link, optional Discord webhook, optional snapshot and webhook interval only when webhook is enabled, and Save And Start.
+Setup is a guided Termux menu, not a raw JSON editor. First-time setup walks through Roblox packages/account names, Roblox public/private link, optional Discord webhook, optional snapshot and webhook interval only when webhook is enabled, and Save And Start.
 
-The Roblox Package screen scans Android for Roblox-related packages, marks `com.roblox.client` as recommended when found, lets you choose detected packages, and also supports manual package entry for app clones. It also uses configurable detection hints such as `roblox`, `rblx`, `blox`, and `moons`, so clone packages like `com.moons.*` can be found even when the package name does not contain `roblox`. Labels like `Main` or `Alt 1` are user-entered nicknames; DENG does not read Roblox usernames or secrets.
+The Roblox Package screen scans Android for Roblox-related packages, marks `com.roblox.client` as recommended when found, lets you choose detected packages, and also supports manual package entry for app clones. It also uses configurable detection hints such as `roblox`, `rblx`, `blox`, and `moons`, so clone packages like `com.moons.*` can be found even when the package name does not contain `roblox`. Account names like `Main`, `Alt 1`, or a Roblox username are safe display names; DENG never reads Roblox cookies, tokens, passwords, or session files.
 
 Advanced direct commands:
 

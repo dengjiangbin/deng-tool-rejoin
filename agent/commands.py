@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import android, db
+from . import account_detect, android, db
 from .banner import print_banner
 from .config import (
     ConfigError,
@@ -27,10 +27,10 @@ from .config import (
     package_entry,
     safe_config_view,
     save_config,
+    validate_account_username,
     validate_config,
     validate_package_detection_hints,
     validate_package_entries,
-    validate_package_label,
     validate_package_name,
 )
 from .constants import (
@@ -139,8 +139,8 @@ def _package_row_label(entry: dict[str, Any]) -> str:
     return package_display_name(entry, include_package=True)
 
 
-def _package_label_value(entry: dict[str, Any]) -> str:
-    return validate_package_label(entry.get("label", "")) or "Not set"
+def _account_username_value(entry: dict[str, Any]) -> str:
+    return validate_account_username(entry.get("account_username", "")) or "Username not set"
 
 
 def _hint_list_label(hints: list[str]) -> str:
@@ -183,10 +183,11 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print("DENG Tool: Rejoin Settings")
     print()
     print("Roblox Packages:")
+    print("  Roblox Username / Account Name")
     if enabled_entries:
         for idx, entry in enumerate(enabled_entries, start=1):
-            label = _package_label_value(entry)
-            print(f"  {idx}. {label:<12} {entry['package']}")
+            username = _account_username_value(entry)
+            print(f"  {idx}. {username:<16} {entry['package']}")
     else:
         print("  Not set")
     print(f"  Detection hints: {_hint_list_label(cfg['package_detection_hints'])}")
@@ -265,13 +266,33 @@ def _entry_for_package(package: str, current_entries: list[dict[str, Any]]) -> d
     return package_entry(package, "", True)
 
 
+def _detect_or_prompt_account_username(entry: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(entry)
+    if validate_account_username(updated.get("account_username", "")):
+        return updated
+    result = account_detect.detect_account_username_for_package(updated["package"])
+    if result:
+        updated["account_username"] = result.username
+        updated["username_source"] = result.source
+        return updated
+    updated["username_source"] = "not_set"
+    if _is_interactive():
+        print(f"DENG could not safely detect a Roblox username/account name for {updated['package']}.")
+        print("This name is only used to make the Start table easy to read.")
+        manual = _prompt(f"Enter Roblox username/account name for {updated['package']}, or press Enter to skip", "").strip()
+        if manual:
+            updated["account_username"] = validate_account_username(manual)
+            updated["username_source"] = "manual"
+    return updated
+
+
 def _print_package_entries(entries: list[dict[str, Any]]) -> None:
     if not entries:
         print("  No packages selected.")
         return
     for idx, entry in enumerate(entries, start=1):
         enabled = "" if entry.get("enabled", True) else " [Disabled]"
-        print(f"  {idx}. {entry['package']:<32} Label: {_package_label_value(entry)}{enabled}")
+        print(f"  {idx}. {_account_username_value(entry):<20} {entry['package']}{enabled}")
 
 
 def _choose_package_menu(current_package: str = DEFAULT_ROBLOX_PACKAGE, package_detection_hints: list[str] | None = None) -> str:
@@ -299,7 +320,7 @@ def _choose_packages_menu(
         print()
         print("A. Auto-detect / Rescan")
         print("M. Add package manually")
-        print("L. Edit package label/account name")
+        print("U. Detect/Edit username")
         print("R. Remove package")
         print("H. Detection hints for cloned package names")
         print("N. Next")
@@ -325,16 +346,16 @@ def _choose_packages_menu(
             for idx, package in enumerate(detected, start=1):
                 marker = " (Recommended)" if package == DEFAULT_ROBLOX_PACKAGE else ""
                 existing = next((entry for entry in selected if entry["package"] == package), None)
-                label = _package_label_value(existing) if existing else "Not set"
+                username = _account_username_value(existing) if existing else "Username not set"
                 already = " [Selected]" if existing else ""
-                print(f"{idx}. {package:<32} Label: {label}{marker}{already}")
+                print(f"{idx}. {username:<20} {package}{marker}{already}")
             print("A. Select all detected packages")
             print("0. Back")
             raw = _prompt("Choose one or more numbers separated by commas", "1").strip().lower()
             if raw == "0":
                 continue
             if raw == "a":
-                selected = [_entry_for_package(package, selected) for package in detected]
+                selected = [_detect_or_prompt_account_username(_entry_for_package(package, selected)) for package in detected]
                 continue
             choices = [part.strip() for part in raw.split(",") if part.strip()]
             new_selection: list[dict[str, Any]] = []
@@ -345,7 +366,7 @@ def _choose_packages_menu(
                 if 1 <= index <= len(detected):
                     package = detected[index - 1]
                     if package not in [entry["package"] for entry in new_selection]:
-                        new_selection.append(_entry_for_package(package, selected))
+                        new_selection.append(_detect_or_prompt_account_username(_entry_for_package(package, selected)))
             if new_selection:
                 selected = new_selection
             else:
@@ -355,27 +376,34 @@ def _choose_packages_menu(
                 default_package = selected[0]["package"] if selected else DEFAULT_ROBLOX_PACKAGE
                 manual = _prompt_manual_package(default_package)
                 if manual and manual not in [entry["package"] for entry in selected]:
-                    label = _prompt("Friendly label/account name (optional)", "").strip()
-                    selected.append(package_entry(manual, label, True))
+                    selected.append(_detect_or_prompt_account_username(package_entry(manual, "", True, "not_set")))
                     print(f"Added: {manual}")
                 if not _prompt_yes_no("Add another package?", False):
                     break
-        elif choice == "l":
+        elif choice == "u":
             if not selected:
                 print("No packages selected yet.")
                 continue
             _print_package_entries(selected)
-            raw = _prompt("Package number to label", "1").strip()
+            raw = _prompt("Package number for username/account name", "1").strip()
             if not raw.isdigit() or not (1 <= int(raw) <= len(selected)):
                 print("Choose a valid package number.")
                 continue
             index = int(raw) - 1
-            current_label = validate_package_label(selected[index].get("label", ""))
-            label = _prompt("Friendly label/account name", current_label).strip()
+            detected = account_detect.detect_account_username_for_package(selected[index]["package"])
+            if detected:
+                print(f"Safe detected username/account name: {detected.username}")
+                if _prompt_yes_no("Use this name?", True):
+                    selected[index]["account_username"] = detected.username
+                    selected[index]["username_source"] = detected.source
+                    continue
+            current_username = validate_account_username(selected[index].get("account_username", ""))
+            username = _prompt("Roblox username/account name", current_username).strip()
             try:
-                selected[index]["label"] = validate_package_label(label)
+                selected[index]["account_username"] = validate_account_username(username)
+                selected[index]["username_source"] = "manual" if username else "not_set"
             except ConfigError as exc:
-                print(f"That label cannot be used: {exc}")
+                print(f"That username/account name cannot be used: {exc}")
         elif choice == "r":
             if not selected:
                 print("No packages selected yet.")
@@ -411,7 +439,7 @@ def _choose_packages_menu(
                 hints = list(DEFAULT_ROBLOX_PACKAGE_HINTS)
                 print("Detection hints reset to defaults.")
         else:
-            print("Please choose A, M, L, R, H, N, or 0.")
+            print("Please choose A, M, U, R, H, N, or 0.")
 
 
 def _choose_launch_settings() -> tuple[str, str]:
@@ -641,7 +669,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("--------------------------------")
         print("DENG Tool: Rejoin Config")
         print("--------------------------------")
-        print("1. Roblox Packages / Account Labels")
+        print("1. Roblox Packages / Account Names")
         print("2. Roblox Launch Link")
         print("3. Discord Webhook")
         if draft.get("webhook_enabled"):
@@ -662,7 +690,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("--------------------------------")
         print("DENG Tool: Rejoin Config")
         print("--------------------------------")
-        print("1. Roblox Packages / Account Labels")
+        print("1. Roblox Packages / Account Names")
         print("2. Roblox Launch Link")
         print("3. Discord Webhook")
         if draft.get("webhook_enabled"):
@@ -852,7 +880,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     entries = enabled_package_entries(cfg)
     print("  Selected packages:")
     for idx, entry in enumerate(entries, start=1):
-        print(f"    {idx}. {_package_label_value(entry):<12} {entry['package']}")
+        print(f"    {idx}. {_account_username_value(entry):<16} {entry['package']}")
     print(f"  Detection hints: {_hint_list_label(cfg['package_detection_hints'])}")
     print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
     print(f"  Launch URL: {_safe_url_label(cfg.get('launch_url'))}")
@@ -907,39 +935,42 @@ def cmd_once(args: argparse.Namespace) -> int:
 
 def build_start_table(entries: list[dict[str, Any]], statuses: dict[str, str]) -> str:
     rows = [(_package_row_label(entry), statuses.get(entry["package"], "Waiting")) for entry in entries]
-    name_width = max([len("Package / Account"), *(len(row[0]) for row in rows)], default=18)
+    name_width = max([len("Package / Username"), *(len(row[0]) for row in rows)], default=18)
     status_width = max([len("Status"), *(len(row[1]) for row in rows)], default=12)
-    border = f"+-{'-' * name_width}-+-{'-' * status_width}-+"
     lines = [
         "DENG Tool: Rejoin Start",
         "",
-        border,
-        f"| {'Package / Account'.ljust(name_width)} | {'Status'.ljust(status_width)} |",
-        border,
+        f"{'Package / Username'.ljust(name_width)}  {'Status'.ljust(status_width)}",
+        "-" * (name_width + status_width + 2),
     ]
     for name, status in rows:
-        lines.append(f"| {name.ljust(name_width)} | {status.ljust(status_width)} |")
-    lines.append(border)
+        lines.append(f"{name.ljust(name_width)}  {status.ljust(status_width)}")
     return "\n".join(lines)
 
 
-def _print_start_table(entries: list[dict[str, Any]], statuses: dict[str, str]) -> None:
-    print()
-    print(build_start_table(entries, statuses))
+def build_final_summary(entries: list[dict[str, Any]], results: dict[str, str]) -> str:
+    rows = [(_package_row_label(entry), results.get(entry["package"], "Unknown")) for entry in entries]
+    name_width = max([len("Package / Username"), *(len(row[0]) for row in rows)], default=18)
+    result_width = max([len("Result"), *(len(row[1]) for row in rows)], default=12)
+    lines = [
+        "Final Summary:",
+        f"{'Package / Username'.ljust(name_width)}  {'Result'.ljust(result_width)}",
+        "-" * (name_width + result_width + 2),
+    ]
+    for name, result in rows:
+        lines.append(f"{name.ljust(name_width)}  {result.ljust(result_width)}")
+    return "\n".join(lines)
 
 
-def _mark_status(entries: list[dict[str, Any]], statuses: dict[str, str], package: str, status: str) -> None:
-    statuses[package] = status
-    _print_start_table(entries, statuses)
+def _progress_line(index: int, total: int, entry: dict[str, Any], message: str) -> str:
+    username = validate_account_username(entry.get("account_username", "")) or entry["package"]
+    return f"[{index}/{total}] {username}: {message}"
 
 
-def _prepare_automatic_layout(cfg: dict[str, Any], entries: list[dict[str, Any]], statuses: dict[str, str]) -> dict[str, Any]:
+def _prepare_automatic_layout(cfg: dict[str, Any], entries: list[dict[str, Any]]) -> tuple[dict[str, Any], str]:
     if len(entries) <= 1:
-        return cfg
+        return cfg, "Layout skipped, one package only."
     packages = [entry["package"] for entry in entries]
-    for package in packages:
-        statuses[package] = "Layout calculated"
-    _print_start_table(entries, statuses)
     root_info = android.detect_root()
     messages, preview = window_layout.apply_layout_to_packages(
         packages,
@@ -948,12 +979,13 @@ def _prepare_automatic_layout(cfg: dict[str, Any], entries: list[dict[str, Any]]
     )
     cfg["last_layout_preview"] = preview
     save_config(cfg)
-    print("\nAutomatic layout:")
-    for message in messages:
-        print(f"  {message}")
     if not root_info.available:
-        print("  Layout apply skipped: root/XML access unavailable. DENG will still launch the apps.")
-    return cfg
+        return cfg, "Layout calculated. Layout skipped, root/XML unavailable."
+    if any("Updated App Cloner window preferences" in message for message in messages):
+        return cfg, "Layout calculated. Layout applied."
+    if messages:
+        return cfg, "Layout calculated. Layout skipped, root/XML unavailable."
+    return cfg, "Layout failed, launch continues."
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -970,25 +1002,43 @@ def cmd_start(args: argparse.Namespace) -> int:
             return 2
 
         statuses = {entry["package"]: "Waiting" for entry in entries}
-        _print_start_table(entries, statuses)
-        cfg = _prepare_automatic_layout(cfg, entries, statuses)
+        print()
+        print(build_start_table(entries, statuses))
+        cfg, layout_status = _prepare_automatic_layout(cfg, entries)
+        print()
+        print(layout_status)
         results: list[RejoinResult] = []
-        for entry in entries:
+        result_labels: dict[str, str] = {}
+        total = len(entries)
+        for index, entry in enumerate(entries, start=1):
             package = entry["package"]
-            _mark_status(entries, statuses, package, "Preparation")
-            _mark_status(entries, statuses, package, "Safe cache check: skipped (data preserved)")
-            _mark_status(entries, statuses, package, "Getting ready")
-            _mark_status(entries, statuses, package, "Launching")
+            print()
+            print(_progress_line(index, total, entry, "Preparing."))
+            print(_progress_line(index, total, entry, "Safe cache check skipped, data preserved."))
+            if len(entries) > 1:
+                print(_progress_line(index, total, entry, layout_status))
+            print(_progress_line(index, total, entry, "Getting ready."))
+            print(_progress_line(index, total, entry, "Launching Roblox."))
             package_cfg = dict(cfg)
             package_cfg["roblox_package"] = package
             package_cfg["roblox_packages"] = [entry]
             result = perform_rejoin(package_cfg, reason="start")
             results.append(result)
             if result.success:
-                _mark_status(entries, statuses, package, "Launched")
+                result_labels[package] = "Launched"
+                print(_progress_line(index, total, entry, "Launched."))
             else:
                 message = result.error or "launch command failed"
-                _mark_status(entries, statuses, package, f"Failed: {message[:80]}")
+                friendly = "Failed to launch"
+                if "not installed" in message.lower():
+                    friendly = "Failed: package not installed"
+                elif "invalid" in message.lower():
+                    friendly = "Failed: invalid URL or package"
+                result_labels[package] = friendly
+                print(_progress_line(index, total, entry, f"{friendly}: {message[:80]}"))
+
+        print()
+        print(build_final_summary(entries, result_labels))
 
         snapshot_path = None
         if cfg.get("webhook_enabled") and cfg.get("webhook_snapshot_enabled"):
