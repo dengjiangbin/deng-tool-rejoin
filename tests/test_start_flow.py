@@ -17,8 +17,8 @@ class StartTableUxTests(unittest.TestCase):
 
     def _make_rows(self):
         return [
-            (1, "com.roblox.client", "deng1629", "Started", "Roblox launch command sent"),
-            (2, "com.moons.alt1", "AltAccount1", "Failed", "Package not installed"),
+            (1, "com.roblox.client", "deng1629", "Started"),
+            (2, "com.moons.alt1", "AltAccount1", "Failed"),
         ]
 
     def test_start_table_has_expected_columns(self):
@@ -27,7 +27,7 @@ class StartTableUxTests(unittest.TestCase):
         self.assertIn("#", table)
         self.assertIn("Package", table)
         self.assertIn("Username", table)
-        self.assertIn("Launch", table)
+        self.assertNotIn("Launch", table)  # Launch column was merged into Status
         self.assertIn("Status", table)
 
     def test_start_table_shows_username_and_package_separately(self):
@@ -40,21 +40,21 @@ class StartTableUxTests(unittest.TestCase):
         self.assertIn("com.moons.alt1", table)
 
     def test_start_table_not_label_column(self):
-        rows = [(1, "com.roblox.client", "Main", "Started", "Roblox launch command sent")]
+        rows = [(1, "com.roblox.client", "Main", "Started")]
         table = build_start_table(rows)
         self.assertNotIn("Label", table)
         self.assertIn("Username", table)
 
-    def test_start_table_shows_launch_and_status(self):
+    def test_start_table_shows_status(self):
         rows = self._make_rows()
         table = build_start_table(rows)
         self.assertIn("Started", table)
-        self.assertIn("Roblox launch command sent", table)
         self.assertIn("Failed", table)
-        self.assertIn("Package not installed", table)
+        # Status column is the only status indicator (no separate launch column)
+        self.assertNotIn("Roblox launch command sent", table)
 
     def test_start_table_has_box_borders(self):
-        rows = [(1, "com.roblox.client", "Main", "Started", "OK")]
+        rows = [(1, "com.roblox.client", "Main", "Started")]
         table = build_start_table(rows)
         self.assertIn("┌", table)
         self.assertIn("┐", table)
@@ -65,11 +65,11 @@ class StartTableUxTests(unittest.TestCase):
     def test_start_table_is_one_table_not_four(self):
         rows = self._make_rows()
         table = build_start_table(rows)
-        # Count top-left corner — should be exactly one table
+        # 4-column table — still exactly one table
         self.assertEqual(table.count("┌"), 1)
 
     def test_unknown_username_shows_unknown_not_waiting(self):
-        rows = [(1, "com.moons.litesc", "Unknown", "Started", "Roblox launch command sent")]
+        rows = [(1, "com.moons.litesc", "Unknown", "Started")]
         table = build_start_table(rows)
         self.assertIn("Unknown", table)
         self.assertNotIn("Waiting", table)

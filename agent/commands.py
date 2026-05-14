@@ -56,7 +56,8 @@ from .launcher_file import create_market_launchers
 from .lockfile import LockManager, stop_running_agent
 from .menu import run_menu
 from .platform_detect import detect_public_download_dir, get_android_release, get_android_sdk, get_platform_info
-from .supervisor import Supervisor
+from .supervisor import MultiPackageSupervisor, Supervisor
+from . import keystore
 from . import snapshot, webhook, window_layout
 from .url_utils import UrlValidationError, detect_launch_mode_from_url, mask_urls_in_text, validate_launch_url
 
@@ -334,136 +335,53 @@ def _choose_packages_menu(
     if not _is_interactive():
         return selected, hints
 
-    while True:
-        print()
-        print("--------------------------------")
-        print("Roblox Package Setup")
-        print("--------------------------------")
-        print("Selected packages:")
-        _print_package_entries(selected)
-        print()
-        print("A. Auto-detect / Rescan")
-        print("M. Add package manually")
-        print("U. Detect/Edit username")
-        print("R. Remove package")
-        print("H. Detection hints for cloned package names")
-        print("N. Next")
-        print("0. Back")
-        choice = _prompt("Choose option", "A").strip().lower()
-        if choice == "0":
+    print()
+    print("--------------------------------")
+    print("Roblox Package Setup")
+    print("--------------------------------")
+    print("1. Auto detect Roblox packages")
+    print("2. Enter package name manually")
+    print("--------------------------------")
+    choice = input("Choose [1]: ").strip() or "1"
+
+    if choice == "1":
+        detected = _ordered_roblox_packages(hints)
+        if not detected:
+            print("No Roblox package was detected.")
+            print("Try option 2 to enter package name manually, or install Roblox and re-run.")
             return selected, hints
-        if choice == "n":
-            if not [entry for entry in selected if entry.get("enabled", True)]:
-                print("Select at least one package before continuing.")
-                continue
+        if len(detected) == 1:
+            selected = [_detect_or_prompt_account_username(_entry_for_package(detected[0], selected))]
+            print(f"Auto-selected: {detected[0]}")
             return selected, hints
-        if choice == "a":
-            detected = _ordered_roblox_packages(hints)
-            print()
-            print(f"Detection hints: {_hint_list_label(hints)}")
-            if not detected:
-                print("No Roblox package was detected yet.")
-                print("If your clone uses names like com.moons.*, add the detection hint moons.")
-                print("You can also enter package names manually now, or install Roblox and rescan later.")
-                continue
-            print("Detected Roblox Packages:")
-            for idx, package in enumerate(detected, start=1):
-                marker = " (Recommended)" if package == DEFAULT_ROBLOX_PACKAGE else ""
-                existing = next((entry for entry in selected if entry["package"] == package), None)
-                username = _account_username_value(existing) if existing else "Username not set"
-                already = " [Selected]" if existing else ""
-                print(f"{idx}. {username:<20} {package}{marker}{already}")
-            print("A. Select all detected packages")
-            print("0. Back")
-            raw = _prompt("Choose one or more numbers separated by commas", "1").strip().lower()
-            if raw == "0":
-                continue
-            if raw == "a":
-                selected = [_detect_or_prompt_account_username(_entry_for_package(package, selected)) for package in detected]
-                continue
+        print()
+        print("Detected Roblox Packages:")
+        for idx, package in enumerate(detected, start=1):
+            marker = " (Recommended)" if package == DEFAULT_ROBLOX_PACKAGE else ""
+            print(f"  {idx}. {package}{marker}")
+        print("  A. Select all")
+        raw = input("Choose packages (e.g. 1,2 or A) [1]: ").strip().lower() or "1"
+        if raw == "a":
+            selected = [_detect_or_prompt_account_username(_entry_for_package(pkg, selected)) for pkg in detected]
+        else:
             choices = [part.strip() for part in raw.split(",") if part.strip()]
             new_selection: list[dict[str, Any]] = []
             for part in choices:
-                if not part.isdigit():
-                    continue
-                index = int(part)
-                if 1 <= index <= len(detected):
-                    package = detected[index - 1]
-                    if package not in [entry["package"] for entry in new_selection]:
-                        new_selection.append(_detect_or_prompt_account_username(_entry_for_package(package, selected)))
+                if part.isdigit():
+                    index = int(part)
+                    if 1 <= index <= len(detected):
+                        pkg = detected[index - 1]
+                        if pkg not in [e["package"] for e in new_selection]:
+                            new_selection.append(_detect_or_prompt_account_username(_entry_for_package(pkg, selected)))
             if new_selection:
                 selected = new_selection
-            else:
-                print("No valid package numbers were selected.")
-        elif choice == "m":
-            while True:
-                default_package = selected[0]["package"] if selected else DEFAULT_ROBLOX_PACKAGE
-                manual = _prompt_manual_package(default_package)
-                if manual and manual not in [entry["package"] for entry in selected]:
-                    selected.append(_detect_or_prompt_account_username(package_entry(manual, "", True, "not_set")))
-                    print(f"Added: {manual}")
-                if not _prompt_yes_no("Add another package?", False):
-                    break
-        elif choice == "u":
-            if not selected:
-                print("No packages selected yet.")
-                continue
-            _print_package_entries(selected)
-            raw = _prompt("Package number for username/account name", "1").strip()
-            if not raw.isdigit() or not (1 <= int(raw) <= len(selected)):
-                print("Choose a valid package number.")
-                continue
-            index = int(raw) - 1
-            detected = account_detect.detect_account_username_for_package(selected[index]["package"])
-            if detected:
-                print(f"Safe detected username/account name: {detected.username}")
-                if _prompt_yes_no("Use this name?", True):
-                    selected[index]["account_username"] = detected.username
-                    selected[index]["username_source"] = detected.source
-                    continue
-            current_username = validate_account_username(selected[index].get("account_username", ""))
-            username = _prompt("Roblox username/account name", current_username).strip()
-            try:
-                selected[index]["account_username"] = validate_account_username(username)
-                selected[index]["username_source"] = "manual" if username else "not_set"
-            except ConfigError as exc:
-                print(f"That username/account name cannot be used: {exc}")
-        elif choice == "r":
-            if not selected:
-                print("No packages selected yet.")
-                continue
-            _print_package_entries(selected)
-            raw = _prompt("Package number to remove", "").strip()
-            if not raw.isdigit() or not (1 <= int(raw) <= len(selected)):
-                print("Choose a valid package number.")
-                continue
-            removed = selected.pop(int(raw) - 1)
-            print(f"Removed: {removed['package']}")
-        elif choice == "h":
-            print()
-            print("Detection Hints")
-            print("Hints are safe package-name fragments used only for local package scanning.")
-            print(f"Current hints: {_hint_list_label(hints)}")
-            print("Example for com.moons.* clones: moons")
-            print("Example for a prefix: com.moons.")
-            print("1. Add hint")
-            print("2. Reset to defaults")
-            print("0. Back")
-            hint_choice = _prompt("Choose option", "1").strip().lower()
-            if hint_choice == "1":
-                raw_hint = _prompt("Detection hint", "moons").strip()
-                try:
-                    hint = normalize_package_detection_hint(raw_hint)
-                    if hint not in hints:
-                        hints.append(hint)
-                    print(f"Detection hint saved for this setup: {hint}")
-                except ConfigError as exc:
-                    print(f"That hint is not safe: {exc}")
-            elif hint_choice == "2":
-                hints = list(DEFAULT_ROBLOX_PACKAGE_HINTS)
-                print("Detection hints reset to defaults.")
-        else:
-            print("Please choose A, M, U, R, H, N, or 0.")
+    elif choice == "2":
+        default_package = selected[0]["package"] if selected else DEFAULT_ROBLOX_PACKAGE
+        manual = _prompt_manual_package(default_package)
+        if manual:
+            selected = [_detect_or_prompt_account_username(_entry_for_package(manual, selected))]
+
+    return selected, hints
 
 
 def _choose_launch_settings() -> tuple[str, str]:
@@ -1037,22 +955,22 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
 def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
     """Build a single clean launch status table.
 
-    Each row must be a 5-tuple: (index, package, username, launch, status).
+    Each row must be a 4-tuple: (index, package, username, status).
     Returns a Unicode box-drawing table string.
-    When ``use_color`` is True, the Launch column is colorised with ANSI codes.
+    When ``use_color`` is True, the Status column is colorised with ANSI codes.
     """
-    headers = ("#", "Package", "Username", "Launch", "Status")
-    str_rows = [(str(r[0]), str(r[1]), str(r[2]), str(r[3]), str(r[4])) for r in rows]
+    headers = ("#", "Package", "Username", "Status")
+    str_rows = [(str(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in rows]
 
     # Column widths are computed from raw (non-ANSI) strings
     widths = [
         max(len(headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
-        for i in range(5)
+        for i in range(4)
     ]
 
-    # Build colored versions of the Launch column (index 3)
+    # Build colored versions of the Status column (index 3)
     colored_rows = [
-        (r[0], r[1], r[2], _colorize_status(r[3], use_color=use_color), r[4])
+        (r[0], r[1], r[2], _colorize_status(r[3], use_color=use_color))
         for r in str_rows
     ]
 
@@ -1128,9 +1046,11 @@ def _run_preparation_phase(
     cfg: dict[str, Any],
     *,
     use_color: bool = True,
+    verbose: bool = True,
 ) -> None:
-    """Preparation phase: stop background Roblox apps, clear cache, print status.
+    """Preparation phase: stop background Roblox apps, clear cache.
 
+    Set ``verbose=False`` to run silently (no terminal output).
     Steps:
     1. Force-stop all Roblox packages NOT in the selected set (close background APKs).
     2. Clear the cache directory for each selected package (root required).
@@ -1144,31 +1064,35 @@ def _run_preparation_phase(
     hints = cfg.get("package_detection_hints")
 
     # Step 1 — close background Roblox processes
-    print(f"  {C}⏳ Stopping background Roblox processes...{RST}")
+    if verbose:
+        print(f"  {C}⏳ Stopping background Roblox processes...{RST}")
     stopped = android.force_stop_packages_except(packages, hints)
-    if stopped:
-        for pkg in stopped:
-            print(f"  {G}✓{RST} Stopped: {pkg}")
-    else:
-        print(f"  {Y}ℹ{RST}  No background Roblox processes found.")
+    if verbose:
+        if stopped:
+            for pkg in stopped:
+                print(f"  {G}✓{RST} Stopped: {pkg}")
+        else:
+            print(f"  {Y}ℹ{RST}  No background Roblox processes found.")
 
     # Step 2 — clear cache for each selected package
-    print(f"  {C}⏳ Clearing Roblox cache...{RST}")
+    if verbose:
+        print(f"  {C}⏳ Clearing Roblox cache...{RST}")
     any_cleared = False
     for entry in entries:
         pkg = entry["package"]
         username = _account_username_for_table(entry)
         cleared = android.clear_package_cache(pkg)
         if cleared:
-            print(f"  {G}✓{RST} Cache cleared: {username} ({pkg})")
+            if verbose:
+                print(f"  {G}✓{RST} Cache cleared: {username} ({pkg})")
             any_cleared = True
-        else:
+        elif verbose:
             print(f"  {Y}ℹ{RST}  Cache clear skipped (root needed): {pkg}")
-    if not any_cleared:
-        print(f"  {Y}ℹ{RST}  Root access is required to clear Roblox cache.")
-
-    print(f"  {G}✓{RST} Preparation complete.")
-    print()
+    if verbose:
+        if not any_cleared:
+            print(f"  {Y}ℹ{RST}  Root access is required to clear Roblox cache.")
+        print(f"  {G}✓{RST} Preparation complete.")
+        print()
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -1185,38 +1109,30 @@ def cmd_start(args: argparse.Namespace) -> int:
             print("Run: deng-rejoin and choose First Time Setup Config.")
             return 2
 
+        # ── Key verification ────────────────────────────────────────────────
+        stored_key = cfg.get("license_key", "")
+        if stored_key:
+            ok, msg = keystore.verify_key(stored_key)
+            if not ok:
+                print(f"License key error: {msg}")
+                return 1
+        elif keystore.DEV_MODE:
+            pass  # dev mode: no key required
+        else:
+            if not keystore.prompt_and_verify_key():
+                print("No valid key — session cancelled.")
+                return 0
+
         n = len(entries)
         G   = _ANSI_GREEN  if use_color else ""
         Y   = _ANSI_YELLOW if use_color else ""
-        B   = _ANSI_BOLD   if use_color else ""
         RST = _ANSI_RESET  if use_color else ""
 
-        # ── Start summary header ────────────────────────────────────────────
-        print()
-        print(f"{B}Start Summary{RST}")
-        print(f"  Packages selected: {n}")
-        print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
-        print(f"  License: {mask_license_key(cfg.get('license_key', ''))}")
-        print(f"  Webhook: {'Enabled' if cfg.get('webhook_enabled') else 'Disabled'}")
-        print()
-
-        # ── Preparation phase ───────────────────────────────────────────────
-        print(f"{B}Preparing...{RST}")
-        _run_preparation_phase(entries, cfg, use_color=use_color)
+        # ── Preparation phase (silent) ──────────────────────────────────────
+        _run_preparation_phase(entries, cfg, use_color=use_color, verbose=False)
 
         # ── Window layout (multi-package only, uses 40/60 split) ────────────
         cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
-
-        # ── Verify split layout for multi-package ───────────────────────────
-        if n > 1:
-            split_report = window_layout.verify_split_layout(
-                [e["package"] for e in entries],
-                gap=int(cfg.get("window_gap_px", 8)),
-            )
-            print(f"{B}Window Layout (40% Termux log | 60% Roblox){RST}")
-            for line in split_report:
-                print(f"  {line}")
-            print()
 
         # ── Record launch start times ───────────────────────────────────────
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -1225,50 +1141,56 @@ def cmd_start(args: argparse.Namespace) -> int:
             start_times[entry["package"]] = now_iso
         cfg["package_start_times"] = start_times
 
-        # ── Launch each package one by one ─────────────────────────────────
-        print(f"{B}Launching...{RST}")
-        table_rows: list[tuple] = []
-        results: list[RejoinResult] = []
+        # ── Launch each package silently ────────────────────────────────────
+        launch_ok: dict[str, bool] = {}
+        launch_err: dict[str, str] = {}
         for index, entry in enumerate(entries, start=1):
             package = entry["package"]
-            username = _account_username_for_table(entry)
-            print(f"  [{index}/{n}] {Y}Launching{RST} {username} ({package})...")
             package_cfg = dict(cfg)
             package_cfg["roblox_package"] = package
             package_cfg["roblox_packages"] = [entry]
             result = perform_rejoin(package_cfg, reason="start")
-            results.append(result)
-            if result.success:
-                print(f"  [{index}/{n}] {G}✓ Started{RST} {username}")
-                table_rows.append((index, package, username, "Started", "Roblox launch command sent"))
-            else:
-                msg = result.error or "launch command failed"
-                if "not installed" in msg.lower():
-                    short = "Package not installed"
-                elif "unavailable" in msg.lower() or "not found" in msg.lower():
-                    short = "Android launcher unavailable"
-                elif "disabled" in msg.lower():
-                    short = "Launch disabled by config"
-                else:
-                    short = msg[:50] if len(msg) > 50 else msg
-                print(f"  [{index}/{n}] Failed: {username} — {short}")
-                table_rows.append((index, package, username, "Failed", short))
-        print()
+            launch_ok[package] = result.success
+            launch_err[package] = result.error or ""
 
-        # ── Status table ────────────────────────────────────────────────────
+        # ── Heartbeat check — wait for apps to start ────────────────────────
+        import time as _time
+        _time.sleep(5)
+        initial_status: dict[str, str] = {}
+        for entry in entries:
+            pkg = entry["package"]
+            if not launch_ok[pkg]:
+                err = launch_err[pkg]
+                if "not installed" in err.lower():
+                    initial_status[pkg] = "Not installed"
+                elif "disabled" in err.lower():
+                    initial_status[pkg] = "Disabled"
+                else:
+                    initial_status[pkg] = "Failed"
+            else:
+                initial_status[pkg] = "Online" if android.is_process_running(pkg) else "Starting"
+
+        # ── Status table (4 columns: #, Package, Username, Status) ─────────
+        table_rows: list[tuple] = []
+        for index, entry in enumerate(entries, start=1):
+            pkg = entry["package"]
+            username = _account_username_for_table(entry)
+            status = initial_status.get(pkg, "Unknown")
+            table_rows.append((index, pkg, username, status))
+
         print(build_start_table(table_rows, use_color=use_color))
         print()
 
-        # ── Webhook (embed format with system stats) ────────────────────────
+        # ── Webhook ─────────────────────────────────────────────────────────
         snapshot_path = None
         if cfg.get("webhook_enabled") and cfg.get("webhook_snapshot_enabled"):
-            snapshot.cleanup_old_snapshots(int(cfg.get("snapshot_max_age_seconds", 300)))
-            snapshot_path, _snap_message = snapshot.capture_snapshot()
+            from . import snapshot as _snapshot
+            _snapshot.cleanup_old_snapshots(int(cfg.get("snapshot_max_age_seconds", 300)))
+            snapshot_path, _snap_message = _snapshot.capture_snapshot()
             if snapshot_path:
                 cfg["snapshot_temp_path"] = str(snapshot_path)
 
         if cfg.get("webhook_enabled"):
-            # Collect live system and app stats for the embed
             mem_info = android.get_memory_info()
             cpu_pct = android.get_cpu_usage()
             temp_c = android.get_temperature()
@@ -1279,7 +1201,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             app_stats: dict[str, Any] = {}
             for entry in entries:
                 pkg = entry["package"]
-                is_online = android.is_process_running(pkg)
+                is_online = initial_status.get(pkg) == "Online"
                 mem_mb = android.get_app_memory_mb(pkg) if is_online else None
                 app_stats[pkg] = {
                     "online": is_online,
@@ -1288,40 +1210,31 @@ def cmd_start(args: argparse.Namespace) -> int:
                     "uptime_start": start_times.get(pkg),
                 }
 
-            ok, message, message_id = webhook.send_webhook_update(
+            ok_wh, message_wh, message_id = webhook.send_webhook_update(
                 cfg,
                 event="start",
                 snapshot_path=snapshot_path,
                 force=True,
                 app_stats=app_stats,
             )
-            print(f"Webhook: {message}")
-            if ok:
-                cfg["webhook_last_sent_at"] = datetime.now(timezone.utc).timestamp()
-                if message_id:
-                    cfg["webhook_last_message_id"] = message_id
+            if message_id:
+                cfg["webhook_last_message_id"] = message_id
 
         cfg["package_start_times"] = start_times
         save_config(cfg)
 
-        # ── Final summary ───────────────────────────────────────────────────
-        success_count = sum(1 for r in results if r.success)
-        fail_count = len(results) - success_count
+        # ── Check if any package launched ───────────────────────────────────
+        success_count = sum(1 for v in launch_ok.values() if v)
         if success_count == 0:
-            reasons = [r.error for r in results if r.error]
+            reasons = [v for v in launch_err.values() if v]
             best_reason = reasons[0][:80] if reasons else "all launch attempts failed"
-            print("0 packages launched.")
-            print(f"Reason: {best_reason}")
+            print(f"0 packages launched. Reason: {best_reason}")
             return 1
-        print("Final:")
-        if fail_count == 0:
-            print(f"{G}{success_count} package{'s' if success_count != 1 else ''} launched successfully.{RST}")
-        else:
-            print(f"{Y}{success_count} package{'s' if success_count != 1 else ''} launched, {fail_count} failed.{RST}")
 
-        if cfg.get("auto_rejoin_enabled"):
-            print("Auto rejoin is enabled. Starting supervisor loop.")
-            Supervisor().run_forever()
+        # ── Session keepalive — supervisor loop (always-on) ─────────────────
+        packages = [entry["package"] for entry in entries]
+        print(f"{G}Session active — monitoring {len(packages)} package(s). Press Ctrl+C to stop.{RST}")
+        MultiPackageSupervisor(packages, cfg, initial_status=initial_status).run_forever()
         return 0
     except Exception as exc:  # noqa: BLE001 - command boundary.
         print(f"Agent start failed: {exc}")

@@ -7,7 +7,7 @@ import threading
 import time
 from typing import Any
 
-from . import db
+from . import android, db
 from .backoff import calculate_backoff_seconds
 from .config import load_config, validate_config
 from .launcher import perform_rejoin
@@ -16,8 +16,17 @@ from .logger import configure_logging, log_event
 from .monitor import check_roblox_health
 
 
+# ─── Status constants (shown in terminal and webhook) ─────────────────────────
+
+STATUS_ONLINE    = "Online"
+STATUS_OFFLINE   = "Offline"
+STATUS_LAUNCHING = "Launching"
+STATUS_CHECKING  = "Checking"
+STATUS_REVIVING  = "Reviving"
+
+
 class Supervisor:
-    """State-machine based local supervisor."""
+    """State-machine based local supervisor (single-package, legacy)."""
 
     def __init__(self) -> None:
         self.stop_event = threading.Event()
@@ -104,3 +113,188 @@ class Supervisor:
             db.insert_heartbeat("disabled", {"stop_requested": True})
             db.insert_event("INFO", "agent_stopped", "auto supervisor stopped")
             log_event(logger, "info", "agent_stopped")
+
+
+# ─── Per-package worker ────────────────────────────────────────────────────────
+
+class _PackageWorker(threading.Thread):
+    """Background thread that monitors and auto-revives one Roblox package.
+
+    It does NOT interact with other workers and never kills packages outside
+    its own scope.  Status is published to ``status_map[package]`` so the
+    main thread (or a display loop) can read current states.
+    """
+
+    def __init__(
+        self,
+        package: str,
+        cfg: dict[str, Any],
+        status_map: dict[str, str],
+        stop_event: threading.Event,
+        on_status_change: Any = None,
+    ) -> None:
+        super().__init__(name=f"worker-{package}", daemon=True)
+        self.package = package
+        self.cfg = cfg
+        self.status_map = status_map
+        self.stop_event = stop_event
+        self.on_status_change = on_status_change
+        self.failure_count = 0
+        self.unhealthy_since: float | None = None
+        self.logger = configure_logging(level=cfg.get("log_level", "INFO"))
+
+    def _set_status(self, status: str) -> None:
+        old = self.status_map.get(self.package)
+        self.status_map[self.package] = status
+        if old != status and callable(self.on_status_change):
+            self.on_status_change(self.package, status)
+
+    def _sleep(self, seconds: float) -> None:
+        deadline = time.time() + max(0.5, float(seconds))
+        while not self.stop_event.is_set() and time.time() < deadline:
+            time.sleep(min(1.0, deadline - time.time()))
+
+    def run(self) -> None:
+        cfg = self.cfg
+        interval = int(cfg.get("health_check_interval_seconds", 30))
+        grace = int(cfg.get("foreground_grace_seconds", 30))
+        grace_start: float | None = None
+
+        while not self.stop_event.is_set():
+            try:
+                # Heartbeat: check if process is running
+                self._set_status(STATUS_CHECKING)
+                running = android.is_process_running(self.package)
+
+                if running:
+                    self.failure_count = 0
+                    self.unhealthy_since = None
+                    grace_start = None
+                    self._set_status(STATUS_ONLINE)
+                    db.insert_heartbeat("healthy", {"package": self.package})
+                    log_event(self.logger, "info", "heartbeat", status="healthy", package=self.package)
+                    self._sleep(interval)
+                    continue
+
+                # Process not detected
+                now = time.time()
+                if grace_start is None:
+                    grace_start = now
+                elapsed = now - grace_start
+
+                if elapsed < grace:
+                    self._set_status(STATUS_OFFLINE)
+                    log_event(self.logger, "warning", "roblox_not_running",
+                              grace_remaining_seconds=int(grace - elapsed), package=self.package)
+                    self._sleep(min(5, grace - elapsed))
+                    continue
+
+                # Grace period expired → auto-revive
+                grace_start = None
+                self._set_status(STATUS_REVIVING)
+                log_event(self.logger, "info", "reviving_package", package=self.package)
+                pkg_cfg = dict(cfg)
+                pkg_cfg["roblox_package"] = self.package
+                result = perform_rejoin(pkg_cfg, reason="heartbeat_dead")
+
+                if result.success:
+                    self.failure_count = 0
+                    self._set_status(STATUS_LAUNCHING)
+                    log_event(self.logger, "info", "revive_success", package=self.package)
+                    # Wait for the app to start up before re-checking
+                    self._sleep(max(int(cfg.get("reconnect_delay_seconds", 8)), interval))
+                else:
+                    self.failure_count += 1
+                    self._set_status(STATUS_OFFLINE)
+                    backoff = calculate_backoff_seconds(
+                        max(1, self.failure_count),
+                        int(cfg.get("backoff_min_seconds", 10)),
+                        int(cfg.get("backoff_max_seconds", 300)),
+                    )
+                    log_event(self.logger, "error", "revive_failed",
+                              package=self.package, failure_count=self.failure_count,
+                              backoff_seconds=backoff, error=result.error or "")
+                    self._sleep(backoff)
+
+            except Exception as exc:  # noqa: BLE001 - worker must not crash
+                log_event(self.logger, "error", "worker_error", package=self.package, error=str(exc))
+                self._set_status(STATUS_OFFLINE)
+                self._sleep(interval)
+
+
+class MultiPackageSupervisor:
+    """Supervisor that monitors multiple Roblox packages independently.
+
+    Each package runs in its own _PackageWorker thread.  Dead packages are
+    revived automatically without touching the other running instances.
+    The session stays alive indefinitely (blocking the calling thread).
+
+    Usage::
+
+        status = {pkg: STATUS_LAUNCHING for pkg in packages}
+        sup = MultiPackageSupervisor(packages, cfg, initial_status=status)
+        sup.run_forever()          # blocks; press Ctrl+C to stop
+    """
+
+    def __init__(
+        self,
+        packages: list[str],
+        cfg: dict[str, Any],
+        *,
+        initial_status: dict[str, str] | None = None,
+        on_status_change: Any = None,
+    ) -> None:
+        self.packages = list(packages)
+        self.cfg = cfg
+        self.stop_event = threading.Event()
+        self.status_map: dict[str, str] = {pkg: STATUS_LAUNCHING for pkg in self.packages}
+        if initial_status:
+            self.status_map.update(initial_status)
+        self.on_status_change = on_status_change
+        self._workers: list[_PackageWorker] = []
+
+    def _handle_stop(self, signum, frame) -> None:  # noqa: ANN001
+        print("\n  Supervisor stopping — Ctrl+C received.")
+        self.stop_event.set()
+
+    def run_forever(self, *, display_interval: float = 10.0) -> None:
+        """Start all workers and block until Ctrl+C or SIGTERM."""
+        signal.signal(signal.SIGTERM, self._handle_stop)
+        signal.signal(signal.SIGINT, self._handle_stop)
+
+        logger = configure_logging(level=self.cfg.get("log_level", "INFO"))
+        log_event(logger, "info", "multi_supervisor_started", packages=self.packages)
+        db.insert_event("INFO", "multi_supervisor_started",
+                        f"monitoring {len(self.packages)} packages: {', '.join(self.packages)}")
+
+        for pkg in self.packages:
+            worker = _PackageWorker(
+                pkg, self.cfg, self.status_map, self.stop_event, self.on_status_change
+            )
+            worker.start()
+            self._workers.append(worker)
+
+        # Keep main thread alive; print a quick status summary periodically
+        try:
+            while not self.stop_event.is_set():
+                self.stop_event.wait(timeout=display_interval)
+                if not self.stop_event.is_set():
+                    self._print_live_status()
+        except Exception:  # noqa: BLE001
+            pass
+
+        self.stop_event.set()
+        for worker in self._workers:
+            worker.join(timeout=5)
+
+        db.insert_event("INFO", "multi_supervisor_stopped", "session ended by user")
+        log_event(logger, "info", "multi_supervisor_stopped")
+
+    def _print_live_status(self) -> None:
+        """Print a compact per-package status line to stdout."""
+        parts = []
+        for pkg in self.packages:
+            status = self.status_map.get(pkg, STATUS_OFFLINE)
+            short_pkg = pkg.split(".")[-1][:12]
+            parts.append(f"{short_pkg}:{status}")
+        print("  [Monitor] " + "  ".join(parts), flush=True)
