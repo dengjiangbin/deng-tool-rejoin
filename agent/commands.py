@@ -1110,18 +1110,33 @@ def cmd_start(args: argparse.Namespace) -> int:
             return 2
 
         # ── Key verification ────────────────────────────────────────────────
-        stored_key = cfg.get("license_key", "")
-        if stored_key:
-            ok, msg = keystore.verify_key(stored_key)
-            if not ok:
-                print(f"License key error: {msg}")
-                return 1
-        elif keystore.DEV_MODE:
-            pass  # dev mode: no key required
-        else:
-            if not keystore.prompt_and_verify_key():
-                print("No valid key — session cancelled.")
-                return 0
+        if not keystore.DEV_MODE:
+            license_cfg = cfg.get("license") or {}
+            if license_cfg.get("enabled", False):
+                _mode = license_cfg.get("mode", "local")
+                if _mode == "remote":
+                    print("Remote license verification is not yet implemented.")
+                    print("Set license.mode to 'local' or use DENG_DEV=1 to bypass.")
+                    return 1
+                # mode=local — check key from new section first, fall back to flat key
+                _key = (license_cfg.get("key") or "").strip() or cfg.get("license_key", "")
+                if _key:
+                    ok, msg = keystore.verify_key(_key)
+                    if not ok:
+                        print(f"License key error: {msg}")
+                        return 1
+                else:
+                    if not keystore.prompt_and_verify_key():
+                        print("No valid key — session cancelled.")
+                        return 0
+            else:
+                # license.enabled=False (default): check flat license_key for backward compat
+                stored_key = cfg.get("license_key", "")
+                if stored_key:
+                    ok, msg = keystore.verify_key(stored_key)
+                    if not ok:
+                        print(f"License key error: {msg}")
+                        return 1
 
         n = len(entries)
         G   = _ANSI_GREEN  if use_color else ""

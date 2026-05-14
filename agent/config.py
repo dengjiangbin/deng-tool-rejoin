@@ -108,6 +108,16 @@ def default_config() -> dict[str, Any]:
         "android_sdk": get_android_sdk(),
         "download_dir": detect_public_download_dir(),
         "license_key": "",
+        "license": {
+            "enabled": False,
+            "mode": "local",
+            "key": "",
+            "server_url": "",
+            "install_id": "",
+            "device_label": "",
+            "last_status": "not_configured",
+            "last_check_at": None,
+        },
         "yescaptcha_key": "",
         "webhook_tags": [],
         "package_start_times": {},
@@ -442,6 +452,28 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     except ConfigError:
         merged["license_key"] = ""
 
+    # Nested license section (new format; disabled by default)
+    raw_lic = merged.get("license")
+    if not isinstance(raw_lic, dict):
+        raw_lic = {}
+    merged_lic: dict[str, Any] = dict(default_config()["license"])
+    merged_lic.update({k: v for k, v in raw_lic.items() if k in merged_lic})
+    # Sanitize sub-fields
+    merged_lic["enabled"] = _as_bool(merged_lic.get("enabled", False))
+    _lic_mode = str(merged_lic.get("mode") or "local").strip().lower()
+    if _lic_mode not in {"local", "remote"}:
+        _lic_mode = "local"
+    merged_lic["mode"] = _lic_mode
+    merged_lic["key"] = str(merged_lic.get("key") or "").strip()[:256]
+    merged_lic["server_url"] = str(merged_lic.get("server_url") or "").strip()[:512]
+    merged_lic["install_id"] = str(merged_lic.get("install_id") or "").strip()[:64]
+    merged_lic["device_label"] = str(merged_lic.get("device_label") or "").strip()[:80]
+    merged_lic["last_status"] = str(merged_lic.get("last_status") or "not_configured").strip()[:32]
+    # last_check_at: keep None or string, do not coerce
+    lca = merged_lic.get("last_check_at")
+    merged_lic["last_check_at"] = str(lca) if lca is not None else None
+    merged["license"] = merged_lic
+
     # YesCaptcha API key (stored verbatim; not validated beyond length)
     merged["yescaptcha_key"] = str(merged.get("yescaptcha_key") or "").strip()[:256]
 
@@ -492,4 +524,8 @@ def safe_config_view(config_data: dict[str, Any]) -> dict[str, Any]:
     view["webhook_url"] = mask_webhook_url(view.get("webhook_url"))
     view["license_key"] = mask_license_key(view.get("license_key", ""))
     view["yescaptcha_key"] = "***" if view.get("yescaptcha_key") else ""
+    if isinstance(view.get("license"), dict):
+        lic_view = dict(view["license"])
+        lic_view["key"] = mask_license_key(lic_view.get("key", ""))
+        view["license"] = lic_view
     return view

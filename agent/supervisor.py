@@ -141,6 +141,10 @@ class _PackageWorker(threading.Thread):
         self.on_status_change = on_status_change
         self.failure_count = 0
         self.unhealthy_since: float | None = None
+        self.revive_count: int = 0
+        self.last_error: str | None = None
+        self.online_since: float | None = None
+        self.last_seen_at: float | None = None
         self.logger = configure_logging(level=cfg.get("log_level", "INFO"))
 
     def _set_status(self, status: str) -> None:
@@ -170,6 +174,10 @@ class _PackageWorker(threading.Thread):
                     self.failure_count = 0
                     self.unhealthy_since = None
                     grace_start = None
+                    now_ts = time.time()
+                    if self.online_since is None:
+                        self.online_since = now_ts
+                    self.last_seen_at = now_ts
                     self._set_status(STATUS_ONLINE)
                     db.insert_heartbeat("healthy", {"package": self.package})
                     log_event(self.logger, "info", "heartbeat", status="healthy", package=self.package)
@@ -199,12 +207,15 @@ class _PackageWorker(threading.Thread):
 
                 if result.success:
                     self.failure_count = 0
+                    self.revive_count += 1
+                    self.online_since = None  # reset; will be set on next healthy beat
                     self._set_status(STATUS_LAUNCHING)
                     log_event(self.logger, "info", "revive_success", package=self.package)
                     # Wait for the app to start up before re-checking
                     self._sleep(max(int(cfg.get("reconnect_delay_seconds", 8)), interval))
                 else:
                     self.failure_count += 1
+                    self.last_error = result.error or "revive failed"
                     self._set_status(STATUS_OFFLINE)
                     backoff = calculate_backoff_seconds(
                         max(1, self.failure_count),
@@ -289,6 +300,41 @@ class MultiPackageSupervisor:
 
         db.insert_event("INFO", "multi_supervisor_stopped", "session ended by user")
         log_event(logger, "info", "multi_supervisor_stopped")
+
+    def get_status_snapshot(self, entries: list[dict] | None = None) -> list[dict]:
+        """Return a per-package status snapshot list.
+
+        Each dict contains:
+            package, username, status, revive_count, failure_count,
+            last_error, online_since, last_seen_at
+
+        ``entries`` is the list of package entry dicts (each has 'package' and
+        optionally 'account_username').  Pass it from ``enabled_package_entries()``
+        to include username info.  If omitted, only package names are used.
+        """
+        entry_map: dict[str, str] = {}
+        if entries:
+            for e in entries:
+                pkg = str(e.get("package") or "")
+                username = str(e.get("account_username") or "").strip()
+                entry_map[pkg] = username
+
+        snapshot: list[dict] = []
+        worker_map = {w.package: w for w in self._workers}
+        for pkg in self.packages:
+            status = self.status_map.get(pkg, STATUS_OFFLINE)
+            worker = worker_map.get(pkg)
+            snapshot.append({
+                "package": pkg,
+                "username": entry_map.get(pkg, ""),
+                "status": status,
+                "revive_count": worker.revive_count if worker else 0,
+                "failure_count": worker.failure_count if worker else 0,
+                "last_error": worker.last_error if worker else None,
+                "online_since": worker.online_since if worker else None,
+                "last_seen_at": worker.last_seen_at if worker else None,
+            })
+        return snapshot
 
     def _print_live_status(self) -> None:
         """Print a compact per-package status line to stdout."""

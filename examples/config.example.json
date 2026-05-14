@@ -40,6 +40,18 @@
   "snapshot_max_age_seconds": 300,
   "snapshot_temp_path": "",
   "termux_boot_enabled": false,
+  "license_key": "",
+  "license": {
+    "enabled": false,
+    "mode": "local",
+    "key": "",
+    "server_url": "",
+    "install_id": "",
+    "device_label": "",
+    "last_status": "not_configured",
+    "last_check_at": null
+  },
+  "yescaptcha_key": "",
   "webhook_enabled": false,
   "webhook_interval_seconds": 300,
   "webhook_last_message_id": "",
@@ -48,6 +60,7 @@
   "webhook_mode": "new_message",
   "webhook_send_snapshot": false,
   "webhook_snapshot_enabled": false,
+  "webhook_tags": [],
   "webhook_url": "",
   "window_gap_px": 8,
   "updated_at": "2026-01-01T00:00:00+00:00"

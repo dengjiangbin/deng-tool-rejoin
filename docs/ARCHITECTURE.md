@@ -8,21 +8,25 @@
 - `constants.py`: version, paths, limits, regexes
 - `platform_detect.py`: Android release, SDK, Termux prefix, and Download path detection
 - `launcher_file.py`: generated `/sdcard/Download/deng-rejoin.py` launcher support
-- `webhook.py`: safe Discord webhook status updates with URL masking
+- `webhook.py`: safe Discord webhook status updates with URL masking; full 7-category status overview
 - `snapshot.py`: optional Android screencap snapshots for webhook use
 - `window_layout.py`: display-aware grid layout and safe App Cloner XML updates
 - `banner.py`: pink ASCII Termux banner
 - `logger.py`: local rotating logs with URL masking
 - `db.py`: SQLite schema and storage helpers
-- `config.py`: config defaults, validation, persistence
+- `config.py`: config defaults, validation, persistence; nested `license` section
 - `url_utils.py`: Roblox URL validation, normalization, masking
 - `backoff.py`: capped exponential backoff
 - `android.py`: Android shell/root command boundary
 - `launcher.py`: one rejoin attempt
 - `monitor.py`: network/package/process/foreground checks
 - `lockfile.py`: PID and duplicate-agent safety
-- `supervisor.py`: auto-rejoin state machine
+- `supervisor.py`: auto-rejoin state machine; `MultiPackageSupervisor.get_status_snapshot()`
 - `doctor.py`: diagnostics
+- `license.py`: license key utilities (DENG-XXXX-XXXX-XXXX-XXXX format, install_id, device summary)
+- `license_store.py`: `BaseLicenseStore` interface + `LocalJsonLicenseStore` implementation
+- `license_panel.py`: Discord license panel embed/button builders (no runtime bot dependency)
+- `keystore.py`: local JSON keystore (legacy flat key format; DENG_DEV=1 bypass)
 
 ## Data Flow
 

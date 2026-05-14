@@ -102,12 +102,29 @@ def _format_uptime(start_iso: str | None) -> str:
         return ""
 
 
+# Status category mapping (supervisor STATUS_* → display bucket)
+_STATUS_CATEGORY: dict[str, str] = {
+    "Online":        "online",
+    "Ready":         "ready",
+    "Preparing":     "preparing",
+    "Launching":     "preparing",
+    "Checking":      "preparing",
+    "Warning":       "warning",
+    "Reviving":      "warning",
+    "Offline":       "offline",
+    "Failed":        "failed",
+    "Not installed": "failed",
+    "Disabled":      "failed",
+}
+
+
 def build_status_embed_payload(
     config_data: dict[str, Any],
     *,
     event: str = "status",
     error: str | None = None,
     app_stats: dict[str, Any] | None = None,
+    supervisor_snapshot: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Build a Kaeru-style Discord embed payload for status updates.
 
@@ -134,9 +151,22 @@ def build_status_embed_payload(
 
     app_stats = app_stats or {}
 
-    # Count online vs offline
-    online_count = sum(1 for e in entries if app_stats.get(e["package"], {}).get("online"))
-    offline_count = len(entries) - online_count
+    # Count status categories from supervisor_snapshot or fall back to app_stats
+    counts: dict[str, int] = {cat: 0 for cat in ("online", "ready", "preparing", "warning", "offline", "failed")}
+    if supervisor_snapshot:
+        for snap in supervisor_snapshot:
+            category = _STATUS_CATEGORY.get(snap.get("status", ""), "offline")
+            counts[category] = counts.get(category, 0) + 1
+        total = len(supervisor_snapshot)
+    else:
+        # Backward-compatible: use app_stats boolean
+        for e in entries:
+            if app_stats.get(e["package"], {}).get("online"):
+                counts["online"] += 1
+            else:
+                counts["offline"] += 1
+        total = len(entries)
+    online_count = counts["online"]
 
     # Embed color
     if error:
@@ -159,9 +189,17 @@ def build_status_embed_payload(
         sys_lines.append(f"🌡️ Temp: {temp_c}°C")
     sys_value = "\n".join(sys_lines) or "N/A"
 
-    # Status overview
-    total = len(entries)
-    overview = f"🟢 Online: {online_count}\n🔴 Offline: {offline_count}\n🤖 Total: {total}"
+    # Status overview — full 7-category breakdown
+    overview_parts = [
+        f"🟢 Online: {counts['online']}",
+        f"🟡 Ready: {counts['ready']}",
+        f"🔵 Preparing: {counts['preparing']}",
+        f"🟠 Warning: {counts['warning']}",
+        f"🔴 Offline: {counts['offline']}",
+        f"❌ Failed: {counts['failed']}",
+        f"🤖 Total: {total}",
+    ]
+    overview = "\n".join(overview_parts)
 
     # Per-app application details
     detail_lines: list[str] = []
