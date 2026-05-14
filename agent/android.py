@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import socket
@@ -367,3 +368,150 @@ def masked_command_for_log(args: Iterable[str]) -> str:
     for arg in _stringify_args(args):
         safe_parts.append(mask_launch_url(arg) or arg)
     return shlex.join(safe_parts)
+
+
+# ─── System & app stat helpers ────────────────────────────────────────────────
+
+
+def get_memory_info() -> dict[str, int]:
+    """Read /proc/meminfo. Returns dict with total_mb, free_mb, percent_free."""
+    content = ""
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+    except OSError:
+        result = run_command(["cat", "/proc/meminfo"], timeout=3)
+        if result.ok:
+            content = result.stdout
+    total = free = 0
+    for line in content.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        if parts[0] == "MemTotal:" and len(parts) >= 2:
+            try:
+                total = int(parts[1]) // 1024
+            except ValueError:
+                pass
+        elif parts[0] == "MemAvailable:" and len(parts) >= 2:
+            try:
+                free = int(parts[1]) // 1024
+            except ValueError:
+                pass
+    percent = int(free * 100 / total) if total > 0 else 0
+    return {"total_mb": total, "free_mb": free, "percent_free": percent}
+
+
+def get_app_memory_mb(package: str) -> float | None:
+    """Get approximate RAM usage for a running package in MB via dumpsys meminfo."""
+    package = validate_package_name(package)
+    result = run_command(["dumpsys", "meminfo", package], timeout=8)
+    if not result.ok:
+        return None
+    # Look for "TOTAL PSS:" or similar summary line (KB → MB)
+    for line in result.stdout.splitlines():
+        m = re.search(r"TOTAL\s+(?:PSS|RSS)?\s*:?\s*(\d+)", line, re.IGNORECASE)
+        if m:
+            return round(int(m.group(1)) / 1024.0, 0)
+    for line in result.stdout.splitlines():
+        if line.strip().upper().startswith("TOTAL"):
+            for part in line.split():
+                if part.isdigit() and int(part) > 100:
+                    return round(int(part) / 1024.0, 0)
+    return None
+
+
+def get_cpu_usage() -> float | None:
+    """Estimate overall CPU usage percentage via top. Returns None if unavailable."""
+    result = run_command(["top", "-bn1"], timeout=6)
+    if not result.ok:
+        return None
+    for line in result.stdout.splitlines():
+        lower = line.lower()
+        if "cpu" not in lower:
+            continue
+        # "%Cpu(s): 9.1 us" format
+        m = re.search(r"(\d+\.?\d*)\s*%?\s*(?:us|user)(?!\w)", line, re.IGNORECASE)
+        if m:
+            return float(m.group(1))
+        # "X% idle" → compute used
+        m2 = re.search(r"(\d+\.?\d*)%?\s*(?:id|idle)(?!\w)", line, re.IGNORECASE)
+        if m2:
+            idle = float(m2.group(1))
+            return round(100.0 - idle, 1)
+    return None
+
+
+def get_temperature() -> float | None:
+    """Read CPU/device temperature in Celsius from thermal zones."""
+    for path in (
+        "/sys/class/thermal/thermal_zone0/temp",
+        "/sys/class/thermal/thermal_zone1/temp",
+        "/sys/class/thermal/thermal_zone2/temp",
+    ):
+        raw = ""
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                raw = fh.read().strip()
+        except OSError:
+            result = run_command(["cat", path], timeout=3)
+            if result.ok:
+                raw = result.stdout.strip()
+        if raw.isdigit():
+            millis = int(raw)
+            # Linux thermal zones usually report in millidegrees
+            temp = millis / 1000.0 if millis > 1000 else float(millis)
+            if 10.0 < temp < 120.0:
+                return round(temp, 1)
+    return None
+
+
+# ─── Preparation helpers ──────────────────────────────────────────────────────
+
+
+def clear_package_cache(package: str) -> bool:
+    """Delete the cache directory contents for a package (requires root).
+
+    Returns True if root was available and the find-delete command ran.
+    Only cache/ is cleared — installed data and preferences are NOT affected.
+    """
+    package = validate_package_name(package)
+    root_info = detect_root()
+    if not root_info.available:
+        return False
+    # build path: /data/data/<validated_package>/cache
+    cache_path = f"/data/data/{package}/cache"
+    result = run_root_command(
+        ["find", cache_path, "-mindepth", "1", "-delete"],
+        root_tool=root_info.tool,
+        timeout=10,
+    )
+    # 0 = deleted files, 1 = directory empty/not found — both are acceptable
+    return result.returncode in (0, 1)
+
+
+def force_stop_packages_except(
+    keep_packages: list[str],
+    detection_hints: list[str] | None = None,
+) -> list[str]:
+    """Force-stop all detected Roblox packages not in keep_packages.
+
+    Tries without root first (works in many Termux ADB setups), then falls
+    back to root. Returns list of package names that were successfully stopped.
+    """
+    keep = set(keep_packages)
+    all_roblox = find_roblox_packages(detection_hints)
+    to_stop = [p for p in all_roblox if p not in keep]
+    if not to_stop:
+        return []
+    root_info = detect_root()
+    stopped: list[str] = []
+    for pkg in to_stop:
+        result = run_command(["am", "force-stop", pkg], timeout=PROCESS_TIMEOUT_SECONDS)
+        if result.ok:
+            stopped.append(pkg)
+        elif root_info.available:
+            result2 = force_stop_package(pkg, root_info)
+            if result2.ok:
+                stopped.append(pkg)
+    return stopped

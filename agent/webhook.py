@@ -11,6 +11,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,13 @@ from .url_utils import mask_launch_url
 WEBHOOK_MODES = {"new_message", "edit_message"}
 MIN_WEBHOOK_INTERVAL_SECONDS = 30
 MASK = "***MASKED***"
+
+# ─── Discord embed color constants ────────────────────────────────────────────
+EMBED_COLOR_GREEN  = 0x57F287  # online / success
+EMBED_COLOR_RED    = 0xED4245  # offline / error
+EMBED_COLOR_YELLOW = 0xFEE75C  # warning / captcha alert
+EMBED_COLOR_ORANGE = 0xE67E22  # starting / preparing
+EMBED_COLOR_GREY   = 0x36393F  # neutral / unknown
 
 
 class WebhookError(ValueError):
@@ -75,6 +83,186 @@ def should_send_webhook(config_data: dict[str, Any], *, now: float | None = None
     return now - last_value >= interval
 
 
+# ─── Embed builder helpers ────────────────────────────────────────────────────
+
+
+def _format_uptime(start_iso: str | None) -> str:
+    """Format uptime string like '1h 22m' from an ISO-8601 launch timestamp."""
+    if not start_iso:
+        return ""
+    try:
+        start = datetime.fromisoformat(start_iso)
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        elapsed = max(0, int((datetime.now(timezone.utc) - start).total_seconds()))
+        hours = elapsed // 3600
+        minutes = (elapsed % 3600) // 60
+        return f"{hours}h {minutes:02d}m"
+    except (ValueError, TypeError):
+        return ""
+
+
+def build_status_embed_payload(
+    config_data: dict[str, Any],
+    *,
+    event: str = "status",
+    error: str | None = None,
+    app_stats: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a Kaeru-style Discord embed payload for status updates.
+
+    ``app_stats`` is an optional dict mapping package name to a sub-dict with:
+        ``online``       bool   — whether the app process is running
+        ``memory_mb``    float  — RAM usage in MB (or None)
+        ``cpu_pct``      float  — CPU % (or None)
+        ``uptime_start`` str    — ISO-8601 timestamp of last launch (or None)
+
+    Returns a ready-to-serialise dict suitable for the Discord webhooks API.
+    """
+    from .config import mask_license_key
+
+    raw_packages = config_data.get("roblox_packages") or [config_data.get("roblox_package", "unknown")]
+    entries: list[dict[str, str]] = []
+    for item in raw_packages:
+        if isinstance(item, dict):
+            package = str(item.get("package") or "unknown")
+            username = str(item.get("account_username") or item.get("label") or "").strip()
+        else:
+            package = str(item)
+            username = ""
+        entries.append({"package": package, "username": username})
+
+    app_stats = app_stats or {}
+
+    # Count online vs offline
+    online_count = sum(1 for e in entries if app_stats.get(e["package"], {}).get("online"))
+    offline_count = len(entries) - online_count
+
+    # Embed color
+    if error:
+        color = EMBED_COLOR_YELLOW
+    elif online_count > 0:
+        color = EMBED_COLOR_GREEN
+    else:
+        color = EMBED_COLOR_RED
+
+    # System stats (injected by caller via _mem_info, _cpu_pct, _temp_c keys)
+    mem_info: dict[str, int] = config_data.get("_mem_info") or {}
+    cpu_pct = config_data.get("_cpu_pct")
+    temp_c = config_data.get("_temp_c")
+    sys_lines: list[str] = []
+    if mem_info.get("free_mb"):
+        sys_lines.append(f"💾 RAM: {mem_info['free_mb']}MB free ({mem_info.get('percent_free', 0)}%)")
+    if cpu_pct is not None:
+        sys_lines.append(f"⚙️ CPU: {cpu_pct:.0f}%")
+    if temp_c is not None:
+        sys_lines.append(f"🌡️ Temp: {temp_c}°C")
+    sys_value = "\n".join(sys_lines) or "N/A"
+
+    # Status overview
+    total = len(entries)
+    overview = f"🟢 Online: {online_count}\n🔴 Offline: {offline_count}\n🤖 Total: {total}"
+
+    # Per-app application details
+    detail_lines: list[str] = []
+    for e in entries:
+        stats = app_stats.get(e["package"], {})
+        indicator = "🟢" if stats.get("online") else "🔴"
+        label = e["username"] or e["package"].rsplit(".", 1)[-1]
+        detail_lines.append(f"{indicator} {label}")
+        sub: list[str] = []
+        uptime = _format_uptime(stats.get("uptime_start"))
+        if uptime:
+            sub.append(f"⏱️ {uptime}")
+        mem = stats.get("memory_mb")
+        if mem is not None:
+            sub.append(f"💾 {int(mem)} MB")
+        cpu = stats.get("cpu_pct")
+        if cpu is not None:
+            sub.append(f"⚡ {cpu:.1f}%")
+        if sub:
+            detail_lines.append("└ " + " | ".join(sub))
+    detail_value = "\n".join(detail_lines) or "No accounts configured"
+
+    # License + tags
+    masked_key = mask_license_key(config_data.get("license_key", ""))
+    webhook_tags = config_data.get("webhook_tags") or []
+    tags_value = f"[{len(webhook_tags)}]"
+
+    fields: list[dict[str, Any]] = [
+        {"name": "📱 Device",           "value": str(config_data.get("device_name", "unknown")), "inline": True},
+        {"name": "🔑 License",          "value": masked_key,                                     "inline": True},
+        {"name": "🏷️ Tags",             "value": tags_value,                                     "inline": True},
+        {"name": "🖥️ System Stats",     "value": sys_value,                                      "inline": False},
+        {"name": "Status Overview",     "value": overview,                                       "inline": False},
+        {"name": "Application Details", "value": detail_value,                                   "inline": False},
+    ]
+    if error:
+        fields.append({"name": "⚠️ Last Error", "value": error[:512], "inline": False})
+
+    version = config_data.get("agent_version", "1.0.0")
+    return {
+        "username": "DENG Tool: Rejoin",
+        "embeds": [
+            {
+                "title": "📊 DENG Status Monitor",
+                "description": f"Event: **{event}**",
+                "color": color,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "fields": fields,
+                "footer": {"text": f"DENG Tool: Rejoin • v{version}"},
+            }
+        ],
+    }
+
+
+def build_alert_embed_payload(
+    config_data: dict[str, Any],
+    *,
+    account: str,
+    reason: str,
+    event: str = "alert",
+) -> dict[str, Any]:
+    """Build a Kaeru-style Account Alert embed payload.
+
+    Used for captcha events, rejoin failures, and other account-level alerts.
+    """
+    from .config import mask_license_key
+
+    masked_key = mask_license_key(config_data.get("license_key", ""))
+    webhook_tags = config_data.get("webhook_tags") or []
+    tags_value = f"[{len(webhook_tags)}]"
+
+    reason_lower = reason.lower()
+    if "solved" in reason_lower or "success" in reason_lower or "✅" in reason:
+        color = EMBED_COLOR_GREEN
+    elif "captcha" in reason_lower or "detect" in reason_lower:
+        color = EMBED_COLOR_YELLOW
+    else:
+        color = EMBED_COLOR_ORANGE
+
+    version = config_data.get("agent_version", "1.0.0")
+    return {
+        "username": "DENG Tool: Rejoin",
+        "embeds": [
+            {
+                "title": "⚠️ Account Alert",
+                "description": "Attention needed immediately.",
+                "color": color,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "fields": [
+                    {"name": "👤 Account", "value": account or "unknown",                              "inline": False},
+                    {"name": "📱 Device",  "value": str(config_data.get("device_name", "unknown")), "inline": False},
+                    {"name": "🔑 License", "value": masked_key,                                     "inline": True},
+                    {"name": "🏷️ Tags",    "value": tags_value,                                     "inline": True},
+                    {"name": "📝 Reason",  "value": reason[:512],                                    "inline": False},
+                ],
+                "footer": {"text": f"DENG Tool: Rejoin • v{version}"},
+            }
+        ],
+    }
+
+
 def build_status_message(config_data: dict[str, Any], *, event: str = "status", error: str | None = None) -> str:
     raw_packages = config_data.get("roblox_packages") or [config_data.get("roblox_package", "unknown")]
     packages = []
@@ -102,15 +290,39 @@ def build_status_message(config_data: dict[str, Any], *, event: str = "status", 
     return "\n".join(lines)
 
 
-def send_webhook_update(config_data: dict[str, Any], *, event: str = "status", snapshot_path: Path | None = None, force: bool = False) -> tuple[bool, str, str | None]:
-    """Send a safe status update. Returns (success, message, message_id)."""
+def send_webhook_update(
+    config_data: dict[str, Any],
+    *,
+    event: str = "status",
+    snapshot_path: Path | None = None,
+    force: bool = False,
+    app_stats: dict[str, Any] | None = None,
+    alert_account: str | None = None,
+    alert_reason: str | None = None,
+) -> tuple[bool, str, str | None]:
+    """Send a status or alert update via Discord webhook embed.
+
+    Returns ``(success, message, message_id)``.
+
+    Pass ``alert_account`` and ``alert_reason`` to send an Account Alert embed
+    instead of the standard Status Monitor embed.
+    Pass ``app_stats`` (mapping package → stat-dict) to populate per-app fields.
+    """
     if not config_data.get("webhook_enabled"):
         return False, "webhook disabled", None
     if not force and not should_send_webhook(config_data):
         return False, "webhook interval has not elapsed", None
     url = validate_webhook_url(config_data.get("webhook_url"))
-    content = build_status_message(config_data, event=event)
-    payload = {"content": content}
+
+    # Choose embed type
+    if alert_account and alert_reason:
+        payload = build_alert_embed_payload(
+            config_data, account=alert_account, reason=alert_reason, event=event
+        )
+    else:
+        payload = build_status_embed_payload(config_data, event=event, app_stats=app_stats)
+
+    data: bytes
     headers: dict[str, str]
     if snapshot_path and snapshot_path.exists():
         boundary = f"deng-{int(time.time())}"
@@ -126,9 +338,10 @@ def send_webhook_update(config_data: dict[str, Any], *, event: str = "status", s
     else:
         data = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
+
     request = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310 - user-configured Discord URL is validated.
+        with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310 - validated Discord URL
             body = response.read().decode("utf-8", errors="replace")
             message_id = None
             if body:

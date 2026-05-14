@@ -19,6 +19,11 @@ APP_CLONER_KEYS = {
     "app_cloner_current_window_bottom": "bottom",
 }
 
+# When multiple packages are selected, the left portion of the screen is
+# reserved for the Termux log terminal and the right portion for Roblox windows.
+TERMUX_LOG_FRACTION = 0.40
+RIGHT_PANE_FRACTION = 0.60
+
 
 @dataclass(frozen=True)
 class DisplayInfo:
@@ -109,6 +114,57 @@ def build_layout_preview(packages: Iterable[str], display: DisplayInfo | None = 
     return [rect.preview_line(index) for index, rect in enumerate(rects, start=1)]
 
 
+def calculate_split_layout(
+    packages: Iterable[str],
+    width: int,
+    height: int,
+    gap: int = 8,
+    *,
+    termux_log_fraction: float = TERMUX_LOG_FRACTION,
+) -> list[WindowRect]:
+    """Calculate window rects using only the right portion of the screen.
+
+    The left ``termux_log_fraction`` of the screen width is reserved for the
+    Termux terminal log display. All Roblox package windows are arranged in the
+    remaining right portion (default: right 60 %).
+
+    This layout is automatically selected when more than one package is active.
+    """
+    package_list = list(packages)
+    if not package_list:
+        return []
+    width = max(1, int(width))
+    height = max(1, int(height))
+    frac = max(0.1, min(0.9, float(termux_log_fraction)))
+    left_offset = int(width * frac)
+    available_width = max(1, width - left_offset)
+    rects = calculate_grid_layout(package_list, available_width, height, gap)
+    # Shift every rect rightward by left_offset so it falls in the right pane
+    return [
+        WindowRect(r.package, r.left + left_offset, r.top, r.right + left_offset, r.bottom)
+        for r in rects
+    ]
+
+
+def verify_split_layout(packages: Iterable[str], display: DisplayInfo | None = None, gap: int = 8) -> list[str]:
+    """Return human-readable verification lines for the 40/60 split layout."""
+    display = display or detect_display_info()
+    package_list = list(packages)
+    left_end = int(display.width * TERMUX_LOG_FRACTION)
+    lines = [
+        f"Display: {display.width}x{display.height}  density={display.density}",
+        f"Left pane (Termux log): 0–{left_end}px ({int(TERMUX_LOG_FRACTION * 100)}% of width)",
+        f"Right pane (Roblox):   {left_end}–{display.width}px ({int(RIGHT_PANE_FRACTION * 100)}% of width)",
+    ]
+    if len(package_list) <= 1:
+        lines.append("Split layout: skipped (single package — full right pane)")
+    else:
+        rects = calculate_split_layout(package_list, display.width, display.height, gap)
+        for i, rect in enumerate(rects, start=1):
+            lines.append(f"  Package {i}: {rect.package}  left={rect.left} top={rect.top} right={rect.right} bottom={rect.bottom}")
+    return lines
+
+
 def app_cloner_prefs_path(package: str) -> Path:
     return Path("/data/data") / package / "shared_prefs" / "pkg_preferences.xml"
 
@@ -144,9 +200,25 @@ def update_app_cloner_xml(package: str, rect: WindowRect) -> tuple[bool, str]:
         return False, f"Could not update App Cloner XML safely: {exc}"
 
 
-def apply_layout_to_packages(packages: Iterable[str], *, gap: int = 8, write_xml: bool = False) -> tuple[list[str], list[dict[str, int | str]]]:
+def apply_layout_to_packages(
+    packages: Iterable[str],
+    *,
+    gap: int = 8,
+    write_xml: bool = False,
+    use_split_layout: bool = False,
+) -> tuple[list[str], list[dict[str, int | str]]]:
+    """Calculate and optionally write App Cloner XML window positions.
+
+    When ``use_split_layout`` is True (or there are multiple packages and it is
+    not explicitly False), the 40/60 split is applied so that the left 40 % of
+    the screen stays free for the Termux log terminal.
+    """
     display = detect_display_info()
-    rects = calculate_grid_layout(packages, display.width, display.height, gap)
+    package_list = list(packages)
+    if use_split_layout and len(package_list) > 1:
+        rects = calculate_split_layout(package_list, display.width, display.height, gap)
+    else:
+        rects = calculate_grid_layout(package_list, display.width, display.height, gap)
     messages = [rect.preview_line(index) for index, rect in enumerate(rects, start=1)]
     if write_xml:
         root = android.detect_root()

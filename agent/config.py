@@ -25,6 +25,7 @@ from .constants import (
     DEFAULT_ROBLOX_PACKAGE,
     DEFAULT_ROBLOX_PACKAGE_HINTS,
     LAUNCH_MODES,
+    LICENSE_KEY_PATTERN,
     MAX_BACKOFF_SECONDS,
     MIN_BACKOFF_SECONDS,
     MIN_FOREGROUND_GRACE_SECONDS,
@@ -106,6 +107,10 @@ def default_config() -> dict[str, Any]:
         "android_release": get_android_release(),
         "android_sdk": get_android_sdk(),
         "download_dir": detect_public_download_dir(),
+        "license_key": "",
+        "yescaptcha_key": "",
+        "webhook_tags": [],
+        "package_start_times": {},
         "created_at": now,
         "updated_at": now,
     }
@@ -135,6 +140,36 @@ def _as_bool(value: Any) -> bool:
 
 
 USERNAME_SOURCES = {"manual", "detected_safe_pref", "android_app_label", "not_set"}
+
+_LICENSE_KEY_RE = re.compile(LICENSE_KEY_PATTERN, re.IGNORECASE)
+_LICENSE_MASK = "***"
+
+
+def validate_license_key(key: str) -> str:
+    """Validate a DENG license key. Empty string is accepted (key not set)."""
+    cleaned = (key or "").strip()
+    if not cleaned:
+        return ""
+    upper = cleaned.upper()
+    if not _LICENSE_KEY_RE.match(upper):
+        raise ConfigError(
+            "License key must be in format DENG-<hex> with at least 8 hex characters (e.g. DENG-38ab1234cd56ef78)"
+        )
+    return upper
+
+
+def mask_license_key(key: str) -> str:
+    """Return a display-safe version of the license key (DENG-38ab...78ef)."""
+    cleaned = (key or "").strip()
+    if not cleaned:
+        return "Not set"
+    parts = cleaned.split("-", 1)
+    if len(parts) != 2:
+        return f"{parts[0][:4]}-{_LICENSE_MASK}"
+    prefix, hex_part = parts
+    if len(hex_part) > 8:
+        return f"{prefix}-{hex_part[:4]}...{hex_part[-4:].lower()}"
+    return f"{prefix}-{_LICENSE_MASK}"
 
 
 def validate_account_username(username: Any) -> str:
@@ -399,6 +434,33 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     if not isinstance(merged.get("last_layout_preview"), list):
         merged["last_layout_preview"] = []
     merged["snapshot_temp_path"] = str(merged.get("snapshot_temp_path") or "")
+
+    # License key (optional; empty = not configured)
+    raw_license = str(merged.get("license_key") or "").strip()
+    try:
+        merged["license_key"] = validate_license_key(raw_license)
+    except ConfigError:
+        merged["license_key"] = ""
+
+    # YesCaptcha API key (stored verbatim; not validated beyond length)
+    merged["yescaptcha_key"] = str(merged.get("yescaptcha_key") or "").strip()[:256]
+
+    # Webhook tags (user-defined labels shown in webhook embeds)
+    raw_tags = merged.get("webhook_tags")
+    if not isinstance(raw_tags, list):
+        raw_tags = []
+    merged["webhook_tags"] = [str(t).strip()[:80] for t in raw_tags if str(t).strip()][:20]
+
+    # Package start times (ISO timestamps of last launch per package)
+    raw_start_times = merged.get("package_start_times")
+    if not isinstance(raw_start_times, dict):
+        raw_start_times = {}
+    merged["package_start_times"] = {
+        k: str(v)
+        for k, v in raw_start_times.items()
+        if is_valid_package_name(str(k))
+    }
+
     return {key: merged[key] for key in default_config().keys()}
 
 
@@ -428,4 +490,6 @@ def safe_config_view(config_data: dict[str, Any]) -> dict[str, Any]:
     view = dict(config_data)
     view["launch_url"] = mask_launch_url(view.get("launch_url")) or ""
     view["webhook_url"] = mask_webhook_url(view.get("webhook_url"))
+    view["license_key"] = mask_license_key(view.get("license_key", ""))
+    view["yescaptcha_key"] = "***" if view.get("yescaptcha_key") else ""
     return view

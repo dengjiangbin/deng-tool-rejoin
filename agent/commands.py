@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,7 @@ from .config import (
     enabled_package_names,
     ensure_app_dirs,
     load_config,
+    mask_license_key,
     normalize_package_detection_hint,
     package_display_name,
     package_entry,
@@ -29,6 +31,7 @@ from .config import (
     save_config,
     validate_account_username,
     validate_config,
+    validate_license_key,
     validate_package_detection_hints,
     validate_package_entries,
     validate_package_name,
@@ -73,6 +76,16 @@ COMMANDS = {
     "enable-boot",
     "update",
 }
+
+# ─── ANSI color constants (used only when a tty is available) ─────────────────
+_ANSI_GREEN   = "\033[32m"
+_ANSI_YELLOW  = "\033[33m"
+_ANSI_RED     = "\033[31m"
+_ANSI_CYAN    = "\033[36m"
+_ANSI_BOLD    = "\033[1m"
+_ANSI_DIM     = "\033[2m"
+_ANSI_RESET   = "\033[0m"
+_ANSI_RE      = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _is_interactive() -> bool:
@@ -196,11 +209,17 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print(f"  Mode: {_launch_mode_label(cfg['launch_mode'])}")
     print(f"  URL: {_safe_url_label(cfg['launch_url'])}")
     print()
+    print("License:")
+    print(f"  Key: {cfg.get('license_key') or 'Not set'}")
+    print()
     print("Discord Webhook:")
     print(f"  Enabled: {'Yes' if cfg['webhook_enabled'] else 'No'}")
     if cfg["webhook_enabled"]:
         print(f"  Mode: {cfg['webhook_mode']}")
         print(f"  URL: {cfg.get('webhook_url') or 'Not set'}")
+        tags = cfg.get("webhook_tags") or []
+        if tags:
+            print(f"  Tags: {', '.join(tags)}")
     print()
     print("Snapshot:")
     print(f"  Enabled: {'Yes' if cfg['webhook_enabled'] and cfg['webhook_snapshot_enabled'] else 'No'}")
@@ -208,8 +227,13 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print("Webhook Interval:")
     print(f"  {cfg['webhook_interval_seconds']} seconds" if cfg["webhook_enabled"] else "  Disabled")
     print()
+    print("YesCaptcha:")
+    print(f"  API key: {'Configured' if cfg.get('yescaptcha_key') else 'Not set'}")
+    print()
     print("Auto Resize:")
     print("  Automatic based on selected package count and device DPI")
+    if len(enabled_entries) > 1:
+        print("  Multi-package: 40% left reserved for Termux log, 60% right for Roblox")
 
 
 def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejoin Setup") -> None:
@@ -596,6 +620,40 @@ def _setup_webhook_interval(draft: dict[str, Any]) -> None:
             print(exc)
 
 
+def _setup_license_key(draft: dict[str, Any]) -> None:
+    """Prompt the user to enter or clear their DENG license key."""
+    print()
+    print("License Key")
+    print("Format: DENG-<hex> (example: DENG-38ab1234cd56ef78)")
+    print("Leave blank to skip or clear the current key.")
+    current = draft.get("license_key", "") or ""
+    display = mask_license_key(current) if current else "Not set"
+    print(f"Current: {display}")
+    raw = _prompt("License key", "").strip()
+    if not raw:
+        return
+    try:
+        draft["license_key"] = validate_license_key(raw)
+        print(f"License key saved: {mask_license_key(draft['license_key'])}")
+    except ConfigError as exc:
+        print(f"Invalid license key: {exc}")
+
+
+def _setup_yescaptcha_key(draft: dict[str, Any]) -> None:
+    """Prompt the user to enter or clear their YesCaptcha API key."""
+    print()
+    print("YesCaptcha API Key")
+    print("Obtain your key from https://yescaptcha.com — used for CAPTCHA solving.")
+    print("Leave blank to skip or clear.")
+    current = draft.get("yescaptcha_key", "") or ""
+    print(f"Current: {'Configured (hidden)' if current else 'Not set'}")
+    raw = _prompt("YesCaptcha key", "").strip()
+    if not raw:
+        return
+    draft["yescaptcha_key"] = raw[:256]
+    print("YesCaptcha API key saved.")
+
+
 def _write_termux_boot_script() -> None:
     TERMUX_BOOT_SCRIPT.parent.mkdir(parents=True, exist_ok=True)
     script = """#!/data/data/com.termux/files/usr/bin/sh
@@ -699,12 +757,14 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         else:
             print("4. Snapshot: Disabled because Discord webhook is off")
             print("5. Webhook Interval: Disabled because Discord webhook is off")
-        print("6. View Current Settings")
+        print("6. License Key")
+        print("7. YesCaptcha API Key")
+        print("8. View Current Settings")
         print("A. Advanced Info")
         print("0. Back")
         print("--------------------------------")
         try:
-            choice = input("Choose setting [6]: ").strip().lower() or "6"
+            choice = input("Choose setting [8]: ").strip().lower() or "8"
         except EOFError:
             print("\nNo interactive input was available. Run this command in Termux to edit settings.")
             print("\nCurrent settings:")
@@ -747,6 +807,14 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
             else:
                 print("Webhook interval is disabled because Discord webhook is off.")
         elif choice == "6":
+            _setup_license_key(draft)
+            draft = save_config(draft)
+            print("License key saved.")
+        elif choice == "7":
+            _setup_yescaptcha_key(draft)
+            draft = save_config(draft)
+            print("YesCaptcha key saved.")
+        elif choice == "8":
             print()
             _print_config_summary(draft)
             input("\nPress Enter to continue...")
@@ -755,7 +823,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
             _print_json(safe_config_view(draft))
             input("\nPress Enter to continue...")
         else:
-            print("Please choose 1-6, A, or 0.")
+            print("Please choose 1-8, A, or 0.")
             input("Press Enter to continue...")
 
 
@@ -899,9 +967,16 @@ def cmd_status(args: argparse.Namespace) -> int:
         print(f"  Snapshot: {_yes_no(cfg['webhook_snapshot_enabled'])}")
         print(f"  Interval: {cfg['webhook_interval_seconds']} seconds")
         print(f"  URL: {safe.get('webhook_url') or 'Not set'}")
+        tags = cfg.get("webhook_tags") or []
+        if tags:
+            print(f"  Tags: {', '.join(tags)}")
     else:
         print("  Snapshot: Disabled")
         print("  Interval: Disabled")
+    print()
+    print("License")
+    print(f"  Key: {mask_license_key(cfg.get('license_key', ''))}")
+    print(f"  YesCaptcha: {'Configured' if cfg.get('yescaptcha_key') else 'Not set'}")
     print()
     print("Window Layout")
     print("  Auto resize: Automatic")
@@ -938,34 +1013,68 @@ def _account_username_for_table(entry: dict[str, Any]) -> str:
     return validate_account_username(entry.get("account_username", "")) or "Unknown"
 
 
-def build_start_table(rows: list[tuple]) -> str:
+def _visible_len(s: str) -> int:
+    """Return the printable width of a string, stripping ANSI escape codes."""
+    return len(_ANSI_RE.sub("", s))
+
+
+def _colorize_status(status: str, *, use_color: bool = True) -> str:
+    """Wrap a status string in the appropriate ANSI color code."""
+    if not use_color:
+        return status
+    color = {
+        "Started":   _ANSI_GREEN,
+        "Online":    _ANSI_GREEN,
+        "Ready":     _ANSI_YELLOW,
+        "Starting":  _ANSI_YELLOW,
+        "Preparing": _ANSI_CYAN,
+        "Failed":    _ANSI_RED,
+        "Offline":   _ANSI_RED,
+    }.get(status, "")
+    return f"{color}{status}{_ANSI_RESET}" if color else status
+
+
+def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
     """Build a single clean launch status table.
 
     Each row must be a 5-tuple: (index, package, username, launch, status).
     Returns a Unicode box-drawing table string.
+    When ``use_color`` is True, the Launch column is colorised with ANSI codes.
     """
     headers = ("#", "Package", "Username", "Launch", "Status")
     str_rows = [(str(r[0]), str(r[1]), str(r[2]), str(r[3]), str(r[4])) for r in rows]
 
+    # Column widths are computed from raw (non-ANSI) strings
     widths = [
-        max(len(headers[i]), max((len(r[i]) for r in str_rows), default=0))
+        max(len(headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
         for i in range(5)
     ]
 
-    def _cell(s: str, w: int) -> str:
-        return f" {s.ljust(w)} "
+    # Build colored versions of the Launch column (index 3)
+    colored_rows = [
+        (r[0], r[1], r[2], _colorize_status(r[3], use_color=use_color), r[4])
+        for r in str_rows
+    ]
+
+    def _cell(s: str, w: int, raw: str | None = None) -> str:
+        pad = w - _visible_len(raw if raw is not None else s)
+        return f" {s}{' ' * max(0, pad)} "
 
     def _hline(left: str, mid: str, right: str) -> str:
         return left + mid.join("─" * (w + 2) for w in widths) + right
 
-    def _data_row(cells: tuple) -> str:
+    def _header_row(cells: tuple) -> str:
         return "│" + "│".join(_cell(str(cells[i]), widths[i]) for i in range(len(widths))) + "│"
+
+    def _data_row(colored: tuple, raw: tuple) -> str:
+        parts = [_cell(str(colored[i]), widths[i], str(raw[i])) for i in range(len(widths))]
+        return "│" + "│".join(parts) + "│"
 
     lines = [
         _hline("┌", "┬", "┐"),
-        _data_row(headers),
+        _header_row(headers),
         _hline("├", "┼", "┤"),
-        *(_data_row(r) for r in str_rows),
+        *(_data_row(colored_rows[i], str_rows[i]) for i in range(len(colored_rows))),
         _hline("└", "┴", "┘"),
     ]
     return "\n".join(lines)
@@ -996,24 +1105,75 @@ def _prepare_automatic_layout(cfg: dict[str, Any], entries: list[dict[str, Any]]
         return cfg, "Layout skipped: only one package selected."
     packages = [entry["package"] for entry in entries]
     root_info = android.detect_root()
+    # Use 40/60 split layout when multiple packages are active
     messages, preview = window_layout.apply_layout_to_packages(
         packages,
         gap=int(cfg.get("window_gap_px", 8)),
         write_xml=root_info.available,
+        use_split_layout=True,
     )
     cfg["last_layout_preview"] = preview
     save_config(cfg)
     if not root_info.available:
-        return cfg, "Layout calculated. Layout skipped, root/XML unavailable."
+        return cfg, "Layout calculated (40/60 split). Layout skipped, root/XML unavailable."
     if any("Updated App Cloner window preferences" in message for message in messages):
-        return cfg, "Layout calculated. Layout applied."
+        return cfg, "Layout calculated (40/60 split). Layout applied."
     if messages:
-        return cfg, "Layout calculated. Layout skipped, root/XML unavailable."
+        return cfg, "Layout calculated (40/60 split). Layout skipped, root/XML unavailable."
     return cfg, "Layout failed, launch continues."
 
 
+def _run_preparation_phase(
+    entries: list[dict[str, Any]],
+    cfg: dict[str, Any],
+    *,
+    use_color: bool = True,
+) -> None:
+    """Preparation phase: stop background Roblox apps, clear cache, print status.
+
+    Steps:
+    1. Force-stop all Roblox packages NOT in the selected set (close background APKs).
+    2. Clear the cache directory for each selected package (root required).
+    """
+    G   = _ANSI_GREEN  if use_color else ""
+    Y   = _ANSI_YELLOW if use_color else ""
+    C   = _ANSI_CYAN   if use_color else ""
+    RST = _ANSI_RESET  if use_color else ""
+
+    packages = [e["package"] for e in entries]
+    hints = cfg.get("package_detection_hints")
+
+    # Step 1 — close background Roblox processes
+    print(f"  {C}⏳ Stopping background Roblox processes...{RST}")
+    stopped = android.force_stop_packages_except(packages, hints)
+    if stopped:
+        for pkg in stopped:
+            print(f"  {G}✓{RST} Stopped: {pkg}")
+    else:
+        print(f"  {Y}ℹ{RST}  No background Roblox processes found.")
+
+    # Step 2 — clear cache for each selected package
+    print(f"  {C}⏳ Clearing Roblox cache...{RST}")
+    any_cleared = False
+    for entry in entries:
+        pkg = entry["package"]
+        username = _account_username_for_table(entry)
+        cleared = android.clear_package_cache(pkg)
+        if cleared:
+            print(f"  {G}✓{RST} Cache cleared: {username} ({pkg})")
+            any_cleared = True
+        else:
+            print(f"  {Y}ℹ{RST}  Cache clear skipped (root needed): {pkg}")
+    if not any_cleared:
+        print(f"  {Y}ℹ{RST}  Root access is required to clear Roblox cache.")
+
+    print(f"  {G}✓{RST} Preparation complete.")
+    print()
+
+
 def cmd_start(args: argparse.Namespace) -> int:
-    print_banner(use_color=not args.no_color)
+    use_color = not args.no_color
+    print_banner(use_color=use_color)
     try:
         cfg = load_config()
         entries = enabled_package_entries(cfg)
@@ -1025,30 +1185,61 @@ def cmd_start(args: argparse.Namespace) -> int:
             print("Run: deng-rejoin and choose First Time Setup Config.")
             return 2
 
-        # Print start summary header
         n = len(entries)
+        G   = _ANSI_GREEN  if use_color else ""
+        Y   = _ANSI_YELLOW if use_color else ""
+        B   = _ANSI_BOLD   if use_color else ""
+        RST = _ANSI_RESET  if use_color else ""
+
+        # ── Start summary header ────────────────────────────────────────────
         print()
-        print("Start Summary")
+        print(f"{B}Start Summary{RST}")
         print(f"  Packages selected: {n}")
         print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
+        print(f"  License: {mask_license_key(cfg.get('license_key', ''))}")
         print(f"  Webhook: {'Enabled' if cfg.get('webhook_enabled') else 'Disabled'}")
         print()
 
-        # Apply window layout (multi-package only) — runs silently for one package
+        # ── Preparation phase ───────────────────────────────────────────────
+        print(f"{B}Preparing...{RST}")
+        _run_preparation_phase(entries, cfg, use_color=use_color)
+
+        # ── Window layout (multi-package only, uses 40/60 split) ────────────
         cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
 
-        # Launch each package, collect table rows
+        # ── Verify split layout for multi-package ───────────────────────────
+        if n > 1:
+            split_report = window_layout.verify_split_layout(
+                [e["package"] for e in entries],
+                gap=int(cfg.get("window_gap_px", 8)),
+            )
+            print(f"{B}Window Layout (40% Termux log | 60% Roblox){RST}")
+            for line in split_report:
+                print(f"  {line}")
+            print()
+
+        # ── Record launch start times ───────────────────────────────────────
+        now_iso = datetime.now(timezone.utc).isoformat()
+        start_times: dict[str, str] = dict(cfg.get("package_start_times") or {})
+        for entry in entries:
+            start_times[entry["package"]] = now_iso
+        cfg["package_start_times"] = start_times
+
+        # ── Launch each package one by one ─────────────────────────────────
+        print(f"{B}Launching...{RST}")
         table_rows: list[tuple] = []
         results: list[RejoinResult] = []
         for index, entry in enumerate(entries, start=1):
             package = entry["package"]
             username = _account_username_for_table(entry)
+            print(f"  [{index}/{n}] {Y}Launching{RST} {username} ({package})...")
             package_cfg = dict(cfg)
             package_cfg["roblox_package"] = package
             package_cfg["roblox_packages"] = [entry]
             result = perform_rejoin(package_cfg, reason="start")
             results.append(result)
             if result.success:
+                print(f"  [{index}/{n}] {G}✓ Started{RST} {username}")
                 table_rows.append((index, package, username, "Started", "Roblox launch command sent"))
             else:
                 msg = result.error or "launch command failed"
@@ -1060,13 +1251,15 @@ def cmd_start(args: argparse.Namespace) -> int:
                     short = "Launch disabled by config"
                 else:
                     short = msg[:50] if len(msg) > 50 else msg
+                print(f"  [{index}/{n}] Failed: {username} — {short}")
                 table_rows.append((index, package, username, "Failed", short))
-
-        # Print ONE clean launch status table
-        print(build_start_table(table_rows))
         print()
 
-        # Webhook and snapshot
+        # ── Status table ────────────────────────────────────────────────────
+        print(build_start_table(table_rows, use_color=use_color))
+        print()
+
+        # ── Webhook (embed format with system stats) ────────────────────────
         snapshot_path = None
         if cfg.get("webhook_enabled") and cfg.get("webhook_snapshot_enabled"):
             snapshot.cleanup_old_snapshots(int(cfg.get("snapshot_max_age_seconds", 300)))
@@ -1075,28 +1268,56 @@ def cmd_start(args: argparse.Namespace) -> int:
                 cfg["snapshot_temp_path"] = str(snapshot_path)
 
         if cfg.get("webhook_enabled"):
-            ok, message, message_id = webhook.send_webhook_update(cfg, event="start", snapshot_path=snapshot_path, force=True)
+            # Collect live system and app stats for the embed
+            mem_info = android.get_memory_info()
+            cpu_pct = android.get_cpu_usage()
+            temp_c = android.get_temperature()
+            cfg["_mem_info"] = mem_info
+            cfg["_cpu_pct"] = cpu_pct
+            cfg["_temp_c"] = temp_c
+
+            app_stats: dict[str, Any] = {}
+            for entry in entries:
+                pkg = entry["package"]
+                is_online = android.is_process_running(pkg)
+                mem_mb = android.get_app_memory_mb(pkg) if is_online else None
+                app_stats[pkg] = {
+                    "online": is_online,
+                    "memory_mb": mem_mb,
+                    "cpu_pct": None,
+                    "uptime_start": start_times.get(pkg),
+                }
+
+            ok, message, message_id = webhook.send_webhook_update(
+                cfg,
+                event="start",
+                snapshot_path=snapshot_path,
+                force=True,
+                app_stats=app_stats,
+            )
             print(f"Webhook: {message}")
             if ok:
                 cfg["webhook_last_sent_at"] = datetime.now(timezone.utc).timestamp()
                 if message_id:
                     cfg["webhook_last_message_id"] = message_id
-                save_config(cfg)
 
-        # Final summary
+        cfg["package_start_times"] = start_times
+        save_config(cfg)
+
+        # ── Final summary ───────────────────────────────────────────────────
         success_count = sum(1 for r in results if r.success)
         fail_count = len(results) - success_count
         if success_count == 0:
             reasons = [r.error for r in results if r.error]
             best_reason = reasons[0][:80] if reasons else "all launch attempts failed"
-            print(f"0 packages launched.")
+            print("0 packages launched.")
             print(f"Reason: {best_reason}")
             return 1
         print("Final:")
         if fail_count == 0:
-            print(f"{success_count} package{'s' if success_count != 1 else ''} launched successfully.")
+            print(f"{G}{success_count} package{'s' if success_count != 1 else ''} launched successfully.{RST}")
         else:
-            print(f"{success_count} package{'s' if success_count != 1 else ''} launched, {fail_count} failed.")
+            print(f"{Y}{success_count} package{'s' if success_count != 1 else ''} launched, {fail_count} failed.{RST}")
 
         if cfg.get("auto_rejoin_enabled"):
             print("Auto rejoin is enabled. Starting supervisor loop.")
