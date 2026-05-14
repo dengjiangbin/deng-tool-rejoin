@@ -933,33 +933,57 @@ def cmd_once(args: argparse.Namespace) -> int:
     return 1
 
 
-def build_start_table(entries: list[dict[str, Any]], statuses: dict[str, str]) -> str:
-    rows = [(_package_row_label(entry), statuses.get(entry["package"], "Waiting")) for entry in entries]
-    name_width = max([len("Package / Username"), *(len(row[0]) for row in rows)], default=18)
-    status_width = max([len("Status"), *(len(row[1]) for row in rows)], default=12)
-    lines = [
-        "DENG Tool: Rejoin Start",
-        "",
-        f"{'Package / Username'.ljust(name_width)}  {'Status'.ljust(status_width)}",
-        "-" * (name_width + status_width + 2),
+def _account_username_for_table(entry: dict[str, Any]) -> str:
+    """Return the display username for a Start table row — shows 'Unknown' if not set."""
+    return validate_account_username(entry.get("account_username", "")) or "Unknown"
+
+
+def build_start_table(rows: list[tuple]) -> str:
+    """Build a single clean launch status table.
+
+    Each row must be a 5-tuple: (index, package, username, launch, status).
+    Returns a Unicode box-drawing table string.
+    """
+    headers = ("#", "Package", "Username", "Launch", "Status")
+    str_rows = [(str(r[0]), str(r[1]), str(r[2]), str(r[3]), str(r[4])) for r in rows]
+
+    widths = [
+        max(len(headers[i]), max((len(r[i]) for r in str_rows), default=0))
+        for i in range(5)
     ]
-    for name, status in rows:
-        lines.append(f"{name.ljust(name_width)}  {status.ljust(status_width)}")
+
+    def _cell(s: str, w: int) -> str:
+        return f" {s.ljust(w)} "
+
+    def _hline(left: str, mid: str, right: str) -> str:
+        return left + mid.join("─" * (w + 2) for w in widths) + right
+
+    def _data_row(cells: tuple) -> str:
+        return "│" + "│".join(_cell(str(cells[i]), widths[i]) for i in range(len(widths))) + "│"
+
+    lines = [
+        _hline("┌", "┬", "┐"),
+        _data_row(headers),
+        _hline("├", "┼", "┤"),
+        *(_data_row(r) for r in str_rows),
+        _hline("└", "┴", "┘"),
+    ]
     return "\n".join(lines)
 
 
-def build_final_summary(entries: list[dict[str, Any]], results: dict[str, str]) -> str:
-    rows = [(_package_row_label(entry), results.get(entry["package"], "Unknown")) for entry in entries]
-    name_width = max([len("Package / Username"), *(len(row[0]) for row in rows)], default=18)
-    result_width = max([len("Result"), *(len(row[1]) for row in rows)], default=12)
-    lines = [
-        "Final Summary:",
-        f"{'Package / Username'.ljust(name_width)}  {'Result'.ljust(result_width)}",
-        "-" * (name_width + result_width + 2),
-    ]
-    for name, result in rows:
-        lines.append(f"{name.ljust(name_width)}  {result.ljust(result_width)}")
-    return "\n".join(lines)
+def build_final_summary(entries: list[Any], results: dict[str, str]) -> str:
+    """Return a one-line final launch summary string."""
+    success_labels = {"Launched", "Started", "Success"}
+    success = sum(
+        1 for e in entries
+        if results.get(e["package"] if isinstance(e, dict) else str(e), "") in success_labels
+    )
+    total = len(entries)
+    if success == 0:
+        return "Final: 0 packages launched."
+    if success == total:
+        return f"Final: {success} package{'s' if success != 1 else ''} launched successfully."
+    return f"Final: {success} of {total} packages launched."
 
 
 def _progress_line(index: int, total: int, entry: dict[str, Any], message: str) -> str:
@@ -969,7 +993,7 @@ def _progress_line(index: int, total: int, entry: dict[str, Any], message: str) 
 
 def _prepare_automatic_layout(cfg: dict[str, Any], entries: list[dict[str, Any]]) -> tuple[dict[str, Any], str]:
     if len(entries) <= 1:
-        return cfg, "Layout skipped, one package only."
+        return cfg, "Layout skipped: only one package selected."
     packages = [entry["package"] for entry in entries]
     root_info = android.detect_root()
     messages, preview = window_layout.apply_layout_to_packages(
@@ -1001,50 +1025,52 @@ def cmd_start(args: argparse.Namespace) -> int:
             print("Run: deng-rejoin and choose First Time Setup Config.")
             return 2
 
-        statuses = {entry["package"]: "Waiting" for entry in entries}
+        # Print start summary header
+        n = len(entries)
         print()
-        print(build_start_table(entries, statuses))
-        cfg, layout_status = _prepare_automatic_layout(cfg, entries)
+        print("Start Summary")
+        print(f"  Packages selected: {n}")
+        print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
+        print(f"  Webhook: {'Enabled' if cfg.get('webhook_enabled') else 'Disabled'}")
         print()
-        print(layout_status)
+
+        # Apply window layout (multi-package only) — runs silently for one package
+        cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
+
+        # Launch each package, collect table rows
+        table_rows: list[tuple] = []
         results: list[RejoinResult] = []
-        result_labels: dict[str, str] = {}
-        total = len(entries)
         for index, entry in enumerate(entries, start=1):
             package = entry["package"]
-            print()
-            print(_progress_line(index, total, entry, "Preparing."))
-            print(_progress_line(index, total, entry, "Safe cache check skipped, data preserved."))
-            if len(entries) > 1:
-                print(_progress_line(index, total, entry, layout_status))
-            print(_progress_line(index, total, entry, "Getting ready."))
-            print(_progress_line(index, total, entry, "Launching Roblox."))
+            username = _account_username_for_table(entry)
             package_cfg = dict(cfg)
             package_cfg["roblox_package"] = package
             package_cfg["roblox_packages"] = [entry]
             result = perform_rejoin(package_cfg, reason="start")
             results.append(result)
             if result.success:
-                result_labels[package] = "Launched"
-                print(_progress_line(index, total, entry, "Launched."))
+                table_rows.append((index, package, username, "Started", "Roblox launch command sent"))
             else:
-                message = result.error or "launch command failed"
-                friendly = "Failed to launch"
-                if "not installed" in message.lower():
-                    friendly = "Failed: package not installed"
-                elif "invalid" in message.lower():
-                    friendly = "Failed: invalid URL or package"
-                result_labels[package] = friendly
-                print(_progress_line(index, total, entry, f"{friendly}: {message[:80]}"))
+                msg = result.error or "launch command failed"
+                if "not installed" in msg.lower():
+                    short = "Package not installed"
+                elif "unavailable" in msg.lower() or "not found" in msg.lower():
+                    short = "Android launcher unavailable"
+                elif "disabled" in msg.lower():
+                    short = "Launch disabled by config"
+                else:
+                    short = msg[:50] if len(msg) > 50 else msg
+                table_rows.append((index, package, username, "Failed", short))
 
+        # Print ONE clean launch status table
+        print(build_start_table(table_rows))
         print()
-        print(build_final_summary(entries, result_labels))
 
+        # Webhook and snapshot
         snapshot_path = None
         if cfg.get("webhook_enabled") and cfg.get("webhook_snapshot_enabled"):
             snapshot.cleanup_old_snapshots(int(cfg.get("snapshot_max_age_seconds", 300)))
-            snapshot_path, snap_message = snapshot.capture_snapshot()
-            print(f"Snapshot: {snap_message}")
+            snapshot_path, _snap_message = snapshot.capture_snapshot()
             if snapshot_path:
                 cfg["snapshot_temp_path"] = str(snapshot_path)
 
@@ -1057,9 +1083,20 @@ def cmd_start(args: argparse.Namespace) -> int:
                     cfg["webhook_last_message_id"] = message_id
                 save_config(cfg)
 
-        if results and not any(result.success for result in results):
-            print("No Roblox package launched successfully. See the table above for the failure reason.")
+        # Final summary
+        success_count = sum(1 for r in results if r.success)
+        fail_count = len(results) - success_count
+        if success_count == 0:
+            reasons = [r.error for r in results if r.error]
+            best_reason = reasons[0][:80] if reasons else "all launch attempts failed"
+            print(f"0 packages launched.")
+            print(f"Reason: {best_reason}")
             return 1
+        print("Final:")
+        if fail_count == 0:
+            print(f"{success_count} package{'s' if success_count != 1 else ''} launched successfully.")
+        else:
+            print(f"{success_count} package{'s' if success_count != 1 else ''} launched, {fail_count} failed.")
 
         if cfg.get("auto_rejoin_enabled"):
             print("Auto rejoin is enabled. Starting supervisor loop.")

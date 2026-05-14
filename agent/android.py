@@ -211,9 +211,97 @@ def force_stop_package(package: str, root_info: RootInfo | None = None) -> Comma
     return run_root_command(["am", "force-stop", package], root_tool=info.tool, timeout=PROCESS_TIMEOUT_SECONDS)
 
 
+def _find_command(*names: str) -> str | None:
+    """Find the first available command from candidates.
+
+    Short names (no /) are searched in PATH via shutil.which.
+    Absolute paths (starting with /) are checked for existence and executability.
+    """
+    for name in names:
+        if name.startswith("/"):
+            if os.path.isfile(name) and os.access(name, os.X_OK):
+                return name
+        else:
+            found = shutil.which(name)
+            if found:
+                return found
+    return None
+
+
+def _parse_activity_component(stdout: str, package: str) -> str | None:
+    """Parse the activity component from cmd package resolve-activity --brief output.
+
+    Returns a string like "com.roblox.client/.activity.SplashActivity" or None.
+    """
+    for line in reversed(stdout.strip().splitlines()):
+        line = line.strip()
+        if "/" in line and package in line:
+            for part in line.split():
+                if "/" in part and package in part:
+                    return part
+    return None
+
+
 def launch_app(package: str) -> CommandResult:
+    """Launch a Roblox package using the best available Android launch method.
+
+    Tries in order:
+    1. am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p <package>
+    2. cmd package resolve-activity --brief <package> then am start -n <component>
+    3. monkey -p <package> -c android.intent.category.LAUNCHER 1 (optional fallback)
+
+    Never raises FileNotFoundError. Returns a CommandResult indicating the outcome.
+    """
     package = validate_package_name(package)
-    return run_command(["monkey", "-p", package, "-c", "android.intent.category.LAUNCHER", "1"], timeout=PROCESS_TIMEOUT_SECONDS)
+    am = _find_command("am", "/system/bin/am")
+    cmd_bin = _find_command("cmd", "/system/bin/cmd")
+    monkey_bin = _find_command("monkey", "/system/bin/monkey")
+
+    last_result: CommandResult | None = None
+
+    # Method 1: am start with MAIN + LAUNCHER intent
+    if am:
+        result = run_command(
+            [am, "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-p", package],
+            timeout=PROCESS_TIMEOUT_SECONDS,
+        )
+        if result.ok:
+            return result
+        last_result = result
+
+    # Method 2: resolve-activity to get exact component, then am start -n
+    if cmd_bin and am:
+        resolve = run_command(
+            [cmd_bin, "package", "resolve-activity", "--brief", package],
+            timeout=PROCESS_TIMEOUT_SECONDS,
+        )
+        if resolve.ok:
+            component = _parse_activity_component(resolve.stdout, package)
+            if component:
+                result2 = run_command([am, "start", "-n", component], timeout=PROCESS_TIMEOUT_SECONDS)
+                if result2.ok:
+                    return result2
+                last_result = result2
+
+    # Method 3: monkey fallback (optional, may not be available)
+    if monkey_bin:
+        result3 = run_command(
+            [monkey_bin, "-p", package, "-c", "android.intent.category.LAUNCHER", "1"],
+            timeout=PROCESS_TIMEOUT_SECONDS,
+        )
+        if result3.ok:
+            return result3
+        last_result = result3
+
+    # All methods failed — return best available failure result
+    if last_result:
+        return last_result
+    return CommandResult(
+        ("am", "start", package),
+        127,
+        "",
+        "Android launcher commands unavailable: am/cmd/monkey not found",
+    )
 
 
 def launch_url(package: str, url: str, launch_mode: str) -> CommandResult:

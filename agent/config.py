@@ -271,6 +271,25 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged = default_config()
     merged.update(input_config)
 
+    # ── Legacy migration ────────────────────────────────────────────────────
+    # Migrate old-style launcher dict with intent_type (from older versions).
+    _old_launcher = merged.get("launcher")
+    if isinstance(_old_launcher, dict):
+        _intent_type = str(_old_launcher.get("intent_type", "")).strip().lower()
+        if _intent_type == "deeplink":
+            merged.setdefault("launch_mode", "deeplink")
+        elif _intent_type in ("web_url", "web", "url"):
+            merged.setdefault("launch_mode", "web_url")
+        else:
+            # "disabled", "none", or unknown → enable launch with default mode
+            merged.setdefault("launch_mode", "app")
+
+    # Migrate launch_mode "disabled" or legacy values to "app" (enable launching).
+    _raw_launch_mode = str(merged.get("launch_mode", "app")).strip().lower()
+    if _raw_launch_mode in ("disabled", "none", "auto"):
+        merged["launch_mode"] = "app"
+    # ────────────────────────────────────────────────────────────────────────
+
     merged["agent_version"] = VERSION
     merged["android_release"] = str(merged.get("android_release") or get_android_release())
     merged["android_sdk"] = str(merged.get("android_sdk") or get_android_sdk())
