@@ -87,12 +87,13 @@ async def _build_and_run(token: str) -> None:
         # Restore persistent views so buttons work after restart
         await cog.restore_persistent_views()
 
-        # Sync slash commands globally
-        try:
-            synced = await bot.tree.sync()
-            log.info("Synced %d slash command(s) globally.", len(synced))
-        except discord.HTTPException as exc:
-            log.error("Failed to sync slash commands: %s", exc)
+        # NOTE: This bot is GUILD-ONLY. Global command sync is intentionally
+        # disabled here. Commands are registered once via:
+        #   python -m bot.deploy_commands --guild 1435142398647734396
+        log.info(
+            "Command sync skipped on startup — "
+            "managed by deploy_commands.py (guild-only policy)."
+        )
 
     @bot.event
     async def on_error(event: str, *args: object, **kwargs: object) -> None:
