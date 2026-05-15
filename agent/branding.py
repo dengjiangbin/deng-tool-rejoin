@@ -33,8 +33,19 @@ def get_branding_logo_url() -> str:
     return ""
 
 
-def apply_branding_to_embed_dict(embed_dict: dict[str, Any]) -> None:
-    """Mutate *embed_dict* in place: set ``thumbnail.url`` when configured."""
+def apply_branding_to_embed_dict(
+    embed_dict: dict[str, Any],
+    *,
+    include_thumbnail: bool = True,
+) -> None:
+    """Mutate *embed_dict* in place: set ``thumbnail.url`` when configured.
+
+    Use ``include_thumbnail=False`` for ephemeral interaction replies so only
+    the main public panel post shows the DENG Hub logo.
+    """
+    if not include_thumbnail:
+        embed_dict.pop("thumbnail", None)
+        return
     url = get_branding_logo_url()
     if not url:
         return

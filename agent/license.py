@@ -8,9 +8,8 @@ Rules:
   • Uppercase on display
   • Accept lowercase input and input without inner dashes
   • Trim spaces; normalize inner grouping dashes
-  • Display full key only once (at generation time)
-  • Everywhere else: masked key  DENG-8F3A...44F0
-  • Store only the SHA-256 hash in any database
+  • Display full key in user copy views (Discord panel, Key Stats when export exists)
+  • Store only the SHA-256 hash in any database (plus optional encrypted export blob)
   • install_id is a privacy-safe random UUID persisted locally
   • Never read IMEI, phone number, or Roblox session/cookie/token
 """

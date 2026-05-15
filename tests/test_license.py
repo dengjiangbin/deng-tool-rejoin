@@ -181,7 +181,7 @@ class StoreUserKeyTests(unittest.TestCase):
             self.store.create_key_for_user(self.uid)
 
     def test_redeem_key_success(self):
-        """Test 14 – redeem an unclaimed key succeeds and returns masked key."""
+        """Test 14 – redeem an unclaimed key succeeds and returns full normalized key."""
         admin_uid = "000000000000000001"
         target_uid = "000000000000000002"
         self.store.get_or_create_user(admin_uid)
@@ -195,9 +195,9 @@ class StoreUserKeyTests(unittest.TestCase):
         store2._save(db)
 
         self.store.get_or_create_user(target_uid)
-        masked = self.store.redeem_key_for_user(target_uid, full_key)
-        self.assertIn("DENG-", masked)
-        self.assertIn("...", masked)
+        ret = self.store.redeem_key_for_user(target_uid, full_key)
+        self.assertEqual(ret, normalize_license_key(full_key))
+        self.assertNotIn("...", ret)
 
     def test_redeem_owned_key_raises_ownership_error(self):
         """Test 15 – redeem a key already owned by another user raises KeyOwnershipError."""

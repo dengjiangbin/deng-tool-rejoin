@@ -140,7 +140,7 @@ class BaseLicenseStore(ABC):
     @abstractmethod
     def redeem_key_for_user(self, discord_user_id: str, raw_key: str) -> str:
         """Attach an existing key to a Discord user.
-        Returns the masked key on success.
+        Returns the normalized **full** key on success (for copy).
         Raises KeyNotFoundError, KeyOwnershipError, or UserLimitError.
         """
 
@@ -160,7 +160,8 @@ class BaseLicenseStore(ABC):
     @abstractmethod
     def list_user_keys(self, discord_user_id: str) -> list[dict[str, Any]]:
         """Return a list of key summary dicts for a user.
-        Each dict: {id, masked_key, status, plan, bound_device, created_at}
+        Each dict: {id, masked_key, full_key_plaintext (optional), status, plan,
+        bound_device, created_at}
         """
 
     @abstractmethod
@@ -219,9 +220,9 @@ class BaseLicenseStore(ABC):
         """Return key dicts with binding state info for the HWID reset selector.
 
         Each dict contains:
-          key_id, masked_key, status, active_binding (bool), device_model,
-          device_label, last_seen_at, reset_count_24h, can_reset (bool),
-          reason_if_not_resettable (str | None).
+          key_id, masked_key, full_key_plaintext (optional), status,
+          active_binding (bool), device_model, device_label, last_seen_at,
+          reset_count_24h, can_reset (bool), reason_if_not_resettable (str | None).
 
         Revoked keys are excluded from the result.
         """
@@ -385,7 +386,6 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         return raw_key
 
     def redeem_key_for_user(self, discord_user_id: str, raw_key: str) -> str:
-        from .license import mask_license_key as _mask
         try:
             normalized = normalize_license_key(raw_key)
         except LicenseKeyError as exc:
@@ -418,7 +418,7 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                     self._save(db)
                     backfilled = True
             raise KeyAlreadySelfOwned(
-                f"This key is already attached to your account ({_mask(normalized)}).",
+                "This key is already attached to your account.",
                 export_backfilled=backfilled,
             )
         if owner and owner != discord_user_id:
@@ -434,10 +434,11 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         db["keys"][key_hash]["updated_at"] = _utc_now()
         self._save(db)
         self.audit_admin_action(discord_user_id, "redeem_key", target_type="key", target_id=key_hash[:8])
-        return _mask(normalized)
+        return normalized
 
     def list_user_keys(self, discord_user_id: str) -> list[dict[str, Any]]:
-        from .license import mask_license_key as _mask
+        from . import license_key_export as lke
+
         db = self._load()
         result: list[dict[str, Any]] = []
         for key_hash, record in db["keys"].items():
@@ -446,6 +447,8 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             binding = db["bindings"].get(key_hash, {})
             active = bool(binding.get("is_active"))
             masked = f"{record.get('prefix', 'DENG-????')}...{record.get('suffix', '????')}"
+            ciphertext = record.get("key_ciphertext") or ""
+            full_plain = lke.decrypt_license_key_ciphertext(ciphertext) if ciphertext else None
             if active:
                 bound_device = binding.get("device_model") or "(unbound)"
                 last_seen = binding.get("last_seen_at")
@@ -455,6 +458,7 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             result.append({
                 "id": key_hash,
                 "masked_key": masked,
+                "full_key_plaintext": full_plain,
                 "status": record.get("status", "unknown"),
                 "plan": record.get("plan", "standard"),
                 "bound_device": bound_device,
@@ -466,6 +470,8 @@ class LocalJsonLicenseStore(BaseLicenseStore):
     def list_user_keys_with_binding_state(
         self, discord_user_id: str
     ) -> list[dict[str, Any]]:
+        from . import license_key_export as lke
+
         db = self._load()
         result: list[dict[str, Any]] = []
         for key_hash, record in db["keys"].items():
@@ -476,6 +482,8 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             binding = db.get("bindings", {}).get(key_hash, {})
             active_binding = bool(binding.get("is_active"))
             masked = f"{record.get('prefix', 'DENG-????')}...{record.get('suffix', '????')}"
+            ciphertext = record.get("key_ciphertext") or ""
+            full_plain = lke.decrypt_license_key_ciphertext(ciphertext) if ciphertext else None
             last_seen_at = binding.get("last_seen_at")
             reset_count = self.get_reset_count_24h(key_hash)
             # Determine can_reset and reason
@@ -498,6 +506,7 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             result.append({
                 "key_id": key_hash,
                 "masked_key": masked,
+                "full_key_plaintext": full_plain,
                 "status": record.get("status", "unknown"),
                 "active_binding": active_binding,
                 "device_model": binding.get("device_model", ""),
@@ -935,8 +944,6 @@ class SupabaseLicenseStore(BaseLicenseStore):
         return raw_key
 
     def redeem_key_for_user(self, discord_user_id: str, raw_key: str) -> str:
-        from .license import mask_license_key as _mask
-
         try:
             normalized = normalize_license_key(raw_key)
         except LicenseKeyError as exc:
@@ -985,7 +992,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
                         else:
                             raise
             raise KeyAlreadySelfOwned(
-                f"This key is already attached to your account ({_mask(normalized)}).",
+                "This key is already attached to your account.",
                 export_backfilled=backfilled,
             )
         if owner and owner != discord_user_id:
@@ -1007,17 +1014,32 @@ class SupabaseLicenseStore(BaseLicenseStore):
             target_type="key",
             target_id=key_hash[:8],
         )
-        return _mask(normalized)
+        return normalized
 
     def list_user_keys(self, discord_user_id: str) -> list[dict[str, Any]]:
-        res = (
-            self._client.table("license_keys")
-            .select("id, prefix, suffix, status, plan, created_at")
-            .eq("owner_discord_id", discord_user_id)
-            .execute()
-        )
+        from . import license_key_export as lke
+
+        try:
+            res = (
+                self._client.table("license_keys")
+                .select(
+                    "id, prefix, suffix, status, plan, created_at, key_ciphertext, key_export_available"
+                )
+                .eq("owner_discord_id", discord_user_id)
+                .execute()
+            )
+            records = res.data or []
+        except Exception:
+            res = (
+                self._client.table("license_keys")
+                .select("id, prefix, suffix, status, plan, created_at")
+                .eq("owner_discord_id", discord_user_id)
+                .execute()
+            )
+            records = res.data or []
+
         result: list[dict[str, Any]] = []
-        for record in res.data:
+        for record in records:
             key_id = record["id"]
             b_res = (
                 self._client.table("device_bindings")
@@ -1028,6 +1050,8 @@ class SupabaseLicenseStore(BaseLicenseStore):
             binding = b_res.data[0] if b_res.data else {}
             active = bool(binding.get("is_active"))
             masked = f"{record.get('prefix', 'DENG-????')}...{record.get('suffix', '????')}"
+            ciphertext = (record.get("key_ciphertext") or "") if "key_ciphertext" in record else ""
+            full_plain = lke.decrypt_license_key_ciphertext(ciphertext) if ciphertext else None
             if active:
                 bound_device = binding.get("device_model") or "(unbound)"
                 last_seen = binding.get("last_seen_at")
@@ -1038,6 +1062,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 {
                     "id": key_id,
                     "masked_key": masked,
+                    "full_key_plaintext": full_plain,
                     "status": record.get("status", "unknown"),
                     "plan": record.get("plan", "standard"),
                     "bound_device": bound_device,
@@ -1050,15 +1075,29 @@ class SupabaseLicenseStore(BaseLicenseStore):
     def list_user_keys_with_binding_state(
         self, discord_user_id: str
     ) -> list[dict[str, Any]]:
-        res = (
-            self._client.table("license_keys")
-            .select("id, prefix, suffix, status")
-            .eq("owner_discord_id", discord_user_id)
-            .neq("status", "revoked")
-            .execute()
-        )
+        from . import license_key_export as lke
+
+        try:
+            res = (
+                self._client.table("license_keys")
+                .select("id, prefix, suffix, status, key_ciphertext, key_export_available")
+                .eq("owner_discord_id", discord_user_id)
+                .neq("status", "revoked")
+                .execute()
+            )
+            records = res.data or []
+        except Exception:
+            res = (
+                self._client.table("license_keys")
+                .select("id, prefix, suffix, status")
+                .eq("owner_discord_id", discord_user_id)
+                .neq("status", "revoked")
+                .execute()
+            )
+            records = res.data or []
+
         result: list[dict[str, Any]] = []
-        for record in res.data:
+        for record in records:
             key_id = record["id"]
             b_res = (
                 self._client.table("device_bindings")
@@ -1069,6 +1108,8 @@ class SupabaseLicenseStore(BaseLicenseStore):
             binding = b_res.data[0] if b_res.data else {}
             active_binding = bool(binding.get("is_active"))
             masked = f"{record.get('prefix', 'DENG-????')}...{record.get('suffix', '????')}"
+            ciphertext = (record.get("key_ciphertext") or "") if "key_ciphertext" in record else ""
+            full_plain = lke.decrypt_license_key_ciphertext(ciphertext) if ciphertext else None
             last_seen_at = binding.get("last_seen_at")
             reset_count = self.get_reset_count_24h(key_id)
             reason: str | None = None
@@ -1090,6 +1131,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
             result.append({
                 "key_id": key_id,
                 "masked_key": masked,
+                "full_key_plaintext": full_plain,
                 "status": record.get("status", "unknown"),
                 "active_binding": active_binding,
                 "device_model": binding.get("device_model", ""),

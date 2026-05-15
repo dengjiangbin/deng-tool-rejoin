@@ -105,7 +105,7 @@ All commands are under the `/license_panel` group.
 4. Bot normalizes key: `deng-8f3a-b3c4-d5e6-44f0` → `DENG-8F3A-B3C4-D5E6-44F0`
 5. Validates format; if invalid → ephemeral "Redemption Failed"
 6. Calls `store.redeem_key_for_user(discord_user_id, raw_key)`
-7. On success → ephemeral "Key Redeemed" with masked key
+7. On success → ephemeral "Key Redeemed" with **full key** in a private code block (copyable)
 
 ### 📊 Key Stats
 
@@ -115,12 +115,12 @@ All commands are under the `/license_panel` group.
 4. **Used** = key has an **active** device binding. **Unused** = no active binding (free for a new device after reset).
 5. **Previous** / **Next** edit the same message. Only the opening user may interact; others get "This key stats view is not yours."
 6. **Recover Full Key** opens a modal when export secret is configured (optional one-time backfill).
-7. **Download Keys** sends another ephemeral message with `my_keys_<discord_user_id>.txt` (full key when export is enabled; otherwise masked plus a short recover hint).
+7. **Download Keys** sends another ephemeral message with `my_keys_<discord_user_id>.txt` (**full key** lines when ciphertext exists; otherwise explicit “not available for copy” text plus recover hint — no fake masked key presented as the full key).
 8. **Close** edits the stats message to `Closed.` and removes the view.
 
 **Limits:** By default **one Discord user → one license key → one device**. If the tool says the key is bound elsewhere, use **Reset HWID** in Discord, wait if recently active, then bind again.
 
-**Logo on embeds:** Set `DENG_BRANDING_LOGO_URL` to a public HTTPS image, or set `LICENSE_API_PUBLIC_URL` so Discord can load `{PUBLIC}/assets/denghub_logo.png` from the license API. Local-only URLs (`http://127.0.0.1`) are skipped for thumbnails.
+**Logo on embeds:** The DENG Hub thumbnail applies **only** to the main public panel message (`/license_panel post` / `refresh`). Ephemeral replies (Generate, Redeem, Key Stats, Reset HWID, Select Version, etc.) do **not** add the logo. Set `DENG_BRANDING_LOGO_URL` to a public HTTPS image, or set `LICENSE_API_PUBLIC_URL` so Discord can load `{PUBLIC}/assets/denghub_logo.png` from the license API. Local-only URLs (`http://127.0.0.1`) are skipped for thumbnails.
 ---
 
 ## Panel Config Storage

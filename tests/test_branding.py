@@ -59,16 +59,25 @@ class TestBranding(unittest.TestCase):
                 "https://rejoin.example/tool/assets/denghub_logo.png",
             )
 
-    def test_localhost_public_url_not_used_for_discord_thumbnail(self) -> None:
+    def test_include_thumbnail_false_omits_logo(self) -> None:
         with patch.dict(
             os.environ,
-            {
-                "DENG_BRANDING_LOGO_URL": "",
-                "LICENSE_API_PUBLIC_URL": "http://127.0.0.1:8787",
-            },
+            {"DENG_BRANDING_LOGO_URL": "https://example.com/logo.png"},
             clear=False,
         ):
-            self.assertEqual(get_branding_logo_url(), "")
+            d: dict = {"title": "X"}
+            apply_branding_to_embed_dict(d, include_thumbnail=False)
+            self.assertNotIn("thumbnail", d)
+
+    def test_include_thumbnail_false_drops_existing_thumbnail(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"DENG_BRANDING_LOGO_URL": "https://example.com/logo.png"},
+            clear=False,
+        ):
+            d: dict = {"title": "X", "thumbnail": {"url": "https://old/wrong.png"}}
+            apply_branding_to_embed_dict(d, include_thumbnail=False)
+            self.assertNotIn("thumbnail", d)
 
 
 if __name__ == "__main__":

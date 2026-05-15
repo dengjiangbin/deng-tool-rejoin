@@ -97,10 +97,14 @@ def _is_owner(user: discord.User | discord.Member) -> bool:
 
 # ── Embed helper ──────────────────────────────────────────────────────────────
 
-def _embed_from_payload(payload: dict[str, Any]) -> discord.Embed:
-    """Convert builder payload dict → discord.Embed."""
+def _embed_from_payload(
+    payload: dict[str, Any],
+    *,
+    include_thumbnail: bool = False,
+) -> discord.Embed:
+    """Convert builder payload dict → discord.Embed (no logo on replies by default)."""
     embed_dict = dict(payload["embed"])
-    apply_branding_to_embed_dict(embed_dict)
+    apply_branding_to_embed_dict(embed_dict, include_thumbnail=include_thumbnail)
     return discord.Embed.from_dict(embed_dict)
 
 
@@ -139,16 +143,20 @@ class RedeemModal(discord.ui.Modal, title="Redeem License Key"):
         uid = str(interaction.user.id)
         username = str(interaction.user)
 
+        from agent.license import normalize_license_key
+
         await interaction.response.defer(ephemeral=True)
 
         try:
             self._store.get_or_create_user(uid, username)
-            masked = self._store.redeem_key_for_user(uid, raw_key)
-            payload = build_redeem_success_response(masked)
+            self._store.redeem_key_for_user(uid, raw_key)
+            display_key = normalize_license_key(raw_key)
+            payload = build_redeem_success_response(display_key)
         except KeyAlreadySelfOwned as exc:
+            display_key = normalize_license_key(raw_key)
             payload = build_redeem_already_owned_response(
-                str(exc),
                 export_backfilled=exc.export_backfilled,
+                copyable_key=display_key,
             )
         except (KeyNotFoundError, KeyOwnershipError, UserLimitError) as exc:
             payload = build_redeem_error_response(str(exc))
@@ -181,9 +189,16 @@ class RecoverKeyExportModal(discord.ui.Modal, title="Recover Full Key"):
         self._store = store
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        from agent.license import LicenseKeyError, normalize_license_key
+
         uid = str(interaction.user.id)
         raw_key = self.key_input.value.strip()
         await interaction.response.defer(ephemeral=True)
+        try:
+            normalized = normalize_license_key(raw_key)
+        except LicenseKeyError as exc:
+            await interaction.followup.send(f"❌ {exc}", ephemeral=True)
+            return
         try:
             result = self._store.recover_key_export_for_user(uid, raw_key)
         except ExportStorageUnavailable as exc:
@@ -198,15 +213,19 @@ class RecoverKeyExportModal(discord.ui.Modal, title="Recover Full Key"):
                 ephemeral=True,
             )
             return
+        key_block = f"**Your license key (copy):**\n```\n{normalized}\n```\n"
         if result == "already_exportable":
             await interaction.followup.send(
-                "✅ Full key export was already enabled. Open **Key Stats** to copy your key.",
+                "✅ Full key export was already enabled.\n"
+                f"{key_block}"
+                "Open **Key Stats** anytime to manage or download your keys.",
                 ephemeral=True,
             )
         else:
             await interaction.followup.send(
-                "Full key saved securely for export.\n"
-                "Open **Key Stats** to copy your key.",
+                "✅ Full key saved securely for export.\n"
+                f"{key_block}"
+                "Open **Key Stats** anytime to view or download your keys.",
                 ephemeral=True,
             )
 
@@ -231,7 +250,9 @@ class ResetHwidSelect(discord.ui.Select):
         options: list[discord.SelectOption] = []
         for k in keys_with_state:
             icon = "🟢" if k.get("active_binding") else "🟡"
-            label = k.get("masked_key", "???")
+            fk = k.get("full_key_plaintext")
+            mk = k.get("masked_key", "???")
+            label = (fk or mk)[:100]
             if k.get("active_binding"):
                 model = k.get("device_model") or "Unknown device"
                 last = k.get("last_seen_at")
@@ -294,9 +315,13 @@ class ConfirmResetButton(discord.ui.Button):
         results: list[dict] = []
         for key_id in selected_ids:
             state = self._key_map.get(key_id, {})
-            masked = state.get("masked_key", "???")
+            fk = state.get("full_key_plaintext")
+            mk = state.get("masked_key", "???")
+            display_key = fk if fk else f"{mk} (reference only)"
+            masked = mk
             if not state.get("can_reset"):
                 results.append({
+                    "display_key": display_key,
                     "masked_key": masked,
                     "success": False,
                     "message": state.get("reason_if_not_resettable") or "Cannot reset this key.",
@@ -305,12 +330,14 @@ class ConfirmResetButton(discord.ui.Button):
             try:
                 self._store.reset_hwid(self._uid, key_id)
                 results.append({
+                    "display_key": display_key,
                     "masked_key": masked,
                     "success": True,
                     "message": "Device binding cleared.",
                 })
             except NoActiveBindingError:
                 results.append({
+                    "display_key": display_key,
                     "masked_key": masked,
                     "success": False,
                     "message": "No device binding to clear.",
@@ -318,6 +345,7 @@ class ConfirmResetButton(discord.ui.Button):
             except ResetLimitError:
                 count = self._store.get_reset_count_24h(key_id)
                 results.append({
+                    "display_key": display_key,
                     "masked_key": masked,
                     "success": False,
                     "message": f"Reset limit reached ({count}/{MAX_HWID_RESETS_PER_24H} today).",
@@ -327,6 +355,7 @@ class ConfirmResetButton(discord.ui.Button):
                 elapsed = int(m.group(1)) if m else 0
                 mins, secs = elapsed // 60, elapsed % 60
                 results.append({
+                    "display_key": display_key,
                     "masked_key": masked,
                     "success": False,
                     "message": f"Key active {mins}m {secs}s ago — wait 5 min first.",
@@ -360,7 +389,6 @@ class CancelResetButton(discord.ui.Button):
             "description": "HWID reset was cancelled. No changes were made.",
             "color": 0x95A5A6,
         }
-        apply_branding_to_embed_dict(embed_dict)
         embed = discord.Embed.from_dict(embed_dict)
         try:
             await interaction.response.edit_message(embed=embed, view=self.view)
@@ -413,8 +441,6 @@ def _build_key_stats_ephemeral_parts(
     else:
         sl = rows_all[page * KEY_STATS_PAGE_SIZE : (page + 1) * KEY_STATS_PAGE_SIZE]
         embed_dicts = build_key_stats_embed_dicts(sl)
-    for ed in embed_dicts:
-        apply_branding_to_embed_dict(ed)
     return header, embed_dicts, page, total_pages, n
 
 
@@ -474,7 +500,6 @@ class KeyStatsDownloadButton(discord.ui.Button):
             "color": 0x2F80ED,
             "footer": {"text": "DENG Tool \u00b7 Key Stats"},
         }
-        apply_branding_to_embed_dict(dl_embed_dict)
         dl_embed = discord.Embed.from_dict(dl_embed_dict)
         await interaction.response.send_message(embed=dl_embed, file=file, ephemeral=True)
 
@@ -775,7 +800,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _owner_denied(self) -> discord.Embed:
-        return _embed_from_payload(build_not_owner_response())
+        return _embed_from_payload(build_not_owner_response(), include_thumbnail=False)
 
     async def _get_panel_channel(
         self, guild: discord.Guild, channel_id: str
@@ -878,7 +903,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
 
             embed_dict = build_panel_embed()
             embed_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
-            apply_branding_to_embed_dict(embed_dict)
+            apply_branding_to_embed_dict(embed_dict, include_thumbnail=True)
             embed = discord.Embed.from_dict(embed_dict)
             view = PanelView(store)
             msg = await channel.send(embed=embed, view=view)
@@ -949,7 +974,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
 
             embed_dict = build_panel_embed()
             embed_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
-            apply_branding_to_embed_dict(embed_dict)
+            apply_branding_to_embed_dict(embed_dict, include_thumbnail=True)
             embed = discord.Embed.from_dict(embed_dict)
             view = PanelView(store)
             await msg.edit(embed=embed, view=view)

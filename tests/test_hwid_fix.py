@@ -296,7 +296,7 @@ class TestRedeemSameUser(unittest.TestCase):
         with self.assertRaises(KeyAlreadySelfOwned):
             store.redeem_key_for_user(uid, full_key)
 
-    def test_already_self_owned_message_contains_masked(self):
+    def test_already_self_owned_message_has_no_plaintext_key(self):
         store = _tmp_store()
         uid = "rd001b"
         store.get_or_create_user(uid)
@@ -305,10 +305,8 @@ class TestRedeemSameUser(unittest.TestCase):
             store.redeem_key_for_user(uid, full_key)
             self.fail("Expected KeyAlreadySelfOwned")
         except KeyAlreadySelfOwned as exc:
-            # Should reference the masked key, NOT the full key
             self.assertNotIn(full_key, str(exc))
-            masked = mask_license_key(normalize_license_key(full_key))
-            self.assertIn(masked, str(exc))
+            self.assertIn("already attached", str(exc).lower())
 
 
 class TestRedeemOtherUserRejected(unittest.TestCase):
@@ -343,7 +341,8 @@ class TestRedeemUnownedKey(unittest.TestCase):
         redeemer = "redeemer_y"
         store.get_or_create_user(redeemer)
         masked = store.redeem_key_for_user(redeemer, full_key)
-        self.assertIn("...", masked)  # masked format
+        self.assertNotIn("...", masked)
+        self.assertEqual(masked, normalize_license_key(full_key))
         # Verify ownership transferred
         key_hash = hash_license_key(normalize_license_key(full_key))
         db = store._load()
@@ -372,33 +371,40 @@ class TestRedeemAtLimit(unittest.TestCase):
             store.redeem_key_for_user(uid2, full_key2)
 
 
-class TestRedeemResponseNoFullKey(unittest.TestCase):
-    """Test 14 – redeem response never shows full key."""
+class TestRedeemResponseEmbeds(unittest.TestCase):
+    """Redeem / already-owned embeds show full key for copy."""
 
-    def test_redeem_success_shows_masked(self):
+    def test_redeem_success_shows_full_key(self):
         from agent.license_panel import build_redeem_success_response
-        masked = "DENG-8F3A...44F0"
-        payload = build_redeem_success_response(masked)
-        desc = payload["embed"]["description"]
-        # Masked format shown
-        self.assertIn(masked, desc)
 
-    def test_redeem_success_does_not_include_full_key(self):
-        from agent.license_panel import build_redeem_success_response
         full_key = "DENG-8F3A-B3C4-D5E6-44F0"
-        masked = mask_license_key(full_key)
-        payload = build_redeem_success_response(masked)
+        payload = build_redeem_success_response(full_key)
         desc = payload["embed"]["description"]
-        self.assertNotIn(full_key, desc)
+        self.assertIn(full_key, desc)
+        self.assertNotIn("...", desc)
 
-    def test_already_owned_response_shows_masked(self):
-        from agent.license_panel import build_redeem_already_owned_response
-        payload = build_redeem_already_owned_response("This key is already attached to your account (DENG-8F3A...44F0).")
+    def test_redeem_success_no_inner_segments_missing(self):
+        from agent.license_panel import build_redeem_success_response
+
+        full_key = "DENG-8F3A-B3C4-D5E6-44F0"
+        payload = build_redeem_success_response(full_key)
         desc = payload["embed"]["description"]
-        self.assertIn("DENG-8F3A...44F0", desc)
+        for part in ("8F3A", "B3C4", "D5E6", "44F0"):
+            self.assertIn(part, desc)
+
+    def test_already_owned_response_shows_copyable_key(self):
+        from agent.license_panel import build_redeem_already_owned_response
+
+        payload = build_redeem_already_owned_response(
+            copyable_key="DENG-8F3A-B3C4-D5E6-44F0",
+        )
+        desc = payload["embed"]["description"]
+        self.assertIn("DENG-8F3A-B3C4-D5E6-44F0", desc)
+        self.assertNotIn("...", desc)
 
     def test_already_owned_response_title_informational(self):
         from agent.license_panel import build_redeem_already_owned_response
+
         payload = build_redeem_already_owned_response("msg")
         title = payload["embed"]["title"]
         # Should be informational, not error-level
@@ -409,7 +415,7 @@ class TestRedeemResponseNoFullKey(unittest.TestCase):
         from agent.license_panel import build_redeem_already_owned_response
 
         payload = build_redeem_already_owned_response(
-            "ignored", export_backfilled=True
+            "ignored", export_backfilled=True, copyable_key="DENG-AAAA-BBBB-CCCC-DDDD",
         )
         self.assertIn(
             "Full key export has been enabled",
@@ -685,14 +691,18 @@ class TestRegressionLocalStore(unittest.TestCase):
         self.assertEqual(len(keys), 1)
         self.assertIn("...", keys[0]["masked_key"])
 
-    def test_full_key_not_in_list_response(self):
-        store = _tmp_store()
-        uid = "reg002"
-        store.get_or_create_user(uid)
-        full_key = store.create_key_for_user(uid)
-        keys = store.list_user_keys(uid)
-        for k in keys:
-            self.assertNotIn(full_key, str(k))
+    def test_list_user_keys_includes_full_plain_when_ciphertext_present(self):
+        from agent import license_key_export
+
+        with patch.dict(os.environ, {"LICENSE_KEY_EXPORT_SECRET": "reg-plaintext-test"}, clear=False):
+            license_key_export.clear_export_key_cache()
+            store = _tmp_store()
+            uid = "reg002"
+            store.get_or_create_user(uid)
+            full_key = store.create_key_for_user(uid)
+            keys = store.list_user_keys(uid)
+            self.assertEqual(len(keys), 1)
+            self.assertEqual(keys[0].get("full_key_plaintext"), full_key)
 
     def test_bind_after_reset_works(self):
         store, full_key, key_hash = _bound_store_with_key("reg003")

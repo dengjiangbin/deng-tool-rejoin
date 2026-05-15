@@ -187,8 +187,6 @@ def build_generate_success_response(full_key: str) -> dict[str, Any]:
     """Build the ephemeral embed shown to a user after key generation.
 
     full_key: the complete DENG-XXXX-XXXX-XXXX-XXXX key string.
-    This response is shown ONCE in Discord; subsequent views use masked keys unless
-    encrypted export storage is enabled server-side (see license_key_export).
     """
     return {
         "ephemeral": True,
@@ -269,15 +267,16 @@ def build_reset_active_warning_response(elapsed_seconds: int) -> dict[str, Any]:
     }
 
 
-def build_redeem_success_response(masked_key: str) -> dict[str, Any]:
-    """Ephemeral embed after successfully redeeming an existing key."""
+def build_redeem_success_response(display_key: str) -> dict[str, Any]:
+    """Ephemeral embed after successfully redeeming an existing key (full key for copy)."""
     return {
         "ephemeral": True,
         "embed": {
             "title": "\U0001f39f\ufe0f Key Redeemed",
             "color": 0x27AE60,
             "description": (
-                f"Key **{masked_key}** has been attached to your account.\n"
+                "**Your license key (copy):**\n"
+                f"```\n{display_key}\n```\n"
                 "Start the tool to activate your device binding."
             ),
         },
@@ -312,9 +311,20 @@ def build_key_list_response(key_records: list[dict]) -> dict[str, Any]:
             last_seen = rec.get("last_seen_at")
             last_seen_str = f"\n   \u23f1 Last seen: `{last_seen}`" if last_seen else ""
             bound_icon = "\U0001f4f1" if device != "(unbound)" else "\U0001f534"
+            full = rec.get("full_key_plaintext")
+            if full:
+                key_block = f"**Key (copy):** `{full}`"
+            else:
+                ref = rec.get("masked_key", "???")
+                key_block = (
+                    "**Full key is not recoverable for copying from the server.** "
+                    "If this is an older key, export storage may not have been enabled when it was created. "
+                    f"Reference only (not a complete key): **{ref}**\n"
+                    "Use **Recover Full Key** in Key Stats if you still have the key text."
+                )
             lines.append(
-                f"{status_icon} `{rec.get('masked_key', '???')}` "
-                f"— {rec.get('status', 'unknown')}\n"
+                f"{status_icon} {key_block}\n"
+                f"   — {rec.get('status', 'unknown')}\n"
                 f"   {bound_icon} Device: {device}{last_seen_str}"
             )
         description = "\n\n".join(lines)
@@ -324,7 +334,7 @@ def build_key_list_response(key_records: list[dict]) -> dict[str, Any]:
             "title": "\U0001f4cb Your License Keys",
             "color": 0x2F80ED,
             "description": description,
-            "footer": {"text": "Use Reset HWID to unbind a device. Keys shown are masked for security."},
+            "footer": {"text": "Use Reset HWID to unbind a device when needed."},
         },
     }
 
@@ -350,11 +360,21 @@ def build_redeem_already_owned_response(
     message: str | None = None,
     *,
     export_backfilled: bool = False,
+    copyable_key: str | None = None,
 ) -> dict[str, Any]:
     """Ephemeral embed when a user tries to redeem their own already-attached key."""
-    if export_backfilled:
+    if copyable_key:
         desc = (
-            "Key Already Attached. Full key export has been enabled for this key."
+            "**Your license key (copy):**\n"
+            f"```\n{copyable_key}\n```\n"
+            "This key is already attached to your account."
+        )
+        if export_backfilled:
+            desc += "\n\n**Full key export has been enabled** for this key in the database."
+    elif export_backfilled:
+        desc = (
+            (message or "This key is already attached to your account.")
+            + "\n\n**Full key export has been enabled** for this key."
         )
     else:
         desc = message or "This key is already attached to your account."
@@ -389,12 +409,17 @@ def build_reset_selector_embed(keys_with_state: list[dict]) -> dict[str, Any]:
     lines: list[str] = []
     for k in keys_with_state:
         icon = "\U0001f7e2" if k.get("active_binding") else "\U0001f7e1"  # 🟢 / 🟡
-        label = k.get("masked_key", "???")
-        if k.get("active_binding"):
-            model = k.get("device_model") or "Unknown device"
-            lines.append(f"{icon} `{label}` — Device: {model}")
+        fk = k.get("full_key_plaintext")
+        mk = k.get("masked_key", "???")
+        bound = k.get("active_binding")
+        model = k.get("device_model") or "Unknown device"
+        if fk:
+            line = f"{icon} `{fk}` — Device: {model}" if bound else f"{icon} `{fk}` — No device bound"
+        elif bound:
+            line = f"{icon} **{mk}** (reference only, not a full key) — Device: {model}"
         else:
-            lines.append(f"{icon} `{label}` — No device bound")
+            line = f"{icon} **{mk}** (reference only, not a full key) — No device bound"
+        lines.append(line)
     key_list = "\n".join(lines)
     return {
         "ephemeral": True,
@@ -430,13 +455,13 @@ def build_reset_no_keys_response() -> dict[str, Any]:
 def build_reset_mixed_summary_embed(results: list[dict]) -> dict[str, Any]:
     """Ephemeral embed listing per-key HWID reset outcomes.
 
-    Each result dict: {masked_key (str), success (bool), message (str)}.
-    Color is green if all succeeded, red if all failed, amber if mixed.
+    Each result dict: {display_key (str), success (bool), message (str)}.
     """
     lines: list[str] = []
     for r in results:
         icon = "\u2705" if r.get("success") else "\u274c"  # ✅ / ❌
-        lines.append(f"{icon} `{r.get('masked_key', '???')}` \u2014 {r.get('message', '')}")
+        dk = r.get("display_key") or r.get("masked_key", "???")
+        lines.append(f"{icon} `{dk}` \u2014 {r.get('message', '')}")
     description = "\n".join(lines) if lines else "No keys were processed."
     all_ok = bool(results) and all(r.get("success") for r in results)
     none_ok = bool(results) and not any(r.get("success") for r in results)

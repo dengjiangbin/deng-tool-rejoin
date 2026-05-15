@@ -110,33 +110,46 @@ class PanelResponseTests(unittest.TestCase):
         resp = build_reset_success_response()
         self.assertTrue(resp.get("ephemeral"))
 
-    def test_redeem_success_contains_masked_key(self):
-        """Test 41 – redeem success response contains masked key."""
-        resp = build_redeem_success_response("DENG-8F3A...44F0")
+    def test_redeem_success_contains_full_key_not_ellipsis(self):
+        """Test 41 – redeem success shows full key for copy (no … mask)."""
+        full_key = "DENG-8F3A-B3C4-D5E6-44F0"
+        resp = build_redeem_success_response(full_key)
         desc = resp["embed"]["description"]
-        self.assertIn("DENG-8F3A...44F0", desc)
+        self.assertIn(full_key, desc)
+        self.assertNotIn("...", desc)
 
 
 class PanelResponseSecurityTests(unittest.TestCase):
-    """Test 42-44: security — full keys never appear outside generate response."""
+    """Test 42-44: copy views show full key when export/plaintext exists."""
 
-    def test_redeem_success_does_not_contain_full_key(self):
-        """Test 42 – redeem success only shows masked key, not original."""
+    def test_redeem_success_includes_full_key_for_copy(self):
+        """Test 42 – redeem success embed includes the full key string."""
         full = "DENG-8F3A-B3C4-D5E6-44F0"
-        masked = "DENG-8F3A...44F0"
-        resp = build_redeem_success_response(masked)
-        import json
-        serialized = json.dumps(resp)
-        self.assertNotIn("B3C4", serialized)
-        self.assertNotIn("D5E6", serialized)
+        resp = build_redeem_success_response(full)
+        self.assertIn(full, resp["embed"]["description"])
+        self.assertNotIn("...", resp["embed"]["description"])
 
-    def test_key_list_response_uses_masked_keys(self):
-        """Test 43 – key list response contains only masked keys."""
-        records = [{"masked_key": "DENG-8F3A...44F0", "status": "active", "bound_device": "Pixel"}]
+    def test_key_list_response_shows_full_key_when_plaintext_available(self):
+        """Test 43 – key list uses full key when full_key_plaintext is set."""
+        records = [{
+            "masked_key": "DENG-8F3A...44F0",
+            "full_key_plaintext": "DENG-8F3A-B3C4-D5E6-44F0",
+            "status": "active",
+            "bound_device": "Pixel",
+        }]
         resp = build_key_list_response(records)
-        import json
-        serialized = json.dumps(resp)
-        self.assertIn("DENG-8F3A...44F0", serialized)
+        desc = resp["embed"]["description"]
+        self.assertIn("DENG-8F3A-B3C4-D5E6-44F0", desc)
+        self.assertNotIn("DENG-8F3A...44F0", desc)
+
+    def test_key_list_without_plaintext_explains_not_copyable(self):
+        records = [
+            {"masked_key": "DENG-8F3A...44F0", "status": "active", "bound_device": "Pixel"},
+        ]
+        resp = build_key_list_response(records)
+        desc = resp["embed"]["description"]
+        self.assertIn("not recoverable", desc.lower())
+        self.assertIn("DENG-8F3A...44F0", desc)
 
     def test_not_owner_response_is_ephemeral(self):
         """Test 44 – not-owner response is ephemeral."""

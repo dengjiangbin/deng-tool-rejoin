@@ -59,8 +59,9 @@ class TestKeyStatsFormat(unittest.TestCase):
         self.assertNotIn("Not Available", desc)
         self.assertNotIn("Full Key", desc)
         self.assertNotIn("Created", desc)
-        self.assertRegex(desc, r"Key: `[^\n]+`\nStatus:")
-        self.assertNotIn("\n\n", desc[: desc.index("\nStatus:")])
+        self.assertIn("not recoverable", desc.lower())
+        self.assertIn("DENG-AA...BB", desc)
+        self.assertNotIn("Key: `", desc)
         self.assertIn("Key Stats", d["footer"]["text"])
 
     def test_embed_used_shows_device(self) -> None:
@@ -270,7 +271,8 @@ class TestDownloadBody(unittest.TestCase):
         self.assertNotIn("Full key export", body.lower())
         self.assertNotIn("key_hash", body.lower())
         self.assertNotIn("Created", body)
-        self.assertIn("Recover full key from Key Stats", body)
+        self.assertIn("Full key not available for copy", body)
+        self.assertIn("not recoverable", body.lower())
 
     def test_download_full_key_when_exportable(self) -> None:
         rows = [

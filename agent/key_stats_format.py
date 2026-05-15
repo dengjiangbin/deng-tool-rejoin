@@ -56,13 +56,23 @@ def build_key_stats_embed_dict(row: dict[str, Any]) -> dict[str, Any]:
     """One Discord embed dict for a single license key row (compact description)."""
     full = row.get("full_key_plaintext")
     masked = row.get("masked_key") or "???"
-    key_display = full if full else masked
 
     lic = (row.get("license_status") or "active").lower()
     used = bool(row.get("used"))
     exp_cfg = bool(row.get("export_storage_configured", False))
 
-    lines: list[str] = [f"Key: `{key_display}`"]
+    lines: list[str] = []
+
+    if full:
+        lines.append(f"Key: `{full}`")
+    elif lic in {"revoked", "expired"}:
+        lines.append(f"Key reference (not copyable): {masked}")
+    else:
+        lines.append(
+            "**Full key is not recoverable for copying from the server.** "
+            "If this is an older key, export storage was not enabled when it was created."
+        )
+        lines.append(f"Reference only (not a complete key): {masked}")
 
     if lic == "revoked":
         lines.append("Status: 🔴 Revoked")
@@ -148,7 +158,6 @@ def build_key_stats_download_body(*, discord_user_id: str, rows: list[dict[str, 
         masked = row.get("masked_key") or "???"
         used = bool(row.get("used"))
         lic = (row.get("license_status") or "active").lower()
-        exp_cfg = bool(row.get("export_storage_configured", False))
 
         if lic == "revoked":
             status_word = "Revoked"
@@ -157,16 +166,17 @@ def build_key_stats_download_body(*, discord_user_id: str, rows: list[dict[str, 
         else:
             status_word = "Used" if used else "Unused"
 
-        key_disp = full if full else masked
-        body.append(f"{i}. {key_disp} - {status_word}")
-
-        if not full and lic not in {"revoked", "expired"}:
-            if exp_cfg:
-                body.append("   Export: Recover full key from Key Stats.")
-            else:
+        if full:
+            body.append(f"{i}. {full} - {status_word}")
+        else:
+            body.append(f"{i}. [Full key not available for copy] - {status_word}")
+            if lic not in {"revoked", "expired"}:
                 body.append(
-                    "   Export: full key storage is not enabled on this server."
+                    "   Full key is not recoverable for this key because export storage "
+                    "was not enabled when it was created (or ciphertext is missing)."
                 )
+            else:
+                body.append(f"   Reference: {masked}")
 
         if device := row.get("device_display"):
             if used and lic not in {"revoked", "expired"}:

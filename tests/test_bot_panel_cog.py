@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # ── Ensure project root is on sys.path ───────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agent.license import normalize_license_key
 from agent.license_store import (
     LocalJsonLicenseStore,
     MAX_HWID_RESETS_PER_24H,
@@ -459,7 +460,8 @@ class TestRedeemModal(unittest.IsolatedAsyncioTestCase):
         _, kwargs = inter.followup.send.call_args
         embed = kwargs["embed"]
         self.assertIn("Redeemed", embed.title)
-        self.assertNotIn(full_key, embed.description)  # full key NOT in success embed
+        self.assertIn(normalize_license_key(full_key), embed.description)
+        self.assertNotIn("...", embed.description)
 
     async def test_redeem_invalid_key_shows_error(self) -> None:
         modal = RedeemModal(self.store)
@@ -557,7 +559,7 @@ class TestSecurity(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         self._tmp.cleanup()
 
-    async def test_full_key_not_in_redeem_success_embed(self) -> None:
+    async def test_redeem_success_embed_contains_full_key(self) -> None:
         uid = "660"
         self.store.get_or_create_user(uid)
         full_key = self.store.create_key_for_user(uid)
@@ -577,9 +579,8 @@ class TestSecurity(unittest.IsolatedAsyncioTestCase):
 
         _, kwargs = inter.followup.send.call_args
         description = kwargs["embed"].description
-        # Full key hex must NOT be in the redeem response (only masked key)
-        hex_part = full_key.replace("DENG-", "").replace("-", "")
-        self.assertNotIn(hex_part, description)
+        self.assertIn(normalize_license_key(full_key), description)
+        self.assertNotIn("...", description)
 
     async def test_generate_key_shown_once_in_full(self) -> None:
         inter = _fake_interaction(user=_fake_user(uid=700))
