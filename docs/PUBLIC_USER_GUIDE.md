@@ -41,12 +41,20 @@ Manage Roblox packages (the main app and any clones):
 - **Remove Package** — Select by number, confirm removal. Only the selected package is removed.
 - **Auto Detect Packages** — Scan for Roblox and cloned packages not yet added. Avoids duplicates.
 - **Detect / Refresh Usernames** — Re-run detection for every configured package and save results to **account_username** when found.
-- **Set / Edit Username** — Manual name if detection fails.
-- **List Packages** — Shows each package with **Unknown** when no username is saved.
+
+Submenu actions (after **Current Packages** at the top):
+
+```
+1. Add Package
+2. Remove Package
+3. Auto Detect Packages
+4. Detect / Refresh Usernames
+0. Back
+```
 
 Beta testers agree the tool may use **root only to read** small config/pref/JSON files under each configured Roblox package’s app-data path. It does **not** read cookies, sessions, or `.ROBLOSECURITY`, and it does **not** modify app data.
 
-Current packages are shown at the top of the submenu.
+**Current Packages** lists each enabled package as `package — username` (or **Unknown**). If none are enabled, it shows **No Packages Configured.**
 
 ### 2. Roblox Launch Link
 
@@ -96,7 +104,7 @@ The package screen automatically scans Android for Roblox-related packages. It u
 
 If packages are found, DENG shows them in a numbered list and marks `com.roblox.client` as recommended. Choose one or more packages to use them, including cloned packages.
 
-Each selected package can have a Roblox username/account name such as `deng1629`, `AltAccount1`, or `MyCloud1`. DENG uses this only to make the Start table easy to read. DENG may use a safe Android app label or allowlisted display-name preference key when available, but it never reads Roblox credentials, cookies, tokens, or private session files. If it cannot safely detect a name, type one yourself or leave it blank (shown as `Unknown` in the Start table).
+Each selected package can have a Roblox username/account name such as `deng1629`, `AltAccount1`, or `MyCloud1`. DENG uses this only to make the Start table easy to read. DENG may use a safe Android app label or allowlisted display-name preference key when available, but it never reads Roblox credentials, cookies, tokens, or private session files. If it cannot safely detect a name, run **Package → Detect / Refresh Usernames** or leave it unset (shown as **Unknown** in the Start table).
 
 If your clone uses another prefix, use **Auto Detect Packages** and add a safe fragment from the package name. For example, add `moons` for `com.moons.myroblox`.
 

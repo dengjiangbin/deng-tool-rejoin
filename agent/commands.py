@@ -616,7 +616,7 @@ sh scripts/start-agent.sh >> "$APP_HOME/logs/agent.log" 2>&1
 # ─── Config Menu Submenus ─────────────────────────────────────────────────────
 
 def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
-    """Package submenu: Add / Remove / Auto Detect / List."""
+    """Package submenu: Add / Remove / Auto Detect / Detect Usernames; current packages shown at top."""
     if not _is_interactive():
         return draft
     while True:
@@ -632,7 +632,7 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         if enabled_entries:
             for idx, entry in enumerate(enabled_entries, start=1):
                 username = _package_username_display(entry)
-                print(f"  {idx}. {username:<20} {entry['package']}")
+                print(f"  {idx}. {entry['package']} — {username}")
         else:
             print("  No Packages Configured.")
         print()
@@ -640,8 +640,6 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         print("2. Remove Package")
         print("3. Auto Detect Packages")
         print("4. Detect / Refresh Usernames")
-        print("5. Set / Edit Username")
-        print("6. List Packages")
         print("0. Back")
         print("--------------------------------")
         try:
@@ -658,12 +656,8 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
             draft = _package_menu_auto_detect(draft)
         elif choice == "4":
             draft = _package_menu_detect_refresh(draft)
-        elif choice == "5":
-            draft = _package_menu_set_username(draft)
-        elif choice == "6":
-            _package_menu_list(draft)
         else:
-            print("Please choose 1-6 or 0.")
+            print("Please choose 1-4 or 0.")
     return draft
 
 
@@ -731,14 +725,17 @@ def _package_menu_detect_refresh(draft: dict[str, Any]) -> dict[str, Any]:
 
 
 def _package_menu_set_username(draft: dict[str, Any]) -> dict[str, Any]:
-    """Manually set account_username for one package."""
+    """Manually set account_username for one package.
+
+    Not offered in the Package submenu (detection covers typical cases). Kept for tests/tools.
+    """
     print()
     print("Set / Edit Username")
     entries = validate_package_entries(
         draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
     )
     for idx, entry in enumerate(entries, start=1):
-        print(f"  {idx}. {_package_username_display(entry):<20} {entry['package']}")
+        print(f"  {idx}. {entry['package']} — {_package_username_display(entry)}")
     print("  0. Back")
     choice = input("Choose package [0]: ").strip() or "0"
     if choice == "0" or not choice.isdigit():
@@ -837,7 +834,7 @@ def _package_menu_remove(draft: dict[str, Any]) -> dict[str, Any]:
     print("Remove Package")
     for idx, entry in enumerate(enabled, start=1):
         username = _package_username_display(entry)
-        print(f"  {idx}. {username:<20} {entry['package']}")
+        print(f"  {idx}. {entry['package']} — {username}")
     print("  0. Back")
     choice = input("Choose package to remove [0]: ").strip() or "0"
     if choice == "0" or not choice.isdigit():
@@ -917,7 +914,7 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
 
 
 def _package_menu_list(draft: dict[str, Any]) -> None:
-    """Display all configured packages with username and status."""
+    """Display all configured packages (tests / internal; not a submenu action)."""
     print()
     print("List Packages")
     entries = validate_package_entries(

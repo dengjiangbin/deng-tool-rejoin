@@ -10,30 +10,34 @@ Requirements covered:
  7.  Menu labels are title case.
  8.  Package submenu has Add Package.
  9.  Package submenu has Remove Package.
- 10. Remove package removes only selected package, preserving others.
- 11. Add package avoids duplicates.
- 12. Unknown username does not block launch.
- 13. No "Label" wording in package menu.
- 14. Blank input for Roblox Launch Link skips safely.
- 15. Empty launch link is allowed (not validation error).
- 16. Clear Roblox Launch Link works.
- 17. Invalid non-empty URL is rejected.
- 18. Start can proceed without a launch link.
- 19. Webhook submenu has URL, Interval, Mode, Snapshot.
- 20. Snapshot requires webhook URL.
- 21. Webhook URL is masked (never full URL shown).
- 22. Test webhook failure does not crash.
- 23. Old webhook interval config migrates.
- 24. YesCaptcha submenu exists.
- 25. Set YesCaptcha key prompts and saves (key not revealed in full).
- 26. Clear YesCaptcha key works.
- 27. Balance shown when API key set (mocked).
- 28. API failure handled cleanly.
- 29. Full API key never printed by balance display.
- 30. License Key menu removed from setup.
- 31. Start license check still works (covered by test_start_flow, regression here).
- 32. DENG_DEV=1 still skips (keystore test, regression).
- 33. Regression: all old tests still pass (covered by running full suite).
+ 10. Package submenu has Auto Detect Packages.
+ 11. Package submenu has Detect / Refresh Usernames.
+ 12. Package submenu does not offer Set / Edit Username or List Packages.
+ 13. Current packages appear at top of Package submenu with package — username.
+ 14. Remove package removes only selected package, preserving others.
+ 15. Add package avoids duplicates.
+ 16. Unknown username does not block launch.
+ 17. No "Label" wording in package menu.
+ 18. Blank input for Roblox Launch Link skips safely.
+ 19. Empty launch link is allowed (not validation error).
+ 20. Clear Roblox Launch Link works.
+ 21. Invalid non-empty URL is rejected.
+ 22. Start can proceed without a launch link.
+ 23. Webhook submenu has URL, Interval, Mode, Snapshot.
+ 24. Snapshot requires webhook URL.
+ 25. Webhook URL is masked (never full URL shown).
+ 26. Test webhook failure does not crash.
+ 27. Old webhook interval config migrates.
+ 28. YesCaptcha submenu exists.
+ 29. Set YesCaptcha key prompts and saves (key not revealed in full).
+ 30. Clear YesCaptcha key works.
+ 31. Balance shown when API key set (mocked).
+ 32. API failure handled cleanly.
+ 33. Full API key never printed by balance display.
+ 34. License Key menu removed from setup.
+ 35. Start license check still works (covered by test_start_flow, regression here).
+ 36. DENG_DEV=1 still skips (keystore test, regression).
+ 37. Regression: all old tests still pass (covered by running full suite).
 """
 from __future__ import annotations
 
@@ -273,14 +277,42 @@ class PackageSubmenuTests(unittest.TestCase):
                     _config_menu_package(cfg)
         self.assertIn("Detect / Refresh Usernames", buf.getvalue())
 
-    def test_package_submenu_has_set_edit_username(self):
+    def test_package_submenu_does_not_offer_set_edit_username(self):
         cfg = _base_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
-        self.assertIn("Set / Edit Username", buf.getvalue())
+        text = buf.getvalue()
+        self.assertNotIn("Set / Edit Username", text)
+        self.assertNotIn("Set Username", text)
+        self.assertNotIn("Edit Username", text)
+
+    def test_package_submenu_does_not_offer_list_packages(self):
+        cfg = _base_cfg()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        text = buf.getvalue()
+        self.assertNotIn("List Packages", text)
+
+    def test_package_submenu_only_four_numbered_options(self):
+        cfg = _base_cfg()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        text = buf.getvalue()
+        self.assertRegex(text, r"(?m)^1\. Add Package")
+        self.assertRegex(text, r"(?m)^2\. Remove Package")
+        self.assertRegex(text, r"(?m)^3\. Auto Detect Packages")
+        self.assertRegex(text, r"(?m)^4\. Detect / Refresh Usernames")
+        self.assertNotRegex(text, r"(?m)^5\. ")
+        self.assertNotRegex(text, r"(?m)^6\. ")
 
     def test_detect_refresh_saves_new_username(self):
         cfg = _base_cfg()
@@ -316,9 +348,6 @@ class PackageSubmenuTests(unittest.TestCase):
 
     def test_package_submenu_has_add_package(self):
         cfg = _base_cfg()
-        args = _non_interactive_args()
-        # In non-interactive mode, submenu still shows menu label in the interactive path
-        # Test via the interactive path with immediate "0" (back)
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
                 buf = io.StringIO()
@@ -336,6 +365,15 @@ class PackageSubmenuTests(unittest.TestCase):
                     _config_menu_package(cfg)
         text = buf.getvalue()
         self.assertIn("Remove Package", text)
+
+    def test_package_submenu_has_auto_detect_packages(self):
+        cfg = _base_cfg()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        self.assertIn("Auto Detect Packages", buf.getvalue())
 
 
 # ─── 14-18: Roblox Launch Link Submenu ───────────────────────────────────────
@@ -621,6 +659,17 @@ class LicenseFlowRegressionTests(unittest.TestCase):
 
 class CurrentSettingsInSubmenuTests(unittest.TestCase):
 
+    def test_package_submenu_output_has_no_label_wording(self):
+        cfg = _base_cfg()
+        cfg["roblox_packages"] = [package_entry("com.roblox.client", "Main", True)]
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        text = buf.getvalue()
+        self.assertNotIn("Label", text)
+
     def test_webhook_submenu_shows_current_url_masked(self):
         cfg = _base_cfg()
         cfg["webhook_url"] = "https://discord.com/api/webhooks/11111/tok-secret"
@@ -647,7 +696,7 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
         self.assertIn("Configured", text)
         self.assertNotIn("abcdefghij", text)
 
-    def test_package_submenu_shows_current_packages(self):
+    def test_package_submenu_shows_current_packages_with_username(self):
         cfg = _base_cfg()
         cfg["roblox_packages"] = [package_entry("com.roblox.client", "Main", True)]
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
@@ -657,7 +706,36 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
                     _config_menu_package(cfg)
         text = buf.getvalue()
         self.assertIn("Current Packages", text)
-        self.assertIn("com.roblox.client", text)
+        self.assertIn("com.roblox.client — Main", text)
+
+    def test_package_submenu_shows_unknown_for_missing_username(self):
+        cfg = _base_cfg()
+        cfg["roblox_packages"] = [package_entry("com.moons.litesc", "", True, "not_set")]
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        text = buf.getvalue()
+        self.assertIn("com.moons.litesc — Unknown", text)
+
+    def test_package_submenu_no_enabled_packages_shows_none_configured(self):
+        cfg = _base_cfg()
+        cfg["roblox_packages"] = [
+            {
+                "package": "com.roblox.client",
+                "account_username": "",
+                "enabled": False,
+                "username_source": "not_set",
+            },
+        ]
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        text = buf.getvalue()
+        self.assertIn("No Packages Configured.", text)
 
     def test_launch_link_submenu_shows_not_set_when_empty(self):
         cfg = _base_cfg()

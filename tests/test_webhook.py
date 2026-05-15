@@ -78,6 +78,21 @@ class WebhookStatusEmbedTests(unittest.TestCase):
         except Exception as exc:
             self.fail(f"build_status_embed_payload raised unexpectedly: {exc}")
 
+    def test_application_details_reflect_account_username(self):
+        cfg = self._base_cfg()
+        cfg["roblox_packages"] = [{"package": "com.roblox.client", "account_username": "TraderJoe"}]
+        payload = build_status_embed_payload(cfg)
+        fields = payload["embeds"][0]["fields"]
+        detail = next(f["value"] for f in fields if f["name"] == "Application Details")
+        self.assertIn("TraderJoe", detail)
+
+    def test_application_details_unknown_when_account_username_empty(self):
+        cfg = self._base_cfg()
+        cfg["roblox_packages"] = [{"package": "com.other.app", "account_username": ""}]
+        payload = build_status_embed_payload(cfg)
+        detail = next(f["value"] for f in payload["embeds"][0]["fields"] if f["name"] == "Application Details")
+        self.assertIn("Unknown", detail)
+
 
 if __name__ == "__main__":
     unittest.main()

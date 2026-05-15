@@ -112,7 +112,7 @@ Save and exit: `Ctrl+O` → Enter → `Ctrl+X`.
 
 ### Account usernames on the phone
 
-DENG can fill in each Roblox package’s **account username** for the Start table and webhooks. It uses normal Android info first, then an optional **read-only root scan** of that package’s app data (small XML/JSON only — never cookies or `.ROBLOSECURITY`). If detection fails, use **Package → Set / Edit Username**. Beta terms include allowing this root use for display names only.
+DENG can fill in each Roblox package’s **account username** for the Start table and webhooks. It uses normal Android info first, then an optional **read-only root scan** of that package’s app data (small XML/JSON only — never cookies or `.ROBLOSECURITY`). Use **Package → Detect / Refresh Usernames** if a name shows as **Unknown**. Beta terms include allowing this root use for display names only.
 
 ---
 
