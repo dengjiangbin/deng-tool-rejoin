@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -239,14 +240,13 @@ class InstallCommandTests(unittest.TestCase):
             label="v1.0.0 Stable",
             install_ref="refs/tags/v1.0.0",
         )
-        with unittest.mock.patch.object(rv, "github_owner", return_value="o"), unittest.mock.patch.object(
-            rv, "github_repo", return_value="r"
-        ):
-            text = rv.format_install_instructions_plain(info)
+        text = rv.format_install_instructions_plain(info)
         self.assertIn("Desktop Copy:", text)
         self.assertIn("Mobile Copy:", text)
         self.assertIn("After install:", text)
         self.assertIn("deng-rejoin", text)
+        self.assertIn("rejoin.deng.my.id/install/", text)
+        self.assertNotIn("raw.githubusercontent.com", text)
 
     def test_main_dev_install_command_uses_refs_heads_in_raw_url(self) -> None:
         info = rv.RejoinVersionInfo(
@@ -272,15 +272,16 @@ class InstallCommandTests(unittest.TestCase):
             internal_only=True,
             description="Owner/admin testing only",
         )
-        with unittest.mock.patch.object(rv, "github_owner", return_value="dengjiangbin"), unittest.mock.patch.object(
-            rv, "github_repo", return_value="deng-tool-rejoin"
+        with unittest.mock.patch.dict(
+            os.environ, {"REJOIN_INSTALL_SIGNING_SECRET": "unit-test-signing-secret"}, clear=False
         ):
             text = rv.format_install_instructions_plain(info)
         self.assertIn("Visibility: owner/admin/tester only", text)
         self.assertIn("Internal testing only", text)
         self.assertIn("Desktop Copy:", text)
         self.assertIn("Mobile Copy:", text)
-        self.assertIn("refs/heads/main", text)
+        self.assertIn("install/dev/main", text)
+        self.assertNotIn("raw.githubusercontent.com", text)
 
 
 class InstallShRefTests(unittest.TestCase):

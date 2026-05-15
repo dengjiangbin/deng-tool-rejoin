@@ -170,6 +170,8 @@ def merge_version_sources(
     tags = list(tag_names) if tag_names else []
     for ver in tags:
         row = by_version.get(ver)
+        if row is not None and row.get("enabled") is False:
+            continue
         if row is not None:
             ref = str(row.get("install_ref") or row.get("ref") or f"refs/tags/{ver}")
             ch = str(row.get("channel") or "stable").lower()
@@ -196,6 +198,8 @@ def merge_version_sources(
         )
 
     for ver, row in by_version.items():
+        if row.get("enabled") is False:
+            continue
         if ver in out:
             continue
         ref = str(row.get("install_ref") or row.get("ref") or f"refs/tags/{ver}")
@@ -242,7 +246,10 @@ def list_public_rejoin_versions(
 
 
 def build_full_install_command(owner: str, repo: str, install_ref: str) -> str:
-    """One-line install for ``install.sh`` (``DENG_REJOIN_INSTALL_REF`` + raw URL)."""
+    """Legacy one-liner using GitHub **raw** ``install.sh`` (internal/dev only).
+
+    Public panel copy uses :func:`build_public_install_curl_command` instead.
+    """
     ref = install_ref.strip()
     raw = f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/install.sh"
     return (
@@ -251,10 +258,33 @@ def build_full_install_command(owner: str, repo: str, install_ref: str) -> str:
     )
 
 
+def build_public_install_curl_command(info: RejoinVersionInfo) -> str:
+    """Public tutorial / panel curl — ``https://rejoin.deng.my.id/install/...``."""
+    from agent.install_registry import public_install_base_url, resolve_latest_public_stable
+    from agent.install_signing import sign_internal_path
+
+    base = public_install_base_url().rstrip("/")
+    if info.internal_only:
+        qs = sign_internal_path("dev/main")
+        if not qs:
+            return (
+                f"# Internal bootstrap requires REJOIN_INSTALL_SIGNING_SECRET on the server.\n"
+                f"# curl -fsSL \"{base}/install/dev/main?<exp>&<sig>\" -o install.sh && bash install.sh"
+            )
+        return f'curl -fsSL "{base}/install/dev/main?{qs}" -o install.sh && bash install.sh'
+
+    latest = resolve_latest_public_stable()
+    latest_ver = str(latest.get("version") or "").strip() if latest else ""
+    if latest_ver and latest_ver == info.version.strip():
+        path = "/install/latest"
+    else:
+        path = f"/install/{info.version.strip()}"
+    return f"curl -fsSL {base}{path} -o install.sh && bash install.sh"
+
+
 def format_install_instructions_plain(info: RejoinVersionInfo) -> str:
     """Plain text for Discord (Desktop + Mobile copy blocks)."""
-    owner, repo = github_owner(), github_repo()
-    cmd = build_full_install_command(owner, repo, info.install_ref)
+    cmd = build_public_install_curl_command(info)
     lines = [
         f"DENG Tool: Rejoin Install — {info.version}",
         "",

@@ -1,5 +1,18 @@
 [
   {
+    "version": "v1.0.0",
+    "channel": "stable",
+    "title": "Initial Stable Release",
+    "recommended": true,
+    "visibility": "public",
+    "install_ref": "refs/tags/v1.0.0",
+    "artifact_path": "releases/v1.0.0/deng-tool-rejoin-v1.0.0.tar.gz",
+    "artifact_sha256": "",
+    "installer_endpoint": "/install/v1.0.0",
+    "notes": "Placeholder row until the stable tarball is published on the license server.",
+    "enabled": false
+  },
+  {
     "version": "main-dev",
     "channel": "dev",
     "recommended": false,
@@ -7,8 +20,10 @@
     "label": "main-dev",
     "description": "Owner/admin testing only",
     "install_ref": "refs/heads/main",
-    "notes": "Internal testing build from main branch",
-    "visible": false,
-    "visibility": "admin"
+    "artifact_path": "",
+    "installer_endpoint": "/install/dev/main",
+    "notes": "Owner/admin testing only — fetch bootstrap via signed URL.",
+    "visibility": "admin",
+    "enabled": true
   }
 ]

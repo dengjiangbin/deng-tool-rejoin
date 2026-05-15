@@ -197,6 +197,17 @@ class BaseLicenseStore(ABC):
         """
 
     @abstractmethod
+    def check_install_download_access(self, raw_key: str, install_id_hash: str) -> str:
+        """Authorize protected artifact download during Termux bootstrap.
+
+        Must **not** create or update device bindings (binding stays on first tool run).
+
+        If the key has an **active** binding and *install_id_hash* is empty or does not
+        match the stored hash, returns ``wrong_device`` so bound keys cannot be used to
+        fetch artifacts from a fresh Termux without proving the same device (use Reset HWID).
+        """
+
+    @abstractmethod
     def log_license_check(self, **kwargs: Any) -> None:
         """Record a license check event (for audit / rate-limit analysis)."""
 
@@ -745,6 +756,87 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         self.log_license_check(
             key_id=key_hash, install_id_hash=install_id_hash,
             result=RESULT_ACTIVE, device_model=device_model, app_version=app_version,
+        )
+        return RESULT_ACTIVE
+
+    def check_install_download_access(self, raw_key: str, install_id_hash: str) -> str:
+        try:
+            normalized = normalize_license_key(raw_key)
+        except LicenseKeyError:
+            return RESULT_NOT_FOUND
+        key_hash = hash_license_key(normalized)
+        db = self._load()
+        record = db["keys"].get(key_hash)
+        if not record:
+            self.log_license_check(
+                key_id=None,
+                install_id_hash=install_id_hash,
+                result=RESULT_NOT_FOUND,
+                device_model="bootstrap",
+                app_version="install",
+            )
+            return RESULT_NOT_FOUND
+        if record.get("status") == "revoked":
+            self.log_license_check(
+                key_id=key_hash,
+                install_id_hash=install_id_hash,
+                result=RESULT_REVOKED,
+                device_model="bootstrap",
+                app_version="install",
+            )
+            return RESULT_REVOKED
+        expires = record.get("expires_at")
+        if expires:
+            try:
+                exp_dt = datetime.fromisoformat(expires)
+                if datetime.now(timezone.utc) > exp_dt:
+                    self.log_license_check(
+                        key_id=key_hash,
+                        install_id_hash=install_id_hash,
+                        result=RESULT_EXPIRED,
+                        device_model="bootstrap",
+                        app_version="install",
+                    )
+                    return RESULT_EXPIRED
+            except (ValueError, TypeError):
+                pass
+        owner_id = record.get("owner_discord_id")
+        if owner_id is None or str(owner_id).strip() == "":
+            self.log_license_check(
+                key_id=key_hash,
+                install_id_hash=install_id_hash,
+                result=RESULT_KEY_NOT_REDEEMED,
+                device_model="bootstrap",
+                app_version="install",
+            )
+            return RESULT_KEY_NOT_REDEEMED
+        binding = db.get("bindings", {}).get(key_hash)
+        if binding and binding.get("is_active"):
+            bound_hash = binding.get("install_id_hash")
+            if not install_id_hash.strip():
+                self.log_license_check(
+                    key_id=key_hash,
+                    install_id_hash=install_id_hash,
+                    result=RESULT_WRONG_DEVICE,
+                    device_model="bootstrap",
+                    app_version="install",
+                )
+                return RESULT_WRONG_DEVICE
+            if bound_hash and bound_hash != install_id_hash:
+                self.log_license_check(
+                    key_id=key_hash,
+                    install_id_hash=install_id_hash,
+                    result=RESULT_WRONG_DEVICE,
+                    device_model="bootstrap",
+                    app_version="install",
+                )
+                return RESULT_WRONG_DEVICE
+        self.log_license_check(
+            key_id=key_hash,
+            install_id_hash=install_id_hash,
+            result=RESULT_ACTIVE,
+            device_model="bootstrap",
+            app_version="install",
         )
         return RESULT_ACTIVE
 
@@ -1350,6 +1442,99 @@ class SupabaseLicenseStore(BaseLicenseStore):
             .execute()
         )
         return res.data[0].get("last_seen_at") if res.data else None
+
+    def check_install_download_access(self, raw_key: str, install_id_hash: str) -> str:
+        try:
+            normalized = normalize_license_key(raw_key)
+        except LicenseKeyError:
+            return RESULT_NOT_FOUND
+        key_hash = hash_license_key(normalized)
+        key_res = (
+            self._client.table("license_keys")
+            .select("status, expires_at, owner_discord_id")
+            .eq("id", key_hash)
+            .execute()
+        )
+        if not key_res.data:
+            self.log_license_check(
+                key_id=None,
+                install_id_hash=install_id_hash,
+                result=RESULT_NOT_FOUND,
+                device_model="bootstrap",
+                app_version="install",
+            )
+            return RESULT_NOT_FOUND
+        record = key_res.data[0]
+        if record.get("status") == "revoked":
+            self.log_license_check(
+                key_id=key_hash,
+                install_id_hash=install_id_hash,
+                result=RESULT_REVOKED,
+                device_model="bootstrap",
+                app_version="install",
+            )
+            return RESULT_REVOKED
+        expires = record.get("expires_at")
+        if expires:
+            try:
+                exp_dt = datetime.fromisoformat(expires)
+                if datetime.now(timezone.utc) > exp_dt:
+                    self.log_license_check(
+                        key_id=key_hash,
+                        install_id_hash=install_id_hash,
+                        result=RESULT_EXPIRED,
+                        device_model="bootstrap",
+                        app_version="install",
+                    )
+                    return RESULT_EXPIRED
+            except (ValueError, TypeError):
+                pass
+        owner_id = record.get("owner_discord_id")
+        if owner_id is None or str(owner_id).strip() == "":
+            self.log_license_check(
+                key_id=key_hash,
+                install_id_hash=install_id_hash,
+                result=RESULT_KEY_NOT_REDEEMED,
+                device_model="bootstrap",
+                app_version="install",
+            )
+            return RESULT_KEY_NOT_REDEEMED
+        b_res = (
+            self._client.table("device_bindings")
+            .select("*")
+            .eq("key_id", key_hash)
+            .execute()
+        )
+        if b_res.data:
+            binding = b_res.data[0]
+            if binding.get("is_active"):
+                bound_hash = binding.get("install_id_hash")
+                if not install_id_hash.strip():
+                    self.log_license_check(
+                        key_id=key_hash,
+                        install_id_hash=install_id_hash,
+                        result=RESULT_WRONG_DEVICE,
+                        device_model="bootstrap",
+                        app_version="install",
+                    )
+                    return RESULT_WRONG_DEVICE
+                if bound_hash and bound_hash != install_id_hash:
+                    self.log_license_check(
+                        key_id=key_hash,
+                        install_id_hash=install_id_hash,
+                        result=RESULT_WRONG_DEVICE,
+                        device_model="bootstrap",
+                        app_version="install",
+                    )
+                    return RESULT_WRONG_DEVICE
+        self.log_license_check(
+            key_id=key_hash,
+            install_id_hash=install_id_hash,
+            result=RESULT_ACTIVE,
+            device_model="bootstrap",
+            app_version="install",
+        )
+        return RESULT_ACTIVE
 
     # ── Device binding ────────────────────────────────────────────────────────
 

@@ -4,7 +4,21 @@ Copy and paste into Termux (long-press the terminal, tap **Paste**, then press *
 
 If you are lost inside the tool, open **New User Help** (main menu option **5**).
 
-Public installs should use **DENG Tool: Rejoin Panel** in Discord → **Select Version** → copy **Mobile Copy** (not the `main` branch).
+Public installs should use **DENG Tool: Rejoin Panel** in Discord → **Select Version** → copy **Mobile Copy** (the server URL is always `https://rejoin.deng.my.id/install/...`, not a moving `main` branch).
+
+---
+
+## DENG Tool: Rejoin — New User Setup
+
+**1. Download Termux**Download from F-Droid: https://f-droid.org/en/packages/com.termux/
+Install it, then open Termux.
+**2. Configure Root & Termux**Open **Magisk / Kitsune / KernelSU / Root Permission → Superuser** and grant Termux root access. If Termux is not listed, skip this step.
+**3. Prepare Termux**Copy and paste: `pkg update -y && pkg upgrade -y && pkg install -y curl git python sqlite`
+**4. Install DENG Tool: Rejoin**Copy and paste: `curl -fsSL https://rejoin.deng.my.id/install/latest -o install.sh && bash install.sh`
+**5. Open DENG Tool: Rejoin**Type: `deng-rejoin`
+**6. Enter License Key**Paste your license key when the tool asks for it.
+**7. First Time Setup**Choose **First Time Setup Config** and follow the setup shown in the tool.
+**8. Start**Choose **Start**.
 
 ---
 

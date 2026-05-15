@@ -15,7 +15,7 @@ See **[NEW_USER_TERMUX_GUIDE.md](NEW_USER_TERMUX_GUIDE.md)** for the full short 
 1. **Download Termux**
 2. **Configure Root & Termux** — Magisk / Kitsune / KernelSU / LSPosed / Root Permission → **Superuser** → allow **Termux** (skip if not applicable or Termux not listed)
 3. **Prepare Termux** — `pkg update -y && pkg upgrade -y` (optional `pkg install` for curl, git, python, sqlite)
-4. **DENG Tool: Rejoin Panel** — **Select Version** → **Stable** → copy **Mobile Copy**
+4. **DENG Tool: Rejoin Panel** — **Select Version** → **Stable** → copy **Mobile Copy**, or run `curl -fsSL https://rejoin.deng.my.id/install/latest -o install.sh && bash install.sh` for the current public stable.
 5. **Paste** the install command into Termux
 6. **Open DENG Tool: Rejoin** — `deng-rejoin`
 7. **Enter License Key** — menu **1**

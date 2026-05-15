@@ -21,6 +21,17 @@ Endpoints
        when ``LICENSE_API_PUBLIC_URL`` is set (e.g.
        https://rejoin.deng.my.id/assets/denghub_logo.png).
 
+  GET  /install/latest
+  GET  /install/<version>   e.g. /install/v1.0.0
+  GET  /install/dev/main?exp=...&sig=...   (HMAC-signed; internal only)
+       Return a small public **bootstrap** shell script (no private source).
+       The script calls POST /api/install/authorize and downloads a short-lived
+       tokenized artifact from GET /api/download/package/<token>.
+
+  POST /api/install/authorize
+       Body: {"license_key", "requested_version", "install_id_hash", optional "bootstrap_session"}
+       Validates license **without binding HWID**, returns download_url + sha256 + resolved_version.
+
   POST /api/license/check
        Body: {"key": "DENG-...", "install_id_hash": "...",
                "device_model": "...", "app_version": "...",
@@ -78,6 +89,7 @@ import secrets
 import sys
 import threading
 import time
+from urllib.parse import parse_qs
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -129,6 +141,10 @@ _rate_limit: dict[str, list[float]] = {}
 _rate_limit_lock = threading.Lock()
 _RATE_LIMIT_WINDOW: float = 60.0   # seconds
 _RATE_LIMIT_MAX: int = 10          # requests per window per IP
+
+# Bootstrap sessions — issued when serving GET /install/dev/main after HMAC gate.
+_bootstrap_sessions: dict[str, dict] = {}
+_bootstrap_sessions_lock = threading.Lock()
 
 # Token URL-safe character set: letters, digits, hyphen, underscore
 _TOKEN_SAFE_RE = re.compile(r'^[A-Za-z0-9_\-]{1,100}$')
@@ -330,6 +346,387 @@ def _read_json_body(environ: dict) -> dict | None:
         return None
 
 
+# Tail segment after ``/install/`` — pinned semver-ish labels (not ``dev/main``).
+_INSTALL_TAIL_SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def _expire_bootstrap_sessions() -> None:
+    now = time.time()
+    dead = [k for k, v in _bootstrap_sessions.items() if now > v["expires_at"]]
+    for k in dead:
+        del _bootstrap_sessions[k]
+
+
+def _register_bootstrap_session(subpath: str) -> str:
+    sid = secrets.token_urlsafe(24)
+    with _bootstrap_sessions_lock:
+        _expire_bootstrap_sessions()
+        if len(_bootstrap_sessions) > 5000:
+            _bootstrap_sessions.clear()
+        _bootstrap_sessions[sid] = {"subpath": subpath, "expires_at": time.time() + 7200}
+    return sid
+
+
+def _bootstrap_session_ok(sid: str, subpath: str) -> bool:
+    if not sid:
+        return False
+    with _bootstrap_sessions_lock:
+        _expire_bootstrap_sessions()
+        entry = _bootstrap_sessions.get(sid)
+        return bool(entry and entry["subpath"] == subpath)
+
+
+def _download_roots_allowed() -> list[Path]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+
+    def add(p: Path | None) -> None:
+        if p is None:
+            return
+        try:
+            resolved = p.expanduser().resolve()
+        except OSError:
+            return
+        if not resolved.is_dir():
+            return
+        s = str(resolved)
+        if s not in seen:
+            seen.add(s)
+            roots.append(resolved)
+
+    for key in ("REJOIN_ARTIFACT_ROOT", "LICENSE_DOWNLOAD_ROOT"):
+        raw = (os.environ.get(key) or "").strip()
+        if raw:
+            add(Path(raw))
+    add(_get_download_root())
+    return roots
+
+
+def _path_under_allowed_download_roots(pkg_path: Path, roots: list[Path]) -> bool:
+    rp = pkg_path.resolve()
+    for root in roots:
+        try:
+            rp.relative_to(root.resolve())
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _guess_package_content_type(filename: str) -> str:
+    lower = (filename or "").lower()
+    if lower.endswith(".tar.gz") or lower.endswith(".tgz"):
+        return "application/gzip"
+    if lower.endswith(".zip"):
+        return "application/zip"
+    return "application/octet-stream"
+
+
+def _route_public_install(
+    environ: dict, path: str, method: str
+) -> tuple[bytes, int, str, list[tuple[str, str]] | None] | None:
+    """Handle install bootstrap + artifact authorize + package GET; no bearer auth."""
+    from agent.bootstrap_installer import render_public_bootstrap
+    from agent.install_registry import (
+        artifact_path_for_row,
+        get_artifact_root,
+        get_exact_registry_row,
+        is_admin_internal_row,
+        public_install_base_url,
+        resolve_requested_public_version,
+    )
+    from agent.install_signing import verify_internal_path
+
+    # GET /install/<tail>
+    if path.startswith("/install/"):
+        if method != "GET":
+            return (
+                json.dumps({"error": "GET required"}).encode("utf-8"),
+                405,
+                "application/json",
+                None,
+            )
+        tail = path[len("/install/") :].strip()
+        if not tail or ".." in tail:
+            return (
+                json.dumps({"error": "Not found"}).encode("utf-8"),
+                404,
+                "application/json",
+                None,
+            )
+        base = public_install_base_url()
+        qs = parse_qs(environ.get("QUERY_STRING", ""))
+        exp = (qs.get("exp") or [""])[0]
+        sig = (qs.get("sig") or [""])[0]
+
+        if tail == "latest":
+            script = render_public_bootstrap(base_url=base, requested="latest")
+            return (script.encode("utf-8"), 200, "text/x-shellscript", None)
+
+        if tail == "dev/main":
+            if not verify_internal_path("dev/main", exp, sig):
+                return (
+                    json.dumps({"error": "Forbidden"}).encode("utf-8"),
+                    403,
+                    "application/json",
+                    None,
+                )
+            sid = _register_bootstrap_session("dev/main")
+            script = render_public_bootstrap(
+                base_url=base, requested="main-dev", bootstrap_session=sid
+            )
+            return (script.encode("utf-8"), 200, "text/x-shellscript", None)
+
+        if "/" in tail:
+            return (
+                json.dumps({"error": "Not found"}).encode("utf-8"),
+                404,
+                "application/json",
+                None,
+            )
+
+        if not _INSTALL_TAIL_SAFE.match(tail):
+            return (
+                json.dumps({"error": "Not found"}).encode("utf-8"),
+                404,
+                "application/json",
+                None,
+            )
+
+        script = render_public_bootstrap(base_url=base, requested=tail)
+        return (script.encode("utf-8"), 200, "text/x-shellscript", None)
+
+    if path == "/api/install/authorize":
+        if method != "POST":
+            return (
+                json.dumps({"error": "POST required"}).encode("utf-8"),
+                405,
+                "application/json",
+                None,
+            )
+        remote_addr = environ.get("REMOTE_ADDR", "unknown")
+        if not _check_rate_limit(remote_addr):
+            return (
+                json.dumps({"error": "Too many requests. Try again later."}).encode("utf-8"),
+                429,
+                "application/json",
+                None,
+            )
+        body = _read_json_body(environ)
+        if not body:
+            return (
+                json.dumps({"error": "Invalid JSON body"}).encode("utf-8"),
+                400,
+                "application/json",
+                None,
+            )
+        raw_key = (body.get("license_key") or body.get("key") or "").strip()
+        req_ver = (body.get("requested_version") or "").strip()
+        install_id_hash = (body.get("install_id_hash") or "").strip()
+        if install_id_hash and len(install_id_hash) != 64:
+            install_id_hash = _hash_install_id(install_id_hash)
+        bootstrap_session = (body.get("bootstrap_session") or "").strip()
+        if not raw_key:
+            payload, status = _build_response("missing_key", 400)
+            return (payload, status, "application/json", None)
+        if not req_ver:
+            return (
+                json.dumps(
+                    {"result": "missing_version", "message": "requested_version is required."}
+                ).encode("utf-8"),
+                400,
+                "application/json",
+                None,
+            )
+
+        try:
+            from agent.license_store import get_default_store
+
+            store = get_default_store()
+        except Exception as exc:  # noqa: BLE001
+            log.error("install authorize store error: %s", exc)
+            p, s = _build_response("server_unavailable", 500)
+            return (p, s, "application/json", None)
+
+        if req_ver.lower() == "main-dev":
+            if not _bootstrap_session_ok(bootstrap_session, "dev/main"):
+                return (
+                    json.dumps(
+                        {
+                            "result": "forbidden",
+                            "message": "Internal install requires a signed bootstrap URL.",
+                        }
+                    ).encode("utf-8"),
+                    403,
+                    "application/json",
+                    None,
+                )
+            row = get_exact_registry_row("main-dev")
+            if row is None or not is_admin_internal_row(row):
+                return (
+                    json.dumps(
+                        {"result": "not_found", "message": "Internal build is not configured."}
+                    ).encode("utf-8"),
+                    404,
+                    "application/json",
+                    None,
+                )
+        else:
+            row, err = resolve_requested_public_version(req_ver)
+            if err or row is None:
+                return (
+                    json.dumps({"result": "not_found", "message": err or "Version not found."}).encode(
+                        "utf-8"
+                    ),
+                    404,
+                    "application/json",
+                    None,
+                )
+
+        lic = store.check_install_download_access(raw_key, install_id_hash)
+        if lic != "active":
+            log.info("install authorize denied: %s key=%s", lic, _mask_key(raw_key))
+            p, s = _build_response(lic, 403)
+            return (p, s, "application/json", None)
+
+        root = get_artifact_root()
+        if root is None:
+            return (
+                json.dumps(
+                    {
+                        "result": "server_unavailable",
+                        "message": "Artifact storage is not configured on this server.",
+                    }
+                ).encode("utf-8"),
+                503,
+                "application/json",
+                None,
+            )
+        pkg_path = artifact_path_for_row(row, root)
+        if pkg_path is None or not pkg_path.is_file():
+            log.error("install artifact missing for %s", row.get("version"))
+            return (
+                json.dumps(
+                    {
+                        "result": "server_unavailable",
+                        "message": "Release artifact is not available on this server yet.",
+                    }
+                ).encode("utf-8"),
+                503,
+                "application/json",
+                None,
+            )
+        try:
+            pkg_path.resolve().relative_to(root.resolve())
+        except ValueError:
+            log.error("artifact path escape: %s", pkg_path)
+            return (
+                json.dumps({"result": "forbidden", "message": "Forbidden."}).encode("utf-8"),
+                403,
+                "application/json",
+                None,
+            )
+
+        sha = str(row.get("artifact_sha256") or "").strip()
+        ttl = max(30, int(os.environ.get("LICENSE_DOWNLOAD_TOKEN_TTL_SECONDS", "300")))
+        token = _issue_download_token(
+            pkg_path,
+            sha,
+            pkg_path.name,
+            str(row.get("version") or ""),
+            str(row.get("channel") or "stable"),
+            pkg_path.stat().st_size,
+            ttl,
+        )
+        download_url = f"{_public_base_url()}/api/download/package/{token}"
+        log.info(
+            "Install artifact authorized: key=%s version=%s",
+            _mask_key(raw_key),
+            row.get("version", "?"),
+        )
+        payload = json.dumps(
+            {
+                "result": "active",
+                "message": "OK",
+                "download_url": download_url,
+                "sha256": sha,
+                "resolved_version": str(row.get("version") or ""),
+            }
+        ).encode("utf-8")
+        return (payload, 200, "application/json", None)
+
+    if path.startswith("/api/download/package/"):
+        raw_token = path[len("/api/download/package/") :]
+
+        if not _TOKEN_SAFE_RE.match(raw_token):
+            return (
+                json.dumps({"error": "Invalid token format."}).encode("utf-8"),
+                400,
+                "application/json",
+                None,
+            )
+
+        entry = _consume_download_token(raw_token)
+        if entry is None:
+            return (
+                json.dumps({"error": "Token invalid or expired."}).encode("utf-8"),
+                401,
+                "application/json",
+                None,
+            )
+
+        pkg_path = Path(entry["path"])
+        roots = _download_roots_allowed()
+        if roots:
+            if not _path_under_allowed_download_roots(pkg_path, roots):
+                log.error("Path escape via token: %s", pkg_path)
+                return (
+                    json.dumps({"error": "Forbidden."}).encode("utf-8"),
+                    403,
+                    "application/json",
+                    None,
+                )
+        else:
+            return (
+                json.dumps({"error": "Download service not configured on this server."}).encode("utf-8"),
+                503,
+                "application/json",
+                None,
+            )
+
+        if not pkg_path.is_file():
+            log.error("Package file gone: %s", pkg_path)
+            return (
+                json.dumps({"error": "Package not found."}).encode("utf-8"),
+                404,
+                "application/json",
+                None,
+            )
+
+        try:
+            data = pkg_path.read_bytes()
+        except OSError as exc:
+            log.error("Cannot read package %s: %s", pkg_path, exc)
+            return (
+                json.dumps({"error": "Cannot serve package."}).encode("utf-8"),
+                500,
+                "application/json",
+                None,
+            )
+
+        filename = entry.get("filename") or pkg_path.name
+        ctype = _guess_package_content_type(filename)
+        log.info("Package served: %s channel=%s", filename, entry.get("channel", "?"))
+        return (
+            data,
+            200,
+            ctype,
+            [("Content-Disposition", f'attachment; filename="{filename}"')],
+        )
+
+    return None
+
+
 def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
     """Minimal WSGI application — no external framework required."""
     path = _strip_path_prefix(environ.get("PATH_INFO", ""))
@@ -386,7 +783,13 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
             return respond(b"Not found", 404)
         return respond(data, content_type="image/png")
 
-    # ── Auth check (all other endpoints) ─────────────────────────────────────
+    # ── Public bootstrap + install authorize + signed package downloads ───────
+    routed = _route_public_install(environ, path, method)
+    if routed is not None:
+        body, st, ctype, extra = routed
+        return respond(body, status=st, content_type=ctype, extra_headers=extra)
+
+    # ── Shared-secret gate (Discord/agent endpoints; not public installers) ───
     if not _is_authorized(environ):
         return respond(json.dumps({"error": "Unauthorized"}).encode(), 401)
 
@@ -545,49 +948,6 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
             "notes": manifest.get("notes", ""),
         }).encode()
         return respond(payload)
-
-    # ── Package file download ─────────────────────────────────────────────────
-    if path.startswith("/api/download/package/"):
-        raw_token = path[len("/api/download/package/"):]
-
-        # Sanitize: only URL-safe base64 characters
-        if not _TOKEN_SAFE_RE.match(raw_token):
-            return respond(json.dumps({"error": "Invalid token format."}).encode(), 400)
-
-        entry = _consume_download_token(raw_token)
-        if entry is None:
-            return respond(json.dumps({"error": "Token invalid or expired."}).encode(), 401)
-
-        pkg_path = Path(entry["path"])
-        download_root = _get_download_root()
-
-        # Safety: verify path within download root
-        if download_root:
-            try:
-                pkg_path.resolve().relative_to(download_root.resolve())
-            except ValueError:
-                log.error("Path escape via token: %s", pkg_path)
-                return respond(json.dumps({"error": "Forbidden."}).encode(), 403)
-
-        if not pkg_path.is_file():
-            log.error("Package file gone: %s", pkg_path)
-            return respond(json.dumps({"error": "Package not found."}).encode(), 404)
-
-        try:
-            data = pkg_path.read_bytes()
-        except OSError as exc:
-            log.error("Cannot read package %s: %s", pkg_path, exc)
-            return respond(json.dumps({"error": "Cannot serve package."}).encode(), 500)
-
-        filename = entry.get("filename") or pkg_path.name
-        log.info("Package served: %s channel=%s", filename, entry.get("channel", "?"))
-        return respond(
-            data,
-            content_type="application/zip",
-            extra_headers=[
-                ("Content-Disposition", f'attachment; filename="{filename}"'),
-            ],
-        )
 
     # ── 404 ───────────────────────────────────────────────────────────────────
     return respond(json.dumps({"error": "Not found"}).encode(), 404)

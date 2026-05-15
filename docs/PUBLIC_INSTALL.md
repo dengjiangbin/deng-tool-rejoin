@@ -5,8 +5,8 @@
 1. Download Termux  
 2. Configure Root & Termux (grant Termux superuser in Magisk / Kitsune / KernelSU / LSPosed / Root Permission when you use those; otherwise skip)  
 3. Prepare Termux (`pkg update` / `pkg upgrade`, optional `pkg install`)  
-4. Open **DENG Tool: Rejoin Panel** in Discord → **Select Version** → choose a **Stable** release → copy **Mobile Copy**  
-5. Paste into Termux and run (uses `DENG_REJOIN_INSTALL_REF` with a tagged `install.sh`)  
+4. Open **DENG Tool: Rejoin Panel** in Discord → **Select Version** → choose a **Stable** release → copy **Mobile Copy**, **or** run `curl -fsSL https://rejoin.deng.my.id/install/latest -o install.sh && bash install.sh` for the current public stable.
+5. Paste into Termux and run (downloads the protected bootstrap from `rejoin.deng.my.id`, then the licensed artifact).
 6. Open DENG Tool: Rejoin (`deng-rejoin`)  
 7. Enter License Key (menu **1**)  
 8. First Time Setup (menu **2**)  
@@ -34,21 +34,25 @@ DENG never asks for Roblox password, cookies, `.ROBLOSECURITY`, session tokens, 
 4. Copy **Mobile Copy** (same text as Desktop Copy if you prefer).
 5. Paste into Termux and run the command once.
 
-The command from the panel sets `DENG_REJOIN_INSTALL_REF` and downloads `install.sh` from `refs/tags/<version>` so the install matches that release.
+The command from the panel (or `/install/latest`) downloads a **bootstrap** installer from `https://rejoin.deng.my.id`, verifies your license server-side, then fetches the exact release artifact — **not** a public GitHub raw URL.
 
-## Advanced: manual tagged install (same as panel)
+## Manual public install (same payload as panel)
 
-Replace `v1.0.0` with a version that exists on GitHub (or appears in your server’s version list):
-
-```sh
-DENG_REJOIN_INSTALL_REF=refs/tags/v1.0.0 curl -fsSL https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/refs/tags/v1.0.0/install.sh -o install.sh && DENG_REJOIN_INSTALL_REF=refs/tags/v1.0.0 bash install.sh
-```
-
-### Developers / testing only (`main` branch)
+Current public stable (moves when you publish a newer stable in `data/rejoin_versions.json`):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh -o install.sh && bash install.sh
+curl -fsSL https://rejoin.deng.my.id/install/latest -o install.sh && bash install.sh
 ```
+
+Pinned example (immutable for that version record):
+
+```sh
+curl -fsSL https://rejoin.deng.my.id/install/v1.0.0 -o install.sh && bash install.sh
+```
+
+### Developers / testing only
+
+Public users must **not** follow moving GitHub `main`. Internal **main-dev** installs use a **signed** panel URL pointing at `/install/dev/main?…`.
 
 ## Start
 
@@ -132,7 +136,23 @@ Doctor checks Python, Termux, Android version, SDK, Download path, root, Roblox 
 
 ## License API — Self-Hosting Behind a Reverse Proxy
 
-The License API exposes HTTP endpoints that Termux clients call to verify licenses and receive signed download packages.  In production the API must run behind HTTPS.
+The License API exposes HTTP endpoints that Termux clients call to verify licenses, download signed packages, and fetch **protected bootstrap installers**.
+
+### Protected bootstrap URLs (`/install/*`)
+
+Expose these on the **same HTTPS host** as the working logo asset (`GET /assets/denghub_logo.png`), forwarding to the license API upstream (typically `127.0.0.1:8787`):
+
+| Path | Purpose |
+|------|---------|
+| `GET /install/latest` | Moving pointer — installs **latest public stable** from `data/rejoin_versions.json`. |
+| `GET /install/vX.Y.Z` | **Frozen** bootstrap for that registry version. |
+| `GET /install/dev/main?exp=…&sig=…` | Internal **main-dev** bootstrap (HMAC; owner/admin/tester panel only). |
+| `POST /api/install/authorize` | License gate + short-lived download URL (no HWID binding). |
+| `GET /api/download/package/<token>` | One-time artifact bytes (must sit under `REJOIN_ARTIFACT_ROOT` / `LICENSE_DOWNLOAD_ROOT`). |
+
+Health check (for uptime monitors): `GET /api/license/health`
+
+Server env: set **`REJOIN_ARTIFACT_ROOT`** (preferred) or **`LICENSE_DOWNLOAD_ROOT`** to the directory containing paths listed as `artifact_path` in `data/rejoin_versions.json`.
 
 ### Architecture
 
@@ -158,8 +178,36 @@ Download package
 | `LICENSE_API_PUBLIC_URL` | `https://yourdomain.com/rejoin-api` | Public URL returned to clients in `download_url`. Trailing slash optional. |
 | `LICENSE_API_PATH_PREFIX` | `/rejoin-api` | If your proxy forwards `/rejoin-api/api/…` to `127.0.0.1:8787/rejoin-api/api/…` (no prefix strip), set this so the WSGI router strips it internally. Leave empty if your proxy strips the prefix before forwarding. |
 | `LICENSE_API_SHARED_SECRET` | `<random>` | Optional Bearer token for extra auth between proxy and API |
-| `LICENSE_DOWNLOAD_ROOT` | `/opt/deng/dist` | Absolute path to the `dist/releases/` folder |
+| `LICENSE_DOWNLOAD_ROOT` | `/opt/deng/dist` | Artifact directory (legacy; also used when `REJOIN_ARTIFACT_ROOT` unset). |
+| `REJOIN_ARTIFACT_ROOT` | `/opt/deng/releases` | Preferred root for protected install `artifact_path` files. |
+| `REJOIN_INSTALL_SIGNING_SECRET` | `<random>` | HMAC secret for `/install/dev/main?…` signed URLs. |
+| `REJOIN_PUBLIC_INSTALL_URL` | `https://rejoin.deng.my.id` | Host embedded in bootstrap scripts (defaults to `LICENSE_API_PUBLIC_URL` or `https://rejoin.deng.my.id`). |
 | `LICENSE_DOWNLOAD_TOKEN_TTL_SECONDS` | `300` | Download token lifetime (seconds) |
+
+### nginx — site root (`https://rejoin.deng.my.id/` → API)
+
+When the public hostname terminates TLS at nginx and maps **directly** to the license API (no `/rejoin-api` prefix), proxy at least `/api/`, `/install/`, and `/assets/`:
+
+```nginx
+location /api/ {
+    proxy_pass         http://127.0.0.1:8787;
+    proxy_set_header   X-Real-IP $remote_addr;
+    proxy_set_header   Host $host;
+}
+
+location /install/ {
+    proxy_pass         http://127.0.0.1:8787;
+    proxy_set_header   X-Real-IP $remote_addr;
+    proxy_set_header   Host $host;
+}
+
+location = /assets/denghub_logo.png {
+    proxy_pass         http://127.0.0.1:8787;
+    proxy_set_header   Host $host;
+}
+```
+
+Use `LICENSE_API_PUBLIC_URL=https://rejoin.deng.my.id` and leave `LICENSE_API_PATH_PREFIX` empty.
 
 ### nginx — prefix strip (recommended)
 
