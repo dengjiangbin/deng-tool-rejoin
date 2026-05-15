@@ -441,10 +441,12 @@ class InstallBootstrapSanityTests(unittest.TestCase):
         from agent.bootstrap_installer import render_public_bootstrap
 
         s = render_public_bootstrap(base_url="https://rejoin.deng.my.id", requested="latest")
-        self.assertIn("${PREFIX}/bin", s)
+        self.assertIn('BIN="${PREFIX}/bin"', s)
+        self.assertIn('mkdir -p "${PREFIX}/bin"', s)
         self.assertIn("$HOME/bin", s)
         self.assertNotIn("$HOME/.local/bin", s)
         self.assertIn("command -v deng-rejoin", s)
+        self.assertIn("hash -r", s)
         self.assertIn("Failed to create deng-rejoin command.", s)
 
     def test_install_complete_only_after_command_check(self) -> None:

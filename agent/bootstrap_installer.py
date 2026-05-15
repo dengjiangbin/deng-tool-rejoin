@@ -4,27 +4,19 @@ Install is non-interactive: it downloads a small launcher tarball, extracts into
 ``~/.deng-tool/rejoin``, and writes ``.install_requested``. License-gated download
 of the full bundle runs on first ``deng-rejoin`` (:mod:`agent.deferred_bundle_install`).
 
-On Termux, ``deng-rejoin`` is installed under ``$PREFIX/bin`` so it is on PATH
-immediately (no restart). Fallback: ``$HOME/bin`` with PATH persisted in shell rc files.
+On Termux, the ``deng-rejoin`` wrapper is written to ``$PREFIX/bin`` (always
+``mkdir -p`` first — do not skip based on ``-w`` checks). Fallback: ``$HOME/bin``.
+Success is reported only after ``command -v deng-rejoin`` resolves.
 """
 
 from __future__ import annotations
 
-# shell: POSIX ``sh`` — Termux provides ``/usr/bin/env``; checks before exec.
+# Exact launcher wrapper — keep in sync with installer UX expectations.
 _WRAPPER_BODY = """#!/usr/bin/env sh
 export DENG_REJOIN_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "deng-rejoin: python3 not found. Install: pkg install python" >&2
-  exit 127
-fi
-if [ ! -f "$DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" ]; then
-  echo "deng-rejoin: missing $DENG_REJOIN_HOME/agent/deng_tool_rejoin.py (re-run install)" >&2
-  exit 1
-fi
 exec python3 "$DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" "$@"
 """
 
-# Installing to $HOME/.local/bin breaks Termux (not on default PATH).
 _INSTALL_PART_BEFORE_HEREDOC = r"""
 command -v curl >/dev/null 2>&1 || { echo "Install curl first: pkg install -y curl" >&2; exit 1; }
 command -v tar >/dev/null 2>&1 || { echo "Install tar first: pkg install -y tar" >&2; exit 1; }
@@ -35,19 +27,16 @@ trap 'rm -f "$TMP"' EXIT
 curl -fsSL "$LAUNCHER_URL" -o "$TMP" || { echo "Could not download launcher bundle." >&2; exit 1; }
 tar -xzf "$TMP" -C "$APP_HOME"
 
-INSTALL_BIN=""
-if [[ -n "${PREFIX:-}" ]] && [[ -d "${PREFIX}/bin" ]] && [[ -w "${PREFIX}/bin" ]]; then
-  INSTALL_BIN="${PREFIX}/bin"
-elif [[ -n "${PREFIX:-}" ]]; then
-  if mkdir -p "${PREFIX}/bin" 2>/dev/null && [[ -w "${PREFIX}/bin" ]]; then
-    INSTALL_BIN="${PREFIX}/bin"
+# Prefer $PREFIX/bin (Termux: on PATH). Always mkdir — do not rely on [[ -w ]]
+# alone; some environments mis-report and skipped installing the wrapper.
+USING_HOME_BIN=0
+BIN=""
+if [[ -n "${PREFIX:-}" ]]; then
+  if mkdir -p "${PREFIX}/bin" 2>/dev/null; then
+    BIN="${PREFIX}/bin"
   fi
 fi
-
-USING_HOME_BIN=0
-if [[ -n "$INSTALL_BIN" ]]; then
-  BIN="$INSTALL_BIN"
-else
+if [[ -z "$BIN" ]]; then
   BIN="$HOME/bin"
   mkdir -p "$BIN"
   export PATH="$HOME/bin:$PATH"
@@ -62,41 +51,49 @@ else
   done
 fi
 
+echo "Installing deng-rejoin wrapper to $BIN/deng-rejoin"
 cat > "$BIN/deng-rejoin" << 'DENG_REJOIN_WRAPPER'
 """
 
 _INSTALL_PART_AFTER_HEREDOC = r"""
 DENG_REJOIN_WRAPPER
-chmod +x "$BIN/deng-rejoin"
+chmod +x "$BIN/deng-rejoin" || { echo "chmod failed: $BIN/deng-rejoin" >&2; exit 1; }
+hash -r 2>/dev/null || true
 
 _fail_install() {
   echo "Failed to create deng-rejoin command." >&2
   echo "Wrapper path: $BIN/deng-rejoin" >&2
   echo "PATH: $PATH" >&2
-  echo "Try direct path: $BIN/deng-rejoin" >&2
+  echo "PREFIX: ${PREFIX:-<unset>}" >&2
+  echo "Try: ls -la $BIN/deng-rejoin" >&2
   exit 1
 }
 
-[[ -f "$BIN/deng-rejoin" ]] || _fail_install
+[[ -s "$BIN/deng-rejoin" ]] || _fail_install
 [[ -x "$BIN/deng-rejoin" ]] || _fail_install
 [[ -f "$APP_HOME/agent/deng_tool_rejoin.py" ]] || _fail_install
 [[ -f "$APP_HOME/agent/deferred_bundle_install.py" ]] || _fail_install
 
-DR_RESOLVED="$(command -v deng-rejoin 2>/dev/null || true)"
+DR_RESOLVED=""
+if command -v deng-rejoin >/dev/null 2>&1; then
+  DR_RESOLVED="$(command -v deng-rejoin)"
+fi
 if [[ -z "$DR_RESOLVED" ]]; then
+  echo "command -v deng-rejoin did not resolve after install." >&2
   _fail_install
 fi
 
 if ! PYTHONPATH="$APP_HOME" python3 -c "import agent.deferred_bundle_install" 2>/dev/null; then
-  echo "Failed: launcher Python modules did not import. Check PYTHONPATH / extract path." >&2
-  echo "APP_HOME: $APP_HOME" >&2
+  echo "Failed: launcher Python modules did not import. APP_HOME: $APP_HOME" >&2
   _fail_install
 fi
 
-echo "deng-rejoin command: $DR_RESOLVED"
+echo "Wrapper path: $BIN/deng-rejoin"
+echo "command -v deng-rejoin -> $DR_RESOLVED"
 if [[ "$USING_HOME_BIN" -eq 1 ]]; then
   echo 'Note: If deng-rejoin is not found in this shell, run once:'
   echo '  export PATH="$HOME/bin:$PATH"'
+  echo '  hash -r'
 fi
 echo ""
 echo "Install complete."
