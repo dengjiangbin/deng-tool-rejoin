@@ -190,6 +190,20 @@ class BaseLicenseStore(ABC):
         """Remove the saved panel config (does NOT delete keys)."""
 
     @abstractmethod
+    def list_user_keys_with_binding_state(
+        self, discord_user_id: str
+    ) -> list[dict[str, Any]]:
+        """Return key dicts with binding state info for the HWID reset selector.
+
+        Each dict contains:
+          key_id, masked_key, status, active_binding (bool), device_model,
+          device_label, last_seen_at, reset_count_24h, can_reset (bool),
+          reason_if_not_resettable (str | None).
+
+        Revoked keys are excluded from the result.
+        """
+
+    @abstractmethod
     def audit_admin_action(
         self,
         actor_discord_user_id: str,
@@ -379,6 +393,52 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 "bound_device": binding.get("device_model") or "(unbound)",
                 "last_seen_at": binding.get("last_seen_at"),
                 "created_at": record.get("created_at"),
+            })
+        return result
+
+    def list_user_keys_with_binding_state(
+        self, discord_user_id: str
+    ) -> list[dict[str, Any]]:
+        db = self._load()
+        result: list[dict[str, Any]] = []
+        for key_hash, record in db["keys"].items():
+            if record.get("owner_discord_id") != discord_user_id:
+                continue
+            if record.get("status") == "revoked":
+                continue
+            binding = db.get("bindings", {}).get(key_hash, {})
+            active_binding = bool(binding.get("is_active"))
+            masked = f"{record.get('prefix', 'DENG-????')}...{record.get('suffix', '????')}"
+            last_seen_at = binding.get("last_seen_at")
+            reset_count = self.get_reset_count_24h(key_hash)
+            # Determine can_reset and reason
+            reason: str | None = None
+            if not active_binding:
+                can_reset = False
+                reason = "No device bound — start the tool first"
+            elif reset_count >= MAX_HWID_RESETS_PER_24H:
+                can_reset = False
+                reason = f"Reset limit reached ({reset_count}/{MAX_HWID_RESETS_PER_24H} today)"
+            else:
+                elapsed = _seconds_since(last_seen_at)
+                if elapsed is not None and elapsed < ACTIVE_HEARTBEAT_WINDOW_S:
+                    can_reset = False
+                    m = int(elapsed) // 60
+                    s = int(elapsed) % 60
+                    reason = f"Key active {m}m {s}s ago — wait 5 min"
+                else:
+                    can_reset = True
+            result.append({
+                "key_id": key_hash,
+                "masked_key": masked,
+                "status": record.get("status", "unknown"),
+                "active_binding": active_binding,
+                "device_model": binding.get("device_model", ""),
+                "device_label": binding.get("device_label", ""),
+                "last_seen_at": last_seen_at,
+                "reset_count_24h": reset_count,
+                "can_reset": can_reset,
+                "reason_if_not_resettable": reason,
             })
         return result
 
@@ -778,6 +838,60 @@ class SupabaseLicenseStore(BaseLicenseStore):
                     "created_at": record.get("created_at"),
                 }
             )
+        return result
+
+    def list_user_keys_with_binding_state(
+        self, discord_user_id: str
+    ) -> list[dict[str, Any]]:
+        res = (
+            self._client.table("license_keys")
+            .select("id, prefix, suffix, status")
+            .eq("owner_discord_id", discord_user_id)
+            .neq("status", "revoked")
+            .execute()
+        )
+        result: list[dict[str, Any]] = []
+        for record in res.data:
+            key_id = record["id"]
+            b_res = (
+                self._client.table("device_bindings")
+                .select("device_model, device_label, last_seen_at, is_active")
+                .eq("key_id", key_id)
+                .execute()
+            )
+            binding = b_res.data[0] if b_res.data else {}
+            active_binding = bool(binding.get("is_active"))
+            masked = f"{record.get('prefix', 'DENG-????')}...{record.get('suffix', '????')}"
+            last_seen_at = binding.get("last_seen_at")
+            reset_count = self.get_reset_count_24h(key_id)
+            reason: str | None = None
+            if not active_binding:
+                can_reset = False
+                reason = "No device bound — start the tool first"
+            elif reset_count >= MAX_HWID_RESETS_PER_24H:
+                can_reset = False
+                reason = f"Reset limit reached ({reset_count}/{MAX_HWID_RESETS_PER_24H} today)"
+            else:
+                elapsed = _seconds_since(last_seen_at)
+                if elapsed is not None and elapsed < ACTIVE_HEARTBEAT_WINDOW_S:
+                    can_reset = False
+                    m = int(elapsed) // 60
+                    s = int(elapsed) % 60
+                    reason = f"Key active {m}m {s}s ago — wait 5 min"
+                else:
+                    can_reset = True
+            result.append({
+                "key_id": key_id,
+                "masked_key": masked,
+                "status": record.get("status", "unknown"),
+                "active_binding": active_binding,
+                "device_model": binding.get("device_model", ""),
+                "device_label": binding.get("device_label", ""),
+                "last_seen_at": last_seen_at,
+                "reset_count_24h": reset_count,
+                "can_reset": can_reset,
+                "reason_if_not_resettable": reason,
+            })
         return result
 
     # ── HWID reset ────────────────────────────────────────────────────────────

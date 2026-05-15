@@ -61,16 +61,33 @@ All commands are under the `/license_panel` group.
 6. Send ephemeral embed with full key in a code block
 7. **The full key is never stored in plaintext** — only the SHA-256 hash
 
-### ♻️ Reset HWID
+### ♻️ Reset HWID — Dropdown Selector Flow
 
 1. User clicks **Reset HWID**
-2. If user has no keys → ephemeral "No keys found"
-3. If user has one key → reset directly
-4. If user has multiple keys → ephemeral select menu to choose
-5. Check reset count: ≥ 5 in last 24h → ephemeral "Reset Limit Reached"
-6. Check last heartbeat: < 5 minutes ago → ephemeral "Key Recently Active" warning
-7. If all checks pass → call `store.reset_hwid(discord_user_id, key_id)`
-8. Send ephemeral "HWID Reset" success embed
+2. Bot calls `store.list_user_keys_with_binding_state(discord_user_id)`
+3. If user has no (non-revoked) keys → ephemeral "No Keys Found" embed
+4. If user has keys → send ephemeral message with:
+   - **Header embed** listing all keys with 🟢/🟡 state indicators
+   - **Dropdown** (`discord.ui.Select`) — one option per key
+   - **Confirm Reset** button (red) and **Cancel** button (grey)
+5. User selects one or more keys from the dropdown
+6. User clicks **Confirm Reset**:
+   - For each selected key: run per-key reset logic
+   - If key has `can_reset=False`: show reason (no binding, limit, recently active)
+   - If key can reset: call `store.reset_hwid(discord_user_id, key_id)`
+7. Message updates in-place with per-key result summary. Components disabled.
+8. Clicking **Cancel** disables components and shows "Reset Cancelled."
+
+**Key state indicators:**
+
+| Indicator | Meaning |
+|-----------|---------|
+| 🟢 | Key is bound to a device (HWID is active) |
+| 🟡 | No device bound — key has never been used or binding was cleared |
+
+**🟡 keys cannot be reset** — there is nothing to clear. The reason is shown in the dropdown description.
+
+**Timeout:** The selector view expires after 120 seconds; components auto-disable.
 
 ### 🎟️ Redeem Key
 
@@ -120,11 +137,14 @@ The module exports framework-agnostic dict payloads:
 
 ```python
 from agent.license_panel import (
-    build_panel_embed,          # → embed dict for discord.Embed.from_dict()
-    build_panel_buttons,        # → components list (action row + 3 buttons)
+    build_panel_embed,                  # → embed dict for discord.Embed.from_dict()
+    build_panel_buttons,                # → components list (action row + 3 buttons)
     build_generate_success_response,
     build_generate_limit_response,
-    build_reset_success_response,
+    build_reset_selector_embed,         # → embed for the HWID key selector
+    build_reset_no_keys_response,       # → embed when user has no keys
+    build_reset_mixed_summary_embed,    # → per-key result summary embed
+    build_reset_success_response,       # kept for direct resets in tests/admin flows
     build_reset_limit_response,
     build_reset_active_warning_response,
     build_redeem_success_response,

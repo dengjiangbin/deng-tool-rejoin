@@ -32,9 +32,12 @@ from agent.license_store import (
     UserLimitError,
 )
 from bot.cog_license_panel import (
+    ConfirmResetButton,
     LicensePanelCog,
     PanelView,
     RedeemModal,
+    ResetHwidSelect,
+    ResetHwidSelectView,
     _is_owner,
     _owner_ids,
 )
@@ -66,6 +69,7 @@ def _fake_interaction(
     inter.response.send_message = AsyncMock()
     inter.response.send_modal = AsyncMock()
     inter.response.defer = AsyncMock()
+    inter.response.edit_message = AsyncMock()
     inter.followup = MagicMock()
     inter.followup.send = AsyncMock()
     return inter
@@ -175,88 +179,125 @@ class TestPanelViewResetHWID(unittest.IsolatedAsyncioTestCase):
         self._tmp.cleanup()
 
     async def test_reset_no_keys_gives_not_found(self) -> None:
+        """No keys → send_message (ephemeral, not followup) with 'No Keys' embed."""
         inter = _fake_interaction(user=_fake_user(uid=77))
         view = PanelView(self.store)
         await view.btn_reset_hwid.callback(inter)
-        _, kwargs = inter.followup.send.call_args
+        inter.response.send_message.assert_called_once()
+        _, kwargs = inter.response.send_message.call_args
         self.assertIn("No Keys", kwargs["embed"].title)
+        self.assertTrue(kwargs.get("ephemeral"))
 
-    async def test_reset_no_binding_after_generate(self) -> None:
-        """Generate creates a key but no device binding; reset should say 'No Device Bound'."""
+    async def test_reset_opens_selector_when_key_exists(self) -> None:
+        """Having an unbound key → selector view is opened via send_message."""
         uid = 88
         inter_gen = _fake_interaction(user=_fake_user(uid=uid))
         inter_reset = _fake_interaction(user=_fake_user(uid=uid))
         view = PanelView(self.store)
         await view.btn_generate.callback(inter_gen)
         await view.btn_reset_hwid.callback(inter_reset)
-        _, kwargs = inter_reset.followup.send.call_args
-        embed = kwargs["embed"]
-        # No device binding was ever created, so reset must NOT claim success.
-        self.assertIn("No Device Bound", embed.title)
+        inter_reset.response.send_message.assert_called_once()
+        _, kwargs = inter_reset.response.send_message.call_args
+        # Must send a ResetHwidSelectView, not a plain embed
+        self.assertIsInstance(kwargs.get("view"), ResetHwidSelectView)
         self.assertTrue(kwargs.get("ephemeral"))
 
-    async def test_reset_success_with_bound_device(self) -> None:
-        """Reset after a device has been bound (old last_seen) must return the HWID Reset success embed."""
-        from agent.license import normalize_license_key, hash_license_key
-        uid = 880
-        inter_gen = _fake_interaction(user=_fake_user(uid=uid))
-        view = PanelView(self.store)
-        await view.btn_generate.callback(inter_gen)
-        # Simulate a bound device with an old last_seen_at so the active guard passes
-        uid_str = str(uid)
-        keys = self.store.list_user_keys(uid_str)
-        key_id = keys[0]["id"]
-        self.store.bind_or_check_device(
-            # bind_or_check_device takes the raw key, so we need to find it from id (key_hash)
-            # Instead patch reset_hwid to return None (success)
-            uid_str, uid_str, uid_str, uid_str  # placeholder - bypassed below
-        )
-        # The cleanest approach: patch reset_hwid to succeed
-        from unittest.mock import patch as _patch
-        with _patch.object(self.store, "reset_hwid", return_value=None):
-            inter_reset = _fake_interaction(user=_fake_user(uid=uid))
-            await view.btn_reset_hwid.callback(inter_reset)
-        _, kwargs = inter_reset.followup.send.call_args
+    async def test_confirm_reset_success_with_bound_device(self) -> None:
+        """ConfirmResetButton with a resettable key emits 'HWID Reset Results' embed."""
+        uid_str = "880"
+        self.store.get_or_create_user(uid_str, "TestUser")
+        raw_key = self.store.create_key_for_user(uid_str)
+        from agent.license import hash_license_key, normalize_license_key
+        key_id = hash_license_key(normalize_license_key(raw_key))
+        # Use a key state dict that says can_reset=True (binding exists, old heartbeat)
+        key_state = {
+            "key_id": key_id,
+            "masked_key": "DENG-????...????",
+            "status": "active",
+            "active_binding": True,
+            "device_model": "Test Device",
+            "device_label": "",
+            "last_seen_at": "2000-01-01T00:00:00+00:00",
+            "reset_count_24h": 0,
+            "can_reset": True,
+            "reason_if_not_resettable": None,
+        }
+        keys_with_state = [key_state]
+        sel_view = ResetHwidSelectView(self.store, uid_str, keys_with_state)
+        select = next(c for c in sel_view.children if isinstance(c, ResetHwidSelect))
+        select._values = [key_id]  # values is a read-only property backed by _values
+        confirm_btn = next(c for c in sel_view.children if isinstance(c, ConfirmResetButton))
+        inter = _fake_interaction(user=_fake_user(uid=880))
+        # Patch reset_hwid to succeed without needing a real binding in the store
+        with patch.object(self.store, "reset_hwid", return_value=None):
+            await confirm_btn.callback(inter)
+        inter.response.edit_message.assert_called_once()
+        _, kwargs = inter.response.edit_message.call_args
+        self.assertIn("HWID", kwargs["embed"].title)
+
+    async def test_confirm_reset_active_warning(self) -> None:
+        """ConfirmResetButton with can_reset=False (recently active) shows reason."""
+        uid_str = "99"
+        self.store.get_or_create_user(uid_str, "TestUser")
+        raw_key = self.store.create_key_for_user(uid_str)
+        from agent.license import hash_license_key, normalize_license_key
+        key_id = hash_license_key(normalize_license_key(raw_key))
+        key_state = {
+            "key_id": key_id,
+            "masked_key": "DENG-????...????",
+            "status": "active",
+            "active_binding": True,
+            "device_model": "Phone",
+            "device_label": "",
+            "last_seen_at": None,
+            "reset_count_24h": 0,
+            "can_reset": False,
+            "reason_if_not_resettable": "Key active 1m 0s ago — wait 5 min",
+        }
+        sel_view = ResetHwidSelectView(self.store, uid_str, [key_state])
+        select = next(c for c in sel_view.children if isinstance(c, ResetHwidSelect))
+        select._values = [key_id]  # values is a read-only property backed by _values
+        confirm_btn = next(c for c in sel_view.children if isinstance(c, ConfirmResetButton))
+        inter = _fake_interaction(user=_fake_user(uid=99))
+        await confirm_btn.callback(inter)
+        inter.response.edit_message.assert_called_once()
+        _, kwargs = inter.response.edit_message.call_args
         embed = kwargs["embed"]
         self.assertIn("HWID", embed.title)
-        self.assertTrue(kwargs.get("ephemeral"))
+        # Reason text should appear in description
+        self.assertIn("wait 5 min", embed.description)
 
-    async def test_reset_active_warning(self) -> None:
-        """Key that was recently seen should raise ActiveKeyWarning → warning embed."""
-        uid = 99
-        inter_gen = _fake_interaction(user=_fake_user(uid=uid))
-        view = PanelView(self.store)
-        await view.btn_generate.callback(inter_gen)
-
-        # Simulate the key being recently seen by patching reset_hwid
-        def _raise_active(*args: Any, **kwargs: Any) -> None:
-            raise ActiveKeyWarning("240s ago.")
-
-        with patch.object(self.store, "reset_hwid", side_effect=_raise_active):
-            inter_reset = _fake_interaction(user=_fake_user(uid=uid))
-            await view.btn_reset_hwid.callback(inter_reset)
-
-        _, kwargs = inter_reset.followup.send.call_args
+    async def test_confirm_reset_limit_exceeded(self) -> None:
+        """ConfirmResetButton with can_reset=False (limit) shows limit reason."""
+        uid_str = "101"
+        self.store.get_or_create_user(uid_str, "TestUser")
+        raw_key = self.store.create_key_for_user(uid_str)
+        from agent.license import hash_license_key, normalize_license_key
+        key_id = hash_license_key(normalize_license_key(raw_key))
+        reason = f"Reset limit reached ({MAX_HWID_RESETS_PER_24H}/{MAX_HWID_RESETS_PER_24H} today)"
+        key_state = {
+            "key_id": key_id,
+            "masked_key": "DENG-????...????",
+            "status": "active",
+            "active_binding": True,
+            "device_model": "Phone",
+            "device_label": "",
+            "last_seen_at": None,
+            "reset_count_24h": MAX_HWID_RESETS_PER_24H,
+            "can_reset": False,
+            "reason_if_not_resettable": reason,
+        }
+        sel_view = ResetHwidSelectView(self.store, uid_str, [key_state])
+        select = next(c for c in sel_view.children if isinstance(c, ResetHwidSelect))
+        select._values = [key_id]  # values is a read-only property backed by _values
+        confirm_btn = next(c for c in sel_view.children if isinstance(c, ConfirmResetButton))
+        inter = _fake_interaction(user=_fake_user(uid=101))
+        await confirm_btn.callback(inter)
+        inter.response.edit_message.assert_called_once()
+        _, kwargs = inter.response.edit_message.call_args
         embed = kwargs["embed"]
-        self.assertIn("Active", embed.title)
-
-    async def test_reset_limit_exceeded(self) -> None:
-        uid = 101
-        inter_gen = _fake_interaction(user=_fake_user(uid=uid))
-        view = PanelView(self.store)
-        await view.btn_generate.callback(inter_gen)
-
-        def _raise_limit(*args: Any, **kwargs: Any) -> None:
-            raise ResetLimitError("Limit reached.")
-
-        with patch.object(self.store, "reset_hwid", side_effect=_raise_limit):
-            with patch.object(self.store, "get_reset_count_24h", return_value=MAX_HWID_RESETS_PER_24H):
-                inter_reset = _fake_interaction(user=_fake_user(uid=uid))
-                await view.btn_reset_hwid.callback(inter_reset)
-
-        _, kwargs = inter_reset.followup.send.call_args
-        embed = kwargs["embed"]
-        self.assertIn("Limit", embed.title)
+        self.assertIn("HWID", embed.title)
+        self.assertIn("Reset limit", embed.description)
 
 
 # ── PanelView — Redeem Key ────────────────────────────────────────────────────

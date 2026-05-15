@@ -339,6 +339,77 @@ def build_not_owner_response() -> dict[str, Any]:
     }
 
 
+def build_reset_selector_embed(keys_with_state: list[dict]) -> dict[str, Any]:
+    """Ephemeral embed shown when the user opens the HWID reset key selector.
+
+    keys_with_state: list of dicts from store.list_user_keys_with_binding_state().
+    Each key is listed with a 🟢/🟡 indicator and device info.
+    """
+    lines: list[str] = []
+    for k in keys_with_state:
+        icon = "\U0001f7e2" if k.get("active_binding") else "\U0001f7e1"  # 🟢 / 🟡
+        label = k.get("masked_key", "???")
+        if k.get("active_binding"):
+            model = k.get("device_model") or "Unknown device"
+            lines.append(f"{icon} `{label}` — Device: {model}")
+        else:
+            lines.append(f"{icon} `{label}` — No device bound")
+    key_list = "\n".join(lines)
+    return {
+        "ephemeral": True,
+        "embed": {
+            "title": "\u267b\ufe0f Reset HWID \u2014 Select Key",
+            "color": 0x2F80ED,
+            "description": (
+                "Select which key to reset from the dropdown below, "
+                "then click **Confirm Reset**.\n\n"
+                f"{key_list}\n\n"
+                "\U0001f7e2 Bound to a device  \u00b7  \U0001f7e1 No device linked"
+            ),
+            "footer": {"text": "DENG Tool \u00b7 Limited to 5 resets per 24 hours per key"},
+        },
+    }
+
+
+def build_reset_no_keys_response() -> dict[str, Any]:
+    """Ephemeral embed when the user has no (non-revoked) license keys to reset."""
+    return {
+        "ephemeral": True,
+        "embed": {
+            "title": "\u274c No Keys Found",
+            "color": 0xE74C3C,
+            "description": (
+                "You have no license keys to reset.\n"
+                "Use **Generate Key** to create one."
+            ),
+        },
+    }
+
+
+def build_reset_mixed_summary_embed(results: list[dict]) -> dict[str, Any]:
+    """Ephemeral embed listing per-key HWID reset outcomes.
+
+    Each result dict: {masked_key (str), success (bool), message (str)}.
+    Color is green if all succeeded, red if all failed, amber if mixed.
+    """
+    lines: list[str] = []
+    for r in results:
+        icon = "\u2705" if r.get("success") else "\u274c"  # ✅ / ❌
+        lines.append(f"{icon} `{r.get('masked_key', '???')}` \u2014 {r.get('message', '')}")
+    description = "\n".join(lines) if lines else "No keys were processed."
+    all_ok = bool(results) and all(r.get("success") for r in results)
+    none_ok = bool(results) and not any(r.get("success") for r in results)
+    color = 0x27AE60 if all_ok else (0xE74C3C if none_ok else 0xF39C12)
+    return {
+        "ephemeral": True,
+        "embed": {
+            "title": "\u267b\ufe0f HWID Reset Results",
+            "color": color,
+            "description": description,
+        },
+    }
+
+
 # ── Admin command spec (documentation / registration helper) ───────────────────
 
 def get_slash_command_specs() -> list[dict[str, Any]]:

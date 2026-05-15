@@ -45,7 +45,10 @@ from agent.license_panel import (
     build_redeem_success_response,
     build_reset_active_warning_response,
     build_reset_limit_response,
+    build_reset_mixed_summary_embed,
     build_reset_no_binding_response,
+    build_reset_no_keys_response,
+    build_reset_selector_embed,
     build_reset_success_response,
 )
 from agent.license_store import (
@@ -145,6 +148,173 @@ class RedeemModal(discord.ui.Modal, title="Redeem License Key"):
             pass
 
 
+# ── HWID reset selector views ─────────────────────────────────────────────────
+
+class ResetHwidSelect(discord.ui.Select):
+    """Dropdown listing the user's keys with 🟢/🟡 binding state indicators."""
+
+    def __init__(self, keys_with_state: list[dict]) -> None:
+        options: list[discord.SelectOption] = []
+        for k in keys_with_state:
+            icon = "🟢" if k.get("active_binding") else "🟡"
+            label = k.get("masked_key", "???")
+            if k.get("active_binding"):
+                model = k.get("device_model") or "Unknown device"
+                last = k.get("last_seen_at")
+                desc = f"Device: {model}" + (f" · Last seen: {last[:10]}" if last else "")
+            else:
+                desc = k.get("reason_if_not_resettable") or "No device bound"
+            options.append(
+                discord.SelectOption(
+                    label=label[:100],
+                    value=k["key_id"],
+                    description=desc[:100],
+                    emoji=icon,
+                )
+            )
+        super().__init__(
+            placeholder="Select a key to reset...",
+            min_values=1,
+            max_values=min(25, len(options)),
+            options=options,
+            custom_id="reset_hwid:select",
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        # Silently acknowledge; selection is read by ConfirmResetButton
+        await interaction.response.defer()
+
+
+class ConfirmResetButton(discord.ui.Button):
+    """Processes the selected key(s) from the dropdown and runs HWID reset."""
+
+    def __init__(
+        self,
+        store: BaseLicenseStore,
+        uid: str,
+        keys_with_state: list[dict],
+    ) -> None:
+        super().__init__(
+            label="Confirm Reset",
+            style=discord.ButtonStyle.danger,
+            custom_id="reset_hwid:confirm",
+            emoji="♻️",
+        )
+        self._store = store
+        self._uid = uid
+        self._key_map: dict[str, dict] = {k["key_id"]: k for k in keys_with_state}
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        select: ResetHwidSelect | None = next(
+            (c for c in self.view.children if isinstance(c, ResetHwidSelect)), None
+        )
+        selected_ids: list[str] = select.values if select and select.values else []
+
+        if not selected_ids:
+            await interaction.response.send_message(
+                "⚠️ Please choose at least one key from the dropdown first.",
+                ephemeral=True,
+            )
+            return
+
+        results: list[dict] = []
+        for key_id in selected_ids:
+            state = self._key_map.get(key_id, {})
+            masked = state.get("masked_key", "???")
+            if not state.get("can_reset"):
+                results.append({
+                    "masked_key": masked,
+                    "success": False,
+                    "message": state.get("reason_if_not_resettable") or "Cannot reset this key.",
+                })
+                continue
+            try:
+                self._store.reset_hwid(self._uid, key_id)
+                results.append({
+                    "masked_key": masked,
+                    "success": True,
+                    "message": "Device binding cleared.",
+                })
+            except NoActiveBindingError:
+                results.append({
+                    "masked_key": masked,
+                    "success": False,
+                    "message": "No device binding to clear.",
+                })
+            except ResetLimitError:
+                count = self._store.get_reset_count_24h(key_id)
+                results.append({
+                    "masked_key": masked,
+                    "success": False,
+                    "message": f"Reset limit reached ({count}/{MAX_HWID_RESETS_PER_24H} today).",
+                })
+            except ActiveKeyWarning as exc:
+                m = re.search(r"(\d+)s ago", str(exc))
+                elapsed = int(m.group(1)) if m else 0
+                mins, secs = elapsed // 60, elapsed % 60
+                results.append({
+                    "masked_key": masked,
+                    "success": False,
+                    "message": f"Key active {mins}m {secs}s ago — wait 5 min first.",
+                })
+
+        for child in self.view.children:
+            child.disabled = True
+
+        embed = _embed_from_payload(build_reset_mixed_summary_embed(results))
+        try:
+            await interaction.response.edit_message(embed=embed, view=self.view)
+        except discord.HTTPException:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class CancelResetButton(discord.ui.Button):
+    """Cancels the HWID reset flow and disables all selector components."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            label="Cancel",
+            style=discord.ButtonStyle.secondary,
+            custom_id="reset_hwid:cancel",
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        for child in self.view.children:
+            child.disabled = True
+        embed = discord.Embed(
+            title="✖ Reset Cancelled",
+            description="HWID reset was cancelled. No changes were made.",
+            color=0x95A5A6,
+        )
+        try:
+            await interaction.response.edit_message(embed=embed, view=self.view)
+        except discord.HTTPException:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class ResetHwidSelectView(discord.ui.View):
+    """Ephemeral, non-persistent view shown when a user clicks Reset HWID.
+
+    Contains: dropdown key selector, Confirm Reset button, Cancel button.
+    Times out after 120 seconds; components are disabled on timeout.
+    """
+
+    def __init__(
+        self,
+        store: BaseLicenseStore,
+        uid: str,
+        keys_with_state: list[dict],
+    ) -> None:
+        super().__init__(timeout=120)
+        self.add_item(ResetHwidSelect(keys_with_state))
+        self.add_item(ConfirmResetButton(store, uid, keys_with_state))
+        self.add_item(CancelResetButton())
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            child.disabled = True
+
+
 # ── Persistent panel view ─────────────────────────────────────────────────────
 
 class PanelView(discord.ui.View):
@@ -203,38 +373,17 @@ class PanelView(discord.ui.View):
         uid = str(interaction.user.id)
         username = str(interaction.user)
 
-        await interaction.response.defer(ephemeral=True)
-
         self._store.get_or_create_user(uid, username)
-        keys = self._store.list_user_keys(uid)
-        active_keys = [k for k in keys if k.get("status") != "revoked"]
+        keys_with_state = self._store.list_user_keys_with_binding_state(uid)
 
-        if not active_keys:
-            embed = discord.Embed(
-                title="❌ No Keys Found",
-                description="You have no license keys. Use **Generate Key** first.",
-                color=0xE74C3C,
-            )
-            await interaction.followup.send(embed=embed, ephemeral=True)
+        if not keys_with_state:
+            embed = _embed_from_payload(build_reset_no_keys_response())
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        # Reset the first active key (most users have exactly one)
-        key_id = active_keys[0]["id"]
-
-        try:
-            self._store.reset_hwid(uid, key_id)
-            payload = build_reset_success_response()
-        except NoActiveBindingError:
-            payload = build_reset_no_binding_response()
-        except ResetLimitError:
-            resets = self._store.get_reset_count_24h(key_id)
-            payload = build_reset_limit_response(resets, MAX_HWID_RESETS_PER_24H)
-        except ActiveKeyWarning as exc:
-            m = re.search(r"(\d+)s ago", str(exc))
-            elapsed = int(m.group(1)) if m else 0
-            payload = build_reset_active_warning_response(elapsed)
-
-        await _respond_ephemeral_payload(interaction, payload, followup=True)
+        embed = _embed_from_payload(build_reset_selector_embed(keys_with_state))
+        view = ResetHwidSelectView(self._store, uid, keys_with_state)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     # ── Redeem Key ────────────────────────────────────────────────────────────
 
