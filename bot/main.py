@@ -80,6 +80,10 @@ async def _build_and_run(token: str) -> None:
     cog = LicensePanelCog(bot, store)
     await bot.add_cog(cog)
 
+    # Start optional license API server in background thread
+    from bot.license_api import maybe_start_api_thread
+    maybe_start_api_thread()
+
     @bot.event
     async def on_ready() -> None:
         log.info("Logged in as %s (id=%s)", bot.user, bot.user.id)

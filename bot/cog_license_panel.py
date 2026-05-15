@@ -40,18 +40,22 @@ from agent.license_panel import (
     build_key_list_response,
     build_not_owner_response,
     build_panel_embed,
+    build_redeem_already_owned_response,
     build_redeem_error_response,
     build_redeem_success_response,
     build_reset_active_warning_response,
     build_reset_limit_response,
+    build_reset_no_binding_response,
     build_reset_success_response,
 )
 from agent.license_store import (
     MAX_HWID_RESETS_PER_24H,
     ActiveKeyWarning,
     BaseLicenseStore,
+    KeyAlreadySelfOwned,
     KeyNotFoundError,
     KeyOwnershipError,
+    NoActiveBindingError,
     ResetLimitError,
     UserLimitError,
 )
@@ -124,6 +128,8 @@ class RedeemModal(discord.ui.Modal, title="Redeem License Key"):
             self._store.get_or_create_user(uid, username)
             masked = self._store.redeem_key_for_user(uid, raw_key)
             payload = build_redeem_success_response(masked)
+        except KeyAlreadySelfOwned as exc:
+            payload = build_redeem_already_owned_response(str(exc))
         except (KeyNotFoundError, KeyOwnershipError, UserLimitError) as exc:
             payload = build_redeem_error_response(str(exc))
 
@@ -218,6 +224,8 @@ class PanelView(discord.ui.View):
         try:
             self._store.reset_hwid(uid, key_id)
             payload = build_reset_success_response()
+        except NoActiveBindingError:
+            payload = build_reset_no_binding_response()
         except ResetLimitError:
             resets = self._store.get_reset_count_24h(key_id)
             payload = build_reset_limit_response(resets, MAX_HWID_RESETS_PER_24H)

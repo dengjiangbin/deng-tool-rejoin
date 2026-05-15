@@ -65,6 +65,12 @@ class KeyNotFoundError(StoreError):
 class KeyOwnershipError(StoreError):
     """Key belongs to a different Discord user."""
 
+class KeyAlreadySelfOwned(StoreError):
+    """Key is already attached to the requesting Discord user."""
+
+class NoActiveBindingError(StoreError):
+    """No active device binding exists for this key; nothing to reset."""
+
 class ResetLimitError(StoreError):
     """HWID reset limit exceeded (5 per 24 hours)."""
 
@@ -138,6 +144,7 @@ class BaseLicenseStore(ABC):
     @abstractmethod
     def reset_hwid(self, discord_user_id: str, key_id: str) -> None:
         """Clear the active device binding for a key.
+        Raises NoActiveBindingError if no active binding exists (nothing to reset).
         Raises ResetLimitError if >= 5 resets in last 24 h.
         Raises ActiveKeyWarning if last heartbeat < 5 minutes ago.
         Raises KeyNotFoundError if key does not exist.
@@ -335,20 +342,24 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         if key_record.get("status") == "revoked":
             raise KeyNotFoundError("This key has been revoked.")
         owner = key_record.get("owner_discord_id")
+        if owner == discord_user_id:
+            # Same user redeeming their own key — already attached
+            raise KeyAlreadySelfOwned(
+                f"This key is already attached to your account ({_mask(normalized)})."
+            )
         if owner and owner != discord_user_id:
             raise KeyOwnershipError("This key belongs to another user.")
         user = self.get_or_create_user(discord_user_id)
-        if not owner:
-            # Key is unowned; check limit before attaching
-            current = self.count_user_keys(discord_user_id)
-            if current >= user.get("max_keys", DEFAULT_MAX_KEYS):
-                raise UserLimitError(
-                    f"You have reached your license key limit ({user.get('max_keys', DEFAULT_MAX_KEYS)})."
-                )
-            db["keys"][key_hash]["owner_discord_id"] = discord_user_id
-            db["keys"][key_hash]["updated_at"] = _utc_now()
-            self._save(db)
-            self.audit_admin_action(discord_user_id, "redeem_key", target_type="key", target_id=key_hash[:8])
+        # Key is unowned; check limit before attaching
+        current = self.count_user_keys(discord_user_id)
+        if current >= user.get("max_keys", DEFAULT_MAX_KEYS):
+            raise UserLimitError(
+                f"You have reached your license key limit ({user.get('max_keys', DEFAULT_MAX_KEYS)})."
+            )
+        db["keys"][key_hash]["owner_discord_id"] = discord_user_id
+        db["keys"][key_hash]["updated_at"] = _utc_now()
+        self._save(db)
+        self.audit_admin_action(discord_user_id, "redeem_key", target_type="key", target_id=key_hash[:8])
         return _mask(normalized)
 
     def list_user_keys(self, discord_user_id: str) -> list[dict[str, Any]]:
@@ -380,6 +391,15 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             raise KeyNotFoundError(f"Key not found: {key_id}")
         if key_record.get("owner_discord_id") != discord_user_id:
             raise KeyOwnershipError("You do not own this key.")
+        # Check for an active device binding FIRST.
+        # If none exists, return without logging a reset or consuming a reset slot.
+        existing_binding = db.get("bindings", {}).get(key_id)
+        if not existing_binding or not existing_binding.get("is_active"):
+            raise NoActiveBindingError(
+                "No device is currently bound to this key. "
+                "Start the tool once to activate your device binding."
+            )
+        # Now check reset count (only counts if there is something to clear)
         resets_24h = self.get_reset_count_24h(key_id)
         if resets_24h >= MAX_HWID_RESETS_PER_24H:
             raise ResetLimitError(
@@ -394,12 +414,10 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 f"This key was active {int(elapsed)}s ago. "
                 "Stop using the tool and wait at least 5 minutes before resetting HWID."
             )
-        old_binding = db["bindings"].get(key_id, {})
-        old_hash = old_binding.get("install_id_hash")
+        old_hash = existing_binding.get("install_id_hash")
         # Deactivate binding
-        if key_id in db["bindings"]:
-            db["bindings"][key_id]["is_active"] = False
-        # Log the reset
+        db["bindings"][key_id]["is_active"] = False
+        # Log the reset (only written when an actual binding is cleared)
         db["reset_logs"].append({
             "key_id": key_id,
             "owner_discord_id": discord_user_id,
@@ -706,25 +724,29 @@ class SupabaseLicenseStore(BaseLicenseStore):
         if record.get("status") == "revoked":
             raise KeyNotFoundError("This key has been revoked.")
         owner = record.get("owner_discord_id")
+        if owner == discord_user_id:
+            raise KeyAlreadySelfOwned(
+                f"This key is already attached to your account ({_mask(normalized)})."
+            )
         if owner and owner != discord_user_id:
             raise KeyOwnershipError("This key belongs to another user.")
-        if not owner:
-            user = self.get_or_create_user(discord_user_id)
-            current = self.count_user_keys(discord_user_id)
-            max_keys = user.get("max_keys", DEFAULT_MAX_KEYS)
-            if current >= max_keys:
-                raise UserLimitError(
-                    f"You have reached your license key limit ({max_keys})."
-                )
-            self._client.table("license_keys").update(
-                {"owner_discord_id": discord_user_id}
-            ).eq("id", key_hash).execute()
-            self.audit_admin_action(
-                discord_user_id,
-                "redeem_key",
-                target_type="key",
-                target_id=key_hash[:8],
+        # Key is unowned; check limit before attaching
+        user = self.get_or_create_user(discord_user_id)
+        current = self.count_user_keys(discord_user_id)
+        max_keys = user.get("max_keys", DEFAULT_MAX_KEYS)
+        if current >= max_keys:
+            raise UserLimitError(
+                f"You have reached your license key limit ({max_keys})."
             )
+        self._client.table("license_keys").update(
+            {"owner_discord_id": discord_user_id}
+        ).eq("id", key_hash).execute()
+        self.audit_admin_action(
+            discord_user_id,
+            "redeem_key",
+            target_type="key",
+            target_id=key_hash[:8],
+        )
         return _mask(normalized)
 
     def list_user_keys(self, discord_user_id: str) -> list[dict[str, Any]]:
@@ -771,6 +793,20 @@ class SupabaseLicenseStore(BaseLicenseStore):
             raise KeyNotFoundError(f"Key not found: {key_id}")
         if res.data[0].get("owner_discord_id") != discord_user_id:
             raise KeyOwnershipError("You do not own this key.")
+        # Check for active binding BEFORE counting resets.
+        # No active binding → nothing to clear; do not consume a reset slot.
+        b_res = (
+            self._client.table("device_bindings")
+            .select("install_id_hash, is_active")
+            .eq("key_id", key_id)
+            .execute()
+        )
+        binding_row = b_res.data[0] if b_res.data else None
+        if not binding_row or not binding_row.get("is_active"):
+            raise NoActiveBindingError(
+                "No device is currently bound to this key. "
+                "Start the tool once to activate your device binding."
+            )
         resets_24h = self.get_reset_count_24h(key_id)
         if resets_24h >= MAX_HWID_RESETS_PER_24H:
             raise ResetLimitError(
@@ -784,13 +820,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 f"This key was active {int(elapsed)}s ago. "
                 "Stop using the tool and wait at least 5 minutes before resetting HWID."
             )
-        b_res = (
-            self._client.table("device_bindings")
-            .select("install_id_hash")
-            .eq("key_id", key_id)
-            .execute()
-        )
-        old_hash = b_res.data[0].get("install_id_hash") if b_res.data else None
+        old_hash = binding_row.get("install_id_hash")
         self._client.table("device_bindings").update(
             {"is_active": False}
         ).eq("key_id", key_id).execute()

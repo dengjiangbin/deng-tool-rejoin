@@ -277,18 +277,52 @@ def build_key_list_response(key_records: list[dict]) -> dict[str, Any]:
                 "expired": "\U0001f534",
                 "revoked": "\u26ab",
             }.get(rec.get("status", ""), "\u26aa")
+            device = rec.get("bound_device") or "(unbound)"
+            last_seen = rec.get("last_seen_at")
+            last_seen_str = f"\n   \u23f1 Last seen: `{last_seen}`" if last_seen else ""
+            bound_icon = "\U0001f4f1" if device != "(unbound)" else "\U0001f534"
             lines.append(
-                f"{status_icon} `{rec.get('masked_key', '???')}` — "
-                f"{rec.get('status', 'unknown')} "
-                f"| Device: {rec.get('bound_device', 'unbound')}"
+                f"{status_icon} `{rec.get('masked_key', '???')}` "
+                f"— {rec.get('status', 'unknown')}\n"
+                f"   {bound_icon} Device: {device}{last_seen_str}"
             )
-        description = "\n".join(lines)
+        description = "\n\n".join(lines)
     return {
         "ephemeral": True,
         "embed": {
             "title": "\U0001f4cb Your License Keys",
             "color": 0x2F80ED,
             "description": description,
+            "footer": {"text": "Use Reset HWID to unbind a device. Keys shown are masked for security."},
+        },
+    }
+
+
+def build_reset_no_binding_response() -> dict[str, Any]:
+    """Ephemeral embed when Reset HWID is attempted but no device is bound."""
+    return {
+        "ephemeral": True,
+        "embed": {
+            "title": "\u26a0\ufe0f No Device Bound",
+            "color": 0xF39C12,
+            "description": (
+                "No device is currently bound to your key.\n"
+                "Start the tool once on your device to activate the binding, "
+                "then you can reset it here if needed.\n\n"
+                "_This does not count against your 5 daily HWID resets._"
+            ),
+        },
+    }
+
+
+def build_redeem_already_owned_response(message: str) -> dict[str, Any]:
+    """Ephemeral embed when a user tries to redeem their own already-attached key."""
+    return {
+        "ephemeral": True,
+        "embed": {
+            "title": "\u2139\ufe0f Key Already Attached",
+            "color": 0x2F80ED,
+            "description": message,
         },
     }
 
