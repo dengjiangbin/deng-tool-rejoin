@@ -24,7 +24,7 @@ DENG Tool: Rejoin helps open, reopen, and reconnect the Roblox Android app
 
 What you need before Start
 --------------------------
-- A valid license key (from the DENG Tool: Rejoin Key Panel in Discord).
+- A valid license key (from the DENG Tool: Rejoin Panel in Discord).
 - At least one Roblox package chosen in setup (often auto-detected).
 - Optional: a private server or game link if you want direct join.
 
@@ -112,7 +112,7 @@ def print_beginner_license_gate_help(*, show_hwid_footer: bool = True) -> None:
     print("You need a DENG Tool: Rejoin license key before using Start.")
     print()
     print("What to do:")
-    print("  1. Get your key from the DENG Tool: Rejoin Key Panel.")
+    print("  1. Get your key from the DENG Tool: Rejoin Panel.")
     print('  2. Choose Enter / Update License Key (main menu option 1).')
     print("  3. Paste your key.")
     print("  4. Run First Time Setup Config (option 2).")
@@ -128,7 +128,7 @@ def print_beginner_menu_license_prompt() -> None:
     print("You need a DENG Tool: Rejoin license key before using Start.")
     print()
     print("What to do:")
-    print("  1. Get your key from the DENG Tool: Rejoin Key Panel.")
+    print("  1. Get your key from the DENG Tool: Rejoin Panel.")
     print('  2. Choose Enter / Update License Key (you are here).')
     print("  3. Paste your key below when prompted.")
     print("  4. Run First Time Setup Config (main menu option 2).")

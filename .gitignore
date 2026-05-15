@@ -13,6 +13,7 @@ htmlcov/
 
 config.json
 data/
+!data/rejoin_versions.json
 logs/
 run/
 backups/

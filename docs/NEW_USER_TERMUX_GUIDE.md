@@ -4,6 +4,8 @@ Copy and paste into Termux (long-press the terminal, tap **Paste**, then press *
 
 If you are lost inside the tool, open **New User Help** (main menu option **5**).
 
+Public installs should use **DENG Tool: Rejoin Panel** in Discord → **Select Version** → copy **Mobile Copy** (not the `main` branch).
+
 ---
 
 ## 1. Download Termux
@@ -40,7 +42,7 @@ Update packages:
 pkg update -y && pkg upgrade -y
 ```
 
-Optional (the installer can install these too):
+Optional (helpful before pasting a long install line):
 
 ```sh
 pkg install -y curl git python sqlite
@@ -48,21 +50,37 @@ pkg install -y curl git python sqlite
 
 ---
 
-## 4. Install DENG Tool: Rejoin
+## 4. Open DENG Tool: Rejoin Panel in Discord
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh -o install.sh && bash install.sh
-```
-
-Wget alternative:
-
-```sh
-wget -O install.sh https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh && bash install.sh
-```
+In your Discord server, open the **DENG Tool: Rejoin Panel** message (license keys + install).
 
 ---
 
-## 5. Open DENG Tool: Rejoin
+## 5. Click Select Version
+
+Press **Select Version** on the panel.
+
+---
+
+## 6. Choose recommended Stable version
+
+Pick the version marked **Stable** (recommended when shown).
+
+---
+
+## 7. Copy Mobile Copy command
+
+Copy the **Mobile Copy** block (same text as **Desktop Copy** if you prefer).
+
+---
+
+## 8. Paste into Termux
+
+Paste the command at the `$` prompt and press **Enter**.
+
+---
+
+## 9. Run deng-rejoin
 
 ```sh
 deng-rejoin
@@ -72,21 +90,21 @@ If the command is not found: close Termux fully, open it again, or run `source ~
 
 ---
 
-## 6. Enter License Key
+## 10. Enter license key
 
 In the menu, choose **1 — Enter / Update License Key**.
 
-Paste your key from the **DENG Tool: Rejoin Key Panel** (Discord).
+Paste your key from the **DENG Tool: Rejoin Panel** (Discord).
 
 ---
 
-## 7. First Time Setup
+## 11. Choose First Time Setup Config
 
 Choose **2 — First Time Setup Config** and follow the prompts on screen.
 
 ---
 
-## 8. Start
+## 12. Choose Start
 
 Choose **4 — Start**.
 
@@ -94,7 +112,7 @@ Choose **4 — Start**.
 
 ## More reading
 
-- [Public install guide](PUBLIC_INSTALL.md)
+- [Public install guide](PUBLIC_INSTALL.md) (developers / advanced paths only in later sections)
 - [Public user guide](PUBLIC_USER_GUIDE.md)
 
 Repository: [https://github.com/dengjiangbin/deng-tool-rejoin](https://github.com/dengjiangbin/deng-tool-rejoin)

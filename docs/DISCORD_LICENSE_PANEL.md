@@ -2,7 +2,7 @@
 
 ## Overview
 
-The license panel is a **persistent Discord embed** with 4 interactive buttons, posted in a designated channel.  It is self-service: users can generate, reset, redeem keys, or open **Key Stats** without pinging an admin.
+The license panel is a **persistent Discord embed** with 5 interactive buttons, posted in a designated channel.  It is self-service: users can generate, reset, redeem keys, open **Key Stats**, or choose a **tagged install** with **Select Version** without pinging an admin.
 
 All button response flows are **ephemeral** — only the clicking user sees the response.
 
@@ -10,7 +10,7 @@ All button response flows are **ephemeral** — only the clicking user sees the 
 
 ## Panel Embed
 
-**Title**: `DENG Tool: Rejoin Key Panel`  
+**Title**: `DENG Tool: Rejoin Panel`  
 **Color**: Brand blue (`#2F80ED`)
 
 | Field | Purpose |
@@ -19,16 +19,18 @@ All button response flows are **ephemeral** — only the clicking user sees the 
 | ♻️ Reset HWID | Unbind current device (max 5/24h) |
 | 🎟️ Redeem Key | Attach an existing key to your account |
 | 📊 Key Stats | Private list of your keys, pagination, **Download Keys** (text file) |
+| 📌 Select Version | Ephemeral picker → copy **Desktop Copy** / **Mobile Copy** install command (`refs/tags/…`) |
 
 ---
 
-## Button Custom IDs
+## Button custom IDs
 
 ```python
 BUTTON_GENERATE   = "license_panel:generate"
 BUTTON_RESET_HWID = "license_panel:reset_hwid"
 BUTTON_REDEEM     = "license_panel:redeem"
 BUTTON_KEY_STATS  = "license_panel:key_stats"
+BUTTON_SELECT_VERSION = "license_panel:select_version"
 ```
 
 Ephemeral **Key Stats** navigation uses these `custom_id`s (not persistent views):

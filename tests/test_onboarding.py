@@ -116,7 +116,7 @@ class StartBeginnerMessageTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         text = out.getvalue()
         self.assertIn("No License Key Found", text)
-        self.assertIn("Key Panel", text)
+        self.assertIn("Rejoin Panel", text)
 
     def test_no_package_selected_message(self):
         cfg = validate_config(default_config())

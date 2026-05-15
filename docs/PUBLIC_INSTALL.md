@@ -5,11 +5,12 @@
 1. Download Termux  
 2. Configure Root & Termux (grant Termux superuser in Magisk / Kitsune / KernelSU / LSPosed / Root Permission when you use those; otherwise skip)  
 3. Prepare Termux (`pkg update` / `pkg upgrade`, optional `pkg install`)  
-4. Install DENG Tool: Rejoin (curl or wget `install.sh` — see below)  
-5. Open DENG Tool: Rejoin (`deng-rejoin`)  
-6. Enter License Key (menu **1**)  
-7. First Time Setup (menu **2**)  
-8. Start (menu **4**)  
+4. Open **DENG Tool: Rejoin Panel** in Discord → **Select Version** → choose a **Stable** release → copy **Mobile Copy**  
+5. Paste into Termux and run (uses `DENG_REJOIN_INSTALL_REF` with a tagged `install.sh`)  
+6. Open DENG Tool: Rejoin (`deng-rejoin`)  
+7. Enter License Key (menu **1**)  
+8. First Time Setup (menu **2**)  
+9. Start (menu **4**)  
 
 ## Prepare First
 
@@ -17,7 +18,7 @@
 2. Termux installed.
 3. Roblox or a Roblox-compatible **clone** client APK installed.
 4. Internet connection.
-5. A valid **DENG Tool: Rejoin license key** from your Discord Key Panel.
+5. A valid **DENG Tool: Rejoin license key** from **DENG Tool: Rejoin Panel** in Discord.
 6. Termux storage permission (the installer may prompt).
 7. Optional root permission for stronger restart and cache cleanup.
 8. Optional Termux:Boot for start after reboot.
@@ -25,16 +26,28 @@
 
 DENG never asks for Roblox password, cookies, `.ROBLOSECURITY`, session tokens, or 2FA codes.
 
-## Install With curl
+## Public install (Discord — recommended)
+
+1. Open **DENG Tool: Rejoin Panel** in your Discord server.
+2. Click **Select Version**.
+3. Choose a **Stable** release (recommended when shown).
+4. Copy **Mobile Copy** (same text as Desktop Copy if you prefer).
+5. Paste into Termux and run the command once.
+
+The command from the panel sets `DENG_REJOIN_INSTALL_REF` and downloads `install.sh` from `refs/tags/<version>` so the install matches that release.
+
+## Advanced: manual tagged install (same as panel)
+
+Replace `v1.0.0` with a version that exists on GitHub (or appears in your server’s version list):
+
+```sh
+DENG_REJOIN_INSTALL_REF=refs/tags/v1.0.0 curl -fsSL https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/refs/tags/v1.0.0/install.sh -o install.sh && DENG_REJOIN_INSTALL_REF=refs/tags/v1.0.0 bash install.sh
+```
+
+### Developers / testing only (`main` branch)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh -o install.sh && bash install.sh
-```
-
-## Install With wget
-
-```sh
-wget -O install.sh https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh && bash install.sh
 ```
 
 ## Start
@@ -79,17 +92,9 @@ Install/open Termux:Boot once, disable battery optimization if possible, reboot,
 deng-rejoin-status
 ```
 
-## Update
+## Reinstall or move to another release (public)
 
-```sh
-deng-rejoin-update
-```
-
-Fallback:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh -o install.sh && bash install.sh
-```
+Use **DENG Tool: Rejoin Panel** → **Select Version** again, copy **Mobile Copy**, and run it in Termux. Do **not** use the moving `main` branch as your normal upgrade path.
 
 ## Reset
 

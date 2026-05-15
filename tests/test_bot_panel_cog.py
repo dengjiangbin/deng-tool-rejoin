@@ -129,14 +129,14 @@ class TestOwnerIds(unittest.TestCase):
             self.assertFalse(_is_owner(user))
 
 
-class TestPanelViewFourButtons(unittest.TestCase):
-    """Panel exposes Generate, Reset HWID, Redeem, Key Stats (order)."""
+class TestPanelViewFiveButtons(unittest.TestCase):
+    """Panel exposes five persistent controls."""
 
-    def test_panel_view_has_four_children(self) -> None:
+    def test_panel_view_has_five_children(self) -> None:
         with TemporaryDirectory() as tmp:
             store = _make_store(tmp)
             view = PanelView(store)
-            self.assertEqual(len(view.children), 4)
+            self.assertEqual(len(view.children), 5)
 
 
 # ── PanelView — Generate Key ──────────────────────────────────────────────────

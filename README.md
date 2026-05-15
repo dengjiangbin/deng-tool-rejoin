@@ -18,31 +18,33 @@ pkg update -y && pkg upgrade -y
 pkg install -y curl git python sqlite
 ```
 
-4. **Install DENG Tool: Rejoin**:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh -o install.sh && bash install.sh
-```
-
-Wget alternative:
-
-```sh
-wget -O install.sh https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh && bash install.sh
-```
-
-5. **Open DENG Tool: Rejoin**:
+4. **Open DENG Tool: Rejoin Panel** (Discord) → **Select Version** → choose a **Stable** release → copy **Mobile Copy**.
+5. **Paste** that command into Termux and run it (it sets `DENG_REJOIN_INSTALL_REF` so the install matches the selected tag).
+6. **Open DENG Tool: Rejoin**:
 
 ```sh
 deng-rejoin
 ```
 
-6. **Enter License Key** — Menu option **1**.
-7. **First Time Setup** — Menu option **2** (full label: First Time Setup Config).
-8. **Start** — Menu option **4**.
+7. **Enter License Key** — Menu option **1**.
+8. **First Time Setup** — Menu option **2** (full label: First Time Setup Config).
+9. **Start** — Menu option **4**.
 
 The main menu also shows **Setup Status** and **New User Help** (option **5**).
 
 **Beginner walkthrough:** [docs/NEW_USER_TERMUX_GUIDE.md](docs/NEW_USER_TERMUX_GUIDE.md)
+
+### Developers / testing only
+
+Installing from the moving `main` branch is **not** the normal public path (see Discord **Select Version**):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh -o install.sh && bash install.sh
+```
+
+### Release manifest (repo owners)
+
+Optional entries in `data/rejoin_versions.json` plus GitHub tags power the panel list. Env: `REJOIN_VERSIONS_MANIFEST`, `REJOIN_PUBLIC_BETA`, `REJOIN_ADMIN_SHOW_DEV`.
 
 ## What To Prepare
 
@@ -155,7 +157,8 @@ It does not automate gameplay, auto farm, run gameplay macros, bypass AFK system
 ## GitHub
 
 - Repo: https://github.com/dengjiangbin/deng-tool-rejoin
-- Raw installer: https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh
+- Public installs should use **Discord → DENG Tool: Rejoin Panel → Select Version** (raw `install.sh` per release tag, with `DENG_REJOIN_INSTALL_REF`).
+- Raw `main` installer (development only): https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh
 
 ## More Docs
 

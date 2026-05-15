@@ -7,6 +7,7 @@ BRANCH="main"
 REMOTE="https://github.com/${OWNER}/${REPO}.git"
 RAW_INSTALL_URL="https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/install.sh"
 APP_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"
+INSTALL_REF="${DENG_REJOIN_INSTALL_REF:-}"
 
 pink() {
   printf '\033[95m%s\033[0m\n' "$1"
@@ -71,8 +72,22 @@ find_source() {
 
   local tmp
   tmp="$(mktemp -d "${TMPDIR:-/data/data/com.termux/files/usr/tmp}/deng-rejoin.XXXXXX")"
-  echo "Cloning ${REMOTE}..." >&2
-  git clone --depth 1 --branch "$BRANCH" "$REMOTE" "$tmp/repo"
+  if [ -n "${INSTALL_REF}" ]; then
+    echo "Cloning ${REMOTE} at ${INSTALL_REF}..." >&2
+    clone_branch="${INSTALL_REF}"
+    if [[ "${INSTALL_REF}" == refs/tags/* ]]; then
+      clone_branch="${INSTALL_REF#refs/tags/}"
+    fi
+    if git clone --depth 1 --branch "${clone_branch}" "$REMOTE" "$tmp/repo" 2>/dev/null; then
+      :
+    else
+      git clone "$REMOTE" "$tmp/repo" || die "git clone failed"
+      git -C "$tmp/repo" checkout --detach "${INSTALL_REF}" || die "git checkout ${INSTALL_REF} failed"
+    fi
+  else
+    echo "Cloning ${REMOTE} (branch ${BRANCH})..." >&2
+    git clone --depth 1 --branch "$BRANCH" "$REMOTE" "$tmp/repo"
+  fi
   echo "$tmp/repo"
 }
 
@@ -80,7 +95,7 @@ install_files() {
   local source_dir="$1"
   mkdir -p "$HOME/.deng-tool" "$APP_HOME" "$APP_HOME/data" "$APP_HOME/logs" "$APP_HOME/run" "$APP_HOME/launcher"
 
-  for name in agent scripts docs examples tests VERSION README.md SECURITY.md INSTALL_TERMUX.md install.sh .gitignore; do
+  for name in agent data scripts docs examples tests VERSION README.md SECURITY.md INSTALL_TERMUX.md install.sh .gitignore; do
     if [ -e "$source_dir/$name" ]; then
       rm -rf "$APP_HOME/$name"
       cp -R "$source_dir/$name" "$APP_HOME/$name"
@@ -174,18 +189,14 @@ main() {
   echo
   echo "Install complete."
   echo
-  echo "Next steps (beginner order — full text in docs/NEW_USER_TERMUX_GUIDE.md):"
-  echo "  1. Download Termux"
-  echo "  2. Configure Root & Termux (Magisk/Kitsune/KernelSU/LSPosed/Root Permission → Superuser → allow Termux; else skip)"
-  echo "  3. Prepare Termux (pkg update/upgrade — this installer already updated packages)"
-  echo "  4. Install DENG Tool: Rejoin (done)"
-  echo "  5. Open: deng-rejoin"
-  echo "  6. Enter License Key (menu 1)"
-  echo "  7. First Time Setup (menu 2)"
-  echo "  8. Start (menu 4)"
+  echo "Next steps:"
+  echo "  1. Run: deng-rejoin"
+  echo "  2. Enter License Key (menu 1) — key from **DENG Tool: Rejoin Panel** in Discord"
+  echo "  3. First Time Setup Config (menu 2)"
+  echo "  4. Start (menu 4)"
   echo
-  echo "Beginner guide file:"
-  echo "  $APP_HOME/docs/NEW_USER_TERMUX_GUIDE.md"
+  echo "On another device, open the same panel → **Select Version** → **Mobile Copy** (see docs/NEW_USER_TERMUX_GUIDE.md)."
+  echo "Full walkthrough: $APP_HOME/docs/NEW_USER_TERMUX_GUIDE.md"
 }
 
 main "$@"

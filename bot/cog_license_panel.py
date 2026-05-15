@@ -14,7 +14,7 @@ Button handlers
   Generate Key   (custom_id = "license_panel:generate")
   Reset HWID     (custom_id = "license_panel:reset_hwid")
   Redeem Key     (custom_id = "license_panel:redeem")
-  Key Stats      (custom_id = "license_panel:key_stats")
+  Select Version (custom_id = "license_panel:select_version")
 
 All button flows are EPHEMERAL.  The panel embed itself is public (pinned-style).
 """
@@ -38,6 +38,7 @@ from agent.license_panel import (
     BUTTON_KEY_STATS,
     BUTTON_REDEEM,
     BUTTON_RESET_HWID,
+    BUTTON_SELECT_VERSION,
     SLASH_GROUP,
     build_generate_limit_response,
     build_generate_success_response,
@@ -54,6 +55,12 @@ from agent.license_panel import (
     build_reset_no_keys_response,
     build_reset_selector_embed,
     build_reset_success_response,
+)
+from agent.rejoin_versions import (
+    NO_PUBLIC_VERSIONS_MESSAGE,
+    RejoinVersionInfo,
+    format_install_instructions_plain,
+    list_public_rejoin_versions,
 )
 from agent.license_store import (
     MAX_HWID_RESETS_PER_24H,
@@ -565,10 +572,56 @@ class KeyStatsView(discord.ui.View):
             child.disabled = True
 
 
+def _admin_dev_versions_enabled(user: discord.User | discord.Member) -> bool:
+    """Owners may see dev/beta channels when env allows (default on)."""
+    if not _is_owner(user):
+        return False
+    raw = (os.environ.get("REJOIN_ADMIN_SHOW_DEV") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+# ── Select Version (install from tagged ref) ────────────────────────────────
+
+
+class VersionPickSelect(discord.ui.Select):
+    """Dropdown of public Rejoin versions; sends copy/paste install command."""
+
+    def __init__(self, versions: list[RejoinVersionInfo]) -> None:
+        self._by_ver = {v.version: v for v in versions}
+        opts: list[discord.SelectOption] = []
+        for v in versions[:25]:
+            desc = (v.description or "").strip()[:100] or None
+            opts.append(
+                discord.SelectOption(
+                    label=v.label[:100],
+                    value=v.version[:100],
+                    description=desc,
+                )
+            )
+        super().__init__(
+            placeholder="Choose a version…",
+            min_values=1,
+            max_values=1,
+            options=opts,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        ver = self.values[0]
+        info = self._by_ver[ver]
+        text = format_install_instructions_plain(info)
+        await interaction.response.send_message(content=text, ephemeral=True)
+
+
+class VersionPickView(discord.ui.View):
+    def __init__(self, versions: list[RejoinVersionInfo]) -> None:
+        super().__init__(timeout=300)
+        self.add_item(VersionPickSelect(versions))
+
+
 # ── Persistent panel view ─────────────────────────────────────────────────────
 
 class PanelView(discord.ui.View):
-    """Persistent view with Generate / Reset HWID / Redeem / Key Stats buttons.
+    """Persistent view: license buttons + Select Version (tagged install).
 
     timeout=None keeps the view alive across bot restarts when registered
     via ``bot.add_view(view, message_id=<id>)``.
@@ -673,6 +726,33 @@ class PanelView(discord.ui.View):
         view = KeyStatsView(self._store, uid, page)
         await interaction.followup.send(
             content=content, embeds=embeds, view=view, ephemeral=True
+        )
+
+    @discord.ui.button(
+        label="Select Version",
+        style=discord.ButtonStyle.primary,
+        custom_id=BUTTON_SELECT_VERSION,
+        emoji="\U0001f4e6",
+        row=1,
+    )
+    async def btn_select_version(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        include_dev = _admin_dev_versions_enabled(interaction.user)
+        versions = list_public_rejoin_versions(include_dev_for_admin=include_dev)
+        if not versions:
+            await interaction.response.send_message(
+                NO_PUBLIC_VERSIONS_MESSAGE,
+                ephemeral=True,
+            )
+            return
+        view = VersionPickView(versions)
+        await interaction.response.send_message(
+            "Pick a version, then copy the install command into Termux:",
+            view=view,
+            ephemeral=True,
         )
 
 

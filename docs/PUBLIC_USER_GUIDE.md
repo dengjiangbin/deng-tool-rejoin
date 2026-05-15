@@ -15,11 +15,12 @@ See **[NEW_USER_TERMUX_GUIDE.md](NEW_USER_TERMUX_GUIDE.md)** for the full short 
 1. **Download Termux**
 2. **Configure Root & Termux** — Magisk / Kitsune / KernelSU / LSPosed / Root Permission → **Superuser** → allow **Termux** (skip if not applicable or Termux not listed)
 3. **Prepare Termux** — `pkg update -y && pkg upgrade -y` (optional `pkg install` for curl, git, python, sqlite)
-4. **Install DENG Tool: Rejoin** — run `install.sh` from [PUBLIC_INSTALL.md](PUBLIC_INSTALL.md)
-5. **Open DENG Tool: Rejoin** — `deng-rejoin`
-6. **Enter License Key** — menu **1**
-7. **First Time Setup** — menu **2** (First Time Setup Config)
-8. **Start** — menu **4**
+4. **DENG Tool: Rejoin Panel** — **Select Version** → **Stable** → copy **Mobile Copy**
+5. **Paste** the install command into Termux
+6. **Open DENG Tool: Rejoin** — `deng-rejoin`
+7. **Enter License Key** — menu **1**
+8. **First Time Setup** — menu **2** (First Time Setup Config)
+9. **Start** — menu **4**
 
 Use **New User Help** (menu **5**) if you need on-device hints.
 
@@ -126,7 +127,7 @@ Verification happens when you use that option and again when you **Start** (opti
 - If the key is missing or invalid, you stay on the license prompt until you fix it or exit.
 - If the key is bound to another device, you see **Reset HWID** guidance for Discord.
 
-In Discord, open **DENG Tool: Rejoin Key Panel** in your server: **Generate Key**, **Redeem Key**, **Reset HWID**, and **Key Stats**. By default you get **one key** per Discord account; it binds to **one device** until you **Reset HWID**. **Key Stats** and **Download Keys** are private; **Used** means an active device binding, **Unused** means none. With export storage enabled (**LICENSE_KEY_EXPORT_SECRET** + migration `002`), those views show the **full key**; older keys can use **Recover Full Key** or redeem the same key again once.
+In Discord, open **DENG Tool: Rejoin Panel** in your server: **Generate Key**, **Redeem Key**, **Reset HWID**, **Key Stats**, and **Select Version** (install command). By default you get **one key** per Discord account; it binds to **one device** until you **Reset HWID**. **Key Stats** and **Download Keys** are private; **Used** means an active device binding, **Unused** means none. With export storage enabled (**LICENSE_KEY_EXPORT_SECRET** + migration `002`), those views show the **full key**; older keys can use **Recover Full Key** or redeem the same key again once.
 
 If the tool reports the key is already bound to another device, use **Reset HWID** in the panel (respect cooldowns), then try again on the new device.
 

@@ -18,6 +18,7 @@ Button custom IDs (use these as constants in your button handler):
     BUTTON_RESET_HWID = "license_panel:reset_hwid"
     BUTTON_REDEEM     = "license_panel:redeem"
     BUTTON_KEY_STATS  = "license_panel:key_stats"
+    BUTTON_SELECT_VERSION = "license_panel:select_version"
 
 All button response flows are EPHEMERAL — only the clicking user sees the result.
 
@@ -35,6 +36,7 @@ BUTTON_GENERATE   = "license_panel:generate"
 BUTTON_RESET_HWID = "license_panel:reset_hwid"
 BUTTON_REDEEM     = "license_panel:redeem"
 BUTTON_KEY_STATS  = "license_panel:key_stats"
+BUTTON_SELECT_VERSION = "license_panel:select_version"
 
 # ── Slash command names ────────────────────────────────────────────────────────
 
@@ -57,17 +59,18 @@ def build_panel_embed() -> dict[str, Any]:
 
     Structure
     ─────────
-    • Title  : "DENG Tool: Rejoin Key Panel"
+    • Title  : "DENG Tool: Rejoin Panel"
     • Color  : 0x2F80ED (brand blue)
-    • Fields : 4 instruction cards — Generate, Reset HWID, Redeem, Key Stats
+    • Fields : 5 instruction cards — Generate, Reset HWID, Redeem, Key Stats, Select Version
     • Footer : "DENG Tool · All responses are private"
     """
     return {
-        "title": "DENG Tool: Rejoin Key Panel",
+        "title": "DENG Tool: Rejoin Panel",
         "color": 0x2F80ED,
         "description": (
-            "Use the buttons below to manage your license key.\n"
-            "All responses are **private** — only you will see them."
+            "Generate or redeem your license key, reset your device binding, "
+            "and choose which DENG Tool: Rejoin version to install.\n"
+            "All key-related responses are **private** — only you will see them."
         ),
         "fields": [
             {
@@ -131,11 +134,11 @@ def build_panel_buttons() -> list[dict[str, Any]]:
     """
     return [
         {
-            "type": 1,       # ACTION_ROW
+            "type": 1,
             "components": [
                 {
-                    "type": 2,           # BUTTON
-                    "style": 1,          # PRIMARY (blurple)
+                    "type": 2,
+                    "style": 1,
                     "label": "Generate Key",
                     "custom_id": BUTTON_GENERATE,
                     "emoji": {"name": "\U0001f511"},
@@ -143,7 +146,7 @@ def build_panel_buttons() -> list[dict[str, Any]]:
                 },
                 {
                     "type": 2,
-                    "style": 2,          # SECONDARY (grey)
+                    "style": 2,
                     "label": "Reset HWID",
                     "custom_id": BUTTON_RESET_HWID,
                     "emoji": {"name": "\u267b\ufe0f"},
@@ -151,7 +154,7 @@ def build_panel_buttons() -> list[dict[str, Any]]:
                 },
                 {
                     "type": 2,
-                    "style": 3,          # SUCCESS (green)
+                    "style": 3,
                     "label": "Redeem Key",
                     "custom_id": BUTTON_REDEEM,
                     "emoji": {"name": "\U0001f39f\ufe0f"},
@@ -159,10 +162,18 @@ def build_panel_buttons() -> list[dict[str, Any]]:
                 },
                 {
                     "type": 2,
-                    "style": 2,          # SECONDARY
+                    "style": 2,
                     "label": "Key Stats",
                     "custom_id": BUTTON_KEY_STATS,
                     "emoji": {"name": "\U0001f4ca"},
+                    "disabled": False,
+                },
+                {
+                    "type": 2,
+                    "style": 1,
+                    "label": "Select Version",
+                    "custom_id": BUTTON_SELECT_VERSION,
+                    "emoji": {"name": "\U0001f4e6"},
                     "disabled": False,
                 },
             ],

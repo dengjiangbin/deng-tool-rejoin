@@ -5,8 +5,9 @@ import unittest
 from agent.license_panel import (
     BUTTON_GENERATE,
     BUTTON_KEY_STATS,
-    BUTTON_RESET_HWID,
     BUTTON_REDEEM,
+    BUTTON_RESET_HWID,
+    BUTTON_SELECT_VERSION,
     SLASH_GROUP,
     build_generate_limit_response,
     build_generate_success_response,
@@ -29,7 +30,7 @@ class PanelEmbedTests(unittest.TestCase):
     def test_panel_embed_title(self):
         """Test 31 – embed title is correct."""
         embed = build_panel_embed()
-        self.assertEqual(embed["title"], "DENG Tool: Rejoin Key Panel")
+        self.assertEqual(embed["title"], "DENG Tool: Rejoin Panel")
 
     def test_panel_embed_has_four_fields(self):
         """Test 32 – embed has exactly 4 instruction fields."""
@@ -54,13 +55,13 @@ class PanelEmbedTests(unittest.TestCase):
 class PanelButtonTests(unittest.TestCase):
     """Test 34-36: panel buttons structure."""
 
-    def test_panel_has_four_buttons(self):
-        """Test 34 – action row contains exactly 4 buttons."""
+    def test_panel_has_five_buttons(self):
+        """Test 34 – action row contains five buttons (incl. Select Version)."""
         components = build_panel_buttons()
         self.assertEqual(len(components), 1)
         row = components[0]
         self.assertEqual(row["type"], 1)
-        self.assertEqual(len(row["components"]), 4)
+        self.assertEqual(len(row["components"]), 5)
 
     def test_button_custom_ids(self):
         """Test 35 – button custom_ids match constants."""
@@ -68,7 +69,13 @@ class PanelButtonTests(unittest.TestCase):
         ids = [btn["custom_id"] for btn in components[0]["components"]]
         self.assertEqual(
             ids,
-            [BUTTON_GENERATE, BUTTON_RESET_HWID, BUTTON_REDEEM, BUTTON_KEY_STATS],
+            [
+                BUTTON_GENERATE,
+                BUTTON_RESET_HWID,
+                BUTTON_REDEEM,
+                BUTTON_KEY_STATS,
+                BUTTON_SELECT_VERSION,
+            ],
         )
 
     def test_buttons_not_disabled_by_default(self):
