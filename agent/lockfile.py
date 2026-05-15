@@ -37,7 +37,10 @@ def is_process_alive(pid: int) -> bool:
         return False
     except PermissionError:
         return True
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        if os.name == "nt" and isinstance(exc, OSError) and getattr(exc, "winerror", None) == 87:
+            # Invalid parameter / non-existent PID — avoid tasklist hang on fake huge PIDs in tests.
+            return False
         if os.name == "nt":
             result = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],

@@ -2049,3 +2049,7 @@ def _handlers() -> dict[str, Any]:
         "enable-boot": cmd_enable_boot,
         "update": cmd_update,
     }
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
