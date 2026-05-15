@@ -1,4 +1,4 @@
-"""Tests for first-run license gate before the main menu and remote check UX."""
+"""Tests for license UX with the main menu and remote check for Start."""
 
 from __future__ import annotations
 
@@ -12,33 +12,33 @@ from agent import commands
 
 
 def _args(*, no_color: bool = False) -> argparse.Namespace:
-    return argparse.Namespace(no_color=no_color)
+    return argparse.Namespace(no_color=no_color, verbose=False, debug=False)
 
 
 class LicenseGateMenuTests(unittest.TestCase):
-    def test_invalid_remote_license_does_not_show_main_menu(self):
+    def test_unverified_remote_license_still_shows_main_menu(self):
         cfg = commands.validate_config(commands.default_config())
         cfg["license"]["key"] = commands.validate_license_key("DENG-AAAA-BBBB-CCCC-DDDD")
+        cfg["license"]["last_status"] = "not_found"
 
         out = io.StringIO()
         with unittest.mock.patch("agent.commands.load_config", return_value=cfg), \
-             unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c), \
-             unittest.mock.patch("agent.commands._ensure_install_id_saved", side_effect=lambda c: c), \
+             unittest.mock.patch("agent.menu.load_config", return_value=cfg), \
              unittest.mock.patch("agent.commands.keystore.DEV_MODE", False), \
-             unittest.mock.patch(
-                 "agent.commands._remote_license_run_check",
-                 return_value=("not_found", "Key not found."),
-             ), \
+             unittest.mock.patch("agent.menu.keystore.DEV_MODE", False), \
              unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
-             unittest.mock.patch("builtins.input", side_effect=["2"]), \
+             unittest.mock.patch("agent.menu._is_interactive", return_value=True), \
+             unittest.mock.patch("builtins.input", side_effect=["0"]), \
              redirect_stdout(out):
             rc = commands.cmd_menu(_args(no_color=True))
 
-        self.assertEqual(rc, 1)
+        self.assertEqual(rc, 0)
         text = out.getvalue()
-        self.assertNotIn("Choose option:", text)
-        self.assertNotIn("First Time Setup Config", text)
-        self.assertIn("ERROR:", text)
+        self.assertIn("Menu:", text)
+        self.assertIn("First Time Setup Config", text)
+        self.assertIn("Enter / Update License Key", text)
+        self.assertIn("Setup Status", text)
+        self.assertIn("Goodbye.", text)
 
     def test_valid_remote_license_shows_menu(self):
         cfg = commands.validate_config(commands.default_config())
@@ -46,13 +46,9 @@ class LicenseGateMenuTests(unittest.TestCase):
 
         out = io.StringIO()
         with unittest.mock.patch("agent.commands.load_config", return_value=cfg), \
-             unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c), \
-             unittest.mock.patch("agent.commands._ensure_install_id_saved", side_effect=lambda c: c), \
+             unittest.mock.patch("agent.menu.load_config", return_value=cfg), \
              unittest.mock.patch("agent.commands.keystore.DEV_MODE", False), \
-             unittest.mock.patch(
-                 "agent.commands._remote_license_run_check",
-                 return_value=("active", "License active."),
-             ), \
+             unittest.mock.patch("agent.menu.keystore.DEV_MODE", False), \
              unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
              unittest.mock.patch("agent.menu._is_interactive", return_value=True), \
              unittest.mock.patch("builtins.input", side_effect=["0"]), \
@@ -62,6 +58,7 @@ class LicenseGateMenuTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         text = out.getvalue()
         self.assertIn("First Time Setup Config", text)
+        self.assertIn("New User Help", text)
         self.assertIn("Goodbye.", text)
 
     def test_license_ok_plain_no_color(self):

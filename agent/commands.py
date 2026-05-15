@@ -58,6 +58,11 @@ from .launcher import RejoinResult, perform_rejoin
 from .launcher_file import create_market_launchers
 from .lockfile import LockManager, stop_running_agent
 from .menu import run_menu
+from .onboarding import (
+    NEW_USER_HELP_TEXT,
+    print_beginner_license_gate_help,
+    print_beginner_menu_license_prompt,
+)
 from .platform_detect import detect_public_download_dir, get_android_release, get_android_sdk, get_platform_info
 from .supervisor import MultiPackageSupervisor, Supervisor
 from . import keystore
@@ -83,6 +88,8 @@ COMMANDS = {
     "logs",
     "version",
     "menu",
+    "license",
+    "new-user-help",
     "enable-boot",
     "update",
 }
@@ -166,8 +173,11 @@ def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool
     _persist_license_status(cfg, result)
     if result == "wrong_device":
         _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
+    elif result == "missing_key":
+        _print_license_err("No License Key Found", use_color)
     else:
         _print_license_err(f"License Invalid: {msg}", use_color)
+    print_beginner_license_gate_help(show_hwid_footer=(result != "wrong_device"))
     return False
 
 
@@ -182,8 +192,10 @@ def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespac
         key = (lic.get("key") or "").strip() or (cfg.get("license_key") or "").strip()
         if not key:
             if not _is_interactive():
-                _print_license_err("No license key configured.", use_color)
+                _print_license_err("No License Key Found", use_color)
+                print_beginner_license_gate_help()
                 return False
+            print_beginner_menu_license_prompt()
             if not keystore.prompt_and_verify_key():
                 return False
             _print_license_ok(use_color)
@@ -219,9 +231,10 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
         key = (lic.get("key") or "").strip()
         if not key:
             if not _is_interactive():
-                _print_license_err("No License Key Found.", use_color)
+                _print_license_err("No License Key Found", use_color)
+                print_beginner_license_gate_help()
                 return False
-            print("No License Key Found.")
+            print_beginner_menu_license_prompt()
             try:
                 raw = input("Enter Your DENG Tool License Key: ").strip()
             except EOFError:
@@ -268,29 +281,9 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
         cfg = save_config(cfg)
 
 
-def ensure_license_before_menu(args: argparse.Namespace) -> bool:
-    """Require a valid license before showing the main Termux menu (unless dev / opt-out)."""
-    use_color = not args.no_color
-    if keystore.DEV_MODE:
-        _print_dev_license_skipped(use_color)
-        return True
-    try:
-        cfg = load_config()
-    except ConfigError as exc:
-        _print_license_err(str(exc), use_color)
-        return False
-
-    lic = cfg.setdefault("license", {})
-    if lic.get("disabled_by_user"):
-        return True
-    if not lic.get("enabled", True):
-        return True
-
-    cfg = _ensure_install_id_saved(cfg)
-    mode = str(cfg["license"].get("mode") or "remote").strip().lower()
-    if mode == "local":
-        return bool(_ensure_local_license_menu_loop(cfg, args, use_color))
-    return bool(_ensure_remote_license_menu_loop(cfg, args, use_color))
+def ensure_menu_can_open(_args: argparse.Namespace) -> bool:
+    """The main menu is always reachable so beginners can enter a license or read help."""
+    return True
 
 
 def _is_interactive() -> bool:
@@ -681,8 +674,16 @@ def _choose_packages_menu(
             config_for_detect=None,
         )
         if reason == "no_candidates":
-            print("No Roblox-compatible package was detected using package manager, hints, and labels.")
-            print("Try option 2 to enter a package name manually, or install a Roblox client and re-run.")
+            print()
+            print("No Roblox Package Detected")
+            print()
+            print("Try:")
+            print("  1. Install Roblox or your Roblox clone APK.")
+            print("  2. Open Roblox once manually.")
+            print("  3. Return to Termux.")
+            print("  4. Run package detection again.")
+            print("  5. Use manual package entry if needed.")
+            print()
             return selected, hints
         if reason == "ok":
             selected = new_sel
@@ -1489,6 +1490,12 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     if not _is_interactive():
         print_banner(use_color=not args.no_color)
         print("First Time Setup Config")
+        print()
+        print("This will prepare your device for DENG Tool: Rejoin.")
+        print("You will set Roblox packages (scan or manual), username, optional private URL,")
+        print("optional webhook, then save. Package detection scans installed apps; manual entry is fallback.")
+        print("Usernames are display-only in the Start table — Unknown is OK.")
+        print()
         print("Run this command in interactive Termux to complete setup.")
         print()
         _print_config_summary(draft)
@@ -1496,7 +1503,19 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
 
     print_banner(use_color=not args.no_color)
     print("First Time Setup Config")
-    print("This wizard sets the important first-run options in a safe order.")
+    print()
+    print("This will prepare your device for DENG Tool: Rejoin.")
+    print()
+    print("You will set:")
+    print("  1. Roblox package / clone app (pick from detection, or manual fallback)")
+    print("  2. Username / account name (display only in the Start table — Unknown is OK)")
+    print("  3. Private server URL (optional — not printed after saving)")
+    print("  4. Discord webhook (optional, if you turn it on)")
+    print("  5. Save config")
+    print()
+    print("Package detection:")
+    print("  The tool scans installed Roblox apps against safe hints. Pick from the table.")
+    print("  Manual package entry is only a fallback if nothing is found.")
     print()
     print("Step 1 of 6: Roblox Package Setup")
     packages, hints = _choose_packages_menu(
@@ -2012,24 +2031,61 @@ def cmd_start(args: argparse.Namespace) -> int:
                     if _key:
                         ok, msg = keystore.verify_key(_key)
                         if not ok:
-                            print(f"License key error: {msg}")
+                            _print_license_err(f"License key error: {msg}", use_color)
+                            print_beginner_license_gate_help()
                             return 1
                     else:
-                        print("No license key configured. Run: deng-rejoin")
+                        _print_license_err("No License Key Found", use_color)
+                        print_beginner_license_gate_help()
                         return 1
                 else:
                     if not verify_remote_license_noninteractive(cfg, use_color=use_color):
-                        print("Run: deng-rejoin to fix your license.")
                         return 1
 
         entries = enabled_package_entries(cfg)
-        if not cfg.get("first_setup_completed") or not entries:
+        if not cfg.get("first_setup_completed"):
             print("First-time setup is required before starting.")
             if _is_interactive():
                 _run_first_time_setup_wizard(cfg, args, start_after_save=True)
                 return 0
             print("Run: deng-rejoin and choose First Time Setup Config.")
             return 2
+
+        if not entries:
+            print("No Roblox Package Selected")
+            print()
+            print("Run Setup / Edit Config, then choose Roblox Package Setup.")
+            return 2
+
+        hints2, inc_launch, det_en = _package_detection_options(cfg)
+        detected_n = len(
+            android.discover_roblox_package_candidates(
+                hints2,
+                include_launchable_only=inc_launch,
+                detection_enabled=det_en,
+            )
+        )
+        if detected_n == 0:
+            print("No Roblox Package Detected")
+            print()
+            print("Try:")
+            print("  1. Install Roblox or your Roblox clone APK.")
+            print("  2. Open Roblox once manually.")
+            print("  3. Return to Termux.")
+            print("  4. Run package detection again.")
+            print("  5. Use manual package entry if needed.")
+            print()
+
+        if cfg.get("root_mode_enabled"):
+            root_info = android.detect_root()
+            if not root_info.available:
+                print("Root Access Not Available")
+                print()
+                print("Try:")
+                print("  su -c id")
+                print()
+                print("If this fails, your cloud phone or root environment may not have root enabled.")
+                print()
 
         n = len(entries)
         G = _ANSI_GREEN if use_color else ""
@@ -2100,14 +2156,6 @@ def cmd_start(args: argparse.Namespace) -> int:
                 {"package": pkg, "cache": cstat, "graphics": gstat, "launch_detail": stat_internal}
             )
 
-        hints2, inc_launch, det_en = _package_detection_options(cfg)
-        detected_n = len(
-            android.discover_roblox_package_candidates(
-                hints2,
-                include_launchable_only=inc_launch,
-                detection_enabled=det_en,
-            )
-        )
         any_url = any(bool(effective_private_server_url(e, cfg)) for e in entries) or bool(
             (str(cfg.get("private_server_url") or "") + str(cfg.get("launch_url") or "")).strip()
         )
@@ -2181,7 +2229,18 @@ def cmd_start(args: argparse.Namespace) -> int:
         if success_count == 0:
             reasons = [v for v in launch_err.values() if v]
             best_reason = reasons[0][:80] if reasons else "all launch attempts failed"
-            print(f"0 packages launched. Reason: {best_reason}")
+            print()
+            print("Launch Failed")
+            print()
+            print("The package was selected, but Android did not launch it.")
+            print()
+            print("Try:")
+            print("  1. Open Roblox manually once.")
+            print("  2. Check the selected package in Setup / Edit Config.")
+            print("  3. Run status (deng-rejoin-status).")
+            print("  4. Send support the package name and Start table screenshot.")
+            print()
+            print(f"Detail: {best_reason}")
             return 1
 
         print(f"{G}Session active — monitoring {n} package(s). Press Ctrl+C to stop.{RST}")
@@ -2354,8 +2413,39 @@ def cmd_update(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_license(args: argparse.Namespace) -> int:
+    use_color = not args.no_color
+    print_banner(use_color=use_color)
+    if keystore.DEV_MODE:
+        _print_dev_license_skipped(use_color)
+        return 0
+    try:
+        cfg = load_config()
+    except ConfigError as exc:
+        _print_license_err(str(exc), use_color)
+        return 1
+    lic = cfg.setdefault("license", {})
+    if lic.get("disabled_by_user") or not lic.get("enabled", True):
+        print("License checks are turned off in your config.")
+        return 0
+    cfg = _ensure_install_id_saved(cfg)
+    mode = str(lic.get("mode") or "remote").strip().lower()
+    if mode == "local":
+        ok = _ensure_local_license_menu_loop(cfg, args, use_color)
+    else:
+        ok = _ensure_remote_license_menu_loop(cfg, args, use_color)
+    return 0 if ok else 1
+
+
+def cmd_new_user_help(args: argparse.Namespace) -> int:
+    print_banner(use_color=not args.no_color)
+    print()
+    print(NEW_USER_HELP_TEXT)
+    return 0
+
+
 def cmd_menu(args: argparse.Namespace) -> int:
-    if not ensure_license_before_menu(args):
+    if not ensure_menu_can_open(args):
         return 1
     return run_menu(args, _handlers())
 
@@ -2375,6 +2465,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--logs", action="store_true")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--menu", action="store_true")
+    parser.add_argument("--license", action="store_true", help="enter or update your license key")
+    parser.add_argument("--new-user-help", dest="new_user_help", action="store_true", help="print the built-in tutorial for beginners")
     parser.add_argument("--enable-boot", action="store_true")
     parser.add_argument("--update", action="store_true")
     parser.add_argument("--verbose", action="store_true", help="show extra Start diagnostics (cache/graphics/launch)")
@@ -2396,6 +2488,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "logs": ns.logs,
         "version": ns.version,
         "menu": ns.menu,
+        "license": ns.license,
+        "new-user-help": ns.new_user_help,
         "enable-boot": ns.enable_boot,
         "update": ns.update,
     }
@@ -2430,6 +2524,8 @@ def _handlers() -> dict[str, Any]:
         "logs": cmd_logs,
         "version": cmd_version,
         "menu": cmd_menu,
+        "license": cmd_license,
+        "new-user-help": cmd_new_user_help,
         "enable-boot": cmd_enable_boot,
         "update": cmd_update,
     }

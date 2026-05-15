@@ -10,15 +10,16 @@ The pink DENG banner appears, then the local Termux menu.
 
 ## First run after install
 
-1. Run **`deng-rejoin`** (see [PUBLIC_INSTALL.md](PUBLIC_INSTALL.md) if the command is missing).
-2. **License** — When prompted, paste the key from the **DENG Tool: Rejoin Key Panel** in Discord. One key is usually bound to **one device** until an admin runs **Reset HWID**.
-3. **First Time Setup Config** — Choose option `1` in the menu. Walk through:
+1. Run **`deng-rejoin`** (see [PUBLIC_INSTALL.md](PUBLIC_INSTALL.md) if the command is missing). The screen shows **Setup Status** and a short **Next Step** hint when something is missing.
+2. **License** — Choose **Enter / Update License Key** (option **1**), then paste the key from the **DENG Tool: Rejoin Key Panel** in Discord. One key is usually bound to **one device** until an admin runs **Reset HWID**. **Start** still verifies your license before launching.
+3. **First Time Setup Config** — Choose option **2** in the menu. Walk through:
    - **Package** — Pick from **auto-detected** installed clients/clones (table: #, Package, App Name, Launchable) or enter a package name **manually** if nothing is listed.
    - **Username / account name** (optional) — Only for the on-screen table; you can leave it unset and see **Unknown** (launch still works).
    - **Private server or game URL** (optional) — Paste a full `https://` private server link or use app-only mode by leaving the link blank.
    - **Discord webhook** (optional) and **snapshot** / interval if you enable webhook.
    - **Save** when offered.
-4. **Start** — Choose option `3`. The **public** Start summary table has columns **#**, **Package**, **Username**, and **State** only (no Cache / Graphics / Status columns in normal output).
+4. **Start** — Choose option **4**. The **public** Start summary table has columns **#**, **Package**, **Username**, and **State** only (no Cache / Graphics / Status columns in normal output).
+5. **New User Help** — Option **5** prints a short in-tool tutorial if you prefer on-device instructions.
 
 For a full beginner walkthrough with troubleshooting, use **[NEW_USER_TERMUX_GUIDE.md](NEW_USER_TERMUX_GUIDE.md)**.
 
@@ -116,7 +117,9 @@ The API key is masked (first four characters only) in all menus and logs. Missin
 
 ## License Key
 
-The license key is **not** configured from the Setup / Config menu. When you run **`deng-rejoin`** (main menu), DENG verifies your license with the public server (`https://rejoin.deng.my.id`) **before** the menu appears. The same check runs again when you use **Start** from the menu or `deng-rejoin-start`.
+The license key is **not** configured from the Setup / Config menu. Use **Enter / Update License Key** (main menu option **1**) anytime you need to paste or replace a key.
+
+Verification happens when you use that option and again when you **Start** (option **4**) or run `deng-rejoin-start` against the public server (`https://rejoin.deng.my.id`) for normal installs.
 
 - `DENG_DEV=1` skips the license check (development mode).
 - If a valid key is stored, you see **License OK** (or plain **OK: License Verified** with `--no-color`).

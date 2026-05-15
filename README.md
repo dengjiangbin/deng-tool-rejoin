@@ -37,7 +37,9 @@ wget -O install.sh https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejo
 deng-rejoin
 ```
 
-6. Enter your **license key** when prompted, then **First Time Setup Config**, then **Start**.
+6. Use **Enter / Update License Key** when needed, then **First Time Setup Config**, then **Start**. The main menu shows a short **Setup Status** block so you can see what is missing.
+
+After `deng-rejoin`, if you are unsure what to press next, open **New User Help** (option **5**) for the built-in tutorial.
 
 **Beginner walkthrough (recommended):** [docs/NEW_USER_TERMUX_GUIDE.md](docs/NEW_USER_TERMUX_GUIDE.md)
 
@@ -62,9 +64,11 @@ deng-rejoin
 
 Menu options:
 
+- Enter / Update License Key
 - First Time Setup Config
 - Setup / Edit Config
 - Start
+- New User Help
 
 ## Manual Commands
 

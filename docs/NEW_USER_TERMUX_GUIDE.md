@@ -94,12 +94,16 @@ After a successful install, start the **main menu** with:
 deng-rejoin
 ```
 
-**What you should see:** a pink **DENG** banner and a short numbered menu:
+**What you should see:** a pink **DENG** banner, a short **Setup Status** summary (license, config, packages, optional private URL, next step), then a numbered menu:
 
-1. First Time Setup Config  
-2. Setup / Edit Config  
-3. Start  
+1. Enter / Update License Key  
+2. First Time Setup Config  
+3. Setup / Edit Config  
+4. Start  
+5. New User Help  
 0. Exit  
+
+If you are lost, choose **5 — New User Help** for the built-in tutorial (same content ideas as this doc, shorter).
 
 **If `deng-rejoin` says “command not found”:** close Termux completely, open it again, and try again. If it still fails, run:
 
@@ -119,10 +123,11 @@ cd "$HOME/.deng-tool/rejoin" && python agent/deng_tool_rejoin.py menu
 
 ## Step 6 — Enter License Key
 
-The license is checked **before** the main menu appears (normal public installs).
+The **main menu always opens** so you can read status and choose what to do next.
 
 - Get your key from the **DENG Tool: Rejoin Key Panel** in Discord (**Generate Key** / **Redeem Key** as your community explains).
-- When Termux asks, **paste the key** and press Enter.
+- In the menu, choose **1 — Enter / Update License Key**, paste the key when asked, and wait for verification.
+- **Start** (option **4**) still runs a license check before it launches — a missing or invalid key shows a clear message with next steps instead of failing silently.
 - **One key is usually tied to one device** until an admin uses **Reset HWID** for you.
 - If you see a **wrong device** message after moving to a new phone, contact the key owner or admin and use **Reset HWID** in the panel (respect cooldown rules), then try again on the new device.
 
@@ -132,7 +137,7 @@ Developer note: `DENG_DEV=1` skips license checks — **only for developers**, n
 
 ## Step 7 — First Time Setup Config
 
-In the menu, choose **1. First Time Setup Config**. The wizard asks simple questions — no JSON editing.
+In the menu, choose **2 — First Time Setup Config**. The wizard asks simple questions — no JSON editing.
 
 Typical topics (wording may vary slightly by version):
 
@@ -149,7 +154,7 @@ You can change most options later via **2. Setup / Edit Config**.
 
 ## Step 8 — Start Rejoin
 
-From the main menu, choose **3. Start** (or use **`deng-rejoin-start`** from the command line — same flow).
+From the main menu, choose **4 — Start** (or use **`deng-rejoin-start`** from the command line — same flow).
 
 After Start runs, the **public** summary table has **four** columns:
 

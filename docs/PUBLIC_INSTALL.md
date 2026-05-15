@@ -34,7 +34,7 @@ wget -O install.sh https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejo
 deng-rejoin
 ```
 
-Choose **First Time Setup Config**, then choose **Start**.
+Choose **Enter / Update License Key** if needed, **First Time Setup Config**, then **Start**. Option **New User Help** prints a short in-tool tutorial if you are unsure what to tap next.
 
 Setup uses a guided public menu. You will choose Roblox packages/account names, launch link, optional Discord webhook, and optional snapshot/webhook interval only when webhook is enabled. Window layout is automatic at Start when multiple packages are selected.
 
