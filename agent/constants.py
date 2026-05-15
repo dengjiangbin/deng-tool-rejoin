@@ -37,6 +37,14 @@ SNAPSHOT_DIR = CACHE_DIR / "snapshots"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AGENT_DIR = PROJECT_ROOT / "agent"
 SCRIPTS_DIR = PROJECT_ROOT / "scripts"
+DIST_DIR = PROJECT_ROOT / "dist"
+RELEASES_DIR = DIST_DIR / "releases"
+
+# Release channels
+CHANNEL_STABLE = "stable"
+CHANNEL_BETA = "beta"
+CHANNEL_DEV = "dev"
+VALID_CHANNELS: frozenset[str] = frozenset({CHANNEL_STABLE, CHANNEL_BETA, CHANNEL_DEV})
 
 LAUNCH_MODES = {"app", "deeplink", "web_url"}
 

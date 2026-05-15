@@ -1,14 +1,14 @@
-"""DENG Tool: Rejoin — Lightweight License Check API Server.
+"""DENG Tool: Rejoin — License Check + Package Download API Server.
 
-Provides HTTP endpoints so the Android/Termux client can verify and bind
-device licenses against Supabase WITHOUT exposing the Supabase service-role key
-to the client.
+Provides HTTP endpoints so the Android/Termux client can verify licenses
+and download signed release packages WITHOUT exposing the Supabase
+service-role key to the client.
 
 Architecture
 ────────────
-• Bot server (this module) knows the service-role key.
+• Bot server (this module) holds the service-role key.
 • Android client sends only: key, install_id_hash, device_model, app_version.
-• The client NEVER sees Supabase credentials.
+• The client NEVER sees Supabase credentials or GitHub tokens.
 • All sensitive operations happen server-side here.
 
 Endpoints
@@ -23,28 +23,35 @@ Endpoints
        Returns: {"result": "active|wrong_device|not_found|...", "message": "..."}
 
   POST /api/license/heartbeat
-       Same body as /check.
-       Just updates last_seen_at if the device is already bound.
-       Returns: {"result": "active|wrong_device|not_found|...", "message": "..."}
+       Same body as /check. Updates last_seen_at for an active binding.
+
+  POST /api/download/authorize
+       Body: {"key", "install_id_hash", "device_model", "app_version", "channel"}
+       Verifies license, returns a short-lived download_token and package
+       metadata (version, sha256, size_bytes, download_url).
+
+  GET  /api/download/package/<token>
+       Validates the token, serves the package file as a binary stream.
+       Token is single-use and expires after LICENSE_DOWNLOAD_TOKEN_TTL_SECONDS.
 
 Environment variables
 ─────────────────────
-  LICENSE_API_ENABLED        Set to "true" to enable (default: false).
-  LICENSE_API_HOST           Bind host (default: 127.0.0.1).
-  LICENSE_API_PORT           Port (default: 8787).
-  LICENSE_API_SHARED_SECRET  Optional bearer token for client → server auth.
-                             If set, every request must include:
-                             Authorization: Bearer <secret>
-                             If not set, any client can call the API
-                             (only safe behind a firewall/VPN/NAT).
+  LICENSE_API_ENABLED                  "true" to enable (default: false).
+  LICENSE_API_HOST                     Bind host (default: 127.0.0.1).
+  LICENSE_API_PORT                     Port (default: 8787).
+  LICENSE_API_SHARED_SECRET            Optional bearer token for auth.
+  LICENSE_DOWNLOAD_ROOT                Path to dist/releases/ directory.
+  LICENSE_DOWNLOAD_TOKEN_TTL_SECONDS   Token TTL in seconds (default: 300).
 
 Security notes
 ──────────────
-• Do NOT expose LICENSE_API_PORT to the public internet without
-  setting LICENSE_API_SHARED_SECRET and using HTTPS.
-• The service-role key is never returned in any response.
-• Full license keys are never logged.
-• install_id_hash values are already hashes — not persisted raw.
+• Do NOT expose the port to the public internet without HTTPS +
+  LICENSE_API_SHARED_SECRET.
+• The service-role key is NEVER returned in any response.
+• Full license keys are NEVER logged.
+• Download tokens are single-use, short-lived, and stored as SHA-256 hashes.
+• Package path is validated against LICENSE_DOWNLOAD_ROOT (no traversal).
+• Rate limiting: max 10 authorize requests per 60 s per IP (in-memory).
 """
 
 from __future__ import annotations
@@ -53,10 +60,29 @@ import hashlib
 import json
 import logging
 import os
+import re
+import secrets
 import sys
+import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 log = logging.getLogger("deng.rejoin.license_api")
+
+# ── In-memory download token store ────────────────────────────────────────────
+# Tokens are stored by their SHA-256 hash (raw token is returned to client once).
+_download_tokens: dict[str, dict] = {}
+_tokens_lock = threading.Lock()
+
+# ── In-memory rate limit (per IP, for /api/download/authorize) ────────────────
+_rate_limit: dict[str, list[float]] = {}
+_rate_limit_lock = threading.Lock()
+_RATE_LIMIT_WINDOW: float = 60.0   # seconds
+_RATE_LIMIT_MAX: int = 10          # requests per window per IP
+
+# Token URL-safe character set: letters, digits, hyphen, underscore
+_TOKEN_SAFE_RE = re.compile(r'^[A-Za-z0-9_\-]{1,100}$')
 
 _RESULT_MESSAGES: dict[str, str] = {
     "active": "License active.",
@@ -67,7 +93,135 @@ _RESULT_MESSAGES: dict[str, str] = {
     "inactive": "License inactive.",
     "missing_key": "No license key provided.",
     "server_unavailable": "License server temporarily unavailable.",
+    "no_release": "No release found for this channel.",
+    "token_expired": "Download token expired or already used.",
 }
+
+# ── Token helpers ─────────────────────────────────────────────────────────────
+
+
+def _expire_old_tokens() -> None:
+    """Remove expired/used tokens. Must be called under _tokens_lock."""
+    now = time.time()
+    expired = [
+        k for k, v in _download_tokens.items()
+        if now > v["expires_at"] or v.get("used")
+    ]
+    for k in expired:
+        del _download_tokens[k]
+
+
+def _issue_download_token(
+    path: Path,
+    sha256: str,
+    filename: str,
+    version: str,
+    channel: str,
+    size_bytes: int,
+    ttl: int,
+) -> str:
+    """Issue a short-lived, single-use download token. Returns the raw token."""
+    raw = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    expires_at = time.time() + ttl
+    with _tokens_lock:
+        _expire_old_tokens()
+        _download_tokens[token_hash] = {
+            "path": str(path),
+            "sha256": sha256,
+            "filename": filename,
+            "version": version,
+            "channel": channel,
+            "size_bytes": size_bytes,
+            "expires_at": expires_at,
+            "used": False,
+        }
+    return raw
+
+
+def _consume_download_token(raw_token: str) -> dict | None:
+    """Return and invalidate a token entry. Returns None if invalid/expired."""
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    now = time.time()
+    with _tokens_lock:
+        entry = _download_tokens.get(token_hash)
+        if not entry:
+            return None
+        if entry.get("used") or now > entry["expires_at"]:
+            _download_tokens.pop(token_hash, None)
+            return None
+        entry["used"] = True
+        return dict(entry)
+
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+
+
+def _check_rate_limit(remote_addr: str) -> bool:
+    """Return True if request is within the rate limit (allowed)."""
+    now = time.time()
+    with _rate_limit_lock:
+        history = _rate_limit.get(remote_addr, [])
+        history = [t for t in history if now - t < _RATE_LIMIT_WINDOW]
+        if len(history) >= _RATE_LIMIT_MAX:
+            _rate_limit[remote_addr] = history
+            return False
+        history.append(now)
+        _rate_limit[remote_addr] = history
+        # Prevent unbounded growth
+        if len(_rate_limit) > 2000:
+            oldest_ip = min(_rate_limit, key=lambda ip: min(_rate_limit[ip], default=0))
+            _rate_limit.pop(oldest_ip, None)
+    return True
+
+
+# ── Download root + manifest ──────────────────────────────────────────────────
+
+
+def _get_download_root() -> Path | None:
+    """Return resolved PATH of the download root, or None if not configured."""
+    dr = os.environ.get("LICENSE_DOWNLOAD_ROOT", "").strip()
+    if not dr:
+        return None
+    p = Path(dr).resolve()
+    return p if p.is_dir() else None
+
+
+def _load_manifest(download_root: Path, channel: str) -> dict | None:
+    """Find and return the newest manifest for *channel*.
+
+    Looks in ``download_root/releases/<channel>/*/manifest.json`` and picks
+    the newest by semantic version.  Returns None if no manifest found.
+    """
+    channel_dir = download_root / "releases" / channel
+    if not channel_dir.is_dir():
+        # Also try without the ``releases/`` sub-level (flat layout)
+        channel_dir = download_root / channel
+    if not channel_dir.is_dir():
+        return None
+
+    manifests = list(channel_dir.glob("*/manifest.json"))
+    if not manifests:
+        return None
+
+    def _ver_key(p: Path) -> tuple[int, ...]:
+        parts = []
+        for seg in p.parent.name.split("."):
+            try:
+                parts.append(int(seg))
+            except ValueError:
+                parts.append(0)
+        return tuple(parts)
+
+    manifests.sort(key=_ver_key, reverse=True)
+    newest = manifests[0]
+    try:
+        data: dict = json.loads(newest.read_text(encoding="utf-8"))
+        pkg_path = (newest.parent / data.get("filename", "")).resolve()
+        data["_pkg_path"] = str(pkg_path)
+        return data
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 def _mask_key(key: str) -> str:
@@ -116,9 +270,26 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
     path = environ.get("PATH_INFO", "")
     method = environ.get("REQUEST_METHOD", "GET")
 
-    def respond(body: bytes, status: int = 200, content_type: str = "application/json") -> list[bytes]:
-        status_str = {200: "200 OK", 400: "400 Bad Request", 401: "401 Unauthorized", 405: "405 Method Not Allowed", 500: "500 Internal Server Error"}.get(status, f"{status} Error")
-        headers = [("Content-Type", content_type), ("Content-Length", str(len(body)))]
+    _STATUS_TEXT = {
+        200: "200 OK", 400: "400 Bad Request", 401: "401 Unauthorized",
+        403: "403 Forbidden", 404: "404 Not Found", 405: "405 Method Not Allowed",
+        429: "429 Too Many Requests", 500: "500 Internal Server Error",
+        503: "503 Service Unavailable",
+    }
+
+    def respond(
+        body: bytes,
+        status: int = 200,
+        content_type: str = "application/json",
+        extra_headers: list[tuple[str, str]] | None = None,
+    ) -> list[bytes]:
+        status_str = _STATUS_TEXT.get(status, f"{status} Error")
+        headers = [
+            ("Content-Type", content_type),
+            ("Content-Length", str(len(body))),
+        ]
+        if extra_headers:
+            headers.extend(extra_headers)
         start_response(status_str, headers)
         return [body]
 
@@ -182,8 +353,162 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         payload, status = _build_response(result)
         return respond(payload, status)
 
+    # ── Download authorize ────────────────────────────────────────────────────
+    if path == "/api/download/authorize":
+        if method != "POST":
+            return respond(json.dumps({"error": "POST required"}).encode(), 405)
+
+        remote_addr = environ.get("REMOTE_ADDR", "unknown")
+        if not _check_rate_limit(remote_addr):
+            return respond(
+                json.dumps({"error": "Too many requests. Try again later."}).encode(), 429
+            )
+
+        body = _read_json_body(environ)
+        if not body:
+            return respond(json.dumps({"error": "Invalid JSON body"}).encode(), 400)
+
+        raw_key = (body.get("key") or "").strip()
+        install_id_hash = (body.get("install_id_hash") or "").strip()
+        device_model = (body.get("device_model") or "unknown")[:120]
+        app_version = (body.get("app_version") or "unknown")[:40]
+        channel = (body.get("channel") or "stable").strip().lower()
+        if channel not in ("stable", "beta", "dev"):
+            channel = "stable"
+
+        if not raw_key:
+            p, s = _build_response("missing_key", 400)
+            return respond(p, s)
+
+        if len(install_id_hash) != 64:
+            install_id_hash = _hash_install_id(install_id_hash)
+
+        download_root = _get_download_root()
+        if not download_root:
+            return respond(
+                json.dumps({"error": "Download service not configured on this server.",
+                            "result": "server_unavailable"}).encode(), 503
+            )
+
+        # Validate license via store
+        try:
+            from agent.license_store import get_default_store
+            store = get_default_store()
+            lic_result = store.bind_or_check_device(
+                raw_key, install_id_hash, device_model, app_version
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.error("License check error in authorize: %s", exc)
+            p, s = _build_response("server_unavailable", 500)
+            return respond(p, s)
+
+        if lic_result != "active":
+            log.info("Download authorize denied: %s key=%s", lic_result, _mask_key(raw_key))
+            p, s = _build_response(lic_result, 403)
+            return respond(p, s)
+
+        # Find manifest for requested channel
+        manifest = _load_manifest(download_root, channel)
+        if not manifest:
+            return respond(
+                json.dumps({"error": f"No release found for channel '{channel}'.",
+                            "result": "no_release"}).encode(), 404
+            )
+
+        pkg_path = Path(manifest["_pkg_path"])
+        if not pkg_path.is_file():
+            log.error("Package file missing: %s", pkg_path)
+            return respond(
+                json.dumps({"error": "Package file not found on server."}).encode(), 503
+            )
+
+        # Safety: path must be within download_root
+        try:
+            pkg_path.resolve().relative_to(download_root.resolve())
+        except ValueError:
+            log.error("Package path escape attempt: %s", pkg_path)
+            return respond(json.dumps({"error": "Forbidden."}).encode(), 403)
+
+        ttl = max(30, int(os.environ.get("LICENSE_DOWNLOAD_TOKEN_TTL_SECONDS", "300")))
+        token = _issue_download_token(
+            pkg_path,
+            manifest.get("sha256", ""),
+            manifest.get("filename", ""),
+            manifest.get("version", ""),
+            channel,
+            manifest.get("size_bytes", 0),
+            ttl,
+        )
+
+        expires_dt = datetime.fromtimestamp(time.time() + ttl, tz=timezone.utc)
+        host = os.environ.get("LICENSE_API_HOST", "127.0.0.1")
+        port = int(os.environ.get("LICENSE_API_PORT", "8787"))
+        download_url = f"http://{host}:{port}/api/download/package/{token}"
+
+        log.info(
+            "Download token issued: key=%s channel=%s version=%s",
+            _mask_key(raw_key), channel, manifest.get("version", "?")
+        )
+
+        payload = json.dumps({
+            "result": "active",
+            "download_token": token,
+            "expires_at": expires_dt.isoformat(),
+            "version": manifest.get("version", ""),
+            "channel": channel,
+            "filename": manifest.get("filename", ""),
+            "sha256": manifest.get("sha256", ""),
+            "size_bytes": manifest.get("size_bytes", 0),
+            "download_url": download_url,
+            "notes": manifest.get("notes", ""),
+        }).encode()
+        return respond(payload)
+
+    # ── Package file download ─────────────────────────────────────────────────
+    if path.startswith("/api/download/package/"):
+        raw_token = path[len("/api/download/package/"):]
+
+        # Sanitize: only URL-safe base64 characters
+        if not _TOKEN_SAFE_RE.match(raw_token):
+            return respond(json.dumps({"error": "Invalid token format."}).encode(), 400)
+
+        entry = _consume_download_token(raw_token)
+        if entry is None:
+            return respond(json.dumps({"error": "Token invalid or expired."}).encode(), 401)
+
+        pkg_path = Path(entry["path"])
+        download_root = _get_download_root()
+
+        # Safety: verify path within download root
+        if download_root:
+            try:
+                pkg_path.resolve().relative_to(download_root.resolve())
+            except ValueError:
+                log.error("Path escape via token: %s", pkg_path)
+                return respond(json.dumps({"error": "Forbidden."}).encode(), 403)
+
+        if not pkg_path.is_file():
+            log.error("Package file gone: %s", pkg_path)
+            return respond(json.dumps({"error": "Package not found."}).encode(), 404)
+
+        try:
+            data = pkg_path.read_bytes()
+        except OSError as exc:
+            log.error("Cannot read package %s: %s", pkg_path, exc)
+            return respond(json.dumps({"error": "Cannot serve package."}).encode(), 500)
+
+        filename = entry.get("filename") or pkg_path.name
+        log.info("Package served: %s channel=%s", filename, entry.get("channel", "?"))
+        return respond(
+            data,
+            content_type="application/zip",
+            extra_headers=[
+                ("Content-Disposition", f'attachment; filename="{filename}"'),
+            ],
+        )
+
     # ── 404 ───────────────────────────────────────────────────────────────────
-    return respond(json.dumps({"error": "Not found"}).encode(), 404 if False else 404)
+    return respond(json.dumps({"error": "Not found"}).encode(), 404)
 
 
 def start_api_server(host: str, port: int) -> None:

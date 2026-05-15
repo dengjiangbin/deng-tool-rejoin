@@ -47,6 +47,7 @@
     "key": "",
     "server_url": "",
     "install_id": "",
+    "channel": "stable",
     "device_label": "",
     "last_status": "not_configured",
     "last_check_at": null
