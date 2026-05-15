@@ -4,22 +4,21 @@
 
 DENG Tool: Rejoin is a Termux-based Android/cloud-phone utility that helps you open, reopen, and reconnect the official Roblox Android app on your own device. It is a local phone agent, not a gameplay bot.
 
-## Quick install for Termux
+## Quick install for Termux (beginner order)
 
-1. Open **Termux**.
-2. Update packages (recommended before first install):
+1. **Download Termux** — Install from [F-Droid](https://f-droid.org/) and open it.
+2. **Configure Root & Termux** — If you use Magisk, Kitsune, KernelSU, LSPosed, or Root Permission: open it → **Superuser** → allow **Termux**. If Termux is not listed, skip.
+3. **Prepare Termux** — Update (and optionally install tools):
 
 ```sh
 pkg update -y && pkg upgrade -y
 ```
 
-3. Install tools the installer expects (optional if you go straight to step 4 — the installer also runs `pkg` and installs `python`, `sqlite`, `curl`, `git`, and tries `android-tools`):
-
 ```sh
 pkg install -y curl git python sqlite
 ```
 
-4. Download and run the **official installer**:
+4. **Install DENG Tool: Rejoin**:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh -o install.sh && bash install.sh
@@ -31,17 +30,19 @@ Wget alternative:
 wget -O install.sh https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh && bash install.sh
 ```
 
-5. Start the menu:
+5. **Open DENG Tool: Rejoin**:
 
 ```sh
 deng-rejoin
 ```
 
-6. Use **Enter / Update License Key** when needed, then **First Time Setup Config**, then **Start**. The main menu shows a short **Setup Status** block so you can see what is missing.
+6. **Enter License Key** — Menu option **1**.
+7. **First Time Setup** — Menu option **2** (full label: First Time Setup Config).
+8. **Start** — Menu option **4**.
 
-After `deng-rejoin`, if you are unsure what to press next, open **New User Help** (option **5**) for the built-in tutorial.
+The main menu also shows **Setup Status** and **New User Help** (option **5**).
 
-**Beginner walkthrough (recommended):** [docs/NEW_USER_TERMUX_GUIDE.md](docs/NEW_USER_TERMUX_GUIDE.md)
+**Beginner walkthrough:** [docs/NEW_USER_TERMUX_GUIDE.md](docs/NEW_USER_TERMUX_GUIDE.md)
 
 ## What To Prepare
 

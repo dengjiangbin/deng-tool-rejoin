@@ -174,29 +174,18 @@ main() {
   echo
   echo "Install complete."
   echo
-  echo "Next steps:"
-  echo "  1. Start the tool: deng-rejoin"
-  echo "  2. Enter your license key when prompted."
-  echo "  3. Run First Time Setup Config from the menu."
-  echo "  4. Select your detected Roblox package (or enter it manually)."
-  echo "  5. Add a private server URL in setup if you need direct join."
-  echo "  6. Choose Start when you are ready."
+  echo "Next steps (beginner order — full text in docs/NEW_USER_TERMUX_GUIDE.md):"
+  echo "  1. Download Termux"
+  echo "  2. Configure Root & Termux (Magisk/Kitsune/KernelSU/LSPosed/Root Permission → Superuser → allow Termux; else skip)"
+  echo "  3. Prepare Termux (pkg update/upgrade — this installer already updated packages)"
+  echo "  4. Install DENG Tool: Rejoin (done)"
+  echo "  5. Open: deng-rejoin"
+  echo "  6. Enter License Key (menu 1)"
+  echo "  7. First Time Setup (menu 2)"
+  echo "  8. Start (menu 4)"
   echo
-  echo "Full beginner guide:"
+  echo "Beginner guide file:"
   echo "  $APP_HOME/docs/NEW_USER_TERMUX_GUIDE.md"
-  echo
-  echo "Other commands:"
-  echo "  deng-rejoin-setup   (setup wizard / config entry)"
-  echo "  deng-rejoin-start   (Start supervisor from CLI)"
-  echo "  deng-rejoin-update  (update from GitHub when installed via git)"
-  echo "  deng-rejoin-status"
-  echo "  deng-rejoin doctor"
-  echo
-  echo "Test one rejoin:"
-  echo "python $APP_HOME/agent/deng_tool_rejoin.py --once"
-  echo
-  echo "Optional Download-folder launcher (if created):"
-  echo "python /sdcard/Download/deng-rejoin.py"
 }
 
 main "$@"

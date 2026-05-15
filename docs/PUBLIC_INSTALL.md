@@ -1,6 +1,15 @@
 # Public Install Guide
 
-**New to Termux?** Start here: **[New User Termux Setup Guide](NEW_USER_TERMUX_GUIDE.md)** — copy/paste steps from opening the app through license, setup, and Start.
+**New to Termux?** **[New User Termux Setup Guide](NEW_USER_TERMUX_GUIDE.md)** — short beginner path:
+
+1. Download Termux  
+2. Configure Root & Termux (grant Termux superuser in Magisk / Kitsune / KernelSU / LSPosed / Root Permission when you use those; otherwise skip)  
+3. Prepare Termux (`pkg update` / `pkg upgrade`, optional `pkg install`)  
+4. Install DENG Tool: Rejoin (curl or wget `install.sh` — see below)  
+5. Open DENG Tool: Rejoin (`deng-rejoin`)  
+6. Enter License Key (menu **1**)  
+7. First Time Setup (menu **2**)  
+8. Start (menu **4**)  
 
 ## Prepare First
 
@@ -112,7 +121,7 @@ cd "$HOME/.deng-tool/rejoin" && python agent/deng_tool_rejoin.py doctor --no-col
 
 Doctor checks Python, Termux, Android version, SDK, Download path, root, Roblox package, SQLite, logs, and duplicate agent state.
 
-**Beginner-oriented fixes:** [NEW_USER_TERMUX_GUIDE.md](NEW_USER_TERMUX_GUIDE.md) (see *Common Problems* at the end).
+**Beginner steps:** [NEW_USER_TERMUX_GUIDE.md](NEW_USER_TERMUX_GUIDE.md)
 
 ---
 

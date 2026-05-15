@@ -8,20 +8,20 @@ deng-rejoin
 
 The pink DENG banner appears, then the local Termux menu.
 
-## First run after install
+## First run after install (beginner order)
 
-1. Run **`deng-rejoin`** (see [PUBLIC_INSTALL.md](PUBLIC_INSTALL.md) if the command is missing). The screen shows **Setup Status** and a short **Next Step** hint when something is missing.
-2. **License** — Choose **Enter / Update License Key** (option **1**), then paste the key from the **DENG Tool: Rejoin Key Panel** in Discord. One key is usually bound to **one device** until an admin runs **Reset HWID**. **Start** still verifies your license before launching.
-3. **First Time Setup Config** — Choose option **2** in the menu. Walk through:
-   - **Package** — Pick from **auto-detected** installed clients/clones (table: #, Package, App Name, Launchable) or enter a package name **manually** if nothing is listed.
-   - **Username / account name** (optional) — Only for the on-screen table; you can leave it unset and see **Unknown** (launch still works).
-   - **Private server or game URL** (optional) — Paste a full `https://` private server link or use app-only mode by leaving the link blank.
-   - **Discord webhook** (optional) and **snapshot** / interval if you enable webhook.
-   - **Save** when offered.
-4. **Start** — Choose option **4**. The **public** Start summary table has columns **#**, **Package**, **Username**, and **State** only (no Cache / Graphics / Status columns in normal output).
-5. **New User Help** — Option **5** prints a short in-tool tutorial if you prefer on-device instructions.
+See **[NEW_USER_TERMUX_GUIDE.md](NEW_USER_TERMUX_GUIDE.md)** for the full short walkthrough. In order:
 
-For a full beginner walkthrough with troubleshooting, use **[NEW_USER_TERMUX_GUIDE.md](NEW_USER_TERMUX_GUIDE.md)**.
+1. **Download Termux**
+2. **Configure Root & Termux** — Magisk / Kitsune / KernelSU / LSPosed / Root Permission → **Superuser** → allow **Termux** (skip if not applicable or Termux not listed)
+3. **Prepare Termux** — `pkg update -y && pkg upgrade -y` (optional `pkg install` for curl, git, python, sqlite)
+4. **Install DENG Tool: Rejoin** — run `install.sh` from [PUBLIC_INSTALL.md](PUBLIC_INSTALL.md)
+5. **Open DENG Tool: Rejoin** — `deng-rejoin`
+6. **Enter License Key** — menu **1**
+7. **First Time Setup** — menu **2** (First Time Setup Config)
+8. **Start** — menu **4**
+
+Use **New User Help** (menu **5**) if you need on-device hints.
 
 ## Root-aware package detection and supervisor
 
