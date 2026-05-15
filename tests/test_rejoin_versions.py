@@ -272,15 +272,13 @@ class InstallCommandTests(unittest.TestCase):
             internal_only=True,
             description="Owner/admin testing only",
         )
-        with unittest.mock.patch.dict(
-            os.environ, {"REJOIN_INSTALL_SIGNING_SECRET": "unit-test-signing-secret"}, clear=False
-        ):
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
             text = rv.format_install_instructions_plain(info)
         self.assertIn("Visibility: owner/admin/tester only", text)
         self.assertIn("Internal testing only", text)
         self.assertIn("Desktop Copy:", text)
         self.assertIn("Mobile Copy:", text)
-        self.assertIn("install/dev/main", text)
+        self.assertIn("install/test/latest", text)
         self.assertNotIn("raw.githubusercontent.com", text)
 
 

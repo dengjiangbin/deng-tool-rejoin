@@ -19,7 +19,7 @@ All button response flows are **ephemeral** — only the clicking user sees the 
 | ♻️ Reset HWID | Unbind current device (max 5/24h) |
 | 🎟️ Redeem Key | Attach an existing key to your account |
 | 📊 Key Stats | Private list of your keys, pagination, **Download Keys** (text file) |
-| 📌 Select Version | Ephemeral picker → copy **Desktop Copy** / **Mobile Copy** using `https://rejoin.deng.my.id/install/latest` or a pinned `/install/v1.0.0` URL. Owners/admins/testers (`LICENSE_OWNER_DISCORD_IDS`, optional `REJOIN_TESTER_DISCORD_IDS`) may also see internal rows such as **main-dev** (signed `/install/dev/main?…`, branch build — not public). |
+| 📌 Select Version | Ephemeral picker → copy **Desktop Copy** / **Mobile Copy** using `https://rejoin.deng.my.id/install/latest` or a pinned `/install/v1.0.0` URL. Owners/admins/testers (`LICENSE_OWNER_DISCORD_IDS`, optional `REJOIN_TESTER_DISCORD_IDS`) may also see internal rows such as **main-dev** (fixed `/install/test/latest`, license-gated — not public). Legacy signed `/install/dev/main?…` remains supported. |
 
 ### 📦 Select Version — public vs internal
 

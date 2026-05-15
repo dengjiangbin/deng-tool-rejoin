@@ -52,7 +52,7 @@ curl -fsSL https://rejoin.deng.my.id/install/v1.0.0 -o install.sh && bash instal
 
 ### Developers / testing only
 
-Public users must **not** follow moving GitHub `main`. Internal **main-dev** installs use a **signed** panel URL pointing at `/install/dev/main?…`.
+Public users must **not** follow moving GitHub `main`. Internal **main-dev** installs for owners/testers use the fixed bootstrap `GET /install/test/latest` (license + Discord allowlist gate). Legacy HMAC-signed `/install/dev/main?…` URLs remain available.
 
 ## Start
 
@@ -146,7 +146,9 @@ Expose these on the **same HTTPS host** as the working logo asset (`GET /assets/
 |------|---------|
 | `GET /install/latest` | Moving pointer — installs **latest public stable** from `data/rejoin_versions.json`. |
 | `GET /install/vX.Y.Z` | **Frozen** bootstrap for that registry version. |
-| `GET /install/dev/main?exp=…&sig=…` | Internal **main-dev** bootstrap (HMAC; owner/admin/tester panel only). |
+| `GET /install/test/latest` | Internal **main-dev** bootstrap (fixed URL; license key + owner/tester Discord allowlist). |
+| `GET /install/beta/latest` | Redirects to `/install/test/latest`. |
+| `GET /install/dev/main?exp=…&sig=…` | Legacy internal **main-dev** bootstrap (HMAC-signed session). |
 | `POST /api/install/authorize` | License gate + short-lived download URL (no HWID binding). |
 | `GET /api/download/package/<token>` | One-time artifact bytes (must sit under `REJOIN_ARTIFACT_ROOT` / `LICENSE_DOWNLOAD_ROOT`). |
 

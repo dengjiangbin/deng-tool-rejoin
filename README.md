@@ -36,7 +36,7 @@ The main menu also shows **Setup Status** and **New User Help** (option **5**).
 
 ### Developers / testing only
 
-Internal `main-dev` installs are **not** public. Owners, admins, and testers get a **signed** `curl` URL from **Select Version** (`/install/dev/main?…`), not the moving GitHub raw `main` installer.
+Internal `main-dev` installs are **not** public. Owners and testers use the fixed installer `GET /install/test/latest` from **Select Version** (license + Discord allowlist); legacy signed `/install/dev/main?…` is still supported. Do not use the moving GitHub raw `main` installer for public users.
 
 ### Release manifest (repo owners)
 
@@ -152,12 +152,13 @@ It does not automate gameplay, auto farm, run gameplay macros, bypass AFK system
 
 - Repo: https://github.com/dengjiangbin/deng-tool-rejoin
 - Public installs use **Discord → DENG Tool: Rejoin Panel → Select Version**, or directly: `curl -fsSL https://rejoin.deng.my.id/install/latest -o install.sh && bash install.sh` (pinned versions: `/install/v1.0.0`, etc.).
-- Internal `main-dev` URLs are signed and visible only to owner/admin/tester flows in the panel.
+- Internal **main-dev** panel copy uses `/install/test/latest` (license + owner/tester allowlist); legacy signed `/install/dev/main?…` remains. Not shown to public users.
 
 ## More Docs
 
 - **[New user Termux setup (step-by-step)](docs/NEW_USER_TERMUX_GUIDE.md)**
 - [Public install guide](docs/PUBLIC_INSTALL.md)
+- [Internal test install](docs/INTERNAL_TEST_INSTALL.md) (owner/testers — not public stable)
 - [Public user guide](docs/PUBLIC_USER_GUIDE.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Root mode](docs/ROOT_MODE.md)

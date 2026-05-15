@@ -65,12 +65,11 @@ def _wsgi_call(method: str, path: str, body=None, environ_extra: dict | None = N
     return status_int, headers_dict, body_out
 
 
-def _tmp_store_with_redeemed_key() -> tuple[LocalJsonLicenseStore, str]:
+def _tmp_store_with_redeemed_key(uid: str = "u-install-test") -> tuple[LocalJsonLicenseStore, str]:
     tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
     tmp.close()
     Path(tmp.name).unlink(missing_ok=True)
     store = LocalJsonLicenseStore(Path(tmp.name))
-    uid = "u-install-test"
     store.get_or_create_user(uid)
     key = store.create_key_for_user(uid)
     return store, key
@@ -365,6 +364,228 @@ class InternalDevBootstrapTests(unittest.TestCase):
             shutil.rmtree(root, ignore_errors=True)
 
 
+class InstallTestLatestBootstrapTests(unittest.TestCase):
+    def test_test_latest_returns_shell_and_banner(self) -> None:
+        status, headers, body = _wsgi_call("GET", "/install/test/latest")
+        self.assertEqual(status, 200)
+        self.assertIn("text/", headers.get("Content-Type", ""))
+        text = body.decode("utf-8")
+        self.assertIn("DENG Tool: Rejoin Test Installer", text)
+        self.assertIn("Channel: internal test", text)
+        self.assertIn("Version: main-dev", text)
+        self.assertIn('REQUESTED="test-latest"', text)
+        self.assertNotIn("GITHUB_TOKEN", text)
+        self.assertNotIn("SUPABASE_SERVICE_ROLE_KEY", text)
+        self.assertNotIn("LICENSE_KEY_EXPORT_SECRET", text)
+
+    def test_beta_latest_redirects_to_test_latest(self) -> None:
+        status, headers, body = _wsgi_call("GET", "/install/beta/latest")
+        self.assertEqual(status, 302)
+        self.assertEqual(headers.get("Location"), "/install/test/latest")
+        self.assertEqual(body, b"")
+
+
+class InstallTestLatestAuthorizeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        with api_mod._rate_limit_lock:
+            api_mod._rate_limit.clear()
+
+    def _main_dev_manifest_env(self) -> tuple[Path, Path]:
+        manifest = Path(__file__).resolve().parent / "_tmp_install_manifest_test_latest.json"
+        root = Path(tempfile.mkdtemp())
+        rows = [
+            {
+                "version": "main-dev",
+                "channel": "dev",
+                "visibility": "admin",
+                "install_ref": "refs/heads/main",
+                "artifact_path": "dev/pkg.tar.gz",
+                "artifact_sha256": "",
+                "enabled": True,
+            }
+        ]
+        _write_versions_manifest(manifest, rows)
+        (root / "dev").mkdir(parents=True)
+        (root / "dev/pkg.tar.gz").write_bytes(_make_tarball())
+        return manifest, root
+
+    def test_owner_license_can_authorize(self) -> None:
+        manifest, root = self._main_dev_manifest_env()
+        owner_uid = "333333333333333333"
+        store, key = _tmp_store_with_redeemed_key(owner_uid)
+        env = {
+            "REJOIN_VERSIONS_MANIFEST": str(manifest),
+            "REJOIN_ARTIFACT_ROOT": str(root),
+            "LICENSE_OWNER_DISCORD_IDS": owner_uid,
+            "REJOIN_TESTER_DISCORD_IDS": "",
+        }
+        try:
+            with patch.dict(os.environ, env, clear=False):
+                from agent.install_internal_access import clear_install_internal_access_cache
+
+                clear_install_internal_access_cache()
+                with patch("agent.license_store.get_default_store", return_value=store):
+                    st, _, resp = _wsgi_call(
+                        "POST",
+                        "/api/install/authorize",
+                        {
+                            "license_key": key,
+                            "requested_version": "test-latest",
+                            "install_id_hash": "",
+                        },
+                    )
+            self.assertEqual(st, 200, resp)
+            data = json.loads(resp)
+            self.assertEqual(data["result"], "active")
+            self.assertEqual(data["resolved_version"], "main-dev")
+            self.assertIn("/api/download/package/", data["download_url"])
+        finally:
+            manifest.unlink(missing_ok=True)
+            shutil.rmtree(root, ignore_errors=True)
+            Path(store._path).unlink(missing_ok=True)
+
+    def test_tester_license_can_authorize(self) -> None:
+        manifest, root = self._main_dev_manifest_env()
+        tester_uid = "444444444444444444"
+        store, key = _tmp_store_with_redeemed_key(tester_uid)
+        env = {
+            "REJOIN_VERSIONS_MANIFEST": str(manifest),
+            "REJOIN_ARTIFACT_ROOT": str(root),
+            "LICENSE_OWNER_DISCORD_IDS": "",
+            "REJOIN_TESTER_DISCORD_IDS": tester_uid,
+        }
+        try:
+            with patch.dict(os.environ, env, clear=False):
+                from agent.install_internal_access import clear_install_internal_access_cache
+
+                clear_install_internal_access_cache()
+                with patch("agent.license_store.get_default_store", return_value=store):
+                    st, _, resp = _wsgi_call(
+                        "POST",
+                        "/api/install/authorize",
+                        {
+                            "license_key": key,
+                            "requested_version": "test-latest",
+                            "install_id_hash": "",
+                        },
+                    )
+            self.assertEqual(st, 200, resp)
+            self.assertEqual(json.loads(resp)["resolved_version"], "main-dev")
+        finally:
+            manifest.unlink(missing_ok=True)
+            shutil.rmtree(root, ignore_errors=True)
+            Path(store._path).unlink(missing_ok=True)
+
+    def test_public_redeemed_license_cannot_authorize(self) -> None:
+        manifest, root = self._main_dev_manifest_env()
+        store, key = _tmp_store_with_redeemed_key("555555555555555555")
+        env = {
+            "REJOIN_VERSIONS_MANIFEST": str(manifest),
+            "REJOIN_ARTIFACT_ROOT": str(root),
+            "LICENSE_OWNER_DISCORD_IDS": "999999999999999999",
+            "REJOIN_TESTER_DISCORD_IDS": "",
+        }
+        try:
+            with patch.dict(os.environ, env, clear=False):
+                from agent.install_internal_access import clear_install_internal_access_cache
+
+                clear_install_internal_access_cache()
+                with patch("agent.license_store.get_default_store", return_value=store):
+                    st, _, resp = _wsgi_call(
+                        "POST",
+                        "/api/install/authorize",
+                        {
+                            "license_key": key,
+                            "requested_version": "test-latest",
+                            "install_id_hash": "",
+                        },
+                    )
+            self.assertEqual(st, 403)
+            data = json.loads(resp)
+            self.assertEqual(data["result"], "forbidden")
+            self.assertEqual(data["message"], api_mod._TEST_INSTALL_FORBIDDEN_MESSAGE)
+        finally:
+            manifest.unlink(missing_ok=True)
+            shutil.rmtree(root, ignore_errors=True)
+            Path(store._path).unlink(missing_ok=True)
+
+    def test_unredeemed_key_rejected(self) -> None:
+        manifest, root = self._main_dev_manifest_env()
+        tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+        tmp.close()
+        Path(tmp.name).unlink(missing_ok=True)
+        store = LocalJsonLicenseStore(Path(tmp.name))
+        uid = "666666666666666666"
+        store.get_or_create_user(uid)
+        key = store.create_key_for_user(uid)
+        db = store._load()
+        kh = next(iter(db["keys"]))
+        db["keys"][kh]["owner_discord_id"] = None
+        store._save(db)
+
+        env = {
+            "REJOIN_VERSIONS_MANIFEST": str(manifest),
+            "REJOIN_ARTIFACT_ROOT": str(root),
+            "LICENSE_OWNER_DISCORD_IDS": uid,
+            "REJOIN_TESTER_DISCORD_IDS": "",
+        }
+        try:
+            with patch.dict(os.environ, env, clear=False):
+                from agent.install_internal_access import clear_install_internal_access_cache
+
+                clear_install_internal_access_cache()
+                with patch("agent.license_store.get_default_store", return_value=store):
+                    st, _, resp = _wsgi_call(
+                        "POST",
+                        "/api/install/authorize",
+                        {
+                            "license_key": key,
+                            "requested_version": "test-latest",
+                            "install_id_hash": "",
+                        },
+                    )
+            self.assertEqual(st, 403)
+            self.assertEqual(json.loads(resp)["result"], "key_not_redeemed")
+        finally:
+            manifest.unlink(missing_ok=True)
+            shutil.rmtree(root, ignore_errors=True)
+            Path(store._path).unlink(missing_ok=True)
+
+    def test_wrong_device_blocked_when_bound(self) -> None:
+        manifest, root = self._main_dev_manifest_env()
+        owner_uid = "777777777777777777"
+        store, key = _tmp_store_with_redeemed_key(owner_uid)
+        h = "a" * 64
+        store.bind_or_check_device(key, h, "Pixel", "1.0.0")
+
+        env = {
+            "REJOIN_VERSIONS_MANIFEST": str(manifest),
+            "REJOIN_ARTIFACT_ROOT": str(root),
+            "LICENSE_OWNER_DISCORD_IDS": owner_uid,
+        }
+        try:
+            with patch.dict(os.environ, env, clear=False):
+                from agent.install_internal_access import clear_install_internal_access_cache
+
+                clear_install_internal_access_cache()
+                with patch("agent.license_store.get_default_store", return_value=store):
+                    st, _, resp = _wsgi_call(
+                        "POST",
+                        "/api/install/authorize",
+                        {
+                            "license_key": key,
+                            "requested_version": "test-latest",
+                            "install_id_hash": "",
+                        },
+                    )
+            self.assertEqual(st, 403)
+            self.assertEqual(json.loads(resp)["result"], "wrong_device")
+        finally:
+            manifest.unlink(missing_ok=True)
+            shutil.rmtree(root, ignore_errors=True)
+            Path(store._path).unlink(missing_ok=True)
+
+
 class PanelCopyUsesProtectedUrlTests(unittest.TestCase):
     def test_public_stable_copy_uses_rejoin_domain(self) -> None:
         from agent import rejoin_versions as rv
@@ -400,6 +621,27 @@ class PanelCopyUsesProtectedUrlTests(unittest.TestCase):
                 cmd = rv.build_public_install_curl_command(info)
             self.assertIn("rejoin.deng.my.id/install/v1.0.0", cmd)
             self.assertNotIn("raw.githubusercontent.com", cmd)
+        finally:
+            manifest.unlink(missing_ok=True)
+
+    def test_internal_main_dev_uses_fixed_test_install_url(self) -> None:
+        from agent import rejoin_versions as rv
+
+        info = rv.RejoinVersionInfo(
+            version="main-dev",
+            channel="dev",
+            label="main-dev",
+            install_ref="refs/heads/main",
+            internal_only=True,
+        )
+        manifest = Path(__file__).resolve().parent / "_tmp_panel_internal.json"
+        _write_versions_manifest(manifest, [])
+        try:
+            with patch.dict(os.environ, {"REJOIN_VERSIONS_MANIFEST": str(manifest)}, clear=False):
+                cmd = rv.build_public_install_curl_command(info)
+            self.assertIn("rejoin.deng.my.id/install/test/latest", cmd)
+            self.assertNotIn("install/dev/main", cmd)
+            self.assertNotIn("sig=", cmd)
         finally:
             manifest.unlink(missing_ok=True)
 

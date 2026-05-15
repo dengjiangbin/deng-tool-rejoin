@@ -208,6 +208,10 @@ class BaseLicenseStore(ABC):
         """
 
     @abstractmethod
+    def get_owner_discord_id_for_license_key(self, raw_key: str) -> str | None:
+        """Return the redeemed owner's Discord user ID for *raw_key*, or None."""
+
+    @abstractmethod
     def log_license_check(self, **kwargs: Any) -> None:
         """Record a license check event (for audit / rate-limit analysis)."""
 
@@ -839,6 +843,21 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             app_version="install",
         )
         return RESULT_ACTIVE
+
+    def get_owner_discord_id_for_license_key(self, raw_key: str) -> str | None:
+        try:
+            normalized = normalize_license_key(raw_key)
+        except LicenseKeyError:
+            return None
+        key_hash = hash_license_key(normalized)
+        db = self._load()
+        record = db["keys"].get(key_hash)
+        if not record:
+            return None
+        owner_id = record.get("owner_discord_id")
+        if owner_id is None or str(owner_id).strip() == "":
+            return None
+        return str(owner_id).strip()
 
     def log_license_check(self, **kwargs: Any) -> None:
         db = self._load()
@@ -1535,6 +1554,25 @@ class SupabaseLicenseStore(BaseLicenseStore):
             app_version="install",
         )
         return RESULT_ACTIVE
+
+    def get_owner_discord_id_for_license_key(self, raw_key: str) -> str | None:
+        try:
+            normalized = normalize_license_key(raw_key)
+        except LicenseKeyError:
+            return None
+        key_hash = hash_license_key(normalized)
+        key_res = (
+            self._client.table("license_keys")
+            .select("owner_discord_id")
+            .eq("id", key_hash)
+            .execute()
+        )
+        if not key_res.data:
+            return None
+        owner_id = key_res.data[0].get("owner_discord_id")
+        if owner_id is None or str(owner_id).strip() == "":
+            return None
+        return str(owner_id).strip()
 
     # ── Device binding ────────────────────────────────────────────────────────
 

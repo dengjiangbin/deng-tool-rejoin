@@ -23,7 +23,9 @@ Endpoints
 
   GET  /install/latest
   GET  /install/<version>   e.g. /install/v1.0.0
-  GET  /install/dev/main?exp=...&sig=...   (HMAC-signed; internal only)
+  GET  /install/test/latest   (fixed URL; internal main-dev artifact; license + owner/tester gate)
+  GET  /install/beta/latest   (302 alias → /install/test/latest)
+  GET  /install/dev/main?exp=...&sig=...   (HMAC-signed; legacy internal)
        Return a small public **bootstrap** shell script (no private source).
        The script calls POST /api/install/authorize and downloads a short-lived
        tokenized artifact from GET /api/download/package/<token>.
@@ -159,6 +161,11 @@ def _key_not_redeemed_api_message() -> str:
     from agent.license import KEY_NOT_REDEEMED_API_MESSAGE
 
     return KEY_NOT_REDEEMED_API_MESSAGE
+
+
+_TEST_INSTALL_FORBIDDEN_MESSAGE = (
+    "This test build is only available to owner/admin/testers."
+)
 
 
 _RESULT_MESSAGES: dict[str, str] = {
@@ -463,6 +470,23 @@ def _route_public_install(
             script = render_public_bootstrap(base_url=base, requested="latest")
             return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
+        if tail == "test/latest":
+            script = render_public_bootstrap(
+                base_url=base,
+                requested="test-latest",
+                installer_title="DENG Tool: Rejoin Test Installer",
+                banner_lines=("Channel: internal test", "Version: main-dev"),
+            )
+            return (script.encode("utf-8"), 200, "text/x-shellscript", None)
+
+        if tail == "beta/latest":
+            return (
+                b"",
+                302,
+                "text/plain",
+                [("Location", "/install/test/latest")],
+            )
+
         if tail == "dev/main":
             if not verify_internal_path("dev/main", exp, sig):
                 return (
@@ -548,7 +572,9 @@ def _route_public_install(
             p, s = _build_response("server_unavailable", 500)
             return (p, s, "application/json", None)
 
-        if req_ver.lower() == "main-dev":
+        req_lower = req_ver.lower()
+
+        if req_lower == "main-dev":
             if not _bootstrap_session_ok(bootstrap_session, "dev/main"):
                 return (
                     json.dumps(
@@ -561,6 +587,17 @@ def _route_public_install(
                     "application/json",
                     None,
                 )
+            row = get_exact_registry_row("main-dev")
+            if row is None or not is_admin_internal_row(row):
+                return (
+                    json.dumps(
+                        {"result": "not_found", "message": "Internal build is not configured."}
+                    ).encode("utf-8"),
+                    404,
+                    "application/json",
+                    None,
+                )
+        elif req_lower == "test-latest":
             row = get_exact_registry_row("main-dev")
             if row is None or not is_admin_internal_row(row):
                 return (
@@ -588,6 +625,27 @@ def _route_public_install(
             log.info("install authorize denied: %s key=%s", lic, _mask_key(raw_key))
             p, s = _build_response(lic, 403)
             return (p, s, "application/json", None)
+
+        if req_lower == "test-latest":
+            from agent.install_internal_access import is_internal_test_install_allowed
+
+            owner_discord_id = store.get_owner_discord_id_for_license_key(raw_key)
+            if not is_internal_test_install_allowed(owner_discord_id):
+                log.info(
+                    "install authorize denied: test-latest not owner/tester key=%s",
+                    _mask_key(raw_key),
+                )
+                return (
+                    json.dumps(
+                        {
+                            "result": "forbidden",
+                            "message": _TEST_INSTALL_FORBIDDEN_MESSAGE,
+                        }
+                    ).encode("utf-8"),
+                    403,
+                    "application/json",
+                    None,
+                )
 
         root = get_artifact_root()
         if root is None:
@@ -733,7 +791,7 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
     method = environ.get("REQUEST_METHOD", "GET")
 
     _STATUS_TEXT = {
-        200: "200 OK", 400: "400 Bad Request", 401: "401 Unauthorized",
+        200: "200 OK", 302: "302 Found", 400: "400 Bad Request", 401: "401 Unauthorized",
         403: "403 Forbidden", 404: "404 Not Found", 405: "405 Method Not Allowed",
         429: "429 Too Many Requests", 500: "500 Internal Server Error",
         503: "503 Service Unavailable",

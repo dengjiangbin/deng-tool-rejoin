@@ -88,7 +88,7 @@ def is_admin_internal_row(row: dict[str, Any]) -> bool:
     if not row_enabled(row):
         return False
     vis = str(row.get("visibility") or "").strip().lower()
-    if vis not in {"admin", "internal", "private", "owner"}:
+    if vis not in {"admin", "internal", "private", "owner", "tester"}:
         return False
     ref = str(row.get("install_ref") or row.get("ref") or "").strip()
     return ref.startswith("refs/heads/")

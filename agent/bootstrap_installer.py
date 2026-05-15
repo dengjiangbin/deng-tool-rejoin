@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 
-def render_public_bootstrap(*, base_url: str, requested: str, bootstrap_session: str = "") -> str:
-    """*requested* is ``latest``, ``v1.0.0``, ``main-dev``, etc.
+def render_public_bootstrap(
+    *,
+    base_url: str,
+    requested: str,
+    bootstrap_session: str = "",
+    installer_title: str = "DENG Tool: Rejoin Installer",
+    banner_lines: tuple[str, ...] = (),
+) -> str:
+    """*requested* is ``latest``, ``v1.0.0``, ``main-dev``, ``test-latest``, etc.
 
-    Empty *bootstrap_session* for public stable/latest; internal dev bootstraps embed a
-    server-issued session id validated by POST /api/install/authorize.
+    Empty *bootstrap_session* for public stable/latest and fixed internal test installers;
+    legacy signed ``/install/dev/main`` bootstraps embed a session validated by
+    ``POST /api/install/authorize``.
     """
     base = base_url.rstrip("/")
     if bootstrap_session:
@@ -15,10 +23,14 @@ def render_public_bootstrap(*, base_url: str, requested: str, bootstrap_session:
     else:
         sess_line = "unset BOOTSTRAP_SESSION 2>/dev/null || true"
 
+    banner_part = ""
+    if banner_lines:
+        banner_part = "\n".join(f'echo "{line}"' for line in banner_lines) + "\n"
+
     return f"""#!/usr/bin/env bash
 set -euo pipefail
-echo "DENG Tool: Rejoin Installer"
-if [[ -n "${{PREFIX:-}}" ]] && [[ "${{PREFIX}}" == *termux* ]]; then
+echo "{installer_title}"
+{banner_part}if [[ -n "${{PREFIX:-}}" ]] && [[ "${{PREFIX}}" == *termux* ]]; then
   echo "Detected: Termux"
 fi
 export DENG_REJOIN_INSTALL_API="{base}"

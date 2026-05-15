@@ -21,8 +21,8 @@
     "description": "Owner/admin testing only",
     "install_ref": "refs/heads/main",
     "artifact_path": "",
-    "installer_endpoint": "/install/dev/main",
-    "notes": "Owner/admin testing only — fetch bootstrap via signed URL.",
+    "installer_endpoint": "/install/test/latest",
+    "notes": "Owner/admin/tester testing — fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
     "visibility": "admin",
     "enabled": true
   }

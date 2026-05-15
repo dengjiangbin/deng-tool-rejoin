@@ -261,17 +261,10 @@ def build_full_install_command(owner: str, repo: str, install_ref: str) -> str:
 def build_public_install_curl_command(info: RejoinVersionInfo) -> str:
     """Public tutorial / panel curl — ``https://rejoin.deng.my.id/install/...``."""
     from agent.install_registry import public_install_base_url, resolve_latest_public_stable
-    from agent.install_signing import sign_internal_path
 
     base = public_install_base_url().rstrip("/")
     if info.internal_only:
-        qs = sign_internal_path("dev/main")
-        if not qs:
-            return (
-                f"# Internal bootstrap requires REJOIN_INSTALL_SIGNING_SECRET on the server.\n"
-                f"# curl -fsSL \"{base}/install/dev/main?<exp>&<sig>\" -o install.sh && bash install.sh"
-            )
-        return f'curl -fsSL "{base}/install/dev/main?{qs}" -o install.sh && bash install.sh'
+        return f"curl -fsSL {base}/install/test/latest -o install.sh && bash install.sh"
 
     latest = resolve_latest_public_stable()
     latest_ver = str(latest.get("version") or "").strip() if latest else ""

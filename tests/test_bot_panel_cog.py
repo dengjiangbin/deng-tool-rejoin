@@ -798,7 +798,7 @@ class TestPanelSelectVersion(unittest.IsolatedAsyncioTestCase):
 
 
 class TestVersionPickSelectCallback(unittest.IsolatedAsyncioTestCase):
-    async def test_install_reply_content_uses_signed_internal_bootstrap_url(self) -> None:
+    async def test_install_reply_content_uses_fixed_internal_test_install_url(self) -> None:
         info = RejoinVersionInfo(
             version="main-dev",
             channel="dev",
@@ -815,7 +815,7 @@ class TestVersionPickSelectCallback(unittest.IsolatedAsyncioTestCase):
 
         kw = inter.response.send_message.call_args[1]
         self.assertIsNone(kw.get("embed"))
-        self.assertIn("install/dev/main", kw["content"])
+        self.assertIn("install/test/latest", kw["content"])
         self.assertIn("Desktop Copy:", kw["content"])
         self.assertIn("Mobile Copy:", kw["content"])
         self.assertTrue(kw["ephemeral"])
