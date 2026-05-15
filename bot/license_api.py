@@ -40,6 +40,14 @@ Environment variables
   LICENSE_API_HOST                     Bind host (default: 127.0.0.1).
   LICENSE_API_PORT                     Port (default: 8787).
   LICENSE_API_SHARED_SECRET            Optional bearer token for auth.
+  LICENSE_API_PUBLIC_URL               Public base URL served by a reverse proxy
+                                       (e.g. https://yourdomain.com/rejoin-api).
+                                       Used to construct the download_url returned
+                                       to clients.  Trailing slash optional.
+                                       If unset, falls back to http://host:port.
+  LICENSE_API_PATH_PREFIX              URL path prefix the reverse proxy strips
+                                       before forwarding (e.g. /rejoin-api).
+                                       Leave empty when running directly.
   LICENSE_DOWNLOAD_ROOT                Path to dist/releases/ directory.
   LICENSE_DOWNLOAD_TOKEN_TTL_SECONDS   Token TTL in seconds (default: 300).
 
@@ -69,6 +77,39 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 log = logging.getLogger("deng.rejoin.license_api")
+
+# ── Public URL helper ─────────────────────────────────────────────────────────
+
+def _public_base_url() -> str:
+    """Return the public base URL used in download_url responses.
+
+    Priority:
+    1. LICENSE_API_PUBLIC_URL env var (set when behind a reverse proxy).
+    2. http://<LICENSE_API_HOST>:<LICENSE_API_PORT>  (fallback for direct access).
+
+    The returned string has NO trailing slash.
+    """
+    pub = os.environ.get("LICENSE_API_PUBLIC_URL", "").strip().rstrip("/")
+    if pub:
+        return pub
+    host = os.environ.get("LICENSE_API_HOST", "127.0.0.1").strip()
+    port = os.environ.get("LICENSE_API_PORT", "8787").strip()
+    return f"http://{host}:{port}"
+
+
+def _strip_path_prefix(path: str) -> str:
+    """Remove the configured LICENSE_API_PATH_PREFIX from the request path.
+
+    Allows the WSGI app to be mounted at a sub-path by a reverse proxy
+    (e.g. nginx ``location /rejoin-api/ { proxy_pass ... }`` with
+    ``proxy_pass http://127.0.0.1:8787/;`` stripping the prefix, OR
+    simply set LICENSE_API_PATH_PREFIX=/rejoin-api and let this handle it).
+    """
+    prefix = os.environ.get("LICENSE_API_PATH_PREFIX", "").strip().rstrip("/")
+    if prefix and path.startswith(prefix):
+        path = path[len(prefix):]
+    return path or "/"
+
 
 # ── In-memory download token store ────────────────────────────────────────────
 # Tokens are stored by their SHA-256 hash (raw token is returned to client once).
@@ -267,7 +308,7 @@ def _read_json_body(environ: dict) -> dict | None:
 
 def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
     """Minimal WSGI application — no external framework required."""
-    path = environ.get("PATH_INFO", "")
+    path = _strip_path_prefix(environ.get("PATH_INFO", ""))
     method = environ.get("REQUEST_METHOD", "GET")
 
     _STATUS_TEXT = {
@@ -441,9 +482,7 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         )
 
         expires_dt = datetime.fromtimestamp(time.time() + ttl, tz=timezone.utc)
-        host = os.environ.get("LICENSE_API_HOST", "127.0.0.1")
-        port = int(os.environ.get("LICENSE_API_PORT", "8787"))
-        download_url = f"http://{host}:{port}/api/download/package/{token}"
+        download_url = f"{_public_base_url()}/api/download/package/{token}"
 
         log.info(
             "Download token issued: key=%s channel=%s version=%s",
