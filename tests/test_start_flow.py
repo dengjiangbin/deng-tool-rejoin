@@ -7,7 +7,13 @@ import unittest.mock
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from agent.commands import _print_config_summary, _run_edit_config_menu, build_final_summary, build_start_table
+from agent.commands import (
+      _print_config_summary,
+      _run_edit_config_menu,
+      build_final_summary,
+      build_start_table,
+      build_start_verbose_details,
+)
 from agent.config import default_config, validate_config
 from agent import android as amod
 
@@ -16,12 +22,9 @@ def _row(
     idx: int,
     pkg: str,
     user: str,
-    cache: str,
-    gfx: str,
     state: str,
-    status: str,
 ) -> tuple:
-    return (idx, pkg, user, cache, gfx, state, status)
+    return (idx, pkg, user, state)
 
 
 class StartTableUxTests(unittest.TestCase):
@@ -29,16 +32,17 @@ class StartTableUxTests(unittest.TestCase):
 
     def _make_rows(self):
         return [
-            _row(1, "com.roblox.client", "deng1629", "Cleared", "Low Applied", "Online", "Heartbeat OK"),
-            _row(2, "com.example.robloxclone", "AltAccount1", "Partial", "Skipped", "Failed", "Launch failed"),
+            _row(1, "com.roblox.client", "deng1629", "Online"),
+            _row(2, "com.example.robloxclone", "AltAccount1", "Failed"),
         ]
 
-    def test_start_table_has_expected_columns(self):
+    def test_start_table_has_only_public_columns(self):
         rows = self._make_rows()
         table = build_start_table(rows)
-        for col in ("#", "Package", "Username", "Cache", "Graphics", "State", "Status"):
+        for col in ("#", "Package", "Username", "State"):
             self.assertIn(col, table)
-        self.assertNotIn("Label", table)
+        for banned in ("Cache", "Graphics", "Status", "Method", "Reason", "Private URL", "Label"):
+            self.assertNotIn(banned, table)
 
     def test_start_table_shows_username_and_package_separately(self):
         rows = self._make_rows()
@@ -49,19 +53,19 @@ class StartTableUxTests(unittest.TestCase):
         self.assertIn("com.example.robloxclone", table)
 
     def test_start_table_not_label_column(self):
-        rows = [_row(1, "com.roblox.client", "Main", "Cleared", "Skipped", "Started", "Launch command sent")]
+        rows = [_row(1, "com.roblox.client", "Main", "Launching")]
         table = build_start_table(rows)
         self.assertNotIn("Label", table)
         self.assertIn("Username", table)
 
-    def test_start_table_shows_status(self):
+    def test_start_table_shows_state(self):
         rows = self._make_rows()
         table = build_start_table(rows)
         self.assertIn("Online", table)
         self.assertIn("Failed", table)
 
     def test_start_table_has_box_borders(self):
-        rows = [_row(1, "com.roblox.client", "Main", "Cleared", "Skipped", "Started", "Heartbeat OK")]
+        rows = [_row(1, "com.roblox.client", "Main", "Online")]
         table = build_start_table(rows)
         self.assertIn("┌", table)
         self.assertIn("┐", table)
@@ -75,28 +79,46 @@ class StartTableUxTests(unittest.TestCase):
         self.assertEqual(table.count("┌"), 1)
 
     def test_unknown_username_shows_unknown_not_waiting(self):
-        rows = [_row(1, "com.example.robloxclone", "Unknown", "Skipped", "Skipped", "Started", "Heartbeat OK")]
+        rows = [_row(1, "com.example.robloxclone", "Unknown", "Launching")]
         table = build_start_table(rows)
         self.assertIn("Unknown", table)
         self.assertNotIn("Waiting", table)
         self.assertNotIn("Username not set", table)
 
-    def test_final_summary_is_one_line(self):
+    def test_verbose_details_include_cache_graphics_not_in_public_table(self):
+        rows = [_row(1, "com.roblox.client", "Main", "Online")]
+        table = build_start_table(rows)
+        self.assertNotIn("Cleared", table)
+        detail = build_start_verbose_details(
+            [{"package": "com.roblox.client", "cache": "Cleared", "graphics": "Skipped", "launch_detail": "ok"}]
+        )
+        self.assertIn("cache=Cleared", detail)
+        self.assertIn("graphics=Skipped", detail)
+        combined = table + detail
+        self.assertNotIn("Private URL", combined)
+
+    def test_final_summary_is_multi_line_final_block(self):
         entries = [
             {"package": "com.roblox.client", "account_username": "deng1629", "enabled": True, "username_source": "manual"},
+            {"package": "com.two.pkg", "account_username": "", "enabled": True, "username_source": "not_set"},
         ]
-        text = build_final_summary(entries, {"com.roblox.client": "Online"})
-        self.assertNotIn("Final Summary:", text)
-        self.assertIn("launched", text.lower())
-        self.assertEqual(text.count("\n"), 0)
+        text = build_final_summary(
+            entries,
+            {"com.roblox.client": "Online", "com.two.pkg": "Reconnecting"},
+        )
+        self.assertIn("Final:", text)
+        self.assertIn("online", text.lower())
+        self.assertIn("reconnecting", text.lower())
+        self.assertGreaterEqual(text.count("\n"), 1)
 
-    def test_final_summary_reports_zero_on_all_failure(self):
+    def test_final_summary_reports_zero_when_no_rows_emitted(self):
         entries = [{"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}]
-        text = build_final_summary(entries, {"com.roblox.client": "Failed"})
-        self.assertIn("0", text)
+        text = build_final_summary(entries, {"com.roblox.client": "Unknown"})
+        self.assertIn("Final:", text)
+        self.assertIn("unknown", text.lower())
 
     def test_start_table_does_not_contain_monkey(self):
-        rows = [_row(1, "com.roblox.client", "Main", "Cleared", "Skipped", "Started", "Launch command sent")]
+        rows = [_row(1, "com.roblox.client", "Main", "Launching")]
         combined = build_start_table(rows) + "\n" + build_final_summary(
             [{"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}],
             {"com.roblox.client": "Online"},
@@ -115,6 +137,7 @@ class StartTableUxTests(unittest.TestCase):
         self.assertIn("Username", text)
         self.assertNotIn("Label:", text)
         self.assertNotIn('{"', text)
+        self.assertNotIn("Username not set", text)
 
     def test_public_config_menu_has_no_manual_auto_resize_step(self):
         args = argparse.Namespace(no_color=True)
@@ -164,14 +187,14 @@ class SinglePackageLaunchTests(unittest.TestCase):
 
     def test_single_package_start_table_row_says_started(self):
         """Table rows may use Online or Launching after heartbeat."""
-        rows = [_row(1, "com.roblox.client", "Main", "Cleared", "Skipped", "Online", "Heartbeat OK")]
+        rows = [_row(1, "com.roblox.client", "Main", "Online")]
         table = build_start_table(rows)
         self.assertIn("Online", table)
         self.assertNotIn("Launch skipped", table)
 
     def test_launch_skipped_phrase_not_in_table(self):
         """The phrase 'Launch skipped' must never appear in a start table."""
-        rows = [_row(1, "com.roblox.client", "Main", "Cleared", "Skipped", "Online", "Heartbeat OK")]
+        rows = [_row(1, "com.roblox.client", "Main", "Online")]
         table = build_start_table(rows)
         self.assertNotIn("Launch skipped", table)
 

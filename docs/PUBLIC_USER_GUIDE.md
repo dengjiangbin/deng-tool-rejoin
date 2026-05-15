@@ -12,13 +12,13 @@ The pink DENG banner appears, then the local Termux menu.
 
 With root, DENG can list installed packages, check launcher activities, read safe `dumpsys` labels, and combine that with **hint fragments** (not a hard-coded package list) so official `com.roblox.client` and renamed clones can appear together in setup. If nothing matches, use manual package entry.
 
-**Every Start** clears **only** safe cache-style paths under each selected package (`cache`, `code_cache`, `files/tmp`). It never runs `pm clear`, never wipes login/session storage, and failures there never block launch. The Start table shows **Cache** and **Graphics** results per package.
+**Every Start** clears **only** safe cache-style paths under each selected package (`cache`, `code_cache`, `files/tmp`). It never runs `pm clear`, never wipes login/session storage, and failures there never block launch. **Cache** (cleanup) and **graphics** (low-quality settings when a safe JSON file is found) still run internally, but the **public Start table** only shows **Package / Username / State**. Use `--verbose` or `--debug` on Start (or set `log_level` to `DEBUG`) to print per-package cache/graphics/launch detail lines below the table—never a full private server URL.
 
-**Low graphics** applies only when the known `ClientAppSettings.json` file exists; otherwise the tool reports **Skipped** honestly.
+**Low graphics** walks likely `files/` subtrees for known Roblox settings JSON names (for example `ClientAppSettings.json`); it skips secret-looking paths, backs up before write, and reports **Skipped** when nothing safe is found.
 
 The **supervisor** (when Auto rejoin is enabled) monitors each selected package with configurable grace time, health interval, backoff, and hourly restart limits. It can **reopen** missing processes and attempt **reconnect** when a process is alive but no longer foreground for your client. Per-package **private server URLs** override the global URL; URLs are **masked** in normal output.
 
-The live **Start** view is **one table** with columns: Package, Username, Cache, Graphics, State, and Status.
+The live **Start** view is **one table** with public columns **#**, **Package**, **Username**, and **State** (for example Online, Launching, Failed).
 
 ## Configure Roblox
 
@@ -49,7 +49,7 @@ The **Setup / Edit Config** menu has four sections:
 
 Manage Roblox packages (the main app and any clones):
 
-- **Add Package** — Auto-detect from Android or enter manually. DENG detects a safe display username when possible (app label, readable app data with **optional root read-only scan**). If nothing is found, the Start table shows **Unknown** (launch still works).
+- **Add Package** — Uses the **same full discovery table** as first-time setup (#, Package, App Name, Launchable), then multi-select or manual entry. DENG detects a safe display username when possible (app label, readable app data with **optional root read-only scan**). If nothing is found, the Start table shows **Unknown** (launch still works).
 - **Remove Package** — Select by number, confirm removal. Only the selected package is removed.
 - **Auto Detect Packages** — Scan for Roblox and cloned packages not yet added. Avoids duplicates.
 - **Detect / Refresh Usernames** — Re-run detection for every configured package and save results to **account_username** when found.
@@ -157,29 +157,26 @@ privateServerLinkCode=***MASKED***
 
 ## Start
 
-Choose **Start**. If first-time setup is not complete, DENG will guide you into setup first. After setup, Start prints a one-line summary (packages selected, launch mode, webhook state), then launches each selected Roblox package using the best available Android launch command (`am`, `cmd`, or `monkey` as a fallback), and prints a single clean status table:
+Choose **Start**. If first-time setup is not complete, DENG will guide you into setup first. After setup, Start prints a short summary (packages selected, launch mode, webhook state), then launches each selected Roblox package using the best available Android launch command (`am`, `cmd`, or `monkey` as a fallback), and prints a **minimal** status table:
 
 ```
-┌───┬──────────────────┬──────────┬─────────┬──────────────────────────────┐
-│ # │ Package          │ Username │ Launch  │ Status                       │
-├───┼──────────────────┼──────────┼─────────┼──────────────────────────────┤
-│ 1 │ com.roblox.client│ Main     │ Started │ Roblox launch command sent   │
-└───┴──────────────────┴──────────┴─────────┴──────────────────────────────┘
+┌───┬───────────────────┬──────────┬────────────┐
+│ # │ Package           │ Username │ State      │
+├───┼───────────────────┼──────────┼────────────┤
+│ 1 │ com.roblox.client │ Main     │ Online     │
+└───┴───────────────────┴──────────┴────────────┘
 
 Final:
-1 package launched successfully.
+1 package online.
 ```
+
+On a real Android or cloud-phone Termux session, verify: package discovery lists expected clients/clones, Start clears safe cache and applies low graphics when possible, the table stays four columns without URLs, the supervisor reaches **Online**, and force-stopping a monitored package leads to reopen/reconnect without printing private URLs. **This Windows/desktop checkout is not a substitute for that device test** when you need physical verification.
 
 **Username** shows the Roblox account name you configured. If no name is configured, it shows **Unknown**. An unknown username does not block launching.
 
-**Android launch fallback**: DENG tries launch methods in order — `am start` (MAIN/LAUNCHER intent), then activity-component from `cmd package resolve-activity`, then `monkey` if available. `monkey` is optional and not required. If all Android launcher commands are unavailable, the table shows `Failed` and the final summary shows `0 packages launched.` with a short reason.
+**Android launch fallback**: DENG tries launch methods in order — `am start` (MAIN/LAUNCHER intent), then activity-component from `cmd package resolve-activity`, then `monkey` if available. `monkey` is optional and not required. If all Android launcher commands are unavailable, **State** shows **Failed** and **Final** includes a **failed** / **offline** tally with a short reason printed separately (not as extra table columns).
 
 **Single package**: One selected package still launches. Only window layout/auto-resize is skipped when there is only one package.
-
-The final summary shows a clear count:
-- `1 package launched successfully.`
-- `2 packages launched, 1 failed.`
-- `0 packages launched.` followed by a short reason.
 
 After Start, DENG sends a webhook update if enabled, then starts the supervisor loop only if auto rejoin is enabled.
 

@@ -42,9 +42,9 @@ Each `roblox_packages` entry supports `package`, `app_name`, `account_username`,
 
 Nested `package_detection` drives root-aware discovery (`pm` / `cmd package` listing, launchability via `resolve-activity`, `dumpsys` labels, and configurable hint fragments). Hints such as `roblox`, `rblx`, `blox`, `moon`, `moons`, `lite`, and `clone` are **aids only** — they are not treated as a fixed allow-list. Manual package entry remains available when nothing matches. Legacy flat `package_detection_hints` is kept in sync with `package_detection.hints`.
 
-On every **Start**, DENG runs **mandatory safe cache cleanup** (e.g. `cache`, `code_cache`, `files/tmp`) via root `find -delete` — never `pm clear` and never full app data, logins, cookies, or shared_prefs. Optional **low graphics** merges known keys into `ClientSettings/ClientAppSettings.json` when that JSON exists, with backup, verification, and honest Skipped/Failed status.
+On every **Start**, DENG runs **mandatory safe cache cleanup** (e.g. `cache`, `code_cache`, `files/tmp`) via root `find -delete` — never `pm clear` and never full app data, logins, cookies, or shared_prefs. Optional **low graphics** merges known keys into discovered Roblox client JSON under the package `files/` tree when a safe, understood file is found (backup + verify), and skips otherwise.
 
-Nested `supervisor` configures launch grace, health interval, restart backoff, hourly restart caps, and global auto-reopen / auto-reconnect behavior coordinated with per-package flags. The Start summary is a **single table**: Package, Username, Cache, Graphics, State, and Status.
+Nested `supervisor` configures launch grace, health interval, restart backoff, hourly restart caps, and global auto-reopen / auto-reconnect behavior coordinated with per-package flags. The **public Start summary** is a **single table**: **#**, **Package**, **Username**, and **State**. Cache/graphics/heartbeat/reconnect detail stay internal, in logs, or under `--verbose` / `--debug` / DEBUG log level — not as extra columns in the default table.
 
 ## Private Test Update Flow
 

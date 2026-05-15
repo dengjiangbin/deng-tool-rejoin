@@ -156,7 +156,7 @@ def run_doctor(config_data: dict[str, Any] | None = None) -> list[DoctorItem]:
             _item(
                 "PASS" if not missing_usernames else "WARN",
                 "Account names",
-                "all selected packages have account names" if not missing_usernames else f"username not set: {', '.join(missing_usernames)}",
+                "all selected packages have account names" if not missing_usernames else f"unknown username for: {', '.join(missing_usernames)}",
                 "Account names are optional, but adding usernames or Main/Alt names makes the start table easier to read.",
             )
         )

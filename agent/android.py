@@ -10,9 +10,10 @@ import shlex
 import shutil
 import socket
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from .config import ConfigError, is_valid_package_name, normalize_package_detection_hint, validate_package_name
 from .constants import (
@@ -218,6 +219,18 @@ def get_application_label(package: str) -> str:
     return ""
 
 
+def get_application_label_cached(package: str, cache: dict[str, str]) -> str:
+    if package not in cache:
+        cache[package] = get_application_label(package)
+    return cache[package]
+
+
+def is_launchable_package_cached(package: str, cache: dict[str, bool]) -> bool:
+    if package not in cache:
+        cache[package] = is_launchable_package(package)
+    return cache[package]
+
+
 def _package_name_matches_hints(pkg: str, hints: list[str]) -> bool:
     lower = pkg.lower()
     return any(hint in lower for hint in hints)
@@ -229,30 +242,42 @@ def _label_matches_roblox_signals(label: str, hints: list[str]) -> bool:
     return any(x in low for x in list(hints) + list(extra))
 
 
+_DISCOVERY_RESULT_CACHE: dict[str, Any] = {"key": None, "t": 0.0, "rows": []}
+_DISCOVERY_CACHE_SECONDS = 12.0
+
+
 def discover_roblox_package_candidates(
     hints: Iterable[str] | None = None,
     *,
     include_launchable_only: bool = True,
     detection_enabled: bool = True,
 ) -> list[RobloxPackageCandidate]:
-    """Root-aware discovery: pm list packages + launchability + label/hint heuristics.
-
-    Hints are aids only — official client, launchable clones with Roblox-like labels,
-    and package names containing hint fragments are all considered.
-    """
+    """Discovery: name-filter first so dumpsys runs only for likely packages (cached per call)."""
     if not detection_enabled:
         return []
     detection_hints = _safe_detection_hints(hints)
+    cache_key = (tuple(detection_hints), bool(include_launchable_only), bool(detection_enabled))
+    now = time.monotonic()
+    if (
+        _DISCOVERY_RESULT_CACHE["key"] == cache_key
+        and now - float(_DISCOVERY_RESULT_CACHE["t"]) < _DISCOVERY_CACHE_SECONDS
+    ):
+        return list(_DISCOVERY_RESULT_CACHE["rows"])
     packages = list_packages()
+    label_cache: dict[str, str] = {}
+    launch_cache: dict[str, bool] = {}
+    candidate_pkgs = [pkg for pkg in packages if pkg == DEFAULT_ROBLOX_PACKAGE or _package_name_matches_hints(pkg, detection_hints)]
+    if DEFAULT_ROBLOX_PACKAGE in packages and DEFAULT_ROBLOX_PACKAGE not in candidate_pkgs:
+        candidate_pkgs.insert(0, DEFAULT_ROBLOX_PACKAGE)
     out: list[RobloxPackageCandidate] = []
-    for pkg in packages:
-        label = get_application_label(pkg)
+    for pkg in sorted(set(candidate_pkgs), key=lambda p: (0 if p == DEFAULT_ROBLOX_PACKAGE else 1, p)):
+        label = get_application_label_cached(pkg, label_cache)
         app_name = label or pkg.rsplit(".", 1)[-1]
         name_match = _package_name_matches_hints(pkg, detection_hints) or pkg == DEFAULT_ROBLOX_PACKAGE
         label_match = bool(label) and _label_matches_roblox_signals(label, detection_hints)
         if not name_match and not label_match:
             continue
-        launchable = is_launchable_package(pkg)
+        launchable = is_launchable_package_cached(pkg, launch_cache)
         if include_launchable_only and not launchable:
             continue
         out.append(RobloxPackageCandidate(package=pkg, app_name=app_name, launchable=launchable))
@@ -261,6 +286,9 @@ def discover_roblox_package_candidates(
         return (0 if c.package == DEFAULT_ROBLOX_PACKAGE else 1, c.package)
 
     out.sort(key=_sort_key)
+    _DISCOVERY_RESULT_CACHE["key"] = cache_key
+    _DISCOVERY_RESULT_CACHE["t"] = now
+    _DISCOVERY_RESULT_CACHE["rows"] = list(out)
     return out
 
 
@@ -623,24 +651,60 @@ def clear_safe_package_cache(package: str) -> str:
 
 _ROBLOX_CLIENT_SETTINGS_REL = "files/ClientSettings/ClientAppSettings.json"
 
+_FORBIDDEN_GRAPHICS_NAME_PARTS = (
+    "cookie",
+    "token",
+    "session",
+    "auth",
+    "login",
+    "password",
+    "credential",
+    "account",
+)
 
-def apply_low_graphics_optimization(package: str, *, enabled: bool = True) -> str:
-    """If the known Roblox ClientAppSettings JSON exists, merge low-FPS / quality flags.
 
-    Backs up before write. Returns Low Applied, Skipped, or Failed.
-    """
-    if not enabled:
-        return "Skipped"
+def _relpath_safe_for_graphics(rel: str) -> bool:
+    low = rel.lower().replace("\\", "/")
+    return not any(bad in low for bad in _FORBIDDEN_GRAPHICS_NAME_PARTS)
+
+
+def discover_roblox_graphics_json_paths(package: str, root_tool: str) -> list[str]:
+    """Find candidate settings JSON under the package files tree (root)."""
     package = validate_package_name(package)
-    root_info = detect_root()
-    if not root_info.available or not root_info.tool:
-        return "Skipped"
-    rel = _ROBLOX_CLIENT_SETTINGS_REL
-    path = f"/data/data/{package}/{rel}"
-    probe = run_root_command(["test", "-f", path], root_tool=root_info.tool, timeout=6)
+    base = f"/data/data/{package}/files"
+    probe = run_root_command(["test", "-d", base], root_tool=root_tool, timeout=4)
+    if not probe.ok:
+        return []
+    # shell find — limited depth and count; skip secret-looking paths when filtering results
+    sh = (
+        f"find {shlex.quote(base)} -maxdepth 9 -type f "
+        r"\( -iname 'ClientAppSettings.json' -o -iname 'clientsettings.json' "
+        r"-o -iname 'settings.json' -o -iname 'GlobalBasicSettings.json' -o -iname 'RobloxSettings.json' "
+        r"-o -path '*/ClientSettings/*.json' -o -path '*/clientsettings/*.json' "
+        r"-o -path '*/robloxsettings/*.json' -o -path '*/RobloxSettings/*.json' \) 2>/dev/null | head -n 24"
+    )
+    res = run_root_command(["sh", "-c", sh], root_tool=root_tool, timeout=12)
+    if not res.ok or not res.stdout.strip():
+        legacy = f"/data/data/{package}/{_ROBLOX_CLIENT_SETTINGS_REL}"
+        pr = run_root_command(["test", "-f", legacy], root_tool=root_tool, timeout=4)
+        return [legacy] if pr.ok else []
+    paths: list[str] = []
+    for line in res.stdout.strip().splitlines():
+        p = line.strip()
+        if not p or p in paths:
+            continue
+        rel = p.split("/files/", 1)[-1] if "/files/" in p else p
+        if not _relpath_safe_for_graphics(rel):
+            continue
+        paths.append(p)
+    return paths
+
+
+def _apply_low_graphics_json_file(path: str, root_tool: str) -> str:
+    probe = run_root_command(["test", "-f", path], root_tool=root_tool, timeout=4)
     if not probe.ok:
         return "Skipped"
-    cat = run_root_command(["cat", path], root_tool=root_info.tool, timeout=8)
+    cat = run_root_command(["cat", path], root_tool=root_tool, timeout=8)
     if not cat.ok or not cat.stdout.strip():
         return "Skipped"
     try:
@@ -650,8 +714,7 @@ def apply_low_graphics_optimization(package: str, *, enabled: bool = True) -> st
     if not isinstance(data, dict):
         return "Skipped"
     backup = f"{path}.bak.deng"
-    run_root_command(["cp", path, backup], root_tool=root_info.tool, timeout=8)
-    # Documented Roblox Android FFlags (best-effort; ignored if absent client-side).
+    run_root_command(["cp", path, backup], root_tool=root_tool, timeout=8)
     low_keys: dict[str, int] = {
         "DFIntTaskSchedulerTargetFps": 15,
         "DFIntTextureQualityOverride": 1,
@@ -666,12 +729,12 @@ def apply_low_graphics_optimization(package: str, *, enabled: bool = True) -> st
     b64 = base64.b64encode(payload.encode("utf-8")).decode("ascii")
     wr = run_root_command(
         ["sh", "-c", f"printf '%s' '{b64}' | base64 -d > '{path}'"],
-        root_tool=root_info.tool,
+        root_tool=root_tool,
         timeout=12,
     )
     if not wr.ok:
         return "Failed"
-    verify = run_root_command(["cat", path], root_tool=root_info.tool, timeout=8)
+    verify = run_root_command(["cat", path], root_tool=root_tool, timeout=8)
     if not verify.ok:
         return "Failed"
     try:
@@ -684,6 +747,27 @@ def apply_low_graphics_optimization(package: str, *, enabled: bool = True) -> st
         if data2.get(k) != data.get(k):
             return "Failed"
     return "Low Applied"
+
+
+def apply_low_graphics_optimization(package: str, *, enabled: bool = True) -> str:
+    """Merge low FPS / texture flags into known Roblox client JSON if found."""
+    if not enabled:
+        return "Skipped"
+    package = validate_package_name(package)
+    root_info = detect_root()
+    if not root_info.available or not root_info.tool:
+        return "Skipped"
+    paths = discover_roblox_graphics_json_paths(package, root_info.tool)
+    if not paths:
+        return "Skipped"
+    outcome = "Skipped"
+    for path in paths:
+        r = _apply_low_graphics_json_file(path, root_info.tool)
+        if r == "Low Applied":
+            return "Low Applied"
+        if r == "Failed":
+            outcome = "Failed"
+    return outcome
 
 
 def launch_package_with_options(

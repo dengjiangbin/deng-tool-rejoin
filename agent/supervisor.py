@@ -14,6 +14,7 @@ from .launcher import perform_rejoin
 from .lockfile import LockManager
 from .logger import configure_logging, log_event
 from .monitor import check_package_health, check_roblox_health
+from .roblox_health import categorize_unhealthy
 
 
 # ─── Status constants (shown in terminal and webhook) ─────────────────────────
@@ -21,8 +22,7 @@ from .monitor import check_package_health, check_roblox_health
 STATUS_ONLINE = "Online"
 STATUS_OFFLINE = "Offline"
 STATUS_LAUNCHING = "Launching"
-STATUS_CHECKING = "Checking"
-STATUS_REVIVING = "Reviving"
+STATUS_CHECKING = "Preparing"
 STATUS_BACKGROUND = "Background"
 STATUS_RECONNECTING = "Reconnecting"
 STATUS_WARNING = "Warning"
@@ -224,7 +224,11 @@ class _PackageWorker(threading.Thread):
                     continue
 
                 running = bool(health.meta.get("running"))
-                fg_wrong = running and health.state == "roblox_not_running" and health.meta.get("foreground") not in (self.package, None)
+                fg = health.meta.get("foreground")
+                disc = health.meta.get("disconnect_category")
+                fg_wrong = running and health.state == "roblox_not_running" and (
+                    fg not in (self.package, None) or bool(disc)
+                )
 
                 if fg_wrong and self._can_auto_reconnect():
                     now = time.time()
@@ -281,7 +285,7 @@ class _PackageWorker(threading.Thread):
                     continue
 
                 self.grace_start = None
-                self._set_status(STATUS_RECONNECTING, "process missing")
+                self._set_status(STATUS_RECONNECTING, categorize_unhealthy("process_missing", self.package))
                 log_event(self.logger, "info", "reviving_package", package=self.package)
                 pkg_cfg = dict(cfg)
                 pkg_cfg["roblox_package"] = self.package

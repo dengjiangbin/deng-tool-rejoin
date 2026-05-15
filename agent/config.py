@@ -344,7 +344,7 @@ def package_display_name(entry: dict[str, Any], *, include_package: bool = True)
         return f"{username} ({package})"
     if username:
         return username
-    return f"Username not set ({package})" if include_package else "Username not set"
+    return f"Unknown ({package})" if include_package else "Unknown"
 
 
 def normalize_package_detection_hint(value: str) -> str:

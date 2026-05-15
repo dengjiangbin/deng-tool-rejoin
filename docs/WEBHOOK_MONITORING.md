@@ -38,8 +38,8 @@ The primary embed (`build_status_embed_payload`) contains:
 |---|---|
 | `Online` | 🟢 online |
 | `Ready` | 🟡 ready |
-| `Preparing`, `Launching`, `Checking` | 🔵 preparing |
-| `Warning`, `Reviving` | 🟠 warning |
+| `Preparing`, `Launching`, `Reconnecting`, `Checking` | 🔵 preparing |
+| `Warning`, `Reviving`, `Background`, `Unknown` | 🟠 warning |
 | `Offline` | 🔴 offline |
 | `Failed`, `Not installed`, `Disabled` | ❌ failed |
 

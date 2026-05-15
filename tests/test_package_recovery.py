@@ -86,6 +86,69 @@ class LaunchStructuredTests(unittest.TestCase):
         self.assertTrue(r.success)
 
 
+class GraphicsPathTests(unittest.TestCase):
+    def test_discover_skips_secret_filename_segments(self):
+        stdout = (
+            "/data/data/com.test/files/foo/cookie_prefs.json\n"
+            "/data/data/com.test/files/ClientSettings/ClientAppSettings.json\n"
+        )
+
+        def runner(args, **kwargs):
+            a = tuple(args)
+            if a == ("test", "-d", "/data/data/com.test/files"):
+                return android.CommandResult(a, 0, "", "")
+            if a[0] == "sh" and any("find" in str(x) for x in a):
+                return android.CommandResult(a, 0, stdout, "")
+            return android.CommandResult(a, 1, "", "")
+
+        with unittest.mock.patch("agent.android.run_root_command", side_effect=runner):
+            paths = android.discover_roblox_graphics_json_paths("com.test", "su")
+        self.assertEqual(len(paths), 1)
+        self.assertIn("ClientAppSettings.json", paths[0])
+        self.assertNotIn("cookie", paths[0].lower())
+
+
+class DiscoveryCacheTests(unittest.TestCase):
+    def setUp(self) -> None:
+        android._DISCOVERY_RESULT_CACHE.update({"key": None, "t": 0.0, "rows": []})
+
+    def test_second_discover_within_ttl_reuses_rows(self):
+        calls: list[str] = []
+        packages = ["com.roblox.client", "com.vendor.unrelated"]
+
+        def on_label(pkg: str) -> str:
+            calls.append(pkg)
+            return "Roblox" if "roblox" in pkg else "Other"
+
+        with unittest.mock.patch("agent.android.list_packages", return_value=packages), \
+             unittest.mock.patch("agent.android.get_application_label", side_effect=on_label), \
+             unittest.mock.patch("agent.android.is_launchable_package", return_value=True), \
+             unittest.mock.patch("agent.android.time.monotonic", side_effect=[50.0, 50.5, 200.0]):
+            a = android.discover_roblox_package_candidates(["roblox"], detection_enabled=True)
+            n_mid = len(calls)
+            b = android.discover_roblox_package_candidates(["roblox"], detection_enabled=True)
+            self.assertEqual(a, b)
+            self.assertEqual(len(calls), n_mid)
+            android.discover_roblox_package_candidates(["roblox"], detection_enabled=True)
+            self.assertGreater(len(calls), n_mid)
+
+    def test_unrelated_packages_skip_label_reads(self):
+        touched: list[str] = []
+        packages = ["aa.bb.unrelated", "com.roblox.client", "zz.yy.other"]
+
+        def on_label(pkg: str) -> str:
+            touched.append(pkg)
+            return "Roblox" if "roblox" in pkg else "X"
+
+        self.setUp()
+        with unittest.mock.patch("agent.android.list_packages", return_value=packages), \
+             unittest.mock.patch("agent.android.get_application_label", side_effect=on_label), \
+             unittest.mock.patch("agent.android.is_launchable_package", return_value=True), \
+             unittest.mock.patch("agent.android.time.monotonic", return_value=0.0):
+            android.discover_roblox_package_candidates(["roblox"], detection_enabled=True)
+        self.assertEqual(touched, ["com.roblox.client"])
+
+
 class SupervisorRecoveryTests(unittest.TestCase):
     def test_restart_budget_blocks_spam(self):
         w = _PackageWorker(

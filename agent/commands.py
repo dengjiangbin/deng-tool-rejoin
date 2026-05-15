@@ -358,7 +358,7 @@ def _package_row_label(entry: dict[str, Any]) -> str:
 
 
 def _account_username_value(entry: dict[str, Any]) -> str:
-    return validate_account_username(entry.get("account_username", "")) or "Username not set"
+    return validate_account_username(entry.get("account_username", "")) or "Unknown"
 
 
 def _package_username_display(entry: dict[str, Any]) -> str:
@@ -398,6 +398,91 @@ def _package_detection_options(config_data: dict[str, Any]) -> tuple[list[str], 
     except ConfigError:
         hints = list(DEFAULT_ROBLOX_PACKAGE_HINTS)
     return hints, bool(pd.get("include_launchable_only", True)), bool(pd.get("enabled", True))
+
+
+def _gather_roblox_candidates_for_ui(config_data: dict[str, Any]) -> list[android.RobloxPackageCandidate]:
+    hints2, inc_launch, det_en = _package_detection_options(config_data)
+    candidates = android.discover_roblox_package_candidates(
+        hints2,
+        include_launchable_only=inc_launch,
+        detection_enabled=det_en,
+    )
+    if not candidates:
+        for pkg in android.find_roblox_packages(hints2):
+            candidates.append(
+                android.RobloxPackageCandidate(
+                    package=pkg,
+                    app_name=android.get_application_label(pkg) or pkg.rsplit(".", 1)[-1],
+                    launchable=android.is_launchable_package(pkg),
+                )
+            )
+    return candidates
+
+
+def _print_full_discovery_table(candidates: list[android.RobloxPackageCandidate]) -> None:
+    print()
+    print("Detected Roblox Packages")
+    print(f"{'#':<4} {'Package':<40} {'App Name':<22} {'Launchable':<10}")
+    print(f"{'-'*4} {'-'*40} {'-'*22} {'-'*10}")
+    for idx, c in enumerate(candidates, start=1):
+        launch_cell = "Yes" if c.launchable else "No"
+        print(f"{idx:<4} {c.package:<40} {c.app_name[:20]:<22} {launch_cell:<10}")
+
+
+def _interactive_discover_package_entries(
+    config_data: dict[str, Any],
+    existing_entries: list[dict[str, Any]],
+    *,
+    exclude_packages: set[str] | frozenset[str] | None = None,
+    config_for_detect: dict[str, Any] | None = None,
+    candidates: list[android.RobloxPackageCandidate] | None = None,
+) -> tuple[list[dict[str, Any]], str]:
+    """Full discovery table + multiselect (same path as first-time Roblox package step).
+
+    Returns ``(entries, reason)`` where reason is ``ok``, ``no_candidates``, or ``empty_choice``.
+
+    When ``candidates`` is passed (e.g. Add Package after pre-filter), discovery is not re-run.
+    """
+    if candidates is None:
+        exclude = frozenset(exclude_packages or ())
+        candidates = _gather_roblox_candidates_for_ui(config_data)
+        candidates = [c for c in candidates if c.package not in exclude]
+    if not candidates:
+        return [], "no_candidates"
+    if len(candidates) == 1:
+        c0 = candidates[0]
+        print(f"Auto-selected: {c0.package}")
+        return [
+            _detect_or_prompt_account_username(
+                _entry_for_package(c0.package, existing_entries, app_name=c0.app_name),
+                config_for_detect,
+            )
+        ], "ok"
+    _print_full_discovery_table(candidates)
+    print("  A. Select all")
+    raw = input("Choose packages (e.g. 1,2 or A) [1]: ").strip().lower() or "1"
+    picked: list[android.RobloxPackageCandidate] = []
+    if raw == "a":
+        picked = list(candidates)
+    else:
+        seen: set[str] = set()
+        for part in [p.strip() for p in raw.split(",") if p.strip()]:
+            if part.isdigit():
+                index = int(part)
+                if 1 <= index <= len(candidates):
+                    c = candidates[index - 1]
+                    if c.package not in seen:
+                        seen.add(c.package)
+                        picked.append(c)
+    if not picked:
+        return [], "empty_choice"
+    return [
+        _detect_or_prompt_account_username(
+            _entry_for_package(c.package, existing_entries, app_name=c.app_name),
+            config_for_detect,
+        )
+        for c in picked
+    ], "ok"
 
 
 def _safe_url_label(value: str | None) -> str:
@@ -589,58 +674,19 @@ def _choose_packages_menu(
     choice = input("Choose [1]: ").strip() or "1"
 
     if choice == "1":
-        hints2, inc_launch, det_en = _package_detection_options(cfg_ctx)
-        candidates = android.discover_roblox_package_candidates(
-            hints2,
-            include_launchable_only=inc_launch,
-            detection_enabled=det_en,
+        new_sel, reason = _interactive_discover_package_entries(
+            cfg_ctx,
+            selected,
+            exclude_packages=None,
+            config_for_detect=None,
         )
-        if not candidates:
-            for pkg in android.find_roblox_packages(hints2):
-                candidates.append(
-                    android.RobloxPackageCandidate(
-                        package=pkg,
-                        app_name=android.get_application_label(pkg) or pkg.rsplit(".", 1)[-1],
-                        launchable=android.is_launchable_package(pkg),
-                    )
-                )
-        if not candidates:
+        if reason == "no_candidates":
             print("No Roblox-compatible package was detected using package manager, hints, and labels.")
             print("Try option 2 to enter a package name manually, or install a Roblox client and re-run.")
             return selected, hints
-        if len(candidates) == 1:
-            c0 = candidates[0]
-            selected = [_detect_or_prompt_account_username(_entry_for_package(c0.package, selected, app_name=c0.app_name))]
-            print(f"Auto-selected: {c0.package}")
-            return selected, hints
-        print()
-        print("Detected Roblox Packages")
-        print(f"{'#':<4} {'Package':<40} {'App Name':<22} {'Launchable':<10}")
-        print(f"{'-'*4} {'-'*40} {'-'*22} {'-'*10}")
-        for idx, c in enumerate(candidates, start=1):
-            launch_cell = "Yes" if c.launchable else "No"
-            print(f"{idx:<4} {c.package:<40} {c.app_name[:20]:<22} {launch_cell:<10}")
-        print("  A. Select all")
-        raw = input("Choose packages (e.g. 1,2 or A) [1]: ").strip().lower() or "1"
-        if raw == "a":
-            selected = [
-                _detect_or_prompt_account_username(_entry_for_package(c.package, selected, app_name=c.app_name))
-                for c in candidates
-            ]
-        else:
-            choices = [part.strip() for part in raw.split(",") if part.strip()]
-            new_selection: list[dict[str, Any]] = []
-            for part in choices:
-                if part.isdigit():
-                    index = int(part)
-                    if 1 <= index <= len(candidates):
-                        c = candidates[index - 1]
-                        if c.package not in [e["package"] for e in new_selection]:
-                            new_selection.append(
-                                _detect_or_prompt_account_username(_entry_for_package(c.package, selected, app_name=c.app_name))
-                            )
-            if new_selection:
-                selected = new_selection
+        if reason == "ok":
+            selected = new_sel
+        return selected, hints
     elif choice == "2":
         default_package = selected[0]["package"] if selected else DEFAULT_ROBLOX_PACKAGE
         manual = _prompt_manual_package(default_package)
@@ -1000,7 +1046,7 @@ def _package_menu_set_username(draft: dict[str, Any]) -> dict[str, Any]:
 
 
 def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
-    """Add a package via auto-detect or manual entry. Username is detected, not labeled."""
+    """Add package(s) via the same full discovery table as first-time wizard, or manual entry."""
     current_entries = validate_package_entries(
         draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
     )
@@ -1013,44 +1059,50 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
     choice = input("Choose [1]: ").strip() or "1"
     if choice == "0":
         return draft
-    new_package = None
+    new_entries_to_append: list[dict[str, Any]] = []
     if choice == "1":
-        hints = _safe_detection_hints(draft)
-        detected = _ordered_roblox_packages(hints)
-        new_pkgs = [p for p in detected if p not in current_pkgs]
-        if not detected:
-            print("No Roblox Packages Detected. Try manual entry.")
-        elif not new_pkgs:
+        all_detected = _gather_roblox_candidates_for_ui(draft)
+        fresh_candidates = [c for c in all_detected if c.package not in current_pkgs]
+        if not all_detected:
+            print("No Roblox-compatible packages were detected. Try manual entry.")
+            return draft
+        if not fresh_candidates:
             print("All Detected Packages Are Already Added.")
-        elif len(new_pkgs) == 1:
-            new_package = new_pkgs[0]
-            print(f"Auto-selected: {new_package}")
-        else:
-            for idx, pkg in enumerate(new_pkgs, start=1):
-                marker = " (Recommended)" if pkg == DEFAULT_ROBLOX_PACKAGE else ""
-                print(f"  {idx}. {pkg}{marker}")
-            choice2 = input("Choose package [1]: ").strip() or "1"
-            if choice2.isdigit():
-                i = int(choice2) - 1
-                if 0 <= i < len(new_pkgs):
-                    new_package = new_pkgs[i]
+            return draft
+        new_sel, reason = _interactive_discover_package_entries(
+            draft,
+            current_entries,
+            config_for_detect=draft,
+            candidates=fresh_candidates,
+        )
+        if reason == "empty_choice":
+            return draft
+        new_entries_to_append = new_sel
     elif choice == "2":
         default_pkg = current_entries[0]["package"] if current_entries else DEFAULT_ROBLOX_PACKAGE
         manual = _prompt_manual_package(default_pkg)
         if manual:
-            new_package = manual
-    if new_package:
-        if new_package in current_pkgs:
-            print(f"Package Already Added: {new_package}")
-        else:
-            entry = _detect_or_prompt_account_username(_entry_for_package(new_package, current_entries), draft)
-            current_entries.append(entry)
-            draft["roblox_packages"] = current_entries
-            active = enabled_package_entries(draft)
-            draft["roblox_package"] = active[0]["package"]
-            draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
-            draft = save_config(draft)
-            print(f"Package Added: {new_package}")
+            if manual in current_pkgs:
+                print(f"Package Already Added: {manual}")
+                return draft
+            new_entries_to_append = [_detect_or_prompt_account_username(_entry_for_package(manual, current_entries), draft)]
+    if not new_entries_to_append:
+        return draft
+    added_any = False
+    for entry in new_entries_to_append:
+        if entry["package"] in current_pkgs:
+            print(f"Package Already Added: {entry['package']}")
+            continue
+        current_entries.append(entry)
+        current_pkgs.add(entry["package"])
+        added_any = True
+        print(f"Package Added: {entry['package']}")
+    if added_any:
+        draft["roblox_packages"] = current_entries
+        active = enabled_package_entries(draft)
+        draft["roblox_package"] = active[0]["package"]
+        draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
+        draft = save_config(draft)
     return draft
 
 
@@ -1742,6 +1794,9 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Partial": _ANSI_YELLOW,
         "Failed": _ANSI_RED,
         "Offline": _ANSI_RED,
+        "Background": _ANSI_YELLOW,
+        "Warning": _ANSI_YELLOW,
+        "Unknown": _ANSI_DIM,
         "Heartbeat OK": _ANSI_GREEN,
         "Launch command sent": _ANSI_GREEN,
     }.get(status, "")
@@ -1749,16 +1804,13 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
 
 
 def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
-    """Build one compact start summary table.
-
-    Each row: (index, package, username, cache, graphics, state, status).
-    """
-    headers = ("#", "Package", "Username", "Cache", "Graphics", "State", "Status")
-    str_rows = [(str(r[0]), str(r[1]), str(r[2]), str(r[3]), str(r[4]), str(r[5]), str(r[6])) for r in rows]
+    """Build the public start summary table: #, Package, Username, State only."""
+    headers = ("#", "Package", "Username", "State")
+    str_rows = [(str(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in rows]
 
     widths = [
         max(len(headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
-        for i in range(7)
+        for i in range(4)
     ]
 
     colored_rows = [
@@ -1767,9 +1819,6 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
             r[1],
             r[2],
             _colorize_status(r[3], use_color=use_color),
-            _colorize_status(r[4], use_color=use_color),
-            _colorize_status(r[5], use_color=use_color),
-            _colorize_status(r[6], use_color=use_color),
         )
         for r in str_rows
     ]
@@ -1781,10 +1830,10 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
     def _hline(left: str, mid: str, right: str) -> str:
         return left + mid.join("─" * (w + 2) for w in widths) + right
 
-    def _header_row(cells: tuple) -> str:
+    def _header_row(cells: tuple[str, ...]) -> str:
         return "│" + "│".join(_cell(str(cells[i]), widths[i]) for i in range(len(widths))) + "│"
 
-    def _data_row(colored: tuple, raw: tuple) -> str:
+    def _data_row(colored: tuple[str, ...], raw: tuple[str, ...]) -> str:
         parts = [_cell(str(colored[i]), widths[i], str(raw[i])) for i in range(len(widths))]
         return "│" + "│".join(parts) + "│"
 
@@ -1798,19 +1847,73 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
     return "\n".join(lines)
 
 
+_FINAL_SUMMARY_ORDER: tuple[tuple[str, str], ...] = (
+    ("online", "online."),
+    ("reconnecting", "reconnecting."),
+    ("launching", "launching."),
+    ("preparing", "preparing."),
+    ("optimizing", "optimizing."),
+    ("in background", "in background."),
+    ("warning", "with warnings."),
+    ("failed", "failed."),
+    ("offline", "offline."),
+    ("unknown", "unknown."),
+)
+
+_STATE_TO_SUMMARY: dict[str, str] = {
+    "Online": "online",
+    "Reconnecting": "reconnecting",
+    "Launching": "launching",
+    "Failed": "failed",
+    "Offline": "offline",
+    "Warning": "warning",
+    "Background": "in background",
+    "Unknown": "unknown",
+    "Preparing": "preparing",
+    "Optimizing": "optimizing",
+}
+
+
+def _final_summary_line(count: int, tail: str) -> str:
+    word = "package" if count == 1 else "packages"
+    return f"{count} {word} {tail}"
+
+
 def build_final_summary(entries: list[Any], results: dict[str, str]) -> str:
-    """Return a one-line final launch summary string."""
-    success_labels = {"Launched", "Started", "Success", "Online"}
-    success = sum(
-        1 for e in entries
-        if results.get(e["package"] if isinstance(e, dict) else str(e), "") in success_labels
-    )
-    total = len(entries)
-    if success == 0:
-        return "Final: 0 packages launched."
-    if success == total:
-        return f"Final: {success} package{'s' if success != 1 else ''} launched successfully."
-    return f"Final: {success} of {total} packages launched."
+    """Short multi-line summary tallying packages by public state."""
+    tallies: dict[str, int] = {}
+    for e in entries:
+        pkg = e["package"] if isinstance(e, dict) else str(e)
+        raw = str(results.get(pkg, "Unknown"))
+        bucket = _STATE_TO_SUMMARY.get(raw, "unknown")
+        tallies[bucket] = tallies.get(bucket, 0) + 1
+    lines = ["Final:"]
+    any_line = False
+    for key, tail in _FINAL_SUMMARY_ORDER:
+        n = tallies.get(key, 0)
+        if n:
+            lines.append(_final_summary_line(n, tail))
+            any_line = True
+    if not any_line:
+        lines.append("0 packages started.")
+    return "\n".join(lines)
+
+
+def build_start_verbose_details(rows: list[dict[str, str]], *, use_color: bool = False) -> str:
+    """Per-package cache / graphics / launch detail for ``--verbose`` / ``--debug`` / log DEBUG only."""
+    if not rows:
+        return ""
+    lines = ["Details (verbose / debug):"]
+    for row in rows:
+        pkg = row.get("package", "")
+        lines.append(
+            f"  {pkg}: cache={row.get('cache', '')}; graphics={row.get('graphics', '')}; "
+            f"launch={row.get('launch_detail', '')}"
+        )
+    block = "\n".join(lines)
+    if use_color:
+        return f"{_ANSI_DIM}{block}{_ANSI_RESET}"
+    return block
 
 
 def _progress_line(index: int, total: int, entry: dict[str, Any], message: str) -> str:
@@ -1970,6 +2073,7 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         initial_status: dict[str, str] = {}
         table_rows: list[tuple] = []
+        detail_rows: list[dict[str, str]] = []
         for index, entry in enumerate(entries, start=1):
             pkg = entry["package"]
             username = _account_username_for_table(entry)
@@ -1979,19 +2083,22 @@ def cmd_start(args: argparse.Namespace) -> int:
                 err = launch_err[pkg]
                 if "not installed" in err.lower():
                     state = "Failed"
-                    stat = "Not installed"
+                    stat_internal = "not installed"
                 else:
                     state = "Failed"
                     safe_err = mask_urls_in_text(err) or "Launch failed"
-                    stat = (safe_err[:57] + "...") if len(safe_err) > 60 else safe_err
+                    stat_internal = (safe_err[:120] + "...") if len(safe_err) > 123 else safe_err
             elif android.is_process_running(pkg):
                 state = "Online"
-                stat = "Heartbeat OK"
+                stat_internal = "process running"
             else:
                 state = "Launching"
-                stat = "Launch command sent"
+                stat_internal = "launch command sent"
             initial_status[pkg] = state
-            table_rows.append((index, pkg, username, cstat, gstat, state, stat))
+            table_rows.append((index, pkg, username, state))
+            detail_rows.append(
+                {"package": pkg, "cache": cstat, "graphics": gstat, "launch_detail": stat_internal}
+            )
 
         hints2, inc_launch, det_en = _package_detection_options(cfg)
         detected_n = len(
@@ -2015,8 +2122,16 @@ def cmd_start(args: argparse.Namespace) -> int:
         print(f"Supervisor: {'Enabled' if sup.get('enabled', True) else 'Disabled'}")
         print()
         print(build_start_table(table_rows, use_color=use_color))
+        show_detail = (
+            bool(getattr(args, "verbose", False))
+            or bool(getattr(args, "debug", False))
+            or str(cfg.get("log_level", "")).upper() == "DEBUG"
+        )
+        if show_detail:
+            print()
+            print(build_start_verbose_details(detail_rows, use_color=use_color))
         print()
-        print(build_final_summary(entries, {entry["package"]: table_rows[i][5] for i, entry in enumerate(entries)}))
+        print(build_final_summary(entries, {entry["package"]: table_rows[i][3] for i, entry in enumerate(entries)}))
         print()
 
         # ── Webhook ─────────────────────────────────────────────────────────
@@ -2262,6 +2377,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--menu", action="store_true")
     parser.add_argument("--enable-boot", action="store_true")
     parser.add_argument("--update", action="store_true")
+    parser.add_argument("--verbose", action="store_true", help="show extra Start diagnostics (cache/graphics/launch)")
+    parser.add_argument("--debug", action="store_true", help="same as --verbose for Start diagnostics")
     parser.add_argument("--lines", type=int, default=50, help="number of log lines for logs command")
     parser.add_argument("--no-color", action="store_true", help="disable ANSI banner color")
     ns = parser.parse_args(argv)

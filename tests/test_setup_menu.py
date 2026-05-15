@@ -47,6 +47,7 @@ import unittest
 import unittest.mock
 from contextlib import redirect_stdout
 
+from agent import android
 from agent.commands import (
     _config_menu_launch_link,
     _config_menu_package,
@@ -207,7 +208,12 @@ class PackageSubmenuTests(unittest.TestCase):
         # Simulate adding same package again
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", side_effect=["1", "0"]):
-                with unittest.mock.patch("agent.commands._ordered_roblox_packages", return_value=["com.roblox.client"]):
+                with unittest.mock.patch(
+                    "agent.commands._gather_roblox_candidates_for_ui",
+                    return_value=[
+                        android.RobloxPackageCandidate("com.roblox.client", "Roblox", True),
+                    ],
+                ):
                     with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
                         buf = io.StringIO()
                         with redirect_stdout(buf):
