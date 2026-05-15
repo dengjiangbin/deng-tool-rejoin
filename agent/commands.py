@@ -35,6 +35,7 @@ from .config import (
     validate_package_detection_hints,
     validate_package_entries,
     validate_package_name,
+    validate_username_source,
 )
 from .constants import (
     CONFIG_PATH,
@@ -155,6 +156,12 @@ def _package_row_label(entry: dict[str, Any]) -> str:
 
 def _account_username_value(entry: dict[str, Any]) -> str:
     return validate_account_username(entry.get("account_username", "")) or "Username not set"
+
+
+def _package_username_display(entry: dict[str, Any]) -> str:
+    """Username for package menus / tables — empty becomes Unknown."""
+    u = validate_account_username(entry.get("account_username", ""))
+    return u if u else "Unknown"
 
 
 def _hint_list_label(hints: list[str]) -> str:
@@ -291,14 +298,21 @@ def _entry_for_package(package: str, current_entries: list[dict[str, Any]]) -> d
     return package_entry(package, "", True)
 
 
-def _detect_or_prompt_account_username(entry: dict[str, Any]) -> dict[str, Any]:
+def _detect_or_prompt_account_username(entry: dict[str, Any], config_data: dict[str, Any] | None = None) -> dict[str, Any]:
     updated = dict(entry)
     if validate_account_username(updated.get("account_username", "")):
         return updated
-    result = account_detect.detect_account_username_for_package(updated["package"])
+    cfg_valid = validate_config(config_data) if config_data is not None else None
+    result = account_detect.detect_account_username(
+        updated["package"],
+        entry=updated,
+        config=cfg_valid,
+        use_root=True,
+        respect_config_manual=False,
+    )
     if result:
-        updated["account_username"] = result.username
-        updated["username_source"] = result.source
+        updated["account_username"] = validate_account_username(result.username)
+        updated["username_source"] = validate_username_source(result.source, result.username)
         return updated
     updated["username_source"] = "not_set"
     if _is_interactive():
@@ -317,7 +331,7 @@ def _print_package_entries(entries: list[dict[str, Any]]) -> None:
         return
     for idx, entry in enumerate(entries, start=1):
         enabled = "" if entry.get("enabled", True) else " [Disabled]"
-        print(f"  {idx}. {_account_username_value(entry):<20} {entry['package']}{enabled}")
+        print(f"  {idx}. {_package_username_display(entry):<20} {entry['package']}{enabled}")
 
 
 def _choose_package_menu(current_package: str = DEFAULT_ROBLOX_PACKAGE, package_detection_hints: list[str] | None = None) -> str:
@@ -617,7 +631,7 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         print("Current Packages:")
         if enabled_entries:
             for idx, entry in enumerate(enabled_entries, start=1):
-                username = _account_username_value(entry)
+                username = _package_username_display(entry)
                 print(f"  {idx}. {username:<20} {entry['package']}")
         else:
             print("  No Packages Configured.")
@@ -625,7 +639,9 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         print("1. Add Package")
         print("2. Remove Package")
         print("3. Auto Detect Packages")
-        print("4. List Packages")
+        print("4. Detect / Refresh Usernames")
+        print("5. Set / Edit Username")
+        print("6. List Packages")
         print("0. Back")
         print("--------------------------------")
         try:
@@ -641,9 +657,115 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         elif choice == "3":
             draft = _package_menu_auto_detect(draft)
         elif choice == "4":
+            draft = _package_menu_detect_refresh(draft)
+        elif choice == "5":
+            draft = _package_menu_set_username(draft)
+        elif choice == "6":
             _package_menu_list(draft)
         else:
-            print("Please choose 1-4 or 0.")
+            print("Please choose 1-6 or 0.")
+    return draft
+
+
+def _package_menu_detect_refresh(draft: dict[str, Any]) -> dict[str, Any]:
+    """Re-run username detection for each package; optionally persist results."""
+    print()
+    print("Detect / Refresh Usernames")
+    entries = validate_package_entries(
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+    )
+    cfg = validate_config(draft)
+    settings = cfg.get("account_detection") or {}
+    if not settings.get("enabled", True):
+        print("Account detection is disabled.")
+        input("\nPress Enter to continue...")
+        return draft
+
+    pairs = account_detect.detect_account_usernames_for_packages(
+        [dict(e) for e in entries],
+        config=cfg,
+        use_root=bool(settings.get("use_root", True)),
+        respect_config_manual=False,
+    )
+    new_entries: list[dict[str, Any]] = []
+    print()
+    print(f"  {'Package':<40} {'Old':<16} {'New':<16} {'Source':<18} {'Status':<12}")
+    print(f"  {'-'*40} {'-'*16} {'-'*16} {'-'*18} {'-'*12}")
+    changed = False
+    for idx, prior in enumerate(entries):
+        base_entry, res = pairs[idx]
+        pkg = str(base_entry.get("package") or "")
+        old_u = validate_account_username(prior.get("account_username", "")) or "Unknown"
+        if res:
+            new_u = validate_account_username(res.username) or "Unknown"
+            src = res.source
+            merged = dict(prior)
+            merged["account_username"] = validate_account_username(res.username)
+            merged["username_source"] = validate_username_source(res.source, res.username)
+            if old_u != new_u:
+                status = "updated"
+                changed = True
+            else:
+                status = "unchanged"
+            new_entries.append(merged)
+        else:
+            new_u = old_u
+            src = "—"
+            status = "not found"
+            new_entries.append(dict(prior))
+        print(f"  {pkg:<40} {str(old_u)[:16]:<16} {str(new_u)[:16]:<16} {str(src)[:18]:<18} {status:<12}")
+
+    if new_entries:
+        draft["roblox_packages"] = new_entries
+        active = enabled_package_entries(draft)
+        if active:
+            draft["roblox_package"] = active[0]["package"]
+        draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
+        if changed:
+            draft = save_config(draft)
+            print("\nSaved updated usernames to config.")
+        else:
+            print("\nNo username changes to save.")
+    input("\nPress Enter to continue...")
+    return draft
+
+
+def _package_menu_set_username(draft: dict[str, Any]) -> dict[str, Any]:
+    """Manually set account_username for one package."""
+    print()
+    print("Set / Edit Username")
+    entries = validate_package_entries(
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+    )
+    for idx, entry in enumerate(entries, start=1):
+        print(f"  {idx}. {_package_username_display(entry):<20} {entry['package']}")
+    print("  0. Back")
+    choice = input("Choose package [0]: ").strip() or "0"
+    if choice == "0" or not choice.isdigit():
+        return draft
+    i = int(choice) - 1
+    if not (0 <= i < len(entries)):
+        print("Invalid choice.")
+        return draft
+    target = dict(entries[i])
+    current = validate_account_username(target.get("account_username", "")) or ""
+    hint = f" [{current}]" if current else ""
+    raw = input(f"Roblox username / display name for {target['package']}{hint}: ").strip()
+    if not raw:
+        print("Skipped.")
+        return draft
+    try:
+        target["account_username"] = validate_account_username(raw)
+        target["username_source"] = validate_username_source("manual", target["account_username"])
+    except ConfigError as exc:
+        print(f"Invalid username: {exc}")
+        input("Press Enter to continue...")
+        return draft
+    entries = [target if e["package"] == target["package"] else dict(e) for e in entries]
+    draft["roblox_packages"] = entries
+    draft = save_config(draft)
+    print(f"Username saved for {target['package']}.")
+    input("Press Enter to continue...")
     return draft
 
 
@@ -691,7 +813,7 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
         if new_package in current_pkgs:
             print(f"Package Already Added: {new_package}")
         else:
-            entry = _detect_or_prompt_account_username(_entry_for_package(new_package, current_entries))
+            entry = _detect_or_prompt_account_username(_entry_for_package(new_package, current_entries), draft)
             current_entries.append(entry)
             draft["roblox_packages"] = current_entries
             active = enabled_package_entries(draft)
@@ -714,7 +836,7 @@ def _package_menu_remove(draft: dict[str, Any]) -> dict[str, Any]:
     print()
     print("Remove Package")
     for idx, entry in enumerate(enabled, start=1):
-        username = _account_username_value(entry)
+        username = _package_username_display(entry)
         print(f"  {idx}. {username:<20} {entry['package']}")
     print("  0. Back")
     choice = input("Choose package to remove [0]: ").strip() or "0"
@@ -781,7 +903,7 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
                     if p not in current_pkgs and p not in to_add:
                         to_add.append(p)
     for pkg in to_add:
-        entry = _detect_or_prompt_account_username(_entry_for_package(pkg, current_entries))
+        entry = _detect_or_prompt_account_username(_entry_for_package(pkg, current_entries), draft)
         current_entries.append(entry)
         current_pkgs.add(pkg)
     if to_add:
@@ -807,7 +929,7 @@ def _package_menu_list(draft: dict[str, Any]) -> None:
         print(f"  {'#':<3} {'Username':<20} Package")
         print(f"  {'-'*3} {'-'*20} {'-'*40}")
         for idx, entry in enumerate(entries, start=1):
-            username = _account_username_value(entry)
+            username = _package_username_display(entry)
             status = "" if entry.get("enabled", True) else " [Disabled]"
             print(f"  {idx:<3} {username:<20} {entry['package']}{status}")
     input("\nPress Enter to continue...")

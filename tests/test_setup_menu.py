@@ -51,11 +51,14 @@ from agent.commands import (
     _config_yescaptcha_balance,
     _config_yescaptcha_set,
     _package_menu_add,
+    _package_menu_detect_refresh,
     _package_menu_list,
     _package_menu_remove,
+    _package_menu_set_username,
     _prompt_launch_url,
     _run_edit_config_menu,
 )
+from agent.account_detect import AccountDetectionResult
 from agent.config import default_config, package_entry, validate_config, validate_package_entries
 
 
@@ -260,6 +263,56 @@ class PackageSubmenuTests(unittest.TestCase):
         text = buf.getvalue()
         self.assertNotIn("Label", text)
         self.assertIn("Username", text)
+
+    def test_package_submenu_has_detect_refresh_usernames(self):
+        cfg = _base_cfg()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        self.assertIn("Detect / Refresh Usernames", buf.getvalue())
+
+    def test_package_submenu_has_set_edit_username(self):
+        cfg = _base_cfg()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        self.assertIn("Set / Edit Username", buf.getvalue())
+
+    def test_detect_refresh_saves_new_username(self):
+        cfg = _base_cfg()
+        cfg["roblox_packages"] = [package_entry("com.roblox.client", "", True, "not_set")]
+        ent = dict(cfg["roblox_packages"][0])
+
+        def _pairs(_pkgs, **kwargs):
+            return [(ent, AccountDetectionResult("founduser", "root_pref"))]
+
+        with unittest.mock.patch("agent.commands.account_detect.detect_account_usernames_for_packages", side_effect=_pairs):
+            with unittest.mock.patch("builtins.input", return_value=""):
+                with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
+                    out = _package_menu_detect_refresh(cfg)
+        self.assertEqual(out["roblox_packages"][0]["account_username"], "founduser")
+
+    def test_set_username_manual_saves(self):
+        cfg = _base_cfg()
+        cfg["roblox_packages"] = [package_entry("com.roblox.client", "", True, "not_set")]
+        with unittest.mock.patch("builtins.input", side_effect=["1", "handuser", ""]):
+            with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
+                out = _package_menu_set_username(cfg)
+        self.assertEqual(out["roblox_packages"][0]["account_username"], "handuser")
+        self.assertEqual(out["roblox_packages"][0]["username_source"], "manual")
+
+    def test_list_packages_shows_unknown_for_empty(self):
+        cfg = _base_cfg()
+        cfg["roblox_packages"] = [package_entry("com.roblox.client", "", True, "not_set")]
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            with unittest.mock.patch("builtins.input", return_value=""):
+                _package_menu_list(cfg)
+        self.assertIn("Unknown", buf.getvalue())
 
     def test_package_submenu_has_add_package(self):
         cfg = _base_cfg()

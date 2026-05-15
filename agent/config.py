@@ -102,6 +102,13 @@ def default_config() -> dict[str, Any]:
         "backoff_max_seconds": DEFAULT_BACKOFF_MAX_SECONDS,
         "root_mode_enabled": False,
         "root_available": False,
+        "account_detection": {
+            "enabled": True,
+            "use_root": True,
+            "cache_detected_usernames": True,
+            "scan_timeout_seconds": 8,
+            "max_file_size_kb": 512,
+        },
         "termux_boot_enabled": False,
         "log_level": "INFO",
         "android_release": get_android_release(),
@@ -149,7 +156,7 @@ def _as_bool(value: Any) -> bool:
     return bool(value)
 
 
-USERNAME_SOURCES = {"manual", "detected_safe_pref", "android_app_label", "not_set"}
+USERNAME_SOURCES = {"manual", "detected_safe_pref", "android_app_label", "not_set", "config_manual", "root_pref", "root_json", "root_scan", "root_sqlite"}
 
 _LICENSE_KEY_RE = re.compile(LICENSE_KEY_PATTERN, re.IGNORECASE)
 _LICENSE_MASK = "***"
@@ -377,6 +384,28 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged["auto_rejoin_enabled"] = _as_bool(merged.get("auto_rejoin_enabled"))
     merged["root_mode_enabled"] = _as_bool(merged.get("root_mode_enabled"))
     merged["root_available"] = _as_bool(merged.get("root_available"))
+    ad_default = default_config()["account_detection"]
+    raw_ad = merged.get("account_detection")
+    if not isinstance(raw_ad, dict):
+        raw_ad = {}
+    merged_ad: dict[str, Any] = dict(ad_default)
+    merged_ad.update({k: v for k, v in raw_ad.items() if k in merged_ad})
+    merged_ad["enabled"] = _as_bool(merged_ad.get("enabled", True))
+    merged_ad["use_root"] = _as_bool(merged_ad.get("use_root", True))
+    merged_ad["cache_detected_usernames"] = _as_bool(merged_ad.get("cache_detected_usernames", True))
+    merged_ad["scan_timeout_seconds"] = _as_int(
+        "account_detection.scan_timeout_seconds",
+        merged_ad.get("scan_timeout_seconds", 8),
+        1,
+        120,
+    )
+    merged_ad["max_file_size_kb"] = _as_int(
+        "account_detection.max_file_size_kb",
+        merged_ad.get("max_file_size_kb", 512),
+        16,
+        4096,
+    )
+    merged["account_detection"] = merged_ad
     merged["termux_boot_enabled"] = _as_bool(merged.get("termux_boot_enabled"))
     merged["webhook_enabled"] = _as_bool(merged.get("webhook_enabled"))
     merged["webhook_snapshot_enabled"] = _as_bool(merged.get("webhook_snapshot_enabled"))

@@ -37,10 +37,14 @@ The **Setup / Edit Config** menu has four sections:
 
 Manage Roblox packages (the main app and any clones):
 
-- **Add Package** — Auto-detect from Android or enter manually. DENG tries to detect the Roblox account username safely from the app; if it cannot, it shows "Unknown" in the Start table (which is fine, it will still launch).
+- **Add Package** — Auto-detect from Android or enter manually. DENG detects a safe display username when possible (app label, readable app data with **optional root read-only scan**). If nothing is found, the Start table shows **Unknown** (launch still works).
 - **Remove Package** — Select by number, confirm removal. Only the selected package is removed.
 - **Auto Detect Packages** — Scan for Roblox and cloned packages not yet added. Avoids duplicates.
-- **List Packages** — Show all configured packages with username and status.
+- **Detect / Refresh Usernames** — Re-run detection for every configured package and save results to **account_username** when found.
+- **Set / Edit Username** — Manual name if detection fails.
+- **List Packages** — Shows each package with **Unknown** when no username is saved.
+
+Beta testers agree the tool may use **root only to read** small config/pref/JSON files under each configured Roblox package’s app-data path. It does **not** read cookies, sessions, or `.ROBLOSECURITY`, and it does **not** modify app data.
 
 Current packages are shown at the top of the submenu.
 

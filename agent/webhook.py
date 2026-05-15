@@ -206,7 +206,7 @@ def build_status_embed_payload(
     for e in entries:
         stats = app_stats.get(e["package"], {})
         indicator = "🟢" if stats.get("online") else "🔴"
-        label = e["username"] or e["package"].rsplit(".", 1)[-1]
+        label = (e["username"] or "").strip() or "Unknown"
         detail_lines.append(f"{indicator} {label}")
         sub: list[str] = []
         uptime = _format_uptime(stats.get("uptime_start"))
@@ -308,7 +308,7 @@ def build_status_message(config_data: dict[str, Any], *, event: str = "status", 
         if isinstance(entry, dict):
             package = str(entry.get("package") or "unknown")
             username = str(entry.get("account_username") or entry.get("label") or "").strip()
-            packages.append(f"{username} ({package})" if username else f"Username not set ({package})")
+            packages.append(f"{username or 'Unknown'} ({package})")
         else:
             packages.append(str(entry))
     launch_url = mask_launch_url(config_data.get("launch_url")) or "not set"

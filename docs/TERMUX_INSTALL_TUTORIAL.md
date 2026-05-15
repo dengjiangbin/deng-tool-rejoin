@@ -110,6 +110,10 @@ Save and exit: `Ctrl+O` → Enter → `Ctrl+X`.
 > The `SUPABASE_SERVICE_ROLE_KEY` gives complete admin access.
 > The `.gitignore` already excludes `.env` from git commits.
 
+### Account usernames on the phone
+
+DENG can fill in each Roblox package’s **account username** for the Start table and webhooks. It uses normal Android info first, then an optional **read-only root scan** of that package’s app data (small XML/JSON only — never cookies or `.ROBLOSECURITY`). If detection fails, use **Package → Set / Edit Username**. Beta terms include allowing this root use for display names only.
+
 ---
 
 ## F. Getting Your License Key

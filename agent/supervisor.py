@@ -317,7 +317,7 @@ class MultiPackageSupervisor:
             for e in entries:
                 pkg = str(e.get("package") or "")
                 username = str(e.get("account_username") or "").strip()
-                entry_map[pkg] = username
+                entry_map[pkg] = username if username else "Unknown"
 
         snapshot: list[dict] = []
         worker_map = {w.package: w for w in self._workers}
