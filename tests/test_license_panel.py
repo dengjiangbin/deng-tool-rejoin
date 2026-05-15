@@ -94,11 +94,11 @@ class PanelResponseTests(unittest.TestCase):
         self.assertTrue(resp.get("ephemeral"))
 
     def test_generate_success_contains_full_key(self):
-        """Test 38 – full key appears in the generate success response."""
+        """Test 38 – full key appears in copy-friendly message content."""
         full_key = "DENG-8F3A-B3C4-D5E6-44F0"
         resp = build_generate_success_response(full_key)
-        desc = resp["embed"]["description"]
-        self.assertIn(full_key, desc)
+        self.assertIn(full_key, resp.get("content", ""))
+        self.assertNotIn(full_key, resp["embed"]["description"])
 
     def test_generate_limit_response_is_ephemeral(self):
         """Test 39 – generate limit response is ephemeral."""
@@ -114,23 +114,24 @@ class PanelResponseTests(unittest.TestCase):
         """Test 41 – redeem success shows full key for copy (no … mask)."""
         full_key = "DENG-8F3A-B3C4-D5E6-44F0"
         resp = build_redeem_success_response(full_key)
-        desc = resp["embed"]["description"]
-        self.assertIn(full_key, desc)
-        self.assertNotIn("...", desc)
+        content = resp.get("content", "")
+        self.assertIn(full_key, content)
+        self.assertNotIn("...", content)
+        self.assertNotIn(full_key, resp["embed"]["description"])
 
 
 class PanelResponseSecurityTests(unittest.TestCase):
     """Test 42-44: copy views show full key when export/plaintext exists."""
 
     def test_redeem_success_includes_full_key_for_copy(self):
-        """Test 42 – redeem success embed includes the full key string."""
+        """Test 42 – redeem success includes the full key string in content."""
         full = "DENG-8F3A-B3C4-D5E6-44F0"
         resp = build_redeem_success_response(full)
-        self.assertIn(full, resp["embed"]["description"])
-        self.assertNotIn("...", resp["embed"]["description"])
+        self.assertIn(full, resp.get("content", ""))
+        self.assertNotIn("...", resp.get("content", ""))
 
     def test_key_list_response_shows_full_key_when_plaintext_available(self):
-        """Test 43 – key list uses full key when full_key_plaintext is set."""
+        """Test 43 – key list puts full key in content when full_key_plaintext is set."""
         records = [{
             "masked_key": "DENG-8F3A...44F0",
             "full_key_plaintext": "DENG-8F3A-B3C4-D5E6-44F0",
@@ -138,8 +139,8 @@ class PanelResponseSecurityTests(unittest.TestCase):
             "bound_device": "Pixel",
         }]
         resp = build_key_list_response(records)
+        self.assertIn("DENG-8F3A-B3C4-D5E6-44F0", resp.get("content", ""))
         desc = resp["embed"]["description"]
-        self.assertIn("DENG-8F3A-B3C4-D5E6-44F0", desc)
         self.assertNotIn("DENG-8F3A...44F0", desc)
 
     def test_key_list_without_plaintext_explains_not_copyable(self):

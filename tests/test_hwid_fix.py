@@ -379,18 +379,16 @@ class TestRedeemResponseEmbeds(unittest.TestCase):
 
         full_key = "DENG-8F3A-B3C4-D5E6-44F0"
         payload = build_redeem_success_response(full_key)
-        desc = payload["embed"]["description"]
-        self.assertIn(full_key, desc)
-        self.assertNotIn("...", desc)
+        self.assertIn(full_key, payload.get("content", ""))
 
     def test_redeem_success_no_inner_segments_missing(self):
         from agent.license_panel import build_redeem_success_response
 
         full_key = "DENG-8F3A-B3C4-D5E6-44F0"
         payload = build_redeem_success_response(full_key)
-        desc = payload["embed"]["description"]
+        text = payload.get("content", "")
         for part in ("8F3A", "B3C4", "D5E6", "44F0"):
-            self.assertIn(part, desc)
+            self.assertIn(part, text)
 
     def test_already_owned_response_shows_copyable_key(self):
         from agent.license_panel import build_redeem_already_owned_response
@@ -398,9 +396,7 @@ class TestRedeemResponseEmbeds(unittest.TestCase):
         payload = build_redeem_already_owned_response(
             copyable_key="DENG-8F3A-B3C4-D5E6-44F0",
         )
-        desc = payload["embed"]["description"]
-        self.assertIn("DENG-8F3A-B3C4-D5E6-44F0", desc)
-        self.assertNotIn("...", desc)
+        self.assertIn("DENG-8F3A-B3C4-D5E6-44F0", payload.get("content", ""))
 
     def test_already_owned_response_title_informational(self):
         from agent.license_panel import build_redeem_already_owned_response

@@ -127,10 +127,13 @@ async def _respond_ephemeral_payload(
     followup: bool = False,
 ) -> None:
     embed = _embed_from_payload(payload)
+    send_kw: dict[str, Any] = {"embed": embed, "ephemeral": True}
+    if "content" in payload and payload["content"]:
+        send_kw["content"] = str(payload["content"])
     if followup:
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send(**send_kw)
     else:
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(**send_kw)
 
 
 # ── Redeem modal ──────────────────────────────────────────────────────────────
@@ -203,6 +206,8 @@ class RecoverKeyExportModal(discord.ui.Modal, title="Recover Full Key"):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         from agent.license import LicenseKeyError, normalize_license_key
 
+        from agent.license_panel import format_copy_license_key_content
+
         uid = str(interaction.user.id)
         raw_key = self.key_input.value.strip()
         await interaction.response.defer(ephemeral=True)
@@ -225,21 +230,27 @@ class RecoverKeyExportModal(discord.ui.Modal, title="Recover Full Key"):
                 ephemeral=True,
             )
             return
-        key_block = f"**Your license key (copy):**\n```\n{normalized}\n```\n"
+        copy_only = format_copy_license_key_content(normalized)
         if result == "already_exportable":
-            await interaction.followup.send(
-                "✅ Full key export was already enabled.\n"
-                f"{key_block}"
-                "Open **Key Stats** anytime to manage or download your keys.",
-                ephemeral=True,
+            emb = discord.Embed(
+                title="Recover Full Key",
+                description=(
+                    "✅ Full key export was already enabled.\n"
+                    "Open **Key Stats** anytime to manage or download your keys."
+                ),
+                color=0x27AE60,
             )
+            await interaction.followup.send(content=copy_only, embed=emb, ephemeral=True)
         else:
-            await interaction.followup.send(
-                "✅ Full key saved securely for export.\n"
-                f"{key_block}"
-                "Open **Key Stats** anytime to view or download your keys.",
-                ephemeral=True,
+            emb = discord.Embed(
+                title="Recover Full Key",
+                description=(
+                    "✅ Full key saved securely for export.\n"
+                    "Open **Key Stats** anytime to view or download your keys."
+                ),
+                color=0x27AE60,
             )
+            await interaction.followup.send(content=copy_only, embed=emb, ephemeral=True)
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         log.exception(
@@ -442,18 +453,19 @@ def _build_key_stats_ephemeral_parts(
     from agent.key_stats_format import (
         build_key_stats_embed_dicts,
         build_key_stats_empty_embed_dict,
-        format_stats_header_plain,
+        format_stats_page_content_header,
     )
 
     n = len(rows_all)
     total_pages = max(1, (n + KEY_STATS_PAGE_SIZE - 1) // KEY_STATS_PAGE_SIZE) if n else 1
     page = max(0, min(page, total_pages - 1))
-    header = format_stats_header_plain(total=n, page=page, total_pages=total_pages)
     if n == 0:
+        sl: list[dict[str, Any]] = []
         embed_dicts = [build_key_stats_empty_embed_dict()]
     else:
         sl = rows_all[page * KEY_STATS_PAGE_SIZE : (page + 1) * KEY_STATS_PAGE_SIZE]
         embed_dicts = build_key_stats_embed_dicts(sl)
+    header = format_stats_page_content_header(sl, total=n, page=page, total_pages=total_pages)
     return header, embed_dicts, page, total_pages, n
 
 

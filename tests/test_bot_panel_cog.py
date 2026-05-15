@@ -172,8 +172,8 @@ class TestPanelViewGenerate(unittest.IsolatedAsyncioTestCase):
         view = PanelView(self.store)
         await view.btn_generate.callback(inter)
         _, kwargs = inter.followup.send.call_args
-        embed = kwargs["embed"]
-        self.assertIn("DENG-", embed.description)
+        content = kwargs.get("content") or ""
+        self.assertIn("DENG-", content)
 
     async def test_generate_limit_reached(self) -> None:
         """Second generate should show limit response, not raise."""
@@ -468,8 +468,9 @@ class TestRedeemModal(unittest.IsolatedAsyncioTestCase):
         _, kwargs = inter.followup.send.call_args
         embed = kwargs["embed"]
         self.assertIn("Redeemed", embed.title)
-        self.assertIn(normalize_license_key(full_key), embed.description)
-        self.assertNotIn("...", embed.description)
+        nk = normalize_license_key(full_key)
+        self.assertIn(nk, kwargs.get("content") or "")
+        self.assertNotIn("...", kwargs.get("content") or "")
 
     async def test_redeem_invalid_key_shows_error(self) -> None:
         modal = RedeemModal(self.store)
@@ -586,18 +587,18 @@ class TestSecurity(unittest.IsolatedAsyncioTestCase):
         await modal.on_submit(inter)
 
         _, kwargs = inter.followup.send.call_args
-        description = kwargs["embed"].description
-        self.assertIn(normalize_license_key(full_key), description)
-        self.assertNotIn("...", description)
+        content = kwargs.get("content") or ""
+        self.assertIn(normalize_license_key(full_key), content)
+        self.assertNotIn("...", content)
 
     async def test_generate_key_shown_once_in_full(self) -> None:
         inter = _fake_interaction(user=_fake_user(uid=700))
         view = PanelView(self.store)
         await view.btn_generate.callback(inter)
         _, kwargs = inter.followup.send.call_args
-        desc = kwargs["embed"].description
+        content = kwargs.get("content") or ""
         # Full key IS in generate response (one-time display)
-        self.assertIn("DENG-", desc)
+        self.assertIn("DENG-", content)
 
 
 # ── Admin status command ──────────────────────────────────────────────────────

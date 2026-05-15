@@ -285,12 +285,12 @@ def prompt_and_verify_key() -> bool:
     print("─" * 48)
     print("  DENG Tool: Rejoin — License Verification")
     print("─" * 48)
-    print("  Enter your license key to continue.")
+    print("  Paste your license key to continue.")
     print("  Format: DENG-<hex>  (e.g. DENG-38ab1234cd56ef78)")
     print()
     while True:
         try:
-            raw = input("  Key (or 'q' to quit): ").strip()
+            raw = input("  Paste your license key (or 'q' to quit): ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return False

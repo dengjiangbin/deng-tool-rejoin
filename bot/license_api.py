@@ -23,12 +23,14 @@ Endpoints
 
   GET  /install/latest
   GET  /install/<version>   e.g. /install/v1.0.0
-  GET  /install/test/latest   (fixed URL; internal main-dev artifact; license + owner/tester gate)
+  GET  /install/test/latest   (fixed URL; internal test channel banner)
   GET  /install/beta/latest   (302 alias → /install/test/latest)
   GET  /install/dev/main?exp=...&sig=...   (HMAC-signed; legacy internal)
-       Return a small public **bootstrap** shell script (no private source).
-       The script calls POST /api/install/authorize and downloads a short-lived
-       tokenized artifact from GET /api/download/package/<token>.
+  GET  /install/launcher/bundle.tar.gz
+       Small public **launcher** tarball (no secrets). The bootstrap script fetches this;
+       license entry and POST /api/install/authorize happen on first ``deng-rejoin``.
+  Shell bootstrap scripts are non-interactive (no license prompt). The full artifact is
+  installed after authorize + tokenized GET /api/download/package/<token>.
 
   POST /api/install/authorize
        Body: {"license_key", "requested_version", "install_id_hash", optional "bootstrap_session"}
@@ -500,6 +502,41 @@ def _route_public_install(
                 base_url=base, requested="main-dev", bootstrap_session=sid
             )
             return (script.encode("utf-8"), 200, "text/x-shellscript", None)
+
+        if tail == "launcher/bundle.tar.gz":
+            from agent.install_registry import get_artifact_root
+
+            root = get_artifact_root()
+            candidates: list[Path] = []
+            if root is not None:
+                candidates.append(root / "releases" / "launcher" / "deng-rejoin-launcher.tar.gz")
+            candidates.append(_PROJECT_ROOT / "releases" / "launcher" / "deng-rejoin-launcher.tar.gz")
+            launcher_path = next((c for c in candidates if c.is_file()), None)
+            if launcher_path is None:
+                return (
+                    json.dumps({"error": "Launcher bundle not found"}).encode("utf-8"),
+                    404,
+                    "application/json",
+                    None,
+                )
+            try:
+                data = launcher_path.read_bytes()
+            except OSError as exc:
+                log.error("launcher bundle read failed: %s", exc)
+                return (
+                    json.dumps({"error": "read failed"}).encode("utf-8"),
+                    500,
+                    "application/json",
+                    None,
+                )
+            return (
+                data,
+                200,
+                "application/gzip",
+                [
+                    ("Content-Disposition", 'attachment; filename="deng-rejoin-launcher.tar.gz"'),
+                ],
+            )
 
         if "/" in tail:
             return (

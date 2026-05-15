@@ -30,6 +30,25 @@ from __future__ import annotations
 from typing import Any
 
 
+def format_copy_license_key_content(full_key: str) -> str:
+    """First line labels; second line is backticks-only for easy Discord copying."""
+    key = (full_key or "").strip()
+    return f"Copy License Key:\n`{key}`"
+
+
+def format_copy_license_keys_lines(keys: list[str]) -> str:
+    """One or many keys: plain lines with minimal extra text inside copy lines."""
+    cleaned = [k.strip() for k in keys if k.strip()]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return format_copy_license_key_content(cleaned[0])
+    lines = ["Copy License Keys:"]
+    for i, k in enumerate(cleaned, start=1):
+        lines.append(f"{i}. `{k}`")
+    return "\n".join(lines)
+
+
 # ── Button custom ID constants ─────────────────────────────────────────────────
 
 BUTTON_GENERATE   = "license_panel:generate"
@@ -190,11 +209,11 @@ def build_generate_success_response(full_key: str) -> dict[str, Any]:
     """
     return {
         "ephemeral": True,
+        "content": format_copy_license_key_content(full_key),
         "embed": {
             "title": "\U0001f511 Your License Key",
             "color": 0x27AE60,
             "description": (
-                f"```\n{full_key}\n```\n"
                 "This key is linked to your Discord account.\n"
                 "Paste it into **DENG Tool: Rejoin**.\n\n"
                 "\u26a0\ufe0f **Save this key now.** It will not be shown again.\n"
@@ -270,17 +289,16 @@ def build_reset_active_warning_response(elapsed_seconds: int) -> dict[str, Any]:
 
 
 def build_redeem_success_response(display_key: str) -> dict[str, Any]:
-    """Ephemeral embed after successfully redeeming an existing key (full key for copy)."""
+    """Ephemeral response after successfully redeeming an existing key."""
     return {
         "ephemeral": True,
+        "content": format_copy_license_key_content(display_key),
         "embed": {
             "title": "\U0001f39f\ufe0f Key Redeemed",
             "color": 0x27AE60,
             "description": (
-                "**Your license key (copy):**\n"
-                f"```\n{display_key}\n```\n"
                 "This key is now linked to your Discord account.\n"
-                "You can now paste it into **DENG Tool: Rejoin**.\n"
+                "Paste it into **DENG Tool: Rejoin**.\n"
                 "Run the tool once to bind this device — that happens on first successful verification."
             ),
         },
@@ -300,7 +318,15 @@ def build_redeem_error_response(reason: str) -> dict[str, Any]:
 
 
 def build_key_list_response(key_records: list[dict]) -> dict[str, Any]:
-    """Ephemeral embed listing a user's active keys (for /license_panel status)."""
+    """Ephemeral response listing a user's active keys (for /license_panel status)."""
+    copy_keys: list[str] = []
+    for rec in key_records:
+        fk = rec.get("full_key_plaintext")
+        if fk:
+            copy_keys.append(str(fk).strip())
+
+    content = format_copy_license_keys_lines(copy_keys) if copy_keys else ""
+
     if not key_records:
         description = "You have no license keys yet. Click **Generate Key** to create one."
     else:
@@ -317,7 +343,7 @@ def build_key_list_response(key_records: list[dict]) -> dict[str, Any]:
             bound_icon = "\U0001f4f1" if device != "(unbound)" else "\U0001f534"
             full = rec.get("full_key_plaintext")
             if full:
-                key_block = f"**Key (copy):** `{full}`"
+                key_block = "**Key:** copy block above (full key not repeated here)."
             else:
                 ref = rec.get("masked_key", "???")
                 key_block = (
@@ -332,7 +358,7 @@ def build_key_list_response(key_records: list[dict]) -> dict[str, Any]:
                 f"   {bound_icon} Device: {device}{last_seen_str}"
             )
         description = "\n\n".join(lines)
-    return {
+    out: dict[str, Any] = {
         "ephemeral": True,
         "embed": {
             "title": "\U0001f4cb Your License Keys",
@@ -341,6 +367,9 @@ def build_key_list_response(key_records: list[dict]) -> dict[str, Any]:
             "footer": {"text": "Use Reset HWID to unbind a device when needed."},
         },
     }
+    if content:
+        out["content"] = content
+    return out
 
 
 def build_reset_no_binding_response() -> dict[str, Any]:
@@ -368,11 +397,7 @@ def build_redeem_already_owned_response(
 ) -> dict[str, Any]:
     """Ephemeral embed when a user tries to redeem their own already-attached key."""
     if copyable_key:
-        desc = (
-            "**Your license key (copy):**\n"
-            f"```\n{copyable_key}\n```\n"
-            "This key is already attached to your account."
-        )
+        desc = "This key is already attached to your account."
         if export_backfilled:
             desc += "\n\n**Full key export has been enabled** for this key in the database."
     elif export_backfilled:
@@ -382,7 +407,7 @@ def build_redeem_already_owned_response(
         )
     else:
         desc = message or "This key is already attached to your account."
-    return {
+    out: dict[str, Any] = {
         "ephemeral": True,
         "embed": {
             "title": "\u2139\ufe0f Key Already Attached",
@@ -390,6 +415,9 @@ def build_redeem_already_owned_response(
             "description": desc,
         },
     }
+    if copyable_key:
+        out["content"] = format_copy_license_key_content(copyable_key)
+    return out
 
 
 def build_not_owner_response() -> dict[str, Any]:

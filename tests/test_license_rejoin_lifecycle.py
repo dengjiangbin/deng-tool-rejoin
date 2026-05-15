@@ -181,7 +181,8 @@ class TestRejoinLicenseLifecycle(unittest.TestCase):
         }
         desc = build_key_stats_embed_dict(row)["description"]
         self.assertIn("Unused / Ready for first device", desc)
-        self.assertIn("`DENG-1111-2222-3333-4444`", desc)
+        self.assertIn("copy block", desc.lower())
+        self.assertNotIn("`DENG-1111-2222-3333-4444`", desc)
         self.assertNotIn("DENG-1111...4444", desc)
 
     def test_9_panel_copy_views_full_key_no_mask(self) -> None:
@@ -190,9 +191,10 @@ class TestRejoinLicenseLifecycle(unittest.TestCase):
             build_generate_success_response(k),
             build_redeem_success_response(k),
         ):
-            desc = payload["embed"]["description"]
-            self.assertIn(k, desc)
-            self.assertNotIn("...", desc)
+            content = payload.get("content") or ""
+            self.assertIn(k, content)
+            self.assertNotIn("...", content)
+            self.assertNotIn(k, payload["embed"]["description"])
 
     def test_10_one_user_one_key_one_device_rule(self) -> None:
         store = _tmp_store()

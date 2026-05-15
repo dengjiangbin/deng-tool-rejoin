@@ -17,6 +17,7 @@ data/
 logs/
 run/
 backups/
-launcher/
+# Root-only launcher working dir (do not ignore releases/launcher/)
+/launcher/
 
 install.sh.tmp

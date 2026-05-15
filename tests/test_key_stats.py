@@ -19,6 +19,7 @@ from agent.key_stats_format import (
     build_key_stats_embed_dict,
     format_stats_embed_title,
     format_stats_header_plain,
+    format_stats_page_content_header,
 )
 from agent.license_store import (
     KeyAlreadySelfOwned,
@@ -99,8 +100,21 @@ class TestKeyStatsFormat(unittest.TestCase):
                 "created_at": "2026-01-15T12:00:00+00:00",
             }
         )
-        self.assertIn("Key: `DENG-1111-2222-3333-4444`", d["description"])
+        self.assertIn("copy block", d["description"].lower())
+        self.assertNotIn("DENG-1111-2222-3333-4444", d["description"])
         self.assertNotIn("Not Available", d["description"])
+
+    def test_header_includes_copy_block_when_full_keys(self) -> None:
+        row = {
+            "masked_key": "DENG-AA...BB",
+            "full_key_plaintext": "DENG-1111-2222-3333-4444",
+            "license_status": "active",
+            "used": False,
+        }
+        h = format_stats_page_content_header([row], total=1, page=0, total_pages=1)
+        self.assertIn("Copy License Key:", h)
+        self.assertIn("`DENG-1111-2222-3333-4444`", h)
+        self.assertIn("Total: 1", h)
 
     def test_unused_and_used_colors_differ(self) -> None:
         unused = build_key_stats_embed_dict(

@@ -47,6 +47,24 @@ def format_stats_header_plain(*, total: int, page: int, total_pages: int) -> str
     return f"Your License Keys (Total: {total} | Page {page + 1}/{total_pages})"
 
 
+def format_stats_copy_block_for_slice(rows_slice: list[dict[str, Any]]) -> str:
+    from agent.license_panel import format_copy_license_keys_lines
+
+    keys = [str(r["full_key_plaintext"]) for r in rows_slice if r.get("full_key_plaintext")]
+    return format_copy_license_keys_lines(keys)
+
+
+def format_stats_page_content_header(
+    rows_slice: list[dict[str, Any]], *, total: int, page: int, total_pages: int
+) -> str:
+    """Message `content`: copy-friendly key lines first, then the page header."""
+    copy_blk = format_stats_copy_block_for_slice(rows_slice)
+    plain = format_stats_header_plain(total=total, page=page, total_pages=total_pages)
+    if copy_blk:
+        return f"{copy_blk}\n\n{plain}"
+    return plain
+
+
 def format_stats_embed_title(*, total: int, page: int, total_pages: int) -> str:
     """Deprecated: use :func:`format_stats_header_plain` for Key Stats."""
     return format_stats_header_plain(total=total, page=page, total_pages=total_pages)
@@ -64,7 +82,7 @@ def build_key_stats_embed_dict(row: dict[str, Any]) -> dict[str, Any]:
     lines: list[str] = []
 
     if full:
-        lines.append(f"Key: `{full}`")
+        lines.append("Full key: use the **copy block** in the message above (not repeated here).")
     elif lic in {"revoked", "expired"}:
         lines.append(f"Key reference (not copyable): {masked}")
     else:

@@ -240,7 +240,7 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
                 return False
             print_beginner_menu_license_prompt()
             try:
-                raw = input("Enter Your DENG Tool License Key: ").strip()
+                raw = input("Paste your license key: ").strip()
             except EOFError:
                 return False
             if not raw:

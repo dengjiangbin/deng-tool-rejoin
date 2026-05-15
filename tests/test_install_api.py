@@ -7,6 +7,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -97,14 +98,16 @@ class InstallBootstrapGetTests(unittest.TestCase):
         self.assertIn("text/", headers.get("Content-Type", ""))
         text = body.decode("utf-8")
         self.assertIn("DENG Tool: Rejoin Installer", text)
-        self.assertIn('REQUESTED="latest"', text)
+        self.assertIn('printf \'%s\\n\' "latest"', text)
+        self.assertIn(".install_requested", text)
+        self.assertIn("Next: run deng-rejoin", text)
         self.assertNotIn("GITHUB_TOKEN", text)
         self.assertNotIn("LICENSE_KEY_EXPORT_SECRET", text)
 
     def test_pinned_version_bootstrap(self) -> None:
         status, _, body = _wsgi_call("GET", "/install/v1.0.0")
         self.assertEqual(status, 200)
-        self.assertIn('REQUESTED="v1.0.0"', body.decode("utf-8"))
+        self.assertIn('printf \'%s\\n\' "v1.0.0"', body.decode("utf-8"))
 
     def test_latest_resolves_registry_semantics_separate_test_manifest(self) -> None:
         manifest = Path(__file__).resolve().parent / "_tmp_install_manifest_latest.json"
@@ -177,7 +180,7 @@ class InstallBootstrapGetTests(unittest.TestCase):
     def test_pinned_v100_not_latest_when_latest_moves(self) -> None:
         """Regression: /install/v1.0.0 bootstrap still pins REQUESTED=v1.0.0."""
         _, _, body = _wsgi_call("GET", "/install/v1.0.0")
-        self.assertNotIn('REQUESTED="latest"', body.decode("utf-8"))
+        self.assertNotIn('"latest"', body.decode("utf-8"))
 
 
 class InstallAuthorizeLicenseTests(unittest.TestCase):
@@ -373,7 +376,8 @@ class InstallTestLatestBootstrapTests(unittest.TestCase):
         self.assertIn("DENG Tool: Rejoin Test Installer", text)
         self.assertIn("Channel: internal test", text)
         self.assertIn("Version: main-dev", text)
-        self.assertIn('REQUESTED="test-latest"', text)
+        self.assertIn('printf \'%s\\n\' "test-latest"', text)
+        self.assertIn(".install_requested", text)
         self.assertNotIn("GITHUB_TOKEN", text)
         self.assertNotIn("SUPABASE_SERVICE_ROLE_KEY", text)
         self.assertNotIn("LICENSE_KEY_EXPORT_SECRET", text)
@@ -383,6 +387,54 @@ class InstallTestLatestBootstrapTests(unittest.TestCase):
         self.assertEqual(status, 302)
         self.assertEqual(headers.get("Location"), "/install/test/latest")
         self.assertEqual(body, b"")
+
+
+class InstallBootstrapSanityTests(unittest.TestCase):
+    """Non-interactive bootstrap + launcher tarball."""
+
+    def test_test_latest_has_no_forbidden_install_strings(self) -> None:
+        _, _, body = _wsgi_call("GET", "/install/test/latest")
+        text = body.decode("utf-8")
+        tl = text.lower()
+        self.assertNotIn("license key", tl)
+        self.assertNotIn("hidden", tl)
+        self.assertNotIn("read -s", tl)
+        self.assertNotIn("supabase_service_role_key", tl)
+        self.assertNotIn("raw.githubusercontent.com", tl)
+
+    def test_public_bootstrap_passes_bash_n(self) -> None:
+        from agent.bootstrap_installer import render_public_bootstrap
+
+        bash_exe = shutil.which("bash")
+        if not bash_exe:
+            self.skipTest("bash not on PATH")
+        script = render_public_bootstrap(
+            base_url="https://rejoin.deng.my.id",
+            requested="latest",
+        )
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".sh", delete=False) as tmp:
+            tmp.write(script.encode("utf-8"))
+            tmp_path = tmp.name
+        try:
+            proc = subprocess.run(
+                [bash_exe, "-n", tmp_path],
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, msg=proc.stderr.decode("utf-8", errors="replace"))
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+    def test_launcher_bundle_tarball_served(self) -> None:
+        status, headers, body = _wsgi_call("GET", "/install/launcher/bundle.tar.gz")
+        self.assertEqual(status, 200)
+        self.assertIn("gzip", headers.get("Content-Type", "").lower())
+        self.assertGreater(len(body), 64)
+        buf = io.BytesIO(body)
+        with tarfile.open(fileobj=buf, mode="r:gz") as tf:
+            names = tf.getnames()
+        self.assertIn("agent/deferred_bundle_install.py", names)
+        self.assertIn("agent/deng_tool_rejoin.py", names)
 
 
 class InstallTestLatestAuthorizeTests(unittest.TestCase):
