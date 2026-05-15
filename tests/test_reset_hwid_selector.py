@@ -78,7 +78,7 @@ def _setup_user_with_key(uid: str = "111") -> tuple[LocalJsonLicenseStore, str, 
 # ── Group 1: list_user_keys_with_binding_state — no binding ───────────────────
 
 class TestListKeysWithStateUnbound(unittest.TestCase):
-    """Tests 1-5: unbound keys are 🟡 and cannot be reset."""
+    """Tests 1-5: unbound keys cannot be reset (nothing to clear)."""
 
     def setUp(self):
         self.store, self.raw_key, self.key_id = _setup_user_with_key("111")
@@ -114,7 +114,7 @@ class TestListKeysWithStateUnbound(unittest.TestCase):
 # ── Group 2: list_user_keys_with_binding_state — with binding ─────────────────
 
 class TestListKeysWithStateBound(unittest.TestCase):
-    """Tests 6-11: bound keys are 🟢 and eligible for reset."""
+    """Tests 6-11: bound keys can be reset when limits and heartbeat allow."""
 
     def setUp(self):
         self.store, self.raw_key, self.key_id = _setup_user_with_key("222")
@@ -291,17 +291,41 @@ class TestBuildResetSelectorEmbed(unittest.TestCase):
         result = build_reset_selector_embed(self._make_keys())
         self.assertTrue(result.get("ephemeral"))
 
-    def test_21_bound_key_shows_green_circle(self):
-        """Test 21 – bound key description contains 🟢 indicator."""
+    def test_21_bound_key_row_uses_yellow_circle(self):
+        """Test 21 – bound key row uses 🟡 (numbered list)."""
         result = build_reset_selector_embed(self._make_keys(bound=True))
         desc = result["embed"]["description"]
-        self.assertIn("\U0001f7e2", desc)  # 🟢
+        self.assertIn("\n1. \U0001f7e1", desc)
 
-    def test_22_unbound_key_shows_yellow_circle(self):
-        """Test 22 – unbound key description contains 🟡 indicator."""
+    def test_22_unbound_key_row_uses_green_circle(self):
+        """Test 22 – unbound key row uses 🟢 (numbered list)."""
         result = build_reset_selector_embed(self._make_keys(bound=False))
         desc = result["embed"]["description"]
-        self.assertIn("\U0001f7e1", desc)  # 🟡
+        self.assertIn("\n1. \U0001f7e2", desc)
+
+    def test_selector_legend_above_rows_with_line_breaks(self):
+        """Legend is above the key list; 🟢/🟡 lines are separated by newline (no · legend)."""
+        desc = build_reset_selector_embed(self._make_keys(bound=False))["embed"]["description"]
+        legend = "\U0001f7e2 No device linked\n\U0001f7e1 Bound to a device"
+        self.assertIn(legend, desc)
+        self.assertLess(desc.index("No device linked"), desc.index("\n1."))
+        self.assertNotIn(" \u00b7 ", desc)
+
+    def test_selector_two_keys_numbered(self):
+        """Multiple keys appear as 1., 2., … with correct bound/unbound suffix."""
+        k_unbound = dict(self._make_keys(bound=False)[0], key_id="unbound1")
+        k_bound = dict(self._make_keys(bound=True)[0], key_id="bound2")
+        desc = build_reset_selector_embed([k_unbound, k_bound])["embed"]["description"]
+        self.assertRegex(desc, r"\n1\. [\s\S]*No device bound")
+        self.assertRegex(desc, r"\n2\. [\s\S]*Bound to a device")
+
+    def test_selector_full_key_when_recoverable(self):
+        """Full key appears in backticks when full_key_plaintext is set."""
+        k = dict(self._make_keys(bound=False)[0])
+        k["full_key_plaintext"] = "DENG-68C9-0BA2-F745-E506"
+        desc = build_reset_selector_embed([k])["embed"]["description"]
+        self.assertIn("`DENG-68C9-0BA2-F745-E506`", desc)
+        self.assertNotIn("reference only", desc)
 
 
 # ── Group 8: build_reset_no_keys_response ────────────────────────────────────
@@ -357,24 +381,26 @@ class TestBuildResetMixedSummaryEmbed(unittest.TestCase):
 # ── Group 10: security ────────────────────────────────────────────────────────
 
 class TestSecurity(unittest.TestCase):
-    """Tests 29-30: no full key values or secrets leak through the selector."""
+    """Tests 29-30: masked-only rows stay masked; non-plaintext fields stay scrubbed."""
 
-    def test_29_no_full_key_in_selector_embed(self):
-        """Test 29 – full raw key never appears in selector embed description."""
-        store, raw_key, key_id = _setup_user_with_key("777")
-        _bind_key(store, key_id)
-        keys_with_state = store.list_user_keys_with_binding_state("777")
-        embed = build_reset_selector_embed(keys_with_state)
-        desc = embed["embed"]["description"]
-        self.assertNotIn(raw_key, desc)
+    def test_29_masked_rows_reference_only_without_plaintext(self):
+        """When full_key_plaintext is absent, embed shows masked **…** (reference only)."""
+        k = dict(TestBuildResetSelectorEmbed()._make_keys(bound=True)[0])
+        k.pop("full_key_plaintext", None)
+        desc = build_reset_selector_embed([k])["embed"]["description"]
+        self.assertIn("(reference only)", desc)
+        self.assertIn("**DENG-AB12...CD34**", desc)
 
-    def test_30_no_full_key_in_binding_state_entries(self):
-        """Test 30 – list_user_keys_with_binding_state never exposes full raw key."""
+    def test_30_no_raw_key_outside_plaintext_field(self):
+        """list_user_keys_with_binding_state must not leak full key into other string fields."""
         store, raw_key, key_id = _setup_user_with_key("888")
         _bind_key(store, key_id)
         result = store.list_user_keys_with_binding_state("888")
+        skip = frozenset({"full_key_plaintext"})
         for entry in result:
-            for field_value in entry.values():
+            for field_name, field_value in entry.items():
+                if field_name in skip:
+                    continue
                 if isinstance(field_value, str):
                     self.assertNotIn(raw_key, field_value)
 

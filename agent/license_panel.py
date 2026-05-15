@@ -408,34 +408,36 @@ def build_reset_selector_embed(keys_with_state: list[dict]) -> dict[str, Any]:
     """Ephemeral embed shown when the user opens the HWID reset key selector.
 
     keys_with_state: list of dicts from store.list_user_keys_with_binding_state().
-    Each key is listed with a 🟢/🟡 indicator and device info.
+    Legend (above the list): 🟢 no device linked, 🟡 bound to a device.
+    Each row is numbered; full key in backticks when recoverable, else masked reference.
     """
+    legend = "\U0001f7e2 No device linked\n\U0001f7e1 Bound to a device"
     lines: list[str] = []
-    for k in keys_with_state:
-        icon = "\U0001f7e2" if k.get("active_binding") else "\U0001f7e1"  # 🟢 / 🟡
+    for i, k in enumerate(keys_with_state, start=1):
+        bound = bool(k.get("active_binding"))
+        # 🟢 = no device linked, 🟡 = bound to a device
+        icon = "\U0001f7e1" if bound else "\U0001f7e2"
         fk = k.get("full_key_plaintext")
         mk = k.get("masked_key", "???")
-        bound = k.get("active_binding")
-        model = k.get("device_model") or "Unknown device"
         if fk:
-            line = f"{icon} `{fk}` — Device: {model}" if bound else f"{icon} `{fk}` — No device bound"
-        elif bound:
-            line = f"{icon} **{mk}** (reference only, not a full key) — Device: {model}"
+            key_disp = f"`{fk}`"
         else:
-            line = f"{icon} **{mk}** (reference only, not a full key) — No device bound"
-        lines.append(line)
+            key_disp = f"**{mk}** (reference only)"
+        suffix = "Bound to a device" if bound else "No device bound"
+        lines.append(f"{i}. {icon} {key_disp} — {suffix}")
     key_list = "\n".join(lines)
+    description = (
+        "Select which key to reset from the dropdown below, "
+        "then click **Confirm Reset**.\n\n"
+        f"{legend}\n\n"
+        f"{key_list}"
+    )
     return {
         "ephemeral": True,
         "embed": {
             "title": "\u267b\ufe0f Reset HWID \u2014 Select Key",
             "color": 0x2F80ED,
-            "description": (
-                "Select which key to reset from the dropdown below, "
-                "then click **Confirm Reset**.\n\n"
-                f"{key_list}\n\n"
-                "\U0001f7e2 Bound to a device  \u00b7  \U0001f7e1 No device linked"
-            ),
+            "description": description,
             "footer": {"text": "DENG Tool \u00b7 Limited to 5 resets per 24 hours per key"},
         },
     }

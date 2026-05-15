@@ -250,14 +250,15 @@ class ResetHwidSelect(discord.ui.Select):
     def __init__(self, keys_with_state: list[dict]) -> None:
         options: list[discord.SelectOption] = []
         for k in keys_with_state:
-            icon = "🟢" if k.get("active_binding") else "🟡"
+            # 🟢 no device linked, 🟡 bound to a device (matches selector embed legend)
+            icon = "🟡" if k.get("active_binding") else "🟢"
             fk = k.get("full_key_plaintext")
             mk = k.get("masked_key", "???")
             label = (fk or mk)[:100]
             if k.get("active_binding"):
                 model = k.get("device_model") or "Unknown device"
                 last = k.get("last_seen_at")
-                desc = f"Device: {model}" + (f" · Last seen: {last[:10]}" if last else "")
+                desc = f"Device: {model}" + (f" — Last seen: {last[:10]}" if last else "")
             else:
                 desc = k.get("reason_if_not_resettable") or "No device bound"
             options.append(

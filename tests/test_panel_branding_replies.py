@@ -11,7 +11,11 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agent.branding import apply_branding_to_embed_dict
-from agent.license_panel import build_generate_success_response, build_panel_embed
+from agent.license_panel import (
+    build_generate_success_response,
+    build_panel_embed,
+    build_reset_selector_embed,
+)
 from bot.cog_license_panel import _embed_from_payload
 
 
@@ -35,6 +39,28 @@ class PanelVersusReplyBrandingTests(unittest.TestCase):
             embed = _embed_from_payload(
                 build_generate_success_response("DENG-1111-2222-3333-4444")
             )
+        self.assertNotIn("thumbnail", embed.to_dict())
+
+    def test_reset_hwid_selector_ephemeral_has_no_thumbnail_with_same_env(self) -> None:
+        keys = [{
+            "key_id": "k1",
+            "masked_key": "DENG-AB12...CD34",
+            "status": "active",
+            "active_binding": False,
+            "device_model": "",
+            "device_label": "",
+            "last_seen_at": None,
+            "reset_count_24h": 0,
+            "can_reset": False,
+            "reason_if_not_resettable": "No device bound — start the tool first",
+        }]
+        payload = build_reset_selector_embed(keys)
+        with patch.dict(
+            os.environ,
+            {"DENG_BRANDING_LOGO_URL": "https://example.com/hub.png"},
+            clear=False,
+        ):
+            embed = _embed_from_payload(payload)
         self.assertNotIn("thumbnail", embed.to_dict())
 
 
