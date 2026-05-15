@@ -20,10 +20,11 @@
     "label": "main-dev",
     "description": "Owner/admin testing only",
     "install_ref": "refs/heads/main",
-    "artifact_path": "",
+    "artifact_path": "releases/main-dev/deng-tool-rejoin-main-dev.tar.gz",
     "installer_endpoint": "/install/test/latest",
-    "notes": "Owner/admin/tester testing — fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
+    "notes": "Owner/admin/tester testing \u2014 fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
     "visibility": "admin",
-    "enabled": true
+    "enabled": true,
+    "artifact_sha256": "860a69e76747de2614f14bcaa566116b31dc375c3196d4ad6d07915cd3657d51"
   }
 ]
