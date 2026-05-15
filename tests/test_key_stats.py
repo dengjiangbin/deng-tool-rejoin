@@ -20,7 +20,12 @@ from agent.key_stats_format import (
     format_stats_embed_title,
     format_stats_header_plain,
 )
-from agent.license_store import LocalJsonLicenseStore, SupabaseLicenseStore
+from agent.license_store import (
+    KeyAlreadySelfOwned,
+    KeyOwnershipError,
+    LocalJsonLicenseStore,
+    SupabaseLicenseStore,
+)
 
 
 class TestKeyStatsFormat(unittest.TestCase):
@@ -39,6 +44,7 @@ class TestKeyStatsFormat(unittest.TestCase):
                 "masked_key": "DENG-AA...BB",
                 "full_key_plaintext": None,
                 "has_stored_ciphertext": False,
+                "export_storage_configured": True,
                 "license_status": "active",
                 "used": False,
                 "device_display": None,
@@ -52,6 +58,9 @@ class TestKeyStatsFormat(unittest.TestCase):
         self.assertNotIn("License Key", desc)
         self.assertNotIn("Not Available", desc)
         self.assertNotIn("Full Key", desc)
+        self.assertNotIn("Created", desc)
+        self.assertRegex(desc, r"Key: `[^\n]+`\nStatus:")
+        self.assertNotIn("\n\n", desc[: desc.index("\nStatus:")])
         self.assertIn("Key Stats", d["footer"]["text"])
 
     def test_embed_used_shows_device(self) -> None:
@@ -60,6 +69,7 @@ class TestKeyStatsFormat(unittest.TestCase):
                 "masked_key": "DENG-AA...BB",
                 "full_key_plaintext": None,
                 "has_stored_ciphertext": False,
+                "export_storage_configured": True,
                 "license_status": "active",
                 "used": True,
                 "device_display": "SM-S9160",
@@ -71,6 +81,7 @@ class TestKeyStatsFormat(unittest.TestCase):
         self.assertIn("✅ Used", desc)
         self.assertIn("SM-S9160", desc)
         self.assertIn("Last Active:", desc)
+        self.assertNotIn("Created", desc)
         self.assertNotIn("Tags:", desc)
 
     def test_full_key_when_plain_present(self) -> None:
@@ -79,6 +90,7 @@ class TestKeyStatsFormat(unittest.TestCase):
                 "masked_key": "DENG-AA...BB",
                 "full_key_plaintext": "DENG-1111-2222-3333-4444",
                 "has_stored_ciphertext": True,
+                "export_storage_configured": True,
                 "license_status": "active",
                 "used": False,
                 "device_display": None,
@@ -86,16 +98,18 @@ class TestKeyStatsFormat(unittest.TestCase):
                 "created_at": "2026-01-15T12:00:00+00:00",
             }
         )
-        self.assertIn("DENG-1111-2222-3333-4444", d["description"])
+        self.assertIn("Key: `DENG-1111-2222-3333-4444`", d["description"])
         self.assertNotIn("Not Available", d["description"])
 
     def test_unused_and_used_colors_differ(self) -> None:
         unused = build_key_stats_embed_dict(
             {"masked_key": "A...B-full", "license_status": "active", "used": False,
+             "export_storage_configured": True,
              "created_at": "2026-01-01T00:00:00+00:00"}
         )
         used = build_key_stats_embed_dict(
             {"masked_key": "A...B-full", "license_status": "active", "used": True,
+             "export_storage_configured": True,
              "device_display": "X", "last_seen_at": "2026-01-02T00:00:00+00:00",
              "created_at": "2026-01-01T00:00:00+00:00"}
         )
@@ -104,12 +118,66 @@ class TestKeyStatsFormat(unittest.TestCase):
     def test_description_joins_blocks(self) -> None:
         rows = [
             {"masked_key": "A...1", "full_key_plaintext": None, "has_stored_ciphertext": False,
+             "export_storage_configured": True,
              "license_status": "active", "used": False, "device_display": None,
              "last_seen_at": None, "created_at": "2026-01-01T00:00:00+00:00"},
         ]
         d = build_key_stats_description(rows)
         self.assertIn("🟢 Unused", d)
         self.assertNotIn("License Key", d)
+
+
+class TestRecoverKeyExport(unittest.TestCase):
+    def tearDown(self) -> None:
+        license_key_export.clear_export_key_cache()
+
+    def test_recover_stores_ciphertext_for_old_key(self) -> None:
+        with patch.dict(os.environ, {"LICENSE_KEY_EXPORT_SECRET": "recover-test"}, clear=False):
+            license_key_export.clear_export_key_cache()
+            with TemporaryDirectory() as tmp:
+                store = LocalJsonLicenseStore(Path(tmp) / "db.json")
+                store.get_or_create_user("55")
+                with patch.dict(os.environ, {"LICENSE_KEY_EXPORT_SECRET": ""}, clear=False):
+                    license_key_export.clear_export_key_cache()
+                    full = store.create_key_for_user("55")
+                license_key_export.clear_export_key_cache()
+                with patch.dict(os.environ, {"LICENSE_KEY_EXPORT_SECRET": "recover-test"}, clear=False):
+                    license_key_export.clear_export_key_cache()
+                    self.assertEqual(store.recover_key_export_for_user("55", full), "stored")
+                rows = store.list_user_keys_for_stats("55")
+                self.assertEqual(rows[0].get("full_key_plaintext"), full)
+
+    def test_recover_wrong_owner_rejected(self) -> None:
+        with patch.dict(os.environ, {"LICENSE_KEY_EXPORT_SECRET": "recover-test"}, clear=False):
+            license_key_export.clear_export_key_cache()
+            with TemporaryDirectory() as tmp:
+                store = LocalJsonLicenseStore(Path(tmp) / "db.json")
+                store.get_or_create_user("a")
+                store.get_or_create_user("b")
+                full = store.create_key_for_user("a")
+                with self.assertRaises(KeyOwnershipError):
+                    store.recover_key_export_for_user("b", full)
+
+    def test_redeem_own_key_backfills_export(self) -> None:
+        with patch.dict(os.environ, {"LICENSE_KEY_EXPORT_SECRET": "redeem-fill"}, clear=False):
+            license_key_export.clear_export_key_cache()
+            with TemporaryDirectory() as tmp:
+                store = LocalJsonLicenseStore(Path(tmp) / "db.json")
+                store.get_or_create_user("99")
+                with patch.dict(os.environ, {"LICENSE_KEY_EXPORT_SECRET": ""}, clear=False):
+                    license_key_export.clear_export_key_cache()
+                    full = store.create_key_for_user("99")
+                license_key_export.clear_export_key_cache()
+                with patch.dict(os.environ, {"LICENSE_KEY_EXPORT_SECRET": "redeem-fill"}, clear=False):
+                    license_key_export.clear_export_key_cache()
+                    try:
+                        store.redeem_key_for_user("99", full)
+                    except KeyAlreadySelfOwned as exc:
+                        self.assertTrue(exc.export_backfilled)
+                    else:
+                        self.fail("expected KeyAlreadySelfOwned")
+                rows = store.list_user_keys_for_stats("99")
+                self.assertEqual(rows[0].get("full_key_plaintext"), full)
 
 
 class TestLocalStoreStats(unittest.TestCase):
@@ -186,6 +254,7 @@ class TestDownloadBody(unittest.TestCase):
                 "masked_key": "DENG-EF95...DCD2",
                 "full_key_plaintext": None,
                 "has_stored_ciphertext": False,
+                "export_storage_configured": True,
                 "license_status": "active",
                 "used": False,
                 "device_display": None,
@@ -200,9 +269,31 @@ class TestDownloadBody(unittest.TestCase):
         self.assertNotIn("Not Available", body)
         self.assertNotIn("Full key export", body.lower())
         self.assertNotIn("key_hash", body.lower())
+        self.assertNotIn("Created", body)
+        self.assertIn("Recover full key from Key Stats", body)
+
+    def test_download_full_key_when_exportable(self) -> None:
+        rows = [
+            {
+                "masked_key": "DENG-AA...BB",
+                "full_key_plaintext": "DENG-1111-2222-3333-4444",
+                "has_stored_ciphertext": True,
+                "export_storage_configured": True,
+                "license_status": "active",
+                "used": True,
+                "device_display": "SM-S9160",
+                "last_seen_at": "2026-05-01T00:00:00+00:00",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        ]
+        body = build_key_stats_download_body(discord_user_id="1", rows=rows)
+        self.assertIn("DENG-1111-2222-3333-4444", body)
+        self.assertNotIn("DENG-AA...BB", body)
+        self.assertNotIn("Created", body)
 
     def test_no_other_user_keys_in_slice(self) -> None:
         rows = [{"masked_key": "K1", "full_key_plaintext": None, "has_stored_ciphertext": False,
+                 "export_storage_configured": True,
                  "license_status": "active", "used": True, "device_display": "D",
                  "last_seen_at": None, "created_at": "2026-01-01T00:00:00+00:00"}]
         body = build_key_stats_download_body(discord_user_id="999", rows=rows)

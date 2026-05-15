@@ -68,6 +68,15 @@ class KeyOwnershipError(StoreError):
 class KeyAlreadySelfOwned(StoreError):
     """Key is already attached to the requesting Discord user."""
 
+    def __init__(self, message: str, *, export_backfilled: bool = False) -> None:
+        super().__init__(message)
+        self.export_backfilled = export_backfilled
+
+
+class ExportStorageUnavailable(StoreError):
+    """Cannot persist encrypted full keys (missing secret, crypto, or DB columns)."""
+
+
 class NoActiveBindingError(StoreError):
     """No active device binding exists for this key; nothing to reset."""
 
@@ -133,6 +142,19 @@ class BaseLicenseStore(ABC):
         """Attach an existing key to a Discord user.
         Returns the masked key on success.
         Raises KeyNotFoundError, KeyOwnershipError, or UserLimitError.
+        """
+
+    @abstractmethod
+    def recover_key_export_for_user(self, discord_user_id: str, raw_key: str) -> str:
+        """Store ciphertext for a key the user owns when export data is missing.
+
+        Returns ``\"stored\"`` after writing ciphertext, or ``\"already_exportable\"``
+        when a working ciphertext already exists. Never logs the plaintext key.
+
+        Raises:
+            ExportStorageUnavailable: encryption unavailable or not configured.
+            KeyNotFoundError: invalid key string or no such key.
+            KeyOwnershipError: key belongs to someone else.
         """
 
     @abstractmethod
@@ -210,8 +232,8 @@ class BaseLicenseStore(ABC):
 
         Each dict may include:
           masked_key, full_key_plaintext (optional), has_stored_ciphertext,
-          license_status, used, device_display, last_seen_at, created_at,
-          plan, reset_count_24h
+          export_storage_configured, license_status, used, device_display,
+          last_seen_at, created_at, plan, reset_count_24h
         """
 
     def get_user_key_export_rows(self, discord_user_id: str) -> list[dict[str, Any]]:
@@ -377,9 +399,27 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             raise KeyNotFoundError("This key has been revoked.")
         owner = key_record.get("owner_discord_id")
         if owner == discord_user_id:
-            # Same user redeeming their own key — already attached
+            from . import license_key_export as lke
+
+            backfilled = False
+            ct = lke.encrypt_license_key_plaintext(normalized)
+            if ct:
+                existing_ct = (key_record.get("key_ciphertext") or "").strip()
+                plain = (
+                    lke.decrypt_license_key_ciphertext(existing_ct)
+                    if existing_ct
+                    else None
+                )
+                if not existing_ct or not plain:
+                    key_record["key_ciphertext"] = ct
+                    key_record["key_export_available"] = True
+                    key_record["updated_at"] = _utc_now()
+                    db["keys"][key_hash] = key_record
+                    self._save(db)
+                    backfilled = True
             raise KeyAlreadySelfOwned(
-                f"This key is already attached to your account ({_mask(normalized)})."
+                f"This key is already attached to your account ({_mask(normalized)}).",
+                export_backfilled=backfilled,
             )
         if owner and owner != discord_user_id:
             raise KeyOwnershipError("This key belongs to another user.")
@@ -474,6 +514,7 @@ class LocalJsonLicenseStore(BaseLicenseStore):
 
         db = self._load()
         rows: list[dict[str, Any]] = []
+        exp_cfg = lke.is_export_secret_configured()
         for key_hash, record in db["keys"].items():
             if record.get("owner_discord_id") != discord_user_id:
                 continue
@@ -491,6 +532,7 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 "masked_key": masked,
                 "full_key_plaintext": full_plain,
                 "has_stored_ciphertext": has_blob,
+                "export_storage_configured": exp_cfg,
                 "license_status": lic_status,
                 "used": active_binding,
                 "device_display": device,
@@ -501,6 +543,49 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             })
         rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
         return rows
+
+    def recover_key_export_for_user(self, discord_user_id: str, raw_key: str) -> str:
+        from . import license_key_export as lke
+
+        if not lke.is_export_secret_configured():
+            raise ExportStorageUnavailable(
+                "Full key export storage is not enabled on this server."
+            )
+        try:
+            normalized = normalize_license_key(raw_key)
+        except LicenseKeyError as exc:
+            raise KeyNotFoundError(str(exc)) from exc
+        key_hash = hash_license_key(normalized)
+        db = self._load()
+        key_record = db["keys"].get(key_hash)
+        if not key_record:
+            raise KeyNotFoundError("Key not found. Check the key and try again.")
+        if key_record.get("owner_discord_id") != discord_user_id:
+            raise KeyOwnershipError("That key does not belong to your account.")
+        if key_record.get("status") == "revoked":
+            raise KeyNotFoundError("This key has been revoked.")
+
+        existing_ct = (key_record.get("key_ciphertext") or "").strip()
+        if existing_ct:
+            if lke.decrypt_license_key_ciphertext(existing_ct):
+                return "already_exportable"
+
+        ciphertext = lke.encrypt_license_key_plaintext(normalized)
+        if not ciphertext:
+            raise ExportStorageUnavailable("Could not encrypt key for storage.")
+
+        key_record["key_ciphertext"] = ciphertext
+        key_record["key_export_available"] = True
+        key_record["updated_at"] = _utc_now()
+        db["keys"][key_hash] = key_record
+        self._save(db)
+        self.audit_admin_action(
+            discord_user_id,
+            "recover_key_export",
+            target_type="key",
+            target_id=key_hash[:8],
+        )
+        return "stored"
 
     # ── HWID reset ────────────────────────────────────────────────────────────
 
@@ -870,8 +955,38 @@ class SupabaseLicenseStore(BaseLicenseStore):
             raise KeyNotFoundError("This key has been revoked.")
         owner = record.get("owner_discord_id")
         if owner == discord_user_id:
+            from . import license_key_export as lke
+
+            backfilled = False
+            ct = lke.encrypt_license_key_plaintext(normalized)
+            if ct:
+                existing_ct = (record.get("key_ciphertext") or "").strip()
+                plain = (
+                    lke.decrypt_license_key_ciphertext(existing_ct)
+                    if existing_ct
+                    else None
+                )
+                if not existing_ct or not plain:
+                    try:
+                        self._client.table("license_keys").update({
+                            "key_ciphertext": ct,
+                            "key_export_available": True,
+                        }).eq("id", key_hash).execute()
+                        backfilled = True
+                    except Exception as exc:
+                        err = str(exc).lower()
+                        if (
+                            "column" in err
+                            or "pgrst204" in err
+                            or "key_ciphertext" in err
+                            or "key_export_available" in err
+                        ):
+                            pass
+                        else:
+                            raise
             raise KeyAlreadySelfOwned(
-                f"This key is already attached to your account ({_mask(normalized)})."
+                f"This key is already attached to your account ({_mask(normalized)}).",
+                export_backfilled=backfilled,
             )
         if owner and owner != discord_user_id:
             raise KeyOwnershipError("This key belongs to another user.")
@@ -1009,6 +1124,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
             records = res.data or []
 
         rows: list[dict[str, Any]] = []
+        exp_cfg = lke.is_export_secret_configured()
         for record in records:
             key_id = record["id"]
             b_res = (
@@ -1031,6 +1147,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 "masked_key": masked,
                 "full_key_plaintext": full_plain,
                 "has_stored_ciphertext": has_blob,
+                "export_storage_configured": exp_cfg,
                 "license_status": lic_status,
                 "used": active_binding,
                 "device_display": device,
@@ -1041,6 +1158,63 @@ class SupabaseLicenseStore(BaseLicenseStore):
             })
         rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
         return rows
+
+    def recover_key_export_for_user(self, discord_user_id: str, raw_key: str) -> str:
+        from . import license_key_export as lke
+
+        if not lke.is_export_secret_configured():
+            raise ExportStorageUnavailable(
+                "Full key export storage is not enabled on this server."
+            )
+        try:
+            normalized = normalize_license_key(raw_key)
+        except LicenseKeyError as exc:
+            raise KeyNotFoundError(str(exc)) from exc
+        key_hash = hash_license_key(normalized)
+        res = (
+            self._client.table("license_keys")
+            .select("*")
+            .eq("id", key_hash)
+            .execute()
+        )
+        if not res.data:
+            raise KeyNotFoundError("Key not found. Check the key and try again.")
+        record = res.data[0]
+        if record.get("owner_discord_id") != discord_user_id:
+            raise KeyOwnershipError("That key does not belong to your account.")
+        if record.get("status") == "revoked":
+            raise KeyNotFoundError("This key has been revoked.")
+
+        existing_ct = ""
+        if "key_ciphertext" in record:
+            existing_ct = (record.get("key_ciphertext") or "").strip()
+        if existing_ct:
+            if lke.decrypt_license_key_ciphertext(existing_ct):
+                return "already_exportable"
+
+        ciphertext = lke.encrypt_license_key_plaintext(normalized)
+        if not ciphertext:
+            raise ExportStorageUnavailable("Could not encrypt key for storage.")
+
+        try:
+            self._client.table("license_keys").update({
+                "key_ciphertext": ciphertext,
+                "key_export_available": True,
+            }).eq("id", key_hash).execute()
+        except Exception as exc:
+            err = str(exc).lower()
+            if "column" in err or "pgrst204" in err or "key_ciphertext" in err:
+                raise ExportStorageUnavailable(
+                    "Full key export columns are not available in the database."
+                ) from exc
+            raise
+        self.audit_admin_action(
+            discord_user_id,
+            "recover_key_export",
+            target_type="key",
+            target_id=key_hash[:8],
+        )
+        return "stored"
 
     # ── HWID reset ────────────────────────────────────────────────────────────
 

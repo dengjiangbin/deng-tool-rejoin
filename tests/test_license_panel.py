@@ -29,8 +29,7 @@ class PanelEmbedTests(unittest.TestCase):
     def test_panel_embed_title(self):
         """Test 31 – embed title is correct."""
         embed = build_panel_embed()
-        self.assertIn("DENG Tool", embed["title"])
-        self.assertIn("License", embed["title"])
+        self.assertEqual(embed["title"], "DENG Tool: Rejoin Key Panel")
 
     def test_panel_embed_has_four_fields(self):
         """Test 32 – embed has exactly 4 instruction fields."""

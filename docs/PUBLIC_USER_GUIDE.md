@@ -97,11 +97,11 @@ The license key is **not** configured from the Setup / Config menu. When you run
 - If the key is missing or invalid, you stay on the license prompt until you fix it or exit.
 - If the key is bound to another device, you see **Reset HWID** guidance for Discord.
 
-In Discord, use the **license panel** in your server: **Generate Key**, **Redeem Key**, **Reset HWID**, and **Key Stats**. By default you get **one key** per Discord account, and that key binds to **one device** until you **Reset HWID**. **Key Stats** / **Download Keys** are private; **Used** means the key is bound to a device, **Unused** means it is not.
+In Discord, open **DENG Tool: Rejoin Key Panel** in your server: **Generate Key**, **Redeem Key**, **Reset HWID**, and **Key Stats**. By default you get **one key** per Discord account; it binds to **one device** until you **Reset HWID**. **Key Stats** and **Download Keys** are private; **Used** means an active device binding, **Unused** means none. With export storage enabled (**LICENSE_KEY_EXPORT_SECRET** + migration `002`), those views show the **full key**; older keys can use **Recover Full Key** or redeem the same key again once.
 
-If the tool reports the key is already bound to another device, open the panel and use **Reset HWID** (respect cooldowns), then try again on the new device.
+If the tool reports the key is already bound to another device, use **Reset HWID** in the panel (respect cooldowns), then try again on the new device.
 
-Server operators can set `DENG_BRANDING_LOGO_URL` for a logo thumbnail on panel embeds (public HTTPS URL).
+Set `DENG_BRANDING_LOGO_URL` for a thumbnail, or `LICENSE_API_PUBLIC_URL` so `…/assets/denghub_logo.png` is used.
 
 ## Roblox Package Setup
 

@@ -10,7 +10,7 @@ All button response flows are **ephemeral** — only the clicking user sees the 
 
 ## Panel Embed
 
-**Title**: `DENG Tool — License Key Panel`  
+**Title**: `DENG Tool: Rejoin Key Panel`  
 **Color**: Brand blue (`#2F80ED`)
 
 | Field | Purpose |
@@ -33,7 +33,7 @@ BUTTON_KEY_STATS  = "license_panel:key_stats"
 
 Ephemeral **Key Stats** navigation uses these `custom_id`s (not persistent views):
 
-`license_panel:ks_prev` · `license_panel:ks_next` · `license_panel:ks_dl` · `license_panel:ks_close`
+`license_panel:ks_prev` · `license_panel:ks_next` · `license_panel:ks_dl` · `license_panel:ks_recover` · `license_panel:ks_close`
 
 Use these constants in your `interaction.custom_id` match in your Discord bot cog.
 
@@ -109,16 +109,16 @@ All commands are under the `/license_panel` group.
 
 1. User clicks **Key Stats**
 2. Bot defers ephemeral, calls `store.list_user_keys_for_stats(discord_user_id)`
-3. Bot sends an ephemeral message: **plain-text header** `Your License Keys (Total: N | Page X/Y)` plus **one embed per key** (max 5 per page).
+3. Bot sends an ephemeral message: **plain-text header** `Your License Keys (Total: N | Page X/Y)` plus **one embed per key** (max 5 per page). When export storage is enabled, the **full DENG-… key** is shown here (private only). Keys created before export storage may need **Recover Full Key** (paste once; hash-verified) or redeem the same key again.
 4. **Used** = key has an **active** device binding. **Unused** = no active binding (free for a new device after reset).
 5. **Previous** / **Next** edit the same message. Only the opening user may interact; others get "This key stats view is not yours."
-6. **Download Keys** sends another ephemeral message with `my_keys_<discord_user_id>.txt` listing **all** keys for that user (short format: Used/Unused, device when bound).
-7. **Close** edits the stats message to `Closed.` and removes the view.
+6. **Recover Full Key** opens a modal when export secret is configured (optional one-time backfill).
+7. **Download Keys** sends another ephemeral message with `my_keys_<discord_user_id>.txt` (full key when export is enabled; otherwise masked plus a short recover hint).
+8. **Close** edits the stats message to `Closed.` and removes the view.
 
 **Limits:** By default **one Discord user → one license key → one device**. If the tool says the key is bound elsewhere, use **Reset HWID** in Discord, wait if recently active, then bind again.
 
-**Logo on embeds:** Set environment variable `DENG_BRANDING_LOGO_URL` to a public HTTPS image URL (for example a hosted `D_96px.png`). If unset, embeds work without a thumbnail.
-
+**Logo on embeds:** Set `DENG_BRANDING_LOGO_URL` to a public HTTPS image, or set `LICENSE_API_PUBLIC_URL` so Discord can load `{PUBLIC}/assets/denghub_logo.png` from the license API. Local-only URLs (`http://127.0.0.1`) are skipped for thumbnails.
 ---
 
 ## Panel Config Storage

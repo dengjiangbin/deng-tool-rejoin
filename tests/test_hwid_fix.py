@@ -405,6 +405,17 @@ class TestRedeemResponseNoFullKey(unittest.TestCase):
         self.assertNotIn("Error", title)
         self.assertNotIn("Failed", title)
 
+    def test_already_owned_backfill_response_text(self):
+        from agent.license_panel import build_redeem_already_owned_response
+
+        payload = build_redeem_already_owned_response(
+            "ignored", export_backfilled=True
+        )
+        self.assertIn(
+            "Full key export has been enabled",
+            payload["embed"]["description"],
+        )
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 15-21: Client/remote license API contract

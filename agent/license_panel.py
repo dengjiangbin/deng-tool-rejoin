@@ -57,13 +57,13 @@ def build_panel_embed() -> dict[str, Any]:
 
     Structure
     ─────────
-    • Title  : "DENG Tool — License Key Panel"
+    • Title  : "DENG Tool: Rejoin Key Panel"
     • Color  : 0x2F80ED (brand blue)
     • Fields : 4 instruction cards — Generate, Reset HWID, Redeem, Key Stats
     • Footer : "DENG Tool · All responses are private"
     """
     return {
-        "title": "DENG Tool \u2014 License Key Panel",
+        "title": "DENG Tool: Rejoin Key Panel",
         "color": 0x2F80ED,
         "description": (
             "Use the buttons below to manage your license key.\n"
@@ -335,14 +335,24 @@ def build_reset_no_binding_response() -> dict[str, Any]:
     }
 
 
-def build_redeem_already_owned_response(message: str) -> dict[str, Any]:
+def build_redeem_already_owned_response(
+    message: str | None = None,
+    *,
+    export_backfilled: bool = False,
+) -> dict[str, Any]:
     """Ephemeral embed when a user tries to redeem their own already-attached key."""
+    if export_backfilled:
+        desc = (
+            "Key Already Attached. Full key export has been enabled for this key."
+        )
+    else:
+        desc = message or "This key is already attached to your account."
     return {
         "ephemeral": True,
         "embed": {
             "title": "\u2139\ufe0f Key Already Attached",
             "color": 0x2F80ED,
-            "description": message,
+            "description": desc,
         },
     }
 

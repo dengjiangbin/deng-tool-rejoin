@@ -32,6 +32,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from agent.branding import apply_branding_to_embed_dict
+from agent.license_key_export import is_export_secret_configured
 from agent.license_panel import (
     BUTTON_GENERATE,
     BUTTON_KEY_STATS,
@@ -58,6 +59,7 @@ from agent.license_store import (
     MAX_HWID_RESETS_PER_24H,
     ActiveKeyWarning,
     BaseLicenseStore,
+    ExportStorageUnavailable,
     KeyAlreadySelfOwned,
     KeyNotFoundError,
     KeyOwnershipError,
@@ -137,7 +139,10 @@ class RedeemModal(discord.ui.Modal, title="Redeem License Key"):
             masked = self._store.redeem_key_for_user(uid, raw_key)
             payload = build_redeem_success_response(masked)
         except KeyAlreadySelfOwned as exc:
-            payload = build_redeem_already_owned_response(str(exc))
+            payload = build_redeem_already_owned_response(
+                str(exc),
+                export_backfilled=exc.export_backfilled,
+            )
         except (KeyNotFoundError, KeyOwnershipError, UserLimitError) as exc:
             payload = build_redeem_error_response(str(exc))
 
@@ -145,6 +150,63 @@ class RedeemModal(discord.ui.Modal, title="Redeem License Key"):
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         log.exception("RedeemModal error for user %s: %s", interaction.user.id, error)
+        try:
+            await interaction.followup.send(
+                "❌ An unexpected error occurred. Please try again.", ephemeral=True
+            )
+        except discord.HTTPException:
+            pass
+
+
+class RecoverKeyExportModal(discord.ui.Modal, title="Recover Full Key"):
+    """Modal: user pastes full key; verified by hash and stored as ciphertext."""
+
+    key_input: discord.ui.TextInput = discord.ui.TextInput(
+        label="Full license key",
+        placeholder="DENG-XXXX-XXXX-XXXX-XXXX",
+        min_length=19,
+        max_length=29,
+        style=discord.TextStyle.short,
+    )
+
+    def __init__(self, store: BaseLicenseStore) -> None:
+        super().__init__()
+        self._store = store
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        uid = str(interaction.user.id)
+        raw_key = self.key_input.value.strip()
+        await interaction.response.defer(ephemeral=True)
+        try:
+            result = self._store.recover_key_export_for_user(uid, raw_key)
+        except ExportStorageUnavailable as exc:
+            await interaction.followup.send(f"❌ {exc}", ephemeral=True)
+            return
+        except KeyNotFoundError as exc:
+            await interaction.followup.send(f"❌ {exc}", ephemeral=True)
+            return
+        except KeyOwnershipError:
+            await interaction.followup.send(
+                "❌ That key does not belong to your account.",
+                ephemeral=True,
+            )
+            return
+        if result == "already_exportable":
+            await interaction.followup.send(
+                "✅ Full key export was already enabled. Open **Key Stats** to copy your key.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                "Full key saved securely for export.\n"
+                "Open **Key Stats** to copy your key.",
+                ephemeral=True,
+            )
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        log.exception(
+            "RecoverKeyExportModal error for user %s: %s", interaction.user.id, error
+        )
         try:
             await interaction.followup.send(
                 "❌ An unexpected error occurred. Please try again.", ephemeral=True
@@ -410,6 +472,26 @@ class KeyStatsDownloadButton(discord.ui.Button):
         await interaction.response.send_message(embed=dl_embed, file=file, ephemeral=True)
 
 
+class KeyStatsRecoverExportButton(discord.ui.Button):
+    """Open modal to paste full key and enable encrypted export for old keys."""
+
+    def __init__(self, host: "KeyStatsView") -> None:
+        super().__init__(
+            label="Recover Full Key",
+            style=discord.ButtonStyle.secondary,
+            custom_id="license_panel:ks_recover",
+        )
+        self._host = host
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if str(interaction.user.id) != self._host._owner_id:
+            await interaction.response.send_message(
+                "This key stats view is not yours.", ephemeral=True
+            )
+            return
+        await interaction.response.send_modal(RecoverKeyExportModal(self._host._store))
+
+
 class KeyStatsPrevButton(discord.ui.Button):
     def __init__(self, host: "KeyStatsView", *, disabled: bool) -> None:
         super().__init__(
@@ -474,6 +556,8 @@ class KeyStatsView(discord.ui.View):
             KeyStatsNextButton(self, disabled=self._page >= total_pages - 1 or n == 0)
         )
         self.add_item(KeyStatsDownloadButton(self, disabled=n == 0))
+        if n > 0 and is_export_secret_configured():
+            self.add_item(KeyStatsRecoverExportButton(self))
         self.add_item(KeyStatsCloseButton(self))
 
     async def on_timeout(self) -> None:

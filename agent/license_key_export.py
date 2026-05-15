@@ -1,9 +1,10 @@
 """Server-side optional encryption for exportable license keys (Fernet).
 
-Full raw keys are never stored in plaintext. When LICENSE_KEY_EXPORT_SECRET is set
-and the cryptography package is installed, newly generated keys can store a
-Fernet ciphertext so the owning Discord user can export the full key from
-Key Stats / Download. Old rows without ciphertext cannot be recovered.
+Full raw keys are not stored in plaintext. When LICENSE_KEY_EXPORT_SECRET is set
+and the cryptography package is installed, keys can store a Fernet ciphertext so
+the owning Discord user can export the full key from Key Stats / Download.
+Rows without ciphertext can be backfilled by the owner (Recover / redeem-again)
+when the secret and DB columns exist.
 """
 
 from __future__ import annotations

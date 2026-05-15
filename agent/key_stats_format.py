@@ -53,15 +53,16 @@ def format_stats_embed_title(*, total: int, page: int, total_pages: int) -> str:
 
 
 def build_key_stats_embed_dict(row: dict[str, Any]) -> dict[str, Any]:
-    """One Discord embed dict for a single license key row."""
+    """One Discord embed dict for a single license key row (compact description)."""
     full = row.get("full_key_plaintext")
     masked = row.get("masked_key") or "???"
     key_display = full if full else masked
 
     lic = (row.get("license_status") or "active").lower()
     used = bool(row.get("used"))
+    exp_cfg = bool(row.get("export_storage_configured", False))
 
-    lines: list[str] = [f"Key: `{key_display}`", ""]
+    lines: list[str] = [f"Key: `{key_display}`"]
 
     if lic == "revoked":
         lines.append("Status: 🔴 Revoked")
@@ -76,17 +77,8 @@ def build_key_stats_embed_dict(row: dict[str, Any]) -> dict[str, Any]:
         lines.append("Status: 🟢 Unused")
         color = COLOR_STATS_UNUSED
 
-    created = row.get("created_at")
-    rel_c = relative_time_ago(created) if created else None
-    lines.append("")
-    if rel_c:
-        lines.append(f"Created: {rel_c}")
-    elif created:
-        lines.append(f"Created: {created[:10]}")
-
-    device = row.get("device_display")
     if used and lic not in {"revoked", "expired"}:
-        lines.append("")
+        device = row.get("device_display")
         if device:
             lines.append(f"Device: {device}")
         last_seen = row.get("last_seen_at")
@@ -95,6 +87,13 @@ def build_key_stats_embed_dict(row: dict[str, Any]) -> dict[str, Any]:
             lines.append(f"Last Active: {rel or last_seen[:19]}")
         else:
             lines.append("Last Active: Never")
+
+    if (
+        not full
+        and lic not in {"revoked", "expired"}
+        and not exp_cfg
+    ):
+        lines.append("Export: full key storage is not enabled on this server.")
 
     return {
         "description": "\n".join(lines),
@@ -149,6 +148,8 @@ def build_key_stats_download_body(*, discord_user_id: str, rows: list[dict[str, 
         masked = row.get("masked_key") or "???"
         used = bool(row.get("used"))
         lic = (row.get("license_status") or "active").lower()
+        exp_cfg = bool(row.get("export_storage_configured", False))
+
         if lic == "revoked":
             status_word = "Revoked"
         elif lic == "expired":
@@ -159,14 +160,17 @@ def build_key_stats_download_body(*, discord_user_id: str, rows: list[dict[str, 
         key_disp = full if full else masked
         body.append(f"{i}. {key_disp} - {status_word}")
 
-        created = row.get("created_at")
-        if created:
-            rel_c = relative_time_ago(created)
-            body.append(f"   Created: {rel_c or created[:10]}")
+        if not full and lic not in {"revoked", "expired"}:
+            if exp_cfg:
+                body.append("   Export: Recover full key from Key Stats.")
+            else:
+                body.append(
+                    "   Export: full key storage is not enabled on this server."
+                )
 
-        device = row.get("device_display")
-        if device and used and lic not in {"revoked", "expired"}:
-            body.append(f"   Device: {device}")
+        if device := row.get("device_display"):
+            if used and lic not in {"revoked", "expired"}:
+                body.append(f"   Device: {device}")
 
         last_seen = row.get("last_seen_at")
         if used and lic not in {"revoked", "expired"}:

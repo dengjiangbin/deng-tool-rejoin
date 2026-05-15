@@ -16,6 +16,11 @@ Endpoints
   GET  /api/license/health
        Returns {"status": "ok", "version": "...", "store": "..."}.
 
+  GET  /assets/denghub_logo.png
+       Public static branding image (no auth). Used as Discord embed thumbnail
+       when ``LICENSE_API_PUBLIC_URL`` is set (e.g.
+       https://rejoin.deng.my.id/assets/denghub_logo.png).
+
   POST /api/license/check
        Body: {"key": "DENG-...", "install_id_hash": "...",
                "device_model": "...", "app_version": "...",
@@ -77,6 +82,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 log = logging.getLogger("deng.rejoin.license_api")
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_LOGO_REL = Path("assets") / "denghub_logo.png"
 
 # ── Public URL helper ─────────────────────────────────────────────────────────
 
@@ -352,6 +360,23 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
             VERSION = "unknown"
         payload = json.dumps({"status": "ok", "version": VERSION, "store": store_mode}).encode()
         return respond(payload)
+
+    # ── Static branding asset (no auth; Discord must fetch via public URL) ───
+    if path == "/assets/denghub_logo.png":
+        if method != "GET":
+            return respond(json.dumps({"error": "GET required"}).encode(), 405)
+        try:
+            logo_path = (_PROJECT_ROOT / _LOGO_REL).resolve()
+            logo_path.relative_to(_PROJECT_ROOT.resolve())
+        except ValueError:
+            return respond(b"Not found", 404)
+        if not logo_path.is_file():
+            return respond(b"Not found", 404)
+        try:
+            data = logo_path.read_bytes()
+        except OSError:
+            return respond(b"Not found", 404)
+        return respond(data, content_type="image/png")
 
     # ── Auth check (all other endpoints) ─────────────────────────────────────
     if not _is_authorized(environ):
