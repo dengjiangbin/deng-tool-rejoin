@@ -109,13 +109,15 @@ All commands are under the `/license_panel` group.
 
 1. User clicks **Key Stats**
 2. Bot defers ephemeral, calls `store.list_user_keys_for_stats(discord_user_id)`
-3. Bot sends a **new ephemeral** message with an embed and `KeyStatsView` (not tied to the public panel)
-4. Embed lists keys (5 per page): masked key, Used/Unused (active device binding), Created, Device, Last Active, Tags (non-default plan), optional full key when encrypted export exists
-5. **Previous** / **Next** edit the same message (pagination). Only the opening user may interact; others get "This key stats view is not yours."
-6. **Download Keys** sends another ephemeral message with `my_keys_<discord_user_id>.txt` (in-memory file). Contains **all** keys for the user, not only the current page.
+3. Bot sends an ephemeral message: **plain-text header** `Your License Keys (Total: N | Page X/Y)` plus **one embed per key** (max 5 per page).
+4. **Used** = key has an **active** device binding. **Unused** = no active binding (free for a new device after reset).
+5. **Previous** / **Next** edit the same message. Only the opening user may interact; others get "This key stats view is not yours."
+6. **Download Keys** sends another ephemeral message with `my_keys_<discord_user_id>.txt` listing **all** keys for that user (short format: Used/Unused, device when bound).
 7. **Close** edits the stats message to `Closed.` and removes the view.
 
-**Full key export:** License keys are stored as hashes. **Old keys cannot be reconstructed** from prefix/suffix alone. After Supabase migration `002_key_export_support.sql` and setting `LICENSE_KEY_EXPORT_SECRET` (server-side), **newly generated** keys may store Fernet ciphertext so Download / Key Stats can show the full key to the owner only. Redeemed keys are not backfilled with ciphertext. Do not share downloaded files publicly.
+**Limits:** By default **one Discord user → one license key → one device**. If the tool says the key is bound elsewhere, use **Reset HWID** in Discord, wait if recently active, then bind again.
+
+**Logo on embeds:** Set environment variable `DENG_BRANDING_LOGO_URL` to a public HTTPS image URL (for example a hosted `D_96px.png`). If unset, embeds work without a thumbnail.
 
 ---
 

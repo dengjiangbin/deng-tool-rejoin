@@ -90,13 +90,18 @@ The API key is masked (first four characters only) in all menus and logs. Missin
 
 ## License Key
 
-The license key is **not** configured from the Setup / Config menu. When you run **Start**, DENG checks your license automatically:
+The license key is **not** configured from the Setup / Config menu. When you run **`deng-rejoin`** (main menu), DENG verifies your license with the public server (`https://rejoin.deng.my.id`) **before** the menu appears. The same check runs again when you use **Start** from the menu or `deng-rejoin-start`.
 
 - `DENG_DEV=1` skips the license check (development mode).
-- If a license key is stored in config, it is verified at Start.
-- If no key is found and license is enabled, DENG prompts you to enter one.
+- If a valid key is stored, you see **License OK** (or plain **OK: License Verified** with `--no-color`).
+- If the key is missing or invalid, you stay on the license prompt until you fix it or exit.
+- If the key is bound to another device, you see **Reset HWID** guidance for Discord.
 
-In Discord, use the **license panel** in your server: **Generate Key**, **Redeem Key**, **Reset HWID**, and **Key Stats**. **Key Stats** and **Download Keys** are private (ephemeral). Older keys may appear masked only — the server stores hashes, so full keys are not recoverable unless encrypted export was enabled when the key was generated (see panel docs). Do not share exported key files publicly.
+In Discord, use the **license panel** in your server: **Generate Key**, **Redeem Key**, **Reset HWID**, and **Key Stats**. By default you get **one key** per Discord account, and that key binds to **one device** until you **Reset HWID**. **Key Stats** / **Download Keys** are private; **Used** means the key is bound to a device, **Unused** means it is not.
+
+If the tool reports the key is already bound to another device, open the panel and use **Reset HWID** (respect cooldowns), then try again on the new device.
+
+Server operators can set `DENG_BRANDING_LOGO_URL` for a logo thumbnail on panel embeds (public HTTPS URL).
 
 ## Roblox Package Setup
 

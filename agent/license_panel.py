@@ -99,9 +99,9 @@ def build_panel_embed() -> dict[str, Any]:
             {
                 "name": "\U0001f4ca Key Stats",
                 "value": (
-                    "View your license keys in a **private** message — "
-                    "binding status, device, dates, and optional secure export.\n"
-                    "**Download Keys** produces a private text file."
+                    "Private summary of your keys.\n"
+                    "**Used** = bound to a device. **Unused** = free for a new device.\n"
+                    "**Download Keys** exports a short text list."
                 ),
                 "inline": True,
             },

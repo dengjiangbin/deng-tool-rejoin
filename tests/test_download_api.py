@@ -213,6 +213,7 @@ class TestDownloadAuthorize(unittest.TestCase):
         data = json.loads(body)
         self.assertEqual(status, 403)
         self.assertEqual(data["result"], "wrong_device")
+        self.assertIn("Reset HWID", data.get("message", ""))
 
     def test_download_root_not_configured_returns_503(self):
         self.store.bind_or_check_device(

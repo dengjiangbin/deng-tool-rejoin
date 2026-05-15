@@ -86,12 +86,13 @@ class WebhookStatusEmbedTests(unittest.TestCase):
         detail = next(f["value"] for f in fields if f["name"] == "Application Details")
         self.assertIn("TraderJoe", detail)
 
-    def test_application_details_unknown_when_account_username_empty(self):
+    def test_device_field_includes_phone_type_when_available(self):
         cfg = self._base_cfg()
-        cfg["roblox_packages"] = [{"package": "com.other.app", "account_username": ""}]
-        payload = build_status_embed_payload(cfg)
-        detail = next(f["value"] for f in payload["embeds"][0]["fields"] if f["name"] == "Application Details")
-        self.assertIn("Unknown", detail)
+        with unittest.mock.patch("agent.license.get_public_device_model", return_value="SM-TEST"):
+            payload = build_status_embed_payload(cfg)
+        dev = next(f["value"] for f in payload["embeds"][0]["fields"] if f["name"] == "📱 Device")
+        self.assertIn("SM-TEST", dev)
+        self.assertIn("test-device", dev)
 
 
 if __name__ == "__main__":

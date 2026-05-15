@@ -18,14 +18,16 @@ Rules:
 from __future__ import annotations
 
 import hashlib
-import os
+import json
 import re
 import secrets
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
-from .constants import APP_HOME
+from .constants import APP_HOME, DEFAULT_LICENSE_SERVER_URL, VERSION
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -164,24 +166,170 @@ def hash_install_id(install_id: str) -> str:
 def get_device_summary() -> dict[str, str]:
     """Return a privacy-safe dict of public device properties.
 
-    Only reads public Android system properties via getprop.
-    Never reads IMEI, phone number, account credentials, or private files.
+    ``model`` uses :func:`get_public_device_model` (getprop-based).
     """
-    model = "unknown"
+    return {"model": get_public_device_model()}
+
+
+# ── Remote license API (POST /api/license/check) ───────────────────────────────
+
+WRONG_DEVICE_USER_MESSAGE = (
+    "This key is already bound to another device. Use Reset HWID in Discord before using it here."
+)
+
+
+def _getprop(prop: str) -> str:
+    """Read a single Android system property (Termux). Returns '' on failure."""
     try:
         result = subprocess.run(
-            ["getprop", "ro.product.model"],
+            ["getprop", prop],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
             timeout=4,
             shell=False,
         )
         if result.returncode == 0:
-            raw = result.stdout.strip()
-            if raw and raw not in ("", "unknown"):
-                model = raw[:64]
+            v = (result.stdout or "").strip()
+            if v.lower() in ("", "unknown"):
+                return ""
+            return v[:120]
     except Exception:  # noqa: BLE001
         pass
-    return {"model": model}
+    return ""
+
+
+def get_public_device_model() -> str:
+    """Public handset identifier for license binding, webhooks, and stats.
+
+    Priority:
+      1. ``ro.product.model`` (e.g. SM-S9160, Pixel 9 Pro XL)
+      2. ``ro.product.manufacturer`` + ``ro.product.model``
+      3. ``ro.product.device``
+
+    Never blocks license; returns ``Unknown`` if nothing usable.
+    """
+    model = _getprop("ro.product.model")
+    manufacturer = _getprop("ro.product.manufacturer")
+    device = _getprop("ro.product.device")
+
+    if model:
+        return model[:120]
+    if manufacturer:
+        extra = device or _getprop("ro.product.name")
+        if extra and extra.lower() != manufacturer.lower():
+            return f"{manufacturer} {extra}"[:120]
+        return manufacturer[:120]
+    if device:
+        return device[:120]
+    return "Unknown"
+
+
+def sync_install_id_with_config(license_section: dict[str, Any]) -> str:
+    """Ensure ``license_section['install_id']`` and ``INSTALL_ID_PATH`` agree.
+
+    Preference order: valid id already in config → valid id on disk → generate new.
+    """
+    lic = license_section
+    cfg_id = (lic.get("install_id") or "").strip().lower()
+    file_id = ""
+    if INSTALL_ID_PATH.exists():
+        file_id = INSTALL_ID_PATH.read_text(encoding="utf-8").strip().lower()
+
+    if re.fullmatch(r"[0-9a-f]{32}", cfg_id):
+        if file_id != cfg_id:
+            INSTALL_ID_PATH.parent.mkdir(parents=True, exist_ok=True)
+            INSTALL_ID_PATH.write_text(cfg_id + "\n", encoding="utf-8")
+        return cfg_id
+
+    if re.fullmatch(r"[0-9a-f]{32}", file_id):
+        lic["install_id"] = file_id
+        return file_id
+
+    new_id = secrets.token_hex(16)
+    lic["install_id"] = new_id
+    INSTALL_ID_PATH.parent.mkdir(parents=True, exist_ok=True)
+    INSTALL_ID_PATH.write_text(new_id + "\n", encoding="utf-8")
+    return new_id
+
+
+def _license_api_post_json(url: str, payload: dict[str, Any], *, timeout: int = 30) -> dict[str, Any]:
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": f"DENG-Tool-Rejoin/{VERSION}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            body = resp.read(256 * 1024)
+            return json.loads(body)  # type: ignore[return-value]
+    except urllib.error.HTTPError as exc:
+        try:
+            raw = exc.read(4096).decode("utf-8", errors="replace")
+            parsed: dict[str, Any] = json.loads(raw)
+            if isinstance(parsed, dict) and parsed.get("result"):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return {"result": "server_unavailable", "message": f"HTTP {exc.code}"}
+    except urllib.error.URLError:
+        return {"result": "server_unavailable", "message": "Network error"}
+    except json.JSONDecodeError:
+        return {"result": "server_unavailable", "message": "Invalid JSON from license server"}
+
+
+def check_remote_license_status(
+    server_url: str,
+    *,
+    license_key: str,
+    install_id: str,
+    device_model: str,
+    app_version: str,
+    device_label: str = "",
+    timeout: int = 30,
+) -> tuple[str, str]:
+    """Call the public license API; return ``(result, message)``.
+
+    Sends only: hashed install id, key, device model, version, optional label —
+    never Supabase secrets, tokens, or cookies.
+    """
+    base = (server_url or DEFAULT_LICENSE_SERVER_URL).strip().rstrip("/")
+    url = f"{base}/api/license/check"
+    install_id_hash = hash_install_id(install_id.strip())
+    payload: dict[str, Any] = {
+        "key": normalize_license_key(license_key),
+        "install_id_hash": install_id_hash,
+        "device_model": (device_model or "unknown")[:120],
+        "app_version": (app_version or VERSION or "unknown")[:40],
+    }
+    label = (device_label or "").strip()[:80]
+    if label:
+        payload["device_label"] = label
+
+    try:
+        resp = _license_api_post_json(url, payload, timeout=timeout)
+    except Exception:  # noqa: BLE001
+        return "server_unavailable", "License server temporarily unavailable."
+
+    result = str(resp.get("result") or "server_unavailable").strip().lower()
+    message = str(resp.get("message") or "").strip()
+    if result == "wrong_device":
+        return result, WRONG_DEVICE_USER_MESSAGE
+    if not message:
+        message = {
+            "active": "License active.",
+            "not_found": "Key not found.",
+            "revoked": "This key has been revoked.",
+            "expired": "This key has expired.",
+            "inactive": "License inactive.",
+            "server_unavailable": "License server temporarily unavailable.",
+            "missing_key": "No license key provided.",
+        }.get(result, result)
+    return result, message

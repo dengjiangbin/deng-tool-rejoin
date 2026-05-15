@@ -327,6 +327,16 @@ class StoreDeviceBindingTests(unittest.TestCase):
         result = self.store.bind_or_check_device(self.full_key, "ccdd" * 8, "Other", "1.0")
         self.assertEqual(result, RESULT_WRONG_DEVICE)
 
+    def test_wrong_device_does_not_overwrite_binding(self) -> None:
+        from agent.license import normalize_license_key, hash_license_key
+        h = hash_license_key(normalize_license_key(self.full_key))
+        self.store.bind_or_check_device(self.full_key, "aabb" * 8, "Pixel", "1.0")
+        self.store.bind_or_check_device(self.full_key, "ccdd" * 8, "HackerPhone", "9.0")
+        db = self.store._load()
+        row = db["bindings"][h]
+        self.assertEqual(row.get("install_id_hash"), "aabb" * 8)
+        self.assertEqual(row.get("device_model"), "Pixel")
+
     def test_not_found_key_returns_not_found(self):
         """Test 24 – nonexistent key returns RESULT_NOT_FOUND."""
         result = self.store.bind_or_check_device("DENG-FFFF-FFFF-FFFF-FFFF", "aabb" * 8, "X", "1")

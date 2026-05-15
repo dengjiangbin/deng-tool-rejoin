@@ -31,6 +31,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from agent.branding import apply_branding_to_embed_dict
 from agent.license_panel import (
     BUTTON_GENERATE,
     BUTTON_KEY_STATS,
@@ -89,7 +90,9 @@ def _is_owner(user: discord.User | discord.Member) -> bool:
 
 def _embed_from_payload(payload: dict[str, Any]) -> discord.Embed:
     """Convert builder payload dict → discord.Embed."""
-    return discord.Embed.from_dict(payload["embed"])
+    embed_dict = dict(payload["embed"])
+    apply_branding_to_embed_dict(embed_dict)
+    return discord.Embed.from_dict(embed_dict)
 
 
 async def _respond_ephemeral_payload(
@@ -283,11 +286,13 @@ class CancelResetButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction) -> None:
         for child in self.view.children:
             child.disabled = True
-        embed = discord.Embed(
-            title="✖ Reset Cancelled",
-            description="HWID reset was cancelled. No changes were made.",
-            color=0x95A5A6,
-        )
+        embed_dict = {
+            "title": "\u2716 Reset Cancelled",
+            "description": "HWID reset was cancelled. No changes were made.",
+            "color": 0x95A5A6,
+        }
+        apply_branding_to_embed_dict(embed_dict)
+        embed = discord.Embed.from_dict(embed_dict)
         try:
             await interaction.response.edit_message(embed=embed, view=self.view)
         except discord.HTTPException:
@@ -320,34 +325,28 @@ class ResetHwidSelectView(discord.ui.View):
 KEY_STATS_PAGE_SIZE = 5
 
 
-def _build_key_stats_discord_embed(rows_all: list[dict], page: int) -> tuple[discord.Embed, int, int, int]:
-    """Return (embed, clamped_page, total_pages, total_rows)."""
+def _build_key_stats_ephemeral_parts(
+    rows_all: list[dict], page: int
+) -> tuple[str, list[dict[str, Any]], int, int, int]:
+    """Return plain-text header, embed dicts (branded), clamped page, total_pages, row count."""
     from agent.key_stats_format import (
-        build_key_stats_description,
-        format_stats_embed_title,
+        build_key_stats_embed_dicts,
+        build_key_stats_empty_embed_dict,
+        format_stats_header_plain,
     )
 
     n = len(rows_all)
     total_pages = max(1, (n + KEY_STATS_PAGE_SIZE - 1) // KEY_STATS_PAGE_SIZE) if n else 1
     page = max(0, min(page, total_pages - 1))
+    header = format_stats_header_plain(total=n, page=page, total_pages=total_pages)
     if n == 0:
-        embed = discord.Embed(
-            title="Your License Keys",
-            description=(
-                "You do not have any license keys yet.\n"
-                "Click **Generate Key** to create one."
-            ),
-            color=0x2F80ED,
-        )
+        embed_dicts = [build_key_stats_empty_embed_dict()]
     else:
         sl = rows_all[page * KEY_STATS_PAGE_SIZE : (page + 1) * KEY_STATS_PAGE_SIZE]
-        title = format_stats_embed_title(total=n, page=page, total_pages=total_pages)
-        desc = build_key_stats_description(sl)
-        if len(desc) > 3900:
-            desc = desc[:3897] + "..."
-        embed = discord.Embed(title=title, description=desc, color=0x2F80ED)
-    embed.set_footer(text="DENG Tool \u00b7 Key Stats")
-    return embed, page, total_pages, n
+        embed_dicts = build_key_stats_embed_dicts(sl)
+    for ed in embed_dicts:
+        apply_branding_to_embed_dict(ed)
+    return header, embed_dicts, page, total_pages, n
 
 
 class KeyStatsCloseButton(discord.ui.Button):
@@ -365,7 +364,7 @@ class KeyStatsCloseButton(discord.ui.Button):
                 "This key stats view is not yours.", ephemeral=True
             )
             return
-        await interaction.response.edit_message(content="Closed.", embed=None, view=None)
+        await interaction.response.edit_message(content="Closed.", embeds=[], view=None)
 
 
 class KeyStatsDownloadButton(discord.ui.Button):
@@ -397,15 +396,17 @@ class KeyStatsDownloadButton(discord.ui.Button):
         buf.seek(0)
         filename = f"my_keys_{self._host._owner_id}.txt"
         file = discord.File(buf, filename=filename)
-        dl_embed = discord.Embed(
-            title="Your Keys Download",
-            description=(
+        dl_embed_dict: dict[str, Any] = {
+            "title": "Your Keys Download",
+            "description": (
                 f"Total: {len(rows)} keys\n\n"
                 "Download the attached file to view your keys."
             ),
-            color=0x2F80ED,
-        )
-        dl_embed.set_footer(text="DENG Tool \u00b7 Key Stats")
+            "color": 0x2F80ED,
+            "footer": {"text": "DENG Tool \u00b7 Key Stats"},
+        }
+        apply_branding_to_embed_dict(dl_embed_dict)
+        dl_embed = discord.Embed.from_dict(dl_embed_dict)
         await interaction.response.send_message(embed=dl_embed, file=file, ephemeral=True)
 
 
@@ -427,9 +428,10 @@ class KeyStatsPrevButton(discord.ui.Button):
             return
         rows = self._host._store.list_user_keys_for_stats(self._host._owner_id)
         new_page = self._host._page - 1
-        embed, new_page, _, _ = _build_key_stats_discord_embed(rows, new_page)
+        content, embed_dicts, new_page, _, _ = _build_key_stats_ephemeral_parts(rows, new_page)
+        embeds = [discord.Embed.from_dict(d) for d in embed_dicts]
         new_view = KeyStatsView(self._host._store, self._host._owner_id, new_page)
-        await interaction.response.edit_message(embed=embed, view=new_view)
+        await interaction.response.edit_message(content=content, embeds=embeds, view=new_view)
 
 
 class KeyStatsNextButton(discord.ui.Button):
@@ -450,9 +452,10 @@ class KeyStatsNextButton(discord.ui.Button):
             return
         rows = self._host._store.list_user_keys_for_stats(self._host._owner_id)
         new_page = self._host._page + 1
-        embed, new_page, _, _ = _build_key_stats_discord_embed(rows, new_page)
+        content, embed_dicts, new_page, _, _ = _build_key_stats_ephemeral_parts(rows, new_page)
+        embeds = [discord.Embed.from_dict(d) for d in embed_dicts]
         new_view = KeyStatsView(self._host._store, self._host._owner_id, new_page)
-        await interaction.response.edit_message(embed=embed, view=new_view)
+        await interaction.response.edit_message(content=content, embeds=embeds, view=new_view)
 
 
 class KeyStatsView(discord.ui.View):
@@ -581,9 +584,12 @@ class PanelView(discord.ui.View):
         self._store.get_or_create_user(uid, username)
         await interaction.response.defer(ephemeral=True)
         rows = self._store.list_user_keys_for_stats(uid)
-        embed, page, _, _ = _build_key_stats_discord_embed(rows, 0)
+        content, embed_dicts, page, _, _ = _build_key_stats_ephemeral_parts(rows, 0)
+        embeds = [discord.Embed.from_dict(d) for d in embed_dicts]
         view = KeyStatsView(self._store, uid, page)
-        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        await interaction.followup.send(
+            content=content, embeds=embeds, view=view, ephemeral=True
+        )
 
 
 # ── Cog ───────────────────────────────────────────────────────────────────────
@@ -708,6 +714,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
 
             embed_dict = build_panel_embed()
             embed_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
+            apply_branding_to_embed_dict(embed_dict)
             embed = discord.Embed.from_dict(embed_dict)
             view = PanelView(store)
             msg = await channel.send(embed=embed, view=view)
@@ -778,6 +785,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
 
             embed_dict = build_panel_embed()
             embed_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
+            apply_branding_to_embed_dict(embed_dict)
             embed = discord.Embed.from_dict(embed_dict)
             view = PanelView(store)
             await msg.edit(embed=embed, view=view)

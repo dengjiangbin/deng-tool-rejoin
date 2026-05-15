@@ -40,7 +40,7 @@ from bot.cog_license_panel import (
     RedeemModal,
     ResetHwidSelect,
     ResetHwidSelectView,
-    _build_key_stats_discord_embed,
+    _build_key_stats_ephemeral_parts,
     _is_owner,
     _owner_ids,
 )
@@ -347,7 +347,10 @@ class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
         inter.response.defer.assert_called_once_with(ephemeral=True)
         inter.followup.send.assert_called_once()
         _, kwargs = inter.followup.send.call_args
-        self.assertIn("any license keys", kwargs["embed"].description.lower())
+        self.assertIn("Total: 0", kwargs.get("content") or "")
+        embeds = kwargs.get("embeds") or []
+        self.assertGreaterEqual(len(embeds), 1)
+        self.assertIn("license keys", (embeds[0].description or "").lower())
 
     async def test_key_stats_shows_unused(self) -> None:
         inter_g = _fake_interaction(user=_fake_user(uid=502))
@@ -356,7 +359,8 @@ class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
         await view.btn_generate.callback(inter_g)
         await view.btn_key_stats.callback(inter_s)
         _, kwargs = inter_s.followup.send.call_args
-        self.assertIn("Unused", kwargs["embed"].description)
+        texts = " ".join((e.description or "") for e in (kwargs.get("embeds") or []))
+        self.assertIn("Unused", texts)
 
     async def test_key_stats_pagination_title(self) -> None:
         uid = 503
@@ -369,7 +373,7 @@ class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
         inter_s = _fake_interaction(user=_fake_user(uid=uid))
         await gen_view.btn_key_stats.callback(inter_s)
         _, kwargs = inter_s.followup.send.call_args
-        self.assertIn("Page 1/2", kwargs["embed"].title)
+        self.assertIn("Page 1/2", kwargs.get("content") or "")
 
     async def test_key_stats_next_page(self) -> None:
         uid = 504
@@ -386,7 +390,7 @@ class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
         await nxt.callback(inter2)
         inter2.response.edit_message.assert_called_once()
         _, ek = inter2.response.edit_message.call_args
-        self.assertIn("Page 2/2", ek["embed"].title)
+        self.assertIn("Page 2/2", ek.get("content") or "")
 
     async def test_key_stats_wrong_user_blocked(self) -> None:
         uid = 600

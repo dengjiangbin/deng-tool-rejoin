@@ -16,20 +16,25 @@ from agent import license_key_export
 from agent.key_stats_format import (
     build_key_stats_description,
     build_key_stats_download_body,
-    format_key_block,
+    build_key_stats_embed_dict,
     format_stats_embed_title,
+    format_stats_header_plain,
 )
 from agent.license_store import LocalJsonLicenseStore, SupabaseLicenseStore
 
 
 class TestKeyStatsFormat(unittest.TestCase):
-    def test_title_shows_total_and_page(self) -> None:
-        t = format_stats_embed_title(total=6, page=0, total_pages=2)
-        self.assertIn("Total: 6", t)
-        self.assertIn("Page 1/2", t)
+    def test_header_plain_matches_title_text(self) -> None:
+        h = format_stats_header_plain(total=6, page=0, total_pages=2)
+        self.assertIn("Total: 6", h)
+        self.assertIn("Page 1/2", h)
+        self.assertEqual(
+            format_stats_embed_title(total=6, page=0, total_pages=2),
+            h,
+        )
 
-    def test_format_unused_no_device_lines(self) -> None:
-        text = format_key_block(
+    def test_embed_unused_no_device_lines(self) -> None:
+        d = build_key_stats_embed_dict(
             {
                 "masked_key": "DENG-AA...BB",
                 "full_key_plaintext": None,
@@ -39,15 +44,18 @@ class TestKeyStatsFormat(unittest.TestCase):
                 "device_display": None,
                 "last_seen_at": None,
                 "created_at": "2026-01-15T12:00:00+00:00",
-                "tags_label": None,
             }
         )
-        self.assertIn("Unused", text)
-        self.assertNotIn("Device:", text)
-        self.assertIn("Not Available For Old Hashed Key", text)
+        desc = d["description"]
+        self.assertIn("🟢 Unused", desc)
+        self.assertNotIn("Device:", desc)
+        self.assertNotIn("License Key", desc)
+        self.assertNotIn("Not Available", desc)
+        self.assertNotIn("Full Key", desc)
+        self.assertIn("Key Stats", d["footer"]["text"])
 
-    def test_format_used_shows_device(self) -> None:
-        text = format_key_block(
+    def test_embed_used_shows_device(self) -> None:
+        d = build_key_stats_embed_dict(
             {
                 "masked_key": "DENG-AA...BB",
                 "full_key_plaintext": None,
@@ -57,16 +65,16 @@ class TestKeyStatsFormat(unittest.TestCase):
                 "device_display": "SM-S9160",
                 "last_seen_at": "2026-05-10T12:00:00+00:00",
                 "created_at": "2026-01-15T12:00:00+00:00",
-                "tags_label": "BANK",
             }
         )
-        self.assertIn("Used", text)
-        self.assertIn("SM-S9160", text)
-        self.assertIn("Tags:", text)
-        self.assertIn("BANK", text)
+        desc = d["description"]
+        self.assertIn("✅ Used", desc)
+        self.assertIn("SM-S9160", desc)
+        self.assertIn("Last Active:", desc)
+        self.assertNotIn("Tags:", desc)
 
     def test_full_key_when_plain_present(self) -> None:
-        text = format_key_block(
+        d = build_key_stats_embed_dict(
             {
                 "masked_key": "DENG-AA...BB",
                 "full_key_plaintext": "DENG-1111-2222-3333-4444",
@@ -76,20 +84,32 @@ class TestKeyStatsFormat(unittest.TestCase):
                 "device_display": None,
                 "last_seen_at": None,
                 "created_at": "2026-01-15T12:00:00+00:00",
-                "tags_label": None,
             }
         )
-        self.assertIn("DENG-1111-2222-3333-4444", text)
-        self.assertNotIn("Not Available For Old Hashed Key", text)
+        self.assertIn("DENG-1111-2222-3333-4444", d["description"])
+        self.assertNotIn("Not Available", d["description"])
+
+    def test_unused_and_used_colors_differ(self) -> None:
+        unused = build_key_stats_embed_dict(
+            {"masked_key": "A...B-full", "license_status": "active", "used": False,
+             "created_at": "2026-01-01T00:00:00+00:00"}
+        )
+        used = build_key_stats_embed_dict(
+            {"masked_key": "A...B-full", "license_status": "active", "used": True,
+             "device_display": "X", "last_seen_at": "2026-01-02T00:00:00+00:00",
+             "created_at": "2026-01-01T00:00:00+00:00"}
+        )
+        self.assertNotEqual(unused["color"], used["color"])
 
     def test_description_joins_blocks(self) -> None:
         rows = [
             {"masked_key": "A...1", "full_key_plaintext": None, "has_stored_ciphertext": False,
              "license_status": "active", "used": False, "device_display": None,
-             "last_seen_at": None, "created_at": "2026-01-01T00:00:00+00:00", "tags_label": None},
+             "last_seen_at": None, "created_at": "2026-01-01T00:00:00+00:00"},
         ]
         d = build_key_stats_description(rows)
-        self.assertIn("License Key", d)
+        self.assertIn("🟢 Unused", d)
+        self.assertNotIn("License Key", d)
 
 
 class TestLocalStoreStats(unittest.TestCase):
@@ -129,6 +149,26 @@ class TestLocalStoreStats(unittest.TestCase):
             self.assertTrue(rows2[0]["used"])
             self.assertIn("Pixel", rows2[0].get("device_display") or "")
 
+    def test_inactive_binding_shows_unbound_in_list_user_keys(self) -> None:
+        with TemporaryDirectory() as tmp:
+            store = LocalJsonLicenseStore(Path(tmp) / "db.json")
+            store.get_or_create_user("9")
+            store.create_key_for_user("9")
+            raw = json.loads((Path(tmp) / "db.json").read_text())
+            kid = next(iter(raw["keys"]))
+            raw.setdefault("bindings", {})[kid] = {
+                "install_id_hash": "h",
+                "device_model": "Old Phone",
+                "device_label": "",
+                "is_active": False,
+                "last_seen_at": "2020-01-01T00:00:00+00:00",
+                "last_status": "active",
+            }
+            (Path(tmp) / "db.json").write_text(json.dumps(raw, indent=2))
+            listed = store.list_user_keys("9")
+            self.assertEqual(listed[0]["bound_device"], "(unbound)")
+            self.assertIsNone(listed[0]["last_seen_at"])
+
     def test_get_user_key_export_rows_matches_stats(self) -> None:
         with TemporaryDirectory() as tmp:
             store = LocalJsonLicenseStore(Path(tmp) / "db.json")
@@ -151,21 +191,24 @@ class TestDownloadBody(unittest.TestCase):
                 "device_display": None,
                 "last_seen_at": None,
                 "created_at": "2026-01-01T00:00:00+00:00",
-                "tags_label": None,
             }
         ]
         body = build_key_stats_download_body(discord_user_id="110184213604499456", rows=rows)
         self.assertIn("License Keys For User ID: 110184213604499456", body)
         self.assertIn("Total Keys: 1", body)
-        self.assertIn("Not Available For Old Hashed Key", body)
+        self.assertIn("Unused", body)
+        self.assertNotIn("Not Available", body)
+        self.assertNotIn("Full key export", body.lower())
         self.assertNotIn("key_hash", body.lower())
 
     def test_no_other_user_keys_in_slice(self) -> None:
         rows = [{"masked_key": "K1", "full_key_plaintext": None, "has_stored_ciphertext": False,
                  "license_status": "active", "used": True, "device_display": "D",
-                 "last_seen_at": None, "created_at": "2026-01-01T00:00:00+00:00", "tags_label": None}]
+                 "last_seen_at": None, "created_at": "2026-01-01T00:00:00+00:00"}]
         body = build_key_stats_download_body(discord_user_id="999", rows=rows)
         self.assertNotIn("888", body)
+        self.assertIn("Used", body)
+        self.assertIn("Device: D", body)
 
 
 class TestLicenseKeyExport(unittest.TestCase):

@@ -464,6 +464,14 @@ class TestLicenseApiContract(unittest.TestCase):
         # Both are valid timestamps; second may equal first if within same second — just check not None
         self.assertIsNotNone(second_seen)
 
+    def test_same_install_updates_device_model(self) -> None:
+        from agent.license import normalize_license_key as _norm, hash_license_key as _hash
+        k = _hash(_norm(self.full_key))
+        self.store.bind_or_check_device(self.full_key, self.install_hash_a, "Pixel 6", "1.0")
+        self.store.bind_or_check_device(self.full_key, self.install_hash_a, "SM-S9160", "1.0")
+        db = self.store._load()
+        self.assertEqual(db["bindings"][k].get("device_model"), "SM-S9160")
+
     def test_different_install_id_returns_wrong_device(self):
         """Test 18 – different install_id returns wrong_device."""
         self.store.bind_or_check_device(self.full_key, self.install_hash_a, "Pixel 6", "1.0")
@@ -629,10 +637,11 @@ class TestTutorialContent(unittest.TestCase):
         self.assertIn("pkg", self.content)
 
     def test_covers_license_steps(self):
-        """Test 27 – tutorial includes license generate/redeem/reset."""
+        """Test 27 – tutorial explains Discord keys and HWID reset."""
+        self.assertIn("discord", self.content)
         self.assertIn("generate", self.content)
-        self.assertIn("redeem", self.content)
         self.assertIn("reset hwid", self.content)
+        self.assertIn("license", self.content)
 
     def test_covers_layout(self):
         """Test 28 – tutorial includes 40/60 layout mention."""

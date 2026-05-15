@@ -165,6 +165,7 @@ class BaseLicenseStore(ABC):
         install_id_hash: str,
         device_model: str,
         app_version: str,
+        device_label: str = "",
     ) -> str:
         """Bind or verify a device against a key.
         Returns a RESULT_* string.
@@ -210,7 +211,7 @@ class BaseLicenseStore(ABC):
         Each dict may include:
           masked_key, full_key_plaintext (optional), has_stored_ciphertext,
           license_status, used, device_display, last_seen_at, created_at,
-          tags_label (optional), plan, reset_count_24h
+          plan, reset_count_24h
         """
 
     def get_user_key_export_rows(self, discord_user_id: str) -> list[dict[str, Any]]:
@@ -403,14 +404,21 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             if record.get("owner_discord_id") != discord_user_id:
                 continue
             binding = db["bindings"].get(key_hash, {})
+            active = bool(binding.get("is_active"))
             masked = f"{record.get('prefix', 'DENG-????')}...{record.get('suffix', '????')}"
+            if active:
+                bound_device = binding.get("device_model") or "(unbound)"
+                last_seen = binding.get("last_seen_at")
+            else:
+                bound_device = "(unbound)"
+                last_seen = None
             result.append({
                 "id": key_hash,
                 "masked_key": masked,
                 "status": record.get("status", "unknown"),
                 "plan": record.get("plan", "standard"),
-                "bound_device": binding.get("device_model") or "(unbound)",
-                "last_seen_at": binding.get("last_seen_at"),
+                "bound_device": bound_device,
+                "last_seen_at": last_seen,
                 "created_at": record.get("created_at"),
             })
         return result
@@ -479,9 +487,6 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             device = (binding.get("device_model") or binding.get("device_label") or "").strip() or None
             reset_count = self.get_reset_count_24h(key_hash)
             plan = record.get("plan", "standard") or "standard"
-            tags = None
-            if str(plan).lower() != "standard":
-                tags = str(plan)
             rows.append({
                 "masked_key": masked,
                 "full_key_plaintext": full_plain,
@@ -491,7 +496,6 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 "device_display": device,
                 "last_seen_at": binding.get("last_seen_at"),
                 "created_at": record.get("created_at"),
-                "tags_label": tags,
                 "plan": plan,
                 "reset_count_24h": reset_count,
             })
@@ -572,7 +576,9 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         install_id_hash: str,
         device_model: str,
         app_version: str,
+        device_label: str = "",
     ) -> str:
+        lbl = (device_label or "").strip()[:80]
         try:
             normalized = normalize_license_key(raw_key)
         except LicenseKeyError:
@@ -614,15 +620,17 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                     result=RESULT_WRONG_DEVICE, device_model=device_model, app_version=app_version,
                 )
                 return RESULT_WRONG_DEVICE
-            # Same device — update last_seen_at
+            # Same device — update heartbeat + device info
             db["bindings"][key_hash]["last_seen_at"] = _utc_now()
             db["bindings"][key_hash]["last_status"] = RESULT_ACTIVE
+            db["bindings"][key_hash]["device_model"] = (device_model or "")[:120] or binding.get("device_model", "")
+            db["bindings"][key_hash]["device_label"] = lbl
         else:
             # New binding
             db.setdefault("bindings", {})[key_hash] = {
                 "install_id_hash": install_id_hash,
-                "device_label": "",
-                "device_model": device_model,
+                "device_label": lbl,
+                "device_model": (device_model or "")[:120],
                 "bound_at": _utc_now(),
                 "last_seen_at": _utc_now(),
                 "last_status": RESULT_ACTIVE,
@@ -898,20 +906,27 @@ class SupabaseLicenseStore(BaseLicenseStore):
             key_id = record["id"]
             b_res = (
                 self._client.table("device_bindings")
-                .select("device_model, last_seen_at")
+                .select("device_model, last_seen_at, is_active")
                 .eq("key_id", key_id)
                 .execute()
             )
             binding = b_res.data[0] if b_res.data else {}
+            active = bool(binding.get("is_active"))
             masked = f"{record.get('prefix', 'DENG-????')}...{record.get('suffix', '????')}"
+            if active:
+                bound_device = binding.get("device_model") or "(unbound)"
+                last_seen = binding.get("last_seen_at")
+            else:
+                bound_device = "(unbound)"
+                last_seen = None
             result.append(
                 {
                     "id": key_id,
                     "masked_key": masked,
                     "status": record.get("status", "unknown"),
                     "plan": record.get("plan", "standard"),
-                    "bound_device": binding.get("device_model") or "(unbound)",
-                    "last_seen_at": binding.get("last_seen_at"),
+                    "bound_device": bound_device,
+                    "last_seen_at": last_seen,
                     "created_at": record.get("created_at"),
                 }
             )
@@ -1012,9 +1027,6 @@ class SupabaseLicenseStore(BaseLicenseStore):
             device = (binding.get("device_model") or binding.get("device_label") or "").strip() or None
             reset_count = self.get_reset_count_24h(key_id)
             plan = record.get("plan", "standard") or "standard"
-            tags = None
-            if str(plan).lower() != "standard":
-                tags = str(plan)
             rows.append({
                 "masked_key": masked,
                 "full_key_plaintext": full_plain,
@@ -1024,7 +1036,6 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 "device_display": device,
                 "last_seen_at": binding.get("last_seen_at"),
                 "created_at": record.get("created_at"),
-                "tags_label": tags,
                 "plan": plan,
                 "reset_count_24h": reset_count,
             })
@@ -1121,7 +1132,9 @@ class SupabaseLicenseStore(BaseLicenseStore):
         install_id_hash: str,
         device_model: str,
         app_version: str,
+        device_label: str = "",
     ) -> str:
+        lbl = (device_label or "").strip()[:80]
         try:
             normalized = normalize_license_key(raw_key)
         except LicenseKeyError:
@@ -1175,14 +1188,20 @@ class SupabaseLicenseStore(BaseLicenseStore):
                     )
                     return RESULT_WRONG_DEVICE
                 self._client.table("device_bindings").update(
-                    {"last_seen_at": _utc_now(), "last_status": RESULT_ACTIVE}
+                    {
+                        "last_seen_at": _utc_now(),
+                        "last_status": RESULT_ACTIVE,
+                        "device_model": (device_model or "")[:120],
+                        "device_label": lbl,
+                    }
                 ).eq("key_id", key_hash).execute()
             else:
                 # Inactive binding — reactivate with current device
                 self._client.table("device_bindings").update(
                     {
                         "install_id_hash": install_id_hash,
-                        "device_model": device_model,
+                        "device_model": (device_model or "")[:120],
+                        "device_label": lbl,
                         "last_seen_at": _utc_now(),
                         "last_status": RESULT_ACTIVE,
                         "is_active": True,
@@ -1193,8 +1212,8 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 {
                     "key_id": key_hash,
                     "install_id_hash": install_id_hash,
-                    "device_label": "",
-                    "device_model": device_model,
+                    "device_label": lbl,
+                    "device_model": (device_model or "")[:120],
                     "last_seen_at": _utc_now(),
                     "last_status": RESULT_ACTIVE,
                     "is_active": True,

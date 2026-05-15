@@ -70,7 +70,11 @@ PACKAGE_NAME_REGEX = r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$"
 TERMUX_BOOT_SCRIPT = Path.home() / ".termux" / "boot" / "deng-tool-rejoin.sh"
 
 LICENSE_KEY_PREFIX = "DENG"
-LICENSE_KEY_PATTERN = r"^DENG-[A-Fa-f0-9]{8,}$"
+# Canonical display: DENG-XXXX-XXXX-XXXX-XXXX (16 uppercase hex, dashed groups).
+LICENSE_KEY_PATTERN = r"^DENG-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$"
+
+# Public beta license + download API (HTTPS only for production clients).
+DEFAULT_LICENSE_SERVER_URL = "https://rejoin.deng.my.id"
 YESCAPTCHA_API_BASE = "https://api.yescaptcha.com"
 
 SENSITIVE_URL_PARAM_NAMES = {

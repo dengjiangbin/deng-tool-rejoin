@@ -14,7 +14,9 @@ from .platform_detect import detect_public_download_dir, get_android_release, ge
 from .webhook import mask_webhook_url, validate_webhook_interval, validate_webhook_url
 from .constants import (
     APP_DIRS,
+    CHANNEL_STABLE,
     CONFIG_PATH,
+    DEFAULT_LICENSE_SERVER_URL,
     DEFAULT_BACKOFF_MAX_SECONDS,
     DEFAULT_BACKOFF_MIN_SECONDS,
     DEFAULT_DEVICE_NAME,
@@ -33,6 +35,7 @@ from .constants import (
     MIN_RECONNECT_DELAY_SECONDS,
     PACKAGE_NAME_REGEX,
     VERSION,
+    VALID_CHANNELS,
 )
 from .url_utils import UrlValidationError, mask_launch_url, normalize_launch_url, validate_launch_url
 
@@ -114,16 +117,19 @@ def default_config() -> dict[str, Any]:
         "android_release": get_android_release(),
         "android_sdk": get_android_sdk(),
         "download_dir": detect_public_download_dir(),
+        "install_profile": "public",
         "license_key": "",
         "license": {
-            "enabled": False,
-            "mode": "local",
+            "enabled": True,
+            "mode": "remote",
             "key": "",
-            "server_url": "",
+            "server_url": DEFAULT_LICENSE_SERVER_URL,
             "install_id": "",
             "device_label": "",
+            "channel": CHANNEL_STABLE,
             "last_status": "not_configured",
             "last_check_at": None,
+            "disabled_by_user": False,
         },
         "yescaptcha_key": "",
         "webhook_tags": [],
@@ -474,33 +480,53 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         merged["last_layout_preview"] = []
     merged["snapshot_temp_path"] = str(merged.get("snapshot_temp_path") or "")
 
-    # License key (optional; empty = not configured)
-    raw_license = str(merged.get("license_key") or "").strip()
-    try:
-        merged["license_key"] = validate_license_key(raw_license)
-    except ConfigError:
-        merged["license_key"] = ""
-
-    # Nested license section (new format; disabled by default)
+    # Nested license section (public installs use remote API by default)
     raw_lic = merged.get("license")
     if not isinstance(raw_lic, dict):
         raw_lic = {}
     merged_lic: dict[str, Any] = dict(default_config()["license"])
     merged_lic.update({k: v for k, v in raw_lic.items() if k in merged_lic})
-    # Sanitize sub-fields
-    merged_lic["enabled"] = _as_bool(merged_lic.get("enabled", False))
-    _lic_mode = str(merged_lic.get("mode") or "local").strip().lower()
+    merged_lic["disabled_by_user"] = _as_bool(merged_lic.get("disabled_by_user", False))
+    merged_lic["enabled"] = _as_bool(merged_lic.get("enabled", True))
+    _lic_mode = str(merged_lic.get("mode") or "remote").strip().lower()
     if _lic_mode not in {"local", "remote"}:
-        _lic_mode = "local"
+        _lic_mode = "remote"
     merged_lic["mode"] = _lic_mode
     merged_lic["key"] = str(merged_lic.get("key") or "").strip()[:256]
     merged_lic["server_url"] = str(merged_lic.get("server_url") or "").strip()[:512]
     merged_lic["install_id"] = str(merged_lic.get("install_id") or "").strip()[:64]
     merged_lic["device_label"] = str(merged_lic.get("device_label") or "").strip()[:80]
     merged_lic["last_status"] = str(merged_lic.get("last_status") or "not_configured").strip()[:32]
-    # last_check_at: keep None or string, do not coerce
+    _ch = str(merged_lic.get("channel") or CHANNEL_STABLE).strip().lower()
+    merged_lic["channel"] = _ch if _ch in VALID_CHANNELS else CHANNEL_STABLE
     lca = merged_lic.get("last_check_at")
     merged_lic["last_check_at"] = str(lca) if lca is not None else None
+
+    install_profile = str(merged.get("install_profile", "public")).strip().lower()
+    if install_profile not in {"public", "developer"}:
+        install_profile = "public"
+    merged["install_profile"] = install_profile
+
+    if install_profile == "public" and not merged_lic["disabled_by_user"]:
+        merged_lic["enabled"] = True
+        merged_lic["mode"] = "remote"
+        if not merged_lic["server_url"]:
+            merged_lic["server_url"] = DEFAULT_LICENSE_SERVER_URL
+    if install_profile == "developer" and merged_lic["mode"] == "remote" and not merged_lic["server_url"]:
+        merged_lic["server_url"] = DEFAULT_LICENSE_SERVER_URL
+
+    _lic_key_raw = str(merged_lic.get("key") or "").strip()
+    _flat_raw = str(merged.get("license_key") or "").strip()
+    _canon = ""
+    try:
+        if _lic_key_raw:
+            _canon = validate_license_key(_lic_key_raw)
+        elif _flat_raw:
+            _canon = validate_license_key(_flat_raw)
+    except ConfigError:
+        _canon = ""
+    merged["license_key"] = _canon
+    merged_lic["key"] = _canon
     merged["license"] = merged_lic
 
     # YesCaptcha API key (stored verbatim; not validated beyond length)

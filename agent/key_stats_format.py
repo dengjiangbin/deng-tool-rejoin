@@ -5,9 +5,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+# Embed colors (Discord integer colors)
+COLOR_STATS_UNUSED = 0x27AE60
+COLOR_STATS_USED = 0x2F80ED
+COLOR_STATS_BAD = 0xE74C3C
+
 
 def relative_time_ago(iso_str: str | None) -> str | None:
-    """Human-readable relative time like '3 days ago', or None if unparseable."""
+    """Human-readable relative time like '3 day(s) ago', or None if unparseable."""
     if not iso_str:
         return None
     try:
@@ -37,66 +42,90 @@ def relative_time_ago(iso_str: str | None) -> str | None:
         return None
 
 
-def format_stats_embed_title(*, total: int, page: int, total_pages: int) -> str:
+def format_stats_header_plain(*, total: int, page: int, total_pages: int) -> str:
+    """Plain (non-embed) header line for Key Stats messages."""
     return f"Your License Keys (Total: {total} | Page {page + 1}/{total_pages})"
 
 
-def format_key_block(row: dict[str, Any]) -> str:
-    """One key section for embed description (markdown)."""
-    lines: list[str] = ["**License Key**", ""]
+def format_stats_embed_title(*, total: int, page: int, total_pages: int) -> str:
+    """Deprecated: use :func:`format_stats_header_plain` for Key Stats."""
+    return format_stats_header_plain(total=total, page=page, total_pages=total_pages)
 
+
+def build_key_stats_embed_dict(row: dict[str, Any]) -> dict[str, Any]:
+    """One Discord embed dict for a single license key row."""
     full = row.get("full_key_plaintext")
     masked = row.get("masked_key") or "???"
-    has_stored_ciphertext = bool(row.get("has_stored_ciphertext"))
-
-    if full:
-        lines.append(f"**Key:** `{full}`")
-    else:
-        lines.append(f"**Key:** `{masked}`")
-        lines.append("**Full Key:** Not Available For Old Hashed Key")
-        if not has_stored_ciphertext:
-            lines.append(
-                "_Full key export is available only for keys generated after export storage was enabled "
-                "and when LICENSE_KEY_EXPORT_SECRET is configured._"
-            )
+    key_display = full if full else masked
 
     lic = (row.get("license_status") or "active").lower()
     used = bool(row.get("used"))
+
+    lines: list[str] = [f"Key: `{key_display}`", ""]
+
     if lic == "revoked":
-        lines.append("**Status:** Revoked")
+        lines.append("Status: 🔴 Revoked")
+        color = COLOR_STATS_BAD
     elif lic == "expired":
-        lines.append("**Status:** Expired")
+        lines.append("Status: 🔴 Expired")
+        color = COLOR_STATS_BAD
+    elif used:
+        lines.append("Status: ✅ Used")
+        color = COLOR_STATS_USED
     else:
-        lines.append("**Status:** Used" if used else "**Status:** Unused")
+        lines.append("Status: 🟢 Unused")
+        color = COLOR_STATS_UNUSED
 
     created = row.get("created_at")
     rel_c = relative_time_ago(created) if created else None
+    lines.append("")
     if rel_c:
-        lines.append(f"**Created:** {rel_c}")
+        lines.append(f"Created: {rel_c}")
     elif created:
-        lines.append(f"**Created:** {created[:10]}")
+        lines.append(f"Created: {created[:10]}")
 
     device = row.get("device_display")
-    show_device = device and used and lic not in {"revoked", "expired"}
-    if show_device:
-        lines.append(f"**Device:** {device}")
-
-    last_seen = row.get("last_seen_at")
     if used and lic not in {"revoked", "expired"}:
+        lines.append("")
+        if device:
+            lines.append(f"Device: {device}")
+        last_seen = row.get("last_seen_at")
         if last_seen:
             rel = relative_time_ago(last_seen)
-            lines.append(f"**Last Active:** {rel or last_seen[:19]}")
+            lines.append(f"Last Active: {rel or last_seen[:19]}")
         else:
-            lines.append("**Last Active:** Never")
+            lines.append("Last Active: Never")
 
-    tags = row.get("tags_label")
-    if tags:
-        lines.append(f"**Tags:** {tags}")
+    return {
+        "description": "\n".join(lines),
+        "color": color,
+        "footer": {"text": "DENG Tool \u00b7 Key Stats"},
+    }
 
-    return "\n".join(lines)
+
+def build_key_stats_embed_dicts(rows_slice: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [build_key_stats_embed_dict(r) for r in rows_slice]
+
+
+def build_key_stats_empty_embed_dict() -> dict[str, Any]:
+    return {
+        "description": (
+            "You do not have any license keys yet.\n"
+            "Click **Generate Key** on the panel to create one."
+        ),
+        "color": COLOR_STATS_USED,
+        "footer": {"text": "DENG Tool \u00b7 Key Stats"},
+    }
+
+
+def format_key_block(row: dict[str, Any]) -> str:
+    """Legacy: flatten one key to markdown (tests / introspection only)."""
+    d = build_key_stats_embed_dict(row)
+    return d.get("description") or ""
 
 
 def build_key_stats_description(rows_slice: list[dict[str, Any]]) -> str:
+    """Legacy: join per-key descriptions (avoid for Discord; use embeds instead)."""
     if not rows_slice:
         return ""
     parts = [format_key_block(r) for r in rows_slice]
@@ -120,13 +149,15 @@ def build_key_stats_download_body(*, discord_user_id: str, rows: list[dict[str, 
         masked = row.get("masked_key") or "???"
         used = bool(row.get("used"))
         lic = (row.get("license_status") or "active").lower()
-        status_word = "Revoked" if lic == "revoked" else ("Expired" if lic == "expired" else ("Used" if used else "Unused"))
-
-        if full:
-            body.append(f"{i}. {full} - {status_word}")
+        if lic == "revoked":
+            status_word = "Revoked"
+        elif lic == "expired":
+            status_word = "Expired"
         else:
-            body.append(f"{i}. {masked} - {status_word}")
-            body.append("   Full Key: Not Available For Old Hashed Key")
+            status_word = "Used" if used else "Unused"
+
+        key_disp = full if full else masked
+        body.append(f"{i}. {key_disp} - {status_word}")
 
         created = row.get("created_at")
         if created:
@@ -144,10 +175,6 @@ def build_key_stats_download_body(*, discord_user_id: str, rows: list[dict[str, 
                 body.append(f"   Last Active: {rel or last_seen[:19]}")
             else:
                 body.append("   Last Active: Never")
-
-        tags = row.get("tags_label")
-        if tags:
-            body.append(f"   Tags: {tags}")
 
         body.append("")
 

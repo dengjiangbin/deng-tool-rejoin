@@ -40,6 +40,7 @@ from .config import (
 from .constants import (
     CONFIG_PATH,
     DB_PATH,
+    DEFAULT_LICENSE_SERVER_URL,
     DEFAULT_ROBLOX_PACKAGE,
     DEFAULT_ROBLOX_PACKAGE_HINTS,
     GITHUB_REMOTE,
@@ -59,6 +60,12 @@ from .menu import run_menu
 from .platform_detect import detect_public_download_dir, get_android_release, get_android_sdk, get_platform_info
 from .supervisor import MultiPackageSupervisor, Supervisor
 from . import keystore
+from .license import (
+    WRONG_DEVICE_USER_MESSAGE,
+    check_remote_license_status,
+    get_device_summary,
+    sync_install_id_with_config,
+)
 from . import snapshot, webhook, window_layout
 from .url_utils import UrlValidationError, detect_launch_mode_from_url, mask_urls_in_text, validate_launch_url
 
@@ -88,6 +95,199 @@ _ANSI_BOLD    = "\033[1m"
 _ANSI_DIM     = "\033[2m"
 _ANSI_RESET   = "\033[0m"
 _ANSI_RE      = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _print_dev_license_skipped(use_color: bool) -> None:
+    msg = "Dev Mode: License Check Skipped"
+    if use_color:
+        print(f"{_ANSI_YELLOW}{msg}{_ANSI_RESET}")
+    else:
+        print(msg)
+
+
+def _print_license_ok(use_color: bool) -> None:
+    if use_color:
+        print(f"{_ANSI_GREEN}License OK{_ANSI_RESET}")
+    else:
+        print("OK: License Verified")
+
+
+def _print_license_err(message: str, use_color: bool) -> None:
+    if use_color:
+        print(f"{_ANSI_RED}{message}{_ANSI_RESET}")
+    else:
+        print(message if message.upper().startswith("ERROR:") else f"ERROR: {message}")
+
+
+def _persist_license_status(cfg: dict[str, Any], status: str) -> dict[str, Any]:
+    from .config import utc_now
+
+    lic = cfg.setdefault("license", {})
+    lic["last_status"] = status
+    lic["last_check_at"] = utc_now()
+    return save_config(cfg)
+
+
+def _ensure_install_id_saved(cfg: dict[str, Any]) -> dict[str, Any]:
+    lic = cfg.setdefault("license", {})
+    before = lic.get("install_id")
+    sync_install_id_with_config(lic)
+    if lic.get("install_id") != before:
+        return save_config(cfg)
+    return cfg
+
+
+def _remote_license_run_check(cfg: dict[str, Any]) -> tuple[str, str]:
+    lic = cfg.setdefault("license", {})
+    key = (lic.get("key") or "").strip()
+    if not key:
+        return "missing_key", "No license key configured."
+    install_id = sync_install_id_with_config(lic)
+    device = get_device_summary()
+    srv = (lic.get("server_url") or "").strip() or DEFAULT_LICENSE_SERVER_URL
+    return check_remote_license_status(
+        srv,
+        license_key=key,
+        install_id=install_id,
+        device_model=device.get("model") or "unknown",
+        app_version=VERSION,
+        device_label=str(lic.get("device_label") or ""),
+    )
+
+
+def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool) -> bool:
+    result, msg = _remote_license_run_check(cfg)
+    if result == "active":
+        _print_license_ok(use_color)
+        _persist_license_status(cfg, "active")
+        return True
+    _persist_license_status(cfg, result)
+    if result == "wrong_device":
+        _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
+    else:
+        _print_license_err(f"License Invalid: {msg}", use_color)
+    return False
+
+
+def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespace, use_color: bool) -> bool:
+    while True:
+        try:
+            cfg = load_config()
+        except ConfigError as exc:
+            _print_license_err(str(exc), use_color)
+            return False
+        lic = cfg.setdefault("license", {})
+        key = (lic.get("key") or "").strip() or (cfg.get("license_key") or "").strip()
+        if not key:
+            if not _is_interactive():
+                _print_license_err("No license key configured.", use_color)
+                return False
+            if not keystore.prompt_and_verify_key():
+                return False
+            _print_license_ok(use_color)
+            return True
+        ok, msg = keystore.verify_key(key)
+        if ok:
+            _print_license_ok(use_color)
+            return True
+        _print_license_err(msg, use_color)
+        if not _is_interactive():
+            return False
+        print("\n1. Enter Different Key\n2. Exit")
+        try:
+            choice = input("Choose [2]: ").strip() or "2"
+        except EOFError:
+            return False
+        if choice != "1":
+            return False
+        lic["key"] = ""
+        cfg["license_key"] = ""
+        cfg = save_config(cfg)
+
+
+def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespace, use_color: bool) -> bool:
+    while True:
+        try:
+            cfg = load_config()
+        except ConfigError as exc:
+            _print_license_err(str(exc), use_color)
+            return False
+        cfg = _ensure_install_id_saved(cfg)
+        lic = cfg.setdefault("license", {})
+        key = (lic.get("key") or "").strip()
+        if not key:
+            if not _is_interactive():
+                _print_license_err("No License Key Found.", use_color)
+                return False
+            print("No License Key Found.")
+            try:
+                raw = input("Enter Your DENG Tool License Key: ").strip()
+            except EOFError:
+                return False
+            if not raw:
+                continue
+            try:
+                norm = validate_license_key(raw)
+            except ConfigError as exc:
+                _print_license_err(str(exc), use_color)
+                continue
+            lic["key"] = norm
+            cfg["license_key"] = norm
+            cfg = save_config(cfg)
+            key = norm
+
+        result, msg = _remote_license_run_check(cfg)
+        if result == "active":
+            _print_license_ok(use_color)
+            _persist_license_status(cfg, "active")
+            return True
+
+        cfg = _persist_license_status(cfg, result)
+        if result == "wrong_device":
+            _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
+        else:
+            _print_license_err(f"License Invalid: {msg}", use_color)
+
+        if not _is_interactive():
+            return False
+
+        if result == "wrong_device":
+            print("\n1. Enter Different Key\n2. Exit")
+        else:
+            print("\n1. Try Another Key\n2. Exit")
+        try:
+            choice = input("Choose [2]: ").strip() or "2"
+        except EOFError:
+            return False
+        if choice != "1":
+            return False
+        lic["key"] = ""
+        cfg["license_key"] = ""
+        cfg = save_config(cfg)
+
+
+def ensure_license_before_menu(args: argparse.Namespace) -> bool:
+    use_color = not args.no_color
+    if keystore.DEV_MODE:
+        _print_dev_license_skipped(use_color)
+        return True
+    try:
+        cfg = load_config()
+    except ConfigError as exc:
+        _print_license_err(str(exc), use_color)
+        return False
+
+    lic = cfg.setdefault("license", {})
+    if lic.get("disabled_by_user"):
+        return True
+    if not lic.get("enabled", True):
+        return True
+
+    cfg = _ensure_install_id_saved(cfg)
+    mode = str(cfg["license"].get("mode") or "remote").strip().lower()
+    if mode == "local":
+        return bool(_ensure_local_license_menu_loop(cfg, args, use_color))
+    return bool(_ensure_remote_license_menu_loop(cfg, args, use_color))
 
 
 def _is_interactive() -> bool:
@@ -1972,6 +2172,8 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 
 def cmd_menu(args: argparse.Namespace) -> int:
+    if not ensure_license_before_menu(args):
+        return 1
     return run_menu(args, _handlers())
 
 

@@ -126,17 +126,9 @@ def build_status_embed_payload(
     app_stats: dict[str, Any] | None = None,
     supervisor_snapshot: list[dict] | None = None,
 ) -> dict[str, Any]:
-    """Build a Kaeru-style Discord embed payload for status updates.
-
-    ``app_stats`` is an optional dict mapping package name to a sub-dict with:
-        ``online``       bool   — whether the app process is running
-        ``memory_mb``    float  — RAM usage in MB (or None)
-        ``cpu_pct``      float  — CPU % (or None)
-        ``uptime_start`` str    — ISO-8601 timestamp of last launch (or None)
-
-    Returns a ready-to-serialise dict suitable for the Discord webhooks API.
-    """
+    """Build a Discord embed payload for periodic status updates."""
     from .config import mask_license_key
+    from .license import get_public_device_model
 
     raw_packages = config_data.get("roblox_packages") or [config_data.get("roblox_package", "unknown")]
     entries: list[dict[str, str]] = []
@@ -226,9 +218,14 @@ def build_status_embed_payload(
     masked_key = mask_license_key(config_data.get("license_key", ""))
     webhook_tags = config_data.get("webhook_tags") or []
     tags_value = f"[{len(webhook_tags)}]"
+    phone_type = get_public_device_model()
+    host_name = str(config_data.get("device_name", "unknown"))
+    device_value = host_name
+    if phone_type and phone_type != "Unknown":
+        device_value = f"{host_name}\n📱 Type: {phone_type}"
 
     fields: list[dict[str, Any]] = [
-        {"name": "📱 Device",           "value": str(config_data.get("device_name", "unknown")), "inline": True},
+        {"name": "📱 Device",           "value": device_value,                               "inline": True},
         {"name": "🔑 License",          "value": masked_key,                                     "inline": True},
         {"name": "🏷️ Tags",             "value": tags_value,                                     "inline": True},
         {"name": "🖥️ System Stats",     "value": sys_value,                                      "inline": False},
@@ -261,15 +258,18 @@ def build_alert_embed_payload(
     reason: str,
     event: str = "alert",
 ) -> dict[str, Any]:
-    """Build a Kaeru-style Account Alert embed payload.
-
-    Used for captcha events, rejoin failures, and other account-level alerts.
-    """
+    """Build an Account Alert embed payload (captcha, failures, etc.)."""
     from .config import mask_license_key
+    from .license import get_public_device_model
 
     masked_key = mask_license_key(config_data.get("license_key", ""))
     webhook_tags = config_data.get("webhook_tags") or []
     tags_value = f"[{len(webhook_tags)}]"
+    phone_type = get_public_device_model()
+    host_name = str(config_data.get("device_name", "unknown"))
+    device_value = host_name
+    if phone_type and phone_type != "Unknown":
+        device_value = f"{host_name}\n📱 Type: {phone_type}"
 
     reason_lower = reason.lower()
     if "solved" in reason_lower or "success" in reason_lower or "✅" in reason:
@@ -290,7 +290,7 @@ def build_alert_embed_payload(
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "fields": [
                     {"name": "👤 Account", "value": account or "unknown",                              "inline": False},
-                    {"name": "📱 Device",  "value": str(config_data.get("device_name", "unknown")), "inline": False},
+                    {"name": "📱 Device",  "value": device_value, "inline": False},
                     {"name": "🔑 License", "value": masked_key,                                     "inline": True},
                     {"name": "🏷️ Tags",    "value": tags_value,                                     "inline": True},
                     {"name": "📝 Reason",  "value": reason[:512],                                    "inline": False},
@@ -302,6 +302,8 @@ def build_alert_embed_payload(
 
 
 def build_status_message(config_data: dict[str, Any], *, event: str = "status", error: str | None = None) -> str:
+    from .license import get_public_device_model
+
     raw_packages = config_data.get("roblox_packages") or [config_data.get("roblox_package", "unknown")]
     packages = []
     for entry in raw_packages:
@@ -312,10 +314,12 @@ def build_status_message(config_data: dict[str, Any], *, event: str = "status", 
         else:
             packages.append(str(entry))
     launch_url = mask_launch_url(config_data.get("launch_url")) or "not set"
+    phone_type = get_public_device_model()
     lines = [
         f"DENG Tool: Rejoin v{config_data.get('agent_version', '1.0.0')}",
         f"Event: {event}",
-        f"Device: {config_data.get('device_name', 'unknown')}",
+        f"Device: {config_data.get('device_name', 'unknown')}"
+        + (f" | {phone_type}" if phone_type and phone_type != "Unknown" else ""),
         f"Android: {config_data.get('android_release', 'unknown')} / SDK {config_data.get('android_sdk', 'unknown')}",
         f"Roblox packages: {', '.join(packages)}",
         f"Launch link: {launch_url}",

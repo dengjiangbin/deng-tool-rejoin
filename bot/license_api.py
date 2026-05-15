@@ -125,9 +125,14 @@ _RATE_LIMIT_MAX: int = 10          # requests per window per IP
 # Token URL-safe character set: letters, digits, hyphen, underscore
 _TOKEN_SAFE_RE = re.compile(r'^[A-Za-z0-9_\-]{1,100}$')
 
+def _wrong_device_api_message() -> str:
+    from agent.license import WRONG_DEVICE_USER_MESSAGE
+
+    return WRONG_DEVICE_USER_MESSAGE
+
+
 _RESULT_MESSAGES: dict[str, str] = {
     "active": "License active.",
-    "wrong_device": "This key is bound to a different device. Use HWID Reset in the Discord panel.",
     "not_found": "Key not found. Check the key and try again.",
     "revoked": "This key has been revoked.",
     "expired": "This key has expired.",
@@ -279,7 +284,10 @@ def _hash_install_id(raw_id: str) -> str:
 
 
 def _build_response(result: str, status: int = 200) -> tuple[bytes, int]:
-    message = _RESULT_MESSAGES.get(result, result)
+    if result == "wrong_device":
+        message = _wrong_device_api_message()
+    else:
+        message = _RESULT_MESSAGES.get(result, result)
     payload = json.dumps({"result": result, "message": message}).encode("utf-8")
     return payload, status
 
@@ -362,6 +370,7 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         install_id_hash = (body.get("install_id_hash") or "").strip()
         device_model = (body.get("device_model") or "unknown")[:120]
         app_version = (body.get("app_version") or "unknown")[:40]
+        device_label = (body.get("device_label") or "").strip()[:80]
 
         if not raw_key:
             payload, status = _build_response("missing_key", 400)
@@ -383,7 +392,7 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
             from agent.license_store import get_default_store
             store = get_default_store()
             result = store.bind_or_check_device(
-                raw_key, install_id_hash, device_model, app_version
+                raw_key, install_id_hash, device_model, app_version, device_label,
             )
         except Exception as exc:  # noqa: BLE001
             log.error("License check error: %s", exc)
@@ -413,6 +422,7 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         install_id_hash = (body.get("install_id_hash") or "").strip()
         device_model = (body.get("device_model") or "unknown")[:120]
         app_version = (body.get("app_version") or "unknown")[:40]
+        device_label = (body.get("device_label") or "").strip()[:80]
         channel = (body.get("channel") or "stable").strip().lower()
         if channel not in ("stable", "beta", "dev"):
             channel = "stable"
@@ -436,7 +446,7 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
             from agent.license_store import get_default_store
             store = get_default_store()
             lic_result = store.bind_or_check_device(
-                raw_key, install_id_hash, device_model, app_version
+                raw_key, install_id_hash, device_model, app_version, device_label,
             )
         except Exception as exc:  # noqa: BLE001
             log.error("License check error in authorize: %s", exc)
