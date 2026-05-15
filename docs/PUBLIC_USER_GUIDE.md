@@ -88,6 +88,8 @@ The license key is **not** configured from the Setup / Config menu. When you run
 - If a license key is stored in config, it is verified at Start.
 - If no key is found and license is enabled, DENG prompts you to enter one.
 
+In Discord, use the **license panel** in your server: **Generate Key**, **Redeem Key**, **Reset HWID**, and **Key Stats**. **Key Stats** and **Download Keys** are private (ephemeral). Older keys may appear masked only — the server stores hashes, so full keys are not recoverable unless encrypted export was enabled when the key was generated (see panel docs). Do not share exported key files publicly.
+
 ## Roblox Package Setup
 
 The package screen automatically scans Android for Roblox-related packages. It uses safe package-name hints such as `roblox`, `rblx`, `blox`, and `moons`, so cloned packages like `com.moons.*` can be detected even when the package name does not contain `roblox`.

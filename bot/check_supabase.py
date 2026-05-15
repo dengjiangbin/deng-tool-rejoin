@@ -181,6 +181,30 @@ def check() -> int:
         except Exception as exc:
             _warn(f"Delete failed: {exc}")
 
+    if not missing:
+        print("\n[5] Optional: license_keys export columns (002_key_export_support)")
+        try:
+            client.table("license_keys").select("key_ciphertext,key_export_available").limit(
+                0
+            ).execute()
+            _ok("license_keys export columns present (DB ready for optional full-key export)")
+        except Exception as exc:
+            err = str(exc)
+            if (
+                "PGRST204" in err
+                or "42703" in err
+                or "column" in err.lower()
+                or "undefined_column" in err.lower()
+                or "schema cache" in err.lower()
+            ):
+                _warn(
+                    "Export columns not found — apply supabase/migrations/002_key_export_support.sql "
+                    "to enable full-key export for newly generated keys."
+                )
+                _warn("Key Stats and Download still work; older keys remain masked-only.")
+            else:
+                _warn(f"Could not verify export columns: {exc}")
+
     # ── Done ─────────────────────────────────────────────────────────────────
     print()
     print("═" * 60)

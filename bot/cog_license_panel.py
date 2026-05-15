@@ -14,6 +14,7 @@ Button handlers
   Generate Key   (custom_id = "license_panel:generate")
   Reset HWID     (custom_id = "license_panel:reset_hwid")
   Redeem Key     (custom_id = "license_panel:redeem")
+  Key Stats      (custom_id = "license_panel:key_stats")
 
 All button flows are EPHEMERAL.  The panel embed itself is public (pinned-style).
 """
@@ -32,6 +33,7 @@ from discord.ext import commands
 
 from agent.license_panel import (
     BUTTON_GENERATE,
+    BUTTON_KEY_STATS,
     BUTTON_REDEEM,
     BUTTON_RESET_HWID,
     SLASH_GROUP,
@@ -315,10 +317,171 @@ class ResetHwidSelectView(discord.ui.View):
             child.disabled = True
 
 
+KEY_STATS_PAGE_SIZE = 5
+
+
+def _build_key_stats_discord_embed(rows_all: list[dict], page: int) -> tuple[discord.Embed, int, int, int]:
+    """Return (embed, clamped_page, total_pages, total_rows)."""
+    from agent.key_stats_format import (
+        build_key_stats_description,
+        format_stats_embed_title,
+    )
+
+    n = len(rows_all)
+    total_pages = max(1, (n + KEY_STATS_PAGE_SIZE - 1) // KEY_STATS_PAGE_SIZE) if n else 1
+    page = max(0, min(page, total_pages - 1))
+    if n == 0:
+        embed = discord.Embed(
+            title="Your License Keys",
+            description=(
+                "You do not have any license keys yet.\n"
+                "Click **Generate Key** to create one."
+            ),
+            color=0x2F80ED,
+        )
+    else:
+        sl = rows_all[page * KEY_STATS_PAGE_SIZE : (page + 1) * KEY_STATS_PAGE_SIZE]
+        title = format_stats_embed_title(total=n, page=page, total_pages=total_pages)
+        desc = build_key_stats_description(sl)
+        if len(desc) > 3900:
+            desc = desc[:3897] + "..."
+        embed = discord.Embed(title=title, description=desc, color=0x2F80ED)
+    embed.set_footer(text="DENG Tool \u00b7 Key Stats")
+    return embed, page, total_pages, n
+
+
+class KeyStatsCloseButton(discord.ui.Button):
+    def __init__(self, host: "KeyStatsView") -> None:
+        super().__init__(
+            label="Close",
+            style=discord.ButtonStyle.secondary,
+            custom_id="license_panel:ks_close",
+        )
+        self._host = host
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if str(interaction.user.id) != self._host._owner_id:
+            await interaction.response.send_message(
+                "This key stats view is not yours.", ephemeral=True
+            )
+            return
+        await interaction.response.edit_message(content="Closed.", embed=None, view=None)
+
+
+class KeyStatsDownloadButton(discord.ui.Button):
+    def __init__(self, host: "KeyStatsView", *, disabled: bool) -> None:
+        super().__init__(
+            label="Download Keys",
+            style=discord.ButtonStyle.primary,
+            custom_id="license_panel:ks_dl",
+            disabled=disabled,
+        )
+        self._host = host
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if str(interaction.user.id) != self._host._owner_id:
+            await interaction.response.send_message(
+                "This key stats view is not yours.", ephemeral=True
+            )
+            return
+        from io import BytesIO
+
+        from agent.key_stats_format import build_key_stats_download_body
+
+        rows = self._host._store.get_user_key_export_rows(self._host._owner_id)
+        body = build_key_stats_download_body(
+            discord_user_id=self._host._owner_id,
+            rows=rows,
+        )
+        buf = BytesIO(body.encode("utf-8"))
+        buf.seek(0)
+        filename = f"my_keys_{self._host._owner_id}.txt"
+        file = discord.File(buf, filename=filename)
+        dl_embed = discord.Embed(
+            title="Your Keys Download",
+            description=(
+                f"Total: {len(rows)} keys\n\n"
+                "Download the attached file to view your keys."
+            ),
+            color=0x2F80ED,
+        )
+        dl_embed.set_footer(text="DENG Tool \u00b7 Key Stats")
+        await interaction.response.send_message(embed=dl_embed, file=file, ephemeral=True)
+
+
+class KeyStatsPrevButton(discord.ui.Button):
+    def __init__(self, host: "KeyStatsView", *, disabled: bool) -> None:
+        super().__init__(
+            label="Previous",
+            style=discord.ButtonStyle.secondary,
+            custom_id="license_panel:ks_prev",
+            disabled=disabled,
+        )
+        self._host = host
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if str(interaction.user.id) != self._host._owner_id:
+            await interaction.response.send_message(
+                "This key stats view is not yours.", ephemeral=True
+            )
+            return
+        rows = self._host._store.list_user_keys_for_stats(self._host._owner_id)
+        new_page = self._host._page - 1
+        embed, new_page, _, _ = _build_key_stats_discord_embed(rows, new_page)
+        new_view = KeyStatsView(self._host._store, self._host._owner_id, new_page)
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+
+class KeyStatsNextButton(discord.ui.Button):
+    def __init__(self, host: "KeyStatsView", *, disabled: bool) -> None:
+        super().__init__(
+            label="Next",
+            style=discord.ButtonStyle.secondary,
+            custom_id="license_panel:ks_next",
+            disabled=disabled,
+        )
+        self._host = host
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if str(interaction.user.id) != self._host._owner_id:
+            await interaction.response.send_message(
+                "This key stats view is not yours.", ephemeral=True
+            )
+            return
+        rows = self._host._store.list_user_keys_for_stats(self._host._owner_id)
+        new_page = self._host._page + 1
+        embed, new_page, _, _ = _build_key_stats_discord_embed(rows, new_page)
+        new_view = KeyStatsView(self._host._store, self._host._owner_id, new_page)
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+
+class KeyStatsView(discord.ui.View):
+    """Ephemeral paginated Key Stats + download (not persistent)."""
+
+    def __init__(self, store: BaseLicenseStore, owner_id: str, page: int = 0) -> None:
+        super().__init__(timeout=600)
+        self._store = store
+        self._owner_id = owner_id
+        rows = store.list_user_keys_for_stats(owner_id)
+        n = len(rows)
+        total_pages = max(1, (n + KEY_STATS_PAGE_SIZE - 1) // KEY_STATS_PAGE_SIZE) if n else 1
+        self._page = max(0, min(page, total_pages - 1))
+        self.add_item(KeyStatsPrevButton(self, disabled=self._page <= 0 or n == 0))
+        self.add_item(
+            KeyStatsNextButton(self, disabled=self._page >= total_pages - 1 or n == 0)
+        )
+        self.add_item(KeyStatsDownloadButton(self, disabled=n == 0))
+        self.add_item(KeyStatsCloseButton(self))
+
+    async def on_timeout(self) -> None:
+        for child in self.children:
+            child.disabled = True
+
+
 # ── Persistent panel view ─────────────────────────────────────────────────────
 
 class PanelView(discord.ui.View):
-    """Persistent view with Generate / Reset HWID / Redeem buttons.
+    """Persistent view with Generate / Reset HWID / Redeem / Key Stats buttons.
 
     timeout=None keeps the view alive across bot restarts when registered
     via ``bot.add_view(view, message_id=<id>)``.
@@ -399,6 +562,28 @@ class PanelView(discord.ui.View):
         button: discord.ui.Button,
     ) -> None:
         await interaction.response.send_modal(RedeemModal(self._store))
+
+    # ── Key Stats ─────────────────────────────────────────────────────────────
+
+    @discord.ui.button(
+        label="Key Stats",
+        style=discord.ButtonStyle.secondary,
+        custom_id=BUTTON_KEY_STATS,
+        emoji="\U0001f4ca",
+    )
+    async def btn_key_stats(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        uid = str(interaction.user.id)
+        username = str(interaction.user)
+        self._store.get_or_create_user(uid, username)
+        await interaction.response.defer(ephemeral=True)
+        rows = self._store.list_user_keys_for_stats(uid)
+        embed, page, _, _ = _build_key_stats_discord_embed(rows, 0)
+        view = KeyStatsView(self._store, uid, page)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 # ── Cog ───────────────────────────────────────────────────────────────────────

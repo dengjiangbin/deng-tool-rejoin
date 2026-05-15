@@ -33,11 +33,14 @@ from agent.license_store import (
 )
 from bot.cog_license_panel import (
     ConfirmResetButton,
+    KeyStatsDownloadButton,
+    KeyStatsNextButton,
     LicensePanelCog,
     PanelView,
     RedeemModal,
     ResetHwidSelect,
     ResetHwidSelectView,
+    _build_key_stats_discord_embed,
     _is_owner,
     _owner_ids,
 )
@@ -124,6 +127,16 @@ class TestOwnerIds(unittest.TestCase):
         user = _fake_user(uid=999)
         with patch.dict(os.environ, {"LICENSE_OWNER_DISCORD_IDS": "111"}):
             self.assertFalse(_is_owner(user))
+
+
+class TestPanelViewFourButtons(unittest.TestCase):
+    """Panel exposes Generate, Reset HWID, Redeem, Key Stats (order)."""
+
+    def test_panel_view_has_four_children(self) -> None:
+        with TemporaryDirectory() as tmp:
+            store = _make_store(tmp)
+            view = PanelView(store)
+            self.assertEqual(len(view.children), 4)
 
 
 # ── PanelView — Generate Key ──────────────────────────────────────────────────
@@ -317,6 +330,95 @@ class TestPanelViewRedeem(unittest.IsolatedAsyncioTestCase):
         inter.response.send_modal.assert_called_once()
         modal_arg = inter.response.send_modal.call_args[0][0]
         self.assertIsInstance(modal_arg, RedeemModal)
+
+
+class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.store = _make_store(self._tmp.name)
+
+    async def asyncTearDown(self) -> None:
+        self._tmp.cleanup()
+
+    async def test_key_stats_empty_message(self) -> None:
+        inter = _fake_interaction(user=_fake_user(uid=501))
+        view = PanelView(self.store)
+        await view.btn_key_stats.callback(inter)
+        inter.response.defer.assert_called_once_with(ephemeral=True)
+        inter.followup.send.assert_called_once()
+        _, kwargs = inter.followup.send.call_args
+        self.assertIn("any license keys", kwargs["embed"].description.lower())
+
+    async def test_key_stats_shows_unused(self) -> None:
+        inter_g = _fake_interaction(user=_fake_user(uid=502))
+        inter_s = _fake_interaction(user=_fake_user(uid=502))
+        view = PanelView(self.store)
+        await view.btn_generate.callback(inter_g)
+        await view.btn_key_stats.callback(inter_s)
+        _, kwargs = inter_s.followup.send.call_args
+        self.assertIn("Unused", kwargs["embed"].description)
+
+    async def test_key_stats_pagination_title(self) -> None:
+        uid = 503
+        self.store.get_or_create_user(str(uid))
+        self.store.set_user_max_keys(str(uid), 10)
+        gen_view = PanelView(self.store)
+        for _ in range(6):
+            inter = _fake_interaction(user=_fake_user(uid=uid))
+            await gen_view.btn_generate.callback(inter)
+        inter_s = _fake_interaction(user=_fake_user(uid=uid))
+        await gen_view.btn_key_stats.callback(inter_s)
+        _, kwargs = inter_s.followup.send.call_args
+        self.assertIn("Page 1/2", kwargs["embed"].title)
+
+    async def test_key_stats_next_page(self) -> None:
+        uid = 504
+        self.store.get_or_create_user(str(uid))
+        self.store.set_user_max_keys(str(uid), 10)
+        gen_view = PanelView(self.store)
+        for _ in range(6):
+            await gen_view.btn_generate.callback(_fake_interaction(user=_fake_user(uid=uid)))
+        inter_s = _fake_interaction(user=_fake_user(uid=uid))
+        await gen_view.btn_key_stats.callback(inter_s)
+        stats_view = inter_s.followup.send.call_args[1]["view"]
+        nxt = next(c for c in stats_view.children if isinstance(c, KeyStatsNextButton))
+        inter2 = _fake_interaction(user=_fake_user(uid=uid))
+        await nxt.callback(inter2)
+        inter2.response.edit_message.assert_called_once()
+        _, ek = inter2.response.edit_message.call_args
+        self.assertIn("Page 2/2", ek["embed"].title)
+
+    async def test_key_stats_wrong_user_blocked(self) -> None:
+        uid = 600
+        self.store.get_or_create_user(str(uid))
+        self.store.set_user_max_keys(str(uid), 10)
+        gen_view = PanelView(self.store)
+        for _ in range(6):
+            await gen_view.btn_generate.callback(_fake_interaction(user=_fake_user(uid=uid)))
+        inter_s = _fake_interaction(user=_fake_user(uid=uid))
+        await gen_view.btn_key_stats.callback(inter_s)
+        stats_view = inter_s.followup.send.call_args[1]["view"]
+        nxt = next(c for c in stats_view.children if isinstance(c, KeyStatsNextButton))
+        inter_bad = _fake_interaction(user=_fake_user(uid=601))
+        await nxt.callback(inter_bad)
+        inter_bad.response.send_message.assert_called_once()
+        call = inter_bad.response.send_message.call_args
+        msg = (call.args[0] if call.args else "") or call.kwargs.get("content") or ""
+        self.assertIn("not yours", msg.lower())
+
+    async def test_download_keys_attachment_name(self) -> None:
+        uid = 602
+        self.store.get_or_create_user(str(uid))
+        self.store.create_key_for_user(str(uid))
+        inter_s = _fake_interaction(user=_fake_user(uid=uid))
+        await PanelView(self.store).btn_key_stats.callback(inter_s)
+        stats_view = inter_s.followup.send.call_args[1]["view"]
+        dl = next(c for c in stats_view.children if isinstance(c, KeyStatsDownloadButton))
+        inter2 = _fake_interaction(user=_fake_user(uid=uid))
+        await dl.callback(inter2)
+        inter2.response.send_message.assert_called_once()
+        _, dk = inter2.response.send_message.call_args
+        self.assertEqual(dk["file"].filename, f"my_keys_{uid}.txt")
 
 
 # ── RedeemModal ───────────────────────────────────────────────────────────────

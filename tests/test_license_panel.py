@@ -4,6 +4,7 @@ import unittest
 
 from agent.license_panel import (
     BUTTON_GENERATE,
+    BUTTON_KEY_STATS,
     BUTTON_RESET_HWID,
     BUTTON_REDEEM,
     SLASH_GROUP,
@@ -31,10 +32,19 @@ class PanelEmbedTests(unittest.TestCase):
         self.assertIn("DENG Tool", embed["title"])
         self.assertIn("License", embed["title"])
 
-    def test_panel_embed_has_three_fields(self):
-        """Test 32 – embed has exactly 3 instruction fields."""
+    def test_panel_embed_has_four_fields(self):
+        """Test 32 – embed has exactly 4 instruction fields."""
         embed = build_panel_embed()
-        self.assertEqual(len(embed["fields"]), 3)
+        self.assertEqual(len(embed["fields"]), 4)
+
+    def test_panel_embed_no_plus_or_kaeru_wording(self):
+        import json as _json
+
+        embed = build_panel_embed()
+        blob = _json.dumps(embed)
+        self.assertNotIn("Plus", blob)
+        self.assertNotIn("Kaeru", blob)
+        self.assertNotIn("KAERU", blob)
 
     def test_panel_embed_color_is_brand_blue(self):
         """Test 33 – embed color is brand blue 0x2F80ED."""
@@ -45,21 +55,22 @@ class PanelEmbedTests(unittest.TestCase):
 class PanelButtonTests(unittest.TestCase):
     """Test 34-36: panel buttons structure."""
 
-    def test_panel_has_three_buttons(self):
-        """Test 34 – action row contains exactly 3 buttons."""
+    def test_panel_has_four_buttons(self):
+        """Test 34 – action row contains exactly 4 buttons."""
         components = build_panel_buttons()
         self.assertEqual(len(components), 1)
         row = components[0]
         self.assertEqual(row["type"], 1)
-        self.assertEqual(len(row["components"]), 3)
+        self.assertEqual(len(row["components"]), 4)
 
     def test_button_custom_ids(self):
         """Test 35 – button custom_ids match constants."""
         components = build_panel_buttons()
         ids = [btn["custom_id"] for btn in components[0]["components"]]
-        self.assertIn(BUTTON_GENERATE, ids)
-        self.assertIn(BUTTON_RESET_HWID, ids)
-        self.assertIn(BUTTON_REDEEM, ids)
+        self.assertEqual(
+            ids,
+            [BUTTON_GENERATE, BUTTON_RESET_HWID, BUTTON_REDEEM, BUTTON_KEY_STATS],
+        )
 
     def test_buttons_not_disabled_by_default(self):
         """Test 36 – all buttons are enabled (not disabled) by default."""

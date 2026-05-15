@@ -17,6 +17,7 @@ Button custom IDs (use these as constants in your button handler):
     BUTTON_GENERATE   = "license_panel:generate"
     BUTTON_RESET_HWID = "license_panel:reset_hwid"
     BUTTON_REDEEM     = "license_panel:redeem"
+    BUTTON_KEY_STATS  = "license_panel:key_stats"
 
 All button response flows are EPHEMERAL — only the clicking user sees the result.
 
@@ -33,6 +34,7 @@ from typing import Any
 BUTTON_GENERATE   = "license_panel:generate"
 BUTTON_RESET_HWID = "license_panel:reset_hwid"
 BUTTON_REDEEM     = "license_panel:redeem"
+BUTTON_KEY_STATS  = "license_panel:key_stats"
 
 # ── Slash command names ────────────────────────────────────────────────────────
 
@@ -57,7 +59,7 @@ def build_panel_embed() -> dict[str, Any]:
     ─────────
     • Title  : "DENG Tool — License Key Panel"
     • Color  : 0x2F80ED (brand blue)
-    • Fields : 3 instruction cards — Generate, Reset HWID, Redeem
+    • Fields : 4 instruction cards — Generate, Reset HWID, Redeem, Key Stats
     • Footer : "DENG Tool · All responses are private"
     """
     return {
@@ -94,6 +96,15 @@ def build_panel_embed() -> dict[str, Any]:
                 ),
                 "inline": True,
             },
+            {
+                "name": "\U0001f4ca Key Stats",
+                "value": (
+                    "View your license keys in a **private** message — "
+                    "binding status, device, dates, and optional secure export.\n"
+                    "**Download Keys** produces a private text file."
+                ),
+                "inline": True,
+            },
         ],
         "footer": {"text": "DENG Tool \u00b7 All responses are private"},
         "timestamp": None,   # Caller should set this to current UTC ISO string
@@ -101,7 +112,7 @@ def build_panel_embed() -> dict[str, Any]:
 
 
 def build_panel_buttons() -> list[dict[str, Any]]:
-    """Return an action-row payload with the 3 panel buttons.
+    """Return an action-row payload with the 4 panel buttons.
 
     Structure mirrors the Discord components v2 JSON shape::
 
@@ -146,6 +157,14 @@ def build_panel_buttons() -> list[dict[str, Any]]:
                     "emoji": {"name": "\U0001f39f\ufe0f"},
                     "disabled": False,
                 },
+                {
+                    "type": 2,
+                    "style": 2,          # SECONDARY
+                    "label": "Key Stats",
+                    "custom_id": BUTTON_KEY_STATS,
+                    "emoji": {"name": "\U0001f4ca"},
+                    "disabled": False,
+                },
             ],
         }
     ]
@@ -157,7 +176,8 @@ def build_generate_success_response(full_key: str) -> dict[str, Any]:
     """Build the ephemeral embed shown to a user after key generation.
 
     full_key: the complete DENG-XXXX-XXXX-XXXX-XXXX key string.
-    This response is shown ONCE; the key is not stored in plaintext.
+    This response is shown ONCE in Discord; subsequent views use masked keys unless
+    encrypted export storage is enabled server-side (see license_key_export).
     """
     return {
         "ephemeral": True,

@@ -204,6 +204,20 @@ class BaseLicenseStore(ABC):
         """
 
     @abstractmethod
+    def list_user_keys_for_stats(self, discord_user_id: str) -> list[dict[str, Any]]:
+        """Rows for Key Stats / download. Never includes key hash/id.
+
+        Each dict may include:
+          masked_key, full_key_plaintext (optional), has_stored_ciphertext,
+          license_status, used, device_display, last_seen_at, created_at,
+          tags_label (optional), plan, reset_count_24h
+        """
+
+    def get_user_key_export_rows(self, discord_user_id: str) -> list[dict[str, Any]]:
+        """Alias for the same data used by Download Keys (all pages)."""
+        return self.list_user_keys_for_stats(discord_user_id)
+
+    @abstractmethod
     def audit_admin_action(
         self,
         actor_discord_user_id: str,
@@ -318,6 +332,9 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         raw_key = generate_license_key()
         key_hash = hash_license_key(raw_key)
         parts = raw_key.split("-")
+        from . import license_key_export as lke
+
+        ciphertext = lke.encrypt_license_key_plaintext(raw_key)
         db = self._load()
         db["keys"][key_hash] = {
             "id": key_hash,
@@ -330,6 +347,8 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             "created_by": created_by or discord_user_id,
             "created_at": _utc_now(),
             "updated_at": _utc_now(),
+            "key_ciphertext": ciphertext,
+            "key_export_available": bool(ciphertext),
         }
         self._save(db)
         self.audit_admin_action(
@@ -441,6 +460,43 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 "reason_if_not_resettable": reason,
             })
         return result
+
+    def list_user_keys_for_stats(self, discord_user_id: str) -> list[dict[str, Any]]:
+        from . import license_key_export as lke
+
+        db = self._load()
+        rows: list[dict[str, Any]] = []
+        for key_hash, record in db["keys"].items():
+            if record.get("owner_discord_id") != discord_user_id:
+                continue
+            binding = db.get("bindings", {}).get(key_hash, {})
+            active_binding = bool(binding.get("is_active"))
+            masked = f"{record.get('prefix', 'DENG-????')}...{record.get('suffix', '????')}"
+            lic_status = record.get("status", "active")
+            ciphertext = record.get("key_ciphertext") or ""
+            has_blob = bool(ciphertext)
+            full_plain = lke.decrypt_license_key_ciphertext(ciphertext) if has_blob else None
+            device = (binding.get("device_model") or binding.get("device_label") or "").strip() or None
+            reset_count = self.get_reset_count_24h(key_hash)
+            plan = record.get("plan", "standard") or "standard"
+            tags = None
+            if str(plan).lower() != "standard":
+                tags = str(plan)
+            rows.append({
+                "masked_key": masked,
+                "full_key_plaintext": full_plain,
+                "has_stored_ciphertext": has_blob,
+                "license_status": lic_status,
+                "used": active_binding,
+                "device_display": device,
+                "last_seen_at": binding.get("last_seen_at"),
+                "created_at": record.get("created_at"),
+                "tags_label": tags,
+                "plan": plan,
+                "reset_count_24h": reset_count,
+            })
+        rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+        return rows
 
     # ── HWID reset ────────────────────────────────────────────────────────────
 
@@ -743,18 +799,39 @@ class SupabaseLicenseStore(BaseLicenseStore):
         raw_key = generate_license_key()
         key_hash = hash_license_key(raw_key)
         parts = raw_key.split("-")
-        self._client.table("license_keys").insert(
-            {
-                "id": key_hash,
-                "prefix": f"{parts[0]}-{parts[1]}",
-                "suffix": parts[-1],
-                "owner_discord_id": discord_user_id,
-                "status": "active",
-                "plan": "standard",
-                "expires_at": None,
-                "created_by": created_by or discord_user_id,
-            }
-        ).execute()
+        from . import license_key_export as lke
+
+        ciphertext = lke.encrypt_license_key_plaintext(raw_key)
+        row: dict[str, Any] = {
+            "id": key_hash,
+            "prefix": f"{parts[0]}-{parts[1]}",
+            "suffix": parts[-1],
+            "owner_discord_id": discord_user_id,
+            "status": "active",
+            "plan": "standard",
+            "expires_at": None,
+            "created_by": created_by or discord_user_id,
+        }
+        if ciphertext:
+            row["key_ciphertext"] = ciphertext
+            row["key_export_available"] = True
+        else:
+            row["key_export_available"] = False
+        try:
+            self._client.table("license_keys").insert(row).execute()
+        except Exception as exc:
+            err = str(exc).lower()
+            if (
+                "key_ciphertext" in err
+                or "key_export_available" in err
+                or "column" in err
+                or "pgrst204" in err
+            ):
+                row.pop("key_ciphertext", None)
+                row.pop("key_export_available", None)
+                self._client.table("license_keys").insert(row).execute()
+            else:
+                raise
         self.audit_admin_action(
             created_by or discord_user_id,
             "create_key",
@@ -893,6 +970,66 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 "reason_if_not_resettable": reason,
             })
         return result
+
+    def list_user_keys_for_stats(self, discord_user_id: str) -> list[dict[str, Any]]:
+        from . import license_key_export as lke
+
+        try:
+            res = (
+                self._client.table("license_keys")
+                .select(
+                    "id, prefix, suffix, status, plan, created_at, key_ciphertext, key_export_available"
+                )
+                .eq("owner_discord_id", discord_user_id)
+                .execute()
+            )
+            records = res.data or []
+        except Exception:
+            res = (
+                self._client.table("license_keys")
+                .select("id, prefix, suffix, status, plan, created_at")
+                .eq("owner_discord_id", discord_user_id)
+                .execute()
+            )
+            records = res.data or []
+
+        rows: list[dict[str, Any]] = []
+        for record in records:
+            key_id = record["id"]
+            b_res = (
+                self._client.table("device_bindings")
+                .select("device_model, device_label, last_seen_at, is_active")
+                .eq("key_id", key_id)
+                .execute()
+            )
+            binding = b_res.data[0] if b_res.data else {}
+            active_binding = bool(binding.get("is_active"))
+            masked = f"{record.get('prefix', 'DENG-????')}...{record.get('suffix', '????')}"
+            lic_status = record.get("status", "active")
+            ciphertext = (record.get("key_ciphertext") or "") if "key_ciphertext" in record else ""
+            has_blob = bool(ciphertext)
+            full_plain = lke.decrypt_license_key_ciphertext(ciphertext) if has_blob else None
+            device = (binding.get("device_model") or binding.get("device_label") or "").strip() or None
+            reset_count = self.get_reset_count_24h(key_id)
+            plan = record.get("plan", "standard") or "standard"
+            tags = None
+            if str(plan).lower() != "standard":
+                tags = str(plan)
+            rows.append({
+                "masked_key": masked,
+                "full_key_plaintext": full_plain,
+                "has_stored_ciphertext": has_blob,
+                "license_status": lic_status,
+                "used": active_binding,
+                "device_display": device,
+                "last_seen_at": binding.get("last_seen_at"),
+                "created_at": record.get("created_at"),
+                "tags_label": tags,
+                "plan": plan,
+                "reset_count_24h": reset_count,
+            })
+        rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+        return rows
 
     # ── HWID reset ────────────────────────────────────────────────────────────
 
