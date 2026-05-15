@@ -4,11 +4,22 @@
 
 DENG Tool: Rejoin is a Termux-based Android/cloud-phone utility that helps you open, reopen, and reconnect the official Roblox Android app on your own device. It is a local phone agent, not a gameplay bot.
 
-## Quick Install
+## Quick install for Termux
 
-1. Install Termux.
-2. Open Termux.
-3. Paste:
+1. Open **Termux**.
+2. Update packages (recommended before first install):
+
+```sh
+pkg update -y && pkg upgrade -y
+```
+
+3. Install tools the installer expects (optional if you go straight to step 4 — the installer also runs `pkg` and installs `python`, `sqlite`, `curl`, `git`, and tries `android-tools`):
+
+```sh
+pkg install -y curl git python sqlite
+```
+
+4. Download and run the **official installer**:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh -o install.sh && bash install.sh
@@ -20,14 +31,15 @@ Wget alternative:
 wget -O install.sh https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/install.sh && bash install.sh
 ```
 
-4. Start:
+5. Start the menu:
 
 ```sh
 deng-rejoin
 ```
 
-5. Choose **First Time Setup Config**.
-6. Choose **Start**.
+6. Enter your **license key** when prompted, then **First Time Setup Config**, then **Start**.
+
+**Beginner walkthrough (recommended):** [docs/NEW_USER_TERMUX_GUIDE.md](docs/NEW_USER_TERMUX_GUIDE.md)
 
 ## What To Prepare
 
@@ -70,7 +82,7 @@ deng-rejoin-reset
 
 Setup is a guided Termux menu, not a raw JSON editor. First-time setup walks through Roblox packages/account names, Roblox public/private link, optional Discord webhook, optional snapshot and webhook interval only when webhook is enabled, and Save And Start.
 
-The Roblox Package screen scans Android for Roblox-related packages, marks `com.roblox.client` as recommended when found, lets you choose detected packages, and also supports manual package entry for app clones. It also uses configurable detection hints such as `roblox`, `rblx`, `blox`, and `moons`, so clone packages like `com.moons.*` can be found even when the package name does not contain `roblox`. Account names like `Main`, `Alt 1`, or a Roblox username are safe display names; DENG never reads Roblox cookies, tokens, passwords, or session files.
+The Roblox Package screen scans Android for Roblox-related packages, marks `com.roblox.client` as recommended when found, lets you choose detected packages, and supports **manual package entry** for clones. Detection uses **hint fragments** (e.g. `roblox`, `rblx`, `blox`, plus optional extra hints you add for your clone’s naming pattern). Account names like `Main`, `Alt 1`, or a Roblox username are safe display names; **Unknown** is shown if you skip a name — launch still works. DENG never reads Roblox cookies, tokens, passwords, or session files.
 
 Advanced direct commands:
 
@@ -142,6 +154,7 @@ It does not automate gameplay, auto farm, run gameplay macros, bypass AFK system
 
 ## More Docs
 
+- **[New user Termux setup (step-by-step)](docs/NEW_USER_TERMUX_GUIDE.md)**
 - [Public install guide](docs/PUBLIC_INSTALL.md)
 - [Public user guide](docs/PUBLIC_USER_GUIDE.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)

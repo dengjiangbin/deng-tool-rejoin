@@ -8,6 +8,20 @@ deng-rejoin
 
 The pink DENG banner appears, then the local Termux menu.
 
+## First run after install
+
+1. Run **`deng-rejoin`** (see [PUBLIC_INSTALL.md](PUBLIC_INSTALL.md) if the command is missing).
+2. **License** — When prompted, paste the key from the **DENG Tool: Rejoin Key Panel** in Discord. One key is usually bound to **one device** until an admin runs **Reset HWID**.
+3. **First Time Setup Config** — Choose option `1` in the menu. Walk through:
+   - **Package** — Pick from **auto-detected** installed clients/clones (table: #, Package, App Name, Launchable) or enter a package name **manually** if nothing is listed.
+   - **Username / account name** (optional) — Only for the on-screen table; you can leave it unset and see **Unknown** (launch still works).
+   - **Private server or game URL** (optional) — Paste a full `https://` private server link or use app-only mode by leaving the link blank.
+   - **Discord webhook** (optional) and **snapshot** / interval if you enable webhook.
+   - **Save** when offered.
+4. **Start** — Choose option `3`. The **public** Start summary table has columns **#**, **Package**, **Username**, and **State** only (no Cache / Graphics / Status columns in normal output).
+
+For a full beginner walkthrough with troubleshooting, use **[NEW_USER_TERMUX_GUIDE.md](NEW_USER_TERMUX_GUIDE.md)**.
+
 ## Root-aware package detection and supervisor
 
 With root, DENG can list installed packages, check launcher activities, read safe `dumpsys` labels, and combine that with **hint fragments** (not a hard-coded package list) so official `com.roblox.client` and renamed clones can appear together in setup. If nothing matches, use manual package entry.
@@ -117,13 +131,13 @@ Set `DENG_BRANDING_LOGO_URL` for a thumbnail, or `LICENSE_API_PUBLIC_URL` so `�
 
 ## Roblox Package Setup
 
-The package screen automatically scans Android for Roblox-related packages. It uses safe package-name hints such as `roblox`, `rblx`, `blox`, and `moons`, so cloned packages like `com.moons.*` can be detected even when the package name does not contain `roblox`.
+The package screen automatically scans Android for Roblox-related packages. It uses safe package-name hints such as `roblox`, `rblx`, `blox`, and optional **extra fragments** you or your admin add for clone naming (**example only:** some communities add `moons` when many clone ids share that substring — yours may differ).
 
-If packages are found, DENG shows them in a numbered list and marks `com.roblox.client` as recommended. Choose one or more packages to use them, including cloned packages.
+If packages are found, DENG shows them in a numbered list and marks `com.roblox.client` as recommended when present. Choose one or more packages, or use **manual entry** for a clone’s exact package id.
 
 Each selected package can have a Roblox username/account name such as `deng1629`, `AltAccount1`, or `MyCloud1`. DENG uses this only to make the Start table easy to read. DENG may use a safe Android app label or allowlisted display-name preference key when available, but it never reads Roblox credentials, cookies, tokens, or private session files. If it cannot safely detect a name, run **Package → Detect / Refresh Usernames** or leave it unset (shown as **Unknown** in the Start table).
 
-If your clone uses another prefix, use **Auto Detect Packages** and add a safe fragment from the package name. For example, add `moons` for `com.moons.myroblox`.
+If your clone does not appear, use **Auto Detect Packages** / **Add Package** and add a **safe fragment** from the package id in detection hints — **example:** for `com.vendor.myroblox` you might add `myroblox` (follow your host’s guidance).
 
 You can also choose **Enter Manually**. Manual package names are validated and must look like a normal Android package, for example:
 

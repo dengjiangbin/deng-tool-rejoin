@@ -1,15 +1,18 @@
 # Public Install Guide
 
+**New to Termux?** Start here: **[New User Termux Setup Guide](NEW_USER_TERMUX_GUIDE.md)** — copy/paste steps from opening the app through license, setup, and Start.
+
 ## Prepare First
 
-1. Android cloud phone or Android device.
+1. Android cloud phone or Android device (root optional but useful on some hosts).
 2. Termux installed.
-3. Roblox installed.
+3. Roblox or a Roblox-compatible **clone** client APK installed.
 4. Internet connection.
-5. Termux storage permission.
-6. Optional root permission for stronger restart.
-7. Optional Termux:Boot for start after reboot.
-8. Optional Roblox private-server URL or normal Roblox game URL.
+5. A valid **DENG Tool: Rejoin license key** from your Discord Key Panel.
+6. Termux storage permission (the installer may prompt).
+7. Optional root permission for stronger restart and cache cleanup.
+8. Optional Termux:Boot for start after reboot.
+9. Optional Roblox private-server URL or normal game URL for direct join.
 
 DENG never asks for Roblox password, cookies, `.ROBLOSECURITY`, session tokens, or 2FA codes.
 
@@ -101,7 +104,15 @@ Run:
 deng-rejoin doctor
 ```
 
+Or:
+
+```sh
+cd "$HOME/.deng-tool/rejoin" && python agent/deng_tool_rejoin.py doctor --no-color
+```
+
 Doctor checks Python, Termux, Android version, SDK, Download path, root, Roblox package, SQLite, logs, and duplicate agent state.
+
+**Beginner-oriented fixes:** [NEW_USER_TERMUX_GUIDE.md](NEW_USER_TERMUX_GUIDE.md) (see *Common Problems* at the end).
 
 ---
 
