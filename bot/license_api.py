@@ -25,7 +25,7 @@ Endpoints
        Body: {"key": "DENG-...", "install_id_hash": "...",
                "device_model": "...", "app_version": "...",
                "device_label": ""}
-       Returns: {"result": "active|wrong_device|not_found|...", "message": "..."}
+       Returns: {"result": "active|wrong_device|key_not_redeemed|not_found|...", "message": "..."}
 
   POST /api/license/heartbeat
        Same body as /check. Updates last_seen_at for an active binding.
@@ -137,6 +137,12 @@ def _wrong_device_api_message() -> str:
     from agent.license import WRONG_DEVICE_USER_MESSAGE
 
     return WRONG_DEVICE_USER_MESSAGE
+
+
+def _key_not_redeemed_api_message() -> str:
+    from agent.license import KEY_NOT_REDEEMED_API_MESSAGE
+
+    return KEY_NOT_REDEEMED_API_MESSAGE
 
 
 _RESULT_MESSAGES: dict[str, str] = {
@@ -294,6 +300,8 @@ def _hash_install_id(raw_id: str) -> str:
 def _build_response(result: str, status: int = 200) -> tuple[bytes, int]:
     if result == "wrong_device":
         message = _wrong_device_api_message()
+    elif result == "key_not_redeemed":
+        message = _key_not_redeemed_api_message()
     else:
         message = _RESULT_MESSAGES.get(result, result)
     payload = json.dumps({"result": result, "message": message}).encode("utf-8")

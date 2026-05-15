@@ -58,9 +58,9 @@ def check() -> int:
     load_dotenv()
 
     print()
-    print("═" * 60)
+    print("=" * 60)
     print("  DENG Tool Rejoin — Supabase Connection Test")
-    print("═" * 60)
+    print("=" * 60)
 
     # ── 1. Environment variables ─────────────────────────────────────────────
     print("\n[1] Environment variables")
@@ -207,12 +207,12 @@ def check() -> int:
 
     # ── Done ─────────────────────────────────────────────────────────────────
     print()
-    print("═" * 60)
+    print("=" * 60)
     if missing:
         print("  RESULT: FAIL — missing tables (see above)")
         return 1
     print("  RESULT: OK — Supabase connection verified")
-    print("═" * 60)
+    print("=" * 60)
     print()
     return 0
 

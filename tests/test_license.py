@@ -18,6 +18,7 @@ from agent.license import (
 )
 from agent.license_store import (
     RESULT_ACTIVE,
+    RESULT_KEY_NOT_REDEEMED,
     RESULT_NOT_FOUND,
     RESULT_REVOKED,
     RESULT_WRONG_DEVICE,
@@ -341,6 +342,23 @@ class StoreDeviceBindingTests(unittest.TestCase):
         """Test 24 – nonexistent key returns RESULT_NOT_FOUND."""
         result = self.store.bind_or_check_device("DENG-FFFF-FFFF-FFFF-FFFF", "aabb" * 8, "X", "1")
         self.assertEqual(result, RESULT_NOT_FOUND)
+
+    def test_unowned_key_returns_key_not_redeemed_without_binding(self):
+        """Pool / unredeemed keys must not bind via the tool."""
+        from agent.license import normalize_license_key, hash_license_key
+
+        creator = "999999999999999999"
+        self.store.get_or_create_user(creator)
+        pool_key = self.store.create_key_for_user(creator)
+        kh = hash_license_key(normalize_license_key(pool_key))
+        db = self.store._load()
+        db["keys"][kh]["owner_discord_id"] = None
+        self.store._save(db)
+
+        result = self.store.bind_or_check_device(pool_key, "dead" * 16, "Pixel", "1.0")
+        self.assertEqual(result, RESULT_KEY_NOT_REDEEMED)
+        db2 = self.store._load()
+        self.assertNotIn(kh, db2.get("bindings", {}))
 
     def test_revoked_key_returns_revoked(self):
         """Test 25 – revoked key returns RESULT_REVOKED."""

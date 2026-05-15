@@ -16,8 +16,8 @@ Data model
 
 Check result codes
 ──────────────────
-active | expired | revoked | wrong_device | not_found | inactive |
-missing_key | server_unavailable
+active | expired | revoked | wrong_device | key_not_redeemed | not_found |
+inactive | missing_key | server_unavailable
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ RESULT_ACTIVE              = "active"
 RESULT_EXPIRED             = "expired"
 RESULT_REVOKED             = "revoked"
 RESULT_WRONG_DEVICE        = "wrong_device"
+RESULT_KEY_NOT_REDEEMED    = "key_not_redeemed"
 RESULT_NOT_FOUND           = "not_found"
 RESULT_INACTIVE            = "inactive"
 RESULT_MISSING_KEY         = "missing_key"
@@ -704,6 +705,16 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                     return RESULT_EXPIRED
             except (ValueError, TypeError):
                 pass
+        owner_id = record.get("owner_discord_id")
+        if owner_id is None or str(owner_id).strip() == "":
+            self.log_license_check(
+                key_id=key_hash,
+                install_id_hash=install_id_hash,
+                result=RESULT_KEY_NOT_REDEEMED,
+                device_model=device_model,
+                app_version=app_version,
+            )
+            return RESULT_KEY_NOT_REDEEMED
         # Check device binding
         binding = db.get("bindings", {}).get(key_hash)
         if binding and binding.get("is_active"):
@@ -1358,7 +1369,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
         key_hash = hash_license_key(normalized)
         key_res = (
             self._client.table("license_keys")
-            .select("status, expires_at")
+            .select("status, expires_at, owner_discord_id")
             .eq("id", key_hash)
             .execute()
         )
@@ -1387,6 +1398,16 @@ class SupabaseLicenseStore(BaseLicenseStore):
                     return RESULT_EXPIRED
             except (ValueError, TypeError):
                 pass
+        owner_id = record.get("owner_discord_id")
+        if owner_id is None or str(owner_id).strip() == "":
+            self.log_license_check(
+                key_id=key_hash,
+                install_id_hash=install_id_hash,
+                result=RESULT_KEY_NOT_REDEEMED,
+                device_model=device_model,
+                app_version=app_version,
+            )
+            return RESULT_KEY_NOT_REDEEMED
         b_res = (
             self._client.table("device_bindings")
             .select("*")

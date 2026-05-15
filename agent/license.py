@@ -173,8 +173,14 @@ def get_device_summary() -> dict[str, str]:
 # ── Remote license API (POST /api/license/check) ───────────────────────────────
 
 WRONG_DEVICE_USER_MESSAGE = (
-    "This key is already bound to another device. Use Reset HWID in Discord before using it here."
+    "Wrong device. Open DENG Tool: Rejoin Panel and use Reset HWID."
 )
+
+KEY_NOT_REDEEMED_API_MESSAGE = (
+    "This key has not been redeemed yet. Redeem it in the DENG Tool: Rejoin Panel first."
+)
+
+REDEEM_IN_PANEL_HINT = "Redeem this key in the Discord panel first."
 
 
 def _getprop(prop: str) -> str:
@@ -321,6 +327,8 @@ def check_remote_license_status(
     message = str(resp.get("message") or "").strip()
     if result == "wrong_device":
         return result, WRONG_DEVICE_USER_MESSAGE
+    if result == "key_not_redeemed":
+        return result, REDEEM_IN_PANEL_HINT
     if not message:
         message = {
             "active": "License active.",
@@ -330,5 +338,6 @@ def check_remote_license_status(
             "inactive": "License inactive.",
             "server_unavailable": "License server temporarily unavailable.",
             "missing_key": "No license key provided.",
+            "key_not_redeemed": KEY_NOT_REDEEMED_API_MESSAGE,
         }.get(result, result)
     return result, message

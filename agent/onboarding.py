@@ -153,6 +153,8 @@ def _license_ui_line(cfg: dict[str, Any], *, dev_mode: bool) -> str:
         return "License: Verified"
     if st == "wrong_device":
         return "License: Wrong device (you may need Reset HWID)"
+    if st == "key_not_redeemed":
+        return "License: Redeem this key in the Discord panel first"
     if not st or st in ("missing_key", "not_configured"):
         return "License: Not verified — Start will check, or use option 1 to update your key"
     return "License: Not verified — use option 1 if you need to change your key"

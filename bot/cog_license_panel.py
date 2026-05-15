@@ -33,6 +33,7 @@ from discord.ext import commands
 
 from agent.branding import apply_branding_to_embed_dict
 from agent.license_key_export import is_export_secret_configured
+from agent.license_owner_recovery import visible_license_rows_for_panel
 from agent.license_panel import (
     BUTTON_GENERATE,
     BUTTON_KEY_STATS,
@@ -482,7 +483,9 @@ class KeyStatsDownloadButton(discord.ui.Button):
 
         from agent.key_stats_format import build_key_stats_download_body
 
-        rows = self._host._store.get_user_key_export_rows(self._host._owner_id)
+        rows = visible_license_rows_for_panel(
+            self._host._store.get_user_key_export_rows(self._host._owner_id)
+        )
         body = build_key_stats_download_body(
             discord_user_id=self._host._owner_id,
             rows=rows,
@@ -540,7 +543,9 @@ class KeyStatsPrevButton(discord.ui.Button):
                 "This key stats view is not yours.", ephemeral=True
             )
             return
-        rows = self._host._store.list_user_keys_for_stats(self._host._owner_id)
+        rows = visible_license_rows_for_panel(
+            self._host._store.list_user_keys_for_stats(self._host._owner_id)
+        )
         new_page = self._host._page - 1
         content, embed_dicts, new_page, _, _ = _build_key_stats_ephemeral_parts(rows, new_page)
         embeds = [discord.Embed.from_dict(d) for d in embed_dicts]
@@ -564,7 +569,9 @@ class KeyStatsNextButton(discord.ui.Button):
                 "This key stats view is not yours.", ephemeral=True
             )
             return
-        rows = self._host._store.list_user_keys_for_stats(self._host._owner_id)
+        rows = visible_license_rows_for_panel(
+            self._host._store.list_user_keys_for_stats(self._host._owner_id)
+        )
         new_page = self._host._page + 1
         content, embed_dicts, new_page, _, _ = _build_key_stats_ephemeral_parts(rows, new_page)
         embeds = [discord.Embed.from_dict(d) for d in embed_dicts]
@@ -579,7 +586,7 @@ class KeyStatsView(discord.ui.View):
         super().__init__(timeout=600)
         self._store = store
         self._owner_id = owner_id
-        rows = store.list_user_keys_for_stats(owner_id)
+        rows = visible_license_rows_for_panel(store.list_user_keys_for_stats(owner_id))
         n = len(rows)
         total_pages = max(1, (n + KEY_STATS_PAGE_SIZE - 1) // KEY_STATS_PAGE_SIZE) if n else 1
         self._page = max(0, min(page, total_pages - 1))
@@ -745,7 +752,7 @@ class PanelView(discord.ui.View):
         username = str(interaction.user)
         self._store.get_or_create_user(uid, username)
         await interaction.response.defer(ephemeral=True)
-        rows = self._store.list_user_keys_for_stats(uid)
+        rows = visible_license_rows_for_panel(self._store.list_user_keys_for_stats(uid))
         content, embed_dicts, page, _, _ = _build_key_stats_ephemeral_parts(rows, 0)
         embeds = [discord.Embed.from_dict(d) for d in embed_dicts]
         view = KeyStatsView(self._store, uid, page)

@@ -53,7 +53,7 @@ class TestKeyStatsFormat(unittest.TestCase):
             }
         )
         desc = d["description"]
-        self.assertIn("🟢 Unused", desc)
+        self.assertIn("Unused / Ready for first device", desc)
         self.assertNotIn("Device:", desc)
         self.assertNotIn("License Key", desc)
         self.assertNotIn("Not Available", desc)
@@ -79,7 +79,7 @@ class TestKeyStatsFormat(unittest.TestCase):
             }
         )
         desc = d["description"]
-        self.assertIn("✅ Used", desc)
+        self.assertIn("Used / Device bound", desc)
         self.assertIn("SM-S9160", desc)
         self.assertIn("Last Active:", desc)
         self.assertNotIn("Created", desc)
@@ -124,7 +124,7 @@ class TestKeyStatsFormat(unittest.TestCase):
              "last_seen_at": None, "created_at": "2026-01-01T00:00:00+00:00"},
         ]
         d = build_key_stats_description(rows)
-        self.assertIn("🟢 Unused", d)
+        self.assertIn("Unused / Ready for first device", d)
         self.assertNotIn("License Key", d)
 
 
@@ -266,7 +266,7 @@ class TestDownloadBody(unittest.TestCase):
         body = build_key_stats_download_body(discord_user_id="110184213604499456", rows=rows)
         self.assertIn("License Keys For User ID: 110184213604499456", body)
         self.assertIn("Total Keys: 1", body)
-        self.assertIn("Unused", body)
+        self.assertIn("Unused / Ready for first device", body)
         self.assertNotIn("Not Available", body)
         self.assertNotIn("Full key export", body.lower())
         self.assertNotIn("key_hash", body.lower())
@@ -290,6 +290,7 @@ class TestDownloadBody(unittest.TestCase):
         ]
         body = build_key_stats_download_body(discord_user_id="1", rows=rows)
         self.assertIn("DENG-1111-2222-3333-4444", body)
+        self.assertIn("Used / Device bound", body)
         self.assertNotIn("DENG-AA...BB", body)
         self.assertNotIn("Created", body)
 
@@ -300,7 +301,7 @@ class TestDownloadBody(unittest.TestCase):
                  "last_seen_at": None, "created_at": "2026-01-01T00:00:00+00:00"}]
         body = build_key_stats_download_body(discord_user_id="999", rows=rows)
         self.assertNotIn("888", body)
-        self.assertIn("Used", body)
+        self.assertIn("Used / Device bound", body)
         self.assertIn("Device: D", body)
 
 

@@ -81,10 +81,10 @@ def build_key_stats_embed_dict(row: dict[str, Any]) -> dict[str, Any]:
         lines.append("Status: 🔴 Expired")
         color = COLOR_STATS_BAD
     elif used:
-        lines.append("Status: ✅ Used")
+        lines.append("Status: Used / Device bound")
         color = COLOR_STATS_USED
     else:
-        lines.append("Status: 🟢 Unused")
+        lines.append("Status: Unused / Ready for first device")
         color = COLOR_STATS_UNUSED
 
     if used and lic not in {"revoked", "expired"}:
@@ -163,8 +163,10 @@ def build_key_stats_download_body(*, discord_user_id: str, rows: list[dict[str, 
             status_word = "Revoked"
         elif lic == "expired":
             status_word = "Expired"
+        elif used:
+            status_word = "Used / Device bound"
         else:
-            status_word = "Used" if used else "Unused"
+            status_word = "Unused / Ready for first device"
 
         if full:
             body.append(f"{i}. {full} - {status_word}")

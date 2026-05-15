@@ -102,8 +102,8 @@ def build_panel_embed() -> dict[str, Any]:
             {
                 "name": "\U0001f4ca Key Stats",
                 "value": (
-                    "Private summary of your keys.\n"
-                    "**Used** = bound to a device. **Unused** = free for a new device.\n"
+                    "Private summary of keys linked to your Discord account.\n"
+                    "**Used / Device bound** or **Unused / Ready for first device**.\n"
                     "**Download Keys** exports a short text list."
                 ),
                 "inline": True,
@@ -195,8 +195,10 @@ def build_generate_success_response(full_key: str) -> dict[str, Any]:
             "color": 0x27AE60,
             "description": (
                 f"```\n{full_key}\n```\n"
+                "This key is linked to your Discord account.\n"
+                "Paste it into **DENG Tool: Rejoin**.\n\n"
                 "\u26a0\ufe0f **Save this key now.** It will not be shown again.\n"
-                "Keep it private — anyone with your key can bind it to their device."
+                "Keep it private — do not share it."
             ),
             "footer": {"text": "DENG Tool \u00b7 Key generated"},
         },
@@ -277,7 +279,9 @@ def build_redeem_success_response(display_key: str) -> dict[str, Any]:
             "description": (
                 "**Your license key (copy):**\n"
                 f"```\n{display_key}\n```\n"
-                "Start the tool to activate your device binding."
+                "This key is now linked to your Discord account.\n"
+                "You can now paste it into **DENG Tool: Rejoin**.\n"
+                "Run the tool once to bind this device — that happens on first successful verification."
             ),
         },
     }

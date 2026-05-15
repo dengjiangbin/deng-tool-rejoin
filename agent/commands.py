@@ -173,11 +173,15 @@ def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool
     _persist_license_status(cfg, result)
     if result == "wrong_device":
         _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
+    elif result == "key_not_redeemed":
+        _print_license_err(msg, use_color)
     elif result == "missing_key":
         _print_license_err("No License Key Found", use_color)
     else:
         _print_license_err(f"License Invalid: {msg}", use_color)
-    print_beginner_license_gate_help(show_hwid_footer=(result != "wrong_device"))
+    print_beginner_license_gate_help(
+        show_hwid_footer=(result not in ("wrong_device", "key_not_redeemed"))
+    )
     return False
 
 
@@ -260,6 +264,8 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
         cfg = _persist_license_status(cfg, result)
         if result == "wrong_device":
             _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
+        elif result == "key_not_redeemed":
+            _print_license_err(msg, use_color)
         else:
             _print_license_err(f"License Invalid: {msg}", use_color)
 
