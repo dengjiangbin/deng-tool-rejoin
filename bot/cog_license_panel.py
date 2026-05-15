@@ -96,6 +96,17 @@ def _is_owner(user: discord.User | discord.Member) -> bool:
     return user.id in _owner_ids()
 
 
+def _tester_ids() -> frozenset[int]:
+    """Parse REJOIN_TESTER_DISCORD_IDS — Select Version internal picker only."""
+    raw = os.environ.get("REJOIN_TESTER_DISCORD_IDS", "")
+    ids: list[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            ids.append(int(part))
+    return frozenset(ids)
+
+
 # ── Embed helper ──────────────────────────────────────────────────────────────
 
 def _embed_from_payload(
@@ -605,8 +616,14 @@ class KeyStatsView(discord.ui.View):
             child.disabled = True
 
 
-def _admin_dev_versions_enabled(user: discord.User | discord.Member) -> bool:
-    """Owners may see dev/beta channels when env allows (default on)."""
+def _internal_version_pick_enabled(user: discord.User | discord.Member) -> bool:
+    """True → Select Version lists manifest dev/beta/internal rows (not public-only).
+
+    Owners respect ``REJOIN_ADMIN_SHOW_DEV`` (default on). Tester IDs always see
+    internal picks when listed in ``REJOIN_TESTER_DISCORD_IDS``.
+    """
+    if user.id in _tester_ids():
+        return True
     if not _is_owner(user):
         return False
     raw = (os.environ.get("REJOIN_ADMIN_SHOW_DEV") or "1").strip().lower()
@@ -773,8 +790,8 @@ class PanelView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        include_dev = _admin_dev_versions_enabled(interaction.user)
-        versions = list_public_rejoin_versions(include_dev_for_admin=include_dev)
+        include_internal = _internal_version_pick_enabled(interaction.user)
+        versions = list_public_rejoin_versions(include_internal_channels=include_internal)
         if not versions:
             await interaction.response.send_message(
                 NO_PUBLIC_VERSIONS_MESSAGE,

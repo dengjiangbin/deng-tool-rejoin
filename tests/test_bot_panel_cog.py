@@ -3,7 +3,8 @@
 Uses unittest + mocked discord.py interactions so no live token is required.
 Tests cover:
   - _is_owner / _owner_ids parsing
-  - PanelView button handler logic (generate, reset_hwid, redeem)
+  - _tester_ids / _internal_version_pick_enabled (Select Version)
+  - PanelView button handler logic (generate, reset_hwid, redeem, select_version)
   - RedeemModal submission
   - LicensePanelCog command helpers (owner denied, panel config persistence)
   - Duplicate panel post prevention
@@ -12,6 +13,7 @@ Tests cover:
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import types
@@ -25,6 +27,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agent.license import normalize_license_key
+from agent import rejoin_versions as rv
+from agent.rejoin_versions import NO_PUBLIC_VERSIONS_MESSAGE, RejoinVersionInfo
 from agent.license_store import (
     LocalJsonLicenseStore,
     MAX_HWID_RESETS_PER_24H,
@@ -41,9 +45,13 @@ from bot.cog_license_panel import (
     RedeemModal,
     ResetHwidSelect,
     ResetHwidSelectView,
+    VersionPickSelect,
+    VersionPickView,
     _build_key_stats_ephemeral_parts,
+    _internal_version_pick_enabled,
     _is_owner,
     _owner_ids,
+    _tester_ids,
 )
 
 
@@ -687,6 +695,130 @@ class TestAdminStatusCommand(unittest.IsolatedAsyncioTestCase):
         embed = kwargs["embed"]
         panel_field = next(f for f in embed.fields if f.name == "Panel Config")
         self.assertIn("no panel configured", panel_field.value)
+
+
+# ── Select Version internal vs public ───────────────────────────────────────────
+
+
+class TestTesterIds(unittest.TestCase):
+    def test_csv_ids(self) -> None:
+        with patch.dict(os.environ, {"REJOIN_TESTER_DISCORD_IDS": "10, 20"}):
+            self.assertEqual(_tester_ids(), frozenset({10, 20}))
+
+
+class TestInternalVersionPickEnabled(unittest.TestCase):
+    def test_owner_default_true(self) -> None:
+        with patch.dict(os.environ, {"LICENSE_OWNER_DISCORD_IDS": "7"}):
+            self.assertTrue(_internal_version_pick_enabled(_fake_user(uid=7)))
+
+    def test_owner_false_when_show_dev_off(self) -> None:
+        with patch.dict(os.environ, {"LICENSE_OWNER_DISCORD_IDS": "7", "REJOIN_ADMIN_SHOW_DEV": "0"}):
+            self.assertFalse(_internal_version_pick_enabled(_fake_user(uid=7)))
+
+    def test_tester_true_without_owner(self) -> None:
+        with patch.dict(os.environ, {"LICENSE_OWNER_DISCORD_IDS": "1", "REJOIN_TESTER_DISCORD_IDS": "99"}):
+            self.assertTrue(_internal_version_pick_enabled(_fake_user(uid=99)))
+
+    def test_random_user_false(self) -> None:
+        with patch.dict(os.environ, {"LICENSE_OWNER_DISCORD_IDS": "1", "REJOIN_TESTER_DISCORD_IDS": ""}):
+            self.assertFalse(_internal_version_pick_enabled(_fake_user(uid=50)))
+
+
+class TestPanelSelectVersion(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.store = _make_store(self._tmp.name)
+        self.manifest = Path(self._tmp.name) / "versions.json"
+        self.manifest.write_text(
+            json.dumps(
+                [
+                    {
+                        "version": "main-dev",
+                        "channel": "dev",
+                        "install_ref": "refs/heads/main",
+                        "visible": False,
+                        "visibility": "admin",
+                        "label": "main-dev",
+                        "description": "Owner/admin testing only",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+    async def asyncTearDown(self) -> None:
+        self._tmp.cleanup()
+
+    async def test_public_user_sees_no_versions_message(self) -> None:
+        with patch.dict(os.environ, {"REJOIN_VERSIONS_MANIFEST": str(self.manifest)}), patch.object(
+            rv, "fetch_github_tag_names", return_value=[]
+        ):
+            inter = _fake_interaction(user=_fake_user(uid=501))
+            inter.response.send_message = AsyncMock()
+            view = PanelView(self.store)
+            await view.btn_select_version.callback(inter)
+
+        inter.response.send_message.assert_called_once()
+        call = inter.response.send_message.call_args
+        content = call.kwargs.get("content")
+        if content is None and call.args:
+            content = call.args[0]
+        self.assertEqual(content, NO_PUBLIC_VERSIONS_MESSAGE)
+        self.assertTrue(call.kwargs.get("ephemeral"))
+        self.assertIsNone(call.kwargs.get("embed"))
+
+    async def test_owner_gets_version_pick_view(self) -> None:
+        with patch.dict(os.environ, {"LICENSE_OWNER_DISCORD_IDS": "502", "REJOIN_VERSIONS_MANIFEST": str(self.manifest)}), patch.object(
+            rv, "fetch_github_tag_names", return_value=[]
+        ):
+            inter = _fake_interaction(user=_fake_user(uid=502))
+            inter.response.send_message = AsyncMock()
+            view = PanelView(self.store)
+            await view.btn_select_version.callback(inter)
+
+        kw = inter.response.send_message.call_args[1]
+        self.assertIsInstance(kw.get("view"), VersionPickView)
+
+    async def test_tester_gets_version_pick_view(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "LICENSE_OWNER_DISCORD_IDS": "999",
+                "REJOIN_TESTER_DISCORD_IDS": "503",
+                "REJOIN_VERSIONS_MANIFEST": str(self.manifest),
+            },
+        ), patch.object(rv, "fetch_github_tag_names", return_value=[]):
+            inter = _fake_interaction(user=_fake_user(uid=503))
+            inter.response.send_message = AsyncMock()
+            view = PanelView(self.store)
+            await view.btn_select_version.callback(inter)
+
+        kw = inter.response.send_message.call_args[1]
+        self.assertIsInstance(kw.get("view"), VersionPickView)
+
+
+class TestVersionPickSelectCallback(unittest.IsolatedAsyncioTestCase):
+    async def test_install_reply_content_only_refs_heads_main(self) -> None:
+        info = RejoinVersionInfo(
+            version="main-dev",
+            channel="dev",
+            label="main-dev",
+            description="x",
+            install_ref="refs/heads/main",
+            internal_only=True,
+        )
+        sel = VersionPickSelect([info])
+        sel._values = ["main-dev"]
+        inter = _fake_interaction()
+        inter.response.send_message = AsyncMock()
+        await sel.callback(inter)
+
+        kw = inter.response.send_message.call_args[1]
+        self.assertIsNone(kw.get("embed"))
+        self.assertIn("refs/heads/main", kw["content"])
+        self.assertIn("Desktop Copy:", kw["content"])
+        self.assertIn("Mobile Copy:", kw["content"])
+        self.assertTrue(kw["ephemeral"])
 
 
 if __name__ == "__main__":

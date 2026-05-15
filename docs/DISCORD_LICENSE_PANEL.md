@@ -19,7 +19,13 @@ All button response flows are **ephemeral** — only the clicking user sees the 
 | ♻️ Reset HWID | Unbind current device (max 5/24h) |
 | 🎟️ Redeem Key | Attach an existing key to your account |
 | 📊 Key Stats | Private list of your keys, pagination, **Download Keys** (text file) |
-| 📌 Select Version | Ephemeral picker → copy **Desktop Copy** / **Mobile Copy** install command (`refs/tags/…`) |
+| 📌 Select Version | Ephemeral picker → copy **Desktop Copy** / **Mobile Copy** (`refs/tags/…` for public stable). Owners/admins/testers (`LICENSE_OWNER_DISCORD_IDS`, optional `REJOIN_TESTER_DISCORD_IDS`) may also see internal rows such as **main-dev** (`refs/heads/main`) before any public stable release exists. |
+
+### 📦 Select Version — public vs internal
+
+- **Everyone** sees only **stable** (immutable tag refs like `refs/tags/v1.0.0`) once those releases exist and pass the public manifest filters.
+- If **no** stable/public rows exist, normal users see: *No public versions are available yet.*
+- **Owners** (`LICENSE_OWNER_DISCORD_IDS`) and optional **testers** (`REJOIN_TESTER_DISCORD_IDS`) additionally see internal manifest rows (`channel` dev/beta, `visibility: admin`, branch installs). Those installs are labeled **internal testing only** — not a public stable release.
 
 ---
 
@@ -90,10 +96,10 @@ All commands are under the `/license_panel` group.
 
 | Indicator | Meaning |
 |-----------|---------|
-| 🟢 | Key is bound to a device (HWID is active) |
-| 🟡 | No device bound — key has never been used or binding was cleared |
+| 🟢 | No device linked — nothing bound yet |
+| 🟡 | Bound to a device (HWID active) |
 
-**🟡 keys cannot be reset** — there is nothing to clear. The reason is shown in the dropdown description.
+**🟢 (no device linked) keys cannot be reset** — there is nothing to clear. The reason is shown in the dropdown description.
 
 **Timeout:** The selector view expires after 120 seconds; components auto-disable.
 

@@ -1,1 +1,14 @@
-[]
+[
+  {
+    "version": "main-dev",
+    "channel": "dev",
+    "recommended": false,
+    "title": "Main Dev Test",
+    "label": "main-dev",
+    "description": "Owner/admin testing only",
+    "install_ref": "refs/heads/main",
+    "notes": "Internal testing build from main branch",
+    "visible": false,
+    "visibility": "admin"
+  }
+]

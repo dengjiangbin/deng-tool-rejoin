@@ -99,23 +99,61 @@ class RejoinVersionMergeTests(unittest.TestCase):
         finally:
             manifest.unlink(missing_ok=True)
 
-    def test_main_ref_dropped(self) -> None:
+    def test_refs_heads_main_in_internal_merge_only(self) -> None:
+        """Branch manifest rows are internal_only; public merge omits them."""
         manifest = Path(__file__).resolve().parent / "_tmp_main_manifest.json"
         _write_manifest(
             manifest,
             [
                 {
-                    "version": "mainline",
+                    "version": "main-dev",
                     "channel": "dev",
                     "install_ref": "refs/heads/main",
-                    "visible": True,
+                    "visible": False,
+                    "visibility": "admin",
                 }
             ],
         )
         try:
             with unittest.mock.patch.dict("os.environ", {"REJOIN_VERSIONS_MANIFEST": str(manifest)}):
-                out = rv.merge_version_sources(tag_names=[], include_dev_for_admin=True)
-            self.assertEqual(out, [])
+                pub = rv.merge_version_sources(tag_names=[], include_internal_channels=False)
+                internal = rv.merge_version_sources(tag_names=[], include_internal_channels=True)
+            self.assertEqual(pub, [])
+            self.assertEqual(len(internal), 1)
+            self.assertEqual(internal[0].version, "main-dev")
+            self.assertEqual(internal[0].install_ref, "refs/heads/main")
+            self.assertTrue(internal[0].internal_only)
+        finally:
+            manifest.unlink(missing_ok=True)
+
+    def test_public_sees_stable_when_tags_and_internal_manifest_coexist(self) -> None:
+        manifest = Path(__file__).resolve().parent / "_tmp_coexist_manifest.json"
+        _write_manifest(
+            manifest,
+            [
+                {
+                    "version": "main-dev",
+                    "channel": "dev",
+                    "install_ref": "refs/heads/main",
+                    "visible": False,
+                    "visibility": "admin",
+                },
+                {
+                    "version": "v1.0.0",
+                    "channel": "stable",
+                    "visible": True,
+                    "install_ref": "refs/tags/v1.0.0",
+                },
+            ],
+        )
+        try:
+            with unittest.mock.patch.dict("os.environ", {"REJOIN_VERSIONS_MANIFEST": str(manifest)}):
+                pub = rv.merge_version_sources(tag_names=["v1.0.0"], include_internal_channels=False)
+                internal = rv.merge_version_sources(tag_names=["v1.0.0"], include_internal_channels=True)
+            pub_versions = {v.version for v in pub}
+            self.assertEqual(pub_versions, {"v1.0.0"})
+            self.assertTrue(any(v.version == "main-dev" for v in internal))
+            self.assertTrue(any(v.version == "v1.0.0" for v in internal))
         finally:
             manifest.unlink(missing_ok=True)
 
@@ -147,9 +185,35 @@ class RejoinVersionMergeTests(unittest.TestCase):
             with unittest.mock.patch.dict("os.environ", {"REJOIN_VERSIONS_MANIFEST": str(manifest)}), unittest.mock.patch.object(
                 rv, "fetch_github_tag_names", return_value=[]
             ):
-                out = rv.list_public_rejoin_versions(include_dev_for_admin=False)
+                out = rv.list_public_rejoin_versions(include_internal_channels=False)
             self.assertEqual(len(out), 1)
             self.assertEqual(out[0].version, "v1.0.0")
+        finally:
+            manifest.unlink(missing_ok=True)
+
+    def test_list_public_empty_when_only_internal_manifest_rows(self) -> None:
+        manifest = Path(__file__).resolve().parent / "_tmp_internal_only_manifest.json"
+        _write_manifest(
+            manifest,
+            [
+                {
+                    "version": "main-dev",
+                    "channel": "dev",
+                    "install_ref": "refs/heads/main",
+                    "visible": False,
+                    "visibility": "admin",
+                }
+            ],
+        )
+        try:
+            with unittest.mock.patch.dict("os.environ", {"REJOIN_VERSIONS_MANIFEST": str(manifest)}), unittest.mock.patch.object(
+                rv, "fetch_github_tag_names", return_value=[]
+            ):
+                pub = rv.list_public_rejoin_versions(include_internal_channels=False)
+                internal = rv.list_public_rejoin_versions(include_internal_channels=True)
+            self.assertEqual(pub, [])
+            self.assertEqual(len(internal), 1)
+            self.assertEqual(internal[0].version, "main-dev")
         finally:
             manifest.unlink(missing_ok=True)
 
@@ -183,6 +247,40 @@ class InstallCommandTests(unittest.TestCase):
         self.assertIn("Mobile Copy:", text)
         self.assertIn("After install:", text)
         self.assertIn("deng-rejoin", text)
+
+    def test_main_dev_install_command_uses_refs_heads_in_raw_url(self) -> None:
+        info = rv.RejoinVersionInfo(
+            version="main-dev",
+            channel="dev",
+            label="main-dev",
+            install_ref="refs/heads/main",
+            internal_only=True,
+        )
+        cmd = rv.build_full_install_command("dengjiangbin", "deng-tool-rejoin", info.install_ref)
+        self.assertIn("DENG_REJOIN_INSTALL_REF=refs/heads/main", cmd)
+        self.assertIn(
+            "raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/refs/heads/main/install.sh",
+            cmd,
+        )
+
+    def test_format_internal_instructions_tester_visibility_and_dual_copy(self) -> None:
+        info = rv.RejoinVersionInfo(
+            version="main-dev",
+            channel="dev",
+            label="main-dev",
+            install_ref="refs/heads/main",
+            internal_only=True,
+            description="Owner/admin testing only",
+        )
+        with unittest.mock.patch.object(rv, "github_owner", return_value="dengjiangbin"), unittest.mock.patch.object(
+            rv, "github_repo", return_value="deng-tool-rejoin"
+        ):
+            text = rv.format_install_instructions_plain(info)
+        self.assertIn("Visibility: owner/admin/tester only", text)
+        self.assertIn("Internal testing only", text)
+        self.assertIn("Desktop Copy:", text)
+        self.assertIn("Mobile Copy:", text)
+        self.assertIn("refs/heads/main", text)
 
 
 class InstallShRefTests(unittest.TestCase):
