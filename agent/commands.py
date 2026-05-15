@@ -438,13 +438,16 @@ def _prompt_launch_url(current_url: str, launch_mode: str) -> str:
         print("App-only mode does not need a URL. DENG will open Roblox normally.")
         return ""
     print()
-    print("Paste a Roblox link.")
+    print("Paste a Roblox link, or leave blank to skip.")
     if launch_mode == "deeplink":
         print("Example: roblox://experiences/start?placeId=123")
     else:
         print("Example: https://www.roblox.com/games/123/name?privateServerLinkCode=...")
     while True:
-        value = _prompt("Launch URL", current_url).strip()
+        value = _prompt("Launch URL (blank to skip)", current_url).strip()
+        if not value:
+            print("Skipped. No launch URL set.")
+            return ""
         try:
             result = validate_launch_url(value, launch_mode, allow_uncertain=True)
             if result.warning:
@@ -452,27 +455,39 @@ def _prompt_launch_url(current_url: str, launch_mode: str) -> str:
             return value
         except UrlValidationError as exc:
             print(f"That URL cannot be used yet: {exc}")
+            print("Enter a valid URL or leave blank to skip.")
 
 
 def _setup_launch_link(draft: dict[str, Any]) -> None:
     print()
     print("Roblox Launch Link")
-    print("1. App only, no link")
-    print("2. Public Roblox game URL")
-    print("3. Private server URL")
-    print("4. Roblox deeplink")
+    print("Roblox Launch Link Is Optional. Leave Blank To Skip.")
+    print("1. App Only, No Link")
+    print("2. Public Roblox Game URL")
+    print("3. Private Server URL")
+    print("4. Roblox Deeplink")
     choice = _prompt("Choose launch link type", "1").strip()
-    if choice == "1":
+    if choice == "1" or not choice:
         draft["launch_mode"] = "app"
         draft["launch_url"] = ""
         return
     if choice in {"2", "3"}:
-        draft["launch_mode"] = "web_url"
-        draft["launch_url"] = _prompt_launch_url(str(draft.get("launch_url") or ""), "web_url")
+        url = _prompt_launch_url(str(draft.get("launch_url") or ""), "web_url")
+        if url:
+            draft["launch_mode"] = "web_url"
+            draft["launch_url"] = url
+        else:
+            draft["launch_mode"] = "app"
+            draft["launch_url"] = ""
         return
     if choice == "4":
-        draft["launch_mode"] = "deeplink"
-        draft["launch_url"] = _prompt_launch_url(str(draft.get("launch_url") or ""), "deeplink")
+        url = _prompt_launch_url(str(draft.get("launch_url") or ""), "deeplink")
+        if url:
+            draft["launch_mode"] = "deeplink"
+            draft["launch_url"] = url
+        else:
+            draft["launch_mode"] = "app"
+            draft["launch_url"] = ""
         return
     print("Unknown choice. Keeping the current launch link settings.")
 
@@ -584,6 +599,482 @@ sh scripts/start-agent.sh >> "$APP_HOME/logs/agent.log" 2>&1
     TERMUX_BOOT_SCRIPT.chmod(0o755)
 
 
+# ─── Config Menu Submenus ─────────────────────────────────────────────────────
+
+def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
+    """Package submenu: Add / Remove / Auto Detect / List."""
+    if not _is_interactive():
+        return draft
+    while True:
+        print()
+        print("--------------------------------")
+        print("Package")
+        print("--------------------------------")
+        entries = validate_package_entries(
+            draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+        )
+        enabled_entries = [e for e in entries if e.get("enabled", True)]
+        print("Current Packages:")
+        if enabled_entries:
+            for idx, entry in enumerate(enabled_entries, start=1):
+                username = _account_username_value(entry)
+                print(f"  {idx}. {username:<20} {entry['package']}")
+        else:
+            print("  No Packages Configured.")
+        print()
+        print("1. Add Package")
+        print("2. Remove Package")
+        print("3. Auto Detect Packages")
+        print("4. List Packages")
+        print("0. Back")
+        print("--------------------------------")
+        try:
+            choice = input("Choose [0]: ").strip() or "0"
+        except EOFError:
+            break
+        if choice == "0":
+            break
+        elif choice == "1":
+            draft = _package_menu_add(draft)
+        elif choice == "2":
+            draft = _package_menu_remove(draft)
+        elif choice == "3":
+            draft = _package_menu_auto_detect(draft)
+        elif choice == "4":
+            _package_menu_list(draft)
+        else:
+            print("Please choose 1-4 or 0.")
+    return draft
+
+
+def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
+    """Add a package via auto-detect or manual entry. Username is detected, not labeled."""
+    current_entries = validate_package_entries(
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+    )
+    current_pkgs = {e["package"] for e in current_entries}
+    print()
+    print("Add Package")
+    print("1. Auto Detect")
+    print("2. Enter Manually")
+    print("0. Back")
+    choice = input("Choose [1]: ").strip() or "1"
+    if choice == "0":
+        return draft
+    new_package = None
+    if choice == "1":
+        hints = _safe_detection_hints(draft)
+        detected = _ordered_roblox_packages(hints)
+        new_pkgs = [p for p in detected if p not in current_pkgs]
+        if not detected:
+            print("No Roblox Packages Detected. Try manual entry.")
+        elif not new_pkgs:
+            print("All Detected Packages Are Already Added.")
+        elif len(new_pkgs) == 1:
+            new_package = new_pkgs[0]
+            print(f"Auto-selected: {new_package}")
+        else:
+            for idx, pkg in enumerate(new_pkgs, start=1):
+                marker = " (Recommended)" if pkg == DEFAULT_ROBLOX_PACKAGE else ""
+                print(f"  {idx}. {pkg}{marker}")
+            choice2 = input("Choose package [1]: ").strip() or "1"
+            if choice2.isdigit():
+                i = int(choice2) - 1
+                if 0 <= i < len(new_pkgs):
+                    new_package = new_pkgs[i]
+    elif choice == "2":
+        default_pkg = current_entries[0]["package"] if current_entries else DEFAULT_ROBLOX_PACKAGE
+        manual = _prompt_manual_package(default_pkg)
+        if manual:
+            new_package = manual
+    if new_package:
+        if new_package in current_pkgs:
+            print(f"Package Already Added: {new_package}")
+        else:
+            entry = _detect_or_prompt_account_username(_entry_for_package(new_package, current_entries))
+            current_entries.append(entry)
+            draft["roblox_packages"] = current_entries
+            active = enabled_package_entries(draft)
+            draft["roblox_package"] = active[0]["package"]
+            draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
+            draft = save_config(draft)
+            print(f"Package Added: {new_package}")
+    return draft
+
+
+def _package_menu_remove(draft: dict[str, Any]) -> dict[str, Any]:
+    """Remove a configured package by number. Confirms before removing."""
+    entries = validate_package_entries(
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+    )
+    enabled = [e for e in entries if e.get("enabled", True)]
+    if not enabled:
+        print("No Packages Configured.")
+        return draft
+    print()
+    print("Remove Package")
+    for idx, entry in enumerate(enabled, start=1):
+        username = _account_username_value(entry)
+        print(f"  {idx}. {username:<20} {entry['package']}")
+    print("  0. Back")
+    choice = input("Choose package to remove [0]: ").strip() or "0"
+    if choice == "0" or not choice.isdigit():
+        return draft
+    i = int(choice) - 1
+    if not (0 <= i < len(enabled)):
+        print("Invalid choice.")
+        return draft
+    target = enabled[i]
+    confirm = input(f"Remove {target['package']}? [y/N]: ").strip().lower()
+    if confirm not in {"y", "yes"}:
+        print("Cancelled.")
+        return draft
+    remaining = [e for e in entries if e["package"] != target["package"]]
+    if not remaining:
+        print("Cannot Remove The Last Package.")
+        return draft
+    draft["roblox_packages"] = remaining
+    active = [e for e in remaining if e.get("enabled", True)]
+    if active:
+        draft["roblox_package"] = active[0]["package"]
+    draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
+    draft = save_config(draft)
+    print(f"Package Removed: {target['package']}")
+    return draft
+
+
+def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
+    """Auto-detect Roblox packages and offer to add those not already added."""
+    print()
+    print("Auto Detect Packages")
+    hints = _safe_detection_hints(draft)
+    detected = _ordered_roblox_packages(hints)
+    if not detected:
+        print("No Roblox Packages Detected.")
+        input("Press Enter to continue...")
+        return draft
+    current_entries = validate_package_entries(
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+    )
+    current_pkgs = {e["package"] for e in current_entries}
+    new_pkgs = [p for p in detected if p not in current_pkgs]
+    print(f"Detected {len(detected)} package(s):")
+    for idx, pkg in enumerate(detected, start=1):
+        status = "Already Added" if pkg in current_pkgs else "New"
+        marker = " (Recommended)" if pkg == DEFAULT_ROBLOX_PACKAGE else ""
+        print(f"  {idx}. [{status}] {pkg}{marker}")
+    if not new_pkgs:
+        print("All Detected Packages Are Already Added.")
+        input("Press Enter to continue...")
+        return draft
+    print()
+    raw = input("Select packages to add (e.g. 1,2 or A for all new) [A]: ").strip().lower() or "a"
+    to_add: list[str] = []
+    if raw == "a":
+        to_add = list(new_pkgs)
+    else:
+        for part in [p.strip() for p in raw.split(",") if p.strip()]:
+            if part.isdigit():
+                i = int(part) - 1
+                if 0 <= i < len(detected):
+                    p = detected[i]
+                    if p not in current_pkgs and p not in to_add:
+                        to_add.append(p)
+    for pkg in to_add:
+        entry = _detect_or_prompt_account_username(_entry_for_package(pkg, current_entries))
+        current_entries.append(entry)
+        current_pkgs.add(pkg)
+    if to_add:
+        draft["roblox_packages"] = current_entries
+        active = enabled_package_entries(draft)
+        draft["roblox_package"] = active[0]["package"]
+        draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
+        draft = save_config(draft)
+        print(f"Added {len(to_add)} package(s).")
+    return draft
+
+
+def _package_menu_list(draft: dict[str, Any]) -> None:
+    """Display all configured packages with username and status."""
+    print()
+    print("List Packages")
+    entries = validate_package_entries(
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+    )
+    if not entries:
+        print("  No Packages Configured.")
+    else:
+        print(f"  {'#':<3} {'Username':<20} Package")
+        print(f"  {'-'*3} {'-'*20} {'-'*40}")
+        for idx, entry in enumerate(entries, start=1):
+            username = _account_username_value(entry)
+            status = "" if entry.get("enabled", True) else " [Disabled]"
+            print(f"  {idx:<3} {username:<20} {entry['package']}{status}")
+    input("\nPress Enter to continue...")
+
+
+def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
+    """Roblox Launch Link submenu — optional, blank input skips safely."""
+    if not _is_interactive():
+        return draft
+    while True:
+        print()
+        print("--------------------------------")
+        print("Roblox Launch Link")
+        print("--------------------------------")
+        print("Roblox Launch Link Is Optional.")
+        current_mode = draft.get("launch_mode", "app")
+        current_url = draft.get("launch_url", "") or ""
+        if current_url:
+            print(f"Current: {_safe_url_label(current_url)}  (Mode: {_launch_mode_label(current_mode)})")
+        else:
+            print("Current: No Roblox Launch Link Set. The Tool Will Launch The App Normally.")
+        print()
+        print("1. Set Roblox Launch Link")
+        print("2. Clear Roblox Launch Link")
+        print("3. Show Current Roblox Launch Link")
+        print("0. Back")
+        print("--------------------------------")
+        try:
+            choice = input("Choose [0]: ").strip() or "0"
+        except EOFError:
+            break
+        if choice == "0":
+            break
+        elif choice == "1":
+            _setup_launch_link(draft)
+            draft = save_config(draft)
+            print("Launch Link Saved.")
+        elif choice == "2":
+            draft["launch_mode"] = "app"
+            draft["launch_url"] = ""
+            draft = save_config(draft)
+            print("Roblox Launch Link Cleared.")
+        elif choice == "3":
+            url = draft.get("launch_url") or ""
+            if url:
+                print(f"  Roblox Launch Link: {_safe_url_label(url)}")
+                print(f"  Mode: {_launch_mode_label(draft.get('launch_mode', 'app'))}")
+            else:
+                print("  No Roblox Launch Link Set. The Tool Will Launch The App Normally.")
+            input("Press Enter to continue...")
+        else:
+            print("Please choose 1-3 or 0.")
+    return draft
+
+
+def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
+    """Webhook submenu: URL / Interval / Mode / Snapshot / Test Webhook."""
+    if not _is_interactive():
+        return draft
+    while True:
+        print()
+        print("--------------------------------")
+        print("Webhook")
+        print("--------------------------------")
+        url = draft.get("webhook_url", "") or ""
+        masked_url = webhook.mask_webhook_url(url) if url else "Not Set"
+        interval = draft.get("webhook_interval_seconds", 300)
+        mode = draft.get("webhook_mode", "new_message")
+        mode_label = "Edit Message" if mode == "edit_message" else "New Message"
+        snap = draft.get("webhook_snapshot_enabled", False)
+        snap_enabled = bool(url) and snap
+        print("Current Webhook:")
+        print(f"  URL: {masked_url}")
+        print(f"  Interval: {interval} Seconds")
+        print(f"  Mode: {mode_label}")
+        print(f"  Snapshot: {'Enabled' if snap_enabled else 'Disabled'}")
+        print()
+        print("1. Webhook URL")
+        print("2. Webhook Interval")
+        print("3. Webhook Mode")
+        print("4. Snapshot")
+        print("5. Test Webhook")
+        print("0. Back")
+        print("--------------------------------")
+        try:
+            choice = input("Choose [0]: ").strip() or "0"
+        except EOFError:
+            break
+        if choice == "0":
+            break
+        elif choice == "1":
+            _config_webhook_url(draft)
+            draft = save_config(draft)
+        elif choice == "2":
+            _setup_webhook_interval(draft)
+            draft = save_config(draft)
+            print("Webhook Interval Saved.")
+        elif choice == "3":
+            _config_webhook_mode(draft)
+            draft = save_config(draft)
+            print("Webhook Mode Saved.")
+        elif choice == "4":
+            if draft.get("webhook_url"):
+                _setup_snapshot(draft)
+                draft = save_config(draft)
+                print("Snapshot Setting Saved.")
+            else:
+                print("Set Webhook URL First.")
+                input("Press Enter to continue...")
+        elif choice == "5":
+            _test_webhook(draft)
+        else:
+            print("Please choose 1-5 or 0.")
+    return draft
+
+
+def _config_webhook_url(draft: dict[str, Any]) -> None:
+    """Set or update the webhook URL. The full URL is never printed."""
+    print()
+    print("Webhook URL")
+    print("Leave blank to skip.")
+    current = draft.get("webhook_url", "") or ""
+    if current:
+        print(f"Current: {webhook.mask_webhook_url(current)}")
+    else:
+        print("Current: Not Set")
+    value = _prompt("Discord Webhook URL (blank to skip)", "").strip()
+    if not value:
+        print("Skipped.")
+        return
+    try:
+        draft["webhook_url"] = webhook.validate_webhook_url(value)
+        draft["webhook_enabled"] = True
+        print("Webhook URL Saved.")
+    except ValueError as exc:
+        print(f"Webhook URL Is Not Valid: {exc}")
+
+
+def _config_webhook_mode(draft: dict[str, Any]) -> None:
+    """Set the webhook operating mode."""
+    print()
+    print("Webhook Mode")
+    print("1. Off")
+    print("2. Status Monitor (New Messages)")
+    print("3. Alert Only (New Messages)")
+    print("4. Status + Alerts (Edit Message)")
+    current_enabled = draft.get("webhook_enabled", False)
+    current_mode = draft.get("webhook_mode", "new_message")
+    default = "1" if not current_enabled else ("4" if current_mode == "edit_message" else "2")
+    choice = input(f"Choose [{default}]: ").strip() or default
+    if choice == "1":
+        draft["webhook_enabled"] = False
+        draft["webhook_snapshot_enabled"] = False
+        draft["webhook_send_snapshot"] = False
+    elif choice in {"2", "3"}:
+        draft["webhook_enabled"] = True
+        draft["webhook_mode"] = "new_message"
+    elif choice == "4":
+        draft["webhook_enabled"] = True
+        draft["webhook_mode"] = "edit_message"
+    else:
+        print("Unknown choice. Keeping current mode.")
+
+
+def _test_webhook(draft: dict[str, Any]) -> None:
+    """Send a test message to the configured webhook. URL is masked in all output."""
+    url = draft.get("webhook_url", "") or ""
+    if not url:
+        print("No Webhook URL Is Set. Set One First.")
+        input("Press Enter to continue...")
+        return
+    import json as _json
+    import urllib.request as _urllib_req
+    masked = webhook.mask_webhook_url(url)
+    print(f"Sending Test Webhook To {masked}...")
+    try:
+        payload = _json.dumps({"content": "DENG Tool: Rejoin — Test Webhook"}).encode("utf-8")
+        req = _urllib_req.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _urllib_req.urlopen(req, timeout=10) as resp:  # noqa: S310
+            code = resp.getcode()
+        if code in (200, 204):
+            print("Test Webhook Sent Successfully.")
+        else:
+            print(f"Webhook Returned Status {code}.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Test Webhook Failed: {exc}")
+    input("Press Enter to continue...")
+
+
+def _config_menu_yescaptcha(draft: dict[str, Any]) -> dict[str, Any]:
+    """YesCaptcha submenu: Set / Clear API key, Check Balance / Points."""
+    if not _is_interactive():
+        return draft
+    while True:
+        print()
+        print("--------------------------------")
+        print("YesCaptcha")
+        print("--------------------------------")
+        current_key = draft.get("yescaptcha_key", "") or ""
+        if current_key:
+            masked = current_key[:4] + "..." if len(current_key) > 4 else "****"
+            print(f"API Key: Configured ({masked})")
+        else:
+            print("YesCaptcha API Key Not Set.")
+        print()
+        print("1. Set YesCaptcha API Key")
+        print("2. Clear YesCaptcha API Key")
+        print("3. Check Balance / Points")
+        print("0. Back")
+        print("--------------------------------")
+        try:
+            choice = input("Choose [0]: ").strip() or "0"
+        except EOFError:
+            break
+        if choice == "0":
+            break
+        elif choice == "1":
+            _config_yescaptcha_set(draft)
+            draft = save_config(draft)
+        elif choice == "2":
+            draft["yescaptcha_key"] = ""
+            draft = save_config(draft)
+            print("YesCaptcha API Key Cleared.")
+        elif choice == "3":
+            _config_yescaptcha_balance(draft)
+        else:
+            print("Please choose 1-3 or 0.")
+    return draft
+
+
+def _config_yescaptcha_set(draft: dict[str, Any]) -> None:
+    """Prompt for YesCaptcha API key. The key is never printed in full."""
+    print()
+    print("Set YesCaptcha API Key")
+    print("Leave blank to skip.")
+    raw = _prompt("YesCaptcha API Key (blank to skip)", "").strip()
+    if not raw:
+        print("Skipped.")
+        return
+    draft["yescaptcha_key"] = raw[:256]
+    print("YesCaptcha API Key Saved.")
+
+
+def _config_yescaptcha_balance(draft: dict[str, Any]) -> None:
+    """Check YesCaptcha account balance / points. The API key is not exposed in output."""
+    key = draft.get("yescaptcha_key", "") or ""
+    if not key:
+        print("YesCaptcha API Key Not Set.")
+        input("Press Enter to continue...")
+        return
+    print("Checking Balance...")
+    try:
+        from . import captcha as _captcha
+        balance = _captcha.get_balance(key)
+        print(f"Balance / Points: {balance}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Balance Check Failed: {exc}")
+    input("Press Enter to continue...")
+
+
+# ─── Setup / Config wizards ───────────────────────────────────────────────────
+
 def _run_guided_config_menu(config_data: dict[str, Any], args: argparse.Namespace, *, title: str) -> tuple[dict[str, Any] | None, bool]:
     """Backward-compatible entrypoint for older setup callers."""
     return _run_edit_config_menu(config_data, args)
@@ -645,16 +1136,10 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("--------------------------------")
         print("DENG Tool: Rejoin Config")
         print("--------------------------------")
-        print("1. Roblox Packages / Account Names")
+        print("1. Package")
         print("2. Roblox Launch Link")
-        print("3. Discord Webhook")
-        if draft.get("webhook_enabled"):
-            print("4. Snapshot")
-            print("5. Webhook Interval")
-        else:
-            print("4. Snapshot: Disabled because Discord webhook is off")
-            print("5. Webhook Interval: Disabled because Discord webhook is off")
-        print("6. View Current Settings")
+        print("3. Webhook")
+        print("4. YesCaptcha")
         print("0. Back")
         print("--------------------------------")
         print("\nCurrent settings:")
@@ -666,23 +1151,14 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("--------------------------------")
         print("DENG Tool: Rejoin Config")
         print("--------------------------------")
-        print("1. Roblox Packages / Account Names")
+        print("1. Package")
         print("2. Roblox Launch Link")
-        print("3. Discord Webhook")
-        if draft.get("webhook_enabled"):
-            print("4. Snapshot")
-            print("5. Webhook Interval")
-        else:
-            print("4. Snapshot: Disabled because Discord webhook is off")
-            print("5. Webhook Interval: Disabled because Discord webhook is off")
-        print("6. License Key")
-        print("7. YesCaptcha API Key")
-        print("8. View Current Settings")
-        print("A. Advanced Info")
+        print("3. Webhook")
+        print("4. YesCaptcha")
         print("0. Back")
         print("--------------------------------")
         try:
-            choice = input("Choose setting [8]: ").strip().lower() or "8"
+            choice = input("Choose [0]: ").strip() or "0"
         except EOFError:
             print("\nNo interactive input was available. Run this command in Termux to edit settings.")
             print("\nCurrent settings:")
@@ -691,57 +1167,15 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         if choice == "0":
             return draft, True
         if choice == "1":
-            packages, hints = _choose_packages_menu(
-                list(draft.get("roblox_packages") or [package_entry(draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE), "Main", True)]),
-                list(draft.get("package_detection_hints") or DEFAULT_ROBLOX_PACKAGE_HINTS),
-            )
-            draft["roblox_packages"] = packages
-            draft["package_detection_hints"] = hints
-            active_entries = enabled_package_entries(draft)
-            draft["roblox_package"] = active_entries[0]["package"]
-            draft["selected_package_mode"] = "multiple" if len(active_entries) > 1 else "single"
-            draft = save_config(draft)
-            print("Package settings saved.")
+            draft = _config_menu_package(draft)
         elif choice == "2":
-            _setup_launch_link(draft)
-            draft = save_config(draft)
-            print("Launch link saved.")
+            draft = _config_menu_launch_link(draft)
         elif choice == "3":
-            _setup_webhook(draft)
-            draft = save_config(draft)
-            print("Webhook settings saved.")
+            draft = _config_menu_webhook(draft)
         elif choice == "4":
-            if draft.get("webhook_enabled"):
-                _setup_snapshot(draft)
-                draft = save_config(draft)
-                print("Snapshot setting saved.")
-            else:
-                print("Snapshot is disabled because Discord webhook is off.")
-        elif choice == "5":
-            if draft.get("webhook_enabled"):
-                _setup_webhook_interval(draft)
-                draft = save_config(draft)
-                print("Webhook interval saved.")
-            else:
-                print("Webhook interval is disabled because Discord webhook is off.")
-        elif choice == "6":
-            _setup_license_key(draft)
-            draft = save_config(draft)
-            print("License key saved.")
-        elif choice == "7":
-            _setup_yescaptcha_key(draft)
-            draft = save_config(draft)
-            print("YesCaptcha key saved.")
-        elif choice == "8":
-            print()
-            _print_config_summary(draft)
-            input("\nPress Enter to continue...")
-        elif choice == "a":
-            print("\nAdvanced Info")
-            _print_json(safe_config_view(draft))
-            input("\nPress Enter to continue...")
+            draft = _config_menu_yescaptcha(draft)
         else:
-            print("Please choose 1-8, A, or 0.")
+            print("Please choose 1-4 or 0.")
             input("Press Enter to continue...")
 
 

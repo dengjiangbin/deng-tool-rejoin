@@ -13,13 +13,76 @@ The pink DENG banner appears, then the local Termux menu.
 Choose **First Time Setup Config** for a new device. Setup is a guided menu, not a code or JSON editor. It walks through:
 
 - Roblox Package Setup
-- Roblox Public / Private Server Link
+- Roblox Public / Private Server Link (Optional — leave blank to skip)
 - Discord Webhook Setup
 - Phone Snapshot For Webhook, only when webhook is enabled
 - Webhook Info Interval, only when webhook is enabled
 - Save And Start
 
 Choose **Setup / Edit Config** to change one section later without redoing everything.
+
+## Setup / Edit Config Menu
+
+The **Setup / Edit Config** menu has four sections:
+
+```
+1. Package
+2. Roblox Launch Link
+3. Webhook
+4. YesCaptcha
+0. Back
+```
+
+### 1. Package
+
+Manage Roblox packages (the main app and any clones):
+
+- **Add Package** — Auto-detect from Android or enter manually. DENG tries to detect the Roblox account username safely from the app; if it cannot, it shows "Unknown" in the Start table (which is fine, it will still launch).
+- **Remove Package** — Select by number, confirm removal. Only the selected package is removed.
+- **Auto Detect Packages** — Scan for Roblox and cloned packages not yet added. Avoids duplicates.
+- **List Packages** — Show all configured packages with username and status.
+
+Current packages are shown at the top of the submenu.
+
+### 2. Roblox Launch Link
+
+**Roblox Launch Link is optional.** Leave it blank and DENG will launch Roblox normally (app mode).
+
+- **Set Roblox Launch Link** — Enter a public Roblox game URL, private server URL, or deeplink. Leave blank to skip.
+- **Clear Roblox Launch Link** — Remove the saved link and revert to app mode.
+- **Show Current Roblox Launch Link** — Display the masked current link.
+
+If no launch link is set, Start launches Roblox using the app launcher normally — same as choosing "App Only, No Link."
+
+### 3. Webhook
+
+Configure Discord status updates. Snapshot and interval are inside this submenu — not separate top-level items.
+
+Current webhook state (URL masked, interval, mode, snapshot) is shown at the top.
+
+- **Webhook URL** — Set or update the Discord webhook URL. The full URL is never shown in logs or menus.
+- **Webhook Interval** — Set how often DENG sends status updates (minimum 30 seconds).
+- **Webhook Mode** — Off / Status Monitor / Alert Only / Status + Alerts.
+- **Snapshot** — Enable phone screenshots attached to webhook messages. Requires Webhook URL to be set first.
+- **Test Webhook** — Send a test message to verify the webhook works.
+
+### 4. YesCaptcha
+
+Configure the YesCaptcha API key for CAPTCHA solving.
+
+- **Set YesCaptcha API Key** — Enter your API key (masked, never printed in full).
+- **Clear YesCaptcha API Key** — Remove the saved key.
+- **Check Balance / Points** — Show current account balance if API key is set.
+
+The API key is masked (first four characters only) in all menus and logs. Missing key does not block Start.
+
+## License Key
+
+The license key is **not** configured from the Setup / Config menu. When you run **Start**, DENG checks your license automatically:
+
+- `DENG_DEV=1` skips the license check (development mode).
+- If a license key is stored in config, it is verified at Start.
+- If no key is found and license is enabled, DENG prompts you to enter one.
 
 ## Roblox Package Setup
 
@@ -29,21 +92,23 @@ If packages are found, DENG shows them in a numbered list and marks `com.roblox.
 
 Each selected package can have a Roblox username/account name such as `deng1629`, `AltAccount1`, or `MyCloud1`. DENG uses this only to make the Start table easy to read. DENG may use a safe Android app label or allowlisted display-name preference key when available, but it never reads Roblox credentials, cookies, tokens, or private session files. If it cannot safely detect a name, type one yourself or leave it blank (shown as `Unknown` in the Start table).
 
-If your clone uses another prefix, open **Detection hints for cloned package names** and add a safe fragment from the package name. For example, add `moons` for `com.moons.myroblox` or `com.moons.` for a whole prefix.
+If your clone uses another prefix, use **Auto Detect Packages** and add a safe fragment from the package name. For example, add `moons` for `com.moons.myroblox`.
 
-You can also choose **Enter package name manually**. Manual package names are validated and must look like a normal Android package, for example:
+You can also choose **Enter Manually**. Manual package names are validated and must look like a normal Android package, for example:
 
 ```text
 com.roblox.client
 ```
 
-If no package is detected, install Roblox, add a clone detection hint, reopen DENG, and rescan. Android package names do not always reveal the original app identity, so manual entry remains available for unusual clone tools.
+If no package is detected, install Roblox, add a clone detection hint, reopen DENG, and rescan.
 
 ## Discord Webhook
 
 Discord webhook updates are optional. DENG masks the webhook URL in status/config/logs and only sends safe device/rejoin information. It never sends Roblox cookies, tokens, passwords, or credentials.
 
 Snapshots are optional and may show private screen information. Enable snapshots only on your own device/cloud phone.
+
+Snapshot and Webhook Interval are configured inside the **Webhook** submenu, not as top-level items.
 
 ## Window Layout
 
@@ -53,7 +118,7 @@ When only one package is selected, window layout is skipped — but the package 
 
 ## Private Server URL
 
-Choose web/private-server URL mode and paste your Roblox URL. DENG masks private query values in logs and status, for example:
+Choose **Set Roblox Launch Link** → **Private Server URL** and paste your Roblox URL. DENG masks private query values in logs and status, for example:
 
 ```text
 privateServerLinkCode=***MASKED***
