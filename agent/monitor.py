@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import android
-from .config import validate_config
+from .config import validate_config, validate_package_name
 
 
 @dataclass(frozen=True)
@@ -16,9 +16,10 @@ class HealthResult:
     meta: dict[str, Any]
 
 
-def check_roblox_health(config_data: dict[str, Any]) -> HealthResult:
-    cfg = validate_config(config_data)
-    package = cfg["roblox_package"]
+def check_package_health(config_data: dict[str, Any], package: str) -> HealthResult:
+    """Environment + process checks for one Android package (Roblox or clone)."""
+    validate_config(config_data)
+    package = validate_package_name(package)
 
     if not android.network_available():
         return HealthResult("network_down", "network check failed", {"package": package})
@@ -47,3 +48,8 @@ def check_roblox_health(config_data: dict[str, Any]) -> HealthResult:
         "Roblox process was not detected",
         {"package": package, "foreground": foreground, "running": False},
     )
+
+
+def check_roblox_health(config_data: dict[str, Any]) -> HealthResult:
+    cfg = validate_config(config_data)
+    return check_package_health(config_data, cfg["roblox_package"])

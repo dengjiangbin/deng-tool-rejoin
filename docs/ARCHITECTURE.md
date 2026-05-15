@@ -38,7 +38,13 @@ Public install creates global Termux wrappers in `$PREFIX/bin` and a market-styl
 
 Config lives at `~/.deng-tool/rejoin/config.json` and is mirrored into the SQLite `config` table. Every save validates package names, launch mode, URLs, booleans, numeric limits, and log level.
 
-Config also stores detected `android_release`, `android_sdk`, and `download_dir` for status and diagnostics. New configs use `roblox_packages` as objects with `package`, `account_username`, `enabled`, and `username_source`; old `label`, old `roblox_package` strings, and old `roblox_packages` string lists migrate into that object list. Account names are display-only and may come from manual entry, a safe Android app label, or an allowlisted display-name preference key. Package auto-detection uses configurable `package_detection_hints` such as `roblox`, `rblx`, `blox`, and `moons` so App Cloner or cloud-phone packages like `com.moons.*` can be found without relaxing Android package validation.
+Each `roblox_packages` entry supports `package`, `app_name`, `account_username`, optional per-package `private_server_url`, and toggles for low graphics / auto reopen / auto reconnect. Global `private_server_url` applies when a package omits its own. URLs are masked in logs and normal CLI output.
+
+Nested `package_detection` drives root-aware discovery (`pm` / `cmd package` listing, launchability via `resolve-activity`, `dumpsys` labels, and configurable hint fragments). Hints such as `roblox`, `rblx`, `blox`, `moon`, `moons`, `lite`, and `clone` are **aids only** — they are not treated as a fixed allow-list. Manual package entry remains available when nothing matches. Legacy flat `package_detection_hints` is kept in sync with `package_detection.hints`.
+
+On every **Start**, DENG runs **mandatory safe cache cleanup** (e.g. `cache`, `code_cache`, `files/tmp`) via root `find -delete` — never `pm clear` and never full app data, logins, cookies, or shared_prefs. Optional **low graphics** merges known keys into `ClientSettings/ClientAppSettings.json` when that JSON exists, with backup, verification, and honest Skipped/Failed status.
+
+Nested `supervisor` configures launch grace, health interval, restart backoff, hourly restart caps, and global auto-reopen / auto-reconnect behavior coordinated with per-package flags. The Start summary is a **single table**: Package, Username, Cache, Graphics, State, and Status.
 
 ## Private Test Update Flow
 

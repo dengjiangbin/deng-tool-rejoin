@@ -1,10 +1,10 @@
 {
   "agent_version": "1.0.0",
+  "android_release": "13",
+  "android_sdk": "33",
   "auto_rejoin_enabled": false,
   "auto_resize_enabled": false,
   "auto_resize_mode": "off",
-  "android_release": "13",
-  "android_sdk": "33",
   "backoff_max_seconds": 300,
   "backoff_min_seconds": 10,
   "created_at": "2026-01-01T00:00:00+00:00",
@@ -13,25 +13,51 @@
   "first_setup_completed": false,
   "foreground_grace_seconds": 30,
   "health_check_interval_seconds": 30,
+  "install_profile": "public",
+  "last_layout_preview": [],
   "launch_mode": "app",
   "launch_url": "",
-  "last_layout_preview": [],
+  "license_key": "",
+  "license": {
+    "channel": "stable",
+    "device_label": "",
+    "disabled_by_user": false,
+    "enabled": true,
+    "install_id": "",
+    "key": "",
+    "last_check_at": null,
+    "last_status": "not_configured",
+    "mode": "remote",
+    "server_url": "https://rejoin.deng.my.id"
+  },
   "log_level": "INFO",
   "max_fast_failures": 3,
-  "package_detection_hints": [
-    "roblox",
-    "rblx",
-    "blox",
-    "moons"
-  ],
+  "optimization": {
+    "keep_screen_awake": true,
+    "low_graphics_enabled": true,
+    "reduce_android_animations": true
+  },
+  "package_detection": {
+    "enabled": true,
+    "hints": ["roblox", "rblx", "blox", "moon", "moons", "lite", "clone"],
+    "include_launchable_only": true
+  },
+  "package_detection_hints": ["roblox", "rblx", "blox", "moon", "moons", "lite", "clone"],
+  "package_start_times": {},
+  "private_server_url": "",
   "reconnect_delay_seconds": 8,
   "roblox_package": "com.roblox.client",
   "roblox_packages": [
     {
-      "account_username": "Main",
+      "account_username": "",
+      "app_name": "",
+      "auto_reconnect_enabled": true,
+      "auto_reopen_enabled": true,
       "enabled": true,
+      "low_graphics_enabled": true,
       "package": "com.roblox.client",
-      "username_source": "manual"
+      "private_server_url": "",
+      "username_source": "not_set"
     }
   ],
   "root_available": false,
@@ -39,20 +65,17 @@
   "selected_package_mode": "single",
   "snapshot_max_age_seconds": 300,
   "snapshot_temp_path": "",
-  "termux_boot_enabled": false,
-  "license_key": "",
-  "license": {
-    "enabled": false,
-    "mode": "local",
-    "key": "",
-    "server_url": "",
-    "install_id": "",
-    "channel": "stable",
-    "device_label": "",
-    "last_status": "not_configured",
-    "last_check_at": null
+  "supervisor": {
+    "auto_reconnect_enabled": true,
+    "auto_reopen_enabled": true,
+    "enabled": true,
+    "health_check_interval_seconds": 10,
+    "launch_grace_seconds": 15,
+    "max_restart_attempts_per_hour": 10,
+    "restart_backoff_seconds": 10
   },
-  "yescaptcha_key": "",
+  "termux_boot_enabled": false,
+  "updated_at": "2026-01-01T00:00:00+00:00",
   "webhook_enabled": false,
   "webhook_interval_seconds": 300,
   "webhook_last_message_id": "",
@@ -64,5 +87,5 @@
   "webhook_tags": [],
   "webhook_url": "",
   "window_gap_px": 8,
-  "updated_at": "2026-01-01T00:00:00+00:00"
+  "yescaptcha_key": ""
 }

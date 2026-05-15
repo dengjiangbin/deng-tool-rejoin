@@ -8,6 +8,18 @@ deng-rejoin
 
 The pink DENG banner appears, then the local Termux menu.
 
+## Root-aware package detection and supervisor
+
+With root, DENG can list installed packages, check launcher activities, read safe `dumpsys` labels, and combine that with **hint fragments** (not a hard-coded package list) so official `com.roblox.client` and renamed clones can appear together in setup. If nothing matches, use manual package entry.
+
+**Every Start** clears **only** safe cache-style paths under each selected package (`cache`, `code_cache`, `files/tmp`). It never runs `pm clear`, never wipes login/session storage, and failures there never block launch. The Start table shows **Cache** and **Graphics** results per package.
+
+**Low graphics** applies only when the known `ClientAppSettings.json` file exists; otherwise the tool reports **Skipped** honestly.
+
+The **supervisor** (when Auto rejoin is enabled) monitors each selected package with configurable grace time, health interval, backoff, and hourly restart limits. It can **reopen** missing processes and attempt **reconnect** when a process is alive but no longer foreground for your client. Per-package **private server URLs** override the global URL; URLs are **masked** in normal output.
+
+The live **Start** view is **one table** with columns: Package, Username, Cache, Graphics, State, and Status.
+
 ## Configure Roblox
 
 Choose **First Time Setup Config** for a new device. Setup is a guided menu, not a code or JSON editor. It walks through:

@@ -7,22 +7,27 @@ import threading
 import time
 from typing import Any
 
-from . import android, db
+from . import db
 from .backoff import calculate_backoff_seconds
 from .config import load_config, validate_config
 from .launcher import perform_rejoin
 from .lockfile import LockManager
 from .logger import configure_logging, log_event
-from .monitor import check_roblox_health
+from .monitor import check_package_health, check_roblox_health
 
 
 # ─── Status constants (shown in terminal and webhook) ─────────────────────────
 
-STATUS_ONLINE    = "Online"
-STATUS_OFFLINE   = "Offline"
+STATUS_ONLINE = "Online"
+STATUS_OFFLINE = "Offline"
 STATUS_LAUNCHING = "Launching"
-STATUS_CHECKING  = "Checking"
-STATUS_REVIVING  = "Reviving"
+STATUS_CHECKING = "Checking"
+STATUS_REVIVING = "Reviving"
+STATUS_BACKGROUND = "Background"
+STATUS_RECONNECTING = "Reconnecting"
+STATUS_WARNING = "Warning"
+STATUS_FAILED = "Failed"
+STATUS_UNKNOWN = "Unknown"
 
 
 class Supervisor:
@@ -117,23 +122,21 @@ class Supervisor:
 
 # ─── Per-package worker ────────────────────────────────────────────────────────
 
-class _PackageWorker(threading.Thread):
-    """Background thread that monitors and auto-revives one Roblox package.
 
-    It does NOT interact with other workers and never kills packages outside
-    its own scope.  Status is published to ``status_map[package]`` so the
-    main thread (or a display loop) can read current states.
-    """
+class _PackageWorker(threading.Thread):
+    """Background thread that monitors and auto-revives one Roblox package."""
 
     def __init__(
         self,
-        package: str,
+        entry: dict[str, Any],
         cfg: dict[str, Any],
         status_map: dict[str, str],
         stop_event: threading.Event,
         on_status_change: Any = None,
     ) -> None:
+        package = str(entry.get("package") or "")
         super().__init__(name=f"worker-{package}", daemon=True)
+        self.entry = dict(entry)
         self.package = package
         self.cfg = cfg
         self.status_map = status_map
@@ -145,11 +148,20 @@ class _PackageWorker(threading.Thread):
         self.last_error: str | None = None
         self.online_since: float | None = None
         self.last_seen_at: float | None = None
+        self.grace_start: float | None = None
+        self.bg_since: float | None = None
+        self._restart_times: list[float] = []
+        self._last_detail: str = ""
         self.logger = configure_logging(level=cfg.get("log_level", "INFO"))
 
-    def _set_status(self, status: str) -> None:
+    def _sup(self) -> dict[str, Any]:
+        raw = self.cfg.get("supervisor")
+        return raw if isinstance(raw, dict) else {}
+
+    def _set_status(self, status: str, detail: str = "") -> None:
         old = self.status_map.get(self.package)
         self.status_map[self.package] = status
+        self._last_detail = detail or self._last_detail
         if old != status and callable(self.on_status_change):
             self.on_status_change(self.package, status)
 
@@ -158,104 +170,172 @@ class _PackageWorker(threading.Thread):
         while not self.stop_event.is_set() and time.time() < deadline:
             time.sleep(min(1.0, deadline - time.time()))
 
+    def _restart_budget_ok(self) -> bool:
+        now = time.time()
+        self._restart_times = [t for t in self._restart_times if now - t < 3600]
+        cap = int(self._sup().get("max_restart_attempts_per_hour", 10))
+        return len(self._restart_times) < cap
+
+    def _record_restart(self) -> None:
+        self._restart_times.append(time.time())
+
+    def _can_auto_reopen(self) -> bool:
+        return bool(self.entry.get("auto_reopen_enabled", True)) and bool(self._sup().get("auto_reopen_enabled", True))
+
+    def _can_auto_reconnect(self) -> bool:
+        return bool(self.entry.get("auto_reconnect_enabled", True)) and bool(self._sup().get("auto_reconnect_enabled", True))
+
     def run(self) -> None:
         cfg = self.cfg
-        interval = int(cfg.get("health_check_interval_seconds", 30))
-        grace = int(cfg.get("foreground_grace_seconds", 30))
-        grace_start: float | None = None
+        sup = self._sup()
+        interval = int(sup.get("health_check_interval_seconds") or cfg.get("health_check_interval_seconds", 30))
+        grace = int(sup.get("launch_grace_seconds") or cfg.get("foreground_grace_seconds", 30))
+        backoff_base = int(sup.get("restart_backoff_seconds", 10))
 
         while not self.stop_event.is_set():
             try:
-                # Heartbeat: check if process is running
-                self._set_status(STATUS_CHECKING)
-                running = android.is_process_running(self.package)
+                if not cfg.get("auto_rejoin_enabled") or not sup.get("enabled", True):
+                    self._set_status(STATUS_OFFLINE, "supervisor disabled")
+                    db.insert_heartbeat("disabled", {"package": self.package})
+                    self._sleep(interval)
+                    continue
 
-                if running:
+                self._set_status(STATUS_CHECKING, "")
+                health = check_package_health(cfg, self.package)
+
+                if health.state == "healthy":
                     self.failure_count = 0
                     self.unhealthy_since = None
-                    grace_start = None
+                    self.grace_start = None
+                    self.bg_since = None
                     now_ts = time.time()
                     if self.online_since is None:
                         self.online_since = now_ts
                     self.last_seen_at = now_ts
-                    self._set_status(STATUS_ONLINE)
+                    self._set_status(STATUS_ONLINE, "Heartbeat OK")
                     db.insert_heartbeat("healthy", {"package": self.package})
                     log_event(self.logger, "info", "heartbeat", status="healthy", package=self.package)
                     self._sleep(interval)
                     continue
 
-                # Process not detected
+                if health.state in {"network_down", "roblox_not_installed"}:
+                    self._set_status(STATUS_WARNING, health.message)
+                    self._sleep(interval)
+                    continue
+
+                running = bool(health.meta.get("running"))
+                fg_wrong = running and health.state == "roblox_not_running" and health.meta.get("foreground") not in (self.package, None)
+
+                if fg_wrong and self._can_auto_reconnect():
+                    now = time.time()
+                    if self.bg_since is None:
+                        self.bg_since = now
+                    if now - self.bg_since < grace * 2:
+                        self._set_status(STATUS_BACKGROUND, "")
+                        self._sleep(min(interval, grace))
+                        continue
+                    if not self._restart_budget_ok():
+                        self._set_status(STATUS_WARNING, "restart limit reached")
+                        self._sleep(backoff_base)
+                        continue
+                    self.bg_since = None
+                    self._set_status(STATUS_RECONNECTING, "disconnected")
+                    log_event(self.logger, "info", "reconnect_stale_foreground", package=self.package)
+                    pkg_cfg = dict(cfg)
+                    pkg_cfg["roblox_package"] = self.package
+                    result = perform_rejoin(pkg_cfg, reason="disconnected", package_entry=self.entry, no_force_stop=True)
+                    self._record_restart()
+                    if result.success:
+                        self._set_status(STATUS_LAUNCHING, "Reopened — launch command sent")
+                    else:
+                        self.failure_count += 1
+                        self.last_error = result.error
+                        self._set_status(STATUS_FAILED, result.error or "launch failed")
+                    self._sleep(max(int(cfg.get("reconnect_delay_seconds", 8)), interval))
+                    continue
+
+                self.bg_since = None
+
+                if running:
+                    self._sleep(interval)
+                    continue
+
                 now = time.time()
-                if grace_start is None:
-                    grace_start = now
-                elapsed = now - grace_start
+                if self.grace_start is None:
+                    self.grace_start = now
+                elapsed = now - self.grace_start
 
                 if elapsed < grace:
-                    self._set_status(STATUS_OFFLINE)
-                    log_event(self.logger, "warning", "roblox_not_running",
-                              grace_remaining_seconds=int(grace - elapsed), package=self.package)
+                    self._set_status(STATUS_OFFLINE, f"grace {int(grace - elapsed)}s")
                     self._sleep(min(5, grace - elapsed))
                     continue
 
-                # Grace period expired → auto-revive
-                grace_start = None
-                self._set_status(STATUS_REVIVING)
+                if not self._can_auto_reopen():
+                    self._set_status(STATUS_OFFLINE, "auto reopen disabled")
+                    self._sleep(interval)
+                    continue
+
+                if not self._restart_budget_ok():
+                    self._set_status(STATUS_WARNING, "restart limit reached")
+                    self._sleep(backoff_base)
+                    continue
+
+                self.grace_start = None
+                self._set_status(STATUS_RECONNECTING, "process missing")
                 log_event(self.logger, "info", "reviving_package", package=self.package)
                 pkg_cfg = dict(cfg)
                 pkg_cfg["roblox_package"] = self.package
-                result = perform_rejoin(pkg_cfg, reason="heartbeat_dead")
+                result = perform_rejoin(pkg_cfg, reason="process_missing", package_entry=self.entry, no_force_stop=True)
+                self._record_restart()
 
                 if result.success:
                     self.failure_count = 0
                     self.revive_count += 1
-                    self.online_since = None  # reset; will be set on next healthy beat
-                    self._set_status(STATUS_LAUNCHING)
-                    log_event(self.logger, "info", "revive_success", package=self.package)
-                    # Wait for the app to start up before re-checking
+                    self.online_since = None
+                    self._set_status(STATUS_LAUNCHING, "Reopened — launch command sent")
                     self._sleep(max(int(cfg.get("reconnect_delay_seconds", 8)), interval))
                 else:
                     self.failure_count += 1
                     self.last_error = result.error or "revive failed"
-                    self._set_status(STATUS_OFFLINE)
-                    backoff = calculate_backoff_seconds(
-                        max(1, self.failure_count),
-                        int(cfg.get("backoff_min_seconds", 10)),
-                        int(cfg.get("backoff_max_seconds", 300)),
+                    self._set_status(STATUS_OFFLINE, result.error or "")
+                    delay = max(
+                        backoff_base,
+                        calculate_backoff_seconds(
+                            max(1, self.failure_count),
+                            int(cfg.get("backoff_min_seconds", 10)),
+                            int(cfg.get("backoff_max_seconds", 300)),
+                        ),
                     )
-                    log_event(self.logger, "error", "revive_failed",
-                              package=self.package, failure_count=self.failure_count,
-                              backoff_seconds=backoff, error=result.error or "")
-                    self._sleep(backoff)
+                    log_event(
+                        self.logger,
+                        "error",
+                        "revive_failed",
+                        package=self.package,
+                        failure_count=self.failure_count,
+                        backoff_seconds=delay,
+                        error=result.error or "",
+                    )
+                    self._sleep(delay)
 
             except Exception as exc:  # noqa: BLE001 - worker must not crash
                 log_event(self.logger, "error", "worker_error", package=self.package, error=str(exc))
-                self._set_status(STATUS_OFFLINE)
+                self._set_status(STATUS_UNKNOWN, str(exc))
                 self._sleep(interval)
 
 
 class MultiPackageSupervisor:
-    """Supervisor that monitors multiple Roblox packages independently.
-
-    Each package runs in its own _PackageWorker thread.  Dead packages are
-    revived automatically without touching the other running instances.
-    The session stays alive indefinitely (blocking the calling thread).
-
-    Usage::
-
-        status = {pkg: STATUS_LAUNCHING for pkg in packages}
-        sup = MultiPackageSupervisor(packages, cfg, initial_status=status)
-        sup.run_forever()          # blocks; press Ctrl+C to stop
-    """
+    """Supervisor that monitors multiple Roblox packages independently."""
 
     def __init__(
         self,
-        packages: list[str],
+        entries: list[dict[str, Any]],
         cfg: dict[str, Any],
         *,
         initial_status: dict[str, str] | None = None,
         on_status_change: Any = None,
     ) -> None:
-        self.packages = list(packages)
+        self.entries = list(entries)
+        self.packages = [str(e["package"]) for e in self.entries]
         self.cfg = cfg
         self.stop_event = threading.Event()
         self.status_map: dict[str, str] = {pkg: STATUS_LAUNCHING for pkg in self.packages}
@@ -269,23 +349,28 @@ class MultiPackageSupervisor:
         self.stop_event.set()
 
     def run_forever(self, *, display_interval: float = 10.0) -> None:
-        """Start all workers and block until Ctrl+C or SIGTERM."""
         signal.signal(signal.SIGTERM, self._handle_stop)
         signal.signal(signal.SIGINT, self._handle_stop)
 
         logger = configure_logging(level=self.cfg.get("log_level", "INFO"))
         log_event(logger, "info", "multi_supervisor_started", packages=self.packages)
-        db.insert_event("INFO", "multi_supervisor_started",
-                        f"monitoring {len(self.packages)} packages: {', '.join(self.packages)}")
+        db.insert_event(
+            "INFO",
+            "multi_supervisor_started",
+            f"monitoring {len(self.packages)} packages: {', '.join(self.packages)}",
+        )
 
-        for pkg in self.packages:
+        for entry in self.entries:
             worker = _PackageWorker(
-                pkg, self.cfg, self.status_map, self.stop_event, self.on_status_change
+                entry,
+                self.cfg,
+                self.status_map,
+                self.stop_event,
+                self.on_status_change,
             )
             worker.start()
             self._workers.append(worker)
 
-        # Keep main thread alive; print a quick status summary periodically
         try:
             while not self.stop_event.is_set():
                 self.stop_event.wait(timeout=display_interval)
@@ -302,42 +387,33 @@ class MultiPackageSupervisor:
         log_event(logger, "info", "multi_supervisor_stopped")
 
     def get_status_snapshot(self, entries: list[dict] | None = None) -> list[dict]:
-        """Return a per-package status snapshot list.
-
-        Each dict contains:
-            package, username, status, revive_count, failure_count,
-            last_error, online_since, last_seen_at
-
-        ``entries`` is the list of package entry dicts (each has 'package' and
-        optionally 'account_username').  Pass it from ``enabled_package_entries()``
-        to include username info.  If omitted, only package names are used.
-        """
         entry_map: dict[str, str] = {}
-        if entries:
-            for e in entries:
-                pkg = str(e.get("package") or "")
-                username = str(e.get("account_username") or "").strip()
-                entry_map[pkg] = username if username else "Unknown"
+        use = entries or self.entries
+        for e in use:
+            pkg = str(e.get("package") or "")
+            username = str(e.get("account_username") or "").strip()
+            entry_map[pkg] = username if username else "Unknown"
 
         snapshot: list[dict] = []
         worker_map = {w.package: w for w in self._workers}
         for pkg in self.packages:
             status = self.status_map.get(pkg, STATUS_OFFLINE)
             worker = worker_map.get(pkg)
-            snapshot.append({
-                "package": pkg,
-                "username": entry_map.get(pkg, ""),
-                "status": status,
-                "revive_count": worker.revive_count if worker else 0,
-                "failure_count": worker.failure_count if worker else 0,
-                "last_error": worker.last_error if worker else None,
-                "online_since": worker.online_since if worker else None,
-                "last_seen_at": worker.last_seen_at if worker else None,
-            })
+            snapshot.append(
+                {
+                    "package": pkg,
+                    "username": entry_map.get(pkg, ""),
+                    "status": status,
+                    "revive_count": worker.revive_count if worker else 0,
+                    "failure_count": worker.failure_count if worker else 0,
+                    "last_error": worker.last_error if worker else None,
+                    "online_since": worker.online_since if worker else None,
+                    "last_seen_at": worker.last_seen_at if worker else None,
+                }
+            )
         return snapshot
 
     def _print_live_status(self) -> None:
-        """Print a compact per-package status line to stdout."""
         parts = []
         for pkg in self.packages:
             status = self.status_map.get(pkg, STATUS_OFFLINE)

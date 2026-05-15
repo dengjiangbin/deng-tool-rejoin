@@ -19,6 +19,7 @@ from .banner import print_banner
 from .config import (
     ConfigError,
     default_config,
+    effective_private_server_url,
     enabled_package_entries,
     enabled_package_names,
     ensure_app_dirs,
@@ -156,6 +157,7 @@ def _remote_license_run_check(cfg: dict[str, Any]) -> tuple[str, str]:
 
 
 def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool) -> bool:
+    """Return True when remote license check is ``active`` (updates ``last_status``)."""
     result, msg = _remote_license_run_check(cfg)
     if result == "active":
         _print_license_ok(use_color)
@@ -267,6 +269,7 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
 
 
 def ensure_license_before_menu(args: argparse.Namespace) -> bool:
+    """Require a valid license before showing the main Termux menu (unless dev / opt-out)."""
     use_color = not args.no_color
     if keystore.DEV_MODE:
         _print_dev_license_skipped(use_color)
@@ -383,6 +386,20 @@ def _safe_detection_hints(config_data: dict[str, Any] | None = None) -> list[str
         return list(DEFAULT_ROBLOX_PACKAGE_HINTS)
 
 
+def _package_detection_options(config_data: dict[str, Any]) -> tuple[list[str], bool, bool]:
+    pd = config_data.get("package_detection")
+    if not isinstance(pd, dict):
+        pd = {}
+    hints_src = pd.get("hints")
+    if hints_src in (None, "", []):
+        hints_src = config_data.get("package_detection_hints")
+    try:
+        hints = validate_package_detection_hints(hints_src)
+    except ConfigError:
+        hints = list(DEFAULT_ROBLOX_PACKAGE_HINTS)
+    return hints, bool(pd.get("include_launchable_only", True)), bool(pd.get("enabled", True))
+
+
 def _safe_url_label(value: str | None) -> str:
     if not value:
         return "Not set"
@@ -491,11 +508,11 @@ def _prompt_manual_package(default: str = DEFAULT_ROBLOX_PACKAGE) -> str | None:
             print("That does not look like a safe Android package name. Use a format like com.roblox.client.")
 
 
-def _entry_for_package(package: str, current_entries: list[dict[str, Any]]) -> dict[str, Any]:
+def _entry_for_package(package: str, current_entries: list[dict[str, Any]], *, app_name: str = "") -> dict[str, Any]:
     for entry in current_entries:
         if entry["package"] == package:
             return dict(entry)
-    return package_entry(package, "", True)
+    return package_entry(package, "", True, "not_set", app_name=str(app_name or "")[:120])
 
 
 def _detect_or_prompt_account_username(entry: dict[str, Any], config_data: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -535,7 +552,15 @@ def _print_package_entries(entries: list[dict[str, Any]]) -> None:
 
 
 def _choose_package_menu(current_package: str = DEFAULT_ROBLOX_PACKAGE, package_detection_hints: list[str] | None = None) -> str:
-    entries, _hints = _choose_packages_menu([package_entry(current_package, "Main", True)], package_detection_hints)
+    try:
+        cfg_ctx = load_config()
+    except ConfigError:
+        cfg_ctx = {}
+    entries, _hints = _choose_packages_menu(
+        [package_entry(current_package, "", True, "not_set")],
+        package_detection_hints,
+        cfg_ctx,
+    )
     enabled = [entry for entry in entries if entry.get("enabled", True)]
     return enabled[0]["package"] if enabled else current_package
 
@@ -543,9 +568,14 @@ def _choose_package_menu(current_package: str = DEFAULT_ROBLOX_PACKAGE, package_
 def _choose_packages_menu(
     current_packages: list[Any] | None = None,
     package_detection_hints: list[str] | None = None,
+    config_data: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    selected = validate_package_entries(current_packages or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)])
-    hints = _safe_detection_hints({"package_detection_hints": package_detection_hints})
+    cfg_ctx = config_data if isinstance(config_data, dict) else {}
+    merged_hints_ctx = dict(cfg_ctx)
+    if package_detection_hints is not None:
+        merged_hints_ctx["package_detection_hints"] = package_detection_hints
+    selected = validate_package_entries(current_packages or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")])
+    hints = _safe_detection_hints(merged_hints_ctx)
     if not _is_interactive():
         return selected, hints
 
@@ -559,34 +589,56 @@ def _choose_packages_menu(
     choice = input("Choose [1]: ").strip() or "1"
 
     if choice == "1":
-        detected = _ordered_roblox_packages(hints)
-        if not detected:
-            print("No Roblox package was detected.")
-            print("Try option 2 to enter package name manually, or install Roblox and re-run.")
+        hints2, inc_launch, det_en = _package_detection_options(cfg_ctx)
+        candidates = android.discover_roblox_package_candidates(
+            hints2,
+            include_launchable_only=inc_launch,
+            detection_enabled=det_en,
+        )
+        if not candidates:
+            for pkg in android.find_roblox_packages(hints2):
+                candidates.append(
+                    android.RobloxPackageCandidate(
+                        package=pkg,
+                        app_name=android.get_application_label(pkg) or pkg.rsplit(".", 1)[-1],
+                        launchable=android.is_launchable_package(pkg),
+                    )
+                )
+        if not candidates:
+            print("No Roblox-compatible package was detected using package manager, hints, and labels.")
+            print("Try option 2 to enter a package name manually, or install a Roblox client and re-run.")
             return selected, hints
-        if len(detected) == 1:
-            selected = [_detect_or_prompt_account_username(_entry_for_package(detected[0], selected))]
-            print(f"Auto-selected: {detected[0]}")
+        if len(candidates) == 1:
+            c0 = candidates[0]
+            selected = [_detect_or_prompt_account_username(_entry_for_package(c0.package, selected, app_name=c0.app_name))]
+            print(f"Auto-selected: {c0.package}")
             return selected, hints
         print()
-        print("Detected Roblox Packages:")
-        for idx, package in enumerate(detected, start=1):
-            marker = " (Recommended)" if package == DEFAULT_ROBLOX_PACKAGE else ""
-            print(f"  {idx}. {package}{marker}")
+        print("Detected Roblox Packages")
+        print(f"{'#':<4} {'Package':<40} {'App Name':<22} {'Launchable':<10}")
+        print(f"{'-'*4} {'-'*40} {'-'*22} {'-'*10}")
+        for idx, c in enumerate(candidates, start=1):
+            launch_cell = "Yes" if c.launchable else "No"
+            print(f"{idx:<4} {c.package:<40} {c.app_name[:20]:<22} {launch_cell:<10}")
         print("  A. Select all")
         raw = input("Choose packages (e.g. 1,2 or A) [1]: ").strip().lower() or "1"
         if raw == "a":
-            selected = [_detect_or_prompt_account_username(_entry_for_package(pkg, selected)) for pkg in detected]
+            selected = [
+                _detect_or_prompt_account_username(_entry_for_package(c.package, selected, app_name=c.app_name))
+                for c in candidates
+            ]
         else:
             choices = [part.strip() for part in raw.split(",") if part.strip()]
             new_selection: list[dict[str, Any]] = []
             for part in choices:
                 if part.isdigit():
                     index = int(part)
-                    if 1 <= index <= len(detected):
-                        pkg = detected[index - 1]
-                        if pkg not in [e["package"] for e in new_selection]:
-                            new_selection.append(_detect_or_prompt_account_username(_entry_for_package(pkg, selected)))
+                    if 1 <= index <= len(candidates):
+                        c = candidates[index - 1]
+                        if c.package not in [e["package"] for e in new_selection]:
+                            new_selection.append(
+                                _detect_or_prompt_account_username(_entry_for_package(c.package, selected, app_name=c.app_name))
+                            )
             if new_selection:
                 selected = new_selection
     elif choice == "2":
@@ -767,25 +819,6 @@ def _setup_webhook_interval(draft: dict[str, Any]) -> None:
             print(exc)
 
 
-def _setup_license_key(draft: dict[str, Any]) -> None:
-    """Prompt the user to enter or clear their DENG license key."""
-    print()
-    print("License Key")
-    print("Format: DENG-<hex> (example: DENG-38ab1234cd56ef78)")
-    print("Leave blank to skip or clear the current key.")
-    current = draft.get("license_key", "") or ""
-    display = mask_license_key(current) if current else "Not set"
-    print(f"Current: {display}")
-    raw = _prompt("License key", "").strip()
-    if not raw:
-        return
-    try:
-        draft["license_key"] = validate_license_key(raw)
-        print(f"License key saved: {mask_license_key(draft['license_key'])}")
-    except ConfigError as exc:
-        print(f"Invalid license key: {exc}")
-
-
 def _setup_yescaptcha_key(draft: dict[str, Any]) -> None:
     """Prompt the user to enter or clear their YesCaptcha API key."""
     print()
@@ -825,7 +858,7 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         print("Package")
         print("--------------------------------")
         entries = validate_package_entries(
-            draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+            draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
         )
         enabled_entries = [e for e in entries if e.get("enabled", True)]
         print("Current Packages:")
@@ -866,7 +899,7 @@ def _package_menu_detect_refresh(draft: dict[str, Any]) -> dict[str, Any]:
     print()
     print("Detect / Refresh Usernames")
     entries = validate_package_entries(
-        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
     )
     cfg = validate_config(draft)
     settings = cfg.get("account_detection") or {}
@@ -932,7 +965,7 @@ def _package_menu_set_username(draft: dict[str, Any]) -> dict[str, Any]:
     print()
     print("Set / Edit Username")
     entries = validate_package_entries(
-        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
     )
     for idx, entry in enumerate(entries, start=1):
         print(f"  {idx}. {entry['package']} — {_package_username_display(entry)}")
@@ -969,7 +1002,7 @@ def _package_menu_set_username(draft: dict[str, Any]) -> dict[str, Any]:
 def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
     """Add a package via auto-detect or manual entry. Username is detected, not labeled."""
     current_entries = validate_package_entries(
-        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
     )
     current_pkgs = {e["package"] for e in current_entries}
     print()
@@ -1024,7 +1057,7 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
 def _package_menu_remove(draft: dict[str, Any]) -> dict[str, Any]:
     """Remove a configured package by number. Confirms before removing."""
     entries = validate_package_entries(
-        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
     )
     enabled = [e for e in entries if e.get("enabled", True)]
     if not enabled:
@@ -1073,7 +1106,7 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
         input("Press Enter to continue...")
         return draft
     current_entries = validate_package_entries(
-        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
     )
     current_pkgs = {e["package"] for e in current_entries}
     new_pkgs = [p for p in detected if p not in current_pkgs]
@@ -1118,7 +1151,7 @@ def _package_menu_list(draft: dict[str, Any]) -> None:
     print()
     print("List Packages")
     entries = validate_package_entries(
-        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "Main", True)]
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
     )
     if not entries:
         print("  No Packages Configured.")
@@ -1415,8 +1448,9 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     print()
     print("Step 1 of 6: Roblox Package Setup")
     packages, hints = _choose_packages_menu(
-        list(draft.get("roblox_packages") or [package_entry(draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE), "Main", True)]),
+        list(draft.get("roblox_packages") or [package_entry(draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE), "", True, "not_set")]),
         list(draft.get("package_detection_hints") or DEFAULT_ROBLOX_PACKAGE_HINTS),
+        draft,
     )
     draft["roblox_packages"] = packages
     draft["package_detection_hints"] = hints
@@ -1694,36 +1728,49 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
     if not use_color:
         return status
     color = {
-        "Started":   _ANSI_GREEN,
-        "Online":    _ANSI_GREEN,
-        "Ready":     _ANSI_YELLOW,
-        "Starting":  _ANSI_YELLOW,
+        "Started": _ANSI_GREEN,
+        "Online": _ANSI_GREEN,
+        "Ready": _ANSI_YELLOW,
+        "Starting": _ANSI_YELLOW,
+        "Launching": _ANSI_YELLOW,
         "Preparing": _ANSI_CYAN,
-        "Failed":    _ANSI_RED,
-        "Offline":   _ANSI_RED,
+        "Optimizing": _ANSI_CYAN,
+        "Reconnecting": _ANSI_CYAN,
+        "Cleared": _ANSI_GREEN,
+        "Low Applied": _ANSI_GREEN,
+        "Skipped": _ANSI_YELLOW,
+        "Partial": _ANSI_YELLOW,
+        "Failed": _ANSI_RED,
+        "Offline": _ANSI_RED,
+        "Heartbeat OK": _ANSI_GREEN,
+        "Launch command sent": _ANSI_GREEN,
     }.get(status, "")
     return f"{color}{status}{_ANSI_RESET}" if color else status
 
 
 def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
-    """Build a single clean launch status table.
+    """Build one compact start summary table.
 
-    Each row must be a 4-tuple: (index, package, username, status).
-    Returns a Unicode box-drawing table string.
-    When ``use_color`` is True, the Status column is colorised with ANSI codes.
+    Each row: (index, package, username, cache, graphics, state, status).
     """
-    headers = ("#", "Package", "Username", "Status")
-    str_rows = [(str(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in rows]
+    headers = ("#", "Package", "Username", "Cache", "Graphics", "State", "Status")
+    str_rows = [(str(r[0]), str(r[1]), str(r[2]), str(r[3]), str(r[4]), str(r[5]), str(r[6])) for r in rows]
 
-    # Column widths are computed from raw (non-ANSI) strings
     widths = [
         max(len(headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
-        for i in range(4)
+        for i in range(7)
     ]
 
-    # Build colored versions of the Status column (index 3)
     colored_rows = [
-        (r[0], r[1], r[2], _colorize_status(r[3], use_color=use_color))
+        (
+            r[0],
+            r[1],
+            r[2],
+            _colorize_status(r[3], use_color=use_color),
+            _colorize_status(r[4], use_color=use_color),
+            _colorize_status(r[5], use_color=use_color),
+            _colorize_status(r[6], use_color=use_color),
+        )
         for r in str_rows
     ]
 
@@ -1753,7 +1800,7 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
 
 def build_final_summary(entries: list[Any], results: dict[str, str]) -> str:
     """Return a one-line final launch summary string."""
-    success_labels = {"Launched", "Started", "Success"}
+    success_labels = {"Launched", "Started", "Success", "Online"}
     success = sum(
         1 for e in entries
         if results.get(e["package"] if isinstance(e, dict) else str(e), "") in success_labels
@@ -1827,23 +1874,21 @@ def _run_preparation_phase(
         else:
             print(f"  {Y}ℹ{RST}  No background Roblox processes found.")
 
-    # Step 2 — clear cache for each selected package
+    # Step 2 — safe cache dirs for each selected package (mandatory when Start calls prep)
     if verbose:
-        print(f"  {C}⏳ Clearing Roblox cache...{RST}")
+        print(f"  {C}⏳ Clearing safe cache (cache, code_cache, files/tmp)...{RST}")
     any_cleared = False
     for entry in entries:
         pkg = entry["package"]
         username = _account_username_for_table(entry)
-        cleared = android.clear_package_cache(pkg)
-        if cleared:
-            if verbose:
-                print(f"  {G}✓{RST} Cache cleared: {username} ({pkg})")
+        label = android.clear_safe_package_cache(pkg)
+        if verbose:
+            print(f"  {G if label == 'Cleared' else Y}•{RST} {pkg}: {label} ({username})")
+        if label == "Cleared":
             any_cleared = True
-        elif verbose:
-            print(f"  {Y}ℹ{RST}  Cache clear skipped (root needed): {pkg}")
     if verbose:
         if not any_cleared:
-            print(f"  {Y}ℹ{RST}  Root access is required to clear Roblox cache.")
+            print(f"  {Y}ℹ{RST}  Cache cleanup: mostly skipped (root/offline) or no cache dirs.")
         print(f"  {G}✓{RST} Preparation complete.")
         print()
 
@@ -1853,6 +1898,27 @@ def cmd_start(args: argparse.Namespace) -> int:
     print_banner(use_color=use_color)
     try:
         cfg = load_config()
+        cfg = _ensure_install_id_saved(cfg)
+
+        # ── License (required for public remote installs before any start work) ──
+        if not keystore.DEV_MODE:
+            license_cfg = cfg.get("license") or {}
+            if not license_cfg.get("disabled_by_user") and license_cfg.get("enabled", True):
+                if str(license_cfg.get("mode") or "remote").strip().lower() == "local":
+                    _key = (license_cfg.get("key") or "").strip() or (cfg.get("license_key") or "").strip()
+                    if _key:
+                        ok, msg = keystore.verify_key(_key)
+                        if not ok:
+                            print(f"License key error: {msg}")
+                            return 1
+                    else:
+                        print("No license key configured. Run: deng-rejoin")
+                        return 1
+                else:
+                    if not verify_remote_license_noninteractive(cfg, use_color=use_color):
+                        print("Run: deng-rejoin to fix your license.")
+                        return 1
+
         entries = enabled_package_entries(cfg)
         if not cfg.get("first_setup_completed") or not entries:
             print("First-time setup is required before starting.")
@@ -1862,91 +1928,95 @@ def cmd_start(args: argparse.Namespace) -> int:
             print("Run: deng-rejoin and choose First Time Setup Config.")
             return 2
 
-        # ── Key verification ────────────────────────────────────────────────
-        if not keystore.DEV_MODE:
-            license_cfg = cfg.get("license") or {}
-            if license_cfg.get("enabled", False):
-                _mode = license_cfg.get("mode", "local")
-                if _mode == "remote":
-                    print("Remote license verification is not yet implemented.")
-                    print("Set license.mode to 'local' or use DENG_DEV=1 to bypass.")
-                    return 1
-                # mode=local — check key from new section first, fall back to flat key
-                _key = (license_cfg.get("key") or "").strip() or cfg.get("license_key", "")
-                if _key:
-                    ok, msg = keystore.verify_key(_key)
-                    if not ok:
-                        print(f"License key error: {msg}")
-                        return 1
-                else:
-                    if not keystore.prompt_and_verify_key():
-                        print("No valid key — session cancelled.")
-                        return 0
-            else:
-                # license.enabled=False (default): check flat license_key for backward compat
-                stored_key = cfg.get("license_key", "")
-                if stored_key:
-                    ok, msg = keystore.verify_key(stored_key)
-                    if not ok:
-                        print(f"License key error: {msg}")
-                        return 1
-
         n = len(entries)
-        G   = _ANSI_GREEN  if use_color else ""
-        Y   = _ANSI_YELLOW if use_color else ""
-        RST = _ANSI_RESET  if use_color else ""
+        G = _ANSI_GREEN if use_color else ""
+        Y = _ANSI_YELLOW if use_color else ""
+        RST = _ANSI_RESET if use_color else ""
 
-        # ── Preparation phase (silent) ──────────────────────────────────────
-        _run_preparation_phase(entries, cfg, use_color=use_color, verbose=False)
+        packages_sl = [e["package"] for e in entries]
+        android.force_stop_packages_except(packages_sl, cfg.get("package_detection_hints"))
+        prep_cache: dict[str, str] = {}
+        prep_gfx: dict[str, str] = {}
+        opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
+        for entry in entries:
+            pkg = entry["package"]
+            prep_cache[pkg] = android.clear_safe_package_cache(pkg)
+            low = bool(opt.get("low_graphics_enabled", True)) and bool(entry.get("low_graphics_enabled", True))
+            prep_gfx[pkg] = android.apply_low_graphics_optimization(pkg, enabled=low)
 
-        # ── Window layout (multi-package only, uses 40/60 split) ────────────
         cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
 
-        # ── Record launch start times ───────────────────────────────────────
         now_iso = datetime.now(timezone.utc).isoformat()
         start_times: dict[str, str] = dict(cfg.get("package_start_times") or {})
         for entry in entries:
             start_times[entry["package"]] = now_iso
         cfg["package_start_times"] = start_times
 
-        # ── Launch each package silently ────────────────────────────────────
         launch_ok: dict[str, bool] = {}
         launch_err: dict[str, str] = {}
         for index, entry in enumerate(entries, start=1):
             package = entry["package"]
             package_cfg = dict(cfg)
             package_cfg["roblox_package"] = package
-            package_cfg["roblox_packages"] = [entry]
-            result = perform_rejoin(package_cfg, reason="start")
+            result = perform_rejoin(package_cfg, reason="start", package_entry=entry)
             launch_ok[package] = result.success
             launch_err[package] = result.error or ""
 
-        # ── Heartbeat check — wait for apps to start ────────────────────────
+        sup = cfg.get("supervisor") if isinstance(cfg.get("supervisor"), dict) else {}
+        grace_wait = int(sup.get("launch_grace_seconds", 15))
         import time as _time
-        _time.sleep(5)
-        initial_status: dict[str, str] = {}
-        for entry in entries:
-            pkg = entry["package"]
-            if not launch_ok[pkg]:
-                err = launch_err[pkg]
-                if "not installed" in err.lower():
-                    initial_status[pkg] = "Not installed"
-                elif "disabled" in err.lower():
-                    initial_status[pkg] = "Disabled"
-                else:
-                    initial_status[pkg] = "Failed"
-            else:
-                initial_status[pkg] = "Online" if android.is_process_running(pkg) else "Starting"
 
-        # ── Status table (4 columns: #, Package, Username, Status) ─────────
+        _time.sleep(max(5, grace_wait))
+
+        initial_status: dict[str, str] = {}
         table_rows: list[tuple] = []
         for index, entry in enumerate(entries, start=1):
             pkg = entry["package"]
             username = _account_username_for_table(entry)
-            status = initial_status.get(pkg, "Unknown")
-            table_rows.append((index, pkg, username, status))
+            cstat = prep_cache.get(pkg, "Skipped")
+            gstat = prep_gfx.get(pkg, "Skipped")
+            if not launch_ok[pkg]:
+                err = launch_err[pkg]
+                if "not installed" in err.lower():
+                    state = "Failed"
+                    stat = "Not installed"
+                else:
+                    state = "Failed"
+                    safe_err = mask_urls_in_text(err) or "Launch failed"
+                    stat = (safe_err[:57] + "...") if len(safe_err) > 60 else safe_err
+            elif android.is_process_running(pkg):
+                state = "Online"
+                stat = "Heartbeat OK"
+            else:
+                state = "Launching"
+                stat = "Launch command sent"
+            initial_status[pkg] = state
+            table_rows.append((index, pkg, username, cstat, gstat, state, stat))
 
+        hints2, inc_launch, det_en = _package_detection_options(cfg)
+        detected_n = len(
+            android.discover_roblox_package_candidates(
+                hints2,
+                include_launchable_only=inc_launch,
+                detection_enabled=det_en,
+            )
+        )
+        any_url = any(bool(effective_private_server_url(e, cfg)) for e in entries) or bool(
+            (str(cfg.get("private_server_url") or "") + str(cfg.get("launch_url") or "")).strip()
+        )
+        mode_disp = "Private URL / Auto" if any_url else _launch_mode_label(str(cfg.get("launch_mode", "app")))
+
+        print(f"{PRODUCT_NAME} v{VERSION}")
+        print()
+        print("Start Summary")
+        print(f"Packages selected: {n}")
+        print(f"Detected packages: {detected_n}")
+        print(f"Launch mode: {mode_disp}")
+        print(f"Supervisor: {'Enabled' if sup.get('enabled', True) else 'Disabled'}")
+        print()
         print(build_start_table(table_rows, use_color=use_color))
+        print()
+        print(build_final_summary(entries, {entry["package"]: table_rows[i][5] for i, entry in enumerate(entries)}))
         print()
 
         # ── Webhook ─────────────────────────────────────────────────────────
@@ -1999,10 +2069,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             print(f"0 packages launched. Reason: {best_reason}")
             return 1
 
-        # ── Session keepalive — supervisor loop (always-on) ─────────────────
-        packages = [entry["package"] for entry in entries]
-        print(f"{G}Session active — monitoring {len(packages)} package(s). Press Ctrl+C to stop.{RST}")
-        MultiPackageSupervisor(packages, cfg, initial_status=initial_status).run_forever()
+        print(f"{G}Session active — monitoring {n} package(s). Press Ctrl+C to stop.{RST}")
+        MultiPackageSupervisor(entries, cfg, initial_status=initial_status).run_forever()
         return 0
     except Exception as exc:  # noqa: BLE001 - command boundary.
         print(f"Agent start failed: {exc}")

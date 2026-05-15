@@ -18,7 +18,7 @@ GITHUB_REMOTE = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}.git"
 RAW_INSTALL_URL = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/{GITHUB_BRANCH}/install.sh"
 
 DEFAULT_ROBLOX_PACKAGE = "com.roblox.client"
-DEFAULT_ROBLOX_PACKAGE_HINTS = ("roblox", "rblx", "blox", "moons")
+DEFAULT_ROBLOX_PACKAGE_HINTS = ("roblox", "rblx", "blox", "moon", "moons", "lite", "clone")
 DEFAULT_DEVICE_NAME = "termux-android"
 
 APP_HOME = Path(os.environ.get("DENG_REJOIN_HOME", Path.home() / ".deng-tool" / "rejoin")).expanduser()

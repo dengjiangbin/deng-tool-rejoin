@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import re
 import shlex
@@ -16,11 +18,19 @@ from .config import ConfigError, is_valid_package_name, normalize_package_detect
 from .constants import (
     DEFAULT_ROBLOX_PACKAGE,
     DEFAULT_ROBLOX_PACKAGE_HINTS,
+    LAUNCH_MODES,
     PROCESS_TIMEOUT_SECONDS,
     ROOT_TIMEOUT_SECONDS,
 )
 from .platform_detect import detect_public_download_dir, get_android_release, get_android_sdk
-from .url_utils import mask_launch_url, validate_launch_url
+from .url_utils import UrlValidationError, detect_launch_mode_from_url, mask_launch_url, validate_launch_url
+
+
+@dataclass(frozen=True)
+class RobloxPackageCandidate:
+    package: str
+    app_name: str
+    launchable: bool
 
 
 @dataclass(frozen=True)
@@ -166,6 +176,92 @@ def find_roblox_packages(hints: Iterable[str] | None = None) -> list[str]:
     elif DEFAULT_ROBLOX_PACKAGE in packages:
         found.insert(0, DEFAULT_ROBLOX_PACKAGE)
     return found
+
+
+def is_launchable_package(package: str) -> bool:
+    """True when cmd package resolve-activity finds a launcher component."""
+    package = validate_package_name(package)
+    cmd_bin = _find_command("cmd", "/system/bin/cmd")
+    if not cmd_bin:
+        return False
+    resolve = run_command(
+        [cmd_bin, "package", "resolve-activity", "--brief", package],
+        timeout=PROCESS_TIMEOUT_SECONDS,
+    )
+    if not resolve.ok or package not in resolve.stdout:
+        return False
+    return True
+
+
+def get_application_label(package: str) -> str:
+    """Best-effort app label from dumpsys package (first ~20k chars only)."""
+    package = validate_package_name(package)
+    result = run_command(["dumpsys", "package", package], timeout=PROCESS_TIMEOUT_SECONDS)
+    if not result.ok:
+        return ""
+    text = result.stdout[:20000]
+    for pattern in (
+        r'application-label="([^"]+)"',
+        r"application-label='([^']+)'",
+        r'android:label="([^"]+)"',
+    ):
+        m = re.search(pattern, text)
+        if m:
+            lab = m.group(1).strip()
+            if lab and lab.lower() != "null":
+                return lab[:120]
+    m2 = re.search(r"nonLocalizedLabel=([^\s}]+)", text)
+    if m2:
+        lab = m2.group(1).strip().strip('"')
+        if lab and lab.lower() != "null":
+            return lab[:120]
+    return ""
+
+
+def _package_name_matches_hints(pkg: str, hints: list[str]) -> bool:
+    lower = pkg.lower()
+    return any(hint in lower for hint in hints)
+
+
+def _label_matches_roblox_signals(label: str, hints: list[str]) -> bool:
+    low = label.lower()
+    extra = ("roblox", "rblx", "blox")
+    return any(x in low for x in list(hints) + list(extra))
+
+
+def discover_roblox_package_candidates(
+    hints: Iterable[str] | None = None,
+    *,
+    include_launchable_only: bool = True,
+    detection_enabled: bool = True,
+) -> list[RobloxPackageCandidate]:
+    """Root-aware discovery: pm list packages + launchability + label/hint heuristics.
+
+    Hints are aids only — official client, launchable clones with Roblox-like labels,
+    and package names containing hint fragments are all considered.
+    """
+    if not detection_enabled:
+        return []
+    detection_hints = _safe_detection_hints(hints)
+    packages = list_packages()
+    out: list[RobloxPackageCandidate] = []
+    for pkg in packages:
+        label = get_application_label(pkg)
+        app_name = label or pkg.rsplit(".", 1)[-1]
+        name_match = _package_name_matches_hints(pkg, detection_hints) or pkg == DEFAULT_ROBLOX_PACKAGE
+        label_match = bool(label) and _label_matches_roblox_signals(label, detection_hints)
+        if not name_match and not label_match:
+            continue
+        launchable = is_launchable_package(pkg)
+        if include_launchable_only and not launchable:
+            continue
+        out.append(RobloxPackageCandidate(package=pkg, app_name=app_name, launchable=launchable))
+
+    def _sort_key(c: RobloxPackageCandidate) -> tuple[int, str]:
+        return (0 if c.package == DEFAULT_ROBLOX_PACKAGE else 1, c.package)
+
+    out.sort(key=_sort_key)
+    return out
 
 
 def package_installed(package: str) -> bool:
@@ -488,6 +584,136 @@ def clear_package_cache(package: str) -> bool:
     )
     # 0 = deleted files, 1 = directory empty/not found — both are acceptable
     return result.returncode in (0, 1)
+
+
+def clear_safe_package_cache(package: str) -> str:
+    """Clear only safe cache/temp dirs under /data/data/<pkg>/. Requires root.
+
+    Returns one of: Cleared, Partial, Skipped, Failed. Does not wipe full app data.
+    """
+    package = validate_package_name(package)
+    root_info = detect_root()
+    if not root_info.available or not root_info.tool:
+        return "Skipped"
+    base = f"/data/data/{package}"
+    targets = [f"{base}/cache", f"{base}/code_cache", f"{base}/files/tmp"]
+    ok = fail = absent = 0
+    for path in targets:
+        probe = run_root_command(["test", "-d", path], root_tool=root_info.tool, timeout=6)
+        if not probe.ok:
+            absent += 1
+            continue
+        result = run_root_command(
+            ["find", path, "-mindepth", "1", "-delete"],
+            root_tool=root_info.tool,
+            timeout=30,
+        )
+        if result.returncode in (0, 1):
+            ok += 1
+        else:
+            fail += 1
+    if fail and ok:
+        return "Partial"
+    if fail:
+        return "Failed"
+    if ok:
+        return "Cleared"
+    return "Skipped"
+
+
+_ROBLOX_CLIENT_SETTINGS_REL = "files/ClientSettings/ClientAppSettings.json"
+
+
+def apply_low_graphics_optimization(package: str, *, enabled: bool = True) -> str:
+    """If the known Roblox ClientAppSettings JSON exists, merge low-FPS / quality flags.
+
+    Backs up before write. Returns Low Applied, Skipped, or Failed.
+    """
+    if not enabled:
+        return "Skipped"
+    package = validate_package_name(package)
+    root_info = detect_root()
+    if not root_info.available or not root_info.tool:
+        return "Skipped"
+    rel = _ROBLOX_CLIENT_SETTINGS_REL
+    path = f"/data/data/{package}/{rel}"
+    probe = run_root_command(["test", "-f", path], root_tool=root_info.tool, timeout=6)
+    if not probe.ok:
+        return "Skipped"
+    cat = run_root_command(["cat", path], root_tool=root_info.tool, timeout=8)
+    if not cat.ok or not cat.stdout.strip():
+        return "Skipped"
+    try:
+        data = json.loads(cat.stdout)
+    except json.JSONDecodeError:
+        return "Skipped"
+    if not isinstance(data, dict):
+        return "Skipped"
+    backup = f"{path}.bak.deng"
+    run_root_command(["cp", path, backup], root_tool=root_info.tool, timeout=8)
+    # Documented Roblox Android FFlags (best-effort; ignored if absent client-side).
+    low_keys: dict[str, int] = {
+        "DFIntTaskSchedulerTargetFps": 15,
+        "DFIntTextureQualityOverride": 1,
+    }
+    for key, val in low_keys.items():
+        cur = data.get(key)
+        if isinstance(cur, int):
+            data[key] = min(cur, val)
+        else:
+            data[key] = val
+    payload = json.dumps(data, separators=(",", ":"), sort_keys=True)
+    b64 = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+    wr = run_root_command(
+        ["sh", "-c", f"printf '%s' '{b64}' | base64 -d > '{path}'"],
+        root_tool=root_info.tool,
+        timeout=12,
+    )
+    if not wr.ok:
+        return "Failed"
+    verify = run_root_command(["cat", path], root_tool=root_info.tool, timeout=8)
+    if not verify.ok:
+        return "Failed"
+    try:
+        data2 = json.loads(verify.stdout)
+    except json.JSONDecodeError:
+        return "Failed"
+    if not isinstance(data2, dict):
+        return "Failed"
+    for k in low_keys:
+        if data2.get(k) != data.get(k):
+            return "Failed"
+    return "Low Applied"
+
+
+def launch_package_with_options(
+    package: str,
+    private_url: str | None = None,
+) -> tuple[CommandResult, str]:
+    """Launch order: private URL (VIEW) if set, else normal ``launch_app`` chain.
+
+    Returns (result, method_label).
+    """
+    package = validate_package_name(package)
+    url = (private_url or "").strip()
+    if url:
+        mode = detect_launch_mode_from_url(url)
+        if mode not in LAUNCH_MODES:
+            mode = "web_url"
+        try:
+            validate_launch_url(url, mode, allow_uncertain=True)
+        except UrlValidationError:
+            result = launch_app(package)
+            return result, "am_or_resolve"
+        result = launch_url(package, url, mode)
+        if result.ok:
+            return result, "private_url"
+        result2 = launch_url_generic(url, mode)
+        if result2.ok:
+            return result2, "private_url_generic"
+        result3 = launch_app(package)
+        return result3, "fallback_am"
+    return launch_app(package), "am_or_resolve"
 
 
 def force_stop_packages_except(

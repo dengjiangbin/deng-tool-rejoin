@@ -16,28 +16,33 @@ from .constants import (
     APP_DIRS,
     CHANNEL_STABLE,
     CONFIG_PATH,
-    DEFAULT_LICENSE_SERVER_URL,
     DEFAULT_BACKOFF_MAX_SECONDS,
     DEFAULT_BACKOFF_MIN_SECONDS,
     DEFAULT_DEVICE_NAME,
     DEFAULT_FOREGROUND_GRACE_SECONDS,
     DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS,
+    DEFAULT_LICENSE_SERVER_URL,
     DEFAULT_MAX_FAST_FAILURES,
     DEFAULT_RECONNECT_DELAY_SECONDS,
     DEFAULT_ROBLOX_PACKAGE,
     DEFAULT_ROBLOX_PACKAGE_HINTS,
     LAUNCH_MODES,
-    LICENSE_KEY_PATTERN,
     MAX_BACKOFF_SECONDS,
     MIN_BACKOFF_SECONDS,
     MIN_FOREGROUND_GRACE_SECONDS,
     MIN_HEALTH_CHECK_INTERVAL_SECONDS,
     MIN_RECONNECT_DELAY_SECONDS,
     PACKAGE_NAME_REGEX,
-    VERSION,
     VALID_CHANNELS,
+    VERSION,
 )
-from .url_utils import UrlValidationError, mask_launch_url, normalize_launch_url, validate_launch_url
+from .url_utils import (
+    UrlValidationError,
+    detect_launch_mode_from_url,
+    mask_launch_url,
+    normalize_launch_url,
+    validate_launch_url,
+)
 
 
 class ConfigError(ValueError):
@@ -71,12 +76,37 @@ def default_config() -> dict[str, Any]:
         "roblox_packages": [
             {
                 "package": DEFAULT_ROBLOX_PACKAGE,
-                "account_username": "Main",
+                "app_name": "",
+                "account_username": "",
+                "private_server_url": "",
+                "low_graphics_enabled": True,
+                "auto_reopen_enabled": True,
+                "auto_reconnect_enabled": True,
                 "enabled": True,
-                "username_source": "manual",
+                "username_source": "not_set",
             }
         ],
+        "package_detection": {
+            "enabled": True,
+            "hints": list(DEFAULT_ROBLOX_PACKAGE_HINTS),
+            "include_launchable_only": True,
+        },
         "package_detection_hints": list(DEFAULT_ROBLOX_PACKAGE_HINTS),
+        "private_server_url": "",
+        "optimization": {
+            "low_graphics_enabled": True,
+            "keep_screen_awake": True,
+            "reduce_android_animations": True,
+        },
+        "supervisor": {
+            "enabled": True,
+            "auto_reopen_enabled": True,
+            "auto_reconnect_enabled": True,
+            "launch_grace_seconds": 15,
+            "health_check_interval_seconds": 10,
+            "restart_backoff_seconds": 10,
+            "max_restart_attempts_per_hour": 10,
+        },
         "selected_package_mode": "single",
         "launch_mode": "app",
         "launch_url": "",
@@ -164,35 +194,25 @@ def _as_bool(value: Any) -> bool:
 
 USERNAME_SOURCES = {"manual", "detected_safe_pref", "android_app_label", "not_set", "config_manual", "root_pref", "root_json", "root_scan", "root_sqlite"}
 
-_LICENSE_KEY_RE = re.compile(LICENSE_KEY_PATTERN, re.IGNORECASE)
-_LICENSE_MASK = "***"
-
 
 def validate_license_key(key: str) -> str:
     """Validate a DENG license key. Empty string is accepted (key not set)."""
     cleaned = (key or "").strip()
     if not cleaned:
         return ""
-    upper = cleaned.upper()
-    if not _LICENSE_KEY_RE.match(upper):
-        raise ConfigError(
-            "License key must be in format DENG-<hex> with at least 8 hex characters (e.g. DENG-38ab1234cd56ef78)"
-        )
-    return upper
+    from .license import LicenseKeyError, normalize_license_key
+
+    try:
+        return normalize_license_key(cleaned)
+    except LicenseKeyError as exc:
+        raise ConfigError(str(exc)) from exc
 
 
 def mask_license_key(key: str) -> str:
-    """Return a display-safe version of the license key (DENG-38ab...78ef)."""
-    cleaned = (key or "").strip()
-    if not cleaned:
-        return "Not set"
-    parts = cleaned.split("-", 1)
-    if len(parts) != 2:
-        return f"{parts[0][:4]}-{_LICENSE_MASK}"
-    prefix, hex_part = parts
-    if len(hex_part) > 8:
-        return f"{prefix}-{hex_part[:4]}...{hex_part[-4:].lower()}"
-    return f"{prefix}-{_LICENSE_MASK}"
+    """Return a display-safe version of the license key."""
+    from .license import mask_license_key as _mask_lic
+
+    return _mask_lic(key)
 
 
 def validate_account_username(username: Any) -> str:
@@ -218,14 +238,39 @@ def package_entry(
     account_username: str = "",
     enabled: bool = True,
     username_source: str = "manual",
+    *,
+    app_name: str = "",
+    private_server_url: str = "",
+    low_graphics_enabled: bool = True,
+    auto_reopen_enabled: bool = True,
+    auto_reconnect_enabled: bool = True,
 ) -> dict[str, Any]:
     username = validate_account_username(account_username)
+    an = str(app_name or "").strip()[:120]
     return {
         "package": validate_package_name(package),
+        "app_name": an,
         "account_username": username,
         "enabled": bool(enabled),
         "username_source": validate_username_source(username_source, username),
+        "private_server_url": str(private_server_url or "").strip(),
+        "low_graphics_enabled": bool(low_graphics_enabled),
+        "auto_reopen_enabled": bool(auto_reopen_enabled),
+        "auto_reconnect_enabled": bool(auto_reconnect_enabled),
     }
+
+
+def _validate_optional_private_server_url(url: str, *, allow_uncertain: bool = True) -> str:
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    try:
+        normalized, _warn = normalize_launch_url(raw)
+        mode = str(detect_launch_mode_from_url(normalized)).strip().lower()
+        validate_launch_url(normalized, mode if mode in LAUNCH_MODES else "web_url", allow_uncertain=allow_uncertain)
+    except UrlValidationError as exc:
+        raise ConfigError(str(exc)) from exc
+    return normalized
 
 
 def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
@@ -235,7 +280,7 @@ def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
     seen: set[str] = set()
     for raw_entry in package_entries:
         if isinstance(raw_entry, str):
-            entry = package_entry(raw_entry, "", True)
+            entry = package_entry(raw_entry, "", True, "not_set")
         elif isinstance(raw_entry, dict):
             username = raw_entry.get("account_username")
             source = raw_entry.get("username_source")
@@ -247,7 +292,13 @@ def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
                 str(username or ""),
                 _as_bool(raw_entry.get("enabled", True)),
                 str(source or ""),
+                app_name=str(raw_entry.get("app_name") or ""),
+                private_server_url="",
+                low_graphics_enabled=_as_bool(raw_entry.get("low_graphics_enabled", True)),
+                auto_reopen_enabled=_as_bool(raw_entry.get("auto_reopen_enabled", True)),
+                auto_reconnect_enabled=_as_bool(raw_entry.get("auto_reconnect_enabled", True)),
             )
+            entry["private_server_url"] = _validate_optional_private_server_url(str(raw_entry.get("private_server_url") or ""))
         else:
             raise ConfigError("each Roblox package entry must be a package string or object")
         if entry["package"] in seen:
@@ -257,6 +308,20 @@ def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
     if not validated:
         raise ConfigError("at least one Roblox package must be configured")
     return validated
+
+
+def effective_private_server_url(entry: dict[str, Any], merged: dict[str, Any]) -> str:
+    """Return per-package private server URL, else global, else legacy launch_url when URL mode."""
+    u = str(entry.get("private_server_url") or "").strip()
+    if u:
+        return u
+    u = str(merged.get("private_server_url") or "").strip()
+    if u:
+        return u
+    mode = str(merged.get("launch_mode") or "app").strip().lower()
+    if mode in {"deeplink", "web_url"}:
+        return str(merged.get("launch_url") or "").strip()
+    return ""
 
 
 def validate_package_names(package_names: list[str] | tuple[str, ...]) -> list[str]:
@@ -355,7 +420,7 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     migrated_package = str(merged.get("roblox_package") or DEFAULT_ROBLOX_PACKAGE)
     if not source_has_packages:
         migrated_label = str(merged.get("roblox_package_label") or "Main")
-        merged["roblox_packages"] = [package_entry(migrated_package, migrated_label, True)]
+        merged["roblox_packages"] = [package_entry(migrated_package, migrated_label, True, "manual")]
     merged["roblox_packages"] = validate_package_entries(merged["roblox_packages"])
     active_entries = [entry for entry in merged["roblox_packages"] if entry["enabled"]]
     if not active_entries:
@@ -367,7 +432,24 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     if len(active_entries) > 1:
         selected_package_mode = "multiple"
     merged["selected_package_mode"] = selected_package_mode
-    merged["package_detection_hints"] = validate_package_detection_hints(merged.get("package_detection_hints"))
+    pd_default = default_config()["package_detection"]
+    raw_pd = merged.get("package_detection")
+    if not isinstance(raw_pd, dict):
+        raw_pd = {}
+    package_detection: dict[str, Any] = dict(pd_default)
+    package_detection.update({k: v for k, v in raw_pd.items() if k in package_detection})
+    package_detection["enabled"] = _as_bool(package_detection.get("enabled", True))
+    package_detection["include_launchable_only"] = _as_bool(package_detection.get("include_launchable_only", True))
+    raw_input_pd = input_config.get("package_detection") if input_config else None
+    if input_config and "package_detection_hints" in input_config:
+        hints_source = input_config.get("package_detection_hints")
+    elif isinstance(raw_input_pd, dict) and raw_input_pd.get("hints") not in (None, "", []):
+        hints_source = raw_input_pd.get("hints")
+    else:
+        hints_source = merged.get("package_detection_hints")
+    package_detection["hints"] = validate_package_detection_hints(hints_source)
+    merged["package_detection_hints"] = list(package_detection["hints"])
+    merged["package_detection"] = package_detection
 
     launch_mode = str(merged.get("launch_mode", "app")).strip().lower()
     if launch_mode not in LAUNCH_MODES:
@@ -386,6 +468,11 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         except UrlValidationError as exc:
             raise ConfigError(str(exc)) from exc
     merged["launch_url"] = launch_url
+
+    _psu_raw = str(merged.get("private_server_url") or "").strip()
+    merged["private_server_url"] = ""
+    if _psu_raw:
+        merged["private_server_url"] = _validate_optional_private_server_url(_psu_raw, allow_uncertain=allow_uncertain_url)
 
     merged["auto_rejoin_enabled"] = _as_bool(merged.get("auto_rejoin_enabled"))
     merged["root_mode_enabled"] = _as_bool(merged.get("root_mode_enabled"))
@@ -486,6 +573,7 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         raw_lic = {}
     merged_lic: dict[str, Any] = dict(default_config()["license"])
     merged_lic.update({k: v for k, v in raw_lic.items() if k in merged_lic})
+    # Sanitize sub-fields
     merged_lic["disabled_by_user"] = _as_bool(merged_lic.get("disabled_by_user", False))
     merged_lic["enabled"] = _as_bool(merged_lic.get("enabled", True))
     _lic_mode = str(merged_lic.get("mode") or "remote").strip().lower()
@@ -499,6 +587,7 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged_lic["last_status"] = str(merged_lic.get("last_status") or "not_configured").strip()[:32]
     _ch = str(merged_lic.get("channel") or CHANNEL_STABLE).strip().lower()
     merged_lic["channel"] = _ch if _ch in VALID_CHANNELS else CHANNEL_STABLE
+    # last_check_at: keep None or string, do not coerce
     lca = merged_lic.get("last_check_at")
     merged_lic["last_check_at"] = str(lca) if lca is not None else None
 
@@ -507,6 +596,7 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         install_profile = "public"
     merged["install_profile"] = install_profile
 
+    # Migrate old public installs that shipped with license disabled / local / blank server.
     if install_profile == "public" and not merged_lic["disabled_by_user"]:
         merged_lic["enabled"] = True
         merged_lic["mode"] = "remote"
@@ -515,6 +605,7 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     if install_profile == "developer" and merged_lic["mode"] == "remote" and not merged_lic["server_url"]:
         merged_lic["server_url"] = DEFAULT_LICENSE_SERVER_URL
 
+    # Keep flat license_key and license.key identical when either is set.
     _lic_key_raw = str(merged_lic.get("key") or "").strip()
     _flat_raw = str(merged.get("license_key") or "").strip()
     _canon = ""
@@ -548,6 +639,43 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         if is_valid_package_name(str(k))
     }
 
+    opt_default = default_config()["optimization"]
+    raw_opt = merged.get("optimization")
+    if not isinstance(raw_opt, dict):
+        raw_opt = {}
+    optimization: dict[str, Any] = dict(opt_default)
+    optimization.update({k: v for k, v in raw_opt.items() if k in optimization})
+    optimization["low_graphics_enabled"] = _as_bool(optimization.get("low_graphics_enabled", True))
+    optimization["keep_screen_awake"] = _as_bool(optimization.get("keep_screen_awake", True))
+    optimization["reduce_android_animations"] = _as_bool(optimization.get("reduce_android_animations", True))
+    merged["optimization"] = optimization
+
+    sup_default = default_config()["supervisor"]
+    raw_sup = merged.get("supervisor")
+    if not isinstance(raw_sup, dict):
+        raw_sup = {}
+    supervisor: dict[str, Any] = dict(sup_default)
+    supervisor.update({k: v for k, v in raw_sup.items() if k in supervisor})
+    supervisor["enabled"] = _as_bool(supervisor.get("enabled", True))
+    supervisor["auto_reopen_enabled"] = _as_bool(supervisor.get("auto_reopen_enabled", True))
+    supervisor["auto_reconnect_enabled"] = _as_bool(supervisor.get("auto_reconnect_enabled", True))
+    supervisor["launch_grace_seconds"] = _as_int(
+        "supervisor.launch_grace_seconds", supervisor.get("launch_grace_seconds"), 5, 600
+    )
+    supervisor["health_check_interval_seconds"] = _as_int(
+        "supervisor.health_check_interval_seconds",
+        supervisor.get("health_check_interval_seconds"),
+        MIN_HEALTH_CHECK_INTERVAL_SECONDS,
+        3600,
+    )
+    supervisor["restart_backoff_seconds"] = _as_int(
+        "supervisor.restart_backoff_seconds", supervisor.get("restart_backoff_seconds"), 5, 600
+    )
+    supervisor["max_restart_attempts_per_hour"] = _as_int(
+        "supervisor.max_restart_attempts_per_hour", supervisor.get("max_restart_attempts_per_hour"), 1, 200
+    )
+    merged["supervisor"] = supervisor
+
     return {key: merged[key] for key in default_config().keys()}
 
 
@@ -576,6 +704,18 @@ def save_config(config_data: dict[str, Any], config_path: Path = CONFIG_PATH) ->
 def safe_config_view(config_data: dict[str, Any]) -> dict[str, Any]:
     view = dict(config_data)
     view["launch_url"] = mask_launch_url(view.get("launch_url")) or ""
+    view["private_server_url"] = mask_launch_url(view.get("private_server_url")) or ""
+    _pkgs = view.get("roblox_packages")
+    if isinstance(_pkgs, list):
+        masked_pkgs: list[Any] = []
+        for item in _pkgs:
+            if isinstance(item, dict):
+                row = dict(item)
+                row["private_server_url"] = mask_launch_url(row.get("private_server_url")) or ""
+                masked_pkgs.append(row)
+            else:
+                masked_pkgs.append(item)
+        view["roblox_packages"] = masked_pkgs
     view["webhook_url"] = mask_webhook_url(view.get("webhook_url"))
     view["license_key"] = mask_license_key(view.get("license_key", ""))
     view["yescaptcha_key"] = "***" if view.get("yescaptcha_key") else ""

@@ -12,35 +12,44 @@ from agent.config import default_config, validate_config
 from agent import android as amod
 
 
+def _row(
+    idx: int,
+    pkg: str,
+    user: str,
+    cache: str,
+    gfx: str,
+    state: str,
+    status: str,
+) -> tuple:
+    return (idx, pkg, user, cache, gfx, state, status)
+
+
 class StartTableUxTests(unittest.TestCase):
     """Verify the single clean start table format."""
 
     def _make_rows(self):
         return [
-            (1, "com.roblox.client", "deng1629", "Started"),
-            (2, "com.moons.alt1", "AltAccount1", "Failed"),
+            _row(1, "com.roblox.client", "deng1629", "Cleared", "Low Applied", "Online", "Heartbeat OK"),
+            _row(2, "com.example.robloxclone", "AltAccount1", "Partial", "Skipped", "Failed", "Launch failed"),
         ]
 
     def test_start_table_has_expected_columns(self):
         rows = self._make_rows()
         table = build_start_table(rows)
-        self.assertIn("#", table)
-        self.assertIn("Package", table)
-        self.assertIn("Username", table)
-        self.assertNotIn("Launch", table)  # Launch column was merged into Status
-        self.assertIn("Status", table)
+        for col in ("#", "Package", "Username", "Cache", "Graphics", "State", "Status"):
+            self.assertIn(col, table)
+        self.assertNotIn("Label", table)
 
     def test_start_table_shows_username_and_package_separately(self):
         rows = self._make_rows()
         table = build_start_table(rows)
-        # Username and package appear as separate values, not "Username (package)"
         self.assertIn("deng1629", table)
         self.assertIn("com.roblox.client", table)
         self.assertIn("AltAccount1", table)
-        self.assertIn("com.moons.alt1", table)
+        self.assertIn("com.example.robloxclone", table)
 
     def test_start_table_not_label_column(self):
-        rows = [(1, "com.roblox.client", "Main", "Started")]
+        rows = [_row(1, "com.roblox.client", "Main", "Cleared", "Skipped", "Started", "Launch command sent")]
         table = build_start_table(rows)
         self.assertNotIn("Label", table)
         self.assertIn("Username", table)
@@ -48,13 +57,11 @@ class StartTableUxTests(unittest.TestCase):
     def test_start_table_shows_status(self):
         rows = self._make_rows()
         table = build_start_table(rows)
-        self.assertIn("Started", table)
+        self.assertIn("Online", table)
         self.assertIn("Failed", table)
-        # Status column is the only status indicator (no separate launch column)
-        self.assertNotIn("Roblox launch command sent", table)
 
     def test_start_table_has_box_borders(self):
-        rows = [(1, "com.roblox.client", "Main", "Started")]
+        rows = [_row(1, "com.roblox.client", "Main", "Cleared", "Skipped", "Started", "Heartbeat OK")]
         table = build_start_table(rows)
         self.assertIn("┌", table)
         self.assertIn("┐", table)
@@ -62,14 +69,13 @@ class StartTableUxTests(unittest.TestCase):
         self.assertIn("┘", table)
         self.assertIn("│", table)
 
-    def test_start_table_is_one_table_not_four(self):
+    def test_start_table_is_one_table_not_multiple(self):
         rows = self._make_rows()
         table = build_start_table(rows)
-        # 4-column table — still exactly one table
         self.assertEqual(table.count("┌"), 1)
 
     def test_unknown_username_shows_unknown_not_waiting(self):
-        rows = [(1, "com.moons.litesc", "Unknown", "Started")]
+        rows = [_row(1, "com.example.robloxclone", "Unknown", "Skipped", "Skipped", "Started", "Heartbeat OK")]
         table = build_start_table(rows)
         self.assertIn("Unknown", table)
         self.assertNotIn("Waiting", table)
@@ -79,22 +85,21 @@ class StartTableUxTests(unittest.TestCase):
         entries = [
             {"package": "com.roblox.client", "account_username": "deng1629", "enabled": True, "username_source": "manual"},
         ]
-        text = build_final_summary(entries, {"com.roblox.client": "Launched"})
-        # New format is a one-liner, not a multi-row table
+        text = build_final_summary(entries, {"com.roblox.client": "Online"})
         self.assertNotIn("Final Summary:", text)
         self.assertIn("launched", text.lower())
         self.assertEqual(text.count("\n"), 0)
 
     def test_final_summary_reports_zero_on_all_failure(self):
-        entries = [{"package": "com.roblox.client", "account_username": "Main", "enabled": True, "username_source": "manual"}]
+        entries = [{"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}]
         text = build_final_summary(entries, {"com.roblox.client": "Failed"})
         self.assertIn("0", text)
 
     def test_start_table_does_not_contain_monkey(self):
-        rows = [(1, "com.roblox.client", "Main", "Started", "Roblox launch command sent")]
+        rows = [_row(1, "com.roblox.client", "Main", "Cleared", "Skipped", "Started", "Launch command sent")]
         combined = build_start_table(rows) + "\n" + build_final_summary(
-            [{"package": "com.roblox.client", "account_username": "Main", "enabled": True, "username_source": "manual"}],
-            {"com.roblox.client": "Launched"},
+            [{"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}],
+            {"com.roblox.client": "Online"},
         )
         self.assertNotIn("monkey", combined.lower())
 
@@ -115,8 +120,7 @@ class StartTableUxTests(unittest.TestCase):
         args = argparse.Namespace(no_color=True)
         cfg = validate_config(default_config())
         output = io.StringIO()
-        with redirect_stdout(output), \
-             unittest.mock.patch("agent.commands._is_interactive", return_value=False):
+        with redirect_stdout(output), unittest.mock.patch("agent.commands._is_interactive", return_value=False):
             _run_edit_config_menu(cfg, args)
 
         text = output.getvalue()
@@ -147,27 +151,27 @@ class SinglePackageLaunchTests(unittest.TestCase):
         return cfg
 
     def test_single_package_calls_launch_app(self):
-        """One package must still call launch_app — no skipping."""
+        """One package must still call launch — no skipping."""
         from agent.launcher import perform_rejoin
 
         cfg = self._make_cfg()
-        with unittest.mock.patch.object(amod, "launch_app") as mock_launch, \
+        with unittest.mock.patch.object(amod, "launch_package_with_options") as mock_launch, \
              unittest.mock.patch.object(amod, "package_installed", return_value=True):
-            mock_launch.return_value = amod.CommandResult(("am", "start"), 0, "Success", "")
+            mock_launch.return_value = (amod.CommandResult(("am", "start"), 0, "Success", ""), "am_or_resolve")
             result = perform_rejoin(cfg, reason="start")
-            mock_launch.assert_called_once_with("com.roblox.client")
+            mock_launch.assert_called_once()
         self.assertTrue(result.success)
 
     def test_single_package_start_table_row_says_started(self):
-        """Table rows for a successful single-package launch say 'Started'."""
-        rows = [(1, "com.roblox.client", "Main", "Started", "Roblox launch command sent")]
+        """Table rows may use Online or Launching after heartbeat."""
+        rows = [_row(1, "com.roblox.client", "Main", "Cleared", "Skipped", "Online", "Heartbeat OK")]
         table = build_start_table(rows)
-        self.assertIn("Started", table)
+        self.assertIn("Online", table)
         self.assertNotIn("Launch skipped", table)
 
     def test_launch_skipped_phrase_not_in_table(self):
         """The phrase 'Launch skipped' must never appear in a start table."""
-        rows = [(1, "com.roblox.client", "Main", "Started", "Roblox launch command sent")]
+        rows = [_row(1, "com.roblox.client", "Main", "Cleared", "Skipped", "Online", "Heartbeat OK")]
         table = build_start_table(rows)
         self.assertNotIn("Launch skipped", table)
 
@@ -177,6 +181,7 @@ class LauncherFallbackTests(unittest.TestCase):
 
     def test_missing_monkey_falls_back_to_am(self):
         """If monkey is unavailable, launch_app must succeed using am."""
+
         def fake_find(*names):
             for name in names:
                 if name in ("am", "/system/bin/am"):
@@ -196,6 +201,7 @@ class LauncherFallbackTests(unittest.TestCase):
 
     def test_missing_monkey_no_file_not_found_error(self):
         """launch_app must never raise FileNotFoundError when monkey is missing."""
+
         def fake_find(*names):
             return None  # nothing available
 
@@ -250,6 +256,7 @@ class LauncherFallbackTests(unittest.TestCase):
 
     def test_monkey_used_as_fallback_when_am_fails(self):
         """When am fails, monkey is tried as the final fallback."""
+
         def fake_find(*names):
             for name in names:
                 if name in ("am", "/system/bin/am"):
@@ -312,13 +319,13 @@ class ConfigMigrationTests(unittest.TestCase):
     def test_string_package_list_still_migrates(self):
         """Existing configs with roblox_packages as strings still migrate safely."""
         cfg = default_config()
-        cfg["roblox_packages"] = ["com.roblox.client", "com.moons.alt1"]
+        cfg["roblox_packages"] = ["com.roblox.client", "com.roblox.client.clone1"]
         validated = validate_config(cfg)
         self.assertEqual(len(validated["roblox_packages"]), 2)
         self.assertEqual(validated["roblox_packages"][0]["package"], "com.roblox.client")
 
     def test_unknown_username_does_not_block_launch(self):
-        """launch_app is not skipped when account_username is empty."""
+        """launch is not skipped when account_username is empty."""
         from agent.launcher import perform_rejoin
 
         cfg = default_config()
@@ -326,9 +333,9 @@ class ConfigMigrationTests(unittest.TestCase):
         cfg["roblox_packages"] = [
             {"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}
         ]
-        with unittest.mock.patch.object(amod, "launch_app") as mock_launch, \
+        with unittest.mock.patch.object(amod, "launch_package_with_options") as mock_launch, \
              unittest.mock.patch.object(amod, "package_installed", return_value=True):
-            mock_launch.return_value = amod.CommandResult(("am", "start"), 0, "Success", "")
+            mock_launch.return_value = (amod.CommandResult(("am", "start"), 0, "Success", ""), "am_or_resolve")
             result = perform_rejoin(cfg, reason="start")
             mock_launch.assert_called_once()
         self.assertTrue(result.success)
@@ -336,4 +343,3 @@ class ConfigMigrationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

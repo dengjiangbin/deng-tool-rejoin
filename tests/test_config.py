@@ -36,8 +36,8 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("android_sdk", validated)
         self.assertIn("download_dir", validated)
         self.assertEqual(enabled_package_names(validated), ["com.roblox.client"])
-        self.assertEqual(validated["roblox_packages"][0]["account_username"], "Main")
-        self.assertEqual(validated["roblox_packages"][0]["username_source"], "manual")
+        self.assertEqual(validated["roblox_packages"][0]["account_username"], "")
+        self.assertEqual(validated["roblox_packages"][0]["username_source"], "not_set")
 
     def test_rejects_bad_launch_mode(self):
         cfg = default_config()
@@ -58,7 +58,19 @@ class ConfigTests(unittest.TestCase):
         validated = validate_config(cfg)
         self.assertEqual(
             validated["roblox_packages"],
-            [{"package": "com.roblox.client.clone1", "account_username": "Main", "enabled": True, "username_source": "manual"}],
+            [
+                {
+                    "package": "com.roblox.client.clone1",
+                    "app_name": "",
+                    "account_username": "Main",
+                    "private_server_url": "",
+                    "low_graphics_enabled": True,
+                    "auto_reopen_enabled": True,
+                    "auto_reconnect_enabled": True,
+                    "enabled": True,
+                    "username_source": "manual",
+                }
+            ],
         )
         self.assertEqual(validated["roblox_package"], "com.roblox.client.clone1")
 
@@ -76,8 +88,28 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             validated["roblox_packages"],
             [
-                {"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"},
-                {"package": "com.roblox.client.clone1", "account_username": "", "enabled": True, "username_source": "not_set"},
+                {
+                    "package": "com.roblox.client",
+                    "app_name": "",
+                    "account_username": "",
+                    "private_server_url": "",
+                    "low_graphics_enabled": True,
+                    "auto_reopen_enabled": True,
+                    "auto_reconnect_enabled": True,
+                    "enabled": True,
+                    "username_source": "not_set",
+                },
+                {
+                    "package": "com.roblox.client.clone1",
+                    "app_name": "",
+                    "account_username": "",
+                    "private_server_url": "",
+                    "low_graphics_enabled": True,
+                    "auto_reopen_enabled": True,
+                    "auto_reconnect_enabled": True,
+                    "enabled": True,
+                    "username_source": "not_set",
+                },
             ],
         )
 
@@ -122,7 +154,39 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(validated["webhook_snapshot_enabled"])
         self.assertFalse(validated["webhook_send_snapshot"])
 
-    def test_package_detection_hint_validation(self):
+    def test_public_profile_enables_remote_license_server(self):
+        cfg = validate_config(default_config())
+        self.assertEqual(cfg["install_profile"], "public")
+        self.assertTrue(cfg["license"]["enabled"])
+        self.assertEqual(cfg["license"]["mode"], "remote")
+        self.assertIn("rejoin.deng", cfg["license"]["server_url"])
+
+    def test_public_old_disabled_license_migrates_to_remote_enabled(self):
+        cfg = default_config()
+        cfg["license"] = {
+            "enabled": False,
+            "mode": "local",
+            "key": "",
+            "server_url": "",
+            "install_id": "",
+            "device_label": "",
+            "channel": "stable",
+            "last_status": "not_configured",
+            "last_check_at": None,
+            "disabled_by_user": False,
+        }
+        v = validate_config(cfg)
+        self.assertTrue(v["license"]["enabled"])
+        self.assertEqual(v["license"]["mode"], "remote")
+        self.assertTrue(v["license"]["server_url"])
+
+    def test_disabled_by_user_skips_public_force_enable(self):
+        cfg = default_config()
+        cfg["license"]["disabled_by_user"] = True
+        cfg["license"]["enabled"] = False
+        v = validate_config(cfg)
+        self.assertFalse(v["license"]["enabled"])
+
         cfg = default_config()
         cfg["package_detection_hints"] = ["com.moons.*", "Roblox", "bad;rm"]
         with self.assertRaises(ConfigError):
