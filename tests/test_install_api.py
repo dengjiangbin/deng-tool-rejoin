@@ -435,6 +435,23 @@ class InstallBootstrapSanityTests(unittest.TestCase):
             names = tf.getnames()
         self.assertIn("agent/deferred_bundle_install.py", names)
         self.assertIn("agent/deng_tool_rejoin.py", names)
+        self.assertIn("agent/__init__.py", names)
+
+    def test_bootstrap_prefers_prefix_bin_avoids_local_bin(self) -> None:
+        from agent.bootstrap_installer import render_public_bootstrap
+
+        s = render_public_bootstrap(base_url="https://rejoin.deng.my.id", requested="latest")
+        self.assertIn("${PREFIX}/bin", s)
+        self.assertIn("$HOME/bin", s)
+        self.assertNotIn("$HOME/.local/bin", s)
+        self.assertIn("command -v deng-rejoin", s)
+        self.assertIn("Failed to create deng-rejoin command.", s)
+
+    def test_install_complete_only_after_command_check(self) -> None:
+        from agent.bootstrap_installer import render_public_bootstrap
+
+        s = render_public_bootstrap(base_url="https://x.example", requested="test-latest")
+        self.assertLess(s.index("command -v deng-rejoin"), s.index("Install complete."))
 
 
 class InstallTestLatestAuthorizeTests(unittest.TestCase):

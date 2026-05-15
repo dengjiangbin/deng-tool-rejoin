@@ -3,14 +3,107 @@
 Install is non-interactive: it downloads a small launcher tarball, extracts into
 ``~/.deng-tool/rejoin``, and writes ``.install_requested``. License-gated download
 of the full bundle runs on first ``deng-rejoin`` (:mod:`agent.deferred_bundle_install`).
+
+On Termux, ``deng-rejoin`` is installed under ``$PREFIX/bin`` so it is on PATH
+immediately (no restart). Fallback: ``$HOME/bin`` with PATH persisted in shell rc files.
 """
 
 from __future__ import annotations
 
-_WRAPPER_BODY = """#!/bin/sh
+# shell: POSIX ``sh`` — Termux provides ``/usr/bin/env``; checks before exec.
+_WRAPPER_BODY = """#!/usr/bin/env sh
 export DENG_REJOIN_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "deng-rejoin: python3 not found. Install: pkg install python" >&2
+  exit 127
+fi
+if [ ! -f "$DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" ]; then
+  echo "deng-rejoin: missing $DENG_REJOIN_HOME/agent/deng_tool_rejoin.py (re-run install)" >&2
+  exit 1
+fi
 exec python3 "$DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" "$@"
 """
+
+# Installing to $HOME/.local/bin breaks Termux (not on default PATH).
+_INSTALL_PART_BEFORE_HEREDOC = r"""
+command -v curl >/dev/null 2>&1 || { echo "Install curl first: pkg install -y curl" >&2; exit 1; }
+command -v tar >/dev/null 2>&1 || { echo "Install tar first: pkg install -y tar" >&2; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "Install python first: pkg install -y python" >&2; exit 1; }
+LAUNCHER_URL="$DENG_REJOIN_INSTALL_API/install/launcher/bundle.tar.gz"
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+curl -fsSL "$LAUNCHER_URL" -o "$TMP" || { echo "Could not download launcher bundle." >&2; exit 1; }
+tar -xzf "$TMP" -C "$APP_HOME"
+
+INSTALL_BIN=""
+if [[ -n "${PREFIX:-}" ]] && [[ -d "${PREFIX}/bin" ]] && [[ -w "${PREFIX}/bin" ]]; then
+  INSTALL_BIN="${PREFIX}/bin"
+elif [[ -n "${PREFIX:-}" ]]; then
+  if mkdir -p "${PREFIX}/bin" 2>/dev/null && [[ -w "${PREFIX}/bin" ]]; then
+    INSTALL_BIN="${PREFIX}/bin"
+  fi
+fi
+
+USING_HOME_BIN=0
+if [[ -n "$INSTALL_BIN" ]]; then
+  BIN="$INSTALL_BIN"
+else
+  BIN="$HOME/bin"
+  mkdir -p "$BIN"
+  export PATH="$HOME/bin:$PATH"
+  USING_HOME_BIN=1
+  _MARK='# DENG Tool: Rejoin - PATH (added by installer)'
+  _LINE='export PATH="$HOME/bin:$PATH"'
+  for _rc in "$HOME/.bashrc" "$HOME/.profile"; do
+    touch "$_rc"
+    if ! grep -qF "$_MARK" "$_rc" 2>/dev/null; then
+      printf '\n%s\n%s\n' "$_MARK" "$_LINE" >> "$_rc"
+    fi
+  done
+fi
+
+cat > "$BIN/deng-rejoin" << 'DENG_REJOIN_WRAPPER'
+"""
+
+_INSTALL_PART_AFTER_HEREDOC = r"""
+DENG_REJOIN_WRAPPER
+chmod +x "$BIN/deng-rejoin"
+
+_fail_install() {
+  echo "Failed to create deng-rejoin command." >&2
+  echo "Wrapper path: $BIN/deng-rejoin" >&2
+  echo "PATH: $PATH" >&2
+  echo "Try direct path: $BIN/deng-rejoin" >&2
+  exit 1
+}
+
+[[ -f "$BIN/deng-rejoin" ]] || _fail_install
+[[ -x "$BIN/deng-rejoin" ]] || _fail_install
+[[ -f "$APP_HOME/agent/deng_tool_rejoin.py" ]] || _fail_install
+[[ -f "$APP_HOME/agent/deferred_bundle_install.py" ]] || _fail_install
+
+DR_RESOLVED="$(command -v deng-rejoin 2>/dev/null || true)"
+if [[ -z "$DR_RESOLVED" ]]; then
+  _fail_install
+fi
+
+if ! PYTHONPATH="$APP_HOME" python3 -c "import agent.deferred_bundle_install" 2>/dev/null; then
+  echo "Failed: launcher Python modules did not import. Check PYTHONPATH / extract path." >&2
+  echo "APP_HOME: $APP_HOME" >&2
+  _fail_install
+fi
+
+echo "deng-rejoin command: $DR_RESOLVED"
+if [[ "$USING_HOME_BIN" -eq 1 ]]; then
+  echo 'Note: If deng-rejoin is not found in this shell, run once:'
+  echo '  export PATH="$HOME/bin:$PATH"'
+fi
+echo ""
+echo "Install complete."
+echo "Next: run deng-rejoin"
+"""
+
+_INSTALL_TAIL = _INSTALL_PART_BEFORE_HEREDOC + _WRAPPER_BODY + _INSTALL_PART_AFTER_HEREDOC
 
 
 def render_public_bootstrap(
@@ -40,7 +133,6 @@ def render_public_bootstrap(
     safe_title = _escape_double(installer_title)
     safe_req = _escape_double(requested)
 
-    # shellcheck-friendly: newline after banner echoes before `if [[ ... ]]`
     return (
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
@@ -59,22 +151,7 @@ def render_public_bootstrap(
         "else\n"
         '  rm -f "$APP_HOME/.bootstrap_session"\n'
         "fi\n"
-        'command -v curl >/dev/null 2>&1 || { echo "Install curl first: pkg install -y curl" >&2; exit 1; }\n'
-        'command -v tar >/dev/null 2>&1 || { echo "Install tar first: pkg install -y tar" >&2; exit 1; }\n'
-        'LAUNCHER_URL="$DENG_REJOIN_INSTALL_API/install/launcher/bundle.tar.gz"\n'
-        'TMP="$(mktemp)"\n'
-        "trap 'rm -f \"$TMP\"' EXIT\n"
-        'curl -fsSL "$LAUNCHER_URL" -o "$TMP" || { echo "Could not download launcher bundle." >&2; exit 1; }\n'
-        'tar -xzf "$TMP" -C "$APP_HOME"\n'
-        'BIN="$HOME/.local/bin"\n'
-        'mkdir -p "$BIN"\n'
-        "cat > \"$BIN/deng-rejoin\" << 'DENG_REJOIN_WRAPPER'\n"
-        f"{_WRAPPER_BODY}"
-        "DENG_REJOIN_WRAPPER\n"
-        'chmod +x "$BIN/deng-rejoin"\n'
-        'echo ""\n'
-        'echo "Install complete."\n'
-        'echo "Next: run deng-rejoin"\n'
+        f"{_INSTALL_TAIL.lstrip()}"
     )
 
 
