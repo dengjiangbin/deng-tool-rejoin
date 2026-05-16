@@ -40,6 +40,8 @@ FORBIDDEN_KEY_MARKERS = frozenset(
 )
 
 # Prefer exact login username keys over display-oriented keys.
+# Keys with score 0 are numeric IDs (not usernames) — they are skipped by the parser.
+# Keys not present default to 0 (skipped) unless they contain user-hint substrings (see _pref_key_score).
 _PREF_KEY_SCORES: dict[str, int] = {
     "username": 100,
     "userid": 0,
@@ -55,6 +57,23 @@ _PREF_KEY_SCORES: dict[str, int] = {
     "roblox_username": 100,
     "current_username": 90,
     "last_username": 85,
+    # Roblox-specific patterns seen in the wild
+    "rbx_username": 100,
+    "rbx_user": 100,
+    "rbxusername": 100,
+    "robloxusername": 100,
+    "playerusername": 92,
+    "player_username": 92,
+    "accountusername": 98,
+    "account_username": 98,
+    "login_name": 95,
+    "loginname": 95,
+    "screenname": 88,
+    "screen_name": 88,
+    "nickname": 75,
+    "nick": 70,
+    "handle": 70,
+    "login": 85,
 }
 
 _ROBLOX_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
@@ -177,6 +196,11 @@ def _pref_key_score(key: str) -> int:
         return _PREF_KEY_SCORES[k]
     if is_sensitive_key_name(k):
         return -999
+    # Fallback: keys whose name contains username-like substrings get a low positive score
+    # so Roblox-specific or app-specific key names don't silently block detection.
+    _USER_HINT_SUBSTRINGS = ("username", "user_name", "display_name", "account_name", "playername", "player_name")
+    if any(sub in k for sub in _USER_HINT_SUBSTRINGS):
+        return 10
     return 0
 
 
@@ -300,6 +324,41 @@ def _root_read_file_capped(abs_path: str, max_bytes: int, timeout: int, root_too
     return out if out else None
 
 
+def _root_read_shared_prefs_for_username(
+    package: str, max_bytes: int, timeout: int, root_tool: str
+) -> str | None:
+    """Targeted root-based shared_prefs reader.
+
+    Faster than a full find scan because it directly lists the shared_prefs directory and
+    reads hint-matching XML files in priority order. Used as a first-pass before the full
+    find-based scan in _root_scan_package_data.
+    """
+    pkg = validate_package_name(package)
+    base = f"/data/data/{pkg}/shared_prefs"
+    # List .xml files in the shared_prefs directory using root
+    list_inner = f"test -d '{base}' && ls '{base}/' 2>/dev/null | grep '\\.xml$' | head -32"
+    list_res = android.run_root_command(["sh", "-c", list_inner], root_tool=root_tool, timeout=timeout)
+    if list_res.timed_out or not list_res.stdout:
+        return None
+    filenames = [f.strip() for f in (list_res.stdout or "").splitlines() if f.strip().endswith(".xml")]
+    if not filenames:
+        return None
+    _hints = ("account", "profile", "settings", "user", "username", "pkg_preferences", "roblox", "rbx")
+    priority = [f for f in filenames if any(h in f.lower() for h in _hints)]
+    fallback = [f for f in filenames if f not in priority]
+    ordered = (priority + fallback)[:24]
+    for fname in ordered:
+        abs_path = f"{base}/{fname}"
+        content = _root_read_file_capped(abs_path, max_bytes, timeout, root_tool)
+        if not content:
+            continue
+        username = username_from_pref_xml(content)
+        if username:
+            _log.debug("Root shared_prefs found username in %s", fname)
+            return username
+    return None
+
+
 def _root_list_scan_files(package: str, max_kb: int, timeout: int, root_tool: str) -> list[str]:
     pkg = validate_package_name(package)
     base = f"/data/data/{pkg}"
@@ -397,6 +456,16 @@ def _root_scan_package_data(package: str, settings: dict[str, Any]) -> tuple[str
     if not root.available or not root.tool:
         _log.info("Root unavailable, skipped package data scan")
         return None, None
+
+    # Fast first pass: directly read shared_prefs XML via root (no find needed).
+    # This covers the common case where the username is in a shared_prefs XML file.
+    fast_user = _root_read_shared_prefs_for_username(package, max_bytes, timeout, root.tool)
+    if fast_user:
+        u = sanitize_detected_username(fast_user)
+        if u:
+            return u, "root_shared_prefs"
+
+    # Full scan: find XML/JSON/db files anywhere under the package data directory.
     paths = _root_list_scan_files(package, max_kb=max_kb, timeout=timeout, root_tool=root.tool)
     best: str | None = None
     best_src: str | None = None

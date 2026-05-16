@@ -205,9 +205,9 @@ class PackageSubmenuTests(unittest.TestCase):
         cfg["roblox_packages"] = [
             package_entry("com.roblox.client", "Main", True),
         ]
-        # Simulate adding same package again
+        # Simulate adding same package again via "B" (back) since all detected are already configured
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
-            with unittest.mock.patch("builtins.input", side_effect=["1", "0"]):
+            with unittest.mock.patch("builtins.input", side_effect=["b"]):
                 with unittest.mock.patch(
                     "agent.commands._gather_roblox_candidates_for_ui",
                     return_value=[
@@ -219,8 +219,8 @@ class PackageSubmenuTests(unittest.TestCase):
                         with redirect_stdout(buf):
                             result = _package_menu_add(cfg)
         text = buf.getvalue()
-        # Should say "already added" not add it again
-        self.assertIn("Already Added", text)
+        # Should say all detected packages are already configured
+        self.assertIn("already configured", text)
         # Still only 1 package
         self.assertEqual(len(result["roblox_packages"]), 1)
 
@@ -275,13 +275,21 @@ class PackageSubmenuTests(unittest.TestCase):
         self.assertIn("Username", text)
 
     def test_package_submenu_has_detect_refresh_usernames(self):
+        """Detect / Refresh Usernames was removed from the public package menu (not a public item).
+        The public menu now only has: Auto Detect Package, Add Package, Remove Package, Back."""
         cfg = _base_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
-        self.assertIn("Detect / Refresh Usernames", buf.getvalue())
+        text = buf.getvalue()
+        # Must NOT be present in the public menu
+        self.assertNotIn("Detect / Refresh Usernames", text)
+        # The three public items must be present
+        self.assertIn("Auto Detect Package", text)
+        self.assertIn("Add Package", text)
+        self.assertIn("Remove Package", text)
 
     def test_package_submenu_does_not_offer_set_edit_username(self):
         cfg = _base_cfg()
@@ -306,6 +314,7 @@ class PackageSubmenuTests(unittest.TestCase):
         self.assertNotIn("List Packages", text)
 
     def test_package_submenu_only_four_numbered_options(self):
+        """Public package menu: Auto Detect (1), Add (2), Remove (3), Back (0). No extras."""
         cfg = _base_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
@@ -313,12 +322,12 @@ class PackageSubmenuTests(unittest.TestCase):
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
         text = buf.getvalue()
-        self.assertRegex(text, r"(?m)^1\. Add Package")
-        self.assertRegex(text, r"(?m)^2\. Remove Package")
-        self.assertRegex(text, r"(?m)^3\. Auto Detect Packages")
-        self.assertRegex(text, r"(?m)^4\. Detect / Refresh Usernames")
+        self.assertRegex(text, r"(?m)^1\. Auto Detect Package")
+        self.assertRegex(text, r"(?m)^2\. Add Package")
+        self.assertRegex(text, r"(?m)^3\. Remove Package")
+        # No 4th numbered public item; only 0. Back after 3
+        self.assertNotRegex(text, r"(?m)^4\. ")
         self.assertNotRegex(text, r"(?m)^5\. ")
-        self.assertNotRegex(text, r"(?m)^6\. ")
 
     def test_detect_refresh_saves_new_username(self):
         cfg = _base_cfg()
@@ -379,7 +388,8 @@ class PackageSubmenuTests(unittest.TestCase):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
-        self.assertIn("Auto Detect Packages", buf.getvalue())
+        # Menu item is now "Auto Detect Package" (singular) in position 1
+        self.assertIn("Auto Detect Package", buf.getvalue())
 
 
 # ─── 14-18: Roblox Launch Link Submenu ───────────────────────────────────────
@@ -754,6 +764,185 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
                     _config_menu_launch_link(cfg)
         text = buf.getvalue()
         self.assertIn("Launch The App Normally", text)
+
+
+class TestPackageMenuBug3Regression(unittest.TestCase):
+    """BUG 3 regression: Auto Detect Package, Add Package (detect+confirm), Remove Package (confirm)."""
+
+    def _make_cfg(self, packages=None):
+        cfg = _base_cfg()
+        if packages:
+            cfg["roblox_packages"] = packages
+        return cfg
+
+    def test_auto_detect_package_is_menu_item_1(self):
+        """Auto Detect Package must appear as item 1 in the public package menu."""
+        cfg = self._make_cfg()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        self.assertRegex(buf.getvalue(), r"(?m)^1\. Auto Detect Package")
+
+    def test_add_package_is_menu_item_2(self):
+        cfg = self._make_cfg()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        self.assertRegex(buf.getvalue(), r"(?m)^2\. Add Package")
+
+    def test_remove_package_is_menu_item_3(self):
+        cfg = self._make_cfg()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        self.assertRegex(buf.getvalue(), r"(?m)^3\. Remove Package")
+
+    def test_no_refresh_username_in_public_menu(self):
+        """Refresh Username / Edit Username must NOT be in the public package menu."""
+        cfg = self._make_cfg()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        text = buf.getvalue()
+        self.assertNotIn("Refresh Username", text)
+        self.assertNotIn("Edit Username", text)
+        self.assertNotIn("Detect / Refresh Usernames", text)
+
+    def test_add_package_runs_detection_first(self):
+        """Add Package must call detection before asking what to add."""
+        cfg = self._make_cfg()
+        detected = [android.RobloxPackageCandidate("com.clone.pkg", "Clone", True)]
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", side_effect=["b"]):
+                with unittest.mock.patch(
+                    "agent.commands._gather_roblox_candidates_for_ui",
+                    return_value=detected,
+                ) as mock_detect:
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        _package_menu_add(cfg)
+        mock_detect.assert_called_once()
+
+    def test_add_package_supports_manual_entry(self):
+        """Add Package M/m option allows typing a package name manually."""
+        cfg = self._make_cfg()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch(
+                "agent.commands._gather_roblox_candidates_for_ui", return_value=[]
+            ):
+                with unittest.mock.patch("builtins.input", side_effect=["m", "com.manual.pkg", "y"]):
+                    with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
+                        with unittest.mock.patch(
+                            "agent.commands._detect_or_prompt_account_username",
+                            side_effect=lambda entry, _cfg: {**entry, "account_username": "Unknown"},
+                        ):
+                            buf = io.StringIO()
+                            with redirect_stdout(buf):
+                                result = _package_menu_add(cfg)
+        pkgs = [e["package"] for e in result.get("roblox_packages", [])]
+        self.assertIn("com.manual.pkg", pkgs)
+
+    def test_add_package_requires_confirmation_before_saving(self):
+        """Add Package must ask for confirmation before saving detected package."""
+        cfg = self._make_cfg()
+        detected = [android.RobloxPackageCandidate("com.new.pkg", "New App", True)]
+        # User selects #1 but then says "n" to confirmation
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch(
+                "agent.commands._gather_roblox_candidates_for_ui", return_value=detected
+            ):
+                with unittest.mock.patch("builtins.input", side_effect=["1", "n"]):
+                    with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c) as mock_save:
+                        with unittest.mock.patch(
+                            "agent.commands._detect_or_prompt_account_username",
+                            side_effect=lambda entry, _cfg: {**entry, "account_username": "Unknown"},
+                        ):
+                            buf = io.StringIO()
+                            with redirect_stdout(buf):
+                                result = _package_menu_add(cfg)
+        # save_config should NOT have been called (user cancelled)
+        mock_save.assert_not_called()
+
+    def test_add_package_cancel_does_not_modify_config(self):
+        """Cancelling Add Package confirmation must leave config unchanged."""
+        cfg = self._make_cfg([package_entry("com.roblox.client", "Main", True)])
+        original_pkgs = list(cfg["roblox_packages"])
+        detected = [android.RobloxPackageCandidate("com.new.pkg", "New", True)]
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch(
+                "agent.commands._gather_roblox_candidates_for_ui", return_value=detected
+            ):
+                with unittest.mock.patch("builtins.input", side_effect=["1", "n"]):
+                    with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
+                        with unittest.mock.patch(
+                            "agent.commands._detect_or_prompt_account_username",
+                            side_effect=lambda entry, _cfg: {**entry, "account_username": "Unknown"},
+                        ):
+                            buf = io.StringIO()
+                            with redirect_stdout(buf):
+                                result = _package_menu_add(cfg)
+        self.assertEqual(len(result.get("roblox_packages", [])), len(original_pkgs))
+
+    def test_remove_package_requires_confirmation(self):
+        """Remove Package must ask 'Confirm? [y/N]' before removing."""
+        cfg = self._make_cfg([
+            package_entry("com.roblox.client", "Main", True),
+            package_entry("com.clone.pkg", "Clone", True),
+        ])
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", side_effect=["1", "n"]):
+                with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        result = _package_menu_remove(cfg)
+        # Cancelled → both packages remain
+        self.assertEqual(len(result.get("roblox_packages", [])), 2)
+
+    def test_remove_package_cancel_does_not_modify_config(self):
+        """Declining removal confirmation must leave config unchanged."""
+        cfg = self._make_cfg([
+            package_entry("com.roblox.client", "Main", True),
+        ])
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", side_effect=["1", "n"]):
+                with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c) as mock_save:
+                    buf = io.StringIO()
+                    with redirect_stdout(buf):
+                        result = _package_menu_remove(cfg)
+        mock_save.assert_not_called()
+
+    def test_blank_input_does_not_crash(self):
+        """Blank input at any package menu prompt must not raise."""
+        cfg = self._make_cfg()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value=""):
+                with unittest.mock.patch(
+                    "agent.commands._gather_roblox_candidates_for_ui", return_value=[]
+                ):
+                    try:
+                        buf = io.StringIO()
+                        with redirect_stdout(buf):
+                            _package_menu_add(cfg)
+                    except Exception as exc:
+                        self.fail(f"Blank input caused crash: {exc}")
+
+    def test_username_detection_failure_falls_back_to_unknown(self):
+        """If username detection fails, package entry must show Unknown — not crash."""
+        from agent.commands import _detect_or_prompt_account_username, _entry_for_package
+        entry = _entry_for_package("com.roblox.client", [])
+        with unittest.mock.patch("agent.account_detect.detect_account_username", return_value=None):
+            with unittest.mock.patch("agent.commands._is_interactive", return_value=False):
+                result = _detect_or_prompt_account_username(entry, {})
+        username = result.get("account_username") or "Unknown"
+        self.assertIn(username, ("Unknown", "", None, "unknown"))
 
 
 if __name__ == "__main__":

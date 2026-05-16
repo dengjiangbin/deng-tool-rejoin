@@ -379,14 +379,13 @@ class ConfirmResetButton(discord.ui.Button):
                     "message": f"Reset limit reached ({count}/{MAX_HWID_RESETS_PER_24H} today).",
                 })
             except ActiveKeyWarning as exc:
-                m = re.search(r"(\d+)s ago", str(exc))
-                elapsed = int(m.group(1)) if m else 0
-                mins, secs = elapsed // 60, elapsed % 60
+                # ActiveKeyWarning is no longer raised (cooldown is based on reset history only),
+                # but kept for safety in case of legacy store implementations.
                 results.append({
                     "display_key": display_key,
                     "masked_key": masked,
                     "success": False,
-                    "message": f"Key active {mins}m {secs}s ago — wait 5 min first.",
+                    "message": str(exc),
                 })
 
         for child in self.view.children:

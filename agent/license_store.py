@@ -511,14 +511,9 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 can_reset = False
                 reason = f"Reset limit reached ({reset_count}/{MAX_HWID_RESETS_PER_24H} today)"
             else:
-                elapsed = _seconds_since(last_seen_at)
-                if elapsed is not None and elapsed < ACTIVE_HEARTBEAT_WINDOW_S:
-                    can_reset = False
-                    m = int(elapsed) // 60
-                    s = int(elapsed) % 60
-                    reason = f"Key active {m}m {s}s ago — wait 5 min"
-                else:
-                    can_reset = True
+                # Cooldown is based only on actual reset history, not on last_seen_at.
+                # First reset is always allowed immediately if no previous reset has occurred.
+                can_reset = True
             result.append({
                 "key_id": key_hash,
                 "masked_key": masked,
@@ -629,20 +624,13 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 "No device is currently bound to this key. "
                 "Start the tool once to activate your device binding."
             )
-        # Now check reset count (only counts if there is something to clear)
+        # Check reset count — based only on actual HWID reset history, never on last_seen_at.
+        # A key used for license verification 1 minute ago must still be resettable on first attempt.
         resets_24h = self.get_reset_count_24h(key_id)
         if resets_24h >= MAX_HWID_RESETS_PER_24H:
             raise ResetLimitError(
                 f"HWID reset limit reached ({MAX_HWID_RESETS_PER_24H} per 24 hours). "
                 "Please wait before trying again."
-            )
-        # Warn if key was recently active
-        last_seen = self.get_last_seen_at(key_id)
-        elapsed = _seconds_since(last_seen)
-        if elapsed is not None and elapsed < ACTIVE_HEARTBEAT_WINDOW_S:
-            raise ActiveKeyWarning(
-                f"This key was active {int(elapsed)}s ago. "
-                "Stop using the tool and wait at least 5 minutes before resetting HWID."
             )
         old_hash = existing_binding.get("install_id_hash")
         # Deactivate binding
@@ -1242,14 +1230,9 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 can_reset = False
                 reason = f"Reset limit reached ({reset_count}/{MAX_HWID_RESETS_PER_24H} today)"
             else:
-                elapsed = _seconds_since(last_seen_at)
-                if elapsed is not None and elapsed < ACTIVE_HEARTBEAT_WINDOW_S:
-                    can_reset = False
-                    m = int(elapsed) // 60
-                    s = int(elapsed) % 60
-                    reason = f"Key active {m}m {s}s ago — wait 5 min"
-                else:
-                    can_reset = True
+                # Cooldown is based only on actual reset history, not on last_seen_at.
+                # First reset is always allowed immediately if no previous reset has occurred.
+                can_reset = True
             result.append({
                 "key_id": key_id,
                 "masked_key": masked,
@@ -1413,13 +1396,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 f"HWID reset limit reached ({MAX_HWID_RESETS_PER_24H} per 24 hours). "
                 "Please wait before trying again."
             )
-        last_seen = self.get_last_seen_at(key_id)
-        elapsed = _seconds_since(last_seen)
-        if elapsed is not None and elapsed < ACTIVE_HEARTBEAT_WINDOW_S:
-            raise ActiveKeyWarning(
-                f"This key was active {int(elapsed)}s ago. "
-                "Stop using the tool and wait at least 5 minutes before resetting HWID."
-            )
+        # No last_seen_at cooldown — HWID reset is gated only on reset history (5/24h), not heartbeat.
         old_hash = binding_row.get("install_id_hash")
         self._client.table("device_bindings").update(
             {"is_active": False}

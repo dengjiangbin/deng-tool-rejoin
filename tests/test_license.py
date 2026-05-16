@@ -273,13 +273,20 @@ class StoreHwidResetTests(unittest.TestCase):
             self.store.reset_hwid(self.uid, self.key_hash)
 
     def test_reset_hwid_warns_if_recently_active(self):
-        """Test 18 – reset raises ActiveKeyWarning when last_seen_at < 5 minutes ago."""
+        """Test 18 – reset must SUCCEED when last_seen_at is recent but no prior reset exists.
+
+        The old 'ActiveKeyWarning on recently-active key' behavior was incorrect:
+        it prevented the first-ever HWID reset immediately after license verification.
+        Reset cooldown is now based only on actual reset history, not heartbeat timestamps.
+        """
         from datetime import datetime, timezone
         db = self.store._load()
         db["bindings"][self.key_hash]["last_seen_at"] = datetime.now(timezone.utc).isoformat()
         self.store._save(db)
-        with self.assertRaises(ActiveKeyWarning):
-            self.store.reset_hwid(self.uid, self.key_hash)
+        # Must NOT raise — no prior reset means first reset is always allowed
+        self.store.reset_hwid(self.uid, self.key_hash)
+        db2 = self.store._load()
+        self.assertFalse(db2["bindings"][self.key_hash]["is_active"], "Binding should be deactivated after reset")
 
     def test_reset_hwid_clears_binding(self):
         """Test 19 – successful reset deactivates the binding."""

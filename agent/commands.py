@@ -224,15 +224,26 @@ def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespac
 
 
 def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespace, use_color: bool) -> bool:
-    while True:
+    """Gate the menu behind a remote license check. Allows bounded retries without recursion."""
+    _MAX_RETRIES = 10
+    attempt = 0
+    while attempt < _MAX_RETRIES:
+        attempt += 1
+        # Always reload config fresh to pick up any changes from save_config
         try:
             cfg = load_config()
         except ConfigError as exc:
             _print_license_err(str(exc), use_color)
             return False
-        cfg = _ensure_install_id_saved(cfg)
+
+        try:
+            cfg = _ensure_install_id_saved(cfg)
+        except Exception:  # noqa: BLE001
+            pass  # non-fatal; continue with current cfg
+
         lic = cfg.setdefault("license", {})
         key = (lic.get("key") or "").strip()
+
         if not key:
             if not _is_interactive():
                 _print_license_err("No License Key Found", use_color)
@@ -241,7 +252,8 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             print_beginner_menu_license_prompt()
             try:
                 raw = input("Paste your license key: ").strip()
-            except EOFError:
+            except (EOFError, KeyboardInterrupt):
+                print()
                 return False
             if not raw:
                 continue
@@ -252,16 +264,32 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
                 continue
             lic["key"] = norm
             cfg["license_key"] = norm
-            cfg = save_config(cfg)
+            try:
+                cfg = save_config(cfg)
+            except Exception as exc:  # noqa: BLE001
+                _print_license_err(f"Could not save license key: {exc}", use_color)
+                continue
             key = norm
 
-        result, msg = _remote_license_run_check(cfg)
+        try:
+            result, msg = _remote_license_run_check(cfg)
+        except Exception as exc:  # noqa: BLE001
+            _print_license_err(f"License check failed: {exc}", use_color)
+            result, msg = "error", str(exc)
+
         if result == "active":
             _print_license_ok(use_color)
-            _persist_license_status(cfg, "active")
+            try:
+                _persist_license_status(cfg, "active")
+            except Exception:  # noqa: BLE001
+                pass
             return True
 
-        cfg = _persist_license_status(cfg, result)
+        try:
+            cfg = _persist_license_status(cfg, result)
+        except Exception:  # noqa: BLE001
+            pass
+
         if result == "wrong_device":
             _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
         elif result == "key_not_redeemed":
@@ -278,13 +306,19 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             print("\n1. Try Another Key\n2. Exit")
         try:
             choice = input("Choose [2]: ").strip() or "2"
-        except EOFError:
+        except (EOFError, KeyboardInterrupt):
+            print()
             return False
         if choice != "1":
             return False
+        # Clear bad key and retry
         lic["key"] = ""
         cfg["license_key"] = ""
-        cfg = save_config(cfg)
+        try:
+            cfg = save_config(cfg)
+        except Exception:  # noqa: BLE001
+            pass  # Will be reloaded at top of loop
+    return False
 
 
 def ensure_menu_can_open(_args: argparse.Namespace) -> bool:
@@ -919,7 +953,7 @@ sh scripts/start-agent.sh >> "$APP_HOME/logs/agent.log" 2>&1
 # ─── Config Menu Submenus ─────────────────────────────────────────────────────
 
 def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
-    """Package submenu: Add / Remove / Auto Detect / Detect Usernames; current packages shown at top."""
+    """Package submenu: Auto Detect / Add / Remove. Clean public menu without debug items."""
     if not _is_interactive():
         return draft
     while True:
@@ -939,10 +973,9 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         else:
             print("  No Packages Configured.")
         print()
-        print("1. Add Package")
-        print("2. Remove Package")
-        print("3. Auto Detect Packages")
-        print("4. Detect / Refresh Usernames")
+        print("1. Auto Detect Package")
+        print("2. Add Package")
+        print("3. Remove Package")
         print("0. Back")
         print("--------------------------------")
         try:
@@ -952,15 +985,13 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         if choice == "0":
             break
         elif choice == "1":
-            draft = _package_menu_add(draft)
-        elif choice == "2":
-            draft = _package_menu_remove(draft)
-        elif choice == "3":
             draft = _package_menu_auto_detect(draft)
-        elif choice == "4":
-            draft = _package_menu_detect_refresh(draft)
+        elif choice == "2":
+            draft = _package_menu_add(draft)
+        elif choice == "3":
+            draft = _package_menu_remove(draft)
         else:
-            print("Please choose 1-4 or 0.")
+            print("Please choose 1-3 or 0.")
     return draft
 
 
@@ -1070,63 +1101,158 @@ def _package_menu_set_username(draft: dict[str, Any]) -> dict[str, Any]:
 
 
 def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
-    """Add package(s) via the same full discovery table as first-time wizard, or manual entry."""
+    """Add Package: detect available Roblox-like packages first, then let user choose or type manually.
+
+    Flow: detect → show table → number/A=all/M=manual/B=back → confirm before saving.
+    """
     current_entries = validate_package_entries(
         draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
     )
     current_pkgs = {e["package"] for e in current_entries}
+
     print()
     print("Add Package")
-    print("1. Auto Detect")
-    print("2. Enter Manually")
-    print("0. Back")
-    choice = input("Choose [1]: ").strip() or "1"
-    if choice == "0":
+    print()
+
+    # Run detection first, filter to not-yet-configured packages
+    all_candidates = _gather_roblox_candidates_for_ui(draft)
+    fresh_candidates = [c for c in all_candidates if c.package not in current_pkgs]
+
+    if fresh_candidates:
+        print(f"Detected {len(fresh_candidates)} new Roblox-like package(s):")
+        _print_full_discovery_table(fresh_candidates)
+        print(f"  A. Add all ({len(fresh_candidates)})")
+        print("  M. Enter package name manually")
+        print("  B. Back")
+        print()
+    else:
+        if all_candidates:
+            print("All detected packages are already configured.")
+        else:
+            print("No Roblox-like packages detected automatically.")
+        print()
+        print("  M. Enter package name manually")
+        print("  B. Back")
+
+    try:
+        raw = input("Choose (e.g. 1,2 or A, M, B) [M]: ").strip().lower() or "m"
+    except (EOFError, KeyboardInterrupt):
+        print()
         return draft
+
+    if raw in ("b", "back", "0"):
+        return draft
+
     new_entries_to_append: list[dict[str, Any]] = []
-    if choice == "1":
-        all_detected = _gather_roblox_candidates_for_ui(draft)
-        fresh_candidates = [c for c in all_detected if c.package not in current_pkgs]
-        if not all_detected:
-            print("No Roblox-compatible packages were detected. Try manual entry.")
-            return draft
-        if not fresh_candidates:
-            print("All Detected Packages Are Already Added.")
-            return draft
-        new_sel, reason = _interactive_discover_package_entries(
-            draft,
-            current_entries,
-            config_for_detect=draft,
-            candidates=fresh_candidates,
-        )
-        if reason == "empty_choice":
-            return draft
-        new_entries_to_append = new_sel
-    elif choice == "2":
+
+    if raw == "m":
+        # Manual entry
         default_pkg = current_entries[0]["package"] if current_entries else DEFAULT_ROBLOX_PACKAGE
         manual = _prompt_manual_package(default_pkg)
-        if manual:
-            if manual in current_pkgs:
-                print(f"Package Already Added: {manual}")
-                return draft
-            new_entries_to_append = [_detect_or_prompt_account_username(_entry_for_package(manual, current_entries), draft)]
+        if not manual:
+            return draft
+        if manual in current_pkgs:
+            print(f"Package already configured: {manual}")
+            return draft
+        entry = _detect_or_prompt_account_username(_entry_for_package(manual, current_entries), draft)
+        username = _package_username_display(entry)
+        print()
+        print(f"  Package:  {manual}")
+        print(f"  Username: {username}")
+        print()
+        try:
+            confirm = input("Add this package? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return draft
+        if confirm in ("n", "no"):
+            print("Cancelled.")
+            return draft
+        new_entries_to_append = [entry]
+
+    elif raw == "a" and fresh_candidates:
+        # Add all detected
+        new_entries_to_append = [
+            _detect_or_prompt_account_username(
+                _entry_for_package(c.package, current_entries, app_name=c.app_name),
+                draft,
+            )
+            for c in fresh_candidates
+        ]
+        print()
+        print("Packages to add:")
+        for i, entry in enumerate(new_entries_to_append, start=1):
+            username = _package_username_display(entry)
+            print(f"  {i}. {entry['package']} — Username: {username}")
+        print()
+        try:
+            confirm = input("Add all these packages? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return draft
+        if confirm in ("n", "no"):
+            print("Cancelled.")
+            return draft
+
+    elif fresh_candidates:
+        # Number selection from detected list
+        picked: list = []
+        seen: set[str] = set()
+        for part in [p.strip() for p in raw.split(",") if p.strip()]:
+            if part.isdigit():
+                idx = int(part) - 1
+                if 0 <= idx < len(fresh_candidates):
+                    c = fresh_candidates[idx]
+                    if c.package not in seen:
+                        seen.add(c.package)
+                        picked.append(c)
+        if not picked:
+            print("No valid selection.")
+            return draft
+        new_entries_to_append = [
+            _detect_or_prompt_account_username(
+                _entry_for_package(c.package, current_entries, app_name=c.app_name),
+                draft,
+            )
+            for c in picked
+        ]
+        print()
+        print("Packages to add:")
+        for i, entry in enumerate(new_entries_to_append, start=1):
+            username = _package_username_display(entry)
+            print(f"  {i}. {entry['package']} — Username: {username}")
+        print()
+        try:
+            confirm = input("Add these packages? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return draft
+        if confirm in ("n", "no"):
+            print("Cancelled.")
+            return draft
+    else:
+        print("No valid selection.")
+        return draft
+
     if not new_entries_to_append:
         return draft
+
     added_any = False
     for entry in new_entries_to_append:
         if entry["package"] in current_pkgs:
-            print(f"Package Already Added: {entry['package']}")
+            print(f"Already configured: {entry['package']}")
             continue
         current_entries.append(entry)
         current_pkgs.add(entry["package"])
         added_any = True
-        print(f"Package Added: {entry['package']}")
+
     if added_any:
         draft["roblox_packages"] = current_entries
         active = enabled_package_entries(draft)
         draft["roblox_package"] = active[0]["package"]
         draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
         draft = save_config(draft)
+        print(f"Saved {sum(1 for e in new_entries_to_append if e['package'] in current_pkgs)} package(s).")
     return draft
 
 
@@ -1172,53 +1298,109 @@ def _package_menu_remove(draft: dict[str, Any]) -> dict[str, Any]:
 
 
 def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
-    """Auto-detect Roblox packages and offer to add those not already added."""
+    """Auto-detect Roblox-like packages, let user select, then confirm before saving."""
     print()
-    print("Auto Detect Packages")
-    hints = _safe_detection_hints(draft)
-    detected = _ordered_roblox_packages(hints)
-    if not detected:
-        print("No Roblox Packages Detected.")
-        input("Press Enter to continue...")
+    print("Auto Detect Package")
+    print()
+    candidates = _gather_roblox_candidates_for_ui(draft)
+    if not candidates:
+        print("No Roblox-like packages were detected.")
+        print("Try: install Roblox or your clone APK, open it once, then try again.")
+        print("Or use Add Package → manual entry as a fallback.")
+        try:
+            input("\nPress Enter to continue...")
+        except EOFError:
+            pass
         return draft
+
     current_entries = validate_package_entries(
         draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
     )
     current_pkgs = {e["package"] for e in current_entries}
-    new_pkgs = [p for p in detected if p not in current_pkgs]
-    print(f"Detected {len(detected)} package(s):")
-    for idx, pkg in enumerate(detected, start=1):
-        status = "Already Added" if pkg in current_pkgs else "New"
-        marker = " (Recommended)" if pkg == DEFAULT_ROBLOX_PACKAGE else ""
-        print(f"  {idx}. [{status}] {pkg}{marker}")
-    if not new_pkgs:
-        print("All Detected Packages Are Already Added.")
-        input("Press Enter to continue...")
+
+    _print_full_discovery_table(candidates)
+    new_candidates = [c for c in candidates if c.package not in current_pkgs]
+    already_all = len(new_candidates) == 0
+    if already_all:
+        print("All detected packages are already configured.")
+        try:
+            input("\nPress Enter to continue...")
+        except EOFError:
+            pass
         return draft
+
+    print(f"  A. Select all ({len(new_candidates)} new)")
+    print("  B. Back (no change)")
     print()
-    raw = input("Select packages to add (e.g. 1,2 or A for all new) [A]: ").strip().lower() or "a"
-    to_add: list[str] = []
+    try:
+        raw = input("Choose packages (e.g. 1,2 or A for all) [A]: ").strip().lower() or "a"
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return draft
+
+    if raw in ("b", "back", "0"):
+        return draft
+
+    to_add_candidates: list = []
     if raw == "a":
-        to_add = list(new_pkgs)
+        to_add_candidates = list(new_candidates)
     else:
+        seen: set[str] = set()
         for part in [p.strip() for p in raw.split(",") if p.strip()]:
             if part.isdigit():
-                i = int(part) - 1
-                if 0 <= i < len(detected):
-                    p = detected[i]
-                    if p not in current_pkgs and p not in to_add:
-                        to_add.append(p)
-    for pkg in to_add:
-        entry = _detect_or_prompt_account_username(_entry_for_package(pkg, current_entries), draft)
-        current_entries.append(entry)
-        current_pkgs.add(pkg)
-    if to_add:
-        draft["roblox_packages"] = current_entries
-        active = enabled_package_entries(draft)
-        draft["roblox_package"] = active[0]["package"]
-        draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
-        draft = save_config(draft)
-        print(f"Added {len(to_add)} package(s).")
+                idx = int(part) - 1
+                if 0 <= idx < len(candidates):
+                    c = candidates[idx]
+                    if c.package not in current_pkgs and c.package not in seen:
+                        seen.add(c.package)
+                        to_add_candidates.append(c)
+
+    if not to_add_candidates:
+        print("No packages selected.")
+        try:
+            input("Press Enter to continue...")
+        except EOFError:
+            pass
+        return draft
+
+    # Detect usernames for selected packages
+    to_add_entries = [
+        _detect_or_prompt_account_username(
+            _entry_for_package(c.package, current_entries, app_name=c.app_name),
+            draft,
+        )
+        for c in to_add_candidates
+    ]
+
+    # Confirmation before saving
+    print()
+    print("Selected packages:")
+    for i, entry in enumerate(to_add_entries, start=1):
+        username = _package_username_display(entry)
+        print(f"  {i}. {entry['package']} — Username: {username}")
+    print()
+    try:
+        confirm = input("Save these packages? [Y/n]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        print("Cancelled.")
+        return draft
+
+    if confirm in ("n", "no"):
+        print("Cancelled.")
+        return draft
+
+    for entry in to_add_entries:
+        if entry["package"] not in current_pkgs:
+            current_entries.append(entry)
+            current_pkgs.add(entry["package"])
+
+    draft["roblox_packages"] = current_entries
+    active = enabled_package_entries(draft)
+    draft["roblox_package"] = active[0]["package"]
+    draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
+    draft = save_config(draft)
+    print(f"Saved {len(to_add_entries)} package(s).")
     return draft
 
 

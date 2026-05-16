@@ -156,11 +156,16 @@ class TestListKeysWithStateBound(unittest.TestCase):
 # ── Group 3: can_reset rules — recently active ────────────────────────────────
 
 class TestCanResetRecentlyActive(unittest.TestCase):
-    """Tests 12-13: key active < 5 min ago → can_reset=False."""
+    """Tests 12-13: key active < 5 min ago must STILL be resettable if no prior reset has occurred.
+
+    The old behavior (blocking HWID reset based on last_seen_at) was incorrect.
+    Cooldown is now based only on actual reset history. A key used 60 seconds ago
+    for license verification must be immediately resettable on the first reset attempt.
+    """
 
     def setUp(self):
         self.store, _, self.key_id = _setup_user_with_key("333")
-        # Write binding with last_seen_at = 60 seconds ago (< 5 min window)
+        # Write binding with last_seen_at = 60 seconds ago (< 5 min — old code would block this)
         db = self.store._load()
         db.setdefault("bindings", {})[self.key_id] = {
             "install_id_hash": "bbbb" * 8,
@@ -174,16 +179,19 @@ class TestCanResetRecentlyActive(unittest.TestCase):
         self.store._save(db)
 
     def test_12_recent_can_reset_false(self):
-        """Test 12 – key active 60s ago has can_reset=False."""
+        """Test 12 – key active 60s ago with no prior reset has can_reset=True (not False).
+
+        Correct: recently-active key with no reset history should be immediately resettable.
+        """
         result = self.store.list_user_keys_with_binding_state("333")
-        self.assertFalse(result[0]["can_reset"])
+        self.assertTrue(result[0]["can_reset"], "No prior resets → first reset must be allowed immediately")
 
     def test_13_recent_reason_contains_wait(self):
-        """Test 13 – reason mentions 'wait 5 min' for recently active key."""
+        """Test 13 – recently-active key with no prior reset has no blocking reason."""
         result = self.store.list_user_keys_with_binding_state("333")
         reason = result[0]["reason_if_not_resettable"]
-        self.assertIsNotNone(reason)
-        self.assertIn("wait 5 min", reason)
+        # No reason needed — reset is allowed
+        self.assertIsNone(reason, f"No blocking reason expected but got: {reason!r}")
 
 
 # ── Group 4: can_reset rules — reset limit ────────────────────────────────────

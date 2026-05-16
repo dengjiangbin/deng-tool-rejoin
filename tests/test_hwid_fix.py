@@ -168,32 +168,39 @@ class TestResetHwidSuccess(unittest.TestCase):
 
 
 class TestResetHwidActiveRecently(unittest.TestCase):
-    """Test 5 – reset blocks if last_seen_at is within the active window."""
+    """Test 5 – a key used recently (last_seen_at fresh) must still be resettable on first attempt.
+
+    The 5-minute 'active key' cooldown was WRONG — it prevented users from performing their first
+    HWID reset immediately after verifying their license key. Reset cooldown is now based ONLY on
+    actual HWID reset history (reset_logs), not on last_seen_at / heartbeat timestamps.
+    """
 
     def test_blocks_active_recently(self):
+        """Correct behavior: a recently-active key with NO prior reset CAN be reset immediately."""
         store, full_key, key_hash = _bound_store_with_key("u005", active_binding=True, last_seen_old=False)
-        # Ensure last_seen_at is very recent
+        # Ensure last_seen_at is very recent (simulating just verified license)
         db = store._load()
         db["bindings"][key_hash]["last_seen_at"] = datetime.now(timezone.utc).isoformat()
         store._save(db)
-        with self.assertRaises(ActiveKeyWarning):
-            store.reset_hwid("u005", key_hash)
+        # Must NOT raise ActiveKeyWarning — first reset should be allowed immediately
+        store.reset_hwid("u005", key_hash)
+        # Confirm binding was deactivated
+        db = store._load()
+        self.assertFalse(db["bindings"][key_hash]["is_active"])
 
     def test_no_log_on_active_recently_block(self):
-        """Active guard block must not write a reset log."""
+        """A successful reset on a recently-active key MUST write a reset log entry."""
         store, full_key, key_hash = _bound_store_with_key("u005b", active_binding=True, last_seen_old=False)
         db = store._load()
         db["bindings"][key_hash]["last_seen_at"] = datetime.now(timezone.utc).isoformat()
         store._save(db)
 
-        try:
-            store.reset_hwid("u005b", key_hash)
-        except ActiveKeyWarning:
-            pass
+        # Reset should succeed and log the event
+        store.reset_hwid("u005b", key_hash)
 
         db = store._load()
         logs = [e for e in db.get("reset_logs", []) if e.get("key_id") == key_hash]
-        self.assertEqual(len(logs), 0, "Reset log must NOT be written on active-recently block")
+        self.assertEqual(len(logs), 1, "Successful reset must write exactly one reset log entry")
 
 
 class TestResetHwidRateLimit(unittest.TestCase):
@@ -721,6 +728,138 @@ class TestRegressionLocalStore(unittest.TestCase):
         """License debug module must import cleanly."""
         import bot.license_debug as dbg_mod
         self.assertTrue(callable(dbg_mod.main))
+
+
+class TestResetCooldownBasedOnResetHistoryOnly(unittest.TestCase):
+    """BUG 1 regression tests: HWID cooldown must use reset history, not last_active."""
+
+    def test_active_key_used_1_min_ago_can_reset_if_no_previous_reset(self):
+        """Key last seen 1 minute ago can be reset immediately if no prior reset exists."""
+        store, _, key_hash = _bound_store_with_key("bug1_a", active_binding=True, last_seen_old=False)
+        db = store._load()
+        db["bindings"][key_hash]["last_seen_at"] = datetime.now(timezone.utc).isoformat()
+        store._save(db)
+        # Must succeed — no prior reset, so first reset is always allowed
+        store.reset_hwid("bug1_a", key_hash)
+        db2 = store._load()
+        self.assertFalse(db2["bindings"][key_hash]["is_active"])
+
+    def test_reset_cooldown_blocks_only_after_actual_reset(self):
+        """Reset limit is enforced only after actual HWID reset actions, not after license checks."""
+        from datetime import timezone as tz
+        from agent.license_store import _utc_now
+        store, _, key_hash = _bound_store_with_key("bug1_b", active_binding=True, last_seen_old=False)
+        # Add 5 reset log entries (the 24h limit)
+        db = store._load()
+        for _ in range(MAX_HWID_RESETS_PER_24H):
+            db["reset_logs"].append({
+                "key_id": key_hash,
+                "owner_discord_id": "bug1_b",
+                "old_install_id_hash": "abc",
+                "reason": "user_requested",
+                "created_at": _utc_now(),
+            })
+        store._save(db)
+        from agent.license_store import ResetLimitError
+        with self.assertRaises(ResetLimitError):
+            store.reset_hwid("bug1_b", key_hash)
+
+    def test_24h_limit_counts_resets_only_not_license_checks(self):
+        """24h limit counts only reset_logs entries, not bind/check events."""
+        store, _, key_hash = _bound_store_with_key("bug1_c", active_binding=True, last_seen_old=False)
+        db = store._load()
+        # Simulate frequent license checks (last_seen_at updates) but NO resets
+        db["bindings"][key_hash]["last_seen_at"] = datetime.now(timezone.utc).isoformat()
+        store._save(db)
+        count = store.get_reset_count_24h(key_hash)
+        self.assertEqual(count, 0, "License checks must not increment reset count")
+        # Can_reset must be True since no resets have occurred
+        result = store.list_user_keys_with_binding_state("bug1_c")
+        self.assertTrue(result[0]["can_reset"])
+
+    def test_reset_hwid_still_requires_key_ownership(self):
+        """HWID reset must still verify the requester owns the key."""
+        from agent.license_store import KeyOwnershipError
+        store, _, key_hash = _bound_store_with_key("owner1", active_binding=True, last_seen_old=False)
+        with self.assertRaises(KeyOwnershipError):
+            store.reset_hwid("wrong_user", key_hash)
+
+
+class TestLicenseRetryFlowSafety(unittest.TestCase):
+    """BUG 2 regression tests: wrong/bound key retry must not crash or recurse."""
+
+    def _run_license_loop(self, inputs: list[str], remote_results: list[tuple[str, str]]) -> bool:
+        """Helper to run _ensure_remote_license_menu_loop with mocked IO."""
+        from agent.commands import _ensure_remote_license_menu_loop
+        import argparse, io, sys
+
+        call_idx = {"n": 0}
+
+        def mock_remote_check(cfg):
+            i = call_idx["n"]
+            call_idx["n"] += 1
+            if i < len(remote_results):
+                return remote_results[i]
+            return ("active", "ok")
+
+        input_iter = iter(inputs)
+        args = argparse.Namespace(no_color=True)
+
+        with patch("agent.commands.load_config", return_value={"license": {"key": ""}, "install_id": "test"}):
+            with patch("agent.commands.save_config", side_effect=lambda c: c):
+                with patch("agent.commands._ensure_install_id_saved", side_effect=lambda c: c):
+                    with patch("agent.commands._remote_license_run_check", side_effect=mock_remote_check):
+                        with patch("agent.commands.validate_license_key", side_effect=lambda k: k):
+                            with patch("agent.commands._is_interactive", return_value=True):
+                                with patch("agent.commands._persist_license_status", side_effect=lambda c, s: c):
+                                    with patch("builtins.input", side_effect=input_iter):
+                                        buf = io.StringIO()
+                                        sys.stdout = buf
+                                        try:
+                                            result = _ensure_remote_license_menu_loop({}, args, False)
+                                        finally:
+                                            sys.stdout = sys.__stdout__
+        return result
+
+    def test_wrong_device_does_not_crash(self):
+        """wrong_device result must not raise SystemExit or segfault."""
+        inputs = ["DENG-AAAA", "2"]  # key, then choose Exit
+        result = self._run_license_loop(inputs, [("wrong_device", "Wrong device")])
+        self.assertFalse(result)
+
+    def test_invalid_key_does_not_crash(self):
+        """Invalid key must not crash."""
+        inputs = ["DENG-BBBB", "2"]
+        result = self._run_license_loop(inputs, [("invalid", "Not found")])
+        self.assertFalse(result)
+
+    def test_choosing_enter_different_key_re_prompts(self):
+        """Selecting 'Enter Different Key' must show the license prompt again."""
+        inputs = ["DENG-CCCC", "1", "DENG-DDDD", "2"]
+        # First key wrong_device, second key also wrong_device → user exits
+        result = self._run_license_loop(inputs, [("wrong_device", "w"), ("wrong_device", "w")])
+        self.assertFalse(result)
+
+    def test_valid_second_key_opens_menu(self):
+        """A valid key entered after a wrong key must open the menu."""
+        inputs = ["DENG-EEEE", "1", "DENG-FFFF"]
+        result = self._run_license_loop(inputs, [("wrong_device", "w"), ("active", "ok")])
+        self.assertTrue(result)
+
+    def test_no_system_exit_in_retry_flow(self):
+        """Retry flow must never call sys.exit or raise SystemExit."""
+        inputs = ["DENG-GGGG", "2"]
+        try:
+            result = self._run_license_loop(inputs, [("invalid", "bad")])
+        except SystemExit:
+            self.fail("SystemExit raised in license retry flow")
+        self.assertFalse(result)
+
+    def test_blank_key_input_does_not_crash(self):
+        """Blank key input must be ignored and re-prompt, not crash."""
+        inputs = ["", "DENG-HHHH", "2"]
+        result = self._run_license_loop(inputs, [("invalid", "bad")])
+        self.assertFalse(result)
 
 
 if __name__ == "__main__":
