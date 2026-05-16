@@ -168,6 +168,7 @@ class TestRejoinLicenseLifecycle(unittest.TestCase):
             store.reset_hwid("999999999999999999", kh)
 
     def test_8_key_stats_unused_ready_copy_text(self) -> None:
+        """Key Stats embed shows the full key inline and uses 'No device linked' status."""
         row = {
             "masked_key": "DENG-1111...4444",
             "full_key_plaintext": "DENG-1111-2222-3333-4444",
@@ -180,9 +181,12 @@ class TestRejoinLicenseLifecycle(unittest.TestCase):
             "created_at": "2026-01-01T00:00:00+00:00",
         }
         desc = build_key_stats_embed_dict(row)["description"]
-        self.assertIn("Unused / Ready for first device", desc)
-        self.assertIn("copy block", desc.lower())
-        self.assertNotIn("`DENG-1111-2222-3333-4444`", desc)
+        # New: "Unused / No device linked" (was "Ready for first device")
+        self.assertIn("Unused / No device linked", desc)
+        # New: full key is shown directly in the embed (no "copy block" message)
+        self.assertIn("`DENG-1111-2222-3333-4444`", desc)
+        self.assertNotIn("copy block", desc.lower())
+        # Masked key not duplicated when full key is present
         self.assertNotIn("DENG-1111...4444", desc)
 
     def test_9_panel_copy_views_full_key_no_mask(self) -> None:

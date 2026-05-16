@@ -211,5 +211,49 @@ class AccountDetectTests(unittest.TestCase):
         m.assert_called_once()
 
 
+class CandidatePrefFilesPermissionTests(unittest.TestCase):
+    """_candidate_pref_files must never crash on PermissionError."""
+
+    def test_permission_error_on_exists_returns_empty(self):
+        """PermissionError when checking if base path exists returns [] without crashing."""
+        from agent.account_detect import _candidate_pref_files
+        from pathlib import Path
+
+        with unittest.mock.patch.object(Path, "exists", side_effect=PermissionError("denied")):
+            result = _candidate_pref_files("com.roblox.client")
+        self.assertEqual(result, [])
+
+    def test_permission_error_on_is_dir_returns_empty(self):
+        """PermissionError when checking is_dir returns [] without crashing."""
+        from agent.account_detect import _candidate_pref_files
+        from pathlib import Path
+
+        with unittest.mock.patch.object(Path, "exists", return_value=True), \
+             unittest.mock.patch.object(Path, "is_dir", side_effect=PermissionError("denied")):
+            result = _candidate_pref_files("com.roblox.client")
+        self.assertEqual(result, [])
+
+    def test_permission_error_on_glob_returns_partial(self):
+        """PermissionError during glob returns whatever was collected without crashing."""
+        from agent.account_detect import _candidate_pref_files
+        from pathlib import Path
+
+        with unittest.mock.patch.object(Path, "exists", return_value=True), \
+             unittest.mock.patch.object(Path, "is_dir", return_value=True), \
+             unittest.mock.patch.object(Path, "glob", side_effect=PermissionError("denied")):
+            result = _candidate_pref_files("com.roblox.client")
+        # No crash; result is [] (empty because glob failed before producing anything)
+        self.assertIsInstance(result, list)
+
+    def test_detect_username_from_safe_prefs_no_crash_on_permission(self):
+        """detect_username_from_safe_prefs returns None without crashing on PermissionError."""
+        from agent.account_detect import detect_username_from_safe_prefs
+        from pathlib import Path
+
+        with unittest.mock.patch.object(Path, "exists", side_effect=PermissionError("denied")):
+            result = detect_username_from_safe_prefs("com.roblox.client")
+        self.assertIsNone(result)
+
+
 if __name__ == "__main__":
     unittest.main()

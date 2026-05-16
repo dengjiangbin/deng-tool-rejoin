@@ -231,16 +231,25 @@ def _clean_username(value: str) -> str:
 
 def _candidate_pref_files(package: str) -> list[Path]:
     base = Path("/data/data") / validate_package_name(package) / "shared_prefs"
-    if not base.exists() or not base.is_dir():
+    try:
+        if not base.exists() or not base.is_dir():
+            return []
+    except PermissionError:
+        _log.debug(
+            "Permission denied checking %s — root may be needed for username auto-detect", base
+        )
         return []
     hints = ("account", "profile", "settings", "user", "username", "pkg_preferences", "roblox")
     candidates: list[Path] = []
-    for path in sorted(base.glob("*.xml")):
-        name = path.name.lower()
-        if any(h in name for h in hints):
-            candidates.append(path)
-    if not candidates:
-        candidates = sorted(base.glob("*.xml"))[:12]
+    try:
+        for path in sorted(base.glob("*.xml")):
+            name = path.name.lower()
+            if any(h in name for h in hints):
+                candidates.append(path)
+        if not candidates:
+            candidates = sorted(base.glob("*.xml"))[:12]
+    except PermissionError:
+        _log.debug("Permission denied listing %s — skipping", base)
     return candidates[:24]
 
 

@@ -107,33 +107,33 @@ Full install guide: docs/NEW_USER_TERMUX_GUIDE.md
 
 
 def print_beginner_license_gate_help(*, show_hwid_footer: bool = True) -> None:
-    """Steps after a Start-time license failure (no shame, no URL dump)."""
+    """Steps shown when a license is required but not yet verified (non-interactive path)."""
     print()
-    print("You need a DENG Tool: Rejoin license key before using Start.")
+    print("A valid license key is required to use DENG Tool: Rejoin.")
     print()
     print("What to do:")
     print("  1. Get your key from the DENG Tool: Rejoin Panel.")
-    print('  2. Choose Enter / Update License Key (main menu option 1).')
-    print("  3. Paste your key.")
-    print("  4. Run First Time Setup Config (option 2).")
+    print("  2. Run: deng-rejoin (and paste the key when prompted).")
+    print("     Or run: deng-rejoin license  to enter / update your key directly.")
+    print("  3. After the key is verified, run: deng-rejoin")
+    print("     Then choose First Time Setup Config.")
     if show_hwid_footer:
         print()
         print("If your key says wrong device, ask support to Reset HWID.")
 
 
 def print_beginner_menu_license_prompt() -> None:
-    """Shown when the license wizard asks for a key (user chose menu option 1)."""
-    print("No License Key Found")
+    """Shown before the main menu when a license key is required but not yet verified."""
     print()
-    print("You need a DENG Tool: Rejoin license key before using Start.")
+    print("License Key Required")
     print()
-    print("What to do:")
-    print("  1. Get your key from the DENG Tool: Rejoin Panel.")
-    print('  2. Choose Enter / Update License Key (you are here).')
-    print("  3. Paste your key below when prompted.")
-    print("  4. Run First Time Setup Config (main menu option 2).")
+    print("A valid DENG Tool: Rejoin license key is needed to open the menu.")
     print()
-    print("If your key says wrong device, ask support to Reset HWID.")
+    print("Where to get your key:")
+    print("  The DENG Tool: Rejoin Panel in Discord → Key Stats or Generate Key.")
+    print()
+    print("Paste your key below when prompted.")
+    print("If your key shows 'wrong device', ask support to Reset HWID.")
     print()
 
 
@@ -282,21 +282,21 @@ def _next_step_line(cfg: dict[str, Any], *, dev_mode: bool) -> str:
         key = (str(lic.get("key") or "").strip() or str(cfg.get("license_key") or "").strip())
         st = str(lic.get("last_status") or "").strip().lower()
         if not key:
-            return "Choose option 1 to enter your license key, then option 2 for First Time Setup Config."
+            return "Run deng-rejoin and enter your license key, then choose First Time Setup Config."
         if st != "active":
-            return "Choose option 1 to verify or update your license key, then try again."
+            return "Run: deng-rejoin license  to verify or update your license key, then try again."
 
     if not cfg.get("first_setup_completed"):
-        return "Choose option 2 — First Time Setup Config — to pick your Roblox package and options."
+        return "Choose option 1 — First Time Setup Config — to pick your Roblox package and options."
 
     try:
         entries = enabled_package_entries(cfg)
     except Exception:
         entries = []
     if not entries:
-        return "Choose option 3 — Setup / Edit Config — then Package, and enable at least one package."
+        return "Choose option 2 — Setup / Edit Config — then Package, and enable at least one package."
 
-    return "Choose option 4 — Start — when you are ready to launch."
+    return "Choose option 3 — Start — when you are ready to launch."
 
 
 def build_onboarding_lines(

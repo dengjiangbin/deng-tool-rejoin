@@ -8,18 +8,17 @@ from collections.abc import Callable
 
 from . import keystore
 from .banner import print_banner
-from .config import ConfigError, load_config
-from .constants import PRODUCT_NAME, VERSION
-from .onboarding import build_onboarding_lines
+from .config import ConfigError, enabled_package_entries, load_config
 
 Handler = Callable[[argparse.Namespace], int]
 
+# License entry and New User Help are removed from the normal menu.
+# License is a gate before the menu (run by cmd_menu before calling run_menu).
+# Users who need to change their key later can run: deng-rejoin license
 MENU_ITEMS = (
-    ("1", "Enter / Update License Key", "license"),
-    ("2", "First Time Setup Config", "first-setup"),
-    ("3", "Setup / Edit Config", "config"),
-    ("4", "Start", "start"),
-    ("5", "New User Help", "new-user-help"),
+    ("1", "First Time Setup Config", "first-setup"),
+    ("2", "Setup / Edit Config", "config"),
+    ("3", "Start", "start"),
     ("0", "Exit", "exit"),
 )
 
@@ -29,16 +28,20 @@ def _is_interactive() -> bool:
 
 
 def _menu_prelude_lines() -> list[str]:
+    """Return a minimal hint if setup is incomplete; empty list when ready."""
     try:
         cfg = load_config()
     except ConfigError:
-        cfg = None
-    return build_onboarding_lines(
-        cfg,
-        dev_mode=keystore.DEV_MODE,
-        version=VERSION,
-        product=PRODUCT_NAME,
-    )
+        return ["Setup required: choose First Time Setup Config to begin."]
+    if cfg is None:
+        return ["Setup required: choose First Time Setup Config to begin."]
+    try:
+        pkgs = enabled_package_entries(cfg)
+    except Exception:
+        pkgs = []
+    if not pkgs:
+        return ["Setup required: choose First Time Setup Config to begin."]
+    return []
 
 
 def print_menu(args: argparse.Namespace, prelude_lines: list[str] | None = None) -> None:
@@ -89,4 +92,3 @@ def run_menu(args: argparse.Namespace, handlers: dict[str, Handler]) -> int:
             input("\nPress Enter to return to menu...")
         except EOFError:
             return result
-

@@ -288,7 +288,7 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
 
 
 def ensure_menu_can_open(_args: argparse.Namespace) -> bool:
-    """The main menu is always reachable so beginners can enter a license or read help."""
+    """Gate checking is performed inside cmd_menu(); this function is kept for compatibility."""
     return True
 
 
@@ -604,13 +604,30 @@ def _detect_or_prompt_account_username(entry: dict[str, Any], config_data: dict[
     if validate_account_username(updated.get("account_username", "")):
         return updated
     cfg_valid = validate_config(config_data) if config_data is not None else None
-    result = account_detect.detect_account_username(
-        updated["package"],
-        entry=updated,
-        config=cfg_valid,
-        use_root=True,
-        respect_config_manual=False,
-    )
+    try:
+        result = account_detect.detect_account_username(
+            updated["package"],
+            entry=updated,
+            config=cfg_valid,
+            use_root=True,
+            respect_config_manual=False,
+        )
+    except PermissionError as exc:
+        import logging as _logging
+        _logging.getLogger("deng_tool_rejoin").debug(
+            "Permission denied during username auto-detect for %s: %s",
+            updated.get("package", "?"),
+            exc,
+        )
+        result = None
+    except Exception as exc:  # noqa: BLE001
+        import logging as _logging
+        _logging.getLogger("deng_tool_rejoin").debug(
+            "Username auto-detect error for %s: %s",
+            updated.get("package", "?"),
+            exc,
+        )
+        result = None
     if result:
         updated["account_username"] = validate_account_username(result.username)
         updated["username_source"] = validate_username_source(result.source, result.username)
@@ -2451,8 +2468,37 @@ def cmd_new_user_help(args: argparse.Namespace) -> int:
 
 
 def cmd_menu(args: argparse.Namespace) -> int:
-    if not ensure_menu_can_open(args):
+    """Open the main menu, gated by a license check on first run."""
+    ensure_app_dirs()
+    use_color = not args.no_color
+
+    # Dev mode: skip license gate entirely
+    if keystore.DEV_MODE:
+        _print_dev_license_skipped(use_color)
+        return run_menu(args, _handlers())
+
+    # Load config (use defaults if not yet created)
+    try:
+        cfg = load_config()
+    except ConfigError:
+        cfg = default_config()
+
+    lic = cfg.setdefault("license", {})
+
+    # Skip gate when license checking is disabled in config
+    if lic.get("disabled_by_user") or not lic.get("enabled", True):
+        return run_menu(args, _handlers())
+
+    cfg = _ensure_install_id_saved(cfg)
+    mode = str(lic.get("mode") or "remote").strip().lower()
+    if mode == "local":
+        ok = _ensure_local_license_menu_loop(cfg, args, use_color)
+    else:
+        ok = _ensure_remote_license_menu_loop(cfg, args, use_color)
+
+    if not ok:
         return 1
+
     return run_menu(args, _handlers())
 
 

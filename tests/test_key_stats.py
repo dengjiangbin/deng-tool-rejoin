@@ -54,15 +54,19 @@ class TestKeyStatsFormat(unittest.TestCase):
             }
         )
         desc = d["description"]
-        self.assertIn("Unused / Ready for first device", desc)
+        # New format: "Unused / No device linked" (not "Ready for first device")
+        self.assertIn("Unused / No device linked", desc)
         self.assertNotIn("Device:", desc)
         self.assertNotIn("License Key", desc)
         self.assertNotIn("Not Available", desc)
         self.assertNotIn("Full Key", desc)
         self.assertNotIn("Created", desc)
         self.assertIn("not recoverable", desc.lower())
+        # Masked key still shown (for reference) when full key unavailable
         self.assertIn("DENG-AA...BB", desc)
         self.assertNotIn("Key: `", desc)
+        # No "copy block" message — key info is in the embed itself
+        self.assertNotIn("copy block", desc.lower())
         self.assertIn("Key Stats", d["footer"]["text"])
 
     def test_embed_used_shows_device(self) -> None:
@@ -87,6 +91,7 @@ class TestKeyStatsFormat(unittest.TestCase):
         self.assertNotIn("Tags:", desc)
 
     def test_full_key_when_plain_present(self) -> None:
+        """When full key is available, it is shown inside the embed (no separate copy-block)."""
         d = build_key_stats_embed_dict(
             {
                 "masked_key": "DENG-AA...BB",
@@ -100,11 +105,14 @@ class TestKeyStatsFormat(unittest.TestCase):
                 "created_at": "2026-01-15T12:00:00+00:00",
             }
         )
-        self.assertIn("copy block", d["description"].lower())
-        self.assertNotIn("DENG-1111-2222-3333-4444", d["description"])
+        # Full key must appear directly in the embed
+        self.assertIn("DENG-1111-2222-3333-4444", d["description"])
+        # "copy block" message is gone — key is shown inline
+        self.assertNotIn("copy block", d["description"].lower())
         self.assertNotIn("Not Available", d["description"])
 
-    def test_header_includes_copy_block_when_full_keys(self) -> None:
+    def test_header_does_not_include_copy_block(self) -> None:
+        """Message content header is now just the page header; no top 'Copy License Key:' block."""
         row = {
             "masked_key": "DENG-AA...BB",
             "full_key_plaintext": "DENG-1111-2222-3333-4444",
@@ -112,8 +120,10 @@ class TestKeyStatsFormat(unittest.TestCase):
             "used": False,
         }
         h = format_stats_page_content_header([row], total=1, page=0, total_pages=1)
-        self.assertIn("Copy License Key:", h)
-        self.assertIn("`DENG-1111-2222-3333-4444`", h)
+        # No top copy block — key is inside the embed
+        self.assertNotIn("Copy License Key:", h)
+        self.assertNotIn("`DENG-1111-2222-3333-4444`", h)
+        # Just the plain page header
         self.assertIn("Total: 1", h)
 
     def test_unused_and_used_colors_differ(self) -> None:
@@ -138,7 +148,8 @@ class TestKeyStatsFormat(unittest.TestCase):
              "last_seen_at": None, "created_at": "2026-01-01T00:00:00+00:00"},
         ]
         d = build_key_stats_description(rows)
-        self.assertIn("Unused / Ready for first device", d)
+        # New status text: "Unused / No device linked"
+        self.assertIn("Unused / No device linked", d)
         self.assertNotIn("License Key", d)
 
 

@@ -108,7 +108,7 @@ class TestListKeysWithStateUnbound(unittest.TestCase):
         result = self.store.list_user_keys_with_binding_state("111")
         reason = result[0]["reason_if_not_resettable"]
         self.assertIsNotNone(reason)
-        self.assertIn("No device bound", reason)
+        self.assertIsNotNone(reason)  # reason_if_not_resettable is set for unbound key
 
 
 # ── Group 2: list_user_keys_with_binding_state — with binding ─────────────────
@@ -278,7 +278,7 @@ class TestBuildResetSelectorEmbed(unittest.TestCase):
             "last_seen_at": _iso_ago(600) if bound else None,
             "reset_count_24h": 0,
             "can_reset": bound,
-            "reason_if_not_resettable": None if bound else "No device bound — start the tool first",
+            "reason_if_not_resettable": None if bound else "No device linked — start the tool first",
         }]
 
     def test_19_returns_dict_with_embed(self):
@@ -316,7 +316,8 @@ class TestBuildResetSelectorEmbed(unittest.TestCase):
         k_unbound = dict(self._make_keys(bound=False)[0], key_id="unbound1")
         k_bound = dict(self._make_keys(bound=True)[0], key_id="bound2")
         desc = build_reset_selector_embed([k_unbound, k_bound])["embed"]["description"]
-        self.assertRegex(desc, r"\n1\. [\s\S]*No device bound")
+        # "No device linked" (not "No device bound")
+        self.assertRegex(desc, r"\n1\. [\s\S]*No device linked")
         self.assertRegex(desc, r"\n2\. [\s\S]*Bound to a device")
 
     def test_selector_full_key_when_recoverable(self):

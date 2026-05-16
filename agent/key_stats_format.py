@@ -57,12 +57,8 @@ def format_stats_copy_block_for_slice(rows_slice: list[dict[str, Any]]) -> str:
 def format_stats_page_content_header(
     rows_slice: list[dict[str, Any]], *, total: int, page: int, total_pages: int
 ) -> str:
-    """Message `content`: copy-friendly key lines first, then the page header."""
-    copy_blk = format_stats_copy_block_for_slice(rows_slice)
-    plain = format_stats_header_plain(total=total, page=page, total_pages=total_pages)
-    if copy_blk:
-        return f"{copy_blk}\n\n{plain}"
-    return plain
+    """Message content: just the page header. Keys are shown inside the embed (no top copy block)."""
+    return format_stats_header_plain(total=total, page=page, total_pages=total_pages)
 
 
 def format_stats_embed_title(*, total: int, page: int, total_pages: int) -> str:
@@ -70,27 +66,32 @@ def format_stats_embed_title(*, total: int, page: int, total_pages: int) -> str:
     return format_stats_header_plain(total=total, page=page, total_pages=total_pages)
 
 
-def build_key_stats_embed_dict(row: dict[str, Any]) -> dict[str, Any]:
-    """One Discord embed dict for a single license key row (compact description)."""
+def build_key_stats_embed_dict(row: dict[str, Any], *, number: int = 0) -> dict[str, Any]:
+    """One Discord embed dict for a single license key row.
+
+    The key itself is shown as a numbered line inside the embed description.
+    Device is combined into the status line. No separate top 'Copy License Key:' block.
+    """
     full = row.get("full_key_plaintext")
     masked = row.get("masked_key") or "???"
 
     lic = (row.get("license_status") or "active").lower()
     used = bool(row.get("used"))
-    exp_cfg = bool(row.get("export_storage_configured", False))
 
     lines: list[str] = []
 
+    # --- Key display (numbered) ---
+    prefix = f"{number}. " if number > 0 else ""
     if full:
-        lines.append("Full key: use the **copy block** in the message above (not repeated here).")
+        lines.append(f"{prefix}`{full}`")
     elif lic in {"revoked", "expired"}:
-        lines.append(f"Key reference (not copyable): {masked}")
+        lines.append(f"{prefix}**{masked}** *(reference only, not copyable)*")
     else:
-        lines.append(
-            "**Full key is not recoverable for copying from the server.** "
-            "If this is an older key, export storage was not enabled when it was created."
-        )
-        lines.append(f"Reference only (not a complete key): {masked}")
+        # Show masked reference and note that the full key is not recoverable
+        lines.append(f"{prefix}**{masked}** *(full key not recoverable)*")
+
+    # --- Status line (device combined) ---
+    device = row.get("device_display") if used and lic not in {"revoked", "expired"} else None
 
     if lic == "revoked":
         lines.append("Status: 🔴 Revoked")
@@ -99,29 +100,23 @@ def build_key_stats_embed_dict(row: dict[str, Any]) -> dict[str, Any]:
         lines.append("Status: 🔴 Expired")
         color = COLOR_STATS_BAD
     elif used:
-        lines.append("Status: Used / Device bound")
+        if device:
+            lines.append(f"Status: Used / Device bound on {device}")
+        else:
+            lines.append("Status: Used / Device bound")
         color = COLOR_STATS_USED
     else:
-        lines.append("Status: Unused / Ready for first device")
+        lines.append("Status: Unused / No device linked")
         color = COLOR_STATS_UNUSED
 
+    # --- Last active ---
     if used and lic not in {"revoked", "expired"}:
-        device = row.get("device_display")
-        if device:
-            lines.append(f"Device: {device}")
         last_seen = row.get("last_seen_at")
         if last_seen:
             rel = relative_time_ago(last_seen)
             lines.append(f"Last Active: {rel or last_seen[:19]}")
         else:
             lines.append("Last Active: Never")
-
-    if (
-        not full
-        and lic not in {"revoked", "expired"}
-        and not exp_cfg
-    ):
-        lines.append("Export: full key storage is not enabled on this server.")
 
     return {
         "description": "\n".join(lines),
@@ -131,7 +126,7 @@ def build_key_stats_embed_dict(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_key_stats_embed_dicts(rows_slice: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [build_key_stats_embed_dict(r) for r in rows_slice]
+    return [build_key_stats_embed_dict(r, number=i) for i, r in enumerate(rows_slice, start=1)]
 
 
 def build_key_stats_empty_embed_dict() -> dict[str, Any]:
