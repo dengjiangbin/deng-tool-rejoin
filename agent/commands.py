@@ -2146,26 +2146,64 @@ def _progress_line(index: int, total: int, entry: dict[str, Any], message: str) 
 
 
 def _prepare_automatic_layout(cfg: dict[str, Any], entries: list[dict[str, Any]]) -> tuple[dict[str, Any], str]:
-    if len(entries) <= 1:
-        return cfg, "Layout skipped: only one package selected."
-    packages = [entry["package"] for entry in entries]
-    root_info = android.detect_root()
-    # Use 40/60 split layout when multiple packages are active
-    messages, preview = window_layout.apply_layout_to_packages(
-        packages,
-        gap=int(cfg.get("window_gap_px", 8)),
-        write_xml=root_info.available,
-        use_split_layout=True,
-    )
-    cfg["last_layout_preview"] = preview
-    save_config(cfg)
-    if not root_info.available:
-        return cfg, "Layout calculated (40/60 split). Layout skipped, root/XML unavailable."
-    if any("Updated App Cloner window preferences" in message for message in messages):
-        return cfg, "Layout calculated (40/60 split). Layout applied."
-    if messages:
-        return cfg, "Layout calculated (40/60 split). Layout skipped, root/XML unavailable."
-    return cfg, "Layout failed, launch continues."
+    """Apply Kaeru-style auto layout during Start.
+
+    Left ~35% of screen stays free for DENG Tool / Termux status panel.
+    Right ~65% is divided among Roblox windows using layout rules based on
+    package count (1, 2, 3, 4, 5-6, 7+). Title bars stay visible; no window
+    fully covers another.
+
+    Failure handling: any write error is caught, logged, and Start continues.
+    """
+    try:
+        packages = [entry["package"] for entry in entries]
+        n        = len(packages)
+        gap      = int(cfg.get("window_gap_px", 8))
+
+        # Always calculate layout for 1+ packages (single package gets right-side position)
+        root_info = android.detect_root()
+        messages, preview = window_layout.apply_layout_to_packages(
+            packages,
+            gap=gap,
+            write_xml=root_info.available,
+            use_split_layout=(n > 1),
+        )
+
+        try:
+            cfg["last_layout_preview"] = preview
+            save_config(cfg)
+        except Exception:  # noqa: BLE001
+            pass  # Non-fatal; layout still applied even if save fails
+
+        if not messages:
+            return cfg, "Kaeru layout failed silently, launch continues."
+
+        # Determine summary note (debug details are in messages, logged below)
+        import logging as _logging
+        _log_layout = _logging.getLogger("deng.rejoin.layout")
+        for m in messages:
+            _log_layout.debug("%s", m)
+
+        _applied = any(
+            ("keys)" in m or "Updated App Cloner" in m)
+            for m in messages
+        )
+        _skipped = not root_info.available or not _applied
+
+        if n == 1:
+            note = "Kaeru layout: 1 package — right-side window."
+        else:
+            layout_name = {2: "side-by-side", 3: "2+1", 4: "2×2", 5: "2×3", 6: "2×3"}.get(n, f"{n}-window cascade")
+            note = f"Kaeru layout: {n} packages — {layout_name}."
+
+        if _skipped:
+            return cfg, f"{note} Position write skipped (root/XML unavailable) — launching normally."
+        return cfg, f"{note} Window positions applied."
+
+    except Exception as exc:  # noqa: BLE001
+        import logging as _logging
+        _logging.getLogger("deng.rejoin.layout").debug("Layout error (non-fatal): %s", exc)
+        return cfg, "Kaeru layout error — launch continues normally."
 
 
 def _run_preparation_phase(
