@@ -203,14 +203,13 @@ def calculate_kaeru_layout(
     if n == 1:
         raw = [(0, 0, W, H)]
 
-    # ── 2 packages: side-by-side (landscape) or stacked (portrait) ───────
+    # ── 2 packages: always side-by-side (wide-first policy) ─────────────
+    # For multiple packages the user always wants a wide, non-overlapping layout.
+    # Landscape/portrait is irrelevant here — we prefer columns so both windows
+    # are visible simultaneously without scrolling.
     elif n == 2:
-        if W >= H:
-            hw = max(_MIN_WIN_W, (W - g) // 2)
-            raw = [(0, 0, hw, H), (hw + g, 0, W, H)]
-        else:
-            hh = max(_MIN_WIN_H, (H - g) // 2)
-            raw = [(0, 0, W, hh), (0, hh + g, W, H)]
+        hw = max(_MIN_WIN_W, (W - g) // 2)
+        raw = [(0, 0, hw, H), (hw + g, 0, W, H)]
 
     # ── 3 packages: 2+1 (two on top ~55 %, one full-width on bottom) ─────
     elif n == 3:

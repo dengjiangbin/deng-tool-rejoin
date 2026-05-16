@@ -19,15 +19,25 @@ from .roblox_health import categorize_unhealthy
 
 # ─── Status constants (shown in terminal and webhook) ─────────────────────────
 
-STATUS_ONLINE = "Online"
-STATUS_OFFLINE = "Offline"
-STATUS_LAUNCHING = "Launching"
-STATUS_CHECKING = "Preparing"
-STATUS_BACKGROUND = "Background"
+STATUS_ONLINE       = "Online"
+STATUS_OFFLINE      = "Offline"
+STATUS_LAUNCHING    = "Launching"
+STATUS_CHECKING     = "Preparing"
+STATUS_BACKGROUND   = "Background"
 STATUS_RECONNECTING = "Reconnecting"
-STATUS_WARNING = "Warning"
-STATUS_FAILED = "Failed"
-STATUS_UNKNOWN = "Unknown"
+STATUS_WARNING      = "Warning"
+STATUS_FAILED       = "Failed"
+STATUS_UNKNOWN      = "Unknown"
+# Richer state constants for improved UX
+STATUS_LOBBY        = "Lobby"       # App open at home/lobby, no URL join active
+STATUS_IN_SERVER    = "In Server"   # URL join was used and app is now healthy
+STATUS_JOINING      = "Joining"     # Deep-link / private URL sent, waiting for join
+STATUS_CLOSED       = "Closed"      # App cleanly not running after a session
+
+# All healthy states — used for state-machine guards
+_HEALTHY_STATES = frozenset({
+    STATUS_ONLINE, STATUS_LOBBY, STATUS_IN_SERVER,
+})
 
 
 class Supervisor:
@@ -153,6 +163,10 @@ class _PackageWorker(threading.Thread):
         self._restart_times: list[float] = []
         self._last_detail: str = ""
         self.logger = configure_logging(level=cfg.get("log_level", "INFO"))
+        # URL-aware state tracking
+        self.has_private_url: bool = False   # set at start of run()
+        self._url_launched: bool = False     # was the LAST launch done with a URL?
+        self.launching_since: float | None = None  # when Launching/Joining was set
 
     def _sup(self) -> dict[str, Any]:
         raw = self.cfg.get("supervisor")
@@ -191,6 +205,11 @@ class _PackageWorker(threading.Thread):
         interval = int(sup.get("health_check_interval_seconds") or cfg.get("health_check_interval_seconds", 30))
         grace = int(sup.get("launch_grace_seconds") or cfg.get("foreground_grace_seconds", 30))
         backoff_base = int(sup.get("restart_backoff_seconds", 10))
+        # Determine URL awareness once at startup
+        from .config import effective_private_server_url as _epsu
+        self.has_private_url = bool(str(_epsu(self.entry, cfg) or "").strip())
+        # Launching/Joining timeout: how many seconds before forcing a re-check
+        _launching_timeout = max(90, grace * 4)
 
         while not self.stop_event.is_set():
             try:
@@ -200,6 +219,26 @@ class _PackageWorker(threading.Thread):
                     self._sleep(interval)
                     continue
 
+                # ── Launching/Joining timeout guard ───────────────────────────
+                current_st = self.status_map.get(self.package, "")
+                if self.launching_since is not None and current_st in {STATUS_LAUNCHING, STATUS_JOINING}:
+                    elapsed_since_launch = time.time() - self.launching_since
+                    if elapsed_since_launch > _launching_timeout:
+                        # App hasn't become healthy after 4× grace — force-check now
+                        timeout_health = check_package_health(cfg, self.package)
+                        if timeout_health.state == "healthy":
+                            target = STATUS_IN_SERVER if self._url_launched else STATUS_LOBBY
+                            self._set_status(target, "Launch timeout — app confirmed running")
+                        else:
+                            self._set_status(STATUS_FAILED, "Launch timeout — app not responding")
+                        self.launching_since = None
+                        # Skip normal health check this iteration — we just ran one
+                        self._sleep(min(5, interval))
+                        continue
+
+                # Save state before we clobber it with STATUS_CHECKING; used to
+                # correctly promote Launching/Joining after a healthy health check.
+                prev_before_check = self.status_map.get(self.package, "")
                 self._set_status(STATUS_CHECKING, "")
                 health = check_package_health(cfg, self.package)
 
@@ -212,7 +251,16 @@ class _PackageWorker(threading.Thread):
                     if self.online_since is None:
                         self.online_since = now_ts
                     self.last_seen_at = now_ts
-                    self._set_status(STATUS_ONLINE, "Heartbeat OK")
+                    # Promote from Launching/Joining to an appropriate healthy state.
+                    # Use prev_before_check because STATUS_CHECKING is transient.
+                    self.launching_since = None
+                    if prev_before_check in {STATUS_LAUNCHING, STATUS_JOINING}:
+                        target = STATUS_IN_SERVER if self._url_launched else STATUS_LOBBY
+                    elif prev_before_check in _HEALTHY_STATES:
+                        target = prev_before_check  # stay in healthy state
+                    else:
+                        target = STATUS_ONLINE
+                    self._set_status(target, "Heartbeat OK")
                     db.insert_heartbeat("healthy", {"package": self.package})
                     log_event(self.logger, "info", "heartbeat", status="healthy", package=self.package)
                     self._sleep(interval)
@@ -250,7 +298,10 @@ class _PackageWorker(threading.Thread):
                     result = perform_rejoin(pkg_cfg, reason="disconnected", package_entry=self.entry, no_force_stop=True)
                     self._record_restart()
                     if result.success:
-                        self._set_status(STATUS_LAUNCHING, "Reopened — launch command sent")
+                        self._url_launched = self.has_private_url
+                        self.launching_since = time.time()
+                        new_st = STATUS_JOINING if self.has_private_url else STATUS_LAUNCHING
+                        self._set_status(new_st, "Reopened — launch command sent")
                     else:
                         self.failure_count += 1
                         self.last_error = result.error
@@ -296,7 +347,10 @@ class _PackageWorker(threading.Thread):
                     self.failure_count = 0
                     self.revive_count += 1
                     self.online_since = None
-                    self._set_status(STATUS_LAUNCHING, "Reopened — launch command sent")
+                    self._url_launched = self.has_private_url
+                    self.launching_since = time.time()
+                    new_st = STATUS_JOINING if self.has_private_url else STATUS_LAUNCHING
+                    self._set_status(new_st, "Reopened — launch command sent")
                     self._sleep(max(int(cfg.get("reconnect_delay_seconds", 8)), interval))
                 else:
                     self.failure_count += 1
@@ -352,7 +406,15 @@ class MultiPackageSupervisor:
         print("\n  Supervisor stopping — Ctrl+C received.")
         self.stop_event.set()
 
-    def run_forever(self, *, display_interval: float = 10.0) -> None:
+    def run_forever(self, *, display_interval: float = 10.0, render_callback=None) -> None:
+        """Run until stopped.
+
+        Args:
+            display_interval: seconds between live status refreshes.
+            render_callback: optional callable invoked every ``display_interval``
+                seconds instead of the default ``_print_live_status`` one-liner.
+                Use this to inject a full clear+banner+table dashboard renderer.
+        """
         signal.signal(signal.SIGTERM, self._handle_stop)
         signal.signal(signal.SIGINT, self._handle_stop)
 
@@ -379,13 +441,20 @@ class MultiPackageSupervisor:
             while not self.stop_event.is_set():
                 self.stop_event.wait(timeout=display_interval)
                 if not self.stop_event.is_set():
-                    self._print_live_status()
+                    if render_callback is not None:
+                        try:
+                            render_callback()
+                        except Exception:  # noqa: BLE001
+                            self._print_live_status()
+                    else:
+                        self._print_live_status()
         except Exception:  # noqa: BLE001
             pass
 
         self.stop_event.set()
         for worker in self._workers:
-            worker.join(timeout=5)
+            if worker.is_alive():
+                worker.join(timeout=5)
 
         db.insert_event("INFO", "multi_supervisor_stopped", "session ended by user")
         log_event(logger, "info", "multi_supervisor_stopped")

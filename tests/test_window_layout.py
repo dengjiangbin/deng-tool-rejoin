@@ -87,26 +87,29 @@ class TestKaeruLayoutCount1(unittest.TestCase):
 
 
 class TestKaeruLayoutCount2(unittest.TestCase):
-    """2 packages → side-by-side in landscape, stacked in portrait."""
+    """2 packages → always side-by-side (wide-first policy)."""
 
     def test_two_landscape_side_by_side(self):
-        # W > H → landscape orientation for the pane
+        # Landscape pane: side-by-side
         rects = calculate_kaeru_layout(_pkgs(2), 960, 540, gap=0)
         self.assertEqual(len(rects), 2)
         self.assertLess(rects[0].right, rects[1].right)     # left window is to the left
         self.assertEqual(rects[0].top, rects[1].top)        # same vertical start
         self.assertEqual(rects[0].bottom, rects[1].bottom)  # same vertical end
 
-    def test_two_portrait_stacked(self):
-        # W < H → portrait → stacked
+    def test_two_portrait_also_side_by_side(self):
+        # Portrait pane: also side-by-side (wide-first policy)
         rects = calculate_kaeru_layout(_pkgs(2), 540, 960, gap=0)
         self.assertEqual(len(rects), 2)
-        self.assertLess(rects[0].bottom, rects[1].bottom)   # first window is above
-        self.assertEqual(rects[0].left, rects[1].left)      # same horizontal start
+        # Both windows should be side-by-side (same top/bottom, different left/right)
+        self.assertEqual(rects[0].top, rects[1].top)        # same top
+        self.assertEqual(rects[0].bottom, rects[1].bottom)  # same bottom
+        self.assertLess(rects[0].right, rects[1].right)     # distinct X positions
 
-    def test_two_no_overlap_portrait(self):
+    def test_two_no_overlap(self):
+        # Side-by-side: right edge of first <= left edge of second
         rects = calculate_kaeru_layout(_pkgs(2), 540, 960, gap=4)
-        self.assertLessEqual(rects[0].bottom, rects[1].top)
+        self.assertLessEqual(rects[0].right, rects[1].left)
 
     def test_two_within_bounds(self):
         rects = calculate_kaeru_layout(_pkgs(2), LW, H, gap=8)
@@ -115,6 +118,18 @@ class TestKaeruLayoutCount2(unittest.TestCase):
             self.assertGreaterEqual(r.top, 0)
             self.assertLessEqual(r.right, LW)
             self.assertLessEqual(r.bottom, H)
+
+    def test_two_unique_x_positions(self):
+        """Both packages must have distinct X positions (no stacking)."""
+        rects = calculate_kaeru_layout(_pkgs(2), LW, H, gap=8)
+        self.assertNotEqual(rects[0].left, rects[1].left,
+                            "Both packages share the same left coordinate — they are stacking")
+
+    def test_two_wide_layout_on_portrait_screen(self):
+        """2-package layout on a portrait right-pane (702×1920) must be side-by-side."""
+        rects = calculate_kaeru_layout(_pkgs(2), LW, H, gap=8)
+        self.assertEqual(rects[0].top, rects[1].top)
+        self.assertLess(rects[0].right, rects[1].left + 1)
 
 
 class TestKaeruLayoutCount3(unittest.TestCase):

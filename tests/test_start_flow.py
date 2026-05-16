@@ -163,6 +163,46 @@ class StartTableUxTests(unittest.TestCase):
         combined = "\n".join(path.read_text(encoding="utf-8") for path in source)
         self.assertNotIn("pm clear", combined)
 
+    def test_clear_terminal_helper_exists(self):
+        from agent.commands import _clear_terminal
+        self.assertTrue(callable(_clear_terminal))
+
+    def test_new_state_lobby_in_start_table(self):
+        """build_start_table must render 'Lobby' without error."""
+        rows = [_row(1, "com.roblox.client", "Main", "Lobby")]
+        table = build_start_table(rows)
+        self.assertIn("Lobby", table)
+
+    def test_new_state_joining_in_start_table(self):
+        """build_start_table must render 'Joining' without error."""
+        rows = [_row(1, "com.roblox.client", "Main", "Joining")]
+        table = build_start_table(rows)
+        self.assertIn("Joining", table)
+
+    def test_new_state_in_server_in_start_table(self):
+        """build_start_table must render 'In Server' without error."""
+        rows = [_row(1, "com.roblox.client", "Main", "In Server")]
+        table = build_start_table(rows)
+        self.assertIn("In Server", table)
+
+    def test_final_summary_lobby_maps_to_online(self):
+        from agent.commands import build_final_summary
+        entries = [{"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}]
+        text = build_final_summary(entries, {"com.roblox.client": "Lobby"})
+        self.assertIn("online", text.lower())
+
+    def test_final_summary_in_server_maps_to_online(self):
+        from agent.commands import build_final_summary
+        entries = [{"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}]
+        text = build_final_summary(entries, {"com.roblox.client": "In Server"})
+        self.assertIn("online", text.lower())
+
+    def test_final_summary_joining_maps_to_launching(self):
+        from agent.commands import build_final_summary
+        entries = [{"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}]
+        text = build_final_summary(entries, {"com.roblox.client": "Joining"})
+        self.assertIn("launching", text.lower())
+
 
 class SinglePackageLaunchTests(unittest.TestCase):
     """Verify that a single selected package still triggers the launcher."""

@@ -2048,30 +2048,42 @@ def _visible_len(s: str) -> int:
     return len(_ANSI_RE.sub("", s))
 
 
+def _clear_terminal() -> None:
+    """Clear the visible terminal/dashboard. Compatible with Termux and Unix."""
+    try:
+        os.system("clear" if os.name != "nt" else "cls")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _colorize_status(status: str, *, use_color: bool = True) -> str:
     """Wrap a status string in the appropriate ANSI color code."""
     if not use_color:
         return status
     color = {
-        "Started": _ANSI_GREEN,
-        "Online": _ANSI_GREEN,
-        "Ready": _ANSI_YELLOW,
-        "Starting": _ANSI_YELLOW,
-        "Launching": _ANSI_YELLOW,
-        "Preparing": _ANSI_CYAN,
-        "Optimizing": _ANSI_CYAN,
+        "Started":      _ANSI_GREEN,
+        "Online":       _ANSI_GREEN,
+        "Lobby":        _ANSI_GREEN,     # app open at home
+        "In Server":    _ANSI_GREEN,     # URL join confirmed
+        "Ready":        _ANSI_YELLOW,
+        "Starting":     _ANSI_YELLOW,
+        "Launching":    _ANSI_YELLOW,
+        "Joining":      _ANSI_CYAN,      # URL deep link sent, waiting
+        "Preparing":    _ANSI_CYAN,
+        "Optimizing":   _ANSI_CYAN,
         "Reconnecting": _ANSI_CYAN,
-        "Cleared": _ANSI_GREEN,
-        "Low Applied": _ANSI_GREEN,
-        "Skipped": _ANSI_YELLOW,
-        "Partial": _ANSI_YELLOW,
-        "Failed": _ANSI_RED,
-        "Offline": _ANSI_RED,
-        "Background": _ANSI_YELLOW,
-        "Warning": _ANSI_YELLOW,
-        "Unknown": _ANSI_DIM,
-        "Heartbeat OK": _ANSI_GREEN,
-        "Launch command sent": _ANSI_GREEN,
+        "Cleared":      _ANSI_GREEN,
+        "Low Applied":  _ANSI_GREEN,
+        "Skipped":      _ANSI_YELLOW,
+        "Partial":      _ANSI_YELLOW,
+        "Failed":       _ANSI_RED,
+        "Offline":      _ANSI_RED,
+        "Closed":       _ANSI_RED,
+        "Background":   _ANSI_YELLOW,
+        "Warning":      _ANSI_YELLOW,
+        "Unknown":      _ANSI_DIM,
+        "Heartbeat OK":          _ANSI_GREEN,
+        "Launch command sent":   _ANSI_GREEN,
     }.get(status, "")
     return f"{color}{status}{_ANSI_RESET}" if color else status
 
@@ -2134,16 +2146,20 @@ _FINAL_SUMMARY_ORDER: tuple[tuple[str, str], ...] = (
 )
 
 _STATE_TO_SUMMARY: dict[str, str] = {
-    "Online": "online",
+    "Online":       "online",
+    "Lobby":        "online",       # healthy at home screen
+    "In Server":    "online",       # healthy in target server
+    "Joining":      "launching",    # URL join in progress
     "Reconnecting": "reconnecting",
-    "Launching": "launching",
-    "Failed": "failed",
-    "Offline": "offline",
-    "Warning": "warning",
-    "Background": "in background",
-    "Unknown": "unknown",
-    "Preparing": "preparing",
-    "Optimizing": "optimizing",
+    "Launching":    "launching",
+    "Failed":       "failed",
+    "Offline":      "offline",
+    "Closed":       "offline",
+    "Warning":      "warning",
+    "Background":   "in background",
+    "Unknown":      "unknown",
+    "Preparing":    "preparing",
+    "Optimizing":   "optimizing",
 }
 
 
@@ -2209,12 +2225,15 @@ def _prepare_automatic_layout(cfg: dict[str, Any], entries: list[dict[str, Any]]
         n        = len(packages)
         gap      = int(cfg.get("window_gap_px", 8))
 
-        # Always calculate layout for 1+ packages (single package gets right-side position)
+        # Always calculate layout and attempt XML write for 1+ packages.
+        # apply_layout_to_packages tries direct file write first (works in Termux
+        # when /data/data/<pkg> is accessible), then falls back to root write.
+        # If both fail it logs at DEBUG level and Start continues normally.
         root_info = android.detect_root()
         messages, preview = window_layout.apply_layout_to_packages(
             packages,
             gap=gap,
-            write_xml=root_info.available,
+            write_xml=True,   # always attempt — direct first, root fallback
             use_split_layout=(n > 1),
         )
 
@@ -2309,6 +2328,7 @@ def _run_preparation_phase(
 
 def cmd_start(args: argparse.Namespace) -> int:
     use_color = not args.no_color
+    _clear_terminal()
     print_banner(use_color=use_color)
     try:
         cfg = load_config()
@@ -2427,6 +2447,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             username = _account_username_for_table(entry)
             cstat = prep_cache.get(pkg, "Skipped")
             gstat = prep_gfx.get(pkg, "Skipped")
+            # Determine whether a private URL was used for this package
+            _has_url = bool(str(effective_private_server_url(entry, cfg) or "").strip())
             if not launch_ok[pkg]:
                 err = launch_err[pkg]
                 if "not installed" in err.lower():
@@ -2437,10 +2459,12 @@ def cmd_start(args: argparse.Namespace) -> int:
                     safe_err = mask_urls_in_text(err) or "Launch failed"
                     stat_internal = (safe_err[:120] + "...") if len(safe_err) > 123 else safe_err
             elif android.is_process_running(pkg):
-                state = "Online"
+                # Process already visible — use URL-aware state
+                state = "Joining" if _has_url else "Lobby"
                 stat_internal = "process running"
             else:
-                state = "Launching"
+                # Process not yet detected — still starting up
+                state = "Joining" if _has_url else "Launching"
                 stat_internal = "launch command sent"
             initial_status[pkg] = state
             table_rows.append((index, pkg, username, state))
@@ -2536,7 +2560,25 @@ def cmd_start(args: argparse.Namespace) -> int:
             return 1
 
         print(f"{G}Session active — monitoring {n} package(s). Press Ctrl+C to stop.{RST}")
-        MultiPackageSupervisor(entries, cfg, initial_status=initial_status).run_forever()
+
+        # Build supervisor; capture its status_map reference for the dashboard closure
+        _supervisor = MultiPackageSupervisor(entries, cfg, initial_status=initial_status)
+        _live_map = _supervisor.status_map  # same dict mutated in-place by workers
+
+        def _live_dashboard() -> None:
+            """Clear screen and re-render banner + table with live status values."""
+            _clear_terminal()
+            print_banner(use_color=use_color)
+            print()
+            live_rows = [
+                (i + 1, e["package"], _account_username_for_table(e),
+                 _live_map.get(e["package"], "Unknown"))
+                for i, e in enumerate(entries)
+            ]
+            print(build_start_table(live_rows, use_color=use_color))
+            print(flush=True)
+
+        _supervisor.run_forever(render_callback=_live_dashboard)
         return 0
     except Exception as exc:  # noqa: BLE001 - command boundary.
         print(f"Agent start failed: {exc}")
