@@ -95,12 +95,14 @@ class BuilderFixtureTests(unittest.TestCase):
 
 class RegistryStableGateTests(unittest.TestCase):
     def test_v100_disabled_public_stable_placeholder(self) -> None:
+        """v1.0.0 is a disabled placeholder; main-dev is disabled (hidden from Discord panel)."""
         root = Path(__file__).resolve().parents[1]
         rows = json.loads((root / "data" / "rejoin_versions.json").read_text(encoding="utf-8"))
         stable = next(r for r in rows if r.get("version") == "v1.0.0")
         self.assertFalse(stable.get("enabled"))
         main_dev = next(r for r in rows if r.get("version") == "main-dev")
-        self.assertTrue(main_dev.get("enabled"))
+        # main-dev is disabled so it never appears in the Discord Select Version panel
+        self.assertFalse(main_dev.get("enabled"))
         self.assertEqual(
             main_dev.get("artifact_path"),
             "releases/main-dev/deng-tool-rejoin-main-dev.tar.gz",

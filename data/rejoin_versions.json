@@ -24,7 +24,7 @@
     "installer_endpoint": "/install/test/latest",
     "notes": "Owner/admin/tester testing \u2014 fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
     "visibility": "admin",
-    "enabled": true,
+    "enabled": false,
     "artifact_sha256": "860a69e76747de2614f14bcaa566116b31dc375c3196d4ad6d07915cd3657d51"
   }
 ]

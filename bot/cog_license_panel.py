@@ -802,8 +802,7 @@ class PanelView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ) -> None:
-        include_internal = _internal_version_pick_enabled(interaction.user)
-        versions = list_public_rejoin_versions(include_internal_channels=include_internal)
+        versions = list_public_rejoin_versions(include_internal_channels=False)
         if not versions:
             await interaction.response.send_message(
                 NO_PUBLIC_VERSIONS_MESSAGE,

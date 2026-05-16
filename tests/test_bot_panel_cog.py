@@ -768,7 +768,8 @@ class TestPanelSelectVersion(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(call.kwargs.get("ephemeral"))
         self.assertIsNone(call.kwargs.get("embed"))
 
-    async def test_owner_gets_version_pick_view(self) -> None:
+    async def test_owner_gets_no_public_versions_message(self) -> None:
+        """Owner must NOT see main-dev; manifest with only main-dev returns no-public message."""
         with patch.dict(os.environ, {"LICENSE_OWNER_DISCORD_IDS": "502", "REJOIN_VERSIONS_MANIFEST": str(self.manifest)}), patch.object(
             rv, "fetch_github_tag_names", return_value=[]
         ):
@@ -777,10 +778,14 @@ class TestPanelSelectVersion(unittest.IsolatedAsyncioTestCase):
             view = PanelView(self.store)
             await view.btn_select_version.callback(inter)
 
-        kw = inter.response.send_message.call_args[1]
-        self.assertIsInstance(kw.get("view"), VersionPickView)
+        call = inter.response.send_message.call_args
+        content = call.kwargs.get("content") or (call.args[0] if call.args else "")
+        self.assertEqual(content, NO_PUBLIC_VERSIONS_MESSAGE)
+        self.assertIsNone(call.kwargs.get("view"))
+        self.assertTrue(call.kwargs.get("ephemeral"))
 
-    async def test_tester_gets_version_pick_view(self) -> None:
+    async def test_tester_gets_no_public_versions_message(self) -> None:
+        """Tester must NOT see main-dev; manifest with only main-dev returns no-public message."""
         with patch.dict(
             os.environ,
             {
@@ -794,32 +799,133 @@ class TestPanelSelectVersion(unittest.IsolatedAsyncioTestCase):
             view = PanelView(self.store)
             await view.btn_select_version.callback(inter)
 
-        kw = inter.response.send_message.call_args[1]
-        self.assertIsInstance(kw.get("view"), VersionPickView)
+        call = inter.response.send_message.call_args
+        content = call.kwargs.get("content") or (call.args[0] if call.args else "")
+        self.assertEqual(content, NO_PUBLIC_VERSIONS_MESSAGE)
+        self.assertIsNone(call.kwargs.get("view"))
+        self.assertTrue(call.kwargs.get("ephemeral"))
+
+    async def test_select_version_never_shows_main_dev_in_dropdown(self) -> None:
+        """main-dev must not appear in VersionPickView even when admin-show-dev is on."""
+        public_manifest = self.manifest.parent / "pub_manifest.json"
+        public_manifest.write_text(
+            json.dumps([
+                {
+                    "version": "main-dev",
+                    "channel": "dev",
+                    "install_ref": "refs/heads/main",
+                    "visible": False,
+                    "visibility": "admin",
+                    "enabled": True,
+                },
+                {
+                    "version": "v1.0.0",
+                    "channel": "stable",
+                    "install_ref": "refs/tags/v1.0.0",
+                    "visibility": "public",
+                    "enabled": True,
+                    "recommended": True,
+                },
+            ]),
+            encoding="utf-8",
+        )
+        try:
+            with patch.dict(
+                os.environ,
+                {"LICENSE_OWNER_DISCORD_IDS": "505", "REJOIN_ADMIN_SHOW_DEV": "1", "REJOIN_VERSIONS_MANIFEST": str(public_manifest)},
+            ), patch.object(rv, "fetch_github_tag_names", return_value=[]):
+                inter = _fake_interaction(user=_fake_user(uid=505))
+                inter.response.send_message = AsyncMock()
+                view = PanelView(self.store)
+                await view.btn_select_version.callback(inter)
+
+            kw = inter.response.send_message.call_args[1]
+            pick_view = kw.get("view")
+            self.assertIsInstance(pick_view, VersionPickView)
+            select = next(c for c in pick_view.children if isinstance(c, VersionPickSelect))
+            version_values = [opt.value for opt in select.options]
+            self.assertNotIn("main-dev", version_values, "main-dev must never appear in the dropdown")
+            self.assertIn("v1.0.0", version_values)
+        finally:
+            public_manifest.unlink(missing_ok=True)
+
+    async def test_public_version_exists_shows_version_pick_view(self) -> None:
+        """When a public stable version exists, Select Version shows VersionPickView."""
+        public_manifest = self.manifest.parent / "pub_manifest2.json"
+        public_manifest.write_text(
+            json.dumps([
+                {
+                    "version": "v1.0.0",
+                    "channel": "stable",
+                    "install_ref": "refs/tags/v1.0.0",
+                    "visibility": "public",
+                    "enabled": True,
+                    "recommended": True,
+                },
+            ]),
+            encoding="utf-8",
+        )
+        try:
+            with patch.dict(os.environ, {"REJOIN_VERSIONS_MANIFEST": str(public_manifest)}), patch.object(
+                rv, "fetch_github_tag_names", return_value=[]
+            ):
+                inter = _fake_interaction(user=_fake_user(uid=506))
+                inter.response.send_message = AsyncMock()
+                view = PanelView(self.store)
+                await view.btn_select_version.callback(inter)
+
+            kw = inter.response.send_message.call_args[1]
+            self.assertIsInstance(kw.get("view"), VersionPickView)
+        finally:
+            public_manifest.unlink(missing_ok=True)
 
 
 class TestVersionPickSelectCallback(unittest.IsolatedAsyncioTestCase):
-    async def test_install_reply_content_uses_fixed_internal_test_install_url(self) -> None:
+    async def test_public_version_reply_has_only_desktop_and_mobile_copy(self) -> None:
+        """Selected public version reply must contain only Desktop Copy and Mobile Copy."""
         info = RejoinVersionInfo(
-            version="main-dev",
-            channel="dev",
-            label="main-dev",
-            description="x",
-            install_ref="refs/heads/main",
-            internal_only=True,
+            version="v1.0.0",
+            channel="stable",
+            label="v1.0.0 Stable",
+            description="",
+            install_ref="refs/tags/v1.0.0",
+            internal_only=False,
         )
         sel = VersionPickSelect([info])
-        sel._values = ["main-dev"]
+        sel._values = ["v1.0.0"]
         inter = _fake_interaction()
         inter.response.send_message = AsyncMock()
         await sel.callback(inter)
 
         kw = inter.response.send_message.call_args[1]
-        self.assertIsNone(kw.get("embed"))
-        self.assertIn("install/test/latest", kw["content"])
-        self.assertIn("Desktop Copy:", kw["content"])
-        self.assertIn("Mobile Copy:", kw["content"])
+        self.assertIsNone(kw.get("embed"), "No embed must be sent with the version reply")
+        content = kw["content"]
+        self.assertIn("Desktop Copy:", content)
+        self.assertIn("Mobile Copy:", content)
         self.assertTrue(kw["ephemeral"])
+        # No metadata in the reply
+        for forbidden in ("Selected version", "Channel:", "Visibility:", "Internal testing", "After install:", "deng-rejoin"):
+            self.assertNotIn(forbidden, content, msg=f"Forbidden text found: {forbidden!r}")
+
+    async def test_public_version_reply_no_duplicate_copy_blocks(self) -> None:
+        """Desktop Copy and Mobile Copy must each appear exactly once."""
+        info = RejoinVersionInfo(
+            version="v1.0.0",
+            channel="stable",
+            label="v1.0.0 Stable",
+            description="",
+            install_ref="refs/tags/v1.0.0",
+            internal_only=False,
+        )
+        sel = VersionPickSelect([info])
+        sel._values = ["v1.0.0"]
+        inter = _fake_interaction()
+        inter.response.send_message = AsyncMock()
+        await sel.callback(inter)
+
+        content = inter.response.send_message.call_args[1]["content"]
+        self.assertEqual(content.count("Desktop Copy:"), 1, "Desktop Copy must appear exactly once")
+        self.assertEqual(content.count("Mobile Copy:"), 1, "Mobile Copy must appear exactly once")
 
 
 if __name__ == "__main__":

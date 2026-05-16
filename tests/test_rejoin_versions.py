@@ -243,10 +243,31 @@ class InstallCommandTests(unittest.TestCase):
         text = rv.format_install_instructions_plain(info)
         self.assertIn("Desktop Copy:", text)
         self.assertIn("Mobile Copy:", text)
-        self.assertIn("After install:", text)
-        self.assertIn("deng-rejoin", text)
+        self.assertNotIn("After install:", text)
+        self.assertNotIn("deng-rejoin", text)
         self.assertIn("rejoin.deng.my.id/install/", text)
         self.assertNotIn("raw.githubusercontent.com", text)
+
+    def test_format_instructions_contains_only_desktop_and_mobile_copy(self) -> None:
+        """Output must NOT contain version metadata, channel, visibility, or deng-rejoin."""
+        info = rv.RejoinVersionInfo(
+            version="v1.0.0",
+            channel="stable",
+            label="v1.0.0 Stable",
+            install_ref="refs/tags/v1.0.0",
+        )
+        text = rv.format_install_instructions_plain(info)
+        for forbidden in (
+            "Selected version",
+            "Channel:",
+            "Visibility:",
+            "Internal testing",
+            "After install",
+            "deng-rejoin",
+        ):
+            self.assertNotIn(forbidden, text, msg=f"Unexpected text in output: {forbidden!r}")
+        self.assertEqual(text.count("Desktop Copy:"), 1, "Desktop Copy must appear exactly once")
+        self.assertEqual(text.count("Mobile Copy:"), 1, "Mobile Copy must appear exactly once")
 
     def test_main_dev_install_command_uses_refs_heads_in_raw_url(self) -> None:
         info = rv.RejoinVersionInfo(
@@ -263,7 +284,8 @@ class InstallCommandTests(unittest.TestCase):
             cmd,
         )
 
-    def test_format_internal_instructions_tester_visibility_and_dual_copy(self) -> None:
+    def test_format_internal_instructions_no_metadata_only_copy_blocks(self) -> None:
+        """Internal versions also output only Desktop/Mobile Copy — no metadata text."""
         info = rv.RejoinVersionInfo(
             version="main-dev",
             channel="dev",
@@ -274,8 +296,10 @@ class InstallCommandTests(unittest.TestCase):
         )
         with unittest.mock.patch.dict(os.environ, {}, clear=False):
             text = rv.format_install_instructions_plain(info)
-        self.assertIn("Visibility: owner/admin/tester only", text)
-        self.assertIn("Internal testing only", text)
+        self.assertNotIn("Visibility: owner/admin/tester only", text)
+        self.assertNotIn("Internal testing only", text)
+        self.assertNotIn("Selected version", text)
+        self.assertNotIn("After install", text)
         self.assertIn("Desktop Copy:", text)
         self.assertIn("Mobile Copy:", text)
         self.assertIn("install/test/latest", text)

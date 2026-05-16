@@ -276,38 +276,15 @@ def build_public_install_curl_command(info: RejoinVersionInfo) -> str:
 
 
 def format_install_instructions_plain(info: RejoinVersionInfo) -> str:
-    """Plain text for Discord (Desktop + Mobile copy blocks)."""
+    """Plain text for Discord — only Desktop Copy and Mobile Copy blocks."""
     cmd = build_public_install_curl_command(info)
     lines = [
-        f"DENG Tool: Rejoin Install — {info.version}",
-        "",
-    ]
-    if info.internal_only:
-        lines.extend([
-            "Selected version:",
-            info.version,
-            f"Channel: {info.channel}",
-            "Visibility: owner/admin/tester only",
-            "",
-            "Internal testing only — not a public stable release.",
-            "",
-        ])
-    else:
-        lines.extend([
-            "Selected version:",
-            info.label,
-            "",
-        ])
-    lines.extend([
         "Desktop Copy:",
         f"```{cmd}```",
         "",
         "Mobile Copy:",
         f"```{cmd}```",
-        "",
-        "After install:",
-        "deng-rejoin",
-    ])
+    ]
     return "\n".join(lines)
 
 
