@@ -25,21 +25,81 @@ class DengFormatter(logging.Formatter):
         return base
 
 
+_PUBLIC_QUIET_NAMESPACES: tuple[str, ...] = (
+    "deng.rejoin",
+    "deng_tool_rejoin",
+)
+
+
+def _silence_namespace_to_file(name: str, file_handler: logging.Handler) -> None:
+    """Attach the file handler to a logger namespace and stop propagation to root.
+
+    This prevents Python's default ``lastResort`` stderr handler from emitting
+    ``deng.rejoin.*`` warnings/errors to the public terminal.
+    """
+    lg = logging.getLogger(name)
+    lg.propagate = False
+    # Remove any pre-existing stream handlers that might leak to stderr/stdout.
+    for h in list(lg.handlers):
+        if isinstance(h, logging.StreamHandler) and not isinstance(
+            h, RotatingFileHandler
+        ):
+            lg.removeHandler(h)
+    # Only add file handler once.
+    if not any(isinstance(h, RotatingFileHandler) for h in lg.handlers):
+        lg.addHandler(file_handler)
+
+
 def configure_logging(log_path: Path = LOG_PATH, level: str = "INFO") -> logging.Logger:
-    """Configure and return the DENG logger."""
+    """Configure and return the DENG logger.
+
+    Also silences the ``deng.rejoin.*`` logger namespace (used by window_layout,
+    supervisor child modules, etc.) so their warnings/errors NEVER reach the
+    public terminal via Python's lastResort handler.
+    """
     log_path.parent.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger("deng_tool_rejoin")
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     logger.propagate = False
-    if logger.handlers:
-        return logger
 
     formatter = DengFormatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%dT%H:%M:%S%z")
 
-    file_handler = RotatingFileHandler(str(log_path), maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT)
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    if not any(isinstance(h, RotatingFileHandler) for h in logger.handlers):
+        file_handler = RotatingFileHandler(
+            str(log_path), maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT
+        )
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    else:
+        file_handler = next(
+            h for h in logger.handlers if isinstance(h, RotatingFileHandler)
+        )
+
+    # Silence all internal namespaces so they only write to the file.
+    for ns in _PUBLIC_QUIET_NAMESPACES:
+        _silence_namespace_to_file(ns, file_handler)
+
     return logger
+
+
+def silence_public_loggers() -> None:
+    """Ensure internal ``deng.rejoin.*`` namespace never leaks to public stdout/stderr.
+
+    Safe to call before any configure_logging() — uses a NullHandler placeholder
+    so messages are simply dropped rather than emitted to stderr via lastResort.
+    Called by every public entry point (cmd_start, main, etc.).
+    """
+    for ns in _PUBLIC_QUIET_NAMESPACES:
+        lg = logging.getLogger(ns)
+        lg.propagate = False
+        # Drop any pre-existing stream handlers
+        for h in list(lg.handlers):
+            if isinstance(h, logging.StreamHandler) and not isinstance(
+                h, RotatingFileHandler
+            ):
+                lg.removeHandler(h)
+        if not lg.handlers:
+            lg.addHandler(logging.NullHandler())
 
 
 def log_event(logger: logging.Logger, level: str, event_type: str, message: str = "", **fields: Any) -> None:

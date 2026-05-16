@@ -1896,8 +1896,21 @@ After restoring orientation:
 """.strip()
 
 
+def _packages_from_cfg(cfg: dict[str, Any] | None) -> list[str]:
+    if not cfg:
+        return []
+    try:
+        from .config import enabled_package_entries
+        return [e["package"] for e in enabled_package_entries(cfg)]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def _cmd_doctor_layout(cfg: dict[str, Any] | None, use_color: bool) -> int:
-    """deng-rejoin doctor layout — compute, apply, and validate window blocks."""
+    """Internal diagnostic: compute, validate and apply window block layout.
+
+    Hidden from public menu.  Concise terminal output, full details in log.
+    """
     from .window_layout import (
         calculate_split_layout,
         detect_display_info,
@@ -1905,122 +1918,105 @@ def _cmd_doctor_layout(cfg: dict[str, Any] | None, use_color: bool) -> int:
         OUTER_MARGIN,
         TERMUX_LOG_FRACTION,
     )
-    import logging as _logging
+    from .window_apply import apply_window_layout
 
     print("Layout Diagnostic")
     print()
 
     disp = detect_display_info()
-    print(f"  Display: {disp.width}×{disp.height} px  density={disp.density}")
+    print(f"  Display: {disp.width}x{disp.height} px  density={disp.density}")
 
     left_end = round(disp.width * TERMUX_LOG_FRACTION)
     pane_x0 = left_end + OUTER_MARGIN
     pane_y0 = OUTER_MARGIN
     pane_x1 = disp.width - OUTER_MARGIN
     pane_y1 = disp.height - OUTER_MARGIN
-    print(f"  Left panel (Termux): 0–{left_end}px (35%)")
-    print(f"  Right pane (Roblox): {pane_x0}–{pane_x1}px × {pane_y0}–{pane_y1}px")
-    print()
 
-    packages: list[str] = []
-    if cfg:
-        from .config import enabled_package_entries
-        try:
-            entries = enabled_package_entries(cfg)
-            packages = [e["package"] for e in entries]
-        except Exception:  # noqa: BLE001
-            pass
-
+    packages = _packages_from_cfg(cfg)
     if not packages:
-        print("  No packages configured — using example packages for preview.")
+        print("  No packages configured.  Using example packages for preview.")
         packages = ["com.roblox.client", "com.roblox.client2"]
 
-    print(f"  Packages: {len(packages)}")
     rects = calculate_split_layout(packages, disp.width, disp.height)
-    print()
-    print("  Computed blocks:")
-    for i, rect in enumerate(rects, 1):
-        print(f"  {rect.preview_line(i)}")
-    print()
+    print(f"  Packages: {len(rects)}")
+    for i, r in enumerate(rects, 1):
+        w, h = r.win_w, r.win_h
+        ratio = (w / h) if h else 0
+        print(f"  [{i}] {r.package[:36]}  {w}x{h}  ratio={ratio:.2f}")
 
     errors = validate_layout_rects(rects, pane_x0, pane_y0, pane_x1, pane_y1)
     if errors:
-        print("  VALIDATION FAILURES:")
-        for e in errors:
-            print(f"    ✗ {e}")
-        result_line = "FAIL"
-    else:
-        print("  Validation: PASS — no overlaps, no touching, all landscape.")
-        result_line = "PASS"
+        print(f"  Validation: FAIL ({len(errors)} issue(s) — see log)")
+        for e in errors[:3]:
+            print(f"    - {e}")
+        return 1
+    print("  Validation: PASS (landscape, no-touch, no-overlap, in-pane)")
 
-    # Attempt to apply layout via XML
+    # Apply (only if we have a config)
     if cfg:
-        from .window_layout import apply_layout_to_packages
-        msgs, _ = apply_layout_to_packages(packages, write_xml=True, use_split_layout=True)
-        print()
-        print("  Layout write results:")
-        for m in msgs:
-            print(f"    {m}")
+        results = apply_window_layout(rects, verify_after=True, retries=1)
+        applied = sum(1 for r in results if r.final_ok)
+        print(f"  Apply: {applied}/{len(results)} package(s) verified")
+        for r in results:
+            mark = "OK" if r.final_ok else "WARN"
+            print(f"    [{mark}] {r.package[:36]}: {r.detail}")
 
-    print()
-    print(f"  Result: {result_line}")
-    return 0 if result_line == "PASS" else 1
+    return 0
 
 
 def _cmd_doctor_root_state(cfg: dict[str, Any] | None) -> int:
-    """deng-rejoin doctor root-state — show process/task/window evidence for each package."""
+    """Internal diagnostic: show process/task/window evidence for each package."""
     print("Root State Diagnostic")
     print()
 
     root_info = android.detect_root()
-    print(f"  Root available: {root_info.available}")
-    if root_info.tool:
-        print(f"  Root tool: {root_info.tool}")
-    print()
+    print(f"  Root: {'available' if root_info.available else 'unavailable'}"
+          f" ({root_info.tool or 'none'})")
 
-    packages: list[str] = []
-    if cfg:
-        from .config import enabled_package_entries
-        try:
-            entries = enabled_package_entries(cfg)
-            packages = [e["package"] for e in entries]
-        except Exception:  # noqa: BLE001
-            pass
-
+    packages = _packages_from_cfg(cfg)
     if not packages:
         print("  No packages configured.")
         return 0
 
     for pkg in packages:
-        print(f"  Package: {pkg}")
         evidence = android.get_package_alive_evidence(pkg)
-        print(f"    Process (pidof/ps): {evidence['running']}")
-        print(f"    Root process:       {evidence['root_running']}")
-        print(f"    Task (dumpsys act): {evidence['task']}")
-        print(f"    Window (dumpsys w): {evidence['window']}")
-        print(f"    Alive:              {evidence['alive']}")
         fg = android.current_foreground_package()
         is_fg = (fg == pkg)
-        print(f"    Foreground:         {is_fg} (current fg: {fg})")
         if evidence["alive"]:
-            if evidence.get("task") or evidence.get("window"):
-                reason = "process/task/window confirmed alive"
-            else:
-                reason = "process confirmed running"
-            print(f"    Inferred state: Online / Background  [{reason}]")
+            inferred = "Online / Background"
         else:
-            print("    Inferred state: Offline  [no process, no task, no window]")
-        print()
+            inferred = "Offline"
+        print(
+            f"  {pkg[:36]:<36}  "
+            f"proc={evidence['running']} root_proc={evidence['root_running']} "
+            f"task={evidence['task']} win={evidence['window']} "
+            f"fg={is_fg}  -> {inferred}"
+        )
 
     return 0
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    use_color = not args.no_color
-    print_banner(use_color=use_color)
+    """Doctor command (internal).  Public users normally do NOT see this output.
 
-    # Subcommand: layout diagnostic
-    if getattr(args, "layout_test", False) or getattr(args, "doctor_layout", False):
+    Subcommands (hidden from public menu):
+      deng-rejoin doctor layout       — test landscape block layout
+      deng-rejoin doctor root-state   — show process/task/window evidence
+      deng-rejoin doctor reset        — print sideways-screen recovery steps
+      deng-rejoin --layout-test       — same as `doctor layout`
+      deng-rejoin --root-state        — same as `doctor root-state`
+    """
+    use_color = not args.no_color
+
+    # Silence internal loggers in case this is called outside main()
+    try:
+        from .logger import silence_public_loggers
+        silence_public_loggers()
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Subcommand routing
+    if getattr(args, "layout_test", False):
         cfg = None
         try:
             cfg = load_config()
@@ -2028,8 +2024,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             pass
         return _cmd_doctor_layout(cfg, use_color)
 
-    # Subcommand: root-state diagnostic
-    if getattr(args, "root_state", False) or getattr(args, "doctor_root_state", False):
+    if getattr(args, "root_state", False):
         cfg = None
         try:
             cfg = load_config()
@@ -2037,11 +2032,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             pass
         return _cmd_doctor_root_state(cfg)
 
-    # layout-reset subcommand: print recovery instructions and exit.
     if getattr(args, "layout_reset", False):
         print(_LAYOUT_RESET_INSTRUCTIONS)
         return 0
 
+    # Default doctor: show standard health check
+    print_banner(use_color=use_color)
     cfg = None
     try:
         cfg = load_config()
@@ -2055,11 +2051,6 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         pass
     items = run_doctor(cfg)
     print_doctor(items)
-    print()
-    print("Tips:")
-    print("  deng-rejoin doctor layout     — test window block layout")
-    print("  deng-rejoin doctor root-state — show process/task/window evidence")
-    print("  deng-rejoin doctor --layout-reset — fix sideways screen")
     return 1 if any(item.status == "FAIL" for item in items) else 0
 
 
@@ -2355,68 +2346,96 @@ def _progress_line(index: int, total: int, entry: dict[str, Any], message: str) 
     return f"[{index}/{total}] {username}: {message}"
 
 
-def _prepare_automatic_layout(cfg: dict[str, Any], entries: list[dict[str, Any]]) -> tuple[dict[str, Any], str]:
-    """Apply Kaeru-style auto layout during Start.
+def _prepare_automatic_layout(
+    cfg: dict[str, Any], entries: list[dict[str, Any]]
+) -> tuple[dict[str, Any], str]:
+    """Pre-launch layout: compute landscape blocks and write App Cloner XML.
 
-    Left ~35% of screen stays free for DENG Tool / Termux status panel.
-    Right ~65% is divided among Roblox windows using layout rules based on
-    package count (1, 2, 3, 4, 5-6, 7+). Title bars stay visible; no window
-    fully covers another.
-
-    Failure handling: any write error is caught, logged, and Start continues.
+    All progress goes to the debug logger.  Public Start UI sees nothing.
     """
+    import logging as _logging
+    _layout_log = _logging.getLogger("deng.rejoin.layout")
     try:
         packages = [entry["package"] for entry in entries]
         n        = len(packages)
-        gap      = int(cfg.get("window_gap_px", 8))
 
-        # Always calculate layout and attempt XML write for 1+ packages.
-        # apply_layout_to_packages tries direct file write first (works in Termux
-        # when /data/data/<pkg> is accessible), then falls back to root write.
-        # If both fail it logs at DEBUG level and Start continues normally.
-        root_info = android.detect_root()
-        messages, preview = window_layout.apply_layout_to_packages(
-            packages,
-            gap=gap,
-            write_xml=True,   # always attempt — direct first, root fallback
-            use_split_layout=(n > 1),
-        )
-
+        # Compute layout rectangles
         try:
-            cfg["last_layout_preview"] = preview
+            display = window_layout.detect_display_info()
+        except Exception:  # noqa: BLE001
+            display = window_layout.DisplayInfo(width=1080, height=1920, density=420)
+
+        rects = window_layout.calculate_split_layout(
+            [p for p in packages if not window_layout._is_layout_excluded(p)],
+            display.width, display.height,
+        )
+        try:
+            cfg["last_layout_preview"] = [r.as_dict() for r in rects]
             save_config(cfg)
         except Exception:  # noqa: BLE001
-            pass  # Non-fatal; layout still applied even if save fails
+            pass
 
-        if not messages:
-            return cfg, "Kaeru layout failed silently, launch continues."
+        # Pre-launch apply (XML write + optional force-stop).
+        # Post-launch verification + direct resize happens in cmd_start after
+        # the launch grace period.
+        try:
+            from . import window_apply
+            results = window_apply.apply_window_layout(
+                rects,
+                force_stop_before=False,   # caller already handled force-stop for selection set
+                relaunch_after=False,
+                verify_after=False,        # verification deferred to post-launch
+                retries=0,
+            )
+            for r in results:
+                _layout_log.debug(
+                    "pre-launch apply: %s ok=%s method=%s attempts=%s",
+                    r.package, r.pre_write_ok, r.pre_write_method, "; ".join(r.attempts),
+                )
+            # Stash results on cfg for later post-launch verify
+            cfg["_layout_rects"] = [r.desired.as_dict() for r in results]
+        except Exception as exc:  # noqa: BLE001
+            _layout_log.debug("pre-launch apply error (non-fatal): %s", exc)
 
-        # Determine summary note (debug details are in messages, logged below)
-        import logging as _logging
-        _log_layout = _logging.getLogger("deng.rejoin.layout")
-        for m in messages:
-            _log_layout.debug("%s", m)
-
-        _applied = any(
-            ("keys)" in m or "Updated App Cloner" in m)
-            for m in messages
-        )
-        _skipped = not root_info.available or not _applied
-
-        if n == 1:
-            note = "Kaeru layout: 1 package — right-side window."
-        else:
-            layout_name = {2: "side-by-side", 3: "2+1", 4: "2×2", 5: "2×3", 6: "2×3"}.get(n, f"{n}-window cascade")
-            note = f"Kaeru layout: {n} packages — {layout_name}."
-
-        if _skipped:
-            return cfg, f"{note} Position write skipped (root/XML unavailable) — launching normally."
-        return cfg, f"{note} Window positions applied."
-
+        return cfg, f"layout_prepared n={n}"
     except Exception as exc:  # noqa: BLE001
-        import logging as _logging
-        _logging.getLogger("deng.rejoin.layout").debug("Layout error (non-fatal): %s", exc)
-        return cfg, "Kaeru layout error — launch continues normally."
+        _layout_log.debug("Layout error (non-fatal): %s", exc)
+        return cfg, "layout_error"
+
+
+def _verify_layout_post_launch(
+    cfg: dict[str, Any], entries: list[dict[str, Any]]
+) -> dict[str, bool]:
+    """Post-launch verification + direct-resize retry.
+
+    Runs silently after the launch grace.  Returns ``{package: applied_ok}``.
+    """
+    import logging as _logging
+    _layout_log = _logging.getLogger("deng.rejoin.layout")
+    out: dict[str, bool] = {}
+    try:
+        display = window_layout.detect_display_info()
+        rects = window_layout.calculate_split_layout(
+            [e["package"] for e in entries if not window_layout._is_layout_excluded(e["package"])],
+            display.width, display.height,
+        )
+        from . import window_apply
+        results = window_apply.apply_window_layout(
+            rects,
+            force_stop_before=False,
+            relaunch_after=False,
+            verify_after=True,
+            retries=1,
+        )
+        for r in results:
+            out[r.package] = r.final_ok
+            _layout_log.debug(
+                "post-launch verify: %s ok=%s actual=%s method=%s attempts=%s",
+                r.package, r.final_ok, r.actual_bounds, r.actual_method, "; ".join(r.attempts),
+            )
+    except Exception as exc:  # noqa: BLE001
+        _layout_log.debug("verify_layout_post_launch error: %s", exc)
+    return out
 
 
 def _run_preparation_phase(
@@ -2473,6 +2492,10 @@ def _run_preparation_phase(
 
 def cmd_start(args: argparse.Namespace) -> int:
     use_color = not args.no_color
+    # Silence all internal loggers so warnings/errors go to file, never stdout.
+    from .logger import silence_public_loggers
+    silence_public_loggers()
+
     _clear_terminal()
     print_banner(use_color=use_color)
     try:
@@ -2598,6 +2621,13 @@ def cmd_start(args: argparse.Namespace) -> int:
         import time as _time
         _time.sleep(max(5, grace_wait))
 
+        # ── Post-launch layout verification + direct-resize retry (silent) ────
+        try:
+            _layout_verify = _verify_layout_post_launch(cfg, entries)
+            _start_log.debug("post-launch layout verify: %s", _layout_verify)
+        except Exception as _exc:  # noqa: BLE001
+            _start_log.debug("post-launch verify error: %s", _exc)
+
         # ── Build initial status table ────────────────────────────────────────
         initial_status: dict[str, str] = {}
         table_rows: list[tuple] = []
@@ -2721,10 +2751,157 @@ def cmd_start(args: argparse.Namespace) -> int:
             print(build_start_table(live_rows, use_color=use_color))
             print(flush=True)
 
-        _supervisor.run_forever(render_callback=_live_dashboard)
+        try:
+            _supervisor.run_forever(render_callback=_live_dashboard)
+        except KeyboardInterrupt:
+            # Silent: signal handler already set stop_event.  Caller will rerun cleanly.
+            pass
+        except Exception as exc:  # noqa: BLE001
+            _start_log.debug("Supervisor terminated with error: %s", exc)
+        # Best-effort clean exit: clear screen so terminal is not littered.
+        try:
+            _clear_terminal()
+        except Exception:  # noqa: BLE001
+            pass
+        return 0
+    except KeyboardInterrupt:
+        # Pre-supervisor Ctrl+C: just exit quietly, no traceback.
+        try:
+            _clear_terminal()
+        except Exception:  # noqa: BLE001
+            pass
         return 0
     except Exception as exc:  # noqa: BLE001 - command boundary.
+        import logging as _logging
+        _logging.getLogger("deng.rejoin.start").debug("cmd_start error: %s", exc)
         print(f"Agent start failed: {exc}")
+        return 1
+
+
+def cmd_support_bundle(args: argparse.Namespace) -> int:
+    """Hidden: write a support bundle for offline diagnosis.
+
+    Writes one file containing version, display info, layout plan, capability
+    probes, per-package evidence, and recent log tails.  Prints only the path.
+    """
+    from datetime import datetime as _dt
+    from .constants import LOG_DIR
+    from .window_layout import (
+        OUTER_MARGIN, TERMUX_LOG_FRACTION,
+        calculate_split_layout, detect_display_info, validate_layout_rects,
+    )
+    from . import window_apply
+
+    try:
+        from .logger import silence_public_loggers
+        silence_public_loggers()
+    except Exception:  # noqa: BLE001
+        pass
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    ts = _dt.now().strftime("%Y%m%d-%H%M%S")
+    bundle_path = LOG_DIR / f"support-bundle-{ts}.txt"
+
+    lines: list[str] = []
+    def _add(s: str = "") -> None:
+        lines.append(s)
+
+    _add(f"DENG Tool: Rejoin Support Bundle  {ts}")
+    _add(f"Product version: {VERSION}")
+    _add("")
+
+    try:
+        cfg = load_config()
+    except Exception:  # noqa: BLE001
+        cfg = None
+
+    _add("== Display ==")
+    try:
+        disp = detect_display_info()
+        _add(f"  size: {disp.width}x{disp.height}  density: {disp.density}")
+    except Exception as exc:  # noqa: BLE001
+        _add(f"  display detect error: {exc}")
+    _add("")
+
+    _add("== Capabilities ==")
+    try:
+        caps = window_apply._capability_probes()
+        for k, v in caps.items():
+            _add(f"  {k}: {v}")
+    except Exception as exc:  # noqa: BLE001
+        _add(f"  capability probe error: {exc}")
+    _add("")
+
+    packages = _packages_from_cfg(cfg)
+    _add(f"== Selected packages ({len(packages)}) ==")
+    for pkg in packages:
+        _add(f"  - {pkg}")
+    _add("")
+
+    if packages and cfg:
+        _add("== Desired layout (landscape blocks) ==")
+        try:
+            rects = calculate_split_layout(packages, disp.width, disp.height)
+            left_end = round(disp.width * TERMUX_LOG_FRACTION)
+            errs = validate_layout_rects(
+                rects, left_end + OUTER_MARGIN, OUTER_MARGIN,
+                disp.width - OUTER_MARGIN, disp.height - OUTER_MARGIN,
+            )
+            for i, r in enumerate(rects, 1):
+                _add(
+                    f"  [{i}] {r.package}: l={r.left} t={r.top} r={r.right} b={r.bottom} "
+                    f"({r.win_w}x{r.win_h}, ratio={r.win_w/max(1,r.win_h):.2f})"
+                )
+            if errs:
+                _add("  validation issues:")
+                for e in errs:
+                    _add(f"    - {e}")
+            else:
+                _add("  validation: PASS")
+        except Exception as exc:  # noqa: BLE001
+            _add(f"  layout compute error: {exc}")
+        _add("")
+
+        _add("== Apply attempt ==")
+        try:
+            results = window_apply.apply_window_layout(rects, verify_after=True, retries=1)
+            for r in results:
+                _add(f"  {r.package}: final_ok={r.final_ok}  detail={r.detail}")
+                _add(f"    actual_bounds={r.actual_bounds}  method={r.actual_method}")
+                for att in r.attempts:
+                    _add(f"    - {att}")
+        except Exception as exc:  # noqa: BLE001
+            _add(f"  apply error: {exc}")
+        _add("")
+
+        _add("== Root state evidence ==")
+        for pkg in packages:
+            try:
+                ev = android.get_package_alive_evidence(pkg)
+                fg = android.current_foreground_package()
+                _add(
+                    f"  {pkg}: proc={ev['running']} root_proc={ev['root_running']} "
+                    f"task={ev['task']} win={ev['window']} alive={ev['alive']} "
+                    f"is_foreground={fg == pkg}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                _add(f"  {pkg}: evidence error: {exc}")
+        _add("")
+
+    _add("== Recent log tail (last 50 lines) ==")
+    try:
+        log_lines = _tail_lines(LOG_PATH, 50)
+        for line in log_lines:
+            _add(f"  {line.rstrip()}")
+    except Exception as exc:  # noqa: BLE001
+        _add(f"  log read error: {exc}")
+
+    try:
+        bundle_path.write_text("\n".join(lines), encoding="utf-8")
+        print(f"Support bundle saved: {bundle_path}")
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        print(f"Support bundle failed: {exc}")
         return 1
 
 
@@ -2985,21 +3162,45 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lines", type=int, default=50, help="number of log lines for logs command")
     parser.add_argument("--no-color", action="store_true", help="disable ANSI banner color")
     parser.add_argument("--layout-reset", dest="layout_reset", action="store_true",
-                        help="(doctor) print orientation recovery instructions")
+                        help=argparse.SUPPRESS)
     parser.add_argument("--layout-test", dest="layout_test", action="store_true",
-                        help="(doctor) compute and validate window block layout")
+                        help=argparse.SUPPRESS)
     parser.add_argument("--root-state", dest="root_state", action="store_true",
-                        help="(doctor) show process/task/window evidence for each package")
-    ns = parser.parse_args(argv)
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--support-bundle", dest="support_bundle", action="store_true",
+                        help=argparse.SUPPRESS)
 
-    # Allow positional subcommands: deng-rejoin doctor layout / doctor root-state
-    _extra = list(getattr(ns, "command_extra", []) or [])
-    if not _extra and ns.command == "doctor" and len(argv) >= 2:
-        _sub = argv[1].lower().replace("-", "_")
-        if _sub == "layout":
+    # Pre-process argv so hidden positional subcommands don't trip choices validation.
+    import sys as _sys
+    if argv is None:
+        argv = _sys.argv[1:]
+    argv = list(argv)
+
+    # Standalone alias: `deng-rejoin support-bundle` → translate to flag.
+    if argv and argv[0] in ("support-bundle", "support_bundle"):
+        argv[0] = "--support-bundle"
+
+    # Use parse_known_args so that `deng-rejoin doctor layout` doesn't fail
+    # with "unrecognized arguments: layout".
+    try:
+        ns, _unknown = parser.parse_known_args(argv)
+    except SystemExit:
+        # argparse choice-validation failure — fall back to safe defaults.
+        ns = parser.parse_args([])
+        _unknown = list(argv)
+
+    # Map positional sub-subcommands for `doctor`: "doctor layout", "doctor root-state".
+    if ns.command == "doctor" and _unknown:
+        sub = (_unknown[0] or "").lower().replace("-", "_")
+        if sub in ("layout", "layout_test"):
             ns.layout_test = True
-        elif _sub in ("root_state", "root-state"):
+        elif sub in ("root_state",):
             ns.root_state = True
+        elif sub in ("reset", "layout_reset"):
+            ns.layout_reset = True
+        elif sub in ("bundle", "support_bundle"):
+            ns.support_bundle = True
+        # Any other doctor sub is just dropped silently — no traceback.
 
     flag_to_command = {
         "setup": ns.setup,
@@ -3024,24 +3225,37 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("use either positional command or --command flag, not both")
     if len(selected) > 1:
         parser.error("choose only one command")
-    ns.resolved_command = ns.command or (selected[0] if selected else "menu")
+
+    # Hidden diagnostics: route to internal commands without showing in public menu.
+    if getattr(ns, "support_bundle", False):
+        ns.resolved_command = "support-bundle"
+    elif getattr(ns, "layout_test", False) or getattr(ns, "root_state", False) or getattr(ns, "layout_reset", False):
+        ns.resolved_command = "doctor"
+    else:
+        ns.resolved_command = ns.command or (selected[0] if selected else "menu")
     return ns
 
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint with global safety wrappers.
 
-    faulthandler is enabled first so that true SIGSEGV crashes write a
-    traceback to logs/crash.log before the process dies.  All Python-level
-    exceptions are caught here; the public user never sees a raw traceback.
+    faulthandler is enabled with a FILE target (never stderr) so SIGSEGV crash
+    tracebacks never reach the public terminal.  All Python-level exceptions
+    are caught here; the public user never sees a raw traceback or signal text.
     """
     safe_io.setup_faulthandler()
+    # Silence internal namespace loggers so warnings/errors never leak to terminal.
+    try:
+        from .logger import silence_public_loggers
+        silence_public_loggers()
+    except Exception:  # noqa: BLE001
+        pass
     try:
         args = parse_args(argv)
         return _handlers()[args.resolved_command](args)
     except KeyboardInterrupt:
-        print("\nInterrupted.")
-        return 130
+        # Silent exit — return cleanly to shell, no public text.
+        return 0
     except EOFError:
         return 0
     except SystemExit as _exc:
@@ -3049,7 +3263,6 @@ def main(argv: list[str] | None = None) -> int:
         return _code if isinstance(_code, int) else (0 if _code is None else 1)
     except Exception:  # noqa: BLE001
         import logging as _logging
-        # Log full traceback at DEBUG only — never expose it to the public terminal.
         _logging.getLogger("deng.rejoin.cli").debug("Unhandled CLI error", exc_info=True)
         print(
             "\nThe tool hit an internal error. "
@@ -3077,6 +3290,7 @@ def _handlers() -> dict[str, Any]:
         "new-user-help": cmd_new_user_help,
         "enable-boot": cmd_enable_boot,
         "update": cmd_update,
+        "support-bundle": cmd_support_bundle,
     }
 
 

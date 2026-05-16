@@ -461,7 +461,14 @@ class MultiPackageSupervisor:
         self._workers: list[_PackageWorker] = []
 
     def _handle_stop(self, signum, frame) -> None:  # noqa: ANN001
-        print("\n  Supervisor stopping — Ctrl+C received.")
+        # Silent stop — no public print.  All shutdown details go to the log.
+        try:
+            import logging as _logging
+            _logging.getLogger("deng.rejoin.supervisor").debug(
+                "Supervisor received signal %s, stopping cleanly.", signum,
+            )
+        except Exception:  # noqa: BLE001
+            pass
         self.stop_event.set()
 
     def run_forever(self, *, display_interval: float = 10.0, render_callback=None) -> None:

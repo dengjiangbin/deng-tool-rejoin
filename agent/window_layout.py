@@ -344,7 +344,8 @@ def calculate_landscape_blocks(
 
     # ── PHASE 4: emergency fallback — just spread evenly ─────────────────
     # No further validation — at least they're unique and inside pane.
-    _log.warning("landscape_blocks: all phases failed, using emergency spread for n=%d", n)
+    # Log at DEBUG only — public stdout must never see this.
+    _log.debug("landscape_blocks: all phases failed, using emergency spread for n=%d", n)
     rows = math.ceil(math.sqrt(n))
     cols = math.ceil(n / rows)
     cell_w = max(_MIN_WIN_W, (pane_w - g * (cols - 1)) // cols)
