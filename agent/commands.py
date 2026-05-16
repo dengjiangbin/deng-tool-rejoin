@@ -2062,14 +2062,16 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         return status
     color = {
         "Started":      _ANSI_GREEN,
-        "Online":       _ANSI_GREEN,
-        "Lobby":        _ANSI_GREEN,     # app open at home
-        "In Server":    _ANSI_GREEN,     # URL join confirmed
-        "Ready":        _ANSI_YELLOW,
-        "Starting":     _ANSI_YELLOW,
-        "Launching":    _ANSI_YELLOW,
-        "Joining":      _ANSI_CYAN,      # URL deep link sent, waiting
-        "Preparing":    _ANSI_CYAN,
+        "Online":            _ANSI_GREEN,
+        "Lobby":             _ANSI_GREEN,    # app open at home
+        "In Server":         _ANSI_GREEN,    # strong evidence: experience loaded
+        "Join Unconfirmed":  _ANSI_YELLOW,   # app healthy but no in-game proof yet
+        "Ready":             _ANSI_YELLOW,
+        "Starting":          _ANSI_YELLOW,
+        "Launching":         _ANSI_YELLOW,
+        "Joining":           _ANSI_CYAN,     # URL deep link sent, waiting
+        "Join Failed":       _ANSI_RED,
+        "Preparing":         _ANSI_CYAN,
         "Optimizing":   _ANSI_CYAN,
         "Reconnecting": _ANSI_CYAN,
         "Cleared":      _ANSI_GREEN,
@@ -2146,20 +2148,22 @@ _FINAL_SUMMARY_ORDER: tuple[tuple[str, str], ...] = (
 )
 
 _STATE_TO_SUMMARY: dict[str, str] = {
-    "Online":       "online",
-    "Lobby":        "online",       # healthy at home screen
-    "In Server":    "online",       # healthy in target server
-    "Joining":      "launching",    # URL join in progress
-    "Reconnecting": "reconnecting",
-    "Launching":    "launching",
-    "Failed":       "failed",
-    "Offline":      "offline",
-    "Closed":       "offline",
-    "Warning":      "warning",
-    "Background":   "in background",
-    "Unknown":      "unknown",
-    "Preparing":    "preparing",
-    "Optimizing":   "optimizing",
+    "Online":            "online",
+    "Lobby":             "online",         # healthy at home screen
+    "In Server":         "online",         # confirmed in target server
+    "Join Unconfirmed":  "launching",      # app open, join evidence pending
+    "Joining":           "launching",      # URL join in progress
+    "Reconnecting":      "reconnecting",
+    "Launching":         "launching",
+    "Failed":            "failed",
+    "Join Failed":       "failed",
+    "Offline":           "offline",
+    "Closed":            "offline",
+    "Warning":           "warning",
+    "Background":        "in background",
+    "Unknown":           "unknown",
+    "Preparing":         "preparing",
+    "Optimizing":        "optimizing",
 }
 
 

@@ -31,6 +31,7 @@ from agent.supervisor import (
     STATUS_CLOSED,
     STATUS_FAILED,
     STATUS_IN_SERVER,
+    STATUS_JOIN_UNCONFIRMED,
     STATUS_JOINING,
     STATUS_LAUNCHING,
     STATUS_LOBBY,
@@ -64,10 +65,18 @@ class TestStatusConstants(unittest.TestCase):
         self.assertIsInstance(STATUS_CLOSED, str)
         self.assertEqual(STATUS_CLOSED, "Closed")
 
+    def test_join_unconfirmed_is_string(self):
+        self.assertIsInstance(STATUS_JOIN_UNCONFIRMED, str)
+        self.assertEqual(STATUS_JOIN_UNCONFIRMED, "Join Unconfirmed")
+
     def test_healthy_states_contains_lobby_and_in_server(self):
         self.assertIn(STATUS_LOBBY, _HEALTHY_STATES)
         self.assertIn(STATUS_IN_SERVER, _HEALTHY_STATES)
         self.assertIn(STATUS_ONLINE, _HEALTHY_STATES)
+
+    def test_join_unconfirmed_in_healthy_states(self):
+        """Join Unconfirmed is a healthy state — app is running."""
+        self.assertIn(STATUS_JOIN_UNCONFIRMED, _HEALTHY_STATES)
 
     def test_joining_not_in_healthy_states(self):
         self.assertNotIn(STATUS_JOINING, _HEALTHY_STATES)
@@ -174,12 +183,54 @@ class TestLaunchingToLobbyTransition(unittest.TestCase):
         result = _run_worker_one_iteration(entry, cfg, STATUS_LAUNCHING, url_launched=False)
         self.assertEqual(result, STATUS_LOBBY)
 
-    def test_joining_with_url_maps_to_in_server(self):
-        """After healthy check when in Joining (URL was used), state must become In Server."""
+    def test_joining_with_url_no_evidence_maps_to_join_unconfirmed(self):
+        """URL launch + healthy process + no Android evidence → Join Unconfirmed (not In Server).
+
+        The tool must not claim In Server just because the process is healthy
+        after a private URL launch.  Without real Android evidence (logcat /
+        dumpsys / uiautomator), the honest state is Join Unconfirmed.
+        In this test environment (Windows) all Android probes fail gracefully,
+        so the detector always returns FOREGROUND_APP evidence.
+        """
         entry = _make_entry("com.roblox.client", private_url="roblox://placeId=123")
         cfg = _make_cfg("com.roblox.client")
         result = _run_worker_one_iteration(entry, cfg, STATUS_JOINING, url_launched=True)
-        self.assertEqual(result, STATUS_IN_SERVER)
+        self.assertEqual(result, STATUS_JOIN_UNCONFIRMED)
+
+    def test_joining_with_url_and_ingame_evidence_maps_to_in_server(self):
+        """URL launch + healthy + strong in-game evidence → In Server."""
+        from agent.experience_detector import EvidenceLevel, ExperienceEvidence
+
+        in_game_ev = ExperienceEvidence(
+            level=EvidenceLevel.EXPERIENCE_LIKELY_LOADED,
+            detail="test: game loaded signal",
+            source="logcat",
+            raw_snippet="GameLoaded",
+        )
+
+        entry = _make_entry("com.roblox.client", private_url="roblox://placeId=123")
+        cfg = _make_cfg("com.roblox.client")
+        pkg = "com.roblox.client"
+        status_map = {pkg: STATUS_JOINING}
+        stop_event = threading.Event()
+
+        from agent.monitor import HealthResult
+
+        def health_side_effect(_cfg, _package):
+            stop_event.set()
+            return HealthResult("healthy", {}, "")
+
+        with unittest.mock.patch("agent.supervisor.check_package_health", side_effect=health_side_effect), \
+             unittest.mock.patch("agent.supervisor.db"), \
+             unittest.mock.patch("agent.supervisor.log_event"), \
+             unittest.mock.patch("agent.config.effective_private_server_url", return_value="roblox://x"), \
+             unittest.mock.patch("agent.supervisor.detect_experience_state", return_value=in_game_ev):
+            worker = _PackageWorker(entry, cfg, status_map, stop_event)
+            worker._url_launched = True
+            worker.launching_since = time.time() - 5
+            worker.run()
+
+        self.assertEqual(status_map[pkg], STATUS_IN_SERVER)
 
     def test_lobby_stays_lobby_on_subsequent_healthy_checks(self):
         """Once in Lobby, healthy checks must not demote to Online."""
@@ -243,8 +294,8 @@ class TestLaunchingTimeout(unittest.TestCase):
     is set so the loop exits.
     """
 
-    def test_launching_timeout_promotes_to_lobby_when_healthy(self):
-        """If Launching for too long and health=healthy → promote to Lobby."""
+    def test_launching_timeout_promotes_to_lobby_when_healthy_no_url(self):
+        """If Launching for too long (no URL) and health=healthy → promote to Lobby."""
         entry = _make_entry("com.roblox.client", private_url="")
         cfg = _make_cfg("com.roblox.client")
         pkg = "com.roblox.client"
@@ -254,7 +305,6 @@ class TestLaunchingTimeout(unittest.TestCase):
         from agent.monitor import HealthResult
 
         def health_side_effect(_cfg, _package):
-            # Called by the timeout guard; set stop so the next iteration exits
             stop_event.set()
             return HealthResult("healthy", {}, "")
 
@@ -264,11 +314,38 @@ class TestLaunchingTimeout(unittest.TestCase):
              unittest.mock.patch("agent.config.effective_private_server_url", return_value=""):
             worker = _PackageWorker(entry, cfg, status_map, stop_event)
             worker._url_launched = False
-            # Far in the past — guarantees elapsed > 90s timeout
             worker.launching_since = time.time() - 200
             worker.run()
 
         self.assertEqual(status_map[pkg], STATUS_LOBBY)
+
+    def test_joining_timeout_with_url_no_evidence_is_join_unconfirmed(self):
+        """Joining timeout + URL used + no Android evidence → Join Unconfirmed, NOT In Server."""
+        entry = _make_entry("com.roblox.client", private_url="roblox://x")
+        cfg = _make_cfg("com.roblox.client")
+        pkg = "com.roblox.client"
+        status_map = {pkg: STATUS_JOINING}
+        stop_event = threading.Event()
+
+        from agent.monitor import HealthResult
+
+        def health_side_effect(_cfg, _package):
+            stop_event.set()
+            return HealthResult("healthy", {}, "")
+
+        with unittest.mock.patch("agent.supervisor.check_package_health", side_effect=health_side_effect), \
+             unittest.mock.patch("agent.supervisor.db"), \
+             unittest.mock.patch("agent.supervisor.log_event"), \
+             unittest.mock.patch("agent.config.effective_private_server_url", return_value="roblox://x"):
+            worker = _PackageWorker(entry, cfg, status_map, stop_event)
+            worker._url_launched = True
+            worker.launching_since = time.time() - 200
+            worker.run()
+
+        # Without Android environment the evidence level is FOREGROUND_APP only.
+        # Must NOT be In Server.
+        self.assertNotEqual(status_map[pkg], STATUS_IN_SERVER)
+        self.assertEqual(status_map[pkg], STATUS_JOIN_UNCONFIRMED)
 
     def test_launching_timeout_fails_when_health_not_running(self):
         """If Launching for too long and health=not_running → status is Failed."""
@@ -424,9 +501,14 @@ class TestColorizeStatusNewStates(unittest.TestCase):
         result = _colorize_status("Closed", use_color=True)
         self.assertIn("Closed", result)
 
+    def test_join_unconfirmed_has_color(self):
+        from agent.commands import _colorize_status
+        result = _colorize_status("Join Unconfirmed", use_color=True)
+        self.assertIn("Join Unconfirmed", result)
+
     def test_no_color_mode_returns_plain_string(self):
         from agent.commands import _colorize_status
-        for state in ("Lobby", "Joining", "In Server", "Closed"):
+        for state in ("Lobby", "Joining", "In Server", "Closed", "Join Unconfirmed"):
             self.assertEqual(_colorize_status(state, use_color=False), state)
 
 
@@ -468,6 +550,136 @@ class TestStateSummaryNewStates(unittest.TestCase):
         rows = [(1, "com.roblox.client", "TestUser", "In Server")]
         table = build_start_table(rows)
         self.assertIn("In Server", table)
+
+    def test_join_unconfirmed_counts_as_launching(self):
+        from agent.commands import build_final_summary
+        entries = [{"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}]
+        text = build_final_summary(entries, {"com.roblox.client": "Join Unconfirmed"})
+        self.assertIn("launching", text.lower())
+
+    def test_start_table_shows_join_unconfirmed(self):
+        from agent.commands import build_start_table
+        rows = [(1, "com.roblox.client", "TestUser", "Join Unconfirmed")]
+        table = build_start_table(rows)
+        self.assertIn("Join Unconfirmed", table)
+
+
+class TestEvidenceBasedStateTransitions(unittest.TestCase):
+    """Comprehensive evidence-model state transition tests."""
+
+    def _run_with_evidence(self, initial_st: str, url_launched: bool, evidence_level) -> str:
+        """Run one worker iteration with a given mocked evidence level."""
+        from agent.experience_detector import EvidenceLevel, ExperienceEvidence
+        from agent.monitor import HealthResult
+
+        pkg = "com.roblox.client"
+        entry = _make_entry(pkg, private_url="roblox://x" if url_launched else "")
+        cfg = _make_cfg(pkg)
+        status_map = {pkg: initial_st}
+        stop_event = threading.Event()
+
+        ev = ExperienceEvidence(
+            level=evidence_level,
+            detail=f"test evidence level={evidence_level}",
+            source="test",
+        )
+
+        def health_side_effect(_cfg, _package):
+            stop_event.set()
+            return HealthResult("healthy", {}, "")
+
+        with unittest.mock.patch("agent.supervisor.check_package_health", side_effect=health_side_effect), \
+             unittest.mock.patch("agent.supervisor.db"), \
+             unittest.mock.patch("agent.supervisor.log_event"), \
+             unittest.mock.patch("agent.config.effective_private_server_url",
+                                  return_value="roblox://x" if url_launched else ""), \
+             unittest.mock.patch("agent.supervisor.detect_experience_state", return_value=ev):
+            worker = _PackageWorker(entry, cfg, status_map, stop_event)
+            worker._url_launched = url_launched
+            worker.launching_since = time.time() - 5
+            worker.run()
+
+        return status_map[pkg]
+
+    def test_url_launch_no_evidence_is_join_unconfirmed(self):
+        """URL launch + FOREGROUND_APP evidence → Join Unconfirmed, not In Server."""
+        from agent.experience_detector import EvidenceLevel
+        result = self._run_with_evidence(STATUS_JOINING, url_launched=True,
+                                          evidence_level=EvidenceLevel.FOREGROUND_APP)
+        self.assertEqual(result, STATUS_JOIN_UNCONFIRMED)
+        self.assertNotEqual(result, STATUS_IN_SERVER)
+
+    def test_url_launch_process_only_is_join_unconfirmed(self):
+        """URL launch + PROCESS_ONLY evidence → Join Unconfirmed."""
+        from agent.experience_detector import EvidenceLevel
+        result = self._run_with_evidence(STATUS_JOINING, url_launched=True,
+                                          evidence_level=EvidenceLevel.PROCESS_ONLY)
+        self.assertEqual(result, STATUS_JOIN_UNCONFIRMED)
+
+    def test_url_launch_game_evidence_is_in_server(self):
+        """URL launch + EXPERIENCE_LIKELY_LOADED evidence → In Server."""
+        from agent.experience_detector import EvidenceLevel
+        result = self._run_with_evidence(STATUS_JOINING, url_launched=True,
+                                          evidence_level=EvidenceLevel.EXPERIENCE_LIKELY_LOADED)
+        self.assertEqual(result, STATUS_IN_SERVER)
+
+    def test_url_launch_home_evidence_is_join_unconfirmed(self):
+        """URL launch + HOME_OR_LOBBY evidence → Join Unconfirmed (honest: join probably failed)."""
+        from agent.experience_detector import EvidenceLevel
+        result = self._run_with_evidence(STATUS_JOINING, url_launched=True,
+                                          evidence_level=EvidenceLevel.ROBLOX_HOME_OR_LOBBY)
+        self.assertEqual(result, STATUS_JOIN_UNCONFIRMED)
+
+    def test_url_launch_join_failed_evidence_is_join_unconfirmed(self):
+        """URL launch + JOIN_FAILED_OR_HOME evidence → Join Unconfirmed."""
+        from agent.experience_detector import EvidenceLevel
+        result = self._run_with_evidence(STATUS_JOINING, url_launched=True,
+                                          evidence_level=EvidenceLevel.JOIN_FAILED_OR_HOME)
+        self.assertEqual(result, STATUS_JOIN_UNCONFIRMED)
+
+    def test_no_url_healthy_home_evidence_is_lobby(self):
+        """No URL + ROBLOX_HOME_OR_LOBBY evidence → Lobby."""
+        from agent.experience_detector import EvidenceLevel
+        result = self._run_with_evidence(STATUS_LAUNCHING, url_launched=False,
+                                          evidence_level=EvidenceLevel.ROBLOX_HOME_OR_LOBBY)
+        self.assertEqual(result, STATUS_LOBBY)
+
+    def test_no_url_game_evidence_is_in_server(self):
+        """No URL + EXPERIENCE_LIKELY_LOADED evidence → In Server (unusual, but honest)."""
+        from agent.experience_detector import EvidenceLevel
+        result = self._run_with_evidence(STATUS_LAUNCHING, url_launched=False,
+                                          evidence_level=EvidenceLevel.EXPERIENCE_LIKELY_LOADED)
+        self.assertEqual(result, STATUS_IN_SERVER)
+
+    def test_no_url_foreground_app_is_lobby(self):
+        """No URL + FOREGROUND_APP evidence → Lobby (app is open, no URL, assume home)."""
+        from agent.experience_detector import EvidenceLevel
+        result = self._run_with_evidence(STATUS_LAUNCHING, url_launched=False,
+                                          evidence_level=EvidenceLevel.FOREGROUND_APP)
+        self.assertEqual(result, STATUS_LOBBY)
+
+    def test_join_unconfirmed_stays_in_healthy_states(self):
+        """Once Join Unconfirmed, the next healthy check must stay in healthy states."""
+        from agent.experience_detector import EvidenceLevel
+        # Join Unconfirmed stays on repeated healthy polls (no evidence change)
+        result = self._run_with_evidence(STATUS_JOIN_UNCONFIRMED, url_launched=True,
+                                          evidence_level=EvidenceLevel.FOREGROUND_APP)
+        # After a healthy check from JOIN_UNCONFIRMED, it should stay in a healthy state
+        self.assertIn(result, _HEALTHY_STATES)
+
+    def test_public_table_has_only_package_username_state(self):
+        """build_start_table output must have only Package, Username, State columns."""
+        from agent.commands import build_start_table
+        rows = [(1, "com.roblox.client", "TestUser", "Join Unconfirmed")]
+        table = build_start_table(rows)
+        # Table headers must include exactly these four columns
+        self.assertIn("Package", table)
+        self.assertIn("Username", table)
+        self.assertIn("State", table)
+        # No debug columns
+        self.assertNotIn("Evidence", table)
+        self.assertNotIn("logcat", table)
+        self.assertNotIn("dumpsys", table)
 
 
 if __name__ == "__main__":

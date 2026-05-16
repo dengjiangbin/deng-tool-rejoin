@@ -10,6 +10,7 @@ from typing import Any
 from . import db
 from .backoff import calculate_backoff_seconds
 from .config import load_config, validate_config
+from .experience_detector import EvidenceLevel, detect_experience_state
 from .launcher import perform_rejoin
 from .lockfile import LockManager
 from .logger import configure_logging, log_event
@@ -19,24 +20,25 @@ from .roblox_health import categorize_unhealthy
 
 # ─── Status constants (shown in terminal and webhook) ─────────────────────────
 
-STATUS_ONLINE       = "Online"
-STATUS_OFFLINE      = "Offline"
-STATUS_LAUNCHING    = "Launching"
-STATUS_CHECKING     = "Preparing"
-STATUS_BACKGROUND   = "Background"
-STATUS_RECONNECTING = "Reconnecting"
-STATUS_WARNING      = "Warning"
-STATUS_FAILED       = "Failed"
-STATUS_UNKNOWN      = "Unknown"
+STATUS_ONLINE            = "Online"
+STATUS_OFFLINE           = "Offline"
+STATUS_LAUNCHING         = "Launching"
+STATUS_CHECKING          = "Preparing"
+STATUS_BACKGROUND        = "Background"
+STATUS_RECONNECTING      = "Reconnecting"
+STATUS_WARNING           = "Warning"
+STATUS_FAILED            = "Failed"
+STATUS_UNKNOWN           = "Unknown"
 # Richer state constants for improved UX
-STATUS_LOBBY        = "Lobby"       # App open at home/lobby, no URL join active
-STATUS_IN_SERVER    = "In Server"   # URL join was used and app is now healthy
-STATUS_JOINING      = "Joining"     # Deep-link / private URL sent, waiting for join
-STATUS_CLOSED       = "Closed"      # App cleanly not running after a session
+STATUS_LOBBY             = "Lobby"             # App open at home/lobby, no URL join active
+STATUS_IN_SERVER         = "In Server"         # Strong evidence: game experience loaded
+STATUS_JOINING           = "Joining"           # Deep-link / private URL sent, waiting
+STATUS_CLOSED            = "Closed"            # App cleanly not running after a session
+STATUS_JOIN_UNCONFIRMED  = "Join Unconfirmed"  # App healthy but no in-game evidence yet
 
 # All healthy states — used for state-machine guards
 _HEALTHY_STATES = frozenset({
-    STATUS_ONLINE, STATUS_LOBBY, STATUS_IN_SERVER,
+    STATUS_ONLINE, STATUS_LOBBY, STATUS_IN_SERVER, STATUS_JOIN_UNCONFIRMED,
 })
 
 
@@ -199,6 +201,59 @@ class _PackageWorker(threading.Thread):
     def _can_auto_reconnect(self) -> bool:
         return bool(self.entry.get("auto_reconnect_enabled", True)) and bool(self._sup().get("auto_reconnect_enabled", True))
 
+    def _post_launch_state(self) -> str:
+        """Determine the honest display state after a health check confirms the app
+        is running, when transitioning FROM Launching / Joining.
+
+        Uses evidence-based detection to avoid falsely claiming ``In Server``
+        when the app is merely healthy (process alive / foreground) without
+        actual proof that the Roblox experience loaded.
+
+        Evidence rules:
+        - EXPERIENCE_LIKELY_LOADED  → In Server
+        - ROBLOX_HOME_OR_LOBBY / JOIN_FAILED_OR_HOME
+            + url_launched  → Join Unconfirmed  (join probably failed; be honest)
+            + no URL        → Lobby
+        - FOREGROUND_APP or lower
+            + url_launched  → Join Unconfirmed  (app open, no game evidence)
+            + no URL        → Lobby
+        - PROCESS_ONLY (shouldn't reach here — health said healthy)
+            + url_launched  → Joining  (still waiting for foreground)
+            + no URL        → Lobby
+        """
+        try:
+            evidence = detect_experience_state(self.package, url_launched=self._url_launched)
+        except Exception:  # noqa: BLE001
+            evidence = None
+
+        if evidence is not None and evidence.is_in_game():
+            log_event(
+                self.logger, "info", "experience_detected",
+                package=self.package,
+                source=evidence.source,
+                detail=evidence.detail,
+            )
+            return STATUS_IN_SERVER
+
+        if evidence is not None and evidence.is_home_or_lobby():
+            # Clear lobby/home evidence: if a URL was used, join probably failed.
+            if self._url_launched:
+                log_event(
+                    self.logger, "info", "join_home_evidence",
+                    package=self.package,
+                    source=evidence.source,
+                    detail=evidence.detail,
+                )
+                return STATUS_JOIN_UNCONFIRMED
+            return STATUS_LOBBY
+
+        if self._url_launched:
+            # App is healthy but we have no Android evidence that an experience
+            # loaded.  Be honest: do NOT claim In Server without real evidence.
+            return STATUS_JOIN_UNCONFIRMED
+
+        return STATUS_LOBBY
+
     def run(self) -> None:
         cfg = self.cfg
         sup = self._sup()
@@ -227,7 +282,9 @@ class _PackageWorker(threading.Thread):
                         # App hasn't become healthy after 4× grace — force-check now
                         timeout_health = check_package_health(cfg, self.package)
                         if timeout_health.state == "healthy":
-                            target = STATUS_IN_SERVER if self._url_launched else STATUS_LOBBY
+                            # Use evidence-based detection: do not assume In Server
+                            # merely because the app is responding after a URL launch.
+                            target = self._post_launch_state()
                             self._set_status(target, "Launch timeout — app confirmed running")
                         else:
                             self._set_status(STATUS_FAILED, "Launch timeout — app not responding")
@@ -255,9 +312,10 @@ class _PackageWorker(threading.Thread):
                     # Use prev_before_check because STATUS_CHECKING is transient.
                     self.launching_since = None
                     if prev_before_check in {STATUS_LAUNCHING, STATUS_JOINING}:
-                        target = STATUS_IN_SERVER if self._url_launched else STATUS_LOBBY
+                        # Evidence-based: never promote to In Server without proof.
+                        target = self._post_launch_state()
                     elif prev_before_check in _HEALTHY_STATES:
-                        target = prev_before_check  # stay in healthy state
+                        target = prev_before_check  # stay in current healthy state
                     else:
                         target = STATUS_ONLINE
                     self._set_status(target, "Heartbeat OK")
