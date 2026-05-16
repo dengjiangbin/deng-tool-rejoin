@@ -21,12 +21,11 @@ import json
 import re
 import secrets
 import subprocess
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
 from .constants import APP_HOME, DEFAULT_LICENSE_SERVER_URL, VERSION
+from . import safe_http
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -260,34 +259,26 @@ def sync_install_id_with_config(license_section: dict[str, Any]) -> str:
 
 
 def _license_api_post_json(url: str, payload: dict[str, Any], *, timeout: int = 30) -> dict[str, Any]:
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": f"DENG-Tool-Rejoin/{VERSION}",
-        },
-    )
+    """POST to the license API.  Uses safe_http which routes through curl on
+    Termux to prevent Python ssl/OpenSSL SIGSEGV from killing the main process.
+    """
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            body = resp.read(256 * 1024)
-            return json.loads(body)  # type: ignore[return-value]
-    except urllib.error.HTTPError as exc:
+        return safe_http.post_json(url, payload, timeout=timeout)
+    except safe_http.SafeHttpStatusError as exc:
+        # Try to parse error JSON embedded in the raised exception body.
         try:
-            raw = exc.read(4096).decode("utf-8", errors="replace")
-            parsed: dict[str, Any] = json.loads(raw)
+            parsed: dict[str, Any] = json.loads(exc.body)
             if isinstance(parsed, dict) and parsed.get("result"):
                 return parsed
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, AttributeError):
             pass
-        return {"result": "server_unavailable", "message": f"HTTP {exc.code}"}
-    except urllib.error.URLError:
-        return {"result": "server_unavailable", "message": "Network error"}
-    except json.JSONDecodeError:
+        return {"result": "server_unavailable", "message": f"HTTP {exc.status_code}"}
+    except safe_http.SafeHttpNetworkError as exc:
+        return {"result": "server_unavailable", "message": str(exc)}
+    except safe_http.SafeHttpJsonError:
         return {"result": "server_unavailable", "message": "Invalid JSON from license server"}
+    except Exception:  # noqa: BLE001
+        return {"result": "server_unavailable", "message": "Network error"}
 
 
 def check_remote_license_status(

@@ -250,10 +250,8 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
                 print_beginner_license_gate_help()
                 return False
             print_beginner_menu_license_prompt()
-            try:
-                raw = input("Paste your license key: ").strip()
-            except (EOFError, KeyboardInterrupt):
-                print()
+            raw = safe_io.safe_prompt("Paste your license key: ")
+            if raw is None:
                 return False
             if not raw:
                 continue
@@ -304,11 +302,10 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             print("\n1. Enter Different Key\n2. Exit")
         else:
             print("\n1. Try Another Key\n2. Exit")
-        try:
-            choice = input("Choose [2]: ").strip() or "2"
-        except (EOFError, KeyboardInterrupt):
-            print()
+        _lc2 = safe_io.safe_prompt("Choose [2]: ", default="2")
+        if _lc2 is None:
             return False
+        choice = _lc2.strip() or "2"
         if choice != "1":
             return False
         # Clear bad key and retry
@@ -1595,29 +1592,22 @@ def _config_webhook_mode(draft: dict[str, Any]) -> None:
 
 def _test_webhook(draft: dict[str, Any]) -> None:
     """Send a test message to the configured webhook. URL is masked in all output."""
+    from . import safe_http as _safe_http  # noqa: PLC0415
     url = draft.get("webhook_url", "") or ""
     if not url:
         print("No Webhook URL Is Set. Set One First.")
         safe_io.press_enter()
         return
-    import json as _json
-    import urllib.request as _urllib_req
     masked = webhook.mask_webhook_url(url)
     print(f"Sending Test Webhook To {masked}...")
     try:
-        payload = _json.dumps({"content": "DENG Tool: Rejoin — Test Webhook"}).encode("utf-8")
-        req = _urllib_req.Request(
-            url,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with _urllib_req.urlopen(req, timeout=10) as resp:  # noqa: S310
-            code = resp.getcode()
-        if code in (200, 204):
-            print("Test Webhook Sent Successfully.")
-        else:
-            print(f"Webhook Returned Status {code}.")
+        payload = {"content": "DENG Tool: Rejoin — Test Webhook"}
+        _safe_http.post_json(url, payload, timeout=10)
+        print("Test Webhook Sent Successfully.")
+    except _safe_http.SafeHttpStatusError as exc:
+        print(f"Webhook Returned Status {exc.status_code}.")
+    except _safe_http.SafeHttpNetworkError as exc:
+        print(f"Test Webhook Failed: {exc}")
     except Exception as exc:  # noqa: BLE001
         print(f"Test Webhook Failed: {exc}")
     safe_io.press_enter()
@@ -1871,8 +1861,49 @@ def cmd_first_setup(args: argparse.Namespace) -> int:
     return 0
 
 
+_LAYOUT_RESET_INSTRUCTIONS = """
+Layout Recovery — Restoring Normal Orientation
+===============================================
+
+If your Termux terminal or screen is sideways after a layout operation:
+
+Method 1 — Rotate the phone back manually:
+  Rotate your physical device to portrait and lock portrait mode in Settings.
+
+Method 2 — Android Settings:
+  Settings → Display → Auto-rotate → turn OFF, then set Portrait.
+
+Method 3 — Quick Settings tile:
+  Swipe down the notification shade and tap the Auto-Rotate toggle.
+
+Method 4 — ADB (from a PC):
+  adb shell settings put system user_rotation 0
+
+Method 5 — Inside Termux:
+  settings put system user_rotation 0
+
+Important:
+  DENG Tool: Rejoin never issues global rotation commands.
+  If Termux appears sideways, the likely cause is App Cloner applying
+  a window position that forces landscape mode on your device.
+  The window layout only writes to the Roblox app clone preferences,
+  NOT to Termux or system UI.
+
+After restoring orientation:
+  1. Restart Termux.
+  2. Run: deng-rejoin
+  3. If the issue recurs, disable layout in config (auto_resize_enabled = false).
+""".strip()
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     print_banner(use_color=not args.no_color)
+
+    # layout-reset subcommand: print recovery instructions and exit.
+    if getattr(args, "layout_reset", False):
+        print(_LAYOUT_RESET_INSTRUCTIONS)
+        return 0
+
     cfg = None
     try:
         cfg = load_config()
@@ -1886,6 +1917,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         pass
     items = run_doctor(cfg)
     print_doctor(items)
+    print()
+    print("Tip: if the screen is sideways, run:  deng-rejoin doctor --layout-reset")
     return 1 if any(item.status == "FAIL" for item in items) else 0
 
 
@@ -2708,6 +2741,11 @@ def cmd_menu(args: argparse.Namespace) -> int:
     ensure_app_dirs()
     use_color = not args.no_color
 
+    # Notify user if a recent crash was detected (but never show the stack).
+    crash_notice = safe_io.check_and_report_crash_log()
+    if crash_notice:
+        print(f"\n⚠  {crash_notice}\n")
+
     # Dev mode: skip license gate entirely
     if keystore.DEV_MODE:
         _print_dev_license_skipped(use_color)
@@ -2761,6 +2799,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--debug", action="store_true", help="same as --verbose for Start diagnostics")
     parser.add_argument("--lines", type=int, default=50, help="number of log lines for logs command")
     parser.add_argument("--no-color", action="store_true", help="disable ANSI banner color")
+    parser.add_argument("--layout-reset", dest="layout_reset", action="store_true",
+                        help="(doctor) print orientation recovery instructions")
     ns = parser.parse_args(argv)
 
     flag_to_command = {

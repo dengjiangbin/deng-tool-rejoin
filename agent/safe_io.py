@@ -11,6 +11,8 @@ safe_prompt()       – Replacement for input() that handles KeyboardInterrupt,
 setup_faulthandler() – Enable Python faulthandler so that true SIGSEGV crashes
                        (which cannot be caught by try/except) write a C-level
                        traceback to a local log file before the process dies.
+                       NEVER writes to stderr — the crash stack must NOT appear
+                       on the user's public terminal.
 
 Platform strategy
 ─────────────────
@@ -35,6 +37,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 
 # ── Platform detection ────────────────────────────────────────────────────────
 
@@ -147,36 +150,78 @@ def press_enter(msg: str = "\nPress Enter to continue...") -> None:
 
 
 def setup_faulthandler() -> None:
-    """Enable Python faulthandler to log crash tracebacks to a local file.
+    """Enable Python faulthandler to log crash tracebacks to a local log file.
 
     True segfaults (SIGSEGV) cannot be caught by try/except.  faulthandler
     writes a C-level traceback to the crash log *before* the process dies,
-    which allows post-mortem diagnosis.
+    which allows post-mortem diagnosis without polluting the user's terminal.
 
-    Safety:
+    Safety rules:
         • The crash log only contains Python frame names and line numbers.
         • No secrets, keys, or user data are written.
-        • If the log file cannot be opened, faulthandler falls back to stderr.
+        • The crash stack is NEVER written to stderr or the terminal.
+          If no writable log path can be found, faulthandler is simply not
+          enabled (silent failure — better than spamming the user's screen).
     """
     try:
         import faulthandler  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
 
         from .constants import CRASH_LOG_PATH  # noqa: PLC0415
 
-        CRASH_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        # Open in append mode — previous crashes are preserved for support.
-        # We intentionally keep this file open for the lifetime of the process
-        # so faulthandler can write to it at any point, including during a crash.
-        _crash_file = open(  # noqa: SIM115
-            str(CRASH_LOG_PATH), "a", encoding="utf-8", errors="replace"
-        )
-        # Store a reference so the GC does not close the file prematurely.
-        _setup_faulthandler._crash_file = _crash_file  # type: ignore[attr-defined]
-        faulthandler.enable(file=_crash_file)
-    except Exception:  # noqa: BLE001
-        try:
-            import faulthandler  # noqa: PLC0415
+        # Try the preferred path first, then a /tmp fallback.
+        candidate_paths = [
+            str(CRASH_LOG_PATH),
+            "/tmp/deng-rejoin-crash.log",
+            str(Path.home() / ".deng-rejoin-crash.log"),
+        ]
 
-            faulthandler.enable()  # stderr fallback
-        except Exception:  # noqa: BLE001
-            pass
+        for crash_path_str in candidate_paths:
+            try:
+                Path(crash_path_str).parent.mkdir(parents=True, exist_ok=True)
+                # Open in append mode — previous crashes are preserved.
+                # Keep the file open for the lifetime of the process so
+                # faulthandler can write to it at any moment, including
+                # during a crash when the GC is no longer running.
+                _crash_file = open(  # noqa: SIM115
+                    crash_path_str, "a", encoding="utf-8", errors="replace"
+                )
+                # Store reference — prevents premature GC close.
+                _setup_faulthandler._crash_file = _crash_file  # type: ignore[attr-defined]
+                faulthandler.enable(file=_crash_file)
+                return  # Successfully enabled; done.
+            except Exception:  # noqa: BLE001
+                continue
+
+        # All paths failed — do NOT fall back to stderr.
+        # Losing crash diagnostics is preferable to printing a giant stack
+        # trace on the user's public terminal.
+
+    except Exception:  # noqa: BLE001
+        pass  # faulthandler module unavailable — ignore silently.
+
+
+def check_and_report_crash_log(max_age_seconds: int = 3600) -> str | None:
+    """Return a user-friendly warning string if a recent crash log exists.
+
+    Called at startup to inform the user that a previous crash occurred.
+    Returns a one-line message or ``None`` if no recent crash is detected.
+
+    Args:
+        max_age_seconds: Crash log is "recent" if modified within this window.
+    """
+    try:
+        from .constants import CRASH_LOG_PATH  # noqa: PLC0415
+
+        if not CRASH_LOG_PATH.exists():
+            return None
+        age = time.time() - CRASH_LOG_PATH.stat().st_mtime
+        if age > max_age_seconds:
+            return None
+        return (
+            f"Previous crash detected. "
+            f"Crash log saved at: {CRASH_LOG_PATH}\n"
+            f"If this keeps happening, share the log with support."
+        )
+    except Exception:  # noqa: BLE001
+        return None

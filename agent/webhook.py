@@ -7,6 +7,7 @@ they may be displayed.
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.parse
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .url_utils import mask_launch_url
+from . import safe_http
 
 WEBHOOK_MODES = {"new_message", "edit_message"}
 MIN_WEBHOOK_INTERVAL_SECONDS = 30
@@ -383,6 +385,23 @@ def send_webhook_update(
     else:
         data = json.dumps(payload).encode("utf-8")
         headers = {"Content-Type": "application/json"}
+
+    # On Termux, route JSON-only webhook through safe_http/curl to prevent
+    # Python ssl SIGSEGV.  Multipart (snapshot) falls back to urllib since
+    # snapshots are rarely used on cloud phones, and the request is not
+    # part of the license-critical path.
+    on_termux = bool(os.environ.get("TERMUX_VERSION")) or os.environ.get("DENG_HTTP_BACKEND") == "curl"
+    if on_termux and not (snapshot_path and snapshot_path.exists()):
+        try:
+            resp_dict = safe_http.post_json(url, payload, timeout=10)
+            message_id = resp_dict.get("id") if isinstance(resp_dict, dict) else None
+            return True, "discord webhook OK (curl)", message_id
+        except safe_http.SafeHttpStatusError as exc:
+            return False, f"webhook HTTP {exc.status_code}", None
+        except safe_http.SafeHttpError as exc:
+            return False, f"webhook failed: {exc}", None
+        except Exception as exc:  # noqa: BLE001
+            return False, f"webhook error: {exc}", None
 
     request = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
