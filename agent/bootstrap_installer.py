@@ -192,6 +192,7 @@ def render_public_bootstrap(
     bootstrap_session: str = "",
     installer_title: str = "DENG Tool: Rejoin Installer",
     banner_lines: tuple[str, ...] = (),
+    bundle_etag: str = "",
 ) -> str:
     """*requested* is ``latest``, ``v1.0.0``, ``main-dev``, ``test-latest``, etc."""
     base = base_url.rstrip("/")
@@ -213,6 +214,12 @@ def render_public_bootstrap(
         + wrapper_body_sh(base)
         + _INSTALL_PART_AFTER_HEREDOC
     )
+
+    # Inject a cache-busting query parameter so CDN edges don't serve a stale bundle.
+    if bundle_etag:
+        _old = '"$DENG_REJOIN_INSTALL_API/install/launcher/bundle.tar.gz"'
+        _new = f'"$DENG_REJOIN_INSTALL_API/install/launcher/bundle.tar.gz?v={bundle_etag}"'
+        tail = tail.replace(_old, _new, 1)
 
     return (
         "#!/usr/bin/env bash\n"

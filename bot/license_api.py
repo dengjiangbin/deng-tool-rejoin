@@ -102,7 +102,29 @@ log = logging.getLogger("deng.rejoin.license_api")
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _LOGO_REL = Path("assets") / "denghub_logo.png"
 
-# ── Public URL helper ─────────────────────────────────────────────────────────
+# ── Bundle etag (SHA-256 prefix of launcher tarball for CDN cache-busting) ────
+
+def _bundle_etag() -> str:
+    """Return the first 16 hex chars of the SHA-256 of the launcher bundle.
+
+    Cached after first computation per process lifetime so that each bootstrap
+    request does not re-read the file, yet the etag changes whenever the PM2
+    process is restarted with a new bundle.
+    """
+    if _bundle_etag._cache:                        # type: ignore[attr-defined]
+        return _bundle_etag._cache[0]              # type: ignore[attr-defined]
+    import hashlib
+    repo_bundle = _PROJECT_ROOT / "releases" / "launcher" / "deng-rejoin-launcher.tar.gz"
+    try:
+        digest = hashlib.sha256(repo_bundle.read_bytes()).hexdigest()[:16]
+    except OSError:
+        digest = ""
+    _bundle_etag._cache = [digest]                 # type: ignore[attr-defined]
+    return digest
+
+_bundle_etag._cache: list[str] = []               # type: ignore[attr-defined]
+
+
 
 def _public_base_url() -> str:
     """Return the public base URL used in download_url responses.
@@ -469,7 +491,7 @@ def _route_public_install(
         sig = (qs.get("sig") or [""])[0]
 
         if tail == "latest":
-            script = render_public_bootstrap(base_url=base, requested="latest")
+            script = render_public_bootstrap(base_url=base, requested="latest", bundle_etag=_bundle_etag())
             return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
         if tail == "test/latest":
@@ -478,6 +500,7 @@ def _route_public_install(
                 requested="test-latest",
                 installer_title="DENG Tool: Rejoin Test Installer",
                 banner_lines=("Channel: internal test", "Version: main-dev"),
+                bundle_etag=_bundle_etag(),
             )
             return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
@@ -499,7 +522,7 @@ def _route_public_install(
                 )
             sid = _register_bootstrap_session("dev/main")
             script = render_public_bootstrap(
-                base_url=base, requested="main-dev", bootstrap_session=sid
+                base_url=base, requested="main-dev", bootstrap_session=sid, bundle_etag=_bundle_etag()
             )
             return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
@@ -544,6 +567,7 @@ def _route_public_install(
                 "application/gzip",
                 [
                     ("Content-Disposition", 'attachment; filename="deng-rejoin-launcher.tar.gz"'),
+                    ("Cache-Control", "no-store"),
                 ],
             )
 
@@ -563,7 +587,7 @@ def _route_public_install(
                 None,
             )
 
-        script = render_public_bootstrap(base_url=base, requested=tail)
+        script = render_public_bootstrap(base_url=base, requested=tail, bundle_etag=_bundle_etag())
         return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
     if path == "/api/install/authorize":
