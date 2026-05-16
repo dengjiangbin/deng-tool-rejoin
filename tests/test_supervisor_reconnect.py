@@ -80,6 +80,10 @@ class TestStrictAliveImmuneToStaleTask(unittest.TestCase):
 class TestWindowVisibleRequiresSurface(unittest.TestCase):
     """is_package_window_visible only returns True for drawing surfaces."""
 
+    def setUp(self):
+        from agent import dumpsys_cache
+        dumpsys_cache.invalidate()
+
     def _mock_with(self, dumpsys_output):
         def _mock_run(args, *a, **kw):
             if args[0] == "dumpsys" and args[1] == "window":

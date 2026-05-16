@@ -2201,6 +2201,8 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Ready":             _ANSI_YELLOW,
         "Starting":          _ANSI_YELLOW,
         "Launching":         _ANSI_YELLOW,
+        "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
+        "Disconnected":      _ANSI_RED,      # Roblox error code detected
         "Joining":           _ANSI_CYAN,     # URL deep link sent, waiting
         "Join Failed":       _ANSI_RED,
         "Preparing":         _ANSI_CYAN,
@@ -2772,7 +2774,10 @@ def cmd_start(args: argparse.Namespace) -> int:
                 safe_err = mask_urls_in_text(err) or "Launch failed"
                 stat_internal = (safe_err[:120] + "...") if len(safe_err) > 123 else safe_err
             elif android.is_process_running(pkg):
-                state = "Joining" if _has_url else "Lobby"
+                # Process is up.  If we sent a URL, the user expects to see
+                # "Joining" until presence confirms In-Game; otherwise we
+                # call it "Launched" (Roblox process is open, no URL yet).
+                state = "Joining" if _has_url else "Launched"
                 stat_internal = "process running"
             else:
                 state = "Joining" if _has_url else "Launching"

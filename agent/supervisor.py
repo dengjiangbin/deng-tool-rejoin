@@ -80,10 +80,16 @@ STATUS_IN_SERVER         = "In Server"         # Strong evidence: game experienc
 STATUS_JOINING           = "Joining"           # Deep-link / private URL sent, waiting
 STATUS_CLOSED            = "Closed"            # App cleanly not running after a session
 STATUS_JOIN_UNCONFIRMED  = "Join Unconfirmed"  # App healthy but no in-game evidence yet
+# State vocabulary aligned to user-facing terminology:
+#   Launched     = Roblox process is up but no URL / game evidence yet.
+#   Disconnected = Roblox error code or "connection lost" signal detected.
+STATUS_LAUNCHED          = "Launched"
+STATUS_DISCONNECTED      = "Disconnected"
 
 # All healthy states — used for state-machine guards
 _HEALTHY_STATES = frozenset({
     STATUS_ONLINE, STATUS_LOBBY, STATUS_IN_SERVER, STATUS_JOIN_UNCONFIRMED,
+    STATUS_LAUNCHED,
 })
 
 
@@ -228,6 +234,12 @@ class _PackageWorker(threading.Thread):
             self._state_tracker = None
         self._last_evidence: dict[str, Any] = {}
         self._consecutive_offline_checks: int = 0
+        # Roblox presence — ground truth via the public Roblox API.
+        self._roblox_user_id: int | None = None
+        self._roblox_username: str = ""
+        self._roblox_cookie: str | None = None
+        self._presence_resolved: bool = False  # username → id resolved yet?
+        self._last_presence_label: str = ""    # for diagnostic logging
 
     def _sup(self) -> dict[str, Any]:
         raw = self.cfg.get("supervisor")
@@ -259,6 +271,41 @@ class _PackageWorker(threading.Thread):
 
     def _can_auto_reconnect(self) -> bool:
         return bool(self.entry.get("auto_reconnect_enabled", True)) and bool(self._sup().get("auto_reconnect_enabled", True))
+
+    def _fetch_roblox_presence(self) -> Any:
+        """Return a :class:`PresenceResult` for the configured account, or None.
+
+        Resolves username → userId once (cached), then asks Roblox's public
+        presence endpoint.  Never raises.  Returns None when no username /
+        no user_id is configured or the API was unreachable AND we have no
+        cached presence — in that case the supervisor falls back to its
+        local heuristics.
+        """
+        try:
+            from . import roblox_presence as _rp
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            if not self._roblox_user_id:
+                if not self._roblox_username:
+                    return None
+                uid = _rp.lookup_user_id(self._roblox_username)
+                if uid:
+                    self._roblox_user_id = uid
+            if not self._roblox_user_id:
+                return None
+            pres = _rp.fetch_presence_one(
+                self._roblox_user_id, cookie=self._roblox_cookie,
+            )
+            if pres is None or pres.is_unknown:
+                return None
+            return pres
+        except Exception as exc:  # noqa: BLE001
+            log_event(
+                self.logger, "debug", "roblox_presence_error",
+                package=self.package, error=str(exc),
+            )
+            return None
 
     def _post_launch_state(self) -> str:
         """Determine the honest display state after a health check confirms the app
@@ -327,6 +374,19 @@ class _PackageWorker(threading.Thread):
             self.has_private_url = bool(str(_epsu(self.entry, cfg) or "").strip())
             # Launching/Joining timeout: how many seconds before forcing a re-check
             _launching_timeout = max(90, grace * 4)
+
+            # Roblox presence setup — read username + optional user_id/cookie
+            # from the per-package entry, then resolve via the public API.
+            self._roblox_username = str(self.entry.get("account_username") or "").strip()
+            try:
+                uid_raw = self.entry.get("roblox_user_id")
+                if isinstance(uid_raw, int) and uid_raw > 0:
+                    self._roblox_user_id = uid_raw
+                elif isinstance(uid_raw, str) and uid_raw.isdigit():
+                    self._roblox_user_id = int(uid_raw)
+            except Exception:  # noqa: BLE001
+                self._roblox_user_id = None
+            self._roblox_cookie = (str(self.entry.get("roblox_cookie") or "").strip() or None)
         except Exception as exc:  # noqa: BLE001
             log_event(self.logger, "error", "worker_setup_error", package=self.package, error=str(exc))
             # Defaults so the loop still runs forever
@@ -365,10 +425,17 @@ class _PackageWorker(threading.Thread):
                         self._sleep(min(5, interval))
                         continue
 
-                # Save state before we clobber it with STATUS_CHECKING; used to
-                # correctly promote Launching/Joining after a healthy health check.
+                # Save state before we run the slow probes.  We do NOT
+                # overwrite the public status with STATUS_CHECKING here —
+                # doing so makes the row visibly flap to "Preparing" on
+                # every tick and looks broken to the user.  Only show
+                # Preparing when we genuinely have no idea yet (first
+                # iteration before any state was established).
                 prev_before_check = self.status_map.get(self.package, "")
-                self._set_status(STATUS_CHECKING, "")
+                if not prev_before_check or prev_before_check in (
+                    STATUS_UNKNOWN, "",
+                ):
+                    self._set_status(STATUS_CHECKING, "")
                 health = check_package_health(cfg, self.package)
 
                 # Feed the heartbeat tracker.  Use the full evidence dict so
@@ -393,6 +460,64 @@ class _PackageWorker(threading.Thread):
                             self.logger, "debug", "state_tracker_observe_error",
                             package=self.package, error=str(_exc),
                         )
+
+                # ── Roblox presence (ground truth) ───────────────────────
+                # Ask Roblox directly: is the configured account InGame /
+                # Online / Offline / InStudio?  When the public presence
+                # endpoint says InGame, the supervisor uses that as the
+                # *authoritative* state regardless of local dumpsys output.
+                # This is what fixes the "stuck in Preparing" symptom: even
+                # when our local checks are slow or wrong, the truthful
+                # state still surfaces every interval.
+                presence = self._fetch_roblox_presence()
+                if presence is not None:
+                    if presence.is_in_game:
+                        self._set_status(
+                            STATUS_ONLINE,
+                            f"Roblox presence: InGame ({presence.last_location[:40]})",
+                        )
+                        self.failure_count = 0
+                        self.unhealthy_since = None
+                        self.grace_start = None
+                        self.bg_since = None
+                        self.launching_since = None
+                        self.online_since = self.online_since or time.time()
+                        self.last_seen_at = time.time()
+                        self._last_presence_label = presence.presence_type.label
+                        self._sleep(interval)
+                        continue
+                    # Online (lobby) → respect URL awareness when deciding
+                    # what to call it on screen.
+                    if presence.is_lobby:
+                        if (
+                            self.launching_since is not None
+                            and self.has_private_url
+                            and prev_before_check in (
+                                STATUS_LAUNCHING, STATUS_JOINING, STATUS_LAUNCHED,
+                            )
+                        ):
+                            # URL was sent and Roblox says the account is in
+                            # the app lobby — that's "Joining", not "Online".
+                            self._set_status(
+                                STATUS_JOINING, "Roblox presence: Online (lobby)",
+                            )
+                        else:
+                            self._set_status(
+                                STATUS_LOBBY, "Roblox presence: Online (lobby)",
+                            )
+                        self._last_presence_label = presence.presence_type.label
+                        self.last_seen_at = time.time()
+                        self._sleep(interval)
+                        continue
+                    if presence.is_offline:
+                        # Authoritative Offline.  Local process/window
+                        # heuristics are NOT trusted to override this — but
+                        # we still feed the heartbeat tracker so brief
+                        # cookie-revocation blips don't immediately churn.
+                        self._last_presence_label = presence.presence_type.label
+                        # Fall through so the existing "no evidence" path
+                        # decides between Reconnecting / Offline.
+                    # InStudio / Invisible / Unknown → fall through.
 
                 if health.state == "healthy":
                     self.failure_count = 0
@@ -436,7 +561,16 @@ class _PackageWorker(threading.Thread):
                     if self.bg_since is None:
                         self.bg_since = now
                     if now - self.bg_since < grace * 2:
-                        self._set_status(STATUS_BACKGROUND, "")
+                        # A "disconnect_category" hit from the logcat /
+                        # dumpsys text scan is a concrete error-code event
+                        # — show it as Disconnected so the user knows the
+                        # tool *saw* the failure (not a silent timeout).
+                        if disc:
+                            self._set_status(
+                                STATUS_DISCONNECTED, f"signal: {disc}",
+                            )
+                        else:
+                            self._set_status(STATUS_BACKGROUND, "")
                         self._sleep(min(interval, grace))
                         continue
                     if not self._restart_budget_ok():

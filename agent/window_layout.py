@@ -192,6 +192,49 @@ APP_CLONER_ENABLE_ALIASES: tuple[str, ...] = (
     "app_cloner_set_dpi_landscape",
 )
 
+# Keys that App Cloner / cloud-phone window managers may use to remember the
+# LAST manually-positioned window state.  If we leave these populated with a
+# stale value, the OS happily restores that stale rect right back on top of
+# the one we just wrote.  By overwriting these to the *desired* rect too,
+# the "restore last window" code path becomes a no-op (the "last" position
+# is what we want).
+APP_CLONER_LAST_POSITION_ALIASES: dict[str, tuple[str, ...]] = {
+    "left": (
+        "last_window_position_x",
+        "last_window_x",
+        "user_window_position_x",
+        "manual_window_position_x",
+        "freeform_last_x",
+        "freeform_window_last_x",
+        "floating_window_last_x",
+    ),
+    "top": (
+        "last_window_position_y",
+        "last_window_y",
+        "user_window_position_y",
+        "manual_window_position_y",
+        "freeform_last_y",
+        "freeform_window_last_y",
+        "floating_window_last_y",
+    ),
+    "width": (
+        "last_window_width",
+        "user_window_width",
+        "manual_window_width",
+        "freeform_last_width",
+        "freeform_window_last_width",
+        "floating_window_last_width",
+    ),
+    "height": (
+        "last_window_height",
+        "user_window_height",
+        "manual_window_height",
+        "freeform_last_height",
+        "freeform_window_last_height",
+        "floating_window_last_height",
+    ),
+}
+
 # Categories whose keys we will always set when writing — even if not
 # pre-existing in the file (App Cloner reads them if present, ignores if not).
 _WRITE_CATEGORIES_FOR_VALUES: dict[str, tuple[str, ...]] = {
@@ -637,6 +680,16 @@ def _apply_layout_keys_to_root(
     for name in APP_CLONER_ENABLE_ALIASES:
         if _ensure_bool_child(root_el, name, True):
             changed += 1
+
+    # 3b. Override last/manual position keys (Layer 5 from the spec).
+    # When App Cloner / the cloud phone "restores the last window position"
+    # on relaunch, that path reads keys like ``last_window_position_x``.
+    # Make those equal to the rect we just wrote so the restore is a no-op.
+    for canon, aliases in APP_CLONER_LAST_POSITION_ALIASES.items():
+        v = values[canon]
+        for name in aliases:
+            if _ensure_int_child(root_el, name, v):
+                changed += 1
 
     # 4. Honor pre-discovered known_keys names by also writing matching
     #    int/bool variants (covers App Cloner versions we have not enumerated).

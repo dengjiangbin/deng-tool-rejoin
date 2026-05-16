@@ -254,6 +254,12 @@ class TestForceResizePackage(unittest.TestCase):
 class TestAliveDetectionForClones(unittest.TestCase):
     """The cloud-phone case: long clone names defeat pidof but are alive."""
 
+    def setUp(self) -> None:
+        # Clear the shared dumpsys cache so stale results from a previous
+        # test do not leak into the dumpsys-mocking tests below.
+        from agent import dumpsys_cache
+        dumpsys_cache.invalidate()
+
     def test_pgrep_finds_process_when_pidof_misses(self) -> None:
         # pidof returns nothing (truncation); pgrep -f matches full cmdline.
         calls: list[list[str]] = []

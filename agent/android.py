@@ -575,7 +575,11 @@ def is_package_task_visible(package: str) -> bool:
     """
     package = validate_package_name(package)
     try:
-        result = run_command(["dumpsys", "activity", "activities"], timeout=6)
+        from . import dumpsys_cache as _dc
+        def _run(_args):
+            r = run_command(list(_args), timeout=3)
+            return _dc.CachedResult(ok=r.ok, stdout=r.stdout)
+        result = _dc.cached_run(("dumpsys", "activity", "activities"), _run)
         if result.ok:
             for line in result.stdout.splitlines():
                 if package in line and any(
@@ -583,22 +587,6 @@ def is_package_task_visible(package: str) -> bool:
                     for marker in ("TaskRecord", "ActivityRecord", "task=", "topActivity", "mResumedActivity")
                 ):
                     return True
-    except Exception:  # noqa: BLE001
-        pass
-    # Root fallback: grep for the package name in activity dump
-    try:
-        root_info = detect_root()
-        if root_info.available and root_info.tool:
-            res = run_root_command(
-                ["sh", "-c", f"dumpsys activity activities 2>/dev/null | grep -c '{package}'"],
-                root_tool=root_info.tool,
-                timeout=6,
-            )
-            if res.ok:
-                try:
-                    return int(res.stdout.strip()) > 0
-                except ValueError:
-                    pass
     except Exception:  # noqa: BLE001
         pass
     return False
@@ -634,7 +622,11 @@ def is_package_window_visible(package: str) -> bool:
     """
     package = validate_package_name(package)
     try:
-        result = run_command(["dumpsys", "window", "windows"], timeout=6)
+        from . import dumpsys_cache as _dc
+        def _run(_args):
+            r = run_command(list(_args), timeout=3)
+            return _dc.CachedResult(ok=r.ok, stdout=r.stdout)
+        result = _dc.cached_run(("dumpsys", "window", "windows"), _run)
         if not result.ok:
             return False
         text = result.stdout
@@ -681,47 +673,32 @@ def is_package_window_visible(package: str) -> bool:
 
 
 def is_package_surface_in_surfaceflinger(package: str) -> bool:
-    """Check ``dumpsys SurfaceFlinger`` for an actively composed layer.
+    """Check ``dumpsys SurfaceFlinger --list`` for an active layer for ``package``.
 
-    This is a separate strong signal that the system is *rendering* a window
-    for the package right now, independent of WindowManager's stale entries.
-    Returns True only when a Layer named after the package has ``isVisible``
-    or ``visible=true`` true.  Never raises.
+    DO NOT call the full ``dumpsys SurfaceFlinger`` here — on cloud phones
+    it serializes through ``system_server`` for many seconds and blocks
+    every supervisor worker, leaving the table stuck on "Preparing".
+    The ``--list`` variant is sub-second and is enough to know whether
+    a layer for the package exists at all.
+
+    Returns True when a SurfaceFlinger layer name mentions the package.
+    Never raises.
     """
     try:
         package_str = validate_package_name(package)
     except Exception:  # noqa: BLE001
         return False
     try:
-        res = run_command(
-            ["dumpsys", "SurfaceFlinger", "--list"], timeout=6,
+        from . import dumpsys_cache as _dc
+        def _run(_args):
+            r = run_command(list(_args), timeout=3)
+            return _dc.CachedResult(ok=r.ok, stdout=r.stdout)
+        res = _dc.cached_run(
+            ("dumpsys", "SurfaceFlinger", "--list"), _run,
         )
-        if res.ok and package_str in res.stdout:
-            # A name match in --list means a layer exists; that is at least a
-            # weak signal of recent rendering activity.  Confirm with the full
-            # dump if available.
-            full = run_command(["dumpsys", "SurfaceFlinger"], timeout=8)
-            if full.ok and package_str in full.stdout:
-                # Look at the lines around the package mention for visibility
-                # markers.  We don't need to be perfect — any positive marker
-                # near the layer name counts.
-                lines = full.stdout.splitlines()
-                for i, line in enumerate(lines):
-                    if package_str not in line:
-                        continue
-                    window = "\n".join(lines[i:i + 25])
-                    if (
-                        "isVisible=true" in window
-                        or "visible=true" in window
-                        or "z=" in window  # has a Z-order = currently composited
-                    ):
-                        return True
-            # If full dump is unavailable but the layer exists in --list,
-            # accept it as a weak positive (better than false-Offline).
-            return True
+        return bool(res.ok and package_str in res.stdout)
     except Exception:  # noqa: BLE001
         return False
-    return False
 
 
 def get_package_alive_evidence(package: str) -> dict[str, bool]:
@@ -823,24 +800,35 @@ def get_package_alive_evidence(package: str) -> dict[str, bool]:
 
 
 def current_foreground_package() -> str | None:
-    checks = [
-        ["dumpsys", "window", "windows"],
-        ["dumpsys", "activity", "activities"],
-    ]
-    for args in checks:
-        result = run_command(args, timeout=PROCESS_TIMEOUT_SECONDS)
-        if not result.ok:
-            continue
-        text = result.stdout
-        for marker in ("mCurrentFocus", "mFocusedApp", "topResumedActivity", "mResumedActivity"):
-            for line in text.splitlines():
-                if marker not in line:
-                    continue
-                for part in line.replace("/", " ").replace("}", " ").split():
-                    if "." in part and is_valid_package_name(part.split(":")[0]):
-                        candidate = part.split(":")[0]
-                        if candidate.startswith("com."):
-                            return candidate
+    # Use the shared dumpsys cache so that multiple worker threads asking
+    # "who's foreground?" within ~3 seconds share one binder transaction.
+    try:
+        from . import dumpsys_cache as _dc
+        def _run(_args):
+            r = run_command(list(_args), timeout=3)
+            return _dc.CachedResult(ok=r.ok, stdout=r.stdout)
+        for args in (
+            ("dumpsys", "window", "windows"),
+            ("dumpsys", "activity", "activities"),
+        ):
+            result = _dc.cached_run(args, _run)
+            if not result.ok:
+                continue
+            text = result.stdout
+            for marker in (
+                "mCurrentFocus", "mFocusedApp",
+                "topResumedActivity", "mResumedActivity",
+            ):
+                for line in text.splitlines():
+                    if marker not in line:
+                        continue
+                    for part in line.replace("/", " ").replace("}", " ").split():
+                        if "." in part and is_valid_package_name(part.split(":")[0]):
+                            candidate = part.split(":")[0]
+                            if candidate.startswith("com."):
+                                return candidate
+    except Exception:  # noqa: BLE001
+        return None
     return None
 
 
