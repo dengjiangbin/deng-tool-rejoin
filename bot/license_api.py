@@ -599,6 +599,13 @@ def _route_public_install(
                 None,
             )
         remote_addr = environ.get("REMOTE_ADDR", "unknown")
+        forwarded_for = (environ.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
+        client_ip = forwarded_for or remote_addr
+        user_agent = (environ.get("HTTP_USER_AGENT") or "")[:120]
+        log.info(
+            "install/authorize request: method=%s ip=%s ua=%s",
+            method, client_ip, user_agent or "<none>",
+        )
         if not _check_rate_limit(remote_addr):
             return (
                 json.dumps({"error": "Too many requests. Try again later."}).encode("utf-8"),

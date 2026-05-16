@@ -14,6 +14,8 @@ if str(PROJECT) not in sys.path:
 
 from agent.deferred_bundle_install import (  # noqa: E402
     DEFAULT_PUBLIC_INSTALL_API,
+    _INSTALLER_UA,
+    _is_cloudflare_block,
     describe_install_authorize_failure,
     resolve_install_api,
 )
@@ -98,6 +100,76 @@ class DescribeInstallAuthorizeFailureTests(unittest.TestCase):
             "",
         )
         self.assertNotRegex(s, r"DENG-[A-Z0-9]{4}")
+
+    def test_cloudflare_1010_returns_friendly_message(self) -> None:
+        # Simulate a Cloudflare 1010 HTML block response (no valid JSON body)
+        cf_html = (
+            "<!DOCTYPE html><html><head><title>Access denied | rejoin.deng.my.id</title></head>"
+            "<body><div>error code: 1010</div><div>Cloudflare</div></body></html>"
+        )
+        s = describe_install_authorize_failure(403, {}, cf_html)
+        self.assertIn("blocked by server protection", s)
+        self.assertIn("Cloudflare", s)
+        self.assertNotIn("Install denied:", s)
+        self.assertIn("HTTP 403", s)
+
+    def test_cloudflare_block_message_does_not_loop_hint(self) -> None:
+        # The message should clarify it is NOT a key issue
+        cf_html = "<html>error code: 1010 cloudflare</html>"
+        s = describe_install_authorize_failure(403, {}, cf_html)
+        self.assertIn("NOT a license key issue", s)
+
+    def test_non_cloudflare_403_still_shows_install_denied(self) -> None:
+        # A 403 from our own backend (JSON body present) should NOT trigger CF detection
+        s = describe_install_authorize_failure(
+            403,
+            {"result": "revoked", "message": "This key has been revoked."},
+            '{"result":"revoked","message":"This key has been revoked."}',
+        )
+        self.assertIn("Install denied:", s)
+        self.assertNotIn("Cloudflare", s)
+
+
+class CloudflareBlockDetectionTests(unittest.TestCase):
+    def test_detects_1010_html(self) -> None:
+        raw = "<html>error code: 1010 cloudflare</html>"
+        self.assertTrue(_is_cloudflare_block(403, {}, raw))
+
+    def test_detects_cloudflare_marker(self) -> None:
+        raw = "<!DOCTYPE html><html><body>attention required cloudflare</body></html>"
+        self.assertTrue(_is_cloudflare_block(403, {}, raw))
+
+    def test_only_triggers_on_403(self) -> None:
+        raw = "<html>error code: 1010 cloudflare</html>"
+        self.assertFalse(_is_cloudflare_block(500, {}, raw))
+        self.assertFalse(_is_cloudflare_block(200, {}, raw))
+
+    def test_json_body_prevents_cf_detection(self) -> None:
+        # If we parsed a JSON body successfully, it is a backend response, not CF
+        raw = "<html>cloudflare</html>"
+        self.assertFalse(_is_cloudflare_block(403, {"result": "revoked"}, raw))
+
+    def test_empty_raw_not_cf(self) -> None:
+        self.assertFalse(_is_cloudflare_block(403, {}, ""))
+
+    def test_html_403_no_json_triggers_cf(self) -> None:
+        # Any 403 with HTML and no JSON body is treated as Cloudflare block
+        raw = "<html><body>access denied</body></html>"
+        self.assertTrue(_is_cloudflare_block(403, {}, raw))
+
+
+class InstallerUserAgentTests(unittest.TestCase):
+    def test_installer_ua_is_set(self) -> None:
+        self.assertIsInstance(_INSTALLER_UA, str)
+        self.assertGreater(len(_INSTALLER_UA), 0)
+
+    def test_installer_ua_not_python_urllib(self) -> None:
+        # The default Python-urllib UA is blocked by Cloudflare BIC
+        self.assertNotIn("Python-urllib", _INSTALLER_UA)
+        self.assertNotIn("python-urllib", _INSTALLER_UA.lower())
+
+    def test_installer_ua_identifies_deng(self) -> None:
+        self.assertIn("deng-rejoin-installer", _INSTALLER_UA)
 
 
 if __name__ == "__main__":

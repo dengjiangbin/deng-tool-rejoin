@@ -24,6 +24,11 @@ from urllib.request import Request, urlopen
 # Official production API host (no localhost; used when env and file are absent).
 DEFAULT_PUBLIC_INSTALL_API = "https://rejoin.deng.my.id"
 
+# Installer User-Agent — identifies the DENG Rejoin installer to the server.
+# Cloudflare Browser Integrity Check blocks the default Python-urllib UA with
+# error 1010.  Using a descriptive but non-browser UA passes the check.
+_INSTALLER_UA = "deng-rejoin-installer/1.0"
+
 
 def _app_home() -> Path:
     raw = (os.environ.get("DENG_REJOIN_HOME") or "").strip()
@@ -67,12 +72,20 @@ def _requested_path(app_home: Path) -> Path:
 
 
 def _http_json_post(url: str, payload: dict) -> tuple[int, dict, str]:
-    """POST JSON; return status, parsed JSON object (may be empty), and raw response text."""
+    """POST JSON; return status, parsed JSON object (may be empty), and raw response text.
+
+    Sends a descriptive User-Agent so Cloudflare Browser Integrity Check does not
+    block the request with error 1010 (which it does for the default Python-urllib UA).
+    """
     data = json.dumps(payload).encode("utf-8")
     req = Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": _INSTALLER_UA,
+        },
         method="POST",
     )
     try:
@@ -101,19 +114,45 @@ def _safe_response_snippet(raw: str, max_len: int = 500) -> str:
     return cleaned
 
 
+def _is_cloudflare_block(status: int, body: dict, raw: str) -> bool:
+    """Detect a Cloudflare edge-block response (BIC / WAF / Bot Fight / 1010).
+
+    Cloudflare returns HTML when it blocks a request — the body is never valid JSON
+    from our backend.  We detect this by looking for characteristic CF markers in
+    the raw response text combined with the HTTP 403 status.
+    """
+    if status != 403:
+        return False
+    raw_lower = (raw or "").lower()
+    if body:
+        return False
+    cf_markers = ("cloudflare", "error code: 1010", "error code:1010", "cf-ray", "attention required")
+    return any(m in raw_lower for m in cf_markers) or "<html" in raw_lower
+
+
 def describe_install_authorize_failure(
     status: int,
     body: dict | None,
     raw: str | None,
 ) -> str:
-    """One line for stderr when POST /api/install/authorize did not return active.
+    """One-line message for stderr when POST /api/install/authorize did not return active.
 
     Uses ``message``, ``error``, ``detail``, ``result``, ``code`` from JSON when present.
-    If JSON is missing or empty, includes a safe slice of the raw body. Never echoes secrets
-    that are not in the server response (license key is only client-side and not passed here).
+    If the response is a Cloudflare edge-block (error code 1010 / BIC / WAF), returns a
+    clear human-readable explanation instead of dumping HTML.  Never echoes secrets that
+    are not in the server response (license key is only client-side and not passed here).
     """
     body = body or {}
     raw = raw or ""
+
+    if _is_cloudflare_block(status, body, raw):
+        return (
+            "Install request was blocked by server protection (Cloudflare) before license "
+            "verification could run.\n"
+            "This is NOT a license key issue — the network/security layer rejected the "
+            f"request before it reached the server [HTTP {status} — error code 1010].\n"
+            "Contact support at https://rejoin.deng.my.id if this persists."
+        )
 
     msg = str(body.get("message") or "").strip()
     err = str(body.get("error") or "").strip()
@@ -155,7 +194,8 @@ def describe_install_authorize_failure(
 
 
 def _http_download(url: str, dest: Path) -> None:
-    with urlopen(url, timeout=300) as resp:  # noqa: S310
+    req = Request(url, headers={"User-Agent": _INSTALLER_UA})
+    with urlopen(req, timeout=300) as resp:  # noqa: S310
         dest.write_bytes(resp.read())
 
 
@@ -216,13 +256,16 @@ def run() -> int:
             payload["bootstrap_session"] = bootstrap_session
         auth_url = f"{base}/api/install/authorize"
         try:
-            status, body, raw = _http_json_post(auth_url, payload)
+            status, body, resp_raw = _http_json_post(auth_url, payload)
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             print(f"Network error: {exc}", file=sys.stderr)
             return 1
 
         if not (status == 200 and body.get("result") == "active"):
-            print(describe_install_authorize_failure(status, body, raw), file=sys.stderr)
+            msg = describe_install_authorize_failure(status, body, resp_raw)
+            print(msg, file=sys.stderr)
+            if _is_cloudflare_block(status, body, resp_raw):
+                return 1
             continue
 
         dl_url = (body.get("download_url") or "").strip()
