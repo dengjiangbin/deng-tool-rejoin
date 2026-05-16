@@ -1,9 +1,16 @@
 """Bootstrap shell scripts for GET /install/* (Termux-friendly, LF-only).
 
-Install is non-interactive: it downloads a small launcher tarball, extracts into
-``~/.deng-tool/rejoin``, writes ``.install_requested`` and ``.install_api``, and
-installs a wrapper that exports ``DENG_REJOIN_INSTALL_API``. License entry runs
-only after ``deng-rejoin`` (:mod:`agent.deferred_bundle_install`).
+Two install modes:
+
+1. **Direct install** (preferred, used for test/latest and public stable releases):
+   :func:`render_direct_install_bootstrap` downloads the *full* package tarball
+   immediately.  No license key is required during install.  The license is only
+   prompted inside the real tool on first run (inside the menu flow).
+
+2. **Launcher-deferred install** (legacy, kept for reference):
+   :func:`render_public_bootstrap` downloads a small launcher tarball and writes
+   ``.install_requested``.  License entry runs only after ``deng-rejoin``
+   (:mod:`agent.deferred_bundle_install`).
 """
 
 from __future__ import annotations
@@ -241,6 +248,129 @@ def render_public_bootstrap(
         '  rm -f "$APP_HOME/.bootstrap_session"\n'
         "fi\n"
         f"{tail.lstrip()}"
+    )
+
+
+def render_direct_install_bootstrap(
+    *,
+    base_url: str,
+    package_sha256: str,
+    installer_title: str = "DENG Tool: Rejoin Installer",
+    banner_lines: tuple[str, ...] = (),
+) -> str:
+    """Generate a bash installer that downloads the full package directly (no license gate).
+
+    The full package tarball is downloaded, SHA256-verified, and extracted into
+    ``APP_HOME`` during install.  No license key is prompted at this stage.
+    License verification happens inside the real tool on first run (menu flow).
+    """
+    base = base_url.rstrip("/")
+    banner_part = ""
+    if banner_lines:
+        banner_part = "\n".join(f'echo "{_escape_double(line)}"' for line in banner_lines) + "\n"
+
+    safe_title = _escape_double(installer_title)
+    safe_sha = _escape_double(package_sha256)
+
+    pre_heredoc = (
+        f'echo "{safe_title}"\n'
+        + banner_part
+        + "command -v curl >/dev/null 2>&1 || { echo \"Install curl first: pkg install -y curl\" >&2; exit 1; }\n"
+        "command -v tar >/dev/null 2>&1 || { echo \"Install tar first: pkg install -y tar\" >&2; exit 1; }\n"
+        "command -v python3 >/dev/null 2>&1 || { echo \"Install python first: pkg install -y python\" >&2; exit 1; }\n"
+        "if [[ -n \"${PREFIX:-}\" ]] && [[ \"${PREFIX}\" == *termux* ]]; then\n"
+        "  echo \"Detected: Termux\"\n"
+        "fi\n"
+        f'export DENG_REJOIN_INSTALL_API="{base}"\n'
+        'APP_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"\n'
+        'mkdir -p "$APP_HOME"\n'
+        'PACKAGE_URL="$DENG_REJOIN_INSTALL_API/install/test/package.tar.gz"\n'
+        f'EXPECTED_SHA256="{safe_sha}"\n'
+        'TMP="$(mktemp)"\n'
+        "trap 'rm -f \"$TMP\"' EXIT\n"
+        'echo "Downloading DENG Tool: Rejoin..."\n'
+        'curl -fsSL -A "deng-rejoin-installer/1.0" "$PACKAGE_URL" -o "$TMP" || {\n'
+        '  echo "Download failed." >&2\n'
+        '  echo "URL: $PACKAGE_URL" >&2\n'
+        "  exit 1\n"
+        "}\n"
+        # Single-quoted python snippet so bash doesn't touch $; no embedded quotes needed
+        "ACTUAL_SHA=\"$(python3 -c 'import hashlib,sys;d=open(sys.argv[1],\"rb\").read();print(hashlib.sha256(d).hexdigest())' \"$TMP\" 2>/dev/null)\" || ACTUAL_SHA=\"\"\n"
+        'if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA256" ]]; then\n'
+        '  echo "Package checksum mismatch. The download may be corrupted." >&2\n'
+        '  echo "Expected: $EXPECTED_SHA256" >&2\n'
+        '  echo "Got:      $ACTUAL_SHA" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        'echo "Package verified."\n'
+        'echo "Installing to $APP_HOME..."\n'
+        'tar -xzf "$TMP" -C "$APP_HOME" || { echo "Could not extract package." >&2; exit 1; }\n'
+        'if [[ ! -f "$APP_HOME/agent/deng_tool_rejoin.py" ]]; then\n'
+        '  echo "Install error: agent/deng_tool_rejoin.py missing from package." >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        'echo "Package installed."\n'
+        "printf '%s\\n' \"$DENG_REJOIN_INSTALL_API\" > \"$APP_HOME/.install_api\"\n"
+        "USING_HOME_BIN=0\n"
+        'BIN=""\n'
+        'if [[ -n "${PREFIX:-}" ]]; then\n'
+        '  if mkdir -p "${PREFIX}/bin" 2>/dev/null; then\n'
+        '    BIN="${PREFIX}/bin"\n'
+        "  fi\n"
+        "fi\n"
+        'if [[ -z "$BIN" ]]; then\n'
+        '  BIN="$HOME/bin"\n'
+        '  mkdir -p "$BIN"\n'
+        '  export PATH="$HOME/bin:$PATH"\n'
+        "  USING_HOME_BIN=1\n"
+        "  _MARK='# DENG Tool: Rejoin - PATH (added by installer)'\n"
+        "  _LINE='export PATH=\"$HOME/bin:$PATH\"'\n"
+        '  for _rc in "$HOME/.bashrc" "$HOME/.profile"; do\n'
+        '    touch "$_rc"\n'
+        '    if ! grep -qF "$_MARK" "$_rc" 2>/dev/null; then\n'
+        "      printf '\\n%s\\n%s\\n' \"$_MARK\" \"$_LINE\" >> \"$_rc\"\n"
+        "    fi\n"
+        "  done\n"
+        "fi\n"
+        'echo "Installing deng-rejoin wrapper to $BIN/deng-rejoin"\n'
+        "cat > \"$BIN/deng-rejoin\" << 'DENG_REJOIN_WRAPPER'\n"
+    )
+
+    post_heredoc = (
+        "DENG_REJOIN_WRAPPER\n"
+        "chmod +x \"$BIN/deng-rejoin\" || { echo \"chmod failed: $BIN/deng-rejoin\" >&2; exit 1; }\n"
+        "hash -r 2>/dev/null || true\n"
+        '[[ -s "$BIN/deng-rejoin" ]] || { echo "Failed to create deng-rejoin wrapper." >&2; exit 1; }\n'
+        '[[ -x "$BIN/deng-rejoin" ]] || { echo "Failed: wrapper not executable." >&2; exit 1; }\n'
+        '[[ -f "$APP_HOME/agent/deng_tool_rejoin.py" ]] || { echo "Failed: deng_tool_rejoin.py missing." >&2; exit 1; }\n'
+        'DR_RESOLVED=""\n'
+        'if command -v deng-rejoin >/dev/null 2>&1; then\n'
+        '  DR_RESOLVED="$(command -v deng-rejoin)"\n'
+        "fi\n"
+        'if [[ -z "$DR_RESOLVED" ]]; then\n'
+        '  echo "command -v deng-rejoin did not resolve after install." >&2\n'
+        '  if [[ "$USING_HOME_BIN" -eq 1 ]]; then\n'
+        "    echo 'Run: export PATH=\"$HOME/bin:$PATH\" && hash -r && deng-rejoin' >&2\n"
+        "  fi\n"
+        "  exit 1\n"
+        "fi\n"
+        'echo "Wrapper: $DR_RESOLVED"\n'
+        'if [[ "$USING_HOME_BIN" -eq 1 ]]; then\n'
+        "  echo 'Note: If deng-rejoin is not found in this shell, run once:'\n"
+        "  echo '  export PATH=\"$HOME/bin:$PATH\"'\n"
+        "  echo '  hash -r'\n"
+        "fi\n"
+        'echo ""\n'
+        'echo "Install complete."\n'
+        'echo "Next: run deng-rejoin"\n'
+    )
+
+    return (
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        + pre_heredoc
+        + wrapper_body_sh(base)
+        + post_heredoc
     )
 
 

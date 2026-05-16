@@ -2504,10 +2504,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("use either positional command or --command flag, not both")
     if len(selected) > 1:
         parser.error("choose only one command")
-    ns.resolved_command = ns.command or (selected[0] if selected else None)
-    if ns.resolved_command is None:
-        parser.print_help()
-        parser.exit(2)
+    ns.resolved_command = ns.command or (selected[0] if selected else "menu")
     return ns
 
 

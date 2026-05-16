@@ -495,12 +495,15 @@ def _route_public_install(
             return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
         if tail == "test/latest":
-            script = render_public_bootstrap(
+            from agent.bootstrap_installer import render_direct_install_bootstrap
+
+            _row = get_exact_registry_row("main-dev")
+            _sha = str(_row.get("artifact_sha256") or "").strip() if _row else ""
+            script = render_direct_install_bootstrap(
                 base_url=base,
-                requested="test-latest",
+                package_sha256=_sha,
                 installer_title="DENG Tool: Rejoin Test Installer",
                 banner_lines=("Channel: internal test", "Version: main-dev"),
-                bundle_etag=_bundle_etag(),
             )
             return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
@@ -567,6 +570,58 @@ def _route_public_install(
                 "application/gzip",
                 [
                     ("Content-Disposition", 'attachment; filename="deng-rejoin-launcher.tar.gz"'),
+                    ("Cache-Control", "no-store"),
+                ],
+            )
+
+        if tail == "test/package.tar.gz":
+            # Serve the full internal test package directly (no license auth required).
+            # The package is safe to serve because it contains no secrets (.env, tokens, etc.)
+            # are excluded by build_internal_test_artifact.py.
+            _row = get_exact_registry_row("main-dev")
+            if _row is None:
+                return (
+                    json.dumps({"error": "Internal test package not configured."}).encode("utf-8"),
+                    404,
+                    "application/json",
+                    None,
+                )
+            # Prefer the copy in the deployed repo's releases/ dir; fall back to artifact root.
+            _project_pkg = _PROJECT_ROOT / "releases" / "main-dev" / "deng-tool-rejoin-main-dev.tar.gz"
+            _pkg_path: Path | None = None
+            if _project_pkg.is_file():
+                _pkg_path = _project_pkg
+            else:
+                _art_root = get_artifact_root()
+                if _art_root is not None:
+                    _cand = artifact_path_for_row(_row, _art_root)
+                    if _cand is not None and _cand.is_file():
+                        _pkg_path = _cand
+                        log.warning("serving test package from artifact root (repo bundle missing): %s", _cand)
+            if _pkg_path is None:
+                log.error("test/package.tar.gz not found in repo or artifact root")
+                return (
+                    json.dumps({"error": "Internal test package not found. Run: python scripts/build_internal_test_artifact.py"}).encode("utf-8"),
+                    404,
+                    "application/json",
+                    None,
+                )
+            try:
+                _pkg_data = _pkg_path.read_bytes()
+            except OSError as _exc:
+                log.error("test package read failed: %s", _exc)
+                return (
+                    json.dumps({"error": "read failed"}).encode("utf-8"),
+                    500,
+                    "application/json",
+                    None,
+                )
+            return (
+                _pkg_data,
+                200,
+                "application/gzip",
+                [
+                    ("Content-Disposition", 'attachment; filename="deng-tool-rejoin-main-dev.tar.gz"'),
                     ("Cache-Control", "no-store"),
                 ],
             )

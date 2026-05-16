@@ -1,8 +1,13 @@
-"""First-run: complete protected-bundle install after unattended shell bootstrap.
+"""Deferred-install helpers — kept for backward compatibility and utility functions.
 
-The shell installer only extracts a small launcher and writes ``.install_requested``.
-This module prompts for a license, calls ``POST /api/install/authorize``, downloads the
-tokenized tarball, extracts into ``DENG_REJOIN_HOME``, then re-execs the real entrypoint.
+The active installer (``/install/test/latest``) now downloads the full package
+directly during ``bash install.sh`` via :func:`agent.bootstrap_installer.render_direct_install_bootstrap`.
+No license key is required at install time; license verification happens inside the
+real tool on first run (inside the menu flow of :mod:`agent.commands`).
+
+This module is retained for:
+- ``resolve_install_api`` and HTTP helper utilities used by other code.
+- Graceful handling of old launcher bundles that still have ``.install_requested``.
 
 Stdlib only — safe inside the minimal launcher tarball.
 """
@@ -12,11 +17,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import sys
 import tarfile
-import tempfile
-import urllib.error
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -232,116 +234,41 @@ def _extract_tar_gz(archive: Path, dest: Path) -> None:
 
 
 def run() -> int:
-    """Run deferred install; on success replace stub and re-exec ``deng_tool_rejoin``."""
+    """Handle the old launcher stub entrypoint.
+
+    The current installer downloads the full package directly during ``bash install.sh``
+    and does not use the deferred-install mechanism.  If this function is reached, the
+    user has an **old launcher bundle** (installed before the direct-install update).
+
+    Direct them to re-run the installer to get the full package.
+    """
     app_home = _app_home()
     marker = _requested_path(app_home)
-    if not marker.is_file():
+
+    reinstall_cmd = "curl -fsSL https://rejoin.deng.my.id/install/test/latest -o install.sh && bash install.sh"
+
+    if marker.is_file():
         print(
-            "This install is already complete, or .install_requested is missing.\n"
-            "Run: deng-rejoin",
+            "Your launcher is outdated and cannot complete the install.\n"
+            "Please re-run the installer to download the full DENG Tool: Rejoin package:\n"
+            f"\n  {reinstall_cmd}\n",
             file=sys.stderr,
         )
-        return 1
-
-    requested = marker.read_text(encoding="utf-8", errors="replace").strip().splitlines()[0].strip()
-    if not requested:
-        print("Invalid install state (.install_requested is empty).", file=sys.stderr)
-        return 1
-
-    base = resolve_install_api(app_home)
-
-    bs_path = app_home / ".bootstrap_session"
-    bootstrap_session = ""
-    if bs_path.is_file():
-        bootstrap_session = bs_path.read_text(encoding="utf-8", errors="replace").strip()
-
-    while True:
-        try:
-            raw = input("Paste your license key: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("", file=sys.stderr)
-            return 130
-        if not raw:
-            print("License key is required. Try again or press Ctrl+C to exit.")
-            continue
-
-        install_hash = (os.environ.get("DENG_INSTALL_ID_HASH") or "").strip()
-        payload: dict = {
-            "license_key": raw,
-            "requested_version": requested,
-            "install_id_hash": install_hash,
-        }
-        if bootstrap_session:
-            payload["bootstrap_session"] = bootstrap_session
-        auth_url = f"{base}/api/install/authorize"
-        try:
-            status, body, resp_raw = _http_json_post(auth_url, payload)
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            print(f"Network error: {exc}", file=sys.stderr)
-            return 1
-
-        if not (status == 200 and body.get("result") == "active"):
-            msg = describe_install_authorize_failure(status, body, resp_raw)
-            print(msg, file=sys.stderr)
-            if _is_cloudflare_block(status, body, resp_raw):
-                return 1
-            if _is_server_side_error(status, body, resp_raw):
-                print(
-                    "The server cannot complete this install request.\n"
-                    "Please contact support at https://rejoin.deng.my.id",
-                    file=sys.stderr,
-                )
-                return 1
-            continue
-
-        dl_url = (body.get("download_url") or "").strip()
-        if not dl_url:
-            print("Server returned no download URL.", file=sys.stderr)
-            return 1
-        want_sha = str(body.get("sha256") or "").strip()
-
-        tmp = Path(tempfile.mkdtemp(prefix="deng-full-"))
-        arc = tmp / "bundle.tar.gz"
-        try:
-            _http_download(dl_url, arc)
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            print(f"Download failed: {exc}", file=sys.stderr)
-            shutil.rmtree(tmp, ignore_errors=True)
-            return 1
-
-        if want_sha and _sha256_file(arc) != want_sha.lower():
-            print("SHA256 mismatch — download corrupted or incomplete.", file=sys.stderr)
-            shutil.rmtree(tmp, ignore_errors=True)
-            return 1
-
-        app_home.mkdir(parents=True, exist_ok=True)
-        try:
-            _extract_tar_gz(arc, app_home)
-        except (OSError, tarfile.TarError) as exc:
-            print(f"Extract failed: {exc}", file=sys.stderr)
-            shutil.rmtree(tmp, ignore_errors=True)
-            return 1
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-
-        try:
-            marker.unlink()
-        except OSError:
-            pass
-        try:
-            if bs_path.is_file():
-                bs_path.unlink()
-        except OSError:
-            pass
-
-        exe = sys.executable
+    else:
+        # No marker — tool may already be installed but pointing to this stub.
         main_py = app_home / "agent" / "deng_tool_rejoin.py"
-        if not main_py.is_file():
-            print("Extracted bundle is missing agent/deng_tool_rejoin.py.", file=sys.stderr)
-            return 1
-
-        os.execv(exe, [exe, str(main_py), *sys.argv[1:]])
-        raise RuntimeError("execv returned unexpectedly")  # pragma: no cover
+        if main_py.is_file():
+            # Real entrypoint is present; exec it directly.
+            exe = sys.executable
+            os.execv(exe, [exe, str(main_py), *sys.argv[1:]])
+            raise RuntimeError("execv returned unexpectedly")  # pragma: no cover
+        print(
+            "DENG Tool: Rejoin is not fully installed.\n"
+            "Run the installer to set up the full package:\n"
+            f"\n  {reinstall_cmd}\n",
+            file=sys.stderr,
+        )
+    return 1
 
 
 if __name__ == "__main__":

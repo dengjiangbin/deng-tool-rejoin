@@ -1,4 +1,4 @@
-"""resolve_install_api and first-run API defaults (no network)."""
+"""resolve_install_api, first-run API defaults, and install flow assertions (no network)."""
 
 from __future__ import annotations
 
@@ -210,6 +210,150 @@ class InstallerUserAgentTests(unittest.TestCase):
 
     def test_installer_ua_identifies_deng(self) -> None:
         self.assertIn("deng-rejoin-installer", _INSTALLER_UA)
+
+
+class DeferredRunLegacyHandlingTests(unittest.TestCase):
+    """run() must gracefully handle old launcher installs (no longer a license gate)."""
+
+    def setUp(self) -> None:
+        import shutil
+
+        self._td = tempfile.mkdtemp()
+        self._app = Path(self._td) / ".deng-tool" / "rejoin"
+        self._app.mkdir(parents=True)
+
+    def tearDown(self) -> None:
+        import shutil
+
+        shutil.rmtree(self._td, ignore_errors=True)
+
+    def test_run_with_install_requested_shows_reinstall_message(self) -> None:
+        """Old launcher with .install_requested must tell the user to re-install."""
+        (self._app / ".install_requested").write_text("test-latest\n", encoding="utf-8")
+        old_env = os.environ.get("DENG_REJOIN_HOME")
+        try:
+            os.environ["DENG_REJOIN_HOME"] = str(self._app)
+            from agent.deferred_bundle_install import run
+            import io, contextlib
+
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = run()
+        finally:
+            if old_env is None:
+                os.environ.pop("DENG_REJOIN_HOME", None)
+            else:
+                os.environ["DENG_REJOIN_HOME"] = old_env
+        self.assertEqual(rc, 1)
+        msg = buf.getvalue()
+        self.assertIn("install.sh", msg)
+        self.assertNotIn("Paste your license key", msg)
+        self.assertNotIn("license key", msg.lower())
+
+    def test_run_without_marker_and_without_real_tool_shows_error(self) -> None:
+        """Without .install_requested and without real entrypoint, show a clean error."""
+        old_env = os.environ.get("DENG_REJOIN_HOME")
+        try:
+            os.environ["DENG_REJOIN_HOME"] = str(self._app)
+            from agent.deferred_bundle_install import run
+            import io, contextlib
+
+            buf = io.StringIO()
+            with contextlib.redirect_stderr(buf):
+                rc = run()
+        finally:
+            if old_env is None:
+                os.environ.pop("DENG_REJOIN_HOME", None)
+            else:
+                os.environ["DENG_REJOIN_HOME"] = old_env
+        self.assertEqual(rc, 1)
+        msg = buf.getvalue()
+        self.assertIn("install.sh", msg)
+
+
+class DirectInstallBootstrapTests(unittest.TestCase):
+    """render_direct_install_bootstrap() must not contain a license gate."""
+
+    def _get_script(self) -> str:
+        from agent.bootstrap_installer import render_direct_install_bootstrap
+
+        return render_direct_install_bootstrap(
+            base_url="https://rejoin.deng.my.id",
+            package_sha256="a" * 64,
+            installer_title="DENG Tool: Rejoin Test Installer",
+            banner_lines=("Channel: internal test", "Version: main-dev"),
+        )
+
+    def test_script_has_shebang(self) -> None:
+        script = self._get_script()
+        self.assertTrue(script.startswith("#!/usr/bin/env bash"))
+
+    def test_script_downloads_full_package(self) -> None:
+        script = self._get_script()
+        self.assertIn("install/test/package.tar.gz", script)
+
+    def test_script_verifies_sha256(self) -> None:
+        script = self._get_script()
+        self.assertIn("EXPECTED_SHA256", script)
+        self.assertIn("sha256", script)
+        self.assertIn("checksum", script.lower())
+
+    def test_script_has_no_license_gate(self) -> None:
+        script = self._get_script().lower()
+        self.assertNotIn("license key", script)
+        self.assertNotIn("paste your", script)
+        self.assertNotIn("install_requested", script)
+        self.assertNotIn("deferred_bundle_install", script)
+        self.assertNotIn("/api/install/authorize", script)
+
+    def test_script_has_wrapper(self) -> None:
+        script = self._get_script()
+        self.assertIn("deng_tool_rejoin.py", script)
+        self.assertIn("DENG_REJOIN_WRAPPER", script)
+
+    def test_script_uses_cloudflare_safe_ua(self) -> None:
+        """curl download must use the deng-rejoin-installer User-Agent to bypass Cloudflare BIC."""
+        script = self._get_script()
+        self.assertIn("deng-rejoin-installer/1.0", script)
+
+    def test_script_does_not_write_install_requested(self) -> None:
+        script = self._get_script()
+        self.assertNotIn(".install_requested", script)
+
+    def test_script_writes_install_api_file(self) -> None:
+        script = self._get_script()
+        self.assertIn(".install_api", script)
+
+
+class CommandsDefaultMenuTests(unittest.TestCase):
+    """When deng-rejoin is called with no arguments, it must default to the menu command."""
+
+    def test_no_args_defaults_to_menu(self) -> None:
+        from agent.commands import parse_args
+
+        ns = parse_args([])
+        self.assertEqual(ns.resolved_command, "menu")
+
+    def test_menu_arg_resolves_to_menu(self) -> None:
+        from agent.commands import parse_args
+
+        ns = parse_args(["menu"])
+        self.assertEqual(ns.resolved_command, "menu")
+
+    def test_other_command_still_works(self) -> None:
+        from agent.commands import parse_args
+
+        ns = parse_args(["version"])
+        self.assertEqual(ns.resolved_command, "version")
+
+    def test_no_args_does_not_call_sys_exit(self) -> None:
+        """parse_args([]) must not raise SystemExit (old behavior printed help and exited)."""
+        from agent.commands import parse_args
+
+        try:
+            parse_args([])
+        except SystemExit as exc:
+            self.fail(f"parse_args([]) raised SystemExit({exc.code}): old help-exit behavior still present")
 
 
 if __name__ == "__main__":

@@ -376,17 +376,78 @@ class InstallTestLatestBootstrapTests(unittest.TestCase):
         self.assertIn("DENG Tool: Rejoin Test Installer", text)
         self.assertIn("Channel: internal test", text)
         self.assertIn("Version: main-dev", text)
-        self.assertIn('printf \'%s\\n\' "test-latest"', text)
-        self.assertIn(".install_requested", text)
+        # New direct-install flow: downloads the full package, no .install_requested
+        self.assertIn("install/test/package.tar.gz", text)
+        self.assertIn("Package verified", text)
+        self.assertNotIn(".install_requested", text)
+        self.assertNotIn("deferred_bundle_install", text)
         self.assertNotIn("GITHUB_TOKEN", text)
         self.assertNotIn("SUPABASE_SERVICE_ROLE_KEY", text)
         self.assertNotIn("LICENSE_KEY_EXPORT_SECRET", text)
+
+    def test_test_latest_uses_direct_install_no_license_gate(self) -> None:
+        """The test-latest bootstrap must download the full package immediately,
+        without prompting for a license key during installation."""
+        _, _, body = _wsgi_call("GET", "/install/test/latest")
+        text = body.decode("utf-8").lower()
+        # Must NOT ask for license key during install
+        self.assertNotIn("license key", text)
+        self.assertNotIn("paste your license", text)
+        # Must download the full package from the package endpoint
+        self.assertIn("install/test/package.tar.gz", text)
+        # Must verify SHA256
+        self.assertIn("sha256", text)
+        # Must NOT use the old deferred install mechanism
+        self.assertNotIn("deferred_bundle_install", text)
+        self.assertNotIn("install_requested", text)
 
     def test_beta_latest_redirects_to_test_latest(self) -> None:
         status, headers, body = _wsgi_call("GET", "/install/beta/latest")
         self.assertEqual(status, 302)
         self.assertEqual(headers.get("Location"), "/install/test/latest")
         self.assertEqual(body, b"")
+
+
+class InstallTestPackageEndpointTests(unittest.TestCase):
+    """GET /install/test/package.tar.gz — serves the full internal package without auth."""
+
+    def test_package_endpoint_returns_200_when_artifact_exists(self) -> None:
+        """If the artifact is present (built by build_internal_test_artifact.py), expect 200."""
+        import tarfile as _tf
+
+        from agent.install_registry import get_artifact_root, get_exact_registry_row, artifact_path_for_row
+
+        row = get_exact_registry_row("main-dev")
+        if row is None:
+            self.skipTest("main-dev not in registry")
+
+        # Check that the artifact actually exists somewhere before testing the endpoint
+        repo_pkg = Path(__file__).resolve().parents[1] / "releases" / "main-dev" / "deng-tool-rejoin-main-dev.tar.gz"
+        art_root = get_artifact_root()
+        artifact_exists = repo_pkg.is_file()
+        if not artifact_exists and art_root:
+            cand = artifact_path_for_row(row, art_root)
+            artifact_exists = cand is not None and cand.is_file()
+
+        if not artifact_exists:
+            self.skipTest("main-dev artifact not built yet; run: python scripts/build_internal_test_artifact.py")
+
+        status, headers, body = _wsgi_call("GET", "/install/test/package.tar.gz")
+        self.assertEqual(status, 200)
+        ct = headers.get("Content-Type", "")
+        self.assertIn("gzip", ct)
+        # Verify the response body is a valid tar.gz with agent/deng_tool_rejoin.py
+        import io
+        with _tf.open(fileobj=io.BytesIO(body), mode="r:gz") as tf:
+            names = tf.getnames()
+        self.assertIn("agent/deng_tool_rejoin.py", names)
+
+    def test_package_endpoint_requires_no_license(self) -> None:
+        """The package endpoint must not check Authorization headers or license keys."""
+        # A GET request with no auth headers must not return 401/403 due to auth checks.
+        # (It may return 404 if the artifact isn't built, but never 401/403 from auth.)
+        status, _headers, _body = _wsgi_call("GET", "/install/test/package.tar.gz")
+        self.assertNotEqual(status, 401)
 
 
 class InstallBootstrapSanityTests(unittest.TestCase):
@@ -441,39 +502,41 @@ class InstallBootstrapSanityTests(unittest.TestCase):
         self.assertIn("agent/__init__.py", names)
         self.assertIn("def resolve_install_api", dtext)
 
-    def test_bootstrap_prefers_prefix_bin_avoids_local_bin(self) -> None:
-        from agent.bootstrap_installer import render_public_bootstrap
+    def test_direct_bootstrap_prefers_prefix_bin_avoids_local_bin(self) -> None:
+        from agent.bootstrap_installer import render_direct_install_bootstrap
 
-        s = render_public_bootstrap(base_url="https://rejoin.deng.my.id", requested="latest")
+        s = render_direct_install_bootstrap(
+            base_url="https://rejoin.deng.my.id",
+            package_sha256="a" * 64,
+        )
         self.assertIn('BIN="${PREFIX}/bin"', s)
         self.assertIn('mkdir -p "${PREFIX}/bin"', s)
         self.assertIn("$HOME/bin", s)
         self.assertNotIn("$HOME/.local/bin", s)
         self.assertIn("command -v deng-rejoin", s)
         self.assertIn("hash -r", s)
-        self.assertIn("Failed to create deng-rejoin command.", s)
+        self.assertIn("Failed to create deng-rejoin wrapper.", s)
         self.assertIn('.install_api', s)
-        self.assertIn(
-            'printf \'%s\\n\' "$DENG_REJOIN_INSTALL_API" > "$APP_HOME/.install_api"',
-            s,
-        )
+        self.assertIn("rejoin.deng.my.id", s)
+        self.assertIn("Package verified.", s)
+        self.assertIn("install/test/package.tar.gz", s)
+        self.assertIn("deng_tool_rejoin.py", s)
+        # Wrapper must use DENG_REJOIN_HOME env with fallback
         self.assertIn(
             'export DENG_REJOIN_INSTALL_API="${DENG_REJOIN_INSTALL_API:-https://rejoin.deng.my.id}"',
             s,
         )
-        self.assertIn("rejoin.deng.my.id", s)
-        self.assertIn("STAGE=", s)
-        self.assertIn("Launcher bundle verified.", s)
-        self.assertIn("rm -f \"$APP_HOME/agent/deng_tool_rejoin.py\"", s)
 
     def test_install_complete_only_after_command_check(self) -> None:
-        from agent.bootstrap_installer import render_public_bootstrap
+        from agent.bootstrap_installer import render_direct_install_bootstrap
 
-        s = render_public_bootstrap(base_url="https://x.example", requested="test-latest")
+        s = render_direct_install_bootstrap(
+            base_url="https://x.example",
+            package_sha256="a" * 64,
+        )
         done = s.index("Install complete.")
-        self.assertLess(s.index("Launcher bundle verified."), done)
+        self.assertLess(s.index("Package verified."), done)
         self.assertLess(s.index("command -v deng-rejoin"), done)
-        self.assertLess(s.index("resolve_install_api"), done)
         self.assertLess(s.index(".install_api"), done)
 
     def test_packed_launcher_tarball_has_resolve_install_api(self) -> None:
