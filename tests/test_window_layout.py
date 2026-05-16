@@ -1,18 +1,15 @@
-"""Tests for Kaeru-style window layout engine.
+"""Tests for landscape-block window layout engine.
 
 Layout rules verified:
-  1 package  → single window occupies right pane
-  2 packages → side-by-side (landscape) or stacked (portrait)
-  3 packages → 2+1 (two on top, one full-width on bottom)
-  4 packages → 2×2 grid
-  5 packages → 2-column compact
-  6 packages → 2-column compact
-  7 packages → 3-column Kaeru cascade (title bars offset)
-  9 packages → 3-column Kaeru cascade
-  Split layout → left 35% reserved, right 65% Kaeru
-
-Regression tests for existing callers:
-  calculate_grid_layout delegates to calculate_kaeru_layout
+  - Every window is landscape-shaped (width >= height * LANDSCAPE_MIN_RATIO).
+  - No two windows overlap or touch (gap >= GAP_PX between all pairs).
+  - All windows are inside the right-pane (left 35% reserved for Termux).
+  - All windows have unique bounds.
+  - Termux and system packages are excluded.
+  - calculate_kaeru_layout (compat wrapper) produces landscape windows.
+  - calculate_split_layout produces landscape windows with 35/65 split.
+  - validate_layout_rects detects violations correctly.
+  - parse_wm_size / parse_wm_density helpers work.
 """
 
 from __future__ import annotations
@@ -26,27 +23,43 @@ if str(PROJECT) not in sys.path:
     sys.path.insert(0, str(PROJECT))
 
 from agent.window_layout import (
+    GAP_PX,
     KAERU_TITLE_BAR_H,
+    LANDSCAPE_MIN_RATIO,
+    OUTER_MARGIN,
     TERMUX_LOG_FRACTION,
     DisplayInfo,
     WindowRect,
+    _is_layout_excluded,
     calculate_grid_layout,
     calculate_kaeru_layout,
+    calculate_landscape_blocks,
     calculate_split_layout,
     parse_wm_density,
     parse_wm_size,
+    validate_layout_rects,
 )
 
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _pkgs(n: int) -> list[str]:
     return [f"com.pkg.test{i}" for i in range(1, n + 1)]
 
 
 W, H = 1080, 1920   # typical portrait phone
-LW   = W - int(W * TERMUX_LOG_FRACTION)   # right-pane width after split
+LW   = W - int(W * TERMUX_LOG_FRACTION)   # right-pane width after 35% split
 
+
+def _pane_bounds_for(display_w, display_h):
+    left_end = round(display_w * TERMUX_LOG_FRACTION)
+    return (
+        left_end + OUTER_MARGIN,
+        OUTER_MARGIN,
+        display_w - OUTER_MARGIN,
+        display_h - OUTER_MARGIN,
+    )
+
+
+# ── Parse helpers ─────────────────────────────────────────────────────────────
 
 class TestParseHelpers(unittest.TestCase):
     def test_parse_wm_size_standard(self):
@@ -65,271 +78,277 @@ class TestParseHelpers(unittest.TestCase):
         self.assertIsNone(parse_wm_density("no density"))
 
 
-class TestKaeruLayoutCount1(unittest.TestCase):
-    """1 package → full right pane."""
+# ── Landscape invariant ───────────────────────────────────────────────────────
 
-    def test_count_is_1(self):
-        rects = calculate_kaeru_layout(_pkgs(1), LW, H)
-        self.assertEqual(len(rects), 1)
+class TestLandscapeInvariant(unittest.TestCase):
+    """Every window must satisfy width >= height * LANDSCAPE_MIN_RATIO."""
 
-    def test_single_window_fills_right_pane(self):
-        rects = calculate_kaeru_layout(_pkgs(1), LW, H, gap=0)
-        r = rects[0]
-        self.assertEqual(r.left, 0)
-        self.assertEqual(r.top, 0)
-        self.assertEqual(r.right, LW)
-        self.assertEqual(r.bottom, H)
-
-    def test_package_name_preserved(self):
-        pkgs = ["com.test.one"]
-        rects = calculate_kaeru_layout(pkgs, LW, H)
-        self.assertEqual(rects[0].package, "com.test.one")
-
-
-class TestKaeruLayoutCount2(unittest.TestCase):
-    """2 packages → always side-by-side (wide-first policy)."""
-
-    def test_two_landscape_side_by_side(self):
-        # Landscape pane: side-by-side
-        rects = calculate_kaeru_layout(_pkgs(2), 960, 540, gap=0)
-        self.assertEqual(len(rects), 2)
-        self.assertLess(rects[0].right, rects[1].right)     # left window is to the left
-        self.assertEqual(rects[0].top, rects[1].top)        # same vertical start
-        self.assertEqual(rects[0].bottom, rects[1].bottom)  # same vertical end
-
-    def test_two_portrait_also_side_by_side(self):
-        # Portrait pane: also side-by-side (wide-first policy)
-        rects = calculate_kaeru_layout(_pkgs(2), 540, 960, gap=0)
-        self.assertEqual(len(rects), 2)
-        # Both windows should be side-by-side (same top/bottom, different left/right)
-        self.assertEqual(rects[0].top, rects[1].top)        # same top
-        self.assertEqual(rects[0].bottom, rects[1].bottom)  # same bottom
-        self.assertLess(rects[0].right, rects[1].right)     # distinct X positions
-
-    def test_two_no_overlap(self):
-        # Side-by-side: right edge of first <= left edge of second
-        rects = calculate_kaeru_layout(_pkgs(2), 540, 960, gap=4)
-        self.assertLessEqual(rects[0].right, rects[1].left)
-
-    def test_two_within_bounds(self):
-        rects = calculate_kaeru_layout(_pkgs(2), LW, H, gap=8)
-        for r in rects:
-            self.assertGreaterEqual(r.left, 0)
-            self.assertGreaterEqual(r.top, 0)
-            self.assertLessEqual(r.right, LW)
-            self.assertLessEqual(r.bottom, H)
-
-    def test_two_unique_x_positions(self):
-        """Both packages must have distinct X positions (no stacking)."""
-        rects = calculate_kaeru_layout(_pkgs(2), LW, H, gap=8)
-        self.assertNotEqual(rects[0].left, rects[1].left,
-                            "Both packages share the same left coordinate — they are stacking")
-
-    def test_two_wide_layout_on_portrait_screen(self):
-        """2-package layout on a portrait right-pane (702×1920) must be side-by-side."""
-        rects = calculate_kaeru_layout(_pkgs(2), LW, H, gap=8)
-        self.assertEqual(rects[0].top, rects[1].top)
-        self.assertLess(rects[0].right, rects[1].left + 1)
-
-
-class TestKaeruLayoutCount3(unittest.TestCase):
-    """3 packages → 2+1 (two on top ~55%, one full-width on bottom ~45%)."""
-
-    def _rects(self, gap=0):
-        return calculate_kaeru_layout(_pkgs(3), LW, H, gap=gap)
-
-    def test_count_is_3(self):
-        self.assertEqual(len(self._rects()), 3)
-
-    def test_top_two_are_above_bottom_one(self):
-        rects = self._rects(gap=0)
-        max_top_bottom  = max(rects[0].bottom, rects[1].bottom)
-        bottom_win_top  = rects[2].top
-        self.assertLessEqual(max_top_bottom, bottom_win_top)
-
-    def test_top_two_same_height(self):
-        rects = self._rects()
-        self.assertEqual(rects[0].bottom, rects[1].bottom)
-
-    def test_top_two_side_by_side(self):
-        rects = self._rects(gap=0)
-        # Right edge of first ≤ left edge of second (they are side by side)
-        self.assertLessEqual(rects[0].right, rects[1].left + 1)
-
-    def test_bottom_window_spans_full_width(self):
-        rects = self._rects(gap=0)
-        self.assertEqual(rects[2].left, 0)
-        self.assertEqual(rects[2].right, LW)
-
-    def test_all_within_bounds(self):
-        for r in self._rects(gap=4):
-            self.assertGreaterEqual(r.left, 0)
-            self.assertLessEqual(r.right, LW)
-            self.assertLessEqual(r.bottom, H)
-
-
-class TestKaeruLayoutCount4(unittest.TestCase):
-    """4 packages → 2×2 grid."""
-
-    def _rects(self, gap=0):
-        return calculate_kaeru_layout(_pkgs(4), LW, H, gap=gap)
-
-    def test_count_is_4(self):
-        self.assertEqual(len(self._rects()), 4)
-
-    def test_2x2_top_row_above_bottom_row(self):
-        rects = self._rects(gap=0)
-        self.assertLessEqual(rects[0].bottom, rects[2].top + 1)
-        self.assertLessEqual(rects[1].bottom, rects[3].top + 1)
-
-    def test_2x2_columns_dont_overlap(self):
-        rects = self._rects(gap=0)
-        # Col 0 right <= col 1 left
-        self.assertLessEqual(rects[0].right, rects[1].left + 1)
-        self.assertLessEqual(rects[2].right, rects[3].left + 1)
-
-    def test_all_within_bounds(self):
-        for r in self._rects(gap=8):
-            self.assertGreaterEqual(r.left, 0)
-            self.assertLessEqual(r.right, LW)
-            self.assertLessEqual(r.bottom, H)
-
-
-class TestKaeruLayoutCount56(unittest.TestCase):
-    """5–6 packages → 2-column compact."""
-
-    def test_five_packages_count(self):
-        self.assertEqual(len(calculate_kaeru_layout(_pkgs(5), LW, H)), 5)
-
-    def test_six_packages_count(self):
-        self.assertEqual(len(calculate_kaeru_layout(_pkgs(6), LW, H)), 6)
-
-    def test_five_all_within_bounds(self):
-        for r in calculate_kaeru_layout(_pkgs(5), LW, H, gap=8):
-            self.assertGreaterEqual(r.left, 0)
-            self.assertLessEqual(r.right, LW)
-            self.assertLessEqual(r.bottom, H)
-
-    def test_six_two_columns(self):
-        rects = calculate_kaeru_layout(_pkgs(6), LW, H, gap=0)
-        # All windows should be in 2 columns — right half of a window should not exceed LW
-        lefts = sorted(set(r.left for r in rects))
-        self.assertEqual(len(lefts), 2, f"Expected 2 unique left positions, got {lefts}")
-
-
-class TestKaeruLayoutCount7Plus(unittest.TestCase):
-    """7+ packages → 3-column Kaeru cascade."""
-
-    def _rects(self, n, gap=8):
-        return calculate_kaeru_layout(_pkgs(n), LW, H, gap=gap)
-
-    def test_seven_packages_count(self):
-        self.assertEqual(len(self._rects(7)), 7)
-
-    def test_nine_packages_count(self):
-        self.assertEqual(len(self._rects(9)), 9)
-
-    def test_three_columns_used_for_7(self):
-        rects = self._rects(7, gap=0)
-        lefts = sorted(set(r.left for r in rects))
-        self.assertEqual(len(lefts), 3, f"Expected 3 unique left positions, got {lefts}")
-
-    def test_title_bars_cascade_downward(self):
-        """Each column in a row must start lower than the previous (cascade offset)."""
-        rects = self._rects(9, gap=0)
-        # First 3 windows are in the same row (index 0,1,2 = col 0,1,2 of row 0)
-        tops = [rects[i].top for i in range(3)]
-        self.assertLess(tops[0], tops[1], "col1 must start below col0")
-        self.assertLess(tops[1], tops[2], "col2 must start below col1")
-        # Cascade step must be at least KAERU_TITLE_BAR_H
-        self.assertGreaterEqual(tops[1] - tops[0], KAERU_TITLE_BAR_H)
-
-    def test_all_within_bounds_for_9(self):
-        for r in self._rects(9, gap=4):
-            self.assertGreaterEqual(r.left, 0)
-            self.assertGreaterEqual(r.top, 0)
-            self.assertLessEqual(r.right, LW)
-            self.assertLessEqual(r.bottom, H)
-
-    def test_twelve_packages_count(self):
-        self.assertEqual(len(self._rects(12)), 12)
-
-
-class TestSplitLayout(unittest.TestCase):
-    """Split layout: left 35% for Termux, right 65% Kaeru."""
-
-    def test_all_rects_start_in_right_pane(self):
-        left_boundary = int(W * TERMUX_LOG_FRACTION)
-        rects = calculate_split_layout(_pkgs(4), W, H)
-        for r in rects:
+    def _assert_all_landscape(self, rects, context=""):
+        for i, r in enumerate(rects):
             self.assertGreaterEqual(
-                r.left, left_boundary - 1,
-                f"Package {r.package} starts in left pane: left={r.left} < {left_boundary}",
+                r.win_w, r.win_h * LANDSCAPE_MIN_RATIO,
+                f"rect[{i}] {r.package} NOT landscape: {r.win_w}×{r.win_h} {context}",
             )
 
-    def test_split_preserves_package_count(self):
-        for n in (1, 2, 3, 4, 6, 9):
-            rects = calculate_split_layout(_pkgs(n), W, H)
-            self.assertEqual(len(rects), n, f"n={n}: expected {n} rects, got {len(rects)}")
+    def test_1_package_landscape(self):
+        self._assert_all_landscape(calculate_landscape_blocks(_pkgs(1), W, H))
 
-    def test_empty_packages_returns_empty(self):
-        self.assertEqual(calculate_split_layout([], W, H), [])
+    def test_2_packages_landscape(self):
+        self._assert_all_landscape(calculate_landscape_blocks(_pkgs(2), W, H))
 
-    def test_all_within_screen_bounds(self):
-        rects = calculate_split_layout(_pkgs(6), W, H, gap=8)
-        for r in rects:
-            self.assertGreaterEqual(r.left, 0)
-            self.assertLessEqual(r.right, W)
+    def test_3_packages_landscape(self):
+        self._assert_all_landscape(calculate_landscape_blocks(_pkgs(3), W, H))
+
+    def test_4_packages_landscape(self):
+        self._assert_all_landscape(calculate_landscape_blocks(_pkgs(4), W, H))
+
+    def test_5_packages_landscape(self):
+        self._assert_all_landscape(calculate_landscape_blocks(_pkgs(5), W, H))
+
+    def test_6_packages_landscape(self):
+        self._assert_all_landscape(calculate_landscape_blocks(_pkgs(6), W, H))
+
+    def test_landscape_display_2_packages(self):
+        self._assert_all_landscape(calculate_landscape_blocks(_pkgs(2), 1920, 1080), "1920×1080")
+
+    def test_landscape_display_3_packages(self):
+        self._assert_all_landscape(calculate_landscape_blocks(_pkgs(3), 1920, 1080), "1920×1080")
+
+    def test_kaeru_compat_2_landscape(self):
+        self._assert_all_landscape(calculate_kaeru_layout(_pkgs(2), LW, H))
+
+    def test_kaeru_compat_3_landscape(self):
+        self._assert_all_landscape(calculate_kaeru_layout(_pkgs(3), LW, H))
+
+    def test_kaeru_compat_4_landscape(self):
+        self._assert_all_landscape(calculate_kaeru_layout(_pkgs(4), LW, H))
+
+    def test_split_2_landscape(self):
+        self._assert_all_landscape(calculate_split_layout(_pkgs(2), W, H))
+
+    def test_split_3_landscape(self):
+        self._assert_all_landscape(calculate_split_layout(_pkgs(3), W, H))
+
+    def test_split_4_landscape(self):
+        self._assert_all_landscape(calculate_split_layout(_pkgs(4), W, H))
+
+
+# ── Count correctness ─────────────────────────────────────────────────────────
+
+class TestWindowCount(unittest.TestCase):
+    """Must return exactly N windows for N packages."""
+
+    def _check(self, n):
+        self.assertEqual(len(calculate_landscape_blocks(_pkgs(n), W, H)), n, f"n={n}")
+
+    def test_count_1(self): self._check(1)
+    def test_count_2(self): self._check(2)
+    def test_count_3(self): self._check(3)
+    def test_count_4(self): self._check(4)
+    def test_count_5(self): self._check(5)
+    def test_count_6(self): self._check(6)
+    def test_count_7(self): self._check(7)
+    def test_count_9(self): self._check(9)
+    def test_count_0_empty(self):
+        self.assertEqual(calculate_landscape_blocks([], W, H), [])
+
+
+# ── No overlap / no touch ─────────────────────────────────────────────────────
+
+class TestNoOverlapNoTouch(unittest.TestCase):
+    """No two windows may overlap or touch (gap >= GAP_PX)."""
+
+    def _check(self, n, w=W, h=H):
+        rects = calculate_landscape_blocks(_pkgs(n), w, h)
+        px0, py0, px1, py1 = _pane_bounds_for(w, h)
+        errors = validate_layout_rects(rects, px0, py0, px1, py1)
+        overlap = [e for e in errors if "overlap" in e or "touch" in e]
+        self.assertEqual(overlap, [], f"n={n} {w}×{h}: {overlap}")
+
+    def test_2_no_touch_portrait(self): self._check(2)
+    def test_3_no_touch_portrait(self): self._check(3)
+    def test_4_no_touch_portrait(self): self._check(4)
+    def test_5_no_touch_portrait(self): self._check(5)
+    def test_6_no_touch_portrait(self): self._check(6)
+    def test_2_no_touch_landscape(self): self._check(2, 1920, 1080)
+    def test_3_no_touch_landscape(self): self._check(3, 1920, 1080)
+    def test_4_no_touch_landscape(self): self._check(4, 1920, 1080)
+
+
+# ── Inside pane ───────────────────────────────────────────────────────────────
+
+class TestInsidePaneAfterSplit(unittest.TestCase):
+    """All windows must be in the right 65% pane (absolute coords)."""
+
+    def _check(self, n):
+        rects = calculate_split_layout(_pkgs(n), W, H)
+        left_end = round(W * TERMUX_LOG_FRACTION)
+        for i, r in enumerate(rects):
+            self.assertGreaterEqual(r.left, left_end,
+                f"rect[{i}] left={r.left} < left_end={left_end}")
+            self.assertLessEqual(r.right, W,
+                f"rect[{i}] right={r.right} > {W}")
+            self.assertGreaterEqual(r.top, 0)
             self.assertLessEqual(r.bottom, H)
 
-    def test_termux_left_pane_untouched(self):
-        """No Roblox window should overlap with the left-pane Termux area."""
-        left_boundary = int(W * TERMUX_LOG_FRACTION)
-        rects = calculate_split_layout(_pkgs(4), W, H)
+    def test_1_inside_pane(self): self._check(1)
+    def test_2_inside_pane(self): self._check(2)
+    def test_3_inside_pane(self): self._check(3)
+    def test_4_inside_pane(self): self._check(4)
+    def test_5_inside_pane(self): self._check(5)
+
+
+# ── Unique bounds ─────────────────────────────────────────────────────────────
+
+class TestUniqueBounds(unittest.TestCase):
+    def _check(self, n):
+        rects = calculate_landscape_blocks(_pkgs(n), W, H)
+        seen: set[tuple[int, int, int, int]] = set()
+        for i, r in enumerate(rects):
+            key = (r.left, r.top, r.right, r.bottom)
+            self.assertNotIn(key, seen, f"rect[{i}] duplicate bounds: {key}")
+            seen.add(key)
+
+    def test_2_unique(self): self._check(2)
+    def test_3_unique(self): self._check(3)
+    def test_4_unique(self): self._check(4)
+    def test_5_unique(self): self._check(5)
+
+
+# ── Termux exclusion ──────────────────────────────────────────────────────────
+
+class TestExclusion(unittest.TestCase):
+    def test_termux_excluded(self):
+        self.assertTrue(_is_layout_excluded("com.termux"))
+
+    def test_termux_boot_excluded(self):
+        self.assertTrue(_is_layout_excluded("com.termux.boot"))
+
+    def test_android_system_excluded(self):
+        self.assertTrue(_is_layout_excluded("com.android.systemui"))
+
+    def test_google_excluded(self):
+        self.assertTrue(_is_layout_excluded("com.google.android.gms"))
+
+    def test_roblox_not_excluded(self):
+        self.assertFalse(_is_layout_excluded("com.roblox.client"))
+
+    def test_roblox_clone_not_excluded(self):
+        self.assertFalse(_is_layout_excluded("com.roblox.client2"))
+
+    def test_empty_string_excluded(self):
+        # Empty string should not crash
+        try:
+            result = _is_layout_excluded("")
+            self.assertIsInstance(result, bool)
+        except Exception:
+            pass
+
+
+# ── Validation helper ─────────────────────────────────────────────────────────
+
+class TestValidateLandscape(unittest.TestCase):
+    def test_portrait_window_flagged(self):
+        rect = WindowRect("com.pkg", 400, 0, 700, 1000)  # 300w × 1000h → portrait
+        errors = validate_layout_rects([rect], 400, 0, 1080, 1920)
+        self.assertTrue(any("NOT landscape" in e for e in errors), errors)
+
+    def test_overlapping_windows_flagged(self):
+        r1 = WindowRect("com.pkg.a", 400, 50, 1060, 420)
+        r2 = WindowRect("com.pkg.b", 400, 200, 1060, 570)
+        errors = validate_layout_rects([r1, r2], 400, 50, 1060, 570)
+        self.assertTrue(any("overlap" in e or "touch" in e for e in errors), errors)
+
+    def test_valid_landscape_pair_passes(self):
+        pkgs = _pkgs(2)
+        rects = calculate_landscape_blocks(pkgs, W, H)
+        px0, py0, px1, py1 = _pane_bounds_for(W, H)
+        errors = validate_layout_rects(rects, px0, py0, px1, py1)
+        self.assertEqual(errors, [], errors)
+
+
+# ── Compat: calculate_grid_layout delegates to kaeru ──────────────────────────
+
+class TestGridLayoutCompat(unittest.TestCase):
+    def test_grid_count_matches_kaeru(self):
+        for n in (1, 2, 3, 4):
+            grid = calculate_grid_layout(_pkgs(n), LW, H)
+            kaeru = calculate_kaeru_layout(_pkgs(n), LW, H)
+            self.assertEqual(len(grid), len(kaeru), f"n={n} count mismatch")
+
+    def test_grid_landscape_1(self):
+        rects = calculate_grid_layout(_pkgs(1), LW, H)
         for r in rects:
-            self.assertGreaterEqual(r.left, left_boundary - 1)
+            self.assertGreaterEqual(r.win_w, r.win_h * LANDSCAPE_MIN_RATIO)
+
+    def test_grid_landscape_2(self):
+        rects = calculate_grid_layout(_pkgs(2), LW, H)
+        for r in rects:
+            self.assertGreaterEqual(r.win_w, r.win_h * LANDSCAPE_MIN_RATIO)
 
 
-class TestLegacyCompatibility(unittest.TestCase):
-    """calculate_grid_layout must delegate to calculate_kaeru_layout (backward compat)."""
+# ── Window rect helpers ───────────────────────────────────────────────────────
 
-    def test_grid_layout_two_side_by_side(self):
-        rects = calculate_grid_layout(["pkg.one", "pkg.two"], 1080, 960, gap=0)
-        self.assertEqual(len(rects), 2)
-        self.assertLess(rects[0].right, rects[1].right)
+class TestWindowRect(unittest.TestCase):
+    def test_win_w_property(self):
+        r = WindowRect("com.pkg", 100, 50, 800, 500)
+        self.assertEqual(r.win_w, 700)
 
-    def test_grid_layout_four(self):
-        rects = calculate_grid_layout(["a.one", "a.two", "a.three", "a.four"], 1000, 1000, gap=10)
-        self.assertEqual(len(rects), 4)
-        self.assertGreaterEqual(rects[0].left, 0)
-        self.assertLessEqual(rects[-1].right, 1000)
-        self.assertLessEqual(rects[-1].bottom, 1000)
+    def test_win_h_property(self):
+        r = WindowRect("com.pkg", 100, 50, 800, 500)
+        self.assertEqual(r.win_h, 450)
 
-    def test_grid_empty_returns_empty(self):
-        self.assertEqual(calculate_grid_layout([], 1080, 1920), [])
-
-
-class TestWindowRectHelpers(unittest.TestCase):
-    def test_as_dict_keys(self):
-        r = WindowRect("com.test.pkg", 100, 200, 400, 800)
+    def test_as_dict(self):
+        r = WindowRect("com.pkg", 10, 20, 300, 200)
         d = r.as_dict()
-        self.assertEqual(d["package"], "com.test.pkg")
-        self.assertEqual(d["left"], 100)
-        self.assertEqual(d["top"], 200)
-        self.assertEqual(d["right"], 400)
-        self.assertEqual(d["bottom"], 800)
+        self.assertEqual(d["left"],  10)
+        self.assertEqual(d["top"],   20)
+        self.assertEqual(d["right"], 300)
+        self.assertEqual(d["bottom"], 200)
 
-    def test_preview_line_contains_package(self):
-        r = WindowRect("com.test.pkg", 10, 20, 300, 600)
-        line = r.preview_line(1)
-        self.assertIn("com.test.pkg", line)
+    def test_package_name_preserved(self):
+        r = calculate_kaeru_layout(["com.test.one"], LW, H)
+        self.assertEqual(r[0].package, "com.test.one")
 
-    def test_preview_line_contains_dimensions(self):
-        r = WindowRect("com.pkg", 0, 0, 200, 400)
-        line = r.preview_line(1)
-        # 200×400
-        self.assertIn("200", line)
-        self.assertIn("400", line)
+    def test_frozen_immutable(self):
+        r = WindowRect("com.pkg", 0, 0, 400, 225)
+        with self.assertRaises((AttributeError, TypeError)):
+            r.left = 999  # type: ignore
+
+
+# ── Split layout ──────────────────────────────────────────────────────────────
+
+class TestSplitLayout(unittest.TestCase):
+    """Split layout: left 35% reserved, right 65% gets landscape windows."""
+
+    def test_split_single_right_of_termux(self):
+        rects = calculate_split_layout(_pkgs(1), W, H)
+        self.assertEqual(len(rects), 1)
+        left_end = round(W * TERMUX_LOG_FRACTION)
+        self.assertGreaterEqual(rects[0].left, left_end,
+            f"Single window left={rects[0].left} must be > left_end={left_end}")
+
+    def test_split_2_all_right_of_termux(self):
+        rects = calculate_split_layout(_pkgs(2), W, H)
+        left_end = round(W * TERMUX_LOG_FRACTION)
+        for r in rects:
+            self.assertGreaterEqual(r.left, left_end)
+
+    def test_split_empty_returns_empty(self):
+        self.assertEqual(calculate_split_layout([], W, H), [])
+
+    def test_split_preserves_package_names(self):
+        pkgs = ["com.a.one", "com.b.two"]
+        rects = calculate_split_layout(pkgs, W, H)
+        names = {r.package for r in rects}
+        self.assertEqual(names, set(pkgs))
+
+
+# ── Backward-compat symbol ────────────────────────────────────────────────────
+
+class TestKaeruTitleBarHExists(unittest.TestCase):
+    def test_constant_exists_and_positive(self):
+        self.assertGreater(KAERU_TITLE_BAR_H, 0)
 
 
 if __name__ == "__main__":

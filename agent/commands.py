@@ -1896,8 +1896,146 @@ After restoring orientation:
 """.strip()
 
 
+def _cmd_doctor_layout(cfg: dict[str, Any] | None, use_color: bool) -> int:
+    """deng-rejoin doctor layout — compute, apply, and validate window blocks."""
+    from .window_layout import (
+        calculate_split_layout,
+        detect_display_info,
+        validate_layout_rects,
+        OUTER_MARGIN,
+        TERMUX_LOG_FRACTION,
+    )
+    import logging as _logging
+
+    print("Layout Diagnostic")
+    print()
+
+    disp = detect_display_info()
+    print(f"  Display: {disp.width}×{disp.height} px  density={disp.density}")
+
+    left_end = round(disp.width * TERMUX_LOG_FRACTION)
+    pane_x0 = left_end + OUTER_MARGIN
+    pane_y0 = OUTER_MARGIN
+    pane_x1 = disp.width - OUTER_MARGIN
+    pane_y1 = disp.height - OUTER_MARGIN
+    print(f"  Left panel (Termux): 0–{left_end}px (35%)")
+    print(f"  Right pane (Roblox): {pane_x0}–{pane_x1}px × {pane_y0}–{pane_y1}px")
+    print()
+
+    packages: list[str] = []
+    if cfg:
+        from .config import enabled_package_entries
+        try:
+            entries = enabled_package_entries(cfg)
+            packages = [e["package"] for e in entries]
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not packages:
+        print("  No packages configured — using example packages for preview.")
+        packages = ["com.roblox.client", "com.roblox.client2"]
+
+    print(f"  Packages: {len(packages)}")
+    rects = calculate_split_layout(packages, disp.width, disp.height)
+    print()
+    print("  Computed blocks:")
+    for i, rect in enumerate(rects, 1):
+        print(f"  {rect.preview_line(i)}")
+    print()
+
+    errors = validate_layout_rects(rects, pane_x0, pane_y0, pane_x1, pane_y1)
+    if errors:
+        print("  VALIDATION FAILURES:")
+        for e in errors:
+            print(f"    ✗ {e}")
+        result_line = "FAIL"
+    else:
+        print("  Validation: PASS — no overlaps, no touching, all landscape.")
+        result_line = "PASS"
+
+    # Attempt to apply layout via XML
+    if cfg:
+        from .window_layout import apply_layout_to_packages
+        msgs, _ = apply_layout_to_packages(packages, write_xml=True, use_split_layout=True)
+        print()
+        print("  Layout write results:")
+        for m in msgs:
+            print(f"    {m}")
+
+    print()
+    print(f"  Result: {result_line}")
+    return 0 if result_line == "PASS" else 1
+
+
+def _cmd_doctor_root_state(cfg: dict[str, Any] | None) -> int:
+    """deng-rejoin doctor root-state — show process/task/window evidence for each package."""
+    print("Root State Diagnostic")
+    print()
+
+    root_info = android.detect_root()
+    print(f"  Root available: {root_info.available}")
+    if root_info.tool:
+        print(f"  Root tool: {root_info.tool}")
+    print()
+
+    packages: list[str] = []
+    if cfg:
+        from .config import enabled_package_entries
+        try:
+            entries = enabled_package_entries(cfg)
+            packages = [e["package"] for e in entries]
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not packages:
+        print("  No packages configured.")
+        return 0
+
+    for pkg in packages:
+        print(f"  Package: {pkg}")
+        evidence = android.get_package_alive_evidence(pkg)
+        print(f"    Process (pidof/ps): {evidence['running']}")
+        print(f"    Root process:       {evidence['root_running']}")
+        print(f"    Task (dumpsys act): {evidence['task']}")
+        print(f"    Window (dumpsys w): {evidence['window']}")
+        print(f"    Alive:              {evidence['alive']}")
+        fg = android.current_foreground_package()
+        is_fg = (fg == pkg)
+        print(f"    Foreground:         {is_fg} (current fg: {fg})")
+        if evidence["alive"]:
+            if evidence.get("task") or evidence.get("window"):
+                reason = "process/task/window confirmed alive"
+            else:
+                reason = "process confirmed running"
+            print(f"    Inferred state: Online / Background  [{reason}]")
+        else:
+            print("    Inferred state: Offline  [no process, no task, no window]")
+        print()
+
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
-    print_banner(use_color=not args.no_color)
+    use_color = not args.no_color
+    print_banner(use_color=use_color)
+
+    # Subcommand: layout diagnostic
+    if getattr(args, "layout_test", False) or getattr(args, "doctor_layout", False):
+        cfg = None
+        try:
+            cfg = load_config()
+        except Exception:  # noqa: BLE001
+            pass
+        return _cmd_doctor_layout(cfg, use_color)
+
+    # Subcommand: root-state diagnostic
+    if getattr(args, "root_state", False) or getattr(args, "doctor_root_state", False):
+        cfg = None
+        try:
+            cfg = load_config()
+        except Exception:  # noqa: BLE001
+            pass
+        return _cmd_doctor_root_state(cfg)
 
     # layout-reset subcommand: print recovery instructions and exit.
     if getattr(args, "layout_reset", False):
@@ -1918,7 +2056,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     items = run_doctor(cfg)
     print_doctor(items)
     print()
-    print("Tip: if the screen is sideways, run:  deng-rejoin doctor --layout-reset")
+    print("Tips:")
+    print("  deng-rejoin doctor layout     — test window block layout")
+    print("  deng-rejoin doctor root-state — show process/task/window evidence")
+    print("  deng-rejoin doctor --layout-reset — fix sideways screen")
     return 1 if any(item.status == "FAIL" for item in items) else 0
 
 
@@ -2338,7 +2479,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         cfg = load_config()
         cfg = _ensure_install_id_saved(cfg)
 
-        # ── License (required for public remote installs before any start work) ──
+        # ── License gate ─────────────────────────────────────────────────────
         if not keystore.DEV_MODE:
             license_cfg = cfg.get("license") or {}
             if not license_cfg.get("disabled_by_user") and license_cfg.get("enabled", True):
@@ -2373,6 +2514,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             print("Run Setup / Edit Config, then choose Roblox Package Setup.")
             return 2
 
+        # ── Detect packages (silently; go to debug log only) ─────────────────
+        import logging as _logging
+        _start_log = _logging.getLogger("deng.rejoin.start")
+
         hints2, inc_launch, det_en = _package_detection_options(cfg)
         detected_n = len(
             android.discover_roblox_package_candidates(
@@ -2381,45 +2526,52 @@ def cmd_start(args: argparse.Namespace) -> int:
                 detection_enabled=det_en,
             )
         )
+        _start_log.debug("start: detected_packages=%d", detected_n)
         if detected_n == 0:
+            # Still report this to stdout so user knows something is wrong
             print("No Roblox Package Detected")
             print()
-            print("Try:")
-            print("  1. Install Roblox or your Roblox clone APK.")
-            print("  2. Open Roblox once manually.")
-            print("  3. Return to Termux.")
-            print("  4. Run package detection again.")
-            print("  5. Use manual package entry if needed.")
+            print("  1. Install Roblox or your clone APK.")
+            print("  2. Open Roblox once manually, then return to Termux.")
+            print("  3. Run package detection again.")
             print()
 
         if cfg.get("root_mode_enabled"):
             root_info = android.detect_root()
-            if not root_info.available:
-                print("Root Access Not Available")
-                print()
-                print("Try:")
-                print("  su -c id")
-                print()
-                print("If this fails, your cloud phone or root environment may not have root enabled.")
-                print()
+            _start_log.debug("start: root_available=%s tool=%s", root_info.available, root_info.tool)
 
         n = len(entries)
-        G = _ANSI_GREEN if use_color else ""
-        Y = _ANSI_YELLOW if use_color else ""
-        RST = _ANSI_RESET if use_color else ""
+        sup = cfg.get("supervisor") if isinstance(cfg.get("supervisor"), dict) else {}
 
+        # ── Show initial "Preparing" table so user sees activity immediately ──
+        _clear_terminal()
+        print_banner(use_color=use_color)
+        print()
+        init_rows = [
+            (i + 1, e["package"], _account_username_for_table(e), "Preparing")
+            for i, e in enumerate(entries)
+        ]
+        print(build_start_table(init_rows, use_color=use_color))
+        print(flush=True)
+
+        # ── Silent preparation phase (all output → debug log) ────────────────
         packages_sl = [e["package"] for e in entries]
         android.force_stop_packages_except(packages_sl, cfg.get("package_detection_hints"))
         prep_cache: dict[str, str] = {}
-        prep_gfx: dict[str, str] = {}
+        prep_gfx:   dict[str, str] = {}
         opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
         for entry in entries:
             pkg = entry["package"]
             prep_cache[pkg] = android.clear_safe_package_cache(pkg)
             low = bool(opt.get("low_graphics_enabled", True)) and bool(entry.get("low_graphics_enabled", True))
             prep_gfx[pkg] = android.apply_low_graphics_optimization(pkg, enabled=low)
+            _start_log.debug(
+                "start: prep pkg=%s cache=%s gfx=%s",
+                pkg, prep_cache[pkg], prep_gfx[pkg],
+            )
 
         cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
+        _start_log.debug("start: layout note=%s", _layout_note)
 
         now_iso = datetime.now(timezone.utc).isoformat()
         start_times: dict[str, str] = dict(cfg.get("package_start_times") or {})
@@ -2427,47 +2579,44 @@ def cmd_start(args: argparse.Namespace) -> int:
             start_times[entry["package"]] = now_iso
         cfg["package_start_times"] = start_times
 
-        launch_ok: dict[str, bool] = {}
-        launch_err: dict[str, str] = {}
+        # ── Launch each package ───────────────────────────────────────────────
+        launch_ok:  dict[str, bool] = {}
+        launch_err: dict[str, str]  = {}
         for index, entry in enumerate(entries, start=1):
             package = entry["package"]
             package_cfg = dict(cfg)
             package_cfg["roblox_package"] = package
             result = perform_rejoin(package_cfg, reason="start", package_entry=entry)
-            launch_ok[package] = result.success
+            launch_ok[package]  = result.success
             launch_err[package] = result.error or ""
+            _start_log.debug(
+                "start: launch pkg=%s ok=%s err=%s",
+                package, result.success, result.error or "",
+            )
 
-        sup = cfg.get("supervisor") if isinstance(cfg.get("supervisor"), dict) else {}
         grace_wait = int(sup.get("launch_grace_seconds", 15))
         import time as _time
-
         _time.sleep(max(5, grace_wait))
 
+        # ── Build initial status table ────────────────────────────────────────
         initial_status: dict[str, str] = {}
         table_rows: list[tuple] = []
         detail_rows: list[dict[str, str]] = []
         for index, entry in enumerate(entries, start=1):
-            pkg = entry["package"]
+            pkg      = entry["package"]
             username = _account_username_for_table(entry)
-            cstat = prep_cache.get(pkg, "Skipped")
-            gstat = prep_gfx.get(pkg, "Skipped")
-            # Determine whether a private URL was used for this package
+            cstat    = prep_cache.get(pkg, "Skipped")
+            gstat    = prep_gfx.get(pkg, "Skipped")
             _has_url = bool(str(effective_private_server_url(entry, cfg) or "").strip())
             if not launch_ok[pkg]:
                 err = launch_err[pkg]
-                if "not installed" in err.lower():
-                    state = "Failed"
-                    stat_internal = "not installed"
-                else:
-                    state = "Failed"
-                    safe_err = mask_urls_in_text(err) or "Launch failed"
-                    stat_internal = (safe_err[:120] + "...") if len(safe_err) > 123 else safe_err
+                state = "Failed"
+                safe_err = mask_urls_in_text(err) or "Launch failed"
+                stat_internal = (safe_err[:120] + "...") if len(safe_err) > 123 else safe_err
             elif android.is_process_running(pkg):
-                # Process already visible — use URL-aware state
                 state = "Joining" if _has_url else "Lobby"
                 stat_internal = "process running"
             else:
-                # Process not yet detected — still starting up
                 state = "Joining" if _has_url else "Launching"
                 stat_internal = "launch command sent"
             initial_status[pkg] = state
@@ -2476,31 +2625,25 @@ def cmd_start(args: argparse.Namespace) -> int:
                 {"package": pkg, "cache": cstat, "graphics": gstat, "launch_detail": stat_internal}
             )
 
-        any_url = any(bool(effective_private_server_url(e, cfg)) for e in entries) or bool(
-            (str(cfg.get("private_server_url") or "") + str(cfg.get("launch_url") or "")).strip()
-        )
-        mode_disp = "Private URL / Auto" if any_url else _launch_mode_label(str(cfg.get("launch_mode", "app")))
-
-        print(f"{PRODUCT_NAME} v{VERSION}")
-        print()
-        print("Start Summary")
-        print(f"Packages selected: {n}")
-        print(f"Detected packages: {detected_n}")
-        print(f"Launch mode: {mode_disp}")
-        print(f"Supervisor: {'Enabled' if sup.get('enabled', True) else 'Disabled'}")
+        # ── Render post-launch table (logo + table only, no other text) ───────
+        _clear_terminal()
+        print_banner(use_color=use_color)
         print()
         print(build_start_table(table_rows, use_color=use_color))
+        print(flush=True)
+
+        # Log verbose detail to debug log only — never to stdout
         show_detail = (
             bool(getattr(args, "verbose", False))
             or bool(getattr(args, "debug", False))
             or str(cfg.get("log_level", "")).upper() == "DEBUG"
         )
         if show_detail:
-            print()
-            print(build_start_verbose_details(detail_rows, use_color=use_color))
-        print()
-        print(build_final_summary(entries, {entry["package"]: table_rows[i][3] for i, entry in enumerate(entries)}))
-        print()
+            for row in detail_rows:
+                _start_log.debug(
+                    "start detail: pkg=%s cache=%s gfx=%s launch=%s",
+                    row["package"], row["cache"], row["graphics"], row["launch_detail"],
+                )
 
         # ── Webhook ─────────────────────────────────────────────────────────
         snapshot_path = None
@@ -2549,28 +2692,24 @@ def cmd_start(args: argparse.Namespace) -> int:
         if success_count == 0:
             reasons = [v for v in launch_err.values() if v]
             best_reason = reasons[0][:80] if reasons else "all launch attempts failed"
+            _clear_terminal()
+            print_banner(use_color=use_color)
             print()
             print("Launch Failed")
             print()
-            print("The package was selected, but Android did not launch it.")
+            print("  Package was selected but Android did not launch it.")
             print()
-            print("Try:")
-            print("  1. Open Roblox manually once.")
-            print("  2. Check the selected package in Setup / Edit Config.")
-            print("  3. Run status (deng-rejoin-status).")
-            print("  4. Send support the package name and Start table screenshot.")
-            print()
-            print(f"Detail: {best_reason}")
+            print(f"  Detail: {best_reason}")
             return 1
 
-        print(f"{G}Session active — monitoring {n} package(s). Press Ctrl+C to stop.{RST}")
-
-        # Build supervisor; capture its status_map reference for the dashboard closure
+        # ── Supervisor loop — dashboard takes over entirely ───────────────────
+        # From this point on, _live_dashboard() clears the terminal and
+        # redraws logo + table on every refresh.  No other text is printed.
         _supervisor = MultiPackageSupervisor(entries, cfg, initial_status=initial_status)
-        _live_map = _supervisor.status_map  # same dict mutated in-place by workers
+        _live_map = _supervisor.status_map  # dict mutated in-place by workers
 
         def _live_dashboard() -> None:
-            """Clear screen and re-render banner + table with live status values."""
+            """Clear screen and redraw banner + table with live status values."""
             _clear_terminal()
             print_banner(use_color=use_color)
             print()
@@ -2847,7 +2986,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-color", action="store_true", help="disable ANSI banner color")
     parser.add_argument("--layout-reset", dest="layout_reset", action="store_true",
                         help="(doctor) print orientation recovery instructions")
+    parser.add_argument("--layout-test", dest="layout_test", action="store_true",
+                        help="(doctor) compute and validate window block layout")
+    parser.add_argument("--root-state", dest="root_state", action="store_true",
+                        help="(doctor) show process/task/window evidence for each package")
     ns = parser.parse_args(argv)
+
+    # Allow positional subcommands: deng-rejoin doctor layout / doctor root-state
+    _extra = list(getattr(ns, "command_extra", []) or [])
+    if not _extra and ns.command == "doctor" and len(argv) >= 2:
+        _sub = argv[1].lower().replace("-", "_")
+        if _sub == "layout":
+            ns.layout_test = True
+        elif _sub in ("root_state", "root-state"):
+            ns.root_state = True
 
     flag_to_command = {
         "setup": ns.setup,

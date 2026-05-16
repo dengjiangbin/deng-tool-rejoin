@@ -450,7 +450,153 @@ def launch_url_generic(url: str, launch_mode: str) -> CommandResult:
 def is_process_running(package: str) -> bool:
     package = validate_package_name(package)
     result = run_command(["pidof", package], timeout=PROCESS_TIMEOUT_SECONDS)
-    return result.ok and bool(result.stdout.strip())
+    if result.ok and bool(result.stdout.strip()):
+        return True
+    # Fallback: check via ps (some Android builds lack pidof)
+    ps_result = run_command(["ps", "-A"], timeout=PROCESS_TIMEOUT_SECONDS)
+    if ps_result.ok:
+        return any(package in line for line in ps_result.stdout.splitlines())
+    return False
+
+
+def is_process_running_root(package: str) -> bool:
+    """Check process via root su for stronger evidence when standard checks fail.
+
+    Uses su pidof and su ps as fallbacks.  Never raises.
+    """
+    package = validate_package_name(package)
+    root_info = detect_root()
+    if not root_info.available or not root_info.tool:
+        return is_process_running(package)
+    try:
+        res = run_root_command(["pidof", package], root_tool=root_info.tool, timeout=5)
+        if res.ok and bool(res.stdout.strip()):
+            return True
+        ps_res = run_root_command(
+            ["sh", "-c", f"ps -A 2>/dev/null | grep -F '{package}'"],
+            root_tool=root_info.tool,
+            timeout=6,
+        )
+        if ps_res.ok and package in ps_res.stdout:
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return is_process_running(package)
+
+
+def is_package_task_visible(package: str) -> bool:
+    """Check if a task exists for this package in Android's activity manager.
+
+    Works for background multi-window packages that are NOT the foreground.
+    Returns True if a task record is found for the package.  Never raises.
+    """
+    package = validate_package_name(package)
+    try:
+        result = run_command(["dumpsys", "activity", "activities"], timeout=6)
+        if result.ok:
+            for line in result.stdout.splitlines():
+                if package in line and any(
+                    marker in line
+                    for marker in ("TaskRecord", "ActivityRecord", "task=", "topActivity", "mResumedActivity")
+                ):
+                    return True
+    except Exception:  # noqa: BLE001
+        pass
+    # Root fallback: grep for the package name in activity dump
+    try:
+        root_info = detect_root()
+        if root_info.available and root_info.tool:
+            res = run_root_command(
+                ["sh", "-c", f"dumpsys activity activities 2>/dev/null | grep -c '{package}'"],
+                root_tool=root_info.tool,
+                timeout=6,
+            )
+            if res.ok:
+                try:
+                    return int(res.stdout.strip()) > 0
+                except ValueError:
+                    pass
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
+def is_package_window_visible(package: str) -> bool:
+    """Check if a window exists for this package in Android's window manager.
+
+    Handles freeform multi-window where the package may not be foreground.
+    Returns True if any window entry is found for the package.  Never raises.
+    """
+    package = validate_package_name(package)
+    try:
+        result = run_command(["dumpsys", "window", "windows"], timeout=6)
+        if result.ok:
+            text = result.stdout
+            for line in text.splitlines():
+                if package in line and any(
+                    marker in line
+                    for marker in ("Window{", "mCurrentFocus", "mFocusedApp", "package=", "mHasSurface=true")
+                ):
+                    return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
+def get_package_alive_evidence(package: str) -> dict[str, bool]:
+    """Comprehensive multi-source check for package aliveness.
+
+    Returns a dict with evidence from multiple sources:
+        running: True if pidof/ps shows a process
+        task:    True if dumpsys activity shows a task
+        window:  True if dumpsys window shows a window entry
+        root_running: True if root pidof/ps confirms the process
+        alive:   True if ANY of the above is True
+
+    Never raises; always returns a valid dict.
+    """
+    _dead: dict[str, bool] = {
+        "running": False, "task": False, "window": False, "root_running": False, "alive": False,
+    }
+    package_str = package
+    try:
+        package_str = validate_package_name(package)
+    except Exception:  # noqa: BLE001
+        return _dead
+
+    running = False
+    try:
+        running = is_process_running(package_str)
+    except Exception:  # noqa: BLE001
+        pass
+
+    task = False
+    try:
+        task = is_package_task_visible(package_str)
+    except Exception:  # noqa: BLE001
+        pass
+
+    window = False
+    try:
+        window = is_package_window_visible(package_str)
+    except Exception:  # noqa: BLE001
+        pass
+
+    root_running = False
+    if not running:
+        try:
+            root_running = is_process_running_root(package_str)
+        except Exception:  # noqa: BLE001
+            pass
+
+    alive = running or root_running or task or window
+    return {
+        "running":      running,
+        "task":         task,
+        "window":       window,
+        "root_running": root_running,
+        "alive":        alive,
+    }
 
 
 def current_foreground_package() -> str | None:

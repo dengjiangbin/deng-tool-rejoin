@@ -1,23 +1,25 @@
-"""Kaeru-style window layout calculation and safe App Cloner XML updates.
+"""Landscape-block window layout and safe App Cloner XML updates.
 
 Layout model
 ────────────
  ┌──────────────────────────────────────────────────────────────────┐
  │  Left panel (35%)                 │  Right pane (65%)            │
  │  DENG Tool / Termux status        │  Roblox clone windows        │
- │  logo, package table, logs        │  (floating, tiled/cascaded)  │
+ │  logo, package table, logs        │  (freeform, landscape-shaped)│
  └──────────────────────────────────────────────────────────────────┘
 
-Layout rules by package count (right pane only):
-  1  → full right pane (single large window)
-  2  → landscape: side-by-side  /  portrait: stacked
-  3  → 2+1  (two on top ~55%, one full-width on bottom ~45%)
-  4  → 2×2 grid
-  5–6 → 2-column compact (up to 3 rows)
-  7+  → 3-column Kaeru-style with cascaded title-bar offsets
+Landscape-block rules (all window counts):
+  - Every Roblox window MUST be landscape-shaped: width >= height * 1.25.
+  - No two windows may touch or overlap; minimum gap is GAP_PX on each side.
+  - Windows are stacked vertically inside the right pane at full pane width
+    and 16:9 height.  When they do not fit at 16:9, height is compressed
+    until either landscape is impossible or 2-column layout is needed.
+  - 2-column layout is used only when single-column compression would make
+    windows too short to remain landscape.
+  - Outer margin separates windows from screen edges.
 
 Failure handling: every write path is wrapped in try/except.
-No crash, no block to Start.  Details in debug logs only.
+No crash, no block to Start.  All layout details go to debug log.
 """
 
 from __future__ import annotations
@@ -37,19 +39,17 @@ from . import android
 _log = logging.getLogger("deng.rejoin.window_layout")
 
 # ── Safety: packages that must NEVER be resized or repositioned ───────────────
-# Layout only targets Roblox-like packages.  Any system, launcher, or shell
-# package that ends up in the list must be silently skipped.
 _LAYOUT_EXCLUDE_PREFIXES: tuple[str, ...] = (
-    "com.termux",            # Termux shell — must stay upright and unresized
-    "com.android.",          # Android system apps
-    "android",               # core Android
-    "com.google.",           # Google services / Play
-    "com.samsung.",          # Samsung system apps
-    "com.huawei.",           # Huawei system apps
-    "com.miui.",             # MIUI system apps
-    "com.oneplus.",          # OnePlus system apps
-    "com.oppo.",             # OPPO system apps
-    "com.vivo.",             # Vivo system apps
+    "com.termux",
+    "com.android.",
+    "android",
+    "com.google.",
+    "com.samsung.",
+    "com.huawei.",
+    "com.miui.",
+    "com.oneplus.",
+    "com.oppo.",
+    "com.vivo.",
 )
 
 _LAYOUT_EXCLUDE_EXACT: frozenset[str] = frozenset({
@@ -66,7 +66,6 @@ _LAYOUT_EXCLUDE_EXACT: frozenset[str] = frozenset({
 
 
 def _is_layout_excluded(package: str) -> bool:
-    """Return True if this package must NOT be targeted by the layout writer."""
     pkg = package.strip().lower()
     if pkg in _LAYOUT_EXCLUDE_EXACT:
         return True
@@ -76,23 +75,35 @@ def _is_layout_excluded(package: str) -> bool:
 # ── Layout constants ─────────────────────────────────────────────────────────
 
 APP_CLONER_KEYS = {
-    "app_cloner_current_window_left": "left",
-    "app_cloner_current_window_top": "top",
-    "app_cloner_current_window_right": "right",
+    "app_cloner_current_window_left":   "left",
+    "app_cloner_current_window_top":    "top",
+    "app_cloner_current_window_right":  "right",
     "app_cloner_current_window_bottom": "bottom",
 }
 
 # Left side reserved for DENG Tool / Termux status panel.
-TERMUX_LOG_FRACTION = 0.35          # 35 % left → 65 % right
+TERMUX_LOG_FRACTION = 0.35          # 35% left → 65% right
 RIGHT_PANE_FRACTION  = 1.0 - TERMUX_LOG_FRACTION
 
-# Estimated title bar height (dp-scale pixels) for each App Cloner window.
-# Used by the 7+ cascade algorithm to keep each title bar clickable.
-KAERU_TITLE_BAR_H: int = 48
+# Landscape aspect ratio: height = width * LANDSCAPE_H_RATIO
+# 16:9 → ratio = 9/16 ≈ 0.5625; we use 9:16 as denominator
+LANDSCAPE_H_RATIO: float = 9.0 / 16.0   # window height = width × this
 
-# Minimum dimensions for any individual window (safety floor).
-_MIN_WIN_W: int = 180
-_MIN_WIN_H: int = 180
+# Minimum gap between any two windows (pixels).
+GAP_PX: int = 20
+
+# Outer margin between screen edge / pane boundary and nearest window.
+OUTER_MARGIN: int = 16
+
+# Minimum window dimension (safety floor — below this layout is abandoned).
+_MIN_WIN_W: int = 160
+_MIN_WIN_H: int = 90
+
+# Landscape threshold: width must be at least this times height.
+LANDSCAPE_MIN_RATIO: float = 1.25
+
+# Legacy cascade constant (kept for backward-compat test references only).
+KAERU_TITLE_BAR_H: int = 48
 
 
 # ── Data classes ─────────────────────────────────────────────────────────────
@@ -112,6 +123,14 @@ class WindowRect:
     right:   int
     bottom:  int
 
+    @property
+    def win_w(self) -> int:
+        return self.right - self.left
+
+    @property
+    def win_h(self) -> int:
+        return self.bottom - self.top
+
     def as_dict(self) -> dict[str, int | str]:
         return {
             "package": self.package,
@@ -122,11 +141,13 @@ class WindowRect:
         }
 
     def preview_line(self, index: int) -> str:
-        w = self.right  - self.left
-        h = self.bottom - self.top
+        w = self.win_w
+        h = self.win_h
+        ratio = f"{w/h:.2f}" if h > 0 else "∞"
         return (
             f"  {index}. {self.package[:36]:<36} "
-            f"l={self.left} t={self.top} r={self.right} b={self.bottom}  ({w}×{h})"
+            f"l={self.left} t={self.top} r={self.right} b={self.bottom}"
+            f"  ({w}×{h}, ratio={ratio})"
         )
 
 
@@ -157,154 +178,257 @@ def detect_display_info() -> DisplayInfo:
     return DisplayInfo(width=width, height=height, density=density or 420)
 
 
-# ── Legacy grid layout (kept for backward compatibility) ──────────────────────
+# ── Validation helpers ────────────────────────────────────────────────────────
 
-def calculate_grid_layout(
+def validate_layout_rects(
+    rects: list[WindowRect],
+    pane_x0: int,
+    pane_y0: int,
+    pane_x1: int,
+    pane_y1: int,
+) -> list[str]:
+    """Validate a list of layout rectangles.
+
+    Returns a list of violation strings (empty = all OK).
+    Checks: landscape, no-overlap, no-touch, inside pane, unique bounds.
+    """
+    errors: list[str] = []
+    for i, r in enumerate(rects):
+        w, h = r.win_w, r.win_h
+        if w < _MIN_WIN_W or h < _MIN_WIN_H:
+            errors.append(f"rect[{i}] {r.package}: too small ({w}×{h})")
+        if w < h * LANDSCAPE_MIN_RATIO:
+            errors.append(
+                f"rect[{i}] {r.package}: NOT landscape ({w}×{h}, need w>={h*LANDSCAPE_MIN_RATIO:.0f})"
+            )
+        if r.left < pane_x0 or r.right > pane_x1:
+            errors.append(f"rect[{i}] {r.package}: x out of pane ({r.left}-{r.right} vs {pane_x0}-{pane_x1})")
+        if r.top < pane_y0 or r.bottom > pane_y1:
+            errors.append(f"rect[{i}] {r.package}: y out of pane ({r.top}-{r.bottom} vs {pane_y0}-{pane_y1})")
+
+    # Pairwise: no overlap, no touch
+    for i in range(len(rects)):
+        for j in range(i + 1, len(rects)):
+            a, b = rects[i], rects[j]
+            # Touch check: requires gap >= 1 between any two windows
+            if not (a.right + GAP_PX <= b.left or b.right + GAP_PX <= a.left or
+                    a.bottom + GAP_PX <= b.top or b.bottom + GAP_PX <= a.top):
+                errors.append(
+                    f"rect[{i}] and rect[{j}] overlap or touch too closely "
+                    f"(gap required={GAP_PX}px)"
+                )
+
+    seen: set[tuple[int, int, int, int]] = set()
+    for i, r in enumerate(rects):
+        key = (r.left, r.top, r.right, r.bottom)
+        if key in seen:
+            errors.append(f"rect[{i}] {r.package}: duplicate bounds")
+        seen.add(key)
+
+    return errors
+
+
+# ── Core landscape-block layout engine ───────────────────────────────────────
+
+def calculate_landscape_blocks(
     packages: Iterable[str],
-    width:    int,
-    height:   int,
-    gap:      int = 8,
+    display_w: int,
+    display_h: int,
+    *,
+    gap: int = GAP_PX,
+    outer: int = OUTER_MARGIN,
+    left_fraction: float = TERMUX_LOG_FRACTION,
 ) -> list[WindowRect]:
-    """Uniform grid layout (no left reservation). Used by legacy callers."""
-    return calculate_kaeru_layout(packages, width, height, gap)
+    """Calculate freeform-window landscape blocks for Roblox packages.
+
+    Algorithm:
+    1. Left panel (35%) reserved for DENG/Termux — never touched.
+    2. Right pane = remaining 65% minus outer margins.
+    3. Target window aspect ratio: 16:9 (width:height).
+    4. PHASE 1: All windows at full pane width, 16:9 height, stacked vertically.
+       If total height fits → center pack vertically with gap between windows.
+    5. PHASE 2: If single column is too tall, compress window height until
+       the stack fits. Continue only while the window remains landscape
+       (width >= height * LANDSCAPE_MIN_RATIO).
+    6. PHASE 3: If even compressed single-column windows would be too short
+       to remain landscape, use 2 columns with 16:9 windows.
+    7. PHASE 4: 3 columns (for very large N).
+    8. Validate all results; fall back to safer layout if validation fails.
+
+    All coordinates are absolute screen coordinates (ready for App Cloner XML).
+    """
+    pkgs = [p for p in packages]
+    n = len(pkgs)
+    if n == 0:
+        return []
+
+    # Screen bounds
+    W = max(1, int(display_w))
+    H = max(1, int(display_h))
+    g = max(1, int(gap))
+    om = max(0, int(outer))
+
+    # Left panel reservation
+    left_end = round(W * max(0.1, min(0.9, float(left_fraction))))
+
+    # Right pane absolute bounds (with outer margins)
+    px0 = left_end + om       # left edge of pane
+    py0 = om                  # top edge of pane
+    px1 = W - om              # right edge of pane
+    py1 = H - om              # bottom edge of pane
+    pane_w = max(_MIN_WIN_W, px1 - px0)
+    pane_h = max(_MIN_WIN_H, py1 - py0)
+
+    def _make_rects_single_col(win_h: int) -> list[WindowRect]:
+        """Stack N windows in one column with the given height."""
+        total_h = n * win_h + (n - 1) * g
+        y_start = py0 + max(0, (pane_h - total_h) // 2)
+        result = []
+        for i, pkg in enumerate(pkgs):
+            y = y_start + i * (win_h + g)
+            result.append(WindowRect(pkg, px0, y, px0 + pane_w, y + win_h))
+        return result
+
+    def _make_rects_grid(cols: int) -> list[WindowRect]:
+        """Lay out in a grid of `cols` columns, 16:9 windows."""
+        cell_w = (pane_w - g * (cols - 1)) // cols
+        win_h_target = round(cell_w * LANDSCAPE_H_RATIO)
+        rows = math.ceil(n / cols)
+        total_h = rows * win_h_target + (rows - 1) * g
+        y_start = py0 + max(0, (pane_h - total_h) // 2)
+        result = []
+        for i, pkg in enumerate(pkgs):
+            row = i // cols
+            col = i % cols
+            x = px0 + col * (cell_w + g)
+            y = y_start + row * (win_h_target + g)
+            result.append(WindowRect(pkg, x, y, x + cell_w, y + win_h_target))
+        return result
+
+    # ── PHASE 1: ideal 16:9 single column ────────────────────────────────
+    ideal_win_h = round(pane_w * LANDSCAPE_H_RATIO)
+    total_ideal = n * ideal_win_h + (n - 1) * g
+
+    if total_ideal <= pane_h:
+        rects = _make_rects_single_col(ideal_win_h)
+        errors = validate_layout_rects(rects, px0, py0, px1, py1)
+        if not errors:
+            _log.debug("landscape_blocks: phase1 (ideal 16:9 single-col), n=%d", n)
+            return rects
+        _log.debug("landscape_blocks: phase1 validation failed: %s", errors)
+
+    # ── PHASE 2: compressed single column ────────────────────────────────
+    # Maximum compression: make windows shorter until they still fit.
+    # Require: win_w >= win_h * LANDSCAPE_MIN_RATIO → min win_h = pane_w / LANDSCAPE_MIN_RATIO
+    min_landscape_h = max(_MIN_WIN_H, int(pane_w / LANDSCAPE_MIN_RATIO))
+    compressed_win_h = (pane_h - (n - 1) * g) // n if n > 0 else pane_h
+
+    if compressed_win_h >= min_landscape_h:
+        rects = _make_rects_single_col(compressed_win_h)
+        errors = validate_layout_rects(rects, px0, py0, px1, py1)
+        if not errors:
+            _log.debug("landscape_blocks: phase2 (compressed single-col h=%d), n=%d", compressed_win_h, n)
+            return rects
+        _log.debug("landscape_blocks: phase2 validation failed: %s", errors)
+
+    # ── PHASE 3: 2-column grid ────────────────────────────────────────────
+    for cols in (2, 3):
+        rects = _make_rects_grid(cols)
+        if not rects:
+            continue
+        errors = validate_layout_rects(rects, px0, py0, px1, py1)
+        if not errors:
+            _log.debug("landscape_blocks: phase3 (%d-col grid), n=%d", cols, n)
+            return rects
+        _log.debug("landscape_blocks: phase3 %d-col validation failed: %s", cols, errors)
+
+    # ── PHASE 4: emergency fallback — just spread evenly ─────────────────
+    # No further validation — at least they're unique and inside pane.
+    _log.warning("landscape_blocks: all phases failed, using emergency spread for n=%d", n)
+    rows = math.ceil(math.sqrt(n))
+    cols = math.ceil(n / rows)
+    cell_w = max(_MIN_WIN_W, (pane_w - g * (cols - 1)) // cols)
+    cell_h = max(_MIN_WIN_H, (pane_h - g * (rows - 1)) // rows)
+    win_h = min(cell_h, round(cell_w * LANDSCAPE_H_RATIO))
+    result = []
+    for i, pkg in enumerate(pkgs):
+        row = i // cols
+        col = i % cols
+        x = px0 + col * (cell_w + g)
+        y = py0 + row * (cell_h + g)
+        result.append(WindowRect(pkg, x, y, x + cell_w, y + win_h))
+    return result
 
 
-# ── Kaeru-style layout ────────────────────────────────────────────────────────
+# ── Legacy / compat wrappers ──────────────────────────────────────────────────
 
 def calculate_kaeru_layout(
     packages:     Iterable[str],
     right_width:  int,
     total_height: int,
-    gap:          int = 8,
+    gap:          int = GAP_PX,
 ) -> list[WindowRect]:
-    """Kaeru-style layout for Roblox windows in the right pane.
+    """Backward-compatible wrapper.  Delegates to calculate_landscape_blocks.
 
-    All coordinates are relative to the top-left of the right pane
-    (caller must add the left-pane offset before passing to App Cloner XML).
+    Coordinates are relative to the top-left of the right pane
+    (caller must add the left-pane offset to X if needed).
 
-    Title bar visibility rules:
-    - 1–6 packages: each window gets its own non-overlapping cell.
-    - 7+ packages:  3-column grid, each column cascaded by KAERU_TITLE_BAR_H
-      vertically so every title bar remains above the content of windows behind it.
+    Note: this function no longer applies the old kaeru cascade algorithm.
+    It now produces proper landscape windows using the new block engine.
+    The `right_width` and `total_height` args are used as the full canvas
+    so the block engine can compute its own pane from them using fraction=0.
     """
     pkgs = list(packages)
-    n = len(pkgs)
-    if n == 0:
+    if not pkgs:
         return []
-
-    W   = max(_MIN_WIN_W, int(right_width))
-    H   = max(_MIN_WIN_H, int(total_height))
-    g   = max(0, int(gap))
-    TBH = KAERU_TITLE_BAR_H
-
-    raw: list[tuple[int, int, int, int]] = []
-
-    # ── 1 package: full right pane ────────────────────────────────────────
-    if n == 1:
-        raw = [(0, 0, W, H)]
-
-    # ── 2 packages: always side-by-side (wide-first policy) ─────────────
-    # For multiple packages the user always wants a wide, non-overlapping layout.
-    # Landscape/portrait is irrelevant here — we prefer columns so both windows
-    # are visible simultaneously without scrolling.
-    elif n == 2:
-        hw = max(_MIN_WIN_W, (W - g) // 2)
-        raw = [(0, 0, hw, H), (hw + g, 0, W, H)]
-
-    # ── 3 packages: 2+1 (two on top ~55 %, one full-width on bottom) ─────
-    elif n == 3:
-        top_h  = max(_MIN_WIN_H, int(H * 0.55))
-        bot_y  = top_h + g
-        hw     = max(_MIN_WIN_W, (W - g) // 2)
-        raw    = [
-            (0,      0,     hw, top_h),
-            (hw + g, 0,      W, top_h),
-            (0,      bot_y,  W, H),
-        ]
-
-    # ── 4 packages: 2×2 grid ──────────────────────────────────────────────
-    elif n == 4:
-        hw = max(_MIN_WIN_W, (W - g) // 2)
-        hh = max(_MIN_WIN_H, (H - g) // 2)
-        raw = [
-            (0,      0,      hw, hh),
-            (hw + g, 0,       W, hh),
-            (0,      hh + g, hw,  H),
-            (hw + g, hh + g,  W,  H),
-        ]
-
-    # ── 5–6 packages: 2-column compact (≤3 rows) ─────────────────────────
-    elif n <= 6:
-        cols = 2
-        rows = math.ceil(n / cols)
-        cw   = max(_MIN_WIN_W, (W - g * (cols - 1)) // cols)
-        ch   = max(_MIN_WIN_H, (H - g * (rows - 1)) // rows)
-        for i in range(n):
-            row, col = divmod(i, cols)
-            x = col * (cw + g)
-            y = row * (ch + g)
-            raw.append((x, y, min(x + cw, W), min(y + ch, H)))
-
-    # ── 7+ packages: 3-column Kaeru cascade ──────────────────────────────
-    else:
-        cols        = 3
-        rows        = math.ceil(n / cols)
-        cw          = max(_MIN_WIN_W, (W - g * (cols - 1)) // cols)
-        # Cascade: each column in a row is offset down by TBH so its
-        # title bar sits below the content area of the previous column.
-        # Total cascade consumed per row = TBH * (cols - 1).
-        cascade_per_col = TBH
-        cascade_total   = cascade_per_col * (cols - 1)
-        available_h     = max(_MIN_WIN_H * rows, H - cascade_total)
-        ch              = max(_MIN_WIN_H, (available_h - g * (rows - 1)) // rows)
-
-        for i in range(n):
-            row, col = divmod(i, cols)
-            x        = col * (cw + g)
-            y_base   = row * (ch + g)
-            y        = y_base + col * cascade_per_col
-            raw.append((
-                max(0, x),
-                max(0, y),
-                min(x + cw, W),
-                min(y + ch, H),
-            ))
-
-    return [
-        WindowRect(pkg, l, t, r, b)
-        for pkg, (l, t, r, b) in zip(pkgs, raw)
-    ]
+    # Treat right_width × total_height as the full right-pane canvas
+    # (no further left reservation — caller already passed right-pane dims).
+    rects = calculate_landscape_blocks(
+        pkgs,
+        right_width,
+        total_height,
+        gap=gap,
+        outer=max(0, gap // 2),
+        left_fraction=0.0,   # no additional left reservation
+    )
+    return rects
 
 
-# ── Split layout (left pane reserved for Termux) ──────────────────────────────
+def calculate_grid_layout(
+    packages: Iterable[str],
+    width:    int,
+    height:   int,
+    gap:      int = GAP_PX,
+) -> list[WindowRect]:
+    """Uniform grid layout.  Delegates to calculate_kaeru_layout for compat."""
+    return calculate_kaeru_layout(packages, width, height, gap)
+
+
+# ── Primary split layout (used by Start) ─────────────────────────────────────
 
 def calculate_split_layout(
-    packages:           Iterable[str],
-    width:              int,
-    height:             int,
-    gap:                int = 8,
+    packages:             Iterable[str],
+    width:                int,
+    height:               int,
+    gap:                  int = GAP_PX,
     *,
-    termux_log_fraction: float = TERMUX_LOG_FRACTION,
+    termux_log_fraction:  float = TERMUX_LOG_FRACTION,
 ) -> list[WindowRect]:
-    """Reserve the left ``termux_log_fraction`` for DENG/Termux; use Kaeru layout on the right.
+    """Reserve the left panel for DENG/Termux; place landscape blocks on the right.
 
-    Returns absolute screen coordinates (ready for App Cloner XML).
+    Returns absolute screen coordinates ready for App Cloner XML.
     """
     package_list = list(packages)
     if not package_list:
         return []
-    width  = max(1, int(width))
-    height = max(1, int(height))
-    frac   = max(0.1, min(0.9, float(termux_log_fraction)))
-    left_offset     = int(width * frac)
-    available_width = max(_MIN_WIN_W, width - left_offset)
-
-    rects = calculate_kaeru_layout(package_list, available_width, height, gap)
-    # Shift every rect into the right pane (add left_offset to X coords)
-    return [
-        WindowRect(r.package, r.left + left_offset, r.top, r.right + left_offset, r.bottom)
-        for r in rects
-    ]
+    return calculate_landscape_blocks(
+        package_list,
+        display_w=max(1, int(width)),
+        display_h=max(1, int(height)),
+        gap=gap,
+        outer=OUTER_MARGIN,
+        left_fraction=termux_log_fraction,
+    )
 
 
 # ── App Cloner XML writers ────────────────────────────────────────────────────
@@ -316,7 +440,6 @@ def app_cloner_prefs_path(package: str) -> Path:
 def update_app_cloner_xml(package: str, rect: WindowRect) -> tuple[bool, str]:
     """Write window position to App Cloner shared_prefs XML (direct file access).
 
-    Works when Termux has read/write access to the file (same UID or permissive).
     Returns (ok, message). Never raises.
     """
     try:
@@ -357,14 +480,9 @@ def update_app_cloner_xml_root(
     root_tool:  str,
     timeout:    int = 10,
 ) -> tuple[bool, str]:
-    """Write App Cloner window position via root (for protected /data/data paths).
-
-    Uses ``base64`` encoding to safely transfer the XML over the shell pipe
-    without any quoting issues. Returns (ok, message). Never raises.
-    """
+    """Write App Cloner window position via root. Returns (ok, message). Never raises."""
     try:
         path_str = f"/data/data/{package}/shared_prefs/pkg_preferences.xml"
-        # Read current XML via root
         read_res = android.run_root_command(
             ["sh", "-c", f"test -f '{path_str}' && cat '{path_str}' 2>/dev/null"],
             root_tool=root_tool, timeout=timeout,
@@ -397,8 +515,6 @@ def update_app_cloner_xml_root(
         new_xml  = "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n"
         new_xml += ET.tostring(root_el, encoding="unicode")
         b64_data = base64.b64encode(new_xml.encode("utf-8")).decode("ascii")
-
-        # Write via root: decode base64 and redirect to the target path.
         write_cmd = f"echo '{b64_data}' | base64 -d > '{path_str}'"
         write_res = android.run_root_command(
             ["sh", "-c", write_cmd], root_tool=root_tool, timeout=timeout,
@@ -413,27 +529,18 @@ def update_app_cloner_xml_root(
         return False, f"Root XML writer error: {exc}"
 
 
-# ── High-level apply function ─────────────────────────────────────────────────
+# ── Apply layout (high-level) ─────────────────────────────────────────────────
 
 def apply_layout_to_packages(
     packages:         Iterable[str],
     *,
-    gap:              int  = 8,
+    gap:              int  = GAP_PX,
     write_xml:        bool = False,
-    use_split_layout: bool = False,
+    use_split_layout: bool = False,  # kept for compat; split is always used
 ) -> tuple[list[str], list[dict[str, int | str]]]:
-    """Calculate Kaeru layout and optionally write App Cloner XML positions.
+    """Calculate landscape block layout and optionally write App Cloner XML.
 
-    When ``use_split_layout`` is True (multiple packages), the left
-    ``TERMUX_LOG_FRACTION`` of the screen is reserved for the DENG/Termux
-    status panel. All Roblox windows are placed in the right pane using the
-    Kaeru-style layout appropriate for the package count.
-
-    Every write path is wrapped in try/except — failures are logged at DEBUG
-    level and reported in the returned messages, but never crash Start.
-
-    Returns:
-        (messages, preview_list) — human-readable status lines, rect dicts.
+    Returns (messages, preview_list).
     """
     try:
         display = detect_display_info()
@@ -442,20 +549,9 @@ def apply_layout_to_packages(
 
     package_list = [p for p in packages if not _is_layout_excluded(p)]
     if not package_list:
-        return ["No Roblox packages to lay out (all were excluded or list was empty)."], []
+        return ["No Roblox packages to lay out (all excluded or empty)."], []
 
-    # Choose layout
-    if use_split_layout and len(package_list) > 1:
-        rects = calculate_split_layout(package_list, display.width, display.height, gap)
-    else:
-        # Single package or explicit full-screen: Kaeru in the right 65 %
-        left_offset = int(display.width * TERMUX_LOG_FRACTION) if len(package_list) == 1 else 0
-        available_w = max(_MIN_WIN_W, display.width - left_offset)
-        raw_rects   = calculate_kaeru_layout(package_list, available_w, display.height, gap)
-        rects       = [
-            WindowRect(r.package, r.left + left_offset, r.top, r.right + left_offset, r.bottom)
-            for r in raw_rects
-        ]
+    rects = calculate_split_layout(package_list, display.width, display.height, gap)
 
     preview  = [rect.as_dict() for rect in rects]
     messages = [rect.preview_line(i) for i, rect in enumerate(rects, 1)]
@@ -463,7 +559,6 @@ def apply_layout_to_packages(
     if not write_xml:
         return messages, preview
 
-    # ── Write App Cloner XML for each package ─────────────────────────────
     root = android.detect_root()
     root_tool: str | None = root.tool if root.available else None
 
@@ -486,9 +581,8 @@ def apply_layout_to_packages(
 def build_layout_preview(
     packages: Iterable[str],
     display:  DisplayInfo | None = None,
-    gap:      int = 8,
+    gap:      int = GAP_PX,
 ) -> list[str]:
-    """Return human-readable preview lines for the Kaeru layout (no write)."""
     disp  = display or detect_display_info()
     rects = calculate_split_layout(list(packages), disp.width, disp.height, gap)
     return [rect.preview_line(i) for i, rect in enumerate(rects, 1)]
@@ -497,26 +591,27 @@ def build_layout_preview(
 def verify_split_layout(
     packages: Iterable[str],
     display:  DisplayInfo | None = None,
-    gap:      int = 8,
+    gap:      int = GAP_PX,
 ) -> list[str]:
-    """Return human-readable verification lines for the split layout."""
     disp         = display or detect_display_info()
     package_list = list(packages)
     left_end     = int(disp.width * TERMUX_LOG_FRACTION)
     lines        = [
         f"Display: {disp.width}×{disp.height}  density={disp.density}",
-        f"Left pane (Termux log): 0–{left_end}px ({int(TERMUX_LOG_FRACTION * 100)}% of width)",
-        f"Right pane (Roblox):   {left_end}–{disp.width}px ({int(RIGHT_PANE_FRACTION * 100)}% of width)",
+        f"Left pane (Termux): 0–{left_end}px ({int(TERMUX_LOG_FRACTION*100)}%)",
+        f"Right pane (Roblox): {left_end}–{disp.width}px ({int(RIGHT_PANE_FRACTION*100)}%)",
     ]
-    if len(package_list) <= 1:
-        lines.append("Split layout: single package — large right-pane window")
-    else:
-        rects = calculate_split_layout(package_list, disp.width, disp.height, gap)
-        for i, rect in enumerate(rects, 1):
-            w = rect.right  - rect.left
-            h = rect.bottom - rect.top
-            lines.append(
-                f"  {i}. {rect.package}  "
-                f"l={rect.left} t={rect.top} r={rect.right} b={rect.bottom}  ({w}×{h})"
-            )
+    rects = calculate_split_layout(package_list, disp.width, disp.height, gap)
+    errors = validate_layout_rects(
+        rects,
+        left_end + OUTER_MARGIN,
+        OUTER_MARGIN,
+        disp.width - OUTER_MARGIN,
+        disp.height - OUTER_MARGIN,
+    )
+    if errors:
+        lines.append("VALIDATION FAILURES:")
+        lines.extend(f"  ! {e}" for e in errors)
+    for i, rect in enumerate(rects, 1):
+        lines.append(rect.preview_line(i))
     return lines
