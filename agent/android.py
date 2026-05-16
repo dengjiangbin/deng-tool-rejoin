@@ -448,15 +448,98 @@ def launch_url_generic(url: str, launch_mode: str) -> CommandResult:
 
 
 def is_process_running(package: str) -> bool:
+    """Detect whether *any* process matching ``package`` is alive.
+
+    App Cloner clones run as their *clone* package name (e.g. ``com.x.clone1``),
+    NOT ``com.roblox.client``.  Linux's ``/proc/<pid>/comm`` is truncated to
+    15 chars (TASK_COMM_LEN), so long clone package names defeat plain
+    ``pidof``.  We try a layered set of checks:
+
+      1. ``pidof <package>`` (works only for short names ≤ 15 chars).
+      2. ``pgrep -f <package>`` (matches full cmdline; usually root-free).
+      3. ``ps -A`` with substring match — but ``ps`` shows truncated comm too,
+         so this is only useful for short names.
+      4. Fallback to scanning ``/proc/*/cmdline`` directly (longer names).
+
+    Never raises.  Returns True when ANY method finds a hit.
+    """
     package = validate_package_name(package)
-    result = run_command(["pidof", package], timeout=PROCESS_TIMEOUT_SECONDS)
-    if result.ok and bool(result.stdout.strip()):
-        return True
-    # Fallback: check via ps (some Android builds lack pidof)
-    ps_result = run_command(["ps", "-A"], timeout=PROCESS_TIMEOUT_SECONDS)
-    if ps_result.ok:
-        return any(package in line for line in ps_result.stdout.splitlines())
+
+    # 1. pidof — fast path for short package names.
+    try:
+        result = run_command(["pidof", package], timeout=PROCESS_TIMEOUT_SECONDS)
+        if result.ok and bool(result.stdout.strip()):
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 2. pgrep -f — matches full /proc/<pid>/cmdline, so the truncation
+    # limitation of comm does not apply.  Available on most Termux setups.
+    try:
+        result = run_command(
+            ["pgrep", "-f", package], timeout=PROCESS_TIMEOUT_SECONDS,
+        )
+        if result.ok and bool(result.stdout.strip()):
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 3. ps -A with substring match (works for short names).
+    try:
+        ps_result = run_command(["ps", "-A"], timeout=PROCESS_TIMEOUT_SECONDS)
+        if ps_result.ok and any(
+            package in line for line in ps_result.stdout.splitlines()
+        ):
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 4. Direct /proc cmdline scan — handles long clone package names where
+    # both pidof and ps -A see a truncated comm.  Single shell pipeline.
+    try:
+        scan = run_command(
+            ["sh", "-c",
+             "for p in /proc/[0-9]*/cmdline; do "
+             "  tr '\\0' ' ' < \"$p\" 2>/dev/null | "
+             f" grep -F -q '{package}' && echo hit && exit 0; "
+             "done; exit 1"],
+            timeout=PROCESS_TIMEOUT_SECONDS,
+        )
+        if scan.ok and "hit" in scan.stdout:
+            return True
+    except Exception:  # noqa: BLE001
+        pass
     return False
+
+
+def is_process_running_any(package: str, root_tool: str | None = None) -> bool:
+    """Like :func:`is_process_running` but also escalates to root /proc scan.
+
+    Use this from health checks.  ``root_tool`` lets callers reuse a cached
+    detection so we don't re-probe ``su`` for every check.
+    """
+    if is_process_running(package):
+        return True
+    if not root_tool:
+        try:
+            info = detect_root()
+        except Exception:  # noqa: BLE001
+            info = RootInfo(False, None, "")
+        if not info.available or not info.tool:
+            return False
+        root_tool = info.tool
+    try:
+        res = run_root_command(
+            ["sh", "-c",
+             f"for p in /proc/[0-9]*/cmdline; do "
+             f"  tr '\\0' ' ' <\"$p\" 2>/dev/null | grep -F -q '{package}' && "
+             f"  echo hit && exit 0; "
+             f"done; exit 1"],
+            root_tool=root_tool, timeout=PROCESS_TIMEOUT_SECONDS,
+        )
+        return res.ok and "hit" in res.stdout
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def is_process_running_root(package: str) -> bool:
@@ -521,56 +604,123 @@ def is_package_task_visible(package: str) -> bool:
     return False
 
 
+_SURFACE_POSITIVE_MARKERS: tuple[str, ...] = (
+    "mHasSurface=true",
+    "hasSurface=true",
+    "mDrawState=HAS_DRAWN",
+    "isReadyForDisplay()=true",
+    "isOnScreen=true",
+)
+
+
 def is_package_window_visible(package: str) -> bool:
-    """Check if a *drawing* window exists for this package.
+    """Check if a real drawing window exists for this package.
 
-    NOTE: ``Window{...package}`` lines persist in ``dumpsys window`` for many
-    seconds after a window is closed.  To avoid stale "still alive" evidence
-    that prevents the supervisor from reconnecting after the user closes a
-    Roblox clone window, we require a stronger signal: either
-    ``mHasSurface=true`` near the package's window block, or the package being
-    the current focus.  A bare ``Window{...package=...}`` entry without a
-    surface is NOT counted as visible.
+    Strategy — broader than the previous mHasSurface-only check.  A window
+    block is considered "drawing" when ANY of these are true for the block:
 
-    Returns True only when a real drawing window for the package is found.
+    * ``mHasSurface=true`` or ``hasSurface=true`` (varies by Android fork)
+    * ``mDrawState=HAS_DRAWN``
+    * ``isReadyForDisplay()=true``
+    * ``isOnScreen=true``
+    * the package appears as ``mCurrentFocus`` / ``mFocusedApp``
+      anywhere in the dump (focused == visible)
+    * a ``Surface(name=...)`` line in the block mentions the package
+
+    Stale window entries that lack ALL of these markers are NOT counted as
+    visible, so closing a window still triggers reconnect.
+
     Never raises.
     """
     package = validate_package_name(package)
     try:
         result = run_command(["dumpsys", "window", "windows"], timeout=6)
-        if result.ok:
-            text = result.stdout
-            # Walk window blocks; only count a block as alive if mHasSurface=true
-            # appears inside it.
-            block_lines: list[str] = []
-            in_block = False
-            block_has_package = False
-            for line in text.splitlines():
-                if "Window{" in line or "Window {" in line:
-                    # Flush previous block
-                    if in_block and block_has_package:
-                        block_text = "\n".join(block_lines)
-                        if "mHasSurface=true" in block_text:
-                            return True
-                    in_block = True
-                    block_lines = [line]
-                    block_has_package = package in line
-                    continue
-                if in_block:
-                    block_lines.append(line)
-                    if package in line:
-                        block_has_package = True
-            # Flush final block
-            if in_block and block_has_package:
-                block_text = "\n".join(block_lines)
-                if "mHasSurface=true" in block_text:
-                    return True
-            # Focus shortcut: if mCurrentFocus mentions our package, it's visible.
-            for line in text.splitlines():
-                if "mCurrentFocus" in line and package in line:
-                    return True
+        if not result.ok:
+            return False
+        text = result.stdout
     except Exception:  # noqa: BLE001
-        pass
+        return False
+
+    # Fast path: focus lines.
+    for line in text.splitlines():
+        if package not in line:
+            continue
+        if "mCurrentFocus" in line or "mFocusedApp" in line or "Focus =" in line:
+            return True
+
+    # Walk window blocks.
+    block_lines: list[str] = []
+    in_block = False
+    block_has_package = False
+
+    def _block_drawing(lines: list[str]) -> bool:
+        block_text = "\n".join(lines)
+        if any(m in block_text for m in _SURFACE_POSITIVE_MARKERS):
+            return True
+        # A Surface(name=<pkg>...) line inside the block also counts.
+        for ln in lines:
+            if "Surface(name=" in ln and package in ln:
+                return True
+        return False
+
+    for line in text.splitlines():
+        if "Window{" in line or "Window {" in line:
+            if in_block and block_has_package and _block_drawing(block_lines):
+                return True
+            in_block = True
+            block_lines = [line]
+            block_has_package = package in line
+            continue
+        if in_block:
+            block_lines.append(line)
+            if package in line:
+                block_has_package = True
+    if in_block and block_has_package and _block_drawing(block_lines):
+        return True
+    return False
+
+
+def is_package_surface_in_surfaceflinger(package: str) -> bool:
+    """Check ``dumpsys SurfaceFlinger`` for an actively composed layer.
+
+    This is a separate strong signal that the system is *rendering* a window
+    for the package right now, independent of WindowManager's stale entries.
+    Returns True only when a Layer named after the package has ``isVisible``
+    or ``visible=true`` true.  Never raises.
+    """
+    try:
+        package_str = validate_package_name(package)
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        res = run_command(
+            ["dumpsys", "SurfaceFlinger", "--list"], timeout=6,
+        )
+        if res.ok and package_str in res.stdout:
+            # A name match in --list means a layer exists; that is at least a
+            # weak signal of recent rendering activity.  Confirm with the full
+            # dump if available.
+            full = run_command(["dumpsys", "SurfaceFlinger"], timeout=8)
+            if full.ok and package_str in full.stdout:
+                # Look at the lines around the package mention for visibility
+                # markers.  We don't need to be perfect — any positive marker
+                # near the layer name counts.
+                lines = full.stdout.splitlines()
+                for i, line in enumerate(lines):
+                    if package_str not in line:
+                        continue
+                    window = "\n".join(lines[i:i + 25])
+                    if (
+                        "isVisible=true" in window
+                        or "visible=true" in window
+                        or "z=" in window  # has a Z-order = currently composited
+                    ):
+                        return True
+            # If full dump is unavailable but the layer exists in --list,
+            # accept it as a weak positive (better than false-Offline).
+            return True
+    except Exception:  # noqa: BLE001
+        return False
     return False
 
 
@@ -599,6 +749,7 @@ def get_package_alive_evidence(package: str) -> dict[str, bool]:
     """
     _dead: dict[str, bool] = {
         "running": False, "task": False, "window": False, "root_running": False,
+        "surface": False, "foreground": False,
         "alive": False, "strict_alive": False,
     }
     package_str = package
@@ -625,21 +776,47 @@ def get_package_alive_evidence(package: str) -> dict[str, bool]:
     except Exception:  # noqa: BLE001
         pass
 
+    # Root-escalate process detection so cloud-phone clones (long names that
+    # defeat unprivileged pidof) are still seen.
     root_running = False
     if not running:
         try:
-            root_running = is_process_running_root(package_str)
+            root_running = is_process_running_any(package_str)
         except Exception:  # noqa: BLE001
-            pass
+            try:
+                root_running = is_process_running_root(package_str)
+            except Exception:  # noqa: BLE001
+                pass
 
-    # STRICT: real process or real drawing surface.  Task alone is no longer
-    # accepted as aliveness — it lingers for many seconds after close.
-    strict_alive = running or root_running or window
+    # SurfaceFlinger evidence — a separate strong "rendering" signal that
+    # bypasses WindowManager's stale entries.
+    surface = False
+    try:
+        surface = is_package_surface_in_surfaceflinger(package_str)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Foreground / resumed-activity evidence.
+    foreground = False
+    try:
+        fg = current_foreground_package()
+        foreground = bool(fg and (fg == package_str or package_str in fg))
+    except Exception:  # noqa: BLE001
+        pass
+
+    # STRICT aliveness: process OR drawing window OR composited surface OR
+    # the system says this package is currently foreground.  Task alone is
+    # still NOT enough — it lingers after a close.
+    process_alive = running or root_running
+    visual_alive = window or surface or foreground
+    strict_alive = process_alive or visual_alive
     return {
         "running":      running,
         "task":         task,
         "window":       window,
         "root_running": root_running,
+        "surface":      surface,
+        "foreground":   foreground,
         "alive":        strict_alive,
         "strict_alive": strict_alive,
     }
@@ -990,6 +1167,86 @@ def launch_package_with_options(
         result3 = launch_app(package)
         return result3, "fallback_am"
     return launch_app(package), "am_or_resolve"
+
+
+def launch_package_with_bounds(
+    package: str,
+    rect: tuple[int, int, int, int],
+    private_url: str | None = None,
+    *,
+    windowing_mode: int = 5,
+) -> tuple[CommandResult, str]:
+    """Launch with ``am start --windowingMode <mode> --activity-launch-bounds`` if supported.
+
+    ``windowing_mode=5`` is Android's freeform windowing mode.  Many cloud
+    phones support freeform at the framework level once
+    ``enable_freeform_support=1`` is set (see :mod:`agent.freeform_enable`).
+    If the ``--activity-launch-bounds`` flag is not recognized on this
+    Android build, we fall back gracefully to the bounds-less launch.
+
+    Returns ``(result, method_label)``.  Never raises.
+    """
+    try:
+        package = validate_package_name(package)
+    except Exception:  # noqa: BLE001
+        return CommandResult(("am", "start"), 2, "", "invalid package"), "invalid"
+
+    l, t, r, b = rect
+    bounds_arg = f"{int(l)} {int(t)} {int(r)} {int(b)}"
+    url = (private_url or "").strip()
+
+    am = _find_command("am", "/system/bin/am")
+    if not am:
+        # Fall back to whatever the normal launcher chain can do.
+        return launch_package_with_options(package, private_url)
+
+    # Common stem options for every variant we try.
+    stem: list[str] = [
+        am, "start",
+        "--windowingMode", str(int(windowing_mode)),
+        "--activity-launch-bounds", str(int(l)), str(int(t)),
+        str(int(r)), str(int(b)),
+    ]
+    method_label = f"am_bounds_mode{int(windowing_mode)}"
+
+    if url:
+        mode = detect_launch_mode_from_url(url)
+        if mode in LAUNCH_MODES:
+            try:
+                validate_launch_url(url, mode, allow_uncertain=True)
+                cmd = stem + ["-a", "android.intent.action.VIEW", "-d", url, package]
+                res = run_command(cmd, timeout=PROCESS_TIMEOUT_SECONDS)
+                if res.ok:
+                    return res, method_label + "_url"
+            except UrlValidationError:
+                pass
+        # If url launch with bounds failed, fall through to plain bounded launch.
+
+    # Plain MAIN/LAUNCHER intent with launch bounds.
+    cmd = stem + [
+        "-a", "android.intent.action.MAIN",
+        "-c", "android.intent.category.LAUNCHER",
+        "-p", package,
+    ]
+    res = run_command(cmd, timeout=PROCESS_TIMEOUT_SECONDS)
+    if res.ok:
+        return res, method_label
+
+    # Fallback when --activity-launch-bounds isn't recognized: try just
+    # --windowingMode (older API levels accept this on its own).
+    cmd2 = [
+        am, "start",
+        "--windowingMode", str(int(windowing_mode)),
+        "-a", "android.intent.action.MAIN",
+        "-c", "android.intent.category.LAUNCHER",
+        "-p", package,
+    ]
+    res2 = run_command(cmd2, timeout=PROCESS_TIMEOUT_SECONDS)
+    if res2.ok:
+        return res2, method_label + "_no_bounds"
+
+    # Final fallback: normal launcher chain without any flags.
+    return launch_package_with_options(package, private_url)
 
 
 def force_stop_packages_except(

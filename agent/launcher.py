@@ -96,10 +96,32 @@ def perform_rejoin(
         elif not cfg.get("root_mode_enabled"):
             warning = "non-root mode: restart capability is limited to launching Roblox"
 
-        result, _method = android.launch_package_with_options(
-            package,
-            url_for_launch or None,
-        )
+        # Layer 2: launch with explicit windowing-mode + launch-bounds so the
+        # window is placed correctly from the first frame.  Falls back to
+        # bounds-less launch automatically if `--activity-launch-bounds`
+        # isn't supported on this build.
+        _bounds_rect: tuple[int, int, int, int] | None = None
+        try:
+            from . import window_layout
+            _display = window_layout.detect_display_info()
+            _rects = window_layout.calculate_split_layout(
+                [package], _display.width, _display.height,
+            )
+            if _rects:
+                _r0 = _rects[0]
+                _bounds_rect = (_r0.left, _r0.top, _r0.right, _r0.bottom)
+        except Exception:  # noqa: BLE001
+            _bounds_rect = None
+
+        if _bounds_rect is not None:
+            result, _method = android.launch_package_with_bounds(
+                package, _bounds_rect, url_for_launch or None,
+            )
+        else:
+            result, _method = android.launch_package_with_options(
+                package,
+                url_for_launch or None,
+            )
 
         if not result.ok:
             error = mask_urls_in_text(result.summary or "Android launch command failed")

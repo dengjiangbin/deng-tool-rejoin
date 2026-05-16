@@ -356,29 +356,60 @@ def _wait_for_window(package: str, timeout: float) -> bool:
 def _direct_resize_via_root(
     package: str, rect: WindowRect, root_tool: str
 ) -> tuple[bool, str]:
-    """Try root ``cmd activity resize-task``/``am task resize`` for the task.
+    """Try multiple direct-resize commands for the package's current task.
 
-    Best-effort.  Returns (ok, detail).  Never raises.
+    Each Android build supports a different subset of these commands.  We
+    try every variant and return success on the first one that runs without
+    error AND moves the actual bounds.  Never raises.
     """
     task_id = _get_task_id(package)
     if task_id is None:
         return False, "no task id"
+    l, t, r, b = rect.left, rect.top, rect.right, rect.bottom
+
+    # First, flip the task into freeform windowing mode so the resize is
+    # honored.  Some Android forks silently no-op resize on fullscreen tasks.
+    try:
+        android.run_root_command(
+            ["cmd", "activity", "set-task-windowing-mode", str(task_id), "5"],
+            root_tool=root_tool, timeout=4,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        android.run_root_command(
+            ["am", "stack", "move-task", str(task_id), "0", "true"],
+            root_tool=root_tool, timeout=4,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     candidates = [
         ["cmd", "activity", "resize-task", str(task_id),
-         str(rect.left), str(rect.top), str(rect.right), str(rect.bottom)],
+         str(l), str(t), str(r), str(b)],
+        ["cmd", "activity", "resize-task", str(task_id),
+         str(l), str(t), str(r), str(b), "1"],
         ["am", "task", "resize", str(task_id),
-         str(rect.left), str(rect.top), str(rect.right), str(rect.bottom)],
+         str(l), str(t), str(r), str(b)],
         ["am", "stack", "resize", str(task_id),
-         str(rect.left), str(rect.top), str(rect.right), str(rect.bottom)],
+         str(l), str(t), str(r), str(b)],
+        # Last resort: write bounds into the activity record directly.
+        ["wm", "task", "resize", str(task_id),
+         str(l), str(t), str(r), str(b)],
     ]
+    last_err = ""
     for cmd_args in candidates:
         try:
-            res = android.run_root_command(cmd_args, root_tool=root_tool, timeout=4)
+            res = android.run_root_command(
+                cmd_args, root_tool=root_tool, timeout=4,
+            )
             if res.ok:
                 return True, f"resize via {cmd_args[0]} {cmd_args[1]}"
-        except Exception:  # noqa: BLE001
+            last_err = (res.stderr or res.stdout or "").strip()[:120]
+        except Exception as exc:  # noqa: BLE001
+            last_err = str(exc)[:120]
             continue
-    return False, f"all direct-resize variants failed (task #{task_id})"
+    return False, f"all direct-resize variants failed (task #{task_id}) — {last_err}"
 
 
 # ── High-level apply ─────────────────────────────────────────────────────────
@@ -477,6 +508,25 @@ def apply_window_layout(
     results: list[ApplyResult] = []
     root_info = android.detect_root()
     root_tool = root_info.tool if root_info.available else None
+
+    # ── Layer 1: enable freeform / resizable-activity capabilities ──────────
+    # Without enable_freeform_support=1 and force_resizable_activities=1,
+    # the system refuses to honor non-fullscreen launch bounds or
+    # ``cmd activity resize-task`` for Roblox.  This is the missing
+    # foundation that App Cloner XML alone cannot replace.
+    try:
+        from .freeform_enable import setup_freeform_capabilities
+        freeform_result = setup_freeform_capabilities()
+        _log.debug(
+            "freeform_setup: root=%s enabled=%s already=%s failed=%s",
+            freeform_result.root_available,
+            freeform_result.enabled_keys,
+            freeform_result.already_enabled_keys,
+            freeform_result.failed_keys,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("freeform setup error: %s", exc)
+        freeform_result = None
 
     packages = [r.package for r in rects if not _is_layout_excluded(r.package)]
     known_keys_map = _discover_known_keys(packages, root_tool)
@@ -641,3 +691,38 @@ def apply_window_layout_silent(
         if r.status in (LAYOUT_APPLIED, LAYOUT_SKIPPED)
     )
     return ok, len(results)
+
+
+def force_resize_package(package: str, rect: WindowRect) -> tuple[bool, str]:
+    """One-shot resize for a single package — used during supervisor recovery.
+
+    Pipeline:
+      1. Ensure freeform/resizable system settings are on.
+      2. Direct resize via root (cmd activity resize-task / am task resize /
+         am stack resize / wm task resize / windowing-mode flip).
+      3. Read back bounds; return whether they match desired ± 32 px.
+
+    Never raises.  Returns ``(ok, detail)``.
+    """
+    try:
+        from .freeform_enable import setup_freeform_capabilities
+        setup_freeform_capabilities()
+    except Exception:  # noqa: BLE001
+        pass
+    root_info = android.detect_root()
+    if not root_info.available or not root_info.tool:
+        return False, "no root"
+    try:
+        ok, detail = _direct_resize_via_root(package, rect, root_info.tool)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"resize error: {exc}"
+    if not ok:
+        return False, detail
+    time.sleep(0.6)
+    try:
+        bounds, _src = read_actual_bounds(package)
+    except Exception:  # noqa: BLE001
+        return ok, f"{detail} (post-readback failed)"
+    if bounds and _bounds_close_enough(bounds, rect, 32):
+        return True, f"{detail} → bounds verified {bounds}"
+    return False, f"{detail} → bounds still {bounds} (want {rect.left,rect.top,rect.right,rect.bottom})"

@@ -21,8 +21,9 @@ from .roblox_health import categorize_unhealthy
 def _reapply_layout_for_package(package: str) -> None:
     """Best-effort layout re-apply for ONE package during recovery.
 
-    Computes the package's slot in the current display layout and writes the
-    XML keys + Set-enable booleans so the relaunched window uses the desired
+    Computes the package's slot in the current display layout, writes the
+    XML keys + Set-enable booleans, AND triggers a direct (post-launch)
+    resize via root so the relaunched window really lands at the desired
     bounds.  Never raises.  All details go to the file logger.
     """
     try:
@@ -40,6 +41,21 @@ def _reapply_layout_for_package(package: str) -> None:
             window_apply.apply_window_layout_silent(
                 rects, force_stop_before=False, verify_after=False, retries=0,
             )
+            # Layer 3: direct resize via root, with freeform mode flip.
+            # This is what actually moves the visible window without
+            # waiting for the next force-stop / relaunch cycle.
+            try:
+                ok, detail = window_apply.force_resize_package(package, rects[0])
+                import logging as _logging
+                _logging.getLogger("deng.rejoin.supervisor").debug(
+                    "force_resize_package(%s) ok=%s detail=%s",
+                    package, ok, detail,
+                )
+            except Exception as exc:  # noqa: BLE001
+                import logging as _logging
+                _logging.getLogger("deng.rejoin.supervisor").debug(
+                    "force_resize_package(%s) error: %s", package, exc,
+                )
     except Exception as exc:  # noqa: BLE001
         import logging as _logging
         _logging.getLogger("deng.rejoin.supervisor").debug(
@@ -198,6 +214,20 @@ class _PackageWorker(threading.Thread):
         self.has_private_url: bool = False   # set at start of run()
         self._url_launched: bool = False     # was the LAST launch done with a URL?
         self.launching_since: float | None = None  # when Launching/Joining was set
+        # Heartbeat-based playing-state tracker.  Lazily imported so the
+        # supervisor still works in test environments that don't have the
+        # full agent package installed.
+        try:
+            from .playing_state import StateTracker
+            self._state_tracker = StateTracker(
+                offline_grace_s=float(cfg.get("offline_grace_seconds", 60.0)),
+                stale_task_grace_s=20.0,
+                join_unconfirmed_grace_s=25.0,
+            )
+        except Exception:  # noqa: BLE001
+            self._state_tracker = None
+        self._last_evidence: dict[str, Any] = {}
+        self._consecutive_offline_checks: int = 0
 
     def _sup(self) -> dict[str, Any]:
         raw = self.cfg.get("supervisor")
@@ -341,6 +371,29 @@ class _PackageWorker(threading.Thread):
                 self._set_status(STATUS_CHECKING, "")
                 health = check_package_health(cfg, self.package)
 
+                # Feed the heartbeat tracker.  Use the full evidence dict so
+                # decide() can see process / window / surface / foreground
+                # signals independently — not just the collapsed `running`
+                # field that older code paths used.
+                _meta = health.meta if isinstance(health.meta, dict) else {}
+                evidence_now = {
+                    "running":      bool(_meta.get("running")),
+                    "root_running": bool(_meta.get("root_running")),
+                    "task":         bool(_meta.get("task")),
+                    "window":       bool(_meta.get("window")),
+                    "surface":      bool(_meta.get("surface")),
+                    "foreground":   bool(_meta.get("fg_evidence")),
+                }
+                self._last_evidence = evidence_now
+                if self._state_tracker is not None:
+                    try:
+                        self._state_tracker.observe(self.package, evidence_now)
+                    except Exception as _exc:  # noqa: BLE001
+                        log_event(
+                            self.logger, "debug", "state_tracker_observe_error",
+                            package=self.package, error=str(_exc),
+                        )
+
                 if health.state == "healthy":
                     self.failure_count = 0
                     self.unhealthy_since = None
@@ -371,9 +424,9 @@ class _PackageWorker(threading.Thread):
                     self._sleep(interval)
                     continue
 
-                running = bool(health.meta.get("running"))
-                fg = health.meta.get("foreground")
-                disc = health.meta.get("disconnect_category")
+                running = bool(_meta.get("running"))
+                fg = _meta.get("foreground")
+                disc = _meta.get("disconnect_category")
                 fg_wrong = running and health.state == "roblox_not_running" and (
                     fg not in (self.package, None) or bool(disc)
                 )
@@ -420,13 +473,66 @@ class _PackageWorker(threading.Thread):
                     self._sleep(interval)
                     continue
 
+                # ── Heartbeat tracker override ────────────────────────────
+                # If evidence is missing right now but a recent heartbeat
+                # (process / window / surface / foreground) existed within
+                # the grace window, do NOT show Offline.  This is the
+                # critical fix for the cloud-phone case where Roblox is
+                # visibly playing but our detection blinks because the
+                # cloned process name is too long for ``pidof`` to see.
+                if self._state_tracker is not None:
+                    try:
+                        decision = self._state_tracker.decide(
+                            self.package,
+                            prev_before_check,
+                            evidence_now,
+                            url_launched=self._url_launched,
+                            attempt_count=self.failure_count,
+                            max_attempts=int(self._sup().get("max_failed_attempts", 0)),
+                        )
+                    except Exception as _exc:  # noqa: BLE001
+                        log_event(
+                            self.logger, "debug", "state_tracker_decide_error",
+                            package=self.package, error=str(_exc),
+                        )
+                        decision = None
+                    if decision is not None and decision.state not in (
+                        # If tracker says anything OTHER than Offline/Failed,
+                        # trust it: we have recent evidence the package is
+                        # alive in some form.
+                        "Offline", "Failed",
+                    ):
+                        # Map the tracker's label to our public constants.
+                        _label_map = {
+                            "Playing":          STATUS_IN_SERVER,
+                            "In Server":        STATUS_IN_SERVER,
+                            "Online":           STATUS_ONLINE,
+                            "Lobby":            STATUS_LOBBY,
+                            "Background":       STATUS_BACKGROUND,
+                            "Join Unconfirmed": STATUS_JOIN_UNCONFIRMED,
+                            "Recovering":       STATUS_RECONNECTING,
+                            "Unknown":          STATUS_BACKGROUND,
+                        }
+                        new_st = _label_map.get(decision.state, STATUS_BACKGROUND)
+                        self._set_status(new_st, decision.reason)
+                        # Reset the grace clock — we still have a heartbeat.
+                        self.grace_start = None
+                        self._consecutive_offline_checks = 0
+                        self._sleep(interval)
+                        continue
+
                 now = time.time()
                 if self.grace_start is None:
                     self.grace_start = now
                 elapsed = now - self.grace_start
 
                 if elapsed < grace:
-                    self._set_status(STATUS_OFFLINE, f"grace {int(grace - elapsed)}s")
+                    # During the grace window with NO heartbeat, show
+                    # Reconnecting (not Offline) so the user sees recovery
+                    # in progress, not a hard "dead" state.
+                    self._set_status(
+                        STATUS_RECONNECTING, f"grace {int(grace - elapsed)}s",
+                    )
                     self._sleep(min(5, grace - elapsed))
                     continue
 

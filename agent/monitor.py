@@ -110,11 +110,13 @@ def check_package_health(config_data: dict[str, Any], package: str) -> HealthRes
         )
 
     if alive:
-        # Package is running / has a task / has a window — it is healthy.
+        # Package is running / has a task / has a window / has a composited
+        # surface / is the current foreground app — it is healthy.
         # Background (non-foreground) clients in freeform mode are still healthy.
         detail = (
             f"fg={is_foreground} proc={running} "
-            f"task={evidence.get('task')} win={evidence.get('window')}"
+            f"task={evidence.get('task')} win={evidence.get('window')} "
+            f"surf={evidence.get('surface')} fgev={evidence.get('foreground')}"
         )
         return HealthResult(
             "healthy",
@@ -125,20 +127,27 @@ def check_package_health(config_data: dict[str, Any], package: str) -> HealthRes
                 "running":      running,
                 "task":         evidence.get("task"),
                 "window":       evidence.get("window"),
+                "surface":      evidence.get("surface"),
+                "fg_evidence":  evidence.get("foreground"),
                 "is_foreground": is_foreground,
             },
         )
 
-    # No evidence of the package being alive at all.
+    # No evidence of the package being alive at all.  Preserve the FULL
+    # evidence dict so the supervisor's heartbeat tracker can still decide
+    # whether this is a transient blind spot vs. a real Offline.
     return HealthResult(
         "roblox_not_running",
-        "Package not running — no process, task, or window found",
+        "Package not running — no process, task, window, or surface found",
         {
-            "package":   package,
-            "foreground": foreground,
-            "running":   False,
-            "task":      False,
-            "window":    False,
+            "package":     package,
+            "foreground":  foreground,
+            "running":     bool(evidence.get("running")),
+            "root_running": bool(evidence.get("root_running")),
+            "task":        bool(evidence.get("task")),
+            "window":      bool(evidence.get("window")),
+            "surface":     bool(evidence.get("surface")),
+            "fg_evidence": bool(evidence.get("foreground")),
         },
     )
 

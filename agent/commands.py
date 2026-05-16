@@ -2426,16 +2426,58 @@ def _prepare_automatic_layout(
         return cfg, "layout_error"
 
 
+def _save_start_diagnostics(payload: dict[str, Any]) -> None:
+    """Write ``~/.deng-tool/rejoin/data/last_start_diagnostics.json`` (silent).
+
+    Used by Start to drop a small JSON file with desired vs actual bounds,
+    layout method used, state evidence, and a few other fields.  Public
+    users never see this file; it exists so we can diagnose without asking
+    them to run support-bundle.
+
+    Never raises.
+    """
+    try:
+        import json as _json
+        import logging as _logging
+        from pathlib import Path
+
+        target_dir = Path.home() / ".deng-tool" / "rejoin" / "data"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / "last_start_diagnostics.json"
+        # Sanitize: convert any non-JSON-serializable values to strings.
+        def _scrub(x: Any) -> Any:
+            if isinstance(x, dict):
+                return {str(k): _scrub(v) for k, v in x.items()}
+            if isinstance(x, (list, tuple)):
+                return [_scrub(v) for v in x]
+            if isinstance(x, (str, int, float, bool)) or x is None:
+                return x
+            return str(x)
+        with target.open("w", encoding="utf-8") as fh:
+            _json.dump(_scrub(payload), fh, indent=2, sort_keys=True)
+        _logging.getLogger("deng.rejoin").debug(
+            "Start diagnostics saved to %s", target,
+        )
+    except Exception as exc:  # noqa: BLE001
+        import logging as _logging
+        _logging.getLogger("deng.rejoin").debug(
+            "save_start_diagnostics error: %s", exc,
+        )
+
+
 def _verify_layout_post_launch(
     cfg: dict[str, Any], entries: list[dict[str, Any]]
-) -> dict[str, bool]:
+) -> tuple[dict[str, bool], list[dict[str, Any]]]:
     """Post-launch verification + direct-resize retry.
 
-    Runs silently after the launch grace.  Returns ``{package: applied_ok}``.
+    Runs silently after the launch grace.  Returns a tuple of
+    ``({package: applied_ok}, [diagnostic_rows...])`` so callers can include
+    per-package details in the start diagnostics JSON.
     """
     import logging as _logging
     _layout_log = _logging.getLogger("deng.rejoin.layout")
     out: dict[str, bool] = {}
+    diag_rows: list[dict[str, Any]] = []
     try:
         display = window_layout.detect_display_info()
         rects = window_layout.calculate_split_layout(
@@ -2452,13 +2494,28 @@ def _verify_layout_post_launch(
         )
         for r in results:
             out[r.package] = r.final_ok
+            diag_rows.append({
+                "package":        r.package,
+                "desired":        r.desired.as_dict() if hasattr(r.desired, "as_dict") else {
+                    "left": r.desired.left, "top": r.desired.top,
+                    "right": r.desired.right, "bottom": r.desired.bottom,
+                },
+                "actual_bounds":  r.actual_bounds,
+                "actual_method":  r.actual_method,
+                "status":         r.status,
+                "pre_write_ok":   r.pre_write_ok,
+                "pre_write_method": r.pre_write_method,
+                "direct_resize_ok": r.direct_resize_ok,
+                "attempts":       r.attempts,
+                "final_ok":       r.final_ok,
+            })
             _layout_log.debug(
                 "post-launch verify: %s ok=%s actual=%s method=%s attempts=%s",
                 r.package, r.final_ok, r.actual_bounds, r.actual_method, "; ".join(r.attempts),
             )
     except Exception as exc:  # noqa: BLE001
         _layout_log.debug("verify_layout_post_launch error: %s", exc)
-    return out
+    return out, diag_rows
 
 
 def _run_preparation_phase(
@@ -2645,11 +2702,59 @@ def cmd_start(args: argparse.Namespace) -> int:
         _time.sleep(max(5, grace_wait))
 
         # ── Post-launch layout verification + direct-resize retry (silent) ────
+        _layout_verify: dict[str, bool] = {}
+        _layout_diag: list[dict[str, Any]] = []
         try:
-            _layout_verify = _verify_layout_post_launch(cfg, entries)
+            _layout_verify, _layout_diag = _verify_layout_post_launch(cfg, entries)
             _start_log.debug("post-launch layout verify: %s", _layout_verify)
         except Exception as _exc:  # noqa: BLE001
             _start_log.debug("post-launch verify error: %s", _exc)
+
+        # ── Save start diagnostics JSON (silent, internal only) ───────────────
+        try:
+            import time as _t
+            _evidence_summary: list[dict[str, Any]] = []
+            for entry in entries:
+                pkg = entry["package"]
+                try:
+                    ev = android.get_package_alive_evidence(pkg)
+                except Exception:  # noqa: BLE001
+                    ev = {}
+                _evidence_summary.append({
+                    "package":     pkg,
+                    "running":     bool(ev.get("running")),
+                    "root_running": bool(ev.get("root_running")),
+                    "window":      bool(ev.get("window")),
+                    "surface":     bool(ev.get("surface")),
+                    "task":        bool(ev.get("task")),
+                    "foreground":  bool(ev.get("foreground")),
+                    "alive":       bool(ev.get("alive")),
+                    "private_url_set": bool(
+                        str(effective_private_server_url(entry, cfg) or "").strip()
+                    ),
+                })
+            try:
+                from . import freeform_enable as _ff
+                _ff_ok, _ff_total = _ff.setup_freeform_capabilities_silent()
+            except Exception:  # noqa: BLE001
+                _ff_ok, _ff_total = 0, 0
+            _save_start_diagnostics({
+                "timestamp_unix":     int(_t.time()),
+                "artifact_sha256":    cfg.get("__artifact_sha256", ""),
+                "version":            cfg.get("__version", ""),
+                "selected_packages":  [e["package"] for e in entries],
+                "freeform_caps":      {"ok": _ff_ok, "total": _ff_total},
+                "layout_verify":      _layout_verify,
+                "layout_diagnostics": _layout_diag,
+                "evidence":           _evidence_summary,
+                "launches": {
+                    pkg: {"ok": launch_ok.get(pkg, False),
+                          "error": launch_err.get(pkg, "") or ""}
+                    for pkg in launch_ok
+                },
+            })
+        except Exception as _exc:  # noqa: BLE001
+            _start_log.debug("save start diagnostics error: %s", _exc)
 
         # ── Build initial status table ────────────────────────────────────────
         initial_status: dict[str, str] = {}
