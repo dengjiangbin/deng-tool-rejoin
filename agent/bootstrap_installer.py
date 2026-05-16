@@ -1,21 +1,12 @@
 """Bootstrap shell scripts for GET /install/* (Termux-friendly, LF-only).
 
 Install is non-interactive: it downloads a small launcher tarball, extracts into
-``~/.deng-tool/rejoin``, and writes ``.install_requested``. License-gated download
-of the full bundle runs on first ``deng-rejoin`` (:mod:`agent.deferred_bundle_install`).
-
-On Termux, the ``deng-rejoin`` wrapper is written to ``$PREFIX/bin`` (always
-``mkdir -p`` first — do not skip based on ``-w`` checks). Fallback: ``$HOME/bin``.
-Success is reported only after ``command -v deng-rejoin`` resolves.
+``~/.deng-tool/rejoin``, writes ``.install_requested`` and ``.install_api``, and
+installs a wrapper that exports ``DENG_REJOIN_INSTALL_API``. License entry runs
+only after ``deng-rejoin`` (:mod:`agent.deferred_bundle_install`).
 """
 
 from __future__ import annotations
-
-# Exact launcher wrapper — keep in sync with installer UX expectations.
-_WRAPPER_BODY = """#!/usr/bin/env sh
-export DENG_REJOIN_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"
-exec python3 "$DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" "$@"
-"""
 
 _INSTALL_PART_BEFORE_HEREDOC = r"""
 command -v curl >/dev/null 2>&1 || { echo "Install curl first: pkg install -y curl" >&2; exit 1; }
@@ -28,7 +19,6 @@ curl -fsSL "$LAUNCHER_URL" -o "$TMP" || { echo "Could not download launcher bund
 tar -xzf "$TMP" -C "$APP_HOME"
 
 # Prefer $PREFIX/bin (Termux: on PATH). Always mkdir — do not rely on [[ -w ]]
-# alone; some environments mis-report and skipped installing the wrapper.
 USING_HOME_BIN=0
 BIN=""
 if [[ -n "${PREFIX:-}" ]]; then
@@ -71,6 +61,7 @@ _fail_install() {
 
 [[ -s "$BIN/deng-rejoin" ]] || _fail_install
 [[ -x "$BIN/deng-rejoin" ]] || _fail_install
+[[ -f "$APP_HOME/.install_api" ]] && [[ -s "$APP_HOME/.install_api" ]] || _fail_install
 [[ -f "$APP_HOME/agent/deng_tool_rejoin.py" ]] || _fail_install
 [[ -f "$APP_HOME/agent/deferred_bundle_install.py" ]] || _fail_install
 
@@ -88,8 +79,25 @@ if ! PYTHONPATH="$APP_HOME" python3 -c "import agent.deferred_bundle_install" 2>
   _fail_install
 fi
 
+# Prove first-run API resolves from ~/.install_api without install shell env
+API_R="$(
+  PYTHONPATH="$APP_HOME" DENG_REJOIN_HOME="$APP_HOME" \
+  python3 -c 'import os; os.environ.pop("DENG_REJOIN_INSTALL_API", None); from agent.deferred_bundle_install import resolve_install_api; print(resolve_install_api())'
+)" || API_R=""
+if [[ -z "$API_R" ]]; then
+  echo "Failed: could not resolve install API (resolve_install_api)." >&2
+  _fail_install
+fi
+if [[ "$API_R" != "$DENG_REJOIN_INSTALL_API" ]]; then
+  echo "Install API URL mismatch after resolve." >&2
+  echo "Expected: $DENG_REJOIN_INSTALL_API" >&2
+  echo "Got: $API_R" >&2
+  exit 1
+fi
+
 echo "Wrapper path: $BIN/deng-rejoin"
 echo "command -v deng-rejoin -> $DR_RESOLVED"
+echo "resolve_install_api (env unset) -> $API_R"
 if [[ "$USING_HOME_BIN" -eq 1 ]]; then
   echo 'Note: If deng-rejoin is not found in this shell, run once:'
   echo '  export PATH="$HOME/bin:$PATH"'
@@ -100,7 +108,29 @@ echo "Install complete."
 echo "Next: run deng-rejoin"
 """
 
-_INSTALL_TAIL = _INSTALL_PART_BEFORE_HEREDOC + _WRAPPER_BODY + _INSTALL_PART_AFTER_HEREDOC
+
+def _sh_default_for_param_expansion(url: str) -> str:
+    """Escape for use inside bash ``${{VAR:-{here}}}`` default segment."""
+    return (url or "").replace("\\", "\\\\").replace("}", "\\}")
+
+
+def wrapper_body_sh(install_api_base: str) -> str:
+    """POSIX wrapper: set HOME, default API in env, python + entry checks, exec."""
+    d = _sh_default_for_param_expansion(install_api_base.rstrip("/"))
+    return (
+        "#!/usr/bin/env sh\n"
+        'export DENG_REJOIN_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"\n'
+        f'export DENG_REJOIN_INSTALL_API="${{DENG_REJOIN_INSTALL_API:-{d}}}"\n'
+        "if ! command -v python3 >/dev/null 2>&1; then\n"
+        '  echo "deng-rejoin: python3 not found. Install: pkg install python" >&2\n'
+        "  exit 127\n"
+        "fi\n"
+        'if [ ! -f "$DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" ]; then\n'
+        '  echo "deng-rejoin: missing $DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        'exec python3 "$DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" "$@"\n'
+    )
 
 
 def render_public_bootstrap(
@@ -111,11 +141,7 @@ def render_public_bootstrap(
     installer_title: str = "DENG Tool: Rejoin Installer",
     banner_lines: tuple[str, ...] = (),
 ) -> str:
-    """*requested* is ``latest``, ``v1.0.0``, ``main-dev``, ``test-latest``, etc.
-
-    Optional *bootstrap_session* for legacy signed ``/install/dev/main`` installs;
-    written to ``.bootstrap_session`` for the first ``deng-rejoin`` run.
-    """
+    """*requested* is ``latest``, ``v1.0.0``, ``main-dev``, ``test-latest``, etc."""
     base = base_url.rstrip("/")
     if bootstrap_session:
         safe_sess = _escape_double(bootstrap_session)
@@ -130,6 +156,12 @@ def render_public_bootstrap(
     safe_title = _escape_double(installer_title)
     safe_req = _escape_double(requested)
 
+    tail = (
+        _INSTALL_PART_BEFORE_HEREDOC
+        + wrapper_body_sh(base)
+        + _INSTALL_PART_AFTER_HEREDOC
+    )
+
     return (
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
@@ -143,12 +175,13 @@ def render_public_bootstrap(
         'APP_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"\n'
         'mkdir -p "$APP_HOME"\n'
         f'printf \'%s\\n\' "{safe_req}" > "$APP_HOME/.install_requested"\n'
+        'printf \'%s\\n\' "$DENG_REJOIN_INSTALL_API" > "$APP_HOME/.install_api"\n'
         "if [[ -n \"${BOOTSTRAP_SESSION:-}\" ]]; then\n"
         '  printf \'%s\\n\' "$BOOTSTRAP_SESSION" > "$APP_HOME/.bootstrap_session"\n'
         "else\n"
         '  rm -f "$APP_HOME/.bootstrap_session"\n'
         "fi\n"
-        f"{_INSTALL_TAIL.lstrip()}"
+        f"{tail.lstrip()}"
     )
 
 

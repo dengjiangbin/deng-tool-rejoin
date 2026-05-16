@@ -448,12 +448,120 @@ class InstallBootstrapSanityTests(unittest.TestCase):
         self.assertIn("command -v deng-rejoin", s)
         self.assertIn("hash -r", s)
         self.assertIn("Failed to create deng-rejoin command.", s)
+        self.assertIn('.install_api', s)
+        self.assertIn(
+            'printf \'%s\\n\' "$DENG_REJOIN_INSTALL_API" > "$APP_HOME/.install_api"',
+            s,
+        )
+        self.assertIn(
+            'export DENG_REJOIN_INSTALL_API="${DENG_REJOIN_INSTALL_API:-https://rejoin.deng.my.id}"',
+            s,
+        )
+        self.assertIn("rejoin.deng.my.id", s)
 
     def test_install_complete_only_after_command_check(self) -> None:
         from agent.bootstrap_installer import render_public_bootstrap
 
         s = render_public_bootstrap(base_url="https://x.example", requested="test-latest")
-        self.assertLess(s.index("command -v deng-rejoin"), s.index("Install complete."))
+        done = s.index("Install complete.")
+        self.assertLess(s.index("command -v deng-rejoin"), done)
+        self.assertLess(s.index("resolve_install_api"), done)
+        self.assertLess(s.index(".install_api"), done)
+
+
+class InstallTermuxSimulationTests(unittest.TestCase):
+    """Fake HOME/PREFIX + stub curl to exercise the public bootstrap without network."""
+
+    def _require_bash(self) -> str | None:
+        b = shutil.which("bash")
+        if not b:
+            self.skipTest("bash not on PATH")
+        return b
+
+    def test_simulated_termux_install_then_deng_rejoin_no_missing_api_error(self) -> None:
+        self._require_bash()
+        from agent.bootstrap_installer import render_public_bootstrap
+
+        tar_path = PROJECT / "releases" / "launcher" / "deng-rejoin-launcher.tar.gz"
+        if not tar_path.is_file():
+            self.skipTest("launcher tarball missing; run scripts/build_launcher_bundle.py")
+
+        td = tempfile.mkdtemp()
+        try:
+            home = Path(td) / "h"
+            prefix = Path(td) / "p"
+            home.mkdir()
+            (prefix / "bin").mkdir(parents=True)
+            bindir = Path(td) / "fakebin"
+            bindir.mkdir()
+
+            curl_sh = bindir / "curl"
+            curl_sh.write_text(
+                f"#!/bin/sh\n"
+                f'REJOIN_SIM_TARBALL="{tar_path.as_posix()}"\n'
+                'out=""\n'
+                "while [ $# -gt 0 ]; do\n"
+                '  if [ "$1" = "-o" ]; then shift; out="$1"; break; fi\n'
+                "  shift\n"
+                "done\n"
+                '[ -n "$out" ] || exit 1\n'
+                'cp "$REJOIN_SIM_TARBALL" "$out"\n',
+                encoding="utf-8",
+                newline="\n",
+            )
+            os.chmod(curl_sh, 0o755)
+
+            script = render_public_bootstrap(
+                base_url="https://rejoin.deng.my.id",
+                requested="latest",
+            )
+            install_sh = Path(td) / "install.sh"
+            install_sh.write_text(script, encoding="utf-8", newline="\n")
+
+            env = os.environ.copy()
+            env["HOME"] = str(home)
+            env["PREFIX"] = str(prefix)
+            env["PATH"] = f"{bindir}:{prefix / 'bin'}:/usr/bin:/bin"
+            env["PYTHONUNBUFFERED"] = "1"
+            env.pop("DENG_REJOIN_INSTALL_API", None)
+
+            r = subprocess.run(
+                ["bash", str(install_sh)],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            self.assertEqual(r.returncode, 0, msg=r.stderr + r.stdout)
+            self.assertIn("Install complete.", r.stdout)
+
+            which_r = subprocess.run(
+                ["bash", "-c", 'command -v deng-rejoin'],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(which_r.returncode, 0, msg=which_r.stderr)
+            self.assertEqual(
+                which_r.stdout.strip(),
+                str(prefix / "bin" / "deng-rejoin"),
+            )
+
+            env2 = env.copy()
+            env2.pop("DENG_REJOIN_INSTALL_API", None)
+            r2 = subprocess.run(
+                ["bash", str(prefix / "bin" / "deng-rejoin")],
+                env=env2,
+                input="",
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            combo = r2.stderr + r2.stdout
+            self.assertNotIn("DENG_REJOIN_INSTALL_API is not set", combo)
+        finally:
+            shutil.rmtree(td, ignore_errors=True)
 
 
 class InstallTestLatestAuthorizeTests(unittest.TestCase):

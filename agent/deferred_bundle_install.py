@@ -21,6 +21,9 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+# Official production API host (no localhost; used when env and file are absent).
+DEFAULT_PUBLIC_INSTALL_API = "https://rejoin.deng.my.id"
+
 
 def _app_home() -> Path:
     raw = (os.environ.get("DENG_REJOIN_HOME") or "").strip()
@@ -29,8 +32,34 @@ def _app_home() -> Path:
     return Path.home() / ".deng-tool" / "rejoin"
 
 
-def _install_api_base() -> str:
-    return (os.environ.get("DENG_REJOIN_INSTALL_API") or "").strip().rstrip("/")
+def _install_api_file(app_home: Path) -> Path:
+    return app_home / ".install_api"
+
+
+def resolve_install_api(app_home: Path | None = None) -> str:
+    """Public base URL for install/authorize (no trailing slash).
+
+    Priority:
+    1. ``DENG_REJOIN_INSTALL_API`` environment variable
+    2. ``$DENG_REJOIN_HOME/.install_api`` (first line), written by the shell installer
+    3. :data:`DEFAULT_PUBLIC_INSTALL_API`
+    """
+    env_raw = (os.environ.get("DENG_REJOIN_INSTALL_API") or "").strip()
+    if env_raw:
+        return env_raw.rstrip("/")
+
+    home = app_home if app_home is not None else _app_home()
+    p = _install_api_file(home)
+    if p.is_file():
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        line = text.strip().splitlines()[0].strip() if text.strip() else ""
+        if line:
+            return line.rstrip("/")
+
+    return DEFAULT_PUBLIC_INSTALL_API.rstrip("/")
 
 
 def _requested_path(app_home: Path) -> Path:
@@ -94,10 +123,7 @@ def run() -> int:
         print("Invalid install state (.install_requested is empty).", file=sys.stderr)
         return 1
 
-    base = _install_api_base()
-    if not base:
-        print("DENG_REJOIN_INSTALL_API is not set.", file=sys.stderr)
-        return 1
+    base = resolve_install_api(app_home)
 
     bs_path = app_home / ".bootstrap_session"
     bootstrap_session = ""
