@@ -130,6 +130,25 @@ def _is_cloudflare_block(status: int, body: dict, raw: str) -> bool:
     return any(m in raw_lower for m in cf_markers) or "<html" in raw_lower
 
 
+def _is_server_side_error(status: int, body: dict, raw: str) -> bool:  # noqa: ARG001
+    """Return True when retrying the same key cannot resolve the error.
+
+    Server-side errors (build not configured, artifact missing, server unavailable)
+    are permanent until the server is fixed — re-prompting the user for the same
+    key would loop forever and confuse them.
+    """
+    if status >= 500:
+        return True
+    result = str(body.get("result") or "").strip().lower()
+    if result in {"server_unavailable", "forbidden", "no_release", "missing_version"}:
+        return True
+    if result == "not_found":
+        msg_lower = str(body.get("message") or "").strip().lower()
+        key_phrases = ("key not found", "check the key", "not found. check")
+        return not any(p in msg_lower for p in key_phrases)
+    return False
+
+
 def describe_install_authorize_failure(
     status: int,
     body: dict | None,
@@ -265,6 +284,13 @@ def run() -> int:
             msg = describe_install_authorize_failure(status, body, resp_raw)
             print(msg, file=sys.stderr)
             if _is_cloudflare_block(status, body, resp_raw):
+                return 1
+            if _is_server_side_error(status, body, resp_raw):
+                print(
+                    "The server cannot complete this install request.\n"
+                    "Please contact support at https://rejoin.deng.my.id",
+                    file=sys.stderr,
+                )
                 return 1
             continue
 

@@ -16,6 +16,7 @@ from agent.deferred_bundle_install import (  # noqa: E402
     DEFAULT_PUBLIC_INSTALL_API,
     _INSTALLER_UA,
     _is_cloudflare_block,
+    _is_server_side_error,
     describe_install_authorize_failure,
     resolve_install_api,
 )
@@ -156,6 +157,45 @@ class CloudflareBlockDetectionTests(unittest.TestCase):
         # Any 403 with HTML and no JSON body is treated as Cloudflare block
         raw = "<html><body>access denied</body></html>"
         self.assertTrue(_is_cloudflare_block(403, {}, raw))
+
+
+class ServerSideErrorDetectionTests(unittest.TestCase):
+    """_is_server_side_error must stop the key-prompt loop for non-retryable errors."""
+
+    def test_500_is_server_side(self) -> None:
+        self.assertTrue(_is_server_side_error(500, {}, ""))
+
+    def test_503_is_server_side(self) -> None:
+        self.assertTrue(_is_server_side_error(503, {"result": "server_unavailable"}, ""))
+
+    def test_server_unavailable_result(self) -> None:
+        self.assertTrue(
+            _is_server_side_error(403, {"result": "server_unavailable"}, "")
+        )
+
+    def test_not_found_internal_build_is_server_side(self) -> None:
+        body = {"result": "not_found", "message": "Internal build is not configured."}
+        self.assertTrue(_is_server_side_error(404, body, ""))
+
+    def test_not_found_no_public_release_is_server_side(self) -> None:
+        body = {"result": "not_found", "message": "No public stable release is configured yet."}
+        self.assertTrue(_is_server_side_error(404, body, ""))
+
+    def test_not_found_key_not_found_is_retryable(self) -> None:
+        body = {"result": "not_found", "message": "Key not found. Check the key and try again."}
+        self.assertFalse(_is_server_side_error(404, body, ""))
+
+    def test_wrong_device_is_retryable(self) -> None:
+        self.assertFalse(_is_server_side_error(403, {"result": "wrong_device"}, ""))
+
+    def test_key_not_redeemed_is_retryable(self) -> None:
+        self.assertFalse(_is_server_side_error(403, {"result": "key_not_redeemed"}, ""))
+
+    def test_forbidden_is_server_side(self) -> None:
+        self.assertTrue(_is_server_side_error(403, {"result": "forbidden"}, ""))
+
+    def test_no_release_is_server_side(self) -> None:
+        self.assertTrue(_is_server_side_error(404, {"result": "no_release"}, ""))
 
 
 class InstallerUserAgentTests(unittest.TestCase):

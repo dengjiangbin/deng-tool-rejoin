@@ -845,6 +845,148 @@ class PanelCopyUsesProtectedUrlTests(unittest.TestCase):
             manifest.unlink(missing_ok=True)
 
 
+class InternalArtifactIntegrationTests(unittest.TestCase):
+    """Smoke tests against the real repo manifest + REJOIN_ARTIFACT_ROOT.
+
+    These tests verify the complete internal test install path end-to-end
+    (backend side) using the real data/rejoin_versions.json and
+    releases/main-dev/ artifact produced by build_internal_test_artifact.py.
+    """
+
+    def setUp(self) -> None:
+        with api_mod._rate_limit_lock:
+            api_mod._rate_limit.clear()
+
+    def test_main_dev_enabled_and_is_admin_row(self) -> None:
+        """main-dev must be enabled and pass is_admin_internal_row after the build script."""
+        from agent.install_registry import get_exact_registry_row, is_admin_internal_row
+
+        row = get_exact_registry_row("main-dev")
+        self.assertIsNotNone(row, "main-dev must be enabled in data/rejoin_versions.json")
+        self.assertTrue(is_admin_internal_row(row), "main-dev must be an admin internal row")
+
+    def test_real_artifact_exists(self) -> None:
+        """The release artifact built by build_internal_test_artifact.py must be present."""
+        artifact = PROJECT / "releases" / "main-dev" / "deng-tool-rejoin-main-dev.tar.gz"
+        self.assertTrue(
+            artifact.is_file(),
+            f"Run: python scripts/build_internal_test_artifact.py\n"
+            f"Expected artifact at: {artifact}",
+        )
+        self.assertGreater(artifact.stat().st_size, 1000, "artifact too small to be valid")
+
+    def test_real_artifact_sha256_matches_manifest(self) -> None:
+        """SHA256 in manifest must match the actual artifact on disk."""
+        import hashlib, json as _json
+
+        artifact = PROJECT / "releases" / "main-dev" / "deng-tool-rejoin-main-dev.tar.gz"
+        if not artifact.is_file():
+            self.skipTest("Run build_internal_test_artifact.py first")
+        manifest_path = PROJECT / "data" / "rejoin_versions.json"
+        rows = _json.loads(manifest_path.read_text(encoding="utf-8"))
+        main_dev = next((r for r in rows if r.get("version") == "main-dev"), None)
+        self.assertIsNotNone(main_dev)
+        want_sha = str(main_dev.get("artifact_sha256") or "").strip()
+        self.assertEqual(len(want_sha), 64, "manifest artifact_sha256 must be 64-char hex")
+        actual_sha = hashlib.sha256(artifact.read_bytes()).hexdigest()
+        self.assertEqual(actual_sha, want_sha, "on-disk artifact SHA256 must match manifest")
+
+    def test_authorize_test_latest_with_real_manifest_succeeds_for_owner(self) -> None:
+        """POST /api/install/authorize (test-latest) must return active when artifact exists."""
+        artifact = PROJECT / "releases" / "main-dev" / "deng-tool-rejoin-main-dev.tar.gz"
+        if not artifact.is_file():
+            self.skipTest("Run build_internal_test_artifact.py first")
+
+        owner_uid = "333333333333333333"
+        store, key = _tmp_store_with_redeemed_key(owner_uid)
+        env = {
+            "REJOIN_VERSIONS_MANIFEST": str(PROJECT / "data" / "rejoin_versions.json"),
+            "REJOIN_ARTIFACT_ROOT": str(PROJECT),
+            "LICENSE_OWNER_DISCORD_IDS": owner_uid,
+            "REJOIN_TESTER_DISCORD_IDS": "",
+        }
+        try:
+            with patch.dict(os.environ, env, clear=False):
+                from agent.install_internal_access import clear_install_internal_access_cache
+
+                clear_install_internal_access_cache()
+                with patch("agent.license_store.get_default_store", return_value=store):
+                    st, _, resp = _wsgi_call(
+                        "POST",
+                        "/api/install/authorize",
+                        {"license_key": key, "requested_version": "test-latest", "install_id_hash": ""},
+                    )
+            self.assertEqual(st, 200, resp.decode())
+            data = json.loads(resp)
+            self.assertEqual(data["result"], "active")
+            self.assertEqual(data["resolved_version"], "main-dev")
+            self.assertIn("/api/download/package/", data["download_url"])
+            self.assertNotEqual(str(data.get("sha256") or ""), "")
+        finally:
+            Path(store._path).unlink(missing_ok=True)
+
+    def test_discord_select_version_still_hides_main_dev_when_enabled(self) -> None:
+        """Even with main-dev enabled, Discord Select Version must show no public versions."""
+        from agent.rejoin_versions import merge_version_sources
+
+        with patch.dict(
+            os.environ,
+            {"REJOIN_VERSIONS_MANIFEST": str(PROJECT / "data" / "rejoin_versions.json")},
+            clear=False,
+        ):
+            versions = merge_version_sources(tag_names=[], include_internal_channels=False)
+        self.assertEqual(
+            len(versions),
+            0,
+            "No public versions expected when main-dev is admin-only and v1.0.0 is disabled",
+        )
+
+    def test_authorize_test_latest_disabled_manifest_returns_404(self) -> None:
+        """If main-dev were disabled, authorize must return not_found 404."""
+        manifest = Path(__file__).resolve().parent / "_tmp_install_disabled_maindev.json"
+        root = Path(tempfile.mkdtemp())
+        rows = [
+            {
+                "version": "main-dev",
+                "channel": "dev",
+                "visibility": "admin",
+                "install_ref": "refs/heads/main",
+                "artifact_path": "dev/pkg.tar.gz",
+                "artifact_sha256": "",
+                "enabled": False,  # Disabled → get_exact_registry_row returns None
+            }
+        ]
+        _write_versions_manifest(manifest, rows)
+        (root / "dev").mkdir(parents=True)
+        (root / "dev/pkg.tar.gz").write_bytes(_make_tarball())
+        store, key = _tmp_store_with_redeemed_key()
+        env = {
+            "REJOIN_VERSIONS_MANIFEST": str(manifest),
+            "REJOIN_ARTIFACT_ROOT": str(root),
+            "LICENSE_OWNER_DISCORD_IDS": "333333333333333333",
+            "REJOIN_TESTER_DISCORD_IDS": "",
+        }
+        try:
+            with patch.dict(os.environ, env, clear=False):
+                from agent.install_internal_access import clear_install_internal_access_cache
+
+                clear_install_internal_access_cache()
+                with patch("agent.license_store.get_default_store", return_value=store):
+                    st, _, resp = _wsgi_call(
+                        "POST",
+                        "/api/install/authorize",
+                        {"license_key": key, "requested_version": "test-latest", "install_id_hash": ""},
+                    )
+            self.assertEqual(st, 404)
+            data = json.loads(resp)
+            self.assertEqual(data["result"], "not_found")
+            self.assertIn("not configured", data["message"].lower())
+        finally:
+            manifest.unlink(missing_ok=True)
+            shutil.rmtree(root, ignore_errors=True)
+            Path(store._path).unlink(missing_ok=True)
+
+
 class DocsNoRawGithubInstallTests(unittest.TestCase):
     def test_selected_public_docs_avoid_raw_github_install_path(self) -> None:
         root = PROJECT

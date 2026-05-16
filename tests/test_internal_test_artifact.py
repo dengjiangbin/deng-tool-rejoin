@@ -95,14 +95,34 @@ class BuilderFixtureTests(unittest.TestCase):
 
 class RegistryStableGateTests(unittest.TestCase):
     def test_v100_disabled_public_stable_placeholder(self) -> None:
-        """v1.0.0 is a disabled placeholder; main-dev is disabled (hidden from Discord panel)."""
+        """v1.0.0 is a disabled placeholder; no public stable release published yet."""
         root = Path(__file__).resolve().parents[1]
         rows = json.loads((root / "data" / "rejoin_versions.json").read_text(encoding="utf-8"))
         stable = next(r for r in rows if r.get("version") == "v1.0.0")
         self.assertFalse(stable.get("enabled"))
+
+    def test_main_dev_hidden_from_discord_via_visibility(self) -> None:
+        """main-dev is hidden from Discord by visibility=admin, NOT by enabled flag.
+
+        The internal test install flow requires main-dev to be enabled so the
+        authorize endpoint can find it.  Discord filtering is done by
+        list_public_rejoin_versions(include_internal_channels=False) which
+        excludes admin/internal visibility and refs/heads/ refs regardless of
+        the enabled flag.
+        """
+        root = Path(__file__).resolve().parents[1]
+        rows = json.loads((root / "data" / "rejoin_versions.json").read_text(encoding="utf-8"))
         main_dev = next(r for r in rows if r.get("version") == "main-dev")
-        # main-dev is disabled so it never appears in the Discord Select Version panel
-        self.assertFalse(main_dev.get("enabled"))
+        # Must be admin-only visibility → Discord Select Version never shows it
+        self.assertEqual(main_dev.get("visibility"), "admin")
+        # install_ref is a branch → also excluded from public list
+        self.assertTrue(
+            str(main_dev.get("install_ref") or "").startswith("refs/heads/"),
+            msg="install_ref must be a branch ref so public install routes skip it",
+        )
+        # Enabled for the backend authorize endpoint
+        self.assertTrue(main_dev.get("enabled"))
+        # Artifact path and SHA256 must be set (build_internal_test_artifact.py populates these)
         self.assertEqual(
             main_dev.get("artifact_path"),
             "releases/main-dev/deng-tool-rejoin-main-dev.tar.gz",
