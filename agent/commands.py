@@ -2349,9 +2349,18 @@ def _progress_line(index: int, total: int, entry: dict[str, Any], message: str) 
 def _prepare_automatic_layout(
     cfg: dict[str, Any], entries: list[dict[str, Any]]
 ) -> tuple[dict[str, Any], str]:
-    """Pre-launch layout: compute landscape blocks and write App Cloner XML.
+    """Pre-launch layout pipeline.
 
-    All progress goes to the debug logger.  Public Start UI sees nothing.
+    Steps (all silent — public Start UI never sees output here):
+      1. Compute landscape-block layout for the selected packages.
+      2. Run layout-key discovery so the writer knows every key alias the
+         real App Cloner build uses (incl. ``Set window position``, auto-DPI
+         landscape, freeform, etc.).
+      3. Write XML for each package with all known aliases + Set-enable flags.
+      4. Force-stop the selected packages so the next launch re-reads prefs.
+
+    Verification and direct-resize happen post-launch in
+    :func:`_verify_layout_post_launch`.
     """
     import logging as _logging
     _layout_log = _logging.getLogger("deng.rejoin.layout")
@@ -2375,24 +2384,38 @@ def _prepare_automatic_layout(
         except Exception:  # noqa: BLE001
             pass
 
-        # Pre-launch apply (XML write + optional force-stop).
-        # Post-launch verification + direct resize happens in cmd_start after
-        # the launch grace period.
+        # ── Discovery: identify real key aliases per package ──────────────
+        try:
+            from . import layout_discovery as _ld
+            try:
+                root_info = android.detect_root()
+                root_tool = root_info.tool if root_info.available else None
+            except Exception:  # noqa: BLE001
+                root_tool = None
+            log_path, _discs = _ld.run_discovery_and_log(
+                packages, root_tool=root_tool, refresh=False,
+            )
+            _layout_log.debug("layout-key discovery saved: %s", log_path)
+        except Exception as exc:  # noqa: BLE001
+            _layout_log.debug("layout-key discovery error (non-fatal): %s", exc)
+
+        # ── Pre-launch apply: write XML + force-stop so prefs are honored
+        # ── on the imminent relaunch (cmd_start will issue the launches).
         try:
             from . import window_apply
             results = window_apply.apply_window_layout(
                 rects,
-                force_stop_before=False,   # caller already handled force-stop for selection set
+                force_stop_before=True,    # MUST force-stop so prefs reload
                 relaunch_after=False,
                 verify_after=False,        # verification deferred to post-launch
                 retries=0,
             )
             for r in results:
                 _layout_log.debug(
-                    "pre-launch apply: %s ok=%s method=%s attempts=%s",
-                    r.package, r.pre_write_ok, r.pre_write_method, "; ".join(r.attempts),
+                    "pre-launch apply: %s ok=%s method=%s status=%s attempts=%s",
+                    r.package, r.pre_write_ok, r.pre_write_method, r.status,
+                    "; ".join(r.attempts),
                 )
-            # Stash results on cfg for later post-launch verify
             cfg["_layout_rects"] = [r.desired.as_dict() for r in results]
         except Exception as exc:  # noqa: BLE001
             _layout_log.debug("pre-launch apply error (non-fatal): %s", exc)
@@ -2778,54 +2801,98 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 1
 
 
+def _run_diag_in_subprocess(args: list[str], *, timeout: int = 8) -> tuple[bool, str]:
+    """Run a diagnostic shell command in an isolated child process.
+
+    If the child crashes (SIGSEGV) the parent survives — no "Segmentation
+    fault" text reaches the user's terminal.  Returns ``(ok, output)`` where
+    output is bounded to ~4 KB.  Never raises.
+    """
+    try:
+        result = subprocess.run(
+            args,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            shell=False,
+        )
+        body = (result.stdout or "")[:4096]
+        if result.returncode != 0 and not body:
+            return False, (result.stderr or "").strip()[:4096]
+        return True, body
+    except FileNotFoundError:
+        return False, ""
+    except subprocess.TimeoutExpired:
+        return False, "(timed out)"
+    except Exception as exc:  # noqa: BLE001
+        return False, f"(child error: {exc})"
+
+
 def cmd_support_bundle(args: argparse.Namespace) -> int:
     """Hidden: write a support bundle for offline diagnosis.
 
-    Writes one file containing version, display info, layout plan, capability
-    probes, per-package evidence, and recent log tails.  Prints only the path.
+    SAFETY CONTRACT (must not regress):
+      * READ-ONLY.  Does NOT modify any config, prefs XML, database, or files
+        outside the bundle path under LOG_DIR.
+      * Does NOT start any supervisor / threads.
+      * Does NOT alter terminal mode (no readline calls, no raw mode, no
+        signal handler installs).
+      * All risky shell commands (``dumpsys``, ``cmd activity``, ``pidof``)
+        run in isolated subprocesses with captured stdout/stderr — a SIGSEGV
+        in any child does NOT propagate to the parent terminal.
+      * Catches every exception and returns 0 (or a small non-zero) — never
+        raises a Python traceback to the public terminal.
+      * Idempotent: running it then running ``deng-rejoin`` normally must work.
     """
     from datetime import datetime as _dt
     from .constants import LOG_DIR
-    from .window_layout import (
-        OUTER_MARGIN, TERMUX_LOG_FRACTION,
-        calculate_split_layout, detect_display_info, validate_layout_rects,
-    )
-    from . import window_apply
-
     try:
         from .logger import silence_public_loggers
         silence_public_loggers()
     except Exception:  # noqa: BLE001
         pass
 
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception:  # noqa: BLE001
+        pass
+
     ts = _dt.now().strftime("%Y%m%d-%H%M%S")
     bundle_path = LOG_DIR / f"support-bundle-{ts}.txt"
 
     lines: list[str] = []
     def _add(s: str = "") -> None:
-        lines.append(s)
+        try:
+            lines.append(s if isinstance(s, str) else str(s))
+        except Exception:  # noqa: BLE001
+            pass
 
     _add(f"DENG Tool: Rejoin Support Bundle  {ts}")
     _add(f"Product version: {VERSION}")
+    _add("(read-only diagnostic — no config or prefs were modified)")
     _add("")
 
+    cfg: dict[str, Any] | None = None
     try:
         cfg = load_config()
     except Exception:  # noqa: BLE001
         cfg = None
 
+    # ── Display (subprocess-isolated) ─────────────────────────────────────
     _add("== Display ==")
-    try:
-        disp = detect_display_info()
-        _add(f"  size: {disp.width}x{disp.height}  density: {disp.density}")
-    except Exception as exc:  # noqa: BLE001
-        _add(f"  display detect error: {exc}")
+    ok_size, size_out = _run_diag_in_subprocess(["wm", "size"], timeout=4)
+    ok_den, den_out = _run_diag_in_subprocess(["wm", "density"], timeout=4)
+    _add(f"  wm size: {('OK' if ok_size else 'FAIL')}  {size_out.strip()}")
+    _add(f"  wm density: {('OK' if ok_den else 'FAIL')}  {den_out.strip()}")
     _add("")
 
+    # ── Capabilities (in-process, fully wrapped) ─────────────────────────
     _add("== Capabilities ==")
     try:
-        caps = window_apply._capability_probes()
+        from . import window_apply as _wa
+        caps = _wa._capability_probes()
         for k, v in caps.items():
             _add(f"  {k}: {v}")
     except Exception as exc:  # noqa: BLE001
@@ -2838,43 +2905,56 @@ def cmd_support_bundle(args: argparse.Namespace) -> int:
         _add(f"  - {pkg}")
     _add("")
 
-    if packages and cfg:
-        _add("== Desired layout (landscape blocks) ==")
+    # ── Desired layout (compute only — DO NOT WRITE) ─────────────────────
+    if packages:
+        _add("== Desired layout (compute-only) ==")
         try:
-            rects = calculate_split_layout(packages, disp.width, disp.height)
-            left_end = round(disp.width * TERMUX_LOG_FRACTION)
+            from .window_layout import (
+                OUTER_MARGIN, TERMUX_LOG_FRACTION,
+                calculate_split_layout, detect_display_info,
+                validate_layout_rects,
+            )
+            disp_ = detect_display_info()
+            rects = calculate_split_layout(packages, disp_.width, disp_.height)
+            left_end = round(disp_.width * TERMUX_LOG_FRACTION)
             errs = validate_layout_rects(
                 rects, left_end + OUTER_MARGIN, OUTER_MARGIN,
-                disp.width - OUTER_MARGIN, disp.height - OUTER_MARGIN,
+                disp_.width - OUTER_MARGIN, disp_.height - OUTER_MARGIN,
             )
             for i, r in enumerate(rects, 1):
                 _add(
                     f"  [{i}] {r.package}: l={r.left} t={r.top} r={r.right} b={r.bottom} "
                     f"({r.win_w}x{r.win_h}, ratio={r.win_w/max(1,r.win_h):.2f})"
                 )
-            if errs:
-                _add("  validation issues:")
-                for e in errs:
-                    _add(f"    - {e}")
-            else:
-                _add("  validation: PASS")
+            _add(f"  validation: {'PASS' if not errs else 'FAIL ('+str(len(errs))+')'}")
+            for e in errs[:5]:
+                _add(f"    - {e}")
         except Exception as exc:  # noqa: BLE001
             _add(f"  layout compute error: {exc}")
         _add("")
 
-        _add("== Apply attempt ==")
+        # ── Layout key discovery (READ-ONLY: no XML written) ──────────────
+        _add("== Layout key discovery ==")
         try:
-            results = window_apply.apply_window_layout(rects, verify_after=True, retries=1)
-            for r in results:
-                _add(f"  {r.package}: final_ok={r.final_ok}  detail={r.detail}")
-                _add(f"    actual_bounds={r.actual_bounds}  method={r.actual_method}")
-                for att in r.attempts:
-                    _add(f"    - {att}")
+            from . import layout_discovery as _ld
+            try:
+                root_info = android.detect_root()
+                root_tool = root_info.tool if root_info.available else None
+            except Exception:  # noqa: BLE001
+                root_tool = None
+            log_path, discs = _ld.run_discovery_and_log(
+                packages, root_tool=root_tool, refresh=True,
+            )
+            _add(f"  saved: {log_path}")
+            for pkg, disc in discs.items():
+                counts = disc.summary()
+                _add(f"  {pkg}: files={len(disc.files_scanned)} categories={counts}")
         except Exception as exc:  # noqa: BLE001
-            _add(f"  apply error: {exc}")
+            _add(f"  discovery error: {exc}")
         _add("")
 
-        _add("== Root state evidence ==")
+        # ── Per-package evidence (READ-ONLY, in-process safe) ─────────────
+        _add("== Root state evidence (read-only) ==")
         for pkg in packages:
             try:
                 ev = android.get_package_alive_evidence(pkg)
@@ -2888,6 +2968,18 @@ def cmd_support_bundle(args: argparse.Namespace) -> int:
                 _add(f"  {pkg}: evidence error: {exc}")
         _add("")
 
+        # ── Actual bounds readback per package (READ-ONLY, isolated) ─────
+        _add("== Actual bounds readback (read-only) ==")
+        for pkg in packages:
+            try:
+                from . import window_apply as _wa
+                bounds, src = _wa.read_actual_bounds(pkg)
+                _add(f"  {pkg}: bounds={bounds} source={src}")
+            except Exception as exc:  # noqa: BLE001
+                _add(f"  {pkg}: readback error: {exc}")
+        _add("")
+
+    # ── Recent log tail ──────────────────────────────────────────────────
     _add("== Recent log tail (last 50 lines) ==")
     try:
         log_lines = _tail_lines(LOG_PATH, 50)
@@ -2896,12 +2988,47 @@ def cmd_support_bundle(args: argparse.Namespace) -> int:
     except Exception as exc:  # noqa: BLE001
         _add(f"  log read error: {exc}")
 
+    # ── Atomic write of the bundle ────────────────────────────────────────
     try:
         bundle_path.write_text("\n".join(lines), encoding="utf-8")
         print(f"Support bundle saved: {bundle_path}")
         return 0
     except Exception as exc:  # noqa: BLE001
-        print(f"Support bundle failed: {exc}")
+        # Surface ONE concise line; never a traceback.
+        print(f"Support bundle could not be saved: {exc}")
+        return 1
+
+
+def cmd_discover_layout_keys(args: argparse.Namespace) -> int:
+    """Hidden: discover real App Cloner layout keys and write the discovery log.
+
+    Single-line output for the public terminal; full details to the discovery
+    log file under LOG_DIR.  Read-only: never writes to any pkg_preferences.xml.
+    """
+    try:
+        from .logger import silence_public_loggers
+        silence_public_loggers()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        cfg = load_config()
+    except Exception:  # noqa: BLE001
+        cfg = None
+    packages = _packages_from_cfg(cfg) or [DEFAULT_ROBLOX_PACKAGE]
+    try:
+        from . import layout_discovery as _ld
+        try:
+            root_info = android.detect_root()
+            root_tool = root_info.tool if root_info.available else None
+        except Exception:  # noqa: BLE001
+            root_tool = None
+        log_path, _discs = _ld.run_discovery_and_log(
+            packages, root_tool=root_tool, refresh=True,
+        )
+        print(f"Layout key discovery saved: {log_path}")
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        print(f"Layout key discovery could not be saved: {exc}")
         return 1
 
 
@@ -3169,6 +3296,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help=argparse.SUPPRESS)
     parser.add_argument("--support-bundle", dest="support_bundle", action="store_true",
                         help=argparse.SUPPRESS)
+    parser.add_argument("--discover-layout-keys", dest="discover_layout_keys",
+                        action="store_true", help=argparse.SUPPRESS)
 
     # Pre-process argv so hidden positional subcommands don't trip choices validation.
     import sys as _sys
@@ -3176,9 +3305,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         argv = _sys.argv[1:]
     argv = list(argv)
 
-    # Standalone alias: `deng-rejoin support-bundle` → translate to flag.
+    # Standalone aliases: hidden subcommand spellings → flag.
     if argv and argv[0] in ("support-bundle", "support_bundle"):
         argv[0] = "--support-bundle"
+    if argv and argv[0] in ("discover-layout-keys", "discover_layout_keys"):
+        argv[0] = "--discover-layout-keys"
 
     # Use parse_known_args so that `deng-rejoin doctor layout` doesn't fail
     # with "unrecognized arguments: layout".
@@ -3227,7 +3358,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("choose only one command")
 
     # Hidden diagnostics: route to internal commands without showing in public menu.
-    if getattr(ns, "support_bundle", False):
+    if getattr(ns, "discover_layout_keys", False):
+        ns.resolved_command = "discover-layout-keys"
+    elif getattr(ns, "support_bundle", False):
         ns.resolved_command = "support-bundle"
     elif getattr(ns, "layout_test", False) or getattr(ns, "root_state", False) or getattr(ns, "layout_reset", False):
         ns.resolved_command = "doctor"
@@ -3291,6 +3424,7 @@ def _handlers() -> dict[str, Any]:
         "enable-boot": cmd_enable_boot,
         "update": cmd_update,
         "support-bundle": cmd_support_bundle,
+        "discover-layout-keys": cmd_discover_layout_keys,
     }
 
 

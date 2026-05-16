@@ -110,8 +110,9 @@ class TestApplyWindowLayoutSilent(unittest.TestCase):
         rect = WindowRect("com.termux", 0, 0, 800, 450)
         success, total = apply_window_layout_silent([rect], verify_after=False)
         self.assertEqual(total, 1)
-        # Excluded packages are not counted as successful
-        self.assertEqual(success, 0)
+        # Excluded packages are intentionally skipped — that counts as
+        # success for the user (no failure to report on Termux/system pkgs).
+        self.assertEqual(success, 1)
 
     def test_never_raises_even_when_subprocess_fails(self):
         import agent.window_apply as wa
@@ -148,6 +149,8 @@ class TestApplyDoesNotPrint(unittest.TestCase):
             patch.object(wa.android, "detect_root",
                          return_value=MagicMock(available=False, tool=None)),
             patch.object(wa, "read_actual_bounds", return_value=(None, "unavailable")),
+            patch.object(wa, "_discover_known_keys", return_value={"com.roblox.client": []}),
+            patch.object(wa, "_wait_for_window", return_value=True),
             redirect_stdout(out),
             redirect_stderr(err),
         ):
@@ -170,11 +173,11 @@ class TestApplyPipelineOrder(unittest.TestCase):
         direct_called = []
         root_called = []
 
-        def _direct(pkg, r):
+        def _direct(pkg, r, *, known_keys=None):
             direct_called.append(pkg)
             return True, "ok"
 
-        def _root(pkg, r, tool, timeout=10):
+        def _root(pkg, r, tool, timeout=10, *, known_keys=None):
             root_called.append(pkg)
             return True, "ok"
 
@@ -184,6 +187,7 @@ class TestApplyPipelineOrder(unittest.TestCase):
             patch.object(wa.android, "detect_root",
                          return_value=MagicMock(available=True, tool="su")),
             patch.object(wa, "read_actual_bounds", return_value=(None, "unavailable")),
+            patch.object(wa, "_discover_known_keys", return_value={"com.roblox.client": []}),
         ):
             wa.apply_window_layout([rect], verify_after=True)
 
@@ -199,14 +203,18 @@ class TestApplyPipelineOrder(unittest.TestCase):
         rect = WindowRect("com.roblox.client", 100, 100, 800, 550)
         root_called = []
 
+        def _root(*a, **kw):
+            root_called.append(1)
+            return True, "via root"
+
         with (
             patch.object(wa, "update_app_cloner_xml",
                          return_value=(False, "permission denied")),
-            patch.object(wa, "update_app_cloner_xml_root",
-                         side_effect=lambda *a, **kw: (root_called.append(1) or (True, "via root"))),
+            patch.object(wa, "update_app_cloner_xml_root", side_effect=_root),
             patch.object(wa.android, "detect_root",
                          return_value=MagicMock(available=True, tool="su")),
             patch.object(wa, "read_actual_bounds", return_value=(None, "unavailable")),
+            patch.object(wa, "_discover_known_keys", return_value={"com.roblox.client": []}),
         ):
             results = wa.apply_window_layout([rect], verify_after=True)
 
@@ -230,9 +238,12 @@ class TestVerifyBoundsTolerance(unittest.TestCase):
                          return_value=MagicMock(available=False, tool=None)),
             patch.object(wa, "read_actual_bounds",
                          return_value=((100, 100, 800, 550), "dumpsys_window")),
+            patch.object(wa, "_discover_known_keys", return_value={"com.roblox.client": []}),
+            patch.object(wa, "_wait_for_window", return_value=True),
         ):
             results = wa.apply_window_layout([rect], verify_after=True)
         self.assertTrue(results[0].final_ok)
+        self.assertEqual(results[0].status, wa.LAYOUT_APPLIED)
 
     def test_drift_outside_tolerance_marked_warn(self):
         import agent.window_apply as wa
@@ -246,10 +257,13 @@ class TestVerifyBoundsTolerance(unittest.TestCase):
                          return_value=MagicMock(available=False, tool=None)),
             patch.object(wa, "read_actual_bounds",
                          return_value=((500, 500, 1200, 950), "dumpsys_window")),
+            patch.object(wa, "_discover_known_keys", return_value={"com.roblox.client": []}),
+            patch.object(wa, "_wait_for_window", return_value=True),
         ):
             results = wa.apply_window_layout([rect], verify_after=True, retries=0)
         # Drift is way outside ±32, and no root → can't direct-resize
         self.assertFalse(results[0].final_ok)
+        self.assertEqual(results[0].status, wa.LAYOUT_FAILED)
 
 
 if __name__ == "__main__":

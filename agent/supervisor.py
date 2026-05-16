@@ -18,6 +18,35 @@ from .monitor import check_package_health, check_roblox_health
 from .roblox_health import categorize_unhealthy
 
 
+def _reapply_layout_for_package(package: str) -> None:
+    """Best-effort layout re-apply for ONE package during recovery.
+
+    Computes the package's slot in the current display layout and writes the
+    XML keys + Set-enable booleans so the relaunched window uses the desired
+    bounds.  Never raises.  All details go to the file logger.
+    """
+    try:
+        from . import window_layout
+        from . import window_apply
+        display = window_layout.detect_display_info()
+        # We don't know the full selected-package set here; compute a 1-package
+        # layout fallback that uses the right-pane rules.  This keeps the
+        # window landscape-shaped on its own; the next full Start cycle will
+        # rebalance for multi-package layouts.
+        rects = window_layout.calculate_split_layout(
+            [package], display.width, display.height,
+        )
+        if rects:
+            window_apply.apply_window_layout_silent(
+                rects, force_stop_before=False, verify_after=False, retries=0,
+            )
+    except Exception as exc:  # noqa: BLE001
+        import logging as _logging
+        _logging.getLogger("deng.rejoin.supervisor").debug(
+            "reapply_layout_for_package(%s) error: %s", package, exc,
+        )
+
+
 # ─── Status constants (shown in terminal and webhook) ─────────────────────────
 
 STATUS_ONLINE            = "Online"
@@ -255,16 +284,29 @@ class _PackageWorker(threading.Thread):
         return STATUS_LOBBY
 
     def run(self) -> None:
-        cfg = self.cfg
-        sup = self._sup()
-        interval = int(sup.get("health_check_interval_seconds") or cfg.get("health_check_interval_seconds", 30))
-        grace = int(sup.get("launch_grace_seconds") or cfg.get("foreground_grace_seconds", 30))
-        backoff_base = int(sup.get("restart_backoff_seconds", 10))
-        # Determine URL awareness once at startup
-        from .config import effective_private_server_url as _epsu
-        self.has_private_url = bool(str(_epsu(self.entry, cfg) or "").strip())
-        # Launching/Joining timeout: how many seconds before forcing a re-check
-        _launching_timeout = max(90, grace * 4)
+        # All worker setup wrapped: a thrown exception here would silently
+        # kill this worker thread and the package would never reconnect.
+        try:
+            cfg = self.cfg
+            sup = self._sup()
+            interval = int(sup.get("health_check_interval_seconds") or cfg.get("health_check_interval_seconds", 30))
+            grace = int(sup.get("launch_grace_seconds") or cfg.get("foreground_grace_seconds", 30))
+            backoff_base = int(sup.get("restart_backoff_seconds", 10))
+            # Determine URL awareness once at startup
+            from .config import effective_private_server_url as _epsu
+            self.has_private_url = bool(str(_epsu(self.entry, cfg) or "").strip())
+            # Launching/Joining timeout: how many seconds before forcing a re-check
+            _launching_timeout = max(90, grace * 4)
+        except Exception as exc:  # noqa: BLE001
+            log_event(self.logger, "error", "worker_setup_error", package=self.package, error=str(exc))
+            # Defaults so the loop still runs forever
+            cfg = self.cfg
+            sup = self._sup()
+            interval = 30
+            grace = 30
+            backoff_base = 10
+            self.has_private_url = False
+            _launching_timeout = 120
 
         while not self.stop_event.is_set():
             try:
@@ -351,6 +393,8 @@ class _PackageWorker(threading.Thread):
                     self.bg_since = None
                     self._set_status(STATUS_RECONNECTING, "disconnected")
                     log_event(self.logger, "info", "reconnect_stale_foreground", package=self.package)
+                    # Reapply layout BEFORE relaunch so the new window has bounds.
+                    _reapply_layout_for_package(self.package)
                     pkg_cfg = dict(cfg)
                     pkg_cfg["roblox_package"] = self.package
                     result = perform_rejoin(pkg_cfg, reason="disconnected", package_entry=self.entry, no_force_stop=True)
@@ -360,6 +404,9 @@ class _PackageWorker(threading.Thread):
                         self.launching_since = time.time()
                         new_st = STATUS_JOINING if self.has_private_url else STATUS_LAUNCHING
                         self._set_status(new_st, "Reopened — launch command sent")
+                        # Reapply once more after launch (clone window may have
+                        # been recreated by App Cloner with default bounds).
+                        _reapply_layout_for_package(self.package)
                     else:
                         self.failure_count += 1
                         self.last_error = result.error
@@ -396,6 +443,9 @@ class _PackageWorker(threading.Thread):
                 self.grace_start = None
                 self._set_status(STATUS_RECONNECTING, categorize_unhealthy("process_missing", self.package))
                 log_event(self.logger, "info", "reviving_package", package=self.package)
+                # Reapply layout BEFORE relaunch so the resurrected clone window
+                # uses the correct bounds from first paint.
+                _reapply_layout_for_package(self.package)
                 pkg_cfg = dict(cfg)
                 pkg_cfg["roblox_package"] = self.package
                 result = perform_rejoin(pkg_cfg, reason="process_missing", package_entry=self.entry, no_force_stop=True)
@@ -409,6 +459,8 @@ class _PackageWorker(threading.Thread):
                     self.launching_since = time.time()
                     new_st = STATUS_JOINING if self.has_private_url else STATUS_LAUNCHING
                     self._set_status(new_st, "Reopened — launch command sent")
+                    # Once more after launch to override any default bounds.
+                    _reapply_layout_for_package(self.package)
                     self._sleep(max(int(cfg.get("reconnect_delay_seconds", 8)), interval))
                 else:
                     self.failure_count += 1

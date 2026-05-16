@@ -105,6 +105,105 @@ LANDSCAPE_MIN_RATIO: float = 1.25
 # Legacy cascade constant (kept for backward-compat test references only).
 KAERU_TITLE_BAR_H: int = 48
 
+# ── App Cloner extended key aliases ───────────────────────────────────────────
+#
+# App Cloner / cloud-phone versions disagree on the key names for window
+# bounds, the "Set window position" / "Set window size" enable booleans, and
+# the per-orientation portrait/landscape variants.  Without the enable booleans
+# turned ON, App Cloner ignores the position ints on next launch — that is the
+# root cause of "windows still use last manually opened position".
+#
+# We write ALL known aliases.  Extras are harmless (App Cloner only honors the
+# ones it knows; unknown keys are kept in shared_prefs without effect).
+APP_CLONER_POSITION_ALIASES: dict[str, tuple[str, ...]] = {
+    "left":   (
+        "app_cloner_current_window_left",
+        "app_cloner_window_position_left",
+        "app_cloner_window_position_landscape_left",
+        "app_cloner_window_position_x",
+        "app_cloner_window_x",
+        "app_cloner_saved_bounds_left",
+        "app_cloner_saved_bounds_landscape_left",
+        "app_cloner_task_bounds_left",
+    ),
+    "top": (
+        "app_cloner_current_window_top",
+        "app_cloner_window_position_top",
+        "app_cloner_window_position_landscape_top",
+        "app_cloner_window_position_y",
+        "app_cloner_window_y",
+        "app_cloner_saved_bounds_top",
+        "app_cloner_saved_bounds_landscape_top",
+        "app_cloner_task_bounds_top",
+    ),
+    "right": (
+        "app_cloner_current_window_right",
+        "app_cloner_window_position_right",
+        "app_cloner_window_position_landscape_right",
+        "app_cloner_saved_bounds_right",
+        "app_cloner_saved_bounds_landscape_right",
+        "app_cloner_task_bounds_right",
+    ),
+    "bottom": (
+        "app_cloner_current_window_bottom",
+        "app_cloner_window_position_bottom",
+        "app_cloner_window_position_landscape_bottom",
+        "app_cloner_saved_bounds_bottom",
+        "app_cloner_saved_bounds_landscape_bottom",
+        "app_cloner_task_bounds_bottom",
+    ),
+    "width": (
+        "app_cloner_window_width",
+        "app_cloner_window_size_width",
+        "app_cloner_window_size_landscape_width",
+        "app_cloner_custom_screen_size_width",
+    ),
+    "height": (
+        "app_cloner_window_height",
+        "app_cloner_window_size_height",
+        "app_cloner_window_size_landscape_height",
+        "app_cloner_custom_screen_size_height",
+    ),
+}
+
+# Boolean "Set X" enable flags — these MUST be true for App Cloner to honor the
+# corresponding int values on next launch.  Writing the int alone is not enough.
+APP_CLONER_ENABLE_ALIASES: tuple[str, ...] = (
+    "app_cloner_set_window_position",
+    "app_cloner_set_window_position_enabled",
+    "app_cloner_window_position_enabled",
+    "app_cloner_set_window_size",
+    "app_cloner_set_window_size_enabled",
+    "app_cloner_window_size_enabled",
+    "app_cloner_custom_screen_size",
+    "app_cloner_enable_custom_screen_size",
+    "app_cloner_enable_resize",
+    "app_cloner_force_resize",
+    "app_cloner_allow_resize",
+    "app_cloner_freeform",
+    "app_cloner_freeform_window",
+    # Orientation enable flags (force landscape on the cloned window)
+    "app_cloner_force_landscape",
+    "app_cloner_orientation_landscape",
+    "app_cloner_set_orientation_landscape",
+    # Auto-DPI landscape flag (Kaeru clue: "look for Set in auto-DPI pot/land")
+    "app_cloner_auto_dpi_landscape",
+    "app_cloner_set_auto_dpi_landscape",
+    "app_cloner_set_dpi_landscape",
+)
+
+# Categories whose keys we will always set when writing — even if not
+# pre-existing in the file (App Cloner reads them if present, ignores if not).
+_WRITE_CATEGORIES_FOR_VALUES: dict[str, tuple[str, ...]] = {
+    # category → list of *aliases* to write with the same integer value
+    "position_left":   APP_CLONER_POSITION_ALIASES["left"],
+    "position_top":    APP_CLONER_POSITION_ALIASES["top"],
+    "position_right":  APP_CLONER_POSITION_ALIASES["right"],
+    "position_bottom": APP_CLONER_POSITION_ALIASES["bottom"],
+    "size_width":      APP_CLONER_POSITION_ALIASES["width"],
+    "size_height":     APP_CLONER_POSITION_ALIASES["height"],
+}
+
 
 # ── Data classes ─────────────────────────────────────────────────────────────
 
@@ -438,8 +537,176 @@ def app_cloner_prefs_path(package: str) -> Path:
     return Path("/data/data") / package / "shared_prefs" / "pkg_preferences.xml"
 
 
-def update_app_cloner_xml(package: str, rect: WindowRect) -> tuple[bool, str]:
-    """Write window position to App Cloner shared_prefs XML (direct file access).
+# ── Multi-alias XML mutators (shared by direct and root writers) ──────────────
+
+
+def _values_from_rect(rect: WindowRect) -> dict[str, int]:
+    """Return position/size values keyed by canonical name."""
+    return {
+        "left":   int(rect.left),
+        "top":    int(rect.top),
+        "right":  int(rect.right),
+        "bottom": int(rect.bottom),
+        "width":  int(rect.win_w),
+        "height": int(rect.win_h),
+    }
+
+
+def _ensure_int_child(root_el: ET.Element, name: str, value: int) -> bool:
+    """Update or create ``<int name=name value=value/>``.  Returns True if changed."""
+    for child in root_el:
+        if child.attrib.get("name") == name:
+            if child.tag != "int":
+                child.tag = "int"
+                if child.text:
+                    child.text = None
+            cur = child.attrib.get("value")
+            new_val = str(int(value))
+            if cur != new_val:
+                child.set("value", new_val)
+                return True
+            return False
+    new = ET.SubElement(root_el, "int")
+    new.set("name", name)
+    new.set("value", str(int(value)))
+    return True
+
+
+def _ensure_bool_child(root_el: ET.Element, name: str, value: bool) -> bool:
+    """Update or create ``<boolean name=name value=value/>``.  Returns True if changed."""
+    new_val = "true" if value else "false"
+    for child in root_el:
+        if child.attrib.get("name") == name:
+            if child.tag != "boolean":
+                child.tag = "boolean"
+                if child.text:
+                    child.text = None
+            cur = child.attrib.get("value")
+            if cur != new_val:
+                child.set("value", new_val)
+                return True
+            return False
+    new = ET.SubElement(root_el, "boolean")
+    new.set("name", name)
+    new.set("value", new_val)
+    return True
+
+
+def _apply_layout_keys_to_root(
+    root_el: ET.Element, rect: WindowRect, *, known_keys: Iterable[str] | None = None
+) -> int:
+    """Apply every layout-relevant key to a parsed XML root.
+
+    Writes:
+      * Every alias in :data:`APP_CLONER_POSITION_ALIASES` for left/top/right/
+        bottom/width/height.
+      * Every flag in :data:`APP_CLONER_ENABLE_ALIASES` set to ``true``.
+      * Any pre-existing keys whose name matches one of the position/size
+        aliases or the legacy ``app_cloner_current_window_*`` set — even if
+        they were stored as ``string`` or ``long`` — are updated.
+
+    Returns the number of keys created/modified.
+    """
+    values = _values_from_rect(rect)
+    changed = 0
+
+    # 1. Legacy compat: update old "current_window" mapping if present (string/int)
+    for child in root_el:
+        legacy_key = APP_CLONER_KEYS.get(child.attrib.get("name") or "")
+        if not legacy_key:
+            continue
+        new_val = str(values[legacy_key])
+        if child.tag == "int":
+            if child.attrib.get("value") != new_val:
+                child.set("value", new_val)
+                changed += 1
+        else:
+            if (child.text or "") != new_val:
+                child.text = new_val
+                changed += 1
+
+    # 2. Position/size aliases — write every known alias as <int>.
+    for canon, aliases in APP_CLONER_POSITION_ALIASES.items():
+        v = values[canon]
+        for name in aliases:
+            if _ensure_int_child(root_el, name, v):
+                changed += 1
+
+    # 3. Critical "Set" enable booleans — these must be true so App Cloner
+    #    actually honors the position/size ints on next launch.
+    for name in APP_CLONER_ENABLE_ALIASES:
+        if _ensure_bool_child(root_el, name, True):
+            changed += 1
+
+    # 4. Honor pre-discovered known_keys names by also writing matching
+    #    int/bool variants (covers App Cloner versions we have not enumerated).
+    if known_keys:
+        from .layout_discovery import _classify  # local import (avoids cycle at import time)
+
+        for name in known_keys:
+            if not name:
+                continue
+            if any(name in aliases for aliases in APP_CLONER_POSITION_ALIASES.values()):
+                continue  # already handled in step 2
+            if name in APP_CLONER_ENABLE_ALIASES:
+                continue  # already handled in step 3
+            cats = _classify(name)
+            target_value: int | None = None
+            if "position_left" in cats or "size_width" in cats and "left" in name.lower():
+                target_value = values["left"]
+            elif "position_top" in cats:
+                target_value = values["top"]
+            elif "position_right" in cats:
+                target_value = values["right"]
+            elif "position_bottom" in cats:
+                target_value = values["bottom"]
+            elif "size_width" in cats:
+                target_value = values["width"]
+            elif "size_height" in cats:
+                target_value = values["height"]
+            if target_value is not None:
+                if _ensure_int_child(root_el, name, target_value):
+                    changed += 1
+                continue
+            # Boolean-y enable categories
+            if any(
+                c in cats
+                for c in (
+                    "set_position_enable",
+                    "set_size_enable",
+                    "set_dpi_enable",
+                    "freeform",
+                    "auto_dpi",
+                    "orient_landscape",
+                )
+            ):
+                if _ensure_bool_child(root_el, name, True):
+                    changed += 1
+
+    return changed
+
+
+def _serialize_xml(root_el: ET.Element) -> str:
+    """Serialize ``root_el`` to a valid Android shared_prefs XML string."""
+    body = ET.tostring(root_el, encoding="unicode")
+    return "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" + body
+
+
+def _validate_xml(text: str) -> bool:
+    try:
+        ET.fromstring(text)
+        return True
+    except ET.ParseError:
+        return False
+
+
+def update_app_cloner_xml(
+    package: str,
+    rect: WindowRect,
+    *,
+    known_keys: Iterable[str] | None = None,
+) -> tuple[bool, str]:
+    """Write window position+size+enable flags via direct file access.
 
     Returns (ok, message). Never raises.
     """
@@ -448,25 +715,19 @@ def update_app_cloner_xml(package: str, rect: WindowRect) -> tuple[bool, str]:
         if not path.exists():
             return False, "pkg_preferences.xml not found (no App Cloner clone?)"
         backup = path.with_suffix(f".xml.bak-{int(time.time())}")
-        shutil.copy2(path, backup)
+        try:
+            shutil.copy2(path, backup)
+        except OSError:
+            pass
         tree    = ET.parse(path)
         root_el = tree.getroot()
-        values  = rect.as_dict()
-        changed = 0
-        for child in root_el:
-            name = child.attrib.get("name")
-            key  = APP_CLONER_KEYS.get(name or "")
-            if not key:
-                continue
-            new_val = str(values[key])
-            if child.tag == "int":
-                child.set("value", new_val)
-            else:
-                child.text = new_val
-            changed += 1
+        changed = _apply_layout_keys_to_root(root_el, rect, known_keys=known_keys)
         if changed == 0:
-            return False, "App Cloner XML found but window keys missing"
-        tree.write(path, encoding="utf-8", xml_declaration=True)
+            return False, "no layout keys changed (XML already at desired bounds)"
+        serialized = _serialize_xml(root_el)
+        if not _validate_xml(serialized):
+            return False, "internal: XML invalid after mutation"
+        path.write_text(serialized, encoding="utf-8")
         _log.debug("Direct XML write OK: %s (%d keys)", package, changed)
         return True, f"Updated App Cloner window preferences ({changed} keys)"
     except PermissionError:
@@ -480,8 +741,15 @@ def update_app_cloner_xml_root(
     rect:       WindowRect,
     root_tool:  str,
     timeout:    int = 10,
+    *,
+    known_keys: Iterable[str] | None = None,
 ) -> tuple[bool, str]:
-    """Write App Cloner window position via root. Returns (ok, message). Never raises."""
+    """Write App Cloner window position via root.
+
+    Reads the existing XML via ``cat``, applies the same multi-alias mutation
+    used by the direct writer, re-writes via base64 decode (so quoting is safe).
+    Returns (ok, message). Never raises.
+    """
     try:
         path_str = f"/data/data/{package}/shared_prefs/pkg_preferences.xml"
         read_res = android.run_root_command(
@@ -489,34 +757,31 @@ def update_app_cloner_xml_root(
             root_tool=root_tool, timeout=timeout,
         )
         if not read_res.ok or not (read_res.stdout or "").strip():
-            return False, "pkg_preferences.xml not accessible via root"
+            # File doesn't exist — create a minimal one with all aliases.
+            root_el = ET.Element("map")
+        else:
+            try:
+                root_el = ET.fromstring(read_res.stdout)
+            except ET.ParseError as exc:
+                return False, f"App Cloner XML parse failed: {exc}"
 
-        try:
-            root_el = ET.fromstring(read_res.stdout)
-        except ET.ParseError as exc:
-            return False, f"App Cloner XML parse failed: {exc}"
-
-        values  = rect.as_dict()
-        changed = 0
-        for child in root_el:
-            name = child.attrib.get("name")
-            key  = APP_CLONER_KEYS.get(name or "")
-            if not key:
-                continue
-            new_val = str(values[key])
-            if child.tag == "int":
-                child.set("value", new_val)
-            else:
-                child.text = new_val
-            changed += 1
+        changed = _apply_layout_keys_to_root(root_el, rect, known_keys=known_keys)
 
         if changed == 0:
-            return False, "No App Cloner window keys found in XML via root"
+            return False, "no layout keys changed via root (XML already at desired bounds)"
 
-        new_xml  = "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n"
-        new_xml += ET.tostring(root_el, encoding="unicode")
+        new_xml  = _serialize_xml(root_el)
+        if not _validate_xml(new_xml):
+            return False, "internal: XML invalid after root mutation"
         b64_data = base64.b64encode(new_xml.encode("utf-8")).decode("ascii")
-        write_cmd = f"echo '{b64_data}' | base64 -d > '{path_str}'"
+        # Atomic write via tmp then move (avoid half-written XML on interrupt).
+        tmp_path = f"{path_str}.deng-tmp"
+        write_cmd = (
+            f"mkdir -p '/data/data/{package}/shared_prefs' && "
+            f"echo '{b64_data}' | base64 -d > '{tmp_path}' && "
+            f"chmod 660 '{tmp_path}' 2>/dev/null; "
+            f"mv -f '{tmp_path}' '{path_str}'"
+        )
         write_res = android.run_root_command(
             ["sh", "-c", write_cmd], root_tool=root_tool, timeout=timeout,
         )

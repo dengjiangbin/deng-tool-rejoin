@@ -522,21 +522,52 @@ def is_package_task_visible(package: str) -> bool:
 
 
 def is_package_window_visible(package: str) -> bool:
-    """Check if a window exists for this package in Android's window manager.
+    """Check if a *drawing* window exists for this package.
 
-    Handles freeform multi-window where the package may not be foreground.
-    Returns True if any window entry is found for the package.  Never raises.
+    NOTE: ``Window{...package}`` lines persist in ``dumpsys window`` for many
+    seconds after a window is closed.  To avoid stale "still alive" evidence
+    that prevents the supervisor from reconnecting after the user closes a
+    Roblox clone window, we require a stronger signal: either
+    ``mHasSurface=true`` near the package's window block, or the package being
+    the current focus.  A bare ``Window{...package=...}`` entry without a
+    surface is NOT counted as visible.
+
+    Returns True only when a real drawing window for the package is found.
+    Never raises.
     """
     package = validate_package_name(package)
     try:
         result = run_command(["dumpsys", "window", "windows"], timeout=6)
         if result.ok:
             text = result.stdout
+            # Walk window blocks; only count a block as alive if mHasSurface=true
+            # appears inside it.
+            block_lines: list[str] = []
+            in_block = False
+            block_has_package = False
             for line in text.splitlines():
-                if package in line and any(
-                    marker in line
-                    for marker in ("Window{", "mCurrentFocus", "mFocusedApp", "package=", "mHasSurface=true")
-                ):
+                if "Window{" in line or "Window {" in line:
+                    # Flush previous block
+                    if in_block and block_has_package:
+                        block_text = "\n".join(block_lines)
+                        if "mHasSurface=true" in block_text:
+                            return True
+                    in_block = True
+                    block_lines = [line]
+                    block_has_package = package in line
+                    continue
+                if in_block:
+                    block_lines.append(line)
+                    if package in line:
+                        block_has_package = True
+            # Flush final block
+            if in_block and block_has_package:
+                block_text = "\n".join(block_lines)
+                if "mHasSurface=true" in block_text:
+                    return True
+            # Focus shortcut: if mCurrentFocus mentions our package, it's visible.
+            for line in text.splitlines():
+                if "mCurrentFocus" in line and package in line:
                     return True
     except Exception:  # noqa: BLE001
         pass
@@ -547,16 +578,28 @@ def get_package_alive_evidence(package: str) -> dict[str, bool]:
     """Comprehensive multi-source check for package aliveness.
 
     Returns a dict with evidence from multiple sources:
-        running: True if pidof/ps shows a process
-        task:    True if dumpsys activity shows a task
-        window:  True if dumpsys window shows a window entry
+        running:      True if pidof/ps shows a process
+        task:         True if dumpsys activity shows a task (may be STALE)
+        window:       True if a *drawing* window for the package exists
         root_running: True if root pidof/ps confirms the process
-        alive:   True if ANY of the above is True
+        alive:        True if process is running OR a drawing window exists
+        strict_alive: same as ``alive`` (provided for explicitness)
+
+    DESIGN NOTE — stale-task immunity
+    ─────────────────────────────────
+    Android's task list (``dumpsys activity activities``) keeps ``TaskRecord``
+    entries for many seconds after a package is force-stopped or its window is
+    closed.  Previously we treated *any* TaskRecord as "alive", which made the
+    supervisor refuse to reconnect after a user closed a Roblox clone window
+    in App Cloner.  We now treat ``task`` as a WEAK signal and exclude it from
+    ``alive`` / ``strict_alive``.  Real aliveness requires a real process or a
+    drawing surface.
 
     Never raises; always returns a valid dict.
     """
     _dead: dict[str, bool] = {
-        "running": False, "task": False, "window": False, "root_running": False, "alive": False,
+        "running": False, "task": False, "window": False, "root_running": False,
+        "alive": False, "strict_alive": False,
     }
     package_str = package
     try:
@@ -589,13 +632,16 @@ def get_package_alive_evidence(package: str) -> dict[str, bool]:
         except Exception:  # noqa: BLE001
             pass
 
-    alive = running or root_running or task or window
+    # STRICT: real process or real drawing surface.  Task alone is no longer
+    # accepted as aliveness — it lingers for many seconds after close.
+    strict_alive = running or root_running or window
     return {
         "running":      running,
         "task":         task,
         "window":       window,
         "root_running": root_running,
-        "alive":        alive,
+        "alive":        strict_alive,
+        "strict_alive": strict_alive,
     }
 
 
