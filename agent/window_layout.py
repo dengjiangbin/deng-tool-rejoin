@@ -3,7 +3,7 @@
 Layout model
 ────────────
  ┌──────────────────────────────────────────────────────────────────┐
- │  Left panel (30-40%)              │  Right pane (60-70%)         │
+ │  Left panel (35%)                 │  Right pane (65%)            │
  │  DENG Tool / Termux status        │  Roblox clone windows        │
  │  logo, package table, logs        │  (floating, tiled/cascaded)  │
  └──────────────────────────────────────────────────────────────────┘
@@ -35,6 +35,43 @@ from typing import Iterable
 from . import android
 
 _log = logging.getLogger("deng.rejoin.window_layout")
+
+# ── Safety: packages that must NEVER be resized or repositioned ───────────────
+# Layout only targets Roblox-like packages.  Any system, launcher, or shell
+# package that ends up in the list must be silently skipped.
+_LAYOUT_EXCLUDE_PREFIXES: tuple[str, ...] = (
+    "com.termux",            # Termux shell — must stay upright and unresized
+    "com.android.",          # Android system apps
+    "android",               # core Android
+    "com.google.",           # Google services / Play
+    "com.samsung.",          # Samsung system apps
+    "com.huawei.",           # Huawei system apps
+    "com.miui.",             # MIUI system apps
+    "com.oneplus.",          # OnePlus system apps
+    "com.oppo.",             # OPPO system apps
+    "com.vivo.",             # Vivo system apps
+)
+
+_LAYOUT_EXCLUDE_EXACT: frozenset[str] = frozenset({
+    "com.termux",
+    "com.termux.boot",
+    "com.termux.api",
+    "com.termux.styling",
+    "com.termux.widget",
+    "android",
+    "com.android.launcher",
+    "com.android.launcher3",
+    "com.android.systemui",
+})
+
+
+def _is_layout_excluded(package: str) -> bool:
+    """Return True if this package must NOT be targeted by the layout writer."""
+    pkg = package.strip().lower()
+    if pkg in _LAYOUT_EXCLUDE_EXACT:
+        return True
+    return any(pkg.startswith(pfx) for pfx in _LAYOUT_EXCLUDE_PREFIXES)
+
 
 # ── Layout constants ─────────────────────────────────────────────────────────
 
@@ -404,9 +441,9 @@ def apply_layout_to_packages(
     except Exception:  # noqa: BLE001
         display = DisplayInfo(width=1080, height=1920, density=420)
 
-    package_list = list(packages)
+    package_list = [p for p in packages if not _is_layout_excluded(p)]
     if not package_list:
-        return ["No packages to lay out."], []
+        return ["No Roblox packages to lay out (all were excluded or list was empty)."], []
 
     # Choose layout
     if use_split_layout and len(package_list) > 1:

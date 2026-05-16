@@ -6,7 +6,7 @@ import argparse
 import sys
 from collections.abc import Callable
 
-from . import keystore
+from . import keystore, safe_io
 from .banner import print_banner
 from .config import ConfigError, enabled_package_entries, load_config
 
@@ -58,7 +58,12 @@ def print_menu(args: argparse.Namespace, prelude_lines: list[str] | None = None)
 
 
 def run_menu(args: argparse.Namespace, handlers: dict[str, Handler]) -> int:
-    """Show a simple public menu and call existing command handlers."""
+    """Show a simple public menu and call existing command handlers.
+
+    Safety: all input() calls are replaced with safe_io.safe_prompt() to
+    bypass the readline C extension and prevent Termux/Android segfaults.
+    KeyboardInterrupt and EOF both exit cleanly.
+    """
     prelude = _menu_prelude_lines()
     if not _is_interactive():
         print_menu(args, prelude)
@@ -67,28 +72,31 @@ def run_menu(args: argparse.Namespace, handlers: dict[str, Handler]) -> int:
 
     while True:
         print_menu(args, prelude)
-        try:
-            choice = input("\nChoose option: ").strip()
-        except EOFError:
+        choice_raw = safe_io.safe_prompt("\nChoose option: ")
+        if choice_raw is None:
             print("\nNo interactive input was available. Run this command in Termux to choose an option.")
             return 0
+        choice = choice_raw.strip()
         command = next((item[2] for item in MENU_ITEMS if item[0] == choice), None)
         if command is None:
             print("Please choose a valid option.")
-            try:
-                input("Press Enter to continue...")
-            except EOFError:
-                return 0
+            safe_io.press_enter()
             prelude = _menu_prelude_lines()
             continue
         if command == "exit":
             print("Goodbye.")
             return 0
-        result = handlers[command](args)
+        try:
+            result = handlers[command](args)
+        except KeyboardInterrupt:
+            print("\nInterrupted — returning to menu.")
+            result = 0
+        except Exception:  # noqa: BLE001
+            print("\nAn error occurred — returning to menu.")
+            result = 1
         prelude = _menu_prelude_lines()
         if command == "start":
             return result
-        try:
-            input("\nPress Enter to return to menu...")
-        except EOFError:
+        ret = safe_io.safe_prompt("\nPress Enter to return to menu...")
+        if ret is None:
             return result

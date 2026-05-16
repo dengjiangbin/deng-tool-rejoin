@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import account_detect, android, db
+from . import account_detect, android, db, safe_io
 from .banner import print_banner
 from .config import (
     ConfigError,
@@ -212,10 +212,10 @@ def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespac
         if not _is_interactive():
             return False
         print("\n1. Enter Different Key\n2. Exit")
-        try:
-            choice = input("Choose [2]: ").strip() or "2"
-        except EOFError:
+        _lc = safe_io.safe_prompt("Choose [2]: ", default="2")
+        if _lc is None:
             return False
+        choice = _lc.strip() or "2"
         if choice != "1":
             return False
         lic["key"] = ""
@@ -332,14 +332,21 @@ def _is_interactive() -> bool:
 
 def _prompt(text: str, default: str = "") -> str:
     suffix = f" [{default}]" if default else ""
-    value = input(f"{text}{suffix}: ").strip()
-    return value or default
+    result = safe_io.safe_prompt(f"{text}{suffix}: ", default=default or None)
+    if result is None:  # EOF / Ctrl-C → treat as default
+        print()
+        return default
+    return result or default
 
 
 def _prompt_yes_no(text: str, default: bool = False) -> bool:
     marker = "Y/n" if default else "y/N"
     while True:
-        value = input(f"{text} [{marker}]: ").strip().lower()
+        result = safe_io.safe_prompt(f"{text} [{marker}]: ")
+        if result is None:  # EOF / Ctrl-C
+            print()
+            return default
+        value = result.strip().lower()
         if not value:
             return default
         if value in {"y", "yes"}:
@@ -493,7 +500,8 @@ def _interactive_discover_package_entries(
         ], "ok"
     _print_full_discovery_table(candidates)
     print("  A. Select all")
-    raw = input("Choose packages (e.g. 1,2 or A) [1]: ").strip().lower() or "1"
+    _raw = safe_io.safe_prompt("Choose packages (e.g. 1,2 or A) [1]: ", default="1")
+    raw = (_raw or "1").strip().lower()
     picked: list[android.RobloxPackageCandidate] = []
     if raw == "a":
         picked = list(candidates)
@@ -576,7 +584,7 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print("Auto Resize:")
     print("  Automatic based on selected package count and device DPI")
     if len(enabled_entries) > 1:
-        print("  Multi-package: 40% left reserved for Termux log, 60% right for Roblox")
+        print("  Multi-package: 35% left reserved for Termux status panel, 65% right for Roblox")
 
 
 def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejoin Setup") -> None:
@@ -721,7 +729,8 @@ def _choose_packages_menu(
     print("1. Auto detect Roblox packages")
     print("2. Enter package name manually")
     print("--------------------------------")
-    choice = input("Choose [1]: ").strip() or "1"
+    _ch = safe_io.safe_prompt("Choose [1]: ", default="1")
+    choice = (_ch or "1").strip() or "1"
 
     if choice == "1":
         new_sel, reason = _interactive_discover_package_entries(
@@ -978,10 +987,10 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         print("3. Remove Package")
         print("0. Back")
         print("--------------------------------")
-        try:
-            choice = input("Choose [0]: ").strip() or "0"
-        except EOFError:
+        _mc = safe_io.safe_prompt("Choose [0]: ", default="0")
+        if _mc is None:
             break
+        choice = _mc.strip() or "0"
         if choice == "0":
             break
         elif choice == "1":
@@ -1071,7 +1080,8 @@ def _package_menu_set_username(draft: dict[str, Any]) -> dict[str, Any]:
     for idx, entry in enumerate(entries, start=1):
         print(f"  {idx}. {entry['package']} — {_package_username_display(entry)}")
     print("  0. Back")
-    choice = input("Choose package [0]: ").strip() or "0"
+    _pc = safe_io.safe_prompt("Choose package [0]: ", default="0")
+    choice = (_pc or "0").strip() or "0"
     if choice == "0" or not choice.isdigit():
         return draft
     i = int(choice) - 1
@@ -1081,7 +1091,8 @@ def _package_menu_set_username(draft: dict[str, Any]) -> dict[str, Any]:
     target = dict(entries[i])
     current = validate_account_username(target.get("account_username", "")) or ""
     hint = f" [{current}]" if current else ""
-    raw = input(f"Roblox username / display name for {target['package']}{hint}: ").strip()
+    _ur = safe_io.safe_prompt(f"Roblox username / display name for {target['package']}{hint}: ")
+    raw = (_ur or "").strip()
     if not raw:
         print("Skipped.")
         return draft
@@ -1090,13 +1101,13 @@ def _package_menu_set_username(draft: dict[str, Any]) -> dict[str, Any]:
         target["username_source"] = validate_username_source("manual", target["account_username"])
     except ConfigError as exc:
         print(f"Invalid username: {exc}")
-        input("Press Enter to continue...")
+        safe_io.press_enter()
         return draft
     entries = [target if e["package"] == target["package"] else dict(e) for e in entries]
     draft["roblox_packages"] = entries
     draft = save_config(draft)
     print(f"Username saved for {target['package']}.")
-    input("Press Enter to continue...")
+    safe_io.press_enter()
     return draft
 
 
@@ -1271,7 +1282,8 @@ def _package_menu_remove(draft: dict[str, Any]) -> dict[str, Any]:
         username = _package_username_display(entry)
         print(f"  {idx}. {entry['package']} — {username}")
     print("  0. Back")
-    choice = input("Choose package to remove [0]: ").strip() or "0"
+    _rc = safe_io.safe_prompt("Choose package to remove [0]: ", default="0")
+    choice = (_rc or "0").strip() or "0"
     if choice == "0" or not choice.isdigit():
         return draft
     i = int(choice) - 1
@@ -1279,7 +1291,8 @@ def _package_menu_remove(draft: dict[str, Any]) -> dict[str, Any]:
         print("Invalid choice.")
         return draft
     target = enabled[i]
-    confirm = input(f"Remove {target['package']}? [y/N]: ").strip().lower()
+    _cf = safe_io.safe_prompt(f"Remove {target['package']}? [y/N]: ")
+    confirm = (_cf or "").strip().lower()
     if confirm not in {"y", "yes"}:
         print("Cancelled.")
         return draft
@@ -1357,10 +1370,7 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
 
     if not to_add_candidates:
         print("No packages selected.")
-        try:
-            input("Press Enter to continue...")
-        except EOFError:
-            pass
+        safe_io.press_enter()
         return draft
 
     # Detect usernames for selected packages
@@ -1445,10 +1455,10 @@ def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
         print("3. Show Current Roblox Launch Link")
         print("0. Back")
         print("--------------------------------")
-        try:
-            choice = input("Choose [0]: ").strip() or "0"
-        except EOFError:
+        _llc = safe_io.safe_prompt("Choose [0]: ", default="0")
+        if _llc is None:
             break
+        choice = _llc.strip() or "0"
         if choice == "0":
             break
         elif choice == "1":
@@ -1467,7 +1477,7 @@ def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
                 print(f"  Mode: {_launch_mode_label(draft.get('launch_mode', 'app'))}")
             else:
                 print("  No Roblox Launch Link Set. The Tool Will Launch The App Normally.")
-            input("Press Enter to continue...")
+            safe_io.press_enter()
         else:
             print("Please choose 1-3 or 0.")
     return draft
@@ -1502,10 +1512,10 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
         print("5. Test Webhook")
         print("0. Back")
         print("--------------------------------")
-        try:
-            choice = input("Choose [0]: ").strip() or "0"
-        except EOFError:
+        _whc = safe_io.safe_prompt("Choose [0]: ", default="0")
+        if _whc is None:
             break
+        choice = _whc.strip() or "0"
         if choice == "0":
             break
         elif choice == "1":
@@ -1526,7 +1536,7 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
                 print("Snapshot Setting Saved.")
             else:
                 print("Set Webhook URL First.")
-                input("Press Enter to continue...")
+                safe_io.press_enter()
         elif choice == "5":
             _test_webhook(draft)
         else:
@@ -1567,7 +1577,8 @@ def _config_webhook_mode(draft: dict[str, Any]) -> None:
     current_enabled = draft.get("webhook_enabled", False)
     current_mode = draft.get("webhook_mode", "new_message")
     default = "1" if not current_enabled else ("4" if current_mode == "edit_message" else "2")
-    choice = input(f"Choose [{default}]: ").strip() or default
+    _wmc = safe_io.safe_prompt(f"Choose [{default}]: ", default=default)
+    choice = (_wmc or default).strip() or default
     if choice == "1":
         draft["webhook_enabled"] = False
         draft["webhook_snapshot_enabled"] = False
@@ -1587,7 +1598,7 @@ def _test_webhook(draft: dict[str, Any]) -> None:
     url = draft.get("webhook_url", "") or ""
     if not url:
         print("No Webhook URL Is Set. Set One First.")
-        input("Press Enter to continue...")
+        safe_io.press_enter()
         return
     import json as _json
     import urllib.request as _urllib_req
@@ -1609,7 +1620,7 @@ def _test_webhook(draft: dict[str, Any]) -> None:
             print(f"Webhook Returned Status {code}.")
     except Exception as exc:  # noqa: BLE001
         print(f"Test Webhook Failed: {exc}")
-    input("Press Enter to continue...")
+    safe_io.press_enter()
 
 
 def _config_menu_yescaptcha(draft: dict[str, Any]) -> dict[str, Any]:
@@ -1633,10 +1644,10 @@ def _config_menu_yescaptcha(draft: dict[str, Any]) -> dict[str, Any]:
         print("3. Check Balance / Points")
         print("0. Back")
         print("--------------------------------")
-        try:
-            choice = input("Choose [0]: ").strip() or "0"
-        except EOFError:
+        _yc = safe_io.safe_prompt("Choose [0]: ", default="0")
+        if _yc is None:
             break
+        choice = _yc.strip() or "0"
         if choice == "0":
             break
         elif choice == "1":
@@ -1671,7 +1682,7 @@ def _config_yescaptcha_balance(draft: dict[str, Any]) -> None:
     key = draft.get("yescaptcha_key", "") or ""
     if not key:
         print("YesCaptcha API Key Not Set.")
-        input("Press Enter to continue...")
+        safe_io.press_enter()
         return
     print("Checking Balance...")
     try:
@@ -1680,7 +1691,7 @@ def _config_yescaptcha_balance(draft: dict[str, Any]) -> None:
         print(f"Balance / Points: {balance}")
     except Exception as exc:  # noqa: BLE001
         print(f"Balance Check Failed: {exc}")
-    input("Press Enter to continue...")
+    safe_io.press_enter()
 
 
 # ─── Setup / Config wizards ───────────────────────────────────────────────────
@@ -1775,8 +1786,10 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         _print_config_summary(draft)
         return draft, False
 
+    # Print banner once before the loop; do NOT reprint inside the loop to
+    # prevent the logo from appearing multiple times as the user navigates.
+    print_banner(use_color=not args.no_color)
     while True:
-        print_banner(use_color=not args.no_color)
         print("--------------------------------")
         print("DENG Tool: Rejoin Config")
         print("--------------------------------")
@@ -1786,13 +1799,13 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("4. YesCaptcha")
         print("0. Back")
         print("--------------------------------")
-        try:
-            choice = input("Choose [0]: ").strip() or "0"
-        except EOFError:
+        choice = safe_io.safe_prompt("Choose [0]: ", default="0")
+        if choice is None:
             print("\nNo interactive input was available. Run this command in Termux to edit settings.")
             print("\nCurrent settings:")
             _print_config_summary(draft)
             return draft, False
+        choice = choice.strip() or "0"
         if choice == "0":
             return draft, True
         if choice == "1":
@@ -1805,7 +1818,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
             draft = _config_menu_yescaptcha(draft)
         else:
             print("Please choose 1-4 or 0.")
-            input("Press Enter to continue...")
+            safe_io.press_enter()
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
@@ -1903,7 +1916,10 @@ def _print_latest(label: str, row: dict[str, Any] | None) -> None:
 
 def cmd_status(args: argparse.Namespace) -> int:
     print_banner(use_color=not args.no_color)
-    cfg = load_config()
+    try:
+        cfg = load_config()
+    except ConfigError:
+        cfg = default_config()
     root_info = android.detect_root()
     cfg["root_available"] = root_info.available
     cfg["android_release"] = get_android_release()
@@ -2775,8 +2791,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    return _handlers()[args.resolved_command](args)
+    """CLI entrypoint with global safety wrappers.
+
+    faulthandler is enabled first so that true SIGSEGV crashes write a
+    traceback to logs/crash.log before the process dies.  All Python-level
+    exceptions are caught here; the public user never sees a raw traceback.
+    """
+    safe_io.setup_faulthandler()
+    try:
+        args = parse_args(argv)
+        return _handlers()[args.resolved_command](args)
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+        return 130
+    except EOFError:
+        return 0
+    except SystemExit as _exc:
+        _code = _exc.code
+        return _code if isinstance(_code, int) else (0 if _code is None else 1)
+    except Exception:  # noqa: BLE001
+        import logging as _logging
+        # Log full traceback at DEBUG only — never expose it to the public terminal.
+        _logging.getLogger("deng.rejoin.cli").debug("Unhandled CLI error", exc_info=True)
+        print(
+            "\nThe tool hit an internal error. "
+            "Please send support the latest crash log.",
+            file=sys.stderr,
+        )
+        return 1
 
 
 def _handlers() -> dict[str, Any]:
