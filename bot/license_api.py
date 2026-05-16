@@ -507,11 +507,20 @@ def _route_public_install(
             from agent.install_registry import get_artifact_root
 
             root = get_artifact_root()
-            candidates: list[Path] = []
-            if root is not None:
-                candidates.append(root / "releases" / "launcher" / "deng-rejoin-launcher.tar.gz")
-            candidates.append(_PROJECT_ROOT / "releases" / "launcher" / "deng-rejoin-launcher.tar.gz")
-            launcher_path = next((c for c in candidates if c.is_file()), None)
+            # Prefer the deployed repo copy (git checkout / PM2 cwd) so `releases/launcher`
+            # always wins over a stale duplicate under the artifact download root.
+            repo_bundle = _PROJECT_ROOT / "releases" / "launcher" / "deng-rejoin-launcher.tar.gz"
+            launcher_path: Path | None = None
+            if repo_bundle.is_file():
+                launcher_path = repo_bundle
+            elif root is not None:
+                alt = root / "releases" / "launcher" / "deng-rejoin-launcher.tar.gz"
+                if alt.is_file():
+                    launcher_path = alt
+                    log.warning(
+                        "serving launcher bundle from artifact root (repo bundle missing): %s",
+                        alt,
+                    )
             if launcher_path is None:
                 return (
                     json.dumps({"error": "Launcher bundle not found"}).encode("utf-8"),
