@@ -664,10 +664,21 @@ def _route_public_install(
             return (p, s, "application/json", None)
 
         if req_lower == "test-latest":
-            from agent.install_internal_access import is_internal_test_install_allowed
+            from agent.install_internal_access import (
+                internal_test_install_allowlisted_discord_ids,
+                is_internal_test_install_allowed,
+            )
 
             owner_discord_id = store.get_owner_discord_id_for_license_key(raw_key)
-            if not is_internal_test_install_allowed(owner_discord_id):
+            _allowed = is_internal_test_install_allowed(owner_discord_id)
+            log.info(
+                "install test-latest access: key=%s owner_discord_id=%s allowed=%s allowlist_n=%d",
+                _mask_key(raw_key),
+                owner_discord_id or "<none>",
+                _allowed,
+                len(internal_test_install_allowlisted_discord_ids()),
+            )
+            if not _allowed:
                 log.info(
                     "install authorize denied: test-latest not owner/tester key=%s",
                     _mask_key(raw_key),

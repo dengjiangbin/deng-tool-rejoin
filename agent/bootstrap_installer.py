@@ -14,9 +14,45 @@ command -v tar >/dev/null 2>&1 || { echo "Install tar first: pkg install -y tar"
 command -v python3 >/dev/null 2>&1 || { echo "Install python first: pkg install -y python" >&2; exit 1; }
 LAUNCHER_URL="$DENG_REJOIN_INSTALL_API/install/launcher/bundle.tar.gz"
 TMP="$(mktemp)"
-trap 'rm -f "$TMP"' EXIT
-curl -fsSL "$LAUNCHER_URL" -o "$TMP" || { echo "Could not download launcher bundle." >&2; exit 1; }
-tar -xzf "$TMP" -C "$APP_HOME"
+STAGE="$(mktemp -d)"
+trap 'rm -f "$TMP"; rm -rf "$STAGE"' EXIT
+curl -fsSL "$LAUNCHER_URL" -o "$TMP" || { echo "Could not download launcher bundle." >&2; echo "URL: $LAUNCHER_URL" >&2; exit 1; }
+tar -xzf "$TMP" -C "$STAGE" || { echo "Could not extract launcher bundle archive." >&2; exit 1; }
+DEF_CK="$STAGE/agent/deferred_bundle_install.py"
+if [[ ! -f "$DEF_CK" ]]; then
+  echo "Failed launcher self-check." >&2
+  echo "agent/deferred_bundle_install.py missing from launcher tarball." >&2
+  echo "APP_HOME=$APP_HOME" >&2
+  echo "Launcher bundle URL: $LAUNCHER_URL" >&2
+  exit 1
+fi
+if ! grep -q "resolve_install_api" "$DEF_CK" 2>/dev/null; then
+  echo "Failed launcher self-check." >&2
+  echo "agent/deferred_bundle_install.py is missing resolve_install_api." >&2
+  echo "The launcher bundle is stale or corrupted." >&2
+  echo "APP_HOME=$APP_HOME" >&2
+  echo "Launcher bundle URL: $LAUNCHER_URL" >&2
+  echo "Deferred file path (staging): $DEF_CK" >&2
+  exit 1
+fi
+mkdir -p "$APP_HOME/agent"
+rm -f "$APP_HOME/agent/deng_tool_rejoin.py" "$APP_HOME/agent/deferred_bundle_install.py" "$APP_HOME/agent/__init__.py"
+shopt -s nullglob
+_LAUNCHER_CP=( "$STAGE"/agent/*.py )
+if [[ ${#_LAUNCHER_CP[@]} -eq 0 ]]; then
+  echo "Failed launcher self-check: no agent/*.py in bundle." >&2
+  echo "Launcher bundle URL: $LAUNCHER_URL" >&2
+  exit 1
+fi
+cp -a "${_LAUNCHER_CP[@]}" "$APP_HOME/agent/" || { echo "Failed to copy launcher Python files into APP_HOME." >&2; exit 1; }
+shopt -u nullglob
+if ! grep -q "resolve_install_api" "$APP_HOME/agent/deferred_bundle_install.py" 2>/dev/null; then
+  echo "Failed launcher self-check: installed deferred_bundle_install.py still missing resolve_install_api." >&2
+  echo "APP_HOME=$APP_HOME" >&2
+  echo "Deferred path: $APP_HOME/agent/deferred_bundle_install.py" >&2
+  exit 1
+fi
+echo "Launcher bundle verified."
 
 # Prefer $PREFIX/bin (Termux: on PATH). Always mkdir — do not rely on [[ -w ]]
 USING_HOME_BIN=0
@@ -77,6 +113,22 @@ fi
 if ! PYTHONPATH="$APP_HOME" python3 -c "import agent.deferred_bundle_install" 2>/dev/null; then
   echo "Failed: launcher Python modules did not import. APP_HOME: $APP_HOME" >&2
   _fail_install
+fi
+
+set +e
+_PY_ERR="$(PYTHONPATH="$APP_HOME" DENG_REJOIN_HOME="$APP_HOME" python3 -c "from agent.deferred_bundle_install import resolve_install_api" 2>&1)"
+_PY_RC=$?
+set -e
+if [[ "$_PY_RC" -ne 0 ]]; then
+  echo "Failed launcher self-check." >&2
+  echo "agent/deferred_bundle_install.py is missing resolve_install_api or import failed." >&2
+  echo "The launcher bundle may be stale or corrupted." >&2
+  echo "APP_HOME=$APP_HOME" >&2
+  echo "Launcher bundle URL: $LAUNCHER_URL" >&2
+  echo "Expected file: $APP_HOME/agent/deferred_bundle_install.py" >&2
+  echo "Python error:" >&2
+  echo "$_PY_ERR" >&2
+  exit 1
 fi
 
 # Prove first-run API resolves from ~/.install_api without install shell env

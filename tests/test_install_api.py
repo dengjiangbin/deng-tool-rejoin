@@ -433,9 +433,13 @@ class InstallBootstrapSanityTests(unittest.TestCase):
         buf = io.BytesIO(body)
         with tarfile.open(fileobj=buf, mode="r:gz") as tf:
             names = tf.getnames()
+            deferred = tf.extractfile("agent/deferred_bundle_install.py")
+            self.assertIsNotNone(deferred)
+            dtext = deferred.read().decode("utf-8", errors="replace")
         self.assertIn("agent/deferred_bundle_install.py", names)
         self.assertIn("agent/deng_tool_rejoin.py", names)
         self.assertIn("agent/__init__.py", names)
+        self.assertIn("def resolve_install_api", dtext)
 
     def test_bootstrap_prefers_prefix_bin_avoids_local_bin(self) -> None:
         from agent.bootstrap_installer import render_public_bootstrap
@@ -458,15 +462,30 @@ class InstallBootstrapSanityTests(unittest.TestCase):
             s,
         )
         self.assertIn("rejoin.deng.my.id", s)
+        self.assertIn("STAGE=", s)
+        self.assertIn("Launcher bundle verified.", s)
+        self.assertIn("rm -f \"$APP_HOME/agent/deng_tool_rejoin.py\"", s)
 
     def test_install_complete_only_after_command_check(self) -> None:
         from agent.bootstrap_installer import render_public_bootstrap
 
         s = render_public_bootstrap(base_url="https://x.example", requested="test-latest")
         done = s.index("Install complete.")
+        self.assertLess(s.index("Launcher bundle verified."), done)
         self.assertLess(s.index("command -v deng-rejoin"), done)
         self.assertLess(s.index("resolve_install_api"), done)
         self.assertLess(s.index(".install_api"), done)
+
+    def test_packed_launcher_tarball_has_resolve_install_api(self) -> None:
+        tar_path = PROJECT / "releases" / "launcher" / "deng-rejoin-launcher.tar.gz"
+        if not tar_path.is_file():
+            self.skipTest("run scripts/build_launcher_bundle.py first")
+        buf = io.BytesIO(tar_path.read_bytes())
+        with tarfile.open(fileobj=buf, mode="r:gz") as tf:
+            member = tf.extractfile("agent/deferred_bundle_install.py")
+            self.assertIsNotNone(member)
+            text = member.read().decode("utf-8", errors="replace")
+        self.assertIn("def resolve_install_api", text)
 
 
 class InstallTermuxSimulationTests(unittest.TestCase):
@@ -533,6 +552,7 @@ class InstallTermuxSimulationTests(unittest.TestCase):
                 timeout=120,
             )
             self.assertEqual(r.returncode, 0, msg=r.stderr + r.stdout)
+            self.assertIn("Launcher bundle verified.", r.stdout)
             self.assertIn("Install complete.", r.stdout)
 
             which_r = subprocess.run(

@@ -66,7 +66,8 @@ def _requested_path(app_home: Path) -> Path:
     return app_home / ".install_requested"
 
 
-def _http_json_post(url: str, payload: dict) -> tuple[int, dict]:
+def _http_json_post(url: str, payload: dict) -> tuple[int, dict, str]:
+    """POST JSON; return status, parsed JSON object (may be empty), and raw response text."""
     data = json.dumps(payload).encode("utf-8")
     req = Request(
         url,
@@ -77,15 +78,80 @@ def _http_json_post(url: str, payload: dict) -> tuple[int, dict]:
     try:
         with urlopen(req, timeout=120) as resp:  # noqa: S310
             raw = resp.read().decode("utf-8", errors="replace")
-            body = json.loads(raw) if raw.strip() else {}
-            return int(getattr(resp, "status", 200) or 200), body
+            try:
+                body = json.loads(raw) if raw.strip() else {}
+            except json.JSONDecodeError:
+                body = {}
+            return int(getattr(resp, "status", 200) or 200), body, raw
     except HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         try:
             body = json.loads(raw) if raw.strip() else {}
         except json.JSONDecodeError:
             body = {}
-        return int(exc.code), body
+        return int(exc.code), body, raw
+
+
+def _safe_response_snippet(raw: str, max_len: int = 500) -> str:
+    if not raw:
+        return ""
+    cleaned = " ".join(raw.split())
+    if len(cleaned) > max_len:
+        return cleaned[:max_len] + "…"
+    return cleaned
+
+
+def describe_install_authorize_failure(
+    status: int,
+    body: dict | None,
+    raw: str | None,
+) -> str:
+    """One line for stderr when POST /api/install/authorize did not return active.
+
+    Uses ``message``, ``error``, ``detail``, ``result``, ``code`` from JSON when present.
+    If JSON is missing or empty, includes a safe slice of the raw body. Never echoes secrets
+    that are not in the server response (license key is only client-side and not passed here).
+    """
+    body = body or {}
+    raw = raw or ""
+
+    msg = str(body.get("message") or "").strip()
+    err = str(body.get("error") or "").strip()
+    detail = str(body.get("detail") or "").strip()
+    res = str(body.get("result") or "").strip()
+    code = body.get("code")
+
+    parts: list[str] = []
+
+    if msg and msg.lower() not in {"install denied.", "install denied"}:
+        parts.append(msg)
+    if err and err not in parts and err.lower() not in " ".join(parts).lower():
+        parts.append(err)
+    if detail and detail not in " ".join(parts):
+        parts.append(detail)
+
+    if res and res != "active":
+        blob = "; ".join(parts)
+        if res not in blob and (not msg or res not in msg):
+            parts.append(f"result={res}")
+
+    if code is not None and str(code).strip() != "":
+        c_str = str(code).strip()
+        if c_str not in " ".join(parts):
+            parts.append(f"code={c_str}")
+
+    if not parts:
+        snippet = _safe_response_snippet(raw)
+        if snippet:
+            parts.append(f"response: {snippet}")
+        elif status:
+            parts.append(f"empty body (HTTP {status})")
+
+    headline = "; ".join(parts) if parts else "unknown error"
+    out = f"Install denied: {headline}"
+    if status >= 400 and f"HTTP {status}" not in out and f"{status}" not in headline:
+        out += f" [HTTP {status}]"
+    return out
 
 
 def _http_download(url: str, dest: Path) -> None:
@@ -150,13 +216,13 @@ def run() -> int:
             payload["bootstrap_session"] = bootstrap_session
         auth_url = f"{base}/api/install/authorize"
         try:
-            status, body = _http_json_post(auth_url, payload)
+            status, body, raw = _http_json_post(auth_url, payload)
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             print(f"Network error: {exc}", file=sys.stderr)
             return 1
 
-        if status >= 400 or body.get("result") != "active":
-            print((body.get("message") or "Install denied.").strip(), file=sys.stderr)
+        if not (status == 200 and body.get("result") == "active"):
+            print(describe_install_authorize_failure(status, body, raw), file=sys.stderr)
             continue
 
         dl_url = (body.get("download_url") or "").strip()
