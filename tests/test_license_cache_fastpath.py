@@ -236,5 +236,229 @@ class LicenseMenuLoopFastPathTest(unittest.TestCase):
         ok_print.assert_called()
 
 
+# ── New: cache-integrity regression for probe p-09484eaab4 ───────────────────
+
+
+class LicenseTransientNotPersistedTest(unittest.TestCase):
+    """A transient remote failure MUST NOT overwrite ``last_status``.
+
+    Real-device evidence (probe ``p-09484eaab4``): the subprocess license
+    check was returning ``rc=1`` (broken PYTHONPATH).  The menu loop
+    persisted ``last_status = "server_unavailable"`` and the user got
+    permanently locked out — cache fast-path & offline grace both require
+    ``last_status == "active"``.  After the fix, the menu loop must
+    leave ``last_status`` alone for transient results.
+    """
+
+    def _run_loop_with(self, transient_result: str) -> dict:
+        """Run the menu loop once with ``transient_result`` from the dispatcher
+        and a stale, non-cached license; return the final cfg dict."""
+        from agent import commands  # noqa: PLC0415
+
+        original_status = "active"
+        original_check = _iso(48 * 3600)  # stale (>24h), so cache misses
+        cfg = {
+            "license": {
+                "key": "ABCD-EFGH",
+                "last_status": original_status,
+                "last_check_at": original_check,
+                "mode": "remote",
+            },
+        }
+        persisted: list[tuple[str, str]] = []
+
+        def fake_persist(c: dict, status: str) -> dict:
+            persisted.append((status, "PERSISTED"))
+            c.setdefault("license", {})["last_status"] = status
+            return c
+
+        with mock.patch.object(commands, "load_config", return_value=cfg), \
+             mock.patch.object(commands, "_ensure_install_id_saved", side_effect=lambda c: c), \
+             mock.patch.object(commands, "_remote_license_run_check",
+                               return_value=(transient_result, "boom")), \
+             mock.patch.object(commands, "_persist_license_status",
+                               side_effect=fake_persist), \
+             mock.patch.object(commands, "_print_license_ok"), \
+             mock.patch.object(commands, "_print_license_err"), \
+             mock.patch.object(commands, "print_beginner_license_gate_help"), \
+             mock.patch.object(commands, "_is_interactive", return_value=False):
+            import argparse  # noqa: PLC0415
+            commands._ensure_remote_license_menu_loop(
+                cfg, argparse.Namespace(), use_color=False,
+            )
+        return {"cfg": cfg, "persisted": persisted}
+
+    def test_server_unavailable_does_not_overwrite_active(self) -> None:
+        result = self._run_loop_with("server_unavailable")
+        # Offline grace already triggered (cached active < 30d), so no
+        # persistence happens at all on this path either.
+        self.assertEqual(
+            result["cfg"]["license"]["last_status"], "active",
+            "transient server_unavailable must NOT corrupt last_status",
+        )
+
+    def test_error_result_does_not_persist(self) -> None:
+        result = self._run_loop_with("error")
+        self.assertEqual(
+            result["cfg"]["license"]["last_status"], "active",
+            "transient 'error' result must NOT corrupt last_status",
+        )
+
+    def test_definitive_wrong_device_still_persists(self) -> None:
+        """Sanity: ``wrong_device`` is *not* transient and SHOULD persist."""
+        from agent import commands  # noqa: PLC0415
+
+        cfg = {
+            "license": {
+                "key": "ABCD-EFGH",
+                "last_status": "active",
+                "last_check_at": _iso(48 * 3600),
+                "mode": "remote",
+            },
+        }
+        persisted: list[str] = []
+
+        def fake_persist(c: dict, status: str) -> dict:
+            persisted.append(status)
+            c.setdefault("license", {})["last_status"] = status
+            return c
+
+        with mock.patch.object(commands, "load_config", return_value=cfg), \
+             mock.patch.object(commands, "_ensure_install_id_saved", side_effect=lambda c: c), \
+             mock.patch.object(commands, "_remote_license_run_check",
+                               return_value=("wrong_device", "hwid mismatch")), \
+             mock.patch.object(commands, "_persist_license_status",
+                               side_effect=fake_persist), \
+             mock.patch.object(commands, "_print_license_err"), \
+             mock.patch.object(commands, "print_beginner_license_gate_help"), \
+             mock.patch.object(commands, "_is_interactive", return_value=False):
+            import argparse  # noqa: PLC0415
+            commands._ensure_remote_license_menu_loop(
+                cfg, argparse.Namespace(), use_color=False,
+            )
+        self.assertIn("wrong_device", persisted,
+                      "definitive results MUST be persisted")
+
+    def test_noninteractive_verify_does_not_persist_transient(self) -> None:
+        """``verify_remote_license_noninteractive`` must also keep cache safe."""
+        from agent import commands  # noqa: PLC0415
+
+        cfg = {
+            "license": {
+                "key": "ABCD-EFGH",
+                "last_status": "active",
+                "last_check_at": _iso(3600),
+                "mode": "remote",
+            },
+        }
+        persisted: list[str] = []
+
+        def fake_persist(c: dict, status: str) -> dict:
+            persisted.append(status)
+            c.setdefault("license", {})["last_status"] = status
+            return c
+
+        with mock.patch.object(commands, "_remote_license_run_check",
+                               return_value=("server_unavailable", "boom")), \
+             mock.patch.object(commands, "_persist_license_status",
+                               side_effect=fake_persist), \
+             mock.patch.object(commands, "_print_license_err"), \
+             mock.patch.object(commands, "print_beginner_license_gate_help"):
+            ok = commands.verify_remote_license_noninteractive(cfg, use_color=False)
+        self.assertFalse(ok, "transient must still surface as failure")
+        self.assertEqual(
+            persisted, [],
+            "transient result MUST NOT be persisted in noninteractive verify",
+        )
+
+
+class IsolatedSubprocessImportsAgentTest(unittest.TestCase):
+    """The isolated subprocess must be able to ``import agent.license``.
+
+    Regression for probe ``p-09484eaab4``: the child Python was launched
+    with ``python3 -c "..."`` but no PYTHONPATH, so ``from agent.license``
+    failed with ``ModuleNotFoundError`` and the child exited rc=1.  Every
+    license check returned ``server_unavailable``.
+    """
+
+    def test_pythonpath_passed_to_subprocess(self) -> None:
+        """Subprocess env MUST carry PYTHONPATH pointing at the agent's parent."""
+        from pathlib import Path  # noqa: PLC0415
+        import os  # noqa: PLC0415
+
+        from agent import commands  # noqa: PLC0415
+
+        captured_env: dict[str, str] = {}
+
+        def fake_run(args, **kwargs):  # noqa: ANN001, ANN002
+            captured_env.update(kwargs.get("env") or {})
+            m = mock.Mock()
+            m.returncode = 0
+            m.stdout = json.dumps({"result": "active", "message": "ok"}).encode()
+            m.stderr = b""
+            return m
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            commands._remote_license_check_isolated({"license": {"key": "X"}})
+
+        self.assertIn("PYTHONPATH", captured_env, "PYTHONPATH must be set")
+        agent_parent = str(Path(commands.__file__).resolve().parent.parent)
+        pp = captured_env["PYTHONPATH"]
+        # First entry must be the agent's parent directory.
+        first = pp.split(os.pathsep)[0]
+        self.assertEqual(first, agent_parent,
+                         f"PYTHONPATH[0] must point at {agent_parent}, got {pp!r}")
+
+    def test_inline_code_inserts_sys_path(self) -> None:
+        """The inline ``-c`` payload must ``sys.path.insert(0, ...)`` so the
+        child can find ``agent`` even if PYTHONPATH is stripped (some
+        sandboxes do this)."""
+        from agent import commands  # noqa: PLC0415
+
+        captured_args: list[list[str]] = []
+
+        def fake_run(args, **kwargs):  # noqa: ANN001, ANN002
+            captured_args.append(list(args))
+            m = mock.Mock()
+            m.returncode = 0
+            m.stdout = json.dumps({"result": "active", "message": "ok"}).encode()
+            m.stderr = b""
+            return m
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            commands._remote_license_check_isolated({"license": {"key": "X"}})
+
+        self.assertEqual(len(captured_args), 1)
+        code = captured_args[0][-1]
+        self.assertIn("sys.path.insert", code,
+                      "inline code MUST manipulate sys.path")
+        self.assertIn("from agent.license import", code,
+                      "inline code MUST import agent.license")
+        self.assertIn("DENG_REJOIN_HOME", code,
+                      "inline code SHOULD also honour DENG_REJOIN_HOME env")
+
+    def test_subprocess_import_error_does_not_crash_parent(self) -> None:
+        """If the child Python can't import ``agent``, the parent must still
+        return cleanly as ``server_unavailable`` (no exception bubbles up)."""
+        from agent import commands  # noqa: PLC0415
+
+        proc = mock.Mock()
+        proc.returncode = 1
+        proc.stdout = b""
+        proc.stderr = (
+            b"Traceback (most recent call last):\n"
+            b"  File \"<string>\", line 5, in <module>\n"
+            b"ModuleNotFoundError: No module named 'agent'\n"
+        )
+        with mock.patch("subprocess.run", return_value=proc):
+            result, msg = commands._remote_license_check_isolated(
+                {"license": {"key": "X"}},
+            )
+        self.assertEqual(result, "server_unavailable")
+        self.assertIn("rc=1", msg)
+        # The stderr hint is included so future probes pinpoint the cause.
+        self.assertIn("Traceback", msg)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -246,16 +246,43 @@ def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35) ->
         "device_label": str(cfg.setdefault("license", {}).get("device_label") or "")[:80],
         "server_url": (cfg.setdefault("license", {}).get("server_url") or "").strip(),
     }
+    # Real-device evidence (probe p-09484eaab4): the child Python was
+    # exiting with rc=1 because ``python3 -c "from agent.license ..."``
+    # doesn't have the parent's ``sys.path``.  Pass the agent package's
+    # parent directory via PYTHONPATH so the child can find it, and add
+    # the same path explicitly inside the code string so ``DENG_REJOIN_HOME``
+    # overrides work too.  Without this fix every check returned rc=1
+    # and the menu loop persisted ``last_status = server_unavailable``,
+    # corrupting the cache permanently.
+    try:
+        from pathlib import Path as _Path  # noqa: PLC0415
+        _agent_parent = str(_Path(__file__).resolve().parent.parent)
+    except Exception:  # noqa: BLE001
+        _agent_parent = os.path.expanduser("~/.deng-tool/rejoin")
     code = (
-        "import json, sys\n"
-        "from agent.license import (\n"
-        "    check_remote_license_status, hash_install_id,\n"
-        "    DEFAULT_LICENSE_SERVER_URL, get_public_device_model,\n"
-        ")\n"
-        "from agent.constants import VERSION\n"
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {_agent_parent!r})\n"
+        "_home = os.environ.get('DENG_REJOIN_HOME')\n"
+        "if _home and _home not in sys.path:\n"
+        "    sys.path.insert(0, _home)\n"
+        "try:\n"
+        "    from agent.license import (\n"
+        "        check_remote_license_status, hash_install_id,\n"
+        "        DEFAULT_LICENSE_SERVER_URL, get_public_device_model,\n"
+        "    )\n"
+        "    from agent.constants import VERSION\n"
+        "except Exception as _imp_exc:\n"
+        "    sys.stdout.write(json.dumps({\n"
+        "        'result': 'server_unavailable',\n"
+        "        'message': f'license import error: {_imp_exc}',\n"
+        "    }))\n"
+        "    sys.exit(0)\n"
         "p = json.loads(sys.stdin.read())\n"
         "srv = p['server_url'] or DEFAULT_LICENSE_SERVER_URL\n"
-        "model = get_public_device_model() or 'unknown'\n"
+        "try:\n"
+        "    model = get_public_device_model() or 'unknown'\n"
+        "except Exception:\n"
+        "    model = 'unknown'\n"
         "try:\n"
         "    r, m = check_remote_license_status(\n"
         "        srv, license_key=p['key'], install_id=p['install_id'],\n"
@@ -266,6 +293,13 @@ def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35) ->
         "    r, m = 'server_unavailable', f'check exception: {exc}'\n"
         "sys.stdout.write(json.dumps({'result': r, 'message': m}))\n"
     )
+    # Pass PYTHONPATH as a belt-and-braces so even subprocess implementations
+    # that strip ``-c`` script directory still find ``agent``.
+    env = dict(os.environ)
+    prev_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        _agent_parent + (os.pathsep + prev_pp if prev_pp else "")
+    )
     try:
         proc = _sp.run(
             [sys.executable, "-c", code],
@@ -274,6 +308,7 @@ def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35) ->
             stderr=_sp.PIPE,
             timeout=timeout,
             check=False,
+            env=env,
         )
     except _sp.TimeoutExpired:
         return "server_unavailable", "License check subprocess timed out."
@@ -286,7 +321,11 @@ def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35) ->
         # running until the next clean check.
         return "server_unavailable", f"License check crashed safely (signal {-proc.returncode})."
     if proc.returncode != 0:
-        return "server_unavailable", f"License check exited rc={proc.returncode}."
+        # Capture stderr's first line so future probes pinpoint *why*
+        # the child failed (ImportError / SyntaxError / etc.).
+        stderr_line = (proc.stderr or b"").decode("utf-8", errors="replace").splitlines()
+        hint = stderr_line[0][:80] if stderr_line else ""
+        return "server_unavailable", f"License check exited rc={proc.returncode} ({hint})"
     try:
         data = json.loads((proc.stdout or b"").decode("utf-8", errors="replace") or "{}")
     except json.JSONDecodeError:
@@ -383,7 +422,14 @@ def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool
         _print_license_ok(use_color)
         _persist_license_status(cfg, "active")
         return True
-    _persist_license_status(cfg, result)
+    # Cache integrity: see _ensure_remote_license_menu_loop for rationale.
+    # Never persist transient results, they would clobber a valid cached
+    # ``last_status == "active"`` and lock the user out.
+    if result not in _LICENSE_TRANSIENT_RESULTS:
+        try:
+            _persist_license_status(cfg, result)
+        except Exception:  # noqa: BLE001
+            pass
     if result == "wrong_device":
         _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
     elif result == "key_not_redeemed":
@@ -519,10 +565,19 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             _print_license_ok(use_color)
             return True
 
-        try:
-            cfg = _persist_license_status(cfg, result)
-        except Exception:  # noqa: BLE001
-            pass
+        # Cache integrity: ONLY persist *definitive* answers
+        # (active / wrong_device / not_found / revoked / expired / inactive /
+        # key_not_redeemed / missing_key).  Persisting a transient
+        # ``server_unavailable`` / ``error`` would overwrite a previously
+        # valid ``last_status == "active"``, permanently disabling the
+        # cache fast-path and offline grace.  Real-device evidence
+        # (probe p-09484eaab4) showed this bug locking the user out
+        # after a single failed subprocess attempt.
+        if result not in _LICENSE_TRANSIENT_RESULTS:
+            try:
+                cfg = _persist_license_status(cfg, result)
+            except Exception:  # noqa: BLE001
+                pass
 
         if result == "wrong_device":
             _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
