@@ -623,6 +623,261 @@ def _capture_diag_startup(errors: list[dict[str, str]]) -> dict[str, Any]:
     return out
 
 
+# ─── Third-party tool discovery (Kaeru / multi-clone / window manager) ──────
+
+
+# Package-name fragments that identify the tools we want to reverse-engineer.
+# We keep the list curated so the probe doesn't accidentally exfiltrate every
+# random app's private prefs — only tools that overlap our problem space.
+_THIRD_PARTY_TOOL_HINTS = (
+    # Kaeru — the user's reference benchmark for "this just works".
+    "kaeru",
+    "shiki",  # the dev's other handle is "kaerushiki" on some channels
+    # App / multi-clone managers
+    "applauncher",
+    "appcloner",
+    "appclone",
+    "multispace",
+    "parallel",
+    "multiwindow",
+    "dualspace",
+    "clone",
+    "isolate",
+    # Free-form window managers / sidecars
+    "taskbar",
+    "sentry",
+    "freeform",
+    "floating",
+    "windowmanager",
+    "sidestore",
+    # Roblox-specific launchers and helpers
+    "rolauncher",
+    "robloxstudio",
+    "rolimons",
+    "joiner",
+    "rejoin",
+    "autojoin",
+)
+
+
+def _capture_installed_packages(errors: list[dict[str, str]]) -> dict[str, Any]:
+    """Return the full ``pm list packages -3`` output and a curated subset.
+
+    The curated subset includes:
+      * every package whose id contains one of :data:`_THIRD_PARTY_TOOL_HINTS`,
+      * every installed Moons / App Cloner clone (so we have a record of which
+        clones the user has installed even if not in the cfg).
+    """
+    out: dict[str, Any] = {}
+    try:
+        res = android.run_android_command(
+            ["pm", "list", "packages", "-3"], timeout=15,
+        )
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "pm list packages -3", "error": str(exc)[:200]})
+        out["pm_list_third_party_raw"] = ""
+        out["third_party_count"] = 0
+        out["third_party_tools"] = []
+        out["clone_packages"] = []
+        return out
+
+    text = res.stdout or ""
+    out["pm_list_third_party_raw"] = text[:60000]  # cap to 60 KB
+
+    pkgs = [
+        ln.split(":", 1)[1].strip()
+        for ln in text.splitlines()
+        if ln.startswith("package:")
+    ]
+    out["third_party_count"] = len(pkgs)
+    out["third_party_tools"] = sorted({
+        p for p in pkgs
+        if any(h in p.lower() for h in _THIRD_PARTY_TOOL_HINTS)
+    })
+    out["clone_packages"] = sorted({
+        p for p in pkgs
+        if (
+            "moons" in p.lower()
+            or "clone" in p.lower()
+            or "applauncher" in p.lower()
+            or "appcloner" in p.lower()
+        )
+    })
+    return out
+
+
+def _capture_kaeru_evidence(
+    third_party: dict[str, Any],
+    errors: list[dict[str, str]],
+) -> dict[str, Any]:
+    """For every third-party tool discovered, capture its install + prefs.
+
+    This is the heart of the "observe what the working tool does" loop:
+    every file under ``shared_prefs`` is read and masked, plus the
+    package's full ``pm dump`` (declared permissions, intent filters,
+    activity windowing flags).
+    """
+    out: dict[str, Any] = {}
+    targets: list[str] = []
+    for src in ("third_party_tools", "clone_packages"):
+        for pkg in third_party.get(src, []) or []:
+            if pkg not in targets:
+                targets.append(pkg)
+
+    out["targets"] = list(targets)
+    out["pm_dump"] = {}
+    out["shared_prefs"] = {}
+    out["files_dir"] = {}
+
+    for pkg in targets:
+        # ── pm dump <pkg>: declared permissions, intent filters, launch config
+        try:
+            res = android.run_android_command(
+                ["pm", "dump", pkg], timeout=12,
+            )
+            out["pm_dump"][pkg] = mask((res.stdout or "")[:24000])
+        except Exception as exc:  # noqa: BLE001
+            errors.append({
+                "step": f"pm dump {pkg}",
+                "error": str(exc)[:200],
+            })
+            out["pm_dump"][pkg] = "<error>"
+
+        # ── /data/data/<pkg>/shared_prefs/*  (full XML, masked)
+        try:
+            out["shared_prefs"][pkg] = _capture_shared_prefs(pkg, errors)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({
+                "step": f"shared_prefs {pkg}",
+                "error": str(exc)[:200],
+            })
+            out["shared_prefs"][pkg] = {}
+
+        # ── /data/data/<pkg>/files/   (root-only; surface filenames + small
+        # text contents so we can spot per-clone window-bounds JSON / cfg).
+        try:
+            ls_res = android.run_root_command(
+                ["sh", "-c", f"ls -la /data/data/{pkg}/files/ 2>/dev/null | head -200"],
+                timeout=6,
+            )
+            out["files_dir"][pkg] = (ls_res.stdout or "")[:8000]
+        except Exception:  # noqa: BLE001
+            out["files_dir"][pkg] = ""
+
+    return out
+
+
+def _capture_appops(
+    targets: list[str],
+    errors: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Capture ``cmd appops get <pkg>`` — which Android permissions each
+    third-party tool actually holds at runtime.  Useful to know whether
+    Kaeru required SYSTEM_ALERT_WINDOW / MANAGE_ACTIVITY_STACKS.
+    """
+    out: dict[str, str] = {}
+    for pkg in targets:
+        try:
+            res = android.run_android_command(
+                ["cmd", "appops", "get", pkg], timeout=8,
+            )
+            out[pkg] = (res.stdout or "")[:8000]
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"step": f"appops {pkg}", "error": str(exc)[:200]})
+            out[pkg] = "<error>"
+    return out
+
+
+def _capture_getprop(errors: list[dict[str, str]]) -> dict[str, str]:
+    """Capture ``getprop`` filtered to window/display/freeform-relevant keys.
+
+    Looking for properties like ``persist.wm.disable_explicit_size_freeze``,
+    ``ro.config.low_ram``, ``persist.sys.dalvik.vm.lib.2``, OEM flags that
+    enable or disable freeform.  Full output is too large; we filter.
+    """
+    out: dict[str, str] = {"raw_filtered": "", "all_count": 0}
+    try:
+        res = android.run_android_command(["getprop"], timeout=10)
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "getprop", "error": str(exc)[:200]})
+        return out
+    raw = res.stdout or ""
+    lines = raw.splitlines()
+    out["all_count"] = len(lines)
+    keep_re = re.compile(
+        r"(?i)(window|freeform|resiz|multi|dpi|density|task|surface|"
+        r"wm\.|persist\.sys|ro\.config|ro\.build|knox|samsung\.|game|"
+        r"split|launcher|home|secur|low_ram|vm\.lib)",
+    )
+    filtered = [ln for ln in lines if keep_re.search(ln)]
+    out["raw_filtered"] = "\n".join(filtered)[:32000]
+    return out
+
+
+def _capture_dumpsys_global(errors: list[dict[str, str]]) -> dict[str, str]:
+    """Capture the FULL ``dumpsys window windows`` / activity / SurfaceFlinger
+    output (not just per-package slices).
+
+    Large but the most valuable single source of evidence for layout state:
+    every Window{} block including its mFrame / mHasSurface / windowing mode
+    / stack id is here.  Capped at 200 KB each so the JSON stays uploadable.
+    """
+    out: dict[str, str] = {}
+    for label, args, cap in (
+        ("window_windows_full",
+            ["dumpsys", "window", "windows"], 200_000),
+        ("activity_activities_full",
+            ["dumpsys", "activity", "activities"], 200_000),
+        ("activity_recents_full",
+            ["dumpsys", "activity", "recents"], 80_000),
+        ("surfaceflinger_full",
+            ["dumpsys", "SurfaceFlinger"], 120_000),
+        ("activity_top",
+            ["dumpsys", "activity", "top"], 60_000),
+        ("activity_starter",
+            ["dumpsys", "activity", "starter"], 30_000),
+    ):
+        try:
+            res = android.run_android_command(args, timeout=15)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"step": label, "error": str(exc)[:200]})
+            out[label] = "<error>"
+            continue
+        out[label] = (res.stdout or "")[:cap]
+    return out
+
+
+def _capture_logcat(errors: list[dict[str, str]]) -> str:
+    """Last ~3000 lines of logcat (dump mode).
+
+    Captures every WindowManager / ActivityTaskManager event in the
+    recent history — which is where we see Kaeru actually doing
+    ``startActivity ... mode=freeform bounds=[l,t][r,b]``.  Masked to
+    drop any URL / cookie that might leak.
+    """
+    try:
+        res = android.run_android_command(
+            ["logcat", "-d", "-t", "3000",
+             "WindowManager:V", "ActivityManager:V",
+             "ActivityTaskManager:V", "AppOps:V",
+             "TaskLaunchModes:V", "SurfaceFlinger:I",
+             "*:W"],
+            timeout=20,
+        )
+        return mask((res.stdout or "")[:200_000])
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "logcat -d", "error": str(exc)[:200]})
+        return ""
+
+
+def _capture_termux_prefs(errors: list[dict[str, str]]) -> dict[str, Any]:
+    """Termux's own shared_prefs — captures any window/UI state set by
+    a tool that resizes Termux (the same trick we want to learn for
+    our 50%-dock).
+    """
+    return _capture_shared_prefs("com.termux", errors)
+
+
 def _capture_last_diagnostics(errors: list[dict[str, str]]) -> dict[str, Any]:
     """Read ``data/last_start_diagnostics.json`` if it exists."""
     p = DATA_DIR / "last_start_diagnostics.json"
@@ -681,6 +936,31 @@ def collect_probe() -> dict[str, Any]:
     out["installed_build"] = _capture_installed_build(errors)
     out["wrapper"] = _capture_wrapper_script(errors)
     out["last_start_diagnostics"] = _capture_last_diagnostics(errors)
+
+    # ── Third-party tool discovery: the "observe what works" loop ─────────
+    # Find any other launcher / multi-clone / window-manager / Kaeru-style
+    # tool the user has installed.  Capture its shared_prefs, declared
+    # permissions, and granted app-ops so we can copy whatever technique
+    # makes their freeform resize actually stick on this exact device.
+    out["installed_packages"] = _capture_installed_packages(errors)
+    out["third_party_evidence"] = _capture_kaeru_evidence(
+        out["installed_packages"], errors,
+    )
+    out["appops"] = _capture_appops(
+        out["third_party_evidence"].get("targets", []) or [],
+        errors,
+    )
+    # Termux's own prefs — Kaeru may set window/dock state on Termux too.
+    out["termux_shared_prefs"] = _capture_termux_prefs(errors)
+    # System-property snapshot — OEM freeform-window flags live here.
+    out["getprop"] = _capture_getprop(errors)
+    # Full (non-package-filtered) dumpsys for window/activity/surface state.
+    # This is what we use to see the EXACT bounds Kaeru achieved.
+    out["dumpsys_global"] = _capture_dumpsys_global(errors)
+    # Recent logcat — `startActivity ... mode=freeform bounds=[...]` lives
+    # here so we see the actual API calls Kaeru made.
+    out["logcat"] = _capture_logcat(errors)
+
     # The big one: runs the actual cmd_menu chain in a child subprocess so
     # we capture the exact step where it segfaults — without the probe
     # itself dying.  Always last so partial captures still survive even if
