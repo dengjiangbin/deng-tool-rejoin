@@ -3399,6 +3399,143 @@ def cmd_doctor_install(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def cmd_diag_startup(args: argparse.Namespace) -> int:
+    """Hidden: walk every step of the menu-startup chain, printing markers.
+
+    Each marker is flushed *before* the step runs.  If any sub-routine
+    segfaults (real device incident: probe ``p-b30c47d37f``), the parent
+    captures the last successful ``STEP:<name>`` line and the failing one
+    is the next call.  Errors are caught and printed as ``ERROR:<step>``
+    so a Python exception doesn't masquerade as a crash.
+
+    Designed to be invoked by :func:`agent.probe._capture_diag_startup`
+    via ``subprocess.run`` so a SIGSEGV in any module is *isolated to
+    this child* — the probe parent survives and uploads the partial
+    output as evidence.
+    """
+    def _step(name: str) -> None:
+        sys.stdout.write(f"STEP:{name}\n")
+        sys.stdout.flush()
+
+    def _ok(name: str, detail: str = "") -> None:
+        suffix = f" {detail}" if detail else ""
+        sys.stdout.write(f"OK:{name}{suffix}\n")
+        sys.stdout.flush()
+
+    def _err(name: str, exc: BaseException) -> None:
+        # Truncated single line.  Real trace goes to the file logger
+        # via the global except in main(); this is just a marker.
+        sys.stdout.write(f"ERROR:{name} {type(exc).__name__}: {str(exc)[:160]}\n")
+        sys.stdout.flush()
+
+    _step("entered")
+
+    try:
+        _step("ensure_app_dirs")
+        ensure_app_dirs()
+        _ok("ensure_app_dirs")
+    except Exception as exc:  # noqa: BLE001
+        _err("ensure_app_dirs", exc)
+        return 2
+
+    try:
+        _step("check_crash_log")
+        notice = safe_io.check_and_report_crash_log()
+        _ok("check_crash_log", f"notice={'yes' if notice else 'no'}")
+    except Exception as exc:  # noqa: BLE001
+        _err("check_crash_log", exc)
+
+    try:
+        _step("keystore_dev_mode")
+        dev = bool(keystore.DEV_MODE)
+        _ok("keystore_dev_mode", f"dev={dev}")
+    except Exception as exc:  # noqa: BLE001
+        _err("keystore_dev_mode", exc)
+
+    try:
+        _step("load_config")
+        cfg = load_config()
+        _ok("load_config")
+    except ConfigError as exc:
+        _err("load_config_config_error", exc)
+        cfg = default_config()
+        _ok("load_config_fallback_default")
+    except Exception as exc:  # noqa: BLE001
+        _err("load_config", exc)
+        # Don't bail — fall through with safe defaults so later steps
+        # still surface evidence (the goal is *narrow*, not *abort*).
+        cfg = default_config()
+        _ok("load_config_fallback_default")
+
+    try:
+        _step("sync_install_id")
+        cfg = _ensure_install_id_saved(cfg)
+        _ok("sync_install_id")
+    except Exception as exc:  # noqa: BLE001
+        _err("sync_install_id", exc)
+
+    try:
+        _step("license_section_read")
+        lic = cfg.setdefault("license", {})
+        mode = str(lic.get("mode") or "remote").strip().lower()
+        _ok("license_section_read", f"mode={mode}")
+    except Exception as exc:  # noqa: BLE001
+        _err("license_section_read", exc)
+        return 4
+
+    try:
+        _step("license_remote_check")
+        # We deliberately exercise the same network call cmd_menu does
+        # (via safe_http → curl subprocess on Termux).  If THIS step
+        # segfaults the child returns -11 and the probe's last_step is
+        # ``license_remote_check`` — instant diagnosis.
+        result, msg = _remote_license_run_check(cfg)
+        _ok("license_remote_check", f"result={result}")
+    except Exception as exc:  # noqa: BLE001
+        _err("license_remote_check", exc)
+
+    try:
+        _step("import_supervisor")
+        from .supervisor import MultiPackageSupervisor  # noqa: F401, PLC0415
+        _ok("import_supervisor")
+    except Exception as exc:  # noqa: BLE001
+        _err("import_supervisor", exc)
+
+    try:
+        _step("import_window_layout")
+        from . import window_layout as _wl  # noqa: PLC0415
+        _ok("import_window_layout")
+    except Exception as exc:  # noqa: BLE001
+        _err("import_window_layout", exc)
+
+    try:
+        _step("detect_display_info")
+        from . import window_layout as _wl2  # noqa: PLC0415
+        di = _wl2.detect_display_info()
+        _ok("detect_display_info", f"{di.width}x{di.height} @ {di.density}")
+    except Exception as exc:  # noqa: BLE001
+        _err("detect_display_info", exc)
+
+    try:
+        _step("freeform_probe")
+        from .freeform_enable import setup_freeform_capabilities_silent  # noqa: PLC0415
+        ok_count, total = setup_freeform_capabilities_silent()
+        _ok("freeform_probe", f"ok={ok_count}/{total}")
+    except Exception as exc:  # noqa: BLE001
+        _err("freeform_probe", exc)
+
+    try:
+        _step("banner_print")
+        from .banner import banner_text  # noqa: PLC0415
+        _ = banner_text(use_color=False)
+        _ok("banner_print")
+    except Exception as exc:  # noqa: BLE001
+        _err("banner_print", exc)
+
+    _step("finished")
+    return 0
+
+
 def cmd_enable_boot(args: argparse.Namespace) -> int:
     print_banner(use_color=not args.no_color)
     try:
@@ -3602,6 +3739,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help=argparse.SUPPRESS)
     parser.add_argument("--upload", dest="upload", action="store_true",
                         help=argparse.SUPPRESS)
+    parser.add_argument("--diag-startup", dest="diag_startup", action="store_true",
+                        help=argparse.SUPPRESS)
 
     # Pre-process argv so hidden positional subcommands don't trip choices validation.
     import sys as _sys
@@ -3673,6 +3812,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ns.resolved_command = "support-bundle"
     elif getattr(ns, "probe", False):
         ns.resolved_command = "probe"
+    elif getattr(ns, "diag_startup", False):
+        ns.resolved_command = "diag-startup"
     elif getattr(ns, "doctor_install", False):
         ns.resolved_command = "doctor-install"
     elif getattr(ns, "layout_test", False) or getattr(ns, "root_state", False) or getattr(ns, "layout_reset", False):
@@ -3740,6 +3881,7 @@ def _handlers() -> dict[str, Any]:
         "discover-layout-keys": cmd_discover_layout_keys,
         "doctor-install": cmd_doctor_install,
         "probe": cmd_probe,
+        "diag-startup": cmd_diag_startup,
     }
 
 

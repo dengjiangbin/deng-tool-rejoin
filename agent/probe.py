@@ -30,7 +30,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import socket
+import subprocess
 import sys
 import time
 import traceback
@@ -484,6 +486,143 @@ def _capture_log_tail(errors: list[dict[str, str]], lines: int = 200) -> str:
         return ""
 
 
+def _capture_all_logs(errors: list[dict[str, str]]) -> dict[str, dict[str, Any]]:
+    """Capture every file in ``~/.deng-tool/rejoin/logs/`` (crash.log, start-debug, …).
+
+    Each entry: ``{size, mtime_iso, tail}`` (last 64 KiB, masked).
+
+    crash.log is the C-level traceback written by :mod:`faulthandler` when a
+    true segfault hits.  We always want to surface it when present so the
+    diagnoser knows the exact Python frame the process died in.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    log_dir = LOG_PATH.parent
+    if not log_dir.is_dir():
+        return out
+    try:
+        files = sorted(log_dir.iterdir())
+    except OSError as exc:
+        errors.append({"step": "logs_dir_list", "error": str(exc)[:200]})
+        return out
+    for path in files:
+        if not path.is_file():
+            continue
+        try:
+            stat = path.stat()
+            size = stat.st_size
+            with path.open("rb") as f:
+                if size > 64 * 1024:
+                    f.seek(size - 64 * 1024)
+                    tail_bytes = f.read()
+                else:
+                    tail_bytes = f.read()
+            tail = tail_bytes.decode("utf-8", errors="replace")
+            out[path.name] = {
+                "size": size,
+                "mtime_iso": datetime.fromtimestamp(
+                    stat.st_mtime, tz=timezone.utc
+                ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "tail": mask(tail),
+            }
+        except OSError as exc:
+            errors.append({"step": f"log_read:{path.name}", "error": str(exc)[:200]})
+    return out
+
+
+def _capture_installed_build(errors: list[dict[str, str]]) -> dict[str, Any]:
+    """Read ``~/.deng-tool/rejoin/.installed-build.json`` if present.
+
+    Written by ``install.sh`` after a successful install; tells us *exactly*
+    which artifact bytes the runtime is supposed to be running.
+    """
+    p = Path(os.path.expanduser("~/.deng-tool/rejoin/.installed-build.json"))
+    if not p.is_file():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append({"step": "installed_build", "error": str(exc)[:200]})
+        return {}
+
+
+def _capture_wrapper_script(errors: list[dict[str, str]]) -> dict[str, Any]:
+    """Capture the ``deng-rejoin`` shell wrapper that PATH resolves to.
+
+    Real-device incident (probe ``p-b30c47d37f``): ``deng-rejoin version``
+    succeeds but bare ``deng-rejoin`` segfaults.  If the wrapper points at a
+    stale install path, this surfaces it immediately.
+    """
+    try:
+        wrapper = shutil.which("deng-rejoin")
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "wrapper_which", "error": str(exc)[:200]})
+        return {}
+    if not wrapper:
+        return {"path": None}
+    out: dict[str, Any] = {"path": wrapper}
+    try:
+        out["resolved"] = os.path.realpath(wrapper)
+    except OSError:
+        pass
+    try:
+        with open(wrapper, "rb") as f:
+            data = f.read(8 * 1024).decode("utf-8", errors="replace")
+        out["head"] = mask(data)
+    except OSError as exc:
+        errors.append({"step": "wrapper_read", "error": str(exc)[:200]})
+    return out
+
+
+def _capture_diag_startup(errors: list[dict[str, str]]) -> dict[str, Any]:
+    """Exec ``deng-rejoin --diag-startup`` as a child subprocess.
+
+    The child walks the ``cmd_menu`` steps one at a time and prints
+    ``STEP:<name>`` before invoking each.  If the child segfaults, we get
+    ``returncode == -11`` (SIGSEGV) without our probe process dying, and
+    the last STEP line tells us *exactly* which sub-routine crashed.
+
+    This is the live evidence loop: probe → diag-startup → captured output
+    → real-device crash location.  No more guessing from logs.
+    """
+    out: dict[str, Any] = {}
+    wrapper = shutil.which("deng-rejoin")
+    if not wrapper:
+        errors.append({"step": "diag_startup", "error": "deng-rejoin not on PATH"})
+        return out
+    try:
+        proc = subprocess.run(
+            [wrapper, "--diag-startup"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=45,
+            check=False,
+            text=True,
+        )
+        out["returncode"] = proc.returncode
+        # SIGSEGV is -11 on Linux/Android; other crash signals also negative.
+        out["sigsegv"] = (proc.returncode == -11)
+        out["crashed"] = proc.returncode < 0
+        out["stdout"] = mask((proc.stdout or "")[-16384:])
+        out["stderr"] = mask((proc.stderr or "")[-16384:])
+        # The last "STEP:<name>" line printed by the child tells us where
+        # it died.  Parse it for convenience.
+        last_step = ""
+        for line in (proc.stdout or "").splitlines():
+            line = line.strip()
+            if line.startswith("STEP:"):
+                last_step = line
+        out["last_step"] = last_step
+    except subprocess.TimeoutExpired as exc:
+        errors.append({"step": "diag_startup", "error": "timeout"})
+        out["returncode"] = None
+        out["timeout"] = True
+        out["stdout"] = mask((exc.stdout or "")[-8192:] if isinstance(exc.stdout, str) else "")
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "diag_startup", "error": str(exc)[:200]})
+    return out
+
+
 def _capture_last_diagnostics(errors: list[dict[str, str]]) -> dict[str, Any]:
     """Read ``data/last_start_diagnostics.json`` if it exists."""
     p = DATA_DIR / "last_start_diagnostics.json"
@@ -538,7 +677,15 @@ def collect_probe() -> dict[str, Any]:
         pkgs[pkg] = pkg_block
     out["packages"] = pkgs
     out["log_tail"] = _capture_log_tail(errors)
+    out["logs"] = _capture_all_logs(errors)
+    out["installed_build"] = _capture_installed_build(errors)
+    out["wrapper"] = _capture_wrapper_script(errors)
     out["last_start_diagnostics"] = _capture_last_diagnostics(errors)
+    # The big one: runs the actual cmd_menu chain in a child subprocess so
+    # we capture the exact step where it segfaults — without the probe
+    # itself dying.  Always last so partial captures still survive even if
+    # the child diagnostic hangs / times out.
+    out["diag_startup"] = _capture_diag_startup(errors)
     return out
 
 
