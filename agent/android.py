@@ -1358,10 +1358,27 @@ def launch_package_with_bounds(
         if mode in LAUNCH_MODES:
             try:
                 validate_launch_url(url, mode, allow_uncertain=True)
-                cmd = stem + ["-a", "android.intent.action.VIEW", "-d", url, package]
+                # Kaeru probe (p-2dbada99a0) uses flags=0x34800000:
+                #   FLAG_ACTIVITY_SINGLE_TOP    (0x20000000)
+                #   FLAG_ACTIVITY_NEW_TASK      (0x10000000)
+                #   FLAG_ACTIVITY_CLEAR_TOP     (0x04000000)
+                #   FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS (0x00800000)
+                # BROWSABLE category ensures Android routes roblox:// to
+                # ActivityProtocolLaunch (not the generic LAUNCHER).
+                cmd = stem + [
+                    "-a", "android.intent.action.VIEW",
+                    "-c", "android.intent.category.BROWSABLE",
+                    "-f", "0x34800000",
+                    "-d", url, package,
+                ]
                 res = run_command(cmd, timeout=PROCESS_TIMEOUT_SECONDS)
                 if res.ok:
                     return res, method_label + "_url"
+                # Retry without flags in case device rejects them.
+                cmd_nf = stem + ["-a", "android.intent.action.VIEW", "-d", url, package]
+                res = run_command(cmd_nf, timeout=PROCESS_TIMEOUT_SECONDS)
+                if res.ok:
+                    return res, method_label + "_url_noflag"
             except UrlValidationError:
                 pass
         # If url launch with bounds failed, fall through to plain bounded launch.

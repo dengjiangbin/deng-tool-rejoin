@@ -76,6 +76,14 @@ def _is_layout_excluded(package: str) -> bool:
 # ── Layout constants ─────────────────────────────────────────────────────────
 
 APP_CLONER_KEYS = {
+    # Moons multi-clone: launch keys control initial position at app start.
+    # Confirmed by probe p-2dbada99a0 (Kaeru) — these are what Kaeru writes.
+    "app_cloner_launch_window_left":    "left",
+    "app_cloner_launch_window_top":     "top",
+    "app_cloner_launch_window_right":   "right",
+    "app_cloner_launch_window_bottom":  "bottom",
+    # Current-window keys are updated by the running app and also read at
+    # startup on some App Cloner variants.
     "app_cloner_current_window_left":   "left",
     "app_cloner_current_window_top":    "top",
     "app_cloner_current_window_right":  "right",
@@ -118,7 +126,12 @@ KAERU_TITLE_BAR_H: int = 48
 # ones it knows; unknown keys are kept in shared_prefs without effect).
 APP_CLONER_POSITION_ALIASES: dict[str, tuple[str, ...]] = {
     "left":   (
-        "app_cloner_current_window_left",
+        # Moons multi-clone (probe p-2dbada99a0): the **launch** key is
+        # what the app reads on startup to set its initial position — this
+        # is the KEY Kaeru writes and the one that actually works.
+        # The "current" key is what the app updates while running.
+        "app_cloner_launch_window_left",    # ← Moons: initial position (Kaeru writes this)
+        "app_cloner_current_window_left",   # ← Moons: last known position (also write for safety)
         "app_cloner_window_position_left",
         "app_cloner_window_position_landscape_left",
         "app_cloner_window_position_x",
@@ -128,6 +141,7 @@ APP_CLONER_POSITION_ALIASES: dict[str, tuple[str, ...]] = {
         "app_cloner_task_bounds_left",
     ),
     "top": (
+        "app_cloner_launch_window_top",     # ← Moons: initial position (Kaeru writes this)
         "app_cloner_current_window_top",
         "app_cloner_window_position_top",
         "app_cloner_window_position_landscape_top",
@@ -138,6 +152,7 @@ APP_CLONER_POSITION_ALIASES: dict[str, tuple[str, ...]] = {
         "app_cloner_task_bounds_top",
     ),
     "right": (
+        "app_cloner_launch_window_right",   # ← Moons: initial position (Kaeru writes this)
         "app_cloner_current_window_right",
         "app_cloner_window_position_right",
         "app_cloner_window_position_landscape_right",
@@ -146,6 +161,7 @@ APP_CLONER_POSITION_ALIASES: dict[str, tuple[str, ...]] = {
         "app_cloner_task_bounds_right",
     ),
     "bottom": (
+        "app_cloner_launch_window_bottom",  # ← Moons: initial position (Kaeru writes this)
         "app_cloner_current_window_bottom",
         "app_cloner_window_position_bottom",
         "app_cloner_window_position_landscape_bottom",
@@ -1009,9 +1025,16 @@ def update_app_cloner_xml_root(
                 continue
             b64_data = base64.b64encode(new_xml.encode("utf-8")).decode("ascii")
             tmp_path = f"{path_str}.deng-tmp"
+            # Strategy: write to a temp file, chown to the app's UID (so it
+            # can read its own prefs), set permissions, then atomic mv.
+            # ``chown --reference`` copies owner:group from the package dir
+            # without hard-coding the numeric UID.
+            # Two write methods tried in order (shell pipe → Python fallback):
             write_cmd = (
                 f"mkdir -p '/data/data/{package}/shared_prefs' && "
-                f"echo '{b64_data}' | base64 -d > '{tmp_path}' && "
+                f"printf '%s' '{b64_data}' | base64 -d > '{tmp_path}' && "
+                f"chown --reference='/data/data/{package}' '{tmp_path}' 2>/dev/null || "
+                f"  chown $(stat -c '%u:%g' '/data/data/{package}' 2>/dev/null) '{tmp_path}' 2>/dev/null; "
                 f"chmod 660 '{tmp_path}' 2>/dev/null; "
                 f"mv -f '{tmp_path}' '{path_str}'"
             )
@@ -1021,7 +1044,26 @@ def update_app_cloner_xml_root(
             if write_res.ok:
                 _log.debug("Root XML write OK: %s → %s (%d keys)", package, path.name, changed)
                 return True, f"Wrote {path.name} via root ({changed} keys)"
-            err = (write_res.stderr or "")[:80]
+            err_shell = (write_res.stderr or "")[:80]
+            # Fallback: use Python to write (avoids base64 availability issues
+            # and handles SELinux context correctly via os.chown).
+            py_snippet = (
+                f"import base64,os;"
+                f"data=base64.b64decode('{b64_data}');"
+                f"tmp='{tmp_path}';"
+                f"fh=open(tmp,'wb');fh.write(data);fh.close();"
+                f"st=os.stat('/data/data/{package}');"
+                f"os.chown(tmp,st.st_uid,st.st_gid);"
+                f"os.chmod(tmp,0o660);"
+                f"os.rename(tmp,'{path_str}')"
+            )
+            py_res = android.run_root_command(
+                ["python3", "-c", py_snippet], root_tool=root_tool, timeout=timeout,
+            )
+            if py_res.ok:
+                _log.debug("Root XML write OK (py): %s → %s (%d keys)", package, path.name, changed)
+                return True, f"Wrote {path.name} via root/python ({changed} keys)"
+            err = f"shell: {err_shell} | py: {(py_res.stderr or '')[:60]}"
             attempted.append(f"{path.name}: write failed: {err}")
         except Exception as exc:  # noqa: BLE001
             _log.debug("update_app_cloner_xml_root error for %s @ %s: %s", package, path.name, exc)

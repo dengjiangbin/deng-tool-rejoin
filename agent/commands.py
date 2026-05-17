@@ -3458,8 +3458,44 @@ def cmd_start(args: argparse.Namespace) -> int:
         # ── Supervisor loop — dashboard takes over entirely ───────────────────
         # From this point on, _live_dashboard() clears the terminal and
         # redraws logo + table on every refresh.  No other text is printed.
-        _supervisor = MultiPackageSupervisor(entries, cfg, initial_status=initial_status)
+        # Cap health-check interval at 5s for real-time detection (like
+        # Kaeru's "blinking" table).  This overrides the config value only
+        # for this session; the saved config is left unchanged.
+        _live_cfg = dict(cfg)
+        _sup_sub = dict(
+            cfg.get("supervisor") if isinstance(cfg.get("supervisor"), dict) else {}
+        )
+        _hci_raw = int(_sup_sub.get("health_check_interval_seconds", 10))
+        _sup_sub["health_check_interval_seconds"] = max(3, min(_hci_raw, 5))
+        _live_cfg["supervisor"] = _sup_sub
+        _supervisor = MultiPackageSupervisor(entries, _live_cfg, initial_status=initial_status)
         _live_map = _supervisor.status_map  # dict mutated in-place by workers
+
+        # RAM info is cached between renders (updated every ~9s) to avoid
+        # running /proc/meminfo on every 3-second render tick.
+        _ram_cache: dict[str, Any] = {"info": None, "next_update": 0.0}
+
+        def _get_ram_label() -> str:
+            """Return 'RAM: NNN MB (NN%)' or '' if unavailable."""
+            import time as _t
+            now = _t.monotonic()
+            if now >= _ram_cache["next_update"]:
+                try:
+                    info = android.get_memory_info()
+                    _ram_cache["info"] = info
+                except Exception:  # noqa: BLE001
+                    _ram_cache["info"] = None
+                _ram_cache["next_update"] = now + 9.0
+            info = _ram_cache["info"]
+            if not info or not info.get("total_mb"):
+                return ""
+            free_mb  = info["free_mb"]
+            pct_free = info["percent_free"]
+            label = f"RAM available: {free_mb} MB ({pct_free}%)"
+            if use_color:
+                col = _ANSI_GREEN if pct_free >= 40 else (_ANSI_YELLOW if pct_free >= 20 else _ANSI_RED)
+                label = f"{_ANSI_BOLD}{col}{label}{_ANSI_RESET}"
+            return label
 
         def _live_dashboard() -> None:
             """Clear screen and redraw banner + table with live status values."""
@@ -3472,10 +3508,18 @@ def cmd_start(args: argparse.Namespace) -> int:
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(live_rows, use_color=use_color))
+            ram_label = _get_ram_label()
+            if ram_label:
+                print()
+                print(f"  {ram_label}")
             print(flush=True)
 
+        # Use 3-second display interval (like Kaeru's blinking real-time table).
         try:
-            _supervisor.run_forever(render_callback=_live_dashboard)
+            _supervisor.run_forever(
+                render_callback=_live_dashboard,
+                display_interval=3.0,
+            )
         except KeyboardInterrupt:
             # Silent: signal handler already set stop_event.  Caller will rerun cleanly.
             pass
