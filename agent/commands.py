@@ -3010,6 +3010,35 @@ def cmd_start(args: argparse.Namespace) -> int:
         cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
         _start_log.debug("start: layout note=%s", _layout_note)
 
+        # ── Minimize Termux to the dock pane (free up screen for clones) ──────
+        # Real-device request (probe p-ce7b1d7918): on the cloud phone the
+        # Termux window covers the area where the layout algorithm wants to
+        # place clones, so the user can't see whether they landed correctly.
+        # Dock Termux into the left ``TERMUX_LOG_FRACTION`` pane BEFORE the
+        # launches so the clones come up into the empty right pane.  Honors
+        # ``config.termux_dock_enabled`` (default True) and
+        # ``config.termux_dock_fraction`` (default 0.35).
+        _termux_minimize_result: dict[str, Any] = {}
+        try:
+            _dock_enabled = bool(cfg.get("termux_dock_enabled", True))
+            if _dock_enabled:
+                from . import termux_minimize as _tm  # noqa: PLC0415
+                from .window_layout import TERMUX_LOG_FRACTION as _DEFAULT_FRAC  # noqa: PLC0415
+                _frac = cfg.get("termux_dock_fraction", _DEFAULT_FRAC)
+                _res = _tm.minimize_termux_to_dock(fraction=float(_frac))
+                _termux_minimize_result = _res.as_dict()
+                _start_log.debug(
+                    "termux_minimize: ok=%s method=%s task=%s desired=%s actual=%s",
+                    _res.ok, _res.method, _res.task_id, _res.desired, _res.actual,
+                )
+            else:
+                _termux_minimize_result = {"ok": False, "skipped": True,
+                                           "reason": "disabled by config"}
+        except Exception as _exc:  # noqa: BLE001
+            _start_log.debug("termux_minimize error (non-fatal): %s", _exc)
+            _termux_minimize_result = {"ok": False, "skipped": True,
+                                       "reason": f"exception: {_exc}"}
+
         now_iso = datetime.now(timezone.utc).isoformat()
         start_times: dict[str, str] = dict(cfg.get("package_start_times") or {})
         for entry in entries:
@@ -3081,6 +3110,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 "layout_verify":      _layout_verify,
                 "layout_diagnostics": _layout_diag,
                 "evidence":           _evidence_summary,
+                "termux_minimize":    _termux_minimize_result,
                 "launches": {
                     pkg: {"ok": launch_ok.get(pkg, False),
                           "error": launch_err.get(pkg, "") or ""}

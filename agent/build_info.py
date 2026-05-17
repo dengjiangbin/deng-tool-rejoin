@@ -84,6 +84,7 @@ REQUIRED_MODULES: tuple[str, ...] = (
     "agent.dumpsys_cache",
     "agent.android",
     "agent.launcher",
+    "agent.termux_minimize",
 )
 
 # (module, symbol) pairs that must resolve at import time.
@@ -94,6 +95,7 @@ REQUIRED_SYMBOLS: tuple[tuple[str, str], ...] = (
     ("agent.freeform_enable", "setup_freeform_capabilities"),
     ("agent.playing_state", "StateTracker"),
     ("agent.android", "launch_package_with_bounds"),
+    ("agent.termux_minimize", "minimize_termux_to_dock"),
 )
 
 
