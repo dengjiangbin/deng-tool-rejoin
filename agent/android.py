@@ -1487,53 +1487,21 @@ _KILL_PROTECTED_PREFIXES: tuple[str, ...] = (
 
 
 def kill_all_background_apps(keep_packages: list[str]) -> dict[str, list[str]]:
-    """Kill ALL background user apps to free RAM, keeping only ``keep_packages``.
+    """Clear cached/background processes to free RAM before launching clones.
 
-    Step 1 – ``am kill-all``: clears every cached/background process quickly.
-    Step 2 – Enumerate running third-party packages and force-stop any that are
-    still alive and not in ``keep_packages`` (covers foreground apps missed by
-    kill-all).
+    Uses ``am kill-all`` which clears processes in the CACHED (background)
+    state without touching running foreground apps or system services.  We
+    deliberately do NOT enumerate and individually force-stop third-party
+    packages — that was too aggressive and killed the Moons cloner service
+    that the clones depend on (probe p-e81414d9f4: apps launched ok but
+    immediately died because their parent service was force-stopped).
 
-    Returns a dict with keys ``killed_bg`` (kill-all ran), ``killed_fg``
-    (individually force-stopped), ``skipped`` (protected or keep list).
+    Returns a dict with keys ``killed_bg`` (kill-all ran) and ``skipped``.
     Never raises.
     """
-    keep = set(keep_packages)
-    result: dict[str, list[str]] = {"killed_bg": [], "killed_fg": [], "skipped": []}
+    result: dict[str, list[str]] = {"killed_bg": [], "skipped": list(keep_packages)}
 
-    # Step 1 – broad kill of all cached/background processes.
     bg = run_android_command(["am", "kill-all"], prefer_root=True, timeout=10)
     if bg.ok:
         result["killed_bg"].append("am kill-all")
-
-    # Step 2 – enumerate third-party packages still running and force-stop them.
-    root_info = detect_root()
-    list_res = run_android_command(["pm", "list", "packages", "-3"], prefer_root=False)
-    if not list_res.ok or not list_res.stdout.strip():
-        return result
-    pkgs: list[str] = []
-    for line in list_res.stdout.strip().splitlines():
-        # "package:com.example.app"
-        pkg = line.strip().removeprefix("package:").strip()
-        if not pkg:
-            continue
-        if pkg in keep:
-            result["skipped"].append(pkg)
-            continue
-        if any(pkg.startswith(pf) for pf in _KILL_PROTECTED_PREFIXES):
-            result["skipped"].append(pkg)
-            continue
-        pkgs.append(pkg)
-
-    for pkg in pkgs:
-        try:
-            res = run_command(["am", "force-stop", pkg], timeout=PROCESS_TIMEOUT_SECONDS)
-            if res.ok:
-                result["killed_fg"].append(pkg)
-            elif root_info.available:
-                res2 = force_stop_package(pkg, root_info)
-                if res2.ok:
-                    result["killed_fg"].append(pkg)
-        except Exception:  # noqa: BLE001
-            pass
     return result

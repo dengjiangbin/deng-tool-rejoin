@@ -2967,7 +2967,7 @@ def _verify_layout_post_launch(
             force_stop_before=False,
             relaunch_after=False,
             verify_after=True,
-            retries=1,
+            retries=0,  # MUST be 0: retries>0 force-stops running apps
         )
         for r in results:
             out[r.package] = r.final_ok
@@ -3201,6 +3201,15 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         # 3) "Boosting" — clear cache + low-graphics tweaks.
         _set_all_phase("Boosting", "Clearing cache and optimizing graphics...")
+        # Restore auto-rotation: am kill-all can kill the rotation service.
+        android.run_android_command(
+            ["settings", "put", "system", "accelerometer_rotation", "1"],
+            prefer_root=True,
+        )
+        android.run_android_command(
+            ["settings", "put", "system", "user_rotation", "0"],
+            prefer_root=True,
+        )
         prep_cache: dict[str, str] = {}
         prep_gfx:   dict[str, str] = {}
         opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
