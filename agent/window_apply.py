@@ -270,11 +270,40 @@ def _parse_activity_dumpsys(text: str, package: str) -> list[_TaskEntry]:
     return entries
 
 
+# Minimum surface size that counts as "the main activity window".
+# Probe ``p-1239f2b5f9`` showed our parser picking up status-bar windows
+# like ``mFrame=[0,0][1280,25]`` (25 px tall) and ``[0,25][1,26]`` (1×1 px)
+# as the package's bounds — both belonged to the same UID but were not
+# the activity surface.  Anything under this threshold is definitely
+# chrome (status bar / IME stub / nav bar) — skip it.
+_MIN_REAL_WINDOW_W = 200
+_MIN_REAL_WINDOW_H = 100
+
+
+def _is_real_activity_bounds(
+    bounds: tuple[int, int, int, int] | None,
+) -> bool:
+    """Heuristic: is this a real activity surface, or a chrome sliver?"""
+    if bounds is None:
+        return False
+    l, t, r, b = bounds
+    w, h = r - l, b - t
+    return w >= _MIN_REAL_WINDOW_W and h >= _MIN_REAL_WINDOW_H
+
+
 def read_actual_bounds(package: str) -> tuple[tuple[int, int, int, int] | None, str]:
     """Read the actual on-screen bounds for ``package``.
 
-    Picks the candidate that (1) has a real surface, (2) is visible, or
-    (3) is focused, in that order.  Returns ``(bounds_or_None, source_label)``.
+    Selection priority (highest → lowest):
+        1. Real activity window (size ≥ 200×100), surface alive AND focused.
+        2. Real activity window (size ≥ 200×100), surface alive.
+        3. Real activity window (size ≥ 200×100), any.
+        4. Legacy fallback — any window with bounds (kept for unit-test
+           fixtures that don't model the full dumpsys layout).
+
+    The size threshold filters out status-bar / IME / nav-bar windows
+    that share the package's UID and would otherwise mask the activity
+    surface (probe ``p-1239f2b5f9`` — every clone "fits" in 25 px).
     Source labels: ``dumpsys_window``, ``dumpsys_activity``, ``unavailable``.
     Never raises.
     """
@@ -283,7 +312,16 @@ def read_actual_bounds(package: str) -> tuple[tuple[int, int, int, int] | None, 
         res = android.run_command(["dumpsys", "window", "windows"], timeout=6)
         if res.ok and res.stdout:
             cands = _parse_window_dumpsys(res.stdout, package)
-            # Prefer: surface + bounds → focused + bounds → any with bounds.
+            for c in cands:
+                if (c.has_surface and c.is_focused
+                        and _is_real_activity_bounds(c.bounds)):
+                    return c.bounds, "dumpsys_window"
+            for c in cands:
+                if c.has_surface and _is_real_activity_bounds(c.bounds):
+                    return c.bounds, "dumpsys_window"
+            for c in cands:
+                if _is_real_activity_bounds(c.bounds):
+                    return c.bounds, "dumpsys_window"
             for c in cands:
                 if c.has_surface and c.bounds:
                     return c.bounds, "dumpsys_window"
@@ -301,6 +339,12 @@ def read_actual_bounds(package: str) -> tuple[tuple[int, int, int, int] | None, 
         res = android.run_command(["dumpsys", "activity", "activities"], timeout=6)
         if res.ok and res.stdout:
             cands = _parse_activity_dumpsys(res.stdout, package)
+            for c in cands:
+                if c.visible and _is_real_activity_bounds(c.bounds):
+                    return c.bounds, "dumpsys_activity"
+            for c in cands:
+                if _is_real_activity_bounds(c.bounds):
+                    return c.bounds, "dumpsys_activity"
             for c in cands:
                 if c.visible and c.bounds:
                     return c.bounds, "dumpsys_activity"
@@ -336,6 +380,50 @@ def _get_task_id(package: str) -> int | None:
     return None
 
 
+def _get_stack_id(package: str) -> int | None:
+    """Find the stack id currently holding ``package``'s task.
+
+    On Android 10 (SDK 29) the working resize verb is::
+
+        am stack resize <STACK_ID> <LEFT,TOP,RIGHT,BOTTOM>
+
+    which operates on the STACK rather than the task, so we need to know
+    the stack the task currently belongs to.  Probe ``p-1239f2b5f9``
+    (SM-N9810 / Android 10) showed task records like::
+
+        * TaskRecord{3169de3 #78 A=com.moons.litesc U=0 StackId=3 sz=1}
+
+    where the trailing ``StackId=3`` is what we need.  Returns ``None``
+    when the stack id cannot be discovered.  Never raises.
+    """
+    try:
+        res = android.run_command(["dumpsys", "activity", "activities"], timeout=8)
+        if not res.ok or not res.stdout:
+            return None
+        text = res.stdout
+        # The TaskRecord line contains both #<task_id> and StackId=<n>.
+        for m in re.finditer(
+            r"TaskRecord\{[^}]*?#(\d+)[^}]*?A=([\w.]+)[^}]*?StackId=(\d+)",
+            text,
+        ):
+            tid_str, pkg_in_block, stack_str = m.group(1), m.group(2), m.group(3)
+            if pkg_in_block == package:
+                return int(stack_str)
+        # Fallback: any "Stack #N" header whose body contains the package.
+        # Stack blocks are delimited by "Stack #" headers in dumpsys output.
+        blocks = re.split(r"\n(?=Stack #\d+:)", text)
+        for blk in blocks:
+            head = blk.split("\n", 1)[0]
+            sm = re.match(r"Stack #(\d+)", head)
+            if not sm:
+                continue
+            if package in blk:
+                return int(sm.group(1))
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def _wait_for_window(package: str, timeout: float) -> bool:
     """Poll until ``package`` has any task/window evidence.  Best-effort.
 
@@ -353,50 +441,101 @@ def _wait_for_window(package: str, timeout: float) -> bool:
     return False
 
 
+# Android 10 (SDK 29) freeform workspace stack id — confirmed by AOSP
+# source ``WindowConfiguration.WINDOWING_MODE_FREEFORM = 5`` and by Samsung
+# One UI 5 behavior.  On most Android 10 builds the freeform workspace
+# stack is dynamically allocated, so callers should prefer
+# ``move-task <tid> <stack> true`` over hard-coding 5.
+ANDROID10_FREEFORM_WINDOWING_MODE = 5
+
+
 def _direct_resize_via_root(
     package: str, rect: WindowRect, root_tool: str
 ) -> tuple[bool, str]:
     """Try multiple direct-resize commands for the package's current task.
 
-    Each Android build supports a different subset of these commands.  We
-    try every variant and return success on the first one that runs without
-    error AND moves the actual bounds.  Never raises.
+    Recipe (probe ``p-1239f2b5f9``, SM-N9810 / Android 10 / SDK 29):
+
+        1. Flip task → freeform windowing mode (``cmd activity
+           set-task-windowing-mode`` if available; otherwise
+           ``am stack move-task <tid> <freeform_stack> true``).
+        2. Resize the STACK (not the task) with COMMA-separated bounds —
+           Android 10 syntax is ``am stack resize <STACK_ID> <L,T,R,B>``.
+        3. Fall back to Android 11+ verbs (``cmd activity resize-task``,
+           ``am task resize``) which take SPACE-separated bounds.
+        4. Final attempt: ``wm task resize`` (some custom ROMs).
+
+    Each variant is logged with its rc / stderr.  Returns the first one
+    that runs without error.  Never raises.
     """
-    task_id = _get_task_id(package)
+    task_id  = _get_task_id(package)
+    stack_id = _get_stack_id(package)
     if task_id is None:
         return False, "no task id"
     l, t, r, b = rect.left, rect.top, rect.right, rect.bottom
+    bounds_comma = f"{l},{t},{r},{b}"     # Android 10 syntax
+    bounds_args  = [str(l), str(t), str(r), str(b)]  # Android 11+ syntax
 
-    # First, flip the task into freeform windowing mode so the resize is
-    # honored.  Some Android forks silently no-op resize on fullscreen tasks.
+    # ── Step 1: move task into freeform ──
+    flipped = False
     try:
-        android.run_root_command(
-            ["cmd", "activity", "set-task-windowing-mode", str(task_id), "5"],
+        res = android.run_root_command(
+            ["cmd", "activity", "set-task-windowing-mode",
+             str(task_id), str(ANDROID10_FREEFORM_WINDOWING_MODE)],
             root_tool=root_tool, timeout=4,
         )
+        flipped = bool(res.ok)
     except Exception:  # noqa: BLE001
         pass
-    try:
-        android.run_root_command(
-            ["am", "stack", "move-task", str(task_id), "0", "true"],
-            root_tool=root_tool, timeout=4,
-        )
-    except Exception:  # noqa: BLE001
-        pass
+    if not flipped:
+        # Android 10 path: move task to the freeform workspace stack.
+        # Pass the freeform windowing mode (5) as the target stack id —
+        # the system will route it into the freeform stack.
+        try:
+            android.run_root_command(
+                ["am", "stack", "move-task", str(task_id),
+                 str(ANDROID10_FREEFORM_WINDOWING_MODE), "true"],
+                root_tool=root_tool, timeout=4,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
-    candidates = [
-        ["cmd", "activity", "resize-task", str(task_id),
-         str(l), str(t), str(r), str(b)],
-        ["cmd", "activity", "resize-task", str(task_id),
-         str(l), str(t), str(r), str(b), "1"],
-        ["am", "task", "resize", str(task_id),
-         str(l), str(t), str(r), str(b)],
-        ["am", "stack", "resize", str(task_id),
-         str(l), str(t), str(r), str(b)],
-        # Last resort: write bounds into the activity record directly.
-        ["wm", "task", "resize", str(task_id),
-         str(l), str(t), str(r), str(b)],
-    ]
+    # Re-detect stack id now that the task may have been moved.
+    new_stack = _get_stack_id(package)
+    target_stack = new_stack if new_stack is not None else stack_id
+
+    candidates: list[list[str]] = []
+
+    # ── Android 10 (CONFIRMED working on probe SM-N9810): stack-based,
+    # COMMA-separated bounds ──
+    if target_stack is not None:
+        candidates.append(
+            ["am", "stack", "resize", str(target_stack), bounds_comma]
+        )
+        candidates.append(
+            ["am", "stack", "resize-animated", str(target_stack),
+             bounds_comma]
+        )
+
+    # ── Android 11+ task-based verbs, SPACE-separated bounds ──
+    candidates.extend([
+        ["cmd", "activity", "resize-task", str(task_id), *bounds_args],
+        ["cmd", "activity", "resize-task", str(task_id), *bounds_args, "1"],
+        ["am", "task", "resize", str(task_id), *bounds_args],
+    ])
+
+    # ── Stack-resize Android 11+ form (SPACE-separated, in case the
+    # device accepts both syntaxes) ──
+    if target_stack is not None:
+        candidates.append(
+            ["am", "stack", "resize", str(target_stack), *bounds_args]
+        )
+
+    # ── Last resort: wm task resize (custom ROMs only) ──
+    candidates.append(
+        ["wm", "task", "resize", str(task_id), *bounds_args]
+    )
+
     last_err = ""
     for cmd_args in candidates:
         try:
@@ -404,12 +543,21 @@ def _direct_resize_via_root(
                 cmd_args, root_tool=root_tool, timeout=4,
             )
             if res.ok:
-                return True, f"resize via {cmd_args[0]} {cmd_args[1]}"
+                # On Android 10 ``am stack resize`` returns rc=0 even when
+                # the stack id is wrong.  We accept ok=True optimistically;
+                # the post-launch verifier will check the actual bounds.
+                return True, (
+                    f"resize via {cmd_args[0]} {cmd_args[1]} "
+                    f"(stack={target_stack},task={task_id})"
+                )
             last_err = (res.stderr or res.stdout or "").strip()[:120]
         except Exception as exc:  # noqa: BLE001
             last_err = str(exc)[:120]
             continue
-    return False, f"all direct-resize variants failed (task #{task_id}) — {last_err}"
+    return False, (
+        f"all direct-resize variants failed (task #{task_id} "
+        f"stack #{target_stack}) — {last_err}"
+    )
 
 
 # ── High-level apply ─────────────────────────────────────────────────────────

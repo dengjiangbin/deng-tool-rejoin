@@ -27,6 +27,7 @@ from __future__ import annotations
 import base64
 import logging
 import math
+import re
 import shutil
 import time
 import xml.etree.ElementTree as ET
@@ -311,22 +312,122 @@ def parse_wm_density(output: str) -> int | None:
     return None
 
 
+# Display-info parsing regexes.  We deliberately do NOT try to balance
+# the outer ``mOverrideDisplayInfo=DisplayInfo{...}`` braces — the
+# string contains nested braces from ``modes [{...}]`` which break naive
+# ``[^}]*`` patterns.  Instead we locate the marker, then scan the next
+# few thousand characters for ``app W x H`` and ``density N``.
+_OVERRIDE_MARKER_RE = re.compile(r"mOverrideDisplayInfo=DisplayInfo\{")
+_BASE_MARKER_RE     = re.compile(r"mBaseDisplayInfo=DisplayInfo\{")
+_APP_SIZE_RE        = re.compile(r"\bapp\s+(\d+)\s*x\s*(\d+)")
+_DENSITY_RE         = re.compile(r"\bdensity\s+(\d+)\b")
+_LOGICAL_FRAME_RE   = re.compile(
+    r"logicalFrame=Rect\((\d+),\s*(\d+)\s*-\s*(\d+),\s*(\d+)\)",
+)
+# Max chars we'll scan past a DisplayInfo marker for app/density values.
+# A real ``mOverrideDisplayInfo`` block is ~1.5 KB; 2500 is a safe ceiling.
+_DISPLAY_INFO_SCAN_CHARS = 2500
+
+
+def _scan_display_info_block(text: str, marker_re: re.Pattern[str]) -> tuple[int, int, int] | None:
+    """Find a ``DisplayInfo{...}`` block by marker, then extract
+    ``app W x H`` and ``density N`` within the next ~2.5 KB.
+
+    Returns ``(width, height, density)`` or ``None`` if the block or its
+    fields cannot be found.  ``density`` is 0 when not present in the
+    block (callers should treat 0 as "unknown").
+    """
+    mark = marker_re.search(text)
+    if not mark:
+        return None
+    block = text[mark.end():mark.end() + _DISPLAY_INFO_SCAN_CHARS]
+    sm = _APP_SIZE_RE.search(block)
+    if not sm:
+        return None
+    w, h = int(sm.group(1)), int(sm.group(2))
+    dm = _DENSITY_RE.search(block)
+    density = int(dm.group(1)) if dm else 0
+    return (w, h, density)
+
+
+def _detect_display_from_dumpsys() -> tuple[int, int, int] | None:
+    """Read ``dumpsys display`` for the ACTIVE (rotation-adjusted) logical
+    size and density.
+
+    Real-device evidence (probe ``p-1239f2b5f9`` on SM-N9810 / Android 10):
+    ``wm size`` returned ``Physical size: 720x1280`` (the sensor's native
+    portrait orientation), but the display was actively in **rotation 1
+    (landscape)** with::
+
+        mOverrideDisplayInfo=DisplayInfo{ ... app 1280 x 720 ...
+                                          rotation 1, density 164 ... }
+        mViewports=[DisplayViewport{ ... logicalFrame=Rect(0, 0 - 1280, 720),
+                                      deviceWidth=1280, deviceHeight=720 }]
+
+    Our layout calc was computing on a 720×1280 grid → bounds landed off-
+    screen for the actual 1280×720 surface.  ``mOverrideDisplayInfo.app``
+    is the runtime-effective logical size we want.
+
+    Returns ``(width, height, density)`` or ``None`` if dumpsys is
+    unavailable or the patterns don't match.
+    """
+    try:
+        res = android.run_android_command(["dumpsys", "display"], timeout=8)
+    except Exception:  # noqa: BLE001
+        return None
+    if not res.ok or not res.stdout:
+        return None
+    text = res.stdout
+
+    # Priority 1 — override block (rotation-adjusted active geometry).
+    override = _scan_display_info_block(text, _OVERRIDE_MARKER_RE)
+    if override:
+        return override
+
+    # Priority 2 — first viewport's logicalFrame.
+    m = _LOGICAL_FRAME_RE.search(text)
+    if m:
+        l, t, r, b = (int(g) for g in m.groups())
+        return (max(1, r - l), max(1, b - t), 0)
+
+    # Priority 3 — base block (rotation 0 reference).
+    base = _scan_display_info_block(text, _BASE_MARKER_RE)
+    if base:
+        return base
+
+    return None
+
+
 def detect_display_info() -> DisplayInfo:
     """Probe the real display size + density of the host.
 
+    Strategy (in priority order):
+
+    1. ``dumpsys display`` → ``mOverrideDisplayInfo.app W x H`` — the
+       rotation-adjusted ACTIVE logical size, which is what bounds need
+       to be expressed in.  Falls back to ``logicalFrame``, then base.
+
+    2. ``wm size`` → physical pixel grid.  This is the SENSOR orientation
+       and is wrong when the device is rotated (probe ``p-1239f2b5f9``:
+       wm reports 720×1280 portrait while the user-facing display is
+       1280×720 landscape).  Used only as a backstop.
+
+    3. Hardcoded ``(1080, 1920)`` final fallback so the layout calculator
+       never sees a zero-size grid.
+
     Uses :func:`android.run_android_command` so:
-
-    * the bare name ``wm`` is auto-resolved to ``/system/bin/wm`` (Termux's
-      ``$PATH`` excludes ``/system/bin`` — this regression was caught on a
-      Samsung SM-N9810 cloud phone where every previous build silently
-      fell back to the hardcoded ``(1080, 1920)`` default, producing
-      off-screen layout bounds);
-    * the call is routed through ``su`` on permission denial — some Samsung
-      One UI builds reject ``wm size`` from unprivileged callers.
-
-    The fallback ``(1080, 1920)`` is only used as a last-ditch safety net
-    when both unprivileged AND root calls fail.
+      * the bare name ``wm``/``dumpsys`` is auto-resolved to its absolute
+        ``/system/bin/`` path (Termux's ``$PATH`` excludes ``/system/bin``);
+      * the call is routed through ``su`` on permission denial.
     """
+    # Layer 1 — dumpsys display (rotation-aware).
+    rot = _detect_display_from_dumpsys()
+    if rot:
+        w, h, density = rot
+        if w >= 320 and h >= 320:
+            return DisplayInfo(width=w, height=h, density=density or 420)
+
+    # Layer 2 — wm size + wm density (rotation-naive).
     size_result    = android.run_android_command(["wm", "size"],    timeout=6)
     density_result = android.run_android_command(["wm", "density"], timeout=6)
     size    = parse_wm_size(size_result.stdout)     if size_result.ok    else None

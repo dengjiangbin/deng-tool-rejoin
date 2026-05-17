@@ -71,6 +71,90 @@ def normalize_launch_url(url: str) -> tuple[str, str | None]:
     return normalized, None
 
 
+def to_roblox_deep_link(url: str | None) -> str | None:
+    """Convert a Roblox web URL to its ``roblox://`` deep-link equivalent.
+
+    Real-device evidence (Kaeru probe ``p-1239f2b5f9`` on cloud SM-N9810
+    /Android 10): the dumpsys recents block for a successfully joined
+    clone showed::
+
+        dat=roblox://navigation/share_links?code=<CODE>&type=Server
+
+    while our launches were sending the ``https://www.roblox.com/share?...``
+    form which Android resolved to the *browser* — landing the user in a
+    Roblox lobby instead of the private server they configured.  This
+    helper performs the conversion so we behave the same way Kaeru does.
+
+    Returns the original URL unchanged for non-Roblox web URLs and for
+    any ``roblox://`` URL.  Returns ``None`` for falsy / empty input.
+
+    Known conversions
+    -----------------
+
+    * ``https://www.roblox.com/share?code=X&type=Server``
+        → ``roblox://navigation/share_links?code=X&type=Server``
+    * ``https://www.roblox.com/share?code=X``  (no type)
+        → ``roblox://navigation/share_links?code=X``
+    * ``https://www.roblox.com/games/123/abc?privateServerLinkCode=Y``
+        → ``roblox://placeId=123&privateServerLinkCode=Y``  (legacy
+          private-server format Roblox still accepts)
+    * Everything else is returned unchanged.
+
+    The function NEVER raises — bad input falls back to the original URL.
+    """
+    if not url:
+        return url
+    raw = url.strip()
+    if not raw:
+        return url
+    try:
+        parsed = urlparse(raw)
+    except Exception:  # noqa: BLE001
+        return raw
+    scheme = (parsed.scheme or "").lower()
+    if scheme == "roblox":
+        return raw  # already a deep link
+    if scheme not in {"http", "https"}:
+        return raw
+    host = _normalized_host(parsed)
+    if host not in APPROVED_WEB_HOSTS:
+        return raw
+
+    path = (parsed.path or "/").rstrip("/")
+    query = parsed.query or ""
+
+    # ── /share | /share-links | /share/ ── new share-link format
+    if path in ("/share", "/share-links"):
+        # Preserve every original query param (code, type, possibly more)
+        return f"roblox://navigation/share_links?{query}" if query else \
+               "roblox://navigation/share_links"
+
+    # ── /games/<placeId>/<name>?privateServerLinkCode=...  (legacy)
+    m = re.match(r"^/games/(\d+)/?", path + "/")
+    if m:
+        place_id = m.group(1)
+        params = dict(parse_qsl(query, keep_blank_values=True))
+        # `gameInstanceId`, `linkCode`, `privateServerLinkCode` all flow through.
+        passthrough = []
+        for k, v in params.items():
+            passthrough.append(f"{k}={v}")
+        suffix = "&" + "&".join(passthrough) if passthrough else ""
+        return f"roblox://placeId={place_id}{suffix}"
+
+    # ── /games/start?placeId=... — also used by Roblox shortcuts
+    if path == "/games/start":
+        params = dict(parse_qsl(query, keep_blank_values=True))
+        place_id = params.pop("placeId", "")
+        if place_id:
+            passthrough = [f"{k}={v}" for k, v in params.items()]
+            suffix = "&" + "&".join(passthrough) if passthrough else ""
+            return f"roblox://placeId={place_id}{suffix}"
+
+    # Path we don't know how to translate — return original; the OS will
+    # still launch it via the Roblox app's https intent filters.
+    return raw
+
+
 def validate_launch_url(url: str | None, launch_mode: str | None = None, *, allow_uncertain: bool = False) -> UrlValidationResult:
     """Validate that a URL is appropriate for Android VIEW launching.
 

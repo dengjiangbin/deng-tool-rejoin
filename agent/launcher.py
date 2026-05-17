@@ -9,7 +9,7 @@ from typing import Any
 from . import android, db
 from .config import effective_private_server_url, enabled_package_entries, validate_config
 from .logger import configure_logging, log_event
-from .url_utils import mask_launch_url, mask_urls_in_text
+from .url_utils import mask_launch_url, mask_urls_in_text, to_roblox_deep_link
 
 
 @dataclass(frozen=True)
@@ -62,6 +62,16 @@ def perform_rejoin(
     effective_url = str(effective_private_server_url(entry, cfg) or "").strip()
     legacy_url_mode = launch_mode in {"deeplink", "web_url"} and bool(launch_url)
     url_for_launch = effective_url or (launch_url if legacy_url_mode else "")
+    # Kaeru-equivalent fix (probe p-1239f2b5f9): Roblox's https share
+    # URL is resolved by Android to the *browser*, which lands the user
+    # in the Roblox app's lobby instead of the private server.  The
+    # working tool (Kaeru) launches the roblox:// deep link directly.
+    # ``to_roblox_deep_link`` is a no-op for already-deep-link URLs and
+    # for URLs whose pattern we don't know how to translate.
+    if url_for_launch:
+        deep = to_roblox_deep_link(url_for_launch)
+        if deep and deep != url_for_launch:
+            url_for_launch = deep
     masked_url = mask_launch_url(url_for_launch) if url_for_launch else None
     root_used = False
     warning: str | None = None
