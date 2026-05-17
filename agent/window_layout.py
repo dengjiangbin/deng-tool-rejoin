@@ -24,9 +24,9 @@ No crash, no block to Start.  All layout details go to debug log.
 
 from __future__ import annotations
 
-import base64
 import logging
 import math
+import os
 import re
 import shutil
 import time
@@ -968,6 +968,14 @@ def update_app_cloner_xml(
     return False, "no writable clone prefs file: " + "; ".join(attempted[:5])
 
 
+def _layout_tmp_dir() -> Path:
+    """Return a writable temp dir inside the DENG install root for staging XML files."""
+    home = os.environ.get("HOME", "/data/data/com.termux/files/home")
+    tmp = Path(home) / ".deng-tool" / "rejoin" / ".tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    return tmp
+
+
 def update_app_cloner_xml_root(
     package:    str,
     rect:       WindowRect,
@@ -978,10 +986,11 @@ def update_app_cloner_xml_root(
 ) -> tuple[bool, str]:
     """Write clone-wrapper window prefs via root.
 
-    Iterates every candidate in :func:`clone_prefs_candidates`; for each one,
-    reads via ``cat`` (creates empty ``<map>`` if missing), applies the
-    multi-alias mutation, and writes via base64-decode to a tmp file then
-    atomic ``mv``.  Stops at the first candidate that succeeds.
+    Strategy: Python writes the XML to a Termux-accessible temp file (no root
+    needed for that step), then root ``cp`` + ``chown`` + ``chmod`` moves it
+    into the app's private data dir.  This avoids any dependency on ``base64``
+    or ``python3`` being present in the ``su`` shell's PATH (they are Termux
+    binaries and are *not* on the system PATH the root shell inherits).
 
     Returns (ok, message); never raises.
     """
@@ -989,12 +998,7 @@ def update_app_cloner_xml_root(
     for path in clone_prefs_candidates(package):
         path_str = str(path)
         try:
-            # Read existing or treat as empty map if missing.  We attempt EVERY
-            # candidate even when missing, because creating ``pkg_preferences.xml``
-            # is the App-Cloner path; for Moons/OEM we only want to touch files
-            # that already exist.  Skip nonexistent unless this is the very last
-            # candidate AND nothing else worked yet (then we try the canonical
-            # ``pkg_preferences.xml`` as last-ditch).
+            # Check existence via root (avoids permission errors for direct stat).
             exists_res = android.run_root_command(
                 ["sh", "-c", f"test -f '{path_str}' && echo Y || echo N"],
                 root_tool=root_tool, timeout=timeout,
@@ -1003,6 +1007,7 @@ def update_app_cloner_xml_root(
             if not exists and path.name != "pkg_preferences.xml":
                 attempted.append(f"{path.name}: missing")
                 continue
+            # Read existing content (create empty <map> if file is absent/unreadable).
             read_res = android.run_root_command(
                 ["sh", "-c", f"test -f '{path_str}' && cat '{path_str}' 2>/dev/null"],
                 root_tool=root_tool, timeout=timeout,
@@ -1023,48 +1028,41 @@ def update_app_cloner_xml_root(
             if not _validate_xml(new_xml):
                 attempted.append(f"{path.name}: XML invalid after mutation")
                 continue
-            b64_data = base64.b64encode(new_xml.encode("utf-8")).decode("ascii")
-            tmp_path = f"{path_str}.deng-tmp"
-            # Strategy: write to a temp file, chown to the app's UID (so it
-            # can read its own prefs), set permissions, then atomic mv.
-            # ``chown --reference`` copies owner:group from the package dir
-            # without hard-coding the numeric UID.
-            # Two write methods tried in order (shell pipe → Python fallback):
-            write_cmd = (
+
+            # ── Write strategy: temp file in Termux space → root cp ──────────
+            # Python writes the XML to a Termux-writable staging file.  Root
+            # then copies it to the target with correct owner/permissions.
+            # This avoids needing ``base64`` or ``python3`` in the su PATH.
+            safe_pkg = package.replace(".", "_")
+            local_tmp = _layout_tmp_dir() / f"layout_{safe_pkg}_{path.name}"
+            local_tmp_str = str(local_tmp)
+            try:
+                local_tmp.write_text(new_xml, encoding="utf-8")
+            except OSError as exc:
+                attempted.append(f"{path.name}: local tmp write failed: {exc}")
+                continue
+
+            copy_cmd = (
                 f"mkdir -p '/data/data/{package}/shared_prefs' && "
-                f"printf '%s' '{b64_data}' | base64 -d > '{tmp_path}' && "
-                f"chown --reference='/data/data/{package}' '{tmp_path}' 2>/dev/null || "
-                f"  chown $(stat -c '%u:%g' '/data/data/{package}' 2>/dev/null) '{tmp_path}' 2>/dev/null; "
-                f"chmod 660 '{tmp_path}' 2>/dev/null; "
-                f"mv -f '{tmp_path}' '{path_str}'"
+                f"cp -f '{local_tmp_str}' '{path_str}' && "
+                f"chown --reference='/data/data/{package}' '{path_str}' 2>/dev/null || "
+                f"chown $(stat -c '%u:%g' '/data/data/{package}') '{path_str}' 2>/dev/null; "
+                f"chmod 660 '{path_str}'; "
+                f"rm -f '{local_tmp_str}'"
             )
             write_res = android.run_root_command(
-                ["sh", "-c", write_cmd], root_tool=root_tool, timeout=timeout,
+                ["sh", "-c", copy_cmd], root_tool=root_tool, timeout=timeout,
             )
+            # Clean up local staging file regardless of outcome.
+            try:
+                local_tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
             if write_res.ok:
                 _log.debug("Root XML write OK: %s → %s (%d keys)", package, path.name, changed)
-                return True, f"Wrote {path.name} via root ({changed} keys)"
-            err_shell = (write_res.stderr or "")[:80]
-            # Fallback: use Python to write (avoids base64 availability issues
-            # and handles SELinux context correctly via os.chown).
-            py_snippet = (
-                f"import base64,os;"
-                f"data=base64.b64decode('{b64_data}');"
-                f"tmp='{tmp_path}';"
-                f"fh=open(tmp,'wb');fh.write(data);fh.close();"
-                f"st=os.stat('/data/data/{package}');"
-                f"os.chown(tmp,st.st_uid,st.st_gid);"
-                f"os.chmod(tmp,0o660);"
-                f"os.rename(tmp,'{path_str}')"
-            )
-            py_res = android.run_root_command(
-                ["python3", "-c", py_snippet], root_tool=root_tool, timeout=timeout,
-            )
-            if py_res.ok:
-                _log.debug("Root XML write OK (py): %s → %s (%d keys)", package, path.name, changed)
-                return True, f"Wrote {path.name} via root/python ({changed} keys)"
-            err = f"shell: {err_shell} | py: {(py_res.stderr or '')[:60]}"
-            attempted.append(f"{path.name}: write failed: {err}")
+                return True, f"Wrote {path.name} via root/cp ({changed} keys)"
+            err = (write_res.stderr or write_res.stdout or "")[:120]
+            attempted.append(f"{path.name}: cp failed: {err}")
         except Exception as exc:  # noqa: BLE001
             _log.debug("update_app_cloner_xml_root error for %s @ %s: %s", package, path.name, exc)
             attempted.append(f"{path.name}: writer error: {exc}")

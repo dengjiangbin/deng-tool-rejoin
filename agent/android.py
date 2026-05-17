@@ -24,7 +24,7 @@ from .constants import (
     ROOT_TIMEOUT_SECONDS,
 )
 from .platform_detect import detect_public_download_dir, get_android_release, get_android_sdk
-from .url_utils import UrlValidationError, detect_launch_mode_from_url, mask_launch_url, validate_launch_url
+from .url_utils import UrlValidationError, detect_launch_mode_from_url, mask_launch_url, to_roblox_deep_link, validate_launch_url
 
 
 @dataclass(frozen=True)
@@ -555,9 +555,18 @@ def launch_url(package: str, url: str, launch_mode: str) -> CommandResult:
     honored.  If the framework rejects the flag (older Android, missing
     permission, etc.) we transparently retry without the flag so callers
     never see a launch regression.
+
+    Web share-link URLs (``https://www.roblox.com/share?...``) are
+    automatically converted to their ``roblox://`` deep-link equivalent
+    before being sent to ``am start``.  Without this conversion Android
+    routes the URL to the browser instead of Roblox (real-device probe
+    p-6f613cbed2: ``launch_mode='web_url'`` landed in lobby, not server).
     """
     package = validate_package_name(package)
     validate_launch_url(url, launch_mode, allow_uncertain=True)
+    # Convert web URLs → roblox:// deep links so Android routes to Roblox,
+    # not to the system browser.
+    deep_url = to_roblox_deep_link(url) or url
     # Force a clean re-route to the private server even when the clone is
     # already running:
     #   FLAG_ACTIVITY_NEW_TASK       (0x10000000)
@@ -565,41 +574,39 @@ def launch_url(package: str, url: str, launch_mode: str) -> CommandResult:
     # + FLAG_ACTIVITY_CLEAR_TOP      (0x04000000)
     # + FLAG_ACTIVITY_RESET_TASK_IF_NEEDED (0x00200000)
     # = 0x14208000
-    #
-    # Real-device evidence (probe ``p-47fa33562a``): without these flags
-    # ``am start -a VIEW -d <url> <pkg>`` simply brought the existing
-    # Roblox lobby task to the front instead of consuming the share URL,
-    # so the user reported "not joining private server URL we already
-    # set" even though every rejoin_success row landed in the log.
     flags = "0x14208000"
-    base = ["am", "start", "-a", "android.intent.action.VIEW", "-d", url,
-            "-f", flags, package]
+    base = ["am", "start", "-a", "android.intent.action.VIEW",
+            "-c", "android.intent.category.BROWSABLE",
+            "-d", deep_url, "-f", flags, package]
     res = run_command(base[:2] + ["--windowingMode", "5"] + base[2:], timeout=PROCESS_TIMEOUT_SECONDS)
     if res.ok:
         return res
-    # Older Android builds reject --windowingMode with "Bad component name"
-    # or "Error type 8" depending on the OEM.  Retry without it.
     res = run_command(base, timeout=PROCESS_TIMEOUT_SECONDS)
     if res.ok:
         return res
-    # Final fallback: keep the legacy un-flagged form so callers never
-    # see a launch regression on platforms that reject ``-f``.
-    legacy = ["am", "start", "-a", "android.intent.action.VIEW", "-d", url, package]
+    legacy = ["am", "start", "-a", "android.intent.action.VIEW",
+              "-c", "android.intent.category.BROWSABLE",
+              "-d", deep_url, package]
     return run_command(legacy, timeout=PROCESS_TIMEOUT_SECONDS)
 
 
 def launch_url_generic(url: str, launch_mode: str) -> CommandResult:
     validate_launch_url(url, launch_mode, allow_uncertain=True)
+    deep_url = to_roblox_deep_link(url) or url
     # Same CLEAR_TASK flags as launch_url above — see comment there.
     flags = "0x14208000"
-    base = ["am", "start", "-a", "android.intent.action.VIEW", "-d", url, "-f", flags]
+    base = ["am", "start", "-a", "android.intent.action.VIEW",
+            "-c", "android.intent.category.BROWSABLE",
+            "-d", deep_url, "-f", flags]
     res = run_command(base[:2] + ["--windowingMode", "5"] + base[2:], timeout=PROCESS_TIMEOUT_SECONDS)
     if res.ok:
         return res
     res = run_command(base, timeout=PROCESS_TIMEOUT_SECONDS)
     if res.ok:
         return res
-    legacy = ["am", "start", "-a", "android.intent.action.VIEW", "-d", url]
+    legacy = ["am", "start", "-a", "android.intent.action.VIEW",
+              "-c", "android.intent.category.BROWSABLE",
+              "-d", deep_url]
     return run_command(legacy, timeout=PROCESS_TIMEOUT_SECONDS)
 
 
@@ -1213,6 +1220,15 @@ def discover_roblox_graphics_json_paths(package: str, root_tool: str) -> list[st
     return paths
 
 
+def _gfx_tmp_dir() -> str:
+    """Return a Termux-writable staging dir for graphics JSON temp files."""
+    import os as _os
+    home = _os.environ.get("HOME", "/data/data/com.termux/files/home")
+    tmp = f"{home}/.deng-tool/rejoin/.tmp"
+    _os.makedirs(tmp, exist_ok=True)
+    return tmp
+
+
 def _apply_low_graphics_json_file(path: str, root_tool: str) -> str:
     probe = run_root_command(["test", "-f", path], root_tool=root_tool, timeout=4)
     if not probe.ok:
@@ -1239,12 +1255,24 @@ def _apply_low_graphics_json_file(path: str, root_tool: str) -> str:
         else:
             data[key] = val
     payload = json.dumps(data, separators=(",", ":"), sort_keys=True)
-    b64 = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+
+    # Write via Termux temp file → root cp (avoids needing base64 in su PATH).
+    import os as _os, pathlib as _pl
+    tmp_name = f"gfx_{_os.path.basename(path)}.deng-tmp"
+    local_tmp = _os.path.join(_gfx_tmp_dir(), tmp_name)
+    try:
+        _pl.Path(local_tmp).write_text(payload, encoding="utf-8")
+    except OSError:
+        return "Failed"
     wr = run_root_command(
-        ["sh", "-c", f"printf '%s' '{b64}' | base64 -d > '{path}'"],
+        ["sh", "-c", f"cp -f '{local_tmp}' '{path}' && chmod 660 '{path}'; rm -f '{local_tmp}'"],
         root_tool=root_tool,
         timeout=12,
     )
+    try:
+        _pl.Path(local_tmp).unlink(missing_ok=True)
+    except OSError:
+        pass
     if not wr.ok:
         return "Failed"
     verify = run_root_command(["cat", path], root_tool=root_tool, timeout=8)
@@ -1338,6 +1366,11 @@ def launch_package_with_bounds(
     l, t, r, b = rect
     bounds_arg = f"{int(l)} {int(t)} {int(r)} {int(b)}"
     url = (private_url or "").strip()
+    # Convert web share-link URLs → roblox:// deep links before am start.
+    # Without this, Android resolves https://www.roblox.com/share?... to the
+    # browser instead of Roblox (probe p-6f613cbed2: launch_mode='web_url'
+    # landed in lobby, not server).
+    deep_url = (to_roblox_deep_link(url) or url) if url else ""
 
     am = _find_command("am", "/system/bin/am")
     if not am:
@@ -1353,34 +1386,37 @@ def launch_package_with_bounds(
     ]
     method_label = f"am_bounds_mode{int(windowing_mode)}"
 
-    if url:
-        mode = detect_launch_mode_from_url(url)
-        if mode in LAUNCH_MODES:
-            try:
-                validate_launch_url(url, mode, allow_uncertain=True)
-                # Kaeru probe (p-2dbada99a0) uses flags=0x34800000:
-                #   FLAG_ACTIVITY_SINGLE_TOP    (0x20000000)
-                #   FLAG_ACTIVITY_NEW_TASK      (0x10000000)
-                #   FLAG_ACTIVITY_CLEAR_TOP     (0x04000000)
-                #   FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS (0x00800000)
-                # BROWSABLE category ensures Android routes roblox:// to
-                # ActivityProtocolLaunch (not the generic LAUNCHER).
-                cmd = stem + [
-                    "-a", "android.intent.action.VIEW",
-                    "-c", "android.intent.category.BROWSABLE",
-                    "-f", "0x34800000",
-                    "-d", url, package,
-                ]
-                res = run_command(cmd, timeout=PROCESS_TIMEOUT_SECONDS)
-                if res.ok:
-                    return res, method_label + "_url"
-                # Retry without flags in case device rejects them.
-                cmd_nf = stem + ["-a", "android.intent.action.VIEW", "-d", url, package]
-                res = run_command(cmd_nf, timeout=PROCESS_TIMEOUT_SECONDS)
-                if res.ok:
-                    return res, method_label + "_url_noflag"
-            except UrlValidationError:
-                pass
+    if deep_url:
+        mode = detect_launch_mode_from_url(deep_url)
+        if mode not in LAUNCH_MODES:
+            mode = "deeplink"
+        try:
+            validate_launch_url(deep_url, mode, allow_uncertain=True)
+            # Kaeru probe (p-2dbada99a0) uses flags=0x34800000:
+            #   FLAG_ACTIVITY_SINGLE_TOP    (0x20000000)
+            #   FLAG_ACTIVITY_NEW_TASK      (0x10000000)
+            #   FLAG_ACTIVITY_CLEAR_TOP     (0x04000000)
+            #   FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS (0x00800000)
+            # BROWSABLE category ensures Android routes roblox:// to
+            # ActivityProtocolLaunch (not the generic LAUNCHER).
+            cmd = stem + [
+                "-a", "android.intent.action.VIEW",
+                "-c", "android.intent.category.BROWSABLE",
+                "-f", "0x34800000",
+                "-d", deep_url, package,
+            ]
+            res = run_command(cmd, timeout=PROCESS_TIMEOUT_SECONDS)
+            if res.ok:
+                return res, method_label + "_url"
+            # Retry without extra flags in case device rejects them.
+            cmd_nf = stem + ["-a", "android.intent.action.VIEW",
+                             "-c", "android.intent.category.BROWSABLE",
+                             "-d", deep_url, package]
+            res = run_command(cmd_nf, timeout=PROCESS_TIMEOUT_SECONDS)
+            if res.ok:
+                return res, method_label + "_url_noflag"
+        except UrlValidationError:
+            pass
         # If url launch with bounds failed, fall through to plain bounded launch.
 
     # Plain MAIN/LAUNCHER intent with launch bounds.
@@ -1435,3 +1471,69 @@ def force_stop_packages_except(
             if result2.ok:
                 stopped.append(pkg)
     return stopped
+
+
+# Packages that must NEVER be killed during the boosting phase.
+_KILL_PROTECTED_PREFIXES: tuple[str, ...] = (
+    "com.termux",
+    "android",
+    "com.android",
+    "com.google.android",
+    "com.samsung",
+    "com.sec",
+    "com.qualcomm",
+    "com.mediatek",
+)
+
+
+def kill_all_background_apps(keep_packages: list[str]) -> dict[str, list[str]]:
+    """Kill ALL background user apps to free RAM, keeping only ``keep_packages``.
+
+    Step 1 – ``am kill-all``: clears every cached/background process quickly.
+    Step 2 – Enumerate running third-party packages and force-stop any that are
+    still alive and not in ``keep_packages`` (covers foreground apps missed by
+    kill-all).
+
+    Returns a dict with keys ``killed_bg`` (kill-all ran), ``killed_fg``
+    (individually force-stopped), ``skipped`` (protected or keep list).
+    Never raises.
+    """
+    keep = set(keep_packages)
+    result: dict[str, list[str]] = {"killed_bg": [], "killed_fg": [], "skipped": []}
+
+    # Step 1 – broad kill of all cached/background processes.
+    bg = run_android_command(["am", "kill-all"], prefer_root=True, timeout=10)
+    if bg.ok:
+        result["killed_bg"].append("am kill-all")
+
+    # Step 2 – enumerate third-party packages still running and force-stop them.
+    root_info = detect_root()
+    list_res = run_android_command(["pm", "list", "packages", "-3"], prefer_root=False)
+    if not list_res.ok or not list_res.stdout.strip():
+        return result
+    pkgs: list[str] = []
+    for line in list_res.stdout.strip().splitlines():
+        # "package:com.example.app"
+        pkg = line.strip().removeprefix("package:").strip()
+        if not pkg:
+            continue
+        if pkg in keep:
+            result["skipped"].append(pkg)
+            continue
+        if any(pkg.startswith(pf) for pf in _KILL_PROTECTED_PREFIXES):
+            result["skipped"].append(pkg)
+            continue
+        pkgs.append(pkg)
+
+    for pkg in pkgs:
+        try:
+            res = run_command(["am", "force-stop", pkg], timeout=PROCESS_TIMEOUT_SECONDS)
+            if res.ok:
+                result["killed_fg"].append(pkg)
+            elif root_info.available:
+                res2 = force_stop_package(pkg, root_info)
+                if res2.ok:
+                    result["killed_fg"].append(pkg)
+        except Exception:  # noqa: BLE001
+            pass
+    return result

@@ -3189,10 +3189,14 @@ def cmd_start(args: argparse.Namespace) -> int:
             _render_phase(note)
 
         # 1) "Preparing" — initial display.
-        _set_all_phase("Preparing", "Stopping background Roblox apps...")
+        _set_all_phase("Preparing", "Stopping all background apps to free RAM...")
 
-        # 2) Force-stop background packages.
+        # 2) Kill ALL background apps except Termux + our Roblox packages,
+        #    then also force-stop any remaining other Roblox packages.
         packages_sl = [e["package"] for e in entries]
+        # Protected: Termux itself and the Roblox clones we are about to launch.
+        keep_alive = ["com.termux"] + packages_sl
+        android.kill_all_background_apps(keep_alive)
         android.force_stop_packages_except(packages_sl, cfg.get("package_detection_hints"))
 
         # 3) "Boosting" — clear cache + low-graphics tweaks.
