@@ -69,6 +69,7 @@ class ConfigTests(unittest.TestCase):
                     "auto_reconnect_enabled": True,
                     "enabled": True,
                     "username_source": "manual",
+                    "roblox_user_id": 0,
                 }
             ],
         )
@@ -98,6 +99,7 @@ class ConfigTests(unittest.TestCase):
                     "auto_reconnect_enabled": True,
                     "enabled": True,
                     "username_source": "not_set",
+                    "roblox_user_id": 0,
                 },
                 {
                     "package": "com.roblox.client.clone1",
@@ -109,6 +111,7 @@ class ConfigTests(unittest.TestCase):
                     "auto_reconnect_enabled": True,
                     "enabled": True,
                     "username_source": "not_set",
+                    "roblox_user_id": 0,
                 },
             ],
         )

@@ -6,9 +6,13 @@ and paths whose segments suggest credentials or sessions.
 
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import io
+import json
+import subprocess
 import tarfile
+import time
 from pathlib import Path
 
 MAIN_DEV_ARCHIVE_REL_PATH = "releases/main-dev/deng-tool-rejoin-main-dev.tar.gz"
@@ -118,8 +122,56 @@ def iter_internal_test_pack_files(repo_root: Path) -> list[tuple[str, Path]]:
     return out
 
 
+def _git_commit_short(repo_root: Path) -> str:
+    """Best-effort: ``git rev-parse --short=12 HEAD`` from the repo.
+
+    Returns empty string if git is unavailable or the directory is not a repo.
+    """
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            cwd=str(repo_root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+        )
+        sha = res.stdout.strip()
+        return sha if res.returncode == 0 and sha else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _make_build_info_bytes(
+    repo_root: Path, *, channel: str = "main-dev",
+) -> bytes:
+    """Render the BUILD-INFO.json payload embedded into the tarball.
+
+    The hash of the tarball itself is computed AFTER write, so it's added
+    to ``.installed-build.json`` at install time, not here.  This file
+    carries the parts the runtime cannot otherwise discover: git commit
+    hash, build time, channel, repo origin.
+    """
+    info = {
+        "channel": channel,
+        "git_commit": _git_commit_short(repo_root),
+        "built_at_iso": _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
+        "built_at_unix": int(time.time()),
+        "product": "DENG Tool: Rejoin",
+        "artifact_format_version": 1,
+    }
+    return json.dumps(info, indent=2, sort_keys=True).encode("utf-8")
+
+
 def build_internal_test_tarball(repo_root: Path, output_tar_gz: Path) -> str:
-    """Write gzip tarball and return lowercase SHA-256 hex digest of the file."""
+    """Write gzip tarball and return lowercase SHA-256 hex digest of the file.
+
+    Also embeds a top-level ``BUILD-INFO.json`` with git commit + build time
+    so the runtime can prove what build it is even before the installer
+    drops ``.installed-build.json``.
+    """
     repo_root = repo_root.resolve()
     output_tar_gz = output_tar_gz.resolve()
     output_tar_gz.parent.mkdir(parents=True, exist_ok=True)
@@ -127,11 +179,20 @@ def build_internal_test_tarball(repo_root: Path, output_tar_gz: Path) -> str:
     if not pairs:
         raise RuntimeError("No files matched internal test artifact rules.")
 
+    build_info_bytes = _make_build_info_bytes(repo_root)
+
     buf = io.BytesIO()
     digest = hashlib.sha256()
     with tarfile.open(fileobj=buf, mode="w:gz", compresslevel=9) as tf:
+        # Sources first.
         for arcname, path in pairs:
             tf.add(path, arcname=arcname, recursive=False)
+        # Then the build-info file.
+        bi = tarfile.TarInfo(name="BUILD-INFO.json")
+        bi.size = len(build_info_bytes)
+        bi.mtime = int(time.time())
+        bi.mode = 0o644
+        tf.addfile(bi, io.BytesIO(build_info_bytes))
     raw = buf.getvalue()
     digest.update(raw)
     output_tar_gz.write_bytes(raw)
@@ -139,7 +200,11 @@ def build_internal_test_tarball(repo_root: Path, output_tar_gz: Path) -> str:
 
 
 def verify_tarball_exclusions(tar_bytes: bytes) -> None:
-    """Raise AssertionError if forbidden names appear inside tarball bytes."""
+    """Raise AssertionError if forbidden names appear inside tarball bytes.
+
+    Also asserts the tarball contains a top-level ``BUILD-INFO.json`` so
+    every published artifact carries its own build proof.
+    """
     with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tf:
         names = [n for n in tf.getnames() if n.rstrip("/")]
     lowered = [n.lower().replace("\\", "/") for n in names]
@@ -155,3 +220,5 @@ def verify_tarball_exclusions(tar_bytes: bytes) -> None:
         assert not n.endswith(".sqlite3"), n
         if n == ".env" or n.endswith("/.env"):
             raise AssertionError(f"unexpected env file in tarball: {n}")
+    if "BUILD-INFO.json" not in names:
+        raise AssertionError("tarball missing BUILD-INFO.json — build proof is required")

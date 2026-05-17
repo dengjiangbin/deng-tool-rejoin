@@ -505,7 +505,72 @@ def _route_public_install(
                 installer_title="DENG Tool: Rejoin Test Installer",
                 banner_lines=("Channel: internal test", "Version: main-dev"),
             )
-            return (script.encode("utf-8"), 200, "text/x-shellscript", None)
+            return (
+                script.encode("utf-8"),
+                200,
+                "text/x-shellscript",
+                [("Cache-Control", "no-store")],
+            )
+
+        if tail == "test/version":
+            # Return JSON build metadata for the active main-dev artifact.
+            # Useful for: installer cache-bust audits, monitoring, and
+            # deng-rejoin doctor install on a phone with curl.
+            _row = get_exact_registry_row("main-dev")
+            if _row is None:
+                return (
+                    json.dumps({"error": "main-dev not configured"}).encode("utf-8"),
+                    404,
+                    "application/json",
+                    [("Cache-Control", "no-store")],
+                )
+            _sha = str(_row.get("artifact_sha256") or "").strip()
+            _commit = str(_row.get("git_commit") or "").strip()
+            _built_at = str(_row.get("built_at_iso") or "").strip()
+            # Try to learn package size + parsed BUILD-INFO from the file.
+            _project_pkg = (
+                _PROJECT_ROOT
+                / "releases"
+                / "main-dev"
+                / "deng-tool-rejoin-main-dev.tar.gz"
+            )
+            _pkg_size = 0
+            try:
+                if _project_pkg.is_file():
+                    _pkg_size = _project_pkg.stat().st_size
+                    if not (_commit and _built_at):
+                        import io
+                        import tarfile as _tar
+
+                        with _tar.open(str(_project_pkg), "r:gz") as _tf:
+                            try:
+                                _m = _tf.getmember("BUILD-INFO.json")
+                                _bi = json.loads(
+                                    _tf.extractfile(_m).read().decode("utf-8")
+                                )
+                                _commit = _commit or str(
+                                    _bi.get("git_commit") or ""
+                                )
+                                _built_at = _built_at or str(
+                                    _bi.get("built_at_iso") or ""
+                                )
+                            except KeyError:
+                                pass
+            except Exception as _exc:  # noqa: BLE001
+                log.warning("test/version BUILD-INFO probe failed: %s", _exc)
+            payload = {
+                "channel": "main-dev",
+                "artifact_sha256": _sha,
+                "git_commit": _commit,
+                "package_size": _pkg_size,
+                "built_at": _built_at,
+            }
+            return (
+                json.dumps(payload, sort_keys=True).encode("utf-8"),
+                200,
+                "application/json",
+                [("Cache-Control", "no-store")],
+            )
 
         if tail == "beta/latest":
             return (

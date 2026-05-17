@@ -982,6 +982,7 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         print("1. Auto Detect Package")
         print("2. Add Package")
         print("3. Remove Package")
+        print("4. Set Account Username / User ID")
         print("0. Back")
         print("--------------------------------")
         _mc = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -996,8 +997,10 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
             draft = _package_menu_add(draft)
         elif choice == "3":
             draft = _package_menu_remove(draft)
+        elif choice == "4":
+            draft = _package_menu_set_user_id(draft)
         else:
-            print("Please choose 1-3 or 0.")
+            print("Please choose 1-4 or 0.")
     return draft
 
 
@@ -1104,6 +1107,99 @@ def _package_menu_set_username(draft: dict[str, Any]) -> dict[str, Any]:
     draft["roblox_packages"] = entries
     draft = save_config(draft)
     print(f"Username saved for {target['package']}.")
+    safe_io.press_enter()
+    return draft
+
+
+def _package_menu_set_user_id(draft: dict[str, Any]) -> dict[str, Any]:
+    """Set per-package Roblox user-id (or auto-resolve from a username).
+
+    Used to enable Roblox presence-API state detection.  Old configs without
+    ``roblox_user_id`` continue to work — supervisor simply falls back to
+    local heuristics for those packages.
+    """
+    print()
+    print("Set Roblox User ID")
+    print("(needed for presence-API state — visible-in-game truth)")
+    entries = validate_package_entries(
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
+    )
+    if not entries:
+        print("No packages configured.")
+        return draft
+    print()
+    for idx, entry in enumerate(entries, start=1):
+        username = _package_username_display(entry)
+        uid = int(entry.get("roblox_user_id") or 0)
+        uid_disp = str(uid) if uid > 0 else "not set"
+        print(f"  {idx}. {entry['package']} — {username} (user_id: {uid_disp})")
+    print("  0. Back")
+    _pc = safe_io.safe_prompt("Choose package [0]: ", default="0")
+    choice = (_pc or "0").strip() or "0"
+    if choice == "0" or not choice.isdigit():
+        return draft
+    i = int(choice) - 1
+    if not (0 <= i < len(entries)):
+        print("Invalid choice.")
+        return draft
+    target = dict(entries[i])
+    current_username = str(target.get("account_username") or "").strip()
+    current_uid = int(target.get("roblox_user_id") or 0)
+    print()
+    print(f"Package: {target['package']}")
+    if current_username:
+        print(f"Username: {current_username}")
+    if current_uid:
+        print(f"User ID:  {current_uid}")
+    print()
+    print("Enter a Roblox username (we will auto-resolve to user ID),")
+    print("or a numeric Roblox user ID directly.  Leave blank to cancel.")
+    raw_inp = safe_io.safe_prompt("Username or user ID: ")
+    raw = (raw_inp or "").strip()
+    if not raw:
+        print("Skipped.")
+        return draft
+
+    new_uid = 0
+    new_username = current_username
+    if raw.isdigit() and int(raw) > 0:
+        new_uid = int(raw)
+        print(f"Set user ID: {new_uid}")
+    else:
+        # Treat as username; auto-resolve.
+        try:
+            from . import roblox_presence as _rp
+
+            resolved = _rp.lookup_user_id(raw)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Username lookup failed: {exc}")
+            print("Username stored without numeric ID; presence may not activate.")
+            resolved = 0
+        if resolved and int(resolved) > 0:
+            new_uid = int(resolved)
+            new_username = raw
+            print(f"Resolved {raw} -> user_id {new_uid}")
+        else:
+            new_username = raw
+            print("Could not resolve username via Roblox API right now.")
+            print("Username stored — try again later or enter user ID directly.")
+
+    try:
+        target["account_username"] = validate_account_username(new_username)
+        target["username_source"] = validate_username_source("manual", target["account_username"])
+        target["roblox_user_id"] = int(new_uid) if new_uid > 0 else 0
+    except ConfigError as exc:
+        print(f"Invalid input: {exc}")
+        safe_io.press_enter()
+        return draft
+
+    entries = [target if e["package"] == target["package"] else dict(e) for e in entries]
+    draft["roblox_packages"] = entries
+    draft = save_config(draft)
+    if new_uid > 0:
+        print(f"Saved user ID {new_uid} for {target['package']}.")
+    else:
+        print(f"Saved username for {target['package']}.")
     safe_io.press_enter()
     return draft
 
@@ -3205,8 +3301,57 @@ def cmd_logs(args: argparse.Namespace) -> int:
 
 
 def cmd_version(args: argparse.Namespace) -> int:
-    print_banner(use_color=not args.no_color)
+    """Print runtime build proof.
+
+    Output goes to stdout in a stable ``key: value`` format so installers,
+    operators, and test harnesses can grep for the SHA or commit.
+    """
+    from . import build_info as _bi
+
+    info = _bi.collect_version_info()
+    lines: list[str] = []
+    lines.append(f"product: {info['product']}")
+    lines.append(f"product_version: {info['product_version']}")
+    if info["channel"]:
+        lines.append(f"channel: {info['channel']}")
+    if info["git_commit_short"]:
+        lines.append(f"git_commit: {info['git_commit_short']}")
+    if info["artifact_sha256_short"]:
+        lines.append(f"artifact_sha256: {info['artifact_sha256_short']}")
+    if info["built_at_iso"]:
+        lines.append(f"built_at: {info['built_at_iso']}")
+    if info["install_time_iso"]:
+        lines.append(f"installed_at: {info['install_time_iso']}")
+    if info["install_api"]:
+        lines.append(f"install_api: {info['install_api']}")
+    lines.append(f"install_root: {info['install_root']}")
+    lines.append(f"python: {info['python_executable']} ({info['python_version']})")
+    if info["wrapper_path"]:
+        lines.append(f"wrapper: {info['wrapper_path']}")
+    lines.append("modules:")
+    for mod, path in info["modules"].items():
+        lines.append(f"  {mod}: {path or '<missing>'}")
+    sys.stdout.write("\n".join(lines) + "\n")
     return 0
+
+
+def cmd_doctor_install(args: argparse.Namespace) -> int:
+    """Verify the on-disk install is wired to the new build.
+
+    Prints one line per check (PASS / FAIL + detail) and exits 0 only if
+    every check passes.  This is hidden from the public menu but documented
+    for cloud-phone install verification.
+    """
+    from . import build_info as _bi
+
+    results = _bi.doctor_install_checks()
+    ok = _bi.doctor_install_overall_ok(results)
+    for r in results:
+        tag = "PASS" if r["ok"] else "FAIL"
+        sys.stdout.write(f"[{tag}] {r['name']}: {r['detail']}\n")
+    summary = "OK" if ok else "FAILED"
+    sys.stdout.write(f"\ndoctor install: {summary}\n")
+    return 0 if ok else 1
 
 
 def cmd_enable_boot(args: argparse.Namespace) -> int:
@@ -3431,6 +3576,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         _unknown = list(argv)
 
     # Map positional sub-subcommands for `doctor`: "doctor layout", "doctor root-state".
+    ns.doctor_install = False
     if ns.command == "doctor" and _unknown:
         sub = (_unknown[0] or "").lower().replace("-", "_")
         if sub in ("layout", "layout_test"):
@@ -3441,6 +3587,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             ns.layout_reset = True
         elif sub in ("bundle", "support_bundle"):
             ns.support_bundle = True
+        elif sub in ("install", "installation", "build"):
+            ns.doctor_install = True
         # Any other doctor sub is just dropped silently — no traceback.
 
     flag_to_command = {
@@ -3472,6 +3620,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ns.resolved_command = "discover-layout-keys"
     elif getattr(ns, "support_bundle", False):
         ns.resolved_command = "support-bundle"
+    elif getattr(ns, "doctor_install", False):
+        ns.resolved_command = "doctor-install"
     elif getattr(ns, "layout_test", False) or getattr(ns, "root_state", False) or getattr(ns, "layout_reset", False):
         ns.resolved_command = "doctor"
     else:
@@ -3535,6 +3685,7 @@ def _handlers() -> dict[str, Any]:
         "update": cmd_update,
         "support-bundle": cmd_support_bundle,
         "discover-layout-keys": cmd_discover_layout_keys,
+        "doctor-install": cmd_doctor_install,
     }
 
 

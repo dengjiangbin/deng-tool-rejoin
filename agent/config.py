@@ -233,6 +233,21 @@ def validate_username_source(source: Any, username: str = "") -> str:
     return cleaned
 
 
+def _validate_roblox_user_id(value: Any) -> int:
+    """Coerce *value* to a positive int Roblox user-id, else 0.
+
+    Accepts ``int``, ``str`` of digits; rejects anything else without
+    raising (returns 0).  This keeps old configs working.
+    """
+    if value is None or value == "":
+        return 0
+    try:
+        as_int = int(str(value).strip())
+    except (TypeError, ValueError):
+        return 0
+    return as_int if as_int > 0 else 0
+
+
 def package_entry(
     package: str,
     account_username: str = "",
@@ -244,6 +259,7 @@ def package_entry(
     low_graphics_enabled: bool = True,
     auto_reopen_enabled: bool = True,
     auto_reconnect_enabled: bool = True,
+    roblox_user_id: int | str = 0,
 ) -> dict[str, Any]:
     username = validate_account_username(account_username)
     an = str(app_name or "").strip()[:120]
@@ -257,6 +273,7 @@ def package_entry(
         "low_graphics_enabled": bool(low_graphics_enabled),
         "auto_reopen_enabled": bool(auto_reopen_enabled),
         "auto_reconnect_enabled": bool(auto_reconnect_enabled),
+        "roblox_user_id": _validate_roblox_user_id(roblox_user_id),
     }
 
 
@@ -297,6 +314,7 @@ def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
                 low_graphics_enabled=_as_bool(raw_entry.get("low_graphics_enabled", True)),
                 auto_reopen_enabled=_as_bool(raw_entry.get("auto_reopen_enabled", True)),
                 auto_reconnect_enabled=_as_bool(raw_entry.get("auto_reconnect_enabled", True)),
+                roblox_user_id=raw_entry.get("roblox_user_id", 0),
             )
             entry["private_server_url"] = _validate_optional_private_server_url(str(raw_entry.get("private_server_url") or ""))
         else:

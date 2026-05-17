@@ -258,11 +258,30 @@ def render_direct_install_bootstrap(
     installer_title: str = "DENG Tool: Rejoin Installer",
     banner_lines: tuple[str, ...] = (),
 ) -> str:
-    """Generate a bash installer that downloads the full package directly (no license gate).
+    """Generate a bash installer that downloads the full package directly.
 
-    The full package tarball is downloaded, SHA256-verified, and extracted into
-    ``APP_HOME`` during install.  No license key is prompted at this stage.
-    License verification happens inside the real tool on first run (menu flow).
+    Behavior (in this order, hard-failing on any step):
+
+    1. Download ``test/package.tar.gz`` with a cache-busting query param.
+    2. Verify SHA-256 matches the manifest value embedded in the script.
+    3. Stop any running ``deng-rejoin`` process (best-effort).
+    4. Preserve user data (``config.json``, ``data/``, ``logs/``,
+       ``license.json``, ``.install_api``, ``backups/``) by leaving them
+       untouched.
+    5. **Delete** the code directories (``agent/``, ``bot/``, ``scripts/``,
+       ``docs/``, ``examples/``, ``assets/``) plus every ``__pycache__/`` and
+       ``*.pyc``.  This guarantees orphan files from the previous build
+       cannot shadow the new install.
+    6. Extract the verified tarball.
+    7. Write ``.installed-build.json`` with the verified SHA, git commit,
+       channel, install time, install API, and the URLs that produced this
+       install.
+    8. Recreate ``$PREFIX/bin/deng-rejoin`` (or ``$HOME/bin/deng-rejoin``).
+    9. Run a Python import probe against the new modules.
+    10. Run ``deng-rejoin version`` to prove the wrapper executes the new
+        installed code and emits the expected commit / SHA.
+    11. Abort cleanly on any failure — the user does not get a half-installed
+        tool.
     """
     base = base_url.rstrip("/")
     banner_part = ""
@@ -284,33 +303,89 @@ def render_direct_install_bootstrap(
         f'export DENG_REJOIN_INSTALL_API="{base}"\n'
         'APP_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"\n'
         'mkdir -p "$APP_HOME"\n'
-        'PACKAGE_URL="$DENG_REJOIN_INSTALL_API/install/test/package.tar.gz"\n'
+        # Cache-bust the package URL so neither curl, transparent proxies,
+        # nor a CDN edge can hand us a stale tarball.
+        'CACHE_BUSTER="$(date +%s)-$$"\n'
+        'PACKAGE_URL_BASE="$DENG_REJOIN_INSTALL_API/install/test/package.tar.gz"\n'
+        'PACKAGE_URL="$PACKAGE_URL_BASE?t=$CACHE_BUSTER"\n'
+        'INSTALLER_URL="$DENG_REJOIN_INSTALL_API/install/test/latest"\n'
         f'EXPECTED_SHA256="{safe_sha}"\n'
         'TMP="$(mktemp)"\n'
         "trap 'rm -f \"$TMP\"' EXIT\n"
-        'echo "Downloading DENG Tool: Rejoin..."\n'
-        'curl -fsSL -A "deng-rejoin-installer/1.0" "$PACKAGE_URL" -o "$TMP" || {\n'
+        'echo "Downloading..."\n'
+        'curl -fsSL '
+        '-H "Cache-Control: no-cache" -H "Pragma: no-cache" '
+        '-A "deng-rejoin-installer/1.0" "$PACKAGE_URL" -o "$TMP" || {\n'
         '  echo "Download failed." >&2\n'
-        '  echo "URL: $PACKAGE_URL" >&2\n'
+        '  echo "URL: $PACKAGE_URL_BASE" >&2\n'
         "  exit 1\n"
         "}\n"
-        # Single-quoted python snippet so bash doesn't touch $; no embedded quotes needed
         "ACTUAL_SHA=\"$(python3 -c 'import hashlib,sys;d=open(sys.argv[1],\"rb\").read();print(hashlib.sha256(d).hexdigest())' \"$TMP\" 2>/dev/null)\" || ACTUAL_SHA=\"\"\n"
         'if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA256" ]]; then\n'
-        '  echo "Package checksum mismatch. The download may be corrupted." >&2\n'
+        '  echo "Package checksum mismatch. The download may be corrupted or stale." >&2\n'
         '  echo "Expected: $EXPECTED_SHA256" >&2\n'
         '  echo "Got:      $ACTUAL_SHA" >&2\n'
         "  exit 1\n"
         "fi\n"
         'echo "Package verified."\n'
-        'echo "Installing to $APP_HOME..."\n'
+        # Stop any running deng-rejoin process so we never overwrite live code.
+        '_stop_running() {\n'
+        '  if command -v pkill >/dev/null 2>&1; then\n'
+        "    pkill -f 'agent/deng_tool_rejoin.py' 2>/dev/null || true\n"
+        '  fi\n'
+        '  if [[ -f "$APP_HOME/data/rejoin.pid" ]]; then\n'
+        '    _pid="$(cat "$APP_HOME/data/rejoin.pid" 2>/dev/null || true)"\n'
+        '    if [[ -n "$_pid" ]]; then\n'
+        '      kill "$_pid" 2>/dev/null || true\n'
+        '    fi\n'
+        '  fi\n'
+        '}\n'
+        '_stop_running\n'
+        # Purge old code directories + every __pycache__/*.pyc anywhere
+        # under APP_HOME.  Preserve user-owned files at the top level.
+        'echo "Installing..."\n'
+        'for _d in agent bot scripts docs examples assets; do\n'
+        '  rm -rf "$APP_HOME/$_d" 2>/dev/null || true\n'
+        'done\n'
+        'rm -f "$APP_HOME/BUILD-INFO.json" "$APP_HOME/.installed-build.json" 2>/dev/null || true\n'
+        # Find /a/b/__pycache__ → delete; also strip every *.pyc.
+        # Using -prune so we don't waste cycles descending into deleted dirs.
+        'find "$APP_HOME" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true\n'
+        'find "$APP_HOME" -type f -name "*.pyc" -delete 2>/dev/null || true\n'
+        # Extract fresh artifact.
         'tar -xzf "$TMP" -C "$APP_HOME" || { echo "Could not extract package." >&2; exit 1; }\n'
         'if [[ ! -f "$APP_HOME/agent/deng_tool_rejoin.py" ]]; then\n'
         '  echo "Install error: agent/deng_tool_rejoin.py missing from package." >&2\n'
         "  exit 1\n"
         "fi\n"
-        'echo "Package installed."\n'
+        # Record the verified API base under the install root.
         "printf '%s\\n' \"$DENG_REJOIN_INSTALL_API\" > \"$APP_HOME/.install_api\"\n"
+        # Write the install-time metadata file.  We parse git_commit out of
+        # the just-extracted BUILD-INFO.json so the runtime can show it
+        # without re-running git.
+        # Read BUILD-INFO.json with single-quoted python -c (bash leaves the
+        # body alone).  Falls back to empty string on any parse error.
+        '_GIT_COMMIT="$(python3 -c \'import json,os,sys; p=sys.argv[1]; '
+        'print((json.load(open(p)).get("git_commit","")) if os.path.isfile(p) else "")\' '
+        '"$APP_HOME/BUILD-INFO.json" 2>/dev/null)" || _GIT_COMMIT=""\n'
+        '_FILE_COUNT="$(find "$APP_HOME/agent" -type f | wc -l 2>/dev/null | tr -d "[:space:]" || echo 0)"\n'
+        '_INSTALL_TIME_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"\n'
+        # Heredoc with bash-substituted variables. Single-quote NOT used here
+        # so $VAR expands. JSON keys/values that contain spaces or special
+        # chars use only the runtime values that we control on this line.
+        'cat > "$APP_HOME/.installed-build.json" <<EOF\n'
+        '{\n'
+        '  "artifact_sha256": "$EXPECTED_SHA256",\n'
+        '  "git_commit": "$_GIT_COMMIT",\n'
+        '  "channel": "main-dev",\n'
+        '  "install_time_iso": "$_INSTALL_TIME_ISO",\n'
+        '  "install_api": "$DENG_REJOIN_INSTALL_API",\n'
+        '  "package_url": "$PACKAGE_URL_BASE",\n'
+        '  "installer_url": "$INSTALLER_URL",\n'
+        '  "extracted_file_count": $_FILE_COUNT\n'
+        '}\n'
+        'EOF\n'
+        # Wrapper install (unchanged choice of $PREFIX/bin vs $HOME/bin).
         "USING_HOME_BIN=0\n"
         'BIN=""\n'
         'if [[ -n "${PREFIX:-}" ]]; then\n'
@@ -332,7 +407,9 @@ def render_direct_install_bootstrap(
         "    fi\n"
         "  done\n"
         "fi\n"
-        'echo "Installing deng-rejoin wrapper to $BIN/deng-rejoin"\n'
+        # Remove any stale wrapper before writing the new one so a prior
+        # symlink or read-only file cannot block recreation.
+        'rm -f "$BIN/deng-rejoin" 2>/dev/null || true\n'
         "cat > \"$BIN/deng-rejoin\" << 'DENG_REJOIN_WRAPPER'\n"
     )
 
@@ -343,6 +420,8 @@ def render_direct_install_bootstrap(
         '[[ -s "$BIN/deng-rejoin" ]] || { echo "Failed to create deng-rejoin wrapper." >&2; exit 1; }\n'
         '[[ -x "$BIN/deng-rejoin" ]] || { echo "Failed: wrapper not executable." >&2; exit 1; }\n'
         '[[ -f "$APP_HOME/agent/deng_tool_rejoin.py" ]] || { echo "Failed: deng_tool_rejoin.py missing." >&2; exit 1; }\n'
+        '[[ -f "$APP_HOME/BUILD-INFO.json" ]] || { echo "Failed: BUILD-INFO.json missing in package." >&2; exit 1; }\n'
+        '[[ -f "$APP_HOME/.installed-build.json" ]] || { echo "Failed: .installed-build.json was not written." >&2; exit 1; }\n'
         'DR_RESOLVED=""\n'
         'if command -v deng-rejoin >/dev/null 2>&1; then\n'
         '  DR_RESOLVED="$(command -v deng-rejoin)"\n'
@@ -354,6 +433,30 @@ def render_direct_install_bootstrap(
         "  fi\n"
         "  exit 1\n"
         "fi\n"
+        # Import check on the new modules.  If any of these fail, the install
+        # is corrupted or the tarball is missing files.
+        'if ! PYTHONPATH="$APP_HOME" python3 -c '
+        "'import agent.commands, agent.supervisor, agent.roblox_presence, agent.freeform_enable, agent.playing_state, agent.dumpsys_cache, agent.window_apply' "
+        '2>/dev/null; then\n'
+        '  echo "Install verification failed: required modules did not import." >&2\n'
+        '  echo "APP_HOME=$APP_HOME" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        # Prove the wrapper executes the new code by invoking `version`.
+        '_VERSION_OUT="$("$BIN/deng-rejoin" version 2>/dev/null)" || _VERSION_OUT=""\n'
+        'if ! echo "$_VERSION_OUT" | grep -q "^artifact_sha256: " ; then\n'
+        '  echo "Install verification failed: deng-rejoin version did not return artifact SHA." >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        '_INSTALLED_SHORT_SHA="$(echo "$_VERSION_OUT" | grep "^artifact_sha256: " | head -n1 | awk \'{print $2}\')"\n'
+        '_EXPECTED_SHORT_SHA="${EXPECTED_SHA256:0:12}"\n'
+        'if [[ "$_INSTALLED_SHORT_SHA" != "$_EXPECTED_SHORT_SHA" ]]; then\n'
+        '  echo "Install verification failed: installed SHA mismatch." >&2\n'
+        '  echo "Expected (short): $_EXPECTED_SHORT_SHA" >&2\n'
+        '  echo "Got (short):      $_INSTALLED_SHORT_SHA" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        'echo "Installed build: ${_GIT_COMMIT:-unknown} ${_EXPECTED_SHORT_SHA}"\n'
         'echo "Wrapper: $DR_RESOLVED"\n'
         'if [[ "$USING_HOME_BIN" -eq 1 ]]; then\n'
         "  echo 'Note: If deng-rejoin is not found in this shell, run once:'\n"
@@ -362,7 +465,7 @@ def render_direct_install_bootstrap(
         "fi\n"
         'echo ""\n'
         'echo "Install complete."\n'
-        'echo "Next: run deng-rejoin"\n'
+        'echo "Run: deng-rejoin"\n'
     )
 
     return (

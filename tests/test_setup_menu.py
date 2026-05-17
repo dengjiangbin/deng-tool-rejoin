@@ -313,8 +313,11 @@ class PackageSubmenuTests(unittest.TestCase):
         text = buf.getvalue()
         self.assertNotIn("List Packages", text)
 
-    def test_package_submenu_only_four_numbered_options(self):
-        """Public package menu: Auto Detect (1), Add (2), Remove (3), Back (0). No extras."""
+    def test_package_submenu_lists_expected_numbered_options(self):
+        """Public package menu options: Auto Detect (1), Add (2), Remove (3),
+        Set Account Username / User ID (4), Back (0).  No further extras —
+        Roblox-presence detection is unlocked by user-id, so option 4 is the
+        explicit user-facing way to enable that without typing config JSON."""
         cfg = _base_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
@@ -325,8 +328,8 @@ class PackageSubmenuTests(unittest.TestCase):
         self.assertRegex(text, r"(?m)^1\. Auto Detect Package")
         self.assertRegex(text, r"(?m)^2\. Add Package")
         self.assertRegex(text, r"(?m)^3\. Remove Package")
-        # No 4th numbered public item; only 0. Back after 3
-        self.assertNotRegex(text, r"(?m)^4\. ")
+        self.assertRegex(text, r"(?m)^4\. Set Account Username / User ID")
+        # No 5th public item; only 0. Back follows
         self.assertNotRegex(text, r"(?m)^5\. ")
 
     def test_detect_refresh_saves_new_username(self):
