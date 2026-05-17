@@ -89,13 +89,23 @@ class FreeformSetupResult:
 
 
 def _settings_get(namespace: str, key: str) -> str | None:
-    """``settings get <ns> <key>`` — returns stripped value or None.  Never raises."""
+    """``settings get <ns> <key>`` — returns stripped value or None.
+
+    Uses :func:`android.run_android_command` so that:
+
+    * the bare name ``settings`` is auto-resolved to ``/system/bin/settings``
+      (Termux's ``$PATH`` excludes ``/system/bin``);
+    * the call is auto-retried through ``su`` if Samsung One UI returns
+      ``Permission Denial: getCurrentUser ... INTERACT_ACROSS_USERS`` for
+      the unprivileged invocation.  Without this, every freeform-capability
+      probe on Samsung devices silently reports the flag as unset and the
+      "freeform_caps: ok=0/4" diagnostic remains misleadingly red.
+    """
     try:
-        res = android.run_command(["settings", "get", namespace, key], timeout=4)
+        res = android.run_android_command(["settings", "get", namespace, key], timeout=5)
         if not res.ok:
             return None
         v = (res.stdout or "").strip()
-        # "null" is the literal Android returns for unset keys
         if v == "" or v.lower() == "null":
             return None
         return v

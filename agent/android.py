@@ -480,15 +480,29 @@ def launch_app(package: str) -> CommandResult:
 
     last_result: CommandResult | None = None
 
-    # Method 1: am start with MAIN + LAUNCHER intent
+    # Method 1: am start with MAIN + LAUNCHER intent, freeform-windowed.
+    # ``--windowingMode 5`` = WINDOWING_MODE_FREEFORM.  When the framework
+    # rejects the flag (older Android, missing perm) we transparently fall
+    # back to the unflagged launch; this keeps the launcher robust across
+    # OEMs while letting App Cloner XML bounds steer the window on hosts
+    # that DO support freeform (probe-confirmed on cloud-phone SM-N9810).
     if am:
+        base_main = [
+            am, "start",
+            "-a", "android.intent.action.MAIN",
+            "-c", "android.intent.category.LAUNCHER",
+            "-p", package,
+        ]
         result = run_command(
-            [am, "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-p", package],
+            base_main[:2] + ["--windowingMode", "5"] + base_main[2:],
             timeout=PROCESS_TIMEOUT_SECONDS,
         )
         if result.ok:
             return result
-        last_result = result
+        unflagged = run_command(base_main, timeout=PROCESS_TIMEOUT_SECONDS)
+        if unflagged.ok:
+            return unflagged
+        last_result = unflagged
 
     # Method 2: resolve-activity to get exact component, then am start -n
     if cmd_bin and am:
@@ -499,6 +513,12 @@ def launch_app(package: str) -> CommandResult:
         if resolve.ok:
             component = _parse_activity_component(resolve.stdout, package)
             if component:
+                ff = run_command(
+                    [am, "start", "--windowingMode", "5", "-n", component],
+                    timeout=PROCESS_TIMEOUT_SECONDS,
+                )
+                if ff.ok:
+                    return ff
                 result2 = run_command([am, "start", "-n", component], timeout=PROCESS_TIMEOUT_SECONDS)
                 if result2.ok:
                     return result2
@@ -526,21 +546,34 @@ def launch_app(package: str) -> CommandResult:
 
 
 def launch_url(package: str, url: str, launch_mode: str) -> CommandResult:
+    """Launch a deep-link URL in *package* (best-effort freeform window).
+
+    On Android builds where ``cmd activity start-activity --windowingMode``
+    is supported (probe-confirmed on cloud-phone SM-N9810/Android 13),
+    we ask the framework to put the new activity into windowing mode 5
+    (``WINDOWING_MODE_FREEFORM``) so the App Cloner XML position keys are
+    honored.  If the framework rejects the flag (older Android, missing
+    permission, etc.) we transparently retry without the flag so callers
+    never see a launch regression.
+    """
     package = validate_package_name(package)
     validate_launch_url(url, launch_mode, allow_uncertain=True)
-    # Android's am tool accepts the package name as the final selector argument.
-    return run_command(
-        ["am", "start", "-a", "android.intent.action.VIEW", "-d", url, package],
-        timeout=PROCESS_TIMEOUT_SECONDS,
-    )
+    base = ["am", "start", "-a", "android.intent.action.VIEW", "-d", url, package]
+    res = run_command(base[:2] + ["--windowingMode", "5"] + base[2:], timeout=PROCESS_TIMEOUT_SECONDS)
+    if res.ok:
+        return res
+    # Older Android builds reject --windowingMode with "Bad component name"
+    # or "Error type 8" depending on the OEM.  Retry without it.
+    return run_command(base, timeout=PROCESS_TIMEOUT_SECONDS)
 
 
 def launch_url_generic(url: str, launch_mode: str) -> CommandResult:
     validate_launch_url(url, launch_mode, allow_uncertain=True)
-    return run_command(
-        ["am", "start", "-a", "android.intent.action.VIEW", "-d", url],
-        timeout=PROCESS_TIMEOUT_SECONDS,
-    )
+    base = ["am", "start", "-a", "android.intent.action.VIEW", "-d", url]
+    res = run_command(base[:2] + ["--windowingMode", "5"] + base[2:], timeout=PROCESS_TIMEOUT_SECONDS)
+    if res.ok:
+        return res
+    return run_command(base, timeout=PROCESS_TIMEOUT_SECONDS)
 
 
 def is_process_running(package: str) -> bool:

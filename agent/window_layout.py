@@ -312,8 +312,23 @@ def parse_wm_density(output: str) -> int | None:
 
 
 def detect_display_info() -> DisplayInfo:
-    size_result    = android.run_command(["wm", "size"],    timeout=5)
-    density_result = android.run_command(["wm", "density"], timeout=5)
+    """Probe the real display size + density of the host.
+
+    Uses :func:`android.run_android_command` so:
+
+    * the bare name ``wm`` is auto-resolved to ``/system/bin/wm`` (Termux's
+      ``$PATH`` excludes ``/system/bin`` — this regression was caught on a
+      Samsung SM-N9810 cloud phone where every previous build silently
+      fell back to the hardcoded ``(1080, 1920)`` default, producing
+      off-screen layout bounds);
+    * the call is routed through ``su`` on permission denial — some Samsung
+      One UI builds reject ``wm size`` from unprivileged callers.
+
+    The fallback ``(1080, 1920)`` is only used as a last-ditch safety net
+    when both unprivileged AND root calls fail.
+    """
+    size_result    = android.run_android_command(["wm", "size"],    timeout=6)
+    density_result = android.run_android_command(["wm", "density"], timeout=6)
     size    = parse_wm_size(size_result.stdout)     if size_result.ok    else None
     density = parse_wm_density(density_result.stdout) if density_result.ok else None
     width, height = size or (1080, 1920)
