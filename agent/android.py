@@ -558,22 +558,49 @@ def launch_url(package: str, url: str, launch_mode: str) -> CommandResult:
     """
     package = validate_package_name(package)
     validate_launch_url(url, launch_mode, allow_uncertain=True)
-    base = ["am", "start", "-a", "android.intent.action.VIEW", "-d", url, package]
+    # Force a clean re-route to the private server even when the clone is
+    # already running:
+    #   FLAG_ACTIVITY_NEW_TASK       (0x10000000)
+    # + FLAG_ACTIVITY_CLEAR_TASK     (0x00008000)
+    # + FLAG_ACTIVITY_CLEAR_TOP      (0x04000000)
+    # + FLAG_ACTIVITY_RESET_TASK_IF_NEEDED (0x00200000)
+    # = 0x14208000
+    #
+    # Real-device evidence (probe ``p-47fa33562a``): without these flags
+    # ``am start -a VIEW -d <url> <pkg>`` simply brought the existing
+    # Roblox lobby task to the front instead of consuming the share URL,
+    # so the user reported "not joining private server URL we already
+    # set" even though every rejoin_success row landed in the log.
+    flags = "0x14208000"
+    base = ["am", "start", "-a", "android.intent.action.VIEW", "-d", url,
+            "-f", flags, package]
     res = run_command(base[:2] + ["--windowingMode", "5"] + base[2:], timeout=PROCESS_TIMEOUT_SECONDS)
     if res.ok:
         return res
     # Older Android builds reject --windowingMode with "Bad component name"
     # or "Error type 8" depending on the OEM.  Retry without it.
-    return run_command(base, timeout=PROCESS_TIMEOUT_SECONDS)
+    res = run_command(base, timeout=PROCESS_TIMEOUT_SECONDS)
+    if res.ok:
+        return res
+    # Final fallback: keep the legacy un-flagged form so callers never
+    # see a launch regression on platforms that reject ``-f``.
+    legacy = ["am", "start", "-a", "android.intent.action.VIEW", "-d", url, package]
+    return run_command(legacy, timeout=PROCESS_TIMEOUT_SECONDS)
 
 
 def launch_url_generic(url: str, launch_mode: str) -> CommandResult:
     validate_launch_url(url, launch_mode, allow_uncertain=True)
-    base = ["am", "start", "-a", "android.intent.action.VIEW", "-d", url]
+    # Same CLEAR_TASK flags as launch_url above — see comment there.
+    flags = "0x14208000"
+    base = ["am", "start", "-a", "android.intent.action.VIEW", "-d", url, "-f", flags]
     res = run_command(base[:2] + ["--windowingMode", "5"] + base[2:], timeout=PROCESS_TIMEOUT_SECONDS)
     if res.ok:
         return res
-    return run_command(base, timeout=PROCESS_TIMEOUT_SECONDS)
+    res = run_command(base, timeout=PROCESS_TIMEOUT_SECONDS)
+    if res.ok:
+        return res
+    legacy = ["am", "start", "-a", "android.intent.action.VIEW", "-d", url]
+    return run_command(legacy, timeout=PROCESS_TIMEOUT_SECONDS)
 
 
 def is_process_running(package: str) -> bool:

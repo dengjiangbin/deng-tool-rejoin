@@ -100,16 +100,33 @@ def perform_rejoin(
         # window is placed correctly from the first frame.  Falls back to
         # bounds-less launch automatically if `--activity-launch-bounds`
         # isn't supported on this build.
+        #
+        # Real-device evidence (probe ``p-47fa33562a``): the old call passed
+        # ``[package]`` (ONE package) to ``calculate_split_layout``, so every
+        # clone was launched into the *same* single-package rect and they all
+        # overlapped.  Build the layout for the FULL list of enabled clones
+        # and pick the rect that matches ``package``.
         _bounds_rect: tuple[int, int, int, int] | None = None
         try:
             from . import window_layout
             _display = window_layout.detect_display_info()
+            _all_pkgs = [e["package"] for e in ents] or [package]
+            if package not in _all_pkgs:
+                _all_pkgs.append(package)
+            _dock_frac = float(cfg.get("termux_dock_fraction", 0.50))
             _rects = window_layout.calculate_split_layout(
-                [package], _display.width, _display.height,
+                _all_pkgs, _display.width, _display.height,
+                termux_log_fraction=_dock_frac,
             )
-            if _rects:
-                _r0 = _rects[0]
-                _bounds_rect = (_r0.left, _r0.top, _r0.right, _r0.bottom)
+            _r_for_pkg = next(
+                (r for r in (_rects or []) if getattr(r, "package", None) == package),
+                None,
+            )
+            if _r_for_pkg is not None:
+                _bounds_rect = (
+                    _r_for_pkg.left, _r_for_pkg.top,
+                    _r_for_pkg.right, _r_for_pkg.bottom,
+                )
         except Exception:  # noqa: BLE001
             _bounds_rect = None
 

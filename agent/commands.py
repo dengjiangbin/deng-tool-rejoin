@@ -2763,9 +2763,17 @@ def _prepare_automatic_layout(
         except Exception:  # noqa: BLE001
             display = window_layout.DisplayInfo(width=1080, height=1920, density=420)
 
+        # Pass the user's Termux dock fraction so the right pane (clone
+        # area) starts exactly where Termux ends.  Without this, Termux at
+        # 50 % overlaps the clone area (which previously assumed 35 % left
+        # reservation).  Probe ``p-47fa33562a`` showed clones overlapping
+        # the Termux pane on a 720 × 1280 phone — fixed by keeping the two
+        # fractions in lock-step.
+        _dock_frac = float(cfg.get("termux_dock_fraction", 0.50))
         rects = window_layout.calculate_split_layout(
             [p for p in packages if not window_layout._is_layout_excluded(p)],
             display.width, display.height,
+            termux_log_fraction=_dock_frac,
         )
         try:
             cfg["last_layout_preview"] = [r.as_dict() for r in rects]
@@ -2869,9 +2877,11 @@ def _verify_layout_post_launch(
     diag_rows: list[dict[str, Any]] = []
     try:
         display = window_layout.detect_display_info()
+        _dock_frac2 = float(cfg.get("termux_dock_fraction", 0.50))
         rects = window_layout.calculate_split_layout(
             [e["package"] for e in entries if not window_layout._is_layout_excluded(e["package"])],
             display.width, display.height,
+            termux_log_fraction=_dock_frac2,
         )
         from . import window_apply
         results = window_apply.apply_window_layout(
@@ -2957,6 +2967,38 @@ def _run_preparation_phase(
             print(f"  {Y}ℹ{RST}  Cache cleanup: mostly skipped (root/offline) or no cache dirs.")
         print(f"  {G}✓{RST} Preparation complete.")
         print()
+
+
+def _termux_exit_clean() -> None:
+    """Bypass Python finalization on Termux to avoid libc-shutdown segfaults.
+
+    Real-device evidence (probe ``p-47fa33562a``): on Termux + Python
+    3.13, after a clean supervisor shutdown the process sometimes
+    segfaults during interpreter teardown (atexit handlers, threading
+    join, file-handle close on the curl subprocess pipes).  The user
+    sees ``Segmentation fault`` even though every worker had already
+    stopped cleanly.  Using ``os._exit(0)`` after we've flushed logs
+    and persisted state skips the buggy native finalizers — the kernel
+    reclaims the file descriptors and the process exits with code 0.
+
+    Non-Termux contexts (CI, tests, dev boxes) return without exiting
+    so unittest can still introspect the return value and exit cleanly
+    via the normal interpreter shutdown.
+    """
+    if not os.environ.get("TERMUX_VERSION"):
+        return
+    if os.environ.get("DENG_DISABLE_TERMUX_HARD_EXIT") == "1":
+        return  # escape hatch for debugging
+    # Flush stdout/stderr so the dashboard's final state isn't lost.
+    try:
+        sys.stdout.flush()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        sys.stderr.flush()
+    except Exception:  # noqa: BLE001
+        pass
+    os._exit(0)
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -3066,20 +3108,20 @@ def cmd_start(args: argparse.Namespace) -> int:
         _start_log.debug("start: layout note=%s", _layout_note)
 
         # ── Minimize Termux to the dock pane (free up screen for clones) ──────
-        # Real-device request (probe p-ce7b1d7918): on the cloud phone the
-        # Termux window covers the area where the layout algorithm wants to
-        # place clones, so the user can't see whether they landed correctly.
-        # Dock Termux into the left ``TERMUX_LOG_FRACTION`` pane BEFORE the
-        # launches so the clones come up into the empty right pane.  Honors
+        # Real-device request (probe p-ce7b1d7918, p-47fa33562a): on the cloud
+        # phone the Termux window covers the area where the layout algorithm
+        # wants to place clones, so the user can't see whether they landed
+        # correctly.  Dock Termux into the left pane BEFORE the launches so
+        # the clones come up into the empty right pane.  Honors
         # ``config.termux_dock_enabled`` (default True) and
-        # ``config.termux_dock_fraction`` (default 0.35).
+        # ``config.termux_dock_fraction`` (default 0.50 — user-requested
+        # "50% on the left" baseline; can be overridden via cfg).
         _termux_minimize_result: dict[str, Any] = {}
         try:
             _dock_enabled = bool(cfg.get("termux_dock_enabled", True))
             if _dock_enabled:
                 from . import termux_minimize as _tm  # noqa: PLC0415
-                from .window_layout import TERMUX_LOG_FRACTION as _DEFAULT_FRAC  # noqa: PLC0415
-                _frac = cfg.get("termux_dock_fraction", _DEFAULT_FRAC)
+                _frac = cfg.get("termux_dock_fraction", 0.50)
                 _res = _tm.minimize_termux_to_dock(fraction=float(_frac))
                 _termux_minimize_result = _res.as_dict()
                 _start_log.debug(
@@ -3313,6 +3355,16 @@ def cmd_start(args: argparse.Namespace) -> int:
             _clear_terminal()
         except Exception:  # noqa: BLE001
             pass
+        # Real-device evidence (probe ``p-47fa33562a``): on Termux, Python
+        # finalization after a supervisor stop sometimes segfaults inside
+        # libc cleanup (atexit handlers / threading shutdown / file-handle
+        # close on the curl subprocess pipes), printing ``Segmentation
+        # fault`` to the public terminal even though everything stopped
+        # cleanly.  Skip Python finalization by calling ``os._exit`` when
+        # running on Termux/Android — the supervisor has already flushed
+        # logs and persisted state.  Non-Termux contexts (CI, tests, dev
+        # box) keep the normal return path so unittest can introspect.
+        _termux_exit_clean()
         return 0
     except KeyboardInterrupt:
         # Pre-supervisor Ctrl+C: just exit quietly, no traceback.
@@ -3320,6 +3372,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             _clear_terminal()
         except Exception:  # noqa: BLE001
             pass
+        _termux_exit_clean()
         return 0
     except Exception as exc:  # noqa: BLE001 - command boundary.
         import logging as _logging
@@ -4218,8 +4271,12 @@ def main(argv: list[str] | None = None) -> int:
         return _handlers()[args.resolved_command](args)
     except KeyboardInterrupt:
         # Silent exit — return cleanly to shell, no public text.
+        # On Termux, also skip Python finalization (libc cleanup
+        # segfaults — probe ``p-47fa33562a``).
+        _termux_exit_clean()
         return 0
     except EOFError:
+        _termux_exit_clean()
         return 0
     except SystemExit as _exc:
         _code = _exc.code

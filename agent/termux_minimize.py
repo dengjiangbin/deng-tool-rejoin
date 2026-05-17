@@ -199,6 +199,12 @@ def _try_resize(task_id: int, rect: tuple[int, int, int, int],
     diagnostics.  When ``root_tool`` is None the cascade is restricted to
     unprivileged ``cmd``/``am`` invocations — most Android builds reject
     resize-task without root, so the result is usually a clean ``False``.
+
+    Real-device note (probe ``p-47fa33562a``): ``am stack resize`` returns
+    rc=0 on modern Android even when the command no-ops (it was deprecated
+    in favour of ``cmd activity`` on Android 12+).  We keep it in the
+    cascade as a "best effort", but rc=0 from this command MUST NOT be
+    treated as a real success — the caller verifies via dumpsys read-back.
     """
     l, t, r, b = rect
     attempts: list[str] = []
@@ -217,20 +223,26 @@ def _try_resize(task_id: int, rect: tuple[int, int, int, int],
         except Exception as exc:  # noqa: BLE001
             attempts.append(f"set-windowing-mode exc={exc}")
 
-    # Step 2 — resize cascade.
-    cmds: list[tuple[list[str], str]] = [
+    # Step 2 — resize cascade.  Labelled "trusted" commands have well-
+    # defined behaviour; "best_effort" includes deprecated APIs that lie
+    # about success and require explicit read-back verification.
+    cmds: list[tuple[list[str], str, bool]] = [
+        # (command, label, trusted)
         (["cmd", "activity", "resize-task", str(task_id),
-          str(l), str(t), str(r), str(b)],          "cmd resize-task"),
+          str(l), str(t), str(r), str(b)],          "cmd resize-task",          True),
         (["cmd", "activity", "resize-task", str(task_id),
-          str(l), str(t), str(r), str(b), "1"],     "cmd resize-task (mode=1)"),
+          str(l), str(t), str(r), str(b), "1"],     "cmd resize-task (mode=1)", True),
         (["am", "task", "resize", str(task_id),
-          str(l), str(t), str(r), str(b)],          "am task resize"),
-        (["am", "stack", "resize", str(task_id),
-          str(l), str(t), str(r), str(b)],          "am stack resize"),
+          str(l), str(t), str(r), str(b)],          "am task resize",           True),
         (["wm", "task", "resize", str(task_id),
-          str(l), str(t), str(r), str(b)],          "wm task resize"),
+          str(l), str(t), str(r), str(b)],          "wm task resize",           True),
+        # NOTE: am stack resize is deprecated on Android 12+; rc=0 does
+        # not mean the resize happened.  Kept last as best-effort.
+        (["am", "stack", "resize", str(task_id),
+          str(l), str(t), str(r), str(b)],          "am stack resize",          False),
     ]
-    for cmd_args, label in cmds:
+    best_effort_winner: tuple[str, list[str]] | None = None
+    for cmd_args, label, trusted in cmds:
         try:
             if root_tool:
                 res = android.run_root_command(
@@ -241,14 +253,24 @@ def _try_resize(task_id: int, rect: tuple[int, int, int, int],
         except Exception as exc:  # noqa: BLE001
             attempts.append(f"{label} exc={exc}")
             continue
-        # ``ok`` is rc==0 — many Android resize commands print to stderr
-        # even on success; check rc only.
         if res.ok:
-            attempts.append(f"{label} OK")
-            return True, label, attempts
+            if trusted:
+                attempts.append(f"{label} OK")
+                return True, label, attempts
+            # Best-effort command — record but don't claim victory yet.
+            attempts.append(f"{label} rc=0 (best-effort, needs read-back)")
+            if best_effort_winner is None:
+                best_effort_winner = (label, list(attempts))
+            continue
         attempts.append(
             f"{label} rc={res.returncode} err={(res.stderr or '')[:80]}"
         )
+    if best_effort_winner is not None:
+        # No trusted command succeeded.  Surface the best-effort outcome
+        # but signal "unverified" so the caller treats readback as the
+        # source of truth.
+        label, _ = best_effort_winner
+        return True, label + " [unverified]", attempts
     return False, "", attempts
 
 
@@ -344,17 +366,32 @@ def minimize_termux_to_dock(
         return result
     result.method = method
 
+    # Whether the command itself was "trusted" — i.e. a rc=0 from one of
+    # the modern cmd/wm/am-task commands.  Best-effort wins are flagged
+    # with "[unverified]" so we can require readback for them below.
+    method_is_trusted = "[unverified]" not in method
+
     if verify:
         # Tiny wait so dumpsys reflects the new bounds.
         time.sleep(0.3)
         actual = _read_back_termux_bounds()
         result.actual = actual
         if actual is None:
-            # Resize ran without error but readback failed — call it OK
-            # since the command succeeded; the dashboard will show the
-            # missing actual.
-            result.ok = True
-            result.reason = "resize ran; readback unavailable"
+            # Readback failed.  ONLY claim OK when the command was trusted
+            # (modern cmd/wm/am-task with rc=0).  Real-device evidence
+            # (probe ``p-47fa33562a``) showed ``am stack resize`` returning
+            # rc=0 without resizing anything, then the dashboard reported
+            # ``ok=True`` while Termux remained fullscreen — exactly what
+            # the user complained about.
+            if method_is_trusted:
+                result.ok = True
+                result.reason = "resize ran; readback unavailable"
+            else:
+                result.ok = False
+                result.reason = (
+                    "best-effort resize ran but readback unavailable — "
+                    "cannot confirm Termux was actually resized"
+                )
             return result
         # Treat ±64 px as a match (status bars / IMEs eat some pixels).
         wl, wt, wr, wb = result.desired
@@ -366,7 +403,9 @@ def minimize_termux_to_dock(
             result.reason = f"resize verified out-of-tolerance: actual={actual}"
         return result
 
-    result.ok = True
+    result.ok = method_is_trusted
+    if not result.ok:
+        result.reason = "best-effort resize without readback verification"
     return result
 
 
