@@ -15,6 +15,17 @@ Two install modes:
 
 from __future__ import annotations
 
+# NOTE: The installer scripts are POSIX-sh only.  No bash features.
+#
+# Termux's ``/data/data/com.termux/files/usr/bin/sh`` is **dash**.
+# When the user invokes ``curl ... | sh``, the shebang on line 1 is
+# ignored and dash executes the bytes — it would choke on
+# ``set -o pipefail``, ``[[ ... ]]``, ``shopt``, arrays, or
+# ``${VAR:0:N}`` substring expansion.  We previously tried a
+# "re-exec into bash" preamble, but ``exec bash "$0"`` failed on
+# Termux because ``$0`` was the dash *binary* itself (not a script
+# file).  The robust answer is to use POSIX-sh syntax throughout.
+
 _INSTALL_PART_BEFORE_HEREDOC = r"""
 command -v curl >/dev/null 2>&1 || { echo "Install curl first: pkg install -y curl" >&2; exit 1; }
 command -v tar >/dev/null 2>&1 || { echo "Install tar first: pkg install -y tar" >&2; exit 1; }
@@ -26,7 +37,7 @@ trap 'rm -f "$TMP"; rm -rf "$STAGE"' EXIT
 curl -fsSL "$LAUNCHER_URL" -o "$TMP" || { echo "Could not download launcher bundle." >&2; echo "URL: $LAUNCHER_URL" >&2; exit 1; }
 tar -xzf "$TMP" -C "$STAGE" || { echo "Could not extract launcher bundle archive." >&2; exit 1; }
 DEF_CK="$STAGE/agent/deferred_bundle_install.py"
-if [[ ! -f "$DEF_CK" ]]; then
+if [ ! -f "$DEF_CK" ]; then
   echo "Failed launcher self-check." >&2
   echo "agent/deferred_bundle_install.py missing from launcher tarball." >&2
   echo "APP_HOME=$APP_HOME" >&2
@@ -44,15 +55,19 @@ if ! grep -q "resolve_install_api" "$DEF_CK" 2>/dev/null; then
 fi
 mkdir -p "$APP_HOME/agent"
 rm -f "$APP_HOME/agent/deng_tool_rejoin.py" "$APP_HOME/agent/deferred_bundle_install.py" "$APP_HOME/agent/__init__.py"
-shopt -s nullglob
-_LAUNCHER_CP=( "$STAGE"/agent/*.py )
-if [[ ${#_LAUNCHER_CP[@]} -eq 0 ]]; then
+# POSIX-sh equivalent of bash's ``shopt -s nullglob`` + array copy:
+# iterate the glob, skip the literal-unmatched case explicitly.
+_COPIED=0
+for _f in "$STAGE"/agent/*.py; do
+  [ -e "$_f" ] || continue
+  cp -a "$_f" "$APP_HOME/agent/" || { echo "Failed to copy $_f into APP_HOME." >&2; exit 1; }
+  _COPIED=1
+done
+if [ "$_COPIED" -ne 1 ]; then
   echo "Failed launcher self-check: no agent/*.py in bundle." >&2
   echo "Launcher bundle URL: $LAUNCHER_URL" >&2
   exit 1
 fi
-cp -a "${_LAUNCHER_CP[@]}" "$APP_HOME/agent/" || { echo "Failed to copy launcher Python files into APP_HOME." >&2; exit 1; }
-shopt -u nullglob
 if ! grep -q "resolve_install_api" "$APP_HOME/agent/deferred_bundle_install.py" 2>/dev/null; then
   echo "Failed launcher self-check: installed deferred_bundle_install.py still missing resolve_install_api." >&2
   echo "APP_HOME=$APP_HOME" >&2
@@ -61,15 +76,15 @@ if ! grep -q "resolve_install_api" "$APP_HOME/agent/deferred_bundle_install.py" 
 fi
 echo "Launcher bundle verified."
 
-# Prefer $PREFIX/bin (Termux: on PATH). Always mkdir — do not rely on [[ -w ]]
+# Prefer $PREFIX/bin (Termux: on PATH). Always mkdir — do not rely on [ -w ]
 USING_HOME_BIN=0
 BIN=""
-if [[ -n "${PREFIX:-}" ]]; then
+if [ -n "${PREFIX:-}" ]; then
   if mkdir -p "${PREFIX}/bin" 2>/dev/null; then
     BIN="${PREFIX}/bin"
   fi
 fi
-if [[ -z "$BIN" ]]; then
+if [ -z "$BIN" ]; then
   BIN="$HOME/bin"
   mkdir -p "$BIN"
   export PATH="$HOME/bin:$PATH"
@@ -102,17 +117,17 @@ _fail_install() {
   exit 1
 }
 
-[[ -s "$BIN/deng-rejoin" ]] || _fail_install
-[[ -x "$BIN/deng-rejoin" ]] || _fail_install
-[[ -f "$APP_HOME/.install_api" ]] && [[ -s "$APP_HOME/.install_api" ]] || _fail_install
-[[ -f "$APP_HOME/agent/deng_tool_rejoin.py" ]] || _fail_install
-[[ -f "$APP_HOME/agent/deferred_bundle_install.py" ]] || _fail_install
+[ -s "$BIN/deng-rejoin" ] || _fail_install
+[ -x "$BIN/deng-rejoin" ] || _fail_install
+{ [ -f "$APP_HOME/.install_api" ] && [ -s "$APP_HOME/.install_api" ]; } || _fail_install
+[ -f "$APP_HOME/agent/deng_tool_rejoin.py" ] || _fail_install
+[ -f "$APP_HOME/agent/deferred_bundle_install.py" ] || _fail_install
 
 DR_RESOLVED=""
 if command -v deng-rejoin >/dev/null 2>&1; then
   DR_RESOLVED="$(command -v deng-rejoin)"
 fi
-if [[ -z "$DR_RESOLVED" ]]; then
+if [ -z "$DR_RESOLVED" ]; then
   echo "command -v deng-rejoin did not resolve after install." >&2
   _fail_install
 fi
@@ -126,7 +141,7 @@ set +e
 _PY_ERR="$(PYTHONPATH="$APP_HOME" DENG_REJOIN_HOME="$APP_HOME" python3 -c "from agent.deferred_bundle_install import resolve_install_api" 2>&1)"
 _PY_RC=$?
 set -e
-if [[ "$_PY_RC" -ne 0 ]]; then
+if [ "$_PY_RC" -ne 0 ]; then
   echo "Failed launcher self-check." >&2
   echo "agent/deferred_bundle_install.py is missing resolve_install_api or import failed." >&2
   echo "The launcher bundle may be stale or corrupted." >&2
@@ -143,11 +158,11 @@ API_R="$(
   PYTHONPATH="$APP_HOME" DENG_REJOIN_HOME="$APP_HOME" \
   python3 -c 'import os; os.environ.pop("DENG_REJOIN_INSTALL_API", None); from agent.deferred_bundle_install import resolve_install_api; print(resolve_install_api())'
 )" || API_R=""
-if [[ -z "$API_R" ]]; then
+if [ -z "$API_R" ]; then
   echo "Failed: could not resolve install API (resolve_install_api)." >&2
   _fail_install
 fi
-if [[ "$API_R" != "$DENG_REJOIN_INSTALL_API" ]]; then
+if [ "$API_R" != "$DENG_REJOIN_INSTALL_API" ]; then
   echo "Install API URL mismatch after resolve." >&2
   echo "Expected: $DENG_REJOIN_INSTALL_API" >&2
   echo "Got: $API_R" >&2
@@ -157,7 +172,7 @@ fi
 echo "Wrapper path: $BIN/deng-rejoin"
 echo "command -v deng-rejoin -> $DR_RESOLVED"
 echo "resolve_install_api (env unset) -> $API_R"
-if [[ "$USING_HOME_BIN" -eq 1 ]]; then
+if [ "$USING_HOME_BIN" -eq 1 ]; then
   echo 'Note: If deng-rejoin is not found in this shell, run once:'
   echo '  export PATH="$HOME/bin:$PATH"'
   echo '  hash -r'
@@ -229,21 +244,23 @@ def render_public_bootstrap(
         tail = tail.replace(_old, _new, 1)
 
     return (
-        "#!/usr/bin/env bash\n"
-        + _BASH_REEXEC_PREAMBLE
-        + "set -euo pipefail\n"
+        "#!/usr/bin/env sh\n"
+        # POSIX-sh only.  No bash features anywhere — Termux's /usr/bin/sh
+        # is dash, and the shebang on line 1 is ignored when invoked as
+        # ``curl ... | sh``.  See module docstring.
+        "set -eu\n"
         + f'echo "{safe_title}"\n'
         + f"{banner_part}"
-        + 'if [[ -n "${PREFIX:-}" ]] && [[ "${PREFIX}" == *termux* ]]; then\n'
-        '  echo "Detected: Termux"\n'
-        "fi\n"
+        + 'case "${PREFIX:-}" in\n'
+        '  *termux*) echo "Detected: Termux" ;;\n'
+        "esac\n"
         f'export DENG_REJOIN_INSTALL_API="{base}"\n'
         f"{sess_export}\n"
         'APP_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"\n'
         'mkdir -p "$APP_HOME"\n'
         f'printf \'%s\\n\' "{safe_req}" > "$APP_HOME/.install_requested"\n'
         'printf \'%s\\n\' "$DENG_REJOIN_INSTALL_API" > "$APP_HOME/.install_api"\n'
-        "if [[ -n \"${BOOTSTRAP_SESSION:-}\" ]]; then\n"
+        'if [ -n "${BOOTSTRAP_SESSION:-}" ]; then\n'
         '  printf \'%s\\n\' "$BOOTSTRAP_SESSION" > "$APP_HOME/.bootstrap_session"\n'
         "else\n"
         '  rm -f "$APP_HOME/.bootstrap_session"\n'
@@ -298,9 +315,9 @@ def render_direct_install_bootstrap(
         + "command -v curl >/dev/null 2>&1 || { echo \"Install curl first: pkg install -y curl\" >&2; exit 1; }\n"
         "command -v tar >/dev/null 2>&1 || { echo \"Install tar first: pkg install -y tar\" >&2; exit 1; }\n"
         "command -v python3 >/dev/null 2>&1 || { echo \"Install python first: pkg install -y python\" >&2; exit 1; }\n"
-        "if [[ -n \"${PREFIX:-}\" ]] && [[ \"${PREFIX}\" == *termux* ]]; then\n"
-        "  echo \"Detected: Termux\"\n"
-        "fi\n"
+        'case "${PREFIX:-}" in\n'
+        '  *termux*) echo "Detected: Termux" ;;\n'
+        "esac\n"
         f'export DENG_REJOIN_INSTALL_API="{base}"\n'
         'APP_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"\n'
         'mkdir -p "$APP_HOME"\n'
@@ -322,7 +339,7 @@ def render_direct_install_bootstrap(
         "  exit 1\n"
         "}\n"
         "ACTUAL_SHA=\"$(python3 -c 'import hashlib,sys;d=open(sys.argv[1],\"rb\").read();print(hashlib.sha256(d).hexdigest())' \"$TMP\" 2>/dev/null)\" || ACTUAL_SHA=\"\"\n"
-        'if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA256" ]]; then\n'
+        'if [ "$ACTUAL_SHA" != "$EXPECTED_SHA256" ]; then\n'
         '  echo "Package checksum mismatch. The download may be corrupted or stale." >&2\n'
         '  echo "Expected: $EXPECTED_SHA256" >&2\n'
         '  echo "Got:      $ACTUAL_SHA" >&2\n'
@@ -334,9 +351,9 @@ def render_direct_install_bootstrap(
         '  if command -v pkill >/dev/null 2>&1; then\n'
         "    pkill -f 'agent/deng_tool_rejoin.py' 2>/dev/null || true\n"
         '  fi\n'
-        '  if [[ -f "$APP_HOME/data/rejoin.pid" ]]; then\n'
+        '  if [ -f "$APP_HOME/data/rejoin.pid" ]; then\n'
         '    _pid="$(cat "$APP_HOME/data/rejoin.pid" 2>/dev/null || true)"\n'
-        '    if [[ -n "$_pid" ]]; then\n'
+        '    if [ -n "$_pid" ]; then\n'
         '      kill "$_pid" 2>/dev/null || true\n'
         '    fi\n'
         '  fi\n'
@@ -355,7 +372,7 @@ def render_direct_install_bootstrap(
         'find "$APP_HOME" -type f -name "*.pyc" -delete 2>/dev/null || true\n'
         # Extract fresh artifact.
         'tar -xzf "$TMP" -C "$APP_HOME" || { echo "Could not extract package." >&2; exit 1; }\n'
-        'if [[ ! -f "$APP_HOME/agent/deng_tool_rejoin.py" ]]; then\n'
+        'if [ ! -f "$APP_HOME/agent/deng_tool_rejoin.py" ]; then\n'
         '  echo "Install error: agent/deng_tool_rejoin.py missing from package." >&2\n'
         "  exit 1\n"
         "fi\n"
@@ -389,12 +406,12 @@ def render_direct_install_bootstrap(
         # Wrapper install (unchanged choice of $PREFIX/bin vs $HOME/bin).
         "USING_HOME_BIN=0\n"
         'BIN=""\n'
-        'if [[ -n "${PREFIX:-}" ]]; then\n'
+        'if [ -n "${PREFIX:-}" ]; then\n'
         '  if mkdir -p "${PREFIX}/bin" 2>/dev/null; then\n'
         '    BIN="${PREFIX}/bin"\n'
         "  fi\n"
         "fi\n"
-        'if [[ -z "$BIN" ]]; then\n'
+        'if [ -z "$BIN" ]; then\n'
         '  BIN="$HOME/bin"\n'
         '  mkdir -p "$BIN"\n'
         '  export PATH="$HOME/bin:$PATH"\n'
@@ -418,18 +435,18 @@ def render_direct_install_bootstrap(
         "DENG_REJOIN_WRAPPER\n"
         "chmod +x \"$BIN/deng-rejoin\" || { echo \"chmod failed: $BIN/deng-rejoin\" >&2; exit 1; }\n"
         "hash -r 2>/dev/null || true\n"
-        '[[ -s "$BIN/deng-rejoin" ]] || { echo "Failed to create deng-rejoin wrapper." >&2; exit 1; }\n'
-        '[[ -x "$BIN/deng-rejoin" ]] || { echo "Failed: wrapper not executable." >&2; exit 1; }\n'
-        '[[ -f "$APP_HOME/agent/deng_tool_rejoin.py" ]] || { echo "Failed: deng_tool_rejoin.py missing." >&2; exit 1; }\n'
-        '[[ -f "$APP_HOME/BUILD-INFO.json" ]] || { echo "Failed: BUILD-INFO.json missing in package." >&2; exit 1; }\n'
-        '[[ -f "$APP_HOME/.installed-build.json" ]] || { echo "Failed: .installed-build.json was not written." >&2; exit 1; }\n'
+        '[ -s "$BIN/deng-rejoin" ] || { echo "Failed to create deng-rejoin wrapper." >&2; exit 1; }\n'
+        '[ -x "$BIN/deng-rejoin" ] || { echo "Failed: wrapper not executable." >&2; exit 1; }\n'
+        '[ -f "$APP_HOME/agent/deng_tool_rejoin.py" ] || { echo "Failed: deng_tool_rejoin.py missing." >&2; exit 1; }\n'
+        '[ -f "$APP_HOME/BUILD-INFO.json" ] || { echo "Failed: BUILD-INFO.json missing in package." >&2; exit 1; }\n'
+        '[ -f "$APP_HOME/.installed-build.json" ] || { echo "Failed: .installed-build.json was not written." >&2; exit 1; }\n'
         'DR_RESOLVED=""\n'
         'if command -v deng-rejoin >/dev/null 2>&1; then\n'
         '  DR_RESOLVED="$(command -v deng-rejoin)"\n'
         "fi\n"
-        'if [[ -z "$DR_RESOLVED" ]]; then\n'
+        'if [ -z "$DR_RESOLVED" ]; then\n'
         '  echo "command -v deng-rejoin did not resolve after install." >&2\n'
-        '  if [[ "$USING_HOME_BIN" -eq 1 ]]; then\n'
+        '  if [ "$USING_HOME_BIN" -eq 1 ]; then\n'
         "    echo 'Run: export PATH=\"$HOME/bin:$PATH\" && hash -r && deng-rejoin' >&2\n"
         "  fi\n"
         "  exit 1\n"
@@ -450,8 +467,10 @@ def render_direct_install_bootstrap(
         "  exit 1\n"
         "fi\n"
         '_INSTALLED_SHORT_SHA="$(echo "$_VERSION_OUT" | grep "^artifact_sha256: " | head -n1 | awk \'{print $2}\')"\n'
-        '_EXPECTED_SHORT_SHA="${EXPECTED_SHA256:0:12}"\n'
-        'if [[ "$_INSTALLED_SHORT_SHA" != "$_EXPECTED_SHORT_SHA" ]]; then\n'
+        # POSIX-sh substring: bash's ``${VAR:0:12}`` is unsupported by dash.
+        # ``printf '%.12s'`` works in every POSIX printf.
+        "_EXPECTED_SHORT_SHA=\"$(printf '%.12s' \"$EXPECTED_SHA256\")\"\n"
+        'if [ "$_INSTALLED_SHORT_SHA" != "$_EXPECTED_SHORT_SHA" ]; then\n'
         '  echo "Install verification failed: installed SHA mismatch." >&2\n'
         '  echo "Expected (short): $_EXPECTED_SHORT_SHA" >&2\n'
         '  echo "Got (short):      $_INSTALLED_SHORT_SHA" >&2\n'
@@ -459,7 +478,7 @@ def render_direct_install_bootstrap(
         "fi\n"
         'echo "Installed build: ${_GIT_COMMIT:-unknown} ${_EXPECTED_SHORT_SHA}"\n'
         'echo "Wrapper: $DR_RESOLVED"\n'
-        'if [[ "$USING_HOME_BIN" -eq 1 ]]; then\n'
+        'if [ "$USING_HOME_BIN" -eq 1 ]; then\n'
         "  echo 'Note: If deng-rejoin is not found in this shell, run once:'\n"
         "  echo '  export PATH=\"$HOME/bin:$PATH\"'\n"
         "  echo '  hash -r'\n"
@@ -470,9 +489,12 @@ def render_direct_install_bootstrap(
     )
 
     return (
-        "#!/usr/bin/env bash\n"
-        + _BASH_REEXEC_PREAMBLE
-        + "set -euo pipefail\n"
+        "#!/usr/bin/env sh\n"
+        # POSIX-sh only.  See module docstring: Termux's /usr/bin/sh is
+        # dash, the shebang is ignored when invoked via ``curl ... | sh``,
+        # and any bash feature would abort with "Illegal option" or
+        # "binary file" errors before this script gets to do anything useful.
+        + "set -eu\n"
         + pre_heredoc
         + wrapper_body_sh(base)
         + post_heredoc
@@ -483,55 +505,22 @@ def _escape_double(s: str) -> str:
     return (s or "").replace("\\", "\\\\").replace('"', '\\"')
 
 
-# ── POSIX-sh preamble that re-execs into bash ─────────────────────────────────
+# ── POSIX-sh discipline ─────────────────────────────────────────────────────
 #
-# The installers below are written for **bash** (``set -o pipefail``,
-# ``[[ ... ]]``, parameter-default substitution in subshells, etc.).  But the
-# user invocation is ``curl -fsSL https://.../install/... | sh`` and on
-# Termux ``/data/data/com.termux/files/usr/bin/sh`` is **dash**, which doesn't
-# understand any of those features.  When ``curl ... | sh`` runs, the
-# shebang on line 1 is ignored — dash is already executing the bytes.
-#
-# Real-device evidence (user terminal, 2026-05-18):
+# We previously attempted a "re-exec into bash" preamble.  It failed on the
+# real device:
 #
 #     $ curl -fsSL https://rejoin.deng.my.id/install/latest | sh
-#     /data/data/com.termux/files/usr/bin/sh: 2: set: Illegal option -o pipefail
+#     /data/data/com.termux/files/usr/bin/sh: /data/data/com.termux/files/usr/bin/sh: cannot execute binary file
 #
-# This preamble is **POSIX-sh-only** (no bash-only constructs!) and runs
-# BEFORE any bash feature is used.  Behavior:
+# Root cause: when ``curl ... | sh`` runs on Termux, dash's ``$0`` is the
+# **dash binary itself** (``/data/data/com.termux/files/usr/bin/sh``), not
+# the name of a script file.  Our preamble did ``exec bash "$0"``, which
+# made bash try to execute the dash ELF binary as a shell script.
 #
-#  * If ``$BASH_VERSION`` is already set, we're under bash — fall through.
-#  * Else, look for ``bash`` on PATH.  If we have it:
-#      - If ``$0`` looks like a readable script file, ``exec bash "$0" "$@"``.
-#      - Else (piped via ``... | sh``), read the rest of stdin into a temp
-#        file and ``exec bash`` on that file.  This works because dash
-#        reads its script from stdin line by line, so anything we
-#        haven't consumed yet is still in the pipe buffer waiting for
-#        ``cat``.
-#  * Else, print a clear "install bash" error and exit non-zero.
-#
-# After the preamble runs, every subsequent line is guaranteed to be
-# executed by bash regardless of how the user invoked us.
-_BASH_REEXEC_PREAMBLE: str = (
-    "# POSIX preamble: re-exec into bash when invoked via dash/sh.\n"
-    "# Termux's /usr/bin/sh is dash and chokes on `set -o pipefail`,\n"
-    "# `[[ ]]`, etc. that this installer uses.  See bootstrap_installer.py.\n"
-    'if [ -z "${BASH_VERSION-}" ]; then\n'
-    '    if command -v bash >/dev/null 2>&1; then\n'
-    '        if [ -r "$0" ] && [ "$0" != "sh" ] && [ "$0" != "/bin/sh" ] \\\n'
-    '             && [ "$0" != "dash" ] && [ "$0" != "/system/bin/sh" ]; then\n'
-    '            exec bash "$0" "$@"\n'
-    "        fi\n"
-    "        # Piped invocation (curl ... | sh).  Save the rest of stdin\n"
-    "        # (the bash body of THIS installer) and exec bash on it.\n"
-    '        _DENG_BOOT_TMP="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/deng-rejoin-bootstrap.$$")"\n'
-    "        cat > \"$_DENG_BOOT_TMP\"\n"
-    "        # Best-effort cleanup so /tmp doesn't fill up over time.\n"
-    '        trap \'rm -f "$_DENG_BOOT_TMP"\' EXIT INT TERM HUP 2>/dev/null || true\n'
-    '        exec bash "$_DENG_BOOT_TMP" "$@"\n'
-    "    fi\n"
-    '    printf "%s\\n" "ERROR: bash is required to run this installer." >&2\n'
-    '    printf "%s\\n" "On Termux:  pkg install bash" >&2\n'
-    "    exit 1\n"
-    "fi\n"
-)
+# Lesson learned: do not try to be clever.  Both bootstrap renderers above
+# emit **strictly POSIX-sh** scripts: ``set -eu`` only, ``[ ... ]`` only,
+# ``case`` instead of ``[[ == *pattern* ]]``, ``printf '%.Ns'`` instead of
+# ``${VAR:0:N}``, explicit glob loops instead of arrays + ``shopt nullglob``.
+# These run cleanly under dash, busybox sh, ash, bash, and any other POSIX
+# shell.  No re-exec, no temp files, no PATH lookups.

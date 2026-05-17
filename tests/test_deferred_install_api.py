@@ -286,7 +286,11 @@ class DirectInstallBootstrapTests(unittest.TestCase):
 
     def test_script_has_shebang(self) -> None:
         script = self._get_script()
-        self.assertTrue(script.startswith("#!/usr/bin/env bash"))
+        # Must be POSIX sh (not bash): Termux's /usr/bin/sh is dash, and
+        # ``curl ... | sh`` ignores the shebang anyway.  The installer
+        # body itself must be POSIX-sh-compatible.  See
+        # tests/test_bootstrap_dash_reexec.py for the live-shell guard.
+        self.assertTrue(script.startswith("#!/usr/bin/env sh"))
 
     def test_script_downloads_full_package(self) -> None:
         script = self._get_script()
