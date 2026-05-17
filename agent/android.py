@@ -69,9 +69,56 @@ def _stringify_args(args: Iterable[str]) -> list[str]:
     return [str(arg) for arg in args]
 
 
+# Android system binaries that live in /system/bin (or /system/xbin) but
+# are NOT in Termux's default PATH.  Without this resolution every call to
+# dumpsys/wm/cmd/settings/etc. fails with ENOENT in Termux, silently
+# breaking state detection, window readback, and layout discovery.
+# Confirmed from real cloud-phone probe (Samsung SM-N9810 fingerprint
+# c1q:13/TP1A.220624.014, probe id p-368a65d699).
+_ANDROID_SYSTEM_BINARIES: frozenset[str] = frozenset({
+    "am", "cmd", "dumpsys", "getprop", "input", "logcat", "monkey", "pm",
+    "pgrep", "pidof", "ps", "service", "settings", "setprop", "wm",
+})
+_ANDROID_BIN_DIRS: tuple[str, ...] = ("/system/bin", "/system/xbin", "/vendor/bin")
+
+
+def _resolve_android_binary(name: str) -> str:
+    """Return absolute path for a known Android binary, or *name* unchanged.
+
+    Skips resolution if *name* is already an absolute or relative path, or
+    if it isn't on our short list of expected Android binaries.  This is
+    deliberately conservative so we never accidentally shadow a Termux
+    binary of the same name.
+    """
+    if not name or "/" in name:
+        return name
+    if name not in _ANDROID_SYSTEM_BINARIES:
+        return name
+    for bin_dir in _ANDROID_BIN_DIRS:
+        candidate = f"{bin_dir}/{name}"
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return name
+
+
+def _maybe_resolve_first_arg(cmd: list[str]) -> list[str]:
+    if not cmd:
+        return cmd
+    resolved = _resolve_android_binary(cmd[0])
+    if resolved == cmd[0]:
+        return cmd
+    return [resolved] + list(cmd[1:])
+
+
 def run_command(args: Iterable[str], *, timeout: int = PROCESS_TIMEOUT_SECONDS) -> CommandResult:
-    """Run a local command with timeout and captured output."""
-    cmd = _stringify_args(args)
+    """Run a local command with timeout and captured output.
+
+    For known Android system binaries (dumpsys/wm/cmd/settings/...), the
+    first argument is auto-resolved to its ``/system/bin/`` absolute path
+    when present.  This is essential on Termux where the default ``$PATH``
+    does NOT include ``/system/bin``.
+    """
+    cmd = _maybe_resolve_first_arg(_stringify_args(args))
     try:
         completed = subprocess.run(
             cmd,
@@ -85,6 +132,8 @@ def run_command(args: Iterable[str], *, timeout: int = PROCESS_TIMEOUT_SECONDS) 
         )
         return CommandResult(tuple(cmd), completed.returncode, completed.stdout.strip(), completed.stderr.strip())
     except FileNotFoundError as exc:
+        # If the bare name was on our list we already tried /system/bin
+        # above; nothing more to do.  Otherwise still report 127 cleanly.
         return CommandResult(tuple(cmd), 127, "", str(exc))
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
@@ -319,13 +368,60 @@ def run_root_command(args: Iterable[str], *, root_tool: str | None = None, timeo
     """Run an explicit root command through su/tsu.
 
     Root shell entry is centralized here so root usage stays auditable.
+
+    For known Android system binaries the first argument is auto-resolved
+    to its absolute ``/system/bin/`` path so the ``su`` subshell — which
+    typically does NOT include Termux's PATH — can still find them.
     """
     tool = root_tool or detect_root().tool
     if not tool:
         return CommandResult(tuple(_stringify_args(args)), 127, "", "root tool unavailable")
-    tokens = _stringify_args(args)
+    tokens = _maybe_resolve_first_arg(_stringify_args(args))
     command = shlex.join(tokens)
     return run_command([tool, "-c", command], timeout=timeout)
+
+
+def run_android_command(
+    args: Iterable[str],
+    *,
+    timeout: int = PROCESS_TIMEOUT_SECONDS,
+    prefer_root: bool = False,
+    root_fallback_markers: tuple[str, ...] = (
+        "Permission Denial",
+        "INTERACT_ACROSS_USERS",
+        "Operation not permitted",
+        "permission denied",
+    ),
+) -> CommandResult:
+    """Run an Android system command, optionally retrying through ``su``.
+
+    If ``prefer_root`` is true and a root tool is available, the command is
+    routed through ``su`` straight away.  Otherwise we run unprivileged
+    first and only fall back to root if stderr contains one of the
+    permission-related markers (real cloud-phone behaviour: ``settings
+    list global`` returns ``Permission Denial ... INTERACT_ACROSS_USERS``
+    unless run as root).
+
+    This wrapper exists because many Android commands (``settings``,
+    ``dumpsys SurfaceFlinger`` on some Samsung builds, ``cmd activity
+    resize-task``) succeed only via root on a given device, but root
+    isn't always available, and we don't want to pay the ``su`` cost
+    every time.
+    """
+    if prefer_root:
+        root = detect_root()
+        if root.available:
+            return run_root_command(args, root_tool=root.tool, timeout=timeout)
+        # Fall through to plain run when root unavailable.
+    res = run_command(args, timeout=timeout)
+    if res.ok or res.timed_out:
+        return res
+    err = res.stderr or ""
+    if any(marker in err for marker in root_fallback_markers):
+        root = detect_root()
+        if root.available:
+            return run_root_command(args, root_tool=root.tool, timeout=timeout)
+    return res
 
 
 def force_stop_package(package: str, root_info: RootInfo | None = None) -> CommandResult:

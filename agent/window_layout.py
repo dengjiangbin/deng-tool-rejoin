@@ -574,10 +574,46 @@ def calculate_split_layout(
     )
 
 
-# ── App Cloner XML writers ────────────────────────────────────────────────────
+# ── App Cloner / generic clone XML writers ───────────────────────────────────
+#
+# Different clone wrappers store their per-package preferences in different
+# files.  App Cloner uses ``pkg_preferences.xml``; Moons multi-clone (real
+# probe id p-368a65d699, packages ``com.moons.litesc/d/e``) uses
+# ``<package>_preferences.xml`` plus a global ``prefs.xml``; some OEM clone
+# managers use ``settings.xml`` or ``cloner_settings.xml``.  We try each
+# candidate in turn so a single tool works across all of them.
+
 
 def app_cloner_prefs_path(package: str) -> Path:
+    """Return the canonical App Cloner prefs path for ``package`` (legacy API).
+
+    Kept for backwards-compatibility with callers/tests that still ask for a
+    single Path.  New code should use :func:`clone_prefs_candidates`.
+    """
     return Path("/data/data") / package / "shared_prefs" / "pkg_preferences.xml"
+
+
+def clone_prefs_candidates(package: str) -> list[Path]:
+    """Return every clone-wrapper prefs file we know how to write.
+
+    Order matters: more-specific names first so we touch the file that's
+    most likely to actually steer the clone's window manager.
+
+    Discovered empirically from real device probes:
+
+    * App Cloner            → ``pkg_preferences.xml``
+    * Moons multi-clone     → ``<package>_preferences.xml`` (e.g.
+      ``com.moons.litesc_preferences.xml``) and ``prefs.xml``
+    * Generic OEM wrappers  → ``settings.xml`` / ``cloner_settings.xml``
+    """
+    base = Path("/data/data") / package / "shared_prefs"
+    return [
+        base / "pkg_preferences.xml",
+        base / f"{package}_preferences.xml",
+        base / "prefs.xml",
+        base / "cloner_settings.xml",
+        base / "settings.xml",
+    ]
 
 
 # ── Multi-alias XML mutators (shared by direct and root writers) ──────────────
@@ -761,32 +797,43 @@ def update_app_cloner_xml(
 ) -> tuple[bool, str]:
     """Write window position+size+enable flags via direct file access.
 
-    Returns (ok, message). Never raises.
+    Walks every candidate in :func:`clone_prefs_candidates`; the first one
+    that exists and is writable wins.  Returns (ok, message); never raises.
     """
-    try:
-        path = app_cloner_prefs_path(package)
+    attempted: list[str] = []
+    last_error = ""
+    for path in clone_prefs_candidates(package):
         if not path.exists():
-            return False, "pkg_preferences.xml not found (no App Cloner clone?)"
-        backup = path.with_suffix(f".xml.bak-{int(time.time())}")
+            attempted.append(f"{path.name}: missing")
+            continue
         try:
-            shutil.copy2(path, backup)
-        except OSError:
-            pass
-        tree    = ET.parse(path)
-        root_el = tree.getroot()
-        changed = _apply_layout_keys_to_root(root_el, rect, known_keys=known_keys)
-        if changed == 0:
-            return False, "no layout keys changed (XML already at desired bounds)"
-        serialized = _serialize_xml(root_el)
-        if not _validate_xml(serialized):
-            return False, "internal: XML invalid after mutation"
-        path.write_text(serialized, encoding="utf-8")
-        _log.debug("Direct XML write OK: %s (%d keys)", package, changed)
-        return True, f"Updated App Cloner window preferences ({changed} keys)"
-    except PermissionError:
-        return False, "Permission denied (try with root)"
-    except (OSError, ET.ParseError) as exc:
-        return False, f"Direct XML write failed: {exc}"
+            backup = path.with_suffix(f".xml.bak-{int(time.time())}")
+            try:
+                shutil.copy2(path, backup)
+            except OSError:
+                pass
+            tree    = ET.parse(path)
+            root_el = tree.getroot()
+            changed = _apply_layout_keys_to_root(root_el, rect, known_keys=known_keys)
+            if changed == 0:
+                attempted.append(f"{path.name}: no keys changed (already desired)")
+                continue
+            serialized = _serialize_xml(root_el)
+            if not _validate_xml(serialized):
+                attempted.append(f"{path.name}: XML invalid after mutation")
+                continue
+            path.write_text(serialized, encoding="utf-8")
+            _log.debug("Direct XML write OK: %s → %s (%d keys)", package, path.name, changed)
+            return True, f"Updated {path.name} ({changed} keys)"
+        except PermissionError:
+            last_error = "Permission denied"
+            attempted.append(f"{path.name}: permission denied (try root)")
+        except (OSError, ET.ParseError) as exc:
+            last_error = str(exc)
+            attempted.append(f"{path.name}: {exc}")
+    if not attempted:
+        return False, "no clone prefs candidates checked"
+    return False, "no writable clone prefs file: " + "; ".join(attempted[:5])
 
 
 def update_app_cloner_xml_root(
@@ -797,55 +844,75 @@ def update_app_cloner_xml_root(
     *,
     known_keys: Iterable[str] | None = None,
 ) -> tuple[bool, str]:
-    """Write App Cloner window position via root.
+    """Write clone-wrapper window prefs via root.
 
-    Reads the existing XML via ``cat``, applies the same multi-alias mutation
-    used by the direct writer, re-writes via base64 decode (so quoting is safe).
-    Returns (ok, message). Never raises.
+    Iterates every candidate in :func:`clone_prefs_candidates`; for each one,
+    reads via ``cat`` (creates empty ``<map>`` if missing), applies the
+    multi-alias mutation, and writes via base64-decode to a tmp file then
+    atomic ``mv``.  Stops at the first candidate that succeeds.
+
+    Returns (ok, message); never raises.
     """
-    try:
-        path_str = f"/data/data/{package}/shared_prefs/pkg_preferences.xml"
-        read_res = android.run_root_command(
-            ["sh", "-c", f"test -f '{path_str}' && cat '{path_str}' 2>/dev/null"],
-            root_tool=root_tool, timeout=timeout,
-        )
-        if not read_res.ok or not (read_res.stdout or "").strip():
-            # File doesn't exist — create a minimal one with all aliases.
-            root_el = ET.Element("map")
-        else:
-            try:
-                root_el = ET.fromstring(read_res.stdout)
-            except ET.ParseError as exc:
-                return False, f"App Cloner XML parse failed: {exc}"
-
-        changed = _apply_layout_keys_to_root(root_el, rect, known_keys=known_keys)
-
-        if changed == 0:
-            return False, "no layout keys changed via root (XML already at desired bounds)"
-
-        new_xml  = _serialize_xml(root_el)
-        if not _validate_xml(new_xml):
-            return False, "internal: XML invalid after root mutation"
-        b64_data = base64.b64encode(new_xml.encode("utf-8")).decode("ascii")
-        # Atomic write via tmp then move (avoid half-written XML on interrupt).
-        tmp_path = f"{path_str}.deng-tmp"
-        write_cmd = (
-            f"mkdir -p '/data/data/{package}/shared_prefs' && "
-            f"echo '{b64_data}' | base64 -d > '{tmp_path}' && "
-            f"chmod 660 '{tmp_path}' 2>/dev/null; "
-            f"mv -f '{tmp_path}' '{path_str}'"
-        )
-        write_res = android.run_root_command(
-            ["sh", "-c", write_cmd], root_tool=root_tool, timeout=timeout,
-        )
-        if write_res.ok:
-            _log.debug("Root XML write OK: %s (%d keys)", package, changed)
-            return True, f"Window position set via root ({changed} keys)"
-        err = (write_res.stderr or "")[:80]
-        return False, f"Root write failed: {err}"
-    except Exception as exc:  # noqa: BLE001
-        _log.debug("update_app_cloner_xml_root error for %s: %s", package, exc)
-        return False, f"Root XML writer error: {exc}"
+    attempted: list[str] = []
+    for path in clone_prefs_candidates(package):
+        path_str = str(path)
+        try:
+            # Read existing or treat as empty map if missing.  We attempt EVERY
+            # candidate even when missing, because creating ``pkg_preferences.xml``
+            # is the App-Cloner path; for Moons/OEM we only want to touch files
+            # that already exist.  Skip nonexistent unless this is the very last
+            # candidate AND nothing else worked yet (then we try the canonical
+            # ``pkg_preferences.xml`` as last-ditch).
+            exists_res = android.run_root_command(
+                ["sh", "-c", f"test -f '{path_str}' && echo Y || echo N"],
+                root_tool=root_tool, timeout=timeout,
+            )
+            exists = (exists_res.stdout or "").strip().startswith("Y")
+            if not exists and path.name != "pkg_preferences.xml":
+                attempted.append(f"{path.name}: missing")
+                continue
+            read_res = android.run_root_command(
+                ["sh", "-c", f"test -f '{path_str}' && cat '{path_str}' 2>/dev/null"],
+                root_tool=root_tool, timeout=timeout,
+            )
+            if not read_res.ok or not (read_res.stdout or "").strip():
+                root_el = ET.Element("map")
+            else:
+                try:
+                    root_el = ET.fromstring(read_res.stdout)
+                except ET.ParseError as exc:
+                    attempted.append(f"{path.name}: parse error: {exc}")
+                    continue
+            changed = _apply_layout_keys_to_root(root_el, rect, known_keys=known_keys)
+            if changed == 0:
+                attempted.append(f"{path.name}: no keys changed (already desired)")
+                continue
+            new_xml = _serialize_xml(root_el)
+            if not _validate_xml(new_xml):
+                attempted.append(f"{path.name}: XML invalid after mutation")
+                continue
+            b64_data = base64.b64encode(new_xml.encode("utf-8")).decode("ascii")
+            tmp_path = f"{path_str}.deng-tmp"
+            write_cmd = (
+                f"mkdir -p '/data/data/{package}/shared_prefs' && "
+                f"echo '{b64_data}' | base64 -d > '{tmp_path}' && "
+                f"chmod 660 '{tmp_path}' 2>/dev/null; "
+                f"mv -f '{tmp_path}' '{path_str}'"
+            )
+            write_res = android.run_root_command(
+                ["sh", "-c", write_cmd], root_tool=root_tool, timeout=timeout,
+            )
+            if write_res.ok:
+                _log.debug("Root XML write OK: %s → %s (%d keys)", package, path.name, changed)
+                return True, f"Wrote {path.name} via root ({changed} keys)"
+            err = (write_res.stderr or "")[:80]
+            attempted.append(f"{path.name}: write failed: {err}")
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("update_app_cloner_xml_root error for %s @ %s: %s", package, path.name, exc)
+            attempted.append(f"{path.name}: writer error: {exc}")
+    if not attempted:
+        return False, "no clone prefs candidates"
+    return False, "Root write failed: " + "; ".join(attempted[:5])
 
 
 # ── Apply layout (high-level) ─────────────────────────────────────────────────

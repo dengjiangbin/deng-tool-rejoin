@@ -158,15 +158,26 @@ def _capture_device(errors: list[dict[str, str]]) -> dict[str, Any]:
 
 
 def _capture_screen(errors: list[dict[str, str]]) -> dict[str, Any]:
+    """Capture screen size / density / display dump.
+
+    Some Samsung builds reject ``dumpsys display`` from unprivileged
+    callers; we route through :func:`android.run_android_command` so the
+    helper transparently retries via ``su`` on permission denial.
+    """
+    def _grab(args: list[str], cap: int = 4000) -> str:
+        try:
+            res = android.run_android_command(args, timeout=8)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"step": " ".join(args), "error": str(exc)[:200]})
+            return ""
+        if not res.ok and not res.stdout:
+            errors.append({"step": " ".join(args) + f": rc={res.returncode}", "error": res.stderr[:200]})
+        return (res.stdout or "")[:cap]
+
     return {
-        "wm_size": _run("wm size", ["wm", "size"], errors, timeout=4).stdout,
-        "wm_density": _run("wm density", ["wm", "density"], errors, timeout=4).stdout,
-        "dumpsys_display": _run(
-            "dumpsys display",
-            ["dumpsys", "display"],
-            errors,
-            timeout=10,
-        ).stdout[:4000],
+        "wm_size": _grab(["wm", "size"], 200),
+        "wm_density": _grab(["wm", "density"], 200),
+        "dumpsys_display": _grab(["dumpsys", "display"], 8000),
     }
 
 
@@ -203,26 +214,51 @@ def _filter_settings(text: str) -> dict[str, str]:
 
 
 def _capture_settings(errors: list[dict[str, str]]) -> dict[str, Any]:
+    """Capture ``settings list global/secure/system``.
+
+    On many Android builds (confirmed: Samsung One UI Android 13 on the
+    cloud phone) the unprivileged caller gets
+    ``Security exception: Permission Denial: getCurrentUser() ...
+    INTERACT_ACROSS_USERS``.  We retry through ``su`` automatically via
+    :func:`android.run_android_command` so the probe actually returns
+    settings on real hardware.
+    """
     out: dict[str, Any] = {}
     for ns in ("global", "secure", "system"):
-        res = _run(f"settings list {ns}", ["settings", "list", ns], errors, timeout=8)
-        # Keep filtered view for readability AND the full text for grep-ability.
+        try:
+            res = android.run_android_command(["settings", "list", ns], timeout=10)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"step": f"settings list {ns}", "error": str(exc)[:200]})
+            out[f"{ns}_filtered"] = {}
+            out[f"{ns}_raw_len"] = 0
+            continue
+        if not res.ok and not res.stdout:
+            errors.append({"step": f"settings list {ns}: rc={res.returncode}", "error": res.stderr[:200]})
         out[f"{ns}_filtered"] = _filter_settings(res.stdout)
         out[f"{ns}_raw_len"] = len(res.stdout)
     return out
 
 
 def _capture_command_help(errors: list[dict[str, str]]) -> dict[str, str]:
-    """Capture which verbs the host actually supports for resize / launch bounds."""
+    """Capture which verbs the host actually supports for resize / launch bounds.
+
+    We bump the captured size to 12 KB so the full activity help (which
+    can mention ``resize-task``, ``--activity-options``, ``--activity-bounds``,
+    ``--windowingMode``) is included verbatim in the probe.  Anything not
+    in the help text is most likely not supported on this build.
+    """
     helps: dict[str, str] = {}
     for label, args in (
         ("cmd_activity_help", ["cmd", "activity", "help"]),
         ("am_help", ["am", "help"]),
         ("cmd_window_help", ["cmd", "window", "help"]),
         ("cmd_package_help", ["cmd", "package"]),
+        # Discovery of free-form / resize-task availability.
+        ("cmd_activity_compat", ["cmd", "activity", "compat"]),
+        ("dumpsys_meminfo_one", ["dumpsys", "meminfo", "-a"]),
     ):
-        res = _run(label, args, errors, timeout=6)
-        helps[label] = (res.stdout or res.stderr)[:4000]
+        res = _run(label, args, errors, timeout=8)
+        helps[label] = (res.stdout or res.stderr)[:12000]
     return helps
 
 
@@ -265,8 +301,14 @@ def _capture_process(package: str, errors: list[dict[str, str]]) -> dict[str, An
 def _capture_dumpsys_for_package(package: str, errors: list[dict[str, str]]) -> dict[str, str]:
     """Capture raw dumpsys output filtered to *package*.
 
-    We keep the unfiltered text length so we can prove that the host did
-    return something and we just didn't match it.
+    Uses :func:`android.run_android_command` so that:
+      * the bare name ``dumpsys`` is auto-resolved to ``/system/bin/dumpsys``
+        (Termux does not include ``/system/bin`` in ``$PATH``);
+      * the call is auto-routed through ``su`` if the unprivileged call
+        returns a permission-denial.
+
+    We keep the unfiltered text length so we can prove the host did return
+    something and we simply didn't match it.
     """
     out: dict[str, str] = {}
     for label, args in (
@@ -275,9 +317,16 @@ def _capture_dumpsys_for_package(package: str, errors: list[dict[str, str]]) -> 
         ("activity_recents", ["dumpsys", "activity", "recents"]),
         ("surfaceflinger_list", ["dumpsys", "SurfaceFlinger", "--list"]),
     ):
-        res = _run(label, args, errors, timeout=10)
+        try:
+            res = android.run_android_command(args, timeout=10)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"step": label, "error": str(exc)[:200]})
+            out[label] = "<error>"
+            out[f"{label}_total_len"] = "0"
+            continue
+        if not res.ok and not res.stdout:
+            errors.append({"step": f"{label}: rc={res.returncode}", "error": res.stderr[:200]})
         full = res.stdout or ""
-        # Take up to 200 lines that mention the package + a 200-char wider window.
         lines = full.splitlines()
         matches: list[str] = []
         for i, ln in enumerate(lines):
@@ -295,7 +344,10 @@ def _capture_shared_prefs(package: str, errors: list[dict[str, str]]) -> dict[st
     """Read every shared_prefs XML for the package (root required).
 
     Returns ``{filename: content}`` where each content is masked.  Without
-    root we can only enumerate the directory.
+    root we can only enumerate the directory.  We skip very large files
+    (``cached_app_settings_prefs.xml`` on Roblox is 1.5 MB and contains no
+    layout data — only experiment flags) so the probe stays under the
+    upload size cap.
     """
     out: dict[str, Any] = {"available": False, "files": {}, "listing": ""}
     root = android.detect_root()
@@ -314,13 +366,36 @@ def _capture_shared_prefs(package: str, errors: list[dict[str, str]]) -> dict[st
     if not listing.ok:
         return out
     out["available"] = True
-    # Pull file names, then cat the small ones.
+    # Parse the listing.  Toybox ``ls -la`` produces 8 whitespace-separated
+    # columns (mode, links, owner, group, size, date, time, name); GNU ls
+    # may produce 9.  Match on the filename column (last) and the size
+    # column (second-to-last numeric) instead of guessing column counts.
+    PREFERRED_NAMES = (
+        "pkg_preferences.xml",
+        f"{package}_preferences.xml",
+        "prefs.xml",
+        "cloner_settings.xml",
+        "settings.xml",
+    )
+    SKIP_LARGE = ("cached_app_settings_prefs.xml", "cached_flag_prefs.xml")
+    MAX_FILE_BYTES = 64 * 1024  # 64 KB per file is plenty for prefs XML
     for line in listing.stdout.splitlines():
         parts = line.split()
-        if len(parts) < 9:
+        if len(parts) < 6:
             continue
         name = parts[-1]
         if not name.endswith(".xml"):
+            continue
+        if name in SKIP_LARGE:
+            out["files"][name] = "<skipped: large cached prefs>"
+            continue
+        # Try to parse the size column; if it's enormous, skip the cat.
+        size = 0
+        for col in parts[:-1]:
+            if col.isdigit():
+                size = max(size, int(col))
+        if size > MAX_FILE_BYTES and name not in PREFERRED_NAMES:
+            out["files"][name] = f"<skipped: {size} bytes>"
             continue
         cat = _run(
             f"cat {name}",
@@ -329,7 +404,7 @@ def _capture_shared_prefs(package: str, errors: list[dict[str, str]]) -> dict[st
             root=True,
             timeout=6,
         )
-        out["files"][name] = mask(cat.stdout)[:6000]
+        out["files"][name] = mask(cat.stdout)[:8000]
     return out
 
 
