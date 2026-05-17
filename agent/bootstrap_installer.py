@@ -230,10 +230,11 @@ def render_public_bootstrap(
 
     return (
         "#!/usr/bin/env bash\n"
-        "set -euo pipefail\n"
-        f'echo "{safe_title}"\n'
-        f"{banner_part}"
-        'if [[ -n "${PREFIX:-}" ]] && [[ "${PREFIX}" == *termux* ]]; then\n'
+        + _BASH_REEXEC_PREAMBLE
+        + "set -euo pipefail\n"
+        + f'echo "{safe_title}"\n'
+        + f"{banner_part}"
+        + 'if [[ -n "${PREFIX:-}" ]] && [[ "${PREFIX}" == *termux* ]]; then\n'
         '  echo "Detected: Termux"\n'
         "fi\n"
         f'export DENG_REJOIN_INSTALL_API="{base}"\n'
@@ -470,7 +471,8 @@ def render_direct_install_bootstrap(
 
     return (
         "#!/usr/bin/env bash\n"
-        "set -euo pipefail\n"
+        + _BASH_REEXEC_PREAMBLE
+        + "set -euo pipefail\n"
         + pre_heredoc
         + wrapper_body_sh(base)
         + post_heredoc
@@ -479,3 +481,57 @@ def render_direct_install_bootstrap(
 
 def _escape_double(s: str) -> str:
     return (s or "").replace("\\", "\\\\").replace('"', '\\"')
+
+
+# ── POSIX-sh preamble that re-execs into bash ─────────────────────────────────
+#
+# The installers below are written for **bash** (``set -o pipefail``,
+# ``[[ ... ]]``, parameter-default substitution in subshells, etc.).  But the
+# user invocation is ``curl -fsSL https://.../install/... | sh`` and on
+# Termux ``/data/data/com.termux/files/usr/bin/sh`` is **dash**, which doesn't
+# understand any of those features.  When ``curl ... | sh`` runs, the
+# shebang on line 1 is ignored — dash is already executing the bytes.
+#
+# Real-device evidence (user terminal, 2026-05-18):
+#
+#     $ curl -fsSL https://rejoin.deng.my.id/install/latest | sh
+#     /data/data/com.termux/files/usr/bin/sh: 2: set: Illegal option -o pipefail
+#
+# This preamble is **POSIX-sh-only** (no bash-only constructs!) and runs
+# BEFORE any bash feature is used.  Behavior:
+#
+#  * If ``$BASH_VERSION`` is already set, we're under bash — fall through.
+#  * Else, look for ``bash`` on PATH.  If we have it:
+#      - If ``$0`` looks like a readable script file, ``exec bash "$0" "$@"``.
+#      - Else (piped via ``... | sh``), read the rest of stdin into a temp
+#        file and ``exec bash`` on that file.  This works because dash
+#        reads its script from stdin line by line, so anything we
+#        haven't consumed yet is still in the pipe buffer waiting for
+#        ``cat``.
+#  * Else, print a clear "install bash" error and exit non-zero.
+#
+# After the preamble runs, every subsequent line is guaranteed to be
+# executed by bash regardless of how the user invoked us.
+_BASH_REEXEC_PREAMBLE: str = (
+    "# POSIX preamble: re-exec into bash when invoked via dash/sh.\n"
+    "# Termux's /usr/bin/sh is dash and chokes on `set -o pipefail`,\n"
+    "# `[[ ]]`, etc. that this installer uses.  See bootstrap_installer.py.\n"
+    'if [ -z "${BASH_VERSION-}" ]; then\n'
+    '    if command -v bash >/dev/null 2>&1; then\n'
+    '        if [ -r "$0" ] && [ "$0" != "sh" ] && [ "$0" != "/bin/sh" ] \\\n'
+    '             && [ "$0" != "dash" ] && [ "$0" != "/system/bin/sh" ]; then\n'
+    '            exec bash "$0" "$@"\n'
+    "        fi\n"
+    "        # Piped invocation (curl ... | sh).  Save the rest of stdin\n"
+    "        # (the bash body of THIS installer) and exec bash on it.\n"
+    '        _DENG_BOOT_TMP="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/deng-rejoin-bootstrap.$$")"\n'
+    "        cat > \"$_DENG_BOOT_TMP\"\n"
+    "        # Best-effort cleanup so /tmp doesn't fill up over time.\n"
+    '        trap \'rm -f "$_DENG_BOOT_TMP"\' EXIT INT TERM HUP 2>/dev/null || true\n'
+    '        exec bash "$_DENG_BOOT_TMP" "$@"\n'
+    "    fi\n"
+    '    printf "%s\\n" "ERROR: bash is required to run this installer." >&2\n'
+    '    printf "%s\\n" "On Termux:  pkg install bash" >&2\n'
+    "    exit 1\n"
+    "fi\n"
+)
