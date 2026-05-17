@@ -818,27 +818,34 @@ def _capture_dumpsys_global(errors: list[dict[str, str]]) -> dict[str, str]:
     """Capture the FULL ``dumpsys window windows`` / activity / SurfaceFlinger
     output (not just per-package slices).
 
-    Large but the most valuable single source of evidence for layout state:
-    every Window{} block including its mFrame / mHasSurface / windowing mode
-    / stack id is here.  Capped at 200 KB each so the JSON stays uploadable.
+    HARD BUDGET — total ~250 KB across all sections (was ~700 KB which
+    blew past the 4 MB compressed upload cap once we added third-party
+    captures and the user hammered the device with tests).  We keep the
+    highest-signal sections (window-windows + activity-activities) and
+    drop the redundant ones.  Caller can use ``--diag`` to re-enable
+    SurfaceFlinger when debugging that specifically.
     """
     out: dict[str, str] = {}
-    for label, args, cap in (
+    # Reduced caps + tighter timeouts.  Each step has its own timeout so
+    # one slow `dumpsys SurfaceFlinger` cannot block the whole probe.
+    for label, args, cap, timeout in (
         ("window_windows_full",
-            ["dumpsys", "window", "windows"], 200_000),
+            ["dumpsys", "window", "windows"], 80_000, 8),
         ("activity_activities_full",
-            ["dumpsys", "activity", "activities"], 200_000),
+            ["dumpsys", "activity", "activities"], 80_000, 8),
         ("activity_recents_full",
-            ["dumpsys", "activity", "recents"], 80_000),
-        ("surfaceflinger_full",
-            ["dumpsys", "SurfaceFlinger"], 120_000),
+            ["dumpsys", "activity", "recents"], 32_000, 6),
         ("activity_top",
-            ["dumpsys", "activity", "top"], 60_000),
+            ["dumpsys", "activity", "top"], 24_000, 5),
         ("activity_starter",
-            ["dumpsys", "activity", "starter"], 30_000),
+            ["dumpsys", "activity", "starter"], 12_000, 5),
+        # SurfaceFlinger is the largest single source (often 80+ KB) and
+        # the lowest signal for window-bounds debugging — keep it tiny.
+        ("surfaceflinger_full",
+            ["dumpsys", "SurfaceFlinger"], 24_000, 6),
     ):
         try:
-            res = android.run_android_command(args, timeout=15)
+            res = android.run_android_command(args, timeout=timeout)
         except Exception as exc:  # noqa: BLE001
             errors.append({"step": label, "error": str(exc)[:200]})
             out[label] = "<error>"
@@ -848,7 +855,7 @@ def _capture_dumpsys_global(errors: list[dict[str, str]]) -> dict[str, str]:
 
 
 def _capture_logcat(errors: list[dict[str, str]]) -> str:
-    """Last ~3000 lines of logcat (dump mode).
+    """Last ~1000 lines of logcat (dump mode), capped at 80 KB.
 
     Captures every WindowManager / ActivityTaskManager event in the
     recent history — which is where we see Kaeru actually doing
@@ -857,14 +864,14 @@ def _capture_logcat(errors: list[dict[str, str]]) -> str:
     """
     try:
         res = android.run_android_command(
-            ["logcat", "-d", "-t", "3000",
+            ["logcat", "-d", "-t", "1000",
              "WindowManager:V", "ActivityManager:V",
              "ActivityTaskManager:V", "AppOps:V",
              "TaskLaunchModes:V", "SurfaceFlinger:I",
              "*:W"],
-            timeout=20,
+            timeout=10,
         )
-        return mask((res.stdout or "")[:200_000])
+        return mask((res.stdout or "")[:80_000])
     except Exception as exc:  # noqa: BLE001
         errors.append({"step": "logcat -d", "error": str(exc)[:200]})
         return ""
@@ -893,11 +900,23 @@ def _capture_last_diagnostics(errors: list[dict[str, str]]) -> dict[str, Any]:
 # ─── Public entrypoint ────────────────────────────────────────────────────────
 
 
-def collect_probe() -> dict[str, Any]:
+def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]:
     """Run every capture step and return the full probe dict.
+
+    ``include_diag_startup`` (default: env ``DENG_PROBE_DIAG_STARTUP``,
+    else False) controls whether the in-process child-subprocess
+    diagnostic runs.  That step can hang for up to 45 s on a stressed
+    device and previously caused the probe to appear stuck (which the
+    user reported as "I CANT UPLOAD PROBE AFTER TESTING").  It is now
+    opt-in via ``--diag`` on the CLI.
 
     Never raises.  Errors are captured under ``probe["errors"]``.
     """
+    if include_diag_startup is None:
+        include_diag_startup = (
+            os.environ.get("DENG_PROBE_DIAG_STARTUP", "").strip() in {"1", "true", "yes"}
+        )
+
     errors: list[dict[str, str]] = []
     out: dict[str, Any] = {
         "probe_version": PROBE_VERSION,
@@ -961,12 +980,132 @@ def collect_probe() -> dict[str, Any]:
     # here so we see the actual API calls Kaeru made.
     out["logcat"] = _capture_logcat(errors)
 
-    # The big one: runs the actual cmd_menu chain in a child subprocess so
-    # we capture the exact step where it segfaults — without the probe
-    # itself dying.  Always last so partial captures still survive even if
-    # the child diagnostic hangs / times out.
-    out["diag_startup"] = _capture_diag_startup(errors)
+    # Heavy in-process child diag: optional, opt-in via --diag.  This
+    # step can hang up to 45 s on a stressed device.  When skipped we
+    # still attach a marker so the operator knows it was deliberate.
+    if include_diag_startup:
+        out["diag_startup"] = _capture_diag_startup(errors)
+    else:
+        out["diag_startup"] = {"skipped": True,
+                               "reason": "default off; use --diag to enable"}
     return out
+
+
+# ── Payload trimming for upload ─────────────────────────────────────────────
+
+# The install API rejects payloads larger than this many bytes after
+# gzip compression.  Match the server's hard cap in license_api.py so we
+# can give the user a clear message instead of a 413.
+_UPLOAD_HARD_CAP_BYTES         = 4 * 1024 * 1024
+_UPLOAD_SOFT_BUDGET_BYTES      = 3 * 1024 * 1024  # leave headroom
+
+# Order matters — when over budget, we drop the highest-cost,
+# lowest-signal fields first.  Per-package shared_prefs/dumpsys win over
+# the global captures because they're scoped to the user's installation.
+_PROBE_DROP_ORDER: tuple[str, ...] = (
+    "logcat",                       # ~80 KB, situational
+    "dumpsys_global.surfaceflinger_full",
+    "dumpsys_global.activity_starter",
+    "dumpsys_global.activity_top",
+    "dumpsys_global.activity_recents_full",
+    "third_party_evidence.pm_dump",   # ~24 KB per package
+    "third_party_evidence.shared_prefs",
+    "installed_packages.pm_list_third_party_raw",
+    "logs",                          # rotating log tails
+    "dumpsys_global.activity_activities_full",
+    "dumpsys_global.window_windows_full",
+)
+
+
+def _drop_field(probe: dict[str, Any], dotted: str) -> bool:
+    """Drop a (possibly nested) key like ``dumpsys_global.activity_top``.
+
+    Returns True if the field existed and was removed.  Never raises.
+    """
+    parts = dotted.split(".")
+    cur: Any = probe
+    for p in parts[:-1]:
+        if not isinstance(cur, dict) or p not in cur:
+            return False
+        cur = cur[p]
+    if not isinstance(cur, dict):
+        return False
+    last = parts[-1]
+    if last not in cur:
+        return False
+    # Replace with marker so the operator knows it was dropped, not absent.
+    cur[last] = "<dropped: payload size budget>"
+    return True
+
+
+def trim_probe_for_upload(
+    probe: dict[str, Any], *,
+    hard_cap: int = _UPLOAD_HARD_CAP_BYTES,
+    soft_budget: int = _UPLOAD_SOFT_BUDGET_BYTES,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return ``(trimmed_probe, report)`` where the gzipped JSON size
+    fits under ``hard_cap`` and is targeted at ``soft_budget``.
+
+    Strategy: serialize → gzip → measure → if over, drop the next entry
+    from :data:`_PROBE_DROP_ORDER` and repeat.  Stop as soon as we are
+    under ``soft_budget`` (or we run out of drop targets).  Never raises.
+    """
+    import gzip as _gz
+
+    trimmed = dict(probe)
+    dropped: list[str] = []
+    measurements: list[int] = []
+
+    def _measure(p: dict[str, Any]) -> int:
+        try:
+            return len(_gz.compress(
+                json.dumps(p, separators=(",", ":")).encode("utf-8"),
+            ))
+        except Exception:  # noqa: BLE001
+            return hard_cap + 1   # force-trim on any error
+
+    size = _measure(trimmed)
+    measurements.append(size)
+    for field in _PROBE_DROP_ORDER:
+        if size <= soft_budget:
+            break
+        if _drop_field(trimmed, field):
+            dropped.append(field)
+        size = _measure(trimmed)
+        measurements.append(size)
+
+    # If we're STILL over the hard cap after dropping everything,
+    # truncate every remaining string field to 4 KB.  Last-ditch.
+    if size > hard_cap:
+        def _truncate(d: Any) -> None:
+            if isinstance(d, dict):
+                for k, v in list(d.items()):
+                    if isinstance(v, str) and len(v) > 4000:
+                        d[k] = v[:4000] + "...<truncated>"
+                    elif isinstance(v, (dict, list)):
+                        _truncate(v)
+            elif isinstance(d, list):
+                for v in d:
+                    if isinstance(v, (dict, list)):
+                        _truncate(v)
+        _truncate(trimmed)
+        size = _measure(trimmed)
+        measurements.append(size)
+        dropped.append("<truncated all strings to 4 KB>")
+
+    trimmed["_upload_trim"] = {
+        "final_gzipped_bytes": size,
+        "hard_cap": hard_cap,
+        "soft_budget": soft_budget,
+        "dropped": dropped,
+        "measurement_bytes_per_pass": measurements,
+    }
+    report = {
+        "dropped": dropped,
+        "final_gzipped_bytes": size,
+        "passes": len(measurements),
+    }
+    return trimmed, report
 
 
 def save_probe(probe: dict[str, Any]) -> Path:
@@ -991,11 +1130,13 @@ def _resolve_install_api() -> str:
     return os.environ.get("DENG_REJOIN_INSTALL_API", "").strip()
 
 
-def upload_probe(probe: dict[str, Any], *, timeout: float = 20.0) -> tuple[bool, str]:
+def upload_probe(probe: dict[str, Any], *, timeout: float = 30.0) -> tuple[bool, str]:
     """POST the probe JSON to the install API's dev-probe endpoint.
 
-    Returns ``(ok, info)`` where ``info`` is a short probe id on success or
-    a short error string on failure.  Never raises.
+    Trims the payload first so it fits the 4 MB compressed cap, then
+    POSTs the gzipped JSON.  Returns ``(ok, info)`` where ``info`` is a
+    short probe id on success, or a short, USER-ACTIONABLE error string
+    on failure.  Never raises.
     """
     import gzip
     import urllib.error
@@ -1003,10 +1144,23 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 20.0) -> tuple[bool,
 
     api = _resolve_install_api()
     if not api:
-        return False, "install API URL not configured"
+        return False, "install API URL not configured (set DENG_REJOIN_INSTALL_API)"
     url = api.rstrip("/") + "/api/dev-probe/upload"
-    body = json.dumps(probe, separators=(",", ":")).encode("utf-8")
+
+    # ── Size budget ── trim ANY oversized payload BEFORE we POST so the
+    # server's 4 MB cap doesn't reject us with an opaque 413.  This is
+    # what was blocking the user after running many tests back-to-back.
+    trimmed, trim_report = trim_probe_for_upload(probe)
+    body = json.dumps(trimmed, separators=(",", ":")).encode("utf-8")
     payload = gzip.compress(body)
+
+    if len(payload) > _UPLOAD_HARD_CAP_BYTES:
+        return False, (
+            f"payload still {len(payload)/1024/1024:.1f} MB after trim — "
+            f"server cap is {_UPLOAD_HARD_CAP_BYTES/1024/1024:.0f} MB. "
+            f"Dropped: {trim_report.get('dropped') or []!r}"
+        )
+
     req = urllib.request.Request(url, data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
     req.add_header("Content-Encoding", "gzip")
@@ -1029,6 +1183,20 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 20.0) -> tuple[bool,
             body_text = exc.read().decode("utf-8", errors="replace")[:300]
         except Exception:  # noqa: BLE001
             pass
+        # Pretty-print common rejection cases so the user knows what to do.
+        if exc.code == 413:
+            return False, (
+                f"server rejected size {len(payload)} bytes (413). "
+                f"Trim dropped: {trim_report.get('dropped') or []!r}. "
+                f"Server body: {body_text}"
+            )
+        if exc.code == 429:
+            return False, (
+                f"rate-limited (429) — wait ~60 seconds and try again. "
+                f"Server body: {body_text}"
+            )
+        if exc.code == 401:
+            return False, f"unauthorized (401) — check DENG_DEV_PROBE_TOKEN. {body_text}"
         return False, f"HTTP {exc.code}: {body_text}"
     except urllib.error.URLError as exc:
         return False, f"network error: {exc.reason}"

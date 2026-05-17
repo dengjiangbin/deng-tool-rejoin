@@ -187,14 +187,29 @@ class TestStartOutputClean(unittest.TestCase):
         )
 
     def test_no_raw_cache_text_in_stdout(self):
+        """The OLD verbose ``Clearing safe cache (cache, code_cache, files/tmp)``
+        progress line must not leak to the dashboard.  The new phase
+        column updates instead, with the short hint ``Clearing cache
+        and optimizing graphics...`` shown as a sub-note — this is
+        intentional UX after the user complained the table looked
+        frozen."""
         out = self._get_output()
-        self.assertNotIn("Clearing safe cache", out,
-            "Cache progress text must go to log, not stdout")
+        # The verbose progress string is gone; the brief sub-note we
+        # show in its place is fine.
+        self.assertNotIn("Clearing safe cache (", out,
+            "Verbose cache progress text must go to log, not stdout")
 
     def test_no_background_processes_text(self):
+        """We DO now show ``Stopping background Roblox apps...`` as a
+        one-line phase note so the user sees the prep phase advance
+        instead of staring at a frozen ``Preparing`` cell.  This test
+        is intentionally permissive — we only forbid the OLD multi-
+        line ``✓ Stopped: pkg`` chatter that polluted the dashboard."""
         out = self._get_output()
-        self.assertNotIn("Stopping background", out,
-            "Background stop text must go to log, not stdout")
+        self.assertNotIn("✓ Stopped:", out,
+            "Per-package stop chatter must go to log, not stdout")
+        self.assertNotIn("No background Roblox processes found.", out,
+            "Idle stop notice must go to log, not stdout")
 
 
 if __name__ == "__main__":

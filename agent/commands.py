@@ -95,12 +95,17 @@ COMMANDS = {
 }
 
 # ─── ANSI color constants (used only when a tty is available) ─────────────────
-_ANSI_GREEN   = "\033[32m"
-_ANSI_YELLOW  = "\033[33m"
-_ANSI_RED     = "\033[31m"
-_ANSI_CYAN    = "\033[36m"
-_ANSI_BOLD    = "\033[1m"
-_ANSI_DIM     = "\033[2m"
+# Termux's default monospace font is very thin and the previous status
+# colors were unreadable on a cloud-phone screen (user feedback: "i cant
+# read shit so thin").  Every status color now starts with the BOLD
+# attribute (\033[1;<color>m) so the foreground text uses the BRIGHT
+# weight glyphs that all Termux monospace fonts have.
+_ANSI_GREEN   = "\033[1;92m"   # bold bright green
+_ANSI_YELLOW  = "\033[1;93m"   # bold bright yellow
+_ANSI_RED     = "\033[1;91m"   # bold bright red
+_ANSI_CYAN    = "\033[1;96m"   # bold bright cyan
+_ANSI_BOLD    = "\033[1m"      # plain bold (no color)
+_ANSI_DIM     = "\033[2;37m"   # dim grey (Unknown only — intentionally low-contrast)
 _ANSI_RESET   = "\033[0m"
 _ANSI_RE      = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -882,8 +887,7 @@ def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejo
     print("--------------------------------")
     print(f"1. Device Name: {cfg['device_name']}")
     print(f"2. Roblox Package: {cfg['roblox_package']}")
-    print(f"3. Launch Mode: {_launch_mode_label(cfg['launch_mode'])}")
-    print(f"4. Launch URL / Private Server URL: {_safe_url_label(cfg['launch_url'])}")
+    print(f"3. Private Server URL: {_safe_url_label(cfg['launch_url'])}")
     print(f"5. Auto Rejoin: {_yes_no(cfg['auto_rejoin_enabled'])}")
     print(f"6. Reconnect Delay: {cfg['reconnect_delay_seconds']} seconds")
     print(f"7. Root Mode: {_yes_no(cfg['root_mode_enabled'])}")
@@ -1126,37 +1130,57 @@ def _prompt_launch_url(current_url: str, launch_mode: str) -> str:
 
 
 def _setup_launch_link(draft: dict[str, Any]) -> None:
+    """Single-prompt URL setup — no mode toggle.
+
+    The user pastes ONE Private Server URL.  We accept any of:
+
+      * ``https://www.roblox.com/share?code=X&type=Server``    (new share link)
+      * ``https://www.roblox.com/share-links?code=X&type=Server``
+      * ``https://www.roblox.com/games/<id>/<name>?privateServerLinkCode=X``  (legacy)
+      * ``roblox://navigation/share_links?code=X&type=Server``  (deep link)
+      * ``roblox://placeId=<id>&privateServerLinkCode=X``       (legacy deep link)
+      * blank — disable URL-based join, app-only mode
+
+    Internally the URL is converted to its ``roblox://`` deep-link form
+    at launch time (see ``url_utils.to_roblox_deep_link``); the user
+    never has to know about modes.  We pick the storage ``launch_mode``
+    based on the URL scheme so existing config plumbing keeps working.
+    """
     print()
-    print("Roblox Launch Link")
-    print("Roblox Launch Link Is Optional. Leave Blank To Skip.")
-    print("1. App Only, No Link")
-    print("2. Public Roblox Game URL")
-    print("3. Private Server URL")
-    print("4. Roblox Deeplink")
-    choice = _prompt("Choose launch link type", "1").strip()
-    if choice == "1" or not choice:
+    print("Private Server URL")
+    print("Paste a Roblox Private Server URL (or leave blank to skip).")
+    print("Examples:")
+    print("  https://www.roblox.com/share?code=XXXX&type=Server")
+    print("  https://www.roblox.com/games/123/Game?privateServerLinkCode=YYY")
+    print("  roblox://navigation/share_links?code=XXXX&type=Server")
+    current = str(draft.get("launch_url") or "")
+    value = _prompt("Private Server URL (blank to skip)", current).strip()
+
+    if not value:
         draft["launch_mode"] = "app"
         draft["launch_url"] = ""
+        print("Skipped. Clones will open the Roblox app without auto-joining a server.")
         return
-    if choice in {"2", "3"}:
-        url = _prompt_launch_url(str(draft.get("launch_url") or ""), "web_url")
-        if url:
-            draft["launch_mode"] = "web_url"
-            draft["launch_url"] = url
-        else:
-            draft["launch_mode"] = "app"
-            draft["launch_url"] = ""
+
+    # Pick storage launch_mode by scheme; let validate_launch_url do the
+    # final sanity check.  We accept the URL on any validation warning
+    # (allow_uncertain=True) so the user isn't blocked by an over-strict
+    # path allow-list — at launch time the deep-link converter handles
+    # any unmapped path.
+    scheme = value.split(":", 1)[0].lower() if ":" in value else ""
+    mode = "deeplink" if scheme == "roblox" else "web_url"
+    try:
+        result = validate_launch_url(value, mode, allow_uncertain=True)
+        if result.warning:
+            print(f"Note: {result.warning}")
+    except UrlValidationError as exc:
+        print(f"That URL cannot be used: {exc}")
+        print("Keeping previous launch link settings.")
         return
-    if choice == "4":
-        url = _prompt_launch_url(str(draft.get("launch_url") or ""), "deeplink")
-        if url:
-            draft["launch_mode"] = "deeplink"
-            draft["launch_url"] = url
-        else:
-            draft["launch_mode"] = "app"
-            draft["launch_url"] = ""
-        return
-    print("Unknown choice. Keeping the current launch link settings.")
+    draft["launch_mode"] = mode
+    draft["launch_url"] = value
+    print("Saved. At launch, this URL will be sent to Roblox as a deep link so")
+    print("each clone joins the private server directly.")
 
 
 def _setup_webhook(draft: dict[str, Any]) -> None:
@@ -1818,25 +1842,30 @@ def _package_menu_list(draft: dict[str, Any]) -> None:
 
 
 def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
-    """Roblox Launch Link submenu — optional, blank input skips safely."""
+    """Private Server URL submenu — one URL field, no mode toggle.
+
+    User reported the old multi-mode menu was "complicated and broken" —
+    after a launch the clone landed in the Roblox lobby instead of the
+    private server.  We now take a single URL and convert it to a
+    ``roblox://`` deep link at launch time (see
+    :func:`agent.url_utils.to_roblox_deep_link`).
+    """
     if not _is_interactive():
         return draft
     while True:
         print()
         print("--------------------------------")
-        print("Roblox Launch Link")
+        print("Private Server URL")
         print("--------------------------------")
-        print("Roblox Launch Link Is Optional.")
-        current_mode = draft.get("launch_mode", "app")
         current_url = draft.get("launch_url", "") or ""
         if current_url:
-            print(f"Current: {_safe_url_label(current_url)}  (Mode: {_launch_mode_label(current_mode)})")
+            print(f"Current: {_safe_url_label(current_url)}")
         else:
-            print("Current: No Roblox Launch Link Set. The Tool Will Launch The App Normally.")
+            print("Current: Not set. Clones will open Roblox without joining a server.")
         print()
-        print("1. Set Roblox Launch Link")
-        print("2. Clear Roblox Launch Link")
-        print("3. Show Current Roblox Launch Link")
+        print("1. Set Private Server URL")
+        print("2. Clear Private Server URL")
+        print("3. Show Current URL")
         print("0. Back")
         print("--------------------------------")
         _llc = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -1848,19 +1877,18 @@ def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
         elif choice == "1":
             _setup_launch_link(draft)
             draft = save_config(draft)
-            print("Launch Link Saved.")
+            print("Private Server URL Saved.")
         elif choice == "2":
             draft["launch_mode"] = "app"
             draft["launch_url"] = ""
             draft = save_config(draft)
-            print("Roblox Launch Link Cleared.")
+            print("Private Server URL Cleared.")
         elif choice == "3":
             url = draft.get("launch_url") or ""
             if url:
-                print(f"  Roblox Launch Link: {_safe_url_label(url)}")
-                print(f"  Mode: {_launch_mode_label(draft.get('launch_mode', 'app'))}")
+                print(f"  Private Server URL: {_safe_url_label(url)}")
             else:
-                print("  No Roblox Launch Link Set. The Tool Will Launch The App Normally.")
+                print("  Not set.")
             safe_io.press_enter()
         else:
             print("Please choose 1-3 or 0.")
@@ -2154,7 +2182,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("DENG Tool: Rejoin Config")
         print("--------------------------------")
         print("1. Package")
-        print("2. Roblox Launch Link")
+        print("2. Private Server URL")
         print("3. Webhook")
         print("4. YesCaptcha")
         print("0. Back")
@@ -2171,7 +2199,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("DENG Tool: Rejoin Config")
         print("--------------------------------")
         print("1. Package")
-        print("2. Roblox Launch Link")
+        print("2. Private Server URL")
         print("3. Webhook")
         print("4. YesCaptcha")
         print("0. Back")
@@ -2562,6 +2590,30 @@ def _account_username_for_table(entry: dict[str, Any]) -> str:
     return validate_account_username(entry.get("account_username", "")) or "Unknown"
 
 
+def _set_all_phase_keep_failed(
+    phase: dict[str, str],
+    new_label: str,
+    entries: list[dict[str, Any]],
+    *,
+    note: str = "",   # accepted for callsite symmetry; unused here
+) -> None:
+    """Mutate ``phase`` so every package that isn't currently in a
+    "terminal" state (``Failed`` / ``Closed``) gets ``new_label``.
+
+    Used by the Start dashboard to advance the phase column without
+    clobbering rows that already errored out.  The ``note`` argument is
+    ignored (the caller passes it through to its own renderer); we
+    accept it so the call sites read symmetrically.
+    """
+    del note   # accepted for callsite symmetry only
+    terminal = {"Failed", "Closed", "Offline"}
+    for entry in entries:
+        pkg = entry["package"]
+        if phase.get(pkg) in terminal:
+            continue
+        phase[pkg] = new_label
+
+
 def _visible_len(s: str) -> int:
     """Return the printable width of a string, stripping ANSI escape codes."""
     return len(_ANSI_RE.sub("", s))
@@ -2592,7 +2644,18 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
         "Joining":           _ANSI_CYAN,     # URL deep link sent, waiting
         "Join Failed":       _ANSI_RED,
-        "Preparing":         _ANSI_CYAN,
+        # ── Prep-phase labels (visible while Start prepares each clone) ──
+        # User feedback: "preparing has many stages (preparing, boosting,
+        # clearing cache, etc) meaning this never work and must copy
+        # kaeru".  Each phase now has its own colour so the row visibly
+        # progresses instead of looking frozen.
+        "Preparing":    _ANSI_CYAN,
+        "Boosting":     _ANSI_CYAN,
+        "Clearing":     _ANSI_CYAN,
+        "Layout":       _ANSI_CYAN,
+        "Docking":      _ANSI_CYAN,
+        "Waiting":      _ANSI_YELLOW,
+        "Resizing":     _ANSI_CYAN,
         "Optimizing":   _ANSI_CYAN,
         "Reconnecting": _ANSI_CYAN,
         "Cleared":      _ANSI_GREEN,
@@ -2612,7 +2675,14 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
 
 
 def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
-    """Build the public start summary table: #, Package, Username, State only."""
+    """Build the public start summary table: #, Package, Username, State only.
+
+    With ``use_color=True`` every cell is rendered in bold so the table
+    is readable on the Termux default monospace font (which renders the
+    regular weight as a hairline).  Status cells additionally carry
+    their colour code from :func:`_colorize_status`; the rest of the
+    cells get the plain ``BOLD`` escape only.
+    """
     headers = ("#", "Package", "Username", "State")
     str_rows = [(str(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in rows]
 
@@ -2621,11 +2691,16 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
         for i in range(4)
     ]
 
+    def _bold(text: str) -> str:
+        if not use_color or not text:
+            return text
+        return f"{_ANSI_BOLD}{text}{_ANSI_RESET}"
+
     colored_rows = [
         (
-            r[0],
-            r[1],
-            r[2],
+            _bold(r[0]),
+            _bold(r[1]),
+            _bold(r[2]),
             _colorize_status(r[3], use_color=use_color),
         )
         for r in str_rows
@@ -2639,7 +2714,10 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
         return left + mid.join("─" * (w + 2) for w in widths) + right
 
     def _header_row(cells: tuple[str, ...]) -> str:
-        return "│" + "│".join(_cell(str(cells[i]), widths[i]) for i in range(len(widths))) + "│"
+        return "│" + "│".join(
+            _cell(_bold(str(cells[i])), widths[i], str(cells[i]))
+            for i in range(len(widths))
+        ) + "│"
 
     def _data_row(colored: tuple[str, ...], raw: tuple[str, ...]) -> str:
         parts = [_cell(str(colored[i]), widths[i], str(raw[i])) for i in range(len(widths))]
@@ -3077,25 +3155,55 @@ def cmd_start(args: argparse.Namespace) -> int:
         n = len(entries)
         sup = cfg.get("supervisor") if isinstance(cfg.get("supervisor"), dict) else {}
 
-        # ── Show initial "Preparing" table so user sees activity immediately ──
-        _clear_terminal()
-        print_banner(use_color=use_color)
-        print()
-        init_rows = [
-            (i + 1, e["package"], _account_username_for_table(e), "Preparing")
-            for i, e in enumerate(entries)
-        ]
-        print(build_start_table(init_rows, use_color=use_color))
-        print(flush=True)
+        # ── Phase-tracked dashboard ───────────────────────────────────────────
+        # User feedback: "text state never change from preparing because
+        # preparing has many stages (preparing, boosting, clearing cache,
+        # etc) meaning this never work and must copy kaeru."  The old
+        # code rendered ONE "Preparing" table at the top of cmd_start and
+        # didn't update it until 30 seconds later when supervisor took
+        # over — so the user thought the tool was frozen.  We now re-
+        # render the table after each prep phase with a distinct label.
 
-        # ── Silent preparation phase (all output → debug log) ────────────────
+        # Per-package phase label.  Updated in place by _phase() below.
+        phase: dict[str, str] = {e["package"]: "Preparing" for e in entries}
+
+        def _render_phase(extra_note: str = "") -> None:
+            """Clear + redraw the dashboard with the current phase per package."""
+            _clear_terminal()
+            print_banner(use_color=use_color)
+            print()
+            rows = [
+                (i + 1, e["package"], _account_username_for_table(e),
+                 phase.get(e["package"], "Preparing"))
+                for i, e in enumerate(entries)
+            ]
+            print(build_start_table(rows, use_color=use_color))
+            if extra_note:
+                print()
+                print(extra_note)
+            print(flush=True)
+
+        def _set_all_phase(label: str, note: str = "") -> None:
+            for pkg in phase:
+                phase[pkg] = label
+            _render_phase(note)
+
+        # 1) "Preparing" — initial display.
+        _set_all_phase("Preparing", "Stopping background Roblox apps...")
+
+        # 2) Force-stop background packages.
         packages_sl = [e["package"] for e in entries]
         android.force_stop_packages_except(packages_sl, cfg.get("package_detection_hints"))
+
+        # 3) "Boosting" — clear cache + low-graphics tweaks.
+        _set_all_phase("Boosting", "Clearing cache and optimizing graphics...")
         prep_cache: dict[str, str] = {}
         prep_gfx:   dict[str, str] = {}
         opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
         for entry in entries:
             pkg = entry["package"]
+            phase[pkg] = "Clearing"
+            _render_phase("Clearing cache and optimizing graphics...")
             prep_cache[pkg] = android.clear_safe_package_cache(pkg)
             low = bool(opt.get("low_graphics_enabled", True)) and bool(entry.get("low_graphics_enabled", True))
             prep_gfx[pkg] = android.apply_low_graphics_optimization(pkg, enabled=low)
@@ -3104,6 +3212,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                 pkg, prep_cache[pkg], prep_gfx[pkg],
             )
 
+        # 4) "Layout" — compute window layout.
+        _set_all_phase("Layout", "Calculating window layout...")
         cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
         _start_log.debug("start: layout note=%s", _layout_note)
 
@@ -3116,6 +3226,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         # ``config.termux_dock_enabled`` (default True) and
         # ``config.termux_dock_fraction`` (default 0.50 — user-requested
         # "50% on the left" baseline; can be overridden via cfg).
+        # 5) "Docking" — dock Termux to the left pane.
+        _set_all_phase("Docking", "Docking Termux window to the left pane...")
         _termux_minimize_result: dict[str, Any] = {}
         try:
             _dock_enabled = bool(cfg.get("termux_dock_enabled", True))
@@ -3143,25 +3255,44 @@ def cmd_start(args: argparse.Namespace) -> int:
         cfg["package_start_times"] = start_times
 
         # ── Launch each package ───────────────────────────────────────────────
+        # 6) "Launching" — per-package phase update so the row visibly
+        # advances even when one launch is slow.
         launch_ok:  dict[str, bool] = {}
         launch_err: dict[str, str]  = {}
         for index, entry in enumerate(entries, start=1):
             package = entry["package"]
+            phase[package] = "Launching"
+            _render_phase("Launching clones with private-server deep link...")
             package_cfg = dict(cfg)
             package_cfg["roblox_package"] = package
             result = perform_rejoin(package_cfg, reason="start", package_entry=entry)
             launch_ok[package]  = result.success
             launch_err[package] = result.error or ""
+            # After a launch, move to "Joining" if a URL was sent, else
+            # leave on "Launching" until the supervisor takes over.
+            has_url = bool(
+                str(effective_private_server_url(entry, cfg) or "").strip()
+            )
+            phase[package] = "Joining" if has_url and result.success else \
+                             ("Launching" if result.success else "Failed")
+            _render_phase("Launching clones with private-server deep link...")
             _start_log.debug(
                 "start: launch pkg=%s ok=%s err=%s",
                 package, result.success, result.error or "",
             )
 
+        # 7) "Waiting" — grace before verifying bounds.
+        _set_all_phase_keep_failed(phase, "Waiting", entries,
+                                   note="Waiting for Roblox to settle...")
+        _render_phase("Waiting for Roblox to settle...")
         grace_wait = int(sup.get("launch_grace_seconds", 15))
         import time as _time
         _time.sleep(max(5, grace_wait))
 
-        # ── Post-launch layout verification + direct-resize retry (silent) ────
+        # 8) "Resizing" — verify+fix layout.
+        _set_all_phase_keep_failed(phase, "Resizing", entries,
+                                   note="Verifying window bounds...")
+        _render_phase("Verifying window bounds...")
         _layout_verify: dict[str, bool] = {}
         _layout_diag: list[dict[str, Any]] = []
         try:
@@ -3722,11 +3853,13 @@ def cmd_probe(args: argparse.Namespace) -> int:
     """
     from . import probe as _p
 
-    sys.stdout.write("Collecting device evidence... (this may take ~10s)\n")
+    include_diag = bool(getattr(args, "diag", False))
+    eta = "~30s" if include_diag else "~10s"
+    sys.stdout.write(f"Collecting device evidence... ({eta})\n")
     sys.stdout.flush()
     started = _p.time.monotonic()
     try:
-        data = _p.collect_probe()
+        data = _p.collect_probe(include_diag_startup=include_diag)
     except Exception as exc:  # noqa: BLE001 — should be impossible, but be safe.
         sys.stdout.write(f"probe failed: {exc}\n")
         return 1
@@ -3734,7 +3867,8 @@ def cmd_probe(args: argparse.Namespace) -> int:
     path = _p.save_probe(data)
     size = path.stat().st_size
     sys.stdout.write(
-        f"probe saved: {path} ({size / 1024:.1f} KB, {len(data.get('errors') or [])} step errors, {elapsed:.1f}s)\n"
+        f"probe saved: {path} ({size / 1024:.1f} KB, "
+        f"{len(data.get('errors') or [])} step errors, {elapsed:.1f}s)\n"
     )
 
     if getattr(args, "upload", False):
@@ -3746,7 +3880,14 @@ def cmd_probe(args: argparse.Namespace) -> int:
             sys.stdout.write("share this id in chat.\n")
         else:
             sys.stdout.write(f"upload failed: {info}\n")
-            sys.stdout.write("paste the JSON file contents in chat instead.\n")
+            sys.stdout.write(
+                "\nFallback options:\n"
+                f"  1) Re-run: deng-rejoin probe --upload   (auto-retries with smaller payload)\n"
+                f"  2) Show the file path so you can copy it manually:\n"
+                f"        {path}\n"
+                f"  3) Tail the last 200 lines into chat:\n"
+                f"        tail -c 50000 {path}\n"
+            )
             return 1
     else:
         sys.stdout.write("to share, either paste the JSON file in chat, or run:\n")
@@ -4169,6 +4310,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--upload", dest="upload", action="store_true",
                         help=argparse.SUPPRESS)
     parser.add_argument("--diag-startup", dest="diag_startup", action="store_true",
+                        help=argparse.SUPPRESS)
+    # ``--diag`` opts INTO the heavy child-subprocess diag step (45 s
+    # timeout) inside ``deng-rejoin probe``.  Off by default — without
+    # it the probe completes in ~10 s and reliably fits the 4 MB upload
+    # cap even after long test sessions.
+    parser.add_argument("--diag", dest="diag", action="store_true",
                         help=argparse.SUPPRESS)
 
     # Pre-process argv so hidden positional subcommands don't trip choices validation.

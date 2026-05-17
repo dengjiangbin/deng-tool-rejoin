@@ -90,21 +90,76 @@ def perform_rejoin(
         if not android.package_installed(package):
             raise RuntimeError(f"Roblox package is not installed: {package}")
 
-        if cfg.get("root_mode_enabled") and not no_force_stop:
-            root_info = android.detect_root()
-            if root_info.available:
-                root_used = True
-                log_event(logger, "info", "root_command", command=f"am force-stop {package}", root_tool=root_info.tool or "su")
-                stop_result = android.force_stop_package(package, root_info=root_info)
-                if not stop_result.ok:
-                    warning = f"root force-stop failed: {mask_urls_in_text(stop_result.summary)}"
-                    log_event(logger, "warning", "force_stop_failed", error=warning, root_used=root_used)
-                time.sleep(max(5, int(cfg["reconnect_delay_seconds"])))
+        # ── ALWAYS force-stop before launch ────────────────────────────────
+        # User feedback (post-probe-1239f2b5f9): "I messed up the open
+        # window then restarted; the tool failed to fix it. Kaeru fixes
+        # it every time."  Kaeru ALWAYS force-stops the clone before
+        # launching so the new ``am start --windowingMode 5
+        # --activity-launch-bounds ...`` produces a *fresh* task with
+        # the requested geometry; otherwise Android brings the existing
+        # task to the foreground and silently drops the bounds.
+        #
+        # We try unprivileged ``am force-stop`` first (works in most
+        # Termux + ADB setups) and fall back to root only when needed.
+        # Honors ``no_force_stop`` for callers that want the old behavior.
+        if not no_force_stop:
+            stopped_via = ""
+            try:
+                pre_stop = android.force_stop_package(package)
+                if pre_stop.ok:
+                    stopped_via = "am_force_stop"
+            except Exception:  # noqa: BLE001
+                pass
+
+            if not stopped_via and cfg.get("root_mode_enabled"):
+                root_info = android.detect_root()
+                if root_info.available:
+                    root_used = True
+                    log_event(
+                        logger, "info", "root_command",
+                        command=f"am force-stop {package}",
+                        root_tool=root_info.tool or "su",
+                    )
+                    try:
+                        root_stop = android.force_stop_package(
+                            package, root_info=root_info,
+                        )
+                        if root_stop.ok:
+                            stopped_via = f"root({root_info.tool})"
+                        else:
+                            warning = (
+                                f"root force-stop failed: "
+                                f"{mask_urls_in_text(root_stop.summary)}"
+                            )
+                            log_event(
+                                logger, "warning", "force_stop_failed",
+                                error=warning, root_used=root_used,
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        warning = f"root force-stop error: {exc}"
+                        log_event(
+                            logger, "warning", "force_stop_error",
+                            error=warning, root_used=root_used,
+                        )
+                else:
+                    warning = (
+                        "root mode is enabled, but root is unavailable; "
+                        "launching without root"
+                    )
+                    log_event(logger, "warning", "root_unavailable",
+                              warning=warning)
+
+            if stopped_via:
+                log_event(logger, "info", "pre_launch_stop",
+                          method=stopped_via, package=package)
+                # Brief grace so the WindowManager actually tears down
+                # the activity before we re-create it.
+                time.sleep(min(2.5, max(1.0, int(cfg.get("reconnect_delay_seconds", 2)) / 2)))
             else:
-                warning = "root mode is enabled, but root is unavailable; launching without force-stop"
-                log_event(logger, "warning", "root_unavailable", warning=warning)
-        elif not cfg.get("root_mode_enabled"):
-            warning = "non-root mode: restart capability is limited to launching Roblox"
+                # Even without successful stop, log so the operator can
+                # correlate "bounds not honored" with "task still alive".
+                log_event(logger, "warning", "pre_launch_stop_skipped",
+                          package=package, root_mode=cfg.get("root_mode_enabled"))
 
         # Layer 2: launch with explicit windowing-mode + launch-bounds so the
         # window is placed correctly from the first frame.  Falls back to

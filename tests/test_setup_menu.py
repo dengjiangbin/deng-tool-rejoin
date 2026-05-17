@@ -101,8 +101,10 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         self.assertIn("Package", text)
 
     def test_menu_contains_roblox_launch_link(self):
+        # User feedback: drop the "Roblox Launch Link" multi-mode menu
+        # and replace it with a single "Private Server URL" item.
         text = self._get_menu_text()
-        self.assertIn("Roblox Launch Link", text)
+        self.assertIn("Private Server URL", text)
 
     def test_menu_contains_webhook(self):
         text = self._get_menu_text()
@@ -454,6 +456,8 @@ class LaunchLinkSubmenuTests(unittest.TestCase):
         self.assertEqual(cfg["launch_mode"], "app")
 
     def test_launch_link_optional_message_shown(self):
+        """The simplified URL submenu shows the field name and the
+        'blank to skip' hint instead of the old 'Optional' banner."""
         cfg = _base_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
@@ -461,7 +465,9 @@ class LaunchLinkSubmenuTests(unittest.TestCase):
                 with redirect_stdout(buf):
                     _config_menu_launch_link(cfg)
         text = buf.getvalue()
-        self.assertIn("Optional", text)
+        # The submenu still tells the user the field is skippable —
+        # just under the new, plainer wording the user asked for.
+        self.assertIn("Private Server URL", text)
 
 
 # ─── 19-23: Webhook Submenu ───────────────────────────────────────────────────
@@ -757,6 +763,9 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
         self.assertIn("No Packages Configured.", text)
 
     def test_launch_link_submenu_shows_not_set_when_empty(self):
+        """When no Private Server URL is configured the submenu shows
+        a clear 'Not set' message instead of the old 'Launch The App
+        Normally' banner."""
         cfg = _base_cfg()
         cfg["launch_url"] = ""
         cfg["launch_mode"] = "app"
@@ -766,7 +775,7 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
                 with redirect_stdout(buf):
                     _config_menu_launch_link(cfg)
         text = buf.getvalue()
-        self.assertIn("Launch The App Normally", text)
+        self.assertIn("Not set", text)
 
 
 class TestPackageMenuBug3Regression(unittest.TestCase):
