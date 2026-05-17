@@ -53,7 +53,15 @@ class DiagStartupCommandTest(unittest.TestCase):
             "keystore_dev_mode",
             "load_config",
             "license_section_read",
-            "license_remote_check",
+            # Granular sub-steps replaced the monolithic "license_remote_check"
+            # so the next on-device segfault points to the exact failing line.
+            "license_cache_fast_path",
+            "license_sync_install_id",
+            "license_get_device_model",
+            "license_safe_http_backend",
+            "license_curl_available",
+            "license_remote_check_isolated",
+            "license_remote_check_direct",
             "import_supervisor",
             "import_window_layout",
             "detect_display_info",

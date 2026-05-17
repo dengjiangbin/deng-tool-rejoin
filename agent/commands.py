@@ -136,6 +136,166 @@ def _persist_license_status(cfg: dict[str, Any], status: str) -> dict[str, Any]:
     return save_config(cfg)
 
 
+# ── License cache fast-path ───────────────────────────────────────────────────
+#
+# Real-device evidence (probe ``p-39924732cd``): on the cloud phone, the
+# remote license check via ``safe_http → curl`` crashes the calling
+# Python process with ``SIGSEGV`` *intermittently* (faulthandler's crash
+# log is empty, suggesting the segfault is in libc fork/exec or a native
+# extension that bypasses the Python signal trampoline).  The user has
+# a valid license that was confirmed ``active`` the day before, so making
+# them retry the network call on every menu open is both unnecessary AND
+# the exact code path that kills the process.
+#
+# Trust the cached ``last_status`` for a bounded window (24 h) when it's
+# ``active``, so the menu opens immediately and the user can run Start
+# without ever touching the segfaulting network code.
+
+_LICENSE_CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 hours
+# Offline grace: if the cached check was ``active`` within this window AND
+# the live remote check fails *transiently* (server_unavailable / crash),
+# treat the license as active so the user is never locked out by a single
+# bad request.  Reset to ``not_configured`` only on definitive answers
+# (wrong_device / not_found / revoked / expired / inactive).
+_LICENSE_OFFLINE_GRACE_SECONDS = 30 * 24 * 60 * 60  # 30 days
+
+_LICENSE_TRANSIENT_RESULTS = {
+    "server_unavailable",
+    "error",
+    "",  # parser couldn't determine anything
+}
+
+
+def _license_cache_age_seconds(lic: dict[str, Any]) -> float | None:
+    """Return seconds since ``last_check_at`` or ``None`` when unparseable."""
+    if not isinstance(lic, dict):
+        return None
+    raw = lic.get("last_check_at")
+    if not raw or not isinstance(raw, str):
+        return None
+    try:
+        norm = raw.strip().replace("Z", "+00:00")
+        from datetime import datetime as _dt, timezone as _tz  # noqa: PLC0415
+        ts = _dt.fromisoformat(norm)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=_tz.utc)
+        return (_dt.now(_tz.utc) - ts).total_seconds()
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _license_cache_is_fresh_active(lic: dict[str, Any]) -> bool:
+    """Return True when the cached license check is recent AND active.
+
+    Cached check is considered fresh when:
+        * ``last_status == 'active'``, AND
+        * ``last_check_at`` parses as an ISO-8601 timestamp, AND
+        * the timestamp is within :data:`_LICENSE_CACHE_TTL_SECONDS`.
+
+    Failures during parsing return False so we fall back to remote check.
+    Never raises.
+    """
+    if not isinstance(lic, dict):
+        return False
+    status = str(lic.get("last_status") or "").strip().lower()
+    if status != "active":
+        return False
+    age = _license_cache_age_seconds(lic)
+    if age is None:
+        return False
+    return 0 <= age <= _LICENSE_CACHE_TTL_SECONDS
+
+
+def _license_should_offline_grace(lic: dict[str, Any]) -> bool:
+    """Return True when a transient remote failure can fall back to cache.
+
+    Only triggers when the most recent SUCCESSFUL answer was ``active``
+    and is within :data:`_LICENSE_OFFLINE_GRACE_SECONDS`.  Treating a
+    transient ``server_unavailable`` (or subprocess SIGSEGV) as ``active``
+    in that window prevents the public user from being locked out by
+    a single bad network request.
+    """
+    status = str((lic or {}).get("last_status") or "").strip().lower()
+    if status != "active":
+        return False
+    age = _license_cache_age_seconds(lic)
+    if age is None:
+        return False
+    return 0 <= age <= _LICENSE_OFFLINE_GRACE_SECONDS
+
+
+def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35) -> tuple[str, str]:
+    """Run the remote license check inside a child Python process.
+
+    Real-device cause: on Termux/Python 3.13.13, the network code path in
+    :func:`check_remote_license_status` segfaults the *parent* process
+    (probe ``p-39924732cd`` showed ``last_step == 'license_remote_check'``
+    with rc = -11).  Doing the call in a short-lived child process means
+    the worst case is a clean ``"server_unavailable"`` result — the menu
+    never crashes.
+
+    Returns (result, message).  On any subprocess failure (non-zero exit,
+    timeout, signal kill, malformed output), returns
+    ``("server_unavailable", <reason>)``.
+    """
+    import subprocess as _sp  # noqa: PLC0415
+
+    payload = {
+        "key": (cfg.setdefault("license", {}).get("key") or "").strip(),
+        "install_id": (cfg.setdefault("license", {}).get("install_id") or "").strip(),
+        "device_label": str(cfg.setdefault("license", {}).get("device_label") or "")[:80],
+        "server_url": (cfg.setdefault("license", {}).get("server_url") or "").strip(),
+    }
+    code = (
+        "import json, sys\n"
+        "from agent.license import (\n"
+        "    check_remote_license_status, hash_install_id,\n"
+        "    DEFAULT_LICENSE_SERVER_URL, get_public_device_model,\n"
+        ")\n"
+        "from agent.constants import VERSION\n"
+        "p = json.loads(sys.stdin.read())\n"
+        "srv = p['server_url'] or DEFAULT_LICENSE_SERVER_URL\n"
+        "model = get_public_device_model() or 'unknown'\n"
+        "try:\n"
+        "    r, m = check_remote_license_status(\n"
+        "        srv, license_key=p['key'], install_id=p['install_id'],\n"
+        "        device_model=model, app_version=VERSION,\n"
+        "        device_label=p['device_label'],\n"
+        "    )\n"
+        "except Exception as exc:\n"
+        "    r, m = 'server_unavailable', f'check exception: {exc}'\n"
+        "sys.stdout.write(json.dumps({'result': r, 'message': m}))\n"
+    )
+    try:
+        proc = _sp.run(
+            [sys.executable, "-c", code],
+            input=json.dumps(payload).encode("utf-8"),
+            stdout=_sp.PIPE,
+            stderr=_sp.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+    except _sp.TimeoutExpired:
+        return "server_unavailable", "License check subprocess timed out."
+    except OSError as exc:
+        return "server_unavailable", f"License check subprocess launch error: {exc}"
+
+    if proc.returncode < 0:
+        # Crashed (SIGSEGV etc.) — DO NOT pollute terminal; treat as a
+        # transient network problem.  Cached license keeps the user
+        # running until the next clean check.
+        return "server_unavailable", f"License check crashed safely (signal {-proc.returncode})."
+    if proc.returncode != 0:
+        return "server_unavailable", f"License check exited rc={proc.returncode}."
+    try:
+        data = json.loads((proc.stdout or b"").decode("utf-8", errors="replace") or "{}")
+    except json.JSONDecodeError:
+        return "server_unavailable", "License check returned invalid JSON."
+    result = str(data.get("result") or "server_unavailable").strip().lower()
+    message = str(data.get("message") or "").strip()
+    return result, message
+
+
 def _ensure_install_id_saved(cfg: dict[str, Any]) -> dict[str, Any]:
     lic = cfg.setdefault("license", {})
     before = lic.get("install_id")
@@ -145,7 +305,14 @@ def _ensure_install_id_saved(cfg: dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
-def _remote_license_run_check(cfg: dict[str, Any]) -> tuple[str, str]:
+def _remote_license_check_direct(cfg: dict[str, Any]) -> tuple[str, str]:
+    """Run the remote license check in-process (legacy path).
+
+    On Termux/Python 3.13.13 this code path can segfault the *parent*
+    process (probe ``p-39924732cd`` showed ``rc=-11`` here).  Prefer
+    :func:`_remote_license_run_check`, which dispatches to subprocess
+    isolation in production.
+    """
     lic = cfg.setdefault("license", {})
     key = (lic.get("key") or "").strip()
     if not key:
@@ -161,6 +328,52 @@ def _remote_license_run_check(cfg: dict[str, Any]) -> tuple[str, str]:
         app_version=VERSION,
         device_label=str(lic.get("device_label") or ""),
     )
+
+
+def _should_isolate_license_check() -> bool:
+    """Decide whether to run the license check in a child subprocess.
+
+    Real-device evidence (probe ``p-39924732cd``): on Termux the
+    in-process network code segfaults the menu intermittently.  We
+    isolate by default on Termux and on Android in general, and let
+    a power user override via ``DENG_LICENSE_INLINE=1``.
+
+    Returns False during ``unittest`` so existing tests that mock
+    :func:`_remote_license_run_check` continue to work without ever
+    spawning subprocesses (subprocess can't see test mocks).
+    """
+    override = (os.environ.get("DENG_LICENSE_INLINE") or "").strip().lower()
+    if override in ("1", "true", "yes", "on"):
+        return False
+    # Tests mock this function and don't want subprocess isolation —
+    # otherwise the child wouldn't see the mock and would do real HTTP.
+    # Detect by the unittest module being imported AND a pytest/unittest
+    # runner currently in sys.argv.
+    if "unittest" in sys.modules and any(
+        "unittest" in a or "pytest" in a or "_test_runner" in a for a in sys.argv[:2]
+    ):
+        return False
+    # Default: isolate when we can see we're on Termux/Android (the
+    # cloud-phone environment where the segfault was observed).  Be
+    # conservative on dev machines so behavior matches the old code.
+    if os.environ.get("TERMUX_VERSION"):
+        return True
+    if os.environ.get("ANDROID_ROOT") or os.environ.get("ANDROID_DATA"):
+        return True
+    return False
+
+
+def _remote_license_run_check(cfg: dict[str, Any]) -> tuple[str, str]:
+    """Public entry — dispatches to subprocess-isolated path on Termux.
+
+    Backwards-compatible signature (used by every caller and mocked by
+    many tests).  Production callers on Termux/Android transparently
+    get SIGSEGV isolation; dev/CI callers get the legacy in-process
+    behaviour so unit tests continue to work.
+    """
+    if _should_isolate_license_check():
+        return _remote_license_check_isolated(cfg)
+    return _remote_license_check_direct(cfg)
 
 
 def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool) -> bool:
@@ -242,6 +455,16 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             pass  # non-fatal; continue with current cfg
 
         lic = cfg.setdefault("license", {})
+
+        # Cache fast-path: if we successfully checked the license recently,
+        # skip the remote call entirely.  Real-device evidence shows the
+        # network code path can segfault Python intermittently on Termux
+        # (probe p-39924732cd, rc=-11 at STEP:license_remote_check); the
+        # cached result is enough to open the menu safely.
+        if _license_cache_is_fresh_active(lic):
+            _print_license_ok(use_color)
+            return True
+
         key = (lic.get("key") or "").strip()
 
         if not key:
@@ -270,6 +493,10 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             key = norm
 
         try:
+            # _remote_license_run_check dispatches to a child subprocess
+            # on Termux/Android (probe p-39924732cd: in-process network
+            # code can SIGSEGV the parent).  Tests / dev machines keep
+            # the legacy in-process behaviour.
             result, msg = _remote_license_run_check(cfg)
         except Exception as exc:  # noqa: BLE001
             _print_license_err(f"License check failed: {exc}", use_color)
@@ -281,6 +508,15 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
                 _persist_license_status(cfg, "active")
             except Exception:  # noqa: BLE001
                 pass
+            return True
+
+        # Offline grace: a transient failure (server unavailable, child
+        # crash) must not lock out a user whose cached license is still
+        # ``active`` and was confirmed within the grace window.  Keep the
+        # last_status / last_check_at untouched so the next attempt can
+        # still re-verify.
+        if result in _LICENSE_TRANSIENT_RESULTS and _license_should_offline_grace(lic):
+            _print_license_ok(use_color)
             return True
 
         try:
@@ -3484,15 +3720,70 @@ def cmd_diag_startup(args: argparse.Namespace) -> int:
         return 4
 
     try:
-        _step("license_remote_check")
-        # We deliberately exercise the same network call cmd_menu does
-        # (via safe_http → curl subprocess on Termux).  If THIS step
-        # segfaults the child returns -11 and the probe's last_step is
-        # ``license_remote_check`` — instant diagnosis.
-        result, msg = _remote_license_run_check(cfg)
-        _ok("license_remote_check", f"result={result}")
+        _step("license_cache_fast_path")
+        cached = _license_cache_is_fresh_active(cfg.get("license") or {})
+        _ok("license_cache_fast_path", f"hit={cached}")
     except Exception as exc:  # noqa: BLE001
-        _err("license_remote_check", exc)
+        _err("license_cache_fast_path", exc)
+
+    # Granular trace of the remote check.  Real-device probe
+    # ``p-39924732cd`` showed the parent process dies at
+    # ``STEP:license_remote_check`` — but didn't tell us WHICH sub-call.
+    # We now print a STEP for each sub-call so the next crash points
+    # at the exact line that segfaults libc / openssl / urllib.
+    try:
+        _step("license_sync_install_id")
+        from .license import sync_install_id_with_config  # noqa: PLC0415
+        _iid = sync_install_id_with_config(cfg.setdefault("license", {}))
+        _ok("license_sync_install_id", f"iid_short={(_iid or '')[:8]}")
+    except Exception as exc:  # noqa: BLE001
+        _err("license_sync_install_id", exc)
+
+    try:
+        _step("license_get_device_model")
+        from .license import get_public_device_model  # noqa: PLC0415
+        _model = get_public_device_model()
+        _ok("license_get_device_model", f"model={_model[:32]}")
+    except Exception as exc:  # noqa: BLE001
+        _err("license_get_device_model", exc)
+
+    try:
+        _step("license_safe_http_backend")
+        from . import safe_http as _sh  # noqa: PLC0415
+        _backend = _sh._http_backend()
+        _ok("license_safe_http_backend", f"backend={_backend}")
+    except Exception as exc:  # noqa: BLE001
+        _err("license_safe_http_backend", exc)
+
+    try:
+        _step("license_curl_available")
+        from . import safe_http as _sh2  # noqa: PLC0415
+        _have = _sh2._curl_available()
+        _ok("license_curl_available", f"have={_have}")
+    except Exception as exc:  # noqa: BLE001
+        _err("license_curl_available", exc)
+
+    try:
+        _step("license_remote_check_isolated")
+        # Routes through the same code path cmd_menu now uses (child
+        # subprocess), so a SIGSEGV here is captured as a clean
+        # returncode in the diagnoser — the probe sees a normal
+        # OK / ERROR line and we can keep tracing past it.
+        result, msg = _remote_license_check_isolated(cfg, timeout=20)
+        _ok("license_remote_check_isolated", f"result={result}")
+    except Exception as exc:  # noqa: BLE001
+        _err("license_remote_check_isolated", exc)
+
+    try:
+        _step("license_remote_check_direct")
+        # The unprotected call — only run AFTER the isolated one so the
+        # child still finishes the rest of the diagnostic if this dies.
+        # If the child segfaults right here, last_step ==
+        # license_remote_check_direct in the parent probe.
+        result2, msg2 = _remote_license_run_check(cfg)
+        _ok("license_remote_check_direct", f"result={result2}")
+    except Exception as exc:  # noqa: BLE001
+        _err("license_remote_check_direct", exc)
 
     try:
         _step("import_supervisor")
