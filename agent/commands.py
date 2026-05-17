@@ -3335,6 +3335,51 @@ def cmd_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_probe(args: argparse.Namespace) -> int:
+    """Hidden: capture sanitized device evidence for a real fix.
+
+    Always runs read-only.  Writes a single JSON file at
+    ``~/.deng-tool/rejoin/data/probes/probe-<ts>-<id>.json``.  With
+    ``--upload`` it POSTs the same JSON to the install API and prints the
+    short probe id the user can paste in chat.
+
+    The command never raises; every collection step is guarded and any
+    failure becomes a ``probe["errors"]`` entry.
+    """
+    from . import probe as _p
+
+    sys.stdout.write("Collecting device evidence... (this may take ~10s)\n")
+    sys.stdout.flush()
+    started = _p.time.monotonic()
+    try:
+        data = _p.collect_probe()
+    except Exception as exc:  # noqa: BLE001 — should be impossible, but be safe.
+        sys.stdout.write(f"probe failed: {exc}\n")
+        return 1
+    elapsed = _p.time.monotonic() - started
+    path = _p.save_probe(data)
+    size = path.stat().st_size
+    sys.stdout.write(
+        f"probe saved: {path} ({size / 1024:.1f} KB, {len(data.get('errors') or [])} step errors, {elapsed:.1f}s)\n"
+    )
+
+    if getattr(args, "upload", False):
+        sys.stdout.write("uploading...\n")
+        sys.stdout.flush()
+        ok, info = _p.upload_probe(data)
+        if ok:
+            sys.stdout.write(f"probe_id: {info}\n")
+            sys.stdout.write("share this id in chat.\n")
+        else:
+            sys.stdout.write(f"upload failed: {info}\n")
+            sys.stdout.write("paste the JSON file contents in chat instead.\n")
+            return 1
+    else:
+        sys.stdout.write("to share, either paste the JSON file in chat, or run:\n")
+        sys.stdout.write("  deng-rejoin probe --upload\n")
+    return 0
+
+
 def cmd_doctor_install(args: argparse.Namespace) -> int:
     """Verify the on-disk install is wired to the new build.
 
@@ -3553,6 +3598,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help=argparse.SUPPRESS)
     parser.add_argument("--discover-layout-keys", dest="discover_layout_keys",
                         action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--probe", dest="probe", action="store_true",
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--upload", dest="upload", action="store_true",
+                        help=argparse.SUPPRESS)
 
     # Pre-process argv so hidden positional subcommands don't trip choices validation.
     import sys as _sys
@@ -3565,6 +3614,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         argv[0] = "--support-bundle"
     if argv and argv[0] in ("discover-layout-keys", "discover_layout_keys"):
         argv[0] = "--discover-layout-keys"
+    if argv and argv[0] in ("probe",):
+        argv[0] = "--probe"
 
     # Use parse_known_args so that `deng-rejoin doctor layout` doesn't fail
     # with "unrecognized arguments: layout".
@@ -3620,6 +3671,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ns.resolved_command = "discover-layout-keys"
     elif getattr(ns, "support_bundle", False):
         ns.resolved_command = "support-bundle"
+    elif getattr(ns, "probe", False):
+        ns.resolved_command = "probe"
     elif getattr(ns, "doctor_install", False):
         ns.resolved_command = "doctor-install"
     elif getattr(ns, "layout_test", False) or getattr(ns, "root_state", False) or getattr(ns, "layout_reset", False):
@@ -3686,6 +3739,7 @@ def _handlers() -> dict[str, Any]:
         "support-bundle": cmd_support_bundle,
         "discover-layout-keys": cmd_discover_layout_keys,
         "doctor-install": cmd_doctor_install,
+        "probe": cmd_probe,
     }
 
 

@@ -710,6 +710,158 @@ def _route_public_install(
         script = render_public_bootstrap(base_url=base, requested=tail, bundle_etag=_bundle_etag())
         return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
+    # ── Dev-probe upload (internal test channel only) ─────────────────────────
+    # The cloud-phone client POSTs sanitized device evidence here so the
+    # operator can read it on the PM2 host without paste-buffer limits.  The
+    # endpoint is intentionally simple: shared-secret header, size cap, no
+    # license check, channel-locked to ``main-dev``.
+    if path == "/api/dev-probe/upload":
+        from agent.dev_probe_store import store_probe
+
+        if method != "POST":
+            return (
+                json.dumps({"error": "POST required"}).encode("utf-8"),
+                405,
+                "application/json",
+                None,
+            )
+        token = (environ.get("HTTP_X_DEV_PROBE_TOKEN") or "").strip()
+        # Token check: env-var override wins, else accept the baked-in value
+        # so an out-of-the-box test install can upload.  The value is not a
+        # secret — the probe content is already sanitized — but it gives us
+        # one knob to disable in case of abuse.
+        expected = os.environ.get("DENG_DEV_PROBE_TOKEN", "deng-rejoin-dev-probe-v1")
+        if token != expected:
+            return (
+                json.dumps({"error": "invalid token"}).encode("utf-8"),
+                401,
+                "application/json",
+                None,
+            )
+        # Hard size cap — anything bigger is rejected without reading.
+        try:
+            content_length = int(environ.get("CONTENT_LENGTH") or "0")
+        except ValueError:
+            content_length = 0
+        if content_length <= 0 or content_length > 4 * 1024 * 1024:  # 4 MB
+            return (
+                json.dumps({"error": "payload too large or missing"}).encode("utf-8"),
+                413,
+                "application/json",
+                None,
+            )
+        try:
+            raw = environ["wsgi.input"].read(content_length) or b""
+        except Exception as exc:  # noqa: BLE001
+            log.warning("dev-probe upload read failed: %s", exc)
+            return (
+                json.dumps({"error": "read failed"}).encode("utf-8"),
+                400,
+                "application/json",
+                None,
+            )
+        # Gzip-decode if the client compressed.  We never trust the encoding
+        # header alone — we look at the magic bytes too.
+        if (environ.get("HTTP_CONTENT_ENCODING") or "").lower() == "gzip" or (
+            len(raw) >= 2 and raw[:2] == b"\x1f\x8b"
+        ):
+            try:
+                import gzip as _gz
+
+                raw = _gz.decompress(raw)
+            except Exception as exc:  # noqa: BLE001
+                return (
+                    json.dumps({"error": f"gzip decompress failed: {exc}"}).encode("utf-8"),
+                    400,
+                    "application/json",
+                    None,
+                )
+        if len(raw) > 16 * 1024 * 1024:  # 16 MB decompressed
+            return (
+                json.dumps({"error": "decompressed payload too large"}).encode("utf-8"),
+                413,
+                "application/json",
+                None,
+            )
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            return (
+                json.dumps({"error": f"invalid JSON: {exc}"}).encode("utf-8"),
+                400,
+                "application/json",
+                None,
+            )
+        if not isinstance(payload, dict) or "probe_version" not in payload:
+            return (
+                json.dumps({"error": "missing probe_version"}).encode("utf-8"),
+                400,
+                "application/json",
+                None,
+            )
+        probe_id, saved_path = store_probe(payload)
+        log.info("dev-probe stored: id=%s path=%s size=%d", probe_id, saved_path, len(raw))
+        return (
+            json.dumps({"probe_id": probe_id, "stored_at": str(saved_path)}).encode("utf-8"),
+            201,
+            "application/json",
+            [("Cache-Control", "no-store")],
+        )
+
+    if path == "/api/dev-probe/list":
+        from agent.dev_probe_store import list_probes
+
+        if method != "GET":
+            return (
+                json.dumps({"error": "GET required"}).encode("utf-8"),
+                405,
+                "application/json",
+                None,
+            )
+        # No auth: list-only metadata, not the probe content.
+        items = list_probes(limit=50)
+        return (
+            json.dumps({"items": items}, sort_keys=True).encode("utf-8"),
+            200,
+            "application/json",
+            [("Cache-Control", "no-store")],
+        )
+
+    if path.startswith("/api/dev-probe/"):
+        # Single probe fetch by id.  No bearer auth — content is already
+        # sanitized; operator reads it on PM2 host.
+        from agent.dev_probe_store import read_probe
+
+        if method != "GET":
+            return (
+                json.dumps({"error": "GET required"}).encode("utf-8"),
+                405,
+                "application/json",
+                None,
+            )
+        probe_id = path[len("/api/dev-probe/"):].strip()
+        if not probe_id or "/" in probe_id or ".." in probe_id:
+            return (
+                json.dumps({"error": "bad id"}).encode("utf-8"),
+                400,
+                "application/json",
+                None,
+            )
+        data = read_probe(probe_id)
+        if data is None:
+            return (
+                json.dumps({"error": "not found"}).encode("utf-8"),
+                404,
+                "application/json",
+                None,
+            )
+        return (
+            json.dumps(data, sort_keys=True).encode("utf-8"),
+            200,
+            "application/json",
+            [("Cache-Control", "no-store")],
+        )
+
     if path == "/api/install/authorize":
         if method != "POST":
             return (
