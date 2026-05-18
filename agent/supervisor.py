@@ -407,7 +407,7 @@ class _PackageWorker(threading.Thread):
 
         while not self.stop_event.is_set():
             try:
-                if not cfg.get("auto_rejoin_enabled") or not sup.get("enabled", True):
+                if not sup.get("enabled", True):
                     self._set_status(STATUS_OFFLINE, "supervisor disabled")
                     db.insert_heartbeat("disabled", {"package": self.package})
                     self._sleep(interval)

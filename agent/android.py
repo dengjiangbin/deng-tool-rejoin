@@ -1029,30 +1029,35 @@ def masked_command_for_log(args: Iterable[str]) -> str:
 
 
 def get_memory_info() -> dict[str, int]:
-    """Read /proc/meminfo. Returns dict with total_mb, free_mb, percent_free."""
-    content = ""
+    """Read /proc/meminfo. Returns dict with total_mb, free_mb, percent_free.
+
+    Pure Python file read only — no subprocess fallback to avoid the
+    fork/exec segfault that can occur on Termux/Python 3.13.  Any read
+    or parse failure returns zeros so callers always get a valid dict.
+    """
     try:
         with open("/proc/meminfo", "r", encoding="utf-8", errors="replace") as fh:
             content = fh.read()
-    except OSError:
-        result = run_command(["cat", "/proc/meminfo"], timeout=3)
-        if result.ok:
-            content = result.stdout
+    except Exception:  # noqa: BLE001
+        return {"total_mb": 0, "free_mb": 0, "percent_free": 0}
     total = free = 0
-    for line in content.splitlines():
-        parts = line.split()
-        if not parts:
-            continue
-        if parts[0] == "MemTotal:" and len(parts) >= 2:
-            try:
-                total = int(parts[1]) // 1024
-            except ValueError:
-                pass
-        elif parts[0] == "MemAvailable:" and len(parts) >= 2:
-            try:
-                free = int(parts[1]) // 1024
-            except ValueError:
-                pass
+    try:
+        for line in content.splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            if parts[0] == "MemTotal:" and len(parts) >= 2:
+                try:
+                    total = int(parts[1]) // 1024
+                except (ValueError, IndexError):
+                    pass
+            elif parts[0] == "MemAvailable:" and len(parts) >= 2:
+                try:
+                    free = int(parts[1]) // 1024
+                except (ValueError, IndexError):
+                    pass
+    except Exception:  # noqa: BLE001
+        pass
     percent = int(free * 100 / total) if total > 0 else 0
     return {"total_mb": total, "free_mb": free, "percent_free": percent}
 

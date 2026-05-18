@@ -3173,6 +3173,47 @@ def cmd_start(args: argparse.Namespace) -> int:
         # Per-package phase label.  Updated in place by _phase() below.
         phase: dict[str, str] = {e["package"]: "Preparing" for e in entries}
 
+        # RAM info is cached between renders (updated every ~9s) to avoid
+        # reading /proc/meminfo on every 3-second render tick.  Defined here
+        # (before _render_phase) so _render_phase can call _get_ram_label
+        # safely during the Preparing / Boosting / Launching phases.
+        _ram_cache: dict[str, Any] = {"info": None, "next_update": 0.0}
+
+        def _get_ram_label() -> str:
+            """Return 'Available RAM: X.XX GB free / Y.YY GB total' or brief fallback."""
+            try:
+                import time as _t
+                now = _t.monotonic()
+                if now >= _ram_cache["next_update"]:
+                    try:
+                        info = android.get_memory_info()
+                        _ram_cache["info"] = info
+                    except Exception:  # noqa: BLE001
+                        _ram_cache["info"] = None
+                    _ram_cache["next_update"] = now + 9.0
+                info = _ram_cache["info"]
+                if not info:
+                    return "Available RAM: Unknown"
+                free_mb  = info.get("free_mb", 0)
+                total_mb = info.get("total_mb", 0)
+                pct_free = info.get("percent_free", 0)
+
+                def _fmt_gb(mb: int) -> str:
+                    if mb >= 1024:
+                        return f"{mb / 1024:.2f} GB"
+                    return f"{mb} MB"
+
+                if total_mb > 0:
+                    label = f"Available RAM: {_fmt_gb(free_mb)} free / {_fmt_gb(total_mb)} total"
+                else:
+                    label = f"Available RAM: {_fmt_gb(free_mb)} free"
+                if use_color:
+                    col = _ANSI_GREEN if pct_free >= 40 else (_ANSI_YELLOW if pct_free >= 20 else _ANSI_RED)
+                    label = f"{_ANSI_BOLD}{col}{label}{_ANSI_RESET}"
+                return label
+            except Exception:  # noqa: BLE001
+                return "Available RAM: Unknown"
+
         def _render_phase(_unused_note: str = "") -> None:
             """Clear + redraw the dashboard with the current phase per package.
 
@@ -3190,10 +3231,13 @@ def cmd_start(args: argparse.Namespace) -> int:
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(rows, use_color=use_color))
-            ram = _get_ram_label()
-            if ram:
-                print()
-                print(f"  {ram}")
+            try:
+                ram = _get_ram_label()
+                if ram:
+                    print()
+                    print(f"  {ram}")
+            except Exception:  # noqa: BLE001
+                pass
             print(flush=True)
 
         def _set_all_phase(label: str, note: str = "") -> None:
@@ -3495,42 +3539,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         _live_cfg["supervisor"] = _sup_sub
         _supervisor = MultiPackageSupervisor(entries, _live_cfg, initial_status=initial_status)
         _live_map = _supervisor.status_map  # dict mutated in-place by workers
-
-        # RAM info is cached between renders (updated every ~9s) to avoid
-        # running /proc/meminfo on every 3-second render tick.
-        _ram_cache: dict[str, Any] = {"info": None, "next_update": 0.0}
-
-        def _get_ram_label() -> str:
-            """Return 'Available RAM: X.XX GB free / Y.YY GB total' or brief fallback."""
-            import time as _t
-            now = _t.monotonic()
-            if now >= _ram_cache["next_update"]:
-                try:
-                    info = android.get_memory_info()
-                    _ram_cache["info"] = info
-                except Exception:  # noqa: BLE001
-                    _ram_cache["info"] = None
-                _ram_cache["next_update"] = now + 9.0
-            info = _ram_cache["info"]
-            if not info:
-                return "Available RAM: Unknown"
-            free_mb  = info.get("free_mb", 0)
-            total_mb = info.get("total_mb", 0)
-            pct_free = info.get("percent_free", 0)
-
-            def _fmt_gb(mb: int) -> str:
-                if mb >= 1024:
-                    return f"{mb / 1024:.2f} GB"
-                return f"{mb} MB"
-
-            if total_mb > 0:
-                label = f"Available RAM: {_fmt_gb(free_mb)} free / {_fmt_gb(total_mb)} total"
-            else:
-                label = f"Available RAM: {_fmt_gb(free_mb)} free"
-            if use_color:
-                col = _ANSI_GREEN if pct_free >= 40 else (_ANSI_YELLOW if pct_free >= 20 else _ANSI_RED)
-                label = f"{_ANSI_BOLD}{col}{label}{_ANSI_RESET}"
-            return label
 
         def _live_dashboard() -> None:
             """Clear screen and redraw banner + table with live status values."""
