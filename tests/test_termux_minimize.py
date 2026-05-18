@@ -217,16 +217,22 @@ class PublicEntrypointTest(unittest.TestCase):
             "  mResumedActivity=ActivityRecord{a com.termux/.app.TermuxActivity}\n"
             "    taskId=11 stackId=0\n"
         )
+        # Also provide a TaskRecord-style line so _find_termux_stack_id sees StackId=0.
+        dumpsys_with_stack = (
+            "Stack #0:\n"
+            "  TaskRecord{abc123 #11 A=com.termux U=0 StackId=0 sz=1}\n"
+        )
         readback = (
             "Window com.termux/...\n"
             "    mFrame=[0,0][252,1280]\n"
         )
         # Mocks: detect_display_info → fixed disp, run_android_command →
-        # first call returns task, second returns readback; root resize cmd
-        # always succeeds.
+        # call 1: task lookup, call 2: stack ID lookup, call 3: readback;
+        # root resize cmd always succeeds.
         with mock.patch.object(tm, "detect_display_info", return_value=disp), \
              mock.patch.object(tm.android, "run_android_command",
                                side_effect=[_fake_cmd_result(0, dumpsys_with_termux),
+                                            _fake_cmd_result(0, dumpsys_with_stack),
                                             _fake_cmd_result(0, readback)]), \
              mock.patch.object(tm.android, "detect_root",
                                return_value=_fake_root_info()), \
