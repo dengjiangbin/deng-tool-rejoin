@@ -111,6 +111,12 @@ class TestBuildStartTable(unittest.TestCase):
         table = build_start_table(rows, use_color=False)
         self.assertIn("Join Unconfirmed", table)
 
+    def test_dead_state_shown_in_table(self):
+        """Dead is a distinct state (process gone) and must appear in the table."""
+        rows = [(1, "com.moons.litesc", "Alice", "Dead")]
+        table = build_start_table(rows, use_color=False)
+        self.assertIn("Dead", table)
+
     def test_multiple_packages_all_shown(self):
         rows = [
             (1, "com.roblox.client",  "Alice", "Lobby"),

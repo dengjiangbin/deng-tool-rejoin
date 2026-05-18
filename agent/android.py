@@ -581,6 +581,17 @@ def launch_url(package: str, url: str, launch_mode: str) -> CommandResult:
     res = run_command(base[:2] + ["--windowingMode", "5"] + base[2:], timeout=PROCESS_TIMEOUT_SECONDS)
     if res.ok:
         return res
+    # Try with explicit ActivityProtocolLaunch component (confirmed in Moons clone
+    # manifests via probe p-80c42a4c03 — bypasses intent resolver ambiguity).
+    proto_component = f"{package}/com.roblox.client.ActivityProtocolLaunch"
+    comp_base = ["am", "start",
+                 "-n", proto_component,
+                 "-a", "android.intent.action.VIEW",
+                 "-c", "android.intent.category.BROWSABLE",
+                 "-d", deep_url, "-f", flags]
+    res = run_command(comp_base, timeout=PROCESS_TIMEOUT_SECONDS)
+    if res.ok:
+        return res
     res = run_command(base, timeout=PROCESS_TIMEOUT_SECONDS)
     if res.ok:
         return res
@@ -1408,6 +1419,20 @@ def launch_package_with_bounds(
             res = run_command(cmd, timeout=PROCESS_TIMEOUT_SECONDS)
             if res.ok:
                 return res, method_label + "_url"
+            # Variant: target ActivityProtocolLaunch directly (bypasses intent
+            # resolver ambiguity — confirmed present in Moons clone manifests by
+            # probe p-80c42a4c03 pm_dump).
+            proto_component = f"{package}/com.roblox.client.ActivityProtocolLaunch"
+            cmd_comp = stem + [
+                "-n", proto_component,
+                "-a", "android.intent.action.VIEW",
+                "-c", "android.intent.category.BROWSABLE",
+                "-f", "0x14208000",
+                "-d", deep_url,
+            ]
+            res = run_command(cmd_comp, timeout=PROCESS_TIMEOUT_SECONDS)
+            if res.ok:
+                return res, method_label + "_url_component"
             # Retry without extra intent flags in case device rejects them.
             cmd_nf = stem + ["-a", "android.intent.action.VIEW",
                              "-c", "android.intent.category.BROWSABLE",

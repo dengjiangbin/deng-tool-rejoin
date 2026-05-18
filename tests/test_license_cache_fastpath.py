@@ -213,7 +213,12 @@ class LicenseMenuLoopFastPathTest(unittest.TestCase):
         dispatcher.assert_called_once()
 
     def test_offline_grace_when_dispatcher_returns_unavailable(self) -> None:
-        """Cached active + transient remote failure → menu still opens."""
+        """Cached active + transient remote failure → menu still opens silently.
+
+        After the quiet-license fix (p-80c42a4c03 requirement): the offline
+        grace path is now SILENT — no "License OK" is printed.  The menu
+        returns True without any public output.
+        """
         from agent import commands  # noqa: PLC0415
         cfg = {
             "license": {
@@ -233,7 +238,8 @@ class LicenseMenuLoopFastPathTest(unittest.TestCase):
                 cfg, argparse.Namespace(), use_color=False,
             )
         self.assertTrue(ok, "offline grace must allow menu through")
-        ok_print.assert_called()
+        # Quiet mode: no "License OK" on grace path.
+        ok_print.assert_not_called()
 
 
 # ── New: cache-integrity regression for probe p-09484eaab4 ───────────────────

@@ -67,6 +67,7 @@ def _reapply_layout_for_package(package: str) -> None:
 
 STATUS_ONLINE            = "Online"
 STATUS_OFFLINE           = "Offline"
+STATUS_DEAD              = "Dead"              # Process confirmed gone (force-closed / crashed)
 STATUS_LAUNCHING         = "Launching"
 STATUS_CHECKING          = "Preparing"
 STATUS_BACKGROUND        = "Background"
@@ -91,6 +92,11 @@ _HEALTHY_STATES = frozenset({
     STATUS_ONLINE, STATUS_LOBBY, STATUS_IN_SERVER, STATUS_JOIN_UNCONFIRMED,
     STATUS_LAUNCHED,
 })
+
+# How long to stay in Join Unconfirmed before triggering a URL re-launch.
+# The URL IS delivered but Roblox may be in the lobby (share code expired,
+# auth needed, etc.).  After this timeout the supervisor re-sends the URL.
+_JOIN_UNCONFIRMED_RELAUNCH_SECONDS = 120
 
 
 class Supervisor:
@@ -220,6 +226,7 @@ class _PackageWorker(threading.Thread):
         self.has_private_url: bool = False   # set at start of run()
         self._url_launched: bool = False     # was the LAST launch done with a URL?
         self.launching_since: float | None = None  # when Launching/Joining was set
+        self.join_unconfirmed_since: float | None = None  # for URL re-launch timeout
         # Heartbeat-based playing-state tracker.  Lazily imported so the
         # supervisor still works in test environments that don't have the
         # full agent package installed.
@@ -541,6 +548,47 @@ class _PackageWorker(threading.Thread):
                     self._set_status(target, "Heartbeat OK")
                     db.insert_heartbeat("healthy", {"package": self.package})
                     log_event(self.logger, "info", "heartbeat", status="healthy", package=self.package)
+
+                    # ── Join Unconfirmed timeout: re-launch with URL ──────────
+                    # If Roblox has been "healthy" but stuck at Join Unconfirmed
+                    # for too long (share code expired, lobby landed, auth
+                    # needed), re-send the private URL to put the user back in
+                    # the server.  Only triggers when a URL was launched AND
+                    # the package has been in this state past the timeout.
+                    current_after = self.status_map.get(self.package, "")
+                    if (
+                        current_after == STATUS_JOIN_UNCONFIRMED
+                        and self.has_private_url
+                        and self._can_auto_reconnect()
+                        and self._restart_budget_ok()
+                    ):
+                        if self.join_unconfirmed_since is None:
+                            self.join_unconfirmed_since = now_ts
+                        elif (now_ts - self.join_unconfirmed_since) > _JOIN_UNCONFIRMED_RELAUNCH_SECONDS:
+                            log_event(
+                                self.logger, "info", "join_unconfirmed_relaunch",
+                                package=self.package,
+                                elapsed_seconds=int(now_ts - self.join_unconfirmed_since),
+                            )
+                            self.join_unconfirmed_since = None
+                            self._set_status(STATUS_JOINING, "Re-sending private server URL")
+                            _reapply_layout_for_package(self.package)
+                            pkg_cfg = dict(cfg)
+                            pkg_cfg["roblox_package"] = self.package
+                            result = perform_rejoin(
+                                pkg_cfg, reason="join_unconfirmed_retry",
+                                package_entry=self.entry, no_force_stop=True,
+                            )
+                            self._record_restart()
+                            if result.success:
+                                self._url_launched = True
+                                self.launching_since = time.time()
+                            else:
+                                self._set_status(STATUS_WARNING, "URL re-launch failed")
+                    else:
+                        if current_after != STATUS_JOIN_UNCONFIRMED:
+                            self.join_unconfirmed_since = None
+
                     self._sleep(interval)
                     continue
 
@@ -661,12 +709,10 @@ class _PackageWorker(threading.Thread):
                 elapsed = now - self.grace_start
 
                 if elapsed < grace:
-                    # During the grace window with NO heartbeat, show
-                    # Reconnecting (not Offline) so the user sees recovery
-                    # in progress, not a hard "dead" state.
-                    self._set_status(
-                        STATUS_RECONNECTING, f"grace {int(grace - elapsed)}s",
-                    )
+                    # During the grace window, show Dead immediately so the
+                    # user sees the package is gone.  Reconnection starts
+                    # once the grace period expires.
+                    self._set_status(STATUS_DEAD, f"process gone ({int(grace - elapsed)}s until rejoin)")
                     self._sleep(min(5, grace - elapsed))
                     continue
 

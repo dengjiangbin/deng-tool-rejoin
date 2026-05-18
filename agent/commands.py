@@ -421,10 +421,14 @@ def _remote_license_run_check(cfg: dict[str, Any]) -> tuple[str, str]:
 
 
 def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool) -> bool:
-    """Return True when remote license check is ``active`` (updates ``last_status``)."""
+    """Return True when remote license check is ``active`` (updates ``last_status``).
+
+    Quiet by design: valid licenses produce NO public output so the clean
+    logo + menu appears without "License OK" spam on every startup.
+    """
     result, msg = _remote_license_run_check(cfg)
     if result == "active":
-        _print_license_ok(use_color)
+        # Silent success — do not print "License OK" on every startup.
         _persist_license_status(cfg, "active")
         return True
     # Cache integrity: see _ensure_remote_license_menu_loop for rationale.
@@ -512,8 +516,8 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
         # network code path can segfault Python intermittently on Termux
         # (probe p-39924732cd, rc=-11 at STEP:license_remote_check); the
         # cached result is enough to open the menu safely.
+        # Silent: no "License OK" output — the user's clean menu appears directly.
         if _license_cache_is_fresh_active(lic):
-            _print_license_ok(use_color)
             return True
 
         key = (lic.get("key") or "").strip()
@@ -554,7 +558,7 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             result, msg = "error", str(exc)
 
         if result == "active":
-            _print_license_ok(use_color)
+            # Silent success on normal startup — clean menu appears next.
             try:
                 _persist_license_status(cfg, "active")
             except Exception:  # noqa: BLE001
@@ -567,8 +571,7 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
         # last_status / last_check_at untouched so the next attempt can
         # still re-verify.
         if result in _LICENSE_TRANSIENT_RESULTS and _license_should_offline_grace(lic):
-            _print_license_ok(use_color)
-            return True
+            return True  # Silent — cached license still valid, no user action needed
 
         # Cache integrity: ONLY persist *definitive* answers
         # (active / wrong_device / not_found / revoked / expired / inactive /
@@ -2663,6 +2666,7 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Skipped":      _ANSI_YELLOW,
         "Partial":      _ANSI_YELLOW,
         "Failed":       _ANSI_RED,
+        "Dead":         _ANSI_RED,
         "Offline":      _ANSI_RED,
         "Closed":       _ANSI_RED,
         "Background":   _ANSI_YELLOW,
@@ -2742,6 +2746,7 @@ _FINAL_SUMMARY_ORDER: tuple[tuple[str, str], ...] = (
     ("in background", "in background."),
     ("warning", "with warnings."),
     ("failed", "failed."),
+    ("dead", "dead (recovering)."),
     ("offline", "offline."),
     ("unknown", "unknown."),
 )
@@ -2756,6 +2761,7 @@ _STATE_TO_SUMMARY: dict[str, str] = {
     "Launching":         "launching",
     "Failed":            "failed",
     "Join Failed":       "failed",
+    "Dead":              "dead",           # process confirmed gone
     "Offline":           "offline",
     "Closed":            "offline",
     "Warning":           "warning",
@@ -3167,8 +3173,14 @@ def cmd_start(args: argparse.Namespace) -> int:
         # Per-package phase label.  Updated in place by _phase() below.
         phase: dict[str, str] = {e["package"]: "Preparing" for e in entries}
 
-        def _render_phase(extra_note: str = "") -> None:
-            """Clear + redraw the dashboard with the current phase per package."""
+        def _render_phase(_unused_note: str = "") -> None:
+            """Clear + redraw the dashboard with the current phase per package.
+
+            Shows only: logo + table + available RAM.
+            State labels in the table already describe what is happening;
+            additional notes below the table are suppressed (user feedback:
+            "useless text explaining state" when state is in the table).
+            """
             _clear_terminal()
             print_banner(use_color=use_color)
             print()
@@ -3178,9 +3190,10 @@ def cmd_start(args: argparse.Namespace) -> int:
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(rows, use_color=use_color))
-            if extra_note:
+            ram = _get_ram_label()
+            if ram:
                 print()
-                print(extra_note)
+                print(f"  {ram}")
             print(flush=True)
 
         def _set_all_phase(label: str, note: str = "") -> None:
@@ -3488,7 +3501,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         _ram_cache: dict[str, Any] = {"info": None, "next_update": 0.0}
 
         def _get_ram_label() -> str:
-            """Return 'RAM: NNN MB (NN%)' or '' if unavailable."""
+            """Return 'Available RAM: X.XX GB free / Y.YY GB total' or brief fallback."""
             import time as _t
             now = _t.monotonic()
             if now >= _ram_cache["next_update"]:
@@ -3499,11 +3512,21 @@ def cmd_start(args: argparse.Namespace) -> int:
                     _ram_cache["info"] = None
                 _ram_cache["next_update"] = now + 9.0
             info = _ram_cache["info"]
-            if not info or not info.get("total_mb"):
-                return ""
-            free_mb  = info["free_mb"]
-            pct_free = info["percent_free"]
-            label = f"RAM available: {free_mb} MB ({pct_free}%)"
+            if not info:
+                return "Available RAM: Unknown"
+            free_mb  = info.get("free_mb", 0)
+            total_mb = info.get("total_mb", 0)
+            pct_free = info.get("percent_free", 0)
+
+            def _fmt_gb(mb: int) -> str:
+                if mb >= 1024:
+                    return f"{mb / 1024:.2f} GB"
+                return f"{mb} MB"
+
+            if total_mb > 0:
+                label = f"Available RAM: {_fmt_gb(free_mb)} free / {_fmt_gb(total_mb)} total"
+            else:
+                label = f"Available RAM: {_fmt_gb(free_mb)} free"
             if use_color:
                 col = _ANSI_GREEN if pct_free >= 40 else (_ANSI_YELLOW if pct_free >= 20 else _ANSI_RED)
                 label = f"{_ANSI_BOLD}{col}{label}{_ANSI_RESET}"
