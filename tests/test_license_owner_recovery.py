@@ -152,6 +152,12 @@ class TestOwnerRecoveryLocal(unittest.TestCase):
             self.assertEqual(len(backups), 1)
 
         self.assertEqual(store.count_user_keys(uid), 0)
+        # Clear the cooldown timestamp so the test can create another key
+        # immediately (cooldown only matters in real-time usage, not in tests).
+        db = store._load()
+        if uid in db.get("users", {}):
+            db["users"][uid]["last_key_generated_at"] = None
+            store._save(db)
         store.create_key_for_user(uid)
         self.assertEqual(store.count_user_keys(uid), 1)
 

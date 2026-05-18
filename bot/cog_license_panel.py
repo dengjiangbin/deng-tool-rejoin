@@ -41,6 +41,7 @@ from agent.license_panel import (
     BUTTON_RESET_HWID,
     BUTTON_SELECT_VERSION,
     SLASH_GROUP,
+    build_generate_cooldown_response,
     build_generate_limit_response,
     build_generate_success_response,
     build_key_list_response,
@@ -68,12 +69,15 @@ from agent.license_store import (
     ActiveKeyWarning,
     BaseLicenseStore,
     ExportStorageUnavailable,
+    ExpiredKeyError,
+    GenerationCooldownError,
     KeyAlreadySelfOwned,
     KeyNotFoundError,
     KeyOwnershipError,
     NoActiveBindingError,
     ResetLimitError,
     UserLimitError,
+    get_license_stats_for_discord_user,
 )
 
 log = logging.getLogger("deng.rejoin.bot.panel")
@@ -136,6 +140,63 @@ async def _respond_ephemeral_payload(
         await interaction.response.send_message(**send_kw)
 
 
+async def _post_license_log(
+    guild: discord.Guild,
+    store: "BaseLicenseStore",
+    *,
+    title: str,
+    user: discord.User | discord.Member,
+    key_serial: str,
+    event_type: str,
+) -> None:
+    """Post a license event log embed to the configured license log channel.
+
+    Silently does nothing if no log channel is configured for this guild or
+    if the channel cannot be found / messaged.
+    """
+    try:
+        cfg = store.get_license_log_config(str(guild.id))
+        if not cfg:
+            return
+        channel_id = int(cfg.get("channel_id", 0))
+        channel = guild.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return
+
+        uid = str(user.id)
+        stats = get_license_stats_for_discord_user(store, uid)
+
+        key_field_name = {
+            "generated": "Generated Key",
+            "redeemed": "Redeemed Key",
+            "reset_hwid": "Reset Key",
+        }.get(event_type, "Key")
+
+        fields = [
+            {"name": "User", "value": f"<@{uid}>", "inline": True},
+            {"name": key_field_name, "value": f"`{key_serial}`", "inline": True},
+            {"name": "Current Key Generated", "value": str(stats["key_generated_count"]), "inline": True},
+            {"name": "Current Key Redeemed", "value": str(stats["key_redeemed_count"]), "inline": True},
+            {"name": "Current Unbound Key", "value": str(stats["unbound_key_count"]), "inline": True},
+            {"name": "Current Bound Key", "value": str(stats["bound_key_count"]), "inline": True},
+            {"name": "Current Reset HWID", "value": f"{stats['reset_hwid_count']} times", "inline": True},
+        ]
+        embed = discord.Embed(
+            title=title,
+            color=discord.Color.from_rgb(0, 0, 0),
+        )
+        for field in fields:
+            embed.add_field(
+                name=field["name"],
+                value=field["value"],
+                inline=field.get("inline", True),
+            )
+        embed.set_footer(text="DENG Tool: Rejoin")
+        await channel.send(embed=embed)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("_post_license_log error: %s", exc)
+
+
 # ── Redeem modal ──────────────────────────────────────────────────────────────
 
 class RedeemModal(discord.ui.Modal, title="Redeem License Key"):
@@ -167,12 +228,22 @@ class RedeemModal(discord.ui.Modal, title="Redeem License Key"):
             self._store.redeem_key_for_user(uid, raw_key)
             display_key = normalize_license_key(raw_key)
             payload = build_redeem_success_response(display_key)
+            if interaction.guild:
+                await _post_license_log(
+                    interaction.guild, self._store,
+                    title="Key Redeemed Log",
+                    user=interaction.user,
+                    key_serial=display_key,
+                    event_type="redeemed",
+                )
         except KeyAlreadySelfOwned as exc:
             display_key = normalize_license_key(raw_key)
             payload = build_redeem_already_owned_response(
                 export_backfilled=exc.export_backfilled,
                 copyable_key=display_key,
             )
+        except ExpiredKeyError as exc:
+            payload = build_redeem_error_response(str(exc))
         except (KeyNotFoundError, KeyOwnershipError, UserLimitError) as exc:
             payload = build_redeem_error_response(str(exc))
 
@@ -363,6 +434,17 @@ class ConfirmResetButton(discord.ui.Button):
                     "success": True,
                     "message": "Device binding cleared.",
                 })
+                if interaction.guild:
+                    import asyncio
+                    asyncio.ensure_future(
+                        _post_license_log(
+                            interaction.guild, self._store,
+                            title="Reset HWID Log",
+                            user=interaction.user,
+                            key_serial=display_key,
+                            event_type="reset_hwid",
+                        )
+                    )
             except NoActiveBindingError:
                 results.append({
                     "display_key": display_key,
@@ -720,6 +802,17 @@ class PanelView(discord.ui.View):
         try:
             full_key = self._store.create_key_for_user(uid, created_by=uid)
             payload = build_generate_success_response(full_key)
+            # Post license log for key generation
+            if interaction.guild:
+                await _post_license_log(
+                    interaction.guild, self._store,
+                    title="Key Generated Log",
+                    user=interaction.user,
+                    key_serial=full_key,
+                    event_type="generated",
+                )
+        except GenerationCooldownError as exc:
+            payload = build_generate_cooldown_response(exc.remaining_seconds)
         except UserLimitError:
             payload = build_generate_limit_response(max_keys)
 
@@ -1152,6 +1245,132 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
             embed.add_field(name="License Store", value=store_lines, inline=False)
             embed.set_footer(text=f"Guild: {guild_id}")
 
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        # /license_log_channel set ────────────────────────────────────────────
+
+        _log_group = app_commands.Group(
+            name="license_log_channel",
+            description="Configure the channel where license events are logged.",
+        )
+        bot.tree.add_command(_log_group)
+
+        @_log_group.command(
+            name="set",
+            description="Set the channel for license event logs (generate/redeem/reset).",
+        )
+        @app_commands.describe(channel="Target text channel for license logs")
+        async def cmd_log_set(
+            interaction: discord.Interaction,
+            channel: discord.TextChannel,
+        ) -> None:
+            if not _is_owner(interaction.user):
+                await interaction.response.send_message(
+                    embed=self._owner_denied(), ephemeral=True
+                )
+                return
+            guild_id = str(interaction.guild_id)
+            store.save_license_log_config(guild_id, str(channel.id), str(interaction.user.id))
+            store.audit_admin_action(
+                str(interaction.user.id), "set_license_log_channel",
+                target_type="channel", target_id=str(channel.id),
+            )
+            await interaction.response.send_message(
+                f"✅ License log channel set to {channel.mention}.", ephemeral=True
+            )
+
+        @_log_group.command(
+            name="clear",
+            description="Remove the configured license log channel.",
+        )
+        async def cmd_log_clear(interaction: discord.Interaction) -> None:
+            if not _is_owner(interaction.user):
+                await interaction.response.send_message(
+                    embed=self._owner_denied(), ephemeral=True
+                )
+                return
+            guild_id = str(interaction.guild_id)
+            store.clear_license_log_config(guild_id)
+            store.audit_admin_action(str(interaction.user.id), "clear_license_log_channel")
+            await interaction.response.send_message(
+                "✅ License log channel cleared.", ephemeral=True
+            )
+
+        @_log_group.command(
+            name="status",
+            description="Show the currently configured license log channel.",
+        )
+        async def cmd_log_status(interaction: discord.Interaction) -> None:
+            if not _is_owner(interaction.user):
+                await interaction.response.send_message(
+                    embed=self._owner_denied(), ephemeral=True
+                )
+                return
+            guild_id = str(interaction.guild_id)
+            cfg = store.get_license_log_config(guild_id)
+            if cfg:
+                ch_id = cfg.get("channel_id", "?")
+                msg = f"✅ License logs → <#{ch_id}> (set by `{cfg.get('updated_by', '?')}` at `{cfg.get('updated_at', '?')}`)"
+            else:
+                msg = "❌ No license log channel configured. Use `/license_log_channel set`."
+            await interaction.response.send_message(msg, ephemeral=True)
+
+        # /license <user> ─────────────────────────────────────────────────────
+
+        @bot.tree.command(
+            name="license",
+            description="View license key stats for a Discord user (owner/admin only).",
+        )
+        @app_commands.describe(user="The Discord user to look up")
+        async def cmd_license_user(
+            interaction: discord.Interaction,
+            user: discord.User,
+        ) -> None:
+            if not _is_owner(interaction.user):
+                await interaction.response.send_message(
+                    embed=self._owner_denied(), ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+            uid = str(user.id)
+            store.get_or_create_user(uid, str(user))
+            stats = get_license_stats_for_discord_user(store, uid)
+
+            embed = discord.Embed(
+                title=f"License Stats — {user.display_name}",
+                color=discord.Color.from_rgb(0, 0, 0),
+            )
+            embed.add_field(name="User", value=f"<@{uid}> (`{uid}`)", inline=False)
+            embed.add_field(name="Current Key Generated", value=str(stats["key_generated_count"]), inline=True)
+            embed.add_field(name="Current Key Redeemed", value=str(stats["key_redeemed_count"]), inline=True)
+            embed.add_field(name="Current Unbound Key", value=str(stats["unbound_key_count"]), inline=True)
+            embed.add_field(name="Current Bound Key", value=str(stats["bound_key_count"]), inline=True)
+            embed.add_field(name="Current Reset HWID", value=f"{stats['reset_hwid_count']} times", inline=True)
+
+            # List active keys for the user (owner can see full keys where available)
+            try:
+                keys = store.list_user_keys(uid)
+                if keys:
+                    lines = []
+                    for k in keys[:10]:
+                        fk = k.get("full_key_plaintext")
+                        display = fk or k.get("masked_key", "???")
+                        status = k.get("status", "?")
+                        bound = k.get("bound_device") or "(unbound)"
+                        lines.append(f"`{display}` — {status} — {bound}")
+                    key_list = "\n".join(lines)
+                    if len(keys) > 10:
+                        key_list += f"\n…and {len(keys) - 10} more"
+                    embed.add_field(name=f"Keys ({len(keys)})", value=key_list[:1024], inline=False)
+            except Exception:  # noqa: BLE001
+                pass
+
+            embed.set_footer(text="DENG Tool: Rejoin")
+            store.audit_admin_action(
+                str(interaction.user.id), "admin_view_license",
+                target_type="user", target_id=uid,
+            )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ── Persistent view restoration ───────────────────────────────────────────

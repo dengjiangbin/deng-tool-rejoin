@@ -256,6 +256,10 @@ class TestMultipleKeys(unittest.TestCase):
         # Allow 2 keys
         self.store.set_user_max_keys("666", 2)
         self.store.create_key_for_user("666")
+        # Clear cooldown timestamp so the second immediate generation isn't blocked
+        db = self.store._load()
+        db["users"]["666"]["last_key_generated_at"] = None
+        self.store._save(db)
         self.store.create_key_for_user("666")
 
     def test_17_two_keys_listed(self):

@@ -158,14 +158,13 @@ class TestLaunchCommandConstructionWithURL(unittest.TestCase):
 
 
 class TestPerformRejoinURLState(unittest.TestCase):
-    """perform_rejoin: URL is read from effective_private_server_url."""
+    """perform_rejoin: URL-first launch — URL passed directly to launch_package_with_options."""
 
     def test_perform_rejoin_with_url_succeeds(self):
-        """Two-phase launch: Phase 1 uses None URL; Phase 2 delivers URL via launch_url.
+        """URL-first: launch_package_with_options receives the URL directly (not None).
 
-        The URL must reach android.launch_url (Phase 2), not the initial
-        launch_package_with_options call (Phase 1), which always uses None so
-        that window bounds are applied before the join URL is sent.
+        When private_server_url is set, the URL is the first thing passed to the
+        launch call — no separate phase-2 delivery via launch_url.
         """
         import agent.launcher as _launcher
         from agent.launcher import perform_rejoin
@@ -184,10 +183,10 @@ class TestPerformRejoinURLState(unittest.TestCase):
             }
         ]
 
-        phase2_urls: list = []
+        launch_url_calls: list = []
 
         def fake_launch_url(pkg, url, mode):
-            phase2_urls.append(url)
+            launch_url_calls.append(url)
             return amod.CommandResult(("am", "start"), 0, "OK", "")
 
         with unittest.mock.patch.object(amod, "launch_package_with_options") as mock_launch, \
@@ -201,15 +200,16 @@ class TestPerformRejoinURLState(unittest.TestCase):
             result = perform_rejoin(cfg, reason="start")
 
         self.assertTrue(result.success)
-        # Phase 1 must receive None (not the URL)
+        # URL-first: launch_package_with_options must receive the URL (not None)
         call_args = mock_launch.call_args
-        url_arg_p1 = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("private_url") or call_args[1].get("url")
-        self.assertIsNone(url_arg_p1, f"Phase 1 must NOT pass URL, got: {url_arg_p1}")
-        # Phase 2 must have received the URL
+        url_arg = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("private_url") or call_args[1].get("url")
+        self.assertIsNotNone(url_arg, "URL-first: launch_package_with_options must receive the URL, not None")
         self.assertTrue(
-            any("42" in str(u) or "placeId" in str(u) for u in phase2_urls),
-            f"Phase 2 (launch_url) must receive the URL, got: {phase2_urls}",
+            "42" in str(url_arg) or "placeId" in str(url_arg),
+            f"URL must include the private server ID, got: {url_arg}",
         )
+        # No separate launch_url (phase-2) call
+        self.assertEqual(launch_url_calls, [], "No separate launch_url phase-2 call in URL-first path")
 
     def test_perform_rejoin_without_url_succeeds(self):
         from agent.launcher import perform_rejoin
@@ -230,11 +230,10 @@ class TestPerformRejoinURLState(unittest.TestCase):
         self.assertTrue(result.success)
 
     def test_per_entry_url_overrides_global(self):
-        """Two-phase launch: Phase 1 launches without URL; Phase 2 delivers URL via launch_url.
+        """URL-first: entry-specific URL is passed directly to launch_package_with_options.
 
-        We verify the entry-specific URL reaches ``android.launch_url`` (Phase 2),
-        not the Phase 1 ``launch_package_with_options`` call which intentionally
-        passes None so the window bounds are applied before the URL is delivered.
+        The entry-level URL must reach the first launch call (not via a separate phase-2
+        launch_url call).  When both global and entry-level URLs are set, the entry wins.
         """
         import agent.launcher as _launcher
         from agent.launcher import perform_rejoin
@@ -254,15 +253,15 @@ class TestPerformRejoinURLState(unittest.TestCase):
             }
         ]
 
-        phase1_urls = []
-        phase2_urls = []
+        launch_opts_urls: list = []
+        launch_url_calls: list = []
 
         def fake_launch_opts(package, url=None):
-            phase1_urls.append(url)
+            launch_opts_urls.append(url)
             return (amod.CommandResult(("am", "start"), 0, "OK", ""), "am_or_resolve")
 
         def fake_launch_url(package, url, mode):
-            phase2_urls.append(url)
+            launch_url_calls.append(url)
             return amod.CommandResult(("am", "start"), 0, "OK", "")
 
         with unittest.mock.patch.object(amod, "launch_package_with_options", side_effect=fake_launch_opts), \
@@ -271,20 +270,21 @@ class TestPerformRejoinURLState(unittest.TestCase):
              unittest.mock.patch.object(_launcher, "_proc_scan_alive", return_value=True):
             perform_rejoin(cfg, reason="start", package_entry=entry)
 
-        # Phase 1: URL must be None (bounds-first, no URL)
-        self.assertEqual(phase1_urls, [None], "Phase 1 must NOT pass URL to launch_package_with_options")
-        # Phase 2: entry-specific URL must be delivered via launch_url
+        # URL-first: launch_package_with_options must receive the ENTRY_SPECIFIC URL
         self.assertTrue(
-            any("ENTRY_SPECIFIC" in str(u) for u in phase2_urls),
-            f"Expected ENTRY_SPECIFIC URL in phase2 launch_url calls, got: {phase2_urls}",
+            any("ENTRY_SPECIFIC" in str(u) for u in launch_opts_urls),
+            f"URL-first: entry-specific URL must be passed to launch_package_with_options, got: {launch_opts_urls}",
         )
+        # No separate phase-2 launch_url call
+        self.assertEqual(launch_url_calls, [],
+                         "URL-first: no separate launch_url call; URL is passed in the first launch call")
 
 
 class TestMultiPackageURLHandling(unittest.TestCase):
     """Multiple packages each get their own private URL correctly."""
 
     def test_each_package_gets_its_own_url(self):
-        """Two packages with different URLs each call launch with their specific URL."""
+        """URL-first: two packages each get their specific URL in the first launch call."""
         from agent.launcher import perform_rejoin
 
         cfg = default_config()
@@ -308,19 +308,15 @@ class TestMultiPackageURLHandling(unittest.TestCase):
             },
         ]
 
-        phase2_urls: dict[str, list] = {}
+        # URL-first: track URLs passed to launch_package_with_options (first/only call)
+        launch_opts_calls: dict[str, list] = {}
 
         def fake_launch_opts(package, url=None):
-            # Phase 1: always called with url=None in two-phase launch
+            launch_opts_calls.setdefault(package, []).append(url)
             return (amod.CommandResult(("am", "start"), 0, "OK", ""), "am_or_resolve")
-
-        def fake_launch_url(package, url, mode):
-            phase2_urls.setdefault(package, []).append(url)
-            return amod.CommandResult(("am", "start"), 0, "OK", "")
 
         import agent.launcher as _launcher
         with unittest.mock.patch.object(amod, "launch_package_with_options", side_effect=fake_launch_opts), \
-             unittest.mock.patch.object(amod, "launch_url", side_effect=fake_launch_url), \
              unittest.mock.patch.object(amod, "package_installed", return_value=True), \
              unittest.mock.patch.object(_launcher, "_proc_scan_alive", return_value=True):
             for entry in cfg["roblox_packages"]:
@@ -328,14 +324,14 @@ class TestMultiPackageURLHandling(unittest.TestCase):
                 pkg_cfg["roblox_package"] = entry["package"]
                 perform_rejoin(pkg_cfg, reason="start", package_entry=entry)
 
-        # Each package's URL must reach Phase 2 (launch_url), not Phase 1 (launch_package_with_options)
+        # URL-first: each package's URL must be in the first launch call (not a phase-2 call)
         self.assertTrue(
-            any("MAIN" in str(u) for u in phase2_urls.get("com.roblox.client", [])),
-            f"MAIN URL not found in phase2 calls for com.roblox.client: {phase2_urls}",
+            any("MAIN" in str(u) for u in launch_opts_calls.get("com.roblox.client", [])),
+            f"MAIN URL not found in launch_package_with_options calls: {launch_opts_calls}",
         )
         self.assertTrue(
-            any("ALT" in str(u) for u in phase2_urls.get("com.roblox.client.alt", [])),
-            f"ALT URL not found in phase2 calls for com.roblox.client.alt: {phase2_urls}",
+            any("ALT" in str(u) for u in launch_opts_calls.get("com.roblox.client.alt", [])),
+            f"ALT URL not found in launch_package_with_options calls: {launch_opts_calls}",
         )
 
     def test_effective_url_per_entry_independent(self):

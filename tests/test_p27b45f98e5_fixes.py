@@ -201,11 +201,16 @@ class TestRamLabelCompactFormat(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 3. Two-phase launch
+# 3. URL-first launch (probe p-316b3b040d fix — replaces two-phase)
 # ---------------------------------------------------------------------------
 
 class TestTwoPhaselaunch(unittest.TestCase):
-    """perform_rejoin must use two-phase launch for private URL."""
+    """perform_rejoin now uses URL-first single-phase launch for private URLs.
+
+    When private_server_url is set, the URL is passed directly to the first
+    (and only) launch call — no separate phase-2 delivery.
+    When blank, a plain MAIN/LAUNCHER intent is used (lobby only).
+    """
 
     def setUp(self):
         import agent.android as amod
@@ -218,15 +223,15 @@ class TestTwoPhaselaunch(unittest.TestCase):
         cfg = _default_config()
         cfg["private_server_url"] = url
 
-        phase1_urls: list = []
-        phase2_urls: list = []
+        launch_opts_urls: list = []
+        launch_url_calls: list = []
 
         def fake_launch_opts(package, url_arg=None):
-            phase1_urls.append(url_arg)
+            launch_opts_urls.append(url_arg)
             return (self.amod.CommandResult(("am", "start"), 0, "OK", ""), "am_or_resolve")
 
         def fake_launch_url(pkg, u, mode):
-            phase2_urls.append(u)
+            launch_url_calls.append(u)
             return self.amod.CommandResult(("am", "start"), 0, "OK", "")
 
         with unittest.mock.patch.object(self.amod, "launch_package_with_options", side_effect=fake_launch_opts), \
@@ -235,43 +240,46 @@ class TestTwoPhaselaunch(unittest.TestCase):
              unittest.mock.patch.object(_launcher, "_proc_scan_alive", return_value=True):
             result = perform_rejoin(cfg, reason="start")
 
-        return result, phase1_urls, phase2_urls
+        return result, launch_opts_urls, launch_url_calls
 
-    def test_phase1_never_passes_url(self):
-        """Phase 1 (launch_package_with_options) must receive url=None."""
+    def test_url_first_passes_url_directly(self):
+        """URL-first: launch_package_with_options must receive the URL (not None) when set."""
         url = "https://www.roblox.com/share?code=abc123&type=Server"
-        _, phase1_urls, _ = self._run_perform_rejoin(url)
-        self.assertEqual(phase1_urls, [None],
-                         "Phase 1 must always pass url=None to launch_package_with_options")
-
-    def test_phase2_receives_url_when_set(self):
-        """Phase 2 (launch_url) must be called with the deep-linked private URL."""
-        url = "https://www.roblox.com/share?code=abc123&type=Server"
-        _, _, phase2_urls = self._run_perform_rejoin(url)
-        self.assertTrue(len(phase2_urls) > 0, "Phase 2 launch_url must be called when URL is set")
-        # The URL should be converted to roblox:// deep link
+        _, launch_opts_urls, _ = self._run_perform_rejoin(url)
+        self.assertEqual(len(launch_opts_urls), 1, "launch_package_with_options called exactly once")
+        delivered = launch_opts_urls[0]
+        self.assertIsNotNone(delivered, "URL-first: url_arg must NOT be None when private_server_url is set")
         self.assertTrue(
-            any("roblox://" in str(u) or "abc123" in str(u) for u in phase2_urls),
-            f"Phase 2 must deliver the URL (possibly converted), got: {phase2_urls}",
+            "roblox://" in str(delivered) or "abc123" in str(delivered),
+            f"URL must be the private server deep link, got: {delivered}",
         )
 
-    def test_no_phase2_when_url_blank(self):
-        """When private URL is blank (and no launch_url fallback), Phase 2 must NOT be called."""
+    def test_no_separate_launch_url_call_when_url_set(self):
+        """URL-first: separate launch_url (old phase-2) must NOT be called after the main launch."""
+        url = "https://www.roblox.com/share?code=abc123&type=Server"
+        _, _, launch_url_calls = self._run_perform_rejoin(url)
+        self.assertEqual(launch_url_calls, [],
+                         "No separate launch_url phase-2 call must occur in the URL-first path")
+
+    def test_blank_url_launches_with_none(self):
+        """When private URL is blank (no launch_url fallback), launch receives url=None."""
         import agent.launcher as _launcher
         from agent.launcher import perform_rejoin
 
         cfg = _default_config()
         cfg["private_server_url"] = ""
-        cfg["launch_url"] = ""      # also blank so no fallback
-        cfg["launch_mode"] = "app"  # app mode: no URL fallback
+        cfg["launch_url"] = ""
+        cfg["launch_mode"] = "app"
 
-        phase2_urls: list = []
+        launch_opts_urls: list = []
+        launch_url_calls: list = []
 
         def fake_launch_opts(package, url_arg=None):
+            launch_opts_urls.append(url_arg)
             return (self.amod.CommandResult(("am", "start"), 0, "OK", ""), "am_or_resolve")
 
         def fake_launch_url(pkg, u, mode):
-            phase2_urls.append(u)
+            launch_url_calls.append(u)
             return self.amod.CommandResult(("am", "start"), 0, "OK", "")
 
         with unittest.mock.patch.object(self.amod, "launch_package_with_options", side_effect=fake_launch_opts), \
@@ -280,11 +288,13 @@ class TestTwoPhaselaunch(unittest.TestCase):
              unittest.mock.patch.object(_launcher, "_proc_scan_alive", return_value=True):
             perform_rejoin(cfg, reason="start")
 
-        self.assertEqual(phase2_urls, [],
-                         "Phase 2 must NOT deliver any URL when private_server_url is blank")
+        self.assertEqual(launch_opts_urls, [None],
+                         "Blank URL must pass url=None to launch_package_with_options (lobby-only)")
+        self.assertEqual(launch_url_calls, [],
+                         "No URL must be delivered when private_server_url is blank")
 
     def test_overall_success_returned(self):
-        """Successful two-phase launch must return RejoinResult.success=True."""
+        """URL-first launch must return RejoinResult.success=True."""
         result, _, _ = self._run_perform_rejoin("roblox://navigation/share_links?code=abc123&type=Server")
         self.assertTrue(result.success)
 
@@ -298,15 +308,15 @@ class TestTwoPhaselaunch(unittest.TestCase):
         cfg["launch_url"] = ""
         cfg["launch_mode"] = "app"
 
-        phase1_urls: list = []
-        phase2_urls: list = []
+        launch_opts_urls: list = []
+        launch_url_calls: list = []
 
         def fake_launch_opts(package, url_arg=None):
-            phase1_urls.append(url_arg)
+            launch_opts_urls.append(url_arg)
             return (self.amod.CommandResult(("am", "start"), 0, "OK", ""), "am_or_resolve")
 
         def fake_launch_url(pkg, u, mode):
-            phase2_urls.append(u)
+            launch_url_calls.append(u)
             return self.amod.CommandResult(("am", "start"), 0, "OK", "")
 
         with unittest.mock.patch.object(self.amod, "launch_package_with_options", side_effect=fake_launch_opts), \
@@ -316,8 +326,8 @@ class TestTwoPhaselaunch(unittest.TestCase):
             result = perform_rejoin(cfg, reason="start")
 
         self.assertTrue(result.success)
-        self.assertEqual(phase1_urls, [None])
-        self.assertEqual(phase2_urls, [], "No URL must be delivered when private_server_url is blank")
+        self.assertEqual(launch_opts_urls, [None])
+        self.assertEqual(launch_url_calls, [], "No URL must be delivered when private_server_url is blank")
 
 
 # ---------------------------------------------------------------------------

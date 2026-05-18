@@ -10,10 +10,20 @@ import shlex
 import shutil
 import socket
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
+# Global lock: serialize ALL subprocess.run() calls to prevent concurrent
+# fork() in a multithreaded Termux/Python 3.13 process.  Multiple
+# _PackageWorker threads calling subprocess.run() simultaneously is the
+# primary cause of SIGSEGV (probe p-316b3b040d).
+# Locking serializes health-check commands across workers — each command
+# still completes quickly (PROCESS_TIMEOUT_SECONDS), so total overhead
+# for 2-3 workers is acceptable vs. the crash risk.
+_subprocess_lock = threading.Lock()
 
 from .config import ConfigError, is_valid_package_name, normalize_package_detection_hint, validate_package_name
 from .constants import (
@@ -117,28 +127,33 @@ def run_command(args: Iterable[str], *, timeout: int = PROCESS_TIMEOUT_SECONDS) 
     first argument is auto-resolved to its ``/system/bin/`` absolute path
     when present.  This is essential on Termux where the default ``$PATH``
     does NOT include ``/system/bin``.
+
+    All subprocess.run() calls are serialized through ``_subprocess_lock``
+    to prevent concurrent fork() from multiple worker threads, which is the
+    primary cause of SIGSEGV on Termux + Python 3.13 (probe p-316b3b040d).
     """
     cmd = _maybe_resolve_first_arg(_stringify_args(args))
-    try:
-        completed = subprocess.run(
-            cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=timeout,
-            shell=False,
-            env=_safe_env(),
-        )
-        return CommandResult(tuple(cmd), completed.returncode, completed.stdout.strip(), completed.stderr.strip())
-    except FileNotFoundError as exc:
-        # If the bare name was on our list we already tried /system/bin
-        # above; nothing more to do.  Otherwise still report 127 cleanly.
-        return CommandResult(tuple(cmd), 127, "", str(exc))
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-        return CommandResult(tuple(cmd), 124, stdout.strip(), stderr.strip() or "command timed out", timed_out=True)
+    with _subprocess_lock:
+        try:
+            completed = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+                shell=False,
+                env=_safe_env(),
+            )
+            return CommandResult(tuple(cmd), completed.returncode, completed.stdout.strip(), completed.stderr.strip())
+        except FileNotFoundError as exc:
+            # If the bare name was on our list we already tried /system/bin
+            # above; nothing more to do.  Otherwise still report 127 cleanly.
+            return CommandResult(tuple(cmd), 127, "", str(exc))
+        except subprocess.TimeoutExpired as exc:
+            stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+            stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            return CommandResult(tuple(cmd), 124, stdout.strip(), stderr.strip() or "command timed out", timed_out=True)
 
 
 def is_termux() -> bool:

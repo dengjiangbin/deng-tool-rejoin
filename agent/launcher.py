@@ -219,68 +219,38 @@ def perform_rejoin(
         except Exception:  # noqa: BLE001
             _bounds_rect = None
 
-        # ── Two-phase launch (probe p-27b45f98e5) ────────────────────────────
-        # Phase 1: start the Roblox package WITHOUT the private URL so that
-        # the correct window bounds are applied to a fresh activity and the
-        # app fully loads before we route it to the private server.
-        # Sending the URL in the same am-start call as the initial launch
-        # can fail silently when the intent is processed before Roblox's
-        # NetworkManager is ready, leaving the package stuck in the lobby.
+        # ── URL-first launch (probe p-316b3b040d fix) ───────────────────────────
+        # When private_server_url is SET, the URL itself IS the join intent.
+        # Pass it directly to the first (and only) am-start call so Android
+        # routes the roblox:// VIEW intent to ActivityProtocolLaunch
+        # immediately — exactly like the user manually tapping the link.
+        # No app-first phase, no waiting, no second phase URL delivery.
         #
-        # Phase 2: once the process is confirmed alive (pure-Python /proc
-        # scan — no fork, no segfault risk), deliver the join URL as a
-        # separate VIEW intent.  Roblox is now warmed up and will route to
-        # the private server correctly.
+        # When private_server_url is BLANK, a plain MAIN/LAUNCHER intent is
+        # used.  Roblox opens to home/lobby only; no join is attempted.
         log_event(
-            logger, "debug", "two_phase_launch_phase1",
+            logger, "debug", "launch_url_first",
             package=package, url_set=bool(url_for_launch),
+            masked_url=masked_url or "",
         )
         if _bounds_rect is not None:
             result, _method = android.launch_package_with_bounds(
-                package, _bounds_rect, None,   # no URL in phase 1
+                package, _bounds_rect, url_for_launch or None,
             )
         else:
             result, _method = android.launch_package_with_options(
-                package, None,                  # no URL in phase 1
+                package, url_for_launch or None,
             )
 
         if not result.ok:
             error = mask_urls_in_text(result.summary or "Android launch command failed")
             raise RuntimeError(error)
 
-        # Phase 2: deliver the private-server URL after the app is alive.
-        if url_for_launch:
-            _alive_wait = min(25, max(10, int(cfg.get("reconnect_delay_seconds", 8)) * 2))
-            _alive = False
-            log_event(
-                logger, "debug", "two_phase_launch_waiting",
-                package=package, wait_seconds=_alive_wait, masked_url=masked_url or "",
-            )
-            for _ in range(max(1, int(_alive_wait / 2))):
-                time.sleep(2)
-                try:
-                    if _proc_scan_alive(package):
-                        _alive = True
-                        break
-                except Exception:  # noqa: BLE001
-                    pass
-            log_event(
-                logger, "debug", "two_phase_launch_phase2",
-                package=package, alive=_alive, masked_url=masked_url or "",
-            )
-            try:
-                _url_mode = "deeplink"  # url_for_launch is already a roblox:// deep link
-                _url_result = android.launch_url(package, url_for_launch, _url_mode)
-                log_event(
-                    logger, "info", "two_phase_url_deliver",
-                    package=package, ok=_url_result.ok,
-                    alive_confirmed=_alive, masked_url=masked_url or "",
-                )
-            except Exception as _url_exc:  # noqa: BLE001
-                log_event(
-                    logger, "warning", "two_phase_url_deliver_error",
-                    package=package, error=str(_url_exc),
-                )
+        log_event(
+            logger, "info", "launch_result",
+            package=package, method=_method, ok=True,
+            url_set=bool(url_for_launch), masked_url=masked_url or "",
+        )
 
         db.insert_rejoin_attempt(
             reason=reason,

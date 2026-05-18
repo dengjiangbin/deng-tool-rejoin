@@ -50,6 +50,8 @@ RESULT_SERVER_UNAVAILABLE  = "server_unavailable"
 MAX_HWID_RESETS_PER_24H    = 5
 ACTIVE_HEARTBEAT_WINDOW_S  = 300          # 5 minutes
 DEFAULT_MAX_KEYS            = 1
+GENERATION_COOLDOWN_SECONDS = 60          # minimum seconds between key generations
+UNREDEEMED_KEY_EXPIRY_SECONDS = 86400    # 24 hours — unredeemed keys expire
 
 
 # ── Custom exceptions ──────────────────────────────────────────────────────────
@@ -86,6 +88,16 @@ class ResetLimitError(StoreError):
 
 class ActiveKeyWarning(StoreError):
     """Key heartbeat was recently active; recommend waiting before reset."""
+
+class GenerationCooldownError(StoreError):
+    """User must wait before generating another key (1-minute cooldown)."""
+
+    def __init__(self, message: str, *, remaining_seconds: int) -> None:
+        super().__init__(message)
+        self.remaining_seconds = remaining_seconds
+
+class ExpiredKeyError(StoreError):
+    """Key has expired (unredeemed for more than 24 hours)."""
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -269,6 +281,35 @@ class BaseLicenseStore(ABC):
     ) -> None:
         """Record an admin action in the audit log."""
 
+    def save_license_log_config(
+        self, guild_id: str, channel_id: str, updated_by: str
+    ) -> None:
+        """Persist the channel ID for license event logs in a guild."""
+
+    def get_license_log_config(self, guild_id: str) -> dict[str, Any] | None:
+        """Return license log config dict or None."""
+        return None
+
+    def clear_license_log_config(self, guild_id: str) -> None:
+        """Remove the license log channel config for a guild."""
+
+    def get_license_stats_for_discord_user(
+        self, discord_user_id: str
+    ) -> dict[str, Any]:
+        """Return license stats dict for a Discord user.
+
+        Subclasses should override this for efficient DB-backed stats.
+        Base default returns zeroed stats.
+        """
+        return {
+            "discord_user_id": discord_user_id,
+            "key_generated_count": 0,
+            "key_redeemed_count": 0,
+            "unbound_key_count": 0,
+            "bound_key_count": 0,
+            "reset_hwid_count": 0,
+        }
+
 
 # ── Local JSON implementation (dev / tests) ────────────────────────────────────
 
@@ -312,6 +353,7 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             "reset_logs": [],
             "check_logs": [],
             "panel_configs": {},
+            "license_log_configs": {},
             "audit_logs": [],
         }
 
@@ -327,14 +369,22 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 "max_keys": DEFAULT_MAX_KEYS,
                 "is_owner": False,
                 "is_blocked": False,
+                "last_key_generated_at": None,
                 "created_at": _utc_now(),
                 "updated_at": _utc_now(),
             }
             self._save(db)
-        elif discord_username:
-            db["users"][discord_user_id]["discord_username"] = discord_username
-            db["users"][discord_user_id]["updated_at"] = _utc_now()
-            self._save(db)
+        else:
+            changed = False
+            if discord_username and discord_username != db["users"][discord_user_id].get("discord_username"):
+                db["users"][discord_user_id]["discord_username"] = discord_username
+                db["users"][discord_user_id]["updated_at"] = _utc_now()
+                changed = True
+            if "last_key_generated_at" not in db["users"][discord_user_id]:
+                db["users"][discord_user_id]["last_key_generated_at"] = None
+                changed = True
+            if changed:
+                self._save(db)
         return dict(db["users"][discord_user_id])
 
     def get_user_by_discord_id(self, discord_user_id: str) -> dict[str, Any] | None:
@@ -364,17 +414,32 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         self, discord_user_id: str, created_by: str | None = None
     ) -> str:
         user = self.get_or_create_user(discord_user_id)
-        current = self.count_user_keys(discord_user_id)
-        if current >= user.get("max_keys", DEFAULT_MAX_KEYS):
-            raise UserLimitError(
-                f"User has reached their license key limit ({user.get('max_keys', DEFAULT_MAX_KEYS)})."
-            )
+        if user.get("is_blocked"):
+            raise UserLimitError("This account is blocked from generating keys.")
+
+        # Cooldown: first generation has no cooldown; subsequent generations
+        # require a 60-second wait (DB-backed, survives restarts).
+        last_gen = user.get("last_key_generated_at")
+        if last_gen:
+            elapsed = _seconds_since(last_gen)
+            if elapsed is not None and elapsed < GENERATION_COOLDOWN_SECONDS:
+                remaining = int(GENERATION_COOLDOWN_SECONDS - elapsed) + 1
+                raise GenerationCooldownError(
+                    f"Please wait {remaining} seconds before generating another key.",
+                    remaining_seconds=remaining,
+                )
+
+        # Lazy-expire unredeemed generated keys older than 24 hours so they
+        # don't silently accumulate in the stats as "active".
+        self._expire_unredeemed_keys(discord_user_id)
+
         raw_key = generate_license_key()
         key_hash = hash_license_key(raw_key)
         parts = raw_key.split("-")
         from . import license_key_export as lke
 
         ciphertext = lke.encrypt_license_key_plaintext(raw_key)
+        now = _utc_now()
         db = self._load()
         db["keys"][key_hash] = {
             "id": key_hash,
@@ -384,12 +449,15 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             "status": "active",
             "plan": "standard",
             "expires_at": None,
+            "redeemed_at": None,
             "created_by": created_by or discord_user_id,
-            "created_at": _utc_now(),
-            "updated_at": _utc_now(),
+            "created_at": now,
+            "updated_at": now,
             "key_ciphertext": ciphertext,
             "key_export_available": bool(ciphertext),
         }
+        db["users"][discord_user_id]["last_key_generated_at"] = now
+        db["users"][discord_user_id]["updated_at"] = now
         self._save(db)
         self.audit_admin_action(
             created_by or discord_user_id,
@@ -400,6 +468,38 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         )
         # Return the FULL key — this is the only time it is returned
         return raw_key
+
+    def _expire_unredeemed_keys(self, discord_user_id: str) -> int:
+        """Mark expired unredeemed keys as 'expired' status.
+
+        A key is expired-unredeemed when: it belongs to the user, has no
+        ``redeemed_at`` timestamp, has no device binding, and is older than
+        ``UNREDEEMED_KEY_EXPIRY_SECONDS``.  Modifies the DB in-place.
+        Returns the number of keys expired.
+        """
+        db = self._load()
+        expired_count = 0
+        for key_hash, record in db["keys"].items():
+            if record.get("owner_discord_id") != discord_user_id:
+                continue
+            if record.get("status") in ("revoked", "expired"):
+                continue
+            if record.get("redeemed_at"):
+                continue
+            binding = db.get("bindings", {}).get(key_hash, {})
+            if binding.get("install_id_hash"):
+                continue
+            created = record.get("created_at")
+            if not created:
+                continue
+            age = _seconds_since(created)
+            if age is not None and age > UNREDEEMED_KEY_EXPIRY_SECONDS:
+                db["keys"][key_hash]["status"] = "expired"
+                db["keys"][key_hash]["updated_at"] = _utc_now()
+                expired_count += 1
+        if expired_count:
+            self._save(db)
+        return expired_count
 
     def redeem_key_for_user(self, discord_user_id: str, raw_key: str) -> str:
         try:
@@ -413,6 +513,9 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             raise KeyNotFoundError("Key not found. Check the key and try again.")
         if key_record.get("status") == "revoked":
             raise KeyNotFoundError("This key has been revoked.")
+        if key_record.get("status") == "expired":
+            raise ExpiredKeyError("This key has expired (unredeemed for more than 24 hours).")
+
         owner = key_record.get("owner_discord_id")
         if owner == discord_user_id:
             from . import license_key_export as lke
@@ -439,15 +542,25 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             )
         if owner and owner != discord_user_id:
             raise KeyOwnershipError("This key belongs to another user.")
-        user = self.get_or_create_user(discord_user_id)
-        # Key is unowned; check limit before attaching
-        current = self.count_user_keys(discord_user_id)
-        if current >= user.get("max_keys", DEFAULT_MAX_KEYS):
-            raise UserLimitError(
-                f"You have reached your license key limit ({user.get('max_keys', DEFAULT_MAX_KEYS)})."
-            )
+
+        # Unowned key: check expiry before attaching.
+        # An unowned key older than 24h with no prior binding is expired.
+        if not key_record.get("redeemed_at"):
+            binding = db.get("bindings", {}).get(key_hash, {})
+            if not binding.get("install_id_hash"):
+                created = key_record.get("created_at")
+                if created:
+                    age = _seconds_since(created)
+                    if age is not None and age > UNREDEEMED_KEY_EXPIRY_SECONDS:
+                        raise ExpiredKeyError(
+                            "This key has expired (not claimed within 24 hours of creation)."
+                        )
+
+        self.get_or_create_user(discord_user_id)
+        now = _utc_now()
         db["keys"][key_hash]["owner_discord_id"] = discord_user_id
-        db["keys"][key_hash]["updated_at"] = _utc_now()
+        db["keys"][key_hash]["redeemed_at"] = now
+        db["keys"][key_hash]["updated_at"] = now
         self._save(db)
         self.audit_admin_action(discord_user_id, "redeem_key", target_type="key", target_id=key_hash[:8])
         return normalized
@@ -729,21 +842,26 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 )
                 return RESULT_WRONG_DEVICE
             # Same device — update heartbeat + device info
-            db["bindings"][key_hash]["last_seen_at"] = _utc_now()
+            now_ts = _utc_now()
+            db["bindings"][key_hash]["last_seen_at"] = now_ts
             db["bindings"][key_hash]["last_status"] = RESULT_ACTIVE
             db["bindings"][key_hash]["device_model"] = (device_model or "")[:120] or binding.get("device_model", "")
             db["bindings"][key_hash]["device_label"] = lbl
         else:
-            # New binding
+            # New binding — also mark the key as redeemed (first activation)
+            now_ts = _utc_now()
             db.setdefault("bindings", {})[key_hash] = {
                 "install_id_hash": install_id_hash,
                 "device_label": lbl,
                 "device_model": (device_model or "")[:120],
-                "bound_at": _utc_now(),
-                "last_seen_at": _utc_now(),
+                "bound_at": now_ts,
+                "last_seen_at": now_ts,
                 "last_status": RESULT_ACTIVE,
                 "is_active": True,
             }
+            if not record.get("redeemed_at"):
+                db["keys"][key_hash]["redeemed_at"] = now_ts
+                db["keys"][key_hash]["updated_at"] = now_ts
         self._save(db)
         self.log_license_check(
             key_id=key_hash, install_id_hash=install_id_hash,
@@ -910,6 +1028,98 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         db["audit_logs"] = db["audit_logs"][-5000:]
         self._save(db)
 
+    # ── License log channel config ─────────────────────────────────────────────
+
+    def save_license_log_config(
+        self, guild_id: str, channel_id: str, updated_by: str
+    ) -> None:
+        db = self._load()
+        db.setdefault("license_log_configs", {})[guild_id] = {
+            "channel_id": channel_id,
+            "updated_by": updated_by,
+            "updated_at": _utc_now(),
+        }
+        self._save(db)
+
+    def get_license_log_config(self, guild_id: str) -> dict[str, Any] | None:
+        db = self._load()
+        cfg = db.get("license_log_configs", {}).get(guild_id)
+        return dict(cfg) if cfg else None
+
+    def clear_license_log_config(self, guild_id: str) -> None:
+        db = self._load()
+        db.setdefault("license_log_configs", {}).pop(guild_id, None)
+        self._save(db)
+
+    # ── Stats ──────────────────────────────────────────────────────────────────
+
+    def get_license_stats_for_discord_user(
+        self, discord_user_id: str
+    ) -> dict[str, Any]:
+        """Return license key statistics for a Discord user.
+
+        This is the canonical stats function — designed to be called from
+        Discord embeds, the /license admin command, and future ecosystem
+        integrations.  All counts are computed from the local JSON store.
+
+        Returns dict with:
+          key_generated_count  — total keys created by this user (all statuses)
+          key_redeemed_count   — keys with redeemed_at set (activated on device or via Redeem button)
+          unbound_key_count    — owned keys with no active device binding
+          bound_key_count      — owned keys with an active device binding
+          reset_hwid_count     — total HWID resets on this user's keys
+        """
+        db = self._load()
+        generated = 0
+        redeemed = 0
+        unbound = 0
+        bound = 0
+        for key_hash, record in db["keys"].items():
+            owner = record.get("owner_discord_id")
+            creator = record.get("created_by")
+            if creator == discord_user_id:
+                generated += 1
+            if owner != discord_user_id:
+                continue
+            if record.get("redeemed_at"):
+                redeemed += 1
+            binding = db.get("bindings", {}).get(key_hash, {})
+            if binding.get("is_active"):
+                bound += 1
+            else:
+                unbound += 1
+        reset_count = sum(
+            1 for entry in db.get("reset_logs", [])
+            if entry.get("owner_discord_id") == discord_user_id
+        )
+        return {
+            "discord_user_id": discord_user_id,
+            "key_generated_count": generated,
+            "key_redeemed_count": redeemed,
+            "unbound_key_count": unbound,
+            "bound_key_count": bound,
+            "reset_hwid_count": reset_count,
+        }
+
+
+def get_license_stats_for_discord_user(
+    store: "BaseLicenseStore", discord_user_id: str
+) -> dict[str, Any]:
+    """Module-level wrapper — callable from any ecosystem code without holding
+    a store reference directly.  Delegates to the store's own method if
+    available; falls back to a safe empty stats dict."""
+    try:
+        return store.get_license_stats_for_discord_user(discord_user_id)
+    except Exception:  # noqa: BLE001
+        return {
+            "discord_user_id": discord_user_id,
+            "key_generated_count": 0,
+            "key_redeemed_count": 0,
+            "unbound_key_count": 0,
+            "bound_key_count": 0,
+            "reset_hwid_count": 0,
+        }
+
 
 # ── Supabase implementation (production) ──────────────────────────────────────
 
@@ -1002,12 +1212,25 @@ class SupabaseLicenseStore(BaseLicenseStore):
         self, discord_user_id: str, created_by: str | None = None
     ) -> str:
         user = self.get_or_create_user(discord_user_id)
-        current = self.count_user_keys(discord_user_id)
-        max_keys = user.get("max_keys", DEFAULT_MAX_KEYS)
-        if current >= max_keys:
-            raise UserLimitError(
-                f"User has reached their license key limit ({max_keys})."
-            )
+        if user.get("is_blocked"):
+            raise UserLimitError("This account is blocked from generating keys.")
+
+        # Cooldown check — use last_key_generated_at from user record
+        last_gen = user.get("last_key_generated_at")
+        if last_gen:
+            try:
+                elapsed = _seconds_since(last_gen)
+                if elapsed is not None and elapsed < GENERATION_COOLDOWN_SECONDS:
+                    remaining = int(GENERATION_COOLDOWN_SECONDS - elapsed) + 1
+                    raise GenerationCooldownError(
+                        f"Please wait {remaining} seconds before generating another key.",
+                        remaining_seconds=remaining,
+                    )
+            except GenerationCooldownError:
+                raise
+            except Exception:
+                pass
+
         raw_key = generate_license_key()
         key_hash = hash_license_key(raw_key)
         parts = raw_key.split("-")
@@ -1022,6 +1245,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
             "status": "active",
             "plan": "standard",
             "expires_at": None,
+            "redeemed_at": None,
             "created_by": created_by or discord_user_id,
         }
         if ciphertext:
@@ -1036,14 +1260,23 @@ class SupabaseLicenseStore(BaseLicenseStore):
             if (
                 "key_ciphertext" in err
                 or "key_export_available" in err
+                or "redeemed_at" in err
                 or "column" in err
                 or "pgrst204" in err
             ):
                 row.pop("key_ciphertext", None)
                 row.pop("key_export_available", None)
+                row.pop("redeemed_at", None)
                 self._client.table("license_keys").insert(row).execute()
             else:
                 raise
+        # Update last_key_generated_at in user record
+        try:
+            self._client.table("license_users").update(
+                {"last_key_generated_at": _utc_now()}
+            ).eq("discord_user_id", discord_user_id).execute()
+        except Exception:
+            pass
         self.audit_admin_action(
             created_by or discord_user_id,
             "create_key",
@@ -1721,6 +1954,106 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 "metadata": metadata or {},
             }
         ).execute()
+
+    # ── License log channel config (Supabase) ─────────────────────────────────
+
+    def save_license_log_config(
+        self, guild_id: str, channel_id: str, updated_by: str
+    ) -> None:
+        try:
+            self._client.table("license_log_configs").upsert(
+                {"guild_id": guild_id, "channel_id": channel_id, "updated_by": updated_by}
+            ).execute()
+        except Exception:
+            pass
+
+    def get_license_log_config(self, guild_id: str) -> dict[str, Any] | None:
+        try:
+            res = (
+                self._client.table("license_log_configs")
+                .select("*")
+                .eq("guild_id", guild_id)
+                .execute()
+            )
+            return res.data[0] if res.data else None
+        except Exception:
+            return None
+
+    def clear_license_log_config(self, guild_id: str) -> None:
+        try:
+            self._client.table("license_log_configs").delete().eq(
+                "guild_id", guild_id
+            ).execute()
+        except Exception:
+            pass
+
+    # ── Stats (Supabase) ──────────────────────────────────────────────────────
+
+    def get_license_stats_for_discord_user(
+        self, discord_user_id: str
+    ) -> dict[str, Any]:
+        try:
+            gen_res = (
+                self._client.table("license_keys")
+                .select("id", count="exact")
+                .eq("created_by", discord_user_id)
+                .execute()
+            )
+            generated = gen_res.count or 0
+        except Exception:
+            generated = 0
+        try:
+            red_res = (
+                self._client.table("license_keys")
+                .select("id", count="exact")
+                .eq("owner_discord_id", discord_user_id)
+                .not_.is_("redeemed_at", "null")
+                .execute()
+            )
+            redeemed = red_res.count or 0
+        except Exception:
+            redeemed = 0
+        try:
+            bound_res = (
+                self._client.table("device_bindings")
+                .select("key_id", count="exact")
+                .eq("license_keys.owner_discord_id", discord_user_id)
+                .eq("is_active", True)
+                .execute()
+            )
+            bound = bound_res.count or 0
+        except Exception:
+            bound = 0
+        try:
+            owned_res = (
+                self._client.table("license_keys")
+                .select("id", count="exact")
+                .eq("owner_discord_id", discord_user_id)
+                .neq("status", "revoked")
+                .execute()
+            )
+            total_owned = owned_res.count or 0
+        except Exception:
+            total_owned = 0
+        unbound = max(0, total_owned - bound)
+        try:
+            reset_res = (
+                self._client.table("hwid_reset_logs")
+                .select("id", count="exact")
+                .eq("owner_discord_id", discord_user_id)
+                .execute()
+            )
+            reset_count = reset_res.count or 0
+        except Exception:
+            reset_count = 0
+        return {
+            "discord_user_id": discord_user_id,
+            "key_generated_count": generated,
+            "key_redeemed_count": redeemed,
+            "unbound_key_count": unbound,
+            "bound_key_count": bound,
+            "reset_hwid_count": reset_count,
+        }
 
 
 # ── Convenience factory ────────────────────────────────────────────────────────

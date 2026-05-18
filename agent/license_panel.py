@@ -239,6 +239,22 @@ def build_generate_limit_response(max_keys: int) -> dict[str, Any]:
     }
 
 
+def build_generate_cooldown_response(remaining_seconds: int) -> dict[str, Any]:
+    """Ephemeral embed when a user tries to generate a key too soon."""
+    return {
+        "ephemeral": True,
+        "embed": {
+            "title": "\u23f3 Please Wait",
+            "color": 0xF39C12,
+            "description": (
+                f"You can generate another key in **{remaining_seconds} second(s)**.\n"
+                "Key generation has a 1-minute cooldown after the first key."
+            ),
+            "footer": {"text": "DENG Tool: Rejoin"},
+        },
+    }
+
+
 def build_reset_success_response() -> dict[str, Any]:
     """Ephemeral embed after a successful HWID reset."""
     return {

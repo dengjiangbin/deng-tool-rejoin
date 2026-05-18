@@ -163,23 +163,46 @@ class StoreUserKeyTests(unittest.TestCase):
         self.store.create_key_for_user(self.uid)
         self.assertEqual(self.store.count_user_keys(self.uid), 1)
 
-    def test_max_keys_limit_enforced(self):
-        """Test 12 – second key creation for default user raises UserLimitError."""
+    def test_max_keys_limit_removed_cooldown_enforced(self):
+        """Test 12 – second immediate key creation raises GenerationCooldownError (not UserLimitError).
+        Users may generate unlimited keys but must wait 60 seconds between generations.
+        """
+        from agent.license_store import GenerationCooldownError
         self.store.get_or_create_user(self.uid)
         self.store.create_key_for_user(self.uid)
+        with self.assertRaises(GenerationCooldownError) as ctx:
+            self.store.create_key_for_user(self.uid)
+        self.assertGreater(ctx.exception.remaining_seconds, 0)
+
+    def test_first_key_generation_no_cooldown(self):
+        """Test 12b – first key generation for a new user has no cooldown."""
+        self.store.get_or_create_user(self.uid)
+        key = self.store.create_key_for_user(self.uid)
+        self.assertIsNotNone(key)
+        self.assertTrue(key.startswith("DENG-"))
+
+    def test_blocked_user_cannot_generate(self):
+        """Test 12c – blocked user cannot generate keys (UserLimitError)."""
+        db = self.store._load()
+        db["users"][self.uid] = {
+            "discord_username": "test",
+            "max_keys": 9999,
+            "is_owner": False,
+            "is_blocked": True,
+            "last_key_generated_at": None,
+            "created_at": "2020-01-01T00:00:00+00:00",
+            "updated_at": "2020-01-01T00:00:00+00:00",
+        }
+        self.store._save(db)
         with self.assertRaises(UserLimitError):
             self.store.create_key_for_user(self.uid)
 
     def test_set_user_max_keys(self):
-        """Test 13 – set_user_max_keys allows more keys."""
+        """Test 13 – set_user_max_keys is a no-op for unlimited flow but still settable."""
         self.store.get_or_create_user(self.uid)
         self.store.set_user_max_keys(self.uid, 3)
-        k1 = self.store.create_key_for_user(self.uid)
-        k2 = self.store.create_key_for_user(self.uid)
-        k3 = self.store.create_key_for_user(self.uid)
-        self.assertEqual(self.store.count_user_keys(self.uid), 3)
-        with self.assertRaises(UserLimitError):
-            self.store.create_key_for_user(self.uid)
+        user = self.store.get_user_by_discord_id(self.uid)
+        self.assertEqual(user["max_keys"], 3)
 
     def test_redeem_key_success(self):
         """Test 14 – redeem an unclaimed key succeeds and returns full normalized key."""

@@ -1,0 +1,30 @@
+fix: URL-first rejoin, SIGSEGV subprocess lock, unlimited license + expiry/cooldown/log channel (p-316b3b040d)
+
+Section A - Private server URL: replace two-phase (open app, send URL) with
+single URL-first VIEW intent in launcher.py. android.launch_package_with_options/
+launch_package_with_bounds now receives the private_server_url directly on the
+first call. Blank URL launches lobby only. Layout/window code untouched.
+
+Section B - SIGSEGV: add global _subprocess_lock (threading.Lock) in android.py
+to serialize every subprocess.run() call across worker threads. Concurrent fork()
+in Python 3.13 + Termux with active threads is the crash source (p-316b3b040d).
+Enable faulthandler early in deng_tool_rejoin.py; crash trace written to
+data/logs/crash_faulthandler.log with probe ID in header.
+
+Section D - License system overhaul:
+- Unlimited keys: removed per-user max_keys gate in create_key_for_user.
+- 24h unredeemed expiry: keys with no redeemed_at expire after 24h; lazy-expired
+  on generate/redeem; ExpiredKeyError raised on attempt to redeem expired key.
+- 1-min generate cooldown: DB-backed last_key_generated_at; GenerationCooldownError
+  with remaining_seconds returned to UI; first generation has no cooldown.
+- redeemed_at column set on explicit redeem and on first device bind.
+- License log channel: /license_log_channel set/clear/status slash commands.
+- Log embeds posted on generate/redeem/reset-HWID with full per-user stats.
+- /license <user> owner/admin command shows full key stats and active key list.
+- getLicenseStatsForDiscordUser() reusable stats function on both store backends.
+- Supabase migration 003_license_unlimited.sql: redeemed_at, last_key_generated_at,
+  license_log_configs table, updated indexes, max_keys default 9999.
+
+Tests: 1421 passed, 0 failed. Updated test_license.py, test_hwid_fix.py,
+test_license_owner_recovery.py, test_p27b45f98e5_fixes.py, test_private_url.py,
+test_reset_hwid_selector.py to match new behavior.

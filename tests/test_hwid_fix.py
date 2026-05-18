@@ -357,25 +357,27 @@ class TestRedeemUnownedKey(unittest.TestCase):
 
 
 class TestRedeemAtLimit(unittest.TestCase):
-    """Test 13 – over-limit user cannot redeem another unowned key."""
+    """Test 13 – unlimited keys: a user with existing keys can still redeem more."""
 
-    def test_user_at_limit_cannot_redeem(self):
+    def test_user_with_existing_keys_can_still_redeem(self):
+        """Users can now redeem unlimited keys — the old per-user limit is removed."""
+        from agent.license_store import normalize_license_key as _n
         store = _tmp_store()
         uid1 = "limit001"
         uid2 = "limit002"
         store.get_or_create_user(uid1)
         store.get_or_create_user(uid2)
-        # uid2 already has 1 key (default max)
+        # uid2 already has 1 key
         store.create_key_for_user(uid2)
-        # Create an unowned key (uid1 creates it, then we detach ownership)
+        # uid1 creates an unowned key
         full_key2 = store.create_key_for_user(uid1)
         key_hash = hash_license_key(normalize_license_key(full_key2))
         db = store._load()
         db["keys"][key_hash]["owner_discord_id"] = None
         store._save(db)
-        # uid2 is already at limit — should fail
-        with self.assertRaises(UserLimitError):
-            store.redeem_key_for_user(uid2, full_key2)
+        # uid2 should now succeed (no limit)
+        result = store.redeem_key_for_user(uid2, full_key2)
+        self.assertEqual(result, normalize_license_key(full_key2))
 
 
 class TestRedeemResponseEmbeds(unittest.TestCase):
