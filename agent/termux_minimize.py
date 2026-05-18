@@ -136,6 +136,51 @@ def _find_termux_task_id() -> tuple[int | None, str]:
     return None, last_err or "no dumpsys output"
 
 
+def _find_termux_stack_id(task_id: int) -> int | None:
+    """Return the ``StackId`` that currently holds the Termux task, or None.
+
+    ``am stack resize`` operates on STACK IDs, not task IDs.  On Android 10
+    the dumpsys activities block contains lines like::
+
+        * TaskRecord{3169de3 #78 A=com.termux U=0 StackId=1 sz=1}
+
+    We parse those to get the real stack ID so the resize lands on the right
+    freeform stack.  Without this fix, passing the task ID (e.g. 78) as the
+    stack ID resizes the wrong stack (or nothing).
+
+    Never raises.  Returns None when the dump is unavailable or the pattern
+    is not found.
+    """
+    try:
+        res = android.run_android_command(
+            ["dumpsys", "activity", "activities"], timeout=8,
+        )
+        if not res.ok or not res.stdout:
+            return None
+        text = res.stdout
+        # Match "TaskRecord{... #<task_id> ... StackId=<n>}" — same pattern
+        # used by window_apply._find_stack_id_for_package.
+        for m in re.finditer(
+            r"TaskRecord\{[^}]*?#(\d+)[^}]*?StackId=(\d+)",
+            text,
+        ):
+            if int(m.group(1)) == task_id:
+                return int(m.group(2))
+        # Fallback: find the "Stack #N" header whose block contains
+        # "com.termux" near a "#<task_id>" reference.
+        blocks = re.split(r"\n(?=Stack #\d+:)", text)
+        for blk in blocks:
+            head = blk.split("\n", 1)[0]
+            sm = re.match(r"Stack #(\d+)", head)
+            if not sm:
+                continue
+            if "com.termux" in blk and f"#{task_id}" in blk:
+                return int(sm.group(1))
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 def _scan_for_termux_task(text: str) -> int | None:
     """Scan *text* (a dumpsys dump) for the first task entry naming Termux.
 
@@ -192,13 +237,19 @@ def _dock_rect(display: DisplayInfo, fraction: float) -> tuple[int, int, int, in
 
 
 def _try_resize(task_id: int, rect: tuple[int, int, int, int],
-                root_tool: str | None) -> tuple[bool, str, list[str]]:
+                root_tool: str | None,
+                stack_id: int | None = None) -> tuple[bool, str, list[str]]:
     """Walk a cascade of resize commands, return (ok, method, attempts).
 
     Each attempt is recorded so the caller can surface the full trail in
     diagnostics.  When ``root_tool`` is None the cascade is restricted to
     unprivileged ``cmd``/``am`` invocations — most Android builds reject
     resize-task without root, so the result is usually a clean ``False``.
+
+    ``stack_id`` is the Android stack ID that owns ``task_id``.  When
+    provided it is used for ``am stack resize`` instead of ``task_id`` —
+    that command operates on stacks, not tasks, and using the wrong ID
+    silently no-ops (probe ``p-52801790db``).
 
     Real-device note (probe ``p-47fa33562a``): ``am stack resize`` returns
     rc=0 on modern Android even when the command no-ops (it was deprecated
@@ -208,6 +259,7 @@ def _try_resize(task_id: int, rect: tuple[int, int, int, int],
     """
     l, t, r, b = rect
     attempts: list[str] = []
+    _stack = stack_id if stack_id is not None else task_id
 
     # Step 1 — set freeform windowing mode (root-only).  No-op if already
     # freeform.  Resize-task is otherwise silently ignored on fullscreen.
@@ -236,10 +288,11 @@ def _try_resize(task_id: int, rect: tuple[int, int, int, int],
           str(l), str(t), str(r), str(b)],          "am task resize",           True),
         (["wm", "task", "resize", str(task_id),
           str(l), str(t), str(r), str(b)],          "wm task resize",           True),
-        # NOTE: am stack resize is deprecated on Android 12+; rc=0 does
-        # not mean the resize happened.  Kept last as best-effort.
-        (["am", "stack", "resize", str(task_id),
-          str(l), str(t), str(r), str(b)],          "am stack resize",          False),
+        # NOTE: am stack resize uses the STACK ID, not the task ID.
+        # _stack is set to the real StackId from dumpsys when available
+        # (probe p-52801790db: using task_id here silently no-ops).
+        (["am", "stack", "resize", str(_stack),
+          str(l), str(t), str(r), str(b)],          f"am stack resize (stack={_stack},task={task_id})", False),
     ]
     best_effort_winner: tuple[str, list[str]] | None = None
     for cmd_args, label, trusted in cmds:
@@ -349,6 +402,17 @@ def minimize_termux_to_dock(
     result.task_id = tid
     result.attempts.append(f"task lookup: tid={tid} via {source}")
 
+    # Look up the actual stack ID for am stack resize (it needs STACK id, not task id).
+    stack_id: int | None = None
+    try:
+        stack_id = _find_termux_stack_id(tid)
+        if stack_id is not None:
+            result.attempts.append(f"stack lookup: sid={stack_id} for tid={tid}")
+        else:
+            result.attempts.append("stack lookup: StackId not found in dumpsys")
+    except Exception as exc:  # noqa: BLE001
+        result.attempts.append(f"stack lookup exc={exc}")
+
     # Resize cascade.
     try:
         root_info = android.detect_root()
@@ -359,7 +423,7 @@ def minimize_termux_to_dock(
     ) else None
     if not root_tool:
         result.attempts.append("root unavailable — trying unprivileged cascade")
-    ok, method, attempts = _try_resize(tid, result.desired, root_tool)
+    ok, method, attempts = _try_resize(tid, result.desired, root_tool, stack_id=stack_id)
     result.attempts.extend(attempts)
     if not ok:
         result.reason = "all resize variants failed"

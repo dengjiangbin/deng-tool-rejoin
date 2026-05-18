@@ -1392,32 +1392,40 @@ def launch_package_with_bounds(
             mode = "deeplink"
         try:
             validate_launch_url(deep_url, mode, allow_uncertain=True)
-            # Kaeru probe (p-2dbada99a0) uses flags=0x34800000:
-            #   FLAG_ACTIVITY_SINGLE_TOP    (0x20000000)
+            # Preferred: bounds + URL + flags.
             #   FLAG_ACTIVITY_NEW_TASK      (0x10000000)
+            #   FLAG_ACTIVITY_CLEAR_TASK    (0x00008000)  — ensures fresh start
             #   FLAG_ACTIVITY_CLEAR_TOP     (0x04000000)
-            #   FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS (0x00800000)
+            #   FLAG_ACTIVITY_RESET_TASK_IF_NEEDED (0x00200000)
             # BROWSABLE category ensures Android routes roblox:// to
             # ActivityProtocolLaunch (not the generic LAUNCHER).
             cmd = stem + [
                 "-a", "android.intent.action.VIEW",
                 "-c", "android.intent.category.BROWSABLE",
-                "-f", "0x34800000",
+                "-f", "0x14208000",
                 "-d", deep_url, package,
             ]
             res = run_command(cmd, timeout=PROCESS_TIMEOUT_SECONDS)
             if res.ok:
                 return res, method_label + "_url"
-            # Retry without extra flags in case device rejects them.
+            # Retry without extra intent flags in case device rejects them.
             cmd_nf = stem + ["-a", "android.intent.action.VIEW",
                              "-c", "android.intent.category.BROWSABLE",
                              "-d", deep_url, package]
             res = run_command(cmd_nf, timeout=PROCESS_TIMEOUT_SECONDS)
             if res.ok:
                 return res, method_label + "_url_noflag"
+            # Last URL fallback: drop --activity-launch-bounds entirely so the
+            # intent is delivered without any positioning flags that might
+            # confuse Android's activity resolver on this device.  The window
+            # position is already pre-written to the App Cloner XML and will
+            # be fixed by the post-launch stack resize.
+            res_nb = launch_url(package, deep_url, mode)
+            if res_nb.ok:
+                return res_nb, method_label + "_url_nobounds"
         except UrlValidationError:
             pass
-        # If url launch with bounds failed, fall through to plain bounded launch.
+        # URL launch failed on all variants — fall through to MAIN/LAUNCHER.
 
     # Plain MAIN/LAUNCHER intent with launch bounds.
     cmd = stem + [

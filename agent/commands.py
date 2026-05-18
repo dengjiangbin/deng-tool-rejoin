@@ -3302,10 +3302,9 @@ def cmd_start(args: argparse.Namespace) -> int:
         import time as _time
         _time.sleep(max(5, grace_wait))
 
-        # 8) "Resizing" — verify+fix layout.
-        _set_all_phase_keep_failed(phase, "Resizing", entries,
-                                   note="Verifying window bounds...")
-        _render_phase("Verifying window bounds...")
+        # 8) Verify layout silently — no "Resizing" label shown (user feedback:
+        #    showing "Resizing" after launching is confusing/useless; the
+        #    supervisor's real-time detection will update the state next).
         _layout_verify: dict[str, bool] = {}
         _layout_diag: list[dict[str, Any]] = []
         try:
@@ -4293,6 +4292,9 @@ def cmd_menu(args: argparse.Namespace) -> int:
     """Open the main menu, gated by a license check on first run."""
     ensure_app_dirs()
     use_color = not args.no_color
+
+    # Clear terminal so the menu opens on a clean screen (user request).
+    _clear_terminal()
 
     # Notify user if a recent crash was detected (but never show the stack).
     crash_notice = safe_io.check_and_report_crash_log()
