@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -10,6 +11,29 @@ from . import android, db
 from .config import effective_private_server_url, enabled_package_entries, validate_config
 from .logger import configure_logging, log_event
 from .url_utils import mask_launch_url, mask_urls_in_text, to_roblox_deep_link
+
+
+def _proc_scan_alive(package: str) -> bool:
+    """Pure Python /proc scan — no subprocess, no fork, no segfault risk.
+
+    Returns True when any running process has ``package`` in its cmdline.
+    This is the safest possible alive check for Termux/Python 3.13 where
+    ``fork()`` in threaded processes can produce SIGSEGV.
+    """
+    try:
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/cmdline", "rb") as fh:
+                    cmdline = fh.read().replace(b"\x00", b" ").decode("utf-8", errors="replace")
+                if package in cmdline:
+                    return True
+            except (OSError, PermissionError):
+                continue
+    except (OSError, PermissionError):
+        pass
+    return False
 
 
 @dataclass(frozen=True)
@@ -195,19 +219,68 @@ def perform_rejoin(
         except Exception:  # noqa: BLE001
             _bounds_rect = None
 
+        # ── Two-phase launch (probe p-27b45f98e5) ────────────────────────────
+        # Phase 1: start the Roblox package WITHOUT the private URL so that
+        # the correct window bounds are applied to a fresh activity and the
+        # app fully loads before we route it to the private server.
+        # Sending the URL in the same am-start call as the initial launch
+        # can fail silently when the intent is processed before Roblox's
+        # NetworkManager is ready, leaving the package stuck in the lobby.
+        #
+        # Phase 2: once the process is confirmed alive (pure-Python /proc
+        # scan — no fork, no segfault risk), deliver the join URL as a
+        # separate VIEW intent.  Roblox is now warmed up and will route to
+        # the private server correctly.
+        log_event(
+            logger, "debug", "two_phase_launch_phase1",
+            package=package, url_set=bool(url_for_launch),
+        )
         if _bounds_rect is not None:
             result, _method = android.launch_package_with_bounds(
-                package, _bounds_rect, url_for_launch or None,
+                package, _bounds_rect, None,   # no URL in phase 1
             )
         else:
             result, _method = android.launch_package_with_options(
-                package,
-                url_for_launch or None,
+                package, None,                  # no URL in phase 1
             )
 
         if not result.ok:
             error = mask_urls_in_text(result.summary or "Android launch command failed")
             raise RuntimeError(error)
+
+        # Phase 2: deliver the private-server URL after the app is alive.
+        if url_for_launch:
+            _alive_wait = min(25, max(10, int(cfg.get("reconnect_delay_seconds", 8)) * 2))
+            _alive = False
+            log_event(
+                logger, "debug", "two_phase_launch_waiting",
+                package=package, wait_seconds=_alive_wait, masked_url=masked_url or "",
+            )
+            for _ in range(max(1, int(_alive_wait / 2))):
+                time.sleep(2)
+                try:
+                    if _proc_scan_alive(package):
+                        _alive = True
+                        break
+                except Exception:  # noqa: BLE001
+                    pass
+            log_event(
+                logger, "debug", "two_phase_launch_phase2",
+                package=package, alive=_alive, masked_url=masked_url or "",
+            )
+            try:
+                _url_mode = "deeplink"  # url_for_launch is already a roblox:// deep link
+                _url_result = android.launch_url(package, url_for_launch, _url_mode)
+                log_event(
+                    logger, "info", "two_phase_url_deliver",
+                    package=package, ok=_url_result.ok,
+                    alive_confirmed=_alive, masked_url=masked_url or "",
+                )
+            except Exception as _url_exc:  # noqa: BLE001
+                log_event(
+                    logger, "warning", "two_phase_url_deliver_error",
+                    package=package, error=str(_url_exc),
+                )
 
         db.insert_rejoin_attempt(
             reason=reason,

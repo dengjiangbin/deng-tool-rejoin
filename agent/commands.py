@@ -2623,9 +2623,20 @@ def _visible_len(s: str) -> int:
 
 
 def _clear_terminal() -> None:
-    """Clear the visible terminal/dashboard. Compatible with Termux and Unix."""
+    """Clear the visible terminal/dashboard. Compatible with Termux and Unix.
+
+    Uses ANSI escape codes on non-Windows to avoid the fork/exec path that
+    ``os.system("clear")`` would take.  On Termux/Python 3.13 that fork is a
+    known source of SIGSEGV — especially while background threads are live
+    (e.g. during the Joining state).  ANSI is instant and fork-free.
+    """
     try:
-        os.system("clear" if os.name != "nt" else "cls")
+        if os.name == "nt":
+            os.system("cls")  # Windows only — no Termux risk here
+        else:
+            import sys as _sys
+            _sys.stdout.write("\033[2J\033[H")
+            _sys.stdout.flush()
     except Exception:  # noqa: BLE001
         pass
 
@@ -3180,7 +3191,12 @@ def cmd_start(args: argparse.Namespace) -> int:
         _ram_cache: dict[str, Any] = {"info": None, "next_update": 0.0}
 
         def _get_ram_label() -> str:
-            """Return 'Available RAM: X.XX GB free / Y.YY GB total' or brief fallback."""
+            """Return compact 'RAM: XMB (Y%)\\n[████░░░░]' or brief fallback.
+
+            Two-line format:  line 1 = bold coloured label,
+                              line 2 = ASCII progress bar matching available %.
+            Caller should split on '\\n' and indent each line individually.
+            """
             try:
                 import time as _t
                 now = _t.monotonic()
@@ -3193,26 +3209,24 @@ def cmd_start(args: argparse.Namespace) -> int:
                     _ram_cache["next_update"] = now + 9.0
                 info = _ram_cache["info"]
                 if not info:
-                    return "Available RAM: Unknown"
-                free_mb  = info.get("free_mb", 0)
-                total_mb = info.get("total_mb", 0)
-                pct_free = info.get("percent_free", 0)
+                    return "RAM: Unknown"
+                free_mb  = int(info.get("free_mb", 0))
+                pct_free = int(info.get("percent_free", 0))
 
-                def _fmt_gb(mb: int) -> str:
-                    if mb >= 1024:
-                        return f"{mb / 1024:.2f} GB"
-                    return f"{mb} MB"
-
-                if total_mb > 0:
-                    label = f"Available RAM: {_fmt_gb(free_mb)} free / {_fmt_gb(total_mb)} total"
-                else:
-                    label = f"Available RAM: {_fmt_gb(free_mb)} free"
+                label = f"RAM: {free_mb}MB ({pct_free}%)"
                 if use_color:
-                    col = _ANSI_GREEN if pct_free >= 40 else (_ANSI_YELLOW if pct_free >= 20 else _ANSI_RED)
+                    col = (
+                        _ANSI_GREEN if pct_free >= 40
+                        else (_ANSI_YELLOW if pct_free >= 20 else _ANSI_RED)
+                    )
                     label = f"{_ANSI_BOLD}{col}{label}{_ANSI_RESET}"
-                return label
+
+                _bar_width = 20
+                _filled = max(0, min(_bar_width, int(pct_free / 100 * _bar_width)))
+                _bar = "[" + "\u2588" * _filled + "\u2591" * (_bar_width - _filled) + "]"
+                return f"{label}\n{_bar}"
             except Exception:  # noqa: BLE001
-                return "Available RAM: Unknown"
+                return "RAM: Unknown"
 
         def _render_phase(_unused_note: str = "") -> None:
             """Clear + redraw the dashboard with the current phase per package.
@@ -3235,7 +3249,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                 ram = _get_ram_label()
                 if ram:
                     print()
-                    print(f"  {ram}")
+                    for _ram_line in ram.split("\n"):
+                        print(f"  {_ram_line}")
             except Exception:  # noqa: BLE001
                 pass
             print(flush=True)
@@ -3554,7 +3569,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             ram_label = _get_ram_label()
             if ram_label:
                 print()
-                print(f"  {ram_label}")
+                for _ram_line in ram_label.split("\n"):
+                    print(f"  {_ram_line}")
             print(flush=True)
 
         # Use 3-second display interval (like Kaeru's blinking real-time table).
