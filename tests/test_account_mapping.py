@@ -928,17 +928,75 @@ class TestMappingStatusLabels(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestSupervisorNoRootScan(unittest.TestCase):
-    def test_supervisor_does_not_import_root_access_for_scan(self):
-        """Supervisor module must NOT call root_access scan functions."""
-        import ast, inspect
+    """Supervisor must not run account-data discovery scans in the hot loop.
+
+    Root IS allowed and expected for runtime process/window/relaunch stability
+    via android.py, window_apply.py, and related modules.
+    Root is NOT allowed for account-data scanning (shared_prefs, SQLite, etc.)
+    from inside the Start/supervisor hot loop — those belong in Package Setup only.
+    """
+
+    def test_supervisor_does_not_call_account_scan_functions(self):
+        """Supervisor source must not call account-data scan functions."""
+        import inspect
         import agent.supervisor as sup
         src = inspect.getsource(sup)
-        # Supervisor should not be calling _root_scan_for_user_id or _root_scan_package_data
-        self.assertNotIn("_root_scan_for_user_id", src)
-        self.assertNotIn("_root_scan_package_data", src)
-        self.assertNotIn("root_access.run_root_command", src)
-        self.assertNotIn("root_access.list_root_glob", src)
-        self.assertNotIn("root_access.read_root_file", src)
+        # Account discovery scans — these belong only in Package Setup
+        self.assertNotIn("_root_scan_for_user_id", src,
+                         "supervisor must not call _root_scan_for_user_id (account scan)")
+        self.assertNotIn("_root_scan_package_data", src,
+                         "supervisor must not call _root_scan_package_data (account scan)")
+
+    def test_supervisor_does_not_import_account_detect(self):
+        """Supervisor must not import account_detect (setup-only module)."""
+        import inspect
+        import agent.supervisor as sup
+        src = inspect.getsource(sup)
+        self.assertNotIn("account_detect", src,
+                         "supervisor must not import account_detect (account scan)")
+
+    def test_supervisor_does_not_call_shared_prefs_scan(self):
+        """Supervisor must not run shared_prefs account scans in the hot loop."""
+        import inspect
+        import agent.supervisor as sup
+        src = inspect.getsource(sup)
+        self.assertNotIn("shared_prefs", src,
+                         "supervisor must not scan shared_prefs for account data")
+
+    def test_supervisor_does_not_call_sqlite_scan(self):
+        """Supervisor must not run SQLite account scans in the hot loop."""
+        import inspect
+        import agent.supervisor as sup
+        src = inspect.getsource(sup)
+        self.assertNotIn("sqlite_account_detect", src,
+                         "supervisor must not call sqlite_account_detect (account scan)")
+
+    def test_supervisor_root_usage_is_allowed_via_android(self):
+        """Supervisor SHOULD use root for runtime stability via android/window modules.
+
+        Root process checks, force-stop, and window layout are legitimate.
+        This test confirms the allowed runtime root functions are reachable.
+        """
+        from agent.android import (
+            force_stop_package,
+            is_process_running_any,
+            launch_package_with_bounds,
+        )
+        from agent.window_apply import apply_window_layout_silent
+        # These root-backed functions must be importable and callable
+        self.assertTrue(callable(force_stop_package))
+        self.assertTrue(callable(is_process_running_any))
+        self.assertTrue(callable(launch_package_with_bounds))
+        self.assertTrue(callable(apply_window_layout_silent))
+
+    def test_supervisor_uses_root_backed_health_check(self):
+        """check_package_health uses root-backed process detection under the hood."""
+        from agent.monitor import check_package_health
+        self.assertTrue(callable(check_package_health))
+        # The function signature must accept (cfg, package) arguments
+        import inspect
+        sig = inspect.signature(check_package_health)
+        self.assertGreaterEqual(len(sig.parameters), 2)
 
 
 # ---------------------------------------------------------------------------

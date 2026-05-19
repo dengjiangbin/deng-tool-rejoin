@@ -328,8 +328,10 @@ class PackageSubmenuTests(unittest.TestCase):
         self.assertNotIn("List Packages", text)
 
     def test_package_submenu_lists_expected_numbered_options(self):
-        """Public package menu options: Auto Detect (1), Add (2), Remove (3),
-        Set Account Username / User ID (4), Refresh Account Mapping (5), Back (0)."""
+        """Public package menu options: Auto Detect (1), Add (2),
+        Refresh Account Mapping (3), Remove (4), Back (0).
+        Manual entry is an advanced fallback within Refresh, not a top-level item.
+        """
         cfg = _base_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
@@ -339,9 +341,10 @@ class PackageSubmenuTests(unittest.TestCase):
         text = buf.getvalue()
         self.assertRegex(text, r"(?m)^1\. Auto Detect Package")
         self.assertRegex(text, r"(?m)^2\. Add Package")
-        self.assertRegex(text, r"(?m)^3\. Remove Package")
-        self.assertRegex(text, r"(?m)^4\. Set Account Username / User ID")
-        self.assertRegex(text, r"(?m)^5\. Refresh Account Mapping")
+        self.assertRegex(text, r"(?m)^3\. Refresh Account Mapping")
+        self.assertRegex(text, r"(?m)^4\. Remove Package")
+        self.assertNotRegex(text, r"(?m)^5\.")
+        self.assertNotIn("Set Account Username / User ID", text)
 
     def test_detect_refresh_saves_new_username(self):
         cfg = _base_cfg()
@@ -815,14 +818,15 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
                     _config_menu_package(cfg)
         self.assertRegex(buf.getvalue(), r"(?m)^2\. Add Package")
 
-    def test_remove_package_is_menu_item_3(self):
+    def test_remove_package_is_menu_item_4(self):
+        """Remove Package is now item 4 (after Refresh Account Mapping at 3)."""
         cfg = self._make_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
-        self.assertRegex(buf.getvalue(), r"(?m)^3\. Remove Package")
+        self.assertRegex(buf.getvalue(), r"(?m)^4\. Remove Package")
 
     def test_no_refresh_username_in_public_menu(self):
         """Refresh Username / Edit Username must NOT be in the public package menu."""

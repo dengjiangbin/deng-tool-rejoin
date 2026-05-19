@@ -102,6 +102,20 @@ _HEALTHY_STATES = frozenset({
 # The large value is a safety net for any legacy path that might still set it.
 _JOIN_UNCONFIRMED_RELAUNCH_SECONDS = 3600  # 1 hour (effectively disabled)
 
+# ─── Presence-based controlled relaunch constants ─────────────────────────────
+# Relaunch from Presence signal requires ALL conditions to be met:
+# - process is alive (running=True)
+# - mapped userId exists
+# - Presence API is reachable (not returning unknown/error)
+# - Presence repeatedly reports offline/not-in-experience within the window
+# - cooldown has passed since last presence-triggered relaunch
+# - hourly cap not exceeded
+# - only the affected package is relaunched (no cross-package cascade)
+PRESENCE_SUSPICIOUS_CONFIRMATIONS: int = 3       # repeated "offline" hits needed
+PRESENCE_SUSPICIOUS_WINDOW_SECONDS: int = 180    # within this time window
+PRESENCE_RELAUNCH_COOLDOWN_SECONDS: int = 600    # min gap between presence relaunches
+PRESENCE_RELAUNCH_MAX_PER_HOUR: int = 2          # hard cap per package per hour
+
 
 class Supervisor:
     """State-machine based local supervisor (single-package, legacy)."""
@@ -259,6 +273,11 @@ class _PackageWorker(threading.Thread):
         self.last_presence_state: str = "unknown"         # classify_presence_result() output
         self.hourly_restart_count: int = 0                # restarts in last 60 minutes
         self.failed_reason: str = ""                      # set when Failed state is entered
+        # Presence-based controlled relaunch tracking
+        self._presence_suspicious_count: int = 0          # consecutive offline results
+        self._presence_suspicious_window_start: float = 0 # when window opened
+        self._last_presence_relaunch_at: float = 0        # last presence-triggered relaunch
+        self._presence_relaunch_times: list[float] = []   # for hourly cap
 
     def _sup(self) -> dict[str, Any]:
         raw = self.cfg.get("supervisor")
@@ -292,6 +311,56 @@ class _PackageWorker(threading.Thread):
 
     def _can_auto_reconnect(self) -> bool:
         return bool(self.entry.get("auto_reconnect_enabled", True)) and bool(self._sup().get("auto_reconnect_enabled", True))
+
+    def _presence_relaunch_cooldown_ok(self) -> bool:
+        """Return True if enough time has passed since the last presence-triggered relaunch."""
+        if not self._last_presence_relaunch_at:
+            return True
+        return (time.time() - self._last_presence_relaunch_at) >= PRESENCE_RELAUNCH_COOLDOWN_SECONDS
+
+    def _presence_relaunch_budget_ok(self) -> bool:
+        """Return True if the per-hour presence-relaunch cap has not been reached."""
+        now = time.time()
+        self._presence_relaunch_times = [
+            t for t in self._presence_relaunch_times if now - t < 3600
+        ]
+        return len(self._presence_relaunch_times) < PRESENCE_RELAUNCH_MAX_PER_HOUR
+
+    def _should_relaunch_from_presence(self, running: bool) -> bool:
+        """Return True only if all conditions for a presence-based relaunch are met.
+
+        Conditions (all required):
+        - process is alive (running=True)
+        - userId is configured for this package
+        - presence suspicious count reached threshold within window
+        - cooldown since last presence relaunch
+        - hourly cap not exceeded
+        - normal restart budget also has room
+        """
+        if not running:
+            return False
+        if not self._roblox_user_id:
+            return False
+        now = time.time()
+        # Window expired — reset counter
+        if (now - self._presence_suspicious_window_start) > PRESENCE_SUSPICIOUS_WINDOW_SECONDS:
+            return False
+        if self._presence_suspicious_count < PRESENCE_SUSPICIOUS_CONFIRMATIONS:
+            return False
+        if not self._presence_relaunch_cooldown_ok():
+            return False
+        if not self._presence_relaunch_budget_ok():
+            return False
+        if not self._restart_budget_ok():
+            return False
+        return True
+
+    def _record_presence_relaunch(self) -> None:
+        now = time.time()
+        self._last_presence_relaunch_at = now
+        self._presence_relaunch_times.append(now)
+        self._presence_suspicious_count = 0
+        self._presence_suspicious_window_start = 0
 
     def _fetch_roblox_presence(self) -> Any:
         """Return a :class:`PresenceResult` for the configured account, or None.
@@ -486,6 +555,9 @@ class _PackageWorker(threading.Thread):
                         self.online_since = self.online_since or time.time()
                         self.last_seen_at = time.time()
                         self._last_presence_label = presence.presence_type.label
+                        # In-game confirms the account is active — clear suspicious counter
+                        self._presence_suspicious_count = 0
+                        self._presence_suspicious_window_start = 0
                         self._sleep(interval)
                         continue
                     # Online (lobby) — Kaeru-style: record internally but do NOT
@@ -498,14 +570,51 @@ class _PackageWorker(threading.Thread):
                         self.last_seen_at = time.time()
                         # Fall through to process health check (no continue).
                     if presence.is_offline:
-                        # Authoritative Offline.  Local process/window
-                        # heuristics are NOT trusted to override this — but
-                        # we still feed the heartbeat tracker so brief
-                        # cookie-revocation blips don't immediately churn.
+                        # Authoritative Offline.  Accumulate the suspicious counter.
+                        # We do NOT immediately relaunch — that would recreate the
+                        # old "Joining loop".  Controlled relaunch only happens after
+                        # PRESENCE_SUSPICIOUS_CONFIRMATIONS hits within the window,
+                        # cooldown passed, and hourly cap respected.
                         self._last_presence_label = presence.presence_type.label
+                        now_p = time.time()
+                        if (now_p - self._presence_suspicious_window_start) > PRESENCE_SUSPICIOUS_WINDOW_SECONDS:
+                            # Start a fresh window
+                            self._presence_suspicious_count = 1
+                            self._presence_suspicious_window_start = now_p
+                        else:
+                            self._presence_suspicious_count += 1
+                        # Check if threshold is met for a controlled presence relaunch.
+                        # Only trigger when process appears alive (avoid double-relaunch
+                        # with the normal dead-process path below).
+                        _cur_running = bool((health.meta or {}).get("running") if isinstance(health.meta, dict) else False)
+                        if self._should_relaunch_from_presence(_cur_running) and self._can_auto_reconnect():
+                            log_event(
+                                self.logger, "info", "presence_controlled_relaunch",
+                                package=self.package,
+                                suspicious_count=self._presence_suspicious_count,
+                                user_id=self._roblox_user_id,
+                            )
+                            self._record_presence_relaunch()
+                            _reapply_layout_for_package(self.package)
+                            _pkg_cfg = dict(cfg)
+                            _pkg_cfg["roblox_package"] = self.package
+                            _pr = perform_rejoin(
+                                _pkg_cfg, reason="presence_offline_controlled",
+                                package_entry=self.entry, no_force_stop=True,
+                            )
+                            self._record_restart()
+                            if _pr.success:
+                                self._url_launched = self.has_private_url
+                                self.launching_since = time.time()
+                                self._set_status(STATUS_LAUNCHING, "Presence offline — controlled relaunch")
+                                _reapply_layout_for_package(self.package)
+                            else:
+                                self._set_status(STATUS_WARNING, "Presence relaunch failed")
+                            self._sleep(max(int(cfg.get("reconnect_delay_seconds", 8)), interval))
+                            continue
                         # Fall through so the existing "no evidence" path
                         # decides between Reconnecting / Offline.
-                    # InStudio / Invisible / Unknown → fall through.
+                    # InStudio / Invisible / Unknown → fall through (reset suspicious on in_game handled above).
 
                 if health.state == "healthy":
                     self.failure_count = 0

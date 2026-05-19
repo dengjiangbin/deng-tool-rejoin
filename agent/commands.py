@@ -1577,7 +1577,18 @@ sh scripts/start-agent.sh >> "$APP_HOME/logs/agent.log" 2>&1
 # ─── Config Menu Submenus ─────────────────────────────────────────────────────
 
 def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
-    """Package submenu: Auto Detect / Add / Remove. Clean public menu without debug items."""
+    """Package submenu: clean public menu.
+
+    Options:
+      1. Auto Detect Package
+      2. Add Package
+      3. Refresh Account Mapping
+      4. Remove Package
+      0. Back
+
+    Manual username entry is an advanced fallback within Refresh Account Mapping,
+    not a top-level menu item.
+    """
     if not _is_interactive():
         return draft
     while True:
@@ -1599,9 +1610,8 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         print()
         print("1. Auto Detect Package")
         print("2. Add Package")
-        print("3. Remove Package")
-        print("4. Set Account Username / User ID")
-        print("5. Refresh Account Mapping")
+        print("3. Refresh Account Mapping")
+        print("4. Remove Package")
         print("0. Back")
         print("--------------------------------")
         _mc = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -1615,13 +1625,11 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         elif choice == "2":
             draft = _package_menu_add(draft)
         elif choice == "3":
-            draft = _package_menu_remove(draft)
-        elif choice == "4":
-            draft = _package_menu_set_user_id(draft)
-        elif choice == "5":
             draft = _package_menu_refresh_mapping(draft)
+        elif choice == "4":
+            draft = _package_menu_remove(draft)
         else:
-            print("Please choose 1-5 or 0.")
+            print("Please choose 1-4 or 0.")
     return draft
 
 

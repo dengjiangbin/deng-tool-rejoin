@@ -464,10 +464,28 @@ def detect_roblox_user_id(
             if root_access.has_root():
                 timeout = int(settings.get("scan_timeout_seconds", 8))
                 max_kb = int(settings.get("max_file_size_kb", 512))
+                # 1. Shared-prefs scan (fast, text-based)
                 uid = _root_scan_for_user_id(package_name, timeout, max_kb * 1024)
                 if uid:
-                    _log.info("Root-detected user_id=%s for %s", uid, package_name)
+                    _log.info("Root-detected user_id=%s for %s via shared_prefs", uid, package_name)
                     return uid
+                # 2. SQLite scan (Setup-only; never called from supervisor hot loop)
+                try:
+                    from . import sqlite_account_detect as _sqdet
+                    sqr = _sqdet.scan_package_dbs(
+                        package_name,
+                        max_bytes=max_kb * 1024,
+                        max_files=5,
+                        scan_timeout=timeout,
+                    )
+                    if sqr.user_id > 0:
+                        _log.info(
+                            "SQLite-detected user_id=%s for %s via %s",
+                            sqr.user_id, package_name, sqr.source,
+                        )
+                        return sqr.user_id
+                except Exception as _sqe:  # noqa: BLE001
+                    _log.debug("SQLite user_id scan error for %s: %s", package_name, _sqe)
         except Exception as exc:  # noqa: BLE001
             _log.debug("Root user_id scan error for %s: %s", package_name, exc)
 
@@ -757,13 +775,36 @@ def _root_scan_package_data(
         if not abs_path.startswith(f"/data/data/{validate_package_name(package)}/"):
             continue
         if abs_path.endswith(".db"):
-            # SQLite databases — use hook only (avoids reading binary data directly)
-            user = _try_sqlite_roblox_user(abs_path)
-            if user:
-                cand = sanitize_detected_username(user)
-                rank = (100, 2 if is_safe_username_value(cand) else 1)
-                if rank > best_rank:
-                    best, best_src, best_rank, best_display_only = cand, "root_sqlite", rank, False
+            # SQLite databases — try real detection first, then fall back to hook
+            db_user: str | None = None
+            db_uid: int = 0
+            db_display_only = False
+            db_src = "root_sqlite"  # keep legacy label as default
+            try:
+                from . import sqlite_account_detect as _sqdet
+                r = _sqdet._scan_db_file(abs_path, abs_path)
+                if r.user_id > 0:
+                    db_uid = r.user_id
+                    db_src = "sqlite_user_id"
+                elif r.username:
+                    db_user = r.username
+                    db_display_only = r.is_display_name_only
+                    db_src = r.source  # e.g. "sqlite_username" or "sqlite_display_name_hint"
+            except Exception:  # noqa: BLE001
+                pass
+            if db_uid:
+                # User ID found — handled by detect_roblox_user_id path; skip username flow
+                continue
+            if not db_user:
+                # Fall back to test hook (backwards-compatible source label)
+                db_user = _try_sqlite_roblox_user(abs_path)
+                db_src = "root_sqlite"
+            if db_user:
+                cand = sanitize_detected_username(db_user)
+                if cand:
+                    rank = (100 if is_safe_username_value(cand) else 50, 2)
+                    if rank > best_rank:
+                        best, best_src, best_rank, best_display_only = cand, db_src, rank, db_display_only
             continue
         raw = _root_read_file_capped(abs_path, min(max_bytes, 262_144), timeout)
         if not raw:
