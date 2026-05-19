@@ -51,8 +51,8 @@ class PurgeStepTests(unittest.TestCase):
 
     def test_purges_pycache_recursively(self) -> None:
         s = _script()
-        self.assertIn('find "$APP_HOME" -type d -name __pycache__', s)
-        self.assertIn('find "$APP_HOME" -type f -name "*.pyc"', s)
+        self.assertIn('find "$APP_HOME" -depth -name __pycache__ -type d', s)
+        self.assertIn('find "$APP_HOME" -name "*.pyc"', s)
 
     def test_removes_previous_build_metadata(self) -> None:
         s = _script()

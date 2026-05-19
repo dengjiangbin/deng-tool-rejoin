@@ -337,9 +337,11 @@ def render_direct_install_bootstrap(
         '  echo "Package checksum mismatch. The download may be corrupted or stale." >&2\n'
         '  echo "Expected: $EXPECTED_SHA256" >&2\n'
         '  echo "Got:      $ACTUAL_SHA" >&2\n'
+        '  echo "This means the installer script and the package are out of sync." >&2\n'
+        '  echo "Re-download the installer: curl -fsSL $INSTALLER_URL -o install.sh && sh install.sh" >&2\n'
         "  exit 1\n"
         "fi\n"
-        'echo "Package verified."\n'
+        'echo "Package verified: $ACTUAL_SHA"\n'
         # Stop any running deng-rejoin process so we never overwrite live code.
         '_stop_running() {\n'
         '  if command -v pkill >/dev/null 2>&1; then\n'
@@ -353,42 +355,51 @@ def render_direct_install_bootstrap(
         '  fi\n'
         '}\n'
         '_stop_running\n'
-        # Purge old code directories + every __pycache__/*.pyc anywhere
-        # under APP_HOME.  Preserve user-owned files at the top level.
-        'echo "Installing..."\n'
+        # ── PURGE OLD RUNTIME ───────────────────────────────────────────────
+        # Remove code directories entirely — NOT just extract-over-them.
+        # This guarantees orphan modules from the previous build cannot shadow
+        # the new install.  User data (config, license, logs) lives at the top
+        # level or under data/ which is intentionally NOT in this list.
+        'echo "Purging old runtime..."\n'
         'for _d in agent bot scripts docs examples assets; do\n'
         '  rm -rf "$APP_HOME/$_d" 2>/dev/null || true\n'
         'done\n'
         'rm -f "$APP_HOME/BUILD-INFO.json" "$APP_HOME/.installed-build.json" 2>/dev/null || true\n'
-        # Find /a/b/__pycache__ → delete; also strip every *.pyc.
-        # Using -prune so we don't waste cycles descending into deleted dirs.
-        'find "$APP_HOME" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true\n'
-        'find "$APP_HOME" -type f -name "*.pyc" -delete 2>/dev/null || true\n'
-        # Extract fresh artifact.
+        # Reliable pycache purge: -depth ensures children before parents,
+        # then a second *.pyc pass catches any stragglers.
+        # POSIX-sh compatible — no bash arrays, no process substitution.
+        'find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
+        'find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
+        # ── EXTRACT FRESH ARTIFACT ──────────────────────────────────────────
+        'echo "Extracting new runtime..."\n'
         'tar -xzf "$TMP" -C "$APP_HOME" || { echo "Could not extract package." >&2; exit 1; }\n'
+        # Post-extraction pycache sweep (the tarball must not contain any, but
+        # verify and clean regardless so the install state is always known-clean).
+        'find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
+        'find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
         'if [ ! -f "$APP_HOME/agent/deng_tool_rejoin.py" ]; then\n'
         '  echo "Install error: agent/deng_tool_rejoin.py missing from package." >&2\n'
         "  exit 1\n"
         "fi\n"
+        '[ -f "$APP_HOME/BUILD-INFO.json" ] || { echo "Install error: BUILD-INFO.json missing — tarball is corrupt." >&2; exit 1; }\n'
         # Record the verified API base under the install root.
         "printf '%s\\n' \"$DENG_REJOIN_INSTALL_API\" > \"$APP_HOME/.install_api\"\n"
-        # Write the install-time metadata file.  We parse git_commit out of
-        # the just-extracted BUILD-INFO.json so the runtime can show it
-        # without re-running git.
-        # Read BUILD-INFO.json with single-quoted python -c (bash leaves the
-        # body alone).  Falls back to empty string on any parse error.
+        # Write the install-time metadata file.  We parse git_commit and
+        # probe_id out of the just-extracted BUILD-INFO.json so the runtime
+        # can show them without re-running git.
         '_GIT_COMMIT="$(python3 -c \'import json,os,sys; p=sys.argv[1]; '
         'print((json.load(open(p)).get("git_commit","")) if os.path.isfile(p) else "")\' '
         '"$APP_HOME/BUILD-INFO.json" 2>/dev/null)" || _GIT_COMMIT=""\n'
+        '_PROBE_ID="$(python3 -c \'import json,os,sys; p=sys.argv[1]; '
+        'print((json.load(open(p)).get("probe_id","")) if os.path.isfile(p) else "")\' '
+        '"$APP_HOME/BUILD-INFO.json" 2>/dev/null)" || _PROBE_ID=""\n'
         '_FILE_COUNT="$(find "$APP_HOME/agent" -type f | wc -l 2>/dev/null | tr -d "[:space:]" || echo 0)"\n'
         '_INSTALL_TIME_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"\n'
-        # Heredoc with bash-substituted variables. Single-quote NOT used here
-        # so $VAR expands. JSON keys/values that contain spaces or special
-        # chars use only the runtime values that we control on this line.
         'cat > "$APP_HOME/.installed-build.json" <<EOF\n'
         '{\n'
         '  "artifact_sha256": "$EXPECTED_SHA256",\n'
         '  "git_commit": "$_GIT_COMMIT",\n'
+        '  "probe_id": "$_PROBE_ID",\n'
         '  "channel": "main-dev",\n'
         '  "install_time_iso": "$_INSTALL_TIME_ISO",\n'
         '  "install_api": "$DENG_REJOIN_INSTALL_API",\n'
@@ -470,6 +481,66 @@ def render_direct_install_bootstrap(
         '  echo "Got (short):      $_INSTALLED_SHORT_SHA" >&2\n'
         "  exit 1\n"
         "fi\n"
+        # ── RUNTIME LEGACY DETECTOR CHECK ──────────────────────────────────
+        # Verify the installed supervisor does not import the old broken
+        # experience_detector module.
+        '_LEGACY_IMPORT="NO"\n'
+        '_OLD_STATES="NO"\n'
+        'if python3 -c \'import importlib.util, sys\n'
+        'sys.path.insert(0, "$APP_HOME")\n'
+        's = importlib.util.find_spec("agent.supervisor")\n'
+        'if s and s.origin:\n'
+        '    src = open(s.origin, encoding="utf-8", errors="replace").read()\n'
+        '    import re\n'
+        '    if re.search(r"^\\s*(?:from|import)[^\\n#]*experience_detector", src, re.M):\n'
+        '        print("YES")\n'
+        '    else:\n'
+        '        print("NO")\n'
+        'else:\n'
+        '    print("NO")\n'
+        '\' 2>/dev/null | grep -q YES 2>/dev/null; then\n'
+        '  _LEGACY_IMPORT="YES (WARNING: old detector in supervisor)"\n'
+        'fi\n'
+        'if python3 -c \'import importlib.util, sys, re\n'
+        'sys.path.insert(0, "$APP_HOME")\n'
+        's = importlib.util.find_spec("agent.supervisor")\n'
+        'if s and s.origin:\n'
+        '    src = open(s.origin, encoding="utf-8", errors="replace").read()\n'
+        '    if re.search(r"""[\'\"](Joining)[\'\"]""", src) or re.search(r"""[\'\"](Join Unconfirmed)[\'\"]""", src):\n'
+        '        print("YES")\n'
+        '    else:\n'
+        '        print("NO")\n'
+        'else:\n'
+        '    print("NO")\n'
+        '\' 2>/dev/null | grep -q YES 2>/dev/null; then\n'
+        '  _OLD_STATES="YES (WARNING: Joining/Join Unconfirmed in supervisor)"\n'
+        'fi\n'
+        # ── AGENT FILE PROOF ────────────────────────────────────────────────
+        '_AGENT_FILE="$(PYTHONPATH="$APP_HOME" python3 -c "import agent; print(agent.__file__)" 2>/dev/null)" || _AGENT_FILE=""\n'
+        # ── RUN DOCTOR INSTALL CHECK ────────────────────────────────────────
+        'echo ""\n'
+        'echo "Running install doctor check..."\n'
+        'PYTHONPATH="$APP_HOME" DENG_REJOIN_HOME="$APP_HOME" python3 -m agent.commands doctor install --no-color 2>/dev/null || true\n'
+        # ── FINAL PROOF BLOCK ───────────────────────────────────────────────
+        'echo ""\n'
+        'echo "============================================================"\n'
+        'echo "DENG Tool: Rejoin Installed"\n'
+        'echo "------------------------------------------------------------"\n'
+        'echo "Channel:                   main-dev"\n'
+        'echo "Expected SHA:              $EXPECTED_SHA256"\n'
+        'echo "Actual SHA:                $ACTUAL_SHA"\n'
+        'echo "Installed Commit:          $_GIT_COMMIT"\n'
+        'echo "Probe ID:                  $_PROBE_ID"\n'
+        'echo "Installed Artifact:        $_INSTALLED_SHORT_SHA..."\n'
+        'echo "Install Path:              $APP_HOME"\n'
+        'echo "Wrapper Path:              $BIN/deng-rejoin"\n'
+        'echo "Python Runtime Path:       $APP_HOME/agent"\n'
+        '_AGENT_DISPLAY="${_AGENT_FILE:-$APP_HOME/agent/__init__.py}"\n'
+        'echo "agent.__file__:            $_AGENT_DISPLAY"\n'
+        'echo "Legacy Detector Imported:  $_LEGACY_IMPORT"\n'
+        'echo "Old Smart Detection:       $_OLD_STATES"\n'
+        'echo "Start Command:             deng-rejoin"\n'
+        'echo "============================================================"\n'
         'if [ "$USING_HOME_BIN" -eq 1 ]; then\n'
         "  echo 'Note: If deng-rejoin is not found in this shell, run once:'\n"
         "  echo '  export PATH=\"$HOME/bin:$PATH\"'\n"
@@ -477,6 +548,7 @@ def render_direct_install_bootstrap(
         "fi\n"
         'echo ""\n'
         'echo "Install complete."\n'
+        'echo "Next: deng-rejoin"\n'
     )
 
     return (

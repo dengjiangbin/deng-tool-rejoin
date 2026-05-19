@@ -150,17 +150,25 @@ def _make_build_info_bytes(
     The hash of the tarball itself is computed AFTER write, so it's added
     to ``.installed-build.json`` at install time, not here.  This file
     carries the parts the runtime cannot otherwise discover: git commit
-    hash, build time, channel, repo origin.
+    hash, build time, channel, and a unique probe_id for this build.
     """
+    import hashlib
+
+    commit = _git_commit_short(repo_root)
+    built_at_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    built_at_unix = int(time.time())
+    # probe_id: short stable ID that uniquely identifies this build.
+    # Derived from commit + timestamp so it differs even for same-commit rebuilds.
+    probe_seed = f"{commit}{built_at_unix}{channel}"
+    probe_id = "p-" + hashlib.sha256(probe_seed.encode()).hexdigest()[:16]
     info = {
         "channel": channel,
-        "git_commit": _git_commit_short(repo_root),
-        "built_at_iso": _dt.datetime.now(_dt.timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        ),
-        "built_at_unix": int(time.time()),
+        "git_commit": commit,
+        "built_at_iso": built_at_iso,
+        "built_at_unix": built_at_unix,
         "product": "DENG Tool: Rejoin",
-        "artifact_format_version": 1,
+        "artifact_format_version": 2,
+        "probe_id": probe_id,
     }
     return json.dumps(info, indent=2, sort_keys=True).encode("utf-8")
 

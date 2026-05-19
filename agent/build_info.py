@@ -373,9 +373,94 @@ def doctor_install_checks() -> list[dict[str, Any]]:
         }
     )
 
+    # 11) BUILD-INFO.json contains probe_id (proves this is a hardened build).
+    probe_id = str(bi.get("probe_id") or "").strip()
+    out.append(
+        {
+            "name": "build_info_has_probe_id",
+            "ok": bool(probe_id and probe_id.startswith("p-")),
+            "detail": probe_id if probe_id else "BUILD-INFO.json missing probe_id",
+        }
+    )
+
+    # 12) No legacy experience_detector imported by live supervisor.
+    sv_path = _module_file_path("agent.supervisor")
+    legacy_ok = True
+    legacy_detail = "clean"
+    if sv_path:
+        try:
+            import re as _re
+
+            sv_src = Path(sv_path).read_text(encoding="utf-8", errors="replace")
+            # Match actual import statements, not comments
+            if _re.search(r"^\s*(?:from|import)[^\n#]*experience_detector", sv_src, _re.MULTILINE):
+                legacy_ok = False
+                legacy_detail = f"supervisor imports experience_detector ({sv_path})"
+        except OSError:
+            legacy_detail = "could not read supervisor source"
+    out.append(
+        {
+            "name": "no_legacy_detector_in_supervisor",
+            "ok": legacy_ok,
+            "detail": legacy_detail,
+        }
+    )
+
+    # 13) No Joining / Join Unconfirmed state names present in live supervisor.
+    joining_ok = True
+    joining_detail = "clean"
+    if sv_path:
+        try:
+            import re as _re
+
+            sv_src = Path(sv_path).read_text(encoding="utf-8", errors="replace")
+            # Detect literal string "Joining" or "Join Unconfirmed" as state values
+            matches: list[str] = []
+            if _re.search(r"""['"](Joining)['"]\s*[,)]""", sv_src):
+                matches.append("Joining")
+            if _re.search(r"""['"](Join Unconfirmed)['"]\s*[,)]""", sv_src):
+                matches.append("Join Unconfirmed")
+            if matches:
+                joining_ok = False
+                joining_detail = f"forbidden state names in supervisor: {', '.join(matches)}"
+        except OSError:
+            joining_detail = "could not read supervisor source"
+    out.append(
+        {
+            "name": "no_joining_state_in_supervisor",
+            "ok": joining_ok,
+            "detail": joining_detail,
+        }
+    )
+
+    # 14) No ANY __pycache__ directories under INSTALL_ROOT (all should be gone post-install).
+    pycache_dirs: list[str] = []
+    for root_dir in (INSTALL_ROOT / "agent", INSTALL_ROOT / "bot"):
+        if not root_dir.is_dir():
+            continue
+        try:
+            for pc in root_dir.rglob("__pycache__"):
+                if pc.is_dir():
+                    pycache_dirs.append(str(pc))
+        except OSError:
+            pass
+    out.append(
+        {
+            "name": "no_pycache_dirs",
+            "ok": not pycache_dirs,
+            "detail": "clean"
+            if not pycache_dirs
+            else f"{len(pycache_dirs)} __pycache__ dirs remain",
+        }
+    )
+
     return out
 
 
 def doctor_install_overall_ok(results: list[dict[str, Any]]) -> bool:
     """Return ``True`` only if every entry's ``ok`` is truthy."""
     return all(bool(r.get("ok")) for r in results)
+
+
+# Alias used in commands.py (collect vs collected — keep both working)
+collected_version_info = collect_version_info

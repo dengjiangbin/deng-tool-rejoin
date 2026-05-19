@@ -519,7 +519,7 @@ class InstallBootstrapSanityTests(unittest.TestCase):
         self.assertIn("Failed to create deng-rejoin wrapper.", s)
         self.assertIn('.install_api', s)
         self.assertIn("rejoin.deng.my.id", s)
-        self.assertIn("Package verified.", s)
+        self.assertIn("Package verified:", s)
         self.assertIn("install/test/package.tar.gz", s)
         self.assertIn("deng_tool_rejoin.py", s)
         # Wrapper must use DENG_REJOIN_HOME env with fallback
@@ -536,7 +536,7 @@ class InstallBootstrapSanityTests(unittest.TestCase):
             package_sha256="a" * 64,
         )
         done = s.index("Install complete.")
-        self.assertLess(s.index("Package verified."), done)
+        self.assertLess(s.index("Package verified:"), done)
         self.assertLess(s.index("command -v deng-rejoin"), done)
         self.assertLess(s.index(".install_api"), done)
 
