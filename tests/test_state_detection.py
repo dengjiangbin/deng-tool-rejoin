@@ -225,11 +225,11 @@ class TestLaunchingToLobbyTransition(unittest.TestCase):
             stop_event.set()
             return HealthResult("healthy", {}, "")
 
+        # detect_experience_state is no longer imported or called in supervisor.py (archived).
         with unittest.mock.patch("agent.supervisor.check_package_health", side_effect=health_side_effect), \
              unittest.mock.patch("agent.supervisor.db"), \
              unittest.mock.patch("agent.supervisor.log_event"), \
-             unittest.mock.patch("agent.config.effective_private_server_url", return_value="roblox://x"), \
-             unittest.mock.patch("agent.supervisor.detect_experience_state", return_value=in_game_ev):
+             unittest.mock.patch("agent.config.effective_private_server_url", return_value="roblox://x"):
             worker = _PackageWorker(entry, cfg, status_map, stop_event)
             worker._url_launched = True
             worker.launching_since = time.time() - 5
@@ -600,12 +600,12 @@ class TestEvidenceBasedStateTransitions(unittest.TestCase):
             stop_event.set()
             return HealthResult("healthy", {}, "")
 
+        # detect_experience_state is archived and no longer imported in supervisor.py.
         with unittest.mock.patch("agent.supervisor.check_package_health", side_effect=health_side_effect), \
              unittest.mock.patch("agent.supervisor.db"), \
              unittest.mock.patch("agent.supervisor.log_event"), \
              unittest.mock.patch("agent.config.effective_private_server_url",
-                                  return_value="roblox://x" if url_launched else ""), \
-             unittest.mock.patch("agent.supervisor.detect_experience_state", return_value=ev):
+                                  return_value="roblox://x" if url_launched else ""):
             worker = _PackageWorker(entry, cfg, status_map, stop_event)
             worker._url_launched = url_launched
             worker.launching_since = time.time() - 5

@@ -353,3 +353,71 @@ def clear_presence_cache() -> None:
         _PRESENCE_CACHE.clear()
     with _USERNAME_LOCK:
         _USERNAME_CACHE.clear()
+
+
+# ─── Supervisor integration helpers ──────────────────────────────────────────
+
+
+def classify_presence_result(result: PresenceResult | None) -> str:
+    """Classify a :class:`PresenceResult` into a stable internal state string.
+
+    Returns one of:
+      ``"unknown"``           — no data / not yet resolved / UNKNOWN type
+      ``"unavailable"``       — result is None (API timeout / error)
+      ``"offline"``           — account is Offline or Invisible
+      ``"online_not_in_game"``— account is in app lobby (PresenceType.ONLINE)
+      ``"in_experience"``     — account is actively in a Roblox experience
+      ``"in_studio"``         — account is in Roblox Studio (treated like in_experience)
+
+    Never raises.
+    """
+    if result is None:
+        return "unavailable"
+    try:
+        ptype = result.presence_type
+        if ptype == PresenceType.UNKNOWN:
+            return "unknown"
+        if ptype == PresenceType.IN_GAME:
+            return "in_experience"
+        if ptype == PresenceType.IN_STUDIO:
+            return "in_studio"
+        if ptype == PresenceType.ONLINE:
+            return "online_not_in_game"
+        if ptype in (PresenceType.OFFLINE, PresenceType.INVISIBLE):
+            return "offline"
+        return "unknown"
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def get_presence_state_for_package(package_entry: dict | None) -> str:  # type: ignore[type-arg]
+    """Convenience: look up and classify the presence state for one package entry.
+
+    ``package_entry`` is a dict from the config's ``roblox_packages`` list.
+    Expected keys:
+      ``account_username``  — display name / Roblox username
+      ``roblox_user_id``    — (optional) pre-resolved numeric user_id
+
+    Returns one of the :func:`classify_presence_result` state strings.
+    Falls back to ``"unavailable"`` for any missing data or network error.
+    Never raises.
+    """
+    if not package_entry or not isinstance(package_entry, dict):
+        return "unavailable"
+    try:
+        user_id: int | None = None
+        raw_uid = package_entry.get("roblox_user_id")
+        if isinstance(raw_uid, int) and raw_uid > 0:
+            user_id = raw_uid
+        elif isinstance(raw_uid, str) and raw_uid.isdigit():
+            user_id = int(raw_uid)
+        if not user_id:
+            username = str(package_entry.get("account_username") or "").strip()
+            if username:
+                user_id = lookup_user_id(username)
+        if not user_id:
+            return "unavailable"
+        result = fetch_presence_one(user_id)
+        return classify_presence_result(result)
+    except Exception:  # noqa: BLE001
+        return "unavailable"

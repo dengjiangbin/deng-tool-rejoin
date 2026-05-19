@@ -97,7 +97,12 @@ class TestPresenceDrivesState(unittest.TestCase):
         )
         self.assertEqual(status, STATUS_ONLINE)
 
-    def test_online_presence_in_lobby_shows_lobby(self) -> None:
+    def test_online_presence_in_lobby_falls_through_to_process_check(self) -> None:
+        """Kaeru-style stable rebuild: lobby presence is recorded internally but
+        does NOT set STATUS_LOBBY publicly.  The supervisor falls through to the
+        process-health check.  When the process is not running the worker enters
+        the grace-window (STATUS_DEAD) regardless of what presence reports.
+        """
         pkg = "com.example.clone2"
         worker = _PackageWorker(
             entry=_make_entry(pkg, user_id=22),
@@ -111,7 +116,12 @@ class TestPresenceDrivesState(unittest.TestCase):
             health_state="roblox_not_running",
             meta={},
         )
-        self.assertEqual(status, STATUS_LOBBY)
+        # STATUS_LOBBY is no longer a public state in the stable rebuild.
+        self.assertNotEqual(status, STATUS_LOBBY)
+        # Process not running → grace window → STATUS_DEAD (or reconnect path).
+        from agent.supervisor import STATUS_DEAD, STATUS_RECONNECTING, STATUS_OFFLINE
+        self.assertIn(status, {STATUS_DEAD, STATUS_RECONNECTING, STATUS_OFFLINE},
+                      f"Expected a dead/reconnect state, got: {status}")
 
     def test_offline_presence_falls_through_to_local_logic(self) -> None:
         """When presence==Offline, the worker doesn't short-circuit — it lets

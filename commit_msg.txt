@@ -1,0 +1,19 @@
+fix: Kaeru-style supervisor, SIGSEGV uiautomator, Joining loop, redeemed count (p-f1a4aaafe5)
+
+- experience_detector: remove uiautomator probe (root SIGSEGV cause on Termux)
+- supervisor: _post_launch_state always returns Online (process alive = Online)
+  eliminates Join Unconfirmed endless re-launch loop
+- supervisor: add Kaeru-style per-package fields (desired_url, last_launch_at,
+  last_foreground_at); _JOIN_UNCONFIRMED_RELAUNCH_SECONDS 120->3600
+- commands: public state map Joining->Launching, Reconnecting->Reopening,
+  In Server/Lobby/Join Unconfirmed->Online; add URL confirmation log line
+- config: canonicalize launch_url->private_server_url in validate_config so
+  Start reads the same key Setup saves regardless of launch_mode
+- license_store: redeemed count includes active bound keys without redeemed_at
+  (fixes Bound 1 but Redeemed 0 for pre-migration-003 bindings)
+- idCardV2.js: rename Key Executed to Executed
+- idProfileSnapshotRead.js: redeemed = max(redeemedDirect, bound)
+- deng_tool_rejoin: update faulthandler probe to p-f1a4aaafe5
+- tests: update state detection tests for Kaeru-style Online behavior;
+  add redeemed-count, Executed label, and URL canonicalization tests (1496 pass)
+- artifact: SHA 8490a9e1294a511c4bdbdc04988a9f596c7b8267a1e2f7e0ae5cb29bb4076283

@@ -10,7 +10,6 @@ from typing import Any
 from . import db
 from .backoff import calculate_backoff_seconds
 from .config import load_config, validate_config
-from .experience_detector import EvidenceLevel, detect_experience_state
 from .launcher import perform_rejoin
 from .lockfile import LockManager
 from .logger import configure_logging, log_event
@@ -87,10 +86,15 @@ STATUS_JOIN_UNCONFIRMED  = "Join Unconfirmed"  # App healthy but no in-game evid
 STATUS_LAUNCHED          = "Launched"
 STATUS_DISCONNECTED      = "Disconnected"
 
-# All healthy states — used for state-machine guards
+# All healthy states — used for state-machine guards.
+# Public live states: Online, Launching, Reopening, Failed, Layout.
+# Legacy aliases (Lobby, In Server, Join Unconfirmed) are kept for display-map
+# compatibility but should never be set by the live supervisor path.
 _HEALTHY_STATES = frozenset({
-    STATUS_ONLINE, STATUS_LOBBY, STATUS_IN_SERVER, STATUS_JOIN_UNCONFIRMED,
-    STATUS_LAUNCHED,
+    STATUS_ONLINE, STATUS_LAUNCHED,
+    # Legacy aliases still accepted so _STATE_DISPLAY_MAP in commands.py can
+    # map them to Online; they must not be produced by the live supervisor.
+    STATUS_LOBBY, STATUS_IN_SERVER, STATUS_JOIN_UNCONFIRMED,
 })
 
 # Join Unconfirmed re-launch threshold.  With the Kaeru-style _post_launch_state
@@ -250,6 +254,11 @@ class _PackageWorker(threading.Thread):
         self._roblox_cookie: str | None = None
         self._presence_resolved: bool = False  # username → id resolved yet?
         self._last_presence_label: str = ""    # for diagnostic logging
+        # Kaeru-style extended tracking (stable rebuild probe p-9e3f2a8d1c)
+        self.last_presence_check_at: float | None = None  # when presence was last fetched
+        self.last_presence_state: str = "unknown"         # classify_presence_result() output
+        self.hourly_restart_count: int = 0                # restarts in last 60 minutes
+        self.failed_reason: str = ""                      # set when Failed state is entered
 
     def _sup(self) -> dict[str, Any]:
         raw = self.cfg.get("supervisor")
@@ -274,7 +283,9 @@ class _PackageWorker(threading.Thread):
         return len(self._restart_times) < cap
 
     def _record_restart(self) -> None:
-        self._restart_times.append(time.time())
+        now = time.time()
+        self._restart_times.append(now)
+        self.hourly_restart_count = len([t for t in self._restart_times if now - t < 3600])
 
     def _can_auto_reopen(self) -> bool:
         return bool(self.entry.get("auto_reopen_enabled", True)) and bool(self._sup().get("auto_reopen_enabled", True))
@@ -289,28 +300,39 @@ class _PackageWorker(threading.Thread):
         presence endpoint.  Never raises.  Returns None when no username /
         no user_id is configured or the API was unreachable AND we have no
         cached presence — in that case the supervisor falls back to its
-        local heuristics.
+        local heuristics (process-alive check).
+
+        Always updates ``last_presence_check_at`` and ``last_presence_state``
+        so the supervisor can expose them for diagnostics without blocking.
         """
         try:
             from . import roblox_presence as _rp
         except Exception:  # noqa: BLE001
+            self.last_presence_state = "unavailable"
             return None
         try:
             if not self._roblox_user_id:
                 if not self._roblox_username:
+                    self.last_presence_state = "unavailable"
                     return None
                 uid = _rp.lookup_user_id(self._roblox_username)
                 if uid:
                     self._roblox_user_id = uid
             if not self._roblox_user_id:
+                self.last_presence_state = "unavailable"
                 return None
             pres = _rp.fetch_presence_one(
                 self._roblox_user_id, cookie=self._roblox_cookie,
             )
+            self.last_presence_check_at = time.time()
+            # Classify and store the presence state using the module helper.
+            classified = _rp.classify_presence_result(pres)
+            self.last_presence_state = classified
             if pres is None or pres.is_unknown:
                 return None
             return pres
         except Exception as exc:  # noqa: BLE001
+            self.last_presence_state = "unavailable"
             log_event(
                 self.logger, "debug", "roblox_presence_error",
                 package=self.package, error=str(exc),
@@ -385,7 +407,9 @@ class _PackageWorker(threading.Thread):
                     self._sleep(interval)
                     continue
 
-                # ── Launching/Joining timeout guard ───────────────────────────
+                # ── Launching timeout guard ───────────────────────────────────
+                # STATUS_JOINING is no longer set by live paths (Kaeru-style).
+                # Only STATUS_LAUNCHING is used post-relaunch.
                 current_st = self.status_map.get(self.package, "")
                 if self.launching_since is not None and current_st in {STATUS_LAUNCHING, STATUS_JOINING}:
                     elapsed_since_launch = time.time() - self.launching_since
@@ -393,12 +417,11 @@ class _PackageWorker(threading.Thread):
                         # App hasn't become healthy after 4× grace — force-check now
                         timeout_health = check_package_health(cfg, self.package)
                         if timeout_health.state == "healthy":
-                            # Use evidence-based detection: do not assume In Server
-                            # merely because the app is responding after a URL launch.
                             target = self._post_launch_state()
                             self._set_status(target, "Launch timeout — app confirmed running")
                         else:
-                            self._set_status(STATUS_FAILED, "Launch timeout — app not responding")
+                            self.failed_reason = "Launch timeout — app not responding"
+                            self._set_status(STATUS_FAILED, self.failed_reason)
                         self.launching_since = None
                         # Skip normal health check this iteration — we just ran one
                         self._sleep(min(5, interval))
@@ -465,29 +488,15 @@ class _PackageWorker(threading.Thread):
                         self._last_presence_label = presence.presence_type.label
                         self._sleep(interval)
                         continue
-                    # Online (lobby) → respect URL awareness when deciding
-                    # what to call it on screen.
+                    # Online (lobby) — Kaeru-style: record internally but do NOT
+                    # set Joining or Lobby as public state.  The process-alive
+                    # check below will determine the public Online/Reopening/Failed.
+                    # This eliminates the old "Joining loop" caused by presence
+                    # lobby detection triggering the 120s URL resend timer.
                     if presence.is_lobby:
-                        if (
-                            self.launching_since is not None
-                            and self.has_private_url
-                            and prev_before_check in (
-                                STATUS_LAUNCHING, STATUS_JOINING, STATUS_LAUNCHED,
-                            )
-                        ):
-                            # URL was sent and Roblox says the account is in
-                            # the app lobby — that's "Joining", not "Online".
-                            self._set_status(
-                                STATUS_JOINING, "Roblox presence: Online (lobby)",
-                            )
-                        else:
-                            self._set_status(
-                                STATUS_LOBBY, "Roblox presence: Online (lobby)",
-                            )
                         self._last_presence_label = presence.presence_type.label
                         self.last_seen_at = time.time()
-                        self._sleep(interval)
-                        continue
+                        # Fall through to process health check (no continue).
                     if presence.is_offline:
                         # Authoritative Offline.  Local process/window
                         # heuristics are NOT trusted to override this — but
@@ -515,7 +524,8 @@ class _PackageWorker(threading.Thread):
                     # Use prev_before_check because STATUS_CHECKING is transient.
                     self.launching_since = None
                     if prev_before_check in {STATUS_LAUNCHING, STATUS_JOINING}:
-                        # Kaeru-style: process alive = Online (probe p-f1a4aaafe5).
+                        # Kaeru-style: process alive = Online (stable rebuild p-9e3f2a8d1c).
+                        # STATUS_JOINING is a legacy alias; live paths now use STATUS_LAUNCHING.
                         target = self._post_launch_state()
                     elif prev_before_check in _HEALTHY_STATES:
                         target = prev_before_check  # stay in current healthy state
@@ -547,7 +557,7 @@ class _PackageWorker(threading.Thread):
                                 elapsed_seconds=int(now_ts - self.join_unconfirmed_since),
                             )
                             self.join_unconfirmed_since = None
-                            self._set_status(STATUS_JOINING, "Re-sending private server URL")
+                            self._set_status(STATUS_LAUNCHING, "Re-sending private server URL")
                             _reapply_layout_for_package(self.package)
                             pkg_cfg = dict(cfg)
                             pkg_cfg["roblox_package"] = self.package
@@ -614,14 +624,16 @@ class _PackageWorker(threading.Thread):
                         self.last_launch_at = time.time()   # Kaeru: last_launch_at
                         self._url_launched = self.has_private_url
                         self.launching_since = self.last_launch_at
-                        new_st = STATUS_JOINING if self.has_private_url else STATUS_LAUNCHING
-                        self._set_status(new_st, "Reopened — launch command sent")
+                        # Kaeru-style: always Launching regardless of URL presence.
+                        # _STATE_DISPLAY_MAP shows this as "Launching" publicly.
+                        self._set_status(STATUS_LAUNCHING, "Reopened — launch command sent")
                         # Reapply once more after launch (clone window may have
                         # been recreated by App Cloner with default bounds).
                         _reapply_layout_for_package(self.package)
                     else:
                         self.failure_count += 1
                         self.last_error = result.error
+                        self.failed_reason = result.error or "launch failed"
                         self._set_status(STATUS_FAILED, result.error or "launch failed")
                     self._sleep(max(int(cfg.get("reconnect_delay_seconds", 8)), interval))
                     continue
@@ -661,16 +673,19 @@ class _PackageWorker(threading.Thread):
                         # alive in some form.
                         "Offline", "Failed",
                     ):
-                        # Map the tracker's label to our public constants.
+                        # Map the tracker's label to public constants.
+                        # Kaeru-style: all alive/uncertain states collapse to
+                        # STATUS_ONLINE; _STATE_DISPLAY_MAP in commands.py
+                        # provides the final user-facing label.
                         _label_map = {
-                            "Playing":          STATUS_IN_SERVER,
-                            "In Server":        STATUS_IN_SERVER,
+                            "Playing":          STATUS_ONLINE,
+                            "In Server":        STATUS_ONLINE,
                             "Online":           STATUS_ONLINE,
-                            "Lobby":            STATUS_LOBBY,
-                            "Background":       STATUS_BACKGROUND,
-                            "Join Unconfirmed": STATUS_JOIN_UNCONFIRMED,
+                            "Lobby":            STATUS_ONLINE,
+                            "Background":       STATUS_ONLINE,
+                            "Join Unconfirmed": STATUS_ONLINE,
                             "Recovering":       STATUS_RECONNECTING,
-                            "Unknown":          STATUS_BACKGROUND,
+                            "Unknown":          STATUS_ONLINE,
                         }
                         new_st = _label_map.get(decision.state, STATUS_BACKGROUND)
                         self._set_status(new_st, decision.reason)
@@ -721,8 +736,8 @@ class _PackageWorker(threading.Thread):
                     self.last_launch_at = time.time()   # Kaeru: last_launch_at
                     self._url_launched = self.has_private_url
                     self.launching_since = self.last_launch_at
-                    new_st = STATUS_JOINING if self.has_private_url else STATUS_LAUNCHING
-                    self._set_status(new_st, "Reopened — launch command sent")
+                    # Kaeru-style: always Launching regardless of URL presence.
+                    self._set_status(STATUS_LAUNCHING, "Reopened — launch command sent")
                     # Once more after launch to override any default bounds.
                     _reapply_layout_for_package(self.package)
                     self._sleep(max(int(cfg.get("reconnect_delay_seconds", 8)), interval))

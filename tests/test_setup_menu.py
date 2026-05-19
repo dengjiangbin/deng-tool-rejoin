@@ -106,13 +106,24 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         text = self._get_menu_text()
         self.assertIn("Private Server URL", text)
 
-    def test_menu_contains_webhook(self):
+    def test_menu_does_not_contain_webhook(self):
+        # Webhook is hidden from public Edit Config menu in this version.
         text = self._get_menu_text()
-        self.assertIn("Webhook", text)
+        import re
+        # Check numbered menu lines only (not summary section below)
+        menu_block = self._menu_block(text) if hasattr(self, '_menu_block') else text
+        webhook_options = re.findall(r'^\s*[0-9]+\.\s+.*[Ww]ebhook', menu_block, re.MULTILINE)
+        self.assertEqual(webhook_options, [],
+                         "Webhook must not appear as a numbered public menu option")
 
-    def test_menu_contains_yescaptcha(self):
+    def test_menu_does_not_contain_yescaptcha(self):
+        # YesCaptcha is hidden from public Edit Config menu in this version.
         text = self._get_menu_text()
-        self.assertIn("YesCaptcha", text)
+        import re
+        menu_block = self._menu_block(text) if hasattr(self, '_menu_block') else text
+        captcha_options = re.findall(r'^\s*[0-9]+\.\s+.*[Cc]aptcha', menu_block, re.MULTILINE)
+        self.assertEqual(captcha_options, [],
+                         "YesCaptcha must not appear as a numbered public menu option")
 
     def test_menu_contains_back(self):
         text = self._get_menu_text()
@@ -127,13 +138,14 @@ class TopLevelMenuStructureTests(unittest.TestCase):
             return parts[2]  # the options section
         return text
 
-    def test_menu_has_exactly_four_numbered_items(self):
+    def test_menu_has_exactly_two_numbered_items(self):
+        # After hiding Webhook and YesCaptcha, the Edit Config menu has exactly 2 items:
+        # 1. Package, 2. Private Server URL
         text = self._get_menu_text()
         block = self._menu_block(text)
         lines = block.splitlines()
-        # Count items starting with 1-9 (exclude "0. Back")
         numbered = [l.strip() for l in lines if len(l.strip()) > 2 and l.strip()[0] in "123456789" and l.strip()[1] == "."]
-        self.assertEqual(len(numbered), 4, f"Expected exactly 4 numbered items, got: {numbered}")
+        self.assertEqual(len(numbered), 2, f"Expected exactly 2 numbered items (Package + Private Server URL), got: {numbered}")
 
     def test_menu_does_not_contain_advanced_info(self):
         text = self._get_menu_text()

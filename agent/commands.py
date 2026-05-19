@@ -902,24 +902,7 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print("License:")
     print(f"  Key: {cfg.get('license_key') or 'Not set'}")
     print()
-    print("Discord Webhook:")
-    print(f"  Enabled: {'Yes' if cfg['webhook_enabled'] else 'No'}")
-    if cfg["webhook_enabled"]:
-        print(f"  Mode: {cfg['webhook_mode']}")
-        print(f"  URL: {cfg.get('webhook_url') or 'Not set'}")
-        tags = cfg.get("webhook_tags") or []
-        if tags:
-            print(f"  Tags: {', '.join(tags)}")
-    print()
-    print("Snapshot:")
-    print(f"  Enabled: {'Yes' if cfg['webhook_enabled'] and cfg['webhook_snapshot_enabled'] else 'No'}")
-    print()
-    print("Webhook Interval:")
-    print(f"  {cfg['webhook_interval_seconds']} seconds" if cfg["webhook_enabled"] else "  Disabled")
-    print()
-    print("YesCaptcha:")
-    print(f"  API key: {'Configured' if cfg.get('yescaptcha_key') else 'Not set'}")
-    print()
+    # Advanced config is hidden from public summary in this version.
     print("Auto Resize:")
     print("  Automatic based on selected package count and device DPI")
     if len(enabled_entries) > 1:
@@ -2159,8 +2142,8 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
         print("First Time Setup Config")
         print()
         print("This will prepare your device for DENG Tool: Rejoin.")
-        print("You will set Roblox packages (scan or manual), username, optional private URL,")
-        print("optional webhook, then save. Package detection scans installed apps; manual entry is fallback.")
+        print("You will set Roblox packages (scan or manual), optional private URL, then save.")
+        print("Package detection scans installed apps; manual entry is fallback.")
         print("Usernames are display-only in the Start table — Unknown is OK.")
         print()
         print("Run this command in interactive Termux to complete setup.")
@@ -2175,16 +2158,14 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     print()
     print("You will set:")
     print("  1. Roblox package / clone app (pick from detection, or manual fallback)")
-    print("  2. Username / account name (display only in the Start table — Unknown is OK)")
-    print("  3. Private server URL (optional — not printed after saving)")
-    print("  4. Discord webhook (optional, if you turn it on)")
-    print("  5. Save config")
+    print("  2. Private server URL (optional — not printed after saving)")
+    print("  3. Save")
     print()
     print("Package detection:")
     print("  The tool scans installed Roblox apps against safe hints. Pick from the table.")
     print("  Manual package entry is only a fallback if nothing is found.")
     print()
-    print("Step 1 of 6: Roblox Package Setup")
+    print("Step 1 of 3: Roblox Package Setup")
     packages, hints = _choose_packages_menu(
         list(draft.get("roblox_packages") or [package_entry(draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE), "", True, "not_set")]),
         list(draft.get("package_detection_hints") or DEFAULT_ROBLOX_PACKAGE_HINTS),
@@ -2195,18 +2176,10 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     active_entries = enabled_package_entries(draft)
     draft["roblox_package"] = active_entries[0]["package"]
     draft["selected_package_mode"] = "multiple" if len(active_entries) > 1 else "single"
-    print("\nStep 2 of 6: Roblox Public / Private Server Link")
+    print("\nStep 2 of 3: Private Server URL")
     _setup_launch_link(draft)
-    print("\nStep 3 of 6: Discord Webhook Setup")
-    _setup_webhook(draft)
-    if draft.get("webhook_enabled"):
-        print("\nStep 4 of 6: Phone Snapshot For Webhook")
-        _setup_snapshot(draft)
-        print("\nStep 5 of 6: Webhook Info Interval")
-        _setup_webhook_interval(draft)
-    else:
-        print("\nDiscord webhook is off, so snapshot and webhook interval setup were skipped.")
-    print("\nStep 6 of 6: Save And Start")
+    # Optional advanced features are not shown in this setup flow.
+    print("\nStep 3 of 3: Save And Start")
     draft["first_setup_completed"] = True
     try:
         saved = save_config(draft)
@@ -2229,8 +2202,6 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("--------------------------------")
         print("1. Package")
         print("2. Private Server URL")
-        print("3. Webhook")
-        print("4. YesCaptcha")
         print("0. Back")
         print("--------------------------------")
         print("\nCurrent settings:")
@@ -2246,8 +2217,6 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("--------------------------------")
         print("1. Package")
         print("2. Private Server URL")
-        print("3. Webhook")
-        print("4. YesCaptcha")
         print("0. Back")
         print("--------------------------------")
         choice = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -2263,12 +2232,8 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
             draft = _config_menu_package(draft)
         elif choice == "2":
             draft = _config_menu_launch_link(draft)
-        elif choice == "3":
-            draft = _config_menu_webhook(draft)
-        elif choice == "4":
-            draft = _config_menu_yescaptcha(draft)
         else:
-            print("Please choose 1-4 or 0.")
+            print("Please choose 1-2 or 0.")
             safe_io.press_enter()
 
 
@@ -3627,14 +3592,27 @@ def cmd_start(args: argparse.Namespace) -> int:
         _supervisor = MultiPackageSupervisor(entries, _live_cfg, initial_status=initial_status)
         _live_map = _supervisor.status_map  # dict mutated in-place by workers
 
-        # Kaeru-style public state map: internal states → clean user-facing labels.
+        # Kaeru-style public state map: internal states → 5 clean user-facing labels.
+        # Allowed public states: Layout, Launching, Online, Reopening, Failed.
+        # Internal states not in this map are shown as-is (e.g. "Online", "Failed").
         _STATE_DISPLAY_MAP: dict[str, str] = {
-            "Joining":          "Launching",   # brief transition; resolves to Online fast
-            "Launched":         "Online",       # process up, no URL → immediately Online
-            "In Server":        "Online",       # was: game detected; now just Online
-            "Lobby":            "Online",       # was: home screen; now just Online
-            "Join Unconfirmed": "Online",       # was: URL sent, detecting; now just Online
-            "Reconnecting":     "Reopening",    # more user-friendly label
+            # Transient post-launch → Launching
+            "Joining":          "Launching",
+            "Preparing":        "Launching",
+            # Alive states (process up in any form) → Online
+            "Launched":         "Online",
+            "In Server":        "Online",
+            "Lobby":            "Online",
+            "Join Unconfirmed": "Online",
+            "Background":       "Online",
+            "Warning":          "Online",
+            # Dead / reconnecting → Reopening (supervisor will relaunch)
+            "Reconnecting":     "Reopening",
+            "Dead":             "Reopening",
+            "Disconnected":     "Reopening",
+            "Offline":          "Reopening",
+            # Unknown at startup → Launching
+            "Unknown":          "Launching",
         }
 
         def _live_dashboard() -> None:
@@ -3656,7 +3634,10 @@ def cmd_start(args: argparse.Namespace) -> int:
                 print()
                 for _ram_line in ram_label.split("\n"):
                     print(f"  {_ram_line}")
-            print(flush=True)
+            print()
+            if _global_url:
+                print("  Launch URL: configured")
+            print("  Press Ctrl+C to stop", flush=True)
 
         # Use 3-second display interval (like Kaeru's blinking real-time table).
         try:
