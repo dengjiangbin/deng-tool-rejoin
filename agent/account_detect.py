@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from . import android
+from . import android, root_access
 from .config import validate_account_username, validate_package_name
 
 _log = logging.getLogger("deng_tool_rejoin")
@@ -23,7 +23,6 @@ _USERNAME_CACHE: dict[str, str] = {}
 
 FORBIDDEN_KEY_MARKERS = frozenset(
     (
-        "auth",
         "bearer",
         "cookie",
         "credential",
@@ -32,10 +31,13 @@ FORBIDDEN_KEY_MARKERS = frozenset(
         "password",
         "roblosecurity",
         "secret",
-        "security",
         "session",
         "ticket",
         "token",
+        "refresh",
+        "jwt",
+        "browser",
+        "webview",
     )
 )
 
@@ -43,38 +45,55 @@ FORBIDDEN_KEY_MARKERS = frozenset(
 # Keys with score 0 are numeric IDs (not usernames) — they are skipped by the parser.
 # Keys not present default to 0 (skipped) unless they contain user-hint substrings (see _pref_key_score).
 _PREF_KEY_SCORES: dict[str, int] = {
+    # --- Strong login username keys ---
     "username": 100,
-    "userid": 0,
-    "user_id": 0,
-    "username_lower": 95,
     "user_name": 100,
-    "account_name": 98,
-    "accountname": 98,
-    "display_name": 80,
-    "displayname": 80,
-    "name": 50,
-    "player_name": 92,
     "roblox_username": 100,
-    "current_username": 90,
-    "last_username": 85,
-    # Roblox-specific patterns seen in the wild
+    "robloxusername": 100,
+    "current_username": 100,
+    "currentusername": 100,
+    "logged_in_username": 100,
+    "loggedinusername": 100,
     "rbx_username": 100,
     "rbx_user": 100,
     "rbxusername": 100,
-    "robloxusername": 100,
-    "playerusername": 92,
-    "player_username": 92,
-    "accountusername": 98,
     "account_username": 98,
+    "accountusername": 98,
+    "account_name": 98,
+    "accountname": 98,
     "login_name": 95,
     "loginname": 95,
+    "username_lower": 95,
+    "player_username": 92,
+    "playerusername": 92,
+    "player_name": 92,
+    "last_username": 85,
+    "lastusername": 85,
+    "login": 85,
     "screenname": 88,
     "screen_name": 88,
+    # --- Display/nick keys (lower priority) ---
+    "display_name": 80,
+    "displayname": 80,
     "nickname": 75,
     "nick": 70,
     "handle": 70,
-    "login": 85,
+    "name": 50,
+    # --- Numeric ID keys: explicitly score 0 so username parser skips them ---
+    "userid": 0,
+    "user_id": 0,
+    "roblox_user_id": 0,
+    "robloxuserid": 0,
+    "authenticateduserid": 0,
+    "authenticated_user_id": 0,
+    "playerid": 0,
+    "player_id": 0,
+    "accountid": 0,
+    "account_id": 0,
 }
+
+# Email pattern for rejection — username must NOT look like an email address.
+_EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 _ROBLOX_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 # Display names: printable, reasonable length; no URLs or token shapes
@@ -82,19 +101,37 @@ _MAX_DISPLAY_LEN = 32
 _MAX_USERNAME_LEN = 20
 
 # Keys likely to contain a numeric Roblox user ID (higher = more authoritative).
-# Only plain numeric values are accepted — no token/hash shapes.
+# This is an explicit allowlist: only keys in this dict are ever read for user ID purposes.
+# Only plain numeric integer values are accepted — no token/hash/UUID shapes.
 _USER_ID_KEY_SCORES: dict[str, int] = {
+    # Highest confidence: directly named user ID fields
     "userid": 100,
     "user_id": 100,
     "robloxuserid": 100,
     "roblox_user_id": 100,
-    "authenticateduserid": 95,   # seen in Roblox shared prefs
+    # Roblox-internal authenticated user ID field
+    "authenticateduserid": 95,
     "authenticated_user_id": 95,
-    "playerid": 80,
-    "player_id": 80,
-    "accountid": 75,
-    "account_id": 75,
-    "id": 40,
+    # Common login state fields
+    "currentuserid": 90,
+    "current_user_id": 90,
+    "loggedinuserid": 90,
+    "logged_in_user_id": 90,
+    "activeuserid": 88,
+    "active_user_id": 88,
+    # Account-scoped fields
+    "accountuserid": 85,
+    "account_user_id": 85,
+    # Player-scoped fields
+    "playeruserid": 80,
+    "player_user_id": 80,
+    "playerid": 78,
+    "player_id": 78,
+    # Generic account ID (lower confidence — accept only if no better key found)
+    "accountid": 60,
+    "account_id": 60,
+    # Bare "id" — very low confidence, only used as last resort
+    "id": 30,
 }
 # Roblox user IDs: 1 to ~9 billion (current ceiling ~7B)
 _ROBLOX_USER_ID_RE = re.compile(r"^\d{1,10}$")
@@ -114,7 +151,8 @@ def set_sqlite_username_hook(cb: Callable[[str], str | None] | None) -> None:
 class AccountDetectionResult:
     username: str
     source: str
-    user_id: int | None = None  # Roblox numeric user ID when detected alongside username
+    user_id: int | None = None   # Roblox numeric user ID when detected alongside username
+    is_display_name_only: bool = False  # True when only a displayName was found (needs confirmation)
 
 
 def is_sensitive_key_name(name: str) -> bool:
@@ -124,6 +162,13 @@ def is_sensitive_key_name(name: str) -> bool:
     if ".roblosecurity" in lowered or "roblosecurity" in lowered:
         return True
     return any(marker in lowered for marker in FORBIDDEN_KEY_MARKERS)
+
+
+def is_email_address(value: str | None) -> bool:
+    """Return True if value looks like an email address (must be rejected as username)."""
+    if not value:
+        return False
+    return bool(_EMAIL_RE.search(str(value).strip()))
 
 
 def is_sensitive_value(value: str | None) -> bool:
@@ -193,7 +238,25 @@ def is_safe_username_value(value: str | None) -> bool:
         return False
     if is_sensitive_value(cleaned):
         return False
+    if is_email_address(cleaned):
+        return False
     return _ROBLOX_USERNAME_RE.fullmatch(cleaned) is not None
+
+
+def is_safe_display_name_value_strict(value: str | None) -> bool:
+    """Looser check for display names — spaces/apostrophes allowed, no emails."""
+    if value is None:
+        return False
+    cleaned = str(value).strip()
+    if not cleaned or len(cleaned) > _MAX_DISPLAY_LEN:
+        return False
+    if is_sensitive_value(cleaned):
+        return False
+    if is_email_address(cleaned):
+        return False
+    if re.search(r"[=/\\{}\[\]<>]", cleaned):
+        return False
+    return bool(re.fullmatch(r"[A-Za-z0-9_ .'-]{1,32}", cleaned))
 
 
 def is_safe_display_name_value(value: str | None) -> bool:
@@ -329,7 +392,7 @@ def _root_scan_for_user_id(
     package: str,
     timeout: int,
     max_bytes: int,
-    root_tool: str,
+    root_tool: str = "",
 ) -> int | None:
     """Root-based scan for a numeric Roblox user ID in shared_prefs XML and JSON files.
 
@@ -337,18 +400,15 @@ def _root_scan_for_user_id(
     """
     pkg = validate_package_name(package)
     base_sp = f"/data/data/{pkg}/shared_prefs"
-    list_inner = f"test -d '{base_sp}' && ls '{base_sp}/' 2>/dev/null | grep '\\.xml$' | head -32"
-    list_res = android.run_root_command(["sh", "-c", list_inner], root_tool=root_tool, timeout=timeout)
-    if not list_res.timed_out and list_res.stdout:
-        filenames = [f.strip() for f in list_res.stdout.splitlines() if f.strip().endswith(".xml")]
-        for fname in filenames[:24]:
-            abs_path = f"{base_sp}/{fname}"
-            content = _root_read_file_capped(abs_path, max_bytes, timeout, root_tool)
-            if content:
-                uid = user_id_from_pref_xml(content)
-                if uid:
-                    _log.debug("Root shared_prefs found user_id in %s", fname)
-                    return uid
+    xml_files = root_access.list_root_glob(f"{base_sp}/*.xml", timeout=timeout, max_results=32)
+    for abs_path in xml_files[:24]:
+        content = _root_read_file_capped(abs_path, max_bytes, timeout)
+        if content:
+            uid = user_id_from_pref_xml(content)
+            if uid:
+                fname = abs_path.split("/")[-1]
+                _log.debug("Root shared_prefs found user_id in %s", fname)
+                return uid
 
     base_data = f"/data/data/{pkg}"
     max_kb = max(1, max_bytes // 1024)
@@ -356,11 +416,11 @@ def _root_scan_for_user_id(
         f"find '{base_data}' -maxdepth 6 -type f -size -{int(max_kb)}k -name '*.json' "
         f"2>/dev/null | head -20"
     )
-    res = android.run_root_command(["sh", "-c", inner], root_tool=root_tool, timeout=timeout)
+    res = root_access.run_root_command(["sh", "-c", inner], timeout=timeout)
     if res.ok and res.stdout:
         prefix = f"/data/data/{pkg}/"
         for abs_path in [ln.strip() for ln in res.stdout.splitlines() if ln.strip().startswith(prefix)]:
-            content = _root_read_file_capped(abs_path, max_bytes, timeout, root_tool)
+            content = _root_read_file_capped(abs_path, max_bytes, timeout)
             if content:
                 uid = user_id_from_json_text(content)
                 if uid:
@@ -401,11 +461,10 @@ def detect_roblox_user_id(
 
     if use_root and settings.get("use_root", True):
         try:
-            root = android.detect_root()
-            if root.available and root.tool:
+            if root_access.has_root():
                 timeout = int(settings.get("scan_timeout_seconds", 8))
                 max_kb = int(settings.get("max_file_size_kb", 512))
-                uid = _root_scan_for_user_id(package_name, timeout, max_kb * 1024, root.tool)
+                uid = _root_scan_for_user_id(package_name, timeout, max_kb * 1024)
                 if uid:
                     _log.info("Root-detected user_id=%s for %s", uid, package_name)
                     return uid
@@ -426,20 +485,27 @@ def detect_roblox_user_id(
     return None
 
 
-def username_from_pref_xml(xml_text: str) -> str | None:
-    """Extract the best-scoring safe username from Android shared_pref XML."""
+def username_from_pref_xml(xml_text: str) -> tuple[str | None, bool]:
+    """Extract the best-scoring safe username from Android shared_pref XML.
+
+    Returns ``(username, is_display_name_only)`` where ``is_display_name_only``
+    is ``True`` when the best result is a display name (not a strict login username).
+    """
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
-        return None
+        return None, False
     best_key = (-1, -1)  # (field_score, type_weight) type_weight: 2=login, 1=display
     best: str | None = None
+    best_tw = 0
     for child in root:
         key = (child.attrib.get("name") or "").strip()
         if not key or is_sensitive_key_name(key):
             continue
         raw_val = _xml_element_text(child)
         if raw_val is None or is_sensitive_value(raw_val):
+            continue
+        if is_email_address(raw_val):
             continue
         candidate = sanitize_detected_username(raw_val)
         if not candidate:
@@ -459,7 +525,8 @@ def username_from_pref_xml(xml_text: str) -> str | None:
         if rank > best_key:
             best_key = rank
             best = candidate
-    return best
+            best_tw = tw
+    return best, (best_tw == 1 and best is not None)
 
 
 def _clean_username(value: str) -> str:
@@ -490,18 +557,23 @@ def _candidate_pref_files(package: str) -> list[Path]:
     return candidates[:24]
 
 
-def detect_username_from_safe_prefs(package: str, *, max_bytes: int | None = None) -> str | None:
+def detect_username_from_safe_prefs(
+    package: str, *, max_bytes: int | None = None
+) -> tuple[str | None, bool]:
+    """Return ``(username, is_display_name_only)`` from non-root shared_prefs scan."""
     limit = max_bytes or 64_000
     for path in _candidate_pref_files(package):
         try:
             if path.stat().st_size > limit:
                 continue
-            username = username_from_pref_xml(path.read_text(encoding="utf-8", errors="ignore"))
+            username, display_only = username_from_pref_xml(
+                path.read_text(encoding="utf-8", errors="ignore")
+            )
         except OSError:
             continue
         if username:
-            return username
-    return None
+            return username, display_only
+    return None, False
 
 
 def detect_android_app_label(package: str) -> str | None:
@@ -524,67 +596,59 @@ def detect_android_app_label(package: str) -> str | None:
     return None
 
 
-def _root_read_file_capped(abs_path: str, max_bytes: int, timeout: int, root_tool: str) -> str | None:
+def _root_read_file_capped(abs_path: str, max_bytes: int, timeout: int, _root_tool: str = "") -> str | None:
+    """Read a root-protected file capped at max_bytes.  Uses root_access module."""
     if max_bytes <= 0:
         return None
-    # Read-only: head -c only. Paths come from our validated package tree.
-    q = abs_path.replace("'", "'\"'\"'")
-    inner = f"test -r '{q}' && head -c {int(max_bytes)} '{q}' 2>/dev/null"
-    res = android.run_root_command(["sh", "-c", inner], root_tool=root_tool, timeout=timeout)
-    if not res.ok or res.timed_out:
-        return None
-    out = (res.stdout or "").strip()
-    return out if out else None
+    content = root_access.read_root_file(abs_path, max_bytes=max_bytes, timeout=timeout)
+    return content if content else None
 
 
 def _root_read_shared_prefs_for_username(
-    package: str, max_bytes: int, timeout: int, root_tool: str
-) -> str | None:
+    package: str, max_bytes: int, timeout: int, root_tool: str = ""
+) -> tuple[str | None, bool]:
     """Targeted root-based shared_prefs reader.
 
+    Returns ``(username, is_display_name_only)``.
     Faster than a full find scan because it directly lists the shared_prefs directory and
     reads hint-matching XML files in priority order. Used as a first-pass before the full
     find-based scan in _root_scan_package_data.
     """
     pkg = validate_package_name(package)
     base = f"/data/data/{pkg}/shared_prefs"
-    # List .xml files in the shared_prefs directory using root
-    list_inner = f"test -d '{base}' && ls '{base}/' 2>/dev/null | grep '\\.xml$' | head -32"
-    list_res = android.run_root_command(["sh", "-c", list_inner], root_tool=root_tool, timeout=timeout)
-    if list_res.timed_out or not list_res.stdout:
-        return None
-    filenames = [f.strip() for f in (list_res.stdout or "").splitlines() if f.strip().endswith(".xml")]
-    if not filenames:
-        return None
+    files = root_access.list_root_glob(f"{base}/*.xml", timeout=timeout, max_results=32)
+    if not files:
+        return None, False
     _hints = ("account", "profile", "settings", "user", "username", "pkg_preferences", "roblox", "rbx")
-    priority = [f for f in filenames if any(h in f.lower() for h in _hints)]
-    fallback = [f for f in filenames if f not in priority]
+    filenames = [f.split("/")[-1] for f in files]
+    priority = [f for f in files if any(h in f.lower() for h in _hints)]
+    fallback = [f for f in files if f not in priority]
     ordered = (priority + fallback)[:24]
-    for fname in ordered:
-        abs_path = f"{base}/{fname}"
-        content = _root_read_file_capped(abs_path, max_bytes, timeout, root_tool)
+    for abs_path in ordered:
+        content = _root_read_file_capped(abs_path, max_bytes, timeout)
         if not content:
             continue
-        username = username_from_pref_xml(content)
+        username, display_only = username_from_pref_xml(content)
         if username:
+            fname = abs_path.split("/")[-1]
             _log.debug("Root shared_prefs found username in %s", fname)
-            return username
-    return None
+            return username, display_only
+    return None, False
 
 
-def _root_list_scan_files(package: str, max_kb: int, timeout: int, root_tool: str) -> list[str]:
+def _root_list_scan_files(package: str, max_kb: int, timeout: int, root_tool: str = "") -> list[str]:
     pkg = validate_package_name(package)
     base = f"/data/data/{pkg}"
     # find: only under this package, caps count and file size
     inner = (
         f"find '{base}' -maxdepth 6 -type f -size -{int(max_kb)}k "
-        f"\\( -path '*/shared_prefs/*.xml' -o -name '*.json' -o -path '*/databases/*.db' \\) "
+        f"\\( -path '*/shared_prefs/*.xml' -o -name '*.json' \\) "
         f"2>/dev/null | head -80"
     )
-    res = android.run_root_command(["sh", "-c", inner], root_tool=root_tool, timeout=timeout)
-    if not res.ok or res.timed_out:
+    result = root_access.run_root_command(["sh", "-c", inner], timeout=timeout)
+    if not result.ok or result.timed_out:
         return []
-    lines = [ln.strip() for ln in (res.stdout or "").splitlines() if ln.strip().startswith("/")]
+    lines = [ln.strip() for ln in (result.stdout or "").splitlines() if ln.strip().startswith("/")]
     return lines
 
 
@@ -661,59 +725,66 @@ def _try_sqlite_roblox_user(db_abs: str) -> str | None:
     return None
 
 
-def _root_scan_package_data(package: str, settings: dict[str, Any]) -> tuple[str | None, str | None]:
+def _root_scan_package_data(
+    package: str, settings: dict[str, Any]
+) -> tuple[str | None, str | None, bool]:
+    """Scan package data for username via root.
+
+    Returns ``(username, source, is_display_name_only)``.
+    """
     timeout = int(settings.get("scan_timeout_seconds", 8))
     max_kb = int(settings.get("max_file_size_kb", 512))
     max_bytes = max_kb * 1024
-    root = android.detect_root()
-    if not root.available or not root.tool:
+
+    if not root_access.has_root():
         _log.info("Root unavailable, skipped package data scan")
-        return None, None
+        return None, None, False
 
     # Fast first pass: directly read shared_prefs XML via root (no find needed).
-    # This covers the common case where the username is in a shared_prefs XML file.
-    fast_user = _root_read_shared_prefs_for_username(package, max_bytes, timeout, root.tool)
+    fast_user, fast_display_only = _root_read_shared_prefs_for_username(package, max_bytes, timeout)
     if fast_user:
         u = sanitize_detected_username(fast_user)
         if u:
-            return u, "root_shared_prefs"
+            return u, "root_shared_prefs", fast_display_only
 
-    # Full scan: find XML/JSON/db files anywhere under the package data directory.
-    paths = _root_list_scan_files(package, max_kb=max_kb, timeout=timeout, root_tool=root.tool)
+    # Full scan: find XML/JSON files under the package data directory.
+    paths = _root_list_scan_files(package, max_kb=max_kb, timeout=timeout)
     best: str | None = None
     best_src: str | None = None
     best_rank: tuple[int, int] = (-1, -1)
+    best_display_only = False
     for abs_path in paths:
         if not abs_path.startswith(f"/data/data/{validate_package_name(package)}/"):
             continue
         if abs_path.endswith(".db"):
+            # SQLite databases — use hook only (avoids reading binary data directly)
             user = _try_sqlite_roblox_user(abs_path)
             if user:
                 cand = sanitize_detected_username(user)
                 rank = (100, 2 if is_safe_username_value(cand) else 1)
                 if rank > best_rank:
-                    best, best_src, best_rank = cand, "root_sqlite", rank
+                    best, best_src, best_rank, best_display_only = cand, "root_sqlite", rank, False
             continue
-        raw = _root_read_file_capped(abs_path, min(max_bytes, 262_144), timeout, root.tool)
+        raw = _root_read_file_capped(abs_path, min(max_bytes, 262_144), timeout)
         if not raw:
             continue
         if abs_path.endswith(".xml"):
-            u = username_from_pref_xml(raw)
+            u, d_only = username_from_pref_xml(raw)
             if u:
                 cand = sanitize_detected_username(u)
                 rank = (95, 2 if is_safe_username_value(cand) else 1)
                 if rank > best_rank:
-                    best, best_src, best_rank = cand, "root_pref", rank
+                    best, best_src, best_rank, best_display_only = cand, "root_pref", rank, d_only
         elif abs_path.endswith(".json"):
             u = _username_from_json_text(raw)
             if u:
                 cand = sanitize_detected_username(u)
                 rank = (90, 2 if is_safe_username_value(cand) else 1)
                 if rank > best_rank:
-                    best, best_src, best_rank = cand, "root_json", rank
+                    best, best_src, best_rank, best_display_only = cand, "root_json", rank, False
     if best:
-        return best, best_src or "root_scan"
-    return None, None
+        return best, best_src or "root_scan", best_display_only
+    return None, None, False
 
 
 def detect_account_username(
@@ -746,27 +817,29 @@ def detect_account_username(
             _log.info("Detected username for %s: %s", package_name, u)
             return AccountDetectionResult(u, "android_app_label")
 
-    pref_user = detect_username_from_safe_prefs(package_name, max_bytes=settings.get("max_file_size_kb", 512) * 1024)
+    pref_user, pref_display_only = detect_username_from_safe_prefs(
+        package_name, max_bytes=settings.get("max_file_size_kb", 512) * 1024
+    )
     if pref_user:
         u = sanitize_detected_username(pref_user)
         if u:
             if settings.get("cache_detected_usernames", True):
                 set_cached_account_username(package_name, u)
             _log.info("Detected username for %s: %s", package_name, u)
-            return AccountDetectionResult(u, "detected_safe_pref")
+            return AccountDetectionResult(u, "detected_safe_pref", is_display_name_only=pref_display_only)
 
     if use_root and settings.get("use_root", True):
         try:
-            root_user, rsrc = _root_scan_package_data(package_name, settings)
+            root_user, rsrc, root_display_only = _root_scan_package_data(package_name, settings)
         except OSError:
-            root_user, rsrc = None, None
+            root_user, rsrc, root_display_only = None, None, False
         if root_user:
             u = sanitize_detected_username(root_user)
             if u:
                 if settings.get("cache_detected_usernames", True):
                     set_cached_account_username(package_name, u)
                 _log.info("Detected username for %s: %s", package_name, u)
-                return AccountDetectionResult(u, rsrc or "root_scan")
+                return AccountDetectionResult(u, rsrc or "root_scan", is_display_name_only=root_display_only)
 
     _log.info("No username found for %s", package_name)
     return None

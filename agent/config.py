@@ -192,7 +192,16 @@ def _as_bool(value: Any) -> bool:
     return bool(value)
 
 
-USERNAME_SOURCES = {"manual", "detected_safe_pref", "android_app_label", "not_set", "config_manual", "root_pref", "root_json", "root_scan", "root_sqlite"}
+USERNAME_SOURCES = {
+    "manual", "detected_safe_pref", "android_app_label", "not_set", "config_manual",
+    "root_pref", "root_json", "root_scan", "root_sqlite", "root_shared_prefs", "api_resolved",
+}
+
+# Valid account mapping status labels for package entries.
+MAPPING_STATUSES = {
+    "Validated", "Detected", "Needs Confirmation", "Manual",
+    "Skipped", "API Unavailable", "Invalid", "Not Mapped",
+}
 
 
 def validate_license_key(key: str) -> str:
@@ -248,6 +257,21 @@ def _validate_roblox_user_id(value: Any) -> int:
     return as_int if as_int > 0 else 0
 
 
+def _validate_mapping_status(status: Any) -> str:
+    s = str(status or "").strip()
+    return s if s in MAPPING_STATUSES else "Not Mapped"
+
+
+def _validate_mapping_source(source: Any) -> str:
+    s = str(source or "").strip()
+    return s[:64] if s else ""
+
+
+def _validate_mapping_timestamp(ts: Any) -> str:
+    s = str(ts or "").strip()
+    return s[:32] if s else ""
+
+
 def package_entry(
     package: str,
     account_username: str = "",
@@ -260,6 +284,9 @@ def package_entry(
     auto_reopen_enabled: bool = True,
     auto_reconnect_enabled: bool = True,
     roblox_user_id: int | str = 0,
+    account_mapping_source: str = "",
+    account_mapping_status: str = "Not Mapped",
+    account_mapping_updated_at: str = "",
 ) -> dict[str, Any]:
     username = validate_account_username(account_username)
     an = str(app_name or "").strip()[:120]
@@ -274,6 +301,9 @@ def package_entry(
         "auto_reopen_enabled": bool(auto_reopen_enabled),
         "auto_reconnect_enabled": bool(auto_reconnect_enabled),
         "roblox_user_id": _validate_roblox_user_id(roblox_user_id),
+        "account_mapping_source": _validate_mapping_source(account_mapping_source),
+        "account_mapping_status": _validate_mapping_status(account_mapping_status),
+        "account_mapping_updated_at": _validate_mapping_timestamp(account_mapping_updated_at),
     }
 
 
@@ -299,11 +329,17 @@ def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
         if isinstance(raw_entry, str):
             entry = package_entry(raw_entry, "", True, "not_set")
         elif isinstance(raw_entry, dict):
+            # Migrate legacy username field names → account_username
             username = raw_entry.get("account_username")
+            if username is None:
+                username = raw_entry.get("username") or raw_entry.get("roblox_username") or raw_entry.get("label")
             source = raw_entry.get("username_source")
-            if username is None and raw_entry.get("label") is not None:
-                username = raw_entry.get("label")
+            if username is None:
+                source = source or "not_set"
+            else:
                 source = source or "manual"
+            # Migrate legacy userId field names → roblox_user_id
+            raw_uid = raw_entry.get("roblox_user_id") or raw_entry.get("userId") or raw_entry.get("user_id") or 0
             entry = package_entry(
                 str(raw_entry.get("package") or ""),
                 str(username or ""),
@@ -314,7 +350,10 @@ def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
                 low_graphics_enabled=_as_bool(raw_entry.get("low_graphics_enabled", True)),
                 auto_reopen_enabled=_as_bool(raw_entry.get("auto_reopen_enabled", True)),
                 auto_reconnect_enabled=_as_bool(raw_entry.get("auto_reconnect_enabled", True)),
-                roblox_user_id=raw_entry.get("roblox_user_id", 0),
+                roblox_user_id=raw_uid,
+                account_mapping_source=str(raw_entry.get("account_mapping_source") or ""),
+                account_mapping_status=str(raw_entry.get("account_mapping_status") or "Not Mapped"),
+                account_mapping_updated_at=str(raw_entry.get("account_mapping_updated_at") or ""),
             )
             entry["private_server_url"] = _validate_optional_private_server_url(str(raw_entry.get("private_server_url") or ""))
         else:

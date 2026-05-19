@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import account_detect, android, db, safe_io
+from . import account_detect, android, db, root_access, safe_io
 from .banner import print_banner
 from .config import (
     ConfigError,
@@ -28,6 +28,7 @@ from .config import (
     normalize_package_detection_hint,
     package_display_name,
     package_entry,
+    MAPPING_STATUSES,
     safe_config_view,
     save_config,
     validate_account_username,
@@ -1050,33 +1051,83 @@ def _try_detect_user_id(entry: dict[str, Any], draft: dict[str, Any]) -> tuple[i
 def _validate_user_id_with_presence(user_id: int) -> str:
     """Quick non-blocking presence check to validate a detected user ID.
 
-    Returns "validated", "unconfirmed" (API down / rate-limited), or "invalid".
+    Returns one of: "Validated", "API Unavailable", "Invalid".
+    Never raises.
     """
     if user_id <= 0:
-        return "invalid"
+        return "Invalid"
     try:
         from . import roblox_presence as _rp
         result = _rp.fetch_presence_one(user_id)
-        if result is not None and not result.is_unknown:
-            return "validated"
-        return "unconfirmed"
+        if result is not None:
+            return "Validated"
+        return "API Unavailable"
     except Exception:  # noqa: BLE001
-        return "unconfirmed"
+        return "API Unavailable"
+
+
+def _mapping_status_for(
+    uid: int,
+    src: str,
+    entry: dict[str, Any],
+    presence_status: str | None = None,
+    is_display_name_only: bool = False,
+) -> str:
+    """Compute the canonical mapping status label for display and saving."""
+    if src in ("skipped",):
+        return "Skipped"
+    if src == "manual":
+        return "Manual"
+    if src == "config":
+        existing = entry.get("account_mapping_status") or ""
+        return existing if existing in MAPPING_STATUSES else "Validated"
+    if uid <= 0:
+        if str(entry.get("account_username") or "").strip():
+            return "Needs Confirmation"
+        return "Not Mapped"
+    if presence_status == "Validated":
+        return "Validated"
+    if presence_status == "API Unavailable":
+        return "Detected"
+    if presence_status == "Invalid":
+        return "Invalid"
+    if is_display_name_only:
+        return "Needs Confirmation"
+    return "Detected"
 
 
 def _run_account_mapping_table(
     entries: list[dict[str, Any]],
     draft: dict[str, Any],
+    *,
+    show_root_message: bool = True,
 ) -> list[dict[str, Any]]:
     """Show account mapping table for the given package entries and let user edit/confirm.
 
     Shows: # | Package | Username | User ID | Source | Status
     Allows: A=accept all, <number>=edit that entry, B=back (cancel mapping only).
-    Returns entries updated with any detected/confirmed roblox_user_id values.
+    Returns entries updated with any detected/confirmed roblox_user_id values
+    and account_mapping_source / account_mapping_status / account_mapping_updated_at.
     Never blocks Start — missing mapping is just silently skipped.
     """
     if not entries:
         return entries
+
+    # --- Show one-time root availability message ---
+    if show_root_message and _is_interactive():
+        if not root_access.has_root():
+            print()
+            print(
+                "  Root access was not available, so DENG Tool could not inspect"
+                " protected Roblox app data."
+            )
+            print(
+                "  Username/User ID detection will rely on public data and"
+                " manual entry instead."
+            )
+            print(
+                "  Root not required for Start — only improves setup detection."
+            )
 
     # --- Run detection for entries that don't have a user_id yet ---
     detected: list[tuple[int, str]] = []
@@ -1084,45 +1135,46 @@ def _run_account_mapping_table(
         uid, src = _try_detect_user_id(entry, draft)
         detected.append((uid, src))
 
-    def _row_status(uid: int, src: str, entry: dict[str, Any]) -> str:
+    # --- Run presence validation ---
+    presence_statuses: list[str] = []
+    for uid, src in detected:
         if src == "config":
-            return "Saved"
-        if src == "manual":
-            return "Manual"
+            existing = str(entries[len(presence_statuses)].get("account_mapping_status") or "")
+            presence_statuses.append(existing if existing in MAPPING_STATUSES else "Validated")
+            continue
         if uid > 0:
-            return "Detected"
-        if str(entry.get("account_username") or "").strip():
-            return "Username only"
-        return "Not found"
+            presence_statuses.append(_validate_user_id_with_presence(uid))
+        else:
+            presence_statuses.append("")
+
+    def _row_status(i: int, entry: dict[str, Any]) -> str:
+        uid, src = detected[i]
+        ps = presence_statuses[i]
+        return _mapping_status_for(uid, src, entry, presence_status=ps)
 
     def _print_mapping_table() -> None:
         print()
         print("Account Mapping")
-        print("-" * 80)
-        fmt = "  {:<3} {:<28} {:<16} {:<12} {:<14} {}"
+        print("-" * 82)
+        fmt = "  {:<3} {:<26} {:<16} {:<12} {:<14} {}"
         print(fmt.format("#", "Package", "Username", "User ID", "Source", "Status"))
-        print("  " + "-" * 78)
-        for i, (entry, (uid, src)) in enumerate(zip(entries, detected), start=1):
+        print("  " + "-" * 80)
+        for i, entry in enumerate(entries):
+            uid, src = detected[i]
             pkg = str(entry.get("package") or "")
-            pkg_short = (pkg[:26] + "..") if len(pkg) > 28 else pkg
+            pkg_short = (pkg[:24] + "..") if len(pkg) > 26 else pkg
             username = _package_username_display(entry)
             uid_disp = str(uid) if uid > 0 else "-"
             src_disp = (src[:12] + "..") if len(src) > 14 else src
-            status = _row_status(uid, src, entry)
-            print(fmt.format(i, pkg_short, username[:16], uid_disp, src_disp, status))
-        print("-" * 80)
+            status = _row_status(i, entry)
+            print(fmt.format(i + 1, pkg_short, username[:16], uid_disp, src_disp, status))
+        print("-" * 82)
         print("  A. Accept all  |  1-N. Edit entry  |  B. Back")
         print()
 
     if not _is_interactive():
-        # Non-interactive: just apply detected mappings silently.
-        out = []
-        for entry, (uid, _src) in zip(entries, detected):
-            e = dict(entry)
-            if uid > 0 and not (isinstance(e.get("roblox_user_id"), int) and e["roblox_user_id"] > 0):
-                e["roblox_user_id"] = uid
-            out.append(e)
-        return out
+        # Non-interactive: apply detected mappings silently with full metadata.
+        return _apply_mapping_to_entries(entries, detected, presence_statuses)
 
     while True:
         _print_mapping_table()
@@ -1135,7 +1187,6 @@ def _run_account_mapping_table(
         if raw in ("a", ""):
             break
         if raw in ("b", "back", "0"):
-            # Cancel mapping changes — return original entries unmodified.
             return list(entries)
 
         if raw.isdigit():
@@ -1144,15 +1195,14 @@ def _run_account_mapping_table(
                 print(f"  Invalid number. Enter 1-{len(entries)}, A, or B.")
                 continue
             entry = dict(entries[idx])
-            uid_cur, src_cur = detected[idx]
+            uid_cur, _ = detected[idx]
             pkg = str(entry.get("package") or "")
             print(f"\n  Editing: {pkg}")
             cur_name = str(entry.get("account_username") or "").strip()
-            cur_uid = uid_cur
             if cur_name:
                 print(f"  Current username: {cur_name}")
-            if cur_uid > 0:
-                print(f"  Current user ID:  {cur_uid}")
+            if uid_cur > 0:
+                print(f"  Current user ID:  {uid_cur}")
             print("  Enter Roblox username or numeric user ID (blank to skip):")
             try:
                 inp = input("  > ").strip()
@@ -1160,14 +1210,17 @@ def _run_account_mapping_table(
                 print()
                 continue
             if not inp:
+                detected[idx] = (0, "skipped")
+                presence_statuses[idx] = ""
                 continue
             if inp.isdigit() and int(inp) > 0:
                 new_uid = int(inp)
                 entry["roblox_user_id"] = new_uid
                 detected[idx] = (new_uid, "manual")
-                print(f"  Set user_id = {new_uid}")
+                ps = _validate_user_id_with_presence(new_uid)
+                presence_statuses[idx] = ps
+                print(f"  Set user_id = {new_uid}  [{ps}]")
             else:
-                # Treat as username — resolve via API.
                 try:
                     from . import roblox_presence as _rp
                     resolved = _rp.lookup_user_id(inp)
@@ -1181,21 +1234,48 @@ def _run_account_mapping_table(
                 if resolved and int(resolved) > 0:
                     entry["roblox_user_id"] = int(resolved)
                     detected[idx] = (int(resolved), "manual")
-                    print(f"  Resolved {inp} -> user_id {resolved}")
+                    ps = _validate_user_id_with_presence(int(resolved))
+                    presence_statuses[idx] = ps
+                    print(f"  Resolved {inp} -> user_id {resolved}  [{ps}]")
                 else:
-                    print(f"  Username stored. Could not resolve user ID right now.")
+                    print("  Username stored. Could not resolve user ID right now.")
                     detected[idx] = (0, "manual")
+                    presence_statuses[idx] = ""
             entries = list(entries)
             entries[idx] = entry
         else:
             print("  Enter A, B, or a package number.")
 
-    # Apply all detected user IDs to entries.
+    return _apply_mapping_to_entries(entries, detected, presence_statuses)
+
+
+def _apply_mapping_to_entries(
+    entries: list[dict[str, Any]],
+    detected: list[tuple[int, str]],
+    presence_statuses: list[str],
+) -> list[dict[str, Any]]:
+    """Apply detected user IDs and mapping metadata to a list of package entries."""
+    now_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     out = []
-    for entry, (uid, _src) in zip(entries, detected):
+    for i, entry in enumerate(entries):
         e = dict(entry)
+        uid, src = detected[i]
+        ps = presence_statuses[i] if i < len(presence_statuses) else ""
+        status = _mapping_status_for(uid, src, e, presence_status=ps)
+
+        if status == "Invalid":
+            # Do not save invalid IDs.
+            uid = 0
+
         if uid > 0:
             e["roblox_user_id"] = uid
+
+        if src not in ("config", "not_found", ""):
+            e["account_mapping_source"] = src
+            e["account_mapping_status"] = status
+            e["account_mapping_updated_at"] = now_ts
+        elif "account_mapping_status" not in e:
+            e["account_mapping_status"] = status
         out.append(e)
     return out
 
@@ -1521,6 +1601,7 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         print("2. Add Package")
         print("3. Remove Package")
         print("4. Set Account Username / User ID")
+        print("5. Refresh Account Mapping")
         print("0. Back")
         print("--------------------------------")
         _mc = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -1537,8 +1618,10 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
             draft = _package_menu_remove(draft)
         elif choice == "4":
             draft = _package_menu_set_user_id(draft)
+        elif choice == "5":
+            draft = _package_menu_refresh_mapping(draft)
         else:
-            print("Please choose 1-4 or 0.")
+            print("Please choose 1-5 or 0.")
     return draft
 
 
@@ -1938,6 +2021,65 @@ def _package_menu_remove(draft: dict[str, Any]) -> dict[str, Any]:
     draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
     draft = save_config(draft)
     print(f"Package Removed: {target['package']}")
+    return draft
+
+
+def _package_menu_refresh_mapping(draft: dict[str, Any]) -> dict[str, Any]:
+    """Refresh Account Mapping: re-run root detection, username resolution, and Presence validation.
+
+    Only available in Package Setup menu. NOT called from Start or supervisor.
+    """
+    print()
+    print("Refresh Account Mapping")
+    print()
+    entries = validate_package_entries(
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
+    )
+    enabled_entries = [e for e in entries if e.get("enabled", True)]
+    if not enabled_entries:
+        print("No packages configured.")
+        safe_io.press_enter()
+        return draft
+
+    print(f"Re-running detection for {len(enabled_entries)} package(s)...")
+    root_access.clear_cache()
+
+    # Reset detected entries so detection runs fresh (keep existing username but clear user_id source)
+    fresh_entries: list[dict[str, Any]] = []
+    for entry in enabled_entries:
+        e = dict(entry)
+        # Keep username, clear user_id so detection re-runs
+        e.pop("account_mapping_status", None)
+        e.pop("account_mapping_source", None)
+        e.pop("account_mapping_updated_at", None)
+        # Also attempt username re-detection if none set
+        if not str(e.get("account_username") or "").strip():
+            try:
+                det = account_detect.detect_account_username(
+                    str(e.get("package") or ""),
+                    entry=e,
+                    config=None,
+                    use_root=True,
+                )
+                if det and det.username:
+                    e["account_username"] = validate_account_username(det.username)
+                    e["username_source"] = validate_username_source(det.source, det.username)
+            except Exception:  # noqa: BLE001
+                pass
+        fresh_entries.append(e)
+
+    refreshed = _run_account_mapping_table(fresh_entries, draft, show_root_message=True)
+    if not refreshed:
+        print("Refresh cancelled.")
+        return draft
+
+    # Merge back into all entries (including disabled ones)
+    refreshed_by_pkg = {e["package"]: e for e in refreshed}
+    merged = [refreshed_by_pkg.get(e["package"], e) for e in entries]
+    draft["roblox_packages"] = merged
+    draft = save_config(draft)
+    print("Account mapping refreshed and saved.")
+    safe_io.press_enter()
     return draft
 
 

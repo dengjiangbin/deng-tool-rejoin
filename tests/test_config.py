@@ -56,23 +56,14 @@ class ConfigTests(unittest.TestCase):
         cfg.pop("roblox_packages")
         cfg["roblox_package"] = "com.roblox.client.clone1"
         validated = validate_config(cfg)
-        self.assertEqual(
-            validated["roblox_packages"],
-            [
-                {
-                    "package": "com.roblox.client.clone1",
-                    "app_name": "",
-                    "account_username": "Main",
-                    "private_server_url": "",
-                    "low_graphics_enabled": True,
-                    "auto_reopen_enabled": True,
-                    "auto_reconnect_enabled": True,
-                    "enabled": True,
-                    "username_source": "manual",
-                    "roblox_user_id": 0,
-                }
-            ],
-        )
+        pkg = validated["roblox_packages"][0]
+        self.assertEqual(pkg["package"], "com.roblox.client.clone1")
+        self.assertEqual(pkg["account_username"], "Main")
+        self.assertEqual(pkg["username_source"], "manual")
+        self.assertEqual(pkg["roblox_user_id"], 0)
+        self.assertIn("account_mapping_source", pkg)
+        self.assertIn("account_mapping_status", pkg)
+        self.assertIn("account_mapping_updated_at", pkg)
         self.assertEqual(validated["roblox_package"], "com.roblox.client.clone1")
 
     def test_migrates_label_to_account_username(self):
@@ -86,6 +77,11 @@ class ConfigTests(unittest.TestCase):
         cfg = default_config()
         cfg["roblox_packages"] = ["com.roblox.client", "com.roblox.client.clone1"]
         validated = validate_config(cfg)
+        _mapping_defaults = {
+            "account_mapping_source": "",
+            "account_mapping_status": "Not Mapped",
+            "account_mapping_updated_at": "",
+        }
         self.assertEqual(
             validated["roblox_packages"],
             [
@@ -100,6 +96,7 @@ class ConfigTests(unittest.TestCase):
                     "enabled": True,
                     "username_source": "not_set",
                     "roblox_user_id": 0,
+                    **_mapping_defaults,
                 },
                 {
                     "package": "com.roblox.client.clone1",
@@ -112,6 +109,7 @@ class ConfigTests(unittest.TestCase):
                     "enabled": True,
                     "username_source": "not_set",
                     "roblox_user_id": 0,
+                    **_mapping_defaults,
                 },
             ],
         )

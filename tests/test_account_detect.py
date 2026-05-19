@@ -33,7 +33,8 @@ class AccountDetectTests(unittest.TestCase):
   <string name="theme">dark</string>
 </map>
 """
-        self.assertEqual(username_from_pref_xml(xml), "deng1629")
+        u, _ = username_from_pref_xml(xml)
+        self.assertEqual(u, "deng1629")
 
     def test_user_name_beats_display_name_in_xml(self):
         xml = """<?xml version="1.0" encoding="utf-8"?>
@@ -42,7 +43,8 @@ class AccountDetectTests(unittest.TestCase):
   <string name="username">strict_user_1</string>
 </map>
 """
-        self.assertEqual(username_from_pref_xml(xml), "strict_user_1")
+        u, _ = username_from_pref_xml(xml)
+        self.assertEqual(u, "strict_user_1")
 
     def test_ignores_forbidden_secret_keys(self):
         xml = """<?xml version="1.0" encoding="utf-8"?>
@@ -52,7 +54,8 @@ class AccountDetectTests(unittest.TestCase):
   <string name="password">nope</string>
 </map>
 """
-        self.assertIsNone(username_from_pref_xml(xml))
+        u, _ = username_from_pref_xml(xml)
+        self.assertIsNone(u)
 
     def test_ignores_token_like_values_even_on_safe_keys(self):
         xml = """<?xml version="1.0" encoding="utf-8"?>
@@ -60,7 +63,8 @@ class AccountDetectTests(unittest.TestCase):
   <string name="username">abcdefghijklmnopqrstuvwxyz1234567890</string>
 </map>
 """
-        self.assertIsNone(username_from_pref_xml(xml))
+        u, _ = username_from_pref_xml(xml)
+        self.assertIsNone(u)
 
     def test_safe_username_value_rules(self):
         self.assertTrue(is_safe_username_value("AltAccount1"))
@@ -105,52 +109,48 @@ class AccountDetectTests(unittest.TestCase):
     def test_root_unavailable_returns_none_cleanly(self):
         cfg = validate_config(default_config())
         with unittest.mock.patch("agent.account_detect.detect_android_app_label", return_value=None):
-            with unittest.mock.patch("agent.account_detect.detect_username_from_safe_prefs", return_value=None):
-                with unittest.mock.patch("agent.android.detect_root", return_value=unittest.mock.MagicMock(available=False, tool=None)):
-                    with unittest.mock.patch("agent.account_detect._root_scan_package_data", return_value=(None, None)):
-                        r = detect_account_username(
-                            "com.roblox.client",
-                            entry=package_entry("com.roblox.client", "", True, "not_set"),
-                            config=cfg,
-                            use_root=True,
-                            respect_config_manual=False,
-                        )
+            with unittest.mock.patch("agent.account_detect.detect_username_from_safe_prefs", return_value=(None, False)):
+                with unittest.mock.patch("agent.account_detect._root_scan_package_data", return_value=(None, None, False)):
+                    r = detect_account_username(
+                        "com.roblox.client",
+                        entry=package_entry("com.roblox.client", "", True, "not_set"),
+                        config=cfg,
+                        use_root=True,
+                        respect_config_manual=False,
+                    )
         self.assertIsNone(r)
 
     def test_timeout_returns_unknown_cleanly(self):
         cfg = validate_config(default_config())
         with unittest.mock.patch("agent.account_detect.detect_android_app_label", return_value=None):
-            with unittest.mock.patch("agent.account_detect.detect_username_from_safe_prefs", return_value=None):
-                with unittest.mock.patch("agent.android.detect_root", return_value=unittest.mock.MagicMock(available=True, tool="su")):
-                    with unittest.mock.patch(
-                        "agent.android.run_root_command",
-                        return_value=unittest.mock.MagicMock(ok=False, timed_out=True, stdout="", stderr="timeout"),
-                    ):
-                        r = detect_account_username(
-                            "com.roblox.client",
-                            entry=package_entry("com.roblox.client", "", True, "not_set"),
-                            config=cfg,
-                            respect_config_manual=False,
-                        )
+            with unittest.mock.patch("agent.account_detect.detect_username_from_safe_prefs", return_value=(None, False)):
+                with unittest.mock.patch("agent.account_detect._root_scan_package_data", return_value=(None, None, False)):
+                    r = detect_account_username(
+                        "com.roblox.client",
+                        entry=package_entry("com.roblox.client", "", True, "not_set"),
+                        config=cfg,
+                        respect_config_manual=False,
+                    )
         self.assertIsNone(r)
 
     def test_sqlite_hook_username(self):
         account_detect.set_sqlite_username_hook(lambda _p: "SqliteNick")
         cfg = validate_config(default_config())
-        with unittest.mock.patch("agent.account_detect.detect_android_app_label", return_value=None):
-            with unittest.mock.patch("agent.account_detect.detect_username_from_safe_prefs", return_value=None):
-                with unittest.mock.patch("agent.android.detect_root", return_value=unittest.mock.MagicMock(available=True, tool="su")):
-                    with unittest.mock.patch(
-                        "agent.account_detect._root_list_scan_files",
-                        return_value=["/data/data/com.roblox.client/databases/app.db"],
-                    ):
-                        with unittest.mock.patch("agent.account_detect._root_read_file_capped", return_value=None):
-                            r = detect_account_username(
-                                "com.roblox.client",
-                                entry=package_entry("com.roblox.client", "", True, "not_set"),
-                                config=cfg,
-                                respect_config_manual=False,
-                            )
+        with unittest.mock.patch("agent.account_detect.detect_android_app_label", return_value=None), \
+             unittest.mock.patch("agent.account_detect.detect_username_from_safe_prefs", return_value=(None, False)), \
+             unittest.mock.patch("agent.account_detect.root_access.has_root", return_value=True), \
+             unittest.mock.patch("agent.account_detect.root_access.list_root_glob", return_value=[]), \
+             unittest.mock.patch(
+                 "agent.account_detect._root_list_scan_files",
+                 return_value=["/data/data/com.roblox.client/databases/app.db"],
+             ), \
+             unittest.mock.patch("agent.account_detect._root_read_file_capped", return_value=None):
+            r = detect_account_username(
+                "com.roblox.client",
+                entry=package_entry("com.roblox.client", "", True, "not_set"),
+                config=cfg,
+                respect_config_manual=False,
+            )
         self.assertIsNotNone(r)
         self.assertEqual(r.username, "SqliteNick")
         self.assertEqual(r.source, "root_sqlite")
@@ -163,23 +163,24 @@ class AccountDetectTests(unittest.TestCase):
         old_handlers = list(log.handlers)
         log.handlers = [h]
         try:
-            with unittest.mock.patch("agent.account_detect.detect_android_app_label", return_value=None):
-                with unittest.mock.patch("agent.account_detect.detect_username_from_safe_prefs", return_value=None):
-                    with unittest.mock.patch("agent.android.detect_root", return_value=unittest.mock.MagicMock(available=True, tool="su")):
-                        with unittest.mock.patch(
-                            "agent.account_detect._root_list_scan_files",
-                            return_value=["/data/data/com.roblox.client/cache/x.json"],
-                        ):
-                            with unittest.mock.patch(
-                                "agent.account_detect._root_read_file_capped",
-                                return_value='{"secret":"Bearer superlongsecrettokenzzzz","username":"u1"}',
-                            ):
-                                detect_account_username(
-                                    "com.roblox.client",
-                                    entry=package_entry("com.roblox.client", "", True, "not_set"),
-                                    config=cfg,
-                                    respect_config_manual=False,
-                                )
+            with unittest.mock.patch("agent.account_detect.detect_android_app_label", return_value=None), \
+                 unittest.mock.patch("agent.account_detect.detect_username_from_safe_prefs", return_value=(None, False)), \
+                 unittest.mock.patch("agent.account_detect.root_access.has_root", return_value=True), \
+                 unittest.mock.patch("agent.account_detect.root_access.list_root_glob", return_value=[]), \
+                 unittest.mock.patch(
+                     "agent.account_detect._root_list_scan_files",
+                     return_value=["/data/data/com.roblox.client/cache/x.json"],
+                 ), \
+                 unittest.mock.patch(
+                     "agent.account_detect._root_read_file_capped",
+                     return_value='{"secret":"Bearer superlongsecrettokenzzzz","username":"u1"}',
+                 ):
+                detect_account_username(
+                    "com.roblox.client",
+                    entry=package_entry("com.roblox.client", "", True, "not_set"),
+                    config=cfg,
+                    respect_config_manual=False,
+                )
             out = stream.getvalue()
             self.assertNotIn("Bearer", out)
             self.assertNotIn("superlong", out)
@@ -246,13 +247,14 @@ class CandidatePrefFilesPermissionTests(unittest.TestCase):
         self.assertIsInstance(result, list)
 
     def test_detect_username_from_safe_prefs_no_crash_on_permission(self):
-        """detect_username_from_safe_prefs returns None without crashing on PermissionError."""
+        """detect_username_from_safe_prefs returns (None, False) without crashing on PermissionError."""
         from agent.account_detect import detect_username_from_safe_prefs
         from pathlib import Path
 
         with unittest.mock.patch.object(Path, "exists", side_effect=PermissionError("denied")):
-            result = detect_username_from_safe_prefs("com.roblox.client")
+            result, display_only = detect_username_from_safe_prefs("com.roblox.client")
         self.assertIsNone(result)
+        self.assertFalse(display_only)
 
 
 if __name__ == "__main__":
