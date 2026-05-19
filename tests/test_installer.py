@@ -543,5 +543,177 @@ class TestNoPycacheDirCheck(unittest.TestCase):
         self.assertIn("detail", check)
 
 
+# ---------------------------------------------------------------------------
+# 12. POSIX sh syntax validation (regression for line-174 ")" syntax error)
+# ---------------------------------------------------------------------------
+
+class TestInstallerPosixShSyntax(unittest.TestCase):
+    """Regression tests for POSIX sh compatibility of the generated installer.
+
+    Root cause of prior break: Python inline code embedded inside a shell
+    single-quoted string (python3 -c '...') contained ['"](Joining)['"] which
+    has single quotes that prematurely close the shell single-quoted string,
+    leaving (Joining) as an unquoted shell subshell → ')" unexpected'.
+
+    Fix: replaced python3 -c '...' blocks with POSIX grep commands that
+    operate directly on the extracted supervisor file.
+    """
+
+    def _get_script(self) -> str:
+        from agent.bootstrap_installer import render_direct_install_bootstrap
+        return render_direct_install_bootstrap(
+            base_url="https://rejoin.deng.my.id",
+            package_sha256="a" * 64,
+        )
+
+    def test_installer_has_posix_shebang(self):
+        s = self._get_script()
+        first_line = s.split("\n")[0]
+        self.assertIn("sh", first_line, "shebang must reference sh")
+
+    def test_no_bash_arrays(self):
+        """No bash array syntax: arr=(a b c)"""
+        import re
+        s = self._get_script()
+        matches = re.findall(r'\b\w+=\(', s)
+        self.assertEqual(matches, [], f"Bash array syntax found: {matches}")
+
+    def test_no_double_bracket_conditionals(self):
+        """No bash [[ ... ]] conditionals — use POSIX [ ... ] instead.
+
+        Note: POSIX character classes like [[:space:]] are allowed and
+        are not the same as bash [[ ... ]] conditionals.
+        """
+        import re
+        s = self._get_script()
+        # Bash [[ appears as a conditional: if [[, while [[, ] && [[, etc.
+        # It does NOT include POSIX character classes like [[:space:]]
+        bash_cond = re.findall(r'(?:if|while|&&|\|\|)\s*\[\[', s)
+        self.assertEqual(
+            bash_cond, [],
+            f"Bash [[ conditional found: {bash_cond}"
+        )
+
+    def test_no_single_quote_inside_single_quoted_python_c(self):
+        """Installer must not embed single quotes inside python3 -c '...' blocks.
+
+        This was the root cause of the line-174 syntax error:
+        python3 -c '... ['"](Joining)['"]...' broke POSIX sh parsing.
+        """
+        import re
+        s = self._get_script()
+        # Find all python3 -c '...' blocks
+        # A single quote inside a single-quoted shell string is impossible in POSIX sh
+        # so we just check: does any line containing python3 -c contain ['"]
+        for i, line in enumerate(s.split("\n"), start=1):
+            if "python3 -c '" in line:
+                # If this is a single-line -c '...', check for embedded ' in the arg
+                # (a multi-line -c is fine as long as no ' appears in the Python body)
+                self.assertNotIn(
+                    "['\"",
+                    line,
+                    f"Line {i}: single-quoted python3 -c block contains ['\" "
+                    f"which closes the shell string: {line!r}"
+                )
+
+    def test_no_joining_state_in_single_quoted_python(self):
+        """The specific broken pattern must not appear in the generated installer."""
+        s = self._get_script()
+        # The old broken pattern was: re.search(r"""['"](Joining)['"]""", src)
+        # inside a single-quoted shell string
+        self.assertNotIn(
+            "['\"](Joining)['\"]",
+            s,
+            "Broken pattern ['\"]( Joining)['\"] found — will break POSIX sh"
+        )
+        self.assertNotIn(
+            "['\"]",
+            s,
+            "Pattern ['\"](containing single-quote) found in installer script"
+        )
+
+    def test_grep_based_supervisor_checks_present(self):
+        """Legacy detector and old-states checks must use grep, not python3 -c."""
+        s = self._get_script()
+        self.assertIn(
+            "grep -qE",
+            s,
+            "experience_detector check must use grep -qE"
+        )
+        self.assertIn(
+            "grep -qF",
+            s,
+            "Joining state check must use grep -qF"
+        )
+        # The supervisor file variable must be used
+        self.assertIn("_SV_FILE", s, "_SV_FILE variable must be set for grep checks")
+
+    def test_sh_syntax_valid(self):
+        """sh -n must pass on the generated installer (requires sh in PATH)."""
+        import shutil
+        import subprocess
+        import tempfile
+        s = self._get_script()
+        sh = shutil.which("sh")
+        if not sh:
+            self.skipTest("sh not found in PATH — skipping sh -n check")
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".sh", delete=False, encoding="utf-8"
+        ) as tf:
+            tf.write(s)
+            tf_path = tf.name
+        try:
+            result = subprocess.run(
+                [sh, "-n", tf_path],
+                capture_output=True, text=True, timeout=10
+            )
+            self.assertEqual(
+                result.returncode, 0,
+                f"sh -n failed:\n{result.stderr}"
+            )
+        finally:
+            import os
+            os.unlink(tf_path)
+
+    def test_bash_syntax_valid(self):
+        """bash -n must pass on the generated installer."""
+        import shutil
+        import subprocess
+        import tempfile
+        s = self._get_script()
+        bash = shutil.which("bash")
+        if not bash:
+            self.skipTest("bash not found in PATH — skipping bash -n check")
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".sh", delete=False, encoding="utf-8"
+        ) as tf:
+            tf.write(s)
+            tf_path = tf.name
+        try:
+            result = subprocess.run(
+                [bash, "-n", tf_path],
+                capture_output=True, text=True, timeout=10
+            )
+            self.assertEqual(
+                result.returncode, 0,
+                f"bash -n failed:\n{result.stderr}"
+            )
+        finally:
+            import os
+            os.unlink(tf_path)
+
+    def test_joining_check_uses_grep_not_python(self):
+        """Old-states check for Joining must be a grep command, not python3 -c."""
+        s = self._get_script()
+        # Must have grep -qF "Joining" (note: no single quotes around Joining in the grep arg)
+        self.assertIn('"Joining"', s, 'grep must search for "Joining" (double-quoted)')
+        # Must NOT embed Joining check inside python3 -c '...'
+        for i, line in enumerate(s.split("\n"), start=1):
+            if "python3 -c '" in line and "Joining" in line:
+                self.fail(
+                    f"Line {i}: Joining check appears inside python3 -c block: {line!r}"
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
