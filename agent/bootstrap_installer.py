@@ -250,11 +250,8 @@ def render_public_bootstrap(
         # ``curl ... | sh``.  See module docstring.
         "set -eu\n"
         + f'echo "{safe_title}"\n'
-        + f"{banner_part}"
-        + 'case "${PREFIX:-}" in\n'
-        '  *termux*) echo "Detected: Termux" ;;\n'
-        "esac\n"
-        f'export DENG_REJOIN_INSTALL_API="{base}"\n'
+        +         f"{banner_part}"
+        + f'export DENG_REJOIN_INSTALL_API="{base}"\n'
         f"{sess_export}\n"
         'APP_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"\n'
         'mkdir -p "$APP_HOME"\n'
@@ -315,9 +312,6 @@ def render_direct_install_bootstrap(
         + "command -v curl >/dev/null 2>&1 || { echo \"Install curl first: pkg install -y curl\" >&2; exit 1; }\n"
         "command -v tar >/dev/null 2>&1 || { echo \"Install tar first: pkg install -y tar\" >&2; exit 1; }\n"
         "command -v python3 >/dev/null 2>&1 || { echo \"Install python first: pkg install -y python\" >&2; exit 1; }\n"
-        'case "${PREFIX:-}" in\n'
-        '  *termux*) echo "Detected: Termux" ;;\n'
-        "esac\n"
         f'export DENG_REJOIN_INSTALL_API="{base}"\n'
         'APP_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"\n'
         'mkdir -p "$APP_HOME"\n'
@@ -476,8 +470,6 @@ def render_direct_install_bootstrap(
         '  echo "Got (short):      $_INSTALLED_SHORT_SHA" >&2\n'
         "  exit 1\n"
         "fi\n"
-        'echo "Installed build: ${_GIT_COMMIT:-unknown} ${_EXPECTED_SHORT_SHA}"\n'
-        'echo "Wrapper: $DR_RESOLVED"\n'
         'if [ "$USING_HOME_BIN" -eq 1 ]; then\n'
         "  echo 'Note: If deng-rejoin is not found in this shell, run once:'\n"
         "  echo '  export PATH=\"$HOME/bin:$PATH\"'\n"
@@ -485,7 +477,6 @@ def render_direct_install_bootstrap(
         "fi\n"
         'echo ""\n'
         'echo "Install complete."\n'
-        'echo "Run: deng-rejoin"\n'
     )
 
     return (

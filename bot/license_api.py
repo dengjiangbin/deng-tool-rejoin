@@ -503,7 +503,7 @@ def _route_public_install(
                 base_url=base,
                 package_sha256=_sha,
                 installer_title="DENG Tool: Rejoin Test Installer",
-                banner_lines=("Channel: internal test", "Version: main-dev"),
+                banner_lines=("Version: main-dev",),
             )
             return (
                 script.encode("utf-8"),
@@ -1256,6 +1256,75 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         log.info("License result: %s for key %s", result, _mask_key(raw_key))
         payload, status = _build_response(result)
         return respond(payload, status)
+
+    # ── Key execution report (public releases only) ───────────────────────────
+    if path == "/api/execute":
+        if method != "POST":
+            return respond(json.dumps({"error": "POST required"}).encode(), 405)
+
+        body = _read_json_body(environ)
+        if not body:
+            return respond(json.dumps({"error": "Invalid JSON body"}).encode(), 400)
+
+        raw_key = (body.get("key") or "").strip()
+        install_id_hash = (body.get("install_id_hash") or "").strip()
+        version = (body.get("version") or "")[:64]
+        channel = (body.get("channel") or "")[:64].strip().lower()
+
+        if not raw_key or not install_id_hash:
+            return respond(json.dumps({"error": "key and install_id_hash required"}).encode(), 400)
+
+        # Only public stable releases count — explicitly exclude dev/test channels.
+        _PUBLIC_CHANNELS = {"stable", "release", "public"}
+        _DEV_CHANNELS = {"main-dev", "dev", "internal", "test", "beta", "test-latest"}
+        is_public = channel in _PUBLIC_CHANNELS and channel not in _DEV_CHANNELS
+
+        if not is_public:
+            return respond(json.dumps({"recorded": False, "reason": "non-public channel"}).encode())
+
+        try:
+            from agent.license_store import get_default_store
+            from agent.license import normalize_license_key, hash_license_key, LicenseKeyError
+            store = get_default_store()
+            try:
+                normalized = normalize_license_key(raw_key)
+                key_id = hash_license_key(normalized)
+            except LicenseKeyError:
+                return respond(json.dumps({"error": "invalid key"}).encode(), 400)
+            # Validate the key exists and is active before recording
+            try:
+                from agent.license_store import RESULT_ACTIVE
+                if len(install_id_hash) != 64:
+                    install_id_hash = _hash_install_id(install_id_hash)
+                device_model = (body.get("device_model") or "unknown")[:120]
+                result = store.bind_or_check_device(raw_key, install_id_hash, device_model, version)
+                if result != RESULT_ACTIVE:
+                    return respond(json.dumps({"recorded": False, "reason": result}).encode())
+            except Exception:  # noqa: BLE001
+                return respond(json.dumps({"recorded": False, "reason": "check_failed"}).encode())
+            # Look up owner_discord_id from the key record
+            try:
+                owner_discord_id = ""
+                if hasattr(store, "_load"):
+                    db = store._load()  # type: ignore[attr-defined]
+                    rec = db.get("keys", {}).get(key_id, {})
+                    owner_discord_id = rec.get("owner_discord_id") or ""
+                elif hasattr(store, "_client"):
+                    res = store._client.table("license_keys").select("owner_discord_id").eq("id", key_id).limit(1).execute()  # type: ignore[attr-defined]
+                    owner_discord_id = (res.data[0].get("owner_discord_id") or "") if res.data else ""
+            except Exception:  # noqa: BLE001
+                owner_discord_id = ""
+            store.record_key_execution(
+                key_id=key_id,
+                owner_discord_id=owner_discord_id,
+                version=version,
+                channel=channel,
+                is_public_release=True,
+            )
+            return respond(json.dumps({"recorded": True}).encode())
+        except Exception as exc:  # noqa: BLE001
+            log.error("Execute record error: %s", exc)
+            return respond(json.dumps({"recorded": False, "reason": "server_error"}).encode(), 500)
 
     # ── Download authorize ────────────────────────────────────────────────────
     if path == "/api/download/authorize":

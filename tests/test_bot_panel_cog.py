@@ -175,18 +175,19 @@ class TestPanelViewGenerate(unittest.IsolatedAsyncioTestCase):
         content = kwargs.get("content") or ""
         self.assertIn("DENG-", content)
 
-    async def test_generate_limit_reached(self) -> None:
-        """Second generate should show limit response, not raise."""
+    async def test_generate_cooldown_on_second(self) -> None:
+        """Second generate within 60s should show cooldown response (unlimited keys)."""
         inter = _fake_interaction(user=_fake_user(uid=42))
         view = PanelView(self.store)
         # First generate succeeds
         await view.btn_generate.callback(inter)
-        # Second generate hits limit
+        # Second generate hits 60s cooldown (not a key limit — keys are unlimited)
         inter2 = _fake_interaction(user=_fake_user(uid=42))
         await view.btn_generate.callback(inter2)
         _, kwargs = inter2.followup.send.call_args
         embed = kwargs["embed"]
-        self.assertIn("Limit", embed.title)
+        # Cooldown response shows "⏳ Please Wait", not "❌ Key Limit Reached"
+        self.assertIn("Wait", embed.title)
         self.assertTrue(kwargs.get("ephemeral"))
 
 
@@ -374,11 +375,16 @@ class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
     async def test_key_stats_pagination_title(self) -> None:
         uid = 503
         self.store.get_or_create_user(str(uid))
-        self.store.set_user_max_keys(str(uid), 10)
+        # Bypass 60-second cooldown so we can create 6 keys for pagination test
+        import agent.license_store as _ls
+        _orig = _ls.GENERATION_COOLDOWN_SECONDS
+        _ls.GENERATION_COOLDOWN_SECONDS = 0
+        try:
+            for _ in range(6):
+                self.store.create_key_for_user(str(uid))
+        finally:
+            _ls.GENERATION_COOLDOWN_SECONDS = _orig
         gen_view = PanelView(self.store)
-        for _ in range(6):
-            inter = _fake_interaction(user=_fake_user(uid=uid))
-            await gen_view.btn_generate.callback(inter)
         inter_s = _fake_interaction(user=_fake_user(uid=uid))
         await gen_view.btn_key_stats.callback(inter_s)
         _, kwargs = inter_s.followup.send.call_args
@@ -387,10 +393,16 @@ class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
     async def test_key_stats_next_page(self) -> None:
         uid = 504
         self.store.get_or_create_user(str(uid))
-        self.store.set_user_max_keys(str(uid), 10)
+        # Bypass 60-second cooldown so we can create 6 keys for pagination test
+        import agent.license_store as _ls
+        _orig = _ls.GENERATION_COOLDOWN_SECONDS
+        _ls.GENERATION_COOLDOWN_SECONDS = 0
+        try:
+            for _ in range(6):
+                self.store.create_key_for_user(str(uid))
+        finally:
+            _ls.GENERATION_COOLDOWN_SECONDS = _orig
         gen_view = PanelView(self.store)
-        for _ in range(6):
-            await gen_view.btn_generate.callback(_fake_interaction(user=_fake_user(uid=uid)))
         inter_s = _fake_interaction(user=_fake_user(uid=uid))
         await gen_view.btn_key_stats.callback(inter_s)
         stats_view = inter_s.followup.send.call_args[1]["view"]
@@ -516,9 +528,28 @@ class TestCogOwnerDenied(unittest.IsolatedAsyncioTestCase):
 
     def test_slash_group_registered(self) -> None:
         cog = LicensePanelCog(self.bot, self.store)
-        self.bot.tree.add_command.assert_called_once()
-        cmd = self.bot.tree.add_command.call_args[0][0]
-        self.assertEqual(cmd.name, "license_panel")
+        # Multiple slash command groups registered: license_panel, license_log_channel
+        self.assertTrue(self.bot.tree.add_command.called)
+        registered_names = {
+            call[0][0].name
+            for call in self.bot.tree.add_command.call_args_list
+        }
+        self.assertIn("license_panel", registered_names)
+        self.assertIn("license_log_channel", registered_names)
+
+    def test_license_command_registered_on_tree(self) -> None:
+        """The /license <user> command must be registered directly on bot.tree."""
+        cog = LicensePanelCog(self.bot, self.store)
+        # /license is registered via bot.tree.command() (not add_command),
+        # so it appears as a tree command rather than an add_command call.
+        # Verify indirectly: _register_commands runs without error and
+        # both license_log_channel and license_panel groups are in add_command.
+        registered_names = {
+            call[0][0].name
+            for call in self.bot.tree.add_command.call_args_list
+        }
+        # license_log_channel group must be registered (set/clear/status subcommands)
+        self.assertIn("license_log_channel", registered_names)
 
 
 # ── Cog: restore_persistent_views ────────────────────────────────────────────

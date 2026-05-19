@@ -374,7 +374,8 @@ class InstallTestLatestBootstrapTests(unittest.TestCase):
         self.assertIn("text/", headers.get("Content-Type", ""))
         text = body.decode("utf-8")
         self.assertIn("DENG Tool: Rejoin Test Installer", text)
-        self.assertIn("Channel: internal test", text)
+        # "Channel: internal test" removed from public output per Section C (keep clean)
+        self.assertNotIn("Channel: internal test", text)
         self.assertIn("Version: main-dev", text)
         # New direct-install flow: downloads the full package, no .install_requested
         self.assertIn("install/test/package.tar.gz", text)

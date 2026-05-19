@@ -349,8 +349,12 @@ class ResetHwidSelect(discord.ui.Select):
             fk = k.get("full_key_plaintext")
             mk = k.get("masked_key", "???")
             key_str = fk or mk
-            # Label: key + friendly status suffix
-            status_suffix = " — Bound to a device" if bound else " — No device linked"
+            # Label: key + device name for bound keys (show actual device, not generic text)
+            if bound:
+                _dev = (k.get("device_model") or k.get("device_label") or "").strip()
+                status_suffix = f" — Bound to {_dev}" if _dev else " — Bound to a device"
+            else:
+                status_suffix = " — No device linked"
             label = f"{key_str}{status_suffix}"[:100]
             # Description: device model for bound keys; friendly text for unbound
             if bound:
@@ -1342,11 +1346,12 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                 color=discord.Color.from_rgb(0, 0, 0),
             )
             embed.add_field(name="User", value=f"<@{uid}> (`{uid}`)", inline=False)
-            embed.add_field(name="Current Key Generated", value=str(stats["key_generated_count"]), inline=True)
-            embed.add_field(name="Current Key Redeemed", value=str(stats["key_redeemed_count"]), inline=True)
-            embed.add_field(name="Current Unbound Key", value=str(stats["unbound_key_count"]), inline=True)
-            embed.add_field(name="Current Bound Key", value=str(stats["bound_key_count"]), inline=True)
-            embed.add_field(name="Current Reset HWID", value=f"{stats['reset_hwid_count']} times", inline=True)
+            embed.add_field(name="Generated (Active)", value=str(stats["key_generated_count"]), inline=True)
+            embed.add_field(name="Redeemed", value=str(stats["key_redeemed_count"]), inline=True)
+            embed.add_field(name="Unbound", value=str(stats["unbound_key_count"]), inline=True)
+            embed.add_field(name="Bound", value=str(stats["bound_key_count"]), inline=True)
+            embed.add_field(name="HWID Resets", value=f"{stats['reset_hwid_count']} times", inline=True)
+            embed.add_field(name="Key Executed (Public)", value=str(stats.get("key_executed_count", 0)), inline=True)
 
             # List active keys for the user (owner can see full keys where available)
             try:

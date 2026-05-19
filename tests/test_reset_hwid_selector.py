@@ -330,7 +330,9 @@ class TestBuildResetSelectorEmbed(unittest.TestCase):
         desc = build_reset_selector_embed([k_unbound, k_bound])["embed"]["description"]
         # "No device linked" (not "No device bound")
         self.assertRegex(desc, r"\n1\. [\s\S]*No device linked")
-        self.assertRegex(desc, r"\n2\. [\s\S]*Bound to a device")
+        # Fix 3: device display name is shown (Pixel 8 from _make_keys fixture)
+        # falls back to "Bound to a device" only when device_model/label is empty
+        self.assertRegex(desc, r"\n2\. [\s\S]*Bound to")
 
     def test_selector_full_key_when_recoverable(self):
         """Full key appears in backticks when full_key_plaintext is set."""

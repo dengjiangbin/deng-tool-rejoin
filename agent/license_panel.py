@@ -467,7 +467,11 @@ def build_reset_selector_embed(keys_with_state: list[dict]) -> dict[str, Any]:
             key_disp = f"`{fk}`"
         else:
             key_disp = f"**{mk}** (reference only)"
-        suffix = "Bound to a device" if bound else "No device linked"
+        if bound:
+            device_name = (k.get("device_model") or k.get("device_label") or "").strip()
+            suffix = f"Bound to {device_name}" if device_name else "Bound to a device"
+        else:
+            suffix = "No device linked"
         lines.append(f"{i}. {icon} {key_disp} — {suffix}")
     key_list = "\n".join(lines)
     description = (

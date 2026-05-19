@@ -16,9 +16,12 @@ Optional:
 from __future__ import annotations
 
 import asyncio
+import datetime
+import json
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 # ── dotenv ────────────────────────────────────────────────────────────────────
@@ -99,6 +102,11 @@ async def _build_and_run(token: str) -> None:
             "managed by deploy_commands.py (guild-only policy)."
         )
 
+        # Write initial health snapshot and start heartbeat loop
+        cmds_loaded = len(bot.tree.get_commands()) if hasattr(bot, 'tree') else 0
+        _write_health(bot, discord_ready=True, db_ok=True, commands_loaded=cmds_loaded)
+        asyncio.create_task(_health_loop(bot, store))
+
     @bot.event
     async def on_error(event: str, *args: object, **kwargs: object) -> None:
         log.exception("Unhandled error in event %s", event)
@@ -106,6 +114,89 @@ async def _build_and_run(token: str) -> None:
     log.info("Starting DENG Tool: Rejoin license panel bot…")
     # log_handler=None → use our structured setup above; discord.py won't add its own
     await bot.start(token, reconnect=True)
+
+
+_HEALTH_PATH = Path(__file__).resolve().parents[1] / "data" / "health.json"
+_PID_LOCK_PATH = Path(__file__).resolve().parents[1] / "data" / "bot.pid"
+_BOT_START_TIME = time.monotonic()
+
+
+def _acquire_single_instance() -> None:
+    """Ensure only one bot instance runs by killing the previous PID from the lock file.
+
+    Called once at startup.  On Windows, PM2 sometimes starts the new process
+    before the old one has fully exited, leaving duplicate instances that share
+    the same Discord token and trigger mutual Gateway disconnects.  Reading the
+    PID lock lets the new instance cleanly evict only the previous instance
+    without accidentally killing unrelated processes.
+    """
+    import subprocess
+
+    own_pid = os.getpid()
+    lock = _PID_LOCK_PATH
+    try:
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        if lock.exists():
+            old_pid_str = lock.read_text().strip()
+            if old_pid_str.isdigit():
+                old_pid = int(old_pid_str)
+                if old_pid and old_pid != own_pid:
+                    log.info("Evicting previous instance (pid=%d).", old_pid)
+                    try:
+                        subprocess.run(
+                            ["taskkill", "/F", "/PID", str(old_pid)],
+                            capture_output=True, timeout=5,
+                        )
+                        time.sleep(0.5)  # allow socket TIME_WAIT to settle
+                    except Exception as exc:  # noqa: BLE001
+                        log.debug("Could not evict pid=%d: %s", old_pid, exc)
+        lock.write_text(str(own_pid))
+    except Exception as exc:  # noqa: BLE001
+        log.debug("PID lock error: %s", exc)
+
+
+def _write_health(bot: commands.Bot | None, *, discord_ready: bool, db_ok: bool, commands_loaded: int) -> None:
+    """Write a health.json compatible with ecosystemPingStatus.js."""
+    try:
+        _HEALTH_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "status": "ok" if discord_ready and db_ok else "warning",
+            "lastHeartbeatAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "pid": os.getpid(),
+            "discordReady": discord_ready,
+            "databaseOk": db_ok,
+            "commandsLoaded": commands_loaded,
+            "uptimeSeconds": int(time.monotonic() - _BOT_START_TIME),
+        }
+        tmp = _HEALTH_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        tmp.replace(_HEALTH_PATH)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("health.json write failed: %s", exc)
+
+
+async def _health_loop(bot: commands.Bot, store: object) -> None:
+    """Background task: refresh health.json every 30 seconds."""
+    while True:
+        try:
+            db_ok = True
+            try:
+                # Lightweight DB check — just probe the users table
+                if hasattr(store, '_client'):
+                    store._client.table("license_users").select("id").limit(1).execute()
+                elif hasattr(store, '_load'):
+                    store._load()
+            except Exception:  # noqa: BLE001
+                db_ok = False
+            _write_health(
+                bot,
+                discord_ready=not bot.is_closed() and bot.is_ready(),
+                db_ok=db_ok,
+                commands_loaded=len(bot.tree.get_commands()) if hasattr(bot, 'tree') else 0,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.debug("health loop error: %s", exc)
+        await asyncio.sleep(30)
 
 
 def main() -> None:
@@ -119,7 +210,46 @@ def main() -> None:
             "owner-only /license_panel commands."
         )
 
-    asyncio.run(_build_and_run(token))
+    # Write our PID to the lock file so the ecosystem knows which instance is
+    # current.  We do NOT evict a running instance here because on Windows,
+    # PM2's restart sequence (old kill → new start) is not atomic.  If the new
+    # process kills the old one, PM2 sees the kill as an unexpected exit and
+    # starts yet another instance, creating a restart loop.  Instead, rely on
+    # PM2's kill_timeout to ensure only one instance is active at a time.
+    try:
+        _PID_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _PID_LOCK_PATH.write_text(str(os.getpid()))
+    except Exception as exc:  # noqa: BLE001
+        log.debug("PID lock write failed: %s", exc)
+
+    # On Windows, PM2 uses TerminateProcess() which doesn't trigger Python
+    # signal handlers.  As a best-effort, also register SIGTERM/SIGINT so that
+    # graceful restarts triggered by other means exit quickly.
+    import signal
+
+    def _sigterm_handler(signum: int, frame: object) -> None:  # noqa: ARG001
+        log.info("Received signal %d — exiting immediately.", signum)
+        os._exit(0)
+
+    for _sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(_sig, _sigterm_handler)
+        except (OSError, ValueError):
+            pass
+
+    # Windows: PM2 may send CTRL_BREAK_EVENT to console processes.
+    if hasattr(signal, "CTRL_BREAK_EVENT"):
+        try:
+            signal.signal(signal.CTRL_BREAK_EVENT, _sigterm_handler)
+        except (OSError, ValueError):
+            pass
+
+    try:
+        asyncio.run(_build_and_run(token))
+        log.warning("asyncio.run returned normally — bot.start() exited. PM2 will restart.")
+    except Exception as exc:
+        log.exception("Unhandled exception in main event loop: %s", exc)
+        raise
 
 
 if __name__ == "__main__":

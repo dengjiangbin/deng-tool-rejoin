@@ -308,7 +308,19 @@ class BaseLicenseStore(ABC):
             "unbound_key_count": 0,
             "bound_key_count": 0,
             "reset_hwid_count": 0,
+            "key_executed_count": 0,
         }
+
+    def record_key_execution(
+        self,
+        key_id: str,
+        owner_discord_id: str,
+        version: str,
+        channel: str,
+        *,
+        is_public_release: bool,
+    ) -> None:
+        """Record one public-release tool execution. No-op by default."""
 
 
 # ── Local JSON implementation (dev / tests) ────────────────────────────────────
@@ -1063,11 +1075,12 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         integrations.  All counts are computed from the local JSON store.
 
         Returns dict with:
-          key_generated_count  — total keys created by this user (all statuses)
+          key_generated_count  — active keys created by this user
           key_redeemed_count   — keys with redeemed_at set (activated on device or via Redeem button)
           unbound_key_count    — owned keys with no active device binding
           bound_key_count      — owned keys with an active device binding
           reset_hwid_count     — total HWID resets on this user's keys
+          key_executed_count   — public-release tool executions (always 0 for local store)
         """
         db = self._load()
         generated = 0
@@ -1077,7 +1090,9 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         for key_hash, record in db["keys"].items():
             owner = record.get("owner_discord_id")
             creator = record.get("created_by")
-            if creator == discord_user_id:
+            status = record.get("status", "active")
+            # Generated: only count active keys (not revoked/permanently dead)
+            if creator == discord_user_id and status == "active":
                 generated += 1
             if owner != discord_user_id:
                 continue
@@ -1099,6 +1114,7 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             "unbound_key_count": unbound,
             "bound_key_count": bound,
             "reset_hwid_count": reset_count,
+            "key_executed_count": 0,  # local store: execution tracking not available
         }
 
 
@@ -1118,6 +1134,7 @@ def get_license_stats_for_discord_user(
             "unbound_key_count": 0,
             "bound_key_count": 0,
             "reset_hwid_count": 0,
+            "key_executed_count": 0,
         }
 
 
@@ -1997,6 +2014,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 self._client.table("license_keys")
                 .select("id", count="exact")
                 .eq("created_by", discord_user_id)
+                .eq("status", "active")
                 .execute()
             )
             generated = gen_res.count or 0
@@ -2046,6 +2064,17 @@ class SupabaseLicenseStore(BaseLicenseStore):
             reset_count = reset_res.count or 0
         except Exception:
             reset_count = 0
+        try:
+            exec_res = (
+                self._client.table("license_key_executions")
+                .select("id", count="exact")
+                .eq("owner_discord_id", discord_user_id)
+                .eq("is_public_release", True)
+                .execute()
+            )
+            exec_count = exec_res.count or 0
+        except Exception:
+            exec_count = 0
         return {
             "discord_user_id": discord_user_id,
             "key_generated_count": generated,
@@ -2053,7 +2082,38 @@ class SupabaseLicenseStore(BaseLicenseStore):
             "unbound_key_count": unbound,
             "bound_key_count": bound,
             "reset_hwid_count": reset_count,
+            "key_executed_count": exec_count,
         }
+
+    def record_key_execution(
+        self,
+        key_id: str,
+        owner_discord_id: str,
+        version: str,
+        channel: str,
+        *,
+        is_public_release: bool,
+    ) -> None:
+        """Record one tool execution for stats tracking.
+
+        Only public-release builds should set is_public_release=True.
+        main-dev / internal / test builds must pass is_public_release=False.
+        Never raises — failures are silently swallowed.
+        """
+        if not is_public_release:
+            return
+        try:
+            self._client.table("license_key_executions").insert(
+                {
+                    "key_id": key_id,
+                    "owner_discord_id": owner_discord_id,
+                    "version": (version or "")[:64],
+                    "channel": (channel or "")[:64],
+                    "is_public_release": True,
+                }
+            ).execute()
+        except Exception:
+            pass
 
 
 # ── Convenience factory ────────────────────────────────────────────────────────

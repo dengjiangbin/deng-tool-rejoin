@@ -453,6 +453,49 @@ def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool
     return False
 
 
+def _report_key_execution_if_public(cfg: dict[str, Any]) -> None:
+    """Fire-and-forget: report one execution to the license API on public builds.
+
+    Only runs when the build channel is a public stable release.
+    main-dev / internal / test builds are silently skipped.
+    Errors are swallowed — this must never interrupt the Start flow.
+    """
+    try:
+        from agent.build_info import collected_version_info
+        info = collected_version_info()
+        channel = (info.get("channel") or "").strip().lower()
+        version = (info.get("version") or "").strip()
+        # Only public stable builds count.
+        _PUBLIC_CHANNELS = {"stable", "release", "public"}
+        _SKIP_CHANNELS = {"main-dev", "dev", "internal", "test", "test-latest"}
+        if channel in _SKIP_CHANNELS or channel not in _PUBLIC_CHANNELS:
+            return
+        lic = cfg.get("license") or {}
+        raw_key = (lic.get("key") or cfg.get("license_key") or "").strip()
+        install_id = (cfg.get("install_id") or "").strip()
+        if not raw_key or not install_id:
+            return
+        # Hash the install ID if it looks unhashed (not 64-char hex).
+        import hashlib
+        if len(install_id) != 64:
+            install_id = hashlib.sha256(install_id.encode()).hexdigest()
+        import threading
+        def _report() -> None:
+            try:
+                from agent.safe_http import post as _post
+                _post(
+                    "/api/execute",
+                    {"key": raw_key, "install_id_hash": install_id, "version": version, "channel": channel},
+                    timeout=6,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        t = threading.Thread(target=_report, daemon=True, name="key-exec-report")
+        t.start()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespace, use_color: bool) -> bool:
     while True:
         try:
@@ -3128,6 +3171,9 @@ def cmd_start(args: argparse.Namespace) -> int:
                     if not verify_remote_license_noninteractive(cfg, use_color=use_color):
                         return 1
 
+        # Report tool execution for public stable builds (silently, non-blocking).
+        _report_key_execution_if_public(cfg)
+
         entries = enabled_package_entries(cfg)
         if not cfg.get("first_setup_completed"):
             print("First-time setup is required before starting.")
@@ -3268,30 +3314,48 @@ def cmd_start(args: argparse.Namespace) -> int:
         packages_sl = [e["package"] for e in entries]
         # Protected: Termux itself and the Roblox clones we are about to launch.
         keep_alive = ["com.termux"] + packages_sl
-        android.kill_all_background_apps(keep_alive)
-        android.force_stop_packages_except(packages_sl, cfg.get("package_detection_hints"))
+        try:
+            android.kill_all_background_apps(keep_alive)
+        except Exception:  # noqa: BLE001
+            _start_log.debug("start: kill_all_background_apps error (non-fatal)")
+        try:
+            android.force_stop_packages_except(packages_sl, cfg.get("package_detection_hints"))
+        except Exception:  # noqa: BLE001
+            _start_log.debug("start: force_stop_packages_except error (non-fatal)")
 
         # 3) "Boosting" — clear cache + low-graphics tweaks.
         _set_all_phase("Boosting", "Clearing cache and optimizing graphics...")
         # Restore auto-rotation: am kill-all can kill the rotation service.
-        android.run_android_command(
-            ["settings", "put", "system", "accelerometer_rotation", "1"],
-            prefer_root=True,
-        )
-        android.run_android_command(
-            ["settings", "put", "system", "user_rotation", "0"],
-            prefer_root=True,
-        )
+        try:
+            android.run_android_command(
+                ["settings", "put", "system", "accelerometer_rotation", "1"],
+                prefer_root=True,
+            )
+            android.run_android_command(
+                ["settings", "put", "system", "user_rotation", "0"],
+                prefer_root=True,
+            )
+        except Exception:  # noqa: BLE001
+            _start_log.debug("start: rotation restore error (non-fatal)")
         prep_cache: dict[str, str] = {}
         prep_gfx:   dict[str, str] = {}
         opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
+        # Set all packages to "Clearing" and render ONCE before the loop so
+        # we don't blink/redraw for every package (probe p-814a3a200f fix).
+        for entry in entries:
+            phase[entry["package"]] = "Clearing"
+        _render_phase()
         for entry in entries:
             pkg = entry["package"]
-            phase[pkg] = "Clearing"
-            _render_phase("Clearing cache and optimizing graphics...")
-            prep_cache[pkg] = android.clear_safe_package_cache(pkg)
+            try:
+                prep_cache[pkg] = android.clear_safe_package_cache(pkg)
+            except Exception:  # noqa: BLE001
+                prep_cache[pkg] = "error"
             low = bool(opt.get("low_graphics_enabled", True)) and bool(entry.get("low_graphics_enabled", True))
-            prep_gfx[pkg] = android.apply_low_graphics_optimization(pkg, enabled=low)
+            try:
+                prep_gfx[pkg] = android.apply_low_graphics_optimization(pkg, enabled=low)
+            except Exception:  # noqa: BLE001
+                prep_gfx[pkg] = "error"
             _start_log.debug(
                 "start: prep pkg=%s cache=%s gfx=%s",
                 pkg, prep_cache[pkg], prep_gfx[pkg],

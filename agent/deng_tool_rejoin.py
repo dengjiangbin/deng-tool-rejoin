@@ -17,7 +17,7 @@ try:
     _crash_dir.mkdir(parents=True, exist_ok=True)
     _crash_file = _crash_dir / "crash_faulthandler.log"
     _crash_fh = open(_crash_file, "a", encoding="utf-8", errors="replace")  # noqa: WPS515
-    _crash_fh.write(f"\n--- faulthandler session started (probe p-316b3b040d) ---\n")
+    _crash_fh.write(f"\n--- faulthandler session started (probe p-814a3a200f) ---\n")
     _crash_fh.flush()
     _fh.enable(file=_crash_fh, all_threads=True)
 except Exception:  # noqa: BLE001
