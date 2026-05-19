@@ -274,8 +274,16 @@ class TestInstallerScript(unittest.TestCase):
         self.assertIn("_OLD_STATES", script)
 
     def test_doctor_install_invoked(self):
+        """Doctor install is intentionally removed from the installer because
+        running 'python3 -m agent.commands doctor install' always triggers
+        no_pycache_dirs failure (Python creates __pycache__ executing the check)
+        and causes confusing 'doctor install: FAILED' output even when the
+        install itself succeeded.  Targeted checks remain in the installer."""
         script = self._make_script()
-        self.assertIn("doctor install", script)
+        # Doctor install must NOT be called from the installer script.
+        self.assertNotIn("doctor install", script,
+                         "doctor install call must be removed — it always fails due "
+                         "to no_pycache_dirs being tripped by its own execution")
 
     def test_final_proof_block_present(self):
         script = self._make_script()
@@ -633,17 +641,17 @@ class TestInstallerPosixShSyntax(unittest.TestCase):
         )
 
     def test_grep_based_supervisor_checks_present(self):
-        """Legacy detector and old-states checks must use grep, not python3 -c."""
+        """Legacy detector and old-states checks must use grep -qE, not python3 -c.
+
+        Both checks (experience_detector and Joining state) use grep -qE with
+        precise patterns so STATUS_JOINING = "Joining"  # comment does NOT
+        trigger a false positive.
+        """
         s = self._get_script()
         self.assertIn(
             "grep -qE",
             s,
-            "experience_detector check must use grep -qE"
-        )
-        self.assertIn(
-            "grep -qF",
-            s,
-            "Joining state check must use grep -qF"
+            "supervisor checks must use grep -qE"
         )
         # The supervisor file variable must be used
         self.assertIn("_SV_FILE", s, "_SV_FILE variable must be set for grep checks")
@@ -703,10 +711,16 @@ class TestInstallerPosixShSyntax(unittest.TestCase):
             os.unlink(tf_path)
 
     def test_joining_check_uses_grep_not_python(self):
-        """Old-states check for Joining must be a grep command, not python3 -c."""
+        """Old-states check for Joining must use precise grep -qE, not python3 -c.
+
+        The grep pattern must match "Joining" only when followed by , or ) so
+        that STATUS_JOINING = "Joining"   # comment  does NOT false-positive.
+        """
         s = self._get_script()
-        # Must have grep -qF "Joining" (note: no single quotes around Joining in the grep arg)
-        self.assertIn('"Joining"', s, 'grep must search for "Joining" (double-quoted)')
+        # Must use grep -qE with the precise pattern (double-quote delimited)
+        self.assertIn('grep -qE', s, 'Joining check must use grep -qE')
+        self.assertIn('"(Joining)"', s,
+                      'grep must search for "(Joining)" with double-quotes')
         # Must NOT embed Joining check inside python3 -c '...'
         for i, line in enumerate(s.split("\n"), start=1):
             if "python3 -c '" in line and "Joining" in line:

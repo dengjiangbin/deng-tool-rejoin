@@ -495,10 +495,15 @@ def render_direct_install_bootstrap(
         '  fi\n'
         '  _JN=""\n'
         '  _JU=""\n'
-        '  if grep -qF "Joining" "$_SV_FILE" 2>/dev/null && grep -vE "^[[:space:]]*#" "$_SV_FILE" 2>/dev/null | grep -qF "Joining"; then\n'
+        # Match "Joining" / "Join Unconfirmed" only when used as an actual argument
+        # or dict value — i.e. followed by , or ) — NOT the constant definition line
+        # which ends with a comment.  Uses single-quoted grep args so no quoting
+        # ambiguity; the grep call is a standalone shell statement, not inside any
+        # python3 -c '...' block, so [[:space:]] works correctly on BusyBox/dash.
+        '  if grep -qE \'"(Joining)"[[:space:]]*[,)]\' "$_SV_FILE" 2>/dev/null; then\n'
         '    _JN="1"\n'
         '  fi\n'
-        '  if grep -qF "Join Unconfirmed" "$_SV_FILE" 2>/dev/null && grep -vE "^[[:space:]]*#" "$_SV_FILE" 2>/dev/null | grep -qF "Join Unconfirmed"; then\n'
+        '  if grep -qE \'"(Join Unconfirmed)"[[:space:]]*[,)]\' "$_SV_FILE" 2>/dev/null; then\n'
         '    _JU="1"\n'
         '  fi\n'
         '  if [ -n "$_JN$_JU" ]; then\n'
@@ -507,10 +512,11 @@ def render_direct_install_bootstrap(
         'fi\n'
         # ── AGENT FILE PROOF ────────────────────────────────────────────────
         '_AGENT_FILE="$(PYTHONPATH="$APP_HOME" python3 -c "import agent; print(agent.__file__)" 2>/dev/null)" || _AGENT_FILE=""\n'
-        # ── RUN DOCTOR INSTALL CHECK ────────────────────────────────────────
-        'echo ""\n'
-        'echo "Running install doctor check..."\n'
-        'PYTHONPATH="$APP_HOME" DENG_REJOIN_HOME="$APP_HOME" python3 -m agent.commands doctor install --no-color 2>/dev/null || true\n'
+        # ── CLEAN PYCACHE before proof block ────────────────────────────────
+        # Running Python above creates __pycache__; clear it so the proof block
+        # reflects a clean post-install state (no stale bytecode).
+        'find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
+        'find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
         # ── FINAL PROOF BLOCK ───────────────────────────────────────────────
         'echo ""\n'
         'echo "============================================================"\n'
