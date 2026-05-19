@@ -488,6 +488,11 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged["launch_url"] = launch_url
 
     _psu_raw = str(merged.get("private_server_url") or "").strip()
+    # Canonicalization: if private_server_url is not set but launch_url is set
+    # (legacy config key from First Time Setup wizard), promote it so that
+    # effective_private_server_url() works regardless of launch_mode check.
+    if not _psu_raw and launch_url:
+        _psu_raw = launch_url
     merged["private_server_url"] = ""
     if _psu_raw:
         merged["private_server_url"] = _validate_optional_private_server_url(_psu_raw, allow_uncertain=allow_uncertain_url)

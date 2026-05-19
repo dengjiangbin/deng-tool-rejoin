@@ -93,10 +93,10 @@ _HEALTHY_STATES = frozenset({
     STATUS_LAUNCHED,
 })
 
-# How long to stay in Join Unconfirmed before triggering a URL re-launch.
-# The URL IS delivered but Roblox may be in the lobby (share code expired,
-# auth needed, etc.).  After this timeout the supervisor re-sends the URL.
-_JOIN_UNCONFIRMED_RELAUNCH_SECONDS = 120
+# Join Unconfirmed re-launch threshold.  With the Kaeru-style _post_launch_state
+# returning Online immediately, this state is no longer entered on normal launches.
+# The large value is a safety net for any legacy path that might still set it.
+_JOIN_UNCONFIRMED_RELAUNCH_SECONDS = 3600  # 1 hour (effectively disabled)
 
 
 class Supervisor:
@@ -213,10 +213,13 @@ class _PackageWorker(threading.Thread):
         self.on_status_change = on_status_change
         self.failure_count = 0
         self.unhealthy_since: float | None = None
-        self.revive_count: int = 0
+        self.revive_count: int = 0       # total per-package relaunches (Kaeru: restart_count)
         self.last_error: str | None = None
         self.online_since: float | None = None
-        self.last_seen_at: float | None = None
+        self.last_seen_at: float | None = None       # Kaeru: last_seen_alive_at
+        self.last_launch_at: float | None = None     # Kaeru: last_launch_at
+        self.last_foreground_at: float | None = None # Kaeru: last_foreground_at
+        self.desired_url: str = ""                   # Kaeru: desired_url (canonical launch URL)
         self.grace_start: float | None = None
         self.bg_since: float | None = None
         self._restart_times: list[float] = []
@@ -315,57 +318,25 @@ class _PackageWorker(threading.Thread):
             return None
 
     def _post_launch_state(self) -> str:
-        """Determine the honest display state after a health check confirms the app
-        is running, when transitioning FROM Launching / Joining.
+        """Process confirmed alive after launch → Online.
 
-        Uses evidence-based detection to avoid falsely claiming ``In Server``
-        when the app is merely healthy (process alive / foreground) without
-        actual proof that the Roblox experience loaded.
+        Kaeru-style supervision (probe p-f1a4aaafe5): if the process is running,
+        it is Online.  We no longer distinguish "in game" vs "lobby" via
+        logcat/dumpsys because:
+          1. The uiautomator probe caused SIGSEGV on Termux with App Cloner packages.
+          2. Lobby detection caused an endless "Join Unconfirmed" re-send loop even
+             when the user was actually playing (URL joined correctly).
+          3. Kaeru works correctly with process-alive = Online logic.
 
-        Evidence rules:
-        - EXPERIENCE_LIKELY_LOADED  → In Server
-        - ROBLOX_HOME_OR_LOBBY / JOIN_FAILED_OR_HOME
-            + url_launched  → Join Unconfirmed  (join probably failed; be honest)
-            + no URL        → Lobby
-        - FOREGROUND_APP or lower
-            + url_launched  → Join Unconfirmed  (app open, no game evidence)
-            + no URL        → Lobby
-        - PROCESS_ONLY (shouldn't reach here — health said healthy)
-            + url_launched  → Joining  (still waiting for foreground)
-            + no URL        → Lobby
+        Relaunch only triggers when the process is completely dead (not running),
+        not when it "might be at the lobby screen."
         """
-        try:
-            evidence = detect_experience_state(self.package, url_launched=self._url_launched)
-        except Exception:  # noqa: BLE001
-            evidence = None
-
-        if evidence is not None and evidence.is_in_game():
-            log_event(
-                self.logger, "info", "experience_detected",
-                package=self.package,
-                source=evidence.source,
-                detail=evidence.detail,
-            )
-            return STATUS_IN_SERVER
-
-        if evidence is not None and evidence.is_home_or_lobby():
-            # Clear lobby/home evidence: if a URL was used, join probably failed.
-            if self._url_launched:
-                log_event(
-                    self.logger, "info", "join_home_evidence",
-                    package=self.package,
-                    source=evidence.source,
-                    detail=evidence.detail,
-                )
-                return STATUS_JOIN_UNCONFIRMED
-            return STATUS_LOBBY
-
-        if self._url_launched:
-            # App is healthy but we have no Android evidence that an experience
-            # loaded.  Be honest: do NOT claim In Server without real evidence.
-            return STATUS_JOIN_UNCONFIRMED
-
-        return STATUS_LOBBY
+        log_event(
+            self.logger, "info", "post_launch_online",
+            package=self.package,
+            url_launched=self._url_launched,
+        )
+        return STATUS_ONLINE
 
     def run(self) -> None:
         # All worker setup wrapped: a thrown exception here would silently
@@ -376,9 +347,10 @@ class _PackageWorker(threading.Thread):
             interval = int(sup.get("health_check_interval_seconds") or cfg.get("health_check_interval_seconds", 30))
             grace = int(sup.get("launch_grace_seconds") or cfg.get("foreground_grace_seconds", 30))
             backoff_base = int(sup.get("restart_backoff_seconds", 10))
-            # Determine URL awareness once at startup
+            # Determine URL awareness once at startup (Kaeru: desired_url)
             from .config import effective_private_server_url as _epsu
-            self.has_private_url = bool(str(_epsu(self.entry, cfg) or "").strip())
+            self.desired_url = str(_epsu(self.entry, cfg) or "").strip()
+            self.has_private_url = bool(self.desired_url)
             # Launching/Joining timeout: how many seconds before forcing a re-check
             _launching_timeout = max(90, grace * 4)
 
@@ -534,12 +506,16 @@ class _PackageWorker(threading.Thread):
                     now_ts = time.time()
                     if self.online_since is None:
                         self.online_since = now_ts
-                    self.last_seen_at = now_ts
+                    self.last_seen_at = now_ts   # Kaeru: last_seen_alive_at
+                    # Track foreground evidence (Kaeru: last_foreground_at)
+                    _meta_fg = (health.meta or {}) if isinstance(health.meta, dict) else {}
+                    if _meta_fg.get("fg_evidence") or _meta_fg.get("foreground"):
+                        self.last_foreground_at = now_ts
                     # Promote from Launching/Joining to an appropriate healthy state.
                     # Use prev_before_check because STATUS_CHECKING is transient.
                     self.launching_since = None
                     if prev_before_check in {STATUS_LAUNCHING, STATUS_JOINING}:
-                        # Evidence-based: never promote to In Server without proof.
+                        # Kaeru-style: process alive = Online (probe p-f1a4aaafe5).
                         target = self._post_launch_state()
                     elif prev_before_check in _HEALTHY_STATES:
                         target = prev_before_check  # stay in current healthy state
@@ -635,8 +611,9 @@ class _PackageWorker(threading.Thread):
                     result = perform_rejoin(pkg_cfg, reason="disconnected", package_entry=self.entry, no_force_stop=True)
                     self._record_restart()
                     if result.success:
+                        self.last_launch_at = time.time()   # Kaeru: last_launch_at
                         self._url_launched = self.has_private_url
-                        self.launching_since = time.time()
+                        self.launching_since = self.last_launch_at
                         new_st = STATUS_JOINING if self.has_private_url else STATUS_LAUNCHING
                         self._set_status(new_st, "Reopened — launch command sent")
                         # Reapply once more after launch (clone window may have
@@ -741,8 +718,9 @@ class _PackageWorker(threading.Thread):
                     self.failure_count = 0
                     self.revive_count += 1
                     self.online_since = None
+                    self.last_launch_at = time.time()   # Kaeru: last_launch_at
                     self._url_launched = self.has_private_url
-                    self.launching_since = time.time()
+                    self.launching_since = self.last_launch_at
                     new_st = STATUS_JOINING if self.has_private_url else STATUS_LAUNCHING
                     self._set_status(new_st, "Reopened — launch command sent")
                     # Once more after launch to override any default bounds.

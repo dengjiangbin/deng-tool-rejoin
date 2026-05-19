@@ -1076,7 +1076,7 @@ class LocalJsonLicenseStore(BaseLicenseStore):
 
         Returns dict with:
           key_generated_count  — active keys created by this user
-          key_redeemed_count   — keys with redeemed_at set (activated on device or via Redeem button)
+          key_redeemed_count   — keys that were redeemed/activated (redeemed_at set OR currently bound)
           unbound_key_count    — owned keys with no active device binding
           bound_key_count      — owned keys with an active device binding
           reset_hwid_count     — total HWID resets on this user's keys
@@ -1096,9 +1096,11 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 generated += 1
             if owner != discord_user_id:
                 continue
-            if record.get("redeemed_at"):
-                redeemed += 1
             binding = db.get("bindings", {}).get(key_hash, {})
+            # Redeemed: count if explicitly redeemed (redeemed_at set) OR currently
+            # bound (handles keys bound before migration 003 added redeemed_at).
+            if record.get("redeemed_at") or binding.get("is_active"):
+                redeemed += 1
             if binding.get("is_active"):
                 bound += 1
             else:
@@ -2028,9 +2030,9 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 .not_.is_("redeemed_at", "null")
                 .execute()
             )
-            redeemed = red_res.count or 0
+            redeemed_direct = red_res.count or 0
         except Exception:
-            redeemed = 0
+            redeemed_direct = 0
         try:
             bound_res = (
                 self._client.table("device_bindings")
@@ -2042,6 +2044,9 @@ class SupabaseLicenseStore(BaseLicenseStore):
             bound = bound_res.count or 0
         except Exception:
             bound = 0
+        # Redeemed: count keys with redeemed_at set, or treat active bound keys as
+        # at least redeemed (handles keys bound before migration 003 added redeemed_at).
+        redeemed = max(redeemed_direct, bound)
         try:
             owned_res = (
                 self._client.table("license_keys")

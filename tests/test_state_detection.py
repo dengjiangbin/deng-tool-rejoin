@@ -1,12 +1,13 @@
 """Tests for the supervisor state machine: state transitions, URL-awareness,
 Launching timeout, anti-flapping, and new state constants.
 
-Covers:
-  - Launching → Lobby when healthy (no URL)
-  - Joining → In Server when healthy (URL used)
-  - Launching timeout forces a re-check and promotes or marks Failed
-  - STATUS_LOBBY, STATUS_IN_SERVER, STATUS_JOINING, STATUS_CLOSED exported
-  - _PackageWorker does not stay in Launching/Joining after health returns healthy
+Kaeru-style behavior (probe p-f1a4aaafe5):
+  - Launching/Joining → Online when health returns healthy (process alive = Online)
+  - Evidence-based detection (logcat/dumpsys) is no longer used to gate Online status
+  - uiautomator probe removed (caused SIGSEGV on Termux with App Cloner packages)
+  - Launching timeout → Online if healthy, Failed if not running
+  - STATUS_LOBBY, STATUS_IN_SERVER, STATUS_JOINING, STATUS_CLOSED still exported
+  - _PackageWorker promotes Launching/Joining → Online on first healthy check
   - Reconnect path uses Joining when URL configured
   - Revive path uses Joining when URL configured
   - MultiPackageSupervisor.run_forever accepts render_callback
@@ -174,31 +175,35 @@ def _run_worker_one_iteration(entry, cfg, initial_status: str, *, url_launched: 
 
 
 class TestLaunchingToLobbyTransition(unittest.TestCase):
-    """Launching (no URL) → Lobby when health returns healthy."""
+    """Launching/Joining → Online when health returns healthy (Kaeru-style)."""
 
-    def test_launching_with_no_url_maps_to_lobby_constant(self):
-        """After healthy check when in Launching (no URL), state must become Lobby."""
+    def test_launching_with_no_url_maps_to_online(self):
+        """After healthy check when in Launching (no URL), state must become Online.
+
+        Kaeru-style: process alive = Online, regardless of URL or evidence.
+        """
         entry = _make_entry("com.roblox.client", private_url="")
         cfg = _make_cfg("com.roblox.client")
         result = _run_worker_one_iteration(entry, cfg, STATUS_LAUNCHING, url_launched=False)
-        self.assertEqual(result, STATUS_LOBBY)
+        self.assertEqual(result, STATUS_ONLINE)
 
-    def test_joining_with_url_no_evidence_maps_to_join_unconfirmed(self):
-        """URL launch + healthy process + no Android evidence → Join Unconfirmed (not In Server).
+    def test_joining_with_url_no_evidence_maps_to_online(self):
+        """URL launch + healthy process → Online (Kaeru-style: process alive = Online).
 
-        The tool must not claim In Server just because the process is healthy
-        after a private URL launch.  Without real Android evidence (logcat /
-        dumpsys / uiautomator), the honest state is Join Unconfirmed.
-        In this test environment (Windows) all Android probes fail gracefully,
-        so the detector always returns FOREGROUND_APP evidence.
+        The uiautomator probe that was causing SIGSEGV has been removed (p-f1a4aaafe5).
+        We no longer distinguish in-game vs lobby — if the process is alive, it's Online.
         """
         entry = _make_entry("com.roblox.client", private_url="roblox://placeId=123")
         cfg = _make_cfg("com.roblox.client")
         result = _run_worker_one_iteration(entry, cfg, STATUS_JOINING, url_launched=True)
-        self.assertEqual(result, STATUS_JOIN_UNCONFIRMED)
+        self.assertEqual(result, STATUS_ONLINE)
 
-    def test_joining_with_url_and_ingame_evidence_maps_to_in_server(self):
-        """URL launch + healthy + strong in-game evidence → In Server."""
+    def test_joining_with_url_and_ingame_evidence_maps_to_online(self):
+        """URL launch + healthy → Online regardless of evidence.
+
+        Kaeru-style: _post_launch_state always returns Online (p-f1a4aaafe5).
+        detect_experience_state is no longer called during state promotion.
+        """
         from agent.experience_detector import EvidenceLevel, ExperienceEvidence
 
         in_game_ev = ExperienceEvidence(
@@ -230,7 +235,7 @@ class TestLaunchingToLobbyTransition(unittest.TestCase):
             worker.launching_since = time.time() - 5
             worker.run()
 
-        self.assertEqual(status_map[pkg], STATUS_IN_SERVER)
+        self.assertEqual(status_map[pkg], STATUS_ONLINE)
 
     def test_lobby_stays_lobby_on_subsequent_healthy_checks(self):
         """Once in Lobby, healthy checks must not demote to Online."""
@@ -284,7 +289,7 @@ class TestLaunchingToLobbyTransition(unittest.TestCase):
 
 
 class TestLaunchingTimeout(unittest.TestCase):
-    """Launching timeout forces re-check and promotes or marks Failed.
+    """Launching timeout forces re-check and promotes to Online or marks Failed.
 
     Timeout threshold = max(90, grace * 4). With grace=10 from _make_cfg,
     _launching_timeout = max(90, 40) = 90 seconds. We set launching_since
@@ -292,10 +297,12 @@ class TestLaunchingTimeout(unittest.TestCase):
     The timeout guard calls check_package_health once, then does `continue`,
     skipping the second health check in that iteration. After that, stop_event
     is set so the loop exits.
+
+    Kaeru-style (p-f1a4aaafe5): healthy = Online, not running = Failed.
     """
 
-    def test_launching_timeout_promotes_to_lobby_when_healthy_no_url(self):
-        """If Launching for too long (no URL) and health=healthy → promote to Lobby."""
+    def test_launching_timeout_promotes_to_online_when_healthy_no_url(self):
+        """If Launching for too long (no URL) and health=healthy → promote to Online."""
         entry = _make_entry("com.roblox.client", private_url="")
         cfg = _make_cfg("com.roblox.client")
         pkg = "com.roblox.client"
@@ -317,10 +324,10 @@ class TestLaunchingTimeout(unittest.TestCase):
             worker.launching_since = time.time() - 200
             worker.run()
 
-        self.assertEqual(status_map[pkg], STATUS_LOBBY)
+        self.assertEqual(status_map[pkg], STATUS_ONLINE)
 
-    def test_joining_timeout_with_url_no_evidence_is_join_unconfirmed(self):
-        """Joining timeout + URL used + no Android evidence → Join Unconfirmed, NOT In Server."""
+    def test_joining_timeout_with_url_is_online_not_in_server(self):
+        """Joining timeout + URL used → Online (Kaeru-style). Must NOT be In Server or Join Unconfirmed."""
         entry = _make_entry("com.roblox.client", private_url="roblox://x")
         cfg = _make_cfg("com.roblox.client")
         pkg = "com.roblox.client"
@@ -342,10 +349,10 @@ class TestLaunchingTimeout(unittest.TestCase):
             worker.launching_since = time.time() - 200
             worker.run()
 
-        # Without Android environment the evidence level is FOREGROUND_APP only.
-        # Must NOT be In Server.
+        # Kaeru-style: process alive after URL launch = Online (no Join Unconfirmed loop)
         self.assertNotEqual(status_map[pkg], STATUS_IN_SERVER)
-        self.assertEqual(status_map[pkg], STATUS_JOIN_UNCONFIRMED)
+        self.assertNotEqual(status_map[pkg], STATUS_JOIN_UNCONFIRMED)
+        self.assertEqual(status_map[pkg], STATUS_ONLINE)
 
     def test_launching_timeout_fails_when_health_not_running(self):
         """If Launching for too long and health=not_running → status is Failed."""
@@ -565,10 +572,15 @@ class TestStateSummaryNewStates(unittest.TestCase):
 
 
 class TestEvidenceBasedStateTransitions(unittest.TestCase):
-    """Comprehensive evidence-model state transition tests."""
+    """Kaeru-style state transition tests (probe p-f1a4aaafe5).
+
+    _post_launch_state() now always returns Online regardless of evidence level.
+    The uiautomator probe (SIGSEGV source) was removed; logcat/dumpsys probes
+    are no longer used to gate Online status — process alive = Online.
+    """
 
     def _run_with_evidence(self, initial_st: str, url_launched: bool, evidence_level) -> str:
-        """Run one worker iteration with a given mocked evidence level."""
+        """Run one worker iteration. Evidence is patched but ignored by new _post_launch_state."""
         from agent.experience_detector import EvidenceLevel, ExperienceEvidence
         from agent.monitor import HealthResult
 
@@ -601,62 +613,63 @@ class TestEvidenceBasedStateTransitions(unittest.TestCase):
 
         return status_map[pkg]
 
-    def test_url_launch_no_evidence_is_join_unconfirmed(self):
-        """URL launch + FOREGROUND_APP evidence → Join Unconfirmed, not In Server."""
+    def test_url_launch_no_evidence_is_online(self):
+        """URL launch + FOREGROUND_APP evidence → Online (Kaeru-style, not Join Unconfirmed)."""
         from agent.experience_detector import EvidenceLevel
         result = self._run_with_evidence(STATUS_JOINING, url_launched=True,
                                           evidence_level=EvidenceLevel.FOREGROUND_APP)
-        self.assertEqual(result, STATUS_JOIN_UNCONFIRMED)
+        self.assertEqual(result, STATUS_ONLINE)
         self.assertNotEqual(result, STATUS_IN_SERVER)
+        self.assertNotEqual(result, STATUS_JOIN_UNCONFIRMED)
 
-    def test_url_launch_process_only_is_join_unconfirmed(self):
-        """URL launch + PROCESS_ONLY evidence → Join Unconfirmed."""
+    def test_url_launch_process_only_is_online(self):
+        """URL launch + PROCESS_ONLY evidence → Online (Kaeru-style)."""
         from agent.experience_detector import EvidenceLevel
         result = self._run_with_evidence(STATUS_JOINING, url_launched=True,
                                           evidence_level=EvidenceLevel.PROCESS_ONLY)
-        self.assertEqual(result, STATUS_JOIN_UNCONFIRMED)
+        self.assertEqual(result, STATUS_ONLINE)
 
-    def test_url_launch_game_evidence_is_in_server(self):
-        """URL launch + EXPERIENCE_LIKELY_LOADED evidence → In Server."""
+    def test_url_launch_game_evidence_is_online(self):
+        """URL launch + EXPERIENCE_LIKELY_LOADED evidence → Online (Kaeru-style, not In Server)."""
         from agent.experience_detector import EvidenceLevel
         result = self._run_with_evidence(STATUS_JOINING, url_launched=True,
                                           evidence_level=EvidenceLevel.EXPERIENCE_LIKELY_LOADED)
-        self.assertEqual(result, STATUS_IN_SERVER)
+        self.assertEqual(result, STATUS_ONLINE)
 
-    def test_url_launch_home_evidence_is_join_unconfirmed(self):
-        """URL launch + HOME_OR_LOBBY evidence → Join Unconfirmed (honest: join probably failed)."""
+    def test_url_launch_home_evidence_is_online(self):
+        """URL launch + HOME_OR_LOBBY evidence → Online (no Join Unconfirmed loop)."""
         from agent.experience_detector import EvidenceLevel
         result = self._run_with_evidence(STATUS_JOINING, url_launched=True,
                                           evidence_level=EvidenceLevel.ROBLOX_HOME_OR_LOBBY)
-        self.assertEqual(result, STATUS_JOIN_UNCONFIRMED)
+        self.assertEqual(result, STATUS_ONLINE)
 
-    def test_url_launch_join_failed_evidence_is_join_unconfirmed(self):
-        """URL launch + JOIN_FAILED_OR_HOME evidence → Join Unconfirmed."""
+    def test_url_launch_join_failed_evidence_is_online(self):
+        """URL launch + JOIN_FAILED_OR_HOME evidence → Online (Kaeru-style)."""
         from agent.experience_detector import EvidenceLevel
         result = self._run_with_evidence(STATUS_JOINING, url_launched=True,
                                           evidence_level=EvidenceLevel.JOIN_FAILED_OR_HOME)
-        self.assertEqual(result, STATUS_JOIN_UNCONFIRMED)
+        self.assertEqual(result, STATUS_ONLINE)
 
-    def test_no_url_healthy_home_evidence_is_lobby(self):
-        """No URL + ROBLOX_HOME_OR_LOBBY evidence → Lobby."""
+    def test_no_url_healthy_home_evidence_is_online(self):
+        """No URL + ROBLOX_HOME_OR_LOBBY evidence → Online (Kaeru-style, not Lobby)."""
         from agent.experience_detector import EvidenceLevel
         result = self._run_with_evidence(STATUS_LAUNCHING, url_launched=False,
                                           evidence_level=EvidenceLevel.ROBLOX_HOME_OR_LOBBY)
-        self.assertEqual(result, STATUS_LOBBY)
+        self.assertEqual(result, STATUS_ONLINE)
 
-    def test_no_url_game_evidence_is_in_server(self):
-        """No URL + EXPERIENCE_LIKELY_LOADED evidence → In Server (unusual, but honest)."""
+    def test_no_url_game_evidence_is_online(self):
+        """No URL + EXPERIENCE_LIKELY_LOADED evidence → Online (Kaeru-style, not In Server)."""
         from agent.experience_detector import EvidenceLevel
         result = self._run_with_evidence(STATUS_LAUNCHING, url_launched=False,
                                           evidence_level=EvidenceLevel.EXPERIENCE_LIKELY_LOADED)
-        self.assertEqual(result, STATUS_IN_SERVER)
+        self.assertEqual(result, STATUS_ONLINE)
 
-    def test_no_url_foreground_app_is_lobby(self):
-        """No URL + FOREGROUND_APP evidence → Lobby (app is open, no URL, assume home)."""
+    def test_no_url_foreground_app_is_online(self):
+        """No URL + FOREGROUND_APP evidence → Online (Kaeru-style, not Lobby)."""
         from agent.experience_detector import EvidenceLevel
         result = self._run_with_evidence(STATUS_LAUNCHING, url_launched=False,
                                           evidence_level=EvidenceLevel.FOREGROUND_APP)
-        self.assertEqual(result, STATUS_LOBBY)
+        self.assertEqual(result, STATUS_ONLINE)
 
     def test_join_unconfirmed_stays_in_healthy_states(self):
         """Once Join Unconfirmed, the next healthy check must stay in healthy states."""

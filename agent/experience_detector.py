@@ -359,21 +359,14 @@ def detect_experience_state(
             )
         return logcat_ev
 
-    # ── 3. UIAutomator (optional, slower — last resort) ───────────────────────
-    uia_ev = _probe_uiautomator(package)
-    if uia_ev is not None and uia_ev.level >= EvidenceLevel.ROBLOX_HOME_OR_LOBBY:
-        if url_launched and uia_ev.level == EvidenceLevel.ROBLOX_HOME_OR_LOBBY:
-            return ExperienceEvidence(
-                level=EvidenceLevel.JOIN_FAILED_OR_HOME,
-                detail=uia_ev.detail + " [after url launch]",
-                source=uia_ev.source,
-                raw_snippet=uia_ev.raw_snippet,
-            )
-        return uia_ev
+    # UIAutomator probe intentionally disabled: on Termux with App Cloner packages,
+    # `uiautomator dump` can trigger SIGSEGV in the calling Python process via the
+    # Android Accessibility Service.  Logcat + dumpsys are sufficient for detection.
+    # (probe p-f1a4aaafe5)
 
-    # Merge partial positive evidence from the three probes.
+    # Merge partial positive evidence from the two fast probes.
     best_partial: Optional[ExperienceEvidence] = None
-    for ev in (dumpsys_ev, logcat_ev, uia_ev):
+    for ev in (dumpsys_ev, logcat_ev):
         if ev is not None:
             if best_partial is None or ev.level > best_partial.level:
                 best_partial = ev

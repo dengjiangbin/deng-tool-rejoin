@@ -3403,6 +3403,14 @@ def cmd_start(args: argparse.Namespace) -> int:
             start_times[entry["package"]] = now_iso
         cfg["package_start_times"] = start_times
 
+        # ── Launch URL confirmation (safe — never expose the raw URL) ────────
+        _global_url = str(effective_private_server_url(entries[0] if entries else {}, cfg) or "").strip() \
+            if entries else str(cfg.get("private_server_url") or cfg.get("launch_url") or "").strip()
+        if _global_url:
+            _start_log.info("start: Launch URL configured — sending private server deep link to each clone")
+        else:
+            _start_log.info("start: No launch URL configured — clones will open Roblox home")
+
         # ── Launch each package ───────────────────────────────────────────────
         # 6) "Launching" — per-package phase update so the row visibly
         # advances even when one launch is slow.
@@ -3512,9 +3520,9 @@ def cmd_start(args: argparse.Namespace) -> int:
                 safe_err = mask_urls_in_text(err) or "Launch failed"
                 stat_internal = (safe_err[:120] + "...") if len(safe_err) > 123 else safe_err
             elif android.is_process_running(pkg):
-                # Process is up.  If we sent a URL, the user expects to see
-                # "Joining" until presence confirms In-Game; otherwise we
-                # call it "Launched" (Roblox process is open, no URL yet).
+                # Process is up.  After URL launch: Joining (supervisor immediately
+                # resolves to Online on first health check — Kaeru-style).
+                # Without URL: Launched (Roblox process open, no server join pending).
                 state = "Joining" if _has_url else "Launched"
                 stat_internal = "process running"
             else:
@@ -3619,6 +3627,16 @@ def cmd_start(args: argparse.Namespace) -> int:
         _supervisor = MultiPackageSupervisor(entries, _live_cfg, initial_status=initial_status)
         _live_map = _supervisor.status_map  # dict mutated in-place by workers
 
+        # Kaeru-style public state map: internal states → clean user-facing labels.
+        _STATE_DISPLAY_MAP: dict[str, str] = {
+            "Joining":          "Launching",   # brief transition; resolves to Online fast
+            "Launched":         "Online",       # process up, no URL → immediately Online
+            "In Server":        "Online",       # was: game detected; now just Online
+            "Lobby":            "Online",       # was: home screen; now just Online
+            "Join Unconfirmed": "Online",       # was: URL sent, detecting; now just Online
+            "Reconnecting":     "Reopening",    # more user-friendly label
+        }
+
         def _live_dashboard() -> None:
             """Clear screen and redraw banner + table with live status values."""
             _clear_terminal()
@@ -3626,7 +3644,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             print()
             live_rows = [
                 (i + 1, e["package"], _account_username_for_table(e),
-                 _live_map.get(e["package"], "Unknown"))
+                 _STATE_DISPLAY_MAP.get(
+                     _live_map.get(e["package"], "Unknown"),
+                     _live_map.get(e["package"], "Unknown"),
+                 ))
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(live_rows, use_color=use_color))
