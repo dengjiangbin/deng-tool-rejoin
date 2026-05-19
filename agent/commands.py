@@ -831,12 +831,12 @@ def _interactive_discover_package_entries(
     if len(candidates) == 1:
         c0 = candidates[0]
         print(f"Auto-selected: {c0.package}")
-        return [
-            _detect_or_prompt_account_username(
-                _entry_for_package(c0.package, existing_entries, app_name=c0.app_name),
-                config_for_detect,
-            )
-        ], "ok"
+        entry = _detect_or_prompt_account_username(
+            _entry_for_package(c0.package, existing_entries, app_name=c0.app_name),
+            config_for_detect,
+        )
+        mapped = _run_account_mapping_table([entry], config_for_detect or {})
+        return mapped, "ok"
     _print_full_discovery_table(candidates)
     print("  A. Select all")
     _raw = safe_io.safe_prompt("Choose packages (e.g. 1,2 or A) [1]: ", default="1")
@@ -856,13 +856,15 @@ def _interactive_discover_package_entries(
                         picked.append(c)
     if not picked:
         return [], "empty_choice"
-    return [
+    base_entries = [
         _detect_or_prompt_account_username(
             _entry_for_package(c.package, existing_entries, app_name=c.app_name),
             config_for_detect,
         )
         for c in picked
-    ], "ok"
+    ]
+    mapped = _run_account_mapping_table(base_entries, config_for_detect or {})
+    return mapped, "ok"
 
 
 def _safe_url_label(value: str | None) -> str:
@@ -1004,6 +1006,198 @@ def _detect_or_prompt_account_username(entry: dict[str, Any], config_data: dict[
             updated["account_username"] = validate_account_username(manual)
             updated["username_source"] = "manual"
     return updated
+
+
+def _try_detect_user_id(entry: dict[str, Any], draft: dict[str, Any]) -> tuple[int, str]:
+    """Attempt root-assisted user ID detection for one package entry.
+
+    Returns (user_id, source_label).  user_id=0 means not found.
+    Never raises — setup must never crash here.
+    """
+    pkg = str(entry.get("package") or "").strip()
+    if not pkg:
+        return 0, "not_found"
+
+    # Already configured — respect it.
+    existing = entry.get("roblox_user_id")
+    if isinstance(existing, int) and existing > 0:
+        return existing, "config"
+    if isinstance(existing, str) and existing.isdigit() and int(existing) > 0:
+        return int(existing), "config"
+
+    try:
+        cfg_valid = validate_config(draft) if draft else None
+        uid = account_detect.detect_roblox_user_id(pkg, entry=entry, config=cfg_valid, use_root=True)
+        if uid:
+            return uid, "root_prefs"
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Fallback: try resolving from known username via Presence API.
+    username = str(entry.get("account_username") or "").strip()
+    if username:
+        try:
+            from . import roblox_presence as _rp
+            uid = _rp.lookup_user_id(username)
+            if uid and uid > 0:
+                return uid, "api_resolved"
+        except Exception:  # noqa: BLE001
+            pass
+
+    return 0, "not_found"
+
+
+def _validate_user_id_with_presence(user_id: int) -> str:
+    """Quick non-blocking presence check to validate a detected user ID.
+
+    Returns "validated", "unconfirmed" (API down / rate-limited), or "invalid".
+    """
+    if user_id <= 0:
+        return "invalid"
+    try:
+        from . import roblox_presence as _rp
+        result = _rp.fetch_presence_one(user_id)
+        if result is not None and not result.is_unknown:
+            return "validated"
+        return "unconfirmed"
+    except Exception:  # noqa: BLE001
+        return "unconfirmed"
+
+
+def _run_account_mapping_table(
+    entries: list[dict[str, Any]],
+    draft: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Show account mapping table for the given package entries and let user edit/confirm.
+
+    Shows: # | Package | Username | User ID | Source | Status
+    Allows: A=accept all, <number>=edit that entry, B=back (cancel mapping only).
+    Returns entries updated with any detected/confirmed roblox_user_id values.
+    Never blocks Start — missing mapping is just silently skipped.
+    """
+    if not entries:
+        return entries
+
+    # --- Run detection for entries that don't have a user_id yet ---
+    detected: list[tuple[int, str]] = []
+    for entry in entries:
+        uid, src = _try_detect_user_id(entry, draft)
+        detected.append((uid, src))
+
+    def _row_status(uid: int, src: str, entry: dict[str, Any]) -> str:
+        if src == "config":
+            return "Saved"
+        if src == "manual":
+            return "Manual"
+        if uid > 0:
+            return "Detected"
+        if str(entry.get("account_username") or "").strip():
+            return "Username only"
+        return "Not found"
+
+    def _print_mapping_table() -> None:
+        print()
+        print("Account Mapping")
+        print("-" * 80)
+        fmt = "  {:<3} {:<28} {:<16} {:<12} {:<14} {}"
+        print(fmt.format("#", "Package", "Username", "User ID", "Source", "Status"))
+        print("  " + "-" * 78)
+        for i, (entry, (uid, src)) in enumerate(zip(entries, detected), start=1):
+            pkg = str(entry.get("package") or "")
+            pkg_short = (pkg[:26] + "..") if len(pkg) > 28 else pkg
+            username = _package_username_display(entry)
+            uid_disp = str(uid) if uid > 0 else "-"
+            src_disp = (src[:12] + "..") if len(src) > 14 else src
+            status = _row_status(uid, src, entry)
+            print(fmt.format(i, pkg_short, username[:16], uid_disp, src_disp, status))
+        print("-" * 80)
+        print("  A. Accept all  |  1-N. Edit entry  |  B. Back")
+        print()
+
+    if not _is_interactive():
+        # Non-interactive: just apply detected mappings silently.
+        out = []
+        for entry, (uid, _src) in zip(entries, detected):
+            e = dict(entry)
+            if uid > 0 and not (isinstance(e.get("roblox_user_id"), int) and e["roblox_user_id"] > 0):
+                e["roblox_user_id"] = uid
+            out.append(e)
+        return out
+
+    while True:
+        _print_mapping_table()
+        try:
+            raw = safe_io.safe_prompt("Choose [A]: ", default="a").strip().lower() or "a"
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if raw in ("a", ""):
+            break
+        if raw in ("b", "back", "0"):
+            # Cancel mapping changes — return original entries unmodified.
+            return list(entries)
+
+        if raw.isdigit():
+            idx = int(raw) - 1
+            if not (0 <= idx < len(entries)):
+                print(f"  Invalid number. Enter 1-{len(entries)}, A, or B.")
+                continue
+            entry = dict(entries[idx])
+            uid_cur, src_cur = detected[idx]
+            pkg = str(entry.get("package") or "")
+            print(f"\n  Editing: {pkg}")
+            cur_name = str(entry.get("account_username") or "").strip()
+            cur_uid = uid_cur
+            if cur_name:
+                print(f"  Current username: {cur_name}")
+            if cur_uid > 0:
+                print(f"  Current user ID:  {cur_uid}")
+            print("  Enter Roblox username or numeric user ID (blank to skip):")
+            try:
+                inp = input("  > ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                continue
+            if not inp:
+                continue
+            if inp.isdigit() and int(inp) > 0:
+                new_uid = int(inp)
+                entry["roblox_user_id"] = new_uid
+                detected[idx] = (new_uid, "manual")
+                print(f"  Set user_id = {new_uid}")
+            else:
+                # Treat as username — resolve via API.
+                try:
+                    from . import roblox_presence as _rp
+                    resolved = _rp.lookup_user_id(inp)
+                except Exception:  # noqa: BLE001
+                    resolved = None
+                try:
+                    entry["account_username"] = validate_account_username(inp)
+                    entry["username_source"] = validate_username_source("manual", inp)
+                except Exception:  # noqa: BLE001
+                    pass
+                if resolved and int(resolved) > 0:
+                    entry["roblox_user_id"] = int(resolved)
+                    detected[idx] = (int(resolved), "manual")
+                    print(f"  Resolved {inp} -> user_id {resolved}")
+                else:
+                    print(f"  Username stored. Could not resolve user ID right now.")
+                    detected[idx] = (0, "manual")
+            entries = list(entries)
+            entries[idx] = entry
+        else:
+            print("  Enter A, B, or a package number.")
+
+    # Apply all detected user IDs to entries.
+    out = []
+    for entry, (uid, _src) in zip(entries, detected):
+        e = dict(entry)
+        if uid > 0:
+            e["roblox_user_id"] = uid
+        out.append(e)
+    return out
 
 
 def _print_package_entries(entries: list[dict[str, Any]]) -> None:
@@ -1819,21 +2013,10 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
         for c in to_add_candidates
     ]
 
-    # Confirmation before saving
-    print()
-    print("Selected packages:")
-    for i, entry in enumerate(to_add_entries, start=1):
-        username = _package_username_display(entry)
-        print(f"  {i}. {entry['package']} — Username: {username}")
-    print()
-    try:
-        confirm = input("Save these packages? [Y/n]: ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        print("Cancelled.")
-        return draft
+    # Run account mapping table (root-assisted userId detection + confirmation)
+    to_add_entries = _run_account_mapping_table(to_add_entries, draft)
 
-    if confirm in ("n", "no"):
+    if not to_add_entries:
         print("Cancelled.")
         return draft
 

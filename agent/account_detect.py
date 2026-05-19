@@ -81,6 +81,25 @@ _ROBLOX_USERNAME_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 _MAX_DISPLAY_LEN = 32
 _MAX_USERNAME_LEN = 20
 
+# Keys likely to contain a numeric Roblox user ID (higher = more authoritative).
+# Only plain numeric values are accepted — no token/hash shapes.
+_USER_ID_KEY_SCORES: dict[str, int] = {
+    "userid": 100,
+    "user_id": 100,
+    "robloxuserid": 100,
+    "roblox_user_id": 100,
+    "authenticateduserid": 95,   # seen in Roblox shared prefs
+    "authenticated_user_id": 95,
+    "playerid": 80,
+    "player_id": 80,
+    "accountid": 75,
+    "account_id": 75,
+    "id": 40,
+}
+# Roblox user IDs: 1 to ~9 billion (current ceiling ~7B)
+_ROBLOX_USER_ID_RE = re.compile(r"^\d{1,10}$")
+_ROBLOX_USER_ID_MAX = 9_999_999_999
+
 # Hook for tests: optional (db_path) -> username or None
 _sqlite_username_hook: Callable[[str], str | None] | None = None
 
@@ -95,6 +114,7 @@ def set_sqlite_username_hook(cb: Callable[[str], str | None] | None) -> None:
 class AccountDetectionResult:
     username: str
     source: str
+    user_id: int | None = None  # Roblox numeric user ID when detected alongside username
 
 
 def is_sensitive_key_name(name: str) -> bool:
@@ -210,6 +230,199 @@ def _xml_element_text(el: ET.Element) -> str | None:
         return raw
     if el.text and str(el.text).strip():
         return str(el.text).strip()
+    return None
+
+
+def _is_plausible_user_id(value: str | int | float | None) -> int | None:
+    """Return int if value looks like a plausible Roblox user ID, else None.
+
+    Accepts only plain positive integers within the expected Roblox range.
+    Rejects anything that looks like a hash, token, or float.
+    """
+    if value is None:
+        return None
+    if isinstance(value, float):
+        if value != int(value):
+            return None
+        value = int(value)
+    if isinstance(value, int):
+        n = value
+    else:
+        s = str(value).strip()
+        if not _ROBLOX_USER_ID_RE.match(s):
+            return None
+        n = int(s)
+    if n < 1 or n > _ROBLOX_USER_ID_MAX:
+        return None
+    return n
+
+
+def user_id_from_pref_xml(xml_text: str) -> int | None:
+    """Extract a plausible Roblox user ID from Android shared_pref XML.
+
+    Only reads elements whose key is in ``_USER_ID_KEY_SCORES`` (an explicit
+    allowlist of known-safe public user ID field names).  Keys in the allowlist
+    bypass the general sensitivity gate because they are definitionally numeric
+    IDs, not tokens or cookies.  The value itself is validated to be a plain
+    positive integer within the expected Roblox user ID range.
+    """
+    try:
+        root_el = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return None
+    best_score = -1
+    best_id: int | None = None
+    for child in root_el:
+        key = (child.attrib.get("name") or "").strip()
+        if not key:
+            continue
+        k = key.lower().replace("-", "_")
+        score = _USER_ID_KEY_SCORES.get(k, 0)
+        if score <= 0:
+            continue  # Not an approved user ID key — skip entirely
+        # For keys in our allowlist we skip the general sensitivity gate:
+        # these are known public numeric fields, not tokens/cookies.
+        raw_val = child.attrib.get("value")
+        if raw_val is None and child.text:
+            raw_val = str(child.text).strip()
+        uid = _is_plausible_user_id(raw_val)
+        if uid is not None and score > best_score:
+            best_score = score
+            best_id = uid
+    return best_id
+
+
+def _user_id_from_json_obj(data: Any, depth: int = 0) -> int | None:
+    if depth > 4 or not isinstance(data, dict):
+        return None
+    best_score = -1
+    best_id: int | None = None
+    for key, val in data.items():
+        if not isinstance(key, str):
+            continue
+        k = key.lower().replace("-", "_")
+        score = _USER_ID_KEY_SCORES.get(k, 0)
+        if score <= 0:
+            if isinstance(val, dict):
+                nested = _user_id_from_json_obj(val, depth + 1)
+                if nested:
+                    return nested
+            continue
+        # Known user ID key (allowlist) — check value for a plausible numeric ID.
+        uid = _is_plausible_user_id(val)
+        if uid is not None and score > best_score:
+            best_score = score
+            best_id = uid
+    return best_id
+
+
+def user_id_from_json_text(text: str) -> int | None:
+    """Extract a plausible Roblox user ID from JSON text."""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return _user_id_from_json_obj(data)
+
+
+def _root_scan_for_user_id(
+    package: str,
+    timeout: int,
+    max_bytes: int,
+    root_tool: str,
+) -> int | None:
+    """Root-based scan for a numeric Roblox user ID in shared_prefs XML and JSON files.
+
+    Reads only small, clearly-structured config files.  Never reads tokens or cookies.
+    """
+    pkg = validate_package_name(package)
+    base_sp = f"/data/data/{pkg}/shared_prefs"
+    list_inner = f"test -d '{base_sp}' && ls '{base_sp}/' 2>/dev/null | grep '\\.xml$' | head -32"
+    list_res = android.run_root_command(["sh", "-c", list_inner], root_tool=root_tool, timeout=timeout)
+    if not list_res.timed_out and list_res.stdout:
+        filenames = [f.strip() for f in list_res.stdout.splitlines() if f.strip().endswith(".xml")]
+        for fname in filenames[:24]:
+            abs_path = f"{base_sp}/{fname}"
+            content = _root_read_file_capped(abs_path, max_bytes, timeout, root_tool)
+            if content:
+                uid = user_id_from_pref_xml(content)
+                if uid:
+                    _log.debug("Root shared_prefs found user_id in %s", fname)
+                    return uid
+
+    base_data = f"/data/data/{pkg}"
+    max_kb = max(1, max_bytes // 1024)
+    inner = (
+        f"find '{base_data}' -maxdepth 6 -type f -size -{int(max_kb)}k -name '*.json' "
+        f"2>/dev/null | head -20"
+    )
+    res = android.run_root_command(["sh", "-c", inner], root_tool=root_tool, timeout=timeout)
+    if res.ok and res.stdout:
+        prefix = f"/data/data/{pkg}/"
+        for abs_path in [ln.strip() for ln in res.stdout.splitlines() if ln.strip().startswith(prefix)]:
+            content = _root_read_file_capped(abs_path, max_bytes, timeout, root_tool)
+            if content:
+                uid = user_id_from_json_text(content)
+                if uid:
+                    _log.debug("Root json found user_id in %s", abs_path)
+                    return uid
+
+    return None
+
+
+def detect_roblox_user_id(
+    package_name: str,
+    *,
+    entry: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None,
+    use_root: bool = True,
+) -> int | None:
+    """Detect a Roblox user ID for a package via safe root prefs/JSON scan.
+
+    Only runs during setup — never called from the live supervisor Start loop.
+    Returns None if unavailable; never raises.
+    """
+    try:
+        package_name = validate_package_name(package_name)
+    except Exception:
+        return None
+
+    # Respect existing confirmed config value.
+    if entry:
+        existing = entry.get("roblox_user_id")
+        if isinstance(existing, int) and existing > 0:
+            return existing
+        if isinstance(existing, str) and existing.isdigit() and int(existing) > 0:
+            return int(existing)
+
+    settings = _settings(config)
+    if not settings.get("enabled", True):
+        return None
+
+    if use_root and settings.get("use_root", True):
+        try:
+            root = android.detect_root()
+            if root.available and root.tool:
+                timeout = int(settings.get("scan_timeout_seconds", 8))
+                max_kb = int(settings.get("max_file_size_kb", 512))
+                uid = _root_scan_for_user_id(package_name, timeout, max_kb * 1024, root.tool)
+                if uid:
+                    _log.info("Root-detected user_id=%s for %s", uid, package_name)
+                    return uid
+        except Exception as exc:  # noqa: BLE001
+            _log.debug("Root user_id scan error for %s: %s", package_name, exc)
+
+    # Non-root: try direct file read (typically requires the process to run as the app)
+    for path in _candidate_pref_files(package_name):
+        try:
+            if path.stat().st_size > 65_536:
+                continue
+            uid = user_id_from_pref_xml(path.read_text(encoding="utf-8", errors="ignore"))
+            if uid:
+                return uid
+        except OSError:
+            continue
+
     return None
 
 

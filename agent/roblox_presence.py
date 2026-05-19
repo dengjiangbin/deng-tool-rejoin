@@ -200,6 +200,16 @@ def mask_cookie(cookie: str | None) -> str:
 _USERNAME_VALID_RE = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 
 
+def resolve_username_to_user_id(username: str | None) -> int | None:
+    """Resolve a Roblox username to a numeric user ID.  Returns None on failure.
+
+    Alias for :func:`lookup_user_id` — provided so callers can use the longer,
+    more descriptive name.  Result is cached for ``USERNAME_LOOKUP_TTL`` seconds.
+    Never raises.
+    """
+    return lookup_user_id(username)
+
+
 def lookup_user_id(username: str | None) -> int | None:
     """Resolve a Roblox username to a numeric user_id.  Returns None on failure.
 
@@ -345,6 +355,20 @@ def fetch_presence_one(
     return out.get(int(user_id), PresenceResult(
         user_id=int(user_id), presence_type=PresenceType.UNKNOWN,
     ))
+
+
+def fetch_presence_for_user_ids(
+    user_ids: Sequence[int],
+    *,
+    cookie: str | None = None,
+    refresh: bool = False,
+) -> dict[int, PresenceResult]:
+    """Fetch presence for a list of user IDs.  Alias for :func:`fetch_presence`.
+
+    Returns a dict ``{user_id: PresenceResult}`` with an entry for every
+    requested id (UNKNOWN if the API didn't return it).  Never raises.
+    """
+    return fetch_presence(user_ids, cookie=cookie, refresh=refresh)
 
 
 def clear_presence_cache() -> None:

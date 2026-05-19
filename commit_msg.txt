@@ -1,19 +1,14 @@
-fix: Kaeru-style supervisor, SIGSEGV uiautomator, Joining loop, redeemed count (p-f1a4aaafe5)
+fix: Kaeru-style stable rebuild -- archive broken smart detection, Roblox Presence API, hide YesCaptcha/Webhook (p-9e3f2a8d1c)
 
-- experience_detector: remove uiautomator probe (root SIGSEGV cause on Termux)
-- supervisor: _post_launch_state always returns Online (process alive = Online)
-  eliminates Join Unconfirmed endless re-launch loop
-- supervisor: add Kaeru-style per-package fields (desired_url, last_launch_at,
-  last_foreground_at); _JOIN_UNCONFIRMED_RELAUNCH_SECONDS 120->3600
-- commands: public state map Joining->Launching, Reconnecting->Reopening,
-  In Server/Lobby/Join Unconfirmed->Online; add URL confirmation log line
-- config: canonicalize launch_url->private_server_url in validate_config so
-  Start reads the same key Setup saves regardless of launch_mode
-- license_store: redeemed count includes active bound keys without redeemed_at
-  (fixes Bound 1 but Redeemed 0 for pre-migration-003 bindings)
-- idCardV2.js: rename Key Executed to Executed
-- idProfileSnapshotRead.js: redeemed = max(redeemedDirect, bound)
-- deng_tool_rejoin: update faulthandler probe to p-f1a4aaafe5
-- tests: update state detection tests for Kaeru-style Online behavior;
-  add redeemed-count, Executed label, and URL canonicalization tests (1496 pass)
-- artifact: SHA 8490a9e1294a511c4bdbdc04988a9f596c7b8267a1e2f7e0ae5cb29bb4076283
+Archive experience_detector, join state machine, start smart detection to agent/legacy/ (marked BROKEN -- not imported by live Start)
+Remove uiautomator/logcat/UI dump from supervisor live path; all probes raise RuntimeError in legacy files
+Simplify public states to Layout/Launching/Online/Reopening/Failed; map old Joining/Lobby/In Server/Join Unconfirmed away
+Per-package Kaeru-style _PackageWorker: last_presence_check_at, last_presence_state, hourly_restart_count, failed_reason, desired_url
+Roblox Presence API (agent/roblox_presence.py): classify_presence_result, get_presence_state_for_package; lobby presence falls through to process-health check without setting STATUS_LOBBY
+Hide YesCaptcha and Webhook from First Time Setup, Edit Config menu, and config summary (code preserved internally)
+First Time Setup simplified to 3 steps: License, Package, Private Server URL
+_STATE_DISPLAY_MAP updated to expose only the 5 allowed public states
+Live dashboard shows "Launch URL: configured" and "Press Ctrl+C to stop"
+faulthandler probe ID updated to p-9e3f2a8d1c
+1564 tests pass, 6 skipped, 0 failed (full suite)
+New artifact SHA: 60d8a1587c6c486c091659eca87424ca2172917fa4e723b7287e537eb8c720c4
