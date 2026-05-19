@@ -3967,10 +3967,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 print()
                 for _ram_line in ram_label.split("\n"):
                     print(f"  {_ram_line}")
-            print()
-            if _global_url:
-                print("  Launch URL: configured")
-            print("  Press Ctrl+C to stop", flush=True)
+            print(flush=True)
 
         # Use 3-second display interval (like Kaeru's blinking real-time table).
         try:

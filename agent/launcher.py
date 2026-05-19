@@ -85,7 +85,9 @@ def perform_rejoin(
     launch_url = str(cfg.get("launch_url") or "").strip()
     effective_url = str(effective_private_server_url(entry, cfg) or "").strip()
     legacy_url_mode = launch_mode in {"deeplink", "web_url"} and bool(launch_url)
-    url_for_launch = effective_url or (launch_url if legacy_url_mode else "")
+    # Always use any configured URL for launch — if a URL is set anywhere,
+    # every launch (including reopening dead packages) must use it.
+    url_for_launch = effective_url or launch_url
     # Kaeru-equivalent fix (probe p-1239f2b5f9): Roblox's https share
     # URL is resolved by Android to the *browser*, which lands the user
     # in the Roblox app's lobby instead of the private server.  The

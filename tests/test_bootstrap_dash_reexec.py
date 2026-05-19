@@ -41,15 +41,20 @@ from agent.bootstrap_installer import (
 
 # Bash-only tokens that MUST NOT appear in any executable installer line.
 # Comments are allowed to reference them for context (we strip those).
+# Note: [[ and ]] are NOT listed here because POSIX character classes like
+# [[:space:]] inside grep patterns also contain [[ and would create false
+# positives.  Bash conditional [[ ... ]] is checked separately by regex.
 _BASH_ONLY_FORBIDDEN: tuple[str, ...] = (
     "set -o pipefail",
     "set -euo pipefail",
     "shopt",
-    "[[",
-    "]]",
     "BASH_REMATCH",
     "BASH_VERSION",
 )
+
+# Bash conditional [[ ... ]] — only when preceded by a conditional keyword
+# or logical operator, NOT inside grep character classes like [[:space:]].
+_BASH_CONDITIONAL_RE = re.compile(r"(?:if|while|&&|\|\|)\s*\[\[")
 
 # Bash-only parameter-expansion forms.  ``${VAR:0:N}`` substring slicing
 # is bash-only and was the source of the install verification crash in
@@ -124,6 +129,22 @@ class PosixShellDisciplineTest(unittest.TestCase):
                     f"{name} installer contains bash-only token "
                     f"{tok!r} in executable code (Termux dash will choke)",
                 )
+
+    def test_no_bash_double_bracket_conditionals(self) -> None:
+        """Bash [[ ... ]] conditionals must not appear in the installer.
+
+        POSIX character classes like [[:space:]] inside grep patterns are
+        allowed — this test specifically targets bash conditional [[ preceded
+        by if/while/&&/|| to avoid false positives from grep patterns.
+        """
+        for name, script in self._render_both().items():
+            executable = _strip_comments_and_heredocs(script)
+            m = _BASH_CONDITIONAL_RE.search(executable)
+            self.assertIsNone(
+                m,
+                f"{name} installer contains bash conditional [[ construct "
+                f"(found: {m.group(0) if m else ''!r}) — use POSIX [ ] instead",
+            )
 
     def test_no_bash_substring_expansion(self) -> None:
         """``${VAR:0:N}`` is bash-only.  Real-device regression: the

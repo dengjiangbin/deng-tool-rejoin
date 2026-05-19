@@ -673,17 +673,17 @@ class TestPrivateUrlCanonical(unittest.TestCase):
 
 class TestLiveDashboard(unittest.TestCase):
 
-    def test_dashboard_mentions_launch_url_configured(self) -> None:
-        """_live_dashboard must print 'Launch URL: configured' if URL is set."""
+    def test_dashboard_does_not_mention_launch_url_configured(self) -> None:
+        """_live_dashboard must NOT print 'Launch URL: configured' (user p-d399d0ca73: useless text)."""
         import agent.commands as cmd
         src = inspect.getsource(cmd.cmd_start)
-        self.assertIn("Launch URL: configured", src)
+        self.assertNotIn('"  Launch URL: configured"', src)
 
-    def test_dashboard_mentions_ctrl_c_to_stop(self) -> None:
-        """_live_dashboard must print 'Press Ctrl+C to stop'."""
+    def test_dashboard_does_not_mention_ctrl_c_to_stop(self) -> None:
+        """_live_dashboard must NOT print 'Press Ctrl+C to stop' (user p-d399d0ca73: useless text)."""
         import agent.commands as cmd
         src = inspect.getsource(cmd.cmd_start)
-        self.assertIn("Press Ctrl+C to stop", src)
+        self.assertNotIn('"  Press Ctrl+C to stop"', src)
 
 
 # ─── 11. License stats not regressed ─────────────────────────────────────────
