@@ -600,7 +600,7 @@ class _PackageWorker(threading.Thread):
                             _pkg_cfg["roblox_package"] = self.package
                             _pr = perform_rejoin(
                                 _pkg_cfg, reason="presence_offline_controlled",
-                                package_entry=self.entry,
+                                package_entry=self.entry, no_force_stop=True,
                             )
                             self._record_restart()
                             if _pr.success:
@@ -727,7 +727,7 @@ class _PackageWorker(threading.Thread):
                     _reapply_layout_for_package(self.package)
                     pkg_cfg = dict(cfg)
                     pkg_cfg["roblox_package"] = self.package
-                    result = perform_rejoin(pkg_cfg, reason="disconnected", package_entry=self.entry)
+                    result = perform_rejoin(pkg_cfg, reason="disconnected", package_entry=self.entry, no_force_stop=True)
                     self._record_restart()
                     if result.success:
                         self.last_launch_at = time.time()   # Kaeru: last_launch_at
@@ -835,7 +835,7 @@ class _PackageWorker(threading.Thread):
                 _reapply_layout_for_package(self.package)
                 pkg_cfg = dict(cfg)
                 pkg_cfg["roblox_package"] = self.package
-                result = perform_rejoin(pkg_cfg, reason="process_missing", package_entry=self.entry)
+                result = perform_rejoin(pkg_cfg, reason="process_missing", package_entry=self.entry, no_force_stop=True)
                 self._record_restart()
 
                 if result.success:
