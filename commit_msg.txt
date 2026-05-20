@@ -1,21 +1,41 @@
-﻿Fix dirty UI transition, Checking Package loop, remove In-Lobby
+﻿Final release cleanup: installer, start flow, runtime, NHB cooldown, volume
 
-TASK 2 dirty Start UI: _render_phase and _live_dashboard now use
-clear_scrollback=True so old prep-phase banner/table never bleeds
-through. Launch loop restructured: all packages set to Launching once
-before the loop, then render once per completed launch (was 2x per
-package). One-shot scrollback clear added at prep-to-supervisor handoff.
+TASK 1 - installer short separators: render_direct_install_bootstrap now
+emits 30-char === / --- separators (was 60-char) and adds a closing
+============================== line after "Install complete.". No
+progress bar, no spinner. Failure paths exit before Install complete.
 
-TASK 3 Checking Package loops: After each round for-loop, checking_label
-is immediately reset to 1/N and force-rendered (guarded by stop_event)
-so the user sees 3/3 then 1/3 cycling instead of 3/3 frozen for sleep.
+TASK 2-5 - start flow public states only (Preparing / Clear Cache /
+Launching): removed Boosting, Clearing, Layout, Docking, Waiting from
+public phase display. Layout and Termux docking now happen silently.
+Preparing force-stops each configured package individually and verifies
+process dead (retry once). Clear Cache uses new clear_package_cache_verified
+which clears only cache/code_cache, verifies file count reaches 0 with
+retry, and emits [DENG_REJOIN_CLEAR_CACHE] probe log with sizes.
+[DENG_REJOIN_PREPARE_PACKAGE] probe log added. [DENG_REJOIN_LAUNCH_PACKAGE]
+probe log added per package after launch.
 
-TASK 4 remove In-Lobby: Removed _LEGACY_LOBBY_STATE. __init__ maps
-In-Lobby and Lobby initial_status to No Heartbeat. _STATE_DISPLAY_MAP
-maps Lobby to No Heartbeat. _HEALTHY_STATES keeps STATUS_LOBBY for
-_PackageWorker backward compat only; WatchdogSupervisor never produces it.
+TASK 6 - remove Checking Package X/Y from public UI: _live_dashboard
+no longer prints checking_label; attribute kept internal for probe logs.
 
-TASK 5 layout skeleton: already implemented; logs, border detection,
-2-col grid for <=6 packages, portrait/>6 skeletons confirmed passing.
+TASK 7 - Runtime column: build_start_table gains 5th column Runtime.
+4-tuple rows still work (empty cell). WatchdogSupervisor tracks
+_online_start_ts per package (set on Online entry, cleared on exit).
+_live_dashboard shows elapsed runtime only for Online packages; blank
+for all other states. Format: compact Xd Xh Xm Xs.
 
-Probe: p-a1927430ee  screen=1280x720  packages=3  rounds=9
+TASK 8 - No Heartbeat relaunch cooldown: NHB_RELAUNCH_COOLDOWN_SEC=5.
+First NHB detection starts cooldown; relaunch skipped until it expires.
+[DENG_REJOIN_NO_HEARTBEAT_COOLDOWN] probe log. Prevents instant loops.
+
+TASK 9 - volume mute via root: new android.mute_package_audio() tries
+appops set <pkg> PLAY_AUDIO deny then cmd appops variant. Called after
+each successful launch. [DENG_REJOIN_PACKAGE_VOLUME] probe log.
+
+TASK 10 - clean public UI: _STATE_DISPLAY_MAP updated; noisy internal
+states (Docking, Layout, Waiting, Boosting, Clearing) never reach the
+live supervisor dashboard.
+
+New: android.get_package_pid(), android.clear_package_cache_verified(),
+android.mute_package_audio(). New test: tests/test_release_cleanup.py
+(50 focused tests covering all tasks).
