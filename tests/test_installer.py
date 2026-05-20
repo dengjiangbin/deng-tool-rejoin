@@ -296,6 +296,22 @@ class TestInstallerScript(unittest.TestCase):
         self.assertNotIn("DENG Tool: Rejoin Installed", script)
         self.assertNotIn("Start Command:", script)
 
+    def test_direct_installer_has_single_bottom_separator(self):
+        script = self._make_script()
+        sep_echo = 'echo "============================================================"'
+        self.assertEqual(script.count(sep_echo), 2)
+        self.assertIn(
+            'echo "Version: main-dev"\n'
+            'echo "============================================================"\n',
+            script,
+        )
+        self.assertNotIn(
+            'echo "============================================================"\n'
+            'echo "============================================================"\n'
+            'echo "Install complete."\n',
+            script,
+        )
+
     def test_agent_file_proof_present(self):
         script = self._make_script()
         self.assertIn("agent.__file__", script)

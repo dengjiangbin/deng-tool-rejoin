@@ -1220,6 +1220,18 @@ class WatchdogSupervisor:
             )
 
         self._logger = configure_logging(level=cfg.get("log_level", "INFO"))
+        log_event(
+            self._logger, "info", "[DENG_REJOIN_SEGFAULT_FIX]",
+            probe_id="p-79933739d8",
+            segfault_source="python_ssl_urllib_presence_api",
+            disabled_path="roblox_presence._post_json urllib_ssl",
+            replacement_path="safe_http.post_json curl_on_termux",
+            live_start_safe="true",
+            joining_removed="true",
+            uiautomator_live="false",
+            logcat_live="false",
+            xml_dump_live="false",
+        )
 
     # ─── Internal helpers ─────────────────────────────────────────────────────
 

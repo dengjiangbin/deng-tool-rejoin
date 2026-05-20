@@ -11,6 +11,7 @@ Requirements verified:
 from __future__ import annotations
 
 import sys
+import inspect
 import threading
 import time
 import unittest
@@ -627,6 +628,17 @@ class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
         self.assertTrue(ev["alive"])
         self.assertTrue(calls)
         self.assertTrue(all(timeout <= 3 for _args, timeout in calls))
+
+    def test_probe_p799_segfault_fix_marker_and_disabled_paths(self):
+        """Regression for p-79933739d8: live Start records the disabled crash path."""
+        import agent.supervisor as sup_mod
+
+        src = inspect.getsource(sup_mod.WatchdogSupervisor)
+        self.assertIn("[DENG_REJOIN_SEGFAULT_FIX]", src)
+        self.assertIn("python_ssl_urllib_presence_api", src)
+        self.assertIn("safe_http.post_json curl_on_termux", src)
+        self.assertNotRegex(src, r'run_command\s*\([^)]*uiautomator')
+        self.assertNotRegex(src, r'run_command\s*\([^)]*logcat')
 
     # Test 27
     def test_joining_not_in_initial_status(self):

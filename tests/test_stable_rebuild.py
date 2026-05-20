@@ -374,11 +374,11 @@ class TestRobloxPresenceAPI(unittest.TestCase):
     def test_presence_never_raises(self) -> None:
         """fetch_presence must never raise regardless of network error."""
         rp = self.rp
-        import urllib.error
-        # Simulate network failure at the urllib level — this is what happens
-        # in real network-down scenarios. _post_json catches it and returns None.
-        url_err = urllib.error.URLError("connection refused")
-        with mock.patch.object(rp.urllib.request, "urlopen", side_effect=url_err):
+        with mock.patch.object(
+            rp.safe_http,
+            "post_json",
+            side_effect=rp.safe_http.SafeHttpNetworkError("connection refused"),
+        ):
             result = rp.fetch_presence_one(123)
         self.assertIsNotNone(result)
         self.assertTrue(result.is_unknown)
@@ -469,7 +469,6 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
         """HTTP 429 (rate limited) must not crash the presence fetcher."""
         import agent.supervisor as sup
         from agent import roblox_presence as rp
-        import urllib.error
 
         entry = {"package": "com.roblox.client", "account_username": "dave"}
         cfg = {"supervisor": {}, "log_level": "INFO", "health_check_interval_seconds": 30}
@@ -479,12 +478,11 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
         worker._roblox_username = "dave"
         worker._roblox_user_id = 77777
 
-        # Simulate HTTP 429 at the urllib level
-        rate_limit_err = urllib.error.HTTPError(
-            url=rp._PRESENCE_URL, code=429, msg="Too Many Requests",
-            hdrs=None, fp=None,  # type: ignore[arg-type]
-        )
-        with mock.patch.object(rp.urllib.request, "urlopen", side_effect=rate_limit_err):
+        with mock.patch.object(
+            rp.safe_http,
+            "post_json",
+            side_effect=rp.safe_http.SafeHttpStatusError(429, "Too Many Requests"),
+        ):
             pres = worker._fetch_roblox_presence()
 
         self.assertIsNone(pres)

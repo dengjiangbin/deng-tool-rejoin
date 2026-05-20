@@ -499,8 +499,6 @@ def render_direct_install_bootstrap(
         'find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
         'find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
         # ── FINAL PROOF BLOCK ───────────────────────────────────────────────
-        'echo "============================================================"\n'
-        'echo ""\n'
         'echo "Install complete."\n'
     )
 

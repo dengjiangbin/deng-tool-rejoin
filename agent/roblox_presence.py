@@ -47,17 +47,15 @@ Never raises.  Network/JSON/SSL failures all return safe defaults.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
-import ssl
 import threading
 import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Iterable, Mapping, Sequence
+
+from . import safe_http
 
 _log = logging.getLogger("deng.rejoin.roblox_presence")
 
@@ -144,17 +142,17 @@ def _post_json(
 
     Never raises.  Returns None on any failure.  Caller decides whether
     "no data" should mean Unknown or Offline.
+
+    Probe p-79933739d8: live Start reached watchdog package 1 and then the
+    process vanished before state evidence was logged.  The only native-risky
+    path entered there was Python urllib/ssl for the Roblox Presence API.
+    Route through ``safe_http`` so Termux uses curl in a child process; if curl
+    crashes, Python receives a clean network error instead of SIGSEGV.
     """
-    try:
-        data = json.dumps(body).encode("utf-8")
-    except (TypeError, ValueError):
+    if not isinstance(body, Mapping):
         return None
 
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Accept", "application/json")
-    req.add_header("User-Agent", _USER_AGENT)
-
+    headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
     if cookie:
         # Some endpoints want X-CSRF-TOKEN even for trivial GETs once a
         # cookie is present.  Roblox returns the token in a header on a
@@ -164,18 +162,17 @@ def _post_json(
         # and we keep the field name safe (no leaking in error text).
         masked = mask_cookie(cookie)
         _log.debug("attaching cookie (masked=%s)", masked)
-        req.add_header("Cookie", f".ROBLOSECURITY={cookie}")
+        headers["Cookie"] = f".ROBLOSECURITY={cookie}"
 
     try:
-        ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            raw = resp.read(1 << 18)  # 256 KB cap
-            txt = raw.decode("utf-8", errors="replace")
-            try:
-                return json.loads(txt)
-            except json.JSONDecodeError:
-                return None
-    except (urllib.error.URLError, urllib.error.HTTPError, ssl.SSLError, TimeoutError):
+        payload = safe_http.post_json(
+            url,
+            dict(body),
+            headers=headers,
+            timeout=max(1, int(timeout)),
+        )
+        return payload if isinstance(payload, Mapping) else None
+    except safe_http.SafeHttpError:
         return None
     except Exception as exc:  # noqa: BLE001
         _log.debug("presence POST error: %s", exc)

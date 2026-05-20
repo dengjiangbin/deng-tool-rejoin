@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import inspect
 import unittest
 from unittest import mock
 
@@ -167,17 +167,31 @@ class TestFetchPresence(unittest.TestCase):
 
 class TestNeverRaises(unittest.TestCase):
     def test_post_json_returns_none_on_network_error(self) -> None:
-        with mock.patch.object(rp.urllib.request, "urlopen",
-                              side_effect=rp.urllib.error.URLError("no network")):
+        with mock.patch.object(
+            rp.safe_http,
+            "post_json",
+            side_effect=rp.safe_http.SafeHttpNetworkError("no network"),
+        ):
             self.assertIsNone(rp._post_json(rp._PRESENCE_URL, {"userIds": [1]}))
 
     def test_post_json_returns_none_on_bad_json(self) -> None:
-        class _Resp:
-            def __enter__(self): return self
-            def __exit__(self, *a): return False
-            def read(self, _n): return b"not json"
-        with mock.patch.object(rp.urllib.request, "urlopen", return_value=_Resp()):
+        with mock.patch.object(
+            rp.safe_http,
+            "post_json",
+            side_effect=rp.safe_http.SafeHttpJsonError("bad json"),
+        ):
             self.assertIsNone(rp._post_json(rp._PRESENCE_URL, {"userIds": [1]}))
+
+    def test_post_json_uses_safe_http_for_termux_stability(self) -> None:
+        with mock.patch.object(rp.safe_http, "post_json", return_value={"ok": True}) as post:
+            self.assertEqual(rp._post_json(rp._PRESENCE_URL, {"userIds": [1]}), {"ok": True})
+        post.assert_called_once()
+
+    def test_post_json_live_path_has_no_python_ssl_urlopen(self) -> None:
+        src = inspect.getsource(rp._post_json)
+        self.assertIn("safe_http.post_json", src)
+        self.assertNotIn("urlopen", src)
+        self.assertNotIn("create_default_context", src)
 
 
 if __name__ == "__main__":  # pragma: no cover
