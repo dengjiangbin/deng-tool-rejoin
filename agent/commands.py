@@ -4049,16 +4049,15 @@ def cmd_start(args: argparse.Namespace) -> int:
         # ── Supervisor loop — dashboard takes over entirely ───────────────────
         # From this point on, _live_dashboard() clears the terminal and
         # redraws logo + table on every refresh.  No other text is printed.
-        # Cap health-check interval at 5s for real-time detection (like
-        # Kaeru's "blinking" table).  This overrides the config value only
-        # for this session; the saved config is left unchanged.
+        # Keep the live supervisor config valid.  The dashboard still refreshes
+        # frequently below; worker health checks must stay within config bounds.
         _live_cfg = dict(runtime_cfg)
         _live_cfg["package_start_times"] = start_times
         _sup_sub = dict(
             cfg.get("supervisor") if isinstance(cfg.get("supervisor"), dict) else {}
         )
         _hci_raw = int(_sup_sub.get("health_check_interval_seconds", 10))
-        _sup_sub["health_check_interval_seconds"] = max(3, min(_hci_raw, 5))
+        _sup_sub["health_check_interval_seconds"] = max(10, _hci_raw)
         _live_cfg["supervisor"] = _sup_sub
         _supervisor = MultiPackageSupervisor(runtime_entries, _live_cfg, initial_status=initial_status)
         _live_map = _supervisor.status_map  # dict mutated in-place by workers

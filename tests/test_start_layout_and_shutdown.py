@@ -320,36 +320,28 @@ class TermuxExitCleanTest(unittest.TestCase):
 
 
 class LaunchUrlClearTaskFlagsTest(unittest.TestCase):
-    """``am start -a VIEW -d <url>`` must include CLEAR_TASK flags so the
-    private-server URL is consumed instead of being routed to the
-    foregrounded Roblox lobby."""
+    """Configured-link launches must target the selected package."""
 
-    def test_launch_url_uses_clear_task_flag(self) -> None:
+    def test_launch_url_uses_root_package_scoped_view_intent(self) -> None:
         from agent import android  # noqa: PLC0415
 
         seen_cmds: list[list[str]] = []
-        def fake_run(cmd, **kw):  # noqa: ANN001, ANN002
+        def fake_root(cmd, **kw):  # noqa: ANN001, ANN002
             seen_cmds.append(list(cmd))
             return mock.Mock(ok=True, returncode=0, stdout="", stderr="")
-        with mock.patch.object(android, "run_command", side_effect=fake_run):
+        with mock.patch.object(android, "detect_root", return_value=android.RootInfo(True, "su", "uid=0")), \
+             mock.patch.object(android, "run_root_command", side_effect=fake_root):
             android.launch_url(
                 "com.moons.litesc",
                 "https://www.roblox.com/share?code=ABC&type=Server",
                 "web_url",
             )
-        # First successful call should carry -f <flags> with CLEAR_TASK
-        # bit set (bit 15 = 0x00008000).
-        joined = " ".join(seen_cmds[0])
-        self.assertIn("-f", joined,
-                      f"missing -f intent flag: {seen_cmds[0]}")
-        # Pull the hex value after -f and confirm CLEAR_TASK is set.
-        idx = seen_cmds[0].index("-f")
-        flags_hex = seen_cmds[0][idx + 1]
-        flags = int(flags_hex, 16)
-        self.assertTrue(flags & 0x00008000,
-                        f"FLAG_ACTIVITY_CLEAR_TASK not set in 0x{flags:08x}")
-        self.assertTrue(flags & 0x10000000,
-                        f"FLAG_ACTIVITY_NEW_TASK not set in 0x{flags:08x}")
+        self.assertIn("-W", seen_cmds[0])
+        self.assertEqual(seen_cmds[0][seen_cmds[0].index("-p") + 1], "com.moons.litesc")
+        self.assertEqual(
+            seen_cmds[0][seen_cmds[0].index("-d") + 1],
+            "roblox://navigation/share_links?code=ABC&type=Server",
+        )
 
     def test_launch_url_generic_uses_clear_task_flag(self) -> None:
         from agent import android  # noqa: PLC0415

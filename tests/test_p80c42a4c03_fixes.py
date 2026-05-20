@@ -442,37 +442,27 @@ class TestPrivateURLLauncherComponent(unittest.TestCase):
 
         call_log: list[list[str]] = []
 
-        def fake_run(cmd, timeout=None):
+        def fake_root(cmd, root_tool=None, timeout=None):
             call_log.append(list(cmd))
             r = MagicMock()
-            # First call (windowingMode + VIEW) fails
-            r.ok = False
+            r.ok = True
             r.stdout = ""
             r.stderr = "error"
-            r.returncode = 1
+            r.returncode = 0
             return r
 
-        with patch.object(android, "run_command", side_effect=fake_run), \
+        with patch.object(android, "detect_root", return_value=android.RootInfo(True, "su", "uid=0")), \
+             patch.object(android, "run_root_command", side_effect=fake_root), \
              patch.object(android, "validate_launch_url"):
-            try:
-                android.launch_url(
-                    "com.moons.litesc",
-                    "roblox://navigation/share_links?code=abc&type=Server",
-                    "deeplink",
-                )
-            except Exception:
-                pass
+            android.launch_url(
+                "com.moons.litesc",
+                "roblox://navigation/share_links?code=abc&type=Server",
+                "deeplink",
+            )
 
-        # Find calls that reference ActivityProtocolLaunch
-        component_calls = [
-            c for c in call_log
-            if any("ActivityProtocolLaunch" in str(a) for a in c)
-        ]
-        self.assertTrue(
-            len(component_calls) >= 1,
-            f"Expected at least one call targeting ActivityProtocolLaunch. "
-            f"Got calls: {call_log}",
-        )
+        self.assertEqual(len(call_log), 1)
+        self.assertEqual(call_log[0][call_log[0].index("-p") + 1], "com.moons.litesc")
+        self.assertFalse(any("ActivityProtocolLaunch" in str(a) for a in call_log[0]))
 
     def test_launch_package_with_bounds_tries_component_variant(self) -> None:
         """launch_package_with_bounds must include the component variant."""
@@ -480,42 +470,32 @@ class TestPrivateURLLauncherComponent(unittest.TestCase):
 
         call_log: list[list[str]] = []
 
-        def fake_run(cmd, timeout=None):
+        def fake_root(cmd, root_tool=None, timeout=None):
             call_log.append(list(cmd))
             r = MagicMock()
-            r.ok = False
+            r.ok = True
             r.stdout = ""
             r.stderr = "error"
-            r.returncode = 1
+            r.returncode = 0
             return r
 
         bounds = (0, 0, 360, 1280)
         # Must use private_url= (not deep_url=) — that's the external param name.
         # Also mock _find_command so it returns "am" (not None) on non-Android hosts.
-        with patch.object(android, "run_command", side_effect=fake_run), \
+        with patch.object(android, "detect_root", return_value=android.RootInfo(True, "su", "uid=0")), \
+             patch.object(android, "run_root_command", side_effect=fake_root), \
              patch.object(android, "validate_launch_url"), \
              patch.object(android, "detect_launch_mode_from_url",
-                          return_value="deeplink"), \
-             patch.object(android, "_find_command", return_value="am"), \
-             patch.object(android, "launch_url", return_value=MagicMock(ok=False)):
-            try:
-                android.launch_package_with_bounds(
-                    "com.moons.litesc",
-                    bounds,
-                    private_url="roblox://navigation/share_links?code=abc&type=Server",
-                )
-            except Exception:
-                pass
+                          return_value="deeplink"):
+            android.launch_package_with_bounds(
+                "com.moons.litesc",
+                bounds,
+                private_url="roblox://navigation/share_links?code=abc&type=Server",
+            )
 
-        component_calls = [
-            c for c in call_log
-            if any("ActivityProtocolLaunch" in str(a) for a in c)
-        ]
-        self.assertTrue(
-            len(component_calls) >= 1,
-            f"launch_package_with_bounds must try ActivityProtocolLaunch. "
-            f"Calls: {call_log}",
-        )
+        self.assertEqual(len(call_log), 1)
+        self.assertEqual(call_log[0][call_log[0].index("-p") + 1], "com.moons.litesc")
+        self.assertFalse(any("ActivityProtocolLaunch" in str(a) for a in call_log[0]))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

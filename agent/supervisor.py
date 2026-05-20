@@ -247,6 +247,8 @@ class _PackageWorker(threading.Thread):
         self.has_private_url: bool = False   # set at start of run()
         self._url_launched: bool = False     # was the LAST launch done with a URL?
         self.launching_since: float | None = None  # when Launching/Joining was set
+        self.last_url_launch_at: float = 0.0
+        self.url_launch_grace_until: float = 0.0
         self.join_unconfirmed_since: float | None = None  # for URL re-launch timeout
         # Heartbeat-based playing-state tracker.  Lazily imported so the
         # supervisor still works in test environments that don't have the
@@ -311,6 +313,59 @@ class _PackageWorker(threading.Thread):
 
     def _can_auto_reconnect(self) -> bool:
         return bool(self.entry.get("auto_reconnect_enabled", True)) and bool(self._sup().get("auto_reconnect_enabled", True))
+
+    def _url_grace_seconds(self, base_grace: int | float) -> float:
+        return float(max(90, int(float(base_grace)) * 4))
+
+    def _note_url_launch_grace(
+        self,
+        reason: str,
+        *,
+        now: float | None = None,
+        grace_seconds: int | float | None = None,
+    ) -> None:
+        if not self.has_private_url:
+            return
+        ts = time.time() if now is None else float(now)
+        seconds = float(grace_seconds if grace_seconds is not None else self._url_grace_seconds(30))
+        self.last_url_launch_at = ts
+        self.url_launch_grace_until = max(self.url_launch_grace_until, ts + seconds)
+        self._url_launched = True
+        log_event(
+            self.logger,
+            "info",
+            "[DENG_REJOIN_SUPERVISOR_GRACE]",
+            package=self.package,
+            grace_reason=reason,
+            grace_until=int(self.url_launch_grace_until),
+            current_state=self.status_map.get(self.package, ""),
+            relaunch_blocked="true",
+        )
+
+    def _url_launch_grace_active(self, now: float | None = None) -> bool:
+        if not self.has_private_url:
+            return False
+        ts = time.time() if now is None else float(now)
+        return bool(self.url_launch_grace_until and ts < self.url_launch_grace_until)
+
+    def _relaunch_allowed(self, reason: str, now: float | None = None) -> bool:
+        ts = time.time() if now is None else float(now)
+        blocked = self._url_launch_grace_active(ts)
+        elapsed_ms = -1
+        if self.last_url_launch_at:
+            elapsed_ms = int(max(0.0, ts - self.last_url_launch_at) * 1000)
+        log_event(
+            self.logger,
+            "info",
+            "[DENG_REJOIN_RELAUNCH_DECISION]",
+            package=self.package,
+            reason=reason,
+            post_launch_action=str(self.cfg.get("post_launch_action") or ""),
+            url_launch_recent=str(blocked).lower(),
+            elapsed_since_url_launch_ms=elapsed_ms,
+            allowed=str(not blocked).lower(),
+        )
+        return not blocked
 
     def _presence_relaunch_cooldown_ok(self) -> bool:
         """Return True if enough time has passed since the last presence-triggered relaunch."""
@@ -444,6 +499,15 @@ class _PackageWorker(threading.Thread):
             self.has_private_url = bool(self.desired_url)
             # Launching/Joining timeout: how many seconds before forcing a re-check
             _launching_timeout = max(90, grace * 4)
+            if self.has_private_url and self.status_map.get(self.package) in {STATUS_LAUNCHING, STATUS_JOINING}:
+                now_launch = time.time()
+                if self.launching_since is None:
+                    self.launching_since = now_launch
+                self._note_url_launch_grace(
+                    "configured_link_launch",
+                    now=now_launch,
+                    grace_seconds=_launching_timeout,
+                )
 
             # Roblox presence setup — read username + optional user_id/cookie
             # from the per-package entry, then resolve via the public API.
@@ -588,6 +652,10 @@ class _PackageWorker(threading.Thread):
                         # with the normal dead-process path below).
                         _cur_running = bool((health.meta or {}).get("running") if isinstance(health.meta, dict) else False)
                         if self._should_relaunch_from_presence(_cur_running) and self._can_auto_reconnect():
+                            if not self._relaunch_allowed("presence_offline_controlled", now_p):
+                                self._set_status(STATUS_LAUNCHING, "Waiting For Roblox Link")
+                                self._sleep(min(5, interval))
+                                continue
                             log_event(
                                 self.logger, "info", "presence_controlled_relaunch",
                                 package=self.package,
@@ -604,8 +672,12 @@ class _PackageWorker(threading.Thread):
                             )
                             self._record_restart()
                             if _pr.success:
-                                self._url_launched = self.has_private_url
                                 self.launching_since = time.time()
+                                self._note_url_launch_grace(
+                                    "configured_link_launch",
+                                    now=self.launching_since,
+                                    grace_seconds=_launching_timeout,
+                                )
                                 self._set_status(STATUS_LAUNCHING, "Presence offline — controlled relaunch")
                                 _reapply_layout_for_package(self.package)
                             else:
@@ -660,6 +732,10 @@ class _PackageWorker(threading.Thread):
                         if self.join_unconfirmed_since is None:
                             self.join_unconfirmed_since = now_ts
                         elif (now_ts - self.join_unconfirmed_since) > _JOIN_UNCONFIRMED_RELAUNCH_SECONDS:
+                            if not self._relaunch_allowed("join_unconfirmed_retry", now_ts):
+                                self._set_status(STATUS_LAUNCHING, "Waiting For Roblox Link")
+                                self._sleep(min(5, interval))
+                                continue
                             log_event(
                                 self.logger, "info", "join_unconfirmed_relaunch",
                                 package=self.package,
@@ -676,8 +752,12 @@ class _PackageWorker(threading.Thread):
                             )
                             self._record_restart()
                             if result.success:
-                                self._url_launched = True
                                 self.launching_since = time.time()
+                                self._note_url_launch_grace(
+                                    "configured_link_launch",
+                                    now=self.launching_since,
+                                    grace_seconds=_launching_timeout,
+                                )
                             else:
                                 self._set_status(STATUS_WARNING, "URL re-launch failed")
                     else:
@@ -701,6 +781,11 @@ class _PackageWorker(threading.Thread):
 
                 if fg_wrong and self._can_auto_reconnect():
                     now = time.time()
+                    if not self._relaunch_allowed("disconnected", now):
+                        self.bg_since = None
+                        self._set_status(STATUS_LAUNCHING, "Waiting For Roblox Link")
+                        self._sleep(min(5, interval))
+                        continue
                     if self.bg_since is None:
                         self.bg_since = now
                     if now - self.bg_since < grace * 2:
@@ -731,8 +816,12 @@ class _PackageWorker(threading.Thread):
                     self._record_restart()
                     if result.success:
                         self.last_launch_at = time.time()   # Kaeru: last_launch_at
-                        self._url_launched = self.has_private_url
                         self.launching_since = self.last_launch_at
+                        self._note_url_launch_grace(
+                            "configured_link_launch",
+                            now=self.launching_since,
+                            grace_seconds=_launching_timeout,
+                        )
                         # Kaeru-style: always Launching regardless of URL presence.
                         # _STATE_DISPLAY_MAP shows this as "Launching" publicly.
                         self._set_status(STATUS_LAUNCHING, "Reopened — launch command sent")
@@ -809,6 +898,12 @@ class _PackageWorker(threading.Thread):
                     self.grace_start = now
                 elapsed = now - self.grace_start
 
+                if not self._relaunch_allowed("process_missing", now):
+                    self.grace_start = None
+                    self._set_status(STATUS_LAUNCHING, "Waiting For Roblox Link")
+                    self._sleep(min(5, interval))
+                    continue
+
                 if elapsed < grace:
                     # During the grace window, show Dead immediately so the
                     # user sees the package is gone.  Reconnection starts
@@ -843,8 +938,12 @@ class _PackageWorker(threading.Thread):
                     self.revive_count += 1
                     self.online_since = None
                     self.last_launch_at = time.time()   # Kaeru: last_launch_at
-                    self._url_launched = self.has_private_url
                     self.launching_since = self.last_launch_at
+                    self._note_url_launch_grace(
+                        "configured_link_launch",
+                        now=self.launching_since,
+                        grace_seconds=_launching_timeout,
+                    )
                     # Kaeru-style: always Launching regardless of URL presence.
                     self._set_status(STATUS_LAUNCHING, "Reopened — launch command sent")
                     # Once more after launch to override any default bounds.

@@ -43,14 +43,15 @@ def _fail(args: tuple[str, ...], stderr: str = "Error type 8") -> android.Comman
 
 
 class LaunchUrlPassesWindowingModeTests(unittest.TestCase):
-    def test_first_attempt_includes_windowingMode_5(self) -> None:
+    def test_first_attempt_is_root_package_scoped_view(self) -> None:
         seen: list[list[str]] = []
 
-        def fake(args, *, timeout):  # noqa: ARG001
+        def fake(args, *, root_tool=None, timeout=None):  # noqa: ARG001
             seen.append(list(args))
             return _ok(tuple(args))
 
-        with patch.object(android, "run_command", side_effect=fake):
+        with patch.object(android, "detect_root", return_value=android.RootInfo(True, "su", "uid=0")), \
+             patch.object(android, "run_root_command", side_effect=fake):
             res = android.launch_url(
                 "com.moons.litesc",
                 "https://www.roblox.com/share?code=abc&type=Server",
@@ -58,34 +59,21 @@ class LaunchUrlPassesWindowingModeTests(unittest.TestCase):
             )
         self.assertTrue(res.ok)
         self.assertEqual(len(seen), 1, msg=f"expected single call; got {seen}")
-        # The flag must come BEFORE the action so am parses it as part
-        # of start-activity options.
         cmd = seen[0]
-        self.assertIn("--windowingMode", cmd)
-        self.assertEqual(cmd[cmd.index("--windowingMode") + 1], "5")
-        # Package is still the last positional.
-        self.assertEqual(cmd[-1], "com.moons.litesc")
+        self.assertIn("-W", cmd)
+        self.assertEqual(cmd[cmd.index("-a") + 1], "android.intent.action.VIEW")
+        self.assertEqual(cmd[cmd.index("-p") + 1], "com.moons.litesc")
+        self.assertEqual(cmd[cmd.index("-d") + 1], "roblox://navigation/share_links?code=abc&type=Server")
 
-    def test_falls_back_without_flag_when_rejected(self) -> None:
-        seen: list[list[str]] = []
-
-        def fake(args, *, timeout):  # noqa: ARG001
-            seen.append(list(args))
-            if "--windowingMode" in args:
-                return _fail(tuple(args), "Error type 8 / Bad component name")
-            return _ok(tuple(args))
-
-        with patch.object(android, "run_command", side_effect=fake):
+    def test_root_unavailable_returns_clear_failure(self) -> None:
+        with patch.object(android, "detect_root", return_value=android.RootInfo(False, None, "no su")):
             res = android.launch_url(
                 "com.moons.litesc",
                 "https://www.roblox.com/share?code=abc&type=Server",
                 "web_url",
             )
-        self.assertTrue(res.ok)
-        # Two calls: the freeform attempt, then the unflagged retry.
-        self.assertEqual(len(seen), 2)
-        self.assertIn("--windowingMode", seen[0])
-        self.assertNotIn("--windowingMode", seen[1])
+        self.assertFalse(res.ok)
+        self.assertIn("root unavailable", res.stderr)
 
 
 class LaunchUrlGenericTests(unittest.TestCase):

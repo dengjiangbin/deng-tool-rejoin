@@ -560,7 +560,7 @@ def launch_app(package: str) -> CommandResult:
     )
 
 
-def launch_url(package: str, url: str, launch_mode: str) -> CommandResult:
+def _legacy_launch_url_pre_root_unused(package: str, url: str, launch_mode: str) -> CommandResult:
     """Launch a deep-link URL in *package* (best-effort freeform window).
 
     On Android builds where ``cmd activity start-activity --windowingMode``
@@ -614,6 +614,38 @@ def launch_url(package: str, url: str, launch_mode: str) -> CommandResult:
               "-c", "android.intent.category.BROWSABLE",
               "-d", deep_url, package]
     return run_command(legacy, timeout=PROCESS_TIMEOUT_SECONDS)
+
+
+def build_package_view_intent_args(package: str, url: str) -> list[str]:
+    """Build the package-scoped Android VIEW intent used for Roblox links."""
+    package = validate_package_name(package)
+    return [
+        "am", "start", "-W",
+        "-a", "android.intent.action.VIEW",
+        "-d", str(url),
+        "-p", package,
+    ]
+
+
+def launch_url(package: str, url: str, launch_mode: str) -> CommandResult:
+    """Launch a Roblox URL directly into *package* using root ``am start``."""
+    package = validate_package_name(package)
+    validate_launch_url(url, launch_mode, allow_uncertain=True)
+    deep_url = to_roblox_deep_link(url) or url
+    args = build_package_view_intent_args(package, deep_url)
+    root_info = detect_root()
+    if not root_info.available:
+        return CommandResult(
+            tuple(args),
+            126,
+            "",
+            "root unavailable for package-scoped Roblox URL launch",
+        )
+    return run_root_command(
+        args,
+        root_tool=root_info.tool,
+        timeout=PROCESS_TIMEOUT_SECONDS,
+    )
 
 
 def launch_url_generic(url: str, launch_mode: str) -> CommandResult:
@@ -1358,17 +1390,15 @@ def launch_package_with_options(
             mode = "web_url"
         try:
             validate_launch_url(url, mode, allow_uncertain=True)
-        except UrlValidationError:
-            result = launch_app(package)
-            return result, "am_or_resolve"
+        except UrlValidationError as exc:
+            return CommandResult(
+                ("am", "start", "-a", "android.intent.action.VIEW", "-p", package),
+                2,
+                "",
+                f"configured Roblox link is invalid: {exc}",
+            ), "invalid_url"
         result = launch_url(package, url, mode)
-        if result.ok:
-            return result, "private_url"
-        result2 = launch_url_generic(url, mode)
-        if result2.ok:
-            return result2, "private_url_generic"
-        result3 = launch_app(package)
-        return result3, "fallback_am"
+        return result, "root_am_view_package"
     return launch_app(package), "am_or_resolve"
 
 
@@ -1401,6 +1431,8 @@ def launch_package_with_bounds(
     # Without this, Android resolves https://www.roblox.com/share?... to the
     # browser instead of Roblox (probe p-6f613cbed2: launch_mode='web_url'
     # landed in lobby, not server).
+    if url:
+        return launch_package_with_options(package, url)
     deep_url = (to_roblox_deep_link(url) or url) if url else ""
 
     am = _find_command("am", "/system/bin/am")

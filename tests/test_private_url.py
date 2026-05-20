@@ -90,14 +90,14 @@ class TestLaunchCommandConstructionWithURL(unittest.TestCase):
 
         captured = []
 
-        def fake_run(cmd, **kwargs):
+        def fake_root(cmd, **kwargs):
             captured.append(list(cmd))
             if "VIEW" in cmd or "android.intent.action.VIEW" in cmd:
                 return amod.CommandResult(tuple(cmd), 0, "OK", "")
             return amod.CommandResult(tuple(cmd), 0, "OK", "")
 
-        with unittest.mock.patch("agent.android.run_command", side_effect=fake_run), \
-             unittest.mock.patch("agent.android._find_command", return_value="/system/bin/am"):
+        with unittest.mock.patch("agent.android.detect_root", return_value=amod.RootInfo(True, "su", "uid=0")), \
+             unittest.mock.patch("agent.android.run_root_command", side_effect=fake_root):
             result, method = amod.launch_package_with_options(
                 "com.roblox.client",
                 "roblox://placeId=123&privateServerLinkCode=abc",
@@ -137,22 +137,20 @@ class TestLaunchCommandConstructionWithURL(unittest.TestCase):
             f"MAIN intent not found: {captured}",
         )
 
-    def test_invalid_url_falls_back_to_launch_app(self):
-        """An unparseable URL must not crash — fall back to launch_app."""
+    def test_invalid_url_is_rejected_without_launch_app_fallback(self):
+        """An unparseable URL must not crash or open Roblox without the URL."""
         from agent import android as amod
 
-        def fake_run(cmd, **kwargs):
-            return amod.CommandResult(tuple(cmd), 0, "OK", "")
-
-        with unittest.mock.patch("agent.android.run_command", side_effect=fake_run), \
-             unittest.mock.patch("agent.android._find_command", return_value="/system/bin/am"):
+        with unittest.mock.patch.object(amod, "launch_app") as mock_launch_app:
             try:
                 result, method = amod.launch_package_with_options(
                     "com.roblox.client",
                     "NOT_A_VALID_URL_##$$%%",
                 )
-                # Should not raise; should fall back gracefully
                 self.assertIsNotNone(result)
+                self.assertFalse(result.ok)
+                self.assertEqual(method, "invalid_url")
+                mock_launch_app.assert_not_called()
             except Exception as exc:
                 self.fail(f"launch_package_with_options raised with invalid URL: {exc}")
 

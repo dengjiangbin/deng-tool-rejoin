@@ -6,11 +6,32 @@ import os
 import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from . import android, db
 from .config import effective_private_server_url, enabled_package_entries, validate_config
 from .logger import configure_logging, log_event
 from .url_utils import mask_launch_url, mask_urls_in_text, to_roblox_deep_link
+
+
+def _first_log_lines(text: str, *, limit: int = 4) -> str:
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    return " | ".join(lines[:limit])[:500]
+
+
+def _url_host_for_log(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        return parsed.hostname or parsed.netloc or parsed.scheme or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _result_used_root(result: android.CommandResult) -> bool:
+    if not result.args:
+        return False
+    exe = os.path.basename(str(result.args[0]))
+    return exe in {"su", "tsu"}
 
 
 def _proc_scan_alive(package: str) -> bool:
@@ -133,7 +154,11 @@ def perform_rejoin(
             try:
                 pre_stop = android.force_stop_package(package)
                 if pre_stop.ok:
-                    stopped_via = "am_force_stop"
+                    if _result_used_root(pre_stop):
+                        root_used = True
+                        stopped_via = f"root({os.path.basename(str(pre_stop.args[0]))})"
+                    else:
+                        stopped_via = "am_force_stop"
             except Exception:  # noqa: BLE001
                 pass
 
@@ -235,6 +260,7 @@ def perform_rejoin(
             package=package, url_set=bool(url_for_launch),
             masked_url=masked_url or "",
         )
+        launch_started = time.monotonic()
         if _bounds_rect is not None:
             result, _method = android.launch_package_with_bounds(
                 package, _bounds_rect, url_for_launch or None,
@@ -242,6 +268,26 @@ def perform_rejoin(
         else:
             result, _method = android.launch_package_with_options(
                 package, url_for_launch or None,
+            )
+        launch_elapsed_ms = int((time.monotonic() - launch_started) * 1000)
+        if _result_used_root(result) or _method.startswith("root_"):
+            root_used = True
+
+        if url_for_launch:
+            log_event(
+                logger,
+                "info",
+                "[DENG_REJOIN_URL_LAUNCH]",
+                package=package,
+                action=str(cfg.get("post_launch_action") or ""),
+                url_present="true",
+                url_host=_url_host_for_log(url_for_launch),
+                url_length=len(url_for_launch),
+                command_mode=_method,
+                return_code=result.returncode,
+                stdout_first_lines=_first_log_lines(mask_urls_in_text(result.stdout)),
+                stderr_first_lines=_first_log_lines(mask_urls_in_text(result.stderr)),
+                elapsed_ms=launch_elapsed_ms,
             )
 
         if not result.ok:
