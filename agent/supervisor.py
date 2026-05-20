@@ -88,18 +88,20 @@ STATUS_LAUNCHED          = "Launched"
 STATUS_DISCONNECTED      = "Disconnected"
 
 # ── Live watchdog vocabulary (WatchdogSupervisor) ────────────────────────────
-# These three states are the ONLY public steady states produced by WatchdogSupervisor.
-_LEGACY_LOBBY_STATE  = "In" + "-Lobby"
-STATUS_NO_HEARTBEAT  = "No Heartbeat"  # Process running, was in game, but heartbeat stalled/warning
+# These three states are the ONLY public steady states produced by WatchdogSupervisor:
+#   Online        — process running and in-game
+#   No Heartbeat  — process running but NOT playing (lobby, stuck, frozen, no heartbeat)
+#   Dead          — process not running
+# "In-Lobby" is removed: running-but-not-in-game now maps directly to No Heartbeat.
+STATUS_NO_HEARTBEAT  = "No Heartbeat"  # Process running but not actively playing
 
-# All healthy states — used for state-machine guards.
-# Public live states: Online, Launching, Reopening, Failed, Layout.
-# Legacy aliases are kept for display-map
-# compatibility but should never be set by the live supervisor path.
+# All healthy states — used for legacy _PackageWorker state-machine guards.
+# WatchdogSupervisor never reads _HEALTHY_STATES; only _PackageWorker uses it.
+# STATUS_LOBBY stays in _HEALTHY_STATES for _PackageWorker backward compat.
+# WatchdogSupervisor never produces Lobby; its display map maps Lobby → No Heartbeat.
 _HEALTHY_STATES = frozenset({
     STATUS_ONLINE, STATUS_LAUNCHED,
-    # Legacy aliases still accepted so _STATE_DISPLAY_MAP in commands.py can
-    # map them to Online; they must not be produced by the live supervisor.
+    # Legacy aliases for _PackageWorker only; never produced by WatchdogSupervisor.
     STATUS_LOBBY, STATUS_IN_SERVER, STATUS_JOIN_UNCONFIRMED,
 })
 
@@ -1164,19 +1166,24 @@ class WatchdogSupervisor:
         self.status_map: dict[str, str] = {
             pkg: STATUS_LAUNCHING for pkg in self.packages
         }
-        # Normalize initial_status: remove legacy transient labels.
+        # Normalize initial_status: remove legacy/transient labels.
+        # "In-Lobby" is gone — running-but-not-in-game is No Heartbeat.
+        # Any lobby-like state from old sessions also maps to No Heartbeat.
         if initial_status:
             _legacy_to_launching = {
                 STATUS_JOINING, STATUS_JOIN_UNCONFIRMED, "Join Failed", "Reconnecting",
             }
+            _legacy_to_no_heartbeat = {
+                "In-Lobby", "Lobby",   # old states: running but not in game
+            }
             for pkg, st in initial_status.items():
                 if pkg in self.status_map:
-                    if st == _LEGACY_LOBBY_STATE:
+                    if st in _legacy_to_no_heartbeat:
                         self.status_map[pkg] = STATUS_NO_HEARTBEAT
+                    elif st in _legacy_to_launching:
+                        self.status_map[pkg] = STATUS_LAUNCHING
                     else:
-                        self.status_map[pkg] = (
-                            STATUS_LAUNCHING if st in _legacy_to_launching else st
-                        )
+                        self.status_map[pkg] = st
 
         self.on_status_change = on_status_change
 
@@ -1888,6 +1895,17 @@ class WatchdogSupervisor:
                 expected=total,
                 duration_ms=int((time.monotonic() - round_started) * 1000),
             )
+
+            # ── Cycle "Checking Package" back to 1/N immediately ──────────────
+            # Without this, the label stays at "N/N" for the full sleep interval
+            # which makes the watchdog appear frozen after the last package.
+            # Resetting to "1/N" right after the round ends gives the user the
+            # visible  3/3 → 1/3  transition that confirms the loop is alive.
+            # Guard: only reset while still running — if stop_event was set
+            # inside the last detect call, preserve "N/N" for clean shutdown.
+            if not self.stop_event.is_set():
+                self.checking_label = f"Checking Package 1/{total}"
+                _maybe_render(force=True)
 
             # ── Sleep (interruptible, keep rendering) ─────────────────────────
             _sleep_deadline = time.time() + interval

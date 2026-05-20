@@ -3761,8 +3761,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             State labels in the table already describe what is happening;
             additional notes below the table are suppressed (user feedback:
             "useless text explaining state" when state is in the table).
+            Uses clear_scrollback=True on every call so old banner/table lines
+            from prior phases never bleed through on slow Termux terminals.
             """
-            _clear_terminal()
+            _clear_terminal(clear_scrollback=True)
             print_banner(use_color=use_color)
             print()
             rows = [
@@ -3892,15 +3894,19 @@ def cmd_start(args: argparse.Namespace) -> int:
             _start_log.info("start: No launch URL configured — clones will open Roblox home")
 
         # ── Launch each package ───────────────────────────────────────────────
-        # 6) "Launching" — per-package phase update so the row visibly
-        # advances even when one launch is slow.
+        # 6) "Launching" — set ALL packages to "Launching" at once before
+        # the loop and render a single clean "all starting" screen.  Only
+        # re-render AFTER each launch (to show success/failure result).
+        # This removes the pre-launch render-per-package that caused 2×N
+        # rapid clears/redraws for N packages (double-logo flicker fix).
         launch_ok:  dict[str, bool] = {}
         launch_err: dict[str, str]  = {}
         launch_attempted: dict[str, bool] = {}
+        for entry in entries:
+            phase[entry["package"]] = "Launching"
+        _render_phase("Launching clones...")
         for index, entry in enumerate(entries, start=1):
             package = entry["package"]
-            phase[package] = "Launching"
-            _render_phase("Launching clones with private-server deep link...")
             runtime_entry = runtime_entry_by_pkg.get(package, entry)
             # URL presence drives the launch intent; blank URL opens the app only.
             launch_attempted[package] = True
@@ -3909,9 +3915,9 @@ def cmd_start(args: argparse.Namespace) -> int:
             result = perform_rejoin(package_cfg, reason="start", package_entry=runtime_entry)
             launch_ok[package]  = result.success
             launch_err[package] = result.error or ""
-            # All post-launch transients use Launching.
+            # Update result state and render once per completed launch.
             phase[package] = "Launching" if result.success else "Failed"
-            _render_phase("Launching clones with private-server deep link...")
+            _render_phase()
             _start_log.debug(
                 "start: launch pkg=%s ok=%s err=%s",
                 package, result.success, result.error or "",
@@ -4109,12 +4115,13 @@ def cmd_start(args: argparse.Namespace) -> int:
             "No Heartbeat":     "No Heartbeat",
             # Transient post-launch → Launching
             "Preparing":        "Launching",
-            # Alive states (process up in any form) → Online
+            # Alive + in-game states → Online
             "Launched":         "Online",
             "In Server":        "Online",
-            "Lobby":            "Online",
             "Background":       "Online",
             "Warning":          "Online",
+            # Lobby = app open but not in game → No Heartbeat (In-Lobby removed)
+            "Lobby":            "No Heartbeat",
             # Recovery states must stay inside the allowed public vocabulary.
             "Reconnecting":     "No Heartbeat",
             "Dead":             "Dead",
@@ -4125,8 +4132,12 @@ def cmd_start(args: argparse.Namespace) -> int:
         }
 
         def _live_dashboard() -> None:
-            """Clear screen and redraw banner + table with live status values."""
-            _clear_terminal()
+            """Clear screen and redraw banner + table with live status values.
+
+            Uses clear_scrollback=True so the prep-phase banner/table cannot
+            bleed through at the Start→supervisor transition (dirty-UI fix).
+            """
+            _clear_terminal(clear_scrollback=True)
             print_banner(use_color=use_color)
             print()
             # "Checking Package X/Y" is a persistent dashboard line, not a
@@ -4152,6 +4163,12 @@ def cmd_start(args: argparse.Namespace) -> int:
             ]
             print(build_start_table(live_rows, use_color=use_color))
             print(flush=True)
+
+        # One-shot scrollback clear at the prep→supervisor transition so the
+        # last "Waiting" prep screen is completely gone before the live
+        # dashboard takes over.  Prevents any remaining prep-phase text from
+        # being visible above the first _live_dashboard frame.
+        _clear_terminal(clear_scrollback=True)
 
         # Use 3-second display interval (like Kaeru's blinking real-time table).
         try:
