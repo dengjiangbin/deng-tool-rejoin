@@ -132,11 +132,35 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             validate_config(cfg)
 
-    def test_removes_old_post_launch_action_config(self):
+    def test_invalid_post_launch_action_normalized_safely(self):
         cfg = default_config()
         cfg["post_launch_action"] = "script_injection"
         validated = validate_config(cfg)
-        self.assertNotIn("post_launch_action", validated)
+        self.assertIn(validated["post_launch_action"], {"none", "open_app", "open_configured_link"})
+        self.assertNotEqual(validated["post_launch_action"], "script_injection")
+
+    def test_post_launch_action_default_migrates_to_link_when_launch_url_exists(self):
+        cfg = default_config()
+        cfg.pop("post_launch_action", None)
+        cfg["launch_mode"] = "web_url"
+        cfg["launch_url"] = "https://www.roblox.com/share?code=ABC123&type=Server"
+        validated = validate_config(cfg)
+        self.assertEqual(validated["post_launch_action"], "open_configured_link")
+
+    def test_post_launch_action_default_migrates_to_app_without_launch_url(self):
+        cfg = default_config()
+        cfg.pop("post_launch_action", None)
+        cfg["launch_mode"] = "app"
+        cfg["launch_url"] = ""
+        validated = validate_config(cfg)
+        self.assertEqual(validated["post_launch_action"], "open_app")
+
+    def test_post_launch_action_allowed_values(self):
+        for value in ("none", "open_app", "open_configured_link"):
+            cfg = default_config()
+            cfg["post_launch_action"] = value
+            validated = validate_config(cfg)
+            self.assertEqual(validated["post_launch_action"], value)
 
     def test_webhook_interval_validation(self):
         cfg = default_config()

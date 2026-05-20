@@ -18,6 +18,10 @@ from . import account_detect, android, db, root_access, safe_io
 from .banner import print_banner
 from .config import (
     ConfigError,
+    POST_LAUNCH_ACTION_NONE,
+    POST_LAUNCH_ACTION_OPEN_APP,
+    POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
+    POST_LAUNCH_ACTIONS,
     default_config,
     effective_private_server_url,
     enabled_package_entries,
@@ -28,6 +32,7 @@ from .config import (
     normalize_package_detection_hint,
     package_display_name,
     package_entry,
+    post_launch_action_label,
     MAPPING_STATUSES,
     safe_config_view,
     save_config,
@@ -726,6 +731,37 @@ def _launch_mode_label(value: str) -> str:
     }.get(value, value)
 
 
+def _post_launch_action_label(value: Any) -> str:
+    return post_launch_action_label(value)
+
+
+def _has_configured_launch_link(config_data: dict[str, Any], entries: list[dict[str, Any]] | None = None) -> bool:
+    rows = entries if entries is not None else list(config_data.get("roblox_packages") or [])
+    if rows:
+        for entry in rows:
+            try:
+                if str(effective_private_server_url(entry, config_data) or "").strip():
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+    return bool(str(config_data.get("launch_url") or config_data.get("private_server_url") or "").strip())
+
+
+def _runtime_config_for_post_launch_action(config_data: dict[str, Any], action: str) -> dict[str, Any]:
+    runtime = dict(config_data)
+    if action in {POST_LAUNCH_ACTION_NONE, POST_LAUNCH_ACTION_OPEN_APP}:
+        runtime["launch_mode"] = "app"
+        runtime["launch_url"] = ""
+        runtime["private_server_url"] = ""
+        runtime["roblox_packages"] = [
+            {**entry, "private_server_url": ""}
+            for entry in validate_package_entries(
+                config_data.get("roblox_packages") or [config_data.get("roblox_package", DEFAULT_ROBLOX_PACKAGE)]
+            )
+        ]
+    return runtime
+
+
 def _package_list_label(packages: list[Any]) -> str:
     if not packages:
         return "Not set"
@@ -901,6 +937,7 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print("Launch:")
     print(f"  Mode: {_launch_mode_label(cfg['launch_mode'])}")
     print(f"  URL: {_safe_url_label(cfg['launch_url'])}")
+    print(f"  Post-Launch Action: {_post_launch_action_label(cfg['post_launch_action'])}")
     print()
     print("License:")
     print(f"  Key: {cfg.get('license_key') or 'Not set'}")
@@ -920,6 +957,7 @@ def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejo
     print(f"1. Device Name: {cfg['device_name']}")
     print(f"2. Roblox Package: {cfg['roblox_package']}")
     print(f"3. Private Server URL: {_safe_url_label(cfg['launch_url'])}")
+    print(f"4. Post-Launch Action: {_post_launch_action_label(cfg['post_launch_action'])}")
     print(f"5. Auto Rejoin: {_yes_no(cfg['auto_rejoin_enabled'])}")
     print(f"6. Reconnect Delay: {cfg['reconnect_delay_seconds']} seconds")
     print(f"7. Root Mode: {_yes_no(cfg['root_mode_enabled'])}")
@@ -1545,6 +1583,35 @@ def _setup_webhook_interval(draft: dict[str, Any]) -> None:
             return
         except ValueError as exc:
             print(exc)
+
+
+def _setup_post_launch_action(draft: dict[str, Any]) -> None:
+    print()
+    print("Post-Launch Action")
+    print("1. None")
+    print("2. Open Roblox app only")
+    print("3. Open configured Roblox link")
+    current = str(draft.get("post_launch_action") or POST_LAUNCH_ACTION_OPEN_APP)
+    default = {
+        POST_LAUNCH_ACTION_NONE: "1",
+        POST_LAUNCH_ACTION_OPEN_APP: "2",
+        POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK: "3",
+    }.get(current, "2")
+    choices = {
+        "1": POST_LAUNCH_ACTION_NONE,
+        "2": POST_LAUNCH_ACTION_OPEN_APP,
+        "3": POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
+        POST_LAUNCH_ACTION_NONE: POST_LAUNCH_ACTION_NONE,
+        POST_LAUNCH_ACTION_OPEN_APP: POST_LAUNCH_ACTION_OPEN_APP,
+        POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK: POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
+    }
+    while True:
+        raw = _prompt("Choose post-launch action", default).strip().lower()
+        action = choices.get(raw.replace("-", "_").replace(" ", "_"))
+        if action in POST_LAUNCH_ACTIONS:
+            draft["post_launch_action"] = action
+            return
+        print("Choose 1, 2, or 3.")
 
 
 def _setup_yescaptcha_key(draft: dict[str, Any]) -> None:
@@ -2257,6 +2324,20 @@ def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
     return draft
 
 
+def _config_menu_post_launch_action(draft: dict[str, Any]) -> dict[str, Any]:
+    if not _is_interactive():
+        return draft
+    print()
+    print("--------------------------------")
+    print("Post-Launch Action")
+    print("--------------------------------")
+    print(f"Current: {_post_launch_action_label(draft.get('post_launch_action'))}")
+    _setup_post_launch_action(draft)
+    draft = save_config(draft)
+    print("Post-Launch Action Saved.")
+    return draft
+
+
 def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
     """Webhook submenu: URL / Interval / Mode / Snapshot / Test Webhook."""
     if not _is_interactive():
@@ -2475,7 +2556,7 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
         print("First Time Setup Config")
         print()
         print("This will prepare your device for DENG Tool: Rejoin.")
-        print("You will set Roblox packages (scan or manual), optional private URL, then save.")
+        print("You will set Roblox packages (scan or manual), optional private URL, webhook, post-launch action, then save.")
         print("Package detection scans installed apps; manual entry is fallback.")
         print("Usernames are display-only in the Start table — Unknown is OK.")
         print()
@@ -2491,14 +2572,18 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     print()
     print("You will set:")
     print("  1. Roblox package / clone app (pick from detection, or manual fallback)")
-    print("  2. Private server URL (optional — not printed after saving)")
-    print("  3. Save")
+    print("  2. Roblox public / private server link")
+    print("  3. Discord webhook setup")
+    print("  4. Phone snapshot for webhook (only when webhook is enabled)")
+    print("  5. Webhook info interval (only when webhook is enabled)")
+    print("  6. Post-launch action")
+    print("  7. Save and start")
     print()
     print("Package detection:")
     print("  The tool scans installed Roblox apps against safe hints. Pick from the table.")
     print("  Manual package entry is only a fallback if nothing is found.")
     print()
-    print("Step 1 of 3: Roblox Package Setup")
+    print("Step 1 of 7: Roblox Package Setup")
     packages, hints = _choose_packages_menu(
         list(draft.get("roblox_packages") or [package_entry(draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE), "", True, "not_set")]),
         list(draft.get("package_detection_hints") or DEFAULT_ROBLOX_PACKAGE_HINTS),
@@ -2509,10 +2594,18 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     active_entries = enabled_package_entries(draft)
     draft["roblox_package"] = active_entries[0]["package"]
     draft["selected_package_mode"] = "multiple" if len(active_entries) > 1 else "single"
-    print("\nStep 2 of 3: Private Server URL")
+    print("\nStep 2 of 7: Roblox Public / Private Server Link")
     _setup_launch_link(draft)
-    # Optional advanced features are not shown in this setup flow.
-    print("\nStep 3 of 3: Save And Start")
+    print("\nStep 3 of 7: Discord Webhook Setup")
+    _setup_webhook(draft)
+    if draft.get("webhook_enabled"):
+        print("\nStep 4 of 7: Phone Snapshot For Webhook")
+        _setup_snapshot(draft)
+        print("\nStep 5 of 7: Webhook Info Interval")
+        _setup_webhook_interval(draft)
+    print("\nStep 6 of 7: Post-Launch Action")
+    _setup_post_launch_action(draft)
+    print("\nStep 7 of 7: Save And Start")
     draft["first_setup_completed"] = True
     try:
         saved = save_config(draft)
@@ -2535,6 +2628,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("--------------------------------")
         print("1. Package")
         print("2. Private Server URL")
+        print("3. Post-Launch Action")
         print("0. Back")
         print("--------------------------------")
         print("\nCurrent settings:")
@@ -2550,6 +2644,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("--------------------------------")
         print("1. Package")
         print("2. Private Server URL")
+        print("3. Post-Launch Action")
         print("0. Back")
         print("--------------------------------")
         choice = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -2565,8 +2660,10 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
             draft = _config_menu_package(draft)
         elif choice == "2":
             draft = _config_menu_launch_link(draft)
+        elif choice == "3":
+            draft = _config_menu_post_launch_action(draft)
         else:
-            print("Please choose 1-2 or 0.")
+            print("Please choose 1-3 or 0.")
             safe_io.press_enter()
 
 
@@ -2873,6 +2970,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"  Detection hints: {_hint_list_label(cfg['package_detection_hints'])}")
     print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
     print(f"  Launch URL: {_safe_url_label(cfg.get('launch_url'))}")
+    print(f"  Post-Launch Action: {_post_launch_action_label(cfg.get('post_launch_action'))}")
     print()
     print("Rejoin Settings")
     print(f"  First setup completed: {'Yes' if cfg['first_setup_completed'] else 'No'}")
@@ -3487,6 +3585,26 @@ def cmd_start(args: argparse.Namespace) -> int:
             print("Run Setup / Edit Config, then choose Roblox Package Setup.")
             return 2
 
+        post_launch_action = str(cfg.get("post_launch_action") or POST_LAUNCH_ACTION_OPEN_APP)
+        if post_launch_action not in POST_LAUNCH_ACTIONS:
+            post_launch_action = POST_LAUNCH_ACTION_OPEN_APP
+        post_launch_label = _post_launch_action_label(post_launch_action)
+        runtime_cfg = _runtime_config_for_post_launch_action(cfg, post_launch_action)
+        runtime_entries = enabled_package_entries(runtime_cfg)
+        runtime_entry_by_pkg = {entry["package"]: entry for entry in runtime_entries}
+        post_launch_notice = ""
+        if (
+            post_launch_action == POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK
+            and not _has_configured_launch_link(cfg, entries)
+        ):
+            post_launch_notice = "No Roblox launch link is configured."
+
+        def _print_post_launch_status() -> None:
+            print()
+            print(f"Post-launch action: {post_launch_label}")
+            if post_launch_notice:
+                print(post_launch_notice)
+
         # ── Detect packages (silently; go to debug log only) ─────────────────
         import logging as _logging
         _start_log = _logging.getLogger("deng.rejoin.start")
@@ -3589,6 +3707,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(rows, use_color=use_color))
+            _print_post_launch_status()
             try:
                 ram = _get_ram_label()
                 if ram:
@@ -3702,8 +3821,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         cfg["package_start_times"] = start_times
 
         # ── Launch URL confirmation (safe — never expose the raw URL) ────────
-        _global_url = str(effective_private_server_url(entries[0] if entries else {}, cfg) or "").strip() \
-            if entries else str(cfg.get("private_server_url") or cfg.get("launch_url") or "").strip()
+        _global_url = str(effective_private_server_url(runtime_entries[0] if runtime_entries else {}, runtime_cfg) or "").strip() \
+            if runtime_entries else str(runtime_cfg.get("private_server_url") or runtime_cfg.get("launch_url") or "").strip()
         if _global_url:
             _start_log.info("start: Launch URL configured — sending private server deep link to each clone")
         else:
@@ -3714,20 +3833,32 @@ def cmd_start(args: argparse.Namespace) -> int:
         # advances even when one launch is slow.
         launch_ok:  dict[str, bool] = {}
         launch_err: dict[str, str]  = {}
+        launch_attempted: dict[str, bool] = {}
         for index, entry in enumerate(entries, start=1):
             package = entry["package"]
             phase[package] = "Launching"
             _render_phase("Launching clones with private-server deep link...")
-            package_cfg = dict(cfg)
+            runtime_entry = runtime_entry_by_pkg.get(package, entry)
+            runtime_url = str(effective_private_server_url(runtime_entry, runtime_cfg) or "").strip()
+            should_launch = post_launch_action != POST_LAUNCH_ACTION_NONE
+            if post_launch_action == POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK and not runtime_url:
+                should_launch = False
+            if not should_launch:
+                launch_attempted[package] = False
+                launch_ok[package] = True
+                launch_err[package] = ""
+                phase[package] = "Waiting"
+                _render_phase()
+                continue
+            launch_attempted[package] = True
+            package_cfg = dict(runtime_cfg)
             package_cfg["roblox_package"] = package
-            result = perform_rejoin(package_cfg, reason="start", package_entry=entry)
+            result = perform_rejoin(package_cfg, reason="start", package_entry=runtime_entry)
             launch_ok[package]  = result.success
             launch_err[package] = result.error or ""
             # After a launch, move to "Joining" if a URL was sent, else
             # leave on "Launching" until the supervisor takes over.
-            has_url = bool(
-                str(effective_private_server_url(entry, cfg) or "").strip()
-            )
+            has_url = bool(runtime_url)
             phase[package] = "Joining" if has_url and result.success else \
                              ("Launching" if result.success else "Failed")
             _render_phase("Launching clones with private-server deep link...")
@@ -3775,7 +3906,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                     "foreground":  bool(ev.get("foreground")),
                     "alive":       bool(ev.get("alive")),
                     "private_url_set": bool(
-                        str(effective_private_server_url(entry, cfg) or "").strip()
+                        str(effective_private_server_url(runtime_entry_by_pkg.get(pkg, entry), runtime_cfg) or "").strip()
                     ),
                 })
             try:
@@ -3811,8 +3942,12 @@ def cmd_start(args: argparse.Namespace) -> int:
             username = _account_username_for_table(entry)
             cstat    = prep_cache.get(pkg, "Skipped")
             gstat    = prep_gfx.get(pkg, "Skipped")
-            _has_url = bool(str(effective_private_server_url(entry, cfg) or "").strip())
-            if not launch_ok[pkg]:
+            _runtime_entry = runtime_entry_by_pkg.get(pkg, entry)
+            _has_url = bool(str(effective_private_server_url(_runtime_entry, runtime_cfg) or "").strip())
+            if not launch_attempted.get(pkg, True):
+                state = "Online" if android.is_process_running(pkg) else "Waiting"
+                stat_internal = "post-launch action skipped"
+            elif not launch_ok[pkg]:
                 err = launch_err[pkg]
                 state = "Failed"
                 safe_err = mask_urls_in_text(err) or "Launch failed"
@@ -3837,6 +3972,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         print_banner(use_color=use_color)
         print()
         print(build_start_table(table_rows, use_color=use_color))
+        _print_post_launch_status()
         print(flush=True)
 
         # Log verbose detail to debug log only — never to stdout
@@ -3895,8 +4031,9 @@ def cmd_start(args: argparse.Namespace) -> int:
         save_config(cfg)
 
         # ── Check if any package launched ───────────────────────────────────
-        success_count = sum(1 for v in launch_ok.values() if v)
-        if success_count == 0:
+        attempted_count = sum(1 for v in launch_attempted.values() if v)
+        success_count = sum(1 for pkg, attempted in launch_attempted.items() if attempted and launch_ok.get(pkg))
+        if attempted_count and success_count == 0:
             reasons = [v for v in launch_err.values() if v]
             best_reason = reasons[0][:80] if reasons else "all launch attempts failed"
             _clear_terminal()
@@ -3915,14 +4052,15 @@ def cmd_start(args: argparse.Namespace) -> int:
         # Cap health-check interval at 5s for real-time detection (like
         # Kaeru's "blinking" table).  This overrides the config value only
         # for this session; the saved config is left unchanged.
-        _live_cfg = dict(cfg)
+        _live_cfg = dict(runtime_cfg)
+        _live_cfg["package_start_times"] = start_times
         _sup_sub = dict(
             cfg.get("supervisor") if isinstance(cfg.get("supervisor"), dict) else {}
         )
         _hci_raw = int(_sup_sub.get("health_check_interval_seconds", 10))
         _sup_sub["health_check_interval_seconds"] = max(3, min(_hci_raw, 5))
         _live_cfg["supervisor"] = _sup_sub
-        _supervisor = MultiPackageSupervisor(entries, _live_cfg, initial_status=initial_status)
+        _supervisor = MultiPackageSupervisor(runtime_entries, _live_cfg, initial_status=initial_status)
         _live_map = _supervisor.status_map  # dict mutated in-place by workers
 
         # Kaeru-style public state map: internal states → 5 clean user-facing labels.
@@ -3962,6 +4100,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(live_rows, use_color=use_color))
+            _print_post_launch_status()
             ram_label = _get_ram_label()
             if ram_label:
                 print()

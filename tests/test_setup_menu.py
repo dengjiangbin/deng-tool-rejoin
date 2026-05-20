@@ -138,14 +138,17 @@ class TopLevelMenuStructureTests(unittest.TestCase):
             return parts[2]  # the options section
         return text
 
-    def test_menu_has_exactly_two_numbered_items(self):
-        # After hiding Webhook and YesCaptcha, the Edit Config menu has exactly 2 items:
-        # 1. Package, 2. Private Server URL
+    def test_menu_has_expected_numbered_items(self):
+        # Webhook and YesCaptcha stay hidden; Post-Launch Action is public.
         text = self._get_menu_text()
         block = self._menu_block(text)
         lines = block.splitlines()
         numbered = [l.strip() for l in lines if len(l.strip()) > 2 and l.strip()[0] in "123456789" and l.strip()[1] == "."]
-        self.assertEqual(len(numbered), 2, f"Expected exactly 2 numbered items (Package + Private Server URL), got: {numbered}")
+        self.assertEqual(
+            numbered,
+            ["1. Package", "2. Private Server URL", "3. Post-Launch Action"],
+            f"Unexpected Edit Config items: {numbered}",
+        )
 
     def test_menu_does_not_contain_advanced_info(self):
         text = self._get_menu_text()

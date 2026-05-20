@@ -135,6 +135,7 @@ class StartTableUxTests(unittest.TestCase):
         self.assertIn("DENG Tool: Rejoin Settings", text)
         self.assertIn("Roblox Packages:", text)
         self.assertIn("Username", text)
+        self.assertIn("Post-Launch Action: Open Roblox app only", text)
         self.assertNotIn("Label:", text)
         self.assertNotIn('{"', text)
         self.assertNotIn("Username not set", text)
@@ -151,12 +152,46 @@ class StartTableUxTests(unittest.TestCase):
         self.assertIn("Auto Resize:", text)
         self.assertIn("Automatic based on selected package count and device DPI", text)
 
+    def test_status_shows_post_launch_action_friendly_wording(self):
+        import agent.commands as commands
+
+        args = argparse.Namespace(no_color=True)
+        cfg = validate_config({**default_config(), "post_launch_action": "open_configured_link"})
+        output = io.StringIO()
+        root_info = argparse.Namespace(available=False, tool="")
+        platform_info = argparse.Namespace(android_release="unknown", android_sdk="unknown", download_dir="")
+        display_info = argparse.Namespace(width=0, height=0, density=0)
+        lock_manager = unittest.mock.Mock()
+        lock_manager.is_running.return_value = False
+        with redirect_stdout(output), \
+             unittest.mock.patch("agent.commands.load_config", return_value=cfg), \
+             unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c), \
+             unittest.mock.patch("agent.commands.android.detect_root", return_value=root_info), \
+             unittest.mock.patch("agent.commands.get_platform_info", return_value=platform_info), \
+             unittest.mock.patch("agent.commands.window_layout.detect_display_info", return_value=display_info), \
+             unittest.mock.patch("agent.commands.LockManager", return_value=lock_manager), \
+             unittest.mock.patch("agent.commands.db.latest_row", return_value=None):
+            self.assertEqual(commands.cmd_status(args), 0)
+
+        self.assertIn("Post-Launch Action: Open configured Roblox link", output.getvalue())
+
     def test_no_script_execution_config_key(self):
         cfg = validate_config(default_config())
         lowered_keys = " ".join(cfg.keys()).lower()
         self.assertNotIn("script", lowered_keys)
         self.assertNotIn("executor", lowered_keys)
-        self.assertNotIn("post_launch_action", cfg)
+        self.assertIn(cfg["post_launch_action"], {"none", "open_app", "open_configured_link"})
+        forbidden_keys = {
+            "script_injection",
+            "executor",
+            "auto_execute_script",
+            "anti_afk",
+            "macro",
+            "captcha_bypass",
+            "memory_editing",
+            "packet_manipulation",
+        }
+        self.assertTrue(forbidden_keys.isdisjoint(set(cfg.keys())))
 
     def test_start_flow_does_not_use_pm_clear(self):
         source = (Path(__file__).resolve().parents[1] / "agent").rglob("*.py")

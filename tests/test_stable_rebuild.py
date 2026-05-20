@@ -555,26 +555,24 @@ class TestWebhookHiddenFromPublicUI(unittest.TestCase):
         import agent.commands as cmd
         return inspect.getsource(cmd._run_edit_config_menu)
 
-    def test_first_time_setup_does_not_call_setup_webhook(self) -> None:
+    def test_first_time_setup_calls_webhook_step(self) -> None:
         src = self._wizard_source()
-        self.assertNotIn("_setup_webhook(", src)
+        self.assertIn("_setup_webhook(draft)", src)
 
-    def test_first_time_setup_does_not_call_setup_snapshot(self) -> None:
+    def test_first_time_setup_snapshot_is_conditional_on_webhook(self) -> None:
         src = self._wizard_source()
-        self.assertNotIn("_setup_snapshot(", src)
+        self.assertIn('if draft.get("webhook_enabled"):', src)
+        self.assertIn("_setup_snapshot(draft)", src)
 
-    def test_first_time_setup_does_not_call_setup_webhook_interval(self) -> None:
+    def test_first_time_setup_webhook_interval_is_conditional_on_webhook(self) -> None:
         src = self._wizard_source()
-        self.assertNotIn("_setup_webhook_interval(", src)
+        self.assertIn('if draft.get("webhook_enabled"):', src)
+        self.assertIn("_setup_webhook_interval(draft)", src)
 
-    def test_first_time_setup_does_not_mention_webhook(self) -> None:
+    def test_first_time_setup_mentions_webhook(self) -> None:
         src = self._wizard_source()
-        import re
-        # Must not print/prompt about webhook to the user
-        printed_webhook = re.findall(r'print\s*\([^)]*[Ww]ebhook|_prompt\s*\([^)]*[Ww]ebhook', src)
-        self.assertEqual(printed_webhook, [], f"Wizard prints about webhook: {printed_webhook}")
-        # Must not call webhook setup functions
-        self.assertNotIn("_setup_webhook(", src)
+        self.assertIn("Discord Webhook Setup", src)
+        self.assertIn("_setup_webhook(draft)", src)
         self.assertNotIn("_config_menu_webhook(", src)
 
     def test_edit_config_does_not_show_webhook_option(self) -> None:
@@ -591,14 +589,15 @@ class TestWebhookHiddenFromPublicUI(unittest.TestCase):
         src = self._edit_config_source()
         self.assertNotIn("_config_menu_webhook", src)
 
-    def test_first_time_setup_has_3_steps(self) -> None:
-        """First Time Setup must have 3 steps, not 6."""
+    def test_first_time_setup_has_7_steps(self) -> None:
         src = self._wizard_source()
-        self.assertIn("Step 1 of 3", src)
-        self.assertIn("Step 2 of 3", src)
-        self.assertIn("Step 3 of 3", src)
-        self.assertNotIn("Step 4", src)
-        self.assertNotIn("Step 6", src)
+        self.assertIn("Step 1 of 7", src)
+        self.assertIn("Step 2 of 7", src)
+        self.assertIn("Step 3 of 7", src)
+        self.assertIn("Step 4 of 7", src)
+        self.assertIn("Step 5 of 7", src)
+        self.assertIn("Step 6 of 7", src)
+        self.assertIn("Step 7 of 7", src)
 
 
 # ─── 8. Public setup menu ──────────────────────────────────────────────────────
@@ -619,14 +618,13 @@ class TestPublicMenuItems(unittest.TestCase):
             self.assertNotIn("Webhook", label)
             self.assertNotIn("Captcha", label)
 
-    def test_edit_config_menu_has_2_options_plus_back(self) -> None:
+    def test_edit_config_menu_has_post_launch_option_plus_back(self) -> None:
         import agent.commands as cmd
         src = inspect.getsource(cmd._run_edit_config_menu)
-        # Must have 1. Package, 2. Private Server URL, 0. Back
         self.assertIn('"1. Package"', src)
         self.assertIn('"2. Private Server URL"', src)
+        self.assertIn('"3. Post-Launch Action"', src)
         self.assertIn('"0. Back"', src)
-        # Must NOT have 3. Webhook or 4. YesCaptcha
         self.assertNotIn('"3. Webhook"', src)
         self.assertNotIn('"4. YesCaptcha"', src)
 
