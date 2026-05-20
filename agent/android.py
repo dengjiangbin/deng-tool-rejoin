@@ -472,7 +472,7 @@ def clear_package_cache_verified(
     *,
     max_retries: int = 2,
 ) -> dict[str, object]:
-    """Clear package cache/code_cache dirs (never shared_prefs/databases/files).
+    """Clear package cache/code_cache dirs only (not app data, sessions, or accounts).
 
     Returns a result dict with keys:
       success (bool), skipped (bool), skipped_reason (str),
