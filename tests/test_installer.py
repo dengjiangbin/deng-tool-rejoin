@@ -298,17 +298,32 @@ class TestInstallerScript(unittest.TestCase):
 
     def test_direct_installer_has_single_bottom_separator(self):
         script = self._make_script()
-        sep_echo = 'echo "============================================================"'
-        self.assertEqual(script.count(sep_echo), 2)
+        # Short 30-char separators (TASK 1 of release cleanup).
+        sep_echo = 'echo "=============================="'
+        # Should appear: top, after Version, after Install complete = 3 times.
+        self.assertGreaterEqual(script.count(sep_echo), 2)
+        # Version line followed by closing separator.
         self.assertIn(
             'echo "Version: main-dev"\n'
-            'echo "============================================================"\n',
+            'echo "=============================="\n',
             script,
         )
+        # Install complete followed by separator.
+        self.assertIn(
+            'echo "Install complete."\n'
+            'echo "=============================="\n',
+            script,
+        )
+        # No duplicate adjacent separators.
         self.assertNotIn(
-            'echo "============================================================"\n'
-            'echo "============================================================"\n'
+            'echo "=============================="\n'
+            'echo "=============================="\n'
             'echo "Install complete."\n',
+            script,
+        )
+        # Old 60-char separator must be gone.
+        self.assertNotIn(
+            'echo "============================================================"',
             script,
         )
 
