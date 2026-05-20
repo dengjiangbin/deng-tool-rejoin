@@ -1,14 +1,21 @@
-fix: Kaeru-style stable rebuild -- archive broken smart detection, Roblox Presence API, hide YesCaptcha/Webhook (p-9e3f2a8d1c)
+﻿Fix dirty UI transition, Checking Package loop, remove In-Lobby
 
-Archive experience_detector, join state machine, start smart detection to agent/legacy/ (marked BROKEN -- not imported by live Start)
-Remove uiautomator/logcat/UI dump from supervisor live path; all probes raise RuntimeError in legacy files
-Simplify public states to Layout/Launching/Online/Reopening/Failed; map old Joining/Lobby/In Server/Join Unconfirmed away
-Per-package Kaeru-style _PackageWorker: last_presence_check_at, last_presence_state, hourly_restart_count, failed_reason, desired_url
-Roblox Presence API (agent/roblox_presence.py): classify_presence_result, get_presence_state_for_package; lobby presence falls through to process-health check without setting STATUS_LOBBY
-Hide YesCaptcha and Webhook from First Time Setup, Edit Config menu, and config summary (code preserved internally)
-First Time Setup simplified to 3 steps: License, Package, Private Server URL
-_STATE_DISPLAY_MAP updated to expose only the 5 allowed public states
-Live dashboard shows "Launch URL: configured" and "Press Ctrl+C to stop"
-faulthandler probe ID updated to p-9e3f2a8d1c
-1564 tests pass, 6 skipped, 0 failed (full suite)
-New artifact SHA: 60d8a1587c6c486c091659eca87424ca2172917fa4e723b7287e537eb8c720c4
+TASK 2 dirty Start UI: _render_phase and _live_dashboard now use
+clear_scrollback=True so old prep-phase banner/table never bleeds
+through. Launch loop restructured: all packages set to Launching once
+before the loop, then render once per completed launch (was 2x per
+package). One-shot scrollback clear added at prep-to-supervisor handoff.
+
+TASK 3 Checking Package loops: After each round for-loop, checking_label
+is immediately reset to 1/N and force-rendered (guarded by stop_event)
+so the user sees 3/3 then 1/3 cycling instead of 3/3 frozen for sleep.
+
+TASK 4 remove In-Lobby: Removed _LEGACY_LOBBY_STATE. __init__ maps
+In-Lobby and Lobby initial_status to No Heartbeat. _STATE_DISPLAY_MAP
+maps Lobby to No Heartbeat. _HEALTHY_STATES keeps STATUS_LOBBY for
+_PackageWorker backward compat only; WatchdogSupervisor never produces it.
+
+TASK 5 layout skeleton: already implemented; logs, border detection,
+2-col grid for <=6 packages, portrait/>6 skeletons confirmed passing.
+
+Probe: p-a1927430ee  screen=1280x720  packages=3  rounds=9
