@@ -13,6 +13,7 @@ Verifies:
 from __future__ import annotations
 
 import io
+import inspect
 import sys
 import unittest
 from pathlib import Path
@@ -216,6 +217,13 @@ class TestStartOutputClean(unittest.TestCase):
             "Per-package stop chatter must go to log, not stdout")
         self.assertNotIn("No background Roblox processes found.", out,
             "Idle stop notice must go to log, not stdout")
+
+    def test_start_transition_uses_single_clean_clear_before_dashboard(self):
+        """Start should clear once at handoff and avoid a redundant pre-dashboard banner."""
+        import agent.commands as _cmd
+        src = inspect.getsource(_cmd.cmd_start)
+        self.assertIn("_clear_terminal(clear_scrollback=True)", src)
+        self.assertNotIn("# ── Render post-launch table", src)
 
 
 if __name__ == "__main__":

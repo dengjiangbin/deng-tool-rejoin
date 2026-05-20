@@ -3072,7 +3072,7 @@ def _visible_len(s: str) -> int:
     return len(_ANSI_RE.sub("", s))
 
 
-def _clear_terminal() -> None:
+def _clear_terminal(*, clear_scrollback: bool = False) -> None:
     """Clear the visible terminal/dashboard. Compatible with Termux and Unix.
 
     Uses ANSI escape codes on non-Windows to avoid the fork/exec path that
@@ -3085,7 +3085,7 @@ def _clear_terminal() -> None:
             os.system("cls")  # Windows only — no Termux risk here
         else:
             import sys as _sys
-            _sys.stdout.write("\033[2J\033[H")
+            _sys.stdout.write("\033[2J\033[3J\033[H" if clear_scrollback else "\033[2J\033[H")
             _sys.stdout.flush()
     except Exception:  # noqa: BLE001
         pass
@@ -3106,8 +3106,7 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Launching":         _ANSI_YELLOW,
         "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
-        "In-Lobby":          _ANSI_YELLOW,   # process running, not in game
-        "No Heartbeat":      _ANSI_RED,      # was in game, heartbeat stalled
+        "No Heartbeat":      _ANSI_RED,      # running but not playing normally
         ("Join" + "ing"):    _ANSI_CYAN,     # legacy alias
         "Join Failed":       _ANSI_RED,
         # ── Prep-phase labels (visible while Start prepares each clone) ──
@@ -3202,7 +3201,6 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
 
 _FINAL_SUMMARY_ORDER: tuple[tuple[str, str], ...] = (
     ("online", "online."),
-    ("in lobby", "in lobby."),
     ("no heartbeat", "no heartbeat (recovering)."),
     ("reconnecting", "reconnecting."),
     ("launching", "launching."),
@@ -3221,7 +3219,6 @@ _STATE_TO_SUMMARY: dict[str, str] = {
     "Lobby":             "online",         # healthy at home screen
     "In Server":         "online",         # confirmed in target server
     ("Join " + "Unconfirmed"):  "launching",
-    "In-Lobby":          "in lobby",       # process running, not in server
     "No Heartbeat":      "no heartbeat",   # was in game, heartbeat stalled
     ("Join" + "ing"):    "launching",
     "Reconnecting":      "reconnecting",
@@ -3585,8 +3582,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             pass
         _start_lock = None
 
-    _clear_terminal()
-    print_banner(use_color=use_color)
+    _clear_terminal(clear_scrollback=True)
     try:
         cfg = load_config()
         cfg = _ensure_install_id_saved(cfg)
@@ -4015,13 +4011,6 @@ def cmd_start(args: argparse.Namespace) -> int:
                 {"package": pkg, "cache": cstat, "graphics": gstat, "launch_detail": stat_internal}
             )
 
-        # ── Render post-launch table (logo + table only, no other text) ───────
-        _clear_terminal()
-        print_banner(use_color=use_color)
-        print()
-        print(build_start_table(table_rows, use_color=use_color))
-        print(flush=True)
-
         # Log verbose detail to debug log only — never to stdout
         show_detail = (
             bool(getattr(args, "verbose", False))
@@ -4116,8 +4105,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         # Public state map: internal states → user-facing labels.
         # Internal states not in this map are shown as-is (e.g. "Online", "Failed").
         _STATE_DISPLAY_MAP: dict[str, str] = {
-            # New 4-state watchdog labels — shown as-is to the user.
-            "In-Lobby":         "In-Lobby",
+            # Live watchdog labels — shown as-is to the user.
             "No Heartbeat":     "No Heartbeat",
             # Transient post-launch → Launching
             "Preparing":        "Launching",
@@ -4127,11 +4115,11 @@ def cmd_start(args: argparse.Namespace) -> int:
             "Lobby":            "Online",
             "Background":       "Online",
             "Warning":          "Online",
-            # Dead / reconnecting → Reopening (supervisor will relaunch)
-            "Reconnecting":     "Reopening",
-            "Dead":             "Reopening",
-            "Disconnected":     "Reopening",
-            "Offline":          "Reopening",
+            # Recovery states must stay inside the allowed public vocabulary.
+            "Reconnecting":     "No Heartbeat",
+            "Dead":             "Dead",
+            "Disconnected":     "Dead",
+            "Offline":          "Dead",
             # Unknown at startup → Launching
             "Unknown":          "Launching",
         }

@@ -1,11 +1,9 @@
 """Tests for the user-aligned state vocabulary.
 
-New 4-state watchdog vocabulary (WatchdogSupervisor):
-    In-Lobby     — process running, not in game/server (home/lobby/menu)
+Watchdog steady states:
     Online       — process running, in game with healthy heartbeat
-    No Heartbeat — process running, was in game, heartbeat stalled
+    No Heartbeat — process running, but not playing normally or stalled
     Dead         — process not running (force-closed / crashed)
-    Launching    — transient: launch sent, awaiting first detection round
 
 Legacy constants are kept in supervisor.py for backward compatibility of
 old _PackageWorker tests but must NOT be produced by WatchdogSupervisor.
@@ -19,7 +17,6 @@ import unittest
 from agent.supervisor import (
     STATUS_DEAD,
     STATUS_DISCONNECTED,
-    STATUS_IN_LOBBY,
     STATUS_JOINING,
     STATUS_LAUNCHED,
     STATUS_LAUNCHING,
@@ -44,8 +41,7 @@ class TestStateConstants(unittest.TestCase):
         self.assertEqual(STATUS_DISCONNECTED, "Disconnected")
 
     def test_new_watchdog_states_exist(self) -> None:
-        """New 4-state machine constants must exist."""
-        self.assertEqual(STATUS_IN_LOBBY, "In-Lobby")
+        """Live steady-state machine constants must exist."""
         self.assertEqual(STATUS_NO_HEARTBEAT, "No Heartbeat")
         self.assertEqual(STATUS_DEAD, "Dead")
         self.assertEqual(STATUS_ONLINE, "Online")
@@ -66,24 +62,15 @@ class TestStateConstants(unittest.TestCase):
     def test_disconnected_is_NOT_a_healthy_state(self) -> None:
         self.assertNotIn(STATUS_DISCONNECTED, _HEALTHY_STATES)
 
-    def test_in_lobby_not_in_legacy_healthy_states(self) -> None:
-        """In-Lobby is not in _HEALTHY_STATES (it's a watchdog-only state)."""
-        # _HEALTHY_STATES is for the old _PackageWorker; the new watchdog has its own logic.
-        self.assertNotIn(STATUS_IN_LOBBY, _HEALTHY_STATES)
-
     def test_no_heartbeat_not_in_legacy_healthy_states(self) -> None:
         self.assertNotIn(STATUS_NO_HEARTBEAT, _HEALTHY_STATES)
 
 
 class TestStatusColors(unittest.TestCase):
-    """Colorize map must have entries for all states including new watchdog states."""
+    """Colorize map must have entries for all live watchdog states."""
 
-    def test_in_lobby_and_no_heartbeat_have_colors(self) -> None:
+    def test_no_heartbeat_has_color(self) -> None:
         from agent.commands import _colorize_status
-        out_il = _colorize_status("In-Lobby", use_color=True)
-        self.assertIn("In-Lobby", out_il)
-        self.assertNotEqual(out_il, "In-Lobby", "In-Lobby must be colorized")
-
         out_nh = _colorize_status("No Heartbeat", use_color=True)
         self.assertIn("No Heartbeat", out_nh)
         self.assertNotEqual(out_nh, "No Heartbeat", "No Heartbeat must be colorized")

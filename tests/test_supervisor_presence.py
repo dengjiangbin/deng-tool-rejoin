@@ -97,7 +97,7 @@ class TestPresenceDrivesState(unittest.TestCase):
         )
         self.assertEqual(status, STATUS_ONLINE)
 
-    def test_online_presence_in_lobby_falls_through_to_process_check(self) -> None:
+    def test_online_presence_not_in_game_falls_through_to_process_check(self) -> None:
         """Kaeru-style stable rebuild: lobby presence is recorded internally but
         does NOT set STATUS_LOBBY publicly.  The supervisor falls through to the
         process-health check.  When the process is not running the worker enters

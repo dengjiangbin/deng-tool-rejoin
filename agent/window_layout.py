@@ -503,6 +503,69 @@ def validate_layout_rects(
     return errors
 
 
+# Minimum top-of-screen safe area to avoid placing windows behind the
+# Android status bar.  Probe p-ea167faf5f confirmed the status bar frame
+# is mFrame=[0,0][1280,25] — i.e. 25 px tall.  We detect this dynamically
+# from dumpsys window policy and fall back to this constant when unavailable.
+SAFE_TOP_INSET_PX: int = 25
+
+_status_bar_height_cache: int | None = None
+
+
+def detect_layout_orientation(width: int, height: int) -> str:
+    """Return ``landscape`` or ``portrait`` for layout planning."""
+    return "landscape" if int(width) >= int(height) else "portrait"
+
+
+def _detect_status_bar_height() -> int:
+    """Return the Android status bar height in pixels.
+
+    Queries ``dumpsys window policy`` for the TYPE_STATUS_BAR frame.
+    Result is cached for the lifetime of the process.
+    Falls back to :data:`SAFE_TOP_INSET_PX` (25 px, confirmed from probe
+    p-ea167faf5f) if the query fails or produces no usable result.
+    Never raises.
+    """
+    global _status_bar_height_cache
+    if _status_bar_height_cache is not None:
+        return _status_bar_height_cache
+    # Set fallback before calling android to avoid re-entrance on error.
+    _status_bar_height_cache = SAFE_TOP_INSET_PX
+    try:
+        res = android.run_command(["dumpsys", "window", "policy"], timeout=4)
+        if res.ok and res.stdout:
+            # Match: mAttrs={(0,0)(fillxN) ty=STATUS_BAR}
+            # or:    (0,0)(fillxN) ... TYPE_STATUS_BAR
+            for pattern in (
+                r"ty=STATUS_BAR[^;]*fillx(\d+)",
+                r"fillx(\d+)[^;]*ty=STATUS_BAR",
+                r"TYPE_STATUS_BAR[^;]*fillx(\d+)",
+                r"fillx(\d+)[^;]*TYPE_STATUS_BAR",
+            ):
+                m = re.search(pattern, res.stdout)
+                if m:
+                    h = int(m.group(1))
+                    if 10 <= h <= 120:  # sanity bounds
+                        _status_bar_height_cache = h
+                        _log.debug(
+                            "[DENG_REJOIN_LAYOUT_SAFE_Y] status_bar_height=%d source=dumpsys_window_policy",
+                            h,
+                        )
+                        break
+    except Exception:  # noqa: BLE001
+        pass
+    return _status_bar_height_cache
+
+
+def _landscape_rows_for_count(count: int) -> int:
+    """Return the safe landscape row count for up to six packages."""
+    if count <= 2:
+        return 1
+    if count <= 4:
+        return 2
+    return 3
+
+
 # ── Core landscape-block layout engine ───────────────────────────────────────
 
 def calculate_landscape_blocks(
@@ -542,17 +605,67 @@ def calculate_landscape_blocks(
     H = max(1, int(display_h))
     g = max(1, int(gap))
     om = max(0, int(outer))
+    orientation = detect_layout_orientation(W, H)
+    _log.debug(
+        "[DENG_REJOIN_LAYOUT_ORIENTATION] orientation=%s screen_w=%d screen_h=%d",
+        orientation, W, H,
+    )
 
     # Left panel reservation
     left_end = round(W * max(0.1, min(0.9, float(left_fraction))))
 
-    # Right pane absolute bounds (with outer margins)
-    px0 = left_end + om       # left edge of pane
-    py0 = om                  # top edge of pane
-    px1 = W - om              # right edge of pane
-    py1 = H - om              # bottom edge of pane
+    # Right pane absolute bounds (with outer margins).
+    # [DENG_REJOIN_LAYOUT_SAFE_Y] probe_id=p-ea167faf5f
+    # The top of the right pane must never be below the Android status bar.
+    # Probe confirmed status bar = 25 px (mFrame=[0,0][1280,25]).
+    # _detect_status_bar_height() reads the live value from dumpsys and
+    # falls back to SAFE_TOP_INSET_PX if unavailable.
+    _sb_h = _detect_status_bar_height()
+    px0 = left_end + om           # left edge of pane
+    py0 = max(om, _sb_h)          # top edge of pane — at least below status bar
+    px1 = W - om                  # right edge of pane
+    py1 = H - om                  # bottom edge of pane
     pane_w = max(_MIN_WIN_W, px1 - px0)
     pane_h = max(_MIN_WIN_H, py1 - py0)
+    _log.debug(
+        "[DENG_REJOIN_LAYOUT_BORDER] detected_border_h=%d fallback_border_h=%d applied_top_y=%d",
+        _sb_h, SAFE_TOP_INSET_PX, py0,
+    )
+
+    if orientation == "landscape" and n <= 6:
+        cols = 2
+        rows = _landscape_rows_for_count(n)
+        usable_h = max(_MIN_WIN_H, py1 - py0)
+        cell_w = max(_MIN_WIN_W, (pane_w - g * (cols - 1)) // cols)
+        # Keep row height stable at one third of usable landscape height so
+        # future >6 layouts can extend without changing <=6 window sizing.
+        cell_h = max(_MIN_WIN_H, usable_h // 3)
+        rects: list[WindowRect] = []
+        for i, pkg in enumerate(pkgs):
+            row = i // cols
+            col = i % cols
+            x = px0 + col * (cell_w + g)
+            y = py0 + row * cell_h
+            rects.append(WindowRect(pkg, x, y, min(px1, x + cell_w), min(py1, y + cell_h)))
+        _log.debug(
+            "[DENG_REJOIN_LAYOUT_GRID] package_count=%d cols=%d rows=%d cell_w=%d cell_h=%d bounds=%s",
+            n, cols, rows, cell_w, cell_h,
+            [(r.left, r.top, r.right, r.bottom) for r in rects],
+        )
+        errors = validate_layout_rects(rects, px0, py0, px1, py1)
+        if not errors:
+            return rects
+        _log.debug("smart landscape grid validation failed: %s", errors)
+    elif orientation == "landscape":
+        _log.debug(
+            "[DENG_REJOIN_LAYOUT_GRID] package_count=%d cols=skeleton rows=skeleton cell_w=0 cell_h=0 bounds=[]",
+            n,
+        )
+    else:
+        _log.debug(
+            "[DENG_REJOIN_LAYOUT_GRID] package_count=%d cols=portrait_skeleton rows=portrait_skeleton cell_w=0 cell_h=0 bounds=[]",
+            n,
+        )
 
     def _make_rects_single_col(win_h: int) -> list[WindowRect]:
         """Stack N windows in one column with the given height."""

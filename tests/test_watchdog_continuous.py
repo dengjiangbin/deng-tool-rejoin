@@ -1,10 +1,10 @@
-﻿"""Tests for WatchdogSupervisor: continuous monitoring, 4-state machine,
+"""Tests for WatchdogSupervisor: continuous monitoring, state machine,
 blank URL support, canonical launcher, Joining removal, and probe logging.
 
 Requirements verified:
 1-5:   Blank private_server_url launches app-only, no error.
 6-10:  Configured URL uses working private URL launcher; &type=Server preserved.
-11-16: State detection: Dead/In-Lobby/Online/No Heartbeat/no Joining.
+11-16: State detection: Dead/Online/No Heartbeat/no Joining.
 17-25: Watchdog continuity: never stops after Online; force-close detected.
 26-30: Regression: no uiautomator/logcat, no Joining in output, no Post-Launch.
 """
@@ -25,7 +25,6 @@ if str(PROJECT) not in sys.path:
 from agent import android
 from agent.supervisor import (
     STATUS_DEAD,
-    STATUS_IN_LOBBY,
     STATUS_LAUNCHING,
     STATUS_NO_HEARTBEAT,
     STATUS_ONLINE,
@@ -243,13 +242,14 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(detail["process_running"], "false")
 
     # Test 12
-    def test_process_running_no_presence_returns_in_lobby(self):
+    def test_process_running_no_presence_returns_no_heartbeat(self):
         sup = _make_sup()
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_IN_LOBBY)
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertEqual(detail["process_running"], "true")
+        self.assertEqual(detail["heartbeat_ok"], "false")
 
     # Test 13
     def test_process_running_presence_in_game_returns_online(self):
@@ -265,27 +265,26 @@ class TestStateDetection(unittest.TestCase):
 
     # Test 14
     def test_was_online_presence_offline_twice_returns_no_heartbeat(self):
-        """After NHB_OFFLINE_CONFIRMATIONS offline presence hits: No Heartbeat."""
+        """Offline presence now immediately becomes No Heartbeat."""
         sup = _make_sup()
         # Mark as recently Online
         sup._last_online_ts[_PKG] = time.time() - 5
         presence = MagicMock()
         presence.is_in_game = False
         presence.is_offline = True
-        # First hit
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state1, _ = sup._detect_package_state(_PKG, _make_entry())
-        # Second hit (NHB_OFFLINE_CONFIRMATIONS=2)
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state2, detail2 = sup._detect_package_state(_PKG, _make_entry())
+        self.assertEqual(state1, STATUS_NO_HEARTBEAT)
         self.assertEqual(state2, STATUS_NO_HEARTBEAT)
         self.assertEqual(detail2["heartbeat_ok"], "false")
 
     # Test 15
-    def test_process_alive_no_in_game_proof_returns_in_lobby_not_joining(self):
-        """When process alive but no in-game proof, state must be In-Lobby, never Joining."""
+    def test_process_alive_no_in_game_proof_returns_no_heartbeat_not_joining(self):
+        """When process alive but no in-game proof, recover as No Heartbeat."""
         sup = _make_sup()
         presence = MagicMock()
         presence.is_in_game = False
@@ -293,7 +292,7 @@ class TestStateDetection(unittest.TestCase):
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state, _ = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_IN_LOBBY)
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
         self.assertNotEqual(state, "Joining")
 
     def test_missing_config_user_id_uses_root_prefs_then_presence_online(self):
@@ -324,8 +323,8 @@ class TestStateDetection(unittest.TestCase):
              patch.object(android, "discover_roblox_user_id_from_prefs", return_value=None), \
              patch("agent.roblox_presence.lookup_user_id", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_IN_LOBBY)
-        self.assertEqual(detail["reason"], "missing_in_game_proof")
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["reason"], "missing_in_game_proof_no_heartbeat")
         self.assertNotIn(_PKG, sup._presence_id_resolved)
 
     def test_foreground_window_hint_online_when_api_missing(self):
@@ -343,7 +342,7 @@ class TestStateDetection(unittest.TestCase):
     # Test 16
     def test_no_joining_state_in_watchdog_allowed_states(self):
         """WatchdogSupervisor must never produce 'Joining' as a state."""
-        allowed = {STATUS_IN_LOBBY, STATUS_ONLINE, STATUS_NO_HEARTBEAT, STATUS_DEAD, STATUS_LAUNCHING}
+        allowed = {STATUS_ONLINE, STATUS_NO_HEARTBEAT, STATUS_DEAD}
         self.assertNotIn("Joining", allowed)
         # _detect_package_state can only return one of these values
         sup = _make_sup()
@@ -551,7 +550,7 @@ class TestWatchdogContinuity(unittest.TestCase):
         self.assertIn("Checking Package 1/3", labels)
         self.assertIn("Checking Package 2/3", labels)
         self.assertIn("Checking Package 3/3", labels)
-        self.assertEqual(sup.status_map[_PKG], STATUS_IN_LOBBY)
+        self.assertEqual(sup.status_map[_PKG], STATUS_NO_HEARTBEAT)
 
     def test_checking_label_persists_after_round_until_shutdown(self):
         packages = [_PKG, _PKG2]
@@ -573,7 +572,39 @@ class TestWatchdogContinuity(unittest.TestCase):
                 render_callback=lambda: labels.append(sup.checking_label),
             )
         self.assertIn("Checking Package 2/2", labels)
-        self.assertEqual(sup.checking_label, "")
+        self.assertEqual(sup.checking_label, "Checking Package 2/2")
+
+    def test_checking_label_loops_back_to_first_package_next_round(self):
+        packages = [_PKG, _PKG2, "com.roblox.client3"]
+        sup = _make_sup(packages=packages)
+        labels: list[str] = []
+        checks = {"n": 0}
+
+        def detect(pkg, entry):
+            checks["n"] += 1
+            if checks["n"] >= 4:
+                sup.stop_event.set()
+            return STATUS_ONLINE, {
+                "process_running": "true", "in_game": "true",
+                "heartbeat_ok": "true", "warning_detected": "false", "elapsed_ms": 0,
+            }
+
+        sup._detect_package_state = detect
+        with patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \
+             patch.object(sup, "_sup_interval", return_value=0):
+            sup.run_forever(
+                display_interval=999,
+                render_callback=lambda: labels.append(sup.checking_label),
+            )
+        self.assertEqual(
+            labels[:4],
+            [
+                "Checking Package 1/3",
+                "Checking Package 2/3",
+                "Checking Package 3/3",
+                "Checking Package 1/3",
+            ],
+        )
 
 
 # â”€â”€â”€ 26-30: Regression â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -603,8 +634,8 @@ class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
              patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_IN_LOBBY)
-        self.assertEqual(detail["reason"], "missing_in_game_proof")
+        self.assertEqual(state, STATUS_NO_HEARTBEAT)
+        self.assertEqual(detail["reason"], "missing_in_game_proof_no_heartbeat")
 
     def test_fast_alive_evidence_uses_short_root_timeouts(self):
         """Root process proof is bounded so Checking Package 1/3 cannot stall a round."""
@@ -704,52 +735,39 @@ class TestLaunchPackageForCurrentConfig(unittest.TestCase):
         self.assertEqual(mock_rejoin.call_args.kwargs.get("package_entry"), entry)
 
 
-# â”€â”€â”€ Additional: In-Lobby recovery logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Additional: running-but-not-playing recovery logic ──────────────────────
 
-class TestInLobbyRecovery(unittest.TestCase):
-    """In-Lobby recovery: URL timeout relaunch vs app-only monitoring."""
+class TestRunningNotPlayingRecovery(unittest.TestCase):
+    """No Heartbeat force-stops only the affected package, then relaunches."""
 
-    def test_in_lobby_blank_url_does_not_relaunch(self):
-        """Blank URL: In-Lobby is acceptable, no relaunch triggered."""
+    def test_no_heartbeat_blank_url_force_stops_then_relaunches_app_only(self):
         sup = _make_sup(private_url="")
-        with patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
-             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
-            sup._handle_state(_PKG, _make_entry(private_url=""), STATUS_IN_LOBBY, STATUS_IN_LOBBY, time.time())
-        mock_launch.assert_not_called()
-
-    def test_in_lobby_with_url_before_timeout_does_not_relaunch(self):
-        """URL configured: In-Lobby within LOBBY_RELAUNCH_SECONDS doesn't relaunch."""
-        url = "roblox://experiences/start?privateServerLinkCode=abc"
-        sup = _make_sup(private_url=url)
-        entry = _make_entry(private_url=url)
-        now = time.time()
-        sup._lobby_since[_PKG] = now - (sup.LOBBY_RELAUNCH_SECONDS - 10)  # not yet expired
-        with patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
-             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
-            sup._handle_state(_PKG, entry, STATUS_IN_LOBBY, STATUS_ONLINE, now)
-        mock_launch.assert_not_called()
-
-    def test_in_lobby_with_url_after_timeout_relaunches(self):
-        """URL configured: In-Lobby after LOBBY_RELAUNCH_SECONDS triggers relaunch."""
-        url = "roblox://experiences/start?privateServerLinkCode=abc"
-        sup = _make_sup(private_url=url)
-        entry = _make_entry(private_url=url)
-        now = time.time()
-        sup._lobby_since[_PKG] = now - (sup.LOBBY_RELAUNCH_SECONDS + 1)  # expired
-        with patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
+        with patch("agent.supervisor.android.force_stop_package") as mock_stop, \
+             patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             mock_launch.return_value = RejoinResult(True, root_used=False)
-            sup._handle_state(_PKG, entry, STATUS_IN_LOBBY, STATUS_ONLINE, now)
+            sup._handle_state(_PKG, _make_entry(private_url=""), STATUS_NO_HEARTBEAT, STATUS_ONLINE, time.time())
+        mock_stop.assert_called_once_with(_PKG)
         mock_launch.assert_called_once()
-        self.assertEqual(mock_launch.call_args.args[2], "lobby_timeout_private_url_recovery")
+        self.assertEqual(mock_launch.call_args.args[2], "no_heartbeat_recovery")
+
+    def test_no_heartbeat_with_url_force_stops_then_relaunches_private_url(self):
+        url = "roblox://experiences/start?privateServerLinkCode=abc"
+        sup = _make_sup(private_url=url)
+        entry = _make_entry(private_url=url)
+        with patch("agent.supervisor.android.force_stop_package") as mock_stop, \
+             patch("agent.supervisor.launch_package_for_current_config") as mock_launch, \
+             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
+            mock_launch.return_value = RejoinResult(True, root_used=False)
+            sup._handle_state(_PKG, entry, STATUS_NO_HEARTBEAT, STATUS_ONLINE, time.time())
+        mock_stop.assert_called_once_with(_PKG)
+        mock_launch.assert_called_once()
+        self.assertEqual(mock_launch.call_args.args[2], "no_heartbeat_recovery")
 
 
 # â”€â”€â”€ Additional: Status constants exist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestNewStatusConstants(unittest.TestCase):
-
-    def test_status_in_lobby_constant(self):
-        self.assertEqual(STATUS_IN_LOBBY, "In-Lobby")
 
     def test_status_no_heartbeat_constant(self):
         self.assertEqual(STATUS_NO_HEARTBEAT, "No Heartbeat")

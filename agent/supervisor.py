@@ -87,9 +87,9 @@ STATUS_JOIN_UNCONFIRMED  = "Join " + "Unconfirmed"  # App healthy but no in-game
 STATUS_LAUNCHED          = "Launched"
 STATUS_DISCONNECTED      = "Disconnected"
 
-# ── New 4-state watchdog vocabulary (WatchdogSupervisor) ─────────────────────
-# These four states are the ONLY public states produced by WatchdogSupervisor.
-STATUS_IN_LOBBY      = "In-Lobby"      # Process running, not in game/server (home/lobby/menu)
+# ── Live watchdog vocabulary (WatchdogSupervisor) ────────────────────────────
+# These three states are the ONLY public steady states produced by WatchdogSupervisor.
+_LEGACY_LOBBY_STATE  = "In" + "-Lobby"
 STATUS_NO_HEARTBEAT  = "No Heartbeat"  # Process running, was in game, but heartbeat stalled/warning
 
 # All healthy states — used for state-machine guards.
@@ -1109,12 +1109,11 @@ class MultiPackageSupervisor:
 
 
 class WatchdogSupervisor:
-    """Continuous sequential watchdog with deterministic 4-state detection.
+    """Continuous sequential watchdog with deterministic live detection.
 
     States produced (public):
-        In-Lobby      — Process running, not in game/server; at Roblox home/lobby/menu.
         Online        — Process running, in game, healthy heartbeat/presence.
-        No Heartbeat  — Process running, was in game, but heartbeat stalled / offline signal.
+        No Heartbeat  — Process running, but not playing normally, stalled, or offline signal.
         Dead          — Process not running (force-closed, crashed, stopped).
         Launching     — Transient: initial launch sent, waiting for first state detection.
 
@@ -1139,14 +1138,11 @@ class WatchdogSupervisor:
     thread-per-package complexity and gives deterministic X/Y progress lines.
     """
 
-    # ── Lobby relaunch timeout when private URL is configured ────────────────
-    LOBBY_RELAUNCH_SECONDS: int = 120   # 2 min in lobby before relaunching via URL
-
     # ── Grace window after launch — do not check immediately ────────────────
     DEFAULT_GRACE_SECONDS: int = 45
 
-    # ── Presence offline confirmations needed to declare No Heartbeat ────────
-    NHB_OFFLINE_CONFIRMATIONS: int = 2  # must see offline/lobby N times before NHB
+    # ── Presence offline confirmation counter retained for probe history ─────
+    NHB_OFFLINE_CONFIRMATIONS: int = 2
 
     def __init__(
         self,
@@ -1175,9 +1171,12 @@ class WatchdogSupervisor:
             }
             for pkg, st in initial_status.items():
                 if pkg in self.status_map:
-                    self.status_map[pkg] = (
-                        STATUS_LAUNCHING if st in _legacy_to_launching else st
-                    )
+                    if st == _LEGACY_LOBBY_STATE:
+                        self.status_map[pkg] = STATUS_NO_HEARTBEAT
+                    else:
+                        self.status_map[pkg] = (
+                            STATUS_LAUNCHING if st in _legacy_to_launching else st
+                        )
 
         self.on_status_change = on_status_change
 
@@ -1190,7 +1189,6 @@ class WatchdogSupervisor:
         self._prev_state: dict[str, str] = {}
         self._last_online_ts: dict[str, float] = {}   # last time confirmed Online
         self._grace_until: dict[str, float] = {}      # no relaunch until this ts
-        self._lobby_since: dict[str, float] = {}      # when In-Lobby started
         self._nhb_offline_count: dict[str, int] = {}  # consecutive offline hits
         self._revive_count: dict[str, int] = {}
         self._failure_count: dict[str, int] = {}
@@ -1444,7 +1442,7 @@ class WatchdogSupervisor:
         B. Process running + presence InGame                → Online
         C. Process running + was recently Online
            + presence offline N times consecutively         → No Heartbeat
-        D. Process running, no in-game evidence             → In-Lobby
+        D. Process running, no in-game evidence             → No Heartbeat
 
         Process check runs FIRST.  Presence is supplementary and never overrides
         a dead process.
@@ -1570,17 +1568,18 @@ class WatchdogSupervisor:
             self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_ONLINE)
             return STATUS_ONLINE, detail
 
-        # D. In-Lobby — process alive, no confirmed in-game signal.
-        #    IMPORTANT: do not return a join-pending state here.
+        # D. Process alive, but no confirmed in-game signal.  This is a
+        # recovery state now: close/relaunch only this package instead of
+        # letting a clone sit at Roblox home.
         reason = (
-            "presence_not_in_game"
+            "presence_not_in_game_no_heartbeat"
             if presence is not None and not presence_unknown
-            else "missing_in_game_proof"
+            else "missing_in_game_proof_no_heartbeat"
         )
         detail = {
             "process_running": "true",
             "in_game": "false",
-            "heartbeat_ok": "unknown",
+            "heartbeat_ok": "false",
             "warning_detected": "false",
             "elapsed_ms": elapsed_ms,
             "root_available": str(root_available).lower(),
@@ -1590,8 +1589,8 @@ class WatchdogSupervisor:
             "heartbeat_age_sec": heartbeat_age_sec,
             "reason": reason,
         }
-        self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_IN_LOBBY)
-        return STATUS_IN_LOBBY, detail
+        self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_NO_HEARTBEAT)
+        return STATUS_NO_HEARTBEAT, detail
 
     def _log_state_evidence(
         self,
@@ -1674,8 +1673,6 @@ class WatchdogSupervisor:
         Recovery rules:
         - Dead        → launch_package_for_current_config
         - No Heartbeat → am force-stop <pkg>, then launch_package_for_current_config
-        - In-Lobby    → if URL configured and lobby timeout exceeded: launch via URL
-                        else: monitor only (In-Lobby is OK when URL is blank)
         - Online      → update last_online_ts, keep monitoring
         """
         logger = self._logger
@@ -1726,49 +1723,6 @@ class WatchdogSupervisor:
             else:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
 
-        elif state == STATUS_IN_LOBBY:
-            if url_configured:
-                lobby_start = self._lobby_since.get(pkg)
-                if lobby_start is None:
-                    self._lobby_since[pkg] = now
-                    log_event(
-                        logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
-                        package=pkg, state="In-Lobby",
-                        private_url_configured="true",
-                        action="monitor_only",
-                        reason="lobby_timeout_not_started",
-                    )
-                elif (now - lobby_start) >= self.LOBBY_RELAUNCH_SECONDS:
-                    elapsed_s = int(now - lobby_start)
-                    log_event(
-                        logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
-                        package=pkg, state="In-Lobby",
-                        private_url_configured="true",
-                        action="lobby_timeout_private_url_recovery",
-                        reason=f"lobby_timeout_exceeded_{elapsed_s}s",
-                    )
-                    success = self._do_launch(pkg, entry, "lobby_timeout_private_url_recovery")
-                    if success:
-                        self._lobby_since.pop(pkg, None)
-                        self._set_grace(pkg, now)
-                        self._set_status(pkg, STATUS_LAUNCHING)
-                else:
-                    log_event(
-                        logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
-                        package=pkg, state="In-Lobby",
-                        private_url_configured="true",
-                        action="monitor_only",
-                        reason=f"lobby_timeout_not_reached_{int(now - lobby_start)}s",
-                    )
-            else:
-                # No URL configured — In-Lobby is acceptable, not fatal.
-                log_event(
-                    logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
-                    package=pkg, state="In-Lobby",
-                    private_url_configured="false",
-                    action="monitor_only",
-                    reason="no_private_url_in_lobby_is_acceptable",
-                )
         # STATUS_ONLINE: just update timestamp, no recovery needed.
 
     # ─── Main loop ────────────────────────────────────────────────────────────
@@ -1867,7 +1821,7 @@ class WatchdogSupervisor:
                     state, detail = self._detect_package_state(pkg, entry)
                 except Exception as exc:  # noqa: BLE001
                     error_text = str(exc)[:180]
-                    state = prev if prev in {STATUS_IN_LOBBY, STATUS_ONLINE, STATUS_NO_HEARTBEAT, STATUS_DEAD} else STATUS_IN_LOBBY
+                    state = prev if prev in {STATUS_ONLINE, STATUS_NO_HEARTBEAT, STATUS_DEAD} else STATUS_NO_HEARTBEAT
                     detail = {
                         "process_running": "unknown",
                         "in_game": "unknown",
@@ -1909,7 +1863,6 @@ class WatchdogSupervisor:
                 # Update Online timestamp when confirmed in-game.
                 if state == STATUS_ONLINE:
                     self._last_online_ts[pkg] = now
-                    self._lobby_since.pop(pkg, None)
 
                 # Grace window: skip recovery immediately after a launch.
                 if not self._in_grace(pkg, now):
@@ -1920,14 +1873,12 @@ class WatchdogSupervisor:
                 "online":       sum(1 for v in self.status_map.values() if v == STATUS_ONLINE),
                 "dead":         sum(1 for v in self.status_map.values() if v == STATUS_DEAD),
                 "no_heartbeat": sum(1 for v in self.status_map.values() if v == STATUS_NO_HEARTBEAT),
-                "in_lobby":     sum(1 for v in self.status_map.values() if v == STATUS_IN_LOBBY),
             }
             log_event(
                 logger, "info", "[DENG_REJOIN_WATCHDOG_CONTINUES]",
                 online_packages=_counts["online"],
                 dead_packages=_counts["dead"],
                 no_heartbeat_packages=_counts["no_heartbeat"],
-                in_lobby_packages=_counts["in_lobby"],
                 next_round_in_sec=interval,
             )
             log_event(
@@ -1939,13 +1890,11 @@ class WatchdogSupervisor:
             )
 
             # ── Sleep (interruptible, keep rendering) ─────────────────────────
-            _maybe_render(force=True)
             _sleep_deadline = time.time() + interval
             while not self.stop_event.is_set() and time.time() < _sleep_deadline:
                 _maybe_render()
                 time.sleep(min(1.0, _sleep_deadline - time.time()))
 
-        self.checking_label = ""
         db.insert_event("INFO", "watchdog_supervisor_stopped", "session ended by user")
         log_event(logger, "info", "watchdog_supervisor_stopped")
 

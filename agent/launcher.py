@@ -419,7 +419,7 @@ def launch_package_for_current_config(
     - Initial Start launch (via cmd_start loop)
     - Dead recovery (watchdog detects process gone)
     - No Heartbeat recovery (watchdog force-stops then relaunches)
-    - In-Lobby timeout recovery (private URL relaunch after lobby timeout)
+    - No Heartbeat recovery (private URL relaunch when configured)
     - Supervisor resurrection
 
     [DENG_REJOIN_CANONICAL_LAUNCHER] probe_id=p-ea167faf5f

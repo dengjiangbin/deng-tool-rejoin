@@ -17,6 +17,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 PROJECT = Path(__file__).resolve().parents[1]
 if str(PROJECT) not in sys.path:
@@ -317,6 +318,60 @@ class TestWindowRect(unittest.TestCase):
 
 
 # ── Split layout ──────────────────────────────────────────────────────────────
+
+class TestSmartLandscapeGrid(unittest.TestCase):
+    """Landscape layout keeps Roblox windows below the Android window border."""
+
+    def _rects(self, n: int, *, w: int = 1280, h: int = 720, border: int = 25):
+        with mock.patch("agent.window_layout._detect_status_bar_height", return_value=border):
+            return calculate_split_layout(
+                _pkgs(n), w, h, termux_log_fraction=0.50
+            )
+
+    def test_first_row_y_uses_detected_border(self):
+        rects = self._rects(3, border=25)
+        self.assertTrue(rects)
+        self.assertEqual(rects[0].top, 25)
+        self.assertEqual(rects[1].top, 25)
+
+    def test_one_two_packages_use_two_columns_one_row(self):
+        one = self._rects(1)
+        two = self._rects(2)
+        self.assertEqual(len({r.top for r in one}), 1)
+        self.assertEqual(len({r.top for r in two}), 1)
+        self.assertEqual(len({r.left for r in two}), 2)
+
+    def test_three_four_packages_use_two_columns_two_rows(self):
+        three = self._rects(3)
+        four = self._rects(4)
+        self.assertEqual(len({r.top for r in three}), 2)
+        self.assertEqual(len({r.top for r in four}), 2)
+        self.assertLessEqual(max(r.top for r in four), 25 + ((720 - 25) // 3))
+
+    def test_five_six_packages_use_two_columns_three_rows(self):
+        five = self._rects(5)
+        six = self._rects(6)
+        self.assertEqual(len({r.top for r in five}), 3)
+        self.assertEqual(len({r.top for r in six}), 3)
+        self.assertEqual(len({r.left for r in six}), 2)
+
+    def test_height_uses_one_third_of_usable_landscape_height(self):
+        rects = self._rects(6, border=25)
+        self.assertEqual(rects[0].win_h, (720 - 25) // 3)
+
+    def test_termux_area_not_resized_or_covered(self):
+        rects = self._rects(6)
+        for rect in rects:
+            self.assertGreaterEqual(rect.left, 640)
+
+    def test_portrait_skeleton_does_not_crash(self):
+        rects = self._rects(3, w=720, h=1280)
+        self.assertEqual(len(rects), 3)
+
+    def test_more_than_six_skeleton_does_not_crash(self):
+        rects = self._rects(7)
+        self.assertEqual(len(rects), 7)
+
 
 class TestSplitLayout(unittest.TestCase):
     """Split layout: left 35% reserved, right 65% gets landscape windows."""

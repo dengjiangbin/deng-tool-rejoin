@@ -129,7 +129,7 @@ class TestPublicStates(unittest.TestCase):
         "Failed", "Layout",
     ]
     _ALLOWED_PUBLIC = {"Layout", "Launching", "Online", "Reopening", "Failed",
-                       "In-Lobby", "No Heartbeat", "Dead"}
+                       "No Heartbeat", "Dead"}
 
     def _get_display_map(self):
         # Extract _STATE_DISPLAY_MAP from cmd_start source via AST.
@@ -172,13 +172,13 @@ class TestPublicStates(unittest.TestCase):
         self.assertNotEqual(smap["Lobby"], "Lobby")
         self.assertIn(smap["Lobby"], self._ALLOWED_PUBLIC)
 
-    def test_reconnecting_maps_to_reopening(self) -> None:
+    def test_reconnecting_maps_to_no_heartbeat(self) -> None:
         smap = self._get_display_map()
-        self.assertEqual(smap.get("Reconnecting"), "Reopening")
+        self.assertEqual(smap.get("Reconnecting"), "No Heartbeat")
 
-    def test_dead_maps_to_reopening(self) -> None:
+    def test_dead_stays_dead(self) -> None:
         smap = self._get_display_map()
-        self.assertEqual(smap.get("Dead"), "Reopening")
+        self.assertEqual(smap.get("Dead"), "Dead")
 
     def test_online_stays_online(self) -> None:
         # "Online" is not in the map (passthrough), so get() returns default
