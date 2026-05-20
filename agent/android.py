@@ -448,6 +448,173 @@ def force_stop_package(package: str, root_info: RootInfo | None = None) -> Comma
     return run_root_command(["am", "force-stop", package], root_tool=info.tool, timeout=PROCESS_TIMEOUT_SECONDS)
 
 
+def get_package_pid(package: str, root_info: RootInfo | None = None) -> str:
+    """Return the main PID of a running package process, or '' if not running."""
+    package = validate_package_name(package)
+    info = root_info or detect_root()
+    if not info.available or not info.tool:
+        return ""
+    res = run_root_command(["pidof", "-s", package], root_tool=info.tool, timeout=5)
+    if res.ok and res.stdout.strip().isdigit():
+        return res.stdout.strip()
+    # Fallback: busybox ps / ps -A grep
+    sh = (
+        f"ps -A 2>/dev/null | grep -F '{package}' | grep -v grep"
+        f" | awk '{{print $2}}' | head -n1"
+    )
+    res2 = run_root_command(["sh", "-c", sh], root_tool=info.tool, timeout=6)
+    pid = (res2.stdout or "").strip()
+    return pid if pid.isdigit() else ""
+
+
+def clear_package_cache_verified(
+    package: str,
+    *,
+    max_retries: int = 2,
+) -> dict[str, object]:
+    """Clear package cache/code_cache dirs (never shared_prefs/databases/files).
+
+    Returns a result dict with keys:
+      success (bool), skipped (bool), skipped_reason (str),
+      cache_paths (list[str]), size_before_bytes (int), size_after_bytes (int),
+      attempts (int), error (str).
+
+    Safe: validates package name, uses root, targets only cache/code_cache.
+    Uses ``find -delete`` on cache dirs only — never the package manager
+    data-wipe command that would also remove accounts/session data.
+    """
+    package = validate_package_name(package)
+    root_info = detect_root()
+    if not root_info.available or not root_info.tool:
+        return {
+            "success": False, "skipped": True,
+            "skipped_reason": "root_unavailable",
+            "cache_paths": [], "size_before_bytes": 0, "size_after_bytes": 0,
+            "attempts": 0, "error": "",
+        }
+
+    # Safe targets — only cache/code_cache, never user data.
+    # /data/user/0 is the modern path (Android 5+); /data/data is the legacy
+    # path.  On most devices they resolve to the same inode via symlink.
+    # We prefer /data/user/0 and fall back to /data/data.
+    candidates = [
+        f"/data/user/0/{package}/cache",
+        f"/data/user/0/{package}/code_cache",
+        f"/data/data/{package}/cache",
+        f"/data/data/{package}/code_cache",
+    ]
+
+    def _exists(path: str) -> bool:
+        r = run_root_command(["test", "-d", path], root_tool=root_info.tool, timeout=5)
+        return r.ok
+
+    def _size(path: str) -> int:
+        sh = f"find {shlex.quote(path)} -mindepth 1 -type f 2>/dev/null | wc -l"
+        r = run_root_command(["sh", "-c", sh], root_tool=root_info.tool, timeout=10)
+        val = (r.stdout or "").strip()
+        return int(val) if val.isdigit() else 0
+
+    existing = [p for p in candidates if _exists(p)]
+    # Deduplicate: if both /data/user/0 and /data/data exist, prefer user/0.
+    user0 = [p for p in existing if "/data/user/0/" in p]
+    data_data = [p for p in existing if "/data/data/" in p]
+    active = user0 if user0 else data_data
+
+    if not active:
+        return {
+            "success": True, "skipped": True,
+            "skipped_reason": "no_cache_dirs",
+            "cache_paths": [], "size_before_bytes": 0, "size_after_bytes": 0,
+            "attempts": 0, "error": "",
+        }
+
+    size_before = sum(_size(p) for p in active)
+    size_after = size_before
+    last_error = ""
+
+    for attempt in range(1, max_retries + 2):
+        for path in active:
+            res = run_root_command(
+                ["find", path, "-mindepth", "1", "-delete"],
+                root_tool=root_info.tool,
+                timeout=30,
+            )
+            if not res.ok and res.returncode not in (0, 1):
+                last_error = (res.stderr or "")[:120]
+
+        size_after = sum(_size(p) for p in active)
+        if size_after == 0:
+            return {
+                "success": True, "skipped": False, "skipped_reason": "",
+                "cache_paths": active,
+                "size_before_bytes": size_before, "size_after_bytes": 0,
+                "attempts": attempt, "error": "",
+            }
+        if attempt <= max_retries:
+            time.sleep(0.5)
+
+    return {
+        "success": False, "skipped": False,
+        "skipped_reason": "size_nonzero_after_clear",
+        "cache_paths": active,
+        "size_before_bytes": size_before, "size_after_bytes": size_after,
+        "attempts": max_retries + 1, "error": last_error,
+    }
+
+
+def mute_package_audio(
+    package: str,
+    root_info: RootInfo | None = None,
+) -> dict[str, object]:
+    """Attempt to mute audio for a specific package via appops (root required).
+
+    Tries ``appops set <pkg> PLAY_AUDIO deny`` first, then the ``cmd appops``
+    variant.  Both are per-package and do NOT affect the system audio stream
+    or Termux.
+
+    Returns a dict with keys:
+      success (bool), method (str), target_volume (int=0),
+      skipped_reason (str), error (str).
+    """
+    package = validate_package_name(package)
+    info = root_info or detect_root()
+    if not info.available or not info.tool:
+        return {
+            "success": False, "method": "none",
+            "target_volume": 0,
+            "skipped_reason": "root_unavailable", "error": "",
+        }
+
+    # Method 1: appops set <pkg> PLAY_AUDIO deny  (AOSP / stock Android)
+    r1 = run_root_command(
+        ["appops", "set", package, "PLAY_AUDIO", "deny"],
+        root_tool=info.tool, timeout=8,
+    )
+    if r1.ok:
+        return {
+            "success": True, "method": "appops_play_audio_deny",
+            "target_volume": 0, "skipped_reason": "", "error": "",
+        }
+
+    # Method 2: cmd appops set (some Android flavours / emulators)
+    r2 = run_root_command(
+        ["cmd", "appops", "set", package, "android:play_audio", "deny"],
+        root_tool=info.tool, timeout=8,
+    )
+    if r2.ok:
+        return {
+            "success": True, "method": "cmd_appops_play_audio_deny",
+            "target_volume": 0, "skipped_reason": "", "error": "",
+        }
+
+    err = ((r1.stderr or "") + " " + (r2.stderr or "")).strip()[:120]
+    return {
+        "success": False, "method": "appops_play_audio_deny",
+        "target_volume": 0,
+        "skipped_reason": "unsupported_or_denied", "error": err,
+    }
+
+
 def _find_command(*names: str) -> str | None:
     """Find the first available command from candidates.
 

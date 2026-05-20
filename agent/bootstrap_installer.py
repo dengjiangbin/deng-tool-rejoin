@@ -307,11 +307,11 @@ def render_direct_install_bootstrap(
     safe_sha = _escape_double(package_sha256)
 
     pre_heredoc = (
-        'echo "============================================================"\n'
+        'echo "=============================="\n'
         'echo "DENG Tool: Rejoin Installing"\n'
-        'echo "------------------------------------------------------------"\n'
+        'echo "------------------------------"\n'
         'echo "Version: main-dev"\n'
-        'echo "============================================================"\n'
+        'echo "=============================="\n'
         + "command -v curl >/dev/null 2>&1 || { echo \"Install curl first: pkg install -y curl\" >&2; exit 1; }\n"
         "command -v tar >/dev/null 2>&1 || { echo \"Install tar first: pkg install -y tar\" >&2; exit 1; }\n"
         "command -v python3 >/dev/null 2>&1 || { echo \"Install python first: pkg install -y python\" >&2; exit 1; }\n"
@@ -500,6 +500,7 @@ def render_direct_install_bootstrap(
         'find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
         # ── FINAL PROOF BLOCK ───────────────────────────────────────────────
         'echo "Install complete."\n'
+        'echo "=============================="\n'
     )
 
     return (

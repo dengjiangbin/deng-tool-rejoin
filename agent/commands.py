@@ -3110,16 +3110,13 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         ("Join" + "ing"):    _ANSI_CYAN,     # legacy alias
         "Join Failed":       _ANSI_RED,
         # ── Prep-phase labels (visible while Start prepares each clone) ──
-        # User feedback: "preparing has many stages (preparing, boosting,
-        # clearing cache, etc) meaning this never work and must copy
-        # kaeru".  Each phase now has its own colour so the row visibly
-        # progresses instead of looking frozen.
         "Preparing":    _ANSI_CYAN,
-        "Boosting":     _ANSI_CYAN,
-        "Clearing":     _ANSI_CYAN,
-        "Layout":       _ANSI_CYAN,
-        "Docking":      _ANSI_CYAN,
-        "Waiting":      _ANSI_YELLOW,
+        "Clear Cache":  _ANSI_CYAN,
+        "Boosting":     _ANSI_CYAN,   # legacy alias
+        "Clearing":     _ANSI_CYAN,   # legacy alias
+        "Layout":       _ANSI_CYAN,   # internal only (not shown in public UI)
+        "Docking":      _ANSI_CYAN,   # internal only
+        "Waiting":      _ANSI_YELLOW, # internal only
         "Resizing":     _ANSI_CYAN,
         "Optimizing":   _ANSI_CYAN,
         "Reconnecting": _ANSI_CYAN,
@@ -3141,7 +3138,11 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
 
 
 def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
-    """Build the public start summary table: #, Package, Username, State only.
+    """Build the public start summary table: #, Package, Username, State, Runtime.
+
+    Rows may be 4-tuples (idx, pkg, username, state) for backward compatibility
+    or 5-tuples (idx, pkg, username, state, runtime).  4-tuple rows show an
+    empty Runtime cell.
 
     With ``use_color=True`` every cell is rendered in bold so the table
     is readable on the Termux default monospace font (which renders the
@@ -3149,12 +3150,18 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
     their colour code from :func:`_colorize_status`; the rest of the
     cells get the plain ``BOLD`` escape only.
     """
-    headers = ("#", "Package", "Username", "State")
-    str_rows = [(str(r[0]), str(r[1]), str(r[2]), str(r[3])) for r in rows]
+    headers = ("#", "Package", "Username", "State", "Runtime")
+    str_rows = [
+        (
+            str(r[0]), str(r[1]), str(r[2]), str(r[3]),
+            str(r[4]) if len(r) > 4 else "",
+        )
+        for r in rows
+    ]
 
     widths = [
         max(len(headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
-        for i in range(4)
+        for i in range(5)
     ]
 
     def _bold(text: str) -> str:
@@ -3168,6 +3175,7 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
             _bold(r[1]),
             _bold(r[2]),
             _colorize_status(r[3], use_color=use_color),
+            _bold(r[4]),
         )
         for r in str_rows
     ]
@@ -3769,7 +3777,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             print()
             rows = [
                 (i + 1, e["package"], _account_username_for_table(e),
-                 phase.get(e["package"], "Preparing"))
+                 phase.get(e["package"], "Preparing"), "")
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(rows, use_color=use_color))
@@ -3788,26 +3796,72 @@ def cmd_start(args: argparse.Namespace) -> int:
                 phase[pkg] = label
             _render_phase(note)
 
-        # 1) "Preparing" — initial display.
-        _set_all_phase("Preparing", "Stopping all background apps to free RAM...")
-
-        # 2) Kill ALL background apps except Termux + our Roblox packages,
-        #    then also force-stop any remaining other Roblox packages.
+        # 1) "Preparing" — force-stop each configured package individually,
+        #    verify it is dead, and clear background apps to free RAM.
+        #    Only configured/selected packages are targeted; Termux and
+        #    system apps are never touched.
+        _set_all_phase("Preparing", "Stopping configured packages...")
         packages_sl = [e["package"] for e in entries]
-        # Protected: Termux itself and the Roblox clones we are about to launch.
-        keep_alive = ["com.termux"] + packages_sl
+        keep_alive  = ["com.termux"] + packages_sl
+
+        # 1a) Clear cached/background processes (am kill-all is safe: only
+        #     kills CACHED-state background apps, never foreground services).
         try:
             android.kill_all_background_apps(keep_alive)
         except Exception:  # noqa: BLE001
             _start_log.debug("start: kill_all_background_apps error (non-fatal)")
+
+        # 1b) Also force-stop any OTHER detected Roblox packages not in our list.
         try:
             android.force_stop_packages_except(packages_sl, cfg.get("package_detection_hints"))
         except Exception:  # noqa: BLE001
             _start_log.debug("start: force_stop_packages_except error (non-fatal)")
 
-        # 3) "Boosting" — clear cache + low-graphics tweaks.
-        _set_all_phase("Boosting", "Clearing cache and optimizing graphics...")
-        # Restore auto-rotation: am kill-all can kill the rotation service.
+        # 1c) Force-stop each CONFIGURED package individually with PID verification.
+        #     Termux (com.termux) and system apps are excluded by design.
+        import logging as _logging
+        _prep_root = android.detect_root()
+        for _prep_entry in entries:
+            _prep_pkg = _prep_entry["package"]
+            _pid_before = ""
+            _pid_after  = ""
+            _stop_ok    = False
+            _stop_err   = ""
+            try:
+                _pid_before = android.get_package_pid(_prep_pkg, _prep_root)
+                _stop_res   = android.force_stop_package(_prep_pkg, _prep_root)
+                _stop_ok    = bool(_stop_res.ok)
+                if not _stop_ok:
+                    _stop_err = (_stop_res.stderr or "")[:80]
+                # Verify process is dead; retry once if still alive.
+                import time as _t
+                _t.sleep(0.3)
+                _pid_after = android.get_package_pid(_prep_pkg, _prep_root)
+                if _pid_after:
+                    _t.sleep(0.8)
+                    android.force_stop_package(_prep_pkg, _prep_root)
+                    _t.sleep(0.3)
+                    _pid_after = android.get_package_pid(_prep_pkg, _prep_root)
+                _stop_ok = not bool(_pid_after)
+            except Exception as _exc:  # noqa: BLE001
+                _stop_err = str(_exc)[:80]
+            _start_log.info(
+                "[DENG_REJOIN_PREPARE_PACKAGE] package=%s force_stop_attempt=1"
+                " pid_before=%s pid_after=%s success=%s error=%s",
+                _prep_pkg, _pid_before or "none", _pid_after or "none",
+                str(_stop_ok).lower(), _stop_err,
+            )
+
+        # 2) "Clear Cache" — clear only cache/code_cache for each configured
+        #    package.  shared_prefs/databases/files are never touched.
+        #    Size is verified to reach 0; retry on non-zero remainder.
+        prep_gfx: dict[str, str] = {}
+        opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
+        # Set all packages to "Clear Cache" and render ONCE before the loop.
+        for entry in entries:
+            phase[entry["package"]] = "Clear Cache"
+        _render_phase()
+        # Restore auto-rotation silently (am kill-all can kill the rotation service).
         try:
             android.run_android_command(
                 ["settings", "put", "system", "accelerometer_rotation", "1"],
@@ -3819,46 +3873,45 @@ def cmd_start(args: argparse.Namespace) -> int:
             )
         except Exception:  # noqa: BLE001
             _start_log.debug("start: rotation restore error (non-fatal)")
-        prep_cache: dict[str, str] = {}
-        prep_gfx:   dict[str, str] = {}
-        opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
-        # Set all packages to "Clearing" and render ONCE before the loop so
-        # we don't blink/redraw for every package (probe p-814a3a200f fix).
-        for entry in entries:
-            phase[entry["package"]] = "Clearing"
-        _render_phase()
         for entry in entries:
             pkg = entry["package"]
+            _cache_result: dict[str, object] = {}
             try:
-                prep_cache[pkg] = android.clear_safe_package_cache(pkg)
-            except Exception:  # noqa: BLE001
-                prep_cache[pkg] = "error"
+                _cache_result = android.clear_package_cache_verified(pkg)
+            except Exception as _exc:  # noqa: BLE001
+                _cache_result = {
+                    "success": False, "skipped": False, "skipped_reason": "",
+                    "cache_paths": [], "size_before_bytes": 0, "size_after_bytes": 0,
+                    "attempts": 0, "error": str(_exc)[:80],
+                }
+            _start_log.info(
+                "[DENG_REJOIN_CLEAR_CACHE] package=%s cache_paths=%s"
+                " size_before_bytes=%s size_after_bytes=%s attempt=%s"
+                " success=%s error=%s",
+                pkg,
+                ",".join(str(p) for p in _cache_result.get("cache_paths") or []) or "none",
+                _cache_result.get("size_before_bytes", 0),
+                _cache_result.get("size_after_bytes", 0),
+                _cache_result.get("attempts", 0),
+                str(_cache_result.get("success", False)).lower(),
+                _cache_result.get("error", ""),
+            )
             low = bool(opt.get("low_graphics_enabled", True)) and bool(entry.get("low_graphics_enabled", True))
             try:
                 prep_gfx[pkg] = android.apply_low_graphics_optimization(pkg, enabled=low)
             except Exception:  # noqa: BLE001
                 prep_gfx[pkg] = "error"
-            _start_log.debug(
-                "start: prep pkg=%s cache=%s gfx=%s",
-                pkg, prep_cache[pkg], prep_gfx[pkg],
-            )
+            _start_log.debug("start: prep pkg=%s cache_ok=%s gfx=%s",
+                             pkg, _cache_result.get("success"), prep_gfx[pkg])
 
-        # 4) "Layout" — compute window layout.
-        _set_all_phase("Layout", "Calculating window layout...")
-        cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
-        _start_log.debug("start: layout note=%s", _layout_note)
+        # 3) Compute window layout silently (no public phase change).
+        try:
+            cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
+            _start_log.debug("start: layout note=%s", _layout_note)
+        except Exception as _exc:  # noqa: BLE001
+            _start_log.debug("start: layout error (non-fatal): %s", _exc)
 
-        # ── Minimize Termux to the dock pane (free up screen for clones) ──────
-        # Real-device request (probe p-ce7b1d7918, p-47fa33562a): on the cloud
-        # phone the Termux window covers the area where the layout algorithm
-        # wants to place clones, so the user can't see whether they landed
-        # correctly.  Dock Termux into the left pane BEFORE the launches so
-        # the clones come up into the empty right pane.  Honors
-        # ``config.termux_dock_enabled`` (default True) and
-        # ``config.termux_dock_fraction`` (default 0.50 — user-requested
-        # "50% on the left" baseline; can be overridden via cfg).
-        # 5) "Docking" — dock Termux to the left pane.
-        _set_all_phase("Docking", "Docking Termux window to the left pane...")
+        # 4) Dock Termux silently (no public phase change).
         _termux_minimize_result: dict[str, Any] = {}
         try:
             _dock_enabled = bool(cfg.get("termux_dock_enabled", True))
@@ -3894,11 +3947,9 @@ def cmd_start(args: argparse.Namespace) -> int:
             _start_log.info("start: No launch URL configured — clones will open Roblox home")
 
         # ── Launch each package ───────────────────────────────────────────────
-        # 6) "Launching" — set ALL packages to "Launching" at once before
+        # 5) "Launching" — set ALL packages to "Launching" at once before
         # the loop and render a single clean "all starting" screen.  Only
         # re-render AFTER each launch (to show success/failure result).
-        # This removes the pre-launch render-per-package that caused 2×N
-        # rapid clears/redraws for N packages (double-logo flicker fix).
         launch_ok:  dict[str, bool] = {}
         launch_err: dict[str, str]  = {}
         launch_attempted: dict[str, bool] = {}
@@ -3908,13 +3959,38 @@ def cmd_start(args: argparse.Namespace) -> int:
         for index, entry in enumerate(entries, start=1):
             package = entry["package"]
             runtime_entry = runtime_entry_by_pkg.get(package, entry)
-            # URL presence drives the launch intent; blank URL opens the app only.
             launch_attempted[package] = True
             package_cfg = dict(runtime_cfg)
             package_cfg["roblox_package"] = package
+            _has_url = bool(str(
+                effective_private_server_url(runtime_entry, runtime_cfg) or ""
+            ).strip())
             result = perform_rejoin(package_cfg, reason="start", package_entry=runtime_entry)
             launch_ok[package]  = result.success
             launch_err[package] = result.error or ""
+            _start_log.info(
+                "[DENG_REJOIN_LAUNCH_PACKAGE] package=%s launcher=%s"
+                " result=%s return_code=%s success=%s",
+                package,
+                "private_url" if _has_url else "app_only",
+                result.error or "ok", 0 if result.success else 1,
+                str(result.success).lower(),
+            )
+            # Try to mute the package audio (per-package, root, non-fatal).
+            if result.success:
+                try:
+                    _mute = android.mute_package_audio(package)
+                    _start_log.info(
+                        "[DENG_REJOIN_PACKAGE_VOLUME] package=%s method=%s"
+                        " target_volume=0 success=%s skipped_reason=%s error=%s",
+                        package,
+                        _mute.get("method", ""),
+                        str(_mute.get("success", False)).lower(),
+                        _mute.get("skipped_reason", ""),
+                        _mute.get("error", ""),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             # Update result state and render once per completed launch.
             phase[package] = "Launching" if result.success else "Failed"
             _render_phase()
@@ -3923,10 +3999,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                 package, result.success, result.error or "",
             )
 
-        # 7) "Waiting" — grace before verifying bounds.
-        _set_all_phase_keep_failed(phase, "Waiting", entries,
-                                   note="Waiting for Roblox to settle...")
-        _render_phase("Waiting for Roblox to settle...")
+        # 6) Grace wait before verifying layout — keep packages shown as
+        #    "Launching" (no "Waiting" label shown in public UI).
         grace_wait = int(sup.get("launch_grace_seconds", 15))
         import time as _time
         _time.sleep(max(5, grace_wait))
@@ -4109,12 +4183,18 @@ def cmd_start(args: argparse.Namespace) -> int:
         _live_map = _supervisor.status_map  # dict mutated in-place by watchdog loop
 
         # Public state map: internal states → user-facing labels.
-        # Internal states not in this map are shown as-is (e.g. "Online", "Failed").
+        # Allowed public states: Online, No Heartbeat, Dead, Launching,
+        #   Clear Cache, Preparing, Failed.
+        # Internal/noisy states (Docking, Layout, Waiting, Checking etc.)
+        # never reach the live supervisor dashboard.
         _STATE_DISPLAY_MAP: dict[str, str] = {
-            # Live watchdog labels — shown as-is to the user.
+            # Live watchdog states — keep as-is.
             "No Heartbeat":     "No Heartbeat",
-            # Transient post-launch → Launching
+            "Online":           "Online",
+            "Dead":             "Dead",
+            # Transient post-launch / startup → Launching
             "Preparing":        "Launching",
+            "Unknown":          "Launching",
             # Alive + in-game states → Online
             "Launched":         "Online",
             "In Server":        "Online",
@@ -4122,43 +4202,64 @@ def cmd_start(args: argparse.Namespace) -> int:
             "Warning":          "Online",
             # Lobby = app open but not in game → No Heartbeat (In-Lobby removed)
             "Lobby":            "No Heartbeat",
-            # Recovery states must stay inside the allowed public vocabulary.
+            # Recovery / disconnect states
             "Reconnecting":     "No Heartbeat",
-            "Dead":             "Dead",
             "Disconnected":     "Dead",
             "Offline":          "Dead",
-            # Unknown at startup → Launching
-            "Unknown":          "Launching",
         }
+
+        def _fmt_runtime(secs: float) -> str:
+            """Format elapsed seconds as compact d/h/m/s string."""
+            s = int(secs)
+            if s <= 0:
+                return "0s"
+            d, s = divmod(s, 86400)
+            h, s = divmod(s, 3600)
+            m, s = divmod(s, 60)
+            if d:
+                return f"{d}d {h}h {m}m {s}s"
+            if h:
+                return f"{h}h {m}m {s}s"
+            if m:
+                return f"{m}m {s}s"
+            return f"{s}s"
 
         def _live_dashboard() -> None:
             """Clear screen and redraw banner + table with live status values.
 
             Uses clear_scrollback=True so the prep-phase banner/table cannot
             bleed through at the Start→supervisor transition (dirty-UI fix).
+            Checking Package X/Y text is removed from public UI (probe-only).
+            Runtime column shows elapsed time since package first became Online.
             """
+            import time as _ts_time
+            _now_ts = _ts_time.time()
+
+            def _get_runtime(pkg: str) -> str:
+                raw_state = _live_map.get(pkg, "Unknown")
+                disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
+                if disp != "Online":
+                    return ""
+                start_ts = getattr(_supervisor, "_online_start_ts", {}).get(pkg, 0.0)
+                if not start_ts:
+                    return ""
+                return _fmt_runtime(max(0.0, _now_ts - start_ts))
+
             _clear_terminal(clear_scrollback=True)
             print_banner(use_color=use_color)
             print()
-            # "Checking Package X/Y" is a persistent dashboard line, not a
-            # debug log.  It stays above RAM and the package table.
-            _ck = getattr(_supervisor, "checking_label", "") or f"Checking Package 0/{len(entries)}"
-            if use_color:
-                print(f"  \033[33m{_ck}\033[0m", flush=True)
-            else:
-                print(f"  {_ck}", flush=True)
             ram_label = _get_ram_label()
             if ram_label:
-                print()
                 for _ram_line in ram_label.split("\n"):
                     print(f"  {_ram_line}")
-            print()
+                print()
             live_rows = [
                 (i + 1, e["package"], _account_username_for_table(e),
                  _STATE_DISPLAY_MAP.get(
                      _live_map.get(e["package"], "Unknown"),
                      _live_map.get(e["package"], "Unknown"),
-                 ))
+                 ),
+                 _get_runtime(e["package"]))
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(live_rows, use_color=use_color))

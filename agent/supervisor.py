@@ -1143,6 +1143,11 @@ class WatchdogSupervisor:
     # ── Grace window after launch — do not check immediately ────────────────
     DEFAULT_GRACE_SECONDS: int = 45
 
+    # ── No-Heartbeat relaunch cooldown — brief pause before force-stop ───────
+    # Prevents instant force-stop/relaunch loops if the heartbeat check fires
+    # repeatedly in quick succession.  Set to 0 to disable.
+    NHB_RELAUNCH_COOLDOWN_SEC: int = 5
+
     # ── Presence offline confirmation counter retained for probe history ─────
     NHB_OFFLINE_CONFIRMATIONS: int = 2
 
@@ -1195,8 +1200,10 @@ class WatchdogSupervisor:
         # ── Per-package mutable tracking ──────────────────────────────────────
         self._prev_state: dict[str, str] = {}
         self._last_online_ts: dict[str, float] = {}   # last time confirmed Online
+        self._online_start_ts: dict[str, float] = {}  # when package first became Online (for Runtime display)
         self._grace_until: dict[str, float] = {}      # no relaunch until this ts
         self._nhb_offline_count: dict[str, int] = {}  # consecutive offline hits
+        self._nhb_cooldown_until: dict[str, float] = {}  # no NHB relaunch until this ts
         self._revive_count: dict[str, int] = {}
         self._failure_count: dict[str, int] = {}
 
@@ -1704,6 +1711,34 @@ class WatchdogSupervisor:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
 
         elif state == STATUS_NO_HEARTBEAT:
+            # ── Cooldown guard — prevent instant force-stop/relaunch loops ────
+            cooldown_sec = self.NHB_RELAUNCH_COOLDOWN_SEC
+            cooldown_until = self._nhb_cooldown_until.get(pkg, 0.0)
+            if now < cooldown_until:
+                # Still in cooldown window: log and skip this round.
+                log_event(
+                    logger, "debug", "[DENG_REJOIN_NO_HEARTBEAT_COOLDOWN]",
+                    package=pkg,
+                    cooldown_sec=cooldown_sec,
+                    remaining_sec=round(cooldown_until - now, 1),
+                    started_at=round(cooldown_until - cooldown_sec, 3),
+                    relaunch_at=round(cooldown_until, 3),
+                    reason="avoid_crash",
+                    status="waiting",
+                )
+                return
+            # Set (or renew) the cooldown window before acting.
+            self._nhb_cooldown_until[pkg] = now + cooldown_sec
+            log_event(
+                logger, "info", "[DENG_REJOIN_NO_HEARTBEAT_COOLDOWN]",
+                package=pkg,
+                cooldown_sec=cooldown_sec,
+                started_at=round(now, 3),
+                relaunch_at=round(now + cooldown_sec, 3),
+                reason="avoid_crash",
+                status="cooldown_set_proceeding",
+            )
+
             action = (
                 "close_then_private_url_relaunch" if url_configured
                 else "close_then_app_only_relaunch"
@@ -1727,6 +1762,8 @@ class WatchdogSupervisor:
                 self._nhb_offline_count[pkg] = 0
                 self._set_grace(pkg, now)
                 self._set_status(pkg, STATUS_LAUNCHING)
+                # Reset online_start_ts — package is relaunching.
+                self._online_start_ts.pop(pkg, None)
             else:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
 
@@ -1870,6 +1907,13 @@ class WatchdogSupervisor:
                 # Update Online timestamp when confirmed in-game.
                 if state == STATUS_ONLINE:
                     self._last_online_ts[pkg] = now
+                    # Track when the package FIRST became Online this run
+                    # (for Runtime column in live dashboard).
+                    if prev != STATUS_ONLINE:
+                        self._online_start_ts[pkg] = now
+                elif pkg in self._online_start_ts:
+                    # Package left Online state — clear its runtime start.
+                    del self._online_start_ts[pkg]
 
                 # Grace window: skip recovery immediately after a launch.
                 if not self._in_grace(pkg, now):
