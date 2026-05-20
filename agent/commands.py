@@ -3138,11 +3138,12 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
 
 
 def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
-    """Build the public start summary table: #, Package, Username, State, Runtime.
+    """Build the public start summary table: #, Package, Username, State, Runtime, Usage.
 
-    Rows may be 4-tuples (idx, pkg, username, state) for backward compatibility
-    or 5-tuples (idx, pkg, username, state, runtime).  4-tuple rows show an
-    empty Runtime cell.
+    Rows may be 4-tuples (idx, pkg, username, state) for backward compatibility,
+    5-tuples (idx, pkg, username, state, runtime), or
+    6-tuples (idx, pkg, username, state, runtime, usage).
+    Missing trailing columns are shown as empty cells.
 
     With ``use_color=True`` every cell is rendered in bold so the table
     is readable on the Termux default monospace font (which renders the
@@ -3150,18 +3151,19 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
     their colour code from :func:`_colorize_status`; the rest of the
     cells get the plain ``BOLD`` escape only.
     """
-    headers = ("#", "Package", "Username", "State", "Runtime")
+    headers = ("#", "Package", "Username", "State", "Runtime", "Usage")
     str_rows = [
         (
             str(r[0]), str(r[1]), str(r[2]), str(r[3]),
             str(r[4]) if len(r) > 4 else "",
+            str(r[5]) if len(r) > 5 else "",
         )
         for r in rows
     ]
 
     widths = [
         max(len(headers[i]), max((_visible_len(r[i]) for r in str_rows), default=0))
-        for i in range(5)
+        for i in range(6)
     ]
 
     def _bold(text: str) -> str:
@@ -3176,6 +3178,7 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
             _bold(r[2]),
             _colorize_status(r[3], use_color=use_color),
             _bold(r[4]),
+            _bold(r[5]),
         )
         for r in str_rows
     ]
@@ -3326,11 +3329,61 @@ def _prepare_automatic_layout(
         # the Termux pane on a 720 × 1280 phone — fixed by keeping the two
         # fractions in lock-step.
         _dock_frac = float(cfg.get("termux_dock_fraction", 0.50))
+        filtered_packages = [p for p in packages if not window_layout._is_layout_excluded(p)]
         rects = window_layout.calculate_split_layout(
-            [p for p in packages if not window_layout._is_layout_excluded(p)],
+            filtered_packages,
             display.width, display.height,
             termux_log_fraction=_dock_frac,
         )
+
+        # ── [DENG_REJOIN_LAYOUT_CALC] — emitted at INFO so it lands in probe
+        try:
+            from . import window_layout as _wl
+            _orient = _wl.detect_layout_orientation(display.width, display.height)
+            _sb_h   = _wl._detect_status_bar_height()
+            _left_end = round(display.width * max(0.1, min(0.9, float(_dock_frac))))
+            _pane_w = max(160, display.width - _left_end)
+            _usable_h = max(90, display.height - _sb_h)
+            if _orient == "landscape" and len(filtered_packages) <= 6:
+                _cols = 2
+                _rows = max(1, (len(filtered_packages) + 1) // 2)
+                _cell_w = max(160, (_pane_w - 1) // _cols)
+                _cell_h = max(90, _usable_h // 3)
+            else:
+                _cols, _rows, _cell_w, _cell_h = 1, len(filtered_packages), _pane_w, 0
+            _layout_log.info(
+                "[DENG_REJOIN_LAYOUT_CALC] package_count=%d orientation=%s"
+                " cols=%d rows=%d screen_w=%d screen_h=%d top_inset=%d"
+                " cell_w=%d cell_h=%d",
+                len(filtered_packages), _orient, _cols, _rows,
+                display.width, display.height, _sb_h, _cell_w, _cell_h,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        # ── [DENG_REJOIN_LAYOUT_BOUNDS] — per-package desired bounds + overlap check
+        try:
+            _seen_bounds: list[tuple[int, int, int, int]] = []
+            for _bi, _r in enumerate(rects):
+                _row = _bi // max(1, _cols)
+                _col = _bi % max(1, _cols)
+                _overlap = any(
+                    not (_r.right <= _o[0] or _o[2] <= _r.left or
+                         _r.bottom <= _o[1] or _o[3] <= _r.top)
+                    for _o in _seen_bounds
+                )
+                _seen_bounds.append((_r.left, _r.top, _r.right, _r.bottom))
+                _layout_log.info(
+                    "[DENG_REJOIN_LAYOUT_BOUNDS] package=%s index=%d row=%d col=%d"
+                    " desired_x=%d desired_y=%d desired_w=%d desired_h=%d"
+                    " actual_before=pending actual_after=pending overlap_detected=%s",
+                    _r.package, _bi, _row, _col,
+                    _r.left, _r.top, _r.win_w, _r.win_h,
+                    "true" if _overlap else "false",
+                )
+        except Exception:  # noqa: BLE001
+            pass
+
         try:
             cfg["last_layout_preview"] = [r.as_dict() for r in rects]
             save_config(cfg)
@@ -3777,7 +3830,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             print()
             rows = [
                 (i + 1, e["package"], _account_username_for_table(e),
-                 phase.get(e["package"], "Preparing"), "")
+                 phase.get(e["package"], "Preparing"), "", "")
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(rows, use_color=use_color))
@@ -3856,6 +3909,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         #    package.  shared_prefs/databases/files are never touched.
         #    Size is verified to reach 0; retry on non-zero remainder.
         prep_gfx: dict[str, str] = {}
+        prep_cache: dict[str, str] = {}   # per-package cache-clear status label
         opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
         # Set all packages to "Clear Cache" and render ONCE before the loop.
         for entry in entries:
@@ -3896,6 +3950,12 @@ def cmd_start(args: argparse.Namespace) -> int:
                 str(_cache_result.get("success", False)).lower(),
                 _cache_result.get("error", ""),
             )
+            if _cache_result.get("success"):
+                prep_cache[pkg] = "Cleared"
+            elif _cache_result.get("skipped"):
+                prep_cache[pkg] = "Skipped"
+            else:
+                prep_cache[pkg] = "Failed"
             low = bool(opt.get("low_graphics_enabled", True)) and bool(entry.get("low_graphics_enabled", True))
             try:
                 prep_gfx[pkg] = android.apply_low_graphics_optimization(pkg, enabled=low)
@@ -4231,6 +4291,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             bleed through at the Start→supervisor transition (dirty-UI fix).
             Checking Package X/Y text is removed from public UI (probe-only).
             Runtime column shows elapsed time since package first became Online.
+            Usage column shows per-package RAM consumption.
             """
             import time as _ts_time
             _now_ts = _ts_time.time()
@@ -4244,6 +4305,18 @@ def cmd_start(args: argparse.Namespace) -> int:
                 if not start_ts:
                     return ""
                 return _fmt_runtime(max(0.0, _now_ts - start_ts))
+
+            def _get_usage(pkg: str) -> str:
+                """Return per-package RAM usage string (e.g. '256MB') or '0MB'."""
+                raw_state = _live_map.get(pkg, "Unknown")
+                disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
+                if disp in ("Dead", "Preparing", "Clear Cache"):
+                    return "0MB"
+                try:
+                    result = android.get_package_ram_usage(pkg)
+                    return str(result.get("usage_mb", "0MB"))
+                except Exception:  # noqa: BLE001
+                    return "0MB"
 
             _clear_terminal(clear_scrollback=True)
             print_banner(use_color=use_color)
@@ -4259,7 +4332,8 @@ def cmd_start(args: argparse.Namespace) -> int:
                      _live_map.get(e["package"], "Unknown"),
                      _live_map.get(e["package"], "Unknown"),
                  ),
-                 _get_runtime(e["package"]))
+                 _get_runtime(e["package"]),
+                 _get_usage(e["package"]))
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(live_rows, use_color=use_color))

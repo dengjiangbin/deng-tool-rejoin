@@ -851,15 +851,28 @@ def clone_prefs_candidates(package: str) -> list[Path]:
     * Moons multi-clone     → ``<package>_preferences.xml`` (e.g.
       ``com.moons.litesc_preferences.xml``) and ``prefs.xml``
     * Generic OEM wrappers  → ``settings.xml`` / ``cloner_settings.xml``
+
+    Both ``/data/data/`` (symlink, some Android versions) and
+    ``/data/user/0/`` (real path) are included because Moons multi-clone
+    can store preferences at either location depending on the ROM.  Probe
+    ``p-43cfb5e3c5`` showed that an existence check against ``/data/data/``
+    returned false while the file existed at ``/data/user/0/``, causing
+    the writer to skip the valid candidate and leaving all packages at the
+    default position (overlay).
     """
-    base = Path("/data/data") / package / "shared_prefs"
-    return [
-        base / "pkg_preferences.xml",
-        base / f"{package}_preferences.xml",
-        base / "prefs.xml",
-        base / "cloner_settings.xml",
-        base / "settings.xml",
+    names = [
+        "pkg_preferences.xml",
+        f"{package}_preferences.xml",
+        "prefs.xml",
+        "cloner_settings.xml",
+        "settings.xml",
     ]
+    paths: list[Path] = []
+    for base_root in ("/data/data", "/data/user/0"):
+        base = Path(base_root) / package / "shared_prefs"
+        for name in names:
+            paths.append(base / name)
+    return paths
 
 
 # ── Multi-alias XML mutators (shared by direct and root writers) ──────────────
@@ -1118,7 +1131,15 @@ def update_app_cloner_xml_root(
                 root_tool=root_tool, timeout=timeout,
             )
             exists = (exists_res.stdout or "").strip().startswith("Y")
-            if not exists and path.name != "pkg_preferences.xml":
+            # Always attempt pkg_preferences.xml and <package>_preferences.xml
+            # (will be created if absent).  Other generic filenames are only
+            # written when they already exist on-device so we don't accidentally
+            # create a wrong-format file for an unrelated clone manager.
+            _always_try_names = frozenset({
+                "pkg_preferences.xml",
+                f"{package}_preferences.xml",
+            })
+            if not exists and path.name not in _always_try_names:
                 attempted.append(f"{path.name}: missing")
                 continue
             # Read existing content (create empty <map> if file is absent/unreadable).

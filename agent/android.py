@@ -1345,6 +1345,91 @@ def get_app_memory_mb(package: str) -> float | None:
     return None
 
 
+def get_package_ram_usage(
+    package: str,
+    root_info: "RootInfo | None" = None,
+) -> dict[str, object]:
+    """Return per-package RAM usage in MB.
+
+    Strategy (in order, first success wins):
+    1. ``/proc/<pid>/status`` VmRSS — fastest; requires a readable PID.
+    2. ``dumpsys meminfo <package>`` TOTAL PSS/RSS — reliable but ~1 s.
+    3. Return 0 MB on any failure so the caller can always display something.
+
+    Returns a dict with:
+      pid           – PID string used (empty if not found)
+      rss_kb        – raw kilobytes (0 on failure)
+      usage_mb      – formatted string e.g. "256MB" or "1.2GB"
+      method        – one of "proc_status" / "dumpsys_meminfo" / "unknown"
+      success       – bool
+      error         – error string (empty on success)
+
+    Probe tag: [DENG_REJOIN_PACKAGE_USAGE]
+    """
+    import logging as _log_mod
+    _log = _log_mod.getLogger("deng.rejoin.android")
+
+    package = validate_package_name(package)
+    pid_str = ""
+    rss_kb  = 0
+    method  = "unknown"
+    success = False
+    error   = ""
+
+    try:
+        # ── Strategy 1: /proc/<pid>/status ───────────────────────────────
+        _ri = root_info or detect_root()
+        pid_str = get_package_pid(package, _ri) if _ri.available else ""
+        if pid_str:
+            proc_path = f"/proc/{pid_str}/status"
+            try:
+                with open(proc_path, "r", encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        if line.startswith("VmRSS:"):
+                            parts = line.split()
+                            if len(parts) >= 2 and parts[1].isdigit():
+                                rss_kb = int(parts[1])
+                                method = "proc_status"
+                                success = True
+                                break
+            except OSError:
+                pass  # fall through to strategy 2
+
+        # ── Strategy 2: dumpsys meminfo ───────────────────────────────────
+        if not success:
+            mb = get_app_memory_mb(package)
+            if mb is not None:
+                rss_kb = int(mb * 1024)
+                method = "dumpsys_meminfo"
+                success = True
+
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)[:80]
+
+    # Format display string
+    if rss_kb <= 0:
+        usage_mb = "0MB"
+    elif rss_kb >= 1024 * 1024:
+        usage_mb = f"{rss_kb / (1024 * 1024):.1f}GB"
+    else:
+        usage_mb = f"{round(rss_kb / 1024)}MB"
+
+    _log.debug(
+        "[DENG_REJOIN_PACKAGE_USAGE] package=%s pid=%s method=%s"
+        " rss_kb=%d usage_display=%s success=%s error=%s",
+        package, pid_str, method, rss_kb, usage_mb,
+        str(success).lower(), error,
+    )
+    return {
+        "pid":       pid_str,
+        "rss_kb":    rss_kb,
+        "usage_mb":  usage_mb,
+        "method":    method,
+        "success":   success,
+        "error":     error,
+    }
+
+
 def get_cpu_usage() -> float | None:
     """Estimate overall CPU usage percentage via top. Returns None if unavailable."""
     result = run_command(["top", "-bn1"], timeout=6)
