@@ -128,7 +128,8 @@ class TestPublicStates(unittest.TestCase):
         "Offline", "Preparing", "Background", "Warning", "Unknown",
         "Failed", "Layout",
     ]
-    _ALLOWED_PUBLIC = {"Layout", "Launching", "Online", "Reopening", "Failed"}
+    _ALLOWED_PUBLIC = {"Layout", "Launching", "Online", "Reopening", "Failed",
+                       "In-Lobby", "No Heartbeat", "Dead"}
 
     def _get_display_map(self):
         # Extract _STATE_DISPLAY_MAP from cmd_start source via AST.

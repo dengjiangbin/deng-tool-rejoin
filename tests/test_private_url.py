@@ -3,7 +3,7 @@
 Covers:
   - effective_private_server_url: per-entry override wins over global config
   - URL used for launch command construction (am start -a VIEW -d <url>)
-  - Private URL sets initial state to Joining (not Launching)
+  - Private URL sets initial state to Launching (Joining removed)
   - No private URL sets initial state to Launching or Lobby
   - Invalid/empty URL falls back to normal launch_app
   - Multiple packages each get their own URL correctly

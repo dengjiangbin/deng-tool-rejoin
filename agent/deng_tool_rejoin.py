@@ -3,29 +3,16 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
-# Enable faulthandler early — writes SIGSEGV/SIGFPE stack traces to a file
-# instead of silently crashing.  Probe context: p-316b3b040d.
-try:
-    import faulthandler as _fh
-    _crash_dir = Path(
-        os.environ.get("DENG_REJOIN_HOME", Path.home() / ".deng-tool" / "rejoin")
-    ) / "data" / "logs"
-    _crash_dir.mkdir(parents=True, exist_ok=True)
-    _crash_file = _crash_dir / "crash_faulthandler.log"
-    _crash_fh = open(_crash_file, "a", encoding="utf-8", errors="replace")  # noqa: WPS515
-    _crash_fh.write(f"\n--- faulthandler session started (probe p-9e3f2a8d1c) ---\n")
-    _crash_fh.flush()
-    _fh.enable(file=_crash_fh, all_threads=True)
-except Exception:  # noqa: BLE001
-    try:
-        import faulthandler as _fh
-        _fh.enable()
-    except Exception:  # noqa: BLE001
-        pass
+# [DENG_REJOIN_SEGFAULT_FIX] probe_id=p-ea167faf5f; supersedes probe p-9e3f2a8d1c.
+# faulthandler with file=<open_fd> + all_threads=True caused SIGSEGV on
+# Python 3.13 ARM/Termux in threaded processes (supervisor spawns multiple
+# worker threads; faulthandler's all_threads walk races with thread teardown).
+# The open file descriptor was also inherited by every su/am subprocess, leaking
+# it into root commands.  Removed entirely — Python 3.13 prints native SIGSEGV
+# traces to stderr by default without any faulthandler setup.
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))

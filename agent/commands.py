@@ -70,7 +70,7 @@ from .onboarding import (
     print_beginner_menu_license_prompt,
 )
 from .platform_detect import detect_public_download_dir, get_android_release, get_android_sdk, get_platform_info
-from .supervisor import MultiPackageSupervisor, Supervisor
+from .supervisor import MultiPackageSupervisor, WatchdogSupervisor, Supervisor
 from . import keystore
 from .license import (
     WRONG_DEVICE_USER_MESSAGE,
@@ -3095,7 +3095,9 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Launching":         _ANSI_YELLOW,
         "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
-        "Joining":           _ANSI_CYAN,     # URL deep link sent, waiting
+        "In-Lobby":          _ANSI_YELLOW,   # process running, not in game
+        "No Heartbeat":      _ANSI_RED,      # was in game, heartbeat stalled
+        "Joining":           _ANSI_CYAN,     # legacy alias (kept for compat)
         "Join Failed":       _ANSI_RED,
         # ── Prep-phase labels (visible while Start prepares each clone) ──
         # User feedback: "preparing has many stages (preparing, boosting,
@@ -3189,6 +3191,8 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
 
 _FINAL_SUMMARY_ORDER: tuple[tuple[str, str], ...] = (
     ("online", "online."),
+    ("in lobby", "in lobby."),
+    ("no heartbeat", "no heartbeat (recovering)."),
     ("reconnecting", "reconnecting."),
     ("launching", "launching."),
     ("preparing", "preparing."),
@@ -3206,7 +3210,9 @@ _STATE_TO_SUMMARY: dict[str, str] = {
     "Lobby":             "online",         # healthy at home screen
     "In Server":         "online",         # confirmed in target server
     "Join Unconfirmed":  "launching",      # app open, join evidence pending
-    "Joining":           "launching",      # URL join in progress
+    "In-Lobby":          "in lobby",       # process running, not in server
+    "No Heartbeat":      "no heartbeat",   # was in game, heartbeat stalled
+    "Joining":           "launching",      # legacy alias
     "Reconnecting":      "reconnecting",
     "Launching":         "launching",
     "Failed":            "failed",
@@ -3585,25 +3591,12 @@ def cmd_start(args: argparse.Namespace) -> int:
             print("Run Setup / Edit Config, then choose Roblox Package Setup.")
             return 2
 
-        post_launch_action = str(cfg.get("post_launch_action") or POST_LAUNCH_ACTION_OPEN_APP)
-        if post_launch_action not in POST_LAUNCH_ACTIONS:
-            post_launch_action = POST_LAUNCH_ACTION_OPEN_APP
-        post_launch_label = _post_launch_action_label(post_launch_action)
-        runtime_cfg = _runtime_config_for_post_launch_action(cfg, post_launch_action)
-        runtime_entries = enabled_package_entries(runtime_cfg)
+        # Start launch selection is now driven by URL presence, not post_launch_action gating.
+        # [DENG_REJOIN_PRIVATE_URL_LAUNCH] probe_id=p-ea167faf5f
+        # Blank URL launches app-only; configured URL uses the private-server launcher.
+        runtime_cfg = cfg
+        runtime_entries = entries
         runtime_entry_by_pkg = {entry["package"]: entry for entry in runtime_entries}
-        post_launch_notice = ""
-        if (
-            post_launch_action == POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK
-            and not _has_configured_launch_link(cfg, entries)
-        ):
-            post_launch_notice = "No Roblox launch link is configured."
-
-        def _print_post_launch_status() -> None:
-            print()
-            print(f"Post-launch action: {post_launch_label}")
-            if post_launch_notice:
-                print(post_launch_notice)
 
         # ── Detect packages (silently; go to debug log only) ─────────────────
         import logging as _logging
@@ -3707,7 +3700,6 @@ def cmd_start(args: argparse.Namespace) -> int:
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(rows, use_color=use_color))
-            _print_post_launch_status()
             try:
                 ram = _get_ram_label()
                 if ram:
@@ -3839,28 +3831,15 @@ def cmd_start(args: argparse.Namespace) -> int:
             phase[package] = "Launching"
             _render_phase("Launching clones with private-server deep link...")
             runtime_entry = runtime_entry_by_pkg.get(package, entry)
-            runtime_url = str(effective_private_server_url(runtime_entry, runtime_cfg) or "").strip()
-            should_launch = post_launch_action != POST_LAUNCH_ACTION_NONE
-            if post_launch_action == POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK and not runtime_url:
-                should_launch = False
-            if not should_launch:
-                launch_attempted[package] = False
-                launch_ok[package] = True
-                launch_err[package] = ""
-                phase[package] = "Waiting"
-                _render_phase()
-                continue
+            # URL presence drives the launch intent; blank URL opens the app only.
             launch_attempted[package] = True
             package_cfg = dict(runtime_cfg)
             package_cfg["roblox_package"] = package
             result = perform_rejoin(package_cfg, reason="start", package_entry=runtime_entry)
             launch_ok[package]  = result.success
             launch_err[package] = result.error or ""
-            # After a launch, move to "Joining" if a URL was sent, else
-            # leave on "Launching" until the supervisor takes over.
-            has_url = bool(runtime_url)
-            phase[package] = "Joining" if has_url and result.success else \
-                             ("Launching" if result.success else "Failed")
+            # All post-launch transients use Launching (Joining state removed).
+            phase[package] = "Launching" if result.success else "Failed"
             _render_phase("Launching clones with private-server deep link...")
             _start_log.debug(
                 "start: launch pkg=%s ok=%s err=%s",
@@ -3942,24 +3921,18 @@ def cmd_start(args: argparse.Namespace) -> int:
             username = _account_username_for_table(entry)
             cstat    = prep_cache.get(pkg, "Skipped")
             gstat    = prep_gfx.get(pkg, "Skipped")
-            _runtime_entry = runtime_entry_by_pkg.get(pkg, entry)
-            _has_url = bool(str(effective_private_server_url(_runtime_entry, runtime_cfg) or "").strip())
-            if not launch_attempted.get(pkg, True):
-                state = "Online" if android.is_process_running(pkg) else "Waiting"
-                stat_internal = "post-launch action skipped"
-            elif not launch_ok[pkg]:
+            if not launch_ok[pkg]:
                 err = launch_err[pkg]
                 state = "Failed"
                 safe_err = mask_urls_in_text(err) or "Launch failed"
                 stat_internal = (safe_err[:120] + "...") if len(safe_err) > 123 else safe_err
             elif android.is_process_running(pkg):
-                # Process is up.  After URL launch: Joining (supervisor immediately
-                # resolves to Online on first health check — Kaeru-style).
-                # Without URL: Launched (Roblox process open, no server join pending).
-                state = "Joining" if _has_url else "Launched"
+                # Process is up.  WatchdogSupervisor will classify on first check.
+                # Use Launching for all cases — Joining is removed.
+                state = "Launching"
                 stat_internal = "process running"
             else:
-                state = "Joining" if _has_url else "Launching"
+                state = "Launching"
                 stat_internal = "launch command sent"
             initial_status[pkg] = state
             table_rows.append((index, pkg, username, state))
@@ -3972,7 +3945,6 @@ def cmd_start(args: argparse.Namespace) -> int:
         print_banner(use_color=use_color)
         print()
         print(build_start_table(table_rows, use_color=use_color))
-        _print_post_launch_status()
         print(flush=True)
 
         # Log verbose detail to debug log only — never to stdout
@@ -4059,15 +4031,19 @@ def cmd_start(args: argparse.Namespace) -> int:
         _hci_raw = int(_sup_sub.get("health_check_interval_seconds", 10))
         _sup_sub["health_check_interval_seconds"] = max(10, _hci_raw)
         _live_cfg["supervisor"] = _sup_sub
-        _supervisor = MultiPackageSupervisor(runtime_entries, _live_cfg, initial_status=initial_status)
-        _live_map = _supervisor.status_map  # dict mutated in-place by workers
+        # [DENG_REJOIN_WATCHDOG_FIX] Use WatchdogSupervisor: sequential per-package
+        # loop, process-check-first, 4 states only, never stops after Online.
+        _supervisor = WatchdogSupervisor(runtime_entries, _live_cfg, initial_status=initial_status)
+        _live_map = _supervisor.status_map  # dict mutated in-place by watchdog loop
 
-        # Kaeru-style public state map: internal states → 5 clean user-facing labels.
-        # Allowed public states: Layout, Launching, Online, Reopening, Failed.
+        # Public state map: internal states → user-facing labels.
         # Internal states not in this map are shown as-is (e.g. "Online", "Failed").
         _STATE_DISPLAY_MAP: dict[str, str] = {
+            # New 4-state watchdog labels — shown as-is to the user.
+            "In-Lobby":         "In-Lobby",
+            "No Heartbeat":     "No Heartbeat",
             # Transient post-launch → Launching
-            "Joining":          "Launching",
+            "Joining":          "Launching",   # legacy alias
             "Preparing":        "Launching",
             # Alive states (process up in any form) → Online
             "Launched":         "Online",
@@ -4099,7 +4075,17 @@ def cmd_start(args: argparse.Namespace) -> int:
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(live_rows, use_color=use_color))
-            _print_post_launch_status()
+            # ── "Checking Package X/Y" — yellow, above RAM text ──────────────
+            # [DENG_REJOIN_WATCHDOG_FIX] WatchdogSupervisor.checking_label is
+            # updated for each package checked. Shown above RAM so the user
+            # can see watchdog is alive and which package is being checked.
+            _ck = getattr(_supervisor, "checking_label", "")
+            if _ck:
+                print()
+                if use_color:
+                    print(f"  \033[33m{_ck}\033[0m", flush=True)
+                else:
+                    print(f"  {_ck}", flush=True)
             ram_label = _get_ram_label()
             if ram_label:
                 print()

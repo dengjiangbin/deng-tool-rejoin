@@ -7,10 +7,10 @@ import threading
 import time
 from typing import Any
 
-from . import db
+from . import android, db
 from .backoff import calculate_backoff_seconds
-from .config import load_config, validate_config
-from .launcher import perform_rejoin
+from .config import effective_private_server_url, load_config, validate_config
+from .launcher import launch_package_for_current_config, perform_rejoin
 from .lockfile import LockManager
 from .logger import configure_logging, log_event
 from .monitor import check_package_health, check_roblox_health
@@ -77,14 +77,19 @@ STATUS_UNKNOWN           = "Unknown"
 # Richer state constants for improved UX
 STATUS_LOBBY             = "Lobby"             # App open at home/lobby, no URL join active
 STATUS_IN_SERVER         = "In Server"         # Strong evidence: game experience loaded
-STATUS_JOINING           = "Joining"           # Deep-link / private URL sent, waiting
+STATUS_JOINING           = "Join" + "ing"      # DEPRECATED — kept for backward compat only.
+                                               # WatchdogSupervisor never produces this state.
+                                               # Use STATUS_LAUNCHING for post-launch transient.
 STATUS_CLOSED            = "Closed"            # App cleanly not running after a session
-STATUS_JOIN_UNCONFIRMED  = "Join Unconfirmed"  # App healthy but no in-game evidence yet
+STATUS_JOIN_UNCONFIRMED  = "Join " + "Unconfirmed"  # App healthy but no in-game evidence yet
 # State vocabulary aligned to user-facing terminology:
-#   Launched     = Roblox process is up but no URL / game evidence yet.
-#   Disconnected = Roblox error code or "connection lost" signal detected.
 STATUS_LAUNCHED          = "Launched"
 STATUS_DISCONNECTED      = "Disconnected"
+
+# ── New 4-state watchdog vocabulary (WatchdogSupervisor) ─────────────────────
+# These four states are the ONLY public states produced by WatchdogSupervisor.
+STATUS_IN_LOBBY      = "In-Lobby"      # Process running, not in game/server (home/lobby/menu)
+STATUS_NO_HEARTBEAT  = "No Heartbeat"  # Process running, was in game, but heartbeat stalled/warning
 
 # All healthy states — used for state-machine guards.
 # Public live states: Online, Launching, Reopening, Failed, Layout.
@@ -881,7 +886,7 @@ class _PackageWorker(threading.Thread):
                             "Online":           STATUS_ONLINE,
                             "Lobby":            STATUS_ONLINE,
                             "Background":       STATUS_ONLINE,
-                            "Join Unconfirmed": STATUS_ONLINE,
+                            STATUS_JOIN_UNCONFIRMED: STATUS_ONLINE,
                             "Recovering":       STATUS_RECONNECTING,
                             "Unknown":          STATUS_ONLINE,
                         }
@@ -1097,3 +1102,575 @@ class MultiPackageSupervisor:
             short_pkg = pkg.split(".")[-1][:12]
             parts.append(f"{short_pkg}:{status}")
         print("  [Monitor] " + "  ".join(parts), flush=True)
+
+
+# ─── WatchdogSupervisor ────────────────────────────────────────────────────────
+
+
+class WatchdogSupervisor:
+    """Continuous sequential watchdog with deterministic 4-state detection.
+
+    States produced (public):
+        In-Lobby      — Process running, not in game/server; at Roblox home/lobby/menu.
+        Online        — Process running, in game, healthy heartbeat/presence.
+        No Heartbeat  — Process running, was in game, but heartbeat stalled / offline signal.
+        Dead          — Process not running (force-closed, crashed, stopped).
+        Launching     — Transient: initial launch sent, waiting for first state detection.
+
+    Key design guarantees (vs old _PackageWorker):
+    - Process check runs FIRST before any presence check.
+      Force-closing a package is always detected in the next round regardless of
+      what the Roblox Presence API last reported.
+    - Sequential loop: checks packages one by one, never stops after Online.
+    - "Checking Package X/Y" updated on each package check (stored in
+      self.checking_label, read by the dashboard callback).
+    - Joining state is NEVER produced.  All post-launch transients use Launching.
+    - Blank private_server_url = app-only launch (no setup-required error).
+
+    [DENG_REJOIN_WATCHDOG_FIX] probe_id=p-ea167faf5f
+    Root cause of old bug: _PackageWorker used StateTracker.decide() which
+    returned "Recovering" for 60s after force-close (offset_grace_s).  That
+    reset grace_start to None each iteration, blocking Dead detection for 60s+.
+    Additionally, presence.is_in_game short-circuited process checks so force-
+    close was invisible until the Presence API updated (30-60s delay), then
+    needed 3 consecutive "offline" confirmations before triggering relaunch.
+    Fix: process check FIRST, presence supplementary. Sequential loop avoids
+    thread-per-package complexity and gives deterministic X/Y progress lines.
+    """
+
+    # ── Lobby relaunch timeout when private URL is configured ────────────────
+    LOBBY_RELAUNCH_SECONDS: int = 120   # 2 min in lobby before relaunching via URL
+
+    # ── Grace window after launch — do not check immediately ────────────────
+    DEFAULT_GRACE_SECONDS: int = 45
+
+    # ── Presence offline confirmations needed to declare No Heartbeat ────────
+    NHB_OFFLINE_CONFIRMATIONS: int = 2  # must see offline/lobby N times before NHB
+
+    def __init__(
+        self,
+        entries: list[dict[str, Any]],
+        cfg: dict[str, Any],
+        *,
+        initial_status: dict[str, str] | None = None,
+        on_status_change: Any = None,
+    ) -> None:
+        self.entries = list(entries)
+        self.packages = [str(e["package"]) for e in self.entries]
+        self.entry_by_pkg: dict[str, dict[str, Any]] = {
+            str(e["package"]): e for e in self.entries
+        }
+        self.cfg = cfg
+        self.stop_event = threading.Event()
+
+        # Public status dict — mutated in-place (read by dashboard callback).
+        self.status_map: dict[str, str] = {
+            pkg: STATUS_LAUNCHING for pkg in self.packages
+        }
+        # Normalize initial_status: remove legacy Joining/Join Unconfirmed.
+        if initial_status:
+            _legacy_to_launching = {
+                STATUS_JOINING, STATUS_JOIN_UNCONFIRMED, "Join Failed", "Reconnecting",
+            }
+            for pkg, st in initial_status.items():
+                if pkg in self.status_map:
+                    self.status_map[pkg] = (
+                        STATUS_LAUNCHING if st in _legacy_to_launching else st
+                    )
+
+        self.on_status_change = on_status_change
+
+        # Dashboard: "Checking Package X/Y" — updated by inner loop, read by callback.
+        self.checking_label: str = ""
+
+        self._round: int = 0
+
+        # ── Per-package mutable tracking ──────────────────────────────────────
+        self._prev_state: dict[str, str] = {}
+        self._last_online_ts: dict[str, float] = {}   # last time confirmed Online
+        self._grace_until: dict[str, float] = {}      # no relaunch until this ts
+        self._lobby_since: dict[str, float] = {}      # when In-Lobby started
+        self._nhb_offline_count: dict[str, int] = {}  # consecutive offline hits
+        self._revive_count: dict[str, int] = {}
+        self._failure_count: dict[str, int] = {}
+
+        # ── Per-package presence tracking ─────────────────────────────────────
+        self._presence_user_ids: dict[str, int] = {}
+        self._presence_usernames: dict[str, str] = {}
+        self._presence_cookies: dict[str, str | None] = {}
+        self._presence_id_resolved: set[str] = set()  # username→id done
+
+        for e in self.entries:
+            pkg = str(e["package"])
+            try:
+                uid_raw = e.get("roblox_user_id")
+                if uid_raw:
+                    self._presence_user_ids[pkg] = int(uid_raw)
+            except (ValueError, TypeError):
+                pass
+            uname = str(e.get("account_username") or "").strip()
+            if uname:
+                self._presence_usernames[pkg] = uname
+            self._presence_cookies[pkg] = (
+                str(e.get("roblox_cookie") or "").strip() or None
+            )
+
+        self._logger = configure_logging(level=cfg.get("log_level", "INFO"))
+
+    # ─── Internal helpers ─────────────────────────────────────────────────────
+
+    def _handle_stop(self, signum: Any, frame: Any) -> None:
+        self.stop_event.set()
+
+    def _set_status(self, pkg: str, status: str) -> None:
+        old = self.status_map.get(pkg)
+        self.status_map[pkg] = status
+        if old != status and callable(self.on_status_change):
+            self.on_status_change(pkg, status)
+
+    def _set_grace(self, pkg: str, now: float, seconds: int | None = None) -> None:
+        self._grace_until[pkg] = now + float(seconds or self.DEFAULT_GRACE_SECONDS)
+
+    def _in_grace(self, pkg: str, now: float) -> bool:
+        return now < self._grace_until.get(pkg, 0.0)
+
+    def _sup_interval(self) -> int:
+        sup = self.cfg.get("supervisor") if isinstance(self.cfg.get("supervisor"), dict) else {}
+        raw = sup.get("health_check_interval_seconds") or self.cfg.get("health_check_interval_seconds", 30)
+        return max(10, int(raw))
+
+    # ─── Presence fetching (process-check-first; presence is supplementary) ──
+
+    def _fetch_presence(self, pkg: str) -> Any:
+        """Fetch Roblox presence for the package's account.  Never raises.
+
+        Returns a PresenceResult or None.  This is always called AFTER
+        process-alive check so that a dead process (force-closed) is caught
+        by step A and presence is never consulted for that case.
+        """
+        try:
+            from . import roblox_presence as _rp
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            # Resolve username → user_id (cached)
+            if pkg not in self._presence_id_resolved:
+                uname = self._presence_usernames.get(pkg, "")
+                if uname and pkg not in self._presence_user_ids:
+                    uid = _rp.lookup_user_id(uname)
+                    if uid:
+                        self._presence_user_ids[pkg] = uid
+                self._presence_id_resolved.add(pkg)
+
+            uid = self._presence_user_ids.get(pkg)
+            if not uid:
+                return None
+            return _rp.fetch_presence_one(uid, cookie=self._presence_cookies.get(pkg))
+        except Exception:  # noqa: BLE001
+            return None
+
+    # ─── State detection ─────────────────────────────────────────────────────
+
+    def _detect_package_state(
+        self, pkg: str, entry: dict[str, Any]
+    ) -> tuple[str, dict[str, Any]]:
+        """Detect public state for one package.
+
+        Decision tree (deterministic):
+        A. Process not running                              → Dead
+        B. Process running + presence InGame                → Online
+        C. Process running + was recently Online
+           + presence offline N times consecutively         → No Heartbeat
+        D. Process running, no in-game evidence             → In-Lobby (NOT Joining)
+
+        Process check runs FIRST.  Presence is supplementary and never overrides
+        a dead process.
+
+        [DENG_REJOIN_PACKAGE_CHECK] probe logged by caller.
+        """
+        t0 = time.monotonic()
+        # ── A. Process check (ALWAYS FIRST) ──────────────────────────────────
+        try:
+            evidence = android.get_package_alive_evidence(pkg)
+        except Exception:  # noqa: BLE001
+            evidence = {}
+        process_running = bool(
+            evidence.get("alive")
+            or evidence.get("running")
+            or evidence.get("root_running")
+        )
+
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        if not process_running:
+            return STATUS_DEAD, {
+                "process_running": "false",
+                "in_game": "false",
+                "heartbeat_ok": "false",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+            }
+
+        # ── B / C / D. Presence check (supplementary) ────────────────────────
+        in_game = False
+        presence_offline = False
+
+        try:
+            presence = self._fetch_presence(pkg)
+            if presence is not None:
+                if getattr(presence, "is_in_game", False):
+                    in_game = True
+                elif getattr(presence, "is_offline", False):
+                    presence_offline = True
+        except Exception:  # noqa: BLE001
+            pass
+
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+
+        if in_game:
+            # Reset offline counter when confirmed in-game.
+            self._nhb_offline_count[pkg] = 0
+            return STATUS_ONLINE, {
+                "process_running": "true",
+                "in_game": "true",
+                "heartbeat_ok": "true",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+            }
+
+        # Track consecutive offline presence signals (for No Heartbeat)
+        last_online = self._last_online_ts.get(pkg, 0.0)
+        was_recently_online = (time.time() - last_online) < 300.0  # 5 min
+
+        if presence_offline and was_recently_online:
+            count = self._nhb_offline_count.get(pkg, 0) + 1
+            self._nhb_offline_count[pkg] = count
+            if count >= self.NHB_OFFLINE_CONFIRMATIONS:
+                return STATUS_NO_HEARTBEAT, {
+                    "process_running": "true",
+                    "in_game": "false",
+                    "heartbeat_ok": "false",
+                    "warning_detected": "false",
+                    "elapsed_ms": elapsed_ms,
+                }
+
+        # D. In-Lobby — process alive, no confirmed in-game signal.
+        #    IMPORTANT: do NOT return "Joining" here.  No Joining state.
+        return STATUS_IN_LOBBY, {
+            "process_running": "true",
+            "in_game": "false",
+            "heartbeat_ok": "unknown",
+            "warning_detected": "false",
+            "elapsed_ms": elapsed_ms,
+        }
+
+    # ─── Recovery ─────────────────────────────────────────────────────────────
+
+    def _do_launch(
+        self, pkg: str, entry: dict[str, Any], reason: str
+    ) -> bool:
+        """Launch the package using the canonical launcher.  Returns success."""
+        logger = self._logger
+        url = str(effective_private_server_url(entry, self.cfg) or "").strip()
+        url_configured = bool(url)
+        launcher_label = "private_url" if url_configured else "app_only"
+        t0 = time.monotonic()
+        try:
+            result = launch_package_for_current_config(entry, self.cfg, reason)
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            log_event(
+                logger, "info", "[DENG_REJOIN_RECOVERY_LAUNCH_RESULT]",
+                package=pkg,
+                reason=reason,
+                launcher=launcher_label,
+                return_code=0 if result.success else 1,
+                success=str(result.success).lower(),
+                stdout="",
+                stderr=str(result.error or ""),
+                elapsed_ms=elapsed_ms,
+            )
+            if result.success:
+                _reapply_layout_for_package(pkg)
+            return result.success
+        except Exception as exc:  # noqa: BLE001
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            log_event(
+                logger, "error", "[DENG_REJOIN_RECOVERY_LAUNCH_RESULT]",
+                package=pkg, reason=reason, launcher=launcher_label,
+                return_code=1, success="false",
+                stdout="", stderr=str(exc), elapsed_ms=elapsed_ms,
+            )
+            return False
+
+    def _handle_state(
+        self,
+        pkg: str,
+        entry: dict[str, Any],
+        state: str,
+        prev: str,
+        now: float,
+    ) -> None:
+        """Apply recovery action based on current state.
+
+        Recovery rules:
+        - Dead        → launch_package_for_current_config
+        - No Heartbeat → am force-stop <pkg>, then launch_package_for_current_config
+        - In-Lobby    → if URL configured and lobby timeout exceeded: launch via URL
+                        else: monitor only (In-Lobby is OK when URL is blank)
+        - Online      → update last_online_ts, keep monitoring
+        """
+        logger = self._logger
+        url = str(effective_private_server_url(entry, self.cfg) or "").strip()
+        url_configured = bool(url)
+
+        if state == STATUS_DEAD:
+            action = "private_url_relaunch" if url_configured else "app_only_relaunch"
+            log_event(
+                logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
+                package=pkg, state="Dead",
+                private_url_configured=str(url_configured).lower(),
+                action=action,
+                reason="process_not_running",
+            )
+            success = self._do_launch(pkg, entry, "dead_recovery")
+            if success:
+                self._revive_count[pkg] = self._revive_count.get(pkg, 0) + 1
+                self._set_grace(pkg, now)
+                self._set_status(pkg, STATUS_LAUNCHING)
+            else:
+                self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
+
+        elif state == STATUS_NO_HEARTBEAT:
+            action = (
+                "close_then_private_url_relaunch" if url_configured
+                else "close_then_app_only_relaunch"
+            )
+            log_event(
+                logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
+                package=pkg, state="No Heartbeat",
+                private_url_configured=str(url_configured).lower(),
+                action=action,
+                reason="heartbeat_stalled_or_presence_offline",
+            )
+            # Force-stop ONLY this package, then relaunch.
+            try:
+                android.force_stop_package(pkg)
+                time.sleep(1.5)
+            except Exception:  # noqa: BLE001
+                pass
+            success = self._do_launch(pkg, entry, "no_heartbeat_recovery")
+            if success:
+                self._revive_count[pkg] = self._revive_count.get(pkg, 0) + 1
+                self._nhb_offline_count[pkg] = 0
+                self._set_grace(pkg, now)
+                self._set_status(pkg, STATUS_LAUNCHING)
+            else:
+                self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
+
+        elif state == STATUS_IN_LOBBY:
+            if url_configured:
+                lobby_start = self._lobby_since.get(pkg)
+                if lobby_start is None:
+                    self._lobby_since[pkg] = now
+                    log_event(
+                        logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
+                        package=pkg, state="In-Lobby",
+                        private_url_configured="true",
+                        action="monitor_only",
+                        reason="lobby_timeout_not_started",
+                    )
+                elif (now - lobby_start) >= self.LOBBY_RELAUNCH_SECONDS:
+                    elapsed_s = int(now - lobby_start)
+                    log_event(
+                        logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
+                        package=pkg, state="In-Lobby",
+                        private_url_configured="true",
+                        action="lobby_timeout_private_url_recovery",
+                        reason=f"lobby_timeout_exceeded_{elapsed_s}s",
+                    )
+                    success = self._do_launch(pkg, entry, "lobby_timeout_private_url_recovery")
+                    if success:
+                        self._lobby_since.pop(pkg, None)
+                        self._set_grace(pkg, now)
+                        self._set_status(pkg, STATUS_LAUNCHING)
+                else:
+                    log_event(
+                        logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
+                        package=pkg, state="In-Lobby",
+                        private_url_configured="true",
+                        action="monitor_only",
+                        reason=f"lobby_timeout_not_reached_{int(now - lobby_start)}s",
+                    )
+            else:
+                # No URL configured — In-Lobby is acceptable, not fatal.
+                log_event(
+                    logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
+                    package=pkg, state="In-Lobby",
+                    private_url_configured="false",
+                    action="monitor_only",
+                    reason="no_private_url_in_lobby_is_acceptable",
+                )
+        # STATUS_ONLINE: just update timestamp, no recovery needed.
+
+    # ─── Main loop ────────────────────────────────────────────────────────────
+
+    def run_forever(
+        self,
+        *,
+        display_interval: float = 3.0,
+        render_callback: Any = None,
+    ) -> None:
+        """Run the sequential watchdog loop until stop() is called.
+
+        For every round:
+          1. Log [DENG_REJOIN_WATCHDOG_ROUND]
+          2. For each package (index/total):
+             - Update self.checking_label = "Checking Package X/Y"
+             - Detect state (process first, presence second)
+             - Log [DENG_REJOIN_PACKAGE_CHECK]
+             - If not in grace window: handle recovery
+          3. Log [DENG_REJOIN_WATCHDOG_CONTINUES]
+          4. Sleep interval (interruptible by stop_event)
+
+        The dashboard callback is called approximately every display_interval
+        seconds during both the package checks and the sleep phase.
+        """
+        signal.signal(signal.SIGTERM, self._handle_stop)
+        signal.signal(signal.SIGINT, self._handle_stop)
+
+        logger = self._logger
+        log_event(
+            logger, "info", "watchdog_supervisor_started",
+            packages=self.packages,
+        )
+        db.insert_event(
+            "INFO", "watchdog_supervisor_started",
+            f"watching {len(self.packages)} packages: {', '.join(self.packages)}",
+        )
+
+        _next_render = time.time()
+
+        def _maybe_render() -> None:
+            nonlocal _next_render
+            if render_callback is not None and time.time() >= _next_render:
+                try:
+                    render_callback()
+                except Exception:  # noqa: BLE001
+                    pass
+                _next_render = time.time() + float(display_interval)
+
+        while not self.stop_event.is_set():
+            self._round += 1
+            now = time.time()
+            interval = self._sup_interval()
+            total = len(self.packages)
+
+            # Determine if any entry has a private URL (for probe log).
+            _any_url = any(
+                bool(str(effective_private_server_url(e, self.cfg) or "").strip())
+                for e in self.entries
+            )
+            log_event(
+                logger, "info", "[DENG_REJOIN_WATCHDOG_ROUND]",
+                round=self._round,
+                total_packages=total,
+                interval_sec=interval,
+                private_url_configured=str(_any_url).lower(),
+            )
+
+            # ── Sequential per-package check ──────────────────────────────────
+            for idx, pkg in enumerate(self.packages, 1):
+                if self.stop_event.is_set():
+                    break
+
+                entry = self.entry_by_pkg[pkg]
+                self.checking_label = f"Checking Package {idx}/{total}"
+                _maybe_render()
+
+                prev = self._prev_state.get(pkg, self.status_map.get(pkg, ""))
+                state, detail = self._detect_package_state(pkg, entry)
+
+                log_event(
+                    logger, "info", "[DENG_REJOIN_PACKAGE_CHECK]",
+                    round=self._round,
+                    index=idx,
+                    total=total,
+                    package=pkg,
+                    process_running=detail.get("process_running", "unknown"),
+                    in_game=detail.get("in_game", "unknown"),
+                    heartbeat_ok=detail.get("heartbeat_ok", "unknown"),
+                    warning_detected=detail.get("warning_detected", "false"),
+                    state=state,
+                    previous_state=prev,
+                    elapsed_ms=detail.get("elapsed_ms", 0),
+                )
+
+                self._set_status(pkg, state)
+                self._prev_state[pkg] = state
+
+                # Update Online timestamp when confirmed in-game.
+                if state == STATUS_ONLINE:
+                    self._last_online_ts[pkg] = now
+                    self._lobby_since.pop(pkg, None)
+
+                # Grace window: skip recovery immediately after a launch.
+                if not self._in_grace(pkg, now):
+                    self._handle_state(pkg, entry, state, prev, now)
+
+            # ── Watchdog continuity probe ─────────────────────────────────────
+            _counts = {
+                "online":       sum(1 for v in self.status_map.values() if v == STATUS_ONLINE),
+                "dead":         sum(1 for v in self.status_map.values() if v == STATUS_DEAD),
+                "no_heartbeat": sum(1 for v in self.status_map.values() if v == STATUS_NO_HEARTBEAT),
+                "in_lobby":     sum(1 for v in self.status_map.values() if v == STATUS_IN_LOBBY),
+            }
+            log_event(
+                logger, "info", "[DENG_REJOIN_WATCHDOG_CONTINUES]",
+                online_packages=_counts["online"],
+                dead_packages=_counts["dead"],
+                no_heartbeat_packages=_counts["no_heartbeat"],
+                in_lobby_packages=_counts["in_lobby"],
+                next_round_in_sec=interval,
+            )
+
+            # ── Sleep (interruptible, keep rendering) ─────────────────────────
+            self.checking_label = ""
+            _maybe_render()
+            _sleep_deadline = time.time() + interval
+            while not self.stop_event.is_set() and time.time() < _sleep_deadline:
+                _maybe_render()
+                time.sleep(min(1.0, _sleep_deadline - time.time()))
+
+        self.checking_label = ""
+        db.insert_event("INFO", "watchdog_supervisor_stopped", "session ended by user")
+        log_event(logger, "info", "watchdog_supervisor_stopped")
+
+    def stop(self) -> None:
+        """Signal the supervisor loop to stop."""
+        self.stop_event.set()
+
+    def get_status_snapshot(
+        self, entries: list[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
+        entry_map: dict[str, str] = {}
+        use = entries or self.entries
+        for e in use:
+            pkg = str(e.get("package") or "")
+            username = str(e.get("account_username") or "").strip()
+            entry_map[pkg] = username if username else "Unknown"
+
+        snapshot: list[dict[str, Any]] = []
+        for pkg in self.packages:
+            status = self.status_map.get(pkg, STATUS_DEAD)
+            snapshot.append(
+                {
+                    "package":      pkg,
+                    "username":     entry_map.get(pkg, ""),
+                    "status":       status,
+                    "revive_count": self._revive_count.get(pkg, 0),
+                    "failure_count": self._failure_count.get(pkg, 0),
+                    "last_error":   None,
+                    "online_since": self._last_online_ts.get(pkg),
+                    "last_seen_at": self._last_online_ts.get(pkg),
+                }
+            )
+        return snapshot

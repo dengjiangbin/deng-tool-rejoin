@@ -95,7 +95,29 @@ def perform_rejoin(
     no_force_stop: bool = False,
 ) -> RejoinResult:
     """Perform one safe rejoin attempt and record the result locally."""
-    cfg = validate_config(config_data)
+    # [DENG_REJOIN_RESURRECT_DECISION] probe_id=p-ea167faf5f
+    # validate_config was previously called OUTSIDE the try/except block.
+    # A ConfigError (e.g. "health_check_interval_seconds must be at least 10")
+    # would propagate to the supervisor worker's outer except, get logged as
+    # worker_error, and loop forever without ever actually relaunching the package.
+    # Wrapping it here converts any config failure into a RejoinResult(False)
+    # so the supervisor receives a clean failure and applies its backoff.
+    try:
+        cfg = validate_config(config_data)
+    except Exception as exc:  # noqa: BLE001
+        _pkg_fallback = str(config_data.get("roblox_package") or "unknown")
+        _err = str(exc)
+        db.insert_rejoin_attempt(
+            reason=reason,
+            package=_pkg_fallback,
+            launch_mode=str(config_data.get("launch_mode") or "app"),
+            masked_launch_url=None,
+            root_used=False,
+            success=False,
+            error=_err,
+        )
+        db.insert_event("ERROR", "rejoin_failed", _err, {"reason": reason, "package": _pkg_fallback})
+        return RejoinResult(False, root_used=False, error=_err)
     logger = configure_logging(level=cfg.get("log_level", "INFO"))
     ents = enabled_package_entries(cfg)
     entry = package_entry
@@ -376,3 +398,37 @@ def launch_configured_packages(config_data: dict[str, Any], *, reason: str = "st
         if index < len(packages) - 1:
             time.sleep(delay)
     return results
+
+
+def launch_package_for_current_config(
+    entry: dict[str, Any],
+    cfg: dict[str, Any],
+    reason: str = "watchdog_recovery",
+) -> "RejoinResult":
+    """Canonical launcher selector for watchdog recovery and initial Start.
+
+    Behavior:
+    - If ``private_server_url`` is configured (per-entry or global):
+        Calls ``perform_rejoin`` which sends the roblox:// deep-link intent.
+        The private server URL is preserved including ``&type=Server`` params.
+    - If ``private_server_url`` is blank:
+        Calls ``perform_rejoin`` with no URL — Roblox opens to home/lobby only
+        (app-only launch, no join intent sent).
+
+    This function MUST be used by:
+    - Initial Start launch (via cmd_start loop)
+    - Dead recovery (watchdog detects process gone)
+    - No Heartbeat recovery (watchdog force-stops then relaunches)
+    - In-Lobby timeout recovery (private URL relaunch after lobby timeout)
+    - Supervisor resurrection
+
+    [DENG_REJOIN_CANONICAL_LAUNCHER] probe_id=p-ea167faf5f
+    Private Server URL is optional. Blank URL = app-only. Configured URL = private join.
+    ``perform_rejoin`` already selects the correct am-start command based on
+    ``effective_private_server_url(entry, cfg)`` — this wrapper just sets the
+    package and delegates.
+    """
+    pkg = str(entry.get("package") or "")
+    pkg_cfg = dict(cfg)
+    pkg_cfg["roblox_package"] = pkg
+    return perform_rejoin(pkg_cfg, reason=reason, package_entry=entry)

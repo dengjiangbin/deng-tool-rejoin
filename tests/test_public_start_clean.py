@@ -98,7 +98,7 @@ def _capture_start_output(entries) -> str:
         patch("agent.commands.perform_rejoin", return_value=MagicMock(success=True, error=None)),
         patch("agent.commands.android.is_process_running", return_value=True),
         patch("agent.commands.effective_private_server_url", return_value=None),
-        patch("agent.commands.MultiPackageSupervisor", return_value=mock_sup_inst),
+        patch("agent.commands.WatchdogSupervisor", return_value=mock_sup_inst),
         patch("agent.commands._package_detection_options", return_value=(None, True, True)),
         patch("agent.commands._clear_terminal"),
         redirect_stdout(out),
