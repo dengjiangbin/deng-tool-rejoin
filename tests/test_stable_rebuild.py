@@ -154,16 +154,11 @@ class TestPublicStates(unittest.TestCase):
 
     def test_no_joining_in_public_display(self) -> None:
         smap = self._get_display_map()
-        # "Joining" must map to something that is NOT "Joining"
-        self.assertIn("Joining", smap)
-        self.assertNotEqual(smap["Joining"], "Joining")
-        self.assertIn(smap["Joining"], self._ALLOWED_PUBLIC)
+        self.assertNotIn("Joining", smap)
 
     def test_no_join_unconfirmed_in_public_display(self) -> None:
         smap = self._get_display_map()
-        self.assertIn("Join Unconfirmed", smap)
-        self.assertNotEqual(smap["Join Unconfirmed"], "Join Unconfirmed")
-        self.assertIn(smap["Join Unconfirmed"], self._ALLOWED_PUBLIC)
+        self.assertNotIn("Join Unconfirmed", smap)
 
     def test_no_in_server_in_public_display(self) -> None:
         smap = self._get_display_map()

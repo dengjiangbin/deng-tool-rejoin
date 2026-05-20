@@ -373,13 +373,13 @@ class InstallTestLatestBootstrapTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/", headers.get("Content-Type", ""))
         text = body.decode("utf-8")
-        self.assertIn("DENG Tool: Rejoin Test Installer", text)
+        self.assertIn("DENG Tool: Rejoin Installing", text)
         # "Channel: internal test" removed from public output per Section C (keep clean)
         self.assertNotIn("Channel: internal test", text)
         self.assertIn("Version: main-dev", text)
         # New direct-install flow: downloads the full package, no .install_requested
         self.assertIn("install/test/package.tar.gz", text)
-        self.assertIn("Package verified", text)
+        self.assertIn("[##############################] 100%", text)
         self.assertNotIn(".install_requested", text)
         self.assertNotIn("deferred_bundle_install", text)
         self.assertNotIn("GITHUB_TOKEN", text)
@@ -519,7 +519,7 @@ class InstallBootstrapSanityTests(unittest.TestCase):
         self.assertIn("Failed to create deng-rejoin wrapper.", s)
         self.assertIn('.install_api', s)
         self.assertIn("rejoin.deng.my.id", s)
-        self.assertIn("Package verified:", s)
+        self.assertIn("[##############################] 100%", s)
         self.assertIn("install/test/package.tar.gz", s)
         self.assertIn("deng_tool_rejoin.py", s)
         # Wrapper must use DENG_REJOIN_HOME env with fallback
@@ -536,7 +536,7 @@ class InstallBootstrapSanityTests(unittest.TestCase):
             package_sha256="a" * 64,
         )
         done = s.index("Install complete.")
-        self.assertLess(s.index("Package verified:"), done)
+        self.assertLess(s.index("[##############################] 100%"), done)
         self.assertLess(s.index("command -v deng-rejoin"), done)
         self.assertLess(s.index(".install_api"), done)
 

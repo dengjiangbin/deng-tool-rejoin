@@ -270,8 +270,8 @@ class TestInstallerScript(unittest.TestCase):
 
     def test_old_states_check_present(self):
         script = self._make_script()
-        self.assertIn("Joining", script)
-        self.assertIn("_OLD_STATES", script)
+        self.assertNotIn("_OLD_STATES", script)
+        self.assertNotIn("Join Unconfirmed", script)
 
     def test_doctor_install_invoked(self):
         """Doctor install is intentionally removed from the installer because
@@ -287,16 +287,12 @@ class TestInstallerScript(unittest.TestCase):
 
     def test_final_proof_block_present(self):
         script = self._make_script()
-        self.assertIn("DENG Tool: Rejoin Installed", script)
-        self.assertIn("Expected SHA:", script)
-        self.assertIn("Actual SHA:", script)
-        self.assertIn("Installed Commit:", script)
-        self.assertIn("Install Path:", script)
-        self.assertIn("Wrapper Path:", script)
-        self.assertIn("Python Runtime Path:", script)
-        self.assertIn("Legacy Detector Imported:", script)
-        self.assertIn("Old Smart Detection:", script)
-        self.assertIn("Start Command:", script)
+        self.assertIn("DENG Tool: Rejoin Installing", script)
+        self.assertIn("Version: main-dev", script)
+        self.assertIn("[##############################] 100%", script)
+        self.assertIn("Install complete.", script)
+        self.assertNotIn("DENG Tool: Rejoin Installed", script)
+        self.assertNotIn("Start Command:", script)
 
     def test_agent_file_proof_present(self):
         script = self._make_script()
@@ -710,23 +706,12 @@ class TestInstallerPosixShSyntax(unittest.TestCase):
             import os
             os.unlink(tf_path)
 
-    def test_joining_check_uses_grep_not_python(self):
-        """Old-states check for Joining must use precise grep -qE, not python3 -c.
-
-        The grep pattern must match "Joining" only when followed by , or ) so
-        that STATUS_JOINING = "Joining"   # comment  does NOT false-positive.
-        """
+    def test_removed_join_state_check_not_in_installer(self):
+        """Installer no longer carries removed join-state grep probes."""
         s = self._get_script()
-        # Must use grep -qE with the precise pattern (double-quote delimited)
-        self.assertIn('grep -qE', s, 'Joining check must use grep -qE')
-        self.assertIn('"(Joining)"', s,
-                      'grep must search for "(Joining)" with double-quotes')
-        # Must NOT embed Joining check inside python3 -c '...'
-        for i, line in enumerate(s.split("\n"), start=1):
-            if "python3 -c '" in line and "Joining" in line:
-                self.fail(
-                    f"Line {i}: Joining check appears inside python3 -c block: {line!r}"
-                )
+        self.assertNotIn('"(Joining)"', s)
+        self.assertNotIn("Join Unconfirmed", s)
+        self.assertNotIn("_OLD_STATES", s)
 
 
 if __name__ == "__main__":

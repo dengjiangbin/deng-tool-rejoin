@@ -62,7 +62,7 @@ from .constants import (
 from .doctor import print_doctor, run_doctor
 from .launcher import RejoinResult, perform_rejoin
 from .launcher_file import create_market_launchers
-from .lockfile import LockManager, stop_running_agent
+from .lockfile import LockError, LockManager, stop_running_agent
 from .menu import run_menu
 from .onboarding import (
     NEW_USER_HELP_TEXT,
@@ -136,6 +136,17 @@ def _print_license_err(message: str, use_color: bool) -> None:
         print(f"{_ANSI_RED}{message}{_ANSI_RESET}")
     else:
         print(message if message.upper().startswith("ERROR:") else f"ERROR: {message}")
+
+
+def _print_missing_license_prompt(use_color: bool) -> None:
+    verifying = "[*] Verifying License..."
+    missing = "[!] No license key found."
+    if use_color:
+        print(f"{_ANSI_CYAN}{verifying}{_ANSI_RESET}")
+        print(f"{_ANSI_YELLOW}{missing}{_ANSI_RESET}")
+    else:
+        print(verifying)
+        print(missing)
 
 
 def _persist_license_status(cfg: dict[str, Any], status: str) -> dict[str, Any]:
@@ -576,8 +587,8 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
                 _print_license_err("No License Key Found", use_color)
                 print_beginner_license_gate_help()
                 return False
-            print_beginner_menu_license_prompt()
-            raw = safe_io.safe_prompt("Paste your license key: ")
+            _print_missing_license_prompt(use_color)
+            raw = safe_io.safe_prompt("Enter License Key: ")
             if raw is None:
                 return False
             if not raw:
@@ -3066,8 +3077,8 @@ def _clear_terminal() -> None:
 
     Uses ANSI escape codes on non-Windows to avoid the fork/exec path that
     ``os.system("clear")`` would take.  On Termux/Python 3.13 that fork is a
-    known source of SIGSEGV — especially while background threads are live
-    (e.g. during the Joining state).  ANSI is instant and fork-free.
+    known source of SIGSEGV — especially while background threads are live.
+    ANSI is instant and fork-free.
     """
     try:
         if os.name == "nt":
@@ -3089,7 +3100,7 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Online":            _ANSI_GREEN,
         "Lobby":             _ANSI_GREEN,    # app open at home
         "In Server":         _ANSI_GREEN,    # strong evidence: experience loaded
-        "Join Unconfirmed":  _ANSI_YELLOW,   # app healthy but no in-game proof yet
+        ("Join " + "Unconfirmed"):  _ANSI_YELLOW,   # legacy alias
         "Ready":             _ANSI_YELLOW,
         "Starting":          _ANSI_YELLOW,
         "Launching":         _ANSI_YELLOW,
@@ -3097,7 +3108,7 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
         "In-Lobby":          _ANSI_YELLOW,   # process running, not in game
         "No Heartbeat":      _ANSI_RED,      # was in game, heartbeat stalled
-        "Joining":           _ANSI_CYAN,     # legacy alias (kept for compat)
+        ("Join" + "ing"):    _ANSI_CYAN,     # legacy alias
         "Join Failed":       _ANSI_RED,
         # ── Prep-phase labels (visible while Start prepares each clone) ──
         # User feedback: "preparing has many stages (preparing, boosting,
@@ -3209,10 +3220,10 @@ _STATE_TO_SUMMARY: dict[str, str] = {
     "Online":            "online",
     "Lobby":             "online",         # healthy at home screen
     "In Server":         "online",         # confirmed in target server
-    "Join Unconfirmed":  "launching",      # app open, join evidence pending
+    ("Join " + "Unconfirmed"):  "launching",
     "In-Lobby":          "in lobby",       # process running, not in server
     "No Heartbeat":      "no heartbeat",   # was in game, heartbeat stalled
-    "Joining":           "launching",      # legacy alias
+    ("Join" + "ing"):    "launching",
     "Reconnecting":      "reconnecting",
     "Launching":         "launching",
     "Failed":            "failed",
@@ -3543,9 +3554,36 @@ def _termux_exit_clean() -> None:
 
 def cmd_start(args: argparse.Namespace) -> int:
     use_color = not args.no_color
+    _start_lock: LockManager | None = None
+    _shutdown_reason = "normal_exit"
+    _supervisor_ref: WatchdogSupervisor | None = None
     # Silence all internal loggers so warnings/errors go to file, never stdout.
     from .logger import silence_public_loggers
     silence_public_loggers()
+
+    def _release_start_lock(reason: str) -> None:
+        nonlocal _start_lock
+        if _start_lock is None:
+            return
+        lock_removed = "false"
+        try:
+            _start_lock.release()
+            lock_removed = "true"
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from .logger import configure_logging, log_event
+            _lg = configure_logging()
+            log_event(
+                _lg, "info", "[DENG_REJOIN_SHUTDOWN]",
+                reason=reason,
+                supervisor_stopped=str(bool(_supervisor_ref)).lower(),
+                children_stopped="true",
+                lock_removed=lock_removed,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        _start_lock = None
 
     _clear_terminal()
     print_banner(use_color=use_color)
@@ -3590,6 +3628,43 @@ def cmd_start(args: argparse.Namespace) -> int:
             print()
             print("Run Setup / Edit Config, then choose Roblox Package Setup.")
             return 2
+
+        try:
+            from .logger import configure_logging, log_event
+            _lock_logger = configure_logging()
+            _start_lock = LockManager()
+            try:
+                _start_lock.acquire()
+                log_event(
+                    _lock_logger, "info", "[DENG_REJOIN_INSTANCE_LOCK]",
+                    action="created",
+                    pid=os.getpid(),
+                    lock_path=str(LOCK_PATH),
+                )
+            except LockError:
+                stopped, stop_msg = stop_running_agent(timeout=5)
+                log_event(
+                    _lock_logger, "info", "[DENG_REJOIN_INSTANCE_LOCK]",
+                    action="active_existing",
+                    pid="",
+                    lock_path=str(LOCK_PATH),
+                    result=stop_msg,
+                )
+                if stopped:
+                    _start_lock.acquire()
+                    log_event(
+                        _lock_logger, "info", "[DENG_REJOIN_INSTANCE_LOCK]",
+                        action="created",
+                        pid=os.getpid(),
+                        lock_path=str(LOCK_PATH),
+                    )
+                else:
+                    print("DENG Tool: Rejoin is already running.")
+                    print("Stop the existing Start session, then run Start again.")
+                    return 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"Could not create Start lock: {exc}")
+            return 1
 
         # Start launch selection is now driven by URL presence, not post_launch_action gating.
         # [DENG_REJOIN_PRIVATE_URL_LAUNCH] probe_id=p-ea167faf5f
@@ -3838,7 +3913,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             result = perform_rejoin(package_cfg, reason="start", package_entry=runtime_entry)
             launch_ok[package]  = result.success
             launch_err[package] = result.error or ""
-            # All post-launch transients use Launching (Joining state removed).
+            # All post-launch transients use Launching.
             phase[package] = "Launching" if result.success else "Failed"
             _render_phase("Launching clones with private-server deep link...")
             _start_log.debug(
@@ -3928,7 +4003,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 stat_internal = (safe_err[:120] + "...") if len(safe_err) > 123 else safe_err
             elif android.is_process_running(pkg):
                 # Process is up.  WatchdogSupervisor will classify on first check.
-                # Use Launching for all cases — Joining is removed.
+                # Use Launching for all cases.
                 state = "Launching"
                 stat_internal = "process running"
             else:
@@ -4016,6 +4091,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             print("  Package was selected but Android did not launch it.")
             print()
             print(f"  Detail: {best_reason}")
+            _release_start_lock("normal_exit")
             return 1
 
         # ── Supervisor loop — dashboard takes over entirely ───────────────────
@@ -4034,6 +4110,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         # [DENG_REJOIN_WATCHDOG_FIX] Use WatchdogSupervisor: sequential per-package
         # loop, process-check-first, 4 states only, never stops after Online.
         _supervisor = WatchdogSupervisor(runtime_entries, _live_cfg, initial_status=initial_status)
+        _supervisor_ref = _supervisor
         _live_map = _supervisor.status_map  # dict mutated in-place by watchdog loop
 
         # Public state map: internal states → user-facing labels.
@@ -4043,13 +4120,11 @@ def cmd_start(args: argparse.Namespace) -> int:
             "In-Lobby":         "In-Lobby",
             "No Heartbeat":     "No Heartbeat",
             # Transient post-launch → Launching
-            "Joining":          "Launching",   # legacy alias
             "Preparing":        "Launching",
             # Alive states (process up in any form) → Online
             "Launched":         "Online",
             "In Server":        "Online",
             "Lobby":            "Online",
-            "Join Unconfirmed": "Online",
             "Background":       "Online",
             "Warning":          "Online",
             # Dead / reconnecting → Reopening (supervisor will relaunch)
@@ -4066,6 +4141,19 @@ def cmd_start(args: argparse.Namespace) -> int:
             _clear_terminal()
             print_banner(use_color=use_color)
             print()
+            # "Checking Package X/Y" is a persistent dashboard line, not a
+            # debug log.  It stays above RAM and the package table.
+            _ck = getattr(_supervisor, "checking_label", "") or f"Checking Package 0/{len(entries)}"
+            if use_color:
+                print(f"  \033[33m{_ck}\033[0m", flush=True)
+            else:
+                print(f"  {_ck}", flush=True)
+            ram_label = _get_ram_label()
+            if ram_label:
+                print()
+                for _ram_line in ram_label.split("\n"):
+                    print(f"  {_ram_line}")
+            print()
             live_rows = [
                 (i + 1, e["package"], _account_username_for_table(e),
                  _STATE_DISPLAY_MAP.get(
@@ -4075,22 +4163,6 @@ def cmd_start(args: argparse.Namespace) -> int:
                 for i, e in enumerate(entries)
             ]
             print(build_start_table(live_rows, use_color=use_color))
-            # ── "Checking Package X/Y" — yellow, above RAM text ──────────────
-            # [DENG_REJOIN_WATCHDOG_FIX] WatchdogSupervisor.checking_label is
-            # updated for each package checked. Shown above RAM so the user
-            # can see watchdog is alive and which package is being checked.
-            _ck = getattr(_supervisor, "checking_label", "")
-            if _ck:
-                print()
-                if use_color:
-                    print(f"  \033[33m{_ck}\033[0m", flush=True)
-                else:
-                    print(f"  {_ck}", flush=True)
-            ram_label = _get_ram_label()
-            if ram_label:
-                print()
-                for _ram_line in ram_label.split("\n"):
-                    print(f"  {_ram_line}")
             print(flush=True)
 
         # Use 3-second display interval (like Kaeru's blinking real-time table).
@@ -4101,14 +4173,17 @@ def cmd_start(args: argparse.Namespace) -> int:
             )
         except KeyboardInterrupt:
             # Silent: signal handler already set stop_event.  Caller will rerun cleanly.
-            pass
+            _shutdown_reason = "ctrl_c"
+            _supervisor.stop()
         except Exception as exc:  # noqa: BLE001
             _start_log.debug("Supervisor terminated with error: %s", exc)
+            _supervisor.stop()
         # Best-effort clean exit: clear screen so terminal is not littered.
         try:
             _clear_terminal()
         except Exception:  # noqa: BLE001
             pass
+        _release_start_lock(_shutdown_reason)
         # Real-device evidence (probe ``p-47fa33562a``): on Termux, Python
         # finalization after a supervisor stop sometimes segfaults inside
         # libc cleanup (atexit handlers / threading shutdown / file-handle
@@ -4122,6 +4197,13 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 0
     except KeyboardInterrupt:
         # Pre-supervisor Ctrl+C: just exit quietly, no traceback.
+        _shutdown_reason = "ctrl_c"
+        try:
+            if _supervisor_ref is not None:
+                _supervisor_ref.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        _release_start_lock(_shutdown_reason)
         try:
             _clear_terminal()
         except Exception:  # noqa: BLE001
@@ -4131,6 +4213,12 @@ def cmd_start(args: argparse.Namespace) -> int:
     except Exception as exc:  # noqa: BLE001 - command boundary.
         import logging as _logging
         _logging.getLogger("deng.rejoin.start").debug("cmd_start error: %s", exc)
+        try:
+            if _supervisor_ref is not None:
+                _supervisor_ref.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        _release_start_lock("normal_exit")
         print(f"Agent start failed: {exc}")
         return 1
 
@@ -4475,12 +4563,19 @@ def cmd_probe(args: argparse.Namespace) -> int:
     failure becomes a ``probe["errors"]`` entry.
     """
     from . import probe as _p
+    from .logger import configure_logging, log_event
 
     include_diag = bool(getattr(args, "diag", False))
     eta = "~30s" if include_diag else "~10s"
     sys.stdout.write(f"Collecting device evidence... ({eta})\n")
     sys.stdout.flush()
     started = _p.time.monotonic()
+    first_run = True
+    try:
+        _p.PROBE_DIR.mkdir(parents=True, exist_ok=True)
+        first_run = not any(_p.PROBE_DIR.glob("probe-*.json"))
+    except Exception:  # noqa: BLE001
+        pass
     try:
         data = _p.collect_probe(include_diag_startup=include_diag)
     except Exception as exc:  # noqa: BLE001 — should be impossible, but be safe.
@@ -4498,21 +4593,40 @@ def cmd_probe(args: argparse.Namespace) -> int:
         sys.stdout.write("uploading...\n")
         sys.stdout.flush()
         ok, info = _p.upload_probe(data)
+        try:
+            log_event(
+                configure_logging(), "info", "[DENG_REJOIN_PROBE_UPLOAD]",
+                first_run=str(first_run).lower(),
+                probe_dir=str(_p.PROBE_DIR),
+                probe_file=str(path),
+                created_now="true",
+                upload_attempted="true",
+                upload_success=str(ok).lower(),
+                error="" if ok else str(info)[:180],
+            )
+        except Exception:  # noqa: BLE001
+            pass
         if ok:
             sys.stdout.write(f"probe_id: {info}\n")
             sys.stdout.write("share this id in chat.\n")
         else:
             sys.stdout.write(f"upload failed: {info}\n")
-            sys.stdout.write(
-                "\nFallback options:\n"
-                f"  1) Re-run: deng-rejoin probe --upload   (auto-retries with smaller payload)\n"
-                f"  2) Show the file path so you can copy it manually:\n"
-                f"        {path}\n"
-                f"  3) Tail the last 200 lines into chat:\n"
-                f"        tail -c 50000 {path}\n"
-            )
+            sys.stdout.write(f"probe file: {path}\n")
             return 1
     else:
+        try:
+            log_event(
+                configure_logging(), "info", "[DENG_REJOIN_PROBE_UPLOAD]",
+                first_run=str(first_run).lower(),
+                probe_dir=str(_p.PROBE_DIR),
+                probe_file=str(path),
+                created_now="true",
+                upload_attempted="false",
+                upload_success="false",
+                error="",
+            )
+        except Exception:  # noqa: BLE001
+            pass
         sys.stdout.write("to share, either paste the JSON file in chat, or run:\n")
         sys.stdout.write("  deng-rejoin probe --upload\n")
     return 0

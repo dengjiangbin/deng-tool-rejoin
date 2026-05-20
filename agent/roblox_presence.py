@@ -228,6 +228,11 @@ def lookup_user_id(username: str | None) -> int | None:
     body = {"usernames": [name], "excludeBannedUsers": False}
     payload = _post_json(_USERNAME_LOOKUP_URL, body)
     user_id: int | None = None
+    if payload is None:
+        # Network/CDN/SSL failures must not poison the username cache with
+        # ``None`` for a day.  The watchdog will retry later or use rooted
+        # per-clone prefs evidence.
+        return None
     if isinstance(payload, dict):
         data = payload.get("data")
         if isinstance(data, list) and data:

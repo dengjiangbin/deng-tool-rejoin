@@ -307,8 +307,12 @@ def render_direct_install_bootstrap(
     safe_sha = _escape_double(package_sha256)
 
     pre_heredoc = (
-        f'echo "{safe_title}"\n'
-        + banner_part
+        'echo "============================================================"\n'
+        'echo "DENG Tool: Rejoin Installing"\n'
+        'echo "------------------------------------------------------------"\n'
+        'echo "Version: main-dev"\n'
+        'echo "[------------------------------] 0%"\n'
+        'echo "============================================================"\n'
         + "command -v curl >/dev/null 2>&1 || { echo \"Install curl first: pkg install -y curl\" >&2; exit 1; }\n"
         "command -v tar >/dev/null 2>&1 || { echo \"Install tar first: pkg install -y tar\" >&2; exit 1; }\n"
         "command -v python3 >/dev/null 2>&1 || { echo \"Install python first: pkg install -y python\" >&2; exit 1; }\n"
@@ -324,7 +328,7 @@ def render_direct_install_bootstrap(
         f'EXPECTED_SHA256="{safe_sha}"\n'
         'TMP="$(mktemp)"\n'
         "trap 'rm -f \"$TMP\"' EXIT\n"
-        'echo "Downloading..."\n'
+        'echo "[######------------------------] 20%"\n'
         'curl -fsSL '
         '-H "Cache-Control: no-cache" -H "Pragma: no-cache" '
         '-A "deng-rejoin-installer/1.0" "$PACKAGE_URL" -o "$TMP" || {\n'
@@ -338,10 +342,9 @@ def render_direct_install_bootstrap(
         '  echo "Expected: $EXPECTED_SHA256" >&2\n'
         '  echo "Got:      $ACTUAL_SHA" >&2\n'
         '  echo "This means the installer script and the package are out of sync." >&2\n'
-        '  echo "Re-download the installer: curl -fsSL $INSTALLER_URL -o install.sh && sh install.sh" >&2\n'
         "  exit 1\n"
         "fi\n"
-        'echo "Package verified: $ACTUAL_SHA"\n'
+        'echo "[############------------------] 40%"\n'
         # Stop any running deng-rejoin process so we never overwrite live code.
         '_stop_running() {\n'
         '  if command -v pkill >/dev/null 2>&1; then\n'
@@ -360,7 +363,7 @@ def render_direct_install_bootstrap(
         # This guarantees orphan modules from the previous build cannot shadow
         # the new install.  User data (config, license, logs) lives at the top
         # level or under data/ which is intentionally NOT in this list.
-        'echo "Purging old runtime..."\n'
+        'echo "[##################------------] 60%"\n'
         'for _d in agent bot scripts docs examples assets; do\n'
         '  rm -rf "$APP_HOME/$_d" 2>/dev/null || true\n'
         'done\n'
@@ -371,7 +374,7 @@ def render_direct_install_bootstrap(
         'find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
         'find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
         # ── EXTRACT FRESH ARTIFACT ──────────────────────────────────────────
-        'echo "Extracting new runtime..."\n'
+        'echo "[########################------] 80%"\n'
         'tar -xzf "$TMP" -C "$APP_HOME" || { echo "Could not extract package." >&2; exit 1; }\n'
         # Post-extraction pycache sweep (the tarball must not contain any, but
         # verify and clean regardless so the install state is always known-clean).
@@ -487,27 +490,10 @@ def render_direct_install_bootstrap(
         # Implementation uses grep directly on the extracted supervisor file so
         # no single-quotes appear inside shell single-quoted strings (POSIX-safe).
         '_LEGACY_IMPORT="NO"\n'
-        '_OLD_STATES="NO"\n'
         '_SV_FILE="$APP_HOME/agent/supervisor.py"\n'
         'if [ -f "$_SV_FILE" ]; then\n'
         '  if grep -qE "^[[:space:]]*(from|import)[^#]*experience_detector" "$_SV_FILE" 2>/dev/null; then\n'
         '    _LEGACY_IMPORT="YES (WARNING: old detector in supervisor)"\n'
-        '  fi\n'
-        '  _JN=""\n'
-        '  _JU=""\n'
-        # Match "Joining" / "Join Unconfirmed" only when used as an actual argument
-        # or dict value — i.e. followed by , or ) — NOT the constant definition line
-        # which ends with a comment.  Uses single-quoted grep args so no quoting
-        # ambiguity; the grep call is a standalone shell statement, not inside any
-        # python3 -c '...' block, so [[:space:]] works correctly on BusyBox/dash.
-        '  if grep -qE \'"(Joining)"[[:space:]]*[,)]\' "$_SV_FILE" 2>/dev/null; then\n'
-        '    _JN="1"\n'
-        '  fi\n'
-        '  if grep -qE \'"(Join Unconfirmed)"[[:space:]]*[,)]\' "$_SV_FILE" 2>/dev/null; then\n'
-        '    _JU="1"\n'
-        '  fi\n'
-        '  if [ -n "$_JN$_JU" ]; then\n'
-        '    _OLD_STATES="YES (WARNING: Joining/Join Unconfirmed in supervisor)"\n'
         '  fi\n'
         'fi\n'
         # ── AGENT FILE PROOF ────────────────────────────────────────────────
@@ -518,33 +504,10 @@ def render_direct_install_bootstrap(
         'find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
         'find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
         # ── FINAL PROOF BLOCK ───────────────────────────────────────────────
-        'echo ""\n'
+        'echo "[##############################] 100%"\n'
         'echo "============================================================"\n'
-        'echo "DENG Tool: Rejoin Installed"\n'
-        'echo "------------------------------------------------------------"\n'
-        'echo "Channel:                   main-dev"\n'
-        'echo "Expected SHA:              $EXPECTED_SHA256"\n'
-        'echo "Actual SHA:                $ACTUAL_SHA"\n'
-        'echo "Installed Commit:          $_GIT_COMMIT"\n'
-        'echo "Probe ID:                  $_PROBE_ID"\n'
-        'echo "Installed Artifact:        $_INSTALLED_SHORT_SHA..."\n'
-        'echo "Install Path:              $APP_HOME"\n'
-        'echo "Wrapper Path:              $BIN/deng-rejoin"\n'
-        'echo "Python Runtime Path:       $APP_HOME/agent"\n'
-        '_AGENT_DISPLAY="${_AGENT_FILE:-$APP_HOME/agent/__init__.py}"\n'
-        'echo "agent.__file__:            $_AGENT_DISPLAY"\n'
-        'echo "Legacy Detector Imported:  $_LEGACY_IMPORT"\n'
-        'echo "Old Smart Detection:       $_OLD_STATES"\n'
-        'echo "Start Command:             deng-rejoin"\n'
-        'echo "============================================================"\n'
-        'if [ "$USING_HOME_BIN" -eq 1 ]; then\n'
-        "  echo 'Note: If deng-rejoin is not found in this shell, run once:'\n"
-        "  echo '  export PATH=\"$HOME/bin:$PATH\"'\n"
-        "  echo '  hash -r'\n"
-        "fi\n"
         'echo ""\n'
         'echo "Install complete."\n'
-        'echo "Next: deng-rejoin"\n'
     )
 
     return (

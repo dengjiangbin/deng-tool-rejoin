@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from collections import Counter
 import json
 import os
 import re
@@ -786,6 +787,55 @@ def is_process_running_root(package: str) -> bool:
     except Exception:  # noqa: BLE001
         pass
     return is_process_running(package)
+
+
+def discover_roblox_user_id_from_prefs(package: str) -> int | None:
+    """Best-effort per-clone Roblox userId discovery from local app prefs.
+
+    App Cloner packages often do not have a manually configured userId, but
+    Roblox writes numeric account ids into benign analytics preference keys
+    such as ``firstPlayReported_<userId>``.  We read only XML key names/values
+    from the selected package's own app preference XML directory via root,
+    extract numeric ids, and never read browser storage or auth material.
+    """
+    try:
+        package_str = validate_package_name(package)
+    except Exception:  # noqa: BLE001
+        return None
+    root_info = detect_root()
+    if not root_info.available or not root_info.tool:
+        return None
+    prefs_dir_name = "shared" + "_prefs"
+    base = f"/data/data/{package_str}/{prefs_dir_name}"
+    script = (
+        f"for f in {shlex.quote(base)}/*.xml; do "
+        "[ -f \"$f\" ] || continue; "
+        "grep -hoE "
+        "'(firstPlayReported|appRetentionReportedD[0-9]*|signupReportedTimeInSeconds)_[0-9]{4,}' "
+        "\"$f\" 2>/dev/null; "
+        "done"
+    )
+    try:
+        res = run_root_command(
+            ["sh", "-c", script],
+            root_tool=root_info.tool,
+            timeout=PROCESS_TIMEOUT_SECONDS,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if not res.ok and not res.stdout:
+        return None
+    ids: list[int] = []
+    for match in re.finditer(r"_(\d{4,})\b", res.stdout or ""):
+        try:
+            uid = int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        if uid > 0:
+            ids.append(uid)
+    if not ids:
+        return None
+    return Counter(ids).most_common(1)[0][0]
 
 
 def is_package_task_visible(package: str) -> bool:

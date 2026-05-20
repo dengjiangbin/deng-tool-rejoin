@@ -295,6 +295,50 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(state, STATUS_IN_LOBBY)
         self.assertNotEqual(state, "Joining")
 
+    def test_missing_config_user_id_uses_root_prefs_then_presence_online(self):
+        """Per-clone prefs userId should feed Presence API when config userId is missing."""
+        sup = _make_sup()
+        presence = MagicMock()
+        presence.is_in_game = True
+        presence.is_offline = False
+        presence.is_unknown = False
+        presence.presence_type = MagicMock(name="IN_GAME")
+        presence.place_id = 123
+        presence.root_place_id = 456
+        with patch.object(android, "get_package_alive_evidence", return_value=_alive_evidence()), \
+             patch.object(android, "current_foreground_package", return_value=""), \
+             patch.object(android, "discover_roblox_user_id_from_prefs", return_value=10957542503), \
+             patch("agent.roblox_presence.fetch_presence_one", return_value=presence):
+            state, detail = sup._detect_package_state(_PKG, _make_entry())
+        self.assertEqual(state, STATUS_ONLINE)
+        self.assertEqual(detail["reason"], "roblox_presence_in_game")
+        self.assertEqual(sup._presence_user_ids[_PKG], 10957542503)
+        self.assertEqual(sup._presence_last_detail[_PKG]["roblox_user_id_source"], "prefs")
+
+    def test_username_lookup_failure_does_not_permanently_mark_resolved(self):
+        """One failed username lookup must not freeze future rounds at missing_user_id."""
+        sup = _make_sup()
+        with patch.object(android, "get_package_alive_evidence", return_value=_alive_evidence()), \
+             patch.object(android, "current_foreground_package", return_value=""), \
+             patch.object(android, "discover_roblox_user_id_from_prefs", return_value=None), \
+             patch("agent.roblox_presence.lookup_user_id", return_value=None):
+            state, detail = sup._detect_package_state(_PKG, _make_entry())
+        self.assertEqual(state, STATUS_IN_LOBBY)
+        self.assertEqual(detail["reason"], "missing_in_game_proof")
+        self.assertNotIn(_PKG, sup._presence_id_resolved)
+
+    def test_foreground_window_hint_online_when_api_missing(self):
+        """Root/window foreground evidence can prove Online when API mapping is missing."""
+        sup = _make_sup()
+        ev = {"alive": True, "running": True, "root_running": False,
+              "task": True, "window": True, "surface": True, "foreground": True}
+        with patch.object(android, "get_package_alive_evidence", return_value=ev), \
+             patch.object(android, "current_foreground_package", return_value=_PKG), \
+             patch.object(sup, "_fetch_presence", return_value=None):
+            state, detail = sup._detect_package_state(_PKG, _make_entry())
+        self.assertEqual(state, STATUS_ONLINE)
+        self.assertEqual(detail["reason"], "foreground_window_surface_hint")
+
     # Test 16
     def test_no_joining_state_in_watchdog_allowed_states(self):
         """WatchdogSupervisor must never produce 'Joining' as a state."""
@@ -477,6 +521,58 @@ class TestWatchdogContinuity(unittest.TestCase):
         rendered = f"  {_YELLOW}{checking}{_RESET}"
         self.assertIn(_YELLOW, rendered)
         self.assertIn(checking, rendered)
+
+    def test_run_forever_checks_all_packages_when_one_detector_raises(self):
+        """One package error must not prevent 1/3 -> 2/3 -> 3/3 in the same round."""
+        packages = [_PKG, _PKG2, "com.roblox.client3"]
+        sup = _make_sup(packages=packages)
+        seen: list[str] = []
+        labels: list[str] = []
+
+        def detect(pkg, entry):
+            seen.append(pkg)
+            if pkg == _PKG:
+                raise RuntimeError("boom")
+            if pkg == packages[-1]:
+                sup.stop_event.set()
+            return STATUS_ONLINE, {
+                "process_running": "true", "in_game": "true",
+                "heartbeat_ok": "true", "warning_detected": "false", "elapsed_ms": 0,
+            }
+
+        sup._detect_package_state = detect
+        with patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
+            sup.run_forever(
+                display_interval=999,
+                render_callback=lambda: labels.append(sup.checking_label),
+            )
+        self.assertEqual(seen, packages)
+        self.assertIn("Checking Package 1/3", labels)
+        self.assertIn("Checking Package 2/3", labels)
+        self.assertIn("Checking Package 3/3", labels)
+        self.assertEqual(sup.status_map[_PKG], STATUS_IN_LOBBY)
+
+    def test_checking_label_persists_after_round_until_shutdown(self):
+        packages = [_PKG, _PKG2]
+        sup = _make_sup(packages=packages)
+        labels: list[str] = []
+
+        def detect(pkg, entry):
+            if pkg == packages[-1]:
+                sup.stop_event.set()
+            return STATUS_ONLINE, {
+                "process_running": "true", "in_game": "true",
+                "heartbeat_ok": "true", "warning_detected": "false", "elapsed_ms": 0,
+            }
+
+        sup._detect_package_state = detect
+        with patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
+            sup.run_forever(
+                display_interval=999,
+                render_callback=lambda: labels.append(sup.checking_label),
+            )
+        self.assertIn("Checking Package 2/2", labels)
+        self.assertEqual(sup.checking_label, "")
 
 
 # ─── 26-30: Regression ────────────────────────────────────────────────────────
