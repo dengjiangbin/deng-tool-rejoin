@@ -1,4 +1,4 @@
-"""Tests for WatchdogSupervisor: continuous monitoring, 4-state machine,
+﻿"""Tests for WatchdogSupervisor: continuous monitoring, 4-state machine,
 blank URL support, canonical launcher, Joining removal, and probe logging.
 
 Requirements verified:
@@ -34,7 +34,7 @@ from agent.launcher import launch_package_for_current_config, RejoinResult
 from agent.config import default_config, validate_config
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _PKG = "com.roblox.client"
 _PKG2 = "com.roblox.client2"
@@ -107,7 +107,7 @@ def _alive_evidence() -> dict:
             "task": True, "window": True, "surface": False, "foreground": False}
 
 
-# ─── 1-5: Blank Private Server URL ────────────────────────────────────────────
+# â”€â”€â”€ 1-5: Blank Private Server URL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestBlankPrivateServerUrl(unittest.TestCase):
     """Blank private_server_url must not fail setup and must launch app-only."""
@@ -118,7 +118,7 @@ class TestBlankPrivateServerUrl(unittest.TestCase):
         sup = _make_sup(private_url="")
         with patch("agent.supervisor.launch_package_for_current_config") as mock_launch:
             mock_launch.return_value = RejoinResult(True, root_used=False)
-            with patch.object(android, "get_package_alive_evidence", return_value=_dead_evidence()):
+            with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()):
                 with patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
                     sup._handle_state(_PKG, _make_entry(), STATUS_DEAD, STATUS_LAUNCHING, time.time())
         mock_launch.assert_called_once()
@@ -166,7 +166,7 @@ class TestBlankPrivateServerUrl(unittest.TestCase):
         mock_launch.assert_called_once()
 
 
-# ─── 6-10: Configured Private Server URL ─────────────────────────────────────
+# â”€â”€â”€ 6-10: Configured Private Server URL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestConfiguredPrivateServerUrl(unittest.TestCase):
     """Configured URL must be passed to perform_rejoin; query params preserved."""
@@ -228,7 +228,7 @@ class TestConfiguredPrivateServerUrl(unittest.TestCase):
         self.assertEqual(effective_private_server_url(entry, cfg), "")
 
 
-# ─── 11-16: State Detection ───────────────────────────────────────────────────
+# â”€â”€â”€ 11-16: State Detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestStateDetection(unittest.TestCase):
     """State detection must follow deterministic priority: process first."""
@@ -236,7 +236,7 @@ class TestStateDetection(unittest.TestCase):
     # Test 11
     def test_process_not_running_returns_dead(self):
         sup = _make_sup()
-        with patch.object(android, "get_package_alive_evidence", return_value=_dead_evidence()):
+        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_DEAD)
         self.assertEqual(detail["process_running"], "false")
@@ -244,7 +244,7 @@ class TestStateDetection(unittest.TestCase):
     # Test 12
     def test_process_running_no_presence_returns_in_lobby(self):
         sup = _make_sup()
-        with patch.object(android, "get_package_alive_evidence", return_value=_alive_evidence()), \
+        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_IN_LOBBY)
@@ -256,7 +256,7 @@ class TestStateDetection(unittest.TestCase):
         presence = MagicMock()
         presence.is_in_game = True
         presence.is_offline = False
-        with patch.object(android, "get_package_alive_evidence", return_value=_alive_evidence()), \
+        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_ONLINE)
@@ -272,11 +272,11 @@ class TestStateDetection(unittest.TestCase):
         presence.is_in_game = False
         presence.is_offline = True
         # First hit
-        with patch.object(android, "get_package_alive_evidence", return_value=_alive_evidence()), \
+        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state1, _ = sup._detect_package_state(_PKG, _make_entry())
         # Second hit (NHB_OFFLINE_CONFIRMATIONS=2)
-        with patch.object(android, "get_package_alive_evidence", return_value=_alive_evidence()), \
+        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state2, detail2 = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state2, STATUS_NO_HEARTBEAT)
@@ -289,7 +289,7 @@ class TestStateDetection(unittest.TestCase):
         presence = MagicMock()
         presence.is_in_game = False
         presence.is_offline = False  # lobby, not offline
-        with patch.object(android, "get_package_alive_evidence", return_value=_alive_evidence()), \
+        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state, _ = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_IN_LOBBY)
@@ -305,7 +305,7 @@ class TestStateDetection(unittest.TestCase):
         presence.presence_type = MagicMock(name="IN_GAME")
         presence.place_id = 123
         presence.root_place_id = 456
-        with patch.object(android, "get_package_alive_evidence", return_value=_alive_evidence()), \
+        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(android, "current_foreground_package", return_value=""), \
              patch.object(android, "discover_roblox_user_id_from_prefs", return_value=10957542503), \
              patch("agent.roblox_presence.fetch_presence_one", return_value=presence):
@@ -318,7 +318,7 @@ class TestStateDetection(unittest.TestCase):
     def test_username_lookup_failure_does_not_permanently_mark_resolved(self):
         """One failed username lookup must not freeze future rounds at missing_user_id."""
         sup = _make_sup()
-        with patch.object(android, "get_package_alive_evidence", return_value=_alive_evidence()), \
+        with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(android, "current_foreground_package", return_value=""), \
              patch.object(android, "discover_roblox_user_id_from_prefs", return_value=None), \
              patch("agent.roblox_presence.lookup_user_id", return_value=None):
@@ -332,7 +332,7 @@ class TestStateDetection(unittest.TestCase):
         sup = _make_sup()
         ev = {"alive": True, "running": True, "root_running": False,
               "task": True, "window": True, "surface": True, "foreground": True}
-        with patch.object(android, "get_package_alive_evidence", return_value=ev), \
+        with patch.object(sup, "_fast_alive_evidence", return_value=ev), \
              patch.object(android, "current_foreground_package", return_value=_PKG), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
@@ -356,7 +356,7 @@ class TestStateDetection(unittest.TestCase):
                     ev = _alive_evidence() if process_up else _dead_evidence()
                     sup._nhb_offline_count[_PKG] = sup.NHB_OFFLINE_CONFIRMATIONS if offline else 0
                     sup._last_online_ts[_PKG] = time.time() - 5 if not in_game else 0
-                    with patch.object(android, "get_package_alive_evidence", return_value=ev), \
+                    with patch.object(sup, "_fast_alive_evidence", return_value=ev), \
                          patch.object(sup, "_fetch_presence", return_value=presence if process_up else None):
                         st, _ = sup._detect_package_state(_PKG, _make_entry())
                     possible_returns.add(st)
@@ -365,7 +365,7 @@ class TestStateDetection(unittest.TestCase):
         self.assertNotIn("Join Pending", possible_returns)
 
 
-# ─── 17-25: Watchdog Continuity ───────────────────────────────────────────────
+# â”€â”€â”€ 17-25: Watchdog Continuity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestWatchdogContinuity(unittest.TestCase):
     """Watchdog must never stop monitoring after packages become Online."""
@@ -411,7 +411,7 @@ class TestWatchdogContinuity(unittest.TestCase):
         sup._sup_interval = lambda: 1  # very short interval
 
         def _stop_after_2_rounds():
-            # Let loop run for enough time to complete 2 rounds (2 pkg × 2 rounds × 1s = 4s)
+            # Let loop run for enough time to complete 2 rounds (2 pkg Ã— 2 rounds Ã— 1s = 4s)
             time.sleep(4.5)
             sup.stop_event.set()
 
@@ -433,7 +433,7 @@ class TestWatchdogContinuity(unittest.TestCase):
         sup._set_status(_PKG, STATUS_ONLINE)
         sup._last_online_ts[_PKG] = time.time()
         # Simulate force-close: process no longer running
-        with patch.object(android, "get_package_alive_evidence", return_value=_dead_evidence()), \
+        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=None):
             state, _ = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_DEAD)
@@ -575,7 +575,7 @@ class TestWatchdogContinuity(unittest.TestCase):
         self.assertEqual(sup.checking_label, "")
 
 
-# ─── 26-30: Regression ────────────────────────────────────────────────────────
+# â”€â”€â”€ 26-30: Regression â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
     """No Joining state. No uiautomator/logcat. No Post-Launch Action."""
@@ -585,15 +585,48 @@ class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
         """WatchdogSupervisor._detect_package_state does not call uiautomator/logcat."""
         sup = _make_sup()
         uia_calls = []
-        with patch.object(android, "get_package_alive_evidence", return_value=_dead_evidence()) as _mock, \
+        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()) as _mock, \
              patch.object(sup, "_fetch_presence", return_value=None):
             # Capture any call whose name contains uiautomator or logcat
             original = android.__dict__.copy()
             sup._detect_package_state(_PKG, _make_entry())
         # If uiautomator_dump or logcat were called, they'd need to be in android module.
-        # Since _detect_package_state only calls get_package_alive_evidence + _fetch_presence,
-        # no uiautomator/logcat calls happen.
+        # Since _detect_package_state only calls bounded alive evidence +
+        # _fetch_presence, no uiautomator/logcat calls happen.
         self.assertNotIn("uiautomator_dump", [c[0] for c in uia_calls])
+
+    def test_probe_p089_state_check_uses_bounded_fast_evidence(self):
+        """Regression for p-0899246178: package 1 check must not enter legacy full scan."""
+        sup = _make_sup()
+        with patch.object(android, "get_package_alive_evidence", side_effect=AssertionError("legacy scan")), \
+             patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
+             patch.object(sup, "_fetch_presence", return_value=None):
+            state, detail = sup._detect_package_state(_PKG, _make_entry())
+        self.assertEqual(state, STATUS_IN_LOBBY)
+        self.assertEqual(detail["reason"], "missing_in_game_proof")
+
+    def test_fast_alive_evidence_uses_short_root_timeouts(self):
+        """Root process proof is bounded so Checking Package 1/3 cannot stall a round."""
+        sup = _make_sup()
+        sup._root_info = android.RootInfo(True, "su", "uid=0")
+        calls = []
+
+        def _root(args, *, root_tool=None, timeout=0):
+            calls.append((tuple(args), timeout))
+            if tuple(args)[:1] == ("pidof",):
+                return android.CommandResult(tuple(args), 1, "", "")
+            return android.CommandResult(tuple(args), 0, "hit", "")
+
+        with patch.object(android, "run_root_command", side_effect=_root), \
+             patch.object(android, "current_foreground_package", return_value=""), \
+             patch.object(android, "is_package_window_visible", return_value=False), \
+             patch.object(android, "is_package_surface_in_surfaceflinger", return_value=False):
+            ev = sup._fast_alive_evidence(_PKG)
+
+        self.assertTrue(ev["root_running"])
+        self.assertTrue(ev["alive"])
+        self.assertTrue(calls)
+        self.assertTrue(all(timeout <= 3 for _args, timeout in calls))
 
     # Test 27
     def test_joining_not_in_initial_status(self):
@@ -614,7 +647,7 @@ class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
 
     # Test 29
     def test_watchdog_supervisor_has_no_worker_threads_list(self):
-        """WatchdogSupervisor is sequential — no _workers list of daemon threads."""
+        """WatchdogSupervisor is sequential â€” no _workers list of daemon threads."""
         sup = _make_sup()
         self.assertFalse(hasattr(sup, "_workers"),
             "WatchdogSupervisor must not have a _workers thread list")
@@ -627,7 +660,7 @@ class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
         import tests.test_internal_test_artifact
 
 
-# ─── Additional: launch_package_for_current_config ────────────────────────────
+# â”€â”€â”€ Additional: launch_package_for_current_config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestLaunchPackageForCurrentConfig(unittest.TestCase):
     """launch_package_for_current_config wraps perform_rejoin correctly."""
@@ -659,7 +692,7 @@ class TestLaunchPackageForCurrentConfig(unittest.TestCase):
         self.assertEqual(mock_rejoin.call_args.kwargs.get("package_entry"), entry)
 
 
-# ─── Additional: In-Lobby recovery logic ─────────────────────────────────────
+# â”€â”€â”€ Additional: In-Lobby recovery logic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestInLobbyRecovery(unittest.TestCase):
     """In-Lobby recovery: URL timeout relaunch vs app-only monitoring."""
@@ -699,7 +732,7 @@ class TestInLobbyRecovery(unittest.TestCase):
         self.assertEqual(mock_launch.call_args.args[2], "lobby_timeout_private_url_recovery")
 
 
-# ─── Additional: Status constants exist ───────────────────────────────────────
+# â”€â”€â”€ Additional: Status constants exist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestNewStatusConstants(unittest.TestCase):
 

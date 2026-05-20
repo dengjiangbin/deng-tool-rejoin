@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import signal
+import shlex
 import threading
 import time
 from typing import Any
@@ -1242,6 +1243,105 @@ class WatchdogSupervisor:
         raw = sup.get("health_check_interval_seconds") or self.cfg.get("health_check_interval_seconds", 30)
         return max(10, int(raw))
 
+    def _fast_alive_evidence(self, pkg: str) -> dict[str, Any]:
+        """Bounded package evidence for the live watchdog.
+
+        Probe p-0899246178 showed the watchdog getting stuck after
+        ``[DENG_REJOIN_PACKAGE_CHECK_START]`` for package 1.  The old path used
+        the full ``android.get_package_alive_evidence`` helper, which can stack
+        repeated process scans before the loop ever reaches package 2.  Start
+        needs a short, deterministic per-package read: cached root process
+        proof first, then lightweight foreground / visual hints.
+        """
+        dead: dict[str, Any] = {
+            "running": False,
+            "task": False,
+            "window": False,
+            "root_running": False,
+            "surface": False,
+            "foreground": False,
+            "foreground_package": "",
+            "alive": False,
+            "strict_alive": False,
+        }
+        try:
+            package = android.validate_package_name(pkg)
+        except Exception:  # noqa: BLE001
+            return dead
+
+        running = False
+        root_running = False
+        root_tool = getattr(self._root_info, "tool", None)
+        if getattr(self._root_info, "available", False) and root_tool:
+            try:
+                res = android.run_root_command(
+                    ["pidof", package],
+                    root_tool=root_tool,
+                    timeout=2,
+                )
+                root_running = bool(res.ok and res.stdout.strip())
+            except Exception:  # noqa: BLE001
+                root_running = False
+            if not root_running:
+                try:
+                    qpkg = shlex.quote(package)
+                    script = (
+                        "for p in /proc/[0-9]*/cmdline; do "
+                        "tr '\\0' ' ' < \"$p\" 2>/dev/null | "
+                        f"grep -F -q -- {qpkg} && echo hit && exit 0; "
+                        "done; exit 1"
+                    )
+                    res = android.run_root_command(
+                        ["sh", "-c", script],
+                        root_tool=root_tool,
+                        timeout=3,
+                    )
+                    root_running = bool(res.ok and "hit" in (res.stdout or ""))
+                except Exception:  # noqa: BLE001
+                    root_running = False
+        else:
+            try:
+                res = android.run_command(["pidof", package], timeout=2)
+                running = bool(res.ok and res.stdout.strip())
+            except Exception:  # noqa: BLE001
+                running = False
+
+        foreground_package = ""
+        try:
+            foreground_package = android.current_foreground_package() or ""
+        except Exception:  # noqa: BLE001
+            foreground_package = ""
+        foreground = bool(
+            foreground_package
+            and (foreground_package == package or package in foreground_package)
+        )
+
+        need_visual = foreground or not (running or root_running)
+        window = False
+        surface = False
+        if need_visual:
+            try:
+                window = bool(android.is_package_window_visible(package))
+            except Exception:  # noqa: BLE001
+                window = False
+            try:
+                surface = bool(android.is_package_surface_in_surfaceflinger(package))
+            except Exception:  # noqa: BLE001
+                surface = False
+
+        strict_alive = bool(running or root_running or window or surface or foreground)
+        return {
+            "running": running,
+            "task": False,
+            "window": window,
+            "root_running": root_running,
+            "surface": surface,
+            "foreground": foreground,
+            "foreground_package": foreground_package,
+            "alive": strict_alive,
+            "strict_alive": strict_alive,
+        }
+
     # ─── Presence fetching (process-check-first; presence is supplementary) ──
 
     def _fetch_presence(self, pkg: str) -> Any:
@@ -1276,7 +1376,7 @@ class WatchdogSupervisor:
             # the exact Roblox username, and avoids using one account for every
             # clone.  The Android helper extracts numeric ids only.
             if uid <= 0 and pkg not in self._presence_id_resolved:
-                pref_uid = android.discover_roblox_user_id_from_prefs(pkg)
+                pref_uid = android.discover_roblox_user_id_from_prefs(pkg, timeout=3)
                 if pref_uid:
                     uid = int(pref_uid)
                     self._presence_user_ids[pkg] = uid
@@ -1342,7 +1442,7 @@ class WatchdogSupervisor:
         t0 = time.monotonic()
         # ── A. Process check (ALWAYS FIRST) ──────────────────────────────────
         try:
-            evidence = android.get_package_alive_evidence(pkg)
+            evidence = self._fast_alive_evidence(pkg)
         except Exception:  # noqa: BLE001
             evidence = {}
         process_running = bool(
@@ -1351,11 +1451,7 @@ class WatchdogSupervisor:
             or evidence.get("root_running")
         )
 
-        foreground_package = ""
-        try:
-            foreground_package = android.current_foreground_package() or ""
-        except Exception:  # noqa: BLE001
-            foreground_package = ""
+        foreground_package = str(evidence.get("foreground_package") or "")
         root_available = bool(getattr(self._root_info, "available", False))
         local_in_game_hint = bool(
             process_running

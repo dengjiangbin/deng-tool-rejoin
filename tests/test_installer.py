@@ -289,8 +289,10 @@ class TestInstallerScript(unittest.TestCase):
         script = self._make_script()
         self.assertIn("DENG Tool: Rejoin Installing", script)
         self.assertIn("Version: main-dev", script)
-        self.assertIn("[##############################] 100%", script)
         self.assertIn("Install complete.", script)
+        self.assertNotIn("100%", script)
+        self.assertNotIn("[################", script)
+        self.assertNotIn("[------", script)
         self.assertNotIn("DENG Tool: Rejoin Installed", script)
         self.assertNotIn("Start Command:", script)
 

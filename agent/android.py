@@ -789,7 +789,7 @@ def is_process_running_root(package: str) -> bool:
     return is_process_running(package)
 
 
-def discover_roblox_user_id_from_prefs(package: str) -> int | None:
+def discover_roblox_user_id_from_prefs(package: str, *, timeout: int = 3) -> int | None:
     """Best-effort per-clone Roblox userId discovery from local app prefs.
 
     App Cloner packages often do not have a manually configured userId, but
@@ -819,7 +819,7 @@ def discover_roblox_user_id_from_prefs(package: str) -> int | None:
         res = run_root_command(
             ["sh", "-c", script],
             root_tool=root_info.tool,
-            timeout=PROCESS_TIMEOUT_SECONDS,
+            timeout=max(1, int(timeout)),
         )
     except Exception:  # noqa: BLE001
         return None

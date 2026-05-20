@@ -311,7 +311,6 @@ def render_direct_install_bootstrap(
         'echo "DENG Tool: Rejoin Installing"\n'
         'echo "------------------------------------------------------------"\n'
         'echo "Version: main-dev"\n'
-        'echo "[------------------------------] 0%"\n'
         'echo "============================================================"\n'
         + "command -v curl >/dev/null 2>&1 || { echo \"Install curl first: pkg install -y curl\" >&2; exit 1; }\n"
         "command -v tar >/dev/null 2>&1 || { echo \"Install tar first: pkg install -y tar\" >&2; exit 1; }\n"
@@ -328,7 +327,6 @@ def render_direct_install_bootstrap(
         f'EXPECTED_SHA256="{safe_sha}"\n'
         'TMP="$(mktemp)"\n'
         "trap 'rm -f \"$TMP\"' EXIT\n"
-        'echo "[######------------------------] 20%"\n'
         'curl -fsSL '
         '-H "Cache-Control: no-cache" -H "Pragma: no-cache" '
         '-A "deng-rejoin-installer/1.0" "$PACKAGE_URL" -o "$TMP" || {\n'
@@ -344,7 +342,6 @@ def render_direct_install_bootstrap(
         '  echo "This means the installer script and the package are out of sync." >&2\n'
         "  exit 1\n"
         "fi\n"
-        'echo "[############------------------] 40%"\n'
         # Stop any running deng-rejoin process so we never overwrite live code.
         '_stop_running() {\n'
         '  if command -v pkill >/dev/null 2>&1; then\n'
@@ -363,7 +360,6 @@ def render_direct_install_bootstrap(
         # This guarantees orphan modules from the previous build cannot shadow
         # the new install.  User data (config, license, logs) lives at the top
         # level or under data/ which is intentionally NOT in this list.
-        'echo "[##################------------] 60%"\n'
         'for _d in agent bot scripts docs examples assets; do\n'
         '  rm -rf "$APP_HOME/$_d" 2>/dev/null || true\n'
         'done\n'
@@ -374,7 +370,6 @@ def render_direct_install_bootstrap(
         'find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
         'find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
         # ── EXTRACT FRESH ARTIFACT ──────────────────────────────────────────
-        'echo "[########################------] 80%"\n'
         'tar -xzf "$TMP" -C "$APP_HOME" || { echo "Could not extract package." >&2; exit 1; }\n'
         # Post-extraction pycache sweep (the tarball must not contain any, but
         # verify and clean regardless so the install state is always known-clean).
@@ -504,7 +499,6 @@ def render_direct_install_bootstrap(
         'find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
         'find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
         # ── FINAL PROOF BLOCK ───────────────────────────────────────────────
-        'echo "[##############################] 100%"\n'
         'echo "============================================================"\n'
         'echo ""\n'
         'echo "Install complete."\n'

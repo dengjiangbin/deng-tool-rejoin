@@ -83,7 +83,7 @@ class LicensePromptTextTests(unittest.TestCase):
 
 
 class InstallerUiTests(unittest.TestCase):
-    def test_direct_installer_success_ui_is_clean_and_keeps_progress_bar(self) -> None:
+    def test_direct_installer_success_ui_is_clean_without_progress_bar(self) -> None:
         script = render_direct_install_bootstrap(
             base_url="https://rejoin.deng.my.id",
             package_sha256="a" * 64,
@@ -91,8 +91,10 @@ class InstallerUiTests(unittest.TestCase):
         )
         self.assertIn("DENG Tool: Rejoin Installing", script)
         self.assertIn("Version: main-dev", script)
-        self.assertIn("[##############################] 100%", script)
         self.assertIn("Install complete.", script)
+        self.assertNotIn("100%", script)
+        self.assertNotIn("[################", script)
+        self.assertNotIn("[------", script)
         self.assertNotIn("DENG Tool: Rejoin Installed", script)
         self.assertNotIn("Next: deng-rejoin", script)
 
