@@ -98,11 +98,12 @@ RIGHT_PANE_FRACTION  = 1.0 - TERMUX_LOG_FRACTION
 # 16:9 → ratio = 9/16 ≈ 0.5625; we use 9:16 as denominator
 LANDSCAPE_H_RATIO: float = 9.0 / 16.0   # window height = width × this
 
-# Minimum gap between any two windows (pixels).
-GAP_PX: int = 20
+# Gap between adjacent windows (pixels). 0 = windows touch side-by-side with no space.
+GAP_PX: int = 0
 
 # Outer margin between screen edge / pane boundary and nearest window.
-OUTER_MARGIN: int = 16
+# 0 = windows fill the pane edge-to-edge and start at the very top.
+OUTER_MARGIN: int = 0
 
 # Minimum window dimension (safety floor — below this layout is abandoned).
 _MIN_WIN_W: int = 160
@@ -520,7 +521,7 @@ def calculate_landscape_blocks(
     2. Right pane = remaining 65% minus outer margins.
     3. Target window aspect ratio: 16:9 (width:height).
     4. PHASE 1: All windows at full pane width, 16:9 height, stacked vertically.
-       If total height fits → center pack vertically with gap between windows.
+       If total height fits → top-align the stack at the top of the pane.
     5. PHASE 2: If single column is too tall, compress window height until
        the stack fits. Continue only while the window remains landscape
        (width >= height * LANDSCAPE_MIN_RATIO).
@@ -556,7 +557,7 @@ def calculate_landscape_blocks(
     def _make_rects_single_col(win_h: int) -> list[WindowRect]:
         """Stack N windows in one column with the given height."""
         total_h = n * win_h + (n - 1) * g
-        y_start = py0 + max(0, (pane_h - total_h) // 2)
+        y_start = py0  # top-aligned: start at top edge of pane
         result = []
         for i, pkg in enumerate(pkgs):
             y = y_start + i * (win_h + g)
@@ -569,7 +570,7 @@ def calculate_landscape_blocks(
         win_h_target = round(cell_w * LANDSCAPE_H_RATIO)
         rows = math.ceil(n / cols)
         total_h = rows * win_h_target + (rows - 1) * g
-        y_start = py0 + max(0, (pane_h - total_h) // 2)
+        y_start = py0  # top-aligned: start at top edge of pane
         result = []
         for i, pkg in enumerate(pkgs):
             row = i // cols

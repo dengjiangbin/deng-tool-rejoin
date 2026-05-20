@@ -7,7 +7,7 @@ Covers (per user requirements):
   4.  4-package rectangles are landscape.
   5.  5+ package rectangles are landscape.
   6.  No rectangles overlap.
-  7.  No rectangles touch (gap >= GAP_PX).
+  7.  No rectangles overlap (GAP_PX=0 allows touching; only overlap is rejected).
   8.  Every rectangle is inside the right 65% pane.
   9.  Each rectangle has unique bounds.
   10. Layout works when display dimensions are swapped (portrait ↔ landscape).
@@ -112,7 +112,7 @@ class TestLandscapeShape(unittest.TestCase):
 
 
 class TestNoOverlapNoTouch(unittest.TestCase):
-    """No two windows may overlap or touch (gap between them >= GAP_PX)."""
+    """No two windows may overlap (GAP_PX=0: touching is allowed; true overlap is not)."""
 
     def _check_no_overlap_touch(self, n: int, w: int, h: int, msg: str = "") -> None:
         pkgs = _pkgs(n)
@@ -266,10 +266,10 @@ class TestValidationRejectsBadRects(unittest.TestCase):
         errors = validate_layout_rects([r1, r2], 400, 50, 1060, 570)
         self.assertTrue(any("overlap" in e or "touch" in e for e in errors), errors)
 
-    def test_touching_windows_rejected(self):
-        """Windows where right of r1 + GAP_PX > left of r2 must fail."""
+    def test_vertical_overlap_rejected(self):
+        """Windows that vertically overlap (top of one inside another) must fail validation."""
         r1 = WindowRect("com.pkg.a", 400,  50, 1060, 420)
-        r2 = WindowRect("com.pkg.b", 400, 421, 1060, 791)  # gap = 1 < GAP_PX
+        r2 = WindowRect("com.pkg.b", 400, 415, 1060, 785)  # top=415 < r1.bottom=420 → overlap
         errors = validate_layout_rects([r1, r2], 400, 50, 1060, 800)
         self.assertTrue(any("overlap" in e or "touch" in e for e in errors), errors)
 

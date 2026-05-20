@@ -2,7 +2,7 @@
 
 Layout rules verified:
   - Every window is landscape-shaped (width >= height * LANDSCAPE_MIN_RATIO).
-  - No two windows overlap or touch (gap >= GAP_PX between all pairs).
+  - No two windows overlap (GAP_PX=0: touching is allowed; true overlap is not).
   - All windows are inside the right-pane (left 35% reserved for Termux).
   - All windows have unique bounds.
   - Termux and system packages are excluded.
@@ -156,7 +156,7 @@ class TestWindowCount(unittest.TestCase):
 # ── No overlap / no touch ─────────────────────────────────────────────────────
 
 class TestNoOverlapNoTouch(unittest.TestCase):
-    """No two windows may overlap or touch (gap >= GAP_PX)."""
+    """No two windows may overlap (GAP_PX=0: touching is allowed; true overlap is not)."""
 
     def _check(self, n, w=W, h=H):
         rects = calculate_landscape_blocks(_pkgs(n), w, h)
