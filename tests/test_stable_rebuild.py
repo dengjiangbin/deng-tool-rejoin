@@ -128,7 +128,7 @@ class TestPublicStates(unittest.TestCase):
         "Offline", "Preparing", "Background", "Warning", "Unknown",
         "Failed", "Layout",
     ]
-    _ALLOWED_PUBLIC = {"Layout", "Launching", "Online", "Reopening", "Failed",
+    _ALLOWED_PUBLIC = {"Layout", "Launching", "Relaunching", "Online", "Reopening", "Failed",
                        "No Heartbeat", "Dead"}
 
     def _get_display_map(self):
@@ -612,12 +612,12 @@ class TestPublicMenuItems(unittest.TestCase):
             self.assertNotIn("Webhook", label)
             self.assertNotIn("Captcha", label)
 
-    def test_edit_config_menu_has_post_launch_option_plus_back(self) -> None:
+    def test_edit_config_menu_has_screen_mode_option_plus_back(self) -> None:
         import agent.commands as cmd
         src = inspect.getsource(cmd._run_edit_config_menu)
         self.assertIn('"1. Package"', src)
         self.assertIn('"2. Private Server URL"', src)
-        self.assertIn('"3. Post-Launch Action"', src)
+        self.assertIn('"3. Screen Mode"', src)
         self.assertIn('"0. Back"', src)
         self.assertNotIn('"3. Webhook"', src)
         self.assertNotIn('"4. YesCaptcha"', src)

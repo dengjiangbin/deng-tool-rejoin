@@ -3,7 +3,7 @@
 Layout model
 ────────────
  ┌──────────────────────────────────────────────────────────────────┐
- │  Left panel (35%)                 │  Right pane (65%)            │
+ │  Left panel (50%)                 │  Right pane (50%)            │
  │  DENG Tool / Termux status        │  Roblox clone windows        │
  │  logo, package table, logs        │  (freeform, landscape-shaped)│
  └──────────────────────────────────────────────────────────────────┘
@@ -91,7 +91,7 @@ APP_CLONER_KEYS = {
 }
 
 # Left side reserved for DENG Tool / Termux status panel.
-TERMUX_LOG_FRACTION = 0.35          # 35% left → 65% right
+TERMUX_LOG_FRACTION = 0.50          # release layout: 50% left → 50% right
 RIGHT_PANE_FRACTION  = 1.0 - TERMUX_LOG_FRACTION
 
 # Landscape aspect ratio: height = width * LANDSCAPE_H_RATIO
@@ -557,16 +557,100 @@ def _detect_status_bar_height() -> int:
     return _status_bar_height_cache
 
 
-def _landscape_rows_for_count(count: int) -> int:
-    """Return the safe landscape row count for up to six packages."""
-    if count <= 2:
-        return 1
-    if count <= 4:
-        return 2
-    return 3
+LANDSCAPE_SLOT_ORDER: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+PORTRAIT_SLOT_ORDER: tuple[int, ...] = (7, 8, 9, 10, 1, 2, 3, 4, 5, 6)
 
 
-# ── Core landscape-block layout engine ───────────────────────────────────────
+def _slot_index_for_package(index: int, slot_order: tuple[int, ...]) -> int:
+    try:
+        return slot_order.index(index)
+    except ValueError:
+        return index - 1
+
+
+def _release_grid_rects(
+    packages: Iterable[str],
+    display_w: int,
+    display_h: int,
+    *,
+    mode: str,
+    left_fraction: float = TERMUX_LOG_FRACTION,
+) -> list[WindowRect]:
+    pkgs = [p for p in packages]
+    if not pkgs:
+        return []
+    W = max(1, int(display_w))
+    H = max(1, int(display_h))
+    configured_mode = str(mode or "landscape").strip().lower()
+    if configured_mode not in {"landscape", "portrait"}:
+        configured_mode = "landscape"
+    orientation = detect_layout_orientation(W, H)
+    top_inset = _detect_status_bar_height()
+    left_end = round(W * max(0.0, min(0.9, float(left_fraction))))
+    px0 = left_end
+    py0 = max(0, top_inset)
+    px1 = W
+    py1 = H
+
+    _log.info(
+        "[DENG_REJOIN_LAYOUT_ENGINE] engine=release_grid legacy_fallback_used=false"
+    )
+    _log.info(
+        "[DENG_REJOIN_LAYOUT_ORIENTATION] orientation=%s screen_w=%d screen_h=%d",
+        orientation, W, H,
+    )
+    _log.info(
+        "[DENG_REJOIN_LAYOUT_BORDER] detected_border_h=%d fallback_border_h=%d applied_top_y=%d",
+        top_inset, SAFE_TOP_INSET_PX, py0,
+    )
+
+    if configured_mode == "portrait":
+        cols, rows = 2, 5
+        slot_order = PORTRAIT_SLOT_ORDER
+        mode_label = "portrait"
+    else:
+        cols, rows = 3, 3
+        slot_order = LANDSCAPE_SLOT_ORDER
+        mode_label = "landscape"
+
+    capacity = cols * rows
+    if len(pkgs) > capacity:
+        raise ValueError(f"{mode_label} release grid supports up to {capacity} packages")
+
+    pane_w = max(_MIN_WIN_W * cols, px1 - px0)
+    pane_h = max(_MIN_WIN_H * rows, py1 - py0)
+    cell_w = max(_MIN_WIN_W, pane_w // cols)
+    cell_h = max(_MIN_WIN_H, pane_h // rows)
+    win_h = max(_MIN_WIN_H, min(cell_h, int(cell_w / LANDSCAPE_MIN_RATIO)))
+    rects: list[WindowRect] = []
+    for index, pkg in enumerate(pkgs, start=1):
+        slot = _slot_index_for_package(index, slot_order)
+        row = slot // cols
+        col = slot % cols
+        left = px0 + col * cell_w
+        top = py0 + row * cell_h
+        right = px1 if col == cols - 1 else min(px1, left + cell_w)
+        bottom = min(py1, top + win_h)
+        rects.append(WindowRect(pkg, left, top, right, bottom))
+
+    _log.info(
+        "[DENG_REJOIN_LAYOUT_GRID] mode=%s package_count=%d grid=%dx%d slot_order=%s "
+        "top_inset=%d screen_w=%d screen_h=%d termux_bounds=%s package_bounds=%s",
+        mode_label,
+        len(pkgs),
+        cols,
+        rows,
+        ",".join(str(x) for x in slot_order),
+        top_inset,
+        W,
+        H,
+        (0, 0, left_end, H),
+        [(r.left, r.top, r.right, r.bottom) for r in rects],
+    )
+    return rects
+
+
+# ── Release grid layout engine ────────────────────────────────────────────────
 
 def calculate_landscape_blocks(
     packages: Iterable[str],
@@ -577,176 +661,18 @@ def calculate_landscape_blocks(
     outer: int = OUTER_MARGIN,
     left_fraction: float = TERMUX_LOG_FRACTION,
 ) -> list[WindowRect]:
-    """Calculate freeform-window landscape blocks for Roblox packages.
+    """Compatibility wrapper for the release landscape grid.
 
-    Algorithm:
-    1. Left panel (35%) reserved for DENG/Termux — never touched.
-    2. Right pane = remaining 65% minus outer margins.
-    3. Target window aspect ratio: 16:9 (width:height).
-    4. PHASE 1: All windows at full pane width, 16:9 height, stacked vertically.
-       If total height fits → top-align the stack at the top of the pane.
-    5. PHASE 2: If single column is too tall, compress window height until
-       the stack fits. Continue only while the window remains landscape
-       (width >= height * LANDSCAPE_MIN_RATIO).
-    6. PHASE 3: If even compressed single-column windows would be too short
-       to remain landscape, use 2 columns with 16:9 windows.
-    7. PHASE 4: 3 columns (for very large N).
-    8. Validate all results; fall back to safer layout if validation fails.
-
-    All coordinates are absolute screen coordinates (ready for App Cloner XML).
+    The old adaptive phase cascade is intentionally gone from the live path.
+    This function now returns the fixed 3x3 landscape release grid only.
     """
-    pkgs = [p for p in packages]
-    n = len(pkgs)
-    if n == 0:
-        return []
-
-    # Screen bounds
-    W = max(1, int(display_w))
-    H = max(1, int(display_h))
-    g = max(1, int(gap))
-    om = max(0, int(outer))
-    orientation = detect_layout_orientation(W, H)
-    _log.debug(
-        "[DENG_REJOIN_LAYOUT_ORIENTATION] orientation=%s screen_w=%d screen_h=%d",
-        orientation, W, H,
+    return _release_grid_rects(
+        packages,
+        display_w,
+        display_h,
+        mode="landscape",
+        left_fraction=left_fraction,
     )
-
-    # Left panel reservation
-    left_end = round(W * max(0.1, min(0.9, float(left_fraction))))
-
-    # Right pane absolute bounds (with outer margins).
-    # [DENG_REJOIN_LAYOUT_SAFE_Y] probe_id=p-ea167faf5f
-    # The top of the right pane must never be below the Android status bar.
-    # Probe confirmed status bar = 25 px (mFrame=[0,0][1280,25]).
-    # _detect_status_bar_height() reads the live value from dumpsys and
-    # falls back to SAFE_TOP_INSET_PX if unavailable.
-    _sb_h = _detect_status_bar_height()
-    px0 = left_end + om           # left edge of pane
-    py0 = max(om, _sb_h)          # top edge of pane — at least below status bar
-    px1 = W - om                  # right edge of pane
-    py1 = H - om                  # bottom edge of pane
-    pane_w = max(_MIN_WIN_W, px1 - px0)
-    pane_h = max(_MIN_WIN_H, py1 - py0)
-    _log.debug(
-        "[DENG_REJOIN_LAYOUT_BORDER] detected_border_h=%d fallback_border_h=%d applied_top_y=%d",
-        _sb_h, SAFE_TOP_INSET_PX, py0,
-    )
-
-    if orientation == "landscape" and n <= 6:
-        cols = 2
-        rows = _landscape_rows_for_count(n)
-        usable_h = max(_MIN_WIN_H, py1 - py0)
-        cell_w = max(_MIN_WIN_W, (pane_w - g * (cols - 1)) // cols)
-        # Keep row height stable at one third of usable landscape height so
-        # future >6 layouts can extend without changing <=6 window sizing.
-        cell_h = max(_MIN_WIN_H, usable_h // 3)
-        rects: list[WindowRect] = []
-        for i, pkg in enumerate(pkgs):
-            row = i // cols
-            col = i % cols
-            x = px0 + col * (cell_w + g)
-            y = py0 + row * cell_h
-            rects.append(WindowRect(pkg, x, y, min(px1, x + cell_w), min(py1, y + cell_h)))
-        _log.debug(
-            "[DENG_REJOIN_LAYOUT_GRID] package_count=%d cols=%d rows=%d cell_w=%d cell_h=%d bounds=%s",
-            n, cols, rows, cell_w, cell_h,
-            [(r.left, r.top, r.right, r.bottom) for r in rects],
-        )
-        errors = validate_layout_rects(rects, px0, py0, px1, py1)
-        if not errors:
-            return rects
-        _log.debug("smart landscape grid validation failed: %s", errors)
-    elif orientation == "landscape":
-        _log.debug(
-            "[DENG_REJOIN_LAYOUT_GRID] package_count=%d cols=skeleton rows=skeleton cell_w=0 cell_h=0 bounds=[]",
-            n,
-        )
-    else:
-        _log.debug(
-            "[DENG_REJOIN_LAYOUT_GRID] package_count=%d cols=portrait_skeleton rows=portrait_skeleton cell_w=0 cell_h=0 bounds=[]",
-            n,
-        )
-
-    def _make_rects_single_col(win_h: int) -> list[WindowRect]:
-        """Stack N windows in one column with the given height."""
-        total_h = n * win_h + (n - 1) * g
-        y_start = py0  # top-aligned: start at top edge of pane
-        result = []
-        for i, pkg in enumerate(pkgs):
-            y = y_start + i * (win_h + g)
-            result.append(WindowRect(pkg, px0, y, px0 + pane_w, y + win_h))
-        return result
-
-    def _make_rects_grid(cols: int) -> list[WindowRect]:
-        """Lay out in a grid of `cols` columns, 16:9 windows."""
-        cell_w = (pane_w - g * (cols - 1)) // cols
-        win_h_target = round(cell_w * LANDSCAPE_H_RATIO)
-        rows = math.ceil(n / cols)
-        total_h = rows * win_h_target + (rows - 1) * g
-        y_start = py0  # top-aligned: start at top edge of pane
-        result = []
-        for i, pkg in enumerate(pkgs):
-            row = i // cols
-            col = i % cols
-            x = px0 + col * (cell_w + g)
-            y = y_start + row * (win_h_target + g)
-            result.append(WindowRect(pkg, x, y, x + cell_w, y + win_h_target))
-        return result
-
-    # ── PHASE 1: ideal 16:9 single column ────────────────────────────────
-    ideal_win_h = round(pane_w * LANDSCAPE_H_RATIO)
-    total_ideal = n * ideal_win_h + (n - 1) * g
-
-    if total_ideal <= pane_h:
-        rects = _make_rects_single_col(ideal_win_h)
-        errors = validate_layout_rects(rects, px0, py0, px1, py1)
-        if not errors:
-            _log.debug("landscape_blocks: phase1 (ideal 16:9 single-col), n=%d", n)
-            return rects
-        _log.debug("landscape_blocks: phase1 validation failed: %s", errors)
-
-    # ── PHASE 2: compressed single column ────────────────────────────────
-    # Maximum compression: make windows shorter until they still fit.
-    # Require: win_w >= win_h * LANDSCAPE_MIN_RATIO → min win_h = pane_w / LANDSCAPE_MIN_RATIO
-    min_landscape_h = max(_MIN_WIN_H, int(pane_w / LANDSCAPE_MIN_RATIO))
-    compressed_win_h = (pane_h - (n - 1) * g) // n if n > 0 else pane_h
-
-    if compressed_win_h >= min_landscape_h:
-        rects = _make_rects_single_col(compressed_win_h)
-        errors = validate_layout_rects(rects, px0, py0, px1, py1)
-        if not errors:
-            _log.debug("landscape_blocks: phase2 (compressed single-col h=%d), n=%d", compressed_win_h, n)
-            return rects
-        _log.debug("landscape_blocks: phase2 validation failed: %s", errors)
-
-    # ── PHASE 3: 2-column grid ────────────────────────────────────────────
-    for cols in (2, 3):
-        rects = _make_rects_grid(cols)
-        if not rects:
-            continue
-        errors = validate_layout_rects(rects, px0, py0, px1, py1)
-        if not errors:
-            _log.debug("landscape_blocks: phase3 (%d-col grid), n=%d", cols, n)
-            return rects
-        _log.debug("landscape_blocks: phase3 %d-col validation failed: %s", cols, errors)
-
-    # ── PHASE 4: emergency fallback — just spread evenly ─────────────────
-    # No further validation — at least they're unique and inside pane.
-    # Log at DEBUG only — public stdout must never see this.
-    _log.debug("landscape_blocks: all phases failed, using emergency spread for n=%d", n)
-    rows = math.ceil(math.sqrt(n))
-    cols = math.ceil(n / rows)
-    cell_w = max(_MIN_WIN_W, (pane_w - g * (cols - 1)) // cols)
-    cell_h = max(_MIN_WIN_H, (pane_h - g * (rows - 1)) // rows)
-    win_h = min(cell_h, round(cell_w * LANDSCAPE_H_RATIO))
-    result = []
-    for i, pkg in enumerate(pkgs):
-        row = i // cols
-        col = i % cols
-        x = px0 + col * (cell_w + g)
-        y = py0 + row * (cell_h + g)
-        result.append(WindowRect(pkg, x, y, x + cell_w, y + win_h))
-    return result
 
 
 # ── Legacy / compat wrappers ──────────────────────────────────────────────────
@@ -802,20 +728,20 @@ def calculate_split_layout(
     gap:                  int = GAP_PX,
     *,
     termux_log_fraction:  float = TERMUX_LOG_FRACTION,
+    screen_mode:          str = "landscape",
 ) -> list[WindowRect]:
-    """Reserve the left panel for DENG/Termux; place landscape blocks on the right.
+    """Reserve the left half for Termux; place packages in release grid.
 
     Returns absolute screen coordinates ready for App Cloner XML.
     """
     package_list = list(packages)
     if not package_list:
         return []
-    return calculate_landscape_blocks(
+    return _release_grid_rects(
         package_list,
-        display_w=max(1, int(width)),
-        display_h=max(1, int(height)),
-        gap=gap,
-        outer=OUTER_MARGIN,
+        max(1, int(width)),
+        max(1, int(height)),
+        mode=screen_mode,
         left_fraction=termux_log_fraction,
     )
 
@@ -1214,6 +1140,7 @@ def apply_layout_to_packages(
     gap:              int  = GAP_PX,
     write_xml:        bool = False,
     use_split_layout: bool = False,  # kept for compat; split is always used
+    screen_mode:      str = "landscape",
 ) -> tuple[list[str], list[dict[str, int | str]]]:
     """Calculate landscape block layout and optionally write App Cloner XML.
 
@@ -1228,7 +1155,7 @@ def apply_layout_to_packages(
     if not package_list:
         return ["No Roblox packages to lay out (all excluded or empty)."], []
 
-    rects = calculate_split_layout(package_list, display.width, display.height, gap)
+    rects = calculate_split_layout(package_list, display.width, display.height, gap, screen_mode=screen_mode)
 
     preview  = [rect.as_dict() for rect in rects]
     messages = [rect.preview_line(i) for i, rect in enumerate(rects, 1)]
@@ -1259,9 +1186,10 @@ def build_layout_preview(
     packages: Iterable[str],
     display:  DisplayInfo | None = None,
     gap:      int = GAP_PX,
+    screen_mode: str = "landscape",
 ) -> list[str]:
     disp  = display or detect_display_info()
-    rects = calculate_split_layout(list(packages), disp.width, disp.height, gap)
+    rects = calculate_split_layout(list(packages), disp.width, disp.height, gap, screen_mode=screen_mode)
     return [rect.preview_line(i) for i, rect in enumerate(rects, 1)]
 
 
@@ -1269,6 +1197,7 @@ def verify_split_layout(
     packages: Iterable[str],
     display:  DisplayInfo | None = None,
     gap:      int = GAP_PX,
+    screen_mode: str = "landscape",
 ) -> list[str]:
     disp         = display or detect_display_info()
     package_list = list(packages)
@@ -1278,7 +1207,7 @@ def verify_split_layout(
         f"Left pane (Termux): 0–{left_end}px ({int(TERMUX_LOG_FRACTION*100)}%)",
         f"Right pane (Roblox): {left_end}–{disp.width}px ({int(RIGHT_PANE_FRACTION*100)}%)",
     ]
-    rects = calculate_split_layout(package_list, disp.width, disp.height, gap)
+    rects = calculate_split_layout(package_list, disp.width, disp.height, gap, screen_mode=screen_mode)
     errors = validate_layout_rects(
         rects,
         left_end + OUTER_MARGIN,

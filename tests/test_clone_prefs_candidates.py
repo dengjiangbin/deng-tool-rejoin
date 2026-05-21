@@ -46,14 +46,17 @@ class CandidatesTests(unittest.TestCase):
         for expected in ("pkg_preferences.xml", "prefs.xml", "cloner_settings.xml", "settings.xml"):
             self.assertIn(expected, names)
 
-    def test_all_under_correct_data_directory(self) -> None:
+    def test_all_under_known_app_data_directories(self) -> None:
+        expected = {
+            "/data/data/com.example.app/shared_prefs"
+            if os.sep == "/" else
+            str(Path("/data/data") / "com.example.app" / "shared_prefs"),
+            "/data/user/0/com.example.app/shared_prefs"
+            if os.sep == "/" else
+            str(Path("/data/user/0") / "com.example.app" / "shared_prefs"),
+        }
         for p in wl.clone_prefs_candidates("com.example.app"):
-            self.assertEqual(
-                str(p.parent),
-                "/data/data/com.example.app/shared_prefs"
-                if os.sep == "/" else
-                str(Path("/data/data") / "com.example.app" / "shared_prefs"),
-            )
+            self.assertIn(str(p.parent), expected)
 
 
 class DirectWriterIteratesCandidatesTests(unittest.TestCase):

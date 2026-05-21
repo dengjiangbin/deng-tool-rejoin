@@ -311,7 +311,7 @@ def render_direct_install_bootstrap(
         'echo "DENG Tool: Rejoin Installing"\n'
         'echo "------------------------------"\n'
         'echo "Version: main-dev"\n'
-        'echo "=============================="\n'
+        'echo "------------------------------"\n'
         + "command -v curl >/dev/null 2>&1 || { echo \"Install curl first: pkg install -y curl\" >&2; exit 1; }\n"
         "command -v tar >/dev/null 2>&1 || { echo \"Install tar first: pkg install -y tar\" >&2; exit 1; }\n"
         "command -v python3 >/dev/null 2>&1 || { echo \"Install python first: pkg install -y python\" >&2; exit 1; }\n"

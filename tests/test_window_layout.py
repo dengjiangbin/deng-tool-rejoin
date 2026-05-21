@@ -334,30 +334,33 @@ class TestSmartLandscapeGrid(unittest.TestCase):
         self.assertEqual(rects[0].top, 25)
         self.assertEqual(rects[1].top, 25)
 
-    def test_one_two_packages_use_two_columns_one_row(self):
+    def test_one_two_three_packages_use_three_columns_one_row(self):
         one = self._rects(1)
         two = self._rects(2)
+        three = self._rects(3)
         self.assertEqual(len({r.top for r in one}), 1)
         self.assertEqual(len({r.top for r in two}), 1)
         self.assertEqual(len({r.left for r in two}), 2)
+        self.assertEqual(len({r.top for r in three}), 1)
+        self.assertEqual(len({r.left for r in three}), 3)
 
-    def test_three_four_packages_use_two_columns_two_rows(self):
-        three = self._rects(3)
+    def test_four_six_packages_fill_second_row(self):
         four = self._rects(4)
-        self.assertEqual(len({r.top for r in three}), 2)
-        self.assertEqual(len({r.top for r in four}), 2)
-        self.assertLessEqual(max(r.top for r in four), 25 + ((720 - 25) // 3))
-
-    def test_five_six_packages_use_two_columns_three_rows(self):
-        five = self._rects(5)
         six = self._rects(6)
-        self.assertEqual(len({r.top for r in five}), 3)
-        self.assertEqual(len({r.top for r in six}), 3)
-        self.assertEqual(len({r.left for r in six}), 2)
+        self.assertEqual(len({r.top for r in four}), 2)
+        self.assertEqual(len({r.top for r in six}), 2)
+        self.assertEqual(len({r.left for r in six}), 3)
 
-    def test_height_uses_one_third_of_usable_landscape_height(self):
+    def test_nine_packages_fill_three_by_three_order(self):
+        nine = self._rects(9)
+        self.assertEqual(len({r.top for r in nine}), 3)
+        self.assertEqual(len({r.left for r in nine}), 3)
+        self.assertEqual(nine[0].top, nine[1].top)
+        self.assertEqual(nine[3].left, nine[0].left)
+
+    def test_height_preserves_landscape_shape_inside_grid_slot(self):
         rects = self._rects(6, border=25)
-        self.assertEqual(rects[0].win_h, (720 - 25) // 3)
+        self.assertGreaterEqual(rects[0].win_w, rects[0].win_h * LANDSCAPE_MIN_RATIO)
 
     def test_termux_area_not_resized_or_covered(self):
         rects = self._rects(6)

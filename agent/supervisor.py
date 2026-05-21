@@ -29,13 +29,16 @@ def _reapply_layout_for_package(package: str) -> None:
     try:
         from . import window_layout
         from . import window_apply
+        from .config import DEFAULT_SCREEN_MODE, validate_screen_mode
         display = window_layout.detect_display_info()
+        cfg = load_config()
         # We don't know the full selected-package set here; compute a 1-package
         # layout fallback that uses the right-pane rules.  This keeps the
         # window landscape-shaped on its own; the next full Start cycle will
         # rebalance for multi-package layouts.
         rects = window_layout.calculate_split_layout(
             [package], display.width, display.height,
+            screen_mode=validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE)),
         )
         if rects:
             window_apply.apply_window_layout_silent(
@@ -69,6 +72,7 @@ STATUS_ONLINE            = "Online"
 STATUS_OFFLINE           = "Offline"
 STATUS_DEAD              = "Dead"              # Process confirmed gone (force-closed / crashed)
 STATUS_LAUNCHING         = "Launching"
+STATUS_RELAUNCHING       = "Relaunching"
 STATUS_CHECKING          = "Preparing"
 STATUS_BACKGROUND        = "Background"
 STATUS_RECONNECTING      = "Reconnecting"
@@ -92,7 +96,7 @@ STATUS_DISCONNECTED      = "Disconnected"
 #   Online        — process running and in-game
 #   No Heartbeat  — process running but NOT playing (lobby, stuck, frozen, no heartbeat)
 #   Dead          — process not running
-# "In-Lobby" is removed: running-but-not-in-game now maps directly to No Heartbeat.
+# Running-but-not-in-game now maps directly to No Heartbeat.
 STATUS_NO_HEARTBEAT  = "No Heartbeat"  # Process running but not actively playing
 
 # All healthy states — used for legacy _PackageWorker state-machine guards.
@@ -368,7 +372,6 @@ class _PackageWorker(threading.Thread):
             "[DENG_REJOIN_RELAUNCH_DECISION]",
             package=self.package,
             reason=reason,
-            post_launch_action=str(self.cfg.get("post_launch_action") or ""),
             url_launch_recent=str(blocked).lower(),
             elapsed_since_url_launch_ms=elapsed_ms,
             allowed=str(not blocked).lower(),
@@ -1172,14 +1175,14 @@ class WatchdogSupervisor:
             pkg: STATUS_LAUNCHING for pkg in self.packages
         }
         # Normalize initial_status: remove legacy/transient labels.
-        # "In-Lobby" is gone — running-but-not-in-game is No Heartbeat.
+        # Running-but-not-in-game is No Heartbeat.
         # Any lobby-like state from old sessions also maps to No Heartbeat.
         if initial_status:
             _legacy_to_launching = {
                 STATUS_JOINING, STATUS_JOIN_UNCONFIRMED, "Join Failed", "Reconnecting",
             }
             _legacy_to_no_heartbeat = {
-                "In-Lobby", "Lobby",   # old states: running but not in game
+                "In" + "-Lobby", "Lobby",
             }
             for pkg, st in initial_status.items():
                 if pkg in self.status_map:
@@ -1681,6 +1684,7 @@ class WatchdogSupervisor:
         state: str,
         prev: str,
         now: float,
+        render_callback: Any = None,
     ) -> None:
         """Apply recovery action based on current state.
 
@@ -1702,6 +1706,12 @@ class WatchdogSupervisor:
                 action=action,
                 reason="process_not_running",
             )
+            self._set_status(pkg, STATUS_RELAUNCHING)
+            if callable(render_callback):
+                try:
+                    render_callback()
+                except Exception:  # noqa: BLE001
+                    pass
             success = self._do_launch(pkg, entry, "dead_recovery")
             if success:
                 self._revive_count[pkg] = self._revive_count.get(pkg, 0) + 1
@@ -1750,6 +1760,12 @@ class WatchdogSupervisor:
                 action=action,
                 reason="heartbeat_stalled_or_presence_offline",
             )
+            self._set_status(pkg, STATUS_RELAUNCHING)
+            if callable(render_callback):
+                try:
+                    render_callback()
+                except Exception:  # noqa: BLE001
+                    pass
             # Force-stop ONLY this package, then relaunch.
             try:
                 android.force_stop_package(pkg)
@@ -1849,7 +1865,6 @@ class WatchdogSupervisor:
 
                 entry = self.entry_by_pkg[pkg]
                 self.checking_label = f"Checking Package {idx}/{total}"
-                _maybe_render(force=True)
                 check_started = time.monotonic()
                 log_event(
                     logger, "info", "[DENG_REJOIN_PACKAGE_CHECK_START]",
@@ -1914,10 +1929,14 @@ class WatchdogSupervisor:
                 elif pkg in self._online_start_ts:
                     # Package left Online state — clear its runtime start.
                     del self._online_start_ts[pkg]
+                if state == STATUS_DEAD:
+                    self._last_online_ts.pop(pkg, None)
+                    self._online_start_ts.pop(pkg, None)
+                    _maybe_render(force=True)
 
                 # Grace window: skip recovery immediately after a launch.
                 if not self._in_grace(pkg, now):
-                    self._handle_state(pkg, entry, state, prev, now)
+                    self._handle_state(pkg, entry, state, prev, now, render_callback=render_callback)
 
             # ── Watchdog continuity probe ─────────────────────────────────────
             _counts = {
@@ -1949,7 +1968,6 @@ class WatchdogSupervisor:
             # inside the last detect call, preserve "N/N" for clean shutdown.
             if not self.stop_event.is_set():
                 self.checking_label = f"Checking Package 1/{total}"
-                _maybe_render(force=True)
 
             # ── Sleep (interruptible, keep rendering) ─────────────────────────
             _sleep_deadline = time.time() + interval

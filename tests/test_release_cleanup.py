@@ -27,7 +27,13 @@ if str(PROJECT) not in sys.path:
 
 from agent.bootstrap_installer import render_direct_install_bootstrap
 from agent.commands import build_start_table
-from agent.supervisor import WatchdogSupervisor, STATUS_ONLINE, STATUS_DEAD, STATUS_NO_HEARTBEAT
+from agent.supervisor import (
+    WatchdogSupervisor,
+    STATUS_ONLINE,
+    STATUS_DEAD,
+    STATUS_NO_HEARTBEAT,
+    STATUS_RELAUNCHING,
+)
 
 
 def _script(sha: str = "a" * 64) -> str:
@@ -95,6 +101,77 @@ class TestInstallerShortSeparators(unittest.TestCase):
         idx_complete  = s.find("Install complete.")
         self.assertGreater(idx_complete, idx_sha_check,
                            "Install complete. must come after SHA verification")
+
+    def test_success_output_echo_order_is_exact(self) -> None:
+        s = _script()
+        expected = (
+            'echo "=============================="\n'
+            'echo "DENG Tool: Rejoin Installing"\n'
+            'echo "------------------------------"\n'
+            'echo "Version: main-dev"\n'
+            'echo "------------------------------"\n'
+        )
+        self.assertIn(expected, s)
+        self.assertIn(
+            'echo "Install complete."\n'
+            'echo "=============================="\n',
+            s,
+        )
+        self.assertNotIn("100%", s)
+        self.assertNotIn("spinner", s.lower())
+
+
+class TestReleaseGridLayouts(unittest.TestCase):
+    def _pkgs(self, count: int) -> list[str]:
+        return [f"com.moons.lite{i}" for i in range(1, count + 1)]
+
+    def test_landscape_grid_is_row_major_three_by_three(self) -> None:
+        from agent import window_layout as wl
+        with unittest.mock.patch("agent.window_layout._detect_status_bar_height", return_value=25):
+            rects = wl.calculate_split_layout(self._pkgs(9), 1280, 720, termux_log_fraction=0.50)
+        self.assertEqual([r.package for r in rects], self._pkgs(9))
+        self.assertEqual(rects[0].top, rects[1].top)
+        self.assertEqual(rects[1].top, rects[2].top)
+        self.assertEqual(rects[3].left, rects[0].left)
+        self.assertEqual(rects[6].left, rects[0].left)
+        self.assertGreaterEqual(rects[0].left, 640)
+
+    def test_portrait_grid_slot_order(self) -> None:
+        from agent import window_layout as wl
+        with unittest.mock.patch("agent.window_layout._detect_status_bar_height", return_value=25):
+            rects = wl.calculate_split_layout(
+                self._pkgs(10), 720, 1280, termux_log_fraction=0.50, screen_mode="portrait",
+            )
+        by_pkg = {r.package: r for r in rects}
+        self.assertLess(by_pkg["com.moons.lite7"].top, by_pkg["com.moons.lite1"].top)
+        self.assertEqual(by_pkg["com.moons.lite1"].left, by_pkg["com.moons.lite3"].left)
+        self.assertEqual(by_pkg["com.moons.lite10"].top, by_pkg["com.moons.lite9"].top)
+        self.assertGreater(by_pkg["com.moons.lite10"].left, by_pkg["com.moons.lite9"].left)
+
+
+class TestReleasePublicCleanup(unittest.TestCase):
+    def test_package_name_shortens_for_public_table(self) -> None:
+        table = build_start_table([(1, "com.moons.litesd", "User", "Online", "1s", "12MB")])
+        self.assertIn("..litesd", table)
+        self.assertNotIn("com.moons.litesd", table)
+
+    def test_dead_is_visible_before_relaunching(self) -> None:
+        pkg = "com.roblox.client"
+        entry = {"package": pkg, "enabled": True}
+        sup = WatchdogSupervisor([entry], {"supervisor": {}})
+        frames: list[str] = []
+        sup._set_status(pkg, STATUS_DEAD)
+        frames.append(sup.status_map[pkg])
+        with unittest.mock.patch.object(sup, "_do_launch", return_value=True):
+            sup._handle_state(
+                pkg,
+                entry,
+                STATUS_DEAD,
+                STATUS_ONLINE,
+                time.time(),
+                render_callback=lambda: frames.append(sup.status_map[pkg]),
+            )
+        self.assertEqual(frames[:2], [STATUS_DEAD, STATUS_RELAUNCHING])
 
 
 # ── TASK 2 — Start flow public state labels ───────────────────────────────────

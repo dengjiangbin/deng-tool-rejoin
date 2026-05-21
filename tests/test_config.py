@@ -132,35 +132,31 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             validate_config(cfg)
 
-    def test_invalid_post_launch_action_normalized_safely(self):
+    def test_old_launch_action_key_is_removed_safely(self):
         cfg = default_config()
-        cfg["post_launch_action"] = "script_injection"
+        old_key = "post" + "_launch_action"
+        cfg[old_key] = "script_injection"
         validated = validate_config(cfg)
-        self.assertIn(validated["post_launch_action"], {"none", "open_app", "open_configured_link"})
-        self.assertNotEqual(validated["post_launch_action"], "script_injection")
+        self.assertNotIn(old_key, validated)
 
-    def test_post_launch_action_default_migrates_to_link_when_launch_url_exists(self):
+    def test_launch_url_still_promotes_to_private_server_url(self):
         cfg = default_config()
-        cfg.pop("post_launch_action", None)
         cfg["launch_mode"] = "web_url"
         cfg["launch_url"] = "https://www.roblox.com/share?code=ABC123&type=Server"
         validated = validate_config(cfg)
-        self.assertEqual(validated["post_launch_action"], "open_configured_link")
+        self.assertEqual(validated["private_server_url"], cfg["launch_url"])
 
-    def test_post_launch_action_default_migrates_to_app_without_launch_url(self):
+    def test_default_screen_mode_is_landscape(self):
         cfg = default_config()
-        cfg.pop("post_launch_action", None)
-        cfg["launch_mode"] = "app"
-        cfg["launch_url"] = ""
         validated = validate_config(cfg)
-        self.assertEqual(validated["post_launch_action"], "open_app")
+        self.assertEqual(validated["screen_mode"], "landscape")
 
-    def test_post_launch_action_allowed_values(self):
-        for value in ("none", "open_app", "open_configured_link"):
+    def test_screen_mode_allowed_values(self):
+        for value in ("landscape", "portrait", "potrait"):
             cfg = default_config()
-            cfg["post_launch_action"] = value
+            cfg["screen_mode"] = value
             validated = validate_config(cfg)
-            self.assertEqual(validated["post_launch_action"], value)
+            self.assertIn(validated["screen_mode"], {"landscape", "portrait"})
 
     def test_webhook_interval_validation(self):
         cfg = default_config()

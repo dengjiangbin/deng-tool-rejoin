@@ -52,19 +52,8 @@ class ConfigError(ValueError):
 SELECTED_PACKAGE_MODES = {"single", "multiple"}
 WEBHOOK_MODES = {"new_message", "edit_message"}
 AUTO_RESIZE_MODES = {"off", "auto", "preview"}
-POST_LAUNCH_ACTION_NONE = "none"
-POST_LAUNCH_ACTION_OPEN_APP = "open_app"
-POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK = "open_configured_link"
-POST_LAUNCH_ACTIONS = {
-    POST_LAUNCH_ACTION_NONE,
-    POST_LAUNCH_ACTION_OPEN_APP,
-    POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
-}
-POST_LAUNCH_ACTION_LABELS = {
-    POST_LAUNCH_ACTION_NONE: "None",
-    POST_LAUNCH_ACTION_OPEN_APP: "Open Roblox app only",
-    POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK: "Open configured Roblox link",
-}
+SCREEN_MODES = {"landscape", "portrait"}
+DEFAULT_SCREEN_MODE = "landscape"
 
 
 def utc_now() -> str:
@@ -121,9 +110,9 @@ def default_config() -> dict[str, Any]:
             "max_restart_attempts_per_hour": 10,
         },
         "selected_package_mode": "single",
+        "screen_mode": DEFAULT_SCREEN_MODE,
         "launch_mode": "app",
         "launch_url": "",
-        "post_launch_action": POST_LAUNCH_ACTION_OPEN_APP,
         "webhook_enabled": False,
         "webhook_url": "",
         "webhook_mode": "new_message",
@@ -204,33 +193,6 @@ def _as_bool(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
     return bool(value)
-
-
-def post_launch_action_label(value: Any) -> str:
-    cleaned = validate_post_launch_action(value, fallback=POST_LAUNCH_ACTION_OPEN_APP)
-    return POST_LAUNCH_ACTION_LABELS[cleaned]
-
-
-def validate_post_launch_action(value: Any, *, fallback: str = POST_LAUNCH_ACTION_OPEN_APP) -> str:
-    fallback = fallback if fallback in POST_LAUNCH_ACTIONS else POST_LAUNCH_ACTION_OPEN_APP
-    cleaned = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-    aliases = {
-        "": fallback,
-        "no": POST_LAUNCH_ACTION_NONE,
-        "off": POST_LAUNCH_ACTION_NONE,
-        "disabled": POST_LAUNCH_ACTION_NONE,
-        "app": POST_LAUNCH_ACTION_OPEN_APP,
-        "open_roblox": POST_LAUNCH_ACTION_OPEN_APP,
-        "open_roblox_app": POST_LAUNCH_ACTION_OPEN_APP,
-        "link": POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
-        "url": POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
-        "open_link": POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
-        "open_url": POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
-        "configured_link": POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
-        "open_configured_url": POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
-    }
-    cleaned = aliases.get(cleaned, cleaned)
-    return cleaned if cleaned in POST_LAUNCH_ACTIONS else fallback
 
 
 USERNAME_SOURCES = {
@@ -486,12 +448,28 @@ def _as_int(name: str, value: Any, minimum: int | None = None, maximum: int | No
     return number
 
 
+def validate_screen_mode(value: Any) -> str:
+    cleaned = str(value or DEFAULT_SCREEN_MODE).strip().lower()
+    aliases = {
+        "land": "landscape",
+        "landscape_mode": "landscape",
+        "potrait": "portrait",
+        "port": "portrait",
+        "portrait_mode": "portrait",
+    }
+    cleaned = aliases.get(cleaned, cleaned)
+    return cleaned if cleaned in SCREEN_MODES else DEFAULT_SCREEN_MODE
+
+
 def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool = True) -> dict[str, Any]:
     input_config = input_config or {}
     source_has_packages = bool(input_config.get("roblox_packages"))
-    source_has_post_launch_action = "post_launch_action" in input_config
     merged = default_config()
     merged.update(input_config)
+    # Old private-test builds exposed a separate launch-action switch. Release behavior is
+    # now canonical: configured private URL -> URL launch, blank URL -> app-only.
+    # Drop the stale key on every save/load so it cannot reappear in public UI.
+    merged.pop("post" + "_launch_action", None)
 
     # ── Legacy migration ────────────────────────────────────────────────────
     # Migrate old-style launcher dict with intent_type (from older versions).
@@ -531,6 +509,7 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     if len(active_entries) > 1:
         selected_package_mode = "multiple"
     merged["selected_package_mode"] = selected_package_mode
+    merged["screen_mode"] = validate_screen_mode(merged.get("screen_mode"))
     pd_default = default_config()["package_detection"]
     raw_pd = merged.get("package_detection")
     if not isinstance(raw_pd, dict):
@@ -550,7 +529,6 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged["package_detection_hints"] = list(package_detection["hints"])
     merged["package_detection"] = package_detection
 
-    raw_launch_url_for_post_action_migration = str(merged.get("launch_url") or "").strip()
     launch_mode = str(merged.get("launch_mode", "app")).strip().lower()
     if launch_mode not in LAUNCH_MODES:
         raise ConfigError("launch_mode must be one of: app, deeplink, web_url")
@@ -578,22 +556,6 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged["private_server_url"] = ""
     if _psu_raw:
         merged["private_server_url"] = _validate_optional_private_server_url(_psu_raw, allow_uncertain=allow_uncertain_url)
-
-    has_configured_launch_link = bool(
-        str(raw_launch_url_for_post_action_migration or merged.get("launch_url") or merged.get("private_server_url") or "").strip()
-    )
-    post_launch_fallback = (
-        POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK
-        if has_configured_launch_link
-        else POST_LAUNCH_ACTION_OPEN_APP
-    )
-    if source_has_post_launch_action:
-        merged["post_launch_action"] = validate_post_launch_action(
-            merged.get("post_launch_action"),
-            fallback=post_launch_fallback,
-        )
-    else:
-        merged["post_launch_action"] = post_launch_fallback
 
     merged["auto_rejoin_enabled"] = _as_bool(merged.get("auto_rejoin_enabled"))
     merged["root_mode_enabled"] = _as_bool(merged.get("root_mode_enabled"))

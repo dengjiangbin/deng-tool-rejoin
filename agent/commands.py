@@ -15,13 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from . import account_detect, android, db, root_access, safe_io
-from .banner import print_banner
+from .banner import banner_text, print_banner
 from .config import (
     ConfigError,
-    POST_LAUNCH_ACTION_NONE,
-    POST_LAUNCH_ACTION_OPEN_APP,
-    POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
-    POST_LAUNCH_ACTIONS,
+    DEFAULT_SCREEN_MODE,
     default_config,
     effective_private_server_url,
     enabled_package_entries,
@@ -32,7 +29,6 @@ from .config import (
     normalize_package_detection_hint,
     package_display_name,
     package_entry,
-    post_launch_action_label,
     MAPPING_STATUSES,
     safe_config_view,
     save_config,
@@ -42,6 +38,7 @@ from .config import (
     validate_package_detection_hints,
     validate_package_entries,
     validate_package_name,
+    validate_screen_mode,
     validate_username_source,
 )
 from .constants import (
@@ -742,8 +739,11 @@ def _launch_mode_label(value: str) -> str:
     }.get(value, value)
 
 
-def _post_launch_action_label(value: Any) -> str:
-    return post_launch_action_label(value)
+def _screen_mode_label(value: Any) -> str:
+    return {
+        "landscape": "Landscape",
+        "portrait": "Portrait",
+    }[validate_screen_mode(value)]
 
 
 def _has_configured_launch_link(config_data: dict[str, Any], entries: list[dict[str, Any]] | None = None) -> bool:
@@ -756,21 +756,6 @@ def _has_configured_launch_link(config_data: dict[str, Any], entries: list[dict[
             except Exception:  # noqa: BLE001
                 continue
     return bool(str(config_data.get("launch_url") or config_data.get("private_server_url") or "").strip())
-
-
-def _runtime_config_for_post_launch_action(config_data: dict[str, Any], action: str) -> dict[str, Any]:
-    runtime = dict(config_data)
-    if action in {POST_LAUNCH_ACTION_NONE, POST_LAUNCH_ACTION_OPEN_APP}:
-        runtime["launch_mode"] = "app"
-        runtime["launch_url"] = ""
-        runtime["private_server_url"] = ""
-        runtime["roblox_packages"] = [
-            {**entry, "private_server_url": ""}
-            for entry in validate_package_entries(
-                config_data.get("roblox_packages") or [config_data.get("roblox_package", DEFAULT_ROBLOX_PACKAGE)]
-            )
-        ]
-    return runtime
 
 
 def _package_list_label(packages: list[Any]) -> str:
@@ -792,6 +777,19 @@ def _package_username_display(entry: dict[str, Any]) -> str:
     """Username for package menus / tables — empty becomes Unknown."""
     u = validate_account_username(entry.get("account_username", ""))
     return u if u else "Unknown"
+
+
+def _short_package_display(package: Any) -> str:
+    """Short public table package display; never changes internal package IDs."""
+    raw = str(package or "").strip()
+    if not raw:
+        return ""
+    if "." in raw:
+        tail = raw.rsplit(".", 1)[-1] or raw
+        return f"..{tail}"
+    if len(raw) > 14:
+        return f"..{raw[-12:]}"
+    return raw
 
 
 def _hint_list_label(hints: list[str]) -> str:
@@ -929,6 +927,62 @@ def _refresh_detected_fields(config_data: dict[str, Any]) -> dict[str, Any]:
     return config_data
 
 
+def _enforce_termux_left_layout(config_data: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Resize Termux to the left 50% pane, silently, with probe logging."""
+    result: dict[str, Any] = {}
+    try:
+        from . import termux_minimize as _tm
+        from .logger import configure_logging, log_event
+
+        cfg = config_data or {}
+        frac = float(cfg.get("termux_dock_fraction", 0.50))
+        frac = 0.50 if abs(frac - 0.50) > 0.001 else frac
+        before = None
+        try:
+            before = _tm._read_back_termux_bounds()
+        except Exception:  # noqa: BLE001
+            before = None
+        res = _tm.minimize_termux_to_dock(fraction=frac)
+        result = res.as_dict()
+        logger = configure_logging()
+        screen_w = screen_h = 0
+        if res.display:
+            screen_w, screen_h = res.display
+        log_event(
+            logger,
+            "info",
+            "[DENG_REJOIN_TERMUX_LAYOUT]",
+            screen_w=screen_w,
+            screen_h=screen_h,
+            termux_package="com.termux",
+            desired_bounds=res.desired or "",
+            actual_before=before or "",
+            actual_after=res.actual or "",
+            success=str(bool(res.ok)).lower(),
+            method=res.method or res.reason or "",
+        )
+    except Exception as exc:  # noqa: BLE001
+        try:
+            from .logger import configure_logging, log_event
+            log_event(
+                configure_logging(),
+                "info",
+                "[DENG_REJOIN_TERMUX_LAYOUT]",
+                screen_w=0,
+                screen_h=0,
+                termux_package="com.termux",
+                desired_bounds="",
+                actual_before="",
+                actual_after="",
+                success="false",
+                method=f"error: {exc}",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        result = {"ok": False, "skipped": True, "reason": str(exc)[:160]}
+    return result
+
+
 def _print_config_summary(config_data: dict[str, Any]) -> None:
     cfg = safe_config_view(validate_config(config_data))
     entries = validate_package_entries(cfg["roblox_packages"])
@@ -948,7 +1002,7 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print("Launch:")
     print(f"  Mode: {_launch_mode_label(cfg['launch_mode'])}")
     print(f"  URL: {_safe_url_label(cfg['launch_url'])}")
-    print(f"  Post-Launch Action: {_post_launch_action_label(cfg['post_launch_action'])}")
+    print(f"  Screen Mode: {_screen_mode_label(cfg.get('screen_mode', DEFAULT_SCREEN_MODE))}")
     print()
     print("License:")
     print(f"  Key: {cfg.get('license_key') or 'Not set'}")
@@ -957,7 +1011,7 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print("Auto Resize:")
     print("  Automatic based on selected package count and device DPI")
     if len(enabled_entries) > 1:
-        print("  Multi-package: 35% left reserved for Termux status panel, 65% right for Roblox")
+        print("  Multi-package: 50% left reserved for Termux status panel, 50% right for Roblox")
 
 
 def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejoin Setup") -> None:
@@ -968,7 +1022,7 @@ def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejo
     print(f"1. Device Name: {cfg['device_name']}")
     print(f"2. Roblox Package: {cfg['roblox_package']}")
     print(f"3. Private Server URL: {_safe_url_label(cfg['launch_url'])}")
-    print(f"4. Post-Launch Action: {_post_launch_action_label(cfg['post_launch_action'])}")
+    print(f"4. Screen Mode: {_screen_mode_label(cfg.get('screen_mode', DEFAULT_SCREEN_MODE))}")
     print(f"5. Auto Rejoin: {_yes_no(cfg['auto_rejoin_enabled'])}")
     print(f"6. Reconnect Delay: {cfg['reconnect_delay_seconds']} seconds")
     print(f"7. Root Mode: {_yes_no(cfg['root_mode_enabled'])}")
@@ -1596,33 +1650,30 @@ def _setup_webhook_interval(draft: dict[str, Any]) -> None:
             print(exc)
 
 
-def _setup_post_launch_action(draft: dict[str, Any]) -> None:
+def _setup_screen_mode(draft: dict[str, Any]) -> None:
     print()
-    print("Post-Launch Action")
-    print("1. None")
-    print("2. Open Roblox app only")
-    print("3. Open configured Roblox link")
-    current = str(draft.get("post_launch_action") or POST_LAUNCH_ACTION_OPEN_APP)
+    print("Screen Mode")
+    print("1. Landscape")
+    print("2. Portrait")
+    current = validate_screen_mode(draft.get("screen_mode", DEFAULT_SCREEN_MODE))
     default = {
-        POST_LAUNCH_ACTION_NONE: "1",
-        POST_LAUNCH_ACTION_OPEN_APP: "2",
-        POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK: "3",
-    }.get(current, "2")
+        "landscape": "1",
+        "portrait": "2",
+    }.get(current, "1")
     choices = {
-        "1": POST_LAUNCH_ACTION_NONE,
-        "2": POST_LAUNCH_ACTION_OPEN_APP,
-        "3": POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
-        POST_LAUNCH_ACTION_NONE: POST_LAUNCH_ACTION_NONE,
-        POST_LAUNCH_ACTION_OPEN_APP: POST_LAUNCH_ACTION_OPEN_APP,
-        POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK: POST_LAUNCH_ACTION_OPEN_CONFIGURED_LINK,
+        "1": "landscape",
+        "2": "portrait",
+        "landscape": "landscape",
+        "portrait": "portrait",
+        "potrait": "portrait",
     }
     while True:
-        raw = _prompt("Choose post-launch action", default).strip().lower()
-        action = choices.get(raw.replace("-", "_").replace(" ", "_"))
-        if action in POST_LAUNCH_ACTIONS:
-            draft["post_launch_action"] = action
+        raw = _prompt("Choose screen mode", default).strip().lower()
+        mode = choices.get(raw.replace("-", "_").replace(" ", "_"))
+        if mode:
+            draft["screen_mode"] = mode
             return
-        print("Choose 1, 2, or 3.")
+        print("Choose 1 or 2.")
 
 
 def _setup_yescaptcha_key(draft: dict[str, Any]) -> None:
@@ -2335,17 +2386,17 @@ def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
     return draft
 
 
-def _config_menu_post_launch_action(draft: dict[str, Any]) -> dict[str, Any]:
+def _config_menu_screen_mode(draft: dict[str, Any]) -> dict[str, Any]:
     if not _is_interactive():
         return draft
     print()
     print("--------------------------------")
-    print("Post-Launch Action")
+    print("Screen Mode")
     print("--------------------------------")
-    print(f"Current: {_post_launch_action_label(draft.get('post_launch_action'))}")
-    _setup_post_launch_action(draft)
+    print(f"Current: {_screen_mode_label(draft.get('screen_mode', DEFAULT_SCREEN_MODE))}")
+    _setup_screen_mode(draft)
     draft = save_config(draft)
-    print("Post-Launch Action Saved.")
+    print("Screen Mode Saved.")
     return draft
 
 
@@ -2567,7 +2618,7 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
         print("First Time Setup Config")
         print()
         print("This will prepare your device for DENG Tool: Rejoin.")
-        print("You will set Roblox packages (scan or manual), optional private URL, webhook, post-launch action, then save.")
+        print("You will set Roblox packages (scan or manual), optional private URL, screen mode, webhook, then save.")
         print("Package detection scans installed apps; manual entry is fallback.")
         print("Usernames are display-only in the Start table — Unknown is OK.")
         print()
@@ -2584,10 +2635,10 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     print("You will set:")
     print("  1. Roblox package / clone app (pick from detection, or manual fallback)")
     print("  2. Roblox public / private server link")
-    print("  3. Discord webhook setup")
-    print("  4. Phone snapshot for webhook (only when webhook is enabled)")
-    print("  5. Webhook info interval (only when webhook is enabled)")
-    print("  6. Post-launch action")
+    print("  3. Screen mode")
+    print("  4. Discord webhook setup")
+    print("  5. Phone snapshot for webhook (only when webhook is enabled)")
+    print("  6. Webhook info interval (only when webhook is enabled)")
     print("  7. Save and start")
     print()
     print("Package detection:")
@@ -2607,15 +2658,15 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     draft["selected_package_mode"] = "multiple" if len(active_entries) > 1 else "single"
     print("\nStep 2 of 7: Roblox Public / Private Server Link")
     _setup_launch_link(draft)
-    print("\nStep 3 of 7: Discord Webhook Setup")
+    print("\nStep 3 of 7: Screen Mode")
+    _setup_screen_mode(draft)
+    print("\nStep 4 of 7: Discord Webhook Setup")
     _setup_webhook(draft)
     if draft.get("webhook_enabled"):
-        print("\nStep 4 of 7: Phone Snapshot For Webhook")
+        print("\nStep 5 of 7: Phone Snapshot For Webhook")
         _setup_snapshot(draft)
-        print("\nStep 5 of 7: Webhook Info Interval")
+        print("\nStep 6 of 7: Webhook Info Interval")
         _setup_webhook_interval(draft)
-    print("\nStep 6 of 7: Post-Launch Action")
-    _setup_post_launch_action(draft)
     print("\nStep 7 of 7: Save And Start")
     draft["first_setup_completed"] = True
     try:
@@ -2639,7 +2690,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("--------------------------------")
         print("1. Package")
         print("2. Private Server URL")
-        print("3. Post-Launch Action")
+        print("3. Screen Mode")
         print("0. Back")
         print("--------------------------------")
         print("\nCurrent settings:")
@@ -2655,7 +2706,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("--------------------------------")
         print("1. Package")
         print("2. Private Server URL")
-        print("3. Post-Launch Action")
+        print("3. Screen Mode")
         print("0. Back")
         print("--------------------------------")
         choice = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -2672,7 +2723,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         elif choice == "2":
             draft = _config_menu_launch_link(draft)
         elif choice == "3":
-            draft = _config_menu_post_launch_action(draft)
+            draft = _config_menu_screen_mode(draft)
         else:
             print("Please choose 1-3 or 0.")
             safe_io.press_enter()
@@ -2981,7 +3032,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"  Detection hints: {_hint_list_label(cfg['package_detection_hints'])}")
     print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
     print(f"  Launch URL: {_safe_url_label(cfg.get('launch_url'))}")
-    print(f"  Post-Launch Action: {_post_launch_action_label(cfg.get('post_launch_action'))}")
+    print(f"  Screen mode: {_screen_mode_label(cfg.get('screen_mode', DEFAULT_SCREEN_MODE))}")
     print()
     print("Rejoin Settings")
     print(f"  First setup completed: {'Yes' if cfg['first_setup_completed'] else 'No'}")
@@ -3104,6 +3155,7 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Ready":             _ANSI_YELLOW,
         "Starting":          _ANSI_YELLOW,
         "Launching":         _ANSI_YELLOW,
+        "Relaunching":       _ANSI_YELLOW,
         "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
         "No Heartbeat":      _ANSI_RED,      # running but not playing normally
@@ -3154,7 +3206,7 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
     headers = ("#", "Package", "Username", "State", "Runtime", "Usage")
     str_rows = [
         (
-            str(r[0]), str(r[1]), str(r[2]), str(r[3]),
+            str(r[0]), _short_package_display(r[1]), str(r[2]), str(r[3]),
             str(r[4]) if len(r) > 4 else "",
             str(r[5]) if len(r) > 5 else "",
         )
@@ -3234,6 +3286,7 @@ _STATE_TO_SUMMARY: dict[str, str] = {
     ("Join" + "ing"):    "launching",
     "Reconnecting":      "reconnecting",
     "Launching":         "launching",
+    "Relaunching":       "reconnecting",
     "Failed":            "failed",
     "Join Failed":       "failed",
     "Dead":              "dead",           # process confirmed gone
@@ -3329,34 +3382,48 @@ def _prepare_automatic_layout(
         # the Termux pane on a 720 × 1280 phone — fixed by keeping the two
         # fractions in lock-step.
         _dock_frac = float(cfg.get("termux_dock_fraction", 0.50))
+        _screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
         filtered_packages = [p for p in packages if not window_layout._is_layout_excluded(p)]
         rects = window_layout.calculate_split_layout(
             filtered_packages,
             display.width, display.height,
             termux_log_fraction=_dock_frac,
+            screen_mode=_screen_mode,
         )
 
-        # ── [DENG_REJOIN_LAYOUT_CALC] — emitted at INFO so it lands in probe
+        # ── release grid probe — emitted at INFO so it lands in probe
         try:
             from . import window_layout as _wl
             _orient = _wl.detect_layout_orientation(display.width, display.height)
             _sb_h   = _wl._detect_status_bar_height()
             _left_end = round(display.width * max(0.1, min(0.9, float(_dock_frac))))
+            if _screen_mode == "portrait":
+                _cols, _rows = 2, 5
+                _slot_order = "7,8,9,10,1,2,3,4,5,6"
+            else:
+                _cols, _rows = 3, 3
+                _slot_order = "1,2,3,4,5,6,7,8,9"
             _pane_w = max(160, display.width - _left_end)
             _usable_h = max(90, display.height - _sb_h)
-            if _orient == "landscape" and len(filtered_packages) <= 6:
-                _cols = 2
-                _rows = max(1, (len(filtered_packages) + 1) // 2)
-                _cell_w = max(160, (_pane_w - 1) // _cols)
-                _cell_h = max(90, _usable_h // 3)
-            else:
-                _cols, _rows, _cell_w, _cell_h = 1, len(filtered_packages), _pane_w, 0
+            _cell_w = max(160, _pane_w // _cols)
+            _cell_h = max(90, _usable_h // _rows)
             _layout_log.info(
-                "[DENG_REJOIN_LAYOUT_CALC] package_count=%d orientation=%s"
-                " cols=%d rows=%d screen_w=%d screen_h=%d top_inset=%d"
-                " cell_w=%d cell_h=%d",
-                len(filtered_packages), _orient, _cols, _rows,
-                display.width, display.height, _sb_h, _cell_w, _cell_h,
+                "[DENG_REJOIN_SCREEN_MODE] configured=%s detected_orientation=%s applied_mode=%s root_available=%s",
+                _screen_mode, _orient, _screen_mode, str(android.detect_root().available).lower(),
+            )
+            _layout_log.info(
+                "[DENG_REJOIN_LAYOUT_GRID] mode=%s package_count=%d grid=%dx%d slot_order=%s "
+                "top_inset=%d screen_w=%d screen_h=%d termux_bounds=%s package_bounds=%s",
+                _screen_mode,
+                len(filtered_packages),
+                _cols,
+                _rows,
+                _slot_order,
+                _sb_h,
+                display.width,
+                display.height,
+                (0, 0, _left_end, display.height),
+                [(r.left, r.top, r.right, r.bottom) for r in rects],
             )
         except Exception:  # noqa: BLE001
             pass
@@ -3491,6 +3558,7 @@ def _verify_layout_post_launch(
             [e["package"] for e in entries if not window_layout._is_layout_excluded(e["package"])],
             display.width, display.height,
             termux_log_fraction=_dock_frac2,
+            screen_mode=validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE)),
         )
         from . import window_apply
         results = window_apply.apply_window_layout(
@@ -3647,6 +3715,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     try:
         cfg = load_config()
         cfg = _ensure_install_id_saved(cfg)
+        _enforce_termux_left_layout(cfg)
 
         # ── License gate ─────────────────────────────────────────────────────
         if not keystore.DEV_MODE:
@@ -3723,7 +3792,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             print(f"Could not create Start lock: {exc}")
             return 1
 
-        # Start launch selection is now driven by URL presence, not post_launch_action gating.
+        # Start launch selection is driven only by URL presence.
         # [DENG_REJOIN_PRIVATE_URL_LAUNCH] probe_id=p-ea167faf5f
         # Blank URL launches app-only; configured URL uses the private-server launcher.
         runtime_cfg = cfg
@@ -3816,7 +3885,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 return "RAM: Unknown"
 
         def _render_phase(_unused_note: str = "") -> None:
-            """Clear + redraw the dashboard with the current phase per package.
+            """Atomically redraw the dashboard with the current phase per package.
 
             Shows only: logo + table + available RAM.
             State labels in the table already describe what is happening;
@@ -3825,24 +3894,23 @@ def cmd_start(args: argparse.Namespace) -> int:
             Uses clear_scrollback=True on every call so old banner/table lines
             from prior phases never bleed through on slow Termux terminals.
             """
-            _clear_terminal(clear_scrollback=True)
-            print_banner(use_color=use_color)
-            print()
             rows = [
                 (i + 1, e["package"], _account_username_for_table(e),
                  phase.get(e["package"], "Preparing"), "", "")
                 for i, e in enumerate(entries)
             ]
-            print(build_start_table(rows, use_color=use_color))
+            lines = [banner_text(use_color=use_color), "", build_start_table(rows, use_color=use_color)]
             try:
                 ram = _get_ram_label()
                 if ram:
-                    print()
+                    lines.append("")
                     for _ram_line in ram.split("\n"):
-                        print(f"  {_ram_line}")
+                        lines.append(f"  {_ram_line}")
             except Exception:  # noqa: BLE001
                 pass
-            print(flush=True)
+            _clear_terminal(clear_scrollback=True)
+            sys.stdout.write("\n".join(lines) + "\n")
+            sys.stdout.flush()
 
         def _set_all_phase(label: str, note: str = "") -> None:
             for pkg in phase:
@@ -3976,14 +4044,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         try:
             _dock_enabled = bool(cfg.get("termux_dock_enabled", True))
             if _dock_enabled:
-                from . import termux_minimize as _tm  # noqa: PLC0415
-                _frac = cfg.get("termux_dock_fraction", 0.50)
-                _res = _tm.minimize_termux_to_dock(fraction=float(_frac))
-                _termux_minimize_result = _res.as_dict()
-                _start_log.debug(
-                    "termux_minimize: ok=%s method=%s task=%s desired=%s actual=%s",
-                    _res.ok, _res.method, _res.task_id, _res.desired, _res.actual,
-                )
+                _termux_minimize_result = _enforce_termux_left_layout(cfg)
+                _start_log.debug("termux_minimize: %s", _termux_minimize_result)
             else:
                 _termux_minimize_result = {"ok": False, "skipped": True,
                                            "reason": "disabled by config"}
@@ -4252,6 +4314,8 @@ def cmd_start(args: argparse.Namespace) -> int:
             "No Heartbeat":     "No Heartbeat",
             "Online":           "Online",
             "Dead":             "Dead",
+            "Relaunching":       "Relaunching",
+            "Launching":         "Launching",
             # Transient post-launch / startup → Launching
             "Preparing":        "Launching",
             "Unknown":          "Launching",
@@ -4260,7 +4324,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             "In Server":        "Online",
             "Background":       "Online",
             "Warning":          "Online",
-            # Lobby = app open but not in game → No Heartbeat (In-Lobby removed)
+            # App open but not in game -> No Heartbeat.
             "Lobby":            "No Heartbeat",
             # Recovery / disconnect states
             "Reconnecting":     "No Heartbeat",
@@ -4318,14 +4382,12 @@ def cmd_start(args: argparse.Namespace) -> int:
                 except Exception:  # noqa: BLE001
                     return "0MB"
 
-            _clear_terminal(clear_scrollback=True)
-            print_banner(use_color=use_color)
-            print()
+            lines = [banner_text(use_color=use_color), ""]
             ram_label = _get_ram_label()
             if ram_label:
                 for _ram_line in ram_label.split("\n"):
-                    print(f"  {_ram_line}")
-                print()
+                    lines.append(f"  {_ram_line}")
+                lines.append("")
             live_rows = [
                 (i + 1, e["package"], _account_username_for_table(e),
                  _STATE_DISPLAY_MAP.get(
@@ -4336,14 +4398,10 @@ def cmd_start(args: argparse.Namespace) -> int:
                  _get_usage(e["package"]))
                 for i, e in enumerate(entries)
             ]
-            print(build_start_table(live_rows, use_color=use_color))
-            print(flush=True)
-
-        # One-shot scrollback clear at the prep→supervisor transition so the
-        # last "Waiting" prep screen is completely gone before the live
-        # dashboard takes over.  Prevents any remaining prep-phase text from
-        # being visible above the first _live_dashboard frame.
-        _clear_terminal(clear_scrollback=True)
+            lines.append(build_start_table(live_rows, use_color=use_color))
+            _clear_terminal(clear_scrollback=False)
+            sys.stdout.write("\n".join(lines) + "\n")
+            sys.stdout.flush()
 
         # Use 3-second display interval (like Kaeru's blinking real-time table).
         try:
@@ -4517,7 +4575,12 @@ def cmd_support_bundle(args: argparse.Namespace) -> int:
                 validate_layout_rects,
             )
             disp_ = detect_display_info()
-            rects = calculate_split_layout(packages, disp_.width, disp_.height)
+            rects = calculate_split_layout(
+                packages,
+                disp_.width,
+                disp_.height,
+                screen_mode=validate_screen_mode((cfg or {}).get("screen_mode", DEFAULT_SCREEN_MODE)),
+            )
             left_end = round(disp_.width * TERMUX_LOG_FRACTION)
             errs = validate_layout_rects(
                 rects, left_end + OUTER_MARGIN, OUTER_MARGIN,
@@ -5156,6 +5219,11 @@ def cmd_menu(args: argparse.Namespace) -> int:
 
     # Clear terminal so the menu opens on a clean screen (user request).
     _clear_terminal()
+    try:
+        _menu_cfg = load_config()
+    except ConfigError:
+        _menu_cfg = default_config()
+    _enforce_termux_left_layout(_menu_cfg)
 
     # Notify user if a recent crash was detected (but never show the stack).
     crash_notice = safe_io.check_and_report_crash_log()
@@ -5168,10 +5236,7 @@ def cmd_menu(args: argparse.Namespace) -> int:
         return run_menu(args, _handlers())
 
     # Load config (use defaults if not yet created)
-    try:
-        cfg = load_config()
-    except ConfigError:
-        cfg = default_config()
+    cfg = _menu_cfg
 
     lic = cfg.setdefault("license", {})
 

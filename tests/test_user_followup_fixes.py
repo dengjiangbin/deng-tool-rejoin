@@ -81,7 +81,7 @@ class BoldDashboardTableTest(unittest.TestCase):
         # The plain ``_ANSI_BOLD`` escape must appear at least once
         # outside the status colour (which has its own bold prefix).
         self.assertIn(_ANSI_BOLD, out)
-        self.assertIn("com.test.client", out)
+        self.assertIn("..client", out)
         self.assertIn("user", out)
 
     def test_phase_labels_are_colorized(self) -> None:

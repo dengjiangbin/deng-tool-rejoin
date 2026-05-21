@@ -300,15 +300,17 @@ class TestInstallerScript(unittest.TestCase):
         script = self._make_script()
         # Short 30-char separators (TASK 1 of release cleanup).
         sep_echo = 'echo "=============================="'
-        # Should appear: top, after Version, after Install complete = 3 times.
-        self.assertGreaterEqual(script.count(sep_echo), 2)
-        # Version line followed by closing separator.
+        dash_echo = 'echo "------------------------------"'
+        self.assertEqual(script.count(sep_echo), 2)
+        self.assertEqual(script.count(dash_echo), 2)
         self.assertIn(
+            'echo "=============================="\n'
+            'echo "DENG Tool: Rejoin Installing"\n'
+            'echo "------------------------------"\n'
             'echo "Version: main-dev"\n'
-            'echo "=============================="\n',
+            'echo "------------------------------"\n',
             script,
         )
-        # Install complete followed by separator.
         self.assertIn(
             'echo "Install complete."\n'
             'echo "=============================="\n',

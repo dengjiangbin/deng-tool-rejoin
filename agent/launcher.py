@@ -301,7 +301,6 @@ def perform_rejoin(
                 "info",
                 "[DENG_REJOIN_URL_LAUNCH]",
                 package=package,
-                action=str(cfg.get("post_launch_action") or ""),
                 url_present="true",
                 url_host=_url_host_for_log(url_for_launch),
                 url_length=len(url_for_launch),

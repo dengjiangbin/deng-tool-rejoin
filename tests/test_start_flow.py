@@ -48,9 +48,9 @@ class StartTableUxTests(unittest.TestCase):
         rows = self._make_rows()
         table = build_start_table(rows)
         self.assertIn("deng1629", table)
-        self.assertIn("com.roblox.client", table)
+        self.assertIn("..client", table)
         self.assertIn("AltAccount1", table)
-        self.assertIn("com.example.robloxclone", table)
+        self.assertIn("..robloxclone", table)
 
     def test_start_table_not_label_column(self):
         rows = [_row(1, "com.roblox.client", "Main", "Launching")]
@@ -135,7 +135,7 @@ class StartTableUxTests(unittest.TestCase):
         self.assertIn("DENG Tool: Rejoin Settings", text)
         self.assertIn("Roblox Packages:", text)
         self.assertIn("Username", text)
-        self.assertIn("Post-Launch Action: Open Roblox app only", text)
+        self.assertIn("Screen Mode: Landscape", text)
         self.assertNotIn("Label:", text)
         self.assertNotIn('{"', text)
         self.assertNotIn("Username not set", text)
@@ -152,11 +152,11 @@ class StartTableUxTests(unittest.TestCase):
         self.assertIn("Auto Resize:", text)
         self.assertIn("Automatic based on selected package count and device DPI", text)
 
-    def test_status_shows_post_launch_action_friendly_wording(self):
+    def test_status_shows_screen_mode_friendly_wording(self):
         import agent.commands as commands
 
         args = argparse.Namespace(no_color=True)
-        cfg = validate_config({**default_config(), "post_launch_action": "open_configured_link"})
+        cfg = validate_config({**default_config(), "screen_mode": "portrait"})
         output = io.StringIO()
         root_info = argparse.Namespace(available=False, tool="")
         platform_info = argparse.Namespace(android_release="unknown", android_sdk="unknown", download_dir="")
@@ -173,14 +173,14 @@ class StartTableUxTests(unittest.TestCase):
              unittest.mock.patch("agent.commands.db.latest_row", return_value=None):
             self.assertEqual(commands.cmd_status(args), 0)
 
-        self.assertIn("Post-Launch Action: Open configured Roblox link", output.getvalue())
+        self.assertIn("Screen mode: Portrait", output.getvalue())
 
     def test_no_script_execution_config_key(self):
         cfg = validate_config(default_config())
         lowered_keys = " ".join(cfg.keys()).lower()
         self.assertNotIn("script", lowered_keys)
         self.assertNotIn("executor", lowered_keys)
-        self.assertIn(cfg["post_launch_action"], {"none", "open_app", "open_configured_link"})
+        self.assertIn(cfg["screen_mode"], {"landscape", "portrait"})
         forbidden_keys = {
             "script_injection",
             "executor",

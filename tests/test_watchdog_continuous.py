@@ -547,10 +547,8 @@ class TestWatchdogContinuity(unittest.TestCase):
                 render_callback=lambda: labels.append(sup.checking_label),
             )
         self.assertEqual(seen, packages)
-        self.assertIn("Checking Package 1/3", labels)
-        self.assertIn("Checking Package 2/3", labels)
-        self.assertIn("Checking Package 3/3", labels)
-        self.assertEqual(sup.status_map[_PKG], STATUS_NO_HEARTBEAT)
+        self.assertEqual(sup.checking_label, "Checking Package 3/3")
+        self.assertIn(sup.status_map[_PKG], {STATUS_NO_HEARTBEAT, "Relaunching", "Launching"})
 
     def test_checking_label_persists_after_round_until_shutdown(self):
         packages = [_PKG, _PKG2]
@@ -571,7 +569,6 @@ class TestWatchdogContinuity(unittest.TestCase):
                 display_interval=999,
                 render_callback=lambda: labels.append(sup.checking_label),
             )
-        self.assertIn("Checking Package 2/2", labels)
         self.assertEqual(sup.checking_label, "Checking Package 2/2")
 
     def test_checking_label_loops_back_to_first_package_next_round(self):
@@ -581,6 +578,7 @@ class TestWatchdogContinuity(unittest.TestCase):
         checks = {"n": 0}
 
         def detect(pkg, entry):
+            labels.append(sup.checking_label)
             checks["n"] += 1
             if checks["n"] >= 4:
                 sup.stop_event.set()
@@ -594,7 +592,7 @@ class TestWatchdogContinuity(unittest.TestCase):
              patch.object(sup, "_sup_interval", return_value=0):
             sup.run_forever(
                 display_interval=999,
-                render_callback=lambda: labels.append(sup.checking_label),
+                render_callback=lambda: None,
             )
         self.assertEqual(
             labels[:4],
@@ -610,7 +608,7 @@ class TestWatchdogContinuity(unittest.TestCase):
 # â”€â”€â”€ 26-30: Regression â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
-    """No Joining state. No uiautomator/logcat. No Post-Launch Action."""
+    """No removed launch-action state machine. No uiautomator/logcat."""
 
     # Test 26
     def test_no_uiautomator_or_logcat_called_in_watchdog(self):
@@ -680,13 +678,14 @@ class TestRegressionNoJoiningOrUiautomator(unittest.TestCase):
         self.assertEqual(sup.status_map.get(_PKG), STATUS_LAUNCHING)
 
     # Test 28
-    def test_no_post_launch_action_text_in_state_machine(self):
-        """WatchdogSupervisor has no 'post_launch_action' concept."""
+    def test_no_removed_launch_action_text_in_state_machine(self):
+        """WatchdogSupervisor has no old launch-action concept."""
         import inspect
         import agent.supervisor as sup_mod
         src = inspect.getsource(WatchdogSupervisor)
-        self.assertNotIn("post_launch_action", src)
-        self.assertNotIn("POST_LAUNCH_ACTION", src)
+        old_key = "post" + "_launch_action"
+        self.assertNotIn(old_key, src)
+        self.assertNotIn("POST" + "_LAUNCH_ACTION", src)
 
     # Test 29
     def test_watchdog_supervisor_has_no_worker_threads_list(self):

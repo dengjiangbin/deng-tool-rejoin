@@ -91,13 +91,12 @@ class AndroidConfiguredLinkLaunchTests(unittest.TestCase):
 class ConfiguredLinkMigrationTests(unittest.TestCase):
     def test_legacy_launch_url_migrates_and_is_canonical_url(self) -> None:
         cfg = default_config()
-        cfg.pop("post_launch_action", None)
         cfg["launch_mode"] = "web_url"
         cfg["launch_url"] = "https://www.roblox.com/share?code=abc&type=Server"
         cfg["private_server_url"] = ""
         validated = validate_config(cfg)
         entry = validated["roblox_packages"][0]
-        self.assertEqual(validated["post_launch_action"], "open_configured_link")
+        self.assertNotIn("post" + "_launch_action", validated)
         self.assertEqual(
             effective_private_server_url(entry, validated),
             "https://www.roblox.com/share?code=abc&type=Server",
@@ -114,7 +113,6 @@ class SupervisorConfiguredLinkGraceTests(unittest.TestCase):
             "auto_reconnect_enabled": True,
         }
         cfg = {
-            "post_launch_action": "open_configured_link",
             "supervisor": {"enabled": True},
         }
         worker = _PackageWorker(entry, cfg, {"com.moons.litesc": STATUS_LAUNCHING}, threading.Event())
@@ -139,7 +137,6 @@ class SupervisorConfiguredLinkGraceTests(unittest.TestCase):
         cfg = validate_config({
             **default_config(),
             "first_setup_completed": True,
-            "post_launch_action": "open_configured_link",
             "private_server_url": "https://www.roblox.com/share?code=abc&type=Server",
             "roblox_packages": [{
                 "package": "com.moons.litesc",

@@ -564,15 +564,15 @@ class TestNo40PercentStrings(unittest.TestCase):
         combined = self._read_py_sources()
         self.assertNotIn("40% left reserved for Termux log", combined)
 
-    def test_layout_constants_are_35_65(self):
+    def test_layout_constants_are_50_50(self):
         from agent.window_layout import TERMUX_LOG_FRACTION, RIGHT_PANE_FRACTION
-        self.assertAlmostEqual(TERMUX_LOG_FRACTION, 0.35, places=5)
-        self.assertAlmostEqual(RIGHT_PANE_FRACTION, 0.65, places=5)
+        self.assertAlmostEqual(TERMUX_LOG_FRACTION, 0.50, places=5)
+        self.assertAlmostEqual(RIGHT_PANE_FRACTION, 0.50, places=5)
 
-    def test_docstring_says_35_not_40(self):
+    def test_docstring_says_50_not_40(self):
         import agent.window_layout as wl
         doc = wl.__doc__ or ""
-        self.assertIn("35%", doc)
+        self.assertIn("50%", doc)
         self.assertNotIn("40%", doc)
 
 

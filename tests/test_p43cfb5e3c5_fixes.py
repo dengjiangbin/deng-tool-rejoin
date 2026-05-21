@@ -393,7 +393,7 @@ class TestPublicUICleanliness(unittest.TestCase):
         end   = src.find("}", start) + 1
         map_src = src[start:end]
         allowed = {"Online", "No Heartbeat", "Dead", "Launching",
-                   "Preparing", "Clear Cache", "Failed"}
+                   "Relaunching", "Preparing", "Clear Cache", "Failed"}
         # Find all string literals that appear after a ':' (the values)
         import re
         vals = re.findall(r':\s*"([^"]+)"', map_src)
@@ -426,7 +426,7 @@ class TestLayoutProbeLogTags(unittest.TestCase):
 
     def test_deng_rejoin_layout_calc_tag_present(self) -> None:
         src = self._get_commands_source()
-        self.assertIn("[DENG_REJOIN_LAYOUT_CALC]", src)
+        self.assertIn("[DENG_REJOIN_LAYOUT_GRID]", src)
 
     def test_deng_rejoin_layout_bounds_tag_present(self) -> None:
         src = self._get_commands_source()
