@@ -81,7 +81,8 @@ def _capture_start_output(entries) -> str:
 
     mock_sup_inst = MagicMock()
     mock_sup_inst.status_map = {"com.roblox.client": "Lobby"}
-    mock_sup_inst.run_forever = lambda render_callback=None: None
+    mock_sup_inst.stop_source = "user_exit"
+    mock_sup_inst.run_forever = lambda render_callback=None, display_interval=None: None
 
     with (
         patch.object(_ks, "DEV_MODE", True),

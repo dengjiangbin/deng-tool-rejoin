@@ -251,10 +251,12 @@ def perform_rejoin(
             _all_pkgs = [e["package"] for e in ents] or [package]
             if package not in _all_pkgs:
                 _all_pkgs.append(package)
-            _dock_frac = float(cfg.get("termux_dock_fraction", 0.50))
+            _dock_frac = 0.50
+            from .config import DEFAULT_SCREEN_MODE, validate_screen_mode
             _rects = window_layout.calculate_split_layout(
                 _all_pkgs, _display.width, _display.height,
                 termux_log_fraction=_dock_frac,
+                screen_mode=validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE)),
             )
             _r_for_pkg = next(
                 (r for r in (_rects or []) if getattr(r, "package", None) == package),

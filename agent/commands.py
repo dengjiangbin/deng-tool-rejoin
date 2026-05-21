@@ -983,6 +983,61 @@ def _enforce_termux_left_layout(config_data: dict[str, Any] | None = None) -> di
     return result
 
 
+def _enforce_configured_screen_mode(
+    config_data: dict[str, Any] | None = None,
+    protected_packages: list[str] | None = None,
+) -> dict[str, Any]:
+    """Apply stored screen mode with root and log probe-only evidence."""
+    result: dict[str, Any] = {}
+    try:
+        from .logger import configure_logging, log_event
+
+        cfg = config_data or {}
+        mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
+        protected = list(protected_packages or [])
+        if not protected:
+            try:
+                protected = enabled_package_names(validate_config(cfg))
+            except Exception:  # noqa: BLE001
+                protected = []
+        result = android.enforce_screen_orientation(mode, protected_packages=protected)
+        log_event(
+            configure_logging(),
+            "info",
+            "[DENG_REJOIN_ORIENTATION_ENFORCE]",
+            requested=result.get("requested", mode),
+            actual_before=result.get("actual_before", "unknown"),
+            actual_after=result.get("actual_after", "unknown"),
+            root_available=str(bool(result.get("root_available"))).lower(),
+            success=str(bool(result.get("success"))).lower(),
+            override_detected=str(bool(result.get("override_detected"))).lower(),
+            override_package=result.get("override_package", ""),
+            override_action=result.get("override_action", "none"),
+            error=result.get("error", ""),
+        )
+    except Exception as exc:  # noqa: BLE001
+        try:
+            from .logger import configure_logging, log_event
+            log_event(
+                configure_logging(),
+                "info",
+                "[DENG_REJOIN_ORIENTATION_ENFORCE]",
+                requested=validate_screen_mode((config_data or {}).get("screen_mode", DEFAULT_SCREEN_MODE)),
+                actual_before="unknown",
+                actual_after="unknown",
+                root_available="false",
+                success="false",
+                override_detected="false",
+                override_package="",
+                override_action="none",
+                error=str(exc)[:160],
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        result = {"success": False, "error": str(exc)[:160]}
+    return result
+
+
 def _print_config_summary(config_data: dict[str, Any]) -> None:
     cfg = safe_config_view(validate_config(config_data))
     entries = validate_package_entries(cfg["roblox_packages"])
@@ -1672,6 +1727,7 @@ def _setup_screen_mode(draft: dict[str, Any]) -> None:
         mode = choices.get(raw.replace("-", "_").replace(" ", "_"))
         if mode:
             draft["screen_mode"] = mode
+            _enforce_configured_screen_mode(draft)
             return
         print("Choose 1 or 2.")
 
@@ -3363,8 +3419,8 @@ def _prepare_automatic_layout(
     Verification and direct-resize happen post-launch in
     :func:`_verify_layout_post_launch`.
     """
-    import logging as _logging
-    _layout_log = _logging.getLogger("deng.rejoin.layout")
+    from .logger import configure_logging
+    _layout_log = configure_logging()
     try:
         packages = [entry["package"] for entry in entries]
         n        = len(packages)
@@ -3381,7 +3437,8 @@ def _prepare_automatic_layout(
         # reservation).  Probe ``p-47fa33562a`` showed clones overlapping
         # the Termux pane on a 720 × 1280 phone — fixed by keeping the two
         # fractions in lock-step.
-        _dock_frac = float(cfg.get("termux_dock_fraction", 0.50))
+        _dock_frac = 0.50
+        cfg["termux_dock_fraction"] = 0.50
         _screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
         filtered_packages = [p for p in packages if not window_layout._is_layout_excluded(p)]
         rects = window_layout.calculate_split_layout(
@@ -3400,9 +3457,15 @@ def _prepare_automatic_layout(
             if _screen_mode == "portrait":
                 _cols, _rows = 2, 5
                 _slot_order = "7,8,9,10,1,2,3,4,5,6"
+                _landscape_rule = ""
             else:
                 _cols, _rows = 3, 3
-                _slot_order = "1,2,3,4,5,6,7,8,9"
+                if len(filtered_packages) <= 6:
+                    _slot_order = "empty,1,2,empty,3,4,empty,5,6"
+                    _landscape_rule = "lte6_right_columns"
+                else:
+                    _slot_order = "1,2,3,4,5,6,7,8,9"
+                    _landscape_rule = "full_3x3"
             _pane_w = max(160, display.width - _left_end)
             _usable_h = max(90, display.height - _sb_h)
             _cell_w = max(160, _pane_w // _cols)
@@ -3411,6 +3474,26 @@ def _prepare_automatic_layout(
                 "[DENG_REJOIN_SCREEN_MODE] configured=%s detected_orientation=%s applied_mode=%s root_available=%s",
                 _screen_mode, _orient, _screen_mode, str(android.detect_root().available).lower(),
             )
+            _layout_log.info(
+                "[DENG_REJOIN_SPLIT_LAYOUT] screen_w=%d screen_h=%d termux_area=left_50 "
+                "roblox_area=right_50 termux_desired=%s termux_actual=%s "
+                "roblox_grid_area=%s full_width_used=false",
+                display.width,
+                display.height,
+                (0, 0, _left_end, display.height),
+                "",
+                (_left_end, _sb_h, display.width, display.height),
+            )
+            if _screen_mode == "landscape":
+                _layout_log.info(
+                    "[DENG_REJOIN_LANDSCAPE_SLOT_MAP] package_count=%d rule=%s grid=3x3 "
+                    "slot_map=%s roblox_grid_area=%s bounds=%s",
+                    len(filtered_packages),
+                    _landscape_rule,
+                    _slot_order,
+                    (_left_end, _sb_h, display.width, display.height),
+                    [(r.left, r.top, r.right, r.bottom) for r in rects],
+                )
             _layout_log.info(
                 "[DENG_REJOIN_LAYOUT_GRID] mode=%s package_count=%d grid=%dx%d slot_order=%s "
                 "top_inset=%d screen_w=%d screen_h=%d termux_bounds=%s package_bounds=%s",
@@ -3553,7 +3636,7 @@ def _verify_layout_post_launch(
     diag_rows: list[dict[str, Any]] = []
     try:
         display = window_layout.detect_display_info()
-        _dock_frac2 = float(cfg.get("termux_dock_fraction", 0.50))
+        _dock_frac2 = 0.50
         rects = window_layout.calculate_split_layout(
             [e["package"] for e in entries if not window_layout._is_layout_excluded(e["package"])],
             display.width, display.height,
@@ -3683,9 +3766,39 @@ def cmd_start(args: argparse.Namespace) -> int:
     _start_lock: LockManager | None = None
     _shutdown_reason = "normal_exit"
     _supervisor_ref: WatchdogSupervisor | None = None
+    _lifecycle_state = "STARTING"
     # Silence all internal loggers so warnings/errors go to file, never stdout.
     from .logger import silence_public_loggers
     silence_public_loggers()
+
+    def _transition_lifecycle(to_state: str, reason: str) -> None:
+        nonlocal _lifecycle_state
+        try:
+            from .logger import configure_logging, log_event
+            log_event(
+                configure_logging(),
+                "info",
+                "[DENG_REJOIN_LIFECYCLE]",
+                **{"from": _lifecycle_state, "to": to_state, "reason": reason},
+            )
+        except Exception:  # noqa: BLE001
+            pass
+        _lifecycle_state = to_state
+
+    def _log_stop_request(source: str, *, allowed: bool, stack: str = "") -> None:
+        try:
+            import traceback as _traceback
+            from .logger import configure_logging, log_event
+            log_event(
+                configure_logging(),
+                "info",
+                "[DENG_REJOIN_STOP_REQUEST]",
+                source=source,
+                stack=stack or "".join(_traceback.format_stack(limit=8))[:1800],
+                allowed=str(bool(allowed)).lower(),
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def _release_start_lock(reason: str) -> None:
         nonlocal _start_lock
@@ -3713,8 +3826,10 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     _clear_terminal(clear_scrollback=True)
     try:
+        _transition_lifecycle("STARTING", "cmd_start")
         cfg = load_config()
         cfg = _ensure_install_id_saved(cfg)
+        _enforce_configured_screen_mode(cfg)
         _enforce_termux_left_layout(cfg)
 
         # ── License gate ─────────────────────────────────────────────────────
@@ -3754,6 +3869,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             print()
             print("Run Setup / Edit Config, then choose Roblox Package Setup.")
             return 2
+        _enforce_configured_screen_mode(cfg, [entry["package"] for entry in entries])
 
         try:
             from .logger import configure_logging, log_event
@@ -3887,7 +4003,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         def _render_phase(_unused_note: str = "") -> None:
             """Atomically redraw the dashboard with the current phase per package.
 
-            Shows only: logo + table + available RAM.
+            Shows only: logo + available RAM + table.
             State labels in the table already describe what is happening;
             additional notes below the table are suppressed (user feedback:
             "useless text explaining state" when state is in the table).
@@ -3899,15 +4015,16 @@ def cmd_start(args: argparse.Namespace) -> int:
                  phase.get(e["package"], "Preparing"), "", "")
                 for i, e in enumerate(entries)
             ]
-            lines = [banner_text(use_color=use_color), "", build_start_table(rows, use_color=use_color)]
+            lines = [banner_text(use_color=use_color), ""]
             try:
                 ram = _get_ram_label()
                 if ram:
-                    lines.append("")
                     for _ram_line in ram.split("\n"):
                         lines.append(f"  {_ram_line}")
+                    lines.append("")
             except Exception:  # noqa: BLE001
                 pass
+            lines.append(build_start_table(rows, use_color=use_color))
             _clear_terminal(clear_scrollback=True)
             sys.stdout.write("\n".join(lines) + "\n")
             sys.stdout.flush()
@@ -3921,6 +4038,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         #    verify it is dead, and clear background apps to free RAM.
         #    Only configured/selected packages are targeted; Termux and
         #    system apps are never touched.
+        _transition_lifecycle("PREPARING", "prepare_packages")
         _set_all_phase("Preparing", "Stopping configured packages...")
         packages_sl = [e["package"] for e in entries]
         keep_alive  = ["com.termux"] + packages_sl
@@ -3980,21 +4098,14 @@ def cmd_start(args: argparse.Namespace) -> int:
         prep_cache: dict[str, str] = {}   # per-package cache-clear status label
         opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
         # Set all packages to "Clear Cache" and render ONCE before the loop.
+        _transition_lifecycle("CLEARING_CACHE", "clear_cache")
         for entry in entries:
             phase[entry["package"]] = "Clear Cache"
         _render_phase()
-        # Restore auto-rotation silently (am kill-all can kill the rotation service).
-        try:
-            android.run_android_command(
-                ["settings", "put", "system", "accelerometer_rotation", "1"],
-                prefer_root=True,
-            )
-            android.run_android_command(
-                ["settings", "put", "system", "user_rotation", "0"],
-                prefer_root=True,
-            )
-        except Exception:  # noqa: BLE001
-            _start_log.debug("start: rotation restore error (non-fatal)")
+        # Re-apply the selected Screen Mode after background cleanup.  The
+        # previous auto-rotation restore let third-party rotation apps win and
+        # could flip the device away from the user's selected mode.
+        _enforce_configured_screen_mode(cfg, packages_sl)
         for entry in entries:
             pkg = entry["package"]
             _cache_result: dict[str, object] = {}
@@ -4072,6 +4183,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         # 5) "Launching" — set ALL packages to "Launching" at once before
         # the loop and render a single clean "all starting" screen.  Only
         # re-render AFTER each launch (to show success/failure result).
+        _transition_lifecycle("LAUNCHING", "launch_packages")
         launch_ok:  dict[str, bool] = {}
         launch_err: dict[str, str]  = {}
         launch_attempted: dict[str, bool] = {}
@@ -4403,25 +4515,74 @@ def cmd_start(args: argparse.Namespace) -> int:
             sys.stdout.write("\n".join(lines) + "\n")
             sys.stdout.flush()
 
-        # Use 3-second display interval (like Kaeru's blinking real-time table).
+        _transition_lifecycle("MONITORING", "launch_complete")
         try:
-            _supervisor.run_forever(
-                render_callback=_live_dashboard,
-                display_interval=3.0,
+            from .logger import configure_logging, log_event
+            log_event(
+                configure_logging(),
+                "info",
+                "[DENG_REJOIN_MONITOR_ENTER]",
+                packages=[e["package"] for e in entries],
+                after_launch="true",
+                main_thread_alive="true",
+                watchdog_alive="true",
             )
-        except KeyboardInterrupt:
-            # Silent: signal handler already set stop_event.  Caller will rerun cleanly.
-            _shutdown_reason = "ctrl_c"
-            _supervisor.stop()
-        except Exception as exc:  # noqa: BLE001
-            _start_log.debug("Supervisor terminated with error: %s", exc)
-            _supervisor.stop()
+        except Exception:  # noqa: BLE001
+            pass
+
+        # Use 3-second display interval (like Kaeru's blinking real-time table).
+        _allowed_stop_sources = {"sigint", "sigterm", "ctrl_c", "user_exit", "fatal_error"}
+        _unexpected_restart_count = 0
+        while True:
+            try:
+                _supervisor.run_forever(
+                    render_callback=_live_dashboard,
+                    display_interval=3.0,
+                )
+            except KeyboardInterrupt:
+                _shutdown_reason = "ctrl_c"
+                _log_stop_request("ctrl_c", allowed=True)
+                _supervisor.stop_source = "ctrl_c"
+                _supervisor.stop("ctrl_c")
+            except Exception as exc:  # noqa: BLE001
+                _start_log.debug("Supervisor terminated with error: %s", exc)
+                _shutdown_reason = "fatal_error"
+                _log_stop_request("fatal_error", allowed=True, stack=str(exc)[:1000])
+                _supervisor.stop_source = "fatal_error"
+                _supervisor.stop("fatal_error")
+
+            _stop_source = str(getattr(_supervisor, "stop_source", "") or "").strip()
+            if _stop_source in _allowed_stop_sources:
+                _shutdown_reason = _stop_source
+                break
+
+            _unexpected_restart_count += 1
+            try:
+                from .logger import configure_logging, log_event
+                log_event(
+                    configure_logging(),
+                    "info",
+                    "[DENG_REJOIN_UNEXPECTED_EXIT_GUARD]",
+                    reason=_stop_source or "watchdog_returned_without_stop_source",
+                    prevented="true",
+                    restart_count=_unexpected_restart_count,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            _supervisor.stop_event.clear()
+            _supervisor.stop_source = ""
+            _transition_lifecycle("MONITORING", "unexpected_watchdog_return_prevented")
+            import time as _guard_time
+            _guard_time.sleep(0.5)
+
+        _transition_lifecycle("STOPPING", _shutdown_reason)
         # Best-effort clean exit: clear screen so terminal is not littered.
         try:
             _clear_terminal()
         except Exception:  # noqa: BLE001
             pass
         _release_start_lock(_shutdown_reason)
+        _transition_lifecycle("STOPPED", _shutdown_reason)
         # Real-device evidence (probe ``p-47fa33562a``): on Termux, Python
         # finalization after a supervisor stop sometimes segfaults inside
         # libc cleanup (atexit handlers / threading shutdown / file-handle
@@ -4436,12 +4597,15 @@ def cmd_start(args: argparse.Namespace) -> int:
     except KeyboardInterrupt:
         # Pre-supervisor Ctrl+C: just exit quietly, no traceback.
         _shutdown_reason = "ctrl_c"
+        _transition_lifecycle("STOPPING", "ctrl_c")
+        _log_stop_request("ctrl_c", allowed=True)
         try:
             if _supervisor_ref is not None:
-                _supervisor_ref.stop()
+                _supervisor_ref.stop("ctrl_c")
         except Exception:  # noqa: BLE001
             pass
         _release_start_lock(_shutdown_reason)
+        _transition_lifecycle("STOPPED", _shutdown_reason)
         try:
             _clear_terminal()
         except Exception:  # noqa: BLE001
@@ -4451,12 +4615,15 @@ def cmd_start(args: argparse.Namespace) -> int:
     except Exception as exc:  # noqa: BLE001 - command boundary.
         import logging as _logging
         _logging.getLogger("deng.rejoin.start").debug("cmd_start error: %s", exc)
+        _transition_lifecycle("STOPPING", "fatal_error")
+        _log_stop_request("fatal_error", allowed=True, stack=str(exc)[:1000])
         try:
             if _supervisor_ref is not None:
-                _supervisor_ref.stop()
+                _supervisor_ref.stop("fatal_error")
         except Exception:  # noqa: BLE001
             pass
-        _release_start_lock("normal_exit")
+        _release_start_lock("fatal_error")
+        _transition_lifecycle("STOPPED", "fatal_error")
         print(f"Agent start failed: {exc}")
         return 1
 
@@ -5223,6 +5390,7 @@ def cmd_menu(args: argparse.Namespace) -> int:
         _menu_cfg = load_config()
     except ConfigError:
         _menu_cfg = default_config()
+    _enforce_configured_screen_mode(_menu_cfg)
     _enforce_termux_left_layout(_menu_cfg)
 
     # Notify user if a recent crash was detected (but never show the stack).

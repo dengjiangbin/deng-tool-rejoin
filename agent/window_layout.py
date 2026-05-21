@@ -558,6 +558,7 @@ def _detect_status_bar_height() -> int:
 
 
 LANDSCAPE_SLOT_ORDER: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 8, 9)
+LANDSCAPE_LTE6_SLOT_ORDER: tuple[int, ...] = (0, 1, 2, 0, 3, 4, 0, 5, 6)
 PORTRAIT_SLOT_ORDER: tuple[int, ...] = (7, 8, 9, 10, 1, 2, 3, 4, 5, 6)
 
 
@@ -622,7 +623,21 @@ def _release_grid_rects(
     cell_w = max(_MIN_WIN_W, pane_w // cols)
     cell_h = max(_MIN_WIN_H, pane_h // rows)
     win_h = max(_MIN_WIN_H, min(cell_h, int(cell_w / LANDSCAPE_MIN_RATIO)))
+    roblox_grid_area = (px0, py0, px1, py1)
+    _log.info(
+        "[DENG_REJOIN_SPLIT_LAYOUT] screen_w=%d screen_h=%d termux_area=left_50 "
+        "roblox_area=right_50 termux_desired=%s termux_actual=%s "
+        "roblox_grid_area=%s full_width_used=false",
+        W, H, (0, 0, left_end, H), "", roblox_grid_area,
+    )
     rects: list[WindowRect] = []
+    if mode_label == "landscape" and len(pkgs) <= 6:
+        slot_order = LANDSCAPE_LTE6_SLOT_ORDER
+        landscape_rule = "lte6_right_columns"
+    elif mode_label == "landscape":
+        landscape_rule = "full_3x3"
+    else:
+        landscape_rule = ""
     for index, pkg in enumerate(pkgs, start=1):
         slot = _slot_index_for_package(index, slot_order)
         row = slot // cols
@@ -632,6 +647,17 @@ def _release_grid_rects(
         right = px1 if col == cols - 1 else min(px1, left + cell_w)
         bottom = min(py1, top + win_h)
         rects.append(WindowRect(pkg, left, top, right, bottom))
+
+    if mode_label == "landscape":
+        _log.info(
+            "[DENG_REJOIN_LANDSCAPE_SLOT_MAP] package_count=%d rule=%s grid=3x3 "
+            "slot_map=%s roblox_grid_area=%s bounds=%s",
+            len(pkgs),
+            landscape_rule,
+            ",".join(str(x) if x else "empty" for x in slot_order),
+            roblox_grid_area,
+            [(r.left, r.top, r.right, r.bottom) for r in rects],
+        )
 
     _log.info(
         "[DENG_REJOIN_LAYOUT_GRID] mode=%s package_count=%d grid=%dx%d slot_order=%s "

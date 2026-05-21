@@ -334,22 +334,27 @@ class TestSmartLandscapeGrid(unittest.TestCase):
         self.assertEqual(rects[0].top, 25)
         self.assertEqual(rects[1].top, 25)
 
-    def test_one_two_three_packages_use_three_columns_one_row(self):
+    def test_one_to_six_packages_use_right_two_columns(self):
         one = self._rects(1)
         two = self._rects(2)
         three = self._rects(3)
+        six = self._rects(6)
         self.assertEqual(len({r.top for r in one}), 1)
         self.assertEqual(len({r.top for r in two}), 1)
         self.assertEqual(len({r.left for r in two}), 2)
-        self.assertEqual(len({r.top for r in three}), 1)
-        self.assertEqual(len({r.left for r in three}), 3)
+        self.assertEqual(len({r.top for r in three}), 2)
+        self.assertEqual(len({r.left for r in three}), 2)
+        self.assertEqual(len({r.top for r in six}), 3)
+        self.assertEqual(len({r.left for r in six}), 2)
+        # Left column of the right-side 3x3 grid stays empty for <= 6.
+        self.assertGreaterEqual(one[0].left, 853)
 
     def test_four_six_packages_fill_second_row(self):
         four = self._rects(4)
         six = self._rects(6)
         self.assertEqual(len({r.top for r in four}), 2)
-        self.assertEqual(len({r.top for r in six}), 2)
-        self.assertEqual(len({r.left for r in six}), 3)
+        self.assertEqual(len({r.top for r in six}), 3)
+        self.assertEqual(len({r.left for r in six}), 2)
 
     def test_nine_packages_fill_three_by_three_order(self):
         nine = self._rects(9)

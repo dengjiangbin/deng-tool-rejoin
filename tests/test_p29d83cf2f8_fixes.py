@@ -77,8 +77,8 @@ class TestRamLabelDefinedBeforeUse(unittest.TestCase):
         self.assertEqual(len(called), 1)
         self.assertEqual(called[0], "Available RAM: Unknown")
 
-    def test_ram_label_below_table_not_above(self) -> None:
-        """The RAM line must appear AFTER build_start_table output, not before."""
+    def test_ram_label_above_table(self) -> None:
+        """The RAM line must appear BEFORE build_start_table output."""
         output_order: list[str] = []
 
         def _fake_build_start_table(*_a, **_kw) -> str:
@@ -95,14 +95,13 @@ class TestRamLabelDefinedBeforeUse(unittest.TestCase):
         old_stdout = sys.stdout
         sys.stdout = buf
         try:
-            print(_fake_build_start_table())
             try:
                 ram = _fake_get_ram()
                 if ram:
-                    print()
                     print(f"  {ram}")
             except Exception:  # noqa: BLE001
                 pass
+            print(_fake_build_start_table())
             print(flush=True)
         finally:
             sys.stdout = old_stdout
@@ -112,7 +111,7 @@ class TestRamLabelDefinedBeforeUse(unittest.TestCase):
         ram_pos = text.find("Available RAM:")
         self.assertGreater(table_pos, -1, "table must appear")
         self.assertGreater(ram_pos, -1, "RAM line must appear")
-        self.assertGreater(ram_pos, table_pos, "RAM line must be AFTER the table")
+        self.assertLess(ram_pos, table_pos, "RAM line must be BEFORE the table")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

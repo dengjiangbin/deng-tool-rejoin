@@ -290,6 +290,209 @@ def get_application_label_cached(package: str, cache: dict[str, str]) -> str:
     return cache[package]
 
 
+_ORIENTATION_PACKAGE_MARKERS: tuple[str, ...] = (
+    "orientation",
+    "rotation",
+    "screenorientation",
+    "screen_orientation",
+    "controlthescreen",
+    "controlscreen",
+)
+
+_ORIENTATION_LABEL_MARKERS: tuple[str, ...] = (
+    "control screen orientation",
+    "screen orientation",
+    "orientation control",
+    "rotation control",
+)
+
+
+def _third_party_packages() -> list[str]:
+    """Return user-installed package names, or an empty list on failure."""
+    result = run_android_command(["pm", "list", "packages", "-3"], timeout=8, prefer_root=False)
+    if not result.ok:
+        result = run_android_command(["pm", "list", "packages"], timeout=8, prefer_root=False)
+    if not result.ok:
+        return []
+    packages: list[str] = []
+    for line in (result.stdout or "").splitlines():
+        raw = line.strip()
+        if raw.startswith("package:"):
+            raw = raw[len("package:") :]
+        try:
+            packages.append(validate_package_name(raw))
+        except ConfigError:
+            continue
+    return sorted(set(packages))
+
+
+def detect_orientation_override_apps(
+    *,
+    packages: Iterable[str] | None = None,
+    protected_packages: Iterable[str] | None = None,
+) -> list[dict[str, str]]:
+    """Detect third-party screen-rotation/orientation controller apps.
+
+    Safe scope: returns candidates only.  Callers decide whether to force-stop
+    one.  Termux and selected Roblox packages can be passed as protected
+    packages and will never be returned.
+    """
+    protected = {str(p).strip() for p in (protected_packages or []) if str(p).strip()}
+    protected.add("com.termux")
+    source = list(packages) if packages is not None else _third_party_packages()
+    out: list[dict[str, str]] = []
+    label_cache: dict[str, str] = {}
+    for raw in source:
+        try:
+            pkg = validate_package_name(raw)
+        except ConfigError:
+            continue
+        if pkg in protected:
+            continue
+        lower = pkg.lower().replace(".", "")
+        pkg_match = any(marker.replace("_", "") in lower for marker in _ORIENTATION_PACKAGE_MARKERS)
+        label = get_application_label_cached(pkg, label_cache)
+        label_lower = label.lower()
+        label_match = any(marker in label_lower for marker in _ORIENTATION_LABEL_MARKERS)
+        if pkg_match or label_match:
+            out.append({
+                "package": pkg,
+                "label": label,
+                "reason": "package_name" if pkg_match else "label",
+            })
+    return out
+
+
+_DISPLAY_INFO_RE = re.compile(
+    r"mOverrideDisplayInfo=DisplayInfo\{[^}]*?\bapp\s+(\d+)\s+x\s+(\d+)[^}]*?\brotation\s+(\d+)",
+    re.IGNORECASE | re.DOTALL,
+)
+_DISPLAY_VIEWPORT_RE = re.compile(
+    r"logicalFrame=Rect\(0,\s*0\s*-\s*(\d+),\s*(\d+)\).*?orientation=(\d+)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def get_display_orientation_state() -> dict[str, object]:
+    """Return current logical display orientation evidence.
+
+    Result keys: orientation, width, height, rotation, raw_present.
+    Orientation is "landscape", "portrait", or "unknown".
+    """
+    res = run_android_command(["dumpsys", "display"], timeout=8, prefer_root=True)
+    text = res.stdout or ""
+    for pattern in (_DISPLAY_INFO_RE, _DISPLAY_VIEWPORT_RE):
+        m = pattern.search(text)
+        if m:
+            width = int(m.group(1))
+            height = int(m.group(2))
+            rotation = int(m.group(3))
+            return {
+                "orientation": "landscape" if width >= height else "portrait",
+                "width": width,
+                "height": height,
+                "rotation": rotation,
+                "raw_present": True,
+            }
+    return {
+        "orientation": "unknown",
+        "width": 0,
+        "height": 0,
+        "rotation": "",
+        "raw_present": bool(text),
+    }
+
+
+def _rotation_for_screen_mode(screen_mode: str) -> int:
+    mode = str(screen_mode or "").strip().lower()
+    return 0 if mode == "portrait" else 1
+
+
+def _apply_user_rotation(screen_mode: str, *, root_info: RootInfo | None = None) -> list[dict[str, object]]:
+    """Apply Android user rotation lock for the requested mode."""
+    rotation = _rotation_for_screen_mode(screen_mode)
+    commands = [
+        ["settings", "put", "system", "accelerometer_rotation", "0"],
+        ["settings", "put", "system", "user_rotation", str(rotation)],
+        ["cmd", "window", "set-user-rotation", "lock", str(rotation)],
+        ["cmd", "window", "set-fix-to-user-rotation", "enabled"],
+    ]
+    results: list[dict[str, object]] = []
+    for cmd in commands:
+        res = run_android_command(cmd, timeout=8, prefer_root=bool(root_info and root_info.available))
+        results.append({
+            "cmd": " ".join(cmd),
+            "returncode": res.returncode,
+            "ok": res.ok,
+            "stderr": (res.stderr or "")[:160],
+            "stdout": (res.stdout or "")[:160],
+        })
+    return results
+
+
+def enforce_screen_orientation(
+    screen_mode: str,
+    *,
+    protected_packages: Iterable[str] | None = None,
+    allow_disable: bool = False,
+) -> dict[str, object]:
+    """Enforce landscape/portrait with root and defeat known rotation apps.
+
+    The function never kills Termux or Roblox packages.  If an installed
+    third-party orientation controller keeps overriding the selected mode, only
+    that controller candidate is force-stopped, then rotation is applied again.
+    """
+    requested = "portrait" if str(screen_mode or "").strip().lower() == "portrait" else "landscape"
+    protected = set(str(p).strip() for p in (protected_packages or []) if str(p).strip())
+    protected.add("com.termux")
+    root_info = detect_root()
+    before = get_display_orientation_state()
+    apply_results = _apply_user_rotation(requested, root_info=root_info)
+    time.sleep(0.4)
+    after = get_display_orientation_state()
+    success = after.get("orientation") == requested
+    candidates: list[dict[str, str]] = []
+    override_package = ""
+    override_action = "none"
+    error = ""
+
+    if not success:
+        candidates = detect_orientation_override_apps(protected_packages=protected)
+        if candidates:
+            override_package = candidates[0]["package"]
+            stop_result = force_stop_package(override_package, root_info)
+            override_action = "force_stop"
+            if not stop_result.ok:
+                error = (stop_result.stderr or stop_result.stdout or "force-stop failed")[:180]
+            _apply_user_rotation(requested, root_info=root_info)
+            time.sleep(0.5)
+            after = get_display_orientation_state()
+            success = after.get("orientation") == requested
+            if not success and allow_disable:
+                # Deliberately not implemented for normal release use.  The
+                # caller asked for a safe first-line action; force-stop is
+                # reversible and bounded, disable would be persistent.
+                override_action = "disable_skipped"
+        else:
+            error = "requested orientation did not take effect"
+
+    return {
+        "requested": requested,
+        "actual_before": before.get("orientation", "unknown"),
+        "actual_after": after.get("orientation", "unknown"),
+        "before": before,
+        "after": after,
+        "root_available": bool(root_info.available),
+        "success": bool(success),
+        "override_detected": bool(candidates),
+        "override_package": override_package,
+        "override_candidates": candidates,
+        "override_action": override_action,
+        "apply_results": apply_results,
+        "error": error,
+    }
+
+
 def is_launchable_package_cached(package: str, cache: dict[str, bool]) -> bool:
     if package not in cache:
         cache[package] = is_launchable_package(package)

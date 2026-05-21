@@ -6,6 +6,7 @@ import signal
 import shlex
 import threading
 import time
+import traceback
 from typing import Any
 
 from . import android, db
@@ -1235,6 +1236,9 @@ class WatchdogSupervisor:
             )
 
         self._logger = configure_logging(level=cfg.get("log_level", "INFO"))
+        self.stop_source: str = ""
+        self.stop_signal: str = ""
+        self.stop_stack: str = ""
         log_event(
             self._logger, "info", "[DENG_REJOIN_SEGFAULT_FIX]",
             probe_id="p-79933739d8",
@@ -1251,6 +1255,21 @@ class WatchdogSupervisor:
     # ─── Internal helpers ─────────────────────────────────────────────────────
 
     def _handle_stop(self, signum: Any, frame: Any) -> None:
+        source = "sigterm" if signum == signal.SIGTERM else ("sigint" if signum == signal.SIGINT else f"signal_{signum}")
+        self.stop_source = source
+        self.stop_signal = str(signum)
+        try:
+            self.stop_stack = "".join(traceback.format_stack(frame, limit=8))[:1800] if frame is not None else ""
+        except Exception:  # noqa: BLE001
+            self.stop_stack = ""
+        log_event(
+            self._logger,
+            "info",
+            "[DENG_REJOIN_STOP_REQUEST]",
+            source=source,
+            stack=self.stop_stack,
+            allowed="true",
+        )
         self.stop_event.set()
 
     def _set_status(self, pkg: str, status: str) -> None:
@@ -1978,8 +1997,21 @@ class WatchdogSupervisor:
         db.insert_event("INFO", "watchdog_supervisor_stopped", "session ended by user")
         log_event(logger, "info", "watchdog_supervisor_stopped")
 
-    def stop(self) -> None:
+    def stop(self, source: str = "programmatic") -> None:
         """Signal the supervisor loop to stop."""
+        self.stop_source = source or "programmatic"
+        try:
+            self.stop_stack = "".join(traceback.format_stack(limit=8))[:1800]
+        except Exception:  # noqa: BLE001
+            self.stop_stack = ""
+        log_event(
+            self._logger,
+            "info",
+            "[DENG_REJOIN_STOP_REQUEST]",
+            source=self.stop_source,
+            stack=self.stop_stack,
+            allowed="true",
+        )
         self.stop_event.set()
 
     def get_status_snapshot(
