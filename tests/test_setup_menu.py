@@ -139,14 +139,21 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         return text
 
     def test_menu_has_expected_numbered_items(self):
-        # Webhook and YesCaptcha stay hidden; Screen Mode is public.
+        # Webhook and YesCaptcha stay hidden; Screen Mode and Key are public.
+        # "Back" navigation items (e.g. "5. Back") are excluded from this check.
         text = self._get_menu_text()
         block = self._menu_block(text)
         lines = block.splitlines()
-        numbered = [l.strip() for l in lines if len(l.strip()) > 2 and l.strip()[0] in "123456789" and l.strip()[1] == "."]
+        numbered = [
+            l.strip() for l in lines
+            if (len(l.strip()) > 2
+                and l.strip()[0] in "123456789"
+                and l.strip()[1] == "."
+                and "Back" not in l.strip())
+        ]
         self.assertEqual(
             numbered,
-            ["1. Package", "2. Private Server URL", "3. Screen Mode"],
+            ["1. Package", "2. Private Server URL", "3. Screen Mode", "4. Key"],
             f"Unexpected Edit Config items: {numbered}",
         )
 

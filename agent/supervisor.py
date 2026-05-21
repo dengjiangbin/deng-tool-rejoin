@@ -1214,6 +1214,11 @@ class WatchdogSupervisor:
         self._revive_count: dict[str, int] = {}
         self._failure_count: dict[str, int] = {}
 
+        # ── Per-package RAM optimization tracking ─────────────────────────────
+        self._ram_last_check_at: dict[str, float] = {}   # last RAM measurement ts
+        self._ram_last_trim_at: dict[str, float] = {}    # last cache trim ts
+        self._ram_cooldown_until: dict[str, float] = {}  # no RAM restart until this ts
+
         # ── Per-package presence tracking ─────────────────────────────────────
         self._presence_user_ids: dict[str, int] = {}
         self._presence_usernames: dict[str, str] = {}
@@ -1672,6 +1677,27 @@ class WatchdogSupervisor:
         url_configured = bool(url)
         launcher_label = "private_url" if url_configured else "app_only"
         t0 = time.monotonic()
+        # Ensure package key license file is present before relaunch.
+        # Separate from DENG Tool license — writes FREE_ key to the Roblox data dir.
+        try:
+            from .package_key import ensure_package_key_for_start as _epkfs
+            _pk = _epkfs(
+                pkg, self.cfg,
+                root_enabled=bool(self.cfg.get("root_mode_enabled", False)),
+            )
+            log_event(
+                logger, "info", "[DENG_REJOIN_PACKAGE_KEY]",
+                package=pkg, mode="recovery_ensure", reason=reason,
+                path=_pk.get("path", ""),
+                key_masked=_pk.get("key_masked", ""),
+                write_needed=str(_pk.get("write_needed", False)).lower(),
+                write_attempted=str(_pk.get("write_attempted", False)).lower(),
+                method=_pk.get("method", "skipped"),
+                success=str(_pk.get("success", True)).lower(),
+                error=_pk.get("error", ""),
+            )
+        except Exception as _pk_exc:  # noqa: BLE001
+            logger.debug("package_key ensure error (non-fatal): %s", _pk_exc)
         try:
             result = launch_package_for_current_config(entry, self.cfg, reason)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -1805,7 +1831,144 @@ class WatchdogSupervisor:
             else:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
 
-        # STATUS_ONLINE: just update timestamp, no recovery needed.
+        elif state == STATUS_ONLINE:
+            # Run adaptive RAM optimization while the package is healthy.
+            self._check_ram_optimization(pkg, entry, now, render_callback=render_callback)
+
+    # ─── RAM optimization ─────────────────────────────────────────────────────
+
+    def _check_ram_optimization(
+        self,
+        pkg: str,
+        entry: dict[str, Any],
+        now: float,
+        render_callback: Any = None,
+    ) -> None:
+        """Check per-package RAM usage and apply trim / restart if required.
+
+        Decision ladder (all thresholds from config):
+          1. Package must have been Online for at least ram_check_delay_after_online_sec.
+          2. Check at most once per ram_trim_interval_sec.
+          3. RAM ≤ effective target  →  no action.
+          4. RAM > effective target  →  try safe cache trim (non-disruptive).
+          5. RAM > ram_restart_threshold_mb AND cooldown expired → force-stop + relaunch.
+
+        Probe tags: [DENG_REJOIN_RAM_CHECK] [DENG_REJOIN_RAM_TRIM] [DENG_REJOIN_RAM_RESTART]
+        """
+        cfg = self.cfg
+        if not cfg.get("ram_optimization_enabled", True):
+            return
+
+        online_since = self._online_start_ts.get(pkg, now)
+        delay_sec = int(cfg.get("ram_check_delay_after_online_sec", 30))
+        if now - online_since < delay_sec:
+            return  # Allow stabilization after coming Online.
+
+        trim_interval = int(cfg.get("ram_trim_interval_sec", 120))
+        if now - self._ram_last_check_at.get(pkg, 0.0) < trim_interval:
+            return  # Not yet time for the next RAM check.
+
+        self._ram_last_check_at[pkg] = now
+        logger = self._logger
+
+        # ── Measure RAM ───────────────────────────────────────────────────────
+        ram_result = android.get_package_ram_usage(pkg, self._root_info)
+        rss_kb: int = int(ram_result.get("rss_kb", 0))
+        usage_mb: float = rss_kb / 1024.0
+        usage_display: str = str(ram_result.get("usage_mb", "0MB"))
+        method: str = str(ram_result.get("method", "unknown"))
+
+        target_normal    = int(cfg.get("ram_target_normal_mb", 700))
+        target_good      = int(cfg.get("ram_target_good_mb", 500))
+        target_aggressive = int(cfg.get("ram_target_aggressive_mb", 300))
+        restart_threshold = int(cfg.get("ram_restart_threshold_mb", 900))
+        aggressive_mode   = bool(cfg.get("ram_aggressive_mode", False))
+        restart_cooldown  = int(cfg.get("ram_restart_cooldown_sec", 180))
+        effective_target  = target_aggressive if aggressive_mode else target_normal
+
+        log_event(
+            logger, "info", "[DENG_REJOIN_RAM_CHECK]",
+            package=pkg,
+            usage_mb=round(usage_mb, 1),
+            usage_display=usage_display,
+            method=method,
+            target_normal_mb=target_normal,
+            target_good_mb=target_good,
+            target_aggressive_mb=target_aggressive,
+            restart_threshold_mb=restart_threshold,
+            aggressive_mode=str(aggressive_mode).lower(),
+            effective_target_mb=effective_target,
+        )
+
+        if usage_mb <= effective_target:
+            return  # RAM is within acceptable range — nothing to do.
+
+        # ── Safe cache trim ───────────────────────────────────────────────────
+        if now - self._ram_last_trim_at.get(pkg, 0.0) >= trim_interval:
+            self._ram_last_trim_at[pkg] = now
+            try:
+                trim_result = android.clear_package_cache_verified(pkg)
+                log_event(
+                    logger, "info", "[DENG_REJOIN_RAM_TRIM]",
+                    package=pkg,
+                    usage_mb_before=round(usage_mb, 1),
+                    cache_cleared=str(not trim_result.get("skipped", True)).lower(),
+                    skipped=str(trim_result.get("skipped", True)).lower(),
+                    skipped_reason=str(trim_result.get("skipped_reason", "")),
+                    trim_success=str(trim_result.get("success", False)).lower(),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("RAM trim error (non-fatal): %s", exc)
+
+        if usage_mb <= restart_threshold:
+            return  # Below restart threshold — trim is sufficient.
+
+        # ── RAM restart ───────────────────────────────────────────────────────
+        ram_cooldown_until = self._ram_cooldown_until.get(pkg, 0.0)
+        nhb_cooldown_until = self._nhb_cooldown_until.get(pkg, 0.0)
+        cooldown_until = max(ram_cooldown_until, nhb_cooldown_until)
+        if now < cooldown_until:
+            log_event(
+                logger, "debug", "[DENG_REJOIN_RAM_RESTART_COOLDOWN]",
+                package=pkg,
+                usage_mb=round(usage_mb, 1),
+                restart_threshold_mb=restart_threshold,
+                remaining_sec=round(cooldown_until - now, 1),
+                status="waiting",
+            )
+            return
+
+        # Set cooldowns before acting to prevent concurrent restarts.
+        self._ram_cooldown_until[pkg] = now + restart_cooldown
+        self._nhb_cooldown_until[pkg] = now + restart_cooldown
+        log_event(
+            logger, "warning", "[DENG_REJOIN_RAM_RESTART]",
+            package=pkg,
+            usage_mb=round(usage_mb, 1),
+            usage_display=usage_display,
+            restart_threshold_mb=restart_threshold,
+            cooldown_sec=restart_cooldown,
+            reason="ram_above_threshold",
+        )
+        self._set_status(pkg, STATUS_RELAUNCHING)
+        if callable(render_callback):
+            try:
+                render_callback()
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            android.force_stop_package(pkg)
+            time.sleep(1.5)
+        except Exception:  # noqa: BLE001
+            pass
+        success = self._do_launch(pkg, entry, "ram_restart")
+        if success:
+            self._revive_count[pkg] = self._revive_count.get(pkg, 0) + 1
+            self._set_grace(pkg, now)
+            self._set_status(pkg, STATUS_LAUNCHING)
+            self._online_start_ts.pop(pkg, None)
+        else:
+            self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
 
     # ─── Main loop ────────────────────────────────────────────────────────────
 

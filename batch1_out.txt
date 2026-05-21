@@ -1,0 +1,783 @@
+﻿python : test_corrupt_db_skipped 
+(tests.test_sqlite_detect.TestSQLiteErrorHandling.test_corrupt_db_skipped) ... 
+ok
+At line:1 char:1
++ python -m unittest tests.test_sqlite_detect tests.test_stable_rebuild ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_corrupt_db...skipped) ... ok 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+test_empty_db_skipped 
+(tests.test_sqlite_detect.TestSQLiteErrorHandling.test_empty_db_skipped) ... ok
+test_oversized_db_skipped_by_copy (tests.test_sqlite_detect.TestSQLiteErrorHand
+ling.test_oversized_db_skipped_by_copy)
+copy_db_via_root checks size before returning temp path. ... ok
+test_scan_never_raises 
+(tests.test_sqlite_detect.TestSQLiteErrorHandling.test_scan_never_raises)
+scan_package_dbs must never raise any exception. ... ok
+test_scan_package_dbs_no_root_returns_empty (tests.test_sqlite_detect.TestSQLit
+eErrorHandling.test_scan_package_dbs_no_root_returns_empty) ... ok
+test_forbidden_column_token_skipped (tests.test_sqlite_detect.TestSQLiteForbidd
+enFiltering.test_forbidden_column_token_skipped) ... ok
+test_forbidden_path_browser_skipped (tests.test_sqlite_detect.TestSQLiteForbidd
+enFiltering.test_forbidden_path_browser_skipped) ... ok
+test_forbidden_path_cookie_skipped (tests.test_sqlite_detect.TestSQLiteForbidde
+nFiltering.test_forbidden_path_cookie_skipped) ... ok
+test_forbidden_table_auth_skipped (tests.test_sqlite_detect.TestSQLiteForbidden
+Filtering.test_forbidden_table_auth_skipped) ... ok
+test_forbidden_table_cookie_skipped (tests.test_sqlite_detect.TestSQLiteForbidd
+enFiltering.test_forbidden_table_cookie_skipped) ... ok
+test_forbidden_table_session_skipped (tests.test_sqlite_detect.TestSQLiteForbid
+denFiltering.test_forbidden_table_session_skipped) ... ok
+test_no_raw_db_dump_in_result (tests.test_sqlite_detect.TestSQLiteForbiddenFilt
+ering.test_no_raw_db_dump_in_result)
+Result must not contain raw DB content. ... ok
+test_safe_path_accepted (tests.test_sqlite_detect.TestSQLiteForbiddenFiltering.
+test_safe_path_accepted) ... ok
+test_supervisor_does_not_call_scan_package_dbs (tests.test_sqlite_detect.TestSQ
+LiteNotCalledFromSupervisor.test_supervisor_does_not_call_scan_package_dbs) 
+... ok
+test_supervisor_does_not_import_sqlite_account_detect (tests.test_sqlite_detect
+.TestSQLiteNotCalledFromSupervisor.test_supervisor_does_not_import_sqlite_accou
+nt_detect) ... ok
+test_temp_copy_deleted_after_scan (tests.test_sqlite_detect.TestSQLiteTempClean
+up.test_temp_copy_deleted_after_scan)
+Temp DB copy must be deleted after scan, even if result is empty. ... ok
+test_temp_copy_deleted_on_scan_error (tests.test_sqlite_detect.TestSQLiteTempCl
+eanup.test_temp_copy_deleted_on_scan_error)
+Temp copy must be deleted even when scan errors internally. ... ok
+test_detects_authenticatedUserId_column (tests.test_sqlite_detect.TestSQLiteUse
+rIdDetection.test_detects_authenticatedUserId_column) ... ok
+test_detects_currentUserId_column (tests.test_sqlite_detect.TestSQLiteUserIdDet
+ection.test_detects_currentUserId_column) ... ok
+test_detects_robloxUserId_column (tests.test_sqlite_detect.TestSQLiteUserIdDete
+ction.test_detects_robloxUserId_column) ... ok
+test_detects_userId_column (tests.test_sqlite_detect.TestSQLiteUserIdDetection.
+test_detects_userId_column) ... ok
+test_invalid_user_id_negative_rejected (tests.test_sqlite_detect.TestSQLiteUser
+IdDetection.test_invalid_user_id_negative_rejected) ... ok
+test_invalid_user_id_too_large_rejected (tests.test_sqlite_detect.TestSQLiteUse
+rIdDetection.test_invalid_user_id_too_large_rejected) ... ok
+test_invalid_user_id_zero_rejected (tests.test_sqlite_detect.TestSQLiteUserIdDe
+tection.test_invalid_user_id_zero_rejected) ... ok
+test_user_id_as_text_string (tests.test_sqlite_detect.TestSQLiteUserIdDetection
+.test_user_id_as_text_string) ... ok
+test_user_id_prefers_userId_over_username (tests.test_sqlite_detect.TestSQLiteU
+serIdDetection.test_user_id_prefers_userId_over_username) ... ok
+test_detects_accountName_column (tests.test_sqlite_detect.TestSQLiteUsernameDet
+ection.test_detects_accountName_column) ... ok
+test_detects_username_column (tests.test_sqlite_detect.TestSQLiteUsernameDetect
+ion.test_detects_username_column) ... ok
+test_display_name_marked_as_hint (tests.test_sqlite_detect.TestSQLiteUsernameDe
+tection.test_display_name_marked_as_hint) ... ok
+test_email_rejected_as_username (tests.test_sqlite_detect.TestSQLiteUsernameDet
+ection.test_email_rejected_as_username) ... ok
+test_username_too_long_rejected (tests.test_sqlite_detect.TestSQLiteUsernameDet
+ection.test_username_too_long_rejected) ... ok
+test_username_too_short_rejected (tests.test_sqlite_detect.TestSQLiteUsernameDe
+tection.test_username_too_short_rejected) ... ok
+test_allowed_userid_columns_not_empty (tests.test_sqlite_detect.TestValidationH
+elpers.test_allowed_userid_columns_not_empty) ... ok
+test_allowed_username_columns_not_empty (tests.test_sqlite_detect.TestValidatio
+nHelpers.test_allowed_username_columns_not_empty) ... ok
+test_forbidden_marker_detection (tests.test_sqlite_detect.TestValidationHelpers
+.test_forbidden_marker_detection) ... ok
+test_invalid_display_name_email (tests.test_sqlite_detect.TestValidationHelpers
+.test_invalid_display_name_email) ... ok
+test_invalid_user_id_negative 
+(tests.test_sqlite_detect.TestValidationHelpers.test_invalid_user_id_negative) 
+... ok
+test_invalid_user_id_too_large (tests.test_sqlite_detect.TestValidationHelpers.
+test_invalid_user_id_too_large) ... ok
+test_invalid_user_id_zero 
+(tests.test_sqlite_detect.TestValidationHelpers.test_invalid_user_id_zero) ... 
+ok
+test_invalid_username_email 
+(tests.test_sqlite_detect.TestValidationHelpers.test_invalid_username_email) 
+... ok
+test_invalid_username_too_long (tests.test_sqlite_detect.TestValidationHelpers.
+test_invalid_username_too_long) ... ok
+test_invalid_username_too_short (tests.test_sqlite_detect.TestValidationHelpers
+.test_invalid_username_too_short) ... ok
+test_valid_display_name 
+(tests.test_sqlite_detect.TestValidationHelpers.test_valid_display_name) ... ok
+test_valid_user_id_range 
+(tests.test_sqlite_detect.TestValidationHelpers.test_valid_user_id_range) ... 
+ok
+test_valid_username 
+(tests.test_sqlite_detect.TestValidationHelpers.test_valid_username) ... ok
+test_commands_start_does_not_import_experience_detector (tests.test_stable_rebu
+ild.TestArchiveIsolation.test_commands_start_does_not_import_experience_detecto
+r)
+cmd_start must not import experience_detector. ... ok
+test_legacy_modules_raise_on_broken_probe_calls (tests.test_stable_rebuild.Test
+ArchiveIsolation.test_legacy_modules_raise_on_broken_probe_calls)
+Archived broken probes must raise RuntimeError if called. ... ok
+test_legacy_package_init_has_broken_header (tests.test_stable_rebuild.TestArchi
+veIsolation.test_legacy_package_init_has_broken_header)
+agent/legacy/__init__.py must contain the broken-code header. ... ok
+test_supervisor_does_not_call_detect_experience_state (tests.test_stable_rebuil
+d.TestArchiveIsolation.test_supervisor_does_not_call_detect_experience_state)
+supervisor.py must not call detect_experience_state. ... ok
+test_supervisor_does_not_call_logcat_directly (tests.test_stable_rebuild.TestAr
+chiveIsolation.test_supervisor_does_not_call_logcat_directly)
+supervisor.py must not call logcat subprocess directly. ... ok
+test_supervisor_does_not_call_uiautomator (tests.test_stable_rebuild.TestArchiv
+eIsolation.test_supervisor_does_not_call_uiautomator)
+supervisor.py must not execute uiautomator subprocess commands. ... ok
+test_supervisor_does_not_import_experience_detector (tests.test_stable_rebuild.
+TestArchiveIsolation.test_supervisor_does_not_import_experience_detector)
+supervisor.py must not import experience_detector at module level. ... ok
+test_executed_label_is_executed_not_key_executed (tests.test_stable_rebuild.Tes
+tLicenseStatsNotRegressed.test_executed_label_is_executed_not_key_executed)
+idCardV2.js must use 'Executed', not 'Key Executed'. ... skipped 'idCardV2.js 
+not found ù DENG Pulse not in workspace'
+test_faulthandler_probe_updated (tests.test_stable_rebuild.TestLicenseStatsNotR
+egressed.test_faulthandler_probe_updated)
+Faulthandler probe ID must be updated for stable rebuild. ... FAIL
+test_dashboard_does_not_mention_ctrl_c_to_stop (tests.test_stable_rebuild.TestL
+iveDashboard.test_dashboard_does_not_mention_ctrl_c_to_stop)
+_live_dashboard must NOT print 'Press Ctrl+C to stop' (user p-d399d0ca73: 
+useless text). ... ok
+test_dashboard_does_not_mention_launch_url_configured (tests.test_stable_rebuil
+d.TestLiveDashboard.test_dashboard_does_not_mention_launch_url_configured)
+_live_dashboard must NOT print 'Launch URL: configured' (user p-d399d0ca73: 
+useless text). ... ok
+test_classify_presence_result_exists (tests.test_stable_rebuild.TestPresenceAPI
+Module.test_classify_presence_result_exists) ... ok
+test_fetch_presence_exists 
+(tests.test_stable_rebuild.TestPresenceAPIModule.test_fetch_presence_exists) 
+... ok
+test_fetch_presence_one_exists (tests.test_stable_rebuild.TestPresenceAPIModule
+.test_fetch_presence_one_exists) ... ok
+test_get_presence_state_for_package_exists (tests.test_stable_rebuild.TestPrese
+nceAPIModule.test_get_presence_state_for_package_exists) ... ok
+test_lookup_user_id_exists 
+(tests.test_stable_rebuild.TestPresenceAPIModule.test_lookup_user_id_exists) 
+... ok
+test_module_importable 
+(tests.test_stable_rebuild.TestPresenceAPIModule.test_module_importable) ... ok
+test_presence_in_game_keeps_package_online (tests.test_stable_rebuild.TestPrese
+nceSupervisorIntegration.test_presence_in_game_keeps_package_online)
+When presence says in_experience, supervisor must keep status Online. ... ok
+test_presence_lobby_does_not_set_joining_status (tests.test_stable_rebuild.Test
+PresenceSupervisorIntegration.test_presence_lobby_does_not_set_joining_status)
+Presence showing lobby must NOT trigger STATUS_JOINING on the worker. ... ok
+test_presence_rate_limit_does_not_crash (tests.test_stable_rebuild.TestPresence
+SupervisorIntegration.test_presence_rate_limit_does_not_crash)
+HTTP 429 (rate limited) must not crash the presence fetcher. ... ok
+test_presence_unavailable_falls_back_gracefully (tests.test_stable_rebuild.Test
+PresenceSupervisorIntegration.test_presence_unavailable_falls_back_gracefully)
+When presence API is unavailable, worker must not crash. ... ok
+test_launch_url_is_promoted_to_private_server_url (tests.test_stable_rebuild.Te
+stPrivateUrlCanonical.test_launch_url_is_promoted_to_private_server_url)
+Legacy launch_url must be promoted to private_server_url. ... ok
+test_private_server_url_is_the_canonical_key (tests.test_stable_rebuild.TestPri
+vateUrlCanonical.test_private_server_url_is_the_canonical_key)
+validate_config must produce private_server_url key. ... ok
+test_private_server_url_takes_priority_over_launch_url (tests.test_stable_rebui
+ld.TestPrivateUrlCanonical.test_private_server_url_takes_priority_over_launch_u
+rl)
+private_server_url must take priority over launch_url. ... ok
+test_edit_config_menu_has_no_post_launch_option (tests.test_stable_rebuild.Test
+PublicMenuItems.test_edit_config_menu_has_no_post_launch_option) ... ok
+test_main_menu_has_only_expected_items (tests.test_stable_rebuild.TestPublicMen
+uItems.test_main_menu_has_only_expected_items)
+Main menu must contain exactly the expected 4 items. ... ok
+test_all_mapped_states_in_allowed_set (tests.test_stable_rebuild.TestPublicStat
+es.test_all_mapped_states_in_allowed_set) ... FAIL
+test_dead_maps_to_reopening 
+(tests.test_stable_rebuild.TestPublicStates.test_dead_maps_to_reopening) ... ok
+test_failed_stays_failed 
+(tests.test_stable_rebuild.TestPublicStates.test_failed_stays_failed) ... ok
+test_no_in_server_in_public_display (tests.test_stable_rebuild.TestPublicStates
+.test_no_in_server_in_public_display) ... ok
+test_no_join_unconfirmed_in_public_display (tests.test_stable_rebuild.TestPubli
+cStates.test_no_join_unconfirmed_in_public_display) ... ok
+test_no_joining_in_public_display 
+(tests.test_stable_rebuild.TestPublicStates.test_no_joining_in_public_display) 
+... ok
+test_no_lobby_in_public_display 
+(tests.test_stable_rebuild.TestPublicStates.test_no_lobby_in_public_display) 
+... ok
+test_online_stays_online 
+(tests.test_stable_rebuild.TestPublicStates.test_online_stays_online) ... ok
+test_reconnecting_maps_to_reopening (tests.test_stable_rebuild.TestPublicStates
+.test_reconnecting_maps_to_reopening) ... ok
+test_classify_in_experience 
+(tests.test_stable_rebuild.TestRobloxPresenceAPI.test_classify_in_experience) 
+... ok
+test_classify_invisible_as_offline (tests.test_stable_rebuild.TestRobloxPresenc
+eAPI.test_classify_invisible_as_offline) ... ok
+test_classify_never_raises_on_weird_input (tests.test_stable_rebuild.TestRoblox
+PresenceAPI.test_classify_never_raises_on_weird_input) ... ok
+test_classify_none_returns_unavailable (tests.test_stable_rebuild.TestRobloxPre
+senceAPI.test_classify_none_returns_unavailable) ... ok
+test_classify_offline 
+(tests.test_stable_rebuild.TestRobloxPresenceAPI.test_classify_offline) ... ok
+test_classify_online_not_in_game (tests.test_stable_rebuild.TestRobloxPresenceA
+PI.test_classify_online_not_in_game) ... ok
+test_classify_unknown 
+(tests.test_stable_rebuild.TestRobloxPresenceAPI.test_classify_unknown) ... ok
+test_get_presence_state_no_entry_returns_unavailable (tests.test_stable_rebuild
+.TestRobloxPresenceAPI.test_get_presence_state_no_entry_returns_unavailable) 
+... ok
+test_get_presence_state_no_username_no_id_returns_unavailable (tests.test_stabl
+e_rebuild.TestRobloxPresenceAPI.test_get_presence_state_no_username_no_id_retur
+ns_unavailable) ... ok
+test_get_presence_state_with_user_id (tests.test_stable_rebuild.TestRobloxPrese
+nceAPI.test_get_presence_state_with_user_id) ... ok
+test_presence_api_failure_returns_unavailable_not_crash (tests.test_stable_rebu
+ild.TestRobloxPresenceAPI.test_presence_api_failure_returns_unavailable_not_cra
+sh)
+API failure must return unavailable, not raise. ... ok
+test_presence_malformed_json_does_not_crash (tests.test_stable_rebuild.TestRobl
+oxPresenceAPI.test_presence_malformed_json_does_not_crash)
+Malformed JSON response must not raise. ... ok
+test_presence_never_raises 
+(tests.test_stable_rebuild.TestRobloxPresenceAPI.test_presence_never_raises)
+fetch_presence must never raise regardless of network error. ... ok
+test_desired_url_field_exists (tests.test_stable_rebuild.TestSupervisorKaeruFie
+lds.test_desired_url_field_exists) ... ok
+test_failed_reason_field_exists (tests.test_stable_rebuild.TestSupervisorKaeruF
+ields.test_failed_reason_field_exists) ... ok
+test_hourly_restart_count_field_exists (tests.test_stable_rebuild.TestSuperviso
+rKaeruFields.test_hourly_restart_count_field_exists) ... ok
+test_last_presence_check_at_field_exists (tests.test_stable_rebuild.TestSupervi
+sorKaeruFields.test_last_presence_check_at_field_exists) ... ok
+test_last_presence_state_field_exists (tests.test_stable_rebuild.TestSupervisor
+KaeruFields.test_last_presence_state_field_exists) ... ok
+test_record_restart_updates_hourly_count (tests.test_stable_rebuild.TestSupervi
+sorKaeruFields.test_record_restart_updates_hourly_count) ... ok
+test_no_status_joining_set_in_live_worker (tests.test_stable_rebuild.TestSuperv
+isorNoJoiningState.test_no_status_joining_set_in_live_worker) ... ok
+test_no_status_lobby_set_in_live_worker (tests.test_stable_rebuild.TestSupervis
+orNoJoiningState.test_no_status_lobby_set_in_live_worker) ... ok
+test_relaunch_uses_status_launching_not_joining (tests.test_stable_rebuild.Test
+SupervisorNoJoiningState.test_relaunch_uses_status_launching_not_joining)
+Post-relaunch state must always be STATUS_LAUNCHING. ... ok
+test_edit_config_does_not_call_webhook_submenu (tests.test_stable_rebuild.TestW
+ebhookHiddenFromPublicUI.test_edit_config_does_not_call_webhook_submenu) ... ok
+test_edit_config_does_not_show_webhook_option (tests.test_stable_rebuild.TestWe
+bhookHiddenFromPublicUI.test_edit_config_does_not_show_webhook_option) ... ok
+test_first_time_setup_calls_webhook_step (tests.test_stable_rebuild.TestWebhook
+HiddenFromPublicUI.test_first_time_setup_calls_webhook_step) ... ok
+test_first_time_setup_has_7_steps (tests.test_stable_rebuild.TestWebhookHiddenF
+romPublicUI.test_first_time_setup_has_7_steps) ... FAIL
+test_first_time_setup_mentions_webhook (tests.test_stable_rebuild.TestWebhookHi
+ddenFromPublicUI.test_first_time_setup_mentions_webhook) ... ok
+test_first_time_setup_snapshot_is_conditional_on_webhook (tests.test_stable_reb
+uild.TestWebhookHiddenFromPublicUI.test_first_time_setup_snapshot_is_conditiona
+l_on_webhook) ... ok
+test_first_time_setup_webhook_interval_is_conditional_on_webhook (tests.test_st
+able_rebuild.TestWebhookHiddenFromPublicUI.test_first_time_setup_webhook_interv
+al_is_conditional_on_webhook) ... ok
+test_config_summary_does_not_print_yescaptcha (tests.test_stable_rebuild.TestYe
+sCaptchaHiddenFromPublicUI.test_config_summary_does_not_print_yescaptcha) ... 
+ok
+test_edit_config_does_not_call_yescaptcha_submenu (tests.test_stable_rebuild.Te
+stYesCaptchaHiddenFromPublicUI.test_edit_config_does_not_call_yescaptcha_submen
+u) ... ok
+test_edit_config_does_not_show_yescaptcha_option (tests.test_stable_rebuild.Tes
+tYesCaptchaHiddenFromPublicUI.test_edit_config_does_not_show_yescaptcha_option)
+ ... ok
+test_first_time_setup_does_not_mention_yescaptcha (tests.test_stable_rebuild.Te
+stYesCaptchaHiddenFromPublicUI.test_first_time_setup_does_not_mention_yescaptch
+a) ... ok
+test_start_does_not_require_yescaptcha (tests.test_stable_rebuild.TestYesCaptch
+aHiddenFromPublicUI.test_start_does_not_require_yescaptcha) ... ok
+test_dead_state_shown_in_table (tests.test_start_dashboard_clean.TestBuildStart
+Table.test_dead_state_shown_in_table)
+Dead is a distinct state (process gone) and must appear in the table. ... ok
+test_has_package_column 
+(tests.test_start_dashboard_clean.TestBuildStartTable.test_has_package_column) 
+... ok
+test_has_state_column 
+(tests.test_start_dashboard_clean.TestBuildStartTable.test_has_state_column) 
+... ok
+test_has_username_column (tests.test_start_dashboard_clean.TestBuildStartTable.
+test_has_username_column) ... ok
+test_multiple_packages_all_shown (tests.test_start_dashboard_clean.TestBuildSta
+rtTable.test_multiple_packages_all_shown) ... ok
+test_state_shown_in_table (tests.test_start_dashboard_clean.TestBuildStartTable
+.test_state_shown_in_table) ... ok
+test_verbose_details_contain_cache (tests.test_start_dashboard_clean.TestBuildS
+tartVerboseDetails.test_verbose_details_contain_cache) ... ok
+test_verbose_details_contain_graphics (tests.test_start_dashboard_clean.TestBui
+ldStartVerboseDetails.test_verbose_details_contain_graphics) ... ok
+test_verbose_details_empty_list_returns_empty (tests.test_start_dashboard_clean
+.TestBuildStartVerboseDetails.test_verbose_details_empty_list_returns_empty) 
+... ok
+test_no_background_processes_text (tests.test_start_dashboard_clean.TestStartOu
+tputClean.test_no_background_processes_text)
+We DO now show ``Stopping background Roblox apps...`` as a ... ok
+test_no_detected_packages_line (tests.test_start_dashboard_clean.TestStartOutpu
+tClean.test_no_detected_packages_line) ... ok
+test_no_launch_mode_line (tests.test_start_dashboard_clean.TestStartOutputClean
+.test_no_launch_mode_line) ... ok
+test_no_packages_selected_line (tests.test_start_dashboard_clean.TestStartOutpu
+tClean.test_no_packages_selected_line) ... ok
+test_no_raw_cache_text_in_stdout (tests.test_start_dashboard_clean.TestStartOut
+putClean.test_no_raw_cache_text_in_stdout)
+The OLD verbose ``Clearing safe cache (cache, code_cache, files/tmp)`` ... ok
+test_no_session_active_line (tests.test_start_dashboard_clean.TestStartOutputCl
+ean.test_no_session_active_line) ... ok
+test_no_start_summary_header (tests.test_start_dashboard_clean.TestStartOutputC
+lean.test_no_start_summary_header) ... ok
+test_table_present_in_output (tests.test_start_dashboard_clean.TestStartOutputC
+lean.test_table_present_in_output) ... ok
+test_intent_type_disabled_migrates_to_app_launch_mode (tests.test_start_flow.Co
+nfigMigrationTests.test_intent_type_disabled_migrates_to_app_launch_mode)
+Old launcher.intent_type = disabled must migrate to launch_mode = app. ... ok
+test_intent_type_none_migrates_to_app (tests.test_start_flow.ConfigMigrationTes
+ts.test_intent_type_none_migrates_to_app)
+Old launcher.intent_type = none must migrate to launch_mode = app. ... ok
+test_label_migrates_to_account_username (tests.test_start_flow.ConfigMigrationT
+ests.test_label_migrates_to_account_username)
+Old package entries with label must migrate to account_username. ... ok
+test_launch_mode_auto_migrates_to_app (tests.test_start_flow.ConfigMigrationTes
+ts.test_launch_mode_auto_migrates_to_app)
+launch_mode = auto must be migrated to app. ... ok
+test_launch_mode_disabled_migrates_to_app (tests.test_start_flow.ConfigMigratio
+nTests.test_launch_mode_disabled_migrates_to_app)
+launch_mode = disabled must be migrated to app (not raise ConfigError). ... ok
+test_string_package_list_still_migrates (tests.test_start_flow.ConfigMigrationT
+ests.test_string_package_list_still_migrates)
+Existing configs with roblox_packages as strings still migrate safely. ... ok
+test_unknown_username_does_not_block_launch (tests.test_start_flow.ConfigMigrat
+ionTests.test_unknown_username_does_not_block_launch)
+launch is not skipped when account_username is empty. ... ok
+test_all_commands_missing_failure_includes_reason (tests.test_start_flow.Launch
+erFallbackTests.test_all_commands_missing_failure_includes_reason)
+Clean failure message when all commands are missing. ... ok
+test_all_launch_commands_missing_clean_failure (tests.test_start_flow.LauncherF
+allbackTests.test_all_launch_commands_missing_clean_failure)
+When no Android launch commands exist, get a clean CommandResult, not an 
+exception. ... ok
+test_am_method_tried_before_monkey (tests.test_start_flow.LauncherFallbackTests
+.test_am_method_tried_before_monkey)
+Method 1 (am MAIN LAUNCHER) is tried before monkey. ... ok
+test_missing_monkey_falls_back_to_am (tests.test_start_flow.LauncherFallbackTes
+ts.test_missing_monkey_falls_back_to_am)
+If monkey is unavailable, launch_app must succeed using am. ... ok
+test_missing_monkey_no_file_not_found_error (tests.test_start_flow.LauncherFall
+backTests.test_missing_monkey_no_file_not_found_error)
+launch_app must never raise FileNotFoundError when monkey is missing. ... ok
+test_monkey_used_as_fallback_when_am_fails (tests.test_start_flow.LauncherFallb
+ackTests.test_monkey_used_as_fallback_when_am_fails)
+When am fails, monkey is tried as the final fallback. ... ok
+test_launch_skipped_phrase_not_in_table (tests.test_start_flow.SinglePackageLau
+nchTests.test_launch_skipped_phrase_not_in_table)
+The phrase 'Launch skipped' must never appear in a start table. ... ok
+test_single_package_calls_launch_app (tests.test_start_flow.SinglePackageLaunch
+Tests.test_single_package_calls_launch_app)
+One package must still call launch ù no skipping. ... ok
+test_single_package_start_table_row_says_started (tests.test_start_flow.SingleP
+ackageLaunchTests.test_single_package_start_table_row_says_started)
+Table rows may use Online or Launching after heartbeat. ... ok
+test_clear_terminal_helper_exists 
+(tests.test_start_flow.StartTableUxTests.test_clear_terminal_helper_exists) 
+... ok
+test_final_summary_in_server_maps_to_online (tests.test_start_flow.StartTableUx
+Tests.test_final_summary_in_server_maps_to_online) ... ok
+test_final_summary_is_multi_line_final_block (tests.test_start_flow.StartTableU
+xTests.test_final_summary_is_multi_line_final_block) ... ok
+test_final_summary_joining_maps_to_launching (tests.test_start_flow.StartTableU
+xTests.test_final_summary_joining_maps_to_launching) ... ok
+test_final_summary_lobby_maps_to_online (tests.test_start_flow.StartTableUxTest
+s.test_final_summary_lobby_maps_to_online) ... ok
+test_final_summary_reports_zero_when_no_rows_emitted (tests.test_start_flow.Sta
+rtTableUxTests.test_final_summary_reports_zero_when_no_rows_emitted) ... ok
+test_new_state_in_server_in_start_table (tests.test_start_flow.StartTableUxTest
+s.test_new_state_in_server_in_start_table)
+build_start_table must render 'In Server' without error. ... ok
+test_new_state_joining_in_start_table 
+(tests.test_start_flow.StartTableUxTests.test_new_state_joining_in_start_table)
+build_start_table must render 'Joining' without error. ... ok
+test_new_state_lobby_in_start_table 
+(tests.test_start_flow.StartTableUxTests.test_new_state_lobby_in_start_table)
+build_start_table must render 'Lobby' without error. ... ok
+test_no_script_execution_config_key 
+(tests.test_start_flow.StartTableUxTests.test_no_script_execution_config_key) 
+... ok
+test_public_config_menu_has_no_manual_auto_resize_step (tests.test_start_flow.S
+tartTableUxTests.test_public_config_menu_has_no_manual_auto_resize_step) ... C:
+\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\subprocess.py:
+639: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001D2AD97BD30>
+  result.append(c)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\subprocess.p
+y:639: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001D2AD97BF10>
+  result.append(c)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\subprocess.p
+y:639: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001D2ADA90040>
+  result.append(c)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\subprocess.p
+y:639: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001D2ADA90130>
+  result.append(c)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\subprocess.p
+y:639: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001D2ADA90220>
+  result.append(c)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\subprocess.p
+y:639: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001D2ADA90310>
+  result.append(c)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\subprocess.p
+y:639: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001D2ADA90400>
+  result.append(c)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\subprocess.p
+y:639: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001D2ADA904F0>
+  result.append(c)
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_settings_summary_is_not_raw_json (tests.test_start_flow.StartTableUxTests.
+test_settings_summary_is_not_raw_json) ... ok
+test_start_flow_does_not_use_pm_clear (tests.test_start_flow.StartTableUxTests.
+test_start_flow_does_not_use_pm_clear) ... ok
+test_start_table_does_not_contain_monkey (tests.test_start_flow.StartTableUxTes
+ts.test_start_table_does_not_contain_monkey) ... ok
+test_start_table_has_box_borders 
+(tests.test_start_flow.StartTableUxTests.test_start_table_has_box_borders) ... 
+ok
+test_start_table_has_only_public_columns (tests.test_start_flow.StartTableUxTes
+ts.test_start_table_has_only_public_columns) ... ok
+test_start_table_is_one_table_not_multiple (tests.test_start_flow.StartTableUxT
+ests.test_start_table_is_one_table_not_multiple) ... ok
+test_start_table_not_label_column 
+(tests.test_start_flow.StartTableUxTests.test_start_table_not_label_column) 
+... ok
+test_start_table_shows_state 
+(tests.test_start_flow.StartTableUxTests.test_start_table_shows_state) ... ok
+test_start_table_shows_username_and_package_separately (tests.test_start_flow.S
+tartTableUxTests.test_start_table_shows_username_and_package_separately) ... ok
+test_status_shows_launch_url_info 
+(tests.test_start_flow.StartTableUxTests.test_status_shows_launch_url_info) 
+... ok
+test_unknown_username_shows_unknown_not_waiting (tests.test_start_flow.StartTab
+leUxTests.test_unknown_username_shows_unknown_not_waiting) ... ok
+test_verbose_details_include_cache_graphics_not_in_public_table (tests.test_sta
+rt_flow.StartTableUxTests.test_verbose_details_include_cache_graphics_not_in_pu
+blic_table) ... ok
+test_50_percent_termux_means_50_percent_clones (tests.test_start_layout_and_shu
+tdown.DockFractionPropagatesToLayoutTest.test_50_percent_termux_means_50_percen
+t_clones) ... ok
+test_clones_do_not_overlap_each_other (tests.test_start_layout_and_shutdown.Doc
+kFractionPropagatesToLayoutTest.test_clones_do_not_overlap_each_other) ... ok
+test_launch_url_generic_uses_clear_task_flag (tests.test_start_layout_and_shutd
+own.LaunchUrlClearTaskFlagsTest.test_launch_url_generic_uses_clear_task_flag) 
+... ok
+test_launch_url_uses_root_package_scoped_view_intent (tests.test_start_layout_a
+nd_shutdown.LaunchUrlClearTaskFlagsTest.test_launch_url_uses_root_package_scope
+d_view_intent) ... ok
+test_full_package_list_passed_to_layout (tests.test_start_layout_and_shutdown.L
+auncherPicksOwnRectFromFullListTest.test_full_package_list_passed_to_layout)
+Layout MUST be calculated for all three enabled clones, ... ok
+test_escape_hatch_disables_exit (tests.test_start_layout_and_shutdown.TermuxExi
+tCleanTest.test_escape_hatch_disables_exit)
+``DENG_DISABLE_TERMUX_HARD_EXIT=1`` lets devs keep Python ... ok
+test_exit_when_termux (tests.test_start_layout_and_shutdown.TermuxExitCleanTest
+.test_exit_when_termux) ... ok
+test_no_exit_when_not_termux (tests.test_start_layout_and_shutdown.TermuxExitCl
+eanTest.test_no_exit_when_not_termux) ... ok
+test_am_stack_rc0_without_readback_is_not_ok (tests.test_start_layout_and_shutd
+own.TermuxMinimizeNoFalsePositiveTest.test_am_stack_rc0_without_readback_is_not
+_ok)
+Exact bug from probe ``p-47fa33562a``: every trusted command ... ok
+test_default_dock_fraction_is_50_percent (tests.test_start_layout_and_shutdown.
+TermuxMinimizeNoFalsePositiveTest.test_default_dock_fraction_is_50_percent)
+User explicitly asked for a 50% Termux dock ù the default in ... ok
+test_trusted_cmd_rc0_without_readback_is_ok (tests.test_start_layout_and_shutdo
+wn.TermuxMinimizeNoFalsePositiveTest.test_trusted_cmd_rc0_without_readback_is_o
+k)
+``cmd activity resize-task`` is trusted ù rc=0 means success ... ok
+test_closed_has_color 
+(tests.test_state_detection.TestColorizeStatusNewStates.test_closed_has_color) 
+... ok
+test_in_server_has_color (tests.test_state_detection.TestColorizeStatusNewState
+s.test_in_server_has_color) ... ok
+test_join_unconfirmed_has_color (tests.test_state_detection.TestColorizeStatusN
+ewStates.test_join_unconfirmed_has_color) ... ok
+test_joining_has_color (tests.test_state_detection.TestColorizeStatusNewStates.
+test_joining_has_color) ... ok
+test_lobby_has_color 
+(tests.test_state_detection.TestColorizeStatusNewStates.test_lobby_has_color) 
+... ok
+test_no_color_mode_returns_plain_string (tests.test_state_detection.TestColoriz
+eStatusNewStates.test_no_color_mode_returns_plain_string) ... ok
+test_join_unconfirmed_stays_in_healthy_states (tests.test_state_detection.TestE
+videnceBasedStateTransitions.test_join_unconfirmed_stays_in_healthy_states)
+Once Join Unconfirmed, the next healthy check must stay in healthy states. ... 
+ok
+test_no_url_foreground_app_is_online (tests.test_state_detection.TestEvidenceBa
+sedStateTransitions.test_no_url_foreground_app_is_online)
+No URL + FOREGROUND_APP evidence \u2192 Online (Kaeru-style, not Lobby). ... ok
+test_no_url_game_evidence_is_online (tests.test_state_detection.TestEvidenceBas
+edStateTransitions.test_no_url_game_evidence_is_online)
+No URL + EXPERIENCE_LIKELY_LOADED evidence \u2192 Online (Kaeru-style, not In 
+Server). ... ok
+test_no_url_healthy_home_evidence_is_online (tests.test_state_detection.TestEvi
+denceBasedStateTransitions.test_no_url_healthy_home_evidence_is_online)
+No URL + ROBLOX_HOME_OR_LOBBY evidence \u2192 Online (Kaeru-style, not Lobby). 
+... ok
+test_public_table_has_only_package_username_state (tests.test_state_detection.T
+estEvidenceBasedStateTransitions.test_public_table_has_only_package_username_st
+ate)
+build_start_table output must have only Package, Username, State columns. ... 
+ok
+test_url_launch_game_evidence_is_online (tests.test_state_detection.TestEvidenc
+eBasedStateTransitions.test_url_launch_game_evidence_is_online)
+URL launch + EXPERIENCE_LIKELY_LOADED evidence \u2192 Online (Kaeru-style, not 
+In Server). ... ok
+test_url_launch_home_evidence_is_online (tests.test_state_detection.TestEvidenc
+eBasedStateTransitions.test_url_launch_home_evidence_is_online)
+URL launch + HOME_OR_LOBBY evidence \u2192 Online (no Join Unconfirmed loop). 
+... ok
+test_url_launch_join_failed_evidence_is_online (tests.test_state_detection.Test
+EvidenceBasedStateTransitions.test_url_launch_join_failed_evidence_is_online)
+URL launch + JOIN_FAILED_OR_HOME evidence \u2192 Online (Kaeru-style). ... ok
+test_url_launch_no_evidence_is_online (tests.test_state_detection.TestEvidenceB
+asedStateTransitions.test_url_launch_no_evidence_is_online)
+URL launch + FOREGROUND_APP evidence \u2192 Online (Kaeru-style, not Join 
+Unconfirmed). ... ok
+test_url_launch_process_only_is_online (tests.test_state_detection.TestEvidence
+BasedStateTransitions.test_url_launch_process_only_is_online)
+URL launch + PROCESS_ONLY evidence \u2192 Online (Kaeru-style). ... ok
+test_joining_timeout_with_url_is_online_not_in_server (tests.test_state_detecti
+on.TestLaunchingTimeout.test_joining_timeout_with_url_is_online_not_in_server)
+Joining timeout + URL used \u2192 Online (Kaeru-style). Must NOT be In Server 
+or Join Unconfirmed. ... ok
+test_launching_timeout_fails_when_health_not_running (tests.test_state_detectio
+n.TestLaunchingTimeout.test_launching_timeout_fails_when_health_not_running)
+If Launching for too long and health=not_running \u2192 status is Failed. ... 
+ok
+test_launching_timeout_promotes_to_online_when_healthy_no_url (tests.test_state
+_detection.TestLaunchingTimeout.test_launching_timeout_promotes_to_online_when_
+healthy_no_url)
+If Launching for too long (no URL) and health=healthy \u2192 promote to 
+Online. ... ok
+test_in_server_stays_in_server_on_subsequent_healthy_checks (tests.test_state_d
+etection.TestLaunchingToLobbyTransition.test_in_server_stays_in_server_on_subse
+quent_healthy_checks)
+Once In Server, healthy checks must not demote to Online. ... ok
+test_joining_with_url_and_ingame_evidence_maps_to_online (tests.test_state_dete
+ction.TestLaunchingToLobbyTransition.test_joining_with_url_and_ingame_evidence_
+maps_to_online)
+URL launch + healthy \u2192 Online regardless of evidence. ... ok
+test_joining_with_url_no_evidence_maps_to_online (tests.test_state_detection.Te
+stLaunchingToLobbyTransition.test_joining_with_url_no_evidence_maps_to_online)
+URL launch + healthy process \u2192 Online (Kaeru-style: process alive = 
+Online). ... ok
+test_launching_with_no_url_maps_to_online (tests.test_state_detection.TestLaunc
+hingToLobbyTransition.test_launching_with_no_url_maps_to_online)
+After healthy check when in Launching (no URL), state must become Online. ... 
+ok
+test_lobby_stays_lobby_on_subsequent_healthy_checks (tests.test_state_detection
+.TestLaunchingToLobbyTransition.test_lobby_stays_lobby_on_subsequent_healthy_ch
+ecks)
+Once in Lobby, healthy checks must not demote to Online. ... ok
+test_print_live_status_fallback_when_no_callback (tests.test_state_detection.Te
+stMultiPackageSupervisorRenderCallback.test_print_live_status_fallback_when_no_
+callback)
+Without render_callback, _print_live_status is called. ... ok
+test_render_callback_called_on_refresh (tests.test_state_detection.TestMultiPac
+kageSupervisorRenderCallback.test_render_callback_called_on_refresh) ... ok
+test_reconnect_no_url_sets_launching (tests.test_state_detection.TestReconnectU
+RLAwareness.test_reconnect_no_url_sets_launching) ... ok
+test_reconnect_with_url_sets_joining (tests.test_state_detection.TestReconnectU
+RLAwareness.test_reconnect_with_url_sets_joining) ... ok
+test_in_server_counts_as_online (tests.test_state_detection.TestStateSummaryNew
+States.test_in_server_counts_as_online) ... ok
+test_join_unconfirmed_counts_as_launching (tests.test_state_detection.TestState
+SummaryNewStates.test_join_unconfirmed_counts_as_launching) ... ok
+test_joining_counts_as_launching (tests.test_state_detection.TestStateSummaryNe
+wStates.test_joining_counts_as_launching) ... ok
+test_lobby_counts_as_online (tests.test_state_detection.TestStateSummaryNewStat
+es.test_lobby_counts_as_online) ... ok
+test_start_table_shows_in_server (tests.test_state_detection.TestStateSummaryNe
+wStates.test_start_table_shows_in_server) ... ok
+test_start_table_shows_join_unconfirmed (tests.test_state_detection.TestStateSu
+mmaryNewStates.test_start_table_shows_join_unconfirmed) ... ok
+test_start_table_shows_joining (tests.test_state_detection.TestStateSummaryNewS
+tates.test_start_table_shows_joining) ... ok
+test_start_table_shows_lobby (tests.test_state_detection.TestStateSummaryNewSta
+tes.test_start_table_shows_lobby) ... ok
+test_closed_is_string 
+(tests.test_state_detection.TestStatusConstants.test_closed_is_string) ... ok
+test_healthy_states_contains_lobby_and_in_server (tests.test_state_detection.Te
+stStatusConstants.test_healthy_states_contains_lobby_and_in_server) ... ok
+test_in_server_is_string 
+(tests.test_state_detection.TestStatusConstants.test_in_server_is_string) ... 
+ok
+test_join_unconfirmed_in_healthy_states (tests.test_state_detection.TestStatusC
+onstants.test_join_unconfirmed_in_healthy_states)
+Join Unconfirmed is a healthy state ù app is running. ... ok
+test_join_unconfirmed_is_string (tests.test_state_detection.TestStatusConstants
+.test_join_unconfirmed_is_string) ... ok
+test_joining_is_string 
+(tests.test_state_detection.TestStatusConstants.test_joining_is_string) ... ok
+test_joining_not_in_healthy_states (tests.test_state_detection.TestStatusConsta
+nts.test_joining_not_in_healthy_states) ... ok
+test_launching_not_in_healthy_states (tests.test_state_detection.TestStatusCons
+tants.test_launching_not_in_healthy_states) ... ok
+test_lobby_is_string 
+(tests.test_state_detection.TestStatusConstants.test_lobby_is_string) ... ok
+test_joining_is_deprecated_and_not_used_as_initial_state (tests.test_state_voca
+bulary.TestInitialStartTableUsesLaunching.test_joining_is_deprecated_and_not_us
+ed_as_initial_state)
+Joining must not appear as an initial status produced by cmd_start logic. ... 
+ok
+test_post_launch_always_launching_regardless_of_url (tests.test_state_vocabular
+y.TestInitialStartTableUsesLaunching.test_post_launch_always_launching_regardle
+ss_of_url)
+cmd_start sets Launching for all packages after launch ù no Joining. ... ok
+test_disconnected_is_NOT_a_healthy_state (tests.test_state_vocabulary.TestState
+Constants.test_disconnected_is_NOT_a_healthy_state) ... ok
+test_in_lobby_not_in_legacy_healthy_states (tests.test_state_vocabulary.TestSta
+teConstants.test_in_lobby_not_in_legacy_healthy_states)
+In-Lobby is not in _HEALTHY_STATES (it's a watchdog-only state). ... ok
+test_launched_is_a_healthy_state (tests.test_state_vocabulary.TestStateConstant
+s.test_launched_is_a_healthy_state) ... ok
+test_lobby_is_a_healthy_state 
+(tests.test_state_vocabulary.TestStateConstants.test_lobby_is_a_healthy_state) 
+... ok
+test_new_watchdog_states_exist 
+(tests.test_state_vocabulary.TestStateConstants.test_new_watchdog_states_exist)
+New 4-state machine constants must exist. ... ok
+test_no_heartbeat_not_in_legacy_healthy_states (tests.test_state_vocabulary.Tes
+tStateConstants.test_no_heartbeat_not_in_legacy_healthy_states) ... ok
+test_offline_is_NOT_a_healthy_state (tests.test_state_vocabulary.TestStateConst
+ants.test_offline_is_NOT_a_healthy_state) ... ok
+test_online_is_a_healthy_state (tests.test_state_vocabulary.TestStateConstants.
+test_online_is_a_healthy_state) ... ok
+test_required_legacy_states_exist (tests.test_state_vocabulary.TestStateConstan
+ts.test_required_legacy_states_exist) ... ok
+test_in_lobby_and_no_heartbeat_have_colors (tests.test_state_vocabulary.TestSta
+tusColors.test_in_lobby_and_no_heartbeat_have_colors) ... ok
+test_launched_and_disconnected_have_colors (tests.test_state_vocabulary.TestSta
+tusColors.test_launched_and_disconnected_have_colors) ... ok
+
+======================================================================
+FAIL: test_faulthandler_probe_updated (tests.test_stable_rebuild.TestLicenseSta
+tsNotRegressed.test_faulthandler_probe_updated)
+Faulthandler probe ID must be updated for stable rebuild.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_stable_rebuild.py", line 708, in 
+test_faulthandler_probe_updated
+    self.assertIn("probe p-9e3f2a8d1c", src,
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                  "faulthandler probe ID not updated for stable rebuild")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'probe p-9e3f2a8d1c' not found in '#!/usr/bin/env 
+python3\n"""DENG Tool: Rejoin CLI entrypoint."""\n\nfrom __future__ import 
+annotations\n\nimport sys\nfrom pathlib import Path\n\n# 
+[DENG_REJOIN_SEGFAULT_FIX] probe_id=p-ea167faf5f\n# faulthandler with 
+file=<open_fd> + all_threads=True caused SIGSEGV on\n# Python 3.13 ARM/Termux 
+in threaded processes (supervisor spawns multiple\n# worker threads; 
+faulthandler\'s all_threads walk races with thread teardown).\n# The open file 
+descriptor was also inherited by every su/am subprocess, leaking\n# it into 
+root commands.  Removed entirely ù Python 3.13 prints native SIGSEGV\n# traces 
+to stderr by default without any faulthandler setup.\n\nif __package__ in 
+{None, ""}:\n    sys.path.insert(0, 
+str(Path(__file__).resolve().parents[1]))\n    from agent.commands import 
+main\nelse:\n    from .commands import main\n\n\nif __name__ == "__main__":\n  
+  raise SystemExit(main())\n' : faulthandler probe ID not updated for stable 
+rebuild
+
+======================================================================
+FAIL: test_all_mapped_states_in_allowed_set (tests.test_stable_rebuild.TestPubl
+icStates.test_all_mapped_states_in_allowed_set)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_stable_rebuild.py", line 203, in 
+test_all_mapped_states_in_allowed_set
+    self.assertIn(
+    ~~~~~~~~~~~~~^
+        public, self._ALLOWED_PUBLIC,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        f"State '{internal}' maps to '{public}' which is not in allowed set 
+{self._ALLOWED_PUBLIC}",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+AssertionError: 'In-Lobby' not found in {'Layout', 'Reopening', 'Failed', 
+'Launching', 'Online'} : State 'In-Lobby' maps to 'In-Lobby' which is not in 
+allowed set {'Layout', 'Reopening', 'Failed', 'Launching', 'Online'}
+
+======================================================================
+FAIL: test_first_time_setup_has_7_steps (tests.test_stable_rebuild.TestWebhookH
+iddenFromPublicUI.test_first_time_setup_has_7_steps)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_stable_rebuild.py", line 594, in 
+test_first_time_setup_has_7_steps
+    self.assertIn("Step 1 of 7", src)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'Step 1 of 7' not found in 'def 
+_run_first_time_setup_wizard(config_data: dict[str, Any], args: 
+argparse.Namespace, *, start_after_save: bool = False) -> tuple[dict[str, Any] 
+| None, bool]:\n    draft = _refresh_detected_fields(dict(config_data))\n    
+if not _is_interactive():\n        print_banner(use_color=not args.no_color)\n 
+       print("First Time Setup Config")\n        print()\n        print("This 
+will prepare your device for DENG Tool: Rejoin.")\n        print("You will set 
+Roblox packages (scan or manual), optional private URL, webhook, then 
+save.")\n        print("Package detection scans installed apps; manual entry 
+is fallback.")\n        print("Usernames are display-only in the Start table ù 
+Unknown is OK.")\n        print()\n        print("Run this command in 
+interactive Termux to complete setup.")\n        print()\n        
+_print_config_summary(draft)\n        return draft, False\n\n    
+print_banner(use_color=not args.no_color)\n    print("First Time Setup 
+Config")\n    print()\n    print("This will prepare your device for DENG Tool: 
+Rejoin.")\n    print()\n    print("You will set:")\n    print("  1. Roblox 
+package / clone app (pick from detection, or manual fallback)")\n    print("  
+2. Roblox public / private server link")\n    print("  3. Discord webhook 
+setup")\n    print("  4. Phone snapshot for webhook (only when webhook is 
+enabled)")\n    print("  5. Webhook info interval (only when webhook is 
+enabled)")\n    print("  6. Save and start")\n    print()\n    print("Package 
+detection:")\n    print("  The tool scans installed Roblox apps against safe 
+hints. Pick from the table.")\n    print("  Manual package entry is only a 
+fallback if nothing is found.")\n    print()\n    print("Step 1 of 6: Roblox 
+Package Setup")\n    packages, hints = _choose_packages_menu(\n        
+list(draft.get("roblox_packages") or 
+[package_entry(draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE), "", True, 
+"not_set")]),\n        list(draft.get("package_detection_hints") or 
+DEFAULT_ROBLOX_PACKAGE_HINTS),\n        draft,\n    )\n    
+draft["roblox_packages"] = packages\n    draft["package_detection_hints"] = 
+hints\n    active_entries = enabled_package_entries(draft)\n    
+draft["roblox_package"] = active_entries[0]["package"]\n    
+draft["selected_package_mode"] = "multiple" if len(active_entries) > 1 else 
+"single"\n    print("\\nStep 2 of 6: Roblox Public / Private Server Link")\n   
+ _setup_launch_link(draft)\n    print("\\nStep 3 of 6: Discord Webhook 
+Setup")\n    _setup_webhook(draft)\n    if draft.get("webhook_enabled"):\n     
+   print("\\nStep 4 of 6: Phone Snapshot For Webhook")\n        
+_setup_snapshot(draft)\n        print("\\nStep 5 of 6: Webhook Info 
+Interval")\n        _setup_webhook_interval(draft)\n    print("\\nStep 6 of 6: 
+Save And Start")\n    draft["first_setup_completed"] = True\n    try:\n        
+saved = save_config(draft)\n    except ConfigError as exc:\n        
+print(f"Setup could not be saved: {exc}")\n        return None, False\n    
+print("First-time setup complete.")\n    _print_config_summary(saved)\n    if 
+start_after_save or _prompt_yes_no("Start DENG now?", True):\n        
+cmd_start(args)\n    return saved, True\n'
+
+----------------------------------------------------------------------
+Ran 239 tests in 53.234s
+
+FAILED (failures=3, skipped=1)

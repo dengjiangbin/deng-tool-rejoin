@@ -2456,6 +2456,215 @@ def _config_menu_screen_mode(draft: dict[str, Any]) -> dict[str, Any]:
     return draft
 
 
+# ─── Package Key Config ───────────────────────────────────────────────────────
+# These functions handle PER-PACKAGE keys written to each Roblox/package
+# internal license file — NOT the DENG Tool license key.
+#
+# File path formula:
+#   /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/license
+#
+# This does NOT touch:
+#   - DENG Tool license file / license server / Supabase / Discord panel
+#   - any shared_prefs, databases, cookies, tokens, or login data
+
+
+def _config_menu_key(draft: dict[str, Any]) -> dict[str, Any]:
+    """Key submenu: configure package key for All Package(s) or Per Package."""
+    if not _is_interactive():
+        return draft
+    while True:
+        print()
+        print("--------------------------------")
+        print("Key Setup")
+        print("--------------------------------")
+        print("1. All Package(s)")
+        print("2. Per Package")
+        print("3. Back")
+        print("--------------------------------")
+        raw = safe_io.safe_prompt("Choose [3]: ", default="3")
+        if raw is None:
+            break
+        choice = raw.strip() or "3"
+        if choice in ("0", "3"):
+            break
+        elif choice == "1":
+            draft = _config_key_all_packages(draft)
+        elif choice == "2":
+            draft = _config_key_per_package(draft)
+        else:
+            print("Please choose 1-2 or 3.")
+            safe_io.press_enter()
+    return draft
+
+
+def _config_key_all_packages(draft: dict[str, Any]) -> dict[str, Any]:
+    """Set the same package key for all configured packages."""
+    from .package_key import (
+        mask_package_key,
+        write_package_key_file,
+        is_valid_package_key,
+    )
+    from .config import enabled_package_entries
+
+    print()
+    print("--------------------------------")
+    print("All Package(s) — Package Key")
+    print("--------------------------------")
+    print("This writes the package key to each configured package internal license file.")
+    print("This is NOT the DENG Tool license key.")
+    print("Leave blank to cancel.")
+    print()
+    raw = safe_io.safe_prompt("Enter package key: ", default="")
+    if raw is None:
+        print("Package key setup cancelled.")
+        return draft
+    key = raw.strip()
+    if not key:
+        print("Package key setup cancelled.")
+        return draft
+
+    if not is_valid_package_key(key):
+        print("Package key must start with FREE_ for this version.")
+        safe_io.press_enter()
+        return draft
+
+    entries = enabled_package_entries(draft)
+    if not entries:
+        print("No package(s) configured yet. Add package(s) first.")
+        safe_io.press_enter()
+        return draft
+
+    any_ok = False
+    for entry in entries:
+        pkg = entry["package"]
+        result = write_package_key_file(pkg, key)
+        if result["success"]:
+            any_ok = True
+        else:
+            err = result.get("error", "")
+            print(f"  Warning: could not write package key for {pkg}: {err[:80]}")
+
+    # Save the global package key in config (NOT DENG Tool license key).
+    pkg_keys = dict(draft.get("package_keys") or {})
+    if not isinstance(pkg_keys, dict):
+        pkg_keys = {}
+    pkg_keys["global"] = key
+    if "per_package" not in pkg_keys or not isinstance(pkg_keys.get("per_package"), dict):
+        pkg_keys["per_package"] = {}
+    draft["package_keys"] = pkg_keys
+    draft = save_config(draft)
+
+    masked = mask_package_key(key)
+    print(f"Package key saved for all package(s): {masked}")
+    safe_io.press_enter()
+    return draft
+
+
+def _config_key_per_package(draft: dict[str, Any]) -> dict[str, Any]:
+    """Set a package key for a specific configured package."""
+    from .package_key import (
+        mask_package_key,
+        write_package_key_file,
+        is_valid_package_key,
+    )
+    from .config import enabled_package_entries
+
+    entries = enabled_package_entries(draft)
+    if not entries:
+        print()
+        print("No package(s) configured yet. Add package(s) first.")
+        safe_io.press_enter()
+        return draft
+
+    while True:
+        print()
+        print("--------------------------------")
+        print("Per Package — Package Key")
+        print("--------------------------------")
+        for i, e in enumerate(entries, 1):
+            pkg = e["package"]
+            short = _short_package_display(pkg)
+            existing_key = _resolve_per_package_key_display(draft, pkg)
+            print(f"  {i}. {short}{existing_key}")
+        print("  B. Back")
+        print("--------------------------------")
+        raw = safe_io.safe_prompt("Choose package [B]: ", default="B")
+        if raw is None:
+            break
+        choice = raw.strip() or "B"
+        if choice.upper() in ("B", "0"):
+            break
+        # Parse index choice
+        try:
+            idx = int(choice) - 1
+            if idx < 0 or idx >= len(entries):
+                raise ValueError("out of range")
+        except (ValueError, TypeError):
+            print("Please enter a package number or B to go back.")
+            safe_io.press_enter()
+            continue
+
+        entry = entries[idx]
+        pkg = entry["package"]
+        short = _short_package_display(pkg)
+
+        print()
+        print(f"Package: {short}")
+        print("Leave blank to cancel.")
+        print()
+        raw_key = safe_io.safe_prompt(f"Enter package key for {short}: ", default="")
+        if raw_key is None:
+            break
+        key = raw_key.strip()
+        if not key:
+            print("Cancelled.")
+            continue
+
+        if not is_valid_package_key(key):
+            print("Package key must start with FREE_ for this version.")
+            safe_io.press_enter()
+            continue
+
+        result = write_package_key_file(pkg, key)
+        if not result["success"]:
+            err = result.get("error", "")
+            print(f"Could not write package key for {short}: {err[:80]}")
+            safe_io.press_enter()
+            continue
+
+        # Save per-package key in config (NOT DENG Tool license key).
+        pkg_keys = dict(draft.get("package_keys") or {})
+        if not isinstance(pkg_keys, dict):
+            pkg_keys = {"global": ""}
+        if not isinstance(pkg_keys.get("per_package"), dict):
+            pkg_keys["per_package"] = {}
+        pkg_keys["per_package"][pkg] = key
+        draft["package_keys"] = pkg_keys
+        draft = save_config(draft)
+
+        masked = mask_package_key(key)
+        print(f"Package key saved for {short}: {masked}")
+        safe_io.press_enter()
+
+    return draft
+
+
+def _resolve_per_package_key_display(draft: dict[str, Any], package: str) -> str:
+    """Return a short display hint showing whether a package key is configured."""
+    from .package_key import mask_package_key
+    pkg_keys = draft.get("package_keys") or {}
+    if not isinstance(pkg_keys, dict):
+        return ""
+    per_pkg = pkg_keys.get("per_package") or {}
+    key = per_pkg.get(package) or ""
+    if key:
+        return f" [{mask_package_key(key)}]"
+    global_key = pkg_keys.get("global") or ""
+    if global_key:
+        return f" [global: {mask_package_key(global_key)}]"
+    return ""
+
+
 def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
     """Webhook submenu: URL / Interval / Mode / Snapshot / Test Webhook."""
     if not _is_interactive():
@@ -2747,7 +2956,8 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("1. Package")
         print("2. Private Server URL")
         print("3. Screen Mode")
-        print("0. Back")
+        print("4. Key")
+        print("5. Back")
         print("--------------------------------")
         print("\nCurrent settings:")
         _print_config_summary(draft)
@@ -2763,16 +2973,17 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("1. Package")
         print("2. Private Server URL")
         print("3. Screen Mode")
-        print("0. Back")
+        print("4. Key")
+        print("5. Back")
         print("--------------------------------")
-        choice = safe_io.safe_prompt("Choose [0]: ", default="0")
+        choice = safe_io.safe_prompt("Choose [5]: ", default="5")
         if choice is None:
             print("\nNo interactive input was available. Run this command in Termux to edit settings.")
             print("\nCurrent settings:")
             _print_config_summary(draft)
             return draft, False
-        choice = choice.strip() or "0"
-        if choice == "0":
+        choice = choice.strip() or "5"
+        if choice in ("0", "5"):
             return draft, True
         if choice == "1":
             draft = _config_menu_package(draft)
@@ -2780,8 +2991,10 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
             draft = _config_menu_launch_link(draft)
         elif choice == "3":
             draft = _config_menu_screen_mode(draft)
+        elif choice == "4":
+            draft = _config_menu_key(draft)
         else:
-            print("Please choose 1-3 or 0.")
+            print("Please choose 1-4 or 5.")
             safe_io.press_enter()
 
 
@@ -4206,6 +4419,31 @@ def cmd_start(args: argparse.Namespace) -> int:
             _has_url = bool(str(
                 effective_private_server_url(runtime_entry, runtime_cfg) or ""
             ).strip())
+            # Ensure package key file is correct before launch.
+            # This writes: /storage/emulated/0/Android/data/{pkg}/files/gloop/external/Internals/license
+            # Only if a FREE_ key is configured; does NOT touch DENG Tool license.
+            try:
+                from .package_key import ensure_package_key_for_start as _epkfs
+                _pk_result = _epkfs(
+                    package, runtime_cfg,
+                    root_enabled=bool(runtime_cfg.get("root_mode_enabled", False)),
+                )
+                _start_log.info(
+                    "[DENG_REJOIN_PACKAGE_KEY] package=%s mode=start_ensure path=%s"
+                    " key_prefix=%s key_masked=%s write_needed=%s write_attempted=%s"
+                    " method=%s success=%s error=%s",
+                    package,
+                    _pk_result.get("path", ""),
+                    _pk_result.get("key_prefix", ""),
+                    _pk_result.get("key_masked", ""),
+                    str(_pk_result.get("write_needed", False)).lower(),
+                    str(_pk_result.get("write_attempted", False)).lower(),
+                    _pk_result.get("method", "skipped"),
+                    str(_pk_result.get("success", True)).lower(),
+                    _pk_result.get("error", ""),
+                )
+            except Exception as _pk_exc:  # noqa: BLE001
+                _start_log.debug("package_key ensure error (non-fatal): %s", _pk_exc)
             result = perform_rejoin(package_cfg, reason="start", package_entry=runtime_entry)
             launch_ok[package]  = result.success
             launch_err[package] = result.error or ""

@@ -1,0 +1,214 @@
+﻿2026-05-20 11:38:23,331 [INFO] deng_tool_rejoin: Detected username for com.roblox.client: u1
+2026-05-20 11:38:23,411 [INFO] deng_tool_rejoin: No username found for com.roblox.client
+2026-05-20 11:38:23,504 [INFO] deng_tool_rejoin: Detected username for com.roblox.client: SqliteNick
+2026-05-20 11:38:23,560 [INFO] deng_tool_rejoin: No username found for com.roblox.client
+2026-05-20 11:38:23,655 [INFO] deng_tool_rejoin: Root-detected user_id=42424242 for com.roblox.client via shared_prefs
+2026-05-20 11:38:25,503 [WARNING] asyncio: Executing <Task finished name='Task-22' coro=<TestAdminStatusCommand.test_admin_status_shows_store_info() done, defined at C:\Users\Administrator\Desktop\DENG Tool Rejoin\tests\test_bot_panel_cog.py:673> result=None created at C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\asyncio\runners.py:100> took 0.101 seconds
+python : ......................................................................
+...............................................................................
+..........................sss..................................................
+..............................C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\agent\safe_io.py:186: ResourceWarning: unclosed file <_io.TextIOWrapper 
+name='C:\\Users\\Administrator\\.deng-tool\\rejoin\\logs\\crash.log' mode='a' 
+encoding='utf-8'>
+At line:1 char:55
++ ... \DENG Tool Rejoin"; python -m unittest discover -s tests 2>&1 | Out-F ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (..................coding='utf-8'> 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  _crash_file = open(  # noqa: SIM115
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\safe_io.py:186: 
+ResourceWarning: unclosed file <_io.TextIOWrapper 
+name='/tmp/deng-rejoin-crash.log' mode='a' encoding='utf-8'>
+  _crash_file = open(  # noqa: SIM115
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_clean_shutdown.py:105: ResourceWarning: unclosed file 
+<_io.TextIOWrapper name='C:\\Users\\Administrator\\.deng-rejoin-crash.log' 
+mode='a' encoding='utf-8'>
+  sio.setup_faulthandler()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...............................................................................
+...................................<frozen os>:717: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000001E0E16D5210>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+<frozen os>:717: ResourceWarning: unclosed database in <sqlite3.Connection 
+object at 0x000001E0E16D53F0>
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...............................................................................
+.............C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib
+\unittest\mock.py:2253: ResourceWarning: unclosed database in 
+<sqlite3.Connection object at 0x000001E0E16D53F0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D58A0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+Name: Val: Input: Input: 
+.......................................C:\Users\Administrator\Desktop\DENG 
+Tool Rejoin\tests\test_global_stability.py:169: ResourceWarning: unclosed file 
+<_io.TextIOWrapper name='C:\\Users\\Administrator\\.deng-rejoin-crash.log' 
+mode='a' encoding='utf-8'>
+  safe_io.setup_faulthandler()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_global_stability.py:170: ResourceWarning: unclosed file 
+<_io.TextIOWrapper name='C:\\Users\\Administrator\\.deng-rejoin-crash.log' 
+mode='a' encoding='utf-8'>
+  safe_io.setup_faulthandler()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_global_stability.py:163: ResourceWarning: unclosed file 
+<_io.TextIOWrapper name='C:\\Users\\Administrator\\.deng-rejoin-crash.log' 
+mode='a' encoding='utf-8'>
+  safe_io.setup_faulthandler()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+....................C:\Users\Administrator\AppData\Local\Programs\Python\Python
+313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed database in 
+<sqlite3.Connection object at 0x000001E0E16D5A80>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D5990>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: RuntimeWarning: coroutine '_list_guild' was never awaited
+  def __init__(self, name, parent):
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+...............................................................................
+..............s.s..............................................s.......s.......
+.........F.....................................................................
+...............................................................................
+..............................................................C:\Users\Administ
+rator\Desktop\DENG Tool Rejoin\tests\test_license_cache_fastpath.py:62: 
+DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for 
+removal in a future version. Use timezone-aware objects to represent datetimes 
+in UTC: datetime.datetime.now(datetime.UTC).
+  naive = (datetime.utcnow() - timedelta(seconds=120)).isoformat()
+...............................................................................
+.................................................C:\Users\Administrator\AppData
+\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: 
+unclosed database in <sqlite3.Connection object at 0x000001E0E16D5C60>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D66B0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D57B0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D56C0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D64D0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D6890>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D6A70>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D5210>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D6980>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D5120>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D4B80>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D4D60>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D4E50>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D4C70>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0E16D54E0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.....C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittes
+t\mock.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection 
+object at 0x000001E0DFDAB2E0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0DFDAB1F0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0DFDAB3D0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0DFDAAF20>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...............................................................................
+......................C:\Users\Administrator\AppData\Local\Programs\Python\Pyth
+on313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed database in 
+<sqlite3.Connection object at 0x000001E0DFDAB100>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0DFDAB5B0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000001E0DF79FB50>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..............C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Li
+b\unittest\mock.py:2253: ResourceWarning: unclosed database in 
+<sqlite3.Connection object at 0x000001E0DF79F100>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+Input: Enter: > t> t> t> t> t> t> t> t> t> t> 
+...........................

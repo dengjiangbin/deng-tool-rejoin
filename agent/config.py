@@ -167,6 +167,24 @@ def default_config() -> dict[str, Any]:
         "yescaptcha_key": "",
         "webhook_tags": [],
         "package_start_times": {},
+        # ── Package keys (per-package internal license, NOT DENG Tool license) ──
+        # These are written to each Roblox/package Android data folder:
+        #   /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/license
+        # This is COMPLETELY separate from the DENG Tool license system.
+        "package_keys": {
+            "global": "",
+            "per_package": {},
+        },
+        # ── RAM optimization settings ─────────────────────────────────────────
+        "ram_optimization_enabled": True,
+        "ram_target_normal_mb": 700,
+        "ram_target_good_mb": 500,
+        "ram_target_aggressive_mb": 300,
+        "ram_restart_threshold_mb": 900,
+        "ram_check_delay_after_online_sec": 30,
+        "ram_trim_interval_sec": 120,
+        "ram_restart_cooldown_sec": 180,
+        "ram_aggressive_mode": False,
         "created_at": now,
         "updated_at": now,
     }
@@ -721,6 +739,41 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         for k, v in raw_start_times.items()
         if is_valid_package_name(str(k))
     }
+
+    # ── Package keys (per-package internal license, NOT DENG Tool license) ──
+    raw_pkg_keys = merged.get("package_keys")
+    if not isinstance(raw_pkg_keys, dict):
+        raw_pkg_keys = {}
+    raw_global_key = str(raw_pkg_keys.get("global") or "").strip()
+    raw_per_pkg = raw_pkg_keys.get("per_package") or {}
+    if not isinstance(raw_per_pkg, dict):
+        raw_per_pkg = {}
+    # Only preserve per-package entries with valid package names.
+    validated_per_pkg = {
+        k: str(v).strip()
+        for k, v in raw_per_pkg.items()
+        if is_valid_package_name(str(k)) and isinstance(v, str) and str(v).strip()
+    }
+    merged["package_keys"] = {
+        "global": raw_global_key,
+        "per_package": validated_per_pkg,
+    }
+
+    # ── RAM optimization settings ─────────────────────────────────────────────
+    def _ram_int(key: str, default: int, minimum: int = 0) -> int:
+        try:
+            return max(minimum, int(merged.get(key, default)))
+        except (TypeError, ValueError):
+            return default
+    merged["ram_optimization_enabled"] = _as_bool(merged.get("ram_optimization_enabled", True))
+    merged["ram_target_normal_mb"] = _ram_int("ram_target_normal_mb", 700, 100)
+    merged["ram_target_good_mb"] = _ram_int("ram_target_good_mb", 500, 100)
+    merged["ram_target_aggressive_mb"] = _ram_int("ram_target_aggressive_mb", 300, 100)
+    merged["ram_restart_threshold_mb"] = _ram_int("ram_restart_threshold_mb", 900, 200)
+    merged["ram_check_delay_after_online_sec"] = _ram_int("ram_check_delay_after_online_sec", 30, 0)
+    merged["ram_trim_interval_sec"] = _ram_int("ram_trim_interval_sec", 120, 30)
+    merged["ram_restart_cooldown_sec"] = _ram_int("ram_restart_cooldown_sec", 180, 30)
+    merged["ram_aggressive_mode"] = _as_bool(merged.get("ram_aggressive_mode", False))
 
     opt_default = default_config()["optimization"]
     raw_opt = merged.get("optimization")

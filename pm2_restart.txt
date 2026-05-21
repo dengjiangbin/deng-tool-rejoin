@@ -1,0 +1,19 @@
+[32m[PM2] [39mApplying action restartProcessId on app [deng-rejoin-panel](ids: [ 15 ])
+[32m[PM2] [39m[deng-rejoin-panel](15) ✓
+┌────┬───────────────────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name                  │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+├────┼───────────────────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┼──────────┼──────────┤
+│ [1m[36m14[39m[22m │ deng-assistant        │ default     │ 1.0.0   │ [7m[1mfork[22m[27m    │ 1088     │ 2D     │ 1    │ [32m[1monline[22m[39m    │ 0%       │ 83.1mb   │ [1mAdm… │ [90mdisabled[39m │
+│ [1m[36m13[39m[22m │ deng-bot              │ default     │ 1.0.0   │ [7m[1mfork[22m[27m    │ 5216     │ 26h    │ 21   │ [32m[1monline[22m[39m    │ 0%       │ 127.1mb  │ [1mAdm… │ [90mdisabled[39m │
+│ [1m[36m4[39m[22m  │ deng-casino           │ default     │ 1.0.0   │ [7m[1mfork[22m[27m    │ 1228     │ 2D     │ 5    │ [32m[1monline[22m[39m    │ 0%       │ 122.3mb  │ [1mAdm… │ [90mdisabled[39m │
+│ [1m[36m3[39m[22m  │ deng-control-panel    │ default     │ 1.0.0   │ [7m[1mfork[22m[27m    │ 17024    │ 2s     │ 700… │ [32m[1monline[22m[39m    │ 79.6%    │ 56.0mb   │ [1mAdm… │ [90mdisabled[39m │
+│ [1m[36m6[39m[22m  │ deng-fish-it          │ default     │ 1.0.0   │ [7m[1mfork[22m[27m    │ 4756     │ 26h    │ 174  │ [32m[1monline[22m[39m    │ 0%       │ 205.5mb  │ [1mAdm… │ [90mdisabled[39m │
+│ [1m[36m7[39m[22m  │ deng-giveaway         │ default     │ 1.0.0   │ [7m[1mfork[22m[27m    │ 4248     │ 2D     │ 2    │ [32m[1monline[22m[39m    │ 0%       │ 102.6mb  │ [1mAdm… │ [90mdisabled[39m │
+│ [1m[36m5[39m[22m  │ deng-infinite         │ default     │ 1.0.0   │ [7m[1mfork[22m[27m    │ 6324     │ 6s     │ 283… │ [32m[1monline[22m[39m    │ 73.6%    │ 79.0mb   │ [1mAdm… │ [90mdisabled[39m │
+│ [1m[36m8[39m[22m  │ deng-level            │ default     │ 1.0.0   │ [7m[1mfork[22m[27m    │ 13492    │ 2D     │ 1    │ [32m[1monline[22m[39m    │ 0%       │ 101.5mb  │ [1mAdm… │ [90mdisabled[39m │
+│ [1m[36m11[39m[22m │ deng-notice           │ default     │ 1.0.0   │ [34m[1mcluster[22m[39m │ 4468     │ 2D     │ 6    │ [32m[1monline[22m[39m    │ 0%       │ 91.0mb   │ [1mAdm… │ [90mdisabled[39m │
+│ [1m[36m9[39m[22m  │ deng-pulse            │ default     │ 1.0.0   │ [7m[1mfork[22m[27m    │ 16364    │ 23h    │ 19   │ [32m[1monline[22m[39m    │ 0%       │ 147.0mb  │ [1mAdm… │ [90mdisabled[39m │
+│ [1m[36m0[39m[22m  │ deng-quiz             │ default     │ 1.0.0   │ [7m[1mfork[22m[27m    │ 16176    │ 2D     │ 3    │ [32m[1monline[22m[39m    │ 1.5%     │ 105.2mb  │ [1mAdm… │ [90mdisabled[39m │
+│ [1m[36m15[39m[22m │ deng-rejoin-panel     │ default     │ N/A     │ [7m[1mfork[22m[27m    │ 10748    │ 1s     │ 178  │ [32m[1monline[22m[39m    │ 67.2%    │ 32.8mb   │ [1mAdm… │ [90mdisabled[39m │
+│ [1m[36m12[39m[22m │ deng-relay            │ default     │ 1.0.0   │ [7m[1mfork[22m[27m    │ 8440     │ 2D     │ 3    │ [32m[1monline[22m[39m    │ 0%       │ 88.2mb   │ [1mAdm… │ [90mdisabled[39m │
+└────┴───────────────────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘

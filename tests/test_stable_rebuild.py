@@ -618,7 +618,8 @@ class TestPublicMenuItems(unittest.TestCase):
         self.assertIn('"1. Package"', src)
         self.assertIn('"2. Private Server URL"', src)
         self.assertIn('"3. Screen Mode"', src)
-        self.assertIn('"0. Back"', src)
+        self.assertIn('"4. Key"', src)
+        self.assertIn('"5. Back"', src)
         self.assertNotIn('"3. Webhook"', src)
         self.assertNotIn('"4. YesCaptcha"', src)
 

@@ -1,0 +1,3 @@
+Wrote C:\Users\Administrator\Desktop\DENG Tool Rejoin\releases\main-dev\deng-tool-rejoin-main-dev.tar.gz
+artifact_sha256=3e16e849e3f59a80846bf8fca6bca8c810407ffb3df258a5397473c841630626
+Updated C:\Users\Administrator\Desktop\DENG Tool Rejoin\data\rejoin_versions.json main-dev artifact_sha256

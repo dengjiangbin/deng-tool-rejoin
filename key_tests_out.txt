@@ -1,0 +1,680 @@
+﻿python : test_joining_is_deprecated_and_not_used_as_initial_state (tests.test_s
+tate_vocabulary.TestInitialStartTableUsesLaunching.test_joining_is_deprecated_a
+nd_not_used_as_initial_state)
+At line:1 char:1
++ python -m unittest tests.test_state_vocabulary tests.test_private_url ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_joining_is..._initial_state) 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Joining must not appear as an initial status produced by cmd_start logic. ... 
+ok
+test_post_launch_always_launching_regardless_of_url (tests.test_state_vocabular
+y.TestInitialStartTableUsesLaunching.test_post_launch_always_launching_regardle
+ss_of_url)
+cmd_start sets Launching for all packages after launch ù no Joining. ... ok
+test_disconnected_is_NOT_a_healthy_state (tests.test_state_vocabulary.TestState
+Constants.test_disconnected_is_NOT_a_healthy_state) ... ok
+test_in_lobby_not_in_legacy_healthy_states (tests.test_state_vocabulary.TestSta
+teConstants.test_in_lobby_not_in_legacy_healthy_states)
+In-Lobby is not in _HEALTHY_STATES (it's a watchdog-only state). ... ok
+test_launched_is_a_healthy_state (tests.test_state_vocabulary.TestStateConstant
+s.test_launched_is_a_healthy_state) ... ok
+test_lobby_is_a_healthy_state 
+(tests.test_state_vocabulary.TestStateConstants.test_lobby_is_a_healthy_state) 
+... ok
+test_new_watchdog_states_exist 
+(tests.test_state_vocabulary.TestStateConstants.test_new_watchdog_states_exist)
+New 4-state machine constants must exist. ... ok
+test_no_heartbeat_not_in_legacy_healthy_states (tests.test_state_vocabulary.Tes
+tStateConstants.test_no_heartbeat_not_in_legacy_healthy_states) ... ok
+test_offline_is_NOT_a_healthy_state (tests.test_state_vocabulary.TestStateConst
+ants.test_offline_is_NOT_a_healthy_state) ... ok
+test_online_is_a_healthy_state (tests.test_state_vocabulary.TestStateConstants.
+test_online_is_a_healthy_state) ... ok
+test_required_legacy_states_exist (tests.test_state_vocabulary.TestStateConstan
+ts.test_required_legacy_states_exist) ... ok
+test_in_lobby_and_no_heartbeat_have_colors (tests.test_state_vocabulary.TestSta
+tusColors.test_in_lobby_and_no_heartbeat_have_colors) ... ok
+test_launched_and_disconnected_have_colors (tests.test_state_vocabulary.TestSta
+tusColors.test_launched_and_disconnected_have_colors) ... ok
+test_entry_url_wins_over_global (tests.test_private_url.TestEffectivePrivateSer
+verUrl.test_entry_url_wins_over_global) ... ok
+test_global_url_used_when_entry_url_empty (tests.test_private_url.TestEffective
+PrivateServerUrl.test_global_url_used_when_entry_url_empty) ... ok
+test_no_url_returns_none_or_empty (tests.test_private_url.TestEffectivePrivateS
+erverUrl.test_no_url_returns_none_or_empty) ... ok
+test_whitespace_url_treated_as_empty (tests.test_private_url.TestEffectivePriva
+teServerUrl.test_whitespace_url_treated_as_empty) ... ok
+test_invalid_url_is_rejected_without_launch_app_fallback (tests.test_private_ur
+l.TestLaunchCommandConstructionWithURL.test_invalid_url_is_rejected_without_lau
+nch_app_fallback)
+An unparseable URL must not crash or open Roblox without the URL. ... ok
+test_no_url_uses_launch_app (tests.test_private_url.TestLaunchCommandConstructi
+onWithURL.test_no_url_uses_launch_app)
+Without URL, fallback to normal app launch (MAIN + LAUNCHER). ... ok
+test_url_triggers_view_intent (tests.test_private_url.TestLaunchCommandConstruc
+tionWithURL.test_url_triggers_view_intent)
+When private URL is set, launch_url() must be called using VIEW intent. ... ok
+test_each_package_gets_its_own_url (tests.test_private_url.TestMultiPackageURLH
+andling.test_each_package_gets_its_own_url)
+URL-first: two packages each get their specific URL in the first launch call. 
+... ok
+test_effective_url_per_entry_independent (tests.test_private_url.TestMultiPacka
+geURLHandling.test_effective_url_per_entry_independent)
+effective_private_server_url returns the entry-specific URL for each. ... ok
+test_per_entry_url_overrides_global (tests.test_private_url.TestPerformRejoinUR
+LState.test_per_entry_url_overrides_global)
+URL-first: entry-specific URL is passed directly to 
+launch_package_with_options. ... ok
+test_perform_rejoin_with_url_succeeds (tests.test_private_url.TestPerformRejoin
+URLState.test_perform_rejoin_with_url_succeeds)
+URL-first: launch_package_with_options receives the URL directly (not None). 
+... C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest
+\mock.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection 
+object at 0x000002697F21E6B0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21E7A0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21E890>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21E980>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21EA70>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21EB60>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21EC50>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21ED40>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21F100>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21F1F0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21F2E0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21F3D0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_perform_rejoin_without_url_succeeds (tests.test_private_url.TestPerformRej
+oinURLState.test_perform_rejoin_without_url_succeeds) ... ok
+test_intent_type_disabled_migrates_to_app_launch_mode (tests.test_start_flow.Co
+nfigMigrationTests.test_intent_type_disabled_migrates_to_app_launch_mode)
+Old launcher.intent_type = disabled must migrate to launch_mode = app. ... ok
+test_intent_type_none_migrates_to_app (tests.test_start_flow.ConfigMigrationTes
+ts.test_intent_type_none_migrates_to_app)
+Old launcher.intent_type = none must migrate to launch_mode = app. ... ok
+test_label_migrates_to_account_username (tests.test_start_flow.ConfigMigrationT
+ests.test_label_migrates_to_account_username)
+Old package entries with label must migrate to account_username. ... ok
+test_launch_mode_auto_migrates_to_app (tests.test_start_flow.ConfigMigrationTes
+ts.test_launch_mode_auto_migrates_to_app)
+launch_mode = auto must be migrated to app. ... ok
+test_launch_mode_disabled_migrates_to_app (tests.test_start_flow.ConfigMigratio
+nTests.test_launch_mode_disabled_migrates_to_app)
+launch_mode = disabled must be migrated to app (not raise ConfigError). ... ok
+test_string_package_list_still_migrates (tests.test_start_flow.ConfigMigrationT
+ests.test_string_package_list_still_migrates)
+Existing configs with roblox_packages as strings still migrate safely. ... ok
+test_unknown_username_does_not_block_launch (tests.test_start_flow.ConfigMigrat
+ionTests.test_unknown_username_does_not_block_launch)
+launch is not skipped when account_username is empty. ... ok
+test_all_commands_missing_failure_includes_reason (tests.test_start_flow.Launch
+erFallbackTests.test_all_commands_missing_failure_includes_reason)
+Clean failure message when all commands are missing. ... ok
+test_all_launch_commands_missing_clean_failure (tests.test_start_flow.LauncherF
+allbackTests.test_all_launch_commands_missing_clean_failure)
+When no Android launch commands exist, get a clean CommandResult, not an 
+exception. ... ok
+test_am_method_tried_before_monkey (tests.test_start_flow.LauncherFallbackTests
+.test_am_method_tried_before_monkey)
+Method 1 (am MAIN LAUNCHER) is tried before monkey. ... ok
+test_missing_monkey_falls_back_to_am (tests.test_start_flow.LauncherFallbackTes
+ts.test_missing_monkey_falls_back_to_am)
+If monkey is unavailable, launch_app must succeed using am. ... ok
+test_missing_monkey_no_file_not_found_error (tests.test_start_flow.LauncherFall
+backTests.test_missing_monkey_no_file_not_found_error)
+launch_app must never raise FileNotFoundError when monkey is missing. ... ok
+test_monkey_used_as_fallback_when_am_fails (tests.test_start_flow.LauncherFallb
+ackTests.test_monkey_used_as_fallback_when_am_fails)
+When am fails, monkey is tried as the final fallback. ... ok
+test_launch_skipped_phrase_not_in_table (tests.test_start_flow.SinglePackageLau
+nchTests.test_launch_skipped_phrase_not_in_table)
+The phrase 'Launch skipped' must never appear in a start table. ... ok
+test_single_package_calls_launch_app (tests.test_start_flow.SinglePackageLaunch
+Tests.test_single_package_calls_launch_app)
+One package must still call launch ù no skipping. ... ok
+test_single_package_start_table_row_says_started (tests.test_start_flow.SingleP
+ackageLaunchTests.test_single_package_start_table_row_says_started)
+Table rows may use Online or Launching after heartbeat. ... ok
+test_clear_terminal_helper_exists 
+(tests.test_start_flow.StartTableUxTests.test_clear_terminal_helper_exists) 
+... ok
+test_final_summary_in_server_maps_to_online (tests.test_start_flow.StartTableUx
+Tests.test_final_summary_in_server_maps_to_online) ... ok
+test_final_summary_is_multi_line_final_block (tests.test_start_flow.StartTableU
+xTests.test_final_summary_is_multi_line_final_block) ... ok
+test_final_summary_joining_maps_to_launching (tests.test_start_flow.StartTableU
+xTests.test_final_summary_joining_maps_to_launching) ... ok
+test_final_summary_lobby_maps_to_online (tests.test_start_flow.StartTableUxTest
+s.test_final_summary_lobby_maps_to_online) ... ok
+test_final_summary_reports_zero_when_no_rows_emitted (tests.test_start_flow.Sta
+rtTableUxTests.test_final_summary_reports_zero_when_no_rows_emitted) ... ok
+test_new_state_in_server_in_start_table (tests.test_start_flow.StartTableUxTest
+s.test_new_state_in_server_in_start_table)
+build_start_table must render 'In Server' without error. ... ok
+test_new_state_joining_in_start_table 
+(tests.test_start_flow.StartTableUxTests.test_new_state_joining_in_start_table)
+build_start_table must render 'Joining' without error. ... ok
+test_new_state_lobby_in_start_table 
+(tests.test_start_flow.StartTableUxTests.test_new_state_lobby_in_start_table)
+build_start_table must render 'Lobby' without error. ... ok
+test_no_script_execution_config_key 
+(tests.test_start_flow.StartTableUxTests.test_no_script_execution_config_key) 
+... ok
+test_public_config_menu_has_no_manual_auto_resize_step (tests.test_start_flow.S
+tartTableUxTests.test_public_config_menu_has_no_manual_auto_resize_step) ... ok
+test_settings_summary_is_not_raw_json (tests.test_start_flow.StartTableUxTests.
+test_settings_summary_is_not_raw_json) ... ok
+test_start_flow_does_not_use_pm_clear (tests.test_start_flow.StartTableUxTests.
+test_start_flow_does_not_use_pm_clear) ... ok
+test_start_table_does_not_contain_monkey (tests.test_start_flow.StartTableUxTes
+ts.test_start_table_does_not_contain_monkey) ... ok
+test_start_table_has_box_borders 
+(tests.test_start_flow.StartTableUxTests.test_start_table_has_box_borders) ... 
+ok
+test_start_table_has_only_public_columns (tests.test_start_flow.StartTableUxTes
+ts.test_start_table_has_only_public_columns) ... ok
+test_start_table_is_one_table_not_multiple (tests.test_start_flow.StartTableUxT
+ests.test_start_table_is_one_table_not_multiple) ... ok
+test_start_table_not_label_column 
+(tests.test_start_flow.StartTableUxTests.test_start_table_not_label_column) 
+... ok
+test_start_table_shows_state 
+(tests.test_start_flow.StartTableUxTests.test_start_table_shows_state) ... ok
+test_start_table_shows_username_and_package_separately (tests.test_start_flow.S
+tartTableUxTests.test_start_table_shows_username_and_package_separately) ... ok
+test_status_shows_launch_url_info 
+(tests.test_start_flow.StartTableUxTests.test_status_shows_launch_url_info) 
+... C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest
+\mock.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object 
+at 0x000002697F21F2E0>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21F1F0>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21F100>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21ED40>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21E4D0>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21F3D0>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21EC50>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21EB60>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21E5C0>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21E980>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21E890>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21E7A0>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21E3E0>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21EA70>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21DF30>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:496: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21E2F0>
+  __dict__['method_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_unknown_username_shows_unknown_not_waiting (tests.test_start_flow.StartTab
+leUxTests.test_unknown_username_shows_unknown_not_waiting) ... ok
+test_verbose_details_include_cache_graphics_not_in_public_table (tests.test_sta
+rt_flow.StartTableUxTests.test_verbose_details_include_cache_graphics_not_in_pu
+blic_table) ... ok
+test_calls_apply_window_layout_silent (tests.test_supervisor_reconnect.TestReap
+plyLayoutOnRecovery.test_calls_apply_window_layout_silent) ... ok
+test_never_raises_even_when_apply_throws (tests.test_supervisor_reconnect.TestR
+eapplyLayoutOnRecovery.test_never_raises_even_when_apply_throws) ... ok
+test_revive_path_invokes_perform_rejoin_and_reapply (tests.test_supervisor_reco
+nnect.TestReviveCallsRejoinAndLayout.test_revive_path_invokes_perform_rejoin_an
+d_reapply) ... ok
+test_only_task_returns_strict_alive_false (tests.test_supervisor_reconnect.Test
+StrictAliveImmuneToStaleTask.test_only_task_returns_strict_alive_false) ... ok
+test_process_running_is_alive (tests.test_supervisor_reconnect.TestStrictAliveI
+mmuneToStaleTask.test_process_running_is_alive) ... ok
+test_window_with_surface_is_alive (tests.test_supervisor_reconnect.TestStrictAl
+iveImmuneToStaleTask.test_window_with_surface_is_alive) ... ok
+  [Monitor] client:Offline
+test_render_callback_exception_does_not_kill_supervisor (tests.test_supervisor_
+reconnect.TestSupervisorRunsForever.test_render_callback_exception_does_not_kil
+l_supervisor) ... ok
+test_render_callback_invoked_until_stop (tests.test_supervisor_reconnect.TestSu
+pervisorRunsForever.test_render_callback_invoked_until_stop) ... ok
+test_stale_window_without_surface_returns_false (tests.test_supervisor_reconnec
+t.TestWindowVisibleRequiresSurface.test_stale_window_without_surface_returns_fa
+lse) ... ok
+test_window_with_surface_returns_true (tests.test_supervisor_reconnect.TestWind
+owVisibleRequiresSurface.test_window_with_surface_returns_true) ... ok
+test_worker_logs_and_continues (tests.test_supervisor_reconnect.TestWorkerSurvi
+vesExceptions.test_worker_logs_and_continues) ... ok
+test_in_game_presence_makes_status_online (tests.test_supervisor_presence.TestP
+resenceDrivesState.test_in_game_presence_makes_status_online) ... ok
+test_offline_presence_falls_through_to_local_logic (tests.test_supervisor_prese
+nce.TestPresenceDrivesState.test_offline_presence_falls_through_to_local_logic)
+When presence==Offline, the worker doesn't short-circuit ù it lets ... C:\Users
+\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:225
+3: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21E4D0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21DF30>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21E5C0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21DB70>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21F970>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21FF10>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\moc
+k.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F36C040>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_online_presence_in_lobby_falls_through_to_process_check (tests.test_superv
+isor_presence.TestPresenceDrivesState.test_online_presence_in_lobby_falls_throu
+gh_to_process_check)
+Kaeru-style stable rebuild: lobby presence is recorded internally but ... ok
+test_unknown_presence_keeps_prior_state_logic (tests.test_supervisor_presence.T
+estPresenceDrivesState.test_unknown_presence_keeps_prior_state_logic)
+When the API is unreachable (Unknown), the worker uses local heuristics. ... ok
+test_dead_state_shown_in_table (tests.test_start_dashboard_clean.TestBuildStart
+Table.test_dead_state_shown_in_table)
+Dead is a distinct state (process gone) and must appear in the table. ... ok
+test_has_package_column 
+(tests.test_start_dashboard_clean.TestBuildStartTable.test_has_package_column) 
+... ok
+test_has_state_column 
+(tests.test_start_dashboard_clean.TestBuildStartTable.test_has_state_column) 
+... ok
+test_has_username_column (tests.test_start_dashboard_clean.TestBuildStartTable.
+test_has_username_column) ... ok
+test_multiple_packages_all_shown (tests.test_start_dashboard_clean.TestBuildSta
+rtTable.test_multiple_packages_all_shown) ... ok
+test_state_shown_in_table (tests.test_start_dashboard_clean.TestBuildStartTable
+.test_state_shown_in_table) ... ok
+test_verbose_details_contain_cache (tests.test_start_dashboard_clean.TestBuildS
+tartVerboseDetails.test_verbose_details_contain_cache) ... ok
+test_verbose_details_contain_graphics (tests.test_start_dashboard_clean.TestBui
+ldStartVerboseDetails.test_verbose_details_contain_graphics) ... ok
+test_verbose_details_empty_list_returns_empty (tests.test_start_dashboard_clean
+.TestBuildStartVerboseDetails.test_verbose_details_empty_list_returns_empty) 
+... ok
+test_no_background_processes_text (tests.test_start_dashboard_clean.TestStartOu
+tputClean.test_no_background_processes_text)
+We DO now show ``Stopping background Roblox apps...`` as a ... --- Logging 
+error ---
+Traceback (most recent call last):
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\logg
+ing\handlers.py", line 80, in emit
+    self.doRollover()
+    ~~~~~~~~~~~~~~~^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\logg
+ing\handlers.py", line 185, in doRollover
+    self.rotate(self.baseFilename, dfn)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\logg
+ing\handlers.py", line 121, in rotate
+    os.rename(source, dest)
+    ~~~~~~~~~^^^^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it 
+is being used by another process: 
+'C:\\Users\\Administrator\\.deng-tool\\rejoin\\logs\\agent.log' -> 
+'C:\\Users\\Administrator\\.deng-tool\\rejoin\\logs\\agent.log.1'
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\__main__.py", line 18, in <module>
+    main(module=None)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\main.py", line 104, in __init__
+    self.runTests()
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\main.py", line 270, in runTests
+    self.result = testRunner.run(self.test)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\runner.py", line 240, in run
+    test(result)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 122, in run
+    test(result)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 122, in run
+    test(result)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 122, in run
+    test(result)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\case.py", line 707, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\case.py", line 651, in run
+    self._callTestMethod(testMethod)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\case.py", line 606, in _callTestMethod
+    if method() is not None:
+  File "C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_start_dashboard_clean.py", line 214, in 
+test_no_background_processes_text
+    out = self._get_output()
+  File "C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_start_dashboard_clean.py", line 161, in _get_output
+    return _capture_start_output(self.ENTRIES)
+  File "C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_start_dashboard_clean.py", line 80, in _capture_start_output
+    _cmd.cmd_start(args)
+  File "C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\commands.py", 
+line 4091, in cmd_start
+    _supervisor.run_forever(
+  File "C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\supervisor.py", 
+line 1593, in run_forever
+    log_event(
+  File "C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\logger.py", line 
+117, in log_event
+    log_method(line)
+Message: '[DENG_REJOIN_PACKAGE_CHECK] elapsed_ms=18 heartbeat_ok=unknown 
+in_game=false index=1 package=com.roblox.client previous_state=In-Lobby 
+process_running=true round=58 state=In-Lobby total=1 warning_detected=false'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\logg
+ing\handlers.py", line 80, in emit
+    self.doRollover()
+    ~~~~~~~~~~~~~~~^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\logg
+ing\handlers.py", line 185, in doRollover
+    self.rotate(self.baseFilename, dfn)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\logg
+ing\handlers.py", line 121, in rotate
+    os.rename(source, dest)
+    ~~~~~~~~~^^^^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it 
+is being used by another process: 
+'C:\\Users\\Administrator\\.deng-tool\\rejoin\\logs\\agent.log' -> 
+'C:\\Users\\Administrator\\.deng-tool\\rejoin\\logs\\agent.log.1'
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\__main__.py", line 18, in <module>
+    main(module=None)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\main.py", line 104, in __init__
+    self.runTests()
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\main.py", line 270, in runTests
+    self.result = testRunner.run(self.test)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\runner.py", line 240, in run
+    test(result)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 122, in run
+    test(result)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 122, in run
+    test(result)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 122, in run
+    test(result)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\case.py", line 707, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\case.py", line 651, in run
+    self._callTestMethod(testMethod)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\case.py", line 606, in _callTestMethod
+    if method() is not None:
+  File "C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_start_dashboard_clean.py", line 214, in 
+test_no_background_processes_text
+    out = self._get_output()
+  File "C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_start_dashboard_clean.py", line 161, in _get_output
+    return _capture_start_output(self.ENTRIES)
+  File "C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_start_dashboard_clean.py", line 80, in _capture_start_output
+    _cmd.cmd_start(args)
+  File "C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\commands.py", 
+line 4091, in cmd_start
+    _supervisor.run_forever(
+  File "C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\supervisor.py", 
+line 1618, in run_forever
+    self._handle_state(pkg, entry, state, prev, now)
+  File "C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\supervisor.py", 
+line 1506, in _handle_state
+    log_event(
+  File "C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\logger.py", line 
+117, in log_event
+    log_method(line)
+Message: '[DENG_REJOIN_RECOVERY_DECISION] action=monitor_only 
+package=com.roblox.client private_url_configured=false 
+reason=no_private_url_in_lobby_is_acceptable state=In-Lobby'
+Arguments: ()
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\logg
+ing\handlers.py", line 80, in emit
+    self.doRollover()
+    ~~~~~~~~~~~~~~~^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\logg
+ing\handlers.py", line 185, in doRollover
+    self.rotate(self.baseFilename, dfn)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\logg
+ing\handlers.py", line 121, in rotate
+    os.rename(source, dest)
+    ~~~~~~~~~^^^^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it 
+is being used by another process: 
+'C:\\Users\\Administrator\\.deng-tool\\rejoin\\logs\\agent.log' -> 
+'C:\\Users\\Administrator\\.deng-tool\\rejoin\\logs\\agent.log.1'
+Call stack:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\__main__.py", line 18, in <module>
+    main(module=None)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\main.py", line 104, in __init__
+    self.runTests()
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\main.py", line 270, in runTests
+    self.result = testRunner.run(self.test)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\runner.py", line 240, in run
+    test(result)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 122, in run
+    test(result)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 122, in run
+    test(result)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 84, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\suite.py", line 122, in run
+    test(result)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\case.py", line 707, in __call__
+    return self.run(*args, **kwds)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\case.py", line 651, in run
+    self._callTestMethod(testMethod)
+  File "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unit
+test\case.py", line 606, in _callTestMethod
+    if method() is not None:
+  File "C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_start_dashboard_clean.py", line 214, in 
+test_no_background_processes_text
+    out = self._get_output()
+  File "C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_start_dashboard_clean.py", line 161, in _get_output
+    return _capture_start_output(self.ENTRIES)
+  File "C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_start_dashboard_clean.py", line 80, in _capture_start_output
+    _cmd.cmd_start(args)
+  File "C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\commands.py", 
+line 4091, in cmd_start
+    _supervisor.run_forever(
+  File "C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\supervisor.py", 
+line 1627, in run_forever
+    log_event(
+  File "C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\logger.py", line 
+117, in log_event
+    log_method(line)
+Message: '[DENG_REJOIN_WATCHDOG_CONTINUES] dead_packages=0 in_lobby_packages=1 
+next_round_in_sec=10 no_heartbeat_packages=0 online_packages=0'
+Arguments: ()
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\contextlib.p
+y:479: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21EB60>
+  @staticmethod
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\contextlib.p
+y:479: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002697F21DA80>
+  @staticmethod
+ResourceWarning: Enable tracemalloc to get the object allocation traceback

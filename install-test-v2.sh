@@ -1,0 +1,200 @@
+#!/usr/bin/env sh
+set -eu
+echo "DENG Tool: Rejoin Test Installer"
+echo "Version: main-dev"
+command -v curl >/dev/null 2>&1 || { echo "Install curl first: pkg install -y curl" >&2; exit 1; }
+command -v tar >/dev/null 2>&1 || { echo "Install tar first: pkg install -y tar" >&2; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "Install python first: pkg install -y python" >&2; exit 1; }
+export DENG_REJOIN_INSTALL_API="https://rejoin.deng.my.id"
+APP_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"
+mkdir -p "$APP_HOME"
+CACHE_BUSTER="$(date +%s)-$$"
+PACKAGE_URL_BASE="$DENG_REJOIN_INSTALL_API/install/test/package.tar.gz"
+PACKAGE_URL="$PACKAGE_URL_BASE?t=$CACHE_BUSTER"
+INSTALLER_URL="$DENG_REJOIN_INSTALL_API/install/test/latest"
+EXPECTED_SHA256="3e16e849e3f59a80846bf8fca6bca8c810407ffb3df258a5397473c841630626"
+TMP="$(mktemp)"
+trap 'rm -f "$TMP"' EXIT
+echo "Downloading..."
+curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" -A "deng-rejoin-installer/1.0" "$PACKAGE_URL" -o "$TMP" || {
+  echo "Download failed." >&2
+  echo "URL: $PACKAGE_URL_BASE" >&2
+  exit 1
+}
+ACTUAL_SHA="$(python3 -c 'import hashlib,sys;d=open(sys.argv[1],"rb").read();print(hashlib.sha256(d).hexdigest())' "$TMP" 2>/dev/null)" || ACTUAL_SHA=""
+if [ "$ACTUAL_SHA" != "$EXPECTED_SHA256" ]; then
+  echo "Package checksum mismatch. The download may be corrupted or stale." >&2
+  echo "Expected: $EXPECTED_SHA256" >&2
+  echo "Got:      $ACTUAL_SHA" >&2
+  echo "This means the installer script and the package are out of sync." >&2
+  echo "Re-download the installer: curl -fsSL $INSTALLER_URL -o install.sh && sh install.sh" >&2
+  exit 1
+fi
+echo "Package verified: $ACTUAL_SHA"
+_stop_running() {
+  if command -v pkill >/dev/null 2>&1; then
+    pkill -f 'agent/deng_tool_rejoin.py' 2>/dev/null || true
+  fi
+  if [ -f "$APP_HOME/data/rejoin.pid" ]; then
+    _pid="$(cat "$APP_HOME/data/rejoin.pid" 2>/dev/null || true)"
+    if [ -n "$_pid" ]; then
+      kill "$_pid" 2>/dev/null || true
+    fi
+  fi
+}
+_stop_running
+echo "Purging old runtime..."
+for _d in agent bot scripts docs examples assets; do
+  rm -rf "$APP_HOME/$_d" 2>/dev/null || true
+done
+rm -f "$APP_HOME/BUILD-INFO.json" "$APP_HOME/.installed-build.json" 2>/dev/null || true
+find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true
+echo "Extracting new runtime..."
+tar -xzf "$TMP" -C "$APP_HOME" || { echo "Could not extract package." >&2; exit 1; }
+find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true
+if [ ! -f "$APP_HOME/agent/deng_tool_rejoin.py" ]; then
+  echo "Install error: agent/deng_tool_rejoin.py missing from package." >&2
+  exit 1
+fi
+[ -f "$APP_HOME/BUILD-INFO.json" ] || { echo "Install error: BUILD-INFO.json missing � tarball is corrupt." >&2; exit 1; }
+printf '%s\n' "$DENG_REJOIN_INSTALL_API" > "$APP_HOME/.install_api"
+_GIT_COMMIT="$(python3 -c 'import json,os,sys; p=sys.argv[1]; print((json.load(open(p)).get("git_commit","")) if os.path.isfile(p) else "")' "$APP_HOME/BUILD-INFO.json" 2>/dev/null)" || _GIT_COMMIT=""
+_PROBE_ID="$(python3 -c 'import json,os,sys; p=sys.argv[1]; print((json.load(open(p)).get("probe_id","")) if os.path.isfile(p) else "")' "$APP_HOME/BUILD-INFO.json" 2>/dev/null)" || _PROBE_ID=""
+_FILE_COUNT="$(find "$APP_HOME/agent" -type f | wc -l 2>/dev/null | tr -d "[:space:]" || echo 0)"
+_INSTALL_TIME_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+cat > "$APP_HOME/.installed-build.json" <<EOF
+{
+  "artifact_sha256": "$EXPECTED_SHA256",
+  "git_commit": "$_GIT_COMMIT",
+  "probe_id": "$_PROBE_ID",
+  "channel": "main-dev",
+  "install_time_iso": "$_INSTALL_TIME_ISO",
+  "install_api": "$DENG_REJOIN_INSTALL_API",
+  "package_url": "$PACKAGE_URL_BASE",
+  "installer_url": "$INSTALLER_URL",
+  "extracted_file_count": $_FILE_COUNT
+}
+EOF
+USING_HOME_BIN=0
+BIN=""
+if [ -n "${PREFIX:-}" ]; then
+  if mkdir -p "${PREFIX}/bin" 2>/dev/null; then
+    BIN="${PREFIX}/bin"
+  fi
+fi
+if [ -z "$BIN" ]; then
+  BIN="$HOME/bin"
+  mkdir -p "$BIN"
+  export PATH="$HOME/bin:$PATH"
+  USING_HOME_BIN=1
+  _MARK='# DENG Tool: Rejoin - PATH (added by installer)'
+  _LINE='export PATH="$HOME/bin:$PATH"'
+  for _rc in "$HOME/.bashrc" "$HOME/.profile"; do
+    touch "$_rc"
+    if ! grep -qF "$_MARK" "$_rc" 2>/dev/null; then
+      printf '\n%s\n%s\n' "$_MARK" "$_LINE" >> "$_rc"
+    fi
+  done
+fi
+rm -f "$BIN/deng-rejoin" 2>/dev/null || true
+cat > "$BIN/deng-rejoin" << 'DENG_REJOIN_WRAPPER'
+#!/usr/bin/env sh
+export DENG_REJOIN_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"
+export DENG_REJOIN_INSTALL_API="${DENG_REJOIN_INSTALL_API:-https://rejoin.deng.my.id}"
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "deng-rejoin: python3 not found. Install: pkg install python" >&2
+  exit 127
+fi
+if [ ! -f "$DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" ]; then
+  echo "deng-rejoin: missing $DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" >&2
+  exit 1
+fi
+exec python3 "$DENG_REJOIN_HOME/agent/deng_tool_rejoin.py" "$@"
+DENG_REJOIN_WRAPPER
+chmod +x "$BIN/deng-rejoin" || { echo "chmod failed: $BIN/deng-rejoin" >&2; exit 1; }
+hash -r 2>/dev/null || true
+[ -s "$BIN/deng-rejoin" ] || { echo "Failed to create deng-rejoin wrapper." >&2; exit 1; }
+[ -x "$BIN/deng-rejoin" ] || { echo "Failed: wrapper not executable." >&2; exit 1; }
+[ -f "$APP_HOME/agent/deng_tool_rejoin.py" ] || { echo "Failed: deng_tool_rejoin.py missing." >&2; exit 1; }
+[ -f "$APP_HOME/BUILD-INFO.json" ] || { echo "Failed: BUILD-INFO.json missing in package." >&2; exit 1; }
+[ -f "$APP_HOME/.installed-build.json" ] || { echo "Failed: .installed-build.json was not written." >&2; exit 1; }
+DR_RESOLVED=""
+if command -v deng-rejoin >/dev/null 2>&1; then
+  DR_RESOLVED="$(command -v deng-rejoin)"
+fi
+if [ -z "$DR_RESOLVED" ]; then
+  echo "command -v deng-rejoin did not resolve after install." >&2
+  if [ "$USING_HOME_BIN" -eq 1 ]; then
+    echo 'Run: export PATH="$HOME/bin:$PATH" && hash -r && deng-rejoin' >&2
+  fi
+  exit 1
+fi
+if ! PYTHONPATH="$APP_HOME" python3 -c 'import agent.commands, agent.supervisor, agent.roblox_presence, agent.freeform_enable, agent.playing_state, agent.dumpsys_cache, agent.window_apply' 2>/dev/null; then
+  echo "Install verification failed: required modules did not import." >&2
+  echo "APP_HOME=$APP_HOME" >&2
+  exit 1
+fi
+_VERSION_OUT="$("$BIN/deng-rejoin" version 2>/dev/null)" || _VERSION_OUT=""
+if ! echo "$_VERSION_OUT" | grep -q "^artifact_sha256: " ; then
+  echo "Install verification failed: deng-rejoin version did not return artifact SHA." >&2
+  exit 1
+fi
+_INSTALLED_SHORT_SHA="$(echo "$_VERSION_OUT" | grep "^artifact_sha256: " | head -n1 | awk '{print $2}')"
+_EXPECTED_SHORT_SHA="$(printf '%.12s' "$EXPECTED_SHA256")"
+if [ "$_INSTALLED_SHORT_SHA" != "$_EXPECTED_SHORT_SHA" ]; then
+  echo "Install verification failed: installed SHA mismatch." >&2
+  echo "Expected (short): $_EXPECTED_SHORT_SHA" >&2
+  echo "Got (short):      $_INSTALLED_SHORT_SHA" >&2
+  exit 1
+fi
+_LEGACY_IMPORT="NO"
+_OLD_STATES="NO"
+_SV_FILE="$APP_HOME/agent/supervisor.py"
+if [ -f "$_SV_FILE" ]; then
+  if grep -qE "^[[:space:]]*(from|import)[^#]*experience_detector" "$_SV_FILE" 2>/dev/null; then
+    _LEGACY_IMPORT="YES (WARNING: old detector in supervisor)"
+  fi
+  _JN=""
+  _JU=""
+  if grep -qE '"(Joining)"[[:space:]]*[,)]' "$_SV_FILE" 2>/dev/null; then
+    _JN="1"
+  fi
+  if grep -qE '"(Join Unconfirmed)"[[:space:]]*[,)]' "$_SV_FILE" 2>/dev/null; then
+    _JU="1"
+  fi
+  if [ -n "$_JN$_JU" ]; then
+    _OLD_STATES="YES (WARNING: Joining/Join Unconfirmed in supervisor)"
+  fi
+fi
+_AGENT_FILE="$(PYTHONPATH="$APP_HOME" python3 -c "import agent; print(agent.__file__)" 2>/dev/null)" || _AGENT_FILE=""
+find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true
+echo ""
+echo "============================================================"
+echo "DENG Tool: Rejoin Installed"
+echo "------------------------------------------------------------"
+echo "Channel:                   main-dev"
+echo "Expected SHA:              $EXPECTED_SHA256"
+echo "Actual SHA:                $ACTUAL_SHA"
+echo "Installed Commit:          $_GIT_COMMIT"
+echo "Probe ID:                  $_PROBE_ID"
+echo "Installed Artifact:        $_INSTALLED_SHORT_SHA..."
+echo "Install Path:              $APP_HOME"
+echo "Wrapper Path:              $BIN/deng-rejoin"
+echo "Python Runtime Path:       $APP_HOME/agent"
+_AGENT_DISPLAY="${_AGENT_FILE:-$APP_HOME/agent/__init__.py}"
+echo "agent.__file__:            $_AGENT_DISPLAY"
+echo "Legacy Detector Imported:  $_LEGACY_IMPORT"
+echo "Old Smart Detection:       $_OLD_STATES"
+echo "Start Command:             deng-rejoin"
+echo "============================================================"
+if [ "$USING_HOME_BIN" -eq 1 ]; then
+  echo 'Note: If deng-rejoin is not found in this shell, run once:'
+  echo '  export PATH="$HOME/bin:$PATH"'
+  echo '  hash -r'
+fi
+echo ""
+echo "Install complete."
+echo "Next: deng-rejoin"

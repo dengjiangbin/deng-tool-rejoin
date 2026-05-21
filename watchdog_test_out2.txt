@@ -1,0 +1,147 @@
+﻿python : test_blank_url_no_setup_required_error (tests.test_watchdog_continuous
+.TestBlankPrivateServerUrl.test_blank_url_no_setup_required_error)
+At line:1 char:55
++ ... ol Rejoin"; python -m unittest tests.test_watchdog_continuous -v 2>&1 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_blank_url_...required_error) 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+validate_config must not raise when private_server_url is blank. ... ok
+test_blank_url_start_still_launches_packages (tests.test_watchdog_continuous.Te
+stBlankPrivateServerUrl.test_blank_url_start_still_launches_packages)
+Blank URL: packages are launched (perform_rejoin is called). ... ok
+test_blank_url_uses_app_only_launcher (tests.test_watchdog_continuous.TestBlank
+PrivateServerUrl.test_blank_url_uses_app_only_launcher)
+Blank URL: launch_package_for_current_config called with entry that has empty 
+url. ... ok
+test_dead_recovery_blank_url_calls_relaunch (tests.test_watchdog_continuous.Tes
+tBlankPrivateServerUrl.test_dead_recovery_blank_url_calls_relaunch)
+Dead recovery with blank URL calls launch_package_for_current_config. ... ok
+test_no_heartbeat_recovery_blank_url_force_stops_then_relaunches (tests.test_wa
+tchdog_continuous.TestBlankPrivateServerUrl.test_no_heartbeat_recovery_blank_ur
+l_force_stops_then_relaunches)
+No Heartbeat: force_stop_package is called, then relaunch (app-only when URL 
+blank). ... ok
+test_configured_url_dead_recovery_sets_launching (tests.test_watchdog_continuou
+s.TestConfiguredPrivateServerUrl.test_configured_url_dead_recovery_sets_launchi
+ng)
+After successful Dead recovery, status becomes Launching. ... ok
+test_configured_url_used_in_dead_recovery (tests.test_watchdog_continuous.TestC
+onfiguredPrivateServerUrl.test_configured_url_used_in_dead_recovery)
+Dead recovery with URL configured calls launch_package_for_current_config. ... 
+ok
+test_launcher_selector_blank_url_empty_effective_url (tests.test_watchdog_conti
+nuous.TestConfiguredPrivateServerUrl.test_launcher_selector_blank_url_empty_eff
+ective_url)
+When URL is blank, effective_private_server_url returns empty string. ... ok
+test_no_heartbeat_recovery_with_url_force_stops_then_relaunches (tests.test_wat
+chdog_continuous.TestConfiguredPrivateServerUrl.test_no_heartbeat_recovery_with
+_url_force_stops_then_relaunches)
+No Heartbeat with URL: force-stop then private URL relaunch. ... ok
+test_url_with_type_server_is_preserved (tests.test_watchdog_continuous.TestConf
+iguredPrivateServerUrl.test_url_with_type_server_is_preserved)
+effective_private_server_url returns URL unchanged (query params preserved). 
+... ok
+test_in_lobby_blank_url_does_not_relaunch (tests.test_watchdog_continuous.TestI
+nLobbyRecovery.test_in_lobby_blank_url_does_not_relaunch)
+Blank URL: In-Lobby is acceptable, no relaunch triggered. ... ok
+test_in_lobby_with_url_after_timeout_relaunches (tests.test_watchdog_continuous
+.TestInLobbyRecovery.test_in_lobby_with_url_after_timeout_relaunches)
+URL configured: In-Lobby after LOBBY_RELAUNCH_SECONDS triggers relaunch. ... ok
+test_in_lobby_with_url_before_timeout_does_not_relaunch (tests.test_watchdog_co
+ntinuous.TestInLobbyRecovery.test_in_lobby_with_url_before_timeout_does_not_rel
+aunch)
+URL configured: In-Lobby within LOBBY_RELAUNCH_SECONDS doesn't relaunch. ... ok
+test_calls_perform_rejoin_with_package_set (tests.test_watchdog_continuous.Test
+LaunchPackageForCurrentConfig.test_calls_perform_rejoin_with_package_set) ... 
+ok
+test_package_entry_forwarded (tests.test_watchdog_continuous.TestLaunchPackageF
+orCurrentConfig.test_package_entry_forwarded) ... ok
+test_reason_forwarded_to_perform_rejoin (tests.test_watchdog_continuous.TestLau
+nchPackageForCurrentConfig.test_reason_forwarded_to_perform_rejoin) ... ok
+test_status_dead_unchanged (tests.test_watchdog_continuous.TestNewStatusConstan
+ts.test_status_dead_unchanged) ... ok
+test_status_in_lobby_constant (tests.test_watchdog_continuous.TestNewStatusCons
+tants.test_status_in_lobby_constant) ... ok
+test_status_launching_unchanged (tests.test_watchdog_continuous.TestNewStatusCo
+nstants.test_status_launching_unchanged) ... ok
+test_status_no_heartbeat_constant (tests.test_watchdog_continuous.TestNewStatus
+Constants.test_status_no_heartbeat_constant) ... ok
+test_status_online_unchanged (tests.test_watchdog_continuous.TestNewStatusConst
+ants.test_status_online_unchanged) ... ok
+test_installer_and_rejoin_versions_tests_still_importable (tests.test_watchdog_
+continuous.TestRegressionNoJoiningOrUiautomator.test_installer_and_rejoin_versi
+ons_tests_still_importable)
+Regression: installer/artifact test modules are still importable. ... ok
+test_joining_not_in_initial_status (tests.test_watchdog_continuous.TestRegressi
+onNoJoiningOrUiautomator.test_joining_not_in_initial_status)
+WatchdogSupervisor normalizes 'Joining' initial_status to Launching. ... ok
+test_no_post_launch_action_text_in_state_machine (tests.test_watchdog_continuou
+s.TestRegressionNoJoiningOrUiautomator.test_no_post_launch_action_text_in_state
+_machine)
+WatchdogSupervisor has no 'post_launch_action' concept. ... ok
+test_no_uiautomator_or_logcat_called_in_watchdog (tests.test_watchdog_continuou
+s.TestRegressionNoJoiningOrUiautomator.test_no_uiautomator_or_logcat_called_in_
+watchdog)
+WatchdogSupervisor._detect_package_state does not call uiautomator/logcat. ... 
+ok
+test_watchdog_supervisor_has_no_worker_threads_list (tests.test_watchdog_contin
+uous.TestRegressionNoJoiningOrUiautomator.test_watchdog_supervisor_has_no_worke
+r_threads_list)
+WatchdogSupervisor is sequential ù no _workers list of daemon threads. ... ok
+test_no_joining_state_in_watchdog_allowed_states (tests.test_watchdog_continuou
+s.TestStateDetection.test_no_joining_state_in_watchdog_allowed_states)
+WatchdogSupervisor must never produce 'Joining' as a state. ... ok
+test_process_alive_no_in_game_proof_returns_in_lobby_not_joining (tests.test_wa
+tchdog_continuous.TestStateDetection.test_process_alive_no_in_game_proof_return
+s_in_lobby_not_joining)
+When process alive but no in-game proof, state must be In-Lobby, never 
+Joining. ... ok
+test_process_not_running_returns_dead (tests.test_watchdog_continuous.TestState
+Detection.test_process_not_running_returns_dead) ... ok
+test_process_running_no_presence_returns_in_lobby (tests.test_watchdog_continuo
+us.TestStateDetection.test_process_running_no_presence_returns_in_lobby) ... ok
+test_process_running_presence_in_game_returns_online (tests.test_watchdog_conti
+nuous.TestStateDetection.test_process_running_presence_in_game_returns_online) 
+... ok
+test_was_online_presence_offline_twice_returns_no_heartbeat (tests.test_watchdo
+g_continuous.TestStateDetection.test_was_online_presence_offline_twice_returns_
+no_heartbeat)
+After NHB_OFFLINE_CONFIRMATIONS offline presence hits: No Heartbeat. ... ok
+test_checking_label_ansi_yellow_in_dashboard (tests.test_watchdog_continuous.Te
+stWatchdogContinuity.test_checking_label_ansi_yellow_in_dashboard)
+When use_color=True, checking_label is wrapped in ANSI yellow ([33m). ... ok
+test_checking_label_format (tests.test_watchdog_continuous.TestWatchdogContinui
+ty.test_checking_label_format)
+checking_label must follow 'Checking Package X/Y' format exactly. ... ok
+test_checking_label_updated_during_loop (tests.test_watchdog_continuous.TestWat
+chdogContinuity.test_checking_label_updated_during_loop)
+checking_label is set to 'Checking Package X/Y' for each package. ... ok
+test_dead_package_triggers_relaunch (tests.test_watchdog_continuous.TestWatchdo
+gContinuity.test_dead_package_triggers_relaunch)
+Dead state triggers launch_package_for_current_config. ... ok
+test_force_close_after_online_detected_as_dead_next_round (tests.test_watchdog_
+continuous.TestWatchdogContinuity.test_force_close_after_online_detected_as_dea
+d_next_round)
+After Online, if process dies the next _detect call returns Dead. ... ok
+test_grace_window_blocks_immediate_repeated_relaunch (tests.test_watchdog_conti
+nuous.TestWatchdogContinuity.test_grace_window_blocks_immediate_repeated_relaun
+ch)
+After a successful launch, grace window prevents immediate re-launch. ... ok
+test_no_heartbeat_triggers_force_stop_then_relaunch (tests.test_watchdog_contin
+uous.TestWatchdogContinuity.test_no_heartbeat_triggers_force_stop_then_relaunch
+)
+No Heartbeat triggers force_stop_package then 
+launch_package_for_current_config. ... ok
+test_online_package_stays_in_status_map (tests.test_watchdog_continuous.TestWat
+chdogContinuity.test_online_package_stays_in_status_map)
+After detecting Online, package remains in status_map (not removed). ... ok
+test_watchdog_continues_after_all_packages_online (tests.test_watchdog_continuo
+us.TestWatchdogContinuity.test_watchdog_continues_after_all_packages_online)
+Watchdog loop does NOT exit when all packages are Online. ... ok
+
+----------------------------------------------------------------------
+Ran 41 tests in 14.336s
+
+OK

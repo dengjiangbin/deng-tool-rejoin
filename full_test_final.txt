@@ -1,0 +1,1137 @@
+﻿2026-05-20 23:42:54,632 [INFO] deng_tool_rejoin: Detected username for com.roblox.client: u1
+2026-05-20 23:42:54,802 [INFO] deng_tool_rejoin: No username found for com.roblox.client
+2026-05-20 23:42:54,997 [INFO] deng_tool_rejoin: Detected username for com.roblox.client: SqliteNick
+2026-05-20 23:42:55,237 [INFO] deng_tool_rejoin: No username found for com.roblox.client
+2026-05-20 23:42:55,511 [INFO] deng_tool_rejoin: Root-detected user_id=42424242 for com.roblox.client via shared_prefs
+2026-05-20 23:42:58,593 [WARNING] asyncio: Executing <Task finished name='Task-22' coro=<TestAdminStatusCommand.test_admin_status_shows_store_info() done, defined at C:\Users\Administrator\Desktop\DENG Tool Rejoin\tests\test_bot_panel_cog.py:673> result=None created at C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\asyncio\runners.py:100> took 0.119 seconds
+2026-05-20 23:43:00,665 [WARNING] asyncio: Executing <Task finished name='Task-90' coro=<TestPanelViewKeyStats.test_key_stats_next_page() done, defined at C:\Users\Administrator\Desktop\DENG Tool Rejoin\tests\test_bot_panel_cog.py:393> result=None created at C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\asyncio\runners.py:100> took 0.263 seconds
+2026-05-20 23:43:00,968 [WARNING] asyncio: Executing <Task finished name='Task-95' coro=<TestPanelViewKeyStats.test_key_stats_pagination_title() done, defined at C:\Users\Administrator\Desktop\DENG Tool Rejoin\tests\test_bot_panel_cog.py:375> result=None created at C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\asyncio\runners.py:100> took 0.186 seconds
+2026-05-20 23:43:01,359 [WARNING] asyncio: Executing <Task finished name='Task-105' coro=<TestPanelViewKeyStats.test_key_stats_wrong_user_blocked() done, defined at C:\Users\Administrator\Desktop\DENG Tool Rejoin\tests\test_bot_panel_cog.py:416> result=None created at C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\asyncio\runners.py:100> took 0.150 seconds
+2026-05-20 23:43:02,322 [WARNING] asyncio: Executing <Task finished name='Task-136' coro=<TestPanelViewResetHWID.test_reset_opens_selector_when_key_exists() done, defined at C:\Users\Administrator\Desktop\DENG Tool Rejoin\tests\test_bot_panel_cog.py:214> result=None created at C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\asyncio\runners.py:100> took 0.179 seconds
+python : ..............................................................................................................
+.................................................................sss...................................................
+.............................C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\safe_io.py:186: ResourceWarning: 
+unclosed file <_io.TextIOWrapper name='C:\\Users\\Administrator\\.deng-tool\\rejoin\\logs\\crash.log' mode='a' 
+encoding='utf-8'>
+At C:\Users\Administrator\AppData\Local\Temp\ps-script-cc66e0a6-6ce6-4583-9e06-326296b5dd41.ps1:72 char:55
++ ... \DENG Tool Rejoin"; python -m unittest discover -s tests 2>&1 | Out-F ...
++                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (..................coding='utf-8'>:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  _crash_file = open(  # noqa: SIM115
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\Desktop\DENG Tool Rejoin\agent\safe_io.py:186: ResourceWarning: unclosed file 
+<_io.TextIOWrapper name='/tmp/deng-rejoin-crash.log' mode='a' encoding='utf-8'>
+  _crash_file = open(  # noqa: SIM115
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\Desktop\DENG Tool Rejoin\tests\test_clean_shutdown.py:105: ResourceWarning: unclosed file 
+<_io.TextIOWrapper name='C:\\Users\\Administrator\\.deng-rejoin-crash.log' mode='a' encoding='utf-8'>
+  sio.setup_faulthandler()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.......................................................................................................................
+..........................................................................C:\Users\Administrator\AppData\Local\Programs
+\Python\Python313\Lib\subprocess.py:1036: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002410E5CB1F0>
+  self.stderr = io.TextIOWrapper(self.stderr,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\subprocess.py:1036: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410B1FA200>
+  self.stderr = io.TextIOWrapper(self.stderr,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+
+Name: Val: Input: Input: 
+....................................................C:\Users\Administrator\Desktop\DENG Tool 
+Rejoin\tests\test_global_stability.py:169: ResourceWarning: unclosed file <_io.TextIOWrapper 
+name='C:\\Users\\Administrator\\.deng-rejoin-crash.log' mode='a' encoding='utf-8'>
+  safe_io.setup_faulthandler()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\Desktop\DENG Tool Rejoin\tests\test_global_stability.py:170: ResourceWarning: unclosed file 
+<_io.TextIOWrapper name='C:\\Users\\Administrator\\.deng-rejoin-crash.log' mode='a' encoding='utf-8'>
+  safe_io.setup_faulthandler()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.C:\Users\Administrator\Desktop\DENG Tool Rejoin\tests\test_global_stability.py:163: ResourceWarning: unclosed file 
+<_io.TextIOWrapper name='C:\\Users\\Administrator\\.deng-rejoin-crash.log' mode='a' encoding='utf-8'>
+  safe_io.setup_faulthandler()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.....................C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: 
+ResourceWarning: unclosed database in <sqlite3.Connection object at 0x000002410E5CAF20>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76EB60>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: RuntimeWarning: coroutine 
+'_list_guild' was never awaited
+  def __init__(self, name, parent):
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+............................................................................................s.s........................
+......................s.......s...F....................................................................................
+.......................................................................................................................
+.....................C:\Users\Administrator\Desktop\DENG Tool Rejoin\tests\test_license_cache_fastpath.py:62: 
+DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use 
+timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  naive = (datetime.utcnow() - timedelta(seconds=120)).isoformat()
+........................................................................................................C:\Users\Admini
+strator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed database in 
+<sqlite3.Connection object at 0x000002410E76EA70>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76F010>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76F1F0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76FA60>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76E020>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...........................C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:157: 
+ResourceWarning: unclosed database in <sqlite3.Connection object at 0x000002410E5CBD30>
+  if getattr(obj, '__call__', None) is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:157: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CB5B0>
+  if getattr(obj, '__call__', None) is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:157: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CB4C0>
+  if getattr(obj, '__call__', None) is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:157: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CB880>
+  if getattr(obj, '__call__', None) is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.....C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: 
+unclosed database in <sqlite3.Connection object at 0x000002410E5CB5B0>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CBD30>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CBB50>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CBA60>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CB970>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CBC40>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410CFC67A0>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410CFC6200>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76FF10>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76F2E0>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76E020>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76FA60>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76F010>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76EB60>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76F1F0>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:494: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76EA70>
+  __dict__['_mock_mock_calls'] = _CallList()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+...........................................C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\
+mock.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x000002410E5CBD30>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CB5B0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CB4C0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410B1FA6B0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.......F................................................................C:\Users\Administrator\AppData\Local\Programs\P
+ython\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed database in <sqlite3.Connection object at 
+0x000002410E5CB6A0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CBB50>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+......C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: 
+unclosed database in <sqlite3.Connection object at 0x000002410E5CB5B0>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76F1F0>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76EA70>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76EB60>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76F010>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76FA60>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76E020>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76F2E0>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76FB50>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76F3D0>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76F100>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76D8A0>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76D7B0>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76D300>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76D120>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76EF20>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CB6A0>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76E2F0>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76FF10>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76D990>
+  self._str_normcase_cached = str(self).lower()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.......................................................................................................................
+..................................................................................................................C:\Us
+ers\Administrator\Desktop\DENG Tool Rejoin\tests\test_safe_http.py:415: ResourceWarning: unclosed file 
+<_io.TextIOWrapper name='C:\\Users\\Administrator\\.deng-rejoin-crash.log' mode='a' encoding='utf-8'>
+  sio.setup_faulthandler()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+Input: Enter: > t> t> t> t> t> t> t> t> t> t> [FAIL] wrapper_present: deng-rejoin not on PATH
+[FAIL] build_info_present: missing BUILD-INFO.json
+[FAIL] installed_build_metadata: missing .installed-build.json
+[FAIL] artifact_sha_recorded: no SHA
+[PASS] required_modules_present: all present
+[PASS] required_symbols_resolvable: all resolve
+[PASS] no_orphan_pycache: clean
+[PASS] no_stale_deferred_installer: clean
+[PASS] modules_under_install_root: all routed correctly
+[FAIL] build_info_has_probe_id: BUILD-INFO.json missing probe_id
+[PASS] no_legacy_detector_in_supervisor: clean
+[PASS] no_joining_state_in_supervisor: clean
+[FAIL] no_pycache_dirs: 3 __pycache__ dirs remain
+
+doctor install: FAILED
+ERROR: License Invalid: down
+
+1. Try Another Key
+2. Exit
+ERROR: License Invalid: down
+
+1. Try Another Key
+2. Exit
+ERROR: License Invalid: timeout
+
+1. Try Another Key
+2. Exit
+ERROR: License Invalid: timeout
+
+1. Try Another Key
+2. Exit
+ERROR: Wrong device. Open DENG Tool: Rejoin Panel and use Reset HWID.
+
+1. Enter Different Key
+2. Exit
+[*] Verifying License...
+[!] No license key found.
+
+Paste a Roblox link, or leave blank to skip.
+Example: https://www.roblox.com/games/123/name?privateServerLinkCode=...
+Skipped. No launch URL set.
+
+Paste a Roblox link, or leave blank to skip.
+Example: roblox://experiences/start?placeId=123
+Skipped. No launch URL set.
+
+Paste a Roblox link, or leave blank to skip.
+Example: https://www.roblox.com/games/123/name?privateServerLinkCode=...
+Skipped. No launch URL set.
+
+Detect / Refresh Usernames
+
+  Package                                  Old              New              Source             Status      
+  ---------------------------------------- ---------------- ---------------- ------------------ ------------
+  com.roblox.client                        Unknown          founduser        root_pref          updated     
+
+Saved updated usernames to config.
+
+--------------------------------
+Package
+--------------------------------
+Current Packages:
+  1. com.roblox.client ù Unknown
+
+1. Auto Detect Package
+2. Add Package
+3. Refresh Account Mapping
+4. Remove Package
+0. Back
+--------------------------------
+.......................................................................................................................
+............................s..........................................................................................
+.........................C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2183: 
+ResourceWarning: unclosed database in <sqlite3.Connection object at 0x000002410D4B5120>
+  if getattr(self, "_mock_methods", None) is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410D4B5030>
+  if getattr(self, "_mock_methods", None) is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410D4B4F40>
+  if getattr(self, "_mock_methods", None) is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410D4B5300>
+  if getattr(self, "_mock_methods", None) is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410D4B53F0>
+  if getattr(self, "_mock_methods", None) is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410D4B5210>
+  if getattr(self, "_mock_methods", None) is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410D4B5990>
+  if getattr(self, "_mock_methods", None) is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2183: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CBD30>
+  if getattr(self, "_mock_methods", None) is not None:
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+Choose [0]: 
+Set / Edit Username
+  1. com.roblox.client ù Unknown
+  0. Back
+Username saved for com.roblox.client.
+  [Monitor] client:Offline
+...........................................................................................C:\Users\Administrator\AppDa
+ta\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed database in 
+<sqlite3.Connection object at 0x000002410D4B5210>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410D4B4F40>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CB970>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CBA60>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E5CB880>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410D4B5030>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76F100>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76D7B0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76D8A0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76E2F0>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76D990>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:2253: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410E76D300>
+  def __init__(self, name, parent):
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.......................................................................................................................
+...............................................................C:\Users\Administrator\AppData\Local\Programs\Python\Pyt
+hon313\Lib\contextlib.py:479: ResourceWarning: unclosed database in <sqlite3.Connection object at 0x000002410D4B58A0>
+  @staticmethod
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+C:\Users\Administrator\AppData\Local\Programs\Python\Python313\Lib\contextlib.py:479: ResourceWarning: unclosed 
+database in <sqlite3.Connection object at 0x000002410D4B5120>
+  @staticmethod
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+........................................................................................
+======================================================================
+FAIL: test_direct_installer_has_single_bottom_separator 
+(test_installer.TestInstallerScript.test_direct_installer_has_single_bottom_separator)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\DENG Tool Rejoin\tests\test_installer.py", line 302, in 
+test_direct_installer_has_single_bottom_separator
+    self.assertEqual(script.count(sep_echo), 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 2
+
+======================================================================
+FAIL: test_clear_safe_cache_targets_not_session_paths 
+(test_package_recovery.SafeCacheTests.test_clear_safe_cache_targets_not_session_paths)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\DENG Tool Rejoin\tests\test_package_recovery.py", line 58, in 
+test_clear_safe_cache_targets_not_session_paths
+    self.assertNotIn("shared_prefs", text)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'shared_prefs' unexpectedly found in '"""Centralized Android and optional-root command 
+execution."""\n\nfrom __future__ import annotations\n\nimport base64\nfrom collections import Counter\nimport 
+json\nimport os\nimport re\nimport shlex\nimport shutil\nimport socket\nimport subprocess\nimport threading\nimport 
+time\nfrom dataclasses import dataclass\nfrom pathlib import Path\nfrom typing import Any, Iterable\n\n# Global lock: 
+serialize ALL subprocess.run() calls to prevent concurrent\n# fork() in a multithreaded Termux/Python 3.13 process.  
+Multiple\n# _PackageWorker threads calling subprocess.run() simultaneously is the\n# primary cause of SIGSEGV (probe 
+p-316b3b040d).\n# Locking serializes health-check commands across workers ù each command\n# still completes quickly 
+(PROCESS_TIMEOUT_SECONDS), so total overhead\n# for 2-3 workers is acceptable vs. the crash risk.\n_subprocess_lock = 
+threading.Lock()\n\nfrom .config import ConfigError, is_valid_package_name, normalize_package_detection_hint, 
+validate_package_name\nfrom .constants import (\n    DEFAULT_ROBLOX_PACKAGE,\n    DEFAULT_ROBLOX_PACKAGE_HINTS,\n    
+LAUNCH_MODES,\n    PROCESS_TIMEOUT_SECONDS,\n    ROOT_TIMEOUT_SECONDS,\n)\nfrom .platform_detect import 
+detect_public_download_dir, get_android_release, get_android_sdk\nfrom .url_utils import UrlValidationError, 
+detect_launch_mode_from_url, mask_launch_url, to_roblox_deep_link, 
+validate_launch_url\n\n\n@dataclass(frozen=True)\nclass RobloxPackageCandidate:\n    package: str\n    app_name: str\n 
+   launchable: bool\n\n\n@dataclass(frozen=True)\nclass CommandResult:\n    args: tuple[str, ...]\n    returncode: 
+int\n    stdout: str\n    stderr: str\n    timed_out: bool = False\n\n    @property\n    def ok(self) -> bool:\n       
+ return self.returncode == 0 and not self.timed_out\n\n    @property\n    def summary(self) -> str:\n        text = 
+(self.stderr or self.stdout or "").strip()\n        return text[:500]\n\n\n@dataclass(frozen=True)\nclass RootInfo:\n  
+  available: bool\n    tool: str | None = None\n    detail: str = ""\n\n\ndef _safe_env() -> dict[str, str]:\n    env 
+= os.environ.copy()\n    env.setdefault("LC_ALL", "C")\n    return env\n\n\ndef _stringify_args(args: Iterable[str]) 
+-> list[str]:\n    return [str(arg) for arg in args]\n\n\n# Android system binaries that live in /system/bin (or 
+/system/xbin) but\n# are NOT in Termux\'s default PATH.  Without this resolution every call to\n# 
+dumpsys/wm/cmd/settings/etc. fails with ENOENT in Termux, silently\n# breaking state detection, window readback, and 
+layout discovery.\n# Confirmed from real cloud-phone probe (Samsung SM-N9810 fingerprint\n# c1q:13/TP1A.220624.014, 
+probe id p-368a65d699).\n_ANDROID_SYSTEM_BINARIES: frozenset[str] = frozenset({\n    "am", "cmd", "dumpsys", 
+"getprop", "input", "logcat", "monkey", "pm",\n    "pgrep", "pidof", "ps", "service", "settings", "setprop", 
+"wm",\n})\n_ANDROID_BIN_DIRS: tuple[str, ...] = ("/system/bin", "/system/xbin", "/vendor/bin")\n\n\ndef 
+_resolve_android_binary(name: str) -> str:\n    """Return absolute path for a known Android binary, or *name* 
+unchanged.\n\n    Skips resolution if *name* is already an absolute or relative path, or\n    if it isn\'t on our 
+short list of expected Android binaries.  This is\n    deliberately conservative so we never accidentally shadow a 
+Termux\n    binary of the same name.\n    """\n    if not name or "/" in name:\n        return name\n    if name not 
+in _ANDROID_SYSTEM_BINARIES:\n        return name\n    for bin_dir in _ANDROID_BIN_DIRS:\n        candidate = 
+f"{bin_dir}/{name}"\n        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):\n            return 
+candidate\n    return name\n\n\ndef _maybe_resolve_first_arg(cmd: list[str]) -> list[str]:\n    if not cmd:\n        
+return cmd\n    resolved = _resolve_android_binary(cmd[0])\n    if resolved == cmd[0]:\n        return cmd\n    return 
+[resolved] + list(cmd[1:])\n\n\ndef run_command(args: Iterable[str], *, timeout: int = PROCESS_TIMEOUT_SECONDS) -> 
+CommandResult:\n    """Run a local command with timeout and captured output.\n\n    For known Android system binaries 
+(dumpsys/wm/cmd/settings/...), the\n    first argument is auto-resolved to its ``/system/bin/`` absolute path\n    
+when present.  This is essential on Termux where the default ``$PATH``\n    does NOT include ``/system/bin``.\n\n    
+All subprocess.run() calls are serialized through ``_subprocess_lock``\n    to prevent concurrent fork() from multiple 
+worker threads, which is the\n    primary cause of SIGSEGV on Termux + Python 3.13 (probe p-316b3b040d).\n    """\n    
+cmd = _maybe_resolve_first_arg(_stringify_args(args))\n    with _subprocess_lock:\n        try:\n            completed 
+= subprocess.run(\n                cmd,\n                stdin=subprocess.DEVNULL,\n                
+stdout=subprocess.PIPE,\n                stderr=subprocess.PIPE,\n                text=True,\n                
+timeout=timeout,\n                shell=False,\n                env=_safe_env(),\n            )\n            return 
+CommandResult(tuple(cmd), completed.returncode, completed.stdout.strip(), completed.stderr.strip())\n        except 
+FileNotFoundError as exc:\n            # If the bare name was on our list we already tried /system/bin\n            # 
+above; nothing more to do.  Otherwise still report 127 cleanly.\n            return CommandResult(tuple(cmd), 127, "", 
+str(exc))\n        except subprocess.TimeoutExpired as exc:\n            stdout = exc.stdout.decode(errors="replace") 
+if isinstance(exc.stdout, bytes) else (exc.stdout or "")\n            stderr = exc.stderr.decode(errors="replace") if 
+isinstance(exc.stderr, bytes) else (exc.stderr or "")\n            return CommandResult(tuple(cmd), 124, 
+stdout.strip(), stderr.strip() or "command timed out", timed_out=True)\n\n\ndef is_termux() -> bool:\n    prefix = 
+os.environ.get("PREFIX", "")\n    return bool(os.environ.get("TERMUX_VERSION") or "com.termux" in prefix or 
+prefix.startswith("/data/data/com.termux"))\n\n\ndef get_android_version() -> str | None:\n    release = 
+get_android_release()\n    return None if release == "unknown" else release\n\n\ndef get_android_sdk_version() -> str 
+| None:\n    sdk = get_android_sdk()\n    return None if sdk == "unknown" else sdk\n\n\ndef has_android_shell_access() 
+-> bool:\n    result = run_command(["getprop", "ro.product.model"], timeout=PROCESS_TIMEOUT_SECONDS)\n    return 
+result.ok\n\n\ndef has_storage_permission() -> bool:\n    candidates = [\n        Path("/sdcard/Download"),\n        
+Path("/sdcard/download"),\n        Path("/storage/emulated/0/Download"),\n        
+Path("/storage/emulated/0/download"),\n        Path.home() / "storage" / "shared",\n    ]\n    return 
+any(path.exists() and os.access(path, os.R_OK) for path in candidates)\n\n\ndef get_download_dir() -> str:\n    return 
+detect_public_download_dir()\n\n\ndef command_exists(name: str) -> bool:\n    return shutil.which(name) is not 
+None\n\n\ndef package_manager_result() -> CommandResult:\n    if os.name == "nt":\n        return 
+CommandResult(("cmd", "package", "list", "packages"), 127, "", "Android package manager is unavailable on Windows")\n  
+  result = run_command(["cmd", "package", "list", "packages"], timeout=PROCESS_TIMEOUT_SECONDS)\n    if result.ok:\n   
+     return result\n    return run_command(["pm", "list", "packages"], timeout=PROCESS_TIMEOUT_SECONDS)\n\n\ndef 
+list_packages() -> list[str]:\n    result = package_manager_result()\n    if not result.ok:\n        return []\n    
+packages: list[str] = []\n    for line in result.stdout.splitlines():\n        line = line.strip()\n        if 
+line.startswith("package:"):\n            line = line[len("package:") :]\n        if line and 
+is_valid_package_name(line):\n            packages.append(line)\n    return sorted(set(packages))\n\n\ndef 
+_safe_detection_hints(hints: Iterable[str] | None = None) -> list[str]:\n    source = hints or 
+DEFAULT_ROBLOX_PACKAGE_HINTS\n    validated: list[str] = []\n    for hint in source:\n        try:\n            
+cleaned = normalize_package_detection_hint(str(hint))\n        except ConfigError:\n            continue\n        if 
+cleaned not in validated:\n            validated.append(cleaned)\n    return validated or 
+list(DEFAULT_ROBLOX_PACKAGE_HINTS)\n\n\ndef find_roblox_packages(hints: Iterable[str] | None = None) -> list[str]:\n   
+ packages = list_packages()\n    detection_hints = _safe_detection_hints(hints)\n    found = [pkg for pkg in packages 
+if any(hint in pkg.lower() for hint in detection_hints)]\n    if DEFAULT_ROBLOX_PACKAGE in found:\n        
+found.remove(DEFAULT_ROBLOX_PACKAGE)\n        found.insert(0, DEFAULT_ROBLOX_PACKAGE)\n    elif DEFAULT_ROBLOX_PACKAGE 
+in packages:\n        found.insert(0, DEFAULT_ROBLOX_PACKAGE)\n    return found\n\n\ndef 
+is_launchable_package(package: str) -> bool:\n    """True when cmd package resolve-activity finds a launcher 
+component."""\n    package = validate_package_name(package)\n    cmd_bin = _find_command("cmd", "/system/bin/cmd")\n   
+ if not cmd_bin:\n        return False\n    resolve = run_command(\n        [cmd_bin, "package", "resolve-activity", 
+"--brief", package],\n        timeout=PROCESS_TIMEOUT_SECONDS,\n    )\n    if not resolve.ok or package not in 
+resolve.stdout:\n        return False\n    return True\n\n\ndef get_application_label(package: str) -> str:\n    
+"""Best-effort app label from dumpsys package (first ~20k chars only)."""\n    package = 
+validate_package_name(package)\n    result = run_command(["dumpsys", "package", package], 
+timeout=PROCESS_TIMEOUT_SECONDS)\n    if not result.ok:\n        return ""\n    text = result.stdout[:20000]\n    for 
+pattern in (\n        r\'application-label="([^"]+)"\',\n        r"application-label=\'([^\']+)\'",\n        
+r\'android:label="([^"]+)"\',\n    ):\n        m = re.search(pattern, text)\n        if m:\n            lab = 
+m.group(1).strip()\n            if lab and lab.lower() != "null":\n                return lab[:120]\n    m2 = 
+re.search(r"nonLocalizedLabel=([^\\s}]+)", text)\n    if m2:\n        lab = m2.group(1).strip().strip(\'"\')\n        
+if lab and lab.lower() != "null":\n            return lab[:120]\n    return ""\n\n\ndef 
+get_application_label_cached(package: str, cache: dict[str, str]) -> str:\n    if package not in cache:\n        
+cache[package] = get_application_label(package)\n    return cache[package]\n\n\ndef 
+is_launchable_package_cached(package: str, cache: dict[str, bool]) -> bool:\n    if package not in cache:\n        
+cache[package] = is_launchable_package(package)\n    return cache[package]\n\n\ndef _package_name_matches_hints(pkg: 
+str, hints: list[str]) -> bool:\n    lower = pkg.lower()\n    return any(hint in lower for hint in hints)\n\n\ndef 
+_label_matches_roblox_signals(label: str, hints: list[str]) -> bool:\n    low = label.lower()\n    extra = ("roblox", 
+"rblx", "blox")\n    return any(x in low for x in list(hints) + list(extra))\n\n\n_DISCOVERY_RESULT_CACHE: dict[str, 
+Any] = {"key": None, "t": 0.0, "rows": []}\n_DISCOVERY_CACHE_SECONDS = 12.0\n\n\ndef 
+discover_roblox_package_candidates(\n    hints: Iterable[str] | None = None,\n    *,\n    include_launchable_only: 
+bool = True,\n    detection_enabled: bool = True,\n) -> list[RobloxPackageCandidate]:\n    """Discovery: name-filter 
+first so dumpsys runs only for likely packages (cached per call)."""\n    if not detection_enabled:\n        return 
+[]\n    detection_hints = _safe_detection_hints(hints)\n    cache_key = (tuple(detection_hints), 
+bool(include_launchable_only), bool(detection_enabled))\n    now = time.monotonic()\n    if (\n        
+_DISCOVERY_RESULT_CACHE["key"] == cache_key\n        and now - float(_DISCOVERY_RESULT_CACHE["t"]) < 
+_DISCOVERY_CACHE_SECONDS\n    ):\n        return list(_DISCOVERY_RESULT_CACHE["rows"])\n    packages = 
+list_packages()\n    label_cache: dict[str, str] = {}\n    launch_cache: dict[str, bool] = {}\n    candidate_pkgs = 
+[pkg for pkg in packages if pkg == DEFAULT_ROBLOX_PACKAGE or _package_name_matches_hints(pkg, detection_hints)]\n    
+if DEFAULT_ROBLOX_PACKAGE in packages and DEFAULT_ROBLOX_PACKAGE not in candidate_pkgs:\n        
+candidate_pkgs.insert(0, DEFAULT_ROBLOX_PACKAGE)\n    out: list[RobloxPackageCandidate] = []\n    for pkg in 
+sorted(set(candidate_pkgs), key=lambda p: (0 if p == DEFAULT_ROBLOX_PACKAGE else 1, p)):\n        label = 
+get_application_label_cached(pkg, label_cache)\n        app_name = label or pkg.rsplit(".", 1)[-1]\n        name_match 
+= _package_name_matches_hints(pkg, detection_hints) or pkg == DEFAULT_ROBLOX_PACKAGE\n        label_match = 
+bool(label) and _label_matches_roblox_signals(label, detection_hints)\n        if not name_match and not 
+label_match:\n            continue\n        launchable = is_launchable_package_cached(pkg, launch_cache)\n        if 
+include_launchable_only and not launchable:\n            continue\n        
+out.append(RobloxPackageCandidate(package=pkg, app_name=app_name, launchable=launchable))\n\n    def _sort_key(c: 
+RobloxPackageCandidate) -> tuple[int, str]:\n        return (0 if c.package == DEFAULT_ROBLOX_PACKAGE else 1, 
+c.package)\n\n    out.sort(key=_sort_key)\n    _DISCOVERY_RESULT_CACHE["key"] = cache_key\n    
+_DISCOVERY_RESULT_CACHE["t"] = now\n    _DISCOVERY_RESULT_CACHE["rows"] = list(out)\n    return out\n\n\ndef 
+package_installed(package: str) -> bool:\n    package = validate_package_name(package)\n    result = 
+run_command(["cmd", "package", "resolve-activity", "--brief", package], timeout=PROCESS_TIMEOUT_SECONDS)\n    if 
+result.ok and package in result.stdout:\n        return True\n    return package in list_packages()\n\n\ndef 
+detect_root() -> RootInfo:\n    """Detect available su/tsu root without hanging for permission."""\n    candidates = 
+[tool for tool in ("tsu", "su") if command_exists(tool)]\n    if not candidates:\n        return RootInfo(False, None, 
+"su/tsu not found")\n    for tool in candidates:\n        result = run_command([tool, "-c", "id"], 
+timeout=ROOT_TIMEOUT_SECONDS)\n        output = f"{result.stdout} {result.stderr}".strip()\n        if result.ok and 
+"uid=0" in output:\n            return RootInfo(True, tool, output[:200])\n        if result.timed_out:\n            
+return RootInfo(False, tool, "root check timed out or permission prompt was not accepted")\n    return RootInfo(False, 
+candidates[0], "root command failed or permission was denied")\n\n\ndef run_root_command(args: Iterable[str], *, 
+root_tool: str | None = None, timeout: int = PROCESS_TIMEOUT_SECONDS) -> CommandResult:\n    """Run an explicit root 
+command through su/tsu.\n\n    Root shell entry is centralized here so root usage stays auditable.\n\n    For known 
+Android system binaries the first argument is auto-resolved\n    to its absolute ``/system/bin/`` path so the ``su`` 
+subshell ù which\n    typically does NOT include Termux\'s PATH ù can still find them.\n    """\n    tool = root_tool 
+or detect_root().tool\n    if not tool:\n        return CommandResult(tuple(_stringify_args(args)), 127, "", "root 
+tool unavailable")\n    tokens = _maybe_resolve_first_arg(_stringify_args(args))\n    command = shlex.join(tokens)\n   
+ return run_command([tool, "-c", command], timeout=timeout)\n\n\ndef run_android_command(\n    args: Iterable[str],\n  
+  *,\n    timeout: int = PROCESS_TIMEOUT_SECONDS,\n    prefer_root: bool = False,\n    root_fallback_markers: 
+tuple[str, ...] = (\n        "Permission Denial",\n        "INTERACT_ACROSS_USERS",\n        "Operation not 
+permitted",\n        "permission denied",\n    ),\n) -> CommandResult:\n    """Run an Android system command, 
+optionally retrying through ``su``.\n\n    If ``prefer_root`` is true and a root tool is available, the command is\n   
+ routed through ``su`` straight away.  Otherwise we run unprivileged\n    first and only fall back to root if stderr 
+contains one of the\n    permission-related markers (real cloud-phone behaviour: ``settings\n    list global`` returns 
+``Permission Denial ... INTERACT_ACROSS_USERS``\n    unless run as root).\n\n    This wrapper exists because many 
+Android commands (``settings``,\n    ``dumpsys SurfaceFlinger`` on some Samsung builds, ``cmd activity\n    
+resize-task``) succeed only via root on a given device, but root\n    isn\'t always available, and we don\'t want to 
+pay the ``su`` cost\n    every time.\n    """\n    if prefer_root:\n        root = detect_root()\n        if 
+root.available:\n            return run_root_command(args, root_tool=root.tool, timeout=timeout)\n        # Fall 
+through to plain run when root unavailable.\n    res = run_command(args, timeout=timeout)\n    if res.ok or 
+res.timed_out:\n        return res\n    err = res.stderr or ""\n    if any(marker in err for marker in 
+root_fallback_markers):\n        root = detect_root()\n        if root.available:\n            return 
+run_root_command(args, root_tool=root.tool, timeout=timeout)\n    return res\n\n\ndef force_stop_package(package: str, 
+root_info: RootInfo | None = None) -> CommandResult:\n    package = validate_package_name(package)\n    info = 
+root_info or detect_root()\n    if not info.available:\n        return CommandResult(("am", "force-stop", package), 
+126, "", "root unavailable")\n    return run_root_command(["am", "force-stop", package], root_tool=info.tool, 
+timeout=PROCESS_TIMEOUT_SECONDS)\n\n\ndef get_package_pid(package: str, root_info: RootInfo | None = None) -> str:\n   
+ """Return the main PID of a running package process, or \'\' if not running."""\n    package = 
+validate_package_name(package)\n    info = root_info or detect_root()\n    if not info.available or not info.tool:\n   
+     return ""\n    res = run_root_command(["pidof", "-s", package], root_tool=info.tool, timeout=5)\n    if res.ok 
+and res.stdout.strip().isdigit():\n        return res.stdout.strip()\n    # Fallback: busybox ps / ps -A grep\n    sh 
+= (\n        f"ps -A 2>/dev/null | grep -F \'{package}\' | grep -v grep"\n        f" | awk \'{{print $2}}\' | head 
+-n1"\n    )\n    res2 = run_root_command(["sh", "-c", sh], root_tool=info.tool, timeout=6)\n    pid = (res2.stdout or 
+"").strip()\n    return pid if pid.isdigit() else ""\n\n\ndef clear_package_cache_verified(\n    package: str,\n    
+*,\n    max_retries: int = 2,\n) -> dict[str, object]:\n    """Clear package cache/code_cache dirs (never 
+shared_prefs/databases/files).\n\n    Returns a result dict with keys:\n      success (bool), skipped (bool), 
+skipped_reason (str),\n      cache_paths (list[str]), size_before_bytes (int), size_after_bytes (int),\n      attempts 
+(int), error (str).\n\n    Safe: validates package name, uses root, targets only cache/code_cache.\n    Uses ``find 
+-delete`` on cache dirs only ù never the package manager\n    data-wipe command that would also remove 
+accounts/session data.\n    """\n    package = validate_package_name(package)\n    root_info = detect_root()\n    if 
+not root_info.available or not root_info.tool:\n        return {\n            "success": False, "skipped": True,\n     
+       "skipped_reason": "root_unavailable",\n            "cache_paths": [], "size_before_bytes": 0, 
+"size_after_bytes": 0,\n            "attempts": 0, "error": "",\n        }\n\n    # Safe targets ù only 
+cache/code_cache, never user data.\n    # /data/user/0 is the modern path (Android 5+); /data/data is the legacy\n    
+# path.  On most devices they resolve to the same inode via symlink.\n    # We prefer /data/user/0 and fall back to 
+/data/data.\n    candidates = [\n        f"/data/user/0/{package}/cache",\n        
+f"/data/user/0/{package}/code_cache",\n        f"/data/data/{package}/cache",\n        
+f"/data/data/{package}/code_cache",\n    ]\n\n    def _exists(path: str) -> bool:\n        r = 
+run_root_command(["test", "-d", path], root_tool=root_info.tool, timeout=5)\n        return r.ok\n\n    def 
+_size(path: str) -> int:\n        sh = f"find {shlex.quote(path)} -mindepth 1 -type f 2>/dev/null | wc -l"\n        r 
+= run_root_command(["sh", "-c", sh], root_tool=root_info.tool, timeout=10)\n        val = (r.stdout or "").strip()\n   
+     return int(val) if val.isdigit() else 0\n\n    existing = [p for p in candidates if _exists(p)]\n    # 
+Deduplicate: if both /data/user/0 and /data/data exist, prefer user/0.\n    user0 = [p for p in existing if 
+"/data/user/0/" in p]\n    data_data = [p for p in existing if "/data/data/" in p]\n    active = user0 if user0 else 
+data_data\n\n    if not active:\n        return {\n            "success": True, "skipped": True,\n            
+"skipped_reason": "no_cache_dirs",\n            "cache_paths": [], "size_before_bytes": 0, "size_after_bytes": 0,\n    
+        "attempts": 0, "error": "",\n        }\n\n    size_before = sum(_size(p) for p in active)\n    size_after = 
+size_before\n    last_error = ""\n\n    for attempt in range(1, max_retries + 2):\n        for path in active:\n       
+     res = run_root_command(\n                ["find", path, "-mindepth", "1", "-delete"],\n                
+root_tool=root_info.tool,\n                timeout=30,\n            )\n            if not res.ok and res.returncode 
+not in (0, 1):\n                last_error = (res.stderr or "")[:120]\n\n        size_after = sum(_size(p) for p in 
+active)\n        if size_after == 0:\n            return {\n                "success": True, "skipped": False, 
+"skipped_reason": "",\n                "cache_paths": active,\n                "size_before_bytes": size_before, 
+"size_after_bytes": 0,\n                "attempts": attempt, "error": "",\n            }\n        if attempt <= 
+max_retries:\n            time.sleep(0.5)\n\n    return {\n        "success": False, "skipped": False,\n        
+"skipped_reason": "size_nonzero_after_clear",\n        "cache_paths": active,\n        "size_before_bytes": 
+size_before, "size_after_bytes": size_after,\n        "attempts": max_retries + 1, "error": last_error,\n    
+}\n\n\ndef mute_package_audio(\n    package: str,\n    root_info: RootInfo | None = None,\n) -> dict[str, object]:\n   
+ """Attempt to mute audio for a specific package via appops (root required).\n\n    Tries ``appops set <pkg> 
+PLAY_AUDIO deny`` first, then the ``cmd appops``\n    variant.  Both are per-package and do NOT affect the system 
+audio stream\n    or Termux.\n\n    Returns a dict with keys:\n      success (bool), method (str), target_volume 
+(int=0),\n      skipped_reason (str), error (str).\n    """\n    package = validate_package_name(package)\n    info = 
+root_info or detect_root()\n    if not info.available or not info.tool:\n        return {\n            "success": 
+False, "method": "none",\n            "target_volume": 0,\n            "skipped_reason": "root_unavailable", "error": 
+"",\n        }\n\n    # Method 1: appops set <pkg> PLAY_AUDIO deny  (AOSP / stock Android)\n    r1 = 
+run_root_command(\n        ["appops", "set", package, "PLAY_AUDIO", "deny"],\n        root_tool=info.tool, 
+timeout=8,\n    )\n    if r1.ok:\n        return {\n            "success": True, "method": "appops_play_audio_deny",\n 
+           "target_volume": 0, "skipped_reason": "", "error": "",\n        }\n\n    # Method 2: cmd appops set (some 
+Android flavours / emulators)\n    r2 = run_root_command(\n        ["cmd", "appops", "set", package, 
+"android:play_audio", "deny"],\n        root_tool=info.tool, timeout=8,\n    )\n    if r2.ok:\n        return {\n      
+      "success": True, "method": "cmd_appops_play_audio_deny",\n            "target_volume": 0, "skipped_reason": "", 
+"error": "",\n        }\n\n    err = ((r1.stderr or "") + " " + (r2.stderr or "")).strip()[:120]\n    return {\n       
+ "success": False, "method": "appops_play_audio_deny",\n        "target_volume": 0,\n        "skipped_reason": 
+"unsupported_or_denied", "error": err,\n    }\n\n\ndef _find_command(*names: str) -> str | None:\n    """Find the 
+first available command from candidates.\n\n    Short names (no /) are searched in PATH via shutil.which.\n    
+Absolute paths (starting with /) are checked for existence and executability.\n    """\n    for name in names:\n       
+ if name.startswith("/"):\n            if os.path.isfile(name) and os.access(name, os.X_OK):\n                return 
+name\n        else:\n            found = shutil.which(name)\n            if found:\n                return found\n    
+return None\n\n\ndef _parse_activity_component(stdout: str, package: str) -> str | None:\n    """Parse the activity 
+component from cmd package resolve-activity --brief output.\n\n    Returns a string like 
+"com.roblox.client/.activity.SplashActivity" or None.\n    """\n    for line in 
+reversed(stdout.strip().splitlines()):\n        line = line.strip()\n        if "/" in line and package in line:\n     
+       for part in line.split():\n                if "/" in part and package in part:\n                    return 
+part\n    return None\n\n\ndef launch_app(package: str) -> CommandResult:\n    """Launch a Roblox package using the 
+best available Android launch method.\n\n    Tries in order:\n    1. am start -a android.intent.action.MAIN -c 
+android.intent.category.LAUNCHER -p <package>\n    2. cmd package resolve-activity --brief <package> then am start -n 
+<component>\n    3. monkey -p <package> -c android.intent.category.LAUNCHER 1 (optional fallback)\n\n    Never raises 
+FileNotFoundError. Returns a CommandResult indicating the outcome.\n    """\n    package = 
+validate_package_name(package)\n    am = _find_command("am", "/system/bin/am")\n    cmd_bin = _find_command("cmd", 
+"/system/bin/cmd")\n    monkey_bin = _find_command("monkey", "/system/bin/monkey")\n\n    last_result: CommandResult | 
+None = None\n\n    # Method 1: am start with MAIN + LAUNCHER intent, freeform-windowed.\n    # ``--windowingMode 5`` = 
+WINDOWING_MODE_FREEFORM.  When the framework\n    # rejects the flag (older Android, missing perm) we transparently 
+fall\n    # back to the unflagged launch; this keeps the launcher robust across\n    # OEMs while letting App Cloner 
+XML bounds steer the window on hosts\n    # that DO support freeform (probe-confirmed on cloud-phone SM-N9810).\n    
+if am:\n        base_main = [\n            am, "start",\n            "-a", "android.intent.action.MAIN",\n            
+"-c", "android.intent.category.LAUNCHER",\n            "-p", package,\n        ]\n        result = run_command(\n      
+      base_main[:2] + ["--windowingMode", "5"] + base_main[2:],\n            timeout=PROCESS_TIMEOUT_SECONDS,\n        
+)\n        if result.ok:\n            return result\n        unflagged = run_command(base_main, 
+timeout=PROCESS_TIMEOUT_SECONDS)\n        if unflagged.ok:\n            return unflagged\n        last_result = 
+unflagged\n\n    # Method 2: resolve-activity to get exact component, then am start -n\n    if cmd_bin and am:\n       
+ resolve = run_command(\n            [cmd_bin, "package", "resolve-activity", "--brief", package],\n            
+timeout=PROCESS_TIMEOUT_SECONDS,\n        )\n        if resolve.ok:\n            component = 
+_parse_activity_component(resolve.stdout, package)\n            if component:\n                ff = run_command(\n     
+               [am, "start", "--windowingMode", "5", "-n", component],\n                    
+timeout=PROCESS_TIMEOUT_SECONDS,\n                )\n                if ff.ok:\n                    return ff\n        
+        result2 = run_command([am, "start", "-n", component], timeout=PROCESS_TIMEOUT_SECONDS)\n                if 
+result2.ok:\n                    return result2\n                last_result = result2\n\n    # Method 3: monkey 
+fallback (optional, may not be available)\n    if monkey_bin:\n        result3 = run_command(\n            
+[monkey_bin, "-p", package, "-c", "android.intent.category.LAUNCHER", "1"],\n            
+timeout=PROCESS_TIMEOUT_SECONDS,\n        )\n        if result3.ok:\n            return result3\n        last_result = 
+result3\n\n    # All methods failed ù return best available failure result\n    if last_result:\n        return 
+last_result\n    return CommandResult(\n        ("am", "start", package),\n        127,\n        "",\n        "Android 
+launcher commands unavailable: am/cmd/monkey not found",\n    )\n\n\ndef _legacy_launch_url_pre_root_unused(package: 
+str, url: str, launch_mode: str) -> CommandResult:\n    """Launch a deep-link URL in *package* (best-effort freeform 
+window).\n\n    On Android builds where ``cmd activity start-activity --windowingMode``\n    is supported 
+(probe-confirmed on cloud-phone SM-N9810/Android 13),\n    we ask the framework to put the new activity into windowing 
+mode 5\n    (``WINDOWING_MODE_FREEFORM``) so the App Cloner XML position keys are\n    honored.  If the framework 
+rejects the flag (older Android, missing\n    permission, etc.) we transparently retry without the flag so callers\n   
+ never see a launch regression.\n\n    Web share-link URLs (``https://www.roblox.com/share?...``) are\n    
+automatically converted to their ``roblox://`` deep-link equivalent\n    before being sent to ``am start``.  Without 
+this conversion Android\n    routes the URL to the browser instead of Roblox (real-device probe\n    p-6f613cbed2: 
+``launch_mode=\'web_url\'`` landed in lobby, not server).\n    """\n    package = validate_package_name(package)\n    
+validate_launch_url(url, launch_mode, allow_uncertain=True)\n    # Convert web URLs \u2192 roblox:// deep links so 
+Android routes to Roblox,\n    # not to the system browser.\n    deep_url = to_roblox_deep_link(url) or url\n    # 
+Force a clean re-route to the private server even when the clone is\n    # already running:\n    #   
+FLAG_ACTIVITY_NEW_TASK       (0x10000000)\n    # + FLAG_ACTIVITY_CLEAR_TASK     (0x00008000)\n    # + 
+FLAG_ACTIVITY_CLEAR_TOP      (0x04000000)\n    # + FLAG_ACTIVITY_RESET_TASK_IF_NEEDED (0x00200000)\n    # = 
+0x14208000\n    flags = "0x14208000"\n    base = ["am", "start", "-a", "android.intent.action.VIEW",\n            
+"-c", "android.intent.category.BROWSABLE",\n            "-d", deep_url, "-f", flags, package]\n    res = 
+run_command(base[:2] + ["--windowingMode", "5"] + base[2:], timeout=PROCESS_TIMEOUT_SECONDS)\n    if res.ok:\n        
+return res\n    # Try with explicit ActivityProtocolLaunch component (confirmed in Moons clone\n    # manifests via 
+probe p-80c42a4c03 ù bypasses intent resolver ambiguity).\n    proto_component = 
+f"{package}/com.roblox.client.ActivityProtocolLaunch"\n    comp_base = ["am", "start",\n                 "-n", 
+proto_component,\n                 "-a", "android.intent.action.VIEW",\n                 "-c", 
+"android.intent.category.BROWSABLE",\n                 "-d", deep_url, "-f", flags]\n    res = run_command(comp_base, 
+timeout=PROCESS_TIMEOUT_SECONDS)\n    if res.ok:\n        return res\n    res = run_command(base, 
+timeout=PROCESS_TIMEOUT_SECONDS)\n    if res.ok:\n        return res\n    legacy = ["am", "start", "-a", 
+"android.intent.action.VIEW",\n              "-c", "android.intent.category.BROWSABLE",\n              "-d", deep_url, 
+package]\n    return run_command(legacy, timeout=PROCESS_TIMEOUT_SECONDS)\n\n\ndef 
+build_package_view_intent_args(package: str, url: str) -> list[str]:\n    """Build the package-scoped Android VIEW 
+intent used for Roblox links."""\n    package = validate_package_name(package)\n    return [\n        "am", "start", 
+"-W",\n        "-a", "android.intent.action.VIEW",\n        "-d", str(url),\n        "-p", package,\n    ]\n\n\ndef 
+launch_url(package: str, url: str, launch_mode: str) -> CommandResult:\n    """Launch a Roblox URL directly into 
+*package* using root ``am start``."""\n    package = validate_package_name(package)\n    validate_launch_url(url, 
+launch_mode, allow_uncertain=True)\n    deep_url = to_roblox_deep_link(url) or url\n    args = 
+build_package_view_intent_args(package, deep_url)\n    root_info = detect_root()\n    if not root_info.available:\n    
+    return CommandResult(\n            tuple(args),\n            126,\n            "",\n            "root unavailable 
+for package-scoped Roblox URL launch",\n        )\n    return run_root_command(\n        args,\n        
+root_tool=root_info.tool,\n        timeout=PROCESS_TIMEOUT_SECONDS,\n    )\n\n\ndef launch_url_generic(url: str, 
+launch_mode: str) -> CommandResult:\n    validate_launch_url(url, launch_mode, allow_uncertain=True)\n    deep_url = 
+to_roblox_deep_link(url) or url\n    # Same CLEAR_TASK flags as launch_url above ù see comment there.\n    flags = 
+"0x14208000"\n    base = ["am", "start", "-a", "android.intent.action.VIEW",\n            "-c", 
+"android.intent.category.BROWSABLE",\n            "-d", deep_url, "-f", flags]\n    res = run_command(base[:2] + 
+["--windowingMode", "5"] + base[2:], timeout=PROCESS_TIMEOUT_SECONDS)\n    if res.ok:\n        return res\n    res = 
+run_command(base, timeout=PROCESS_TIMEOUT_SECONDS)\n    if res.ok:\n        return res\n    legacy = ["am", "start", 
+"-a", "android.intent.action.VIEW",\n              "-c", "android.intent.category.BROWSABLE",\n              "-d", 
+deep_url]\n    return run_command(legacy, timeout=PROCESS_TIMEOUT_SECONDS)\n\n\ndef is_process_running(package: str) 
+-> bool:\n    """Detect whether *any* process matching ``package`` is alive.\n\n    App Cloner clones run as their 
+*clone* package name (e.g. ``com.x.clone1``),\n    NOT ``com.roblox.client``.  Linux\'s ``/proc/<pid>/comm`` is 
+truncated to\n    15 chars (TASK_COMM_LEN), so long clone package names defeat plain\n    ``pidof``.  We try a layered 
+set of checks:\n\n      1. ``pidof <package>`` (works only for short names \u2264 15 chars).\n      2. ``pgrep -f 
+<package>`` (matches full cmdline; usually root-free).\n      3. ``ps -A`` with substring match ù but ``ps`` shows 
+truncated comm too,\n         so this is only useful for short names.\n      4. Fallback to scanning 
+``/proc/*/cmdline`` directly (longer names).\n\n    Never raises.  Returns True when ANY method finds a hit.\n    
+"""\n    package = validate_package_name(package)\n\n    # 1. pidof ù fast path for short package names.\n    try:\n   
+     result = run_command(["pidof", package], timeout=PROCESS_TIMEOUT_SECONDS)\n        if result.ok and 
+bool(result.stdout.strip()):\n            return True\n    except Exception:  # noqa: BLE001\n        pass\n\n    # 2. 
+pgrep -f ù matches full /proc/<pid>/cmdline, so the truncation\n    # limitation of comm does not apply.  Available on 
+most Termux setups.\n    try:\n        result = run_command(\n            ["pgrep", "-f", package], 
+timeout=PROCESS_TIMEOUT_SECONDS,\n        )\n        if result.ok and bool(result.stdout.strip()):\n            return 
+True\n    except Exception:  # noqa: BLE001\n        pass\n\n    # 3. ps -A with substring match (works for short 
+names).\n    try:\n        ps_result = run_command(["ps", "-A"], timeout=PROCESS_TIMEOUT_SECONDS)\n        if 
+ps_result.ok and any(\n            package in line for line in ps_result.stdout.splitlines()\n        ):\n            
+return True\n    except Exception:  # noqa: BLE001\n        pass\n\n    # 4. Direct /proc cmdline scan ù handles long 
+clone package names where\n    # both pidof and ps -A see a truncated comm.  Single shell pipeline.\n    try:\n        
+scan = run_command(\n            ["sh", "-c",\n             "for p in /proc/[0-9]*/cmdline; do "\n             "  tr 
+\'\\\\0\' \' \' < \\"$p\\" 2>/dev/null | "\n             f" grep -F -q \'{package}\' && echo hit && exit 0; "\n        
+     "done; exit 1"],\n            timeout=PROCESS_TIMEOUT_SECONDS,\n        )\n        if scan.ok and "hit" in 
+scan.stdout:\n            return True\n    except Exception:  # noqa: BLE001\n        pass\n    return False\n\n\ndef 
+is_process_running_any(package: str, root_tool: str | None = None) -> bool:\n    """Like :func:`is_process_running` 
+but also escalates to root /proc scan.\n\n    Use this from health checks.  ``root_tool`` lets callers reuse a 
+cached\n    detection so we don\'t re-probe ``su`` for every check.\n    """\n    if is_process_running(package):\n    
+    return True\n    if not root_tool:\n        try:\n            info = detect_root()\n        except Exception:  # 
+noqa: BLE001\n            info = RootInfo(False, None, "")\n        if not info.available or not info.tool:\n          
+  return False\n        root_tool = info.tool\n    try:\n        res = run_root_command(\n            ["sh", "-c",\n   
+          f"for p in /proc/[0-9]*/cmdline; do "\n             f"  tr \'\\\\0\' \' \' <\\"$p\\" 2>/dev/null | grep -F 
+-q \'{package}\' && "\n             f"  echo hit && exit 0; "\n             f"done; exit 1"],\n            
+root_tool=root_tool, timeout=PROCESS_TIMEOUT_SECONDS,\n        )\n        return res.ok and "hit" in res.stdout\n    
+except Exception:  # noqa: BLE001\n        return False\n\n\ndef is_process_running_root(package: str) -> bool:\n    
+"""Check process via root su for stronger evidence when standard checks fail.\n\n    Uses su pidof and su ps as 
+fallbacks.  Never raises.\n    """\n    package = validate_package_name(package)\n    root_info = detect_root()\n    
+if not root_info.available or not root_info.tool:\n        return is_process_running(package)\n    try:\n        res = 
+run_root_command(["pidof", package], root_tool=root_info.tool, timeout=5)\n        if res.ok and 
+bool(res.stdout.strip()):\n            return True\n        ps_res = run_root_command(\n            ["sh", "-c", f"ps 
+-A 2>/dev/null | grep -F \'{package}\'"],\n            root_tool=root_info.tool,\n            timeout=6,\n        )\n  
+      if ps_res.ok and package in ps_res.stdout:\n            return True\n    except Exception:  # noqa: BLE001\n     
+   pass\n    return is_process_running(package)\n\n\ndef discover_roblox_user_id_from_prefs(package: str, *, timeout: 
+int = 3) -> int | None:\n    """Best-effort per-clone Roblox userId discovery from local app prefs.\n\n    App Cloner 
+packages often do not have a manually configured userId, but\n    Roblox writes numeric account ids into benign 
+analytics preference keys\n    such as ``firstPlayReported_<userId>``.  We read only XML key names/values\n    from 
+the selected package\'s own app preference XML directory via root,\n    extract numeric ids, and never read browser 
+storage or auth material.\n    """\n    try:\n        package_str = validate_package_name(package)\n    except 
+Exception:  # noqa: BLE001\n        return None\n    root_info = detect_root()\n    if not root_info.available or not 
+root_info.tool:\n        return None\n    prefs_dir_name = "shared" + "_prefs"\n    base = 
+f"/data/data/{package_str}/{prefs_dir_name}"\n    script = (\n        f"for f in {shlex.quote(base)}/*.xml; do "\n     
+   "[ -f \\"$f\\" ] || continue; "\n        "grep -hoE "\n        
+"\'(firstPlayReported|appRetentionReportedD[0-9]*|signupReportedTimeInSeconds)_[0-9]{4,}\' "\n        "\\"$f\\" 
+2>/dev/null; "\n        "done"\n    )\n    try:\n        res = run_root_command(\n            ["sh", "-c", script],\n  
+          root_tool=root_info.tool,\n            timeout=max(1, int(timeout)),\n        )\n    except Exception:  # 
+noqa: BLE001\n        return None\n    if not res.ok and not res.stdout:\n        return None\n    ids: list[int] = 
+[]\n    for match in re.finditer(r"_(\\d{4,})\\b", res.stdout or ""):\n        try:\n            uid = 
+int(match.group(1))\n        except (TypeError, ValueError):\n            continue\n        if uid > 0:\n            
+ids.append(uid)\n    if not ids:\n        return None\n    return Counter(ids).most_common(1)[0][0]\n\n\ndef 
+is_package_task_visible(package: str) -> bool:\n    """Check if a task exists for this package in Android\'s activity 
+manager.\n\n    Works for background multi-window packages that are NOT the foreground.\n    Returns True if a task 
+record is found for the package.  Never raises.\n    """\n    package = validate_package_name(package)\n    try:\n     
+   from . import dumpsys_cache as _dc\n        def _run(_args):\n            r = run_command(list(_args), timeout=3)\n 
+           return _dc.CachedResult(ok=r.ok, stdout=r.stdout)\n        result = _dc.cached_run(("dumpsys", "activity", 
+"activities"), _run)\n        if result.ok:\n            for line in result.stdout.splitlines():\n                if 
+package in line and any(\n                    marker in line\n                    for marker in ("TaskRecord", 
+"ActivityRecord", "task=", "topActivity", "mResumedActivity")\n                ):\n                    return True\n   
+ except Exception:  # noqa: BLE001\n        pass\n    return False\n\n\n_SURFACE_POSITIVE_MARKERS: tuple[str, ...] = 
+(\n    "mHasSurface=true",\n    "hasSurface=true",\n    "mDrawState=HAS_DRAWN",\n    "isReadyForDisplay()=true",\n    
+"isOnScreen=true",\n)\n\n\ndef is_package_window_visible(package: str) -> bool:\n    """Check if a real drawing window 
+exists for this package.\n\n    Strategy ù broader than the previous mHasSurface-only check.  A window\n    block is 
+considered "drawing" when ANY of these are true for the block:\n\n    * ``mHasSurface=true`` or ``hasSurface=true`` 
+(varies by Android fork)\n    * ``mDrawState=HAS_DRAWN``\n    * ``isReadyForDisplay()=true``\n    * 
+``isOnScreen=true``\n    * the package appears as ``mCurrentFocus`` / ``mFocusedApp``\n      anywhere in the dump 
+(focused == visible)\n    * a ``Surface(name=...)`` line in the block mentions the package\n\n    Stale window entries 
+that lack ALL of these markers are NOT counted as\n    visible, so closing a window still triggers reconnect.\n\n    
+Never raises.\n    """\n    package = validate_package_name(package)\n    try:\n        from . import dumpsys_cache as 
+_dc\n        def _run(_args):\n            r = run_command(list(_args), timeout=3)\n            return 
+_dc.CachedResult(ok=r.ok, stdout=r.stdout)\n        result = _dc.cached_run(("dumpsys", "window", "windows"), _run)\n  
+      if not result.ok:\n            return False\n        text = result.stdout\n    except Exception:  # noqa: 
+BLE001\n        return False\n\n    # Fast path: focus lines.\n    for line in text.splitlines():\n        if package 
+not in line:\n            continue\n        if "mCurrentFocus" in line or "mFocusedApp" in line or "Focus =" in 
+line:\n            return True\n\n    # Walk window blocks.\n    block_lines: list[str] = []\n    in_block = False\n   
+ block_has_package = False\n\n    def _block_drawing(lines: list[str]) -> bool:\n        block_text = 
+"\\n".join(lines)\n        if any(m in block_text for m in _SURFACE_POSITIVE_MARKERS):\n            return True\n      
+  # A Surface(name=<pkg>...) line inside the block also counts.\n        for ln in lines:\n            if 
+"Surface(name=" in ln and package in ln:\n                return True\n        return False\n\n    for line in 
+text.splitlines():\n        if "Window{" in line or "Window {" in line:\n            if in_block and block_has_package 
+and _block_drawing(block_lines):\n                return True\n            in_block = True\n            block_lines = 
+[line]\n            block_has_package = package in line\n            continue\n        if in_block:\n            
+block_lines.append(line)\n            if package in line:\n                block_has_package = True\n    if in_block 
+and block_has_package and _block_drawing(block_lines):\n        return True\n    return False\n\n\ndef 
+is_package_surface_in_surfaceflinger(package: str) -> bool:\n    """Check ``dumpsys SurfaceFlinger --list`` for an 
+active layer for ``package``.\n\n    DO NOT call the full ``dumpsys SurfaceFlinger`` here ù on cloud phones\n    it 
+serializes through ``system_server`` for many seconds and blocks\n    every supervisor worker, leaving the table stuck 
+on "Preparing".\n    The ``--list`` variant is sub-second and is enough to know whether\n    a layer for the package 
+exists at all.\n\n    Returns True when a SurfaceFlinger layer name mentions the package.\n    Never raises.\n    
+"""\n    try:\n        package_str = validate_package_name(package)\n    except Exception:  # noqa: BLE001\n        
+return False\n    try:\n        from . import dumpsys_cache as _dc\n        def _run(_args):\n            r = 
+run_command(list(_args), timeout=3)\n            return _dc.CachedResult(ok=r.ok, stdout=r.stdout)\n        res = 
+_dc.cached_run(\n            ("dumpsys", "SurfaceFlinger", "--list"), _run,\n        )\n        return bool(res.ok and 
+package_str in res.stdout)\n    except Exception:  # noqa: BLE001\n        return False\n\n\ndef 
+get_package_alive_evidence(package: str) -> dict[str, bool]:\n    """Comprehensive multi-source check for package 
+aliveness.\n\n    Returns a dict with evidence from multiple sources:\n        running:      True if pidof/ps shows a 
+process\n        task:         True if dumpsys activity shows a task (may be STALE)\n        window:       True if a 
+*drawing* window for the package exists\n        root_running: True if root pidof/ps confirms the process\n        
+alive:        True if process is running OR a drawing window exists\n        strict_alive: same as ``alive`` (provided 
+for explicitness)\n\n    DESIGN NOTE ù stale-task immunity\n    \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+\u2500\u2500\u2500\u2500\n    Android\'s task list (``dumpsys activity activities``) keeps ``TaskRecord``\n    entries 
+for many seconds after a package is force-stopped or its window is\n    closed.  Previously we treated *any* 
+TaskRecord as "alive", which made the\n    supervisor refuse to reconnect after a user closed a Roblox clone window\n  
+  in App Cloner.  We now treat ``task`` as a WEAK signal and exclude it from\n    ``alive`` / ``strict_alive``.  Real 
+aliveness requires a real process or a\n    drawing surface.\n\n    Never raises; always returns a valid dict.\n    
+"""\n    _dead: dict[str, bool] = {\n        "running": False, "task": False, "window": False, "root_running": 
+False,\n        "surface": False, "foreground": False,\n        "alive": False, "strict_alive": False,\n    }\n    
+package_str = package\n    try:\n        package_str = validate_package_name(package)\n    except Exception:  # noqa: 
+BLE001\n        return _dead\n\n    running = False\n    try:\n        running = is_process_running(package_str)\n    
+except Exception:  # noqa: BLE001\n        pass\n\n    task = False\n    try:\n        task = 
+is_package_task_visible(package_str)\n    except Exception:  # noqa: BLE001\n        pass\n\n    window = False\n    
+try:\n        window = is_package_window_visible(package_str)\n    except Exception:  # noqa: BLE001\n        pass\n\n 
+   # Root-escalate process detection so cloud-phone clones (long names that\n    # defeat unprivileged pidof) are 
+still seen.\n    root_running = False\n    if not running:\n        try:\n            root_running = 
+is_process_running_any(package_str)\n        except Exception:  # noqa: BLE001\n            try:\n                
+root_running = is_process_running_root(package_str)\n            except Exception:  # noqa: BLE001\n                
+pass\n\n    # SurfaceFlinger evidence ù a separate strong "rendering" signal that\n    # bypasses WindowManager\'s 
+stale entries.\n    surface = False\n    try:\n        surface = is_package_surface_in_surfaceflinger(package_str)\n   
+ except Exception:  # noqa: BLE001\n        pass\n\n    # Foreground / resumed-activity evidence.\n    foreground = 
+False\n    try:\n        fg = current_foreground_package()\n        foreground = bool(fg and (fg == package_str or 
+package_str in fg))\n    except Exception:  # noqa: BLE001\n        pass\n\n    # STRICT aliveness: process OR drawing 
+window OR composited surface OR\n    # the system says this package is currently foreground.  Task alone is\n    # 
+still NOT enough ù it lingers after a close.\n    process_alive = running or root_running\n    visual_alive = window 
+or surface or foreground\n    strict_alive = process_alive or visual_alive\n    return {\n        "running":      
+running,\n        "task":         task,\n        "window":       window,\n        "root_running": root_running,\n      
+  "surface":      surface,\n        "foreground":   foreground,\n        "alive":        strict_alive,\n        
+"strict_alive": strict_alive,\n    }\n\n\ndef current_foreground_package() -> str | None:\n    # Use the shared 
+dumpsys cache so that multiple worker threads asking\n    # "who\'s foreground?" within ~3 seconds share one binder 
+transaction.\n    try:\n        from . import dumpsys_cache as _dc\n        def _run(_args):\n            r = 
+run_command(list(_args), timeout=3)\n            return _dc.CachedResult(ok=r.ok, stdout=r.stdout)\n        for args 
+in (\n            ("dumpsys", "window", "windows"),\n            ("dumpsys", "activity", "activities"),\n        ):\n  
+          result = _dc.cached_run(args, _run)\n            if not result.ok:\n                continue\n            
+text = result.stdout\n            for marker in (\n                "mCurrentFocus", "mFocusedApp",\n                
+"topResumedActivity", "mResumedActivity",\n            ):\n                for line in text.splitlines():\n            
+        if marker not in line:\n                        continue\n                    for part in line.replace("/", " 
+").replace("}", " ").split():\n                        if "." in part and is_valid_package_name(part.split(":")[0]):\n 
+                           candidate = part.split(":")[0]\n                            if 
+candidate.startswith("com."):\n                                return candidate\n    except Exception:  # noqa: 
+BLE001\n        return None\n    return None\n\n\ndef network_available() -> bool:\n    try:\n        with 
+socket.create_connection(("1.1.1.1", 53), timeout=3):\n            return True\n    except OSError:\n        try:\n    
+        socket.gethostbyname("roblox.com")\n            return True\n        except OSError:\n            return 
+False\n\n\ndef masked_command_for_log(args: Iterable[str]) -> str:\n    safe_parts = []\n    for arg in 
+_stringify_args(args):\n        safe_parts.append(mask_launch_url(arg) or arg)\n    return 
+shlex.join(safe_parts)\n\n\n# \u2500\u2500\u2500 System & app stat helpers \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u
+2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+\u2500\n\n\ndef get_memory_info() -> dict[str, int]:\n    """Read /proc/meminfo. Returns dict with total_mb, free_mb, 
+percent_free.\n\n    Pure Python file read only ù no subprocess fallback to avoid the\n    fork/exec segfault that can 
+occur on Termux/Python 3.13.  Any read\n    or parse failure returns zeros so callers always get a valid dict.\n    
+"""\n    try:\n        with open("/proc/meminfo", "r", encoding="utf-8", errors="replace") as fh:\n            content 
+= fh.read()\n    except Exception:  # noqa: BLE001\n        return {"total_mb": 0, "free_mb": 0, "percent_free": 0}\n  
+  total = free = 0\n    try:\n        for line in content.splitlines():\n            parts = line.split()\n            
+if not parts:\n                continue\n            if parts[0] == "MemTotal:" and len(parts) >= 2:\n                
+try:\n                    total = int(parts[1]) // 1024\n                except (ValueError, IndexError):\n            
+        pass\n            elif parts[0] == "MemAvailable:" and len(parts) >= 2:\n                try:\n                
+    free = int(parts[1]) // 1024\n                except (ValueError, IndexError):\n                    pass\n    
+except Exception:  # noqa: BLE001\n        pass\n    percent = int(free * 100 / total) if total > 0 else 0\n    return 
+{"total_mb": total, "free_mb": free, "percent_free": percent}\n\n\ndef get_app_memory_mb(package: str) -> float | 
+None:\n    """Get approximate RAM usage for a running package in MB via dumpsys meminfo."""\n    package = 
+validate_package_name(package)\n    result = run_command(["dumpsys", "meminfo", package], timeout=8)\n    if not 
+result.ok:\n        return None\n    # Look for "TOTAL PSS:" or similar summary line (KB \u2192 MB)\n    for line in 
+result.stdout.splitlines():\n        m = re.search(r"TOTAL\\s+(?:PSS|RSS)?\\s*:?\\s*(\\d+)", line, re.IGNORECASE)\n    
+    if m:\n            return round(int(m.group(1)) / 1024.0, 0)\n    for line in result.stdout.splitlines():\n        
+if line.strip().upper().startswith("TOTAL"):\n            for part in line.split():\n                if part.isdigit() 
+and int(part) > 100:\n                    return round(int(part) / 1024.0, 0)\n    return None\n\n\ndef 
+get_cpu_usage() -> float | None:\n    """Estimate overall CPU usage percentage via top. Returns None if 
+unavailable."""\n    result = run_command(["top", "-bn1"], timeout=6)\n    if not result.ok:\n        return None\n    
+for line in result.stdout.splitlines():\n        lower = line.lower()\n        if "cpu" not in lower:\n            
+continue\n        # "%Cpu(s): 9.1 us" format\n        m = re.search(r"(\\d+\\.?\\d*)\\s*%?\\s*(?:us|user)(?!\\w)", 
+line, re.IGNORECASE)\n        if m:\n            return float(m.group(1))\n        # "X% idle" \u2192 compute used\n   
+     m2 = re.search(r"(\\d+\\.?\\d*)%?\\s*(?:id|idle)(?!\\w)", line, re.IGNORECASE)\n        if m2:\n            idle 
+= float(m2.group(1))\n            return round(100.0 - idle, 1)\n    return None\n\n\ndef get_temperature() -> float | 
+None:\n    """Read CPU/device temperature in Celsius from thermal zones."""\n    for path in (\n        
+"/sys/class/thermal/thermal_zone0/temp",\n        "/sys/class/thermal/thermal_zone1/temp",\n        
+"/sys/class/thermal/thermal_zone2/temp",\n    ):\n        raw = ""\n        try:\n            with open(path, "r", 
+encoding="utf-8", errors="replace") as fh:\n                raw = fh.read().strip()\n        except OSError:\n         
+   result = run_command(["cat", path], timeout=3)\n            if result.ok:\n                raw = 
+result.stdout.strip()\n        if raw.isdigit():\n            millis = int(raw)\n            # Linux thermal zones 
+usually report in millidegrees\n            temp = millis / 1000.0 if millis > 1000 else float(millis)\n            if 
+10.0 < temp < 120.0:\n                return round(temp, 1)\n    return None\n\n\n# \u2500\u2500\u2500 Preparation 
+helpers \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2
+500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u
+2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n\ndef 
+clear_package_cache(package: str) -> bool:\n    """Delete the cache directory contents for a package (requires 
+root).\n\n    Returns True if root was available and the find-delete command ran.\n    Only cache/ is cleared ù 
+installed data and preferences are NOT affected.\n    """\n    package = validate_package_name(package)\n    root_info 
+= detect_root()\n    if not root_info.available:\n        return False\n    # build path: 
+/data/data/<validated_package>/cache\n    cache_path = f"/data/data/{package}/cache"\n    result = run_root_command(\n 
+       ["find", cache_path, "-mindepth", "1", "-delete"],\n        root_tool=root_info.tool,\n        timeout=10,\n    
+)\n    # 0 = deleted files, 1 = directory empty/not found ù both are acceptable\n    return result.returncode in (0, 
+1)\n\n\ndef clear_safe_package_cache(package: str) -> str:\n    """Clear only safe cache/temp dirs under 
+/data/data/<pkg>/. Requires root.\n\n    Returns one of: Cleared, Partial, Skipped, Failed. Does not wipe full app 
+data.\n    """\n    package = validate_package_name(package)\n    root_info = detect_root()\n    if not 
+root_info.available or not root_info.tool:\n        return "Skipped"\n    base = f"/data/data/{package}"\n    targets 
+= [f"{base}/cache", f"{base}/code_cache", f"{base}/files/tmp"]\n    ok = fail = absent = 0\n    for path in targets:\n 
+       probe = run_root_command(["test", "-d", path], root_tool=root_info.tool, timeout=6)\n        if not probe.ok:\n 
+           absent += 1\n            continue\n        result = run_root_command(\n            ["find", path, 
+"-mindepth", "1", "-delete"],\n            root_tool=root_info.tool,\n            timeout=30,\n        )\n        if 
+result.returncode in (0, 1):\n            ok += 1\n        else:\n            fail += 1\n    if fail and ok:\n        
+return "Partial"\n    if fail:\n        return "Failed"\n    if ok:\n        return "Cleared"\n    return 
+"Skipped"\n\n\n_ROBLOX_CLIENT_SETTINGS_REL = 
+"files/ClientSettings/ClientAppSettings.json"\n\n_FORBIDDEN_GRAPHICS_NAME_PARTS = (\n    "cookie",\n    "token",\n    
+"session",\n    "auth",\n    "login",\n    "password",\n    "credential",\n    "account",\n)\n\n\ndef 
+_relpath_safe_for_graphics(rel: str) -> bool:\n    low = rel.lower().replace("\\\\", "/")\n    return not any(bad in 
+low for bad in _FORBIDDEN_GRAPHICS_NAME_PARTS)\n\n\ndef discover_roblox_graphics_json_paths(package: str, root_tool: 
+str) -> list[str]:\n    """Find candidate settings JSON under the package files tree (root)."""\n    package = 
+validate_package_name(package)\n    base = f"/data/data/{package}/files"\n    probe = run_root_command(["test", "-d", 
+base], root_tool=root_tool, timeout=4)\n    if not probe.ok:\n        return []\n    # shell find ù limited depth and 
+count; skip secret-looking paths when filtering results\n    sh = (\n        f"find {shlex.quote(base)} -maxdepth 9 
+-type f "\n        r"\\( -iname \'ClientAppSettings.json\' -o -iname \'clientsettings.json\' "\n        r"-o -iname 
+\'settings.json\' -o -iname \'GlobalBasicSettings.json\' -o -iname \'RobloxSettings.json\' "\n        r"-o -path 
+\'*/ClientSettings/*.json\' -o -path \'*/clientsettings/*.json\' "\n        r"-o -path \'*/robloxsettings/*.json\' -o 
+-path \'*/RobloxSettings/*.json\' \\) 2>/dev/null | head -n 24"\n    )\n    res = run_root_command(["sh", "-c", sh], 
+root_tool=root_tool, timeout=12)\n    if not res.ok or not res.stdout.strip():\n        legacy = 
+f"/data/data/{package}/{_ROBLOX_CLIENT_SETTINGS_REL}"\n        pr = run_root_command(["test", "-f", legacy], 
+root_tool=root_tool, timeout=4)\n        return [legacy] if pr.ok else []\n    paths: list[str] = []\n    for line in 
+res.stdout.strip().splitlines():\n        p = line.strip()\n        if not p or p in paths:\n            continue\n    
+    rel = p.split("/files/", 1)[-1] if "/files/" in p else p\n        if not _relpath_safe_for_graphics(rel):\n        
+    continue\n        paths.append(p)\n    return paths\n\n\ndef _gfx_tmp_dir() -> str:\n    """Return a 
+Termux-writable staging dir for graphics JSON temp files."""\n    import os as _os\n    home = _os.environ.get("HOME", 
+"/data/data/com.termux/files/home")\n    tmp = f"{home}/.deng-tool/rejoin/.tmp"\n    _os.makedirs(tmp, 
+exist_ok=True)\n    return tmp\n\n\ndef _apply_low_graphics_json_file(path: str, root_tool: str) -> str:\n    probe = 
+run_root_command(["test", "-f", path], root_tool=root_tool, timeout=4)\n    if not probe.ok:\n        return 
+"Skipped"\n    cat = run_root_command(["cat", path], root_tool=root_tool, timeout=8)\n    if not cat.ok or not 
+cat.stdout.strip():\n        return "Skipped"\n    try:\n        data = json.loads(cat.stdout)\n    except 
+json.JSONDecodeError:\n        return "Skipped"\n    if not isinstance(data, dict):\n        return "Skipped"\n    
+backup = f"{path}.bak.deng"\n    run_root_command(["cp", path, backup], root_tool=root_tool, timeout=8)\n    low_keys: 
+dict[str, int] = {\n        "DFIntTaskSchedulerTargetFps": 15,\n        "DFIntTextureQualityOverride": 1,\n    }\n    
+for key, val in low_keys.items():\n        cur = data.get(key)\n        if isinstance(cur, int):\n            
+data[key] = min(cur, val)\n        else:\n            data[key] = val\n    payload = json.dumps(data, separators=(",", 
+":"), sort_keys=True)\n\n    # Write via Termux temp file \u2192 root cp (avoids needing base64 in su PATH).\n    
+import os as _os, pathlib as _pl\n    tmp_name = f"gfx_{_os.path.basename(path)}.deng-tmp"\n    local_tmp = 
+_os.path.join(_gfx_tmp_dir(), tmp_name)\n    try:\n        _pl.Path(local_tmp).write_text(payload, encoding="utf-8")\n 
+   except OSError:\n        return "Failed"\n    wr = run_root_command(\n        ["sh", "-c", f"cp -f \'{local_tmp}\' 
+\'{path}\' && chmod 660 \'{path}\'; rm -f \'{local_tmp}\'"],\n        root_tool=root_tool,\n        timeout=12,\n    
+)\n    try:\n        _pl.Path(local_tmp).unlink(missing_ok=True)\n    except OSError:\n        pass\n    if not 
+wr.ok:\n        return "Failed"\n    verify = run_root_command(["cat", path], root_tool=root_tool, timeout=8)\n    if 
+not verify.ok:\n        return "Failed"\n    try:\n        data2 = json.loads(verify.stdout)\n    except 
+json.JSONDecodeError:\n        return "Failed"\n    if not isinstance(data2, dict):\n        return "Failed"\n    for 
+k in low_keys:\n        if data2.get(k) != data.get(k):\n            return "Failed"\n    return "Low 
+Applied"\n\n\ndef apply_low_graphics_optimization(package: str, *, enabled: bool = True) -> str:\n    """Merge low FPS 
+/ texture flags into known Roblox client JSON if found."""\n    if not enabled:\n        return "Skipped"\n    package 
+= validate_package_name(package)\n    root_info = detect_root()\n    if not root_info.available or not 
+root_info.tool:\n        return "Skipped"\n    paths = discover_roblox_graphics_json_paths(package, root_info.tool)\n  
+  if not paths:\n        return "Skipped"\n    outcome = "Skipped"\n    for path in paths:\n        r = 
+_apply_low_graphics_json_file(path, root_info.tool)\n        if r == "Low Applied":\n            return "Low 
+Applied"\n        if r == "Failed":\n            outcome = "Failed"\n    return outcome\n\n\ndef 
+launch_package_with_options(\n    package: str,\n    private_url: str | None = None,\n) -> tuple[CommandResult, 
+str]:\n    """Launch order: private URL (VIEW) if set, else normal ``launch_app`` chain.\n\n    Returns (result, 
+method_label).\n    """\n    package = validate_package_name(package)\n    url = (private_url or "").strip()\n    if 
+url:\n        mode = detect_launch_mode_from_url(url)\n        if mode not in LAUNCH_MODES:\n            mode = 
+"web_url"\n        try:\n            validate_launch_url(url, mode, allow_uncertain=True)\n        except 
+UrlValidationError as exc:\n            return CommandResult(\n                ("am", "start", "-a", 
+"android.intent.action.VIEW", "-p", package),\n                2,\n                "",\n                f"configured 
+Roblox link is invalid: {exc}",\n            ), "invalid_url"\n        result = launch_url(package, url, mode)\n       
+ return result, "root_am_view_package"\n    return launch_app(package), "am_or_resolve"\n\n\ndef 
+launch_package_with_bounds(\n    package: str,\n    rect: tuple[int, int, int, int],\n    private_url: str | None = 
+None,\n    *,\n    windowing_mode: int = 5,\n) -> tuple[CommandResult, str]:\n    """Launch with ``am start 
+--windowingMode <mode> --activity-launch-bounds`` if supported.\n\n    ``windowing_mode=5`` is Android\'s freeform 
+windowing mode.  Many cloud\n    phones support freeform at the framework level once\n    
+``enable_freeform_support=1`` is set (see :mod:`agent.freeform_enable`).\n    If the ``--activity-launch-bounds`` flag 
+is not recognized on this\n    Android build, we fall back gracefully to the bounds-less launch.\n\n    Returns 
+``(result, method_label)``.  Never raises.\n    """\n    try:\n        package = validate_package_name(package)\n    
+except Exception:  # noqa: BLE001\n        return CommandResult(("am", "start"), 2, "", "invalid package"), 
+"invalid"\n\n    l, t, r, b = rect\n    bounds_arg = f"{int(l)} {int(t)} {int(r)} {int(b)}"\n    url = (private_url or 
+"").strip()\n    # Convert web share-link URLs \u2192 roblox:// deep links before am start.\n    # Without this, 
+Android resolves https://www.roblox.com/share?... to the\n    # browser instead of Roblox (probe p-6f613cbed2: 
+launch_mode=\'web_url\'\n    # landed in lobby, not server).\n    if url:\n        return 
+launch_package_with_options(package, url)\n    deep_url = (to_roblox_deep_link(url) or url) if url else ""\n\n    am = 
+_find_command("am", "/system/bin/am")\n    if not am:\n        # Fall back to whatever the normal launcher chain can 
+do.\n        return launch_package_with_options(package, private_url)\n\n    # Common stem options for every variant 
+we try.\n    stem: list[str] = [\n        am, "start",\n        "--windowingMode", str(int(windowing_mode)),\n        
+"--activity-launch-bounds", str(int(l)), str(int(t)),\n        str(int(r)), str(int(b)),\n    ]\n    method_label = 
+f"am_bounds_mode{int(windowing_mode)}"\n\n    if deep_url:\n        mode = detect_launch_mode_from_url(deep_url)\n     
+   if mode not in LAUNCH_MODES:\n            mode = "deeplink"\n        try:\n            
+validate_launch_url(deep_url, mode, allow_uncertain=True)\n            # Preferred: bounds + URL + flags.\n            
+#   FLAG_ACTIVITY_NEW_TASK      (0x10000000)\n            #   FLAG_ACTIVITY_CLEAR_TASK    (0x00008000)  ù ensures 
+fresh start\n            #   FLAG_ACTIVITY_CLEAR_TOP     (0x04000000)\n            #   
+FLAG_ACTIVITY_RESET_TASK_IF_NEEDED (0x00200000)\n            # BROWSABLE category ensures Android routes roblox:// 
+to\n            # ActivityProtocolLaunch (not the generic LAUNCHER).\n            cmd = stem + [\n                
+"-a", "android.intent.action.VIEW",\n                "-c", "android.intent.category.BROWSABLE",\n                "-f", 
+"0x14208000",\n                "-d", deep_url, package,\n            ]\n            res = run_command(cmd, 
+timeout=PROCESS_TIMEOUT_SECONDS)\n            if res.ok:\n                return res, method_label + "_url"\n          
+  # Variant: target ActivityProtocolLaunch directly (bypasses intent\n            # resolver ambiguity ù confirmed 
+present in Moons clone manifests by\n            # probe p-80c42a4c03 pm_dump).\n            proto_component = 
+f"{package}/com.roblox.client.ActivityProtocolLaunch"\n            cmd_comp = stem + [\n                "-n", 
+proto_component,\n                "-a", "android.intent.action.VIEW",\n                "-c", 
+"android.intent.category.BROWSABLE",\n                "-f", "0x14208000",\n                "-d", deep_url,\n           
+ ]\n            res = run_command(cmd_comp, timeout=PROCESS_TIMEOUT_SECONDS)\n            if res.ok:\n                
+return res, method_label + "_url_component"\n            # Retry without extra intent flags in case device rejects 
+them.\n            cmd_nf = stem + ["-a", "android.intent.action.VIEW",\n                             "-c", 
+"android.intent.category.BROWSABLE",\n                             "-d", deep_url, package]\n            res = 
+run_command(cmd_nf, timeout=PROCESS_TIMEOUT_SECONDS)\n            if res.ok:\n                return res, method_label 
++ "_url_noflag"\n            # Last URL fallback: drop --activity-launch-bounds entirely so the\n            # intent 
+is delivered without any positioning flags that might\n            # confuse Android\'s activity resolver on this 
+device.  The window\n            # position is already pre-written to the App Cloner XML and will\n            # be 
+fixed by the post-launch stack resize.\n            res_nb = launch_url(package, deep_url, mode)\n            if 
+res_nb.ok:\n                return res_nb, method_label + "_url_nobounds"\n        except UrlValidationError:\n        
+    pass\n        # URL launch failed on all variants ù fall through to MAIN/LAUNCHER.\n\n    # Plain MAIN/LAUNCHER 
+intent with launch bounds.\n    cmd = stem + [\n        "-a", "android.intent.action.MAIN",\n        "-c", 
+"android.intent.category.LAUNCHER",\n        "-p", package,\n    ]\n    res = run_command(cmd, 
+timeout=PROCESS_TIMEOUT_SECONDS)\n    if res.ok:\n        return res, method_label\n\n    # Fallback when 
+--activity-launch-bounds isn\'t recognized: try just\n    # --windowingMode (older API levels accept this on its 
+own).\n    cmd2 = [\n        am, "start",\n        "--windowingMode", str(int(windowing_mode)),\n        "-a", 
+"android.intent.action.MAIN",\n        "-c", "android.intent.category.LAUNCHER",\n        "-p", package,\n    ]\n    
+res2 = run_command(cmd2, timeout=PROCESS_TIMEOUT_SECONDS)\n    if res2.ok:\n        return res2, method_label + 
+"_no_bounds"\n\n    # Final fallback: normal launcher chain without any flags.\n    return 
+launch_package_with_options(package, private_url)\n\n\ndef force_stop_packages_except(\n    keep_packages: 
+list[str],\n    detection_hints: list[str] | None = None,\n) -> list[str]:\n    """Force-stop all detected Roblox 
+packages not in keep_packages.\n\n    Tries without root first (works in many Termux ADB setups), then falls\n    back 
+to root. Returns list of package names that were successfully stopped.\n    """\n    keep = set(keep_packages)\n    
+all_roblox = find_roblox_packages(detection_hints)\n    to_stop = [p for p in all_roblox if p not in keep]\n    if not 
+to_stop:\n        return []\n    root_info = detect_root()\n    stopped: list[str] = []\n    for pkg in to_stop:\n     
+   result = run_command(["am", "force-stop", pkg], timeout=PROCESS_TIMEOUT_SECONDS)\n        if result.ok:\n           
+ stopped.append(pkg)\n        elif root_info.available:\n            result2 = force_stop_package(pkg, root_info)\n    
+        if result2.ok:\n                stopped.append(pkg)\n    return stopped\n\n\n# Packages that must NEVER be 
+killed during the boosting phase.\n_KILL_PROTECTED_PREFIXES: tuple[str, ...] = (\n    "com.termux",\n    "android",\n  
+  "com.android",\n    "com.google.android",\n    "com.samsung",\n    "com.sec",\n    "com.qualcomm",\n    
+"com.mediatek",\n)\n\n\ndef kill_all_background_apps(keep_packages: list[str]) -> dict[str, list[str]]:\n    """Clear 
+cached/background processes to free RAM before launching clones.\n\n    Uses ``am kill-all`` which clears processes in 
+the CACHED (background)\n    state without touching running foreground apps or system services.  We\n    deliberately 
+do NOT enumerate and individually force-stop third-party\n    packages ù that was too aggressive and killed the Moons 
+cloner service\n    that the clones depend on (probe p-e81414d9f4: apps launched ok but\n    immediately died because 
+their parent service was force-stopped).\n\n    Returns a dict with keys ``killed_bg`` (kill-all ran) and 
+``skipped``.\n    Never raises.\n    """\n    result: dict[str, list[str]] = {"killed_bg": [], "skipped": 
+list(keep_packages)}\n\n    bg = run_android_command(["am", "kill-all"], prefer_root=True, timeout=10)\n    if 
+bg.ok:\n        result["killed_bg"].append("am kill-all")\n    return result\n'
+
+----------------------------------------------------------------------
+Ran 2017 tests in 322.966s
+
+FAILED (failures=2, skipped=8)
+
+Private Server URL
+Paste a Roblox Private Server URL (or leave blank to skip).
+Examples:
+  https://www.roblox.com/share?code=XXXX&type=Server
+  https://www.roblox.com/games/123/Game?privateServerLinkCode=YYY
+  roblox://navigation/share_links?code=XXXX&type=Server
+Skipped. Clones will open the Roblox app without auto-joining a server.
+
+Private Server URL
+Paste a Roblox Private Server URL (or leave blank to skip).
+Examples:
+  https://www.roblox.com/share?code=XXXX&type=Server
+  https://www.roblox.com/games/123/Game?privateServerLinkCode=YYY
+  roblox://navigation/share_links?code=XXXX&type=Server
+Saved. At launch, this URL will be sent to Roblox as a deep link so
+each clone joins the private server directly.
+
+Private Server URL
+Paste a Roblox Private Server URL (or leave blank to skip).
+Examples:
+  https://www.roblox.com/share?code=XXXX&type=Server
+  https://www.roblox.com/games/123/Game?privateServerLinkCode=YYY
+  roblox://navigation/share_links?code=XXXX&type=Server
+Saved. At launch, this URL will be sent to Roblox as a deep link so
+each clone joins the private server directly.
