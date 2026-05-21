@@ -37,8 +37,11 @@ def _reapply_layout_for_package(package: str) -> None:
         # layout fallback that uses the right-pane rules.  This keeps the
         # window landscape-shaped on its own; the next full Start cycle will
         # rebalance for multi-package layouts.
+        # Use termux_log_fraction=0.0 so the layout uses full screen width
+        # (probe p-cf20e97a18: consistent with _prepare_automatic_layout fix).
         rects = window_layout.calculate_split_layout(
             [package], display.width, display.height,
+            termux_log_fraction=0.0,
             screen_mode=validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE)),
         )
         if rects:
@@ -144,7 +147,7 @@ class Supervisor:
     def _sleep(self, seconds: int | float) -> None:
         deadline = time.time() + max(1, float(seconds))
         while not self.stop_event.is_set() and time.time() < deadline:
-            time.sleep(min(1.0, deadline - time.time()))
+            time.sleep(max(0.0, min(1.0, deadline - time.time())))
 
     def run_forever(self) -> None:
         signal.signal(signal.SIGTERM, self._handle_stop)
@@ -308,7 +311,7 @@ class _PackageWorker(threading.Thread):
     def _sleep(self, seconds: float) -> None:
         deadline = time.time() + max(0.5, float(seconds))
         while not self.stop_event.is_set() and time.time() < deadline:
-            time.sleep(min(1.0, deadline - time.time()))
+            time.sleep(max(0.0, min(1.0, deadline - time.time())))
 
     def _restart_budget_ok(self) -> bool:
         now = time.time()
@@ -1992,7 +1995,7 @@ class WatchdogSupervisor:
             _sleep_deadline = time.time() + interval
             while not self.stop_event.is_set() and time.time() < _sleep_deadline:
                 _maybe_render()
-                time.sleep(min(1.0, _sleep_deadline - time.time()))
+                time.sleep(max(0.0, min(1.0, _sleep_deadline - time.time())))
 
         db.insert_event("INFO", "watchdog_supervisor_stopped", "session ended by user")
         log_event(logger, "info", "watchdog_supervisor_stopped")

@@ -3431,14 +3431,13 @@ def _prepare_automatic_layout(
         except Exception:  # noqa: BLE001
             display = window_layout.DisplayInfo(width=1080, height=1920, density=420)
 
-        # Pass the user's Termux dock fraction so the right pane (clone
-        # area) starts exactly where Termux ends.  Without this, Termux at
-        # 50 % overlaps the clone area (which previously assumed 35 % left
-        # reservation).  Probe ``p-47fa33562a`` showed clones overlapping
-        # the Termux pane on a 720 × 1280 phone — fixed by keeping the two
-        # fractions in lock-step.
-        _dock_frac = 0.50
-        cfg["termux_dock_fraction"] = 0.50
+        # Use the full physical screen width for the package grid (probe
+        # p-cf20e97a18: packages were confined to right 33% because
+        # left_fraction=0.50 reserved the left half THEN lte6 skipped col0
+        # of that half, leaving only cols 1+2 of the right 640px).  With
+        # left_fraction=0.0 the grid spans the full display width; lte6 keeps
+        # col0 naturally empty for Termux, giving packages 2/3 of the screen.
+        _dock_frac = 0.0
         _screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
         filtered_packages = [p for p in packages if not window_layout._is_layout_excluded(p)]
         rects = window_layout.calculate_split_layout(
@@ -3447,13 +3446,21 @@ def _prepare_automatic_layout(
             termux_log_fraction=_dock_frac,
             screen_mode=_screen_mode,
         )
+        # Derive Termux dock fraction from the actual package bounds so that
+        # _enforce_termux_left_layout (called later in cmd_start) minimises
+        # Termux to exactly the empty col0 area rather than a hard-coded 50%.
+        if rects and display.width > 0:
+            _termux_frac = min(r.left for r in rects) / display.width
+        else:
+            _termux_frac = 0.0
+        cfg["termux_dock_fraction"] = _termux_frac
 
         # ── release grid probe — emitted at INFO so it lands in probe
         try:
             from . import window_layout as _wl
             _orient = _wl.detect_layout_orientation(display.width, display.height)
             _sb_h   = _wl._detect_status_bar_height()
-            _left_end = round(display.width * max(0.1, min(0.9, float(_dock_frac))))
+            _left_end = min(r.left for r in rects) if rects else 0
             if _screen_mode == "portrait":
                 _cols, _rows = 2, 5
                 _slot_order = "7,8,9,10,1,2,3,4,5,6"
@@ -3475,14 +3482,14 @@ def _prepare_automatic_layout(
                 _screen_mode, _orient, _screen_mode, str(android.detect_root().available).lower(),
             )
             _layout_log.info(
-                "[DENG_REJOIN_SPLIT_LAYOUT] screen_w=%d screen_h=%d termux_area=left_50 "
-                "roblox_area=right_50 termux_desired=%s termux_actual=%s "
-                "roblox_grid_area=%s full_width_used=false",
+                "[DENG_REJOIN_SPLIT_LAYOUT] screen_w=%d screen_h=%d termux_area=left_col0 "
+                "roblox_area=right_cols1_plus termux_desired=%s termux_actual=%s "
+                "roblox_grid_area=%s full_width_used=true",
                 display.width,
                 display.height,
                 (0, 0, _left_end, display.height),
                 "",
-                (_left_end, _sb_h, display.width, display.height),
+                (0, _sb_h, display.width, display.height),
             )
             if _screen_mode == "landscape":
                 _layout_log.info(
@@ -3491,7 +3498,7 @@ def _prepare_automatic_layout(
                     len(filtered_packages),
                     _landscape_rule,
                     _slot_order,
-                    (_left_end, _sb_h, display.width, display.height),
+                    (0, _sb_h, display.width, display.height),
                     [(r.left, r.top, r.right, r.bottom) for r in rects],
                 )
             _layout_log.info(
