@@ -1,0 +1,47 @@
+<% locals.activePage = 'license' %>
+
+<div class="unlock-page">
+  <div class="unlock-card">
+    <h2 class="unlock-title">🔗 Linkvertise Unlock</h2>
+    <p class="unlock-desc">
+      Click the button below to visit the Linkvertise page. After completing it,
+      you will be automatically redirected back here to receive your key.
+    </p>
+
+    <div class="unlock-steps">
+      <div class="step"><span class="step-num">1</span>Click the unlock button</div>
+      <div class="step"><span class="step-num">2</span>Complete the Linkvertise page</div>
+      <div class="step"><span class="step-num">3</span>Return here for your key</div>
+    </div>
+
+    <!-- Linkvertise publisher script -->
+    <script src="https://publisher.linkvertise.com/cdn/linkvertise.js"></script>
+    <div id="lv-container">
+      <a id="lv-link" href="#" class="btn btn-primary btn-block btn-lv" 
+         data-publisher="<%= publisherId %>"
+         data-target="<%= callbackUrl %>">
+        🔗 &nbsp;Open Linkvertise Unlock Page
+      </a>
+    </div>
+    <script>
+      // Initialize Linkvertise with the publisher ID and target callback URL
+      document.addEventListener('DOMContentLoaded', function() {
+        var link = document.getElementById('lv-link');
+        var publisher = link.dataset.publisher;
+        var target = decodeURIComponent(link.dataset.target);
+        // Use Linkvertise SDK API if available
+        if (typeof linkvertise === 'function') {
+          link.href = linkvertise(publisher, { whitelist: [], blacklist: [] });
+        } else {
+          link.href = 'https://link-to.net/' + publisher + '/' + encodeURIComponent(target);
+        }
+      });
+    </script>
+
+    <p class="unlock-note">
+      ⚠️ Do not close this page while completing the unlock.
+    </p>
+
+    <a href="/license" class="back-link">← Cancel and go back</a>
+  </div>
+</div>

@@ -1,0 +1,29 @@
+{
+  "name": "deng-tool-site",
+  "version": "1.0.0",
+  "description": "DENG Tool web portal – ad-unlock key generation",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test tests/site.test.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.44.4",
+    "axios": "^1.7.2",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "ejs": "^3.1.10",
+    "express": "^4.19.2",
+    "express-ejs-layouts": "^2.5.1",
+    "express-rate-limit": "^7.3.1",
+    "express-session": "^1.18.0",
+    "helmet": "^7.1.0"
+  },
+  "devDependencies": {
+    "supertest": "^7.0.0"
+  }
+}

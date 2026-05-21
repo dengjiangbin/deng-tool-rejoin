@@ -782,45 +782,16 @@ class PanelView(discord.ui.View):
         super().__init__(timeout=None)
         self._store = store
 
-    # ── Generate Key ──────────────────────────────────────────────────────────
-
-    @discord.ui.button(
-        label="Generate Key",
-        style=discord.ButtonStyle.primary,
-        custom_id=BUTTON_GENERATE,
-        emoji="🔑",
-    )
-    async def btn_generate(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button,
-    ) -> None:
-        uid = str(interaction.user.id)
-        username = str(interaction.user)
-
-        await interaction.response.defer(ephemeral=True)
-
-        user = self._store.get_or_create_user(uid, username)
-        max_keys = user.get("max_keys", 1)
-
-        try:
-            full_key = self._store.create_key_for_user(uid, created_by=uid)
-            payload = build_generate_success_response(full_key)
-            # Post license log for key generation
-            if interaction.guild:
-                await _post_license_log(
-                    interaction.guild, self._store,
-                    title="Key Generated Log",
-                    user=interaction.user,
-                    key_serial=full_key,
-                    event_type="generated",
-                )
-        except GenerationCooldownError as exc:
-            payload = build_generate_cooldown_response(exc.remaining_seconds)
-        except UserLimitError:
-            payload = build_generate_limit_response(max_keys)
-
-        await _respond_ephemeral_payload(interaction, payload, followup=True)
+        # "Generate Key" is a link button that opens the web portal.
+        # Link buttons do not send interactions, so no handler is needed.
+        import os as _os
+        self.add_item(discord.ui.Button(
+            style=discord.ButtonStyle.link,
+            label="Generate Key",
+            emoji="🔑",
+            url=_os.environ.get("TOOL_SITE_URL", "https://tool.deng.my.id"),
+            row=0,
+        ))
 
     # ── Reset HWID ────────────────────────────────────────────────────────────
 

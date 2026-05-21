@@ -1,0 +1,19 @@
+{
+  "apps": [
+    {
+      "name": "deng-tool-site",
+      "script": "server.js",
+      "cwd": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site",
+      "interpreter": "node",
+      "watch": false,
+      "autorestart": true,
+      "max_restarts": 10,
+      "restart_delay": 2000,
+      "env": {
+        "NODE_ENV": "production",
+        "TOOL_SITE_HOST": "127.0.0.1",
+        "TOOL_SITE_PORT": "8791"
+      }
+    }
+  ]
+}

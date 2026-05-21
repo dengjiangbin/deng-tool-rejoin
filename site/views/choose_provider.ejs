@@ -1,0 +1,52 @@
+<% locals.activePage = 'license' %>
+
+<div class="page-header">
+  <h2 class="page-title">Choose Unlock Method</h2>
+  <p class="page-subtitle">Select an ad provider to unlock your key. Complete the ad to receive your key immediately after.</p>
+</div>
+
+<div class="provider-grid">
+
+  <!-- LootLabs -->
+  <div class="provider-card">
+    <div class="provider-icon provider-icon-lootlabs">🍀</div>
+    <h3 class="provider-name">LootLabs</h3>
+    <p class="provider-desc">Quick and easy – complete a short survey or ad task.</p>
+    <ul class="provider-features">
+      <li>✓ Fast completion (~30s)</li>
+      <li>✓ No download required</li>
+    </ul>
+    <form method="POST" action="/license/provider">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <input type="hidden" name="challenge_id" value="<%= challengeId %>">
+      <input type="hidden" name="provider" value="lootlabs">
+      <button type="submit" class="btn btn-primary btn-block btn-provider">
+        Unlock via LootLabs
+      </button>
+    </form>
+  </div>
+
+  <!-- Linkvertise -->
+  <div class="provider-card">
+    <div class="provider-icon provider-icon-lv">🔗</div>
+    <h3 class="provider-name">Linkvertise</h3>
+    <p class="provider-desc">Click through a short Linkvertise page to earn your key.</p>
+    <ul class="provider-features">
+      <li>✓ Reliable detection</li>
+      <li>✓ Simple click-through</li>
+    </ul>
+    <form method="POST" action="/license/provider">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <input type="hidden" name="challenge_id" value="<%= challengeId %>">
+      <input type="hidden" name="provider" value="linkvertise">
+      <button type="submit" class="btn btn-outline btn-block btn-provider">
+        Unlock via Linkvertise
+      </button>
+    </form>
+  </div>
+
+</div>
+
+<div class="back-link-wrap">
+  <a href="/license" class="back-link">← Cancel and go back</a>
+</div>

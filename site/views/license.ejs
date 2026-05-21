@@ -1,0 +1,85 @@
+<% locals.activePage = 'license' %>
+
+<div class="page-header">
+  <h2 class="page-title">My License</h2>
+  <p class="page-subtitle">Generate and manage your DENG Tool keys</p>
+</div>
+
+<!-- Generate Key Card -->
+<div class="section-card generate-card">
+  <div class="generate-header">
+    <div>
+      <h3 class="section-title">Generate a Key</h3>
+      <p class="section-desc">Complete a quick ad unlock to receive a free key. Keys are valid for 24 hours and expire if not redeemed.</p>
+    </div>
+    <div class="generate-icon">🔑</div>
+  </div>
+
+  <% if (flash && flash.cooldown) { %>
+    <div class="cooldown-notice" data-seconds="<%= flash.cooldown %>">
+      ⏳ Cooldown active — <span class="countdown"></span>
+    </div>
+  <% } %>
+
+  <form method="POST" action="/license/generate">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <button type="submit" class="btn btn-primary btn-generate" id="btn-generate">
+      🔑 &nbsp;Generate Key
+    </button>
+  </form>
+</div>
+
+<!-- Key History -->
+<div class="section-card">
+  <div class="section-header">
+    <h3 class="section-title">Key History</h3>
+  </div>
+
+  <% if (history && history.length > 0) { %>
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Key (masked)</th>
+            <th>Provider</th>
+            <th>Status</th>
+            <th>Generated</th>
+            <th>Key Expires</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% history.forEach(row => { %>
+          <tr>
+            <td class="key-cell">
+              <code><%= row.key_prefix ? row.key_prefix + '-****-****' : '—' %></code>
+            </td>
+            <td>
+              <span class="badge badge-provider"><%= row.provider || '—' %></span>
+            </td>
+            <td>
+              <% if (row.status === 'key_generated') { %>
+                <span class="badge badge-green">Generated</span>
+              <% } else if (row.status === 'expired' || row.status === 'failed') { %>
+                <span class="badge badge-red"><%= row.status %></span>
+              <% } else { %>
+                <span class="badge badge-gray"><%= row.status %></span>
+              <% } %>
+            </td>
+            <td class="muted-cell"><%= new Date(row.created_at).toLocaleString() %></td>
+            <td class="muted-cell">
+              <% if (row.key_expires_at) { %>
+                <%= new Date(row.key_expires_at).toLocaleString() %>
+              <% } else { %>—<% } %>
+            </td>
+          </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } else { %>
+    <div class="empty-state">
+      <p class="empty-icon">📋</p>
+      <p class="empty-text">No key generation history yet.</p>
+    </div>
+  <% } %>
+</div>
