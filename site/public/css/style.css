@@ -475,6 +475,18 @@ input {
   padding: 22px;
 }
 
+.provider-card-disabled {
+  border-radius: 14px;
+  padding: 22px;
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.provider-card-disabled .btn {
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
 .provider-mark {
   width: 46px;
   height: 46px;
@@ -671,6 +683,20 @@ input {
   height: 52px;
   border-radius: 16px;
   margin: 0 auto 14px;
+}
+
+.key-success-logo {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.result-logo-img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  border-radius: 16px;
+  box-shadow: 0 8px 28px rgba(23, 160, 221, 0.24), 0 8px 30px rgba(255, 47, 179, 0.14);
 }
 
 .key-display-wrap {

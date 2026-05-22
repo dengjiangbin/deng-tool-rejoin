@@ -58,7 +58,7 @@
         <tbody>
           <% history.forEach(row => { %>
             <tr>
-              <td class="key-cell"><code><%= maskKeyRow(row) %></code></td>
+              <td class="key-cell"><code><%= fullKeyRow(row) %></code></td>
               <td><span class="badge badge-provider"><%= providerLabel(row.provider) %></span></td>
               <td><span class="badge <%= friendlyStatus(row) === 'Generated' ? 'badge-green' : (friendlyStatus(row) === 'Expired' ? 'badge-red' : 'badge-gray') %>"><%= friendlyStatus(row) %></span></td>
               <td class="muted-cell"><%= new Date(row.created_at).toLocaleString() %></td>

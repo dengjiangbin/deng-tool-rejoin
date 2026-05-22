@@ -20,7 +20,11 @@
   var notice = document.querySelector('.cooldown-notice');
   if (!notice) return;
   var seconds = parseInt(notice.dataset.seconds || '0', 10);
-  if (!seconds || seconds <= 0) return;
+  // If the cooldown has already expired (server rendered a stale state), hide immediately.
+  if (!seconds || seconds <= 0) {
+    notice.style.display = 'none';
+    return;
+  }
 
   var counter = notice.querySelector('.countdown');
   var btn = document.getElementById('btn-generate');

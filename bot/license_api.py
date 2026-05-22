@@ -495,82 +495,14 @@ def _route_public_install(
             return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
         if tail == "test/latest":
-            from agent.bootstrap_installer import render_direct_install_bootstrap
-
-            _row = get_exact_registry_row("main-dev")
-            _sha = str(_row.get("artifact_sha256") or "").strip() if _row else ""
-            script = render_direct_install_bootstrap(
+            script = render_public_bootstrap(
                 base_url=base,
-                package_sha256=_sha,
+                requested="test-latest",
                 installer_title="DENG Tool: Rejoin Test Installer",
-                banner_lines=("Version: main-dev",),
+                banner_lines=("Channel: internal test", "Version: main-dev"),
+                bundle_etag=_bundle_etag(),
             )
-            return (
-                script.encode("utf-8"),
-                200,
-                "text/x-shellscript",
-                [("Cache-Control", "no-store")],
-            )
-
-        if tail == "test/version":
-            # Return JSON build metadata for the active main-dev artifact.
-            # Useful for: installer cache-bust audits, monitoring, and
-            # deng-rejoin doctor install on a phone with curl.
-            _row = get_exact_registry_row("main-dev")
-            if _row is None:
-                return (
-                    json.dumps({"error": "main-dev not configured"}).encode("utf-8"),
-                    404,
-                    "application/json",
-                    [("Cache-Control", "no-store")],
-                )
-            _sha = str(_row.get("artifact_sha256") or "").strip()
-            _commit = str(_row.get("git_commit") or "").strip()
-            _built_at = str(_row.get("built_at_iso") or "").strip()
-            # Try to learn package size + parsed BUILD-INFO from the file.
-            _project_pkg = (
-                _PROJECT_ROOT
-                / "releases"
-                / "main-dev"
-                / "deng-tool-rejoin-main-dev.tar.gz"
-            )
-            _pkg_size = 0
-            try:
-                if _project_pkg.is_file():
-                    _pkg_size = _project_pkg.stat().st_size
-                    if not (_commit and _built_at):
-                        import io
-                        import tarfile as _tar
-
-                        with _tar.open(str(_project_pkg), "r:gz") as _tf:
-                            try:
-                                _m = _tf.getmember("BUILD-INFO.json")
-                                _bi = json.loads(
-                                    _tf.extractfile(_m).read().decode("utf-8")
-                                )
-                                _commit = _commit or str(
-                                    _bi.get("git_commit") or ""
-                                )
-                                _built_at = _built_at or str(
-                                    _bi.get("built_at_iso") or ""
-                                )
-                            except KeyError:
-                                pass
-            except Exception as _exc:  # noqa: BLE001
-                log.warning("test/version BUILD-INFO probe failed: %s", _exc)
-            payload = {
-                "channel": "main-dev",
-                "artifact_sha256": _sha,
-                "git_commit": _commit,
-                "package_size": _pkg_size,
-                "built_at": _built_at,
-            }
-            return (
-                json.dumps(payload, sort_keys=True).encode("utf-8"),
-                200,
-                "application/json",
-                [("Cache-Control", "no-store")],
-            )
+            return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
         if tail == "beta/latest":
             return (
@@ -639,58 +571,6 @@ def _route_public_install(
                 ],
             )
 
-        if tail == "test/package.tar.gz":
-            # Serve the full internal test package directly (no license auth required).
-            # The package is safe to serve because it contains no secrets (.env, tokens, etc.)
-            # are excluded by build_internal_test_artifact.py.
-            _row = get_exact_registry_row("main-dev")
-            if _row is None:
-                return (
-                    json.dumps({"error": "Internal test package not configured."}).encode("utf-8"),
-                    404,
-                    "application/json",
-                    None,
-                )
-            # Prefer the copy in the deployed repo's releases/ dir; fall back to artifact root.
-            _project_pkg = _PROJECT_ROOT / "releases" / "main-dev" / "deng-tool-rejoin-main-dev.tar.gz"
-            _pkg_path: Path | None = None
-            if _project_pkg.is_file():
-                _pkg_path = _project_pkg
-            else:
-                _art_root = get_artifact_root()
-                if _art_root is not None:
-                    _cand = artifact_path_for_row(_row, _art_root)
-                    if _cand is not None and _cand.is_file():
-                        _pkg_path = _cand
-                        log.warning("serving test package from artifact root (repo bundle missing): %s", _cand)
-            if _pkg_path is None:
-                log.error("test/package.tar.gz not found in repo or artifact root")
-                return (
-                    json.dumps({"error": "Internal test package not found. Run: python scripts/build_internal_test_artifact.py"}).encode("utf-8"),
-                    404,
-                    "application/json",
-                    None,
-                )
-            try:
-                _pkg_data = _pkg_path.read_bytes()
-            except OSError as _exc:
-                log.error("test package read failed: %s", _exc)
-                return (
-                    json.dumps({"error": "read failed"}).encode("utf-8"),
-                    500,
-                    "application/json",
-                    None,
-                )
-            return (
-                _pkg_data,
-                200,
-                "application/gzip",
-                [
-                    ("Content-Disposition", 'attachment; filename="deng-tool-rejoin-main-dev.tar.gz"'),
-                    ("Cache-Control", "no-store"),
-                ],
-            )
-
         if "/" in tail:
             return (
                 json.dumps({"error": "Not found"}).encode("utf-8"),
@@ -710,158 +590,6 @@ def _route_public_install(
         script = render_public_bootstrap(base_url=base, requested=tail, bundle_etag=_bundle_etag())
         return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
-    # ── Dev-probe upload (internal test channel only) ─────────────────────────
-    # The cloud-phone client POSTs sanitized device evidence here so the
-    # operator can read it on the PM2 host without paste-buffer limits.  The
-    # endpoint is intentionally simple: shared-secret header, size cap, no
-    # license check, channel-locked to ``main-dev``.
-    if path == "/api/dev-probe/upload":
-        from agent.dev_probe_store import store_probe
-
-        if method != "POST":
-            return (
-                json.dumps({"error": "POST required"}).encode("utf-8"),
-                405,
-                "application/json",
-                None,
-            )
-        token = (environ.get("HTTP_X_DEV_PROBE_TOKEN") or "").strip()
-        # Token check: env-var override wins, else accept the baked-in value
-        # so an out-of-the-box test install can upload.  The value is not a
-        # secret — the probe content is already sanitized — but it gives us
-        # one knob to disable in case of abuse.
-        expected = os.environ.get("DENG_DEV_PROBE_TOKEN", "deng-rejoin-dev-probe-v1")
-        if token != expected:
-            return (
-                json.dumps({"error": "invalid token"}).encode("utf-8"),
-                401,
-                "application/json",
-                None,
-            )
-        # Hard size cap — anything bigger is rejected without reading.
-        try:
-            content_length = int(environ.get("CONTENT_LENGTH") or "0")
-        except ValueError:
-            content_length = 0
-        if content_length <= 0 or content_length > 4 * 1024 * 1024:  # 4 MB
-            return (
-                json.dumps({"error": "payload too large or missing"}).encode("utf-8"),
-                413,
-                "application/json",
-                None,
-            )
-        try:
-            raw = environ["wsgi.input"].read(content_length) or b""
-        except Exception as exc:  # noqa: BLE001
-            log.warning("dev-probe upload read failed: %s", exc)
-            return (
-                json.dumps({"error": "read failed"}).encode("utf-8"),
-                400,
-                "application/json",
-                None,
-            )
-        # Gzip-decode if the client compressed.  We never trust the encoding
-        # header alone — we look at the magic bytes too.
-        if (environ.get("HTTP_CONTENT_ENCODING") or "").lower() == "gzip" or (
-            len(raw) >= 2 and raw[:2] == b"\x1f\x8b"
-        ):
-            try:
-                import gzip as _gz
-
-                raw = _gz.decompress(raw)
-            except Exception as exc:  # noqa: BLE001
-                return (
-                    json.dumps({"error": f"gzip decompress failed: {exc}"}).encode("utf-8"),
-                    400,
-                    "application/json",
-                    None,
-                )
-        if len(raw) > 16 * 1024 * 1024:  # 16 MB decompressed
-            return (
-                json.dumps({"error": "decompressed payload too large"}).encode("utf-8"),
-                413,
-                "application/json",
-                None,
-            )
-        try:
-            payload = json.loads(raw.decode("utf-8"))
-        except Exception as exc:  # noqa: BLE001
-            return (
-                json.dumps({"error": f"invalid JSON: {exc}"}).encode("utf-8"),
-                400,
-                "application/json",
-                None,
-            )
-        if not isinstance(payload, dict) or "probe_version" not in payload:
-            return (
-                json.dumps({"error": "missing probe_version"}).encode("utf-8"),
-                400,
-                "application/json",
-                None,
-            )
-        probe_id, saved_path = store_probe(payload)
-        log.info("dev-probe stored: id=%s path=%s size=%d", probe_id, saved_path, len(raw))
-        return (
-            json.dumps({"probe_id": probe_id, "stored_at": str(saved_path)}).encode("utf-8"),
-            201,
-            "application/json",
-            [("Cache-Control", "no-store")],
-        )
-
-    if path == "/api/dev-probe/list":
-        from agent.dev_probe_store import list_probes
-
-        if method != "GET":
-            return (
-                json.dumps({"error": "GET required"}).encode("utf-8"),
-                405,
-                "application/json",
-                None,
-            )
-        # No auth: list-only metadata, not the probe content.
-        items = list_probes(limit=50)
-        return (
-            json.dumps({"items": items}, sort_keys=True).encode("utf-8"),
-            200,
-            "application/json",
-            [("Cache-Control", "no-store")],
-        )
-
-    if path.startswith("/api/dev-probe/"):
-        # Single probe fetch by id.  No bearer auth — content is already
-        # sanitized; operator reads it on PM2 host.
-        from agent.dev_probe_store import read_probe
-
-        if method != "GET":
-            return (
-                json.dumps({"error": "GET required"}).encode("utf-8"),
-                405,
-                "application/json",
-                None,
-            )
-        probe_id = path[len("/api/dev-probe/"):].strip()
-        if not probe_id or "/" in probe_id or ".." in probe_id:
-            return (
-                json.dumps({"error": "bad id"}).encode("utf-8"),
-                400,
-                "application/json",
-                None,
-            )
-        data = read_probe(probe_id)
-        if data is None:
-            return (
-                json.dumps({"error": "not found"}).encode("utf-8"),
-                404,
-                "application/json",
-                None,
-            )
-        return (
-            json.dumps(data, sort_keys=True).encode("utf-8"),
-            200,
-            "application/json",
-            [("Cache-Control", "no-store")],
-        )
-
     if path == "/api/install/authorize":
         if method != "POST":
             return (
@@ -871,13 +599,6 @@ def _route_public_install(
                 None,
             )
         remote_addr = environ.get("REMOTE_ADDR", "unknown")
-        forwarded_for = (environ.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
-        client_ip = forwarded_for or remote_addr
-        user_agent = (environ.get("HTTP_USER_AGENT") or "")[:120]
-        log.info(
-            "install/authorize request: method=%s ip=%s ua=%s",
-            method, client_ip, user_agent or "<none>",
-        )
         if not _check_rate_limit(remote_addr):
             return (
                 json.dumps({"error": "Too many requests. Try again later."}).encode("utf-8"),
@@ -1256,75 +977,6 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         log.info("License result: %s for key %s", result, _mask_key(raw_key))
         payload, status = _build_response(result)
         return respond(payload, status)
-
-    # ── Key execution report (public releases only) ───────────────────────────
-    if path == "/api/execute":
-        if method != "POST":
-            return respond(json.dumps({"error": "POST required"}).encode(), 405)
-
-        body = _read_json_body(environ)
-        if not body:
-            return respond(json.dumps({"error": "Invalid JSON body"}).encode(), 400)
-
-        raw_key = (body.get("key") or "").strip()
-        install_id_hash = (body.get("install_id_hash") or "").strip()
-        version = (body.get("version") or "")[:64]
-        channel = (body.get("channel") or "")[:64].strip().lower()
-
-        if not raw_key or not install_id_hash:
-            return respond(json.dumps({"error": "key and install_id_hash required"}).encode(), 400)
-
-        # Only public stable releases count — explicitly exclude dev/test channels.
-        _PUBLIC_CHANNELS = {"stable", "release", "public"}
-        _DEV_CHANNELS = {"main-dev", "dev", "internal", "test", "beta", "test-latest"}
-        is_public = channel in _PUBLIC_CHANNELS and channel not in _DEV_CHANNELS
-
-        if not is_public:
-            return respond(json.dumps({"recorded": False, "reason": "non-public channel"}).encode())
-
-        try:
-            from agent.license_store import get_default_store
-            from agent.license import normalize_license_key, hash_license_key, LicenseKeyError
-            store = get_default_store()
-            try:
-                normalized = normalize_license_key(raw_key)
-                key_id = hash_license_key(normalized)
-            except LicenseKeyError:
-                return respond(json.dumps({"error": "invalid key"}).encode(), 400)
-            # Validate the key exists and is active before recording
-            try:
-                from agent.license_store import RESULT_ACTIVE
-                if len(install_id_hash) != 64:
-                    install_id_hash = _hash_install_id(install_id_hash)
-                device_model = (body.get("device_model") or "unknown")[:120]
-                result = store.bind_or_check_device(raw_key, install_id_hash, device_model, version)
-                if result != RESULT_ACTIVE:
-                    return respond(json.dumps({"recorded": False, "reason": result}).encode())
-            except Exception:  # noqa: BLE001
-                return respond(json.dumps({"recorded": False, "reason": "check_failed"}).encode())
-            # Look up owner_discord_id from the key record
-            try:
-                owner_discord_id = ""
-                if hasattr(store, "_load"):
-                    db = store._load()  # type: ignore[attr-defined]
-                    rec = db.get("keys", {}).get(key_id, {})
-                    owner_discord_id = rec.get("owner_discord_id") or ""
-                elif hasattr(store, "_client"):
-                    res = store._client.table("license_keys").select("owner_discord_id").eq("id", key_id).limit(1).execute()  # type: ignore[attr-defined]
-                    owner_discord_id = (res.data[0].get("owner_discord_id") or "") if res.data else ""
-            except Exception:  # noqa: BLE001
-                owner_discord_id = ""
-            store.record_key_execution(
-                key_id=key_id,
-                owner_discord_id=owner_discord_id,
-                version=version,
-                channel=channel,
-                is_public_release=True,
-            )
-            return respond(json.dumps({"recorded": True}).encode())
-        except Exception as exc:  # noqa: BLE001
-            log.error("Execute record error: %s", exc)
-            return respond(json.dumps({"recorded": False, "reason": "server_error"}).encode(), 500)
 
     # ── Download authorize ────────────────────────────────────────────────────
     if path == "/api/download/authorize":

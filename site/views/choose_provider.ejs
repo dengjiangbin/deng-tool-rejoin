@@ -8,7 +8,13 @@
   </div>
 </div>
 
+<%
+  var lootlabsEnabled = providers.some(function(p){ return p.provider === 'lootlabs'; });
+  var linkvertiseEnabled = providers.some(function(p){ return p.provider === 'linkvertise'; });
+%>
+
 <div class="provider-grid" data-portal-step="provider-choice">
+  <% if (lootlabsEnabled) { %>
   <section class="provider-card">
     <div class="provider-mark">LL</div>
     <h2 class="provider-name">LootLabs</h2>
@@ -20,7 +26,16 @@
       <button type="submit" class="btn btn-primary btn-block btn-provider">LootLabs</button>
     </form>
   </section>
+  <% } else { %>
+  <section class="provider-card provider-card-disabled" aria-disabled="true">
+    <div class="provider-mark">LL</div>
+    <h2 class="provider-name">LootLabs</h2>
+    <p class="provider-desc">LootLabs is temporarily unavailable. Please check back later.</p>
+    <button class="btn btn-outline btn-block btn-provider" disabled aria-disabled="true">Unavailable</button>
+  </section>
+  <% } %>
 
+  <% if (linkvertiseEnabled) { %>
   <section class="provider-card">
     <div class="provider-mark">LV</div>
     <h2 class="provider-name">Linkvertise</h2>
@@ -32,6 +47,16 @@
       <button type="submit" class="btn btn-outline btn-block btn-provider">Linkvertise</button>
     </form>
   </section>
+  <% } else { %>
+  <section class="provider-card provider-card-disabled" aria-disabled="true">
+    <div class="provider-mark">LV</div>
+    <h2 class="provider-name">Linkvertise</h2>
+    <p class="alert alert-error" role="note" style="font-size:.9rem;margin:12px 0">
+      Linkvertise is temporarily unavailable.<br>Please use LootLabs.
+    </p>
+    <button class="btn btn-outline btn-block btn-provider" disabled aria-disabled="true">Unavailable</button>
+  </section>
+  <% } %>
 </div>
 
 <div class="back-link-wrap">

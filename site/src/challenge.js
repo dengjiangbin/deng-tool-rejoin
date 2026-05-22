@@ -340,7 +340,9 @@ async function checkCooldown(siteUserId) {
   if (data && data.length > 0) {
     const lastMs = new Date(data[0].completed_at || data[0].created_at).getTime();
     const secondsLeft = Math.ceil((lastMs + COOLDOWN_SECONDS * 1000 - Date.now()) / 1000);
-    return { allowed: false, secondsLeft: Math.max(0, secondsLeft) };
+    // If the cooldown window has already expired (secondsLeft <= 0), treat as allowed.
+    if (secondsLeft <= 0) return { allowed: true, secondsLeft: 0 };
+    return { allowed: false, secondsLeft };
   }
   return { allowed: true, secondsLeft: 0 };
 }

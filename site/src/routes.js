@@ -23,7 +23,10 @@ const router = express.Router();
 
 const DEFAULT_PROVIDER_CONFIG = {
   linkvertise: {
-    enabled: 'true',
+    // Linkvertise Full Script cannot prevent direct navigation to the signed
+    // completion URL (the href is necessarily visible in the DOM). Disabled by
+    // default until a server-side callback / verified API approach is available.
+    enabled: 'false',
     monetizedUrl: 'https://link-hub.net/5914830/XEpUhZ8TdtyV',
     completeUrl: 'https://tool.deng.my.id/unlock/linkvertise/complete',
     publisherId: '5914830',
@@ -101,12 +104,19 @@ function getProviderConfig(provider) {
 function enabledProviders() {
   return ['linkvertise', 'lootlabs']
     .map(getProviderConfig)
-    .filter((item) => item && item.enabled && item.monetizedUrl && item.completeUrl);
+    .filter((item) => item && providerIsReady(item.provider));
 }
 
 function providerIsReady(provider) {
   const cfg = getProviderConfig(provider);
-  return Boolean(cfg && cfg.enabled && cfg.monetizedUrl && cfg.completeUrl);
+  if (!cfg || !cfg.enabled || !cfg.monetizedUrl || !cfg.completeUrl) return false;
+  // LootLabs requires a template URL that supports {url} substitution so the
+  // signed return token can be embedded in the provider destination. Without
+  // it, lootdest.org cannot redirect back to the DENG portal after the ad.
+  if (provider === 'lootlabs') {
+    return Boolean(cleanEnv('LOOTLABS_TEMPLATE_URL', ''));
+  }
+  return true;
 }
 
 function codeFromError(err, fallback = 'UNEXPECTED_ERROR') {
@@ -191,8 +201,9 @@ function tokenizedCompleteUrl(provider, returnToken) {
 
 /**
  * Build a LootLabs redirect URL that embeds the signed return URL.
- * Prefers LOOTLABS_TEMPLATE_URL (contains {url} placeholder) so that the
+ * Requires LOOTLABS_TEMPLATE_URL (contains {url} placeholder) so that the
  * provider destination is set per-challenge rather than hard-coded.
+ * Without a template URL, lootdest.org cannot return to the DENG portal.
  */
 function lootlabsProviderUrl(returnToken) {
   const completeUrl = tokenizedCompleteUrl('lootlabs', returnToken);
@@ -200,16 +211,23 @@ function lootlabsProviderUrl(returnToken) {
   if (templateUrl) {
     // Template approach: preserves the shortlink ID exactly as written.
     // Replace {url} placeholder with the encoded signed completion URL.
-    return templateUrl.replace('{url}', encodeURIComponent(completeUrl));
+    const providerUrl = templateUrl.replace('{url}', encodeURIComponent(completeUrl));
+    if (process.env.NODE_ENV !== 'test') {
+      let providerHost = '';
+      try { providerHost = new URL(providerUrl).hostname; } catch {}
+      console.log('[lootlabs_provider_url_created] host=%s token_len=%d', providerHost, returnToken.length);
+    }
+    return providerUrl;
   }
   // Fallback: safe string-based append — do NOT use the URL searchParams API
   // because new URL('…s?TqZQAW38').searchParams.set(…) normalises the
   // valueless key to "TqZQAW38=" which breaks the LootDest shortlink lookup.
+  // NOTE: this fallback is retained for backward-compat tests only.
+  // In production, LOOTLABS_TEMPLATE_URL must be set (providerIsReady enforces this).
   const cfg = getProviderConfig('lootlabs');
   const base = cfg.monetizedUrl;
   const sep = base.includes('?') ? '&' : '?';
-  const logWarn = process.env.NODE_ENV !== 'test';
-  if (logWarn) {
+  if (process.env.NODE_ENV !== 'test') {
     console.warn('[key/provider] lootlabs LOOTLABS_TEMPLATE_URL not set; fallback url may not be forwarded by provider');
   }
   return `${base}${sep}return_url=${encodeURIComponent(completeUrl)}&deng_return=${encodeURIComponent(completeUrl)}`;
@@ -248,6 +266,18 @@ function maskKeyRow(row) {
   const prefix = row.key_prefix || 'DENG-????-????';
   const suffix = row.key_suffix || '????-????';
   return `${prefix}-****-${String(suffix).split('-').pop() || '????'}`;
+}
+
+/**
+ * Return full unmasked key for authenticated owner portal pages.
+ * key_prefix = "DENG-XXXX-XXXX", key_suffix = "XXXX-XXXX"
+ * Full key = "DENG-XXXX-XXXX-XXXX-XXXX"
+ * Never use this in URLs, logs, or public Discord messages.
+ */
+function fullKeyRow(row) {
+  const prefix = row.key_prefix || 'DENG-????-????';
+  const suffix = row.key_suffix || '????-????';
+  return `${prefix}-${suffix}`;
 }
 
 function providerLabel(provider) {
@@ -492,6 +522,9 @@ async function handleProviderComplete(req, res, provider) {
       return res.redirect('/license');
     }
 
+    if (selected === 'linkvertise') {
+      console.log('[linkvertise_complete_success] referer_host=%s', refererHost);
+    }
     console.log('[unlock/%s/complete] status=success referer_host=%s', selected, refererHost);
     req.session.generatedKey = key;
     req.session.generatedKeyAt = Date.now();
@@ -634,6 +667,7 @@ router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
       history,
       stats: summarizeHistory(history),
       maskKeyRow,
+      fullKeyRow,
       friendlyStatus,
       providerLabel,
     });
@@ -644,6 +678,7 @@ router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
       history: [],
       stats: summarizeHistory([]),
       maskKeyRow,
+      fullKeyRow,
       friendlyStatus,
       providerLabel,
     });
@@ -660,6 +695,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
       stats: summarizeHistory(history),
       cooldown,
       maskKeyRow,
+      fullKeyRow,
       friendlyStatus,
       providerLabel,
     });
@@ -671,6 +707,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
       stats: summarizeHistory([]),
       cooldown: { allowed: true, secondsLeft: 0 },
       maskKeyRow,
+      fullKeyRow,
       friendlyStatus,
       providerLabel,
     });
@@ -715,18 +752,24 @@ router.get('/unlock/linkvertise/start', requireLogin, repairSiteUser, (req, res)
     safeFlash(req, 'error', messageFor('PROVIDER_RETURN_TOKEN_INVALID'));
     return res.redirect('/license');
   }
-  const cfg = getProviderConfig('linkvertise');
-  const publisherId = parseInt(String(cfg ? cfg.publisherId : '5914830'), 10) || 5914830;
-  const completeUrl = tokenizedCompleteUrl('linkvertise', returnToken);
+  // Linkvertise Full Script cannot prevent direct navigation to the signed
+  // completion URL — the href must appear in the DOM for wrapping, making it
+  // bypassable client-side. Always render the unavailable page.
+  // If LINKVERTISE_ENABLED is forced to 'true' in env and a real server-side
+  // callback approach is later implemented, this route can be updated.
+  console.log('[linkvertise_start_rendered] token_len=%d', returnToken.length);
   return res.render('unlock_linkvertise', {
     title: 'Ad Step – DENG Tool',
-    publisherId,
-    completeUrl,
+    linkvertiseDisabled: true,
   });
 });
 
 router.get('/unlock/lootlabs/complete', requireLogin, repairSiteUser, (req, res) => handleProviderComplete(req, res, 'lootlabs'));
-router.get('/unlock/linkvertise/complete', requireLogin, repairSiteUser, (req, res) => handleProviderComplete(req, res, 'linkvertise'));
+router.get('/unlock/linkvertise/complete', requireLogin, repairSiteUser, (req, res) => {
+  const returnToken = String(req.query.t || '');
+  console.log('[linkvertise_complete_attempt] token_present=%s', !!returnToken);
+  return handleProviderComplete(req, res, 'linkvertise');
+});
 
 router.get('/unlock/linkvertise/done', requireLogin, (_req, res) => {
   res.redirect('/license');

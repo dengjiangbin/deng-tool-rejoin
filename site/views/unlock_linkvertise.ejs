@@ -5,78 +5,12 @@
     <div class="key-success-mark" aria-hidden="true">LV</div>
     <h1 class="unlock-title">Ad Step &ndash; Linkvertise</h1>
 
-    <%# Loading state — shown until the Linkvertise script loads %>
-    <div id="lv-loading" aria-live="polite" style="text-align:center;padding:16px 0">
-      <p class="unlock-desc">Preparing Linkvertise ad&hellip;</p>
-      <p style="color:#94a3b8;font-size:.875rem">Please wait while the ad step is initialised.</p>
-    </div>
-
-    <%# Error state — shown when the Linkvertise script fails to load %>
-    <div id="lv-error" style="display:none;text-align:center;padding:16px 0" aria-live="assertive">
-      <div class="alert alert-error" role="alert">
-        Linkvertise is temporarily unavailable. Please go back and use LootLabs instead.
-      </div>
-      <a href="/license" class="btn btn-outline" style="margin-top:14px">Back to My License</a>
-    </div>
-
-    <%# Ready state — revealed after the Linkvertise publisher script loads %>
-    <div id="lv-ready" style="display:none">
-      <p class="unlock-desc">
-        Click the button below to start the Linkvertise ad step.
-        After watching the ad you will be returned here automatically with your key ready.
-      </p>
-
-      <div style="margin:28px 0 18px;text-align:center;">
-        <%# href is the signed completion URL. Linkvertise JS wraps this link. %>
-        <a id="lv-link" href="<%= completeUrl %>" class="btn btn-primary btn-generate"
-           data-linkvertise="true">
-          Start Ad Step &rarr;
-        </a>
-      </div>
-
-      <p class="unlock-note" style="font-size:.8125rem;color:#94a3b8;text-align:center">
-        After the ad step you will land back on this site to claim your key.
-      </p>
+    <div class="alert alert-error" role="alert" style="margin:18px 0">
+      Linkvertise is temporarily unavailable. Please go back and use LootLabs instead.
     </div>
 
     <div style="margin-top:20px;text-align:center;">
-      <a href="/license" class="back-link">Cancel and return to My License</a>
+      <a href="/license" class="btn btn-primary">Back to My License</a>
     </div>
   </section>
 </div>
-
-<%# Linkvertise Full Script publisher integration.
-    linkvertise_publisher_id must be set before the external script loads. %>
-<script>var linkvertise_publisher_id = <%= publisherId %>;</script>
-<script
-  src="https://publisher.linkvertise.com/cdn/linkvertise.js"
-  onload="(function(){var l=document.getElementById('lv-loading'),r=document.getElementById('lv-ready');if(l)l.style.display='none';if(r)r.style.display='block';})()"
-  onerror="(function(){var l=document.getElementById('lv-loading'),e=document.getElementById('lv-error');if(l)l.style.display='none';if(e)e.style.display='block';})()"
-></script>
-<script>
-// Belt-and-suspenders timeout: if the script neither fires onload nor onerror
-// within 12 seconds, show the error state so the user is not stuck waiting.
-(function(){
-  var shown = false;
-  function showReady(){
-    if(shown) return; shown = true;
-    var l=document.getElementById('lv-loading'),r=document.getElementById('lv-ready');
-    if(l)l.style.display='none';
-    if(r)r.style.display='block';
-  }
-  function showError(){
-    if(shown) return; shown = true;
-    var l=document.getElementById('lv-loading'),e=document.getElementById('lv-error');
-    if(l)l.style.display='none';
-    if(e)e.style.display='block';
-  }
-  // If the script already fired onload synchronously (cached), we may already be shown.
-  var r=document.getElementById('lv-ready');
-  if(r && r.style.display !== 'none'){ shown = true; return; }
-  setTimeout(function(){
-    // If neither state is visible yet, check whether the script object was created
-    var scripts = document.querySelectorAll('script[src*="linkvertise.js"]');
-    if(scripts.length > 0){ showReady(); } else { showError(); }
-  }, 12000);
-}());
-</script>
