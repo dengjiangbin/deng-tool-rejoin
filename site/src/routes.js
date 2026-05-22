@@ -90,7 +90,15 @@ async function loadHistory(siteUserId, limit = 20) {
     .eq('site_user_id', siteUserId)
     .order('created_at', { ascending: false })
     .limit(limit);
-  if (error) throw new Error(error.message || 'history query failed');
+  if (error) {
+    const msg = error.message || '';
+    if (msg.includes('schema cache') || msg.includes('does not exist') || msg.includes('license_ad_challenges')) {
+      console.warn('[routes] license_ad_challenges table not found – apply migration 005_site_portal.sql');
+    } else {
+      console.error('[routes/loadHistory]', msg);
+    }
+    return [];
+  }
   return data || [];
 }
 
@@ -275,34 +283,84 @@ router.get('/auth/discord', (req, res) => {
 });
 
 router.get('/auth/discord/callback', authLimiter, async (req, res) => {
-  const { code, state, error } = req.query;
-  if (error) {
-    safeFlash(req, 'error', `Discord denied access: ${error}`);
+  const { code, state, error: oauthError } = req.query;
+
+  if (oauthError) {
+    console.warn('[auth/discord/callback] category=oauth_denied discord_error=%s', String(oauthError).slice(0, 64));
+    safeFlash(req, 'error', `Discord denied access: ${oauthError}`);
     return res.redirect('/login');
   }
 
   const storedState = req.session.oauthState;
   delete req.session.oauthState;
-  if (!storedState || String(state) !== storedState || !code) {
+
+  if (!code) {
+    console.warn('[auth/discord/callback] category=code_missing state_present=%s', !!storedState);
+    safeFlash(req, 'error', 'Invalid OAuth response. Please try again.');
+    return res.redirect('/login');
+  }
+  if (!storedState) {
+    console.warn('[auth/discord/callback] category=state_missing code_present=true');
+    safeFlash(req, 'error', 'Session expired. Please try again.');
+    return res.redirect('/login');
+  }
+  if (String(state) !== storedState) {
+    console.warn('[auth/discord/callback] category=state_mismatch code_present=true');
     safeFlash(req, 'error', 'Invalid OAuth state. Please try again.');
     return res.redirect('/login');
   }
 
+  // Step 1: Exchange code for access token
+  let tokens;
   try {
-    const tokens = await exchangeDiscordCode(String(code));
-    const discordUser = await fetchDiscordUser(tokens.access_token);
-    const siteUser = await upsertDiscordUser(discordUser, tokens);
-    return req.session.regenerate((err) => {
-      if (err) throw err;
-      req.session.user = toSessionUser(siteUser);
-      req.session.flash = { success: `Welcome, ${req.session.user.username}!` };
-      res.redirect('/dashboard');
-    });
-  } catch (err) {
-    console.error('[auth/discord/callback]', err.message || err);
+    tokens = await exchangeDiscordCode(String(code));
+  } catch (_err) {
+    // Structured error details are already logged inside exchangeDiscordCode.
     safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
     return res.redirect('/login');
   }
+
+  // Step 2: Fetch Discord user identity
+  let discordUser;
+  try {
+    discordUser = await fetchDiscordUser(tokens.access_token);
+  } catch (err) {
+    const status = (err.response && err.response.status) || 'unknown';
+    console.error('[auth/discord/callback] category=user_fetch_failed http_status=%s', status);
+    safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
+    return res.redirect('/login');
+  }
+
+  // Step 3: Create or update portal user
+  let siteUser;
+  try {
+    siteUser = await upsertDiscordUser(discordUser, tokens);
+  } catch (err) {
+    console.error('[auth/discord/callback] category=site_user_upsert_failed error=%s', err.message);
+    safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
+    return res.redirect('/login');
+  }
+
+  // Step 4: Regenerate session and redirect
+  return new Promise((resolve) => {
+    req.session.regenerate((regenErr) => {
+      if (regenErr) {
+        console.error('[auth/discord/callback] category=session_regenerate_failed error=%s', regenErr.message);
+        safeFlash(req, 'error', 'Session error. Please try again.');
+        res.redirect('/login');
+        return resolve();
+      }
+      req.session.user  = toSessionUser(siteUser);
+      req.session.flash = { success: `Welcome, ${req.session.user.username}!` };
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error('[auth/discord/callback] category=session_save_failed error=%s', saveErr.message);
+        }
+        res.redirect('/dashboard');
+        resolve();
+      });
+    });
+  });
 });
 
 router.post('/auth/logout', (req, res) => {

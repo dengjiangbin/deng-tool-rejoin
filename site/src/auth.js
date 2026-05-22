@@ -16,6 +16,40 @@ const DISCORD_API           = 'https://discord.com/api/v10';
 const SCOPES                = 'identify';
 
 // ---------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------
+
+/**
+ * Detect PostgREST/Supabase "table not in schema cache" errors.
+ * These occur when migration 005_site_portal.sql has not been applied.
+ */
+function isSchemaMissingError(err) {
+  const msg = (err && err.message) || '';
+  return (
+    msg.includes('schema cache') ||
+    msg.includes('does not exist') ||
+    msg.includes('relation') ||
+    /site_users|license_ad_challenges/.test(msg)
+  );
+}
+
+/**
+ * Derive a deterministic UUID-v4-formatted ID from a Discord user ID.
+ * The same Discord ID always maps to the same portal ID so sessions are
+ * stable across restarts even when the site_users table is not yet created.
+ */
+function discordFallbackId(discordId) {
+  const h = crypto.createHash('sha256').update(`portal:${discordId}`).digest('hex');
+  return [
+    h.slice(0, 8),
+    h.slice(8, 12),
+    `4${h.slice(13, 16)}`,
+    `${(parseInt(h[16], 16) & 0x3 | 0x8).toString(16)}${h.slice(17, 20)}`,
+    h.slice(20, 32),
+  ].join('-');
+}
+
+// ---------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------
 
@@ -90,12 +124,22 @@ async function exchangeDiscordCode(code) {
     redirect_uri:  DISCORD_REDIRECT_URI,
   });
 
-  const { data } = await axios.post(
-    `${DISCORD_API}/oauth2/token`,
-    params.toString(),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
-  );
-  return data; // { access_token, refresh_token, token_type, scope, expires_in }
+  try {
+    const { data } = await axios.post(
+      `${DISCORD_API}/oauth2/token`,
+      params.toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+    );
+    return data; // { access_token, token_type, scope, expires_in }
+  } catch (err) {
+    const status   = (err.response && err.response.status) || 'network_error';
+    const errName  = (err.response && err.response.data && err.response.data.error) || err.message;
+    console.error(
+      '[auth] category=token_exchange_failed http_status=%s discord_error=%s redirect_uri=%s client_id=%s client_secret_set=%s',
+      status, errName, DISCORD_REDIRECT_URI, DISCORD_CLIENT_ID, !!DISCORD_CLIENT_SECRET,
+    );
+    throw err;
+  }
 }
 
 /**
@@ -115,46 +159,66 @@ async function fetchDiscordUser(accessToken) {
 async function upsertDiscordUser(discordUser, _tokens) {
   const now = new Date().toISOString();
 
-  // Check if user already exists by discord_user_id
-  const { data: existing } = await supabase
-    .from('site_users')
-    .select('*')
-    .eq('discord_user_id', discordUser.id)
-    .maybeSingle();
+  try {
+    // Check if user already exists by discord_user_id
+    const { data: existing } = await supabase
+      .from('site_users')
+      .select('*')
+      .eq('discord_user_id', discordUser.id)
+      .maybeSingle();
 
-  if (existing) {
+    if (existing) {
+      const { data, error } = await supabase
+        .from('site_users')
+        .update({
+          discord_username:     discordUser.username,
+          discord_avatar:       discordUser.avatar || null,
+          discord_access_token: null,
+          discord_refresh_token:null,
+          last_login_at:        now,
+        })
+        .eq('id', existing.id)
+        .select()
+        .single();
+      if (error) throw new Error(`DB update failed: ${error.message}`);
+      return data;
+    }
+
+    // New user — email is optional (scope is identify only)
     const { data, error } = await supabase
       .from('site_users')
-      .update({
+      .insert({
+        discord_user_id:      discordUser.id,
         discord_username:     discordUser.username,
         discord_avatar:       discordUser.avatar || null,
         discord_access_token: null,
         discord_refresh_token:null,
+        email:                discordUser.email || null,
         last_login_at:        now,
       })
-      .eq('id', existing.id)
       .select()
       .single();
-    if (error) throw new Error(`DB update failed: ${error.message}`);
+    if (error) throw new Error(`DB insert failed: ${error.message}`);
     return data;
+  } catch (err) {
+    if (isSchemaMissingError(err)) {
+      console.warn(
+        '[auth] category=site_users_schema_missing discord_id=%s – using Discord-only session.' +
+        ' Apply migration: supabase/migrations/005_site_portal.sql',
+        discordUser.id,
+      );
+      // Return a synthetic user so login works even without the DB table.
+      // The ID is deterministic so the same Discord user always gets the same ID.
+      return {
+        id:               discordFallbackId(discordUser.id),
+        discord_user_id:  discordUser.id,
+        discord_username: discordUser.username || discordUser.global_name || `user_${discordUser.id.slice(-4)}`,
+        discord_avatar:   discordUser.avatar || null,
+        email:            null,
+      };
+    }
+    throw err;
   }
-
-  // New user
-  const { data, error } = await supabase
-    .from('site_users')
-    .insert({
-      discord_user_id:      discordUser.id,
-      discord_username:     discordUser.username,
-      discord_avatar:       discordUser.avatar || null,
-      discord_access_token: null,
-      discord_refresh_token:null,
-      email:                discordUser.email || null,
-      last_login_at:        now,
-    })
-    .select()
-    .single();
-  if (error) throw new Error(`DB insert failed: ${error.message}`);
-  return data;
 }
 
 

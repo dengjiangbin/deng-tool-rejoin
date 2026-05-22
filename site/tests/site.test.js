@@ -304,6 +304,64 @@ describe('auth and protected pages', () => {
     }
   });
 
+  test('callback token exchange failure redirects to login and exposes no secrets', async () => {
+    const originalPost = fakeAxios.post;
+    fakeAxios.post = async () => {
+      const err = new Error('Unauthorized');
+      err.response = { status: 401, data: { error: 'invalid_client' } };
+      throw err;
+    };
+    try {
+      const agent = request.agent(app);
+      const start = await agent.get('/auth/discord');
+      const state = new URL(start.headers.location).searchParams.get('state');
+      const res = await agent.get(`/auth/discord/callback?code=ok&state=${state}`);
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.location, '/login');
+      // Must not expose secrets in redirect URL or response body
+      assert.doesNotMatch(res.headers.location, /secret|token|code/i);
+    } finally {
+      fakeAxios.post = originalPost;
+    }
+  });
+
+  test('callback state mismatch rejects without creating session', async () => {
+    const agent = request.agent(app);
+    await agent.get('/auth/discord'); // seeds oauthState in session
+    const res = await agent.get('/auth/discord/callback?code=ok&state=WRONG_STATE');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/login');
+    assert.equal(memoryDb.site_users.length, 0);
+  });
+
+  test('callback with missing state rejects (session expired scenario)', async () => {
+    // No prior /auth/discord call, so no oauthState in session
+    const res = await request(app).get('/auth/discord/callback?code=ok&state=anything');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/login');
+  });
+
+  test('identify-only Discord user (no email field) logs in successfully', async () => {
+    const originalGet = fakeAxios.get;
+    fakeAxios.get = async () => ({
+      data: { id: 'discord-user-nomail', username: 'NoMailUser', avatar: null },
+      // no email field at all
+    });
+    try {
+      const agent = request.agent(app);
+      const start = await agent.get('/auth/discord');
+      const state = new URL(start.headers.location).searchParams.get('state');
+      const res = await agent.get(`/auth/discord/callback?code=ok&state=${state}`);
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.location, '/dashboard');
+      // Dashboard must be accessible
+      const dash = await agent.get('/dashboard');
+      assert.equal(dash.status, 200);
+    } finally {
+      fakeAxios.get = originalGet;
+    }
+  });
+
   test('logout destroys the session and protected pages redirect to login', async () => {
     const agent = request.agent(app);
     await login(agent);
