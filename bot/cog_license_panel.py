@@ -1369,6 +1369,26 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                 msg_id = int(cfg["message_id"])
                 view = PanelView(self._store)
                 self.bot.add_view(view, message_id=msg_id)
+                channel = await self._get_panel_channel(guild, str(cfg.get("channel_id", "")))
+                if channel is not None:
+                    try:
+                        msg = await channel.fetch_message(msg_id)
+                        embed_dict = build_panel_embed()
+                        embed_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
+                        apply_branding_to_embed_dict(embed_dict, include_thumbnail=True)
+                        await msg.edit(embed=discord.Embed.from_dict(embed_dict), view=view)
+                        log.info(
+                            "Refreshed persistent panel message: guild=%s message=%s",
+                            guild.id,
+                            msg_id,
+                        )
+                    except (discord.Forbidden, discord.HTTPException, discord.NotFound) as exc:
+                        log.warning(
+                            "Could not refresh persistent panel message for guild %s message %s: %s",
+                            guild.id,
+                            msg_id,
+                            exc,
+                        )
                 log.info(
                     "Restored persistent panel view: guild=%s message=%s",
                     guild.id,
