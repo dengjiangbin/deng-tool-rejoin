@@ -1,5 +1,14 @@
 'use strict';
-require('dotenv').config();
+// Load env in priority order (dotenv never overrides already-set vars):
+//   1. process.env (always wins – PM2 / system env)
+//   2. site/.env   (portal-specific overrides)
+//   3. ../.env     (project root – shared Discord/Supabase credentials)
+//   4. ../env      (same root, alternate filename some setups use)
+const path   = require('path');
+const dotenv = require('dotenv');
+dotenv.config({ path: path.join(__dirname, '.env') });
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
+dotenv.config({ path: path.join(__dirname, '..', 'env') });
 
 const app = require('./src/app');
 
