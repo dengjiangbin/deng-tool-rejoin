@@ -16,6 +16,16 @@ const KEY_EXPIRY_HOURS = parseInt(process.env.UNREDEEMED_KEY_EXPIRY_HOURS || '24
 const AD_MIN_COMPLETION_SECONDS = parseInt(process.env.AD_MIN_COMPLETION_SECONDS || '30', 10);
 const RETURN_TOKEN_TTL_MS = 30 * 60 * 1000;
 
+// Log configuration once at startup (only outside tests to avoid noise)
+if (process.env.NODE_ENV !== 'test') {
+  console.log(
+    '[challenge/cfg] AD_MIN_COMPLETION_SECONDS=%d LOOTLABS_TEMPLATE_URL_present=%s AD_RETURN_SIGNING_SECRET_len=%d',
+    AD_MIN_COMPLETION_SECONDS,
+    !!process.env.LOOTLABS_TEMPLATE_URL,
+    (process.env.AD_RETURN_SIGNING_SECRET || '').length,
+  );
+}
+
 const ALLOWED_PROVIDER_REFERERS = {
   linkvertise: [
     'link-hub.net',
@@ -280,11 +290,20 @@ function assertProviderReturnProof(req, row, expectedProvider, returnToken) {
 
   const elapsedSeconds = Math.floor((Date.now() - startedMs) / 1000);
   if (elapsedSeconds < AD_MIN_COMPLETION_SECONDS) {
-    throw safeError('PROVIDER_WAIT_INCOMPLETE', 'Provider completion returned too quickly');
+    throw safeError(
+      'PROVIDER_WAIT_INCOMPLETE',
+      `Provider completion returned too quickly (elapsed=${elapsedSeconds}s min=${AD_MIN_COMPLETION_SECONDS}s)`,
+    );
   }
 
   const { host, source } = providerReturnHost(req);
-  if (!host || !hostAllowed(host, expectedProvider)) {
+  // Linkvertise's interstitial page does not forward the Referer header to
+  // the completion URL. Since all cryptographic checks (HMAC token, hash,
+  // expiry, session binding) have passed, accept a missing/empty referer for
+  // Linkvertise specifically. An incorrect referer (non-empty, wrong domain)
+  // is still rejected for all providers.
+  const linkvertiseMissingRefererOk = expectedProvider === 'linkvertise' && !host;
+  if (!linkvertiseMissingRefererOk && (!host || !hostAllowed(host, expectedProvider))) {
     throw safeError(
       'PROVIDER_RETURN_UNVERIFIED',
       `Provider return host not verified: source=${source} host=${host || 'missing'}`,
@@ -293,7 +312,7 @@ function assertProviderReturnProof(req, row, expectedProvider, returnToken) {
 
   return {
     elapsedSeconds,
-    returnHost: host,
+    returnHost: host || 'missing',
   };
 }
 

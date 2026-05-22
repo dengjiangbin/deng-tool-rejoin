@@ -851,9 +851,15 @@ describe('Luarmor-style key flow', () => {
         provider: 'lootlabs',
       });
       assert.equal(res.status, 303);
-      // Fallback: static URL with return_url/deng_return appended
+      // Fallback: static URL with return_url/deng_return appended using string concat
       assert.ok(res.headers.location.includes('lootdest.org'), `expected fallback to lootdest.org, got: ${res.headers.location}`);
       assert.ok(res.headers.location.includes('return_url=') || res.headers.location.includes('deng_return='));
+      // Critical: the shortlink hash must NOT be corrupted by URL searchParams normalization.
+      // URL API would turn "?TqZQAW38" into "?TqZQAW38=" which breaks LootDest lookup.
+      assert.ok(
+        !res.headers.location.includes('TqZQAW38='),
+        `shortlink hash must not have '=' appended by URL API normalization, got: ${res.headers.location}`,
+      );
     } finally {
       process.env.LOOTLABS_TEMPLATE_URL = originalTmpl;
     }
@@ -884,14 +890,16 @@ describe('Luarmor-style key flow', () => {
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
-  test('manual complete URL without provider referer is blocked after provider selection', async () => {
+  test('manual complete URL without provider referer is blocked for LootLabs', async () => {
+    // LootLabs always requires a valid referer from the provider domain.
+    // Linkvertise is exempt because their interstitial does not forward Referer.
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
+    const { returnToken } = await chooseProvider(agent, 'lootlabs');
     ageProviderStart();
 
     const res = await agent
-      .get(`/unlock/linkvertise/complete?t=${encodeURIComponent(returnToken)}`)
+      .get(`/unlock/lootlabs/complete?t=${encodeURIComponent(returnToken)}`)
       .set('Accept', 'text/html');
     assert.equal(res.status, 302);
     assert.equal(res.headers.location, '/license');
@@ -899,6 +907,37 @@ describe('Luarmor-style key flow', () => {
     const rendered = await agent.get('/license');
     assert.match(rendered.text, /Could not verify ad completion\. Please complete the ad step again\./);
     assert.doesNotMatch(rendered.text, /^\{"error"/);
+  });
+
+  test('Linkvertise completion succeeds without provider referer (Linkvertise does not forward Referer)', async () => {
+    // Linkvertise Full Script does not forward the Referer header when it
+    // redirects back to the completion URL. The signed HMAC token + session
+    // binding + time check provide equivalent protection.
+    const agent = request.agent(app);
+    await login(agent);
+    const { returnToken } = await chooseProvider(agent, 'linkvertise');
+    ageProviderStart();
+
+    // No Referer header — simulates Linkvertise behaviour
+    const res = await agent
+      .get(`/unlock/linkvertise/complete?t=${encodeURIComponent(returnToken)}`)
+      .set('Accept', 'text/html');
+    assert.equal(res.status, 302, 'Linkvertise completion without referer should succeed');
+    assert.equal(res.headers.location, '/key/result');
+    assert.equal(memoryDb.license_keys.length, 1);
+  });
+
+  test('Linkvertise completion with wrong referer is still rejected', async () => {
+    // A non-empty, non-Linkvertise referer is not exempt — it indicates spoofing.
+    const agent = request.agent(app);
+    await login(agent);
+    const { returnToken } = await chooseProvider(agent, 'linkvertise');
+    ageProviderStart();
+
+    const res = await completeProvider(agent, 'linkvertise', returnToken, 'https://evil.example.com/');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
   });
 
   test('manual complete URLs without signed token are blocked even with a pending challenge', async () => {

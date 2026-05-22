@@ -198,16 +198,21 @@ function lootlabsProviderUrl(returnToken) {
   const completeUrl = tokenizedCompleteUrl('lootlabs', returnToken);
   const templateUrl = cleanEnv('LOOTLABS_TEMPLATE_URL', '');
   if (templateUrl) {
+    // Template approach: preserves the shortlink ID exactly as written.
+    // Replace {url} placeholder with the encoded signed completion URL.
     return templateUrl.replace('{url}', encodeURIComponent(completeUrl));
   }
-  // Fallback: append return params to the static monetised URL.
-  // NOTE: static shortlinks (lootdest.org/s?...) do not forward these params
-  // in production – configure LOOTLABS_TEMPLATE_URL for a working deployment.
+  // Fallback: safe string-based append — do NOT use the URL searchParams API
+  // because new URL('…s?TqZQAW38').searchParams.set(…) normalises the
+  // valueless key to "TqZQAW38=" which breaks the LootDest shortlink lookup.
   const cfg = getProviderConfig('lootlabs');
-  const url = new URL(cfg.monetizedUrl);
-  url.searchParams.set('return_url', completeUrl);
-  url.searchParams.set('deng_return', completeUrl);
-  return url.toString();
+  const base = cfg.monetizedUrl;
+  const sep = base.includes('?') ? '&' : '?';
+  const logWarn = process.env.NODE_ENV !== 'test';
+  if (logWarn) {
+    console.warn('[key/provider] lootlabs LOOTLABS_TEMPLATE_URL not set; fallback url may not be forwarded by provider');
+  }
+  return `${base}${sep}return_url=${encodeURIComponent(completeUrl)}&deng_return=${encodeURIComponent(completeUrl)}`;
 }
 
 function providerRedirectUrl(providerCfg, returnToken) {
@@ -414,6 +419,17 @@ async function handleProvider(req, res) {
 
     req.session.pendingProvider = provider;
 
+    // Safe debug log: URL host only (never full signed token or complete URL)
+    let redirectHost = '';
+    try { redirectHost = new URL(redirectUrl).hostname; } catch {}
+    console.log(
+      '[key/provider] provider=%s challenge_prefix=%s url_host=%s token_len=%d status=303',
+      provider,
+      String(challengeId).slice(0, 8),
+      redirectHost,
+      (started.return_token || '').length,
+    );
+
     if (wantsJson(req)) {
       return res.json({
         provider,
@@ -450,8 +466,23 @@ async function handleProviderComplete(req, res, provider) {
     return res.redirect('/license');
   }
 
+  const returnToken = String(req.query.t || '');
+  const refererHost = (() => {
+    try {
+      const h = req.headers.referer || req.headers.referrer || req.headers.origin || '';
+      return h ? new URL(h).hostname : 'missing';
+    } catch { return 'malformed'; }
+  })();
+
+  // Safe debug log for completion attempt
+  console.log(
+    '[unlock/%s/complete] token_present=%s referer_host=%s',
+    selected,
+    !!returnToken,
+    refererHost,
+  );
+
   try {
-    const returnToken = String(req.query.t || '');
     const { key, alreadyDone } = await challenge.completeActiveProviderChallenge(req, selected, returnToken);
     if (alreadyDone && req.session.generatedKey) {
       return res.redirect('/key/result');
@@ -461,6 +492,7 @@ async function handleProviderComplete(req, res, provider) {
       return res.redirect('/license');
     }
 
+    console.log('[unlock/%s/complete] status=success referer_host=%s', selected, refererHost);
     req.session.generatedKey = key;
     req.session.generatedKeyAt = Date.now();
     delete req.session.pendingChallenge;
