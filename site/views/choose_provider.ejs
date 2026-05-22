@@ -18,19 +18,21 @@
   <section class="provider-card">
     <div class="provider-mark">LL</div>
     <h2 class="provider-name">LootLabs</h2>
-    <p class="provider-desc">Complete the LootLabs unlock, then return through the protected completion route.</p>
+    <p class="provider-desc">Complete the LootLabs ad step, then return automatically to unlock your key.</p>
     <form method="POST" action="/key/provider/lootlabs">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
       <input type="hidden" name="challenge_id" value="<%= challengeId %>">
       <input type="hidden" name="provider" value="lootlabs">
-      <button type="submit" class="btn btn-primary btn-block btn-provider">LootLabs</button>
+      <button type="submit" class="btn btn-primary btn-block btn-provider">Continue with LootLabs</button>
     </form>
   </section>
   <% } else { %>
   <section class="provider-card provider-card-disabled" aria-disabled="true">
     <div class="provider-mark">LL</div>
     <h2 class="provider-name">LootLabs</h2>
-    <p class="provider-desc">LootLabs is temporarily unavailable. Please check back later.</p>
+    <p class="alert alert-error" role="note" style="font-size:.9rem;margin:12px 0">
+      LootLabs is temporarily unavailable.
+    </p>
     <button class="btn btn-outline btn-block btn-provider" disabled aria-disabled="true">Unavailable</button>
   </section>
   <% } %>

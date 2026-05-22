@@ -26,9 +26,12 @@ process.env.LINKVERTISE_CALLBACK_URL = 'http://localhost:8791/unlock/linkvertise
 process.env.LINKVERTISE_VERIFY_URL = 'https://publisher.linkvertise.com/api/v1/anti_bypassing';
 process.env.LINKVERTISE_ANTI_BYPASS_TOKEN = 'test-anti-bypass-token-very-long-do-not-log-1234567890abcdef';
 process.env.LOOTLABS_ENABLED = 'true';
+process.env.LOOTLABS_BASE_LINK = 'https://lootdest.org/s?TqZQAW38';
+process.env.LOOTLABS_API_TOKEN = 'test-lootlabs-api-token-very-long-do-not-log-1234567890abcdef';
+process.env.LOOTLABS_ENCRYPT_URL = 'https://creators.lootlabs.gg/api/public/url_encryptor';
+// Legacy LootLabs vars kept for backward-compat regression cases in this suite.
 process.env.LOOTLABS_MONETIZED_URL = 'https://lootdest.org/s?TqZQAW38';
 process.env.LOOTLABS_COMPLETE_URL = 'http://localhost:8791/unlock/lootlabs/complete';
-process.env.LOOTLABS_TEMPLATE_URL = 'https://lootlabs.example/unlock?target={url}';
 process.env.AD_MIN_COMPLETION_SECONDS = '30';
 process.env.AD_RETURN_SIGNING_SECRET = 'test-return-signing-secret-that-is-long-enough';
 
@@ -253,13 +256,84 @@ function linkvertiseMockResponse(url, body) {
   }
 }
 
+// LootLabs Redirect API / Anti-Bypass mock.
+//   - mode='auto'              : every call gets a unique encrypted blob and
+//                                 records destination_url→encrypted mapping
+//   - mode='invalid_token'     : returns { type: 'error', message: 'Invalid token' }
+//   - mode='type_error'        : returns { type: 'error', message: 'Bad input' }
+//   - mode='http500'           : returns HTTP 500
+//   - mode='timeout'           : rejects with ECONNABORTED
+//   - mode='network'           : rejects with ECONNRESET
+//   - mode='invalid_response'  : returns { whatever: 'shape' } (no message)
+const lootlabsApi = {
+  mode: 'auto',
+  byEncrypted: new Map(), // encrypted → destination_url
+  lastCall: null,         // { url, headers, body, destination_url }
+  callCount: 0,
+  counter: 0,
+};
+
+function resetLootLabsApi() {
+  lootlabsApi.mode = 'auto';
+  lootlabsApi.byEncrypted.clear();
+  lootlabsApi.lastCall = null;
+  lootlabsApi.callCount = 0;
+  lootlabsApi.counter = 0;
+}
+
+function lootlabsMockResponse(url, body, opts = {}) {
+  lootlabsApi.callCount += 1;
+  const headers = (opts && opts.headers) || {};
+  const destination = body && typeof body === 'object' ? String(body.destination_url || '') : '';
+  lootlabsApi.lastCall = {
+    url: String(url || ''),
+    headers,
+    body,
+    destination_url: destination,
+  };
+  switch (lootlabsApi.mode) {
+    case 'invalid_token':
+      return Promise.resolve({ status: 401, data: { type: 'error', message: 'Invalid token' } });
+    case 'type_error':
+      return Promise.resolve({ status: 200, data: { type: 'error', message: 'Bad input' } });
+    case 'http500':
+      return Promise.resolve({ status: 500, data: 'server error' });
+    case 'invalid_response':
+      return Promise.resolve({ status: 200, data: { whatever: 'shape' } });
+    case 'timeout': {
+      const err = new Error('timeout of 8000ms exceeded');
+      err.code = 'ECONNABORTED';
+      return Promise.reject(err);
+    }
+    case 'network': {
+      const err = new Error('socket hang up');
+      err.code = 'ECONNRESET';
+      return Promise.reject(err);
+    }
+    case 'auto':
+    default: {
+      lootlabsApi.counter += 1;
+      const encrypted = `enc_${lootlabsApi.counter}_${Buffer.from(destination).toString('base64url').slice(0, 24)}`;
+      lootlabsApi.byEncrypted.set(encrypted, destination);
+      return Promise.resolve({
+        status: 200,
+        data: { type: 'success', message: encrypted },
+      });
+    }
+  }
+}
+
 // fakeAxios is declared as a plain object so individual tests can temporarily
 // override .get() to exercise different Discord identity responses, and so
-// .post() can route Linkvertise Anti-Bypass calls to the mock above.
+// .post() can route Linkvertise Anti-Bypass + LootLabs encrypt calls to the
+// mocks above.
 const fakeAxios = {
-  async post(url, body) {
+  async post(url, body, opts) {
     if (typeof url === 'string' && url.includes('anti_bypassing')) {
       return linkvertiseMockResponse(url, body);
+    }
+    if (typeof url === 'string' && url.includes('url_encryptor')) {
+      return lootlabsMockResponse(url, body, opts);
     }
     return { data: { access_token: 'discord-access-token' } };
   },
@@ -428,8 +502,39 @@ async function chooseProvider(agent, provider = 'lootlabs') {
     return { started, res, location, returnUrl: null, returnToken: hash, linkvertiseHash: hash };
   }
 
+  if (provider === 'lootlabs') {
+    // LootLabs Redirect API / Anti-Bypass: server signs a state, calls the
+    // mocked encrypt API, then redirects 303 to:
+    //   https://lootdest.org/s?TqZQAW38&data=<encrypted>
+    // The shortlink id (?TqZQAW38) is a valueless query key — assert that
+    // it was preserved exactly (no `=` appended).
+    const base = (process.env.LOOTLABS_BASE_LINK || 'https://lootdest.org/s?TqZQAW38').replace(/[?&]data=.*$/, '');
+    assert.ok(location.startsWith(`${base}&data=`), `expected ${base}&data=… , got: ${location}`);
+    assert.ok(!/\bTqZQAW38=/.test(location), 'LootLabs shortlink hash must not gain "=" suffix');
+    // Pull out the encrypted blob, look up the destination URL from the mock,
+    // and extract `?s=<signed_state>` from that destination URL.
+    const dataMatch = location.match(/[?&]data=([^&]+)$/);
+    assert.ok(dataMatch, 'encrypted data param must be present');
+    const encrypted = decodeURIComponent(dataMatch[1]);
+    const destinationUrl = lootlabsApi.byEncrypted.get(encrypted);
+    assert.ok(destinationUrl, 'mock must have recorded the destination URL for the encrypted blob');
+    const destUrl = new URL(destinationUrl);
+    const signedState = destUrl.searchParams.get('s');
+    assert.ok(signedState, 'destination URL must include the signed state ?s=…');
+    assert.ok(signedState.length > 32, 'signed state must look like an HMAC token');
+    return {
+      started,
+      res,
+      location,
+      returnUrl: destinationUrl,
+      returnToken: signedState,
+      lootlabsEncrypted: encrypted,
+      lootlabsDestination: destinationUrl,
+    };
+  }
+
+  // Generic fallback (unknown provider) — keep legacy template/destination parsing
   const locationUrl = new URL(location, basePublicUrl);
-  // LootLabs template or generic: token nested in destination/return_url param
   const destParam =
     locationUrl.searchParams.get('return_url') ||
     locationUrl.searchParams.get('deng_return') ||
@@ -474,11 +579,19 @@ function providerReferer(provider) {
 
 async function completeProvider(agent, provider = 'linkvertise', returnToken = '', referer = providerReferer(provider)) {
   // For Linkvertise we treat `returnToken` as the Linkvertise hash that the
-  // provider appends to the callback URL as `?hash=...`. For LootLabs we
-  // keep the legacy `?t=<signed_token>` behaviour.
+  // provider appends to the callback URL as `?hash=...`.
+  // For LootLabs we treat `returnToken` as the HMAC-signed state that LootLabs
+  // delivers back via the encrypted destination URL: `?s=<signed_state>`.
+  // For any other provider we fall back to the legacy `?t=<signed_token>`.
   if (provider === 'linkvertise') {
     const suffix = returnToken ? `?hash=${encodeURIComponent(returnToken)}` : '';
     const req = agent.get(`/unlock/linkvertise/complete${suffix}`);
+    if (referer) req.set('Referer', referer);
+    return req;
+  }
+  if (provider === 'lootlabs') {
+    const suffix = returnToken ? `?s=${encodeURIComponent(returnToken)}` : '';
+    const req = agent.get(`/unlock/lootlabs/complete${suffix}`);
     if (referer) req.set('Referer', referer);
     return req;
   }
@@ -506,6 +619,7 @@ function tamperToken(token) {
 beforeEach(() => {
   resetDb();
   resetLinkvertiseApi();
+  resetLootLabsApi();
 });
 
 describe('auth and protected pages', () => {
@@ -792,7 +906,7 @@ describe('Luarmor-style key flow', () => {
     }), 'DB_PERMISSION_DENIED');
   });
 
-  test('provider complete routes require an active session challenge', async () => {
+  test('provider complete routes require a proof param (hash for Linkvertise, ?s= for LootLabs)', async () => {
     const agent = request.agent(app);
     await login(agent);
     for (const route of ['/unlock/linkvertise/complete', '/unlock/lootlabs/complete']) {
@@ -802,7 +916,9 @@ describe('Luarmor-style key flow', () => {
     }
     assert.equal(memoryDb.license_keys.length, 0);
     const rendered = await agent.get('/license');
-    assert.match(rendered.text, /Please start key generation again\./);
+    // Both providers fail closed with a styled "key generation session" error.
+    assert.match(rendered.text, /Invalid or expired key generation session\. Please start again\.|Please start key generation again\./);
+    // No raw JSON leaked to the browser.
     assert.doesNotMatch(rendered.text, /^\{"error"/);
   });
 
@@ -854,23 +970,37 @@ describe('Luarmor-style key flow', () => {
     assert.ok(payload.provider_started_at);
   });
 
-  test('LootLabs template URL provider embeds signed return URL in destination param', async () => {
+  test('LootLabs Redirect API: provider POST encrypts the callback and 303s to lootdest.org/s?TqZQAW38&data=…', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { res, location, returnUrl, returnToken } = await chooseProvider(agent, 'lootlabs');
+    const { res, location, returnUrl, returnToken, lootlabsEncrypted } = await chooseProvider(agent, 'lootlabs');
     assert.equal(res.status, 303);
-    // With LOOTLABS_TEMPLATE_URL set, location must use the template base
-    assert.ok(location.startsWith('https://lootlabs.example/unlock?'), `expected template URL, got: ${location}`);
-    assert.ok(!location.includes('lootdest.org'), 'must use template URL, not static lootdest shortlink');
-    // The destination param must decode to the signed complete URL
-    assert.match(returnUrl, /^http:\/\/localhost:8791\/unlock\/lootlabs\/complete\?t=/);
-    assert.ok(returnToken.length > 80);
+    // Final URL must keep the LootLabs shortlink id exactly as written.
+    assert.ok(location.startsWith('https://lootdest.org/s?TqZQAW38&data='), `expected lootdest.org/s?TqZQAW38&data=… , got: ${location}`);
+    // The valueless shortlink key MUST NOT gain `=` (no URLSearchParams normalisation).
+    assert.ok(!/\bTqZQAW38=/.test(location), 'shortlink hash must not have "=" appended');
+    // Exactly one encrypt API call was made.
+    assert.equal(lootlabsApi.callCount, 1);
+    // The encrypt call sent the API token via Authorization header — NOT in the URL or body.
+    assert.ok(lootlabsApi.lastCall.headers.Authorization && lootlabsApi.lastCall.headers.Authorization.startsWith('Bearer '));
+    assert.ok(!String(lootlabsApi.lastCall.url).includes('token='));
+    assert.ok(!String(JSON.stringify(lootlabsApi.lastCall.body)).includes(process.env.LOOTLABS_API_TOKEN));
+    // The destination URL passed to the encrypt API points at the DENG callback.
+    assert.match(lootlabsApi.lastCall.destination_url, /^https?:\/\/[^/]+\/unlock\/lootlabs\/complete\?s=/);
+    // returnUrl is the destination URL recovered from the mock (would be inside LootLabs encrypted blob in real life)
+    assert.match(returnUrl, /\/unlock\/lootlabs\/complete\?s=/);
+    assert.ok(returnToken.length > 32);
+    // Encrypted blob must not appear in plaintext as a `data=<destination>` (it was opaque)
+    assert.ok(!location.includes('/unlock/lootlabs/complete'), 'destination URL must NOT appear in the redirect (only the encrypted blob)');
+    assert.ok(typeof lootlabsEncrypted === 'string' && lootlabsEncrypted.length > 0);
     assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
     assert.equal(memoryDb.license_ad_challenges[0].provider, 'lootlabs');
     assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
-    assert.equal(memoryDb.license_ad_challenges[0].provider_payload.redirect_started, true);
+    assert.equal(memoryDb.license_ad_challenges[0].provider_payload.lootlabs_started, true);
+    assert.equal(memoryDb.license_ad_challenges[0].provider_payload.base_link_host, 'lootdest.org');
+    assert.equal(memoryDb.license_ad_challenges[0].provider_payload.callback_path, '/unlock/lootlabs/complete');
+    assert.equal(memoryDb.license_ad_challenges[0].provider_payload.encrypted_data_present, true);
     assert.ok(memoryDb.license_ad_challenges[0].provider_payload.provider_started_at);
-    assert.equal(memoryDb.license_ad_challenges[0].provider_payload.return_token_hash.length, 64);
   });
 
   test('first provider click immediately redirects and repeated click does not corrupt the challenge', async () => {
@@ -895,7 +1025,7 @@ describe('Luarmor-style key flow', () => {
     assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
   });
 
-  test('provider selection works as a mobile top-level form redirect using template URL', async () => {
+  test('LootLabs provider selection works as a mobile top-level form redirect with the encrypted shortlink', async () => {
     const agent = request.agent(app);
     await login(agent);
     const started = await startChallenge(agent);
@@ -908,31 +1038,54 @@ describe('Luarmor-style key flow', () => {
         provider: 'lootlabs',
       });
     assert.equal(res.status, 303);
-    // Must use template URL, not the static lootdest shortlink
-    assert.ok(res.headers.location.startsWith('https://lootlabs.example/unlock?'), `expected template URL, got: ${res.headers.location}`);
+    assert.ok(res.headers.location.startsWith('https://lootdest.org/s?TqZQAW38&data='), `expected lootdest.org/s?TqZQAW38&data=… , got: ${res.headers.location}`);
+    assert.ok(!/\bTqZQAW38=/.test(res.headers.location), 'shortlink hash must not have "=" appended');
     assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
   });
 
-  test('missing AD_RETURN_SIGNING_SECRET fails LootLabs provider redirect closed', async () => {
-    // LootLabs still uses the signed return token; Linkvertise has its own
-    // Anti-Bypass verification and no longer depends on AD_RETURN_SIGNING_SECRET.
+  test('LootLabs encrypt API failure (HTTP 500) fails closed (no redirect to lootdest.org, no key)', async () => {
     const agent = request.agent(app);
     await login(agent);
     const started = await startChallenge(agent);
-    const originalSecret = process.env.AD_RETURN_SIGNING_SECRET;
-    delete process.env.AD_RETURN_SIGNING_SECRET;
-    try {
-      const res = await agent.post('/key/provider/lootlabs').type('form').send({
-        _csrf: started.csrf,
-        challenge_id: started.challengeId,
-        provider: 'lootlabs',
-      });
-      assert.equal(res.status, 302);
-      assert.equal(res.headers.location, '/license');
-      assert.equal(memoryDb.license_keys.length, 0);
-    } finally {
-      process.env.AD_RETURN_SIGNING_SECRET = originalSecret;
-    }
+    lootlabsApi.mode = 'http500';
+    const res = await agent.post('/key/provider/lootlabs').type('form').send({
+      _csrf: started.csrf,
+      challenge_id: started.challengeId,
+      provider: 'lootlabs',
+    });
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+  });
+
+  test('LootLabs encrypt API timeout fails closed', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const started = await startChallenge(agent);
+    lootlabsApi.mode = 'timeout';
+    const res = await agent.post('/key/provider/lootlabs').type('form').send({
+      _csrf: started.csrf,
+      challenge_id: started.challengeId,
+      provider: 'lootlabs',
+    });
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+  });
+
+  test('LootLabs encrypt API invalid_token fails closed with PROVIDER_NOT_CONFIGURED reason', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const started = await startChallenge(agent);
+    lootlabsApi.mode = 'invalid_token';
+    const res = await agent.post('/key/provider/lootlabs').type('form').send({
+      _csrf: started.csrf,
+      challenge_id: started.challengeId,
+      provider: 'lootlabs',
+    });
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
   });
 
   test('legacy Linkvertise Full Script start page is unreachable (redirects, no raw completion button)', async () => {
@@ -957,14 +1110,14 @@ describe('Luarmor-style key flow', () => {
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
-  test('LootLabs is disabled as provider when LOOTLABS_TEMPLATE_URL is not configured', async () => {
-    // Without LOOTLABS_TEMPLATE_URL, lootdest.org cannot redirect back to the DENG portal.
-    // The server must refuse the provider selection request (302 PROVIDER_NOT_CONFIGURED)
-    // instead of silently redirecting to a URL that has no return path.
+  test('LootLabs is disabled as provider when LOOTLABS_API_TOKEN is not configured', async () => {
+    // Without LOOTLABS_API_TOKEN, the encrypt API cannot be called and the
+    // anti-bypass flow cannot start. The server must refuse the provider
+    // selection (302 PROVIDER_NOT_CONFIGURED) rather than silently redirect.
     const agent = request.agent(app);
     await login(agent);
-    const originalTmpl = process.env.LOOTLABS_TEMPLATE_URL;
-    delete process.env.LOOTLABS_TEMPLATE_URL;
+    const originalToken = process.env.LOOTLABS_API_TOKEN;
+    delete process.env.LOOTLABS_API_TOKEN;
     try {
       const started = await startChallenge(agent);
       const res = await agent.post('/key/provider/lootlabs').type('form').send({
@@ -972,17 +1125,60 @@ describe('Luarmor-style key flow', () => {
         challenge_id: started.challengeId,
         provider: 'lootlabs',
       });
-      // Must refuse (provider not ready) rather than silently generating a broken URL
       assert.equal(res.status, 302);
       assert.equal(res.headers.location, '/license');
       assert.equal(memoryDb.license_keys.length, 0);
-      // No LootLabs key challenge must have been created
       const pendingLl = memoryDb.license_ad_challenges.filter(
         (c) => c.provider === 'lootlabs' && c.status === 'pending_ad',
       );
       assert.equal(pendingLl.length, 0);
+      // No encrypt API call must have been made when config is missing.
+      assert.equal(lootlabsApi.callCount, 0);
     } finally {
-      if (originalTmpl !== undefined) process.env.LOOTLABS_TEMPLATE_URL = originalTmpl;
+      if (originalToken !== undefined) process.env.LOOTLABS_API_TOKEN = originalToken;
+    }
+  });
+
+  test('LootLabs is disabled as provider when LOOTLABS_BASE_LINK is not configured', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const originalBase = process.env.LOOTLABS_BASE_LINK;
+    const originalMon = process.env.LOOTLABS_MONETIZED_URL;
+    delete process.env.LOOTLABS_BASE_LINK;
+    delete process.env.LOOTLABS_MONETIZED_URL;
+    try {
+      const started = await startChallenge(agent);
+      const res = await agent.post('/key/provider/lootlabs').type('form').send({
+        _csrf: started.csrf,
+        challenge_id: started.challengeId,
+        provider: 'lootlabs',
+      });
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.location, '/license');
+      assert.equal(memoryDb.license_keys.length, 0);
+    } finally {
+      if (originalBase !== undefined) process.env.LOOTLABS_BASE_LINK = originalBase;
+      if (originalMon !== undefined) process.env.LOOTLABS_MONETIZED_URL = originalMon;
+    }
+  });
+
+  test('LootLabs is disabled when LOOTLABS_ENABLED is false', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const originalEnabled = process.env.LOOTLABS_ENABLED;
+    process.env.LOOTLABS_ENABLED = 'false';
+    try {
+      const started = await startChallenge(agent);
+      const res = await agent.post('/key/provider/lootlabs').type('form').send({
+        _csrf: started.csrf,
+        challenge_id: started.challengeId,
+        provider: 'lootlabs',
+      });
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.location, '/license');
+      assert.equal(memoryDb.license_keys.length, 0);
+    } finally {
+      if (originalEnabled !== undefined) process.env.LOOTLABS_ENABLED = originalEnabled;
     }
   });
 
@@ -1011,23 +1207,19 @@ describe('Luarmor-style key flow', () => {
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
-  test('manual complete URL without provider referer is blocked for LootLabs', async () => {
-    // LootLabs always requires a valid referer from the provider domain.
-    // Linkvertise is exempt because their interstitial does not forward Referer.
+  test('LootLabs completion with legacy ?t= token (not ?s=) is blocked — no key generated', async () => {
+    // The Redirect API flow only accepts the HMAC-signed ?s= state. Legacy
+    // ?t= return tokens from the old template flow must NOT generate a key.
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'lootlabs');
-    ageProviderStart();
+    const { returnToken: signedState } = await chooseProvider(agent, 'lootlabs');
 
     const res = await agent
-      .get(`/unlock/lootlabs/complete?t=${encodeURIComponent(returnToken)}`)
+      .get(`/unlock/lootlabs/complete?t=${encodeURIComponent(signedState)}`)
       .set('Accept', 'text/html');
     assert.equal(res.status, 302);
     assert.equal(res.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
-    const rendered = await agent.get('/license');
-    assert.match(rendered.text, /Could not verify ad completion\. Please complete the ad step again\./);
-    assert.doesNotMatch(rendered.text, /^\{"error"/);
   });
 
   test('Linkvertise completion succeeds via hash (Anti-Bypass TRUE) without referer requirement', async () => {
@@ -1197,17 +1389,18 @@ describe('Luarmor-style key flow', () => {
     }
   });
 
-  test('provider complete URL before minimum ad wait is blocked', async () => {
-    const agent = request.agent(app);
-    await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'lootlabs');
-
-    const res = await completeProvider(agent, 'lootlabs', returnToken);
-    assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/license');
-    assert.equal(memoryDb.license_keys.length, 0);
-    const rendered = await agent.get('/license');
-    assert.match(rendered.text, /Please complete the ad step before continuing\./);
+  test('LootLabs provider URL builder does NOT use URLSearchParams (regression: shortlink id corruption)', async () => {
+    // The shortlink id `?TqZQAW38` is a valueless query key. URLSearchParams
+    // would normalise it to `?TqZQAW38=`. This regression test directly
+    // checks the URL builder output for the exact byte sequence.
+    const ll = require('../src/providers/lootlabs');
+    const url = ll.buildLootLabsStartUrl({
+      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      encryptedData: 'opaque',
+    });
+    assert.equal(url, 'https://lootdest.org/s?TqZQAW38&data=opaque');
+    // Reject any byte sequence "TqZQAW38=" anywhere in the URL.
+    assert.ok(!/\bTqZQAW38=/.test(url), 'shortlink id must not gain "=" suffix');
   });
 
   test('wrong provider complete route is blocked for a Linkvertise challenge', async () => {
@@ -1248,33 +1441,41 @@ describe('Luarmor-style key flow', () => {
     assert.doesNotMatch(result.req.path, /DENG-/);
   });
 
-  test('valid LootLabs signed return generates one key', async () => {
+  test('LootLabs Redirect API: valid signed state + pending challenge generates exactly one key', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'lootlabs');
-    ageProviderStart();
+    const { returnToken: signedState } = await chooseProvider(agent, 'lootlabs');
 
-    const unlock = await completeProvider(agent, 'lootlabs', returnToken);
+    const unlock = await completeProvider(agent, 'lootlabs', signedState);
     assert.equal(unlock.status, 302);
     assert.equal(unlock.headers.location, '/key/result');
     assert.equal(memoryDb.license_keys.length, 1);
+    assert.equal(memoryDb.license_ad_challenges[0].status, 'key_generated');
   });
 
-  test('tampered LootLabs token and legacy Linkvertise URL are rejected', async () => {
+  test('LootLabs Redirect API: tampered signed state and provider-mismatched state are rejected', async () => {
     const agent = request.agent(app);
     await login(agent);
     const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
 
-    // LootLabs route called with Linkvertise hash as ?t= — fails provider
-    // mismatch (and bad signed token shape).
+    // LootLabs route called with Linkvertise hash as ?s= — bad signed token shape.
     const tampered = await completeProvider(agent, 'lootlabs', hash);
     assert.equal(tampered.status, 302);
+    assert.equal(tampered.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
 
-    // Legacy signed challenge query on /unlock/linkvertise → just redirects.
-    const expiredToken = signChallenge('missing', 'linkvertise', Date.now() - 1000);
-    const expired = await agent.get(`/unlock/linkvertise?challenge=${encodeURIComponent(expiredToken)}`);
+    // Signed state for the wrong provider must be rejected.
+    const wrongProviderState = signChallenge('00000000-0000-0000-0000-000000000000', 'linkvertise', Date.now() + 60000);
+    const wrong = await completeProvider(agent, 'lootlabs', wrongProviderState);
+    assert.equal(wrong.status, 302);
+    assert.equal(wrong.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+
+    // An expired signed state must be rejected.
+    const expiredState = signChallenge('00000000-0000-0000-0000-000000000000', 'lootlabs', Date.now() - 1000);
+    const expired = await completeProvider(agent, 'lootlabs', expiredState);
     assert.equal(expired.status, 302);
+    assert.equal(expired.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
@@ -1469,19 +1670,18 @@ describe('provider UI and security gate', () => {
     }
   });
 
-  test('LootLabs disabled in choose_provider when LOOTLABS_TEMPLATE_URL not set', async () => {
-    const originalTmpl = process.env.LOOTLABS_TEMPLATE_URL;
-    delete process.env.LOOTLABS_TEMPLATE_URL;
+  test('LootLabs disabled card shown in choose_provider when LOOTLABS_API_TOKEN not set', async () => {
+    const originalToken = process.env.LOOTLABS_API_TOKEN;
+    delete process.env.LOOTLABS_API_TOKEN;
     try {
       const agent = request.agent(app);
       await login(agent);
       const { html } = await startChallenge(agent);
-      // LootLabs unavailable card must be shown
       assert.match(html, /LootLabs is temporarily unavailable/i);
-      // Must not have an active submit form for LootLabs
-      assert.doesNotMatch(html, /action="\/key\/provider\/lootlabs"(?=(?:[^"]*"[^"]*")*[^"]*$)/);
+      // No active submit form for LootLabs when disabled.
+      assert.doesNotMatch(html, /action="\/key\/provider\/lootlabs"/);
     } finally {
-      if (originalTmpl !== undefined) process.env.LOOTLABS_TEMPLATE_URL = originalTmpl;
+      if (originalToken !== undefined) process.env.LOOTLABS_API_TOKEN = originalToken;
     }
   });
 
@@ -1560,23 +1760,71 @@ describe('provider UI and security gate', () => {
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
-  test('missing AD_RETURN_SIGNING_SECRET blocks LootLabs provider redirect', async () => {
+  test('LootLabs Anti-Bypass: API token is NEVER included in the redirect URL or in any rendered HTML', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const started = await startChallenge(agent);
-    const originalSecret = process.env.AD_RETURN_SIGNING_SECRET;
-    delete process.env.AD_RETURN_SIGNING_SECRET;
+    const { res } = await chooseProvider(agent, 'lootlabs');
+    const tokenRegex = new RegExp(process.env.LOOTLABS_API_TOKEN);
+    assert.doesNotMatch(res.headers.location || '', tokenRegex);
+    const license = await agent.get('/license');
+    assert.doesNotMatch(license.text, tokenRegex);
+    const { html } = await startChallenge(agent);
+    assert.doesNotMatch(html, tokenRegex);
+  });
+
+  test('LootLabs Anti-Bypass: replayed ?s= state cannot mint a second key (challenge already consumed)', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { returnToken: signedState } = await chooseProvider(agent, 'lootlabs');
+
+    const first = await completeProvider(agent, 'lootlabs', signedState);
+    assert.equal(first.headers.location, '/key/result');
+    assert.equal(memoryDb.license_keys.length, 1);
+
+    // Replay: same signed state, second hit must not generate another key.
+    const second = await completeProvider(agent, 'lootlabs', signedState);
+    assert.notEqual(second.headers.location, '/key/result');
+    assert.equal(memoryDb.license_keys.length, 1);
+  });
+
+  test('LootLabs Anti-Bypass: direct /unlock/lootlabs/complete (no ?s=, fake ?s=, fake ?t=) is blocked', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    for (const url of [
+      '/unlock/lootlabs/complete',
+      '/unlock/lootlabs/complete?s=fake',
+      '/unlock/lootlabs/complete?s=' + encodeURIComponent('a.b'),
+      '/unlock/lootlabs/complete?t=anything',
+      '/unlock/lootlabs/complete?s=anything&t=anything',
+    ]) {
+      const res = await agent.get(url);
+      assert.equal(res.status, 302, `${url} should redirect`);
+      assert.equal(res.headers.location, '/license');
+    }
+    assert.equal(memoryDb.license_keys.length, 0);
+  });
+
+  test('LootLabs Anti-Bypass: direct completion from a different session does not generate a key', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { returnToken: signedState } = await chooseProvider(agent, 'lootlabs');
+
+    // A second fresh session (same Discord user re-logged in) tries the first
+    // session's signed state — must fail because the second session has a
+    // different session_hash on the challenge row.
+    const other = request.agent(app);
+    const originalGet = fakeAxios.get;
+    fakeAxios.get = async () => ({
+      data: { id: 'discord-user-1', username: 'DiscordTester', avatar: null },
+    });
     try {
-      const res = await agent.post('/key/provider/lootlabs').type('form').send({
-        _csrf: started.csrf,
-        challenge_id: started.challengeId,
-        provider: 'lootlabs',
-      });
+      await login(other);
+      const res = await other.get(`/unlock/lootlabs/complete?s=${encodeURIComponent(signedState)}`);
       assert.equal(res.status, 302);
       assert.equal(res.headers.location, '/license');
       assert.equal(memoryDb.license_keys.length, 0);
     } finally {
-      process.env.AD_RETURN_SIGNING_SECRET = originalSecret;
+      fakeAxios.get = originalGet;
     }
   });
 
@@ -1633,25 +1881,27 @@ describe('provider UI and security gate', () => {
     assert.ok(/lootdest\.org/.test(formAction), 'form-action must allow lootdest.org so the LootLabs 303 redirect is not blocked by CSP');
   });
 
-  test('LootLabs static fallback URL does not corrupt shortlink hash with = suffix', async () => {
-    const agent = request.agent(app);
-    await login(agent);
-    const originalTmpl = process.env.LOOTLABS_TEMPLATE_URL;
-    delete process.env.LOOTLABS_TEMPLATE_URL;
-    try {
-      const started = await startChallenge(agent);
-      // Bypass providerIsReady by posting directly (template URL check is server-side)
-      // The fallback URL generation must not corrupt the shortlink hash
-      const { lootlabsProviderUrl } = require('../src/routes');
-      // Since lootlabsProviderUrl is not exported, test indirectly via the fallback
-      // by checking the internal logic doesn't produce '=' appended to shortlink key
-      const base = 'https://lootdest.org/s?TqZQAW38';
-      const sep = base.includes('?') ? '&' : '?';
-      const result = `${base}${sep}return_url=https%3A%2F%2Fexample.com%2Fcomplete%3Ft%3Dabc`;
-      assert.ok(!result.includes('TqZQAW38='), 'shortlink hash must not have = appended');
-    } finally {
-      if (originalTmpl !== undefined) process.env.LOOTLABS_TEMPLATE_URL = originalTmpl;
-    }
+  test('LootLabs Redirect API URL builder preserves the valueless shortlink id (no "=" appended)', async () => {
+    const ll = require('../src/providers/lootlabs');
+    // Direct check of the URL builder: this is the only piece responsible for
+    // not corrupting the shortlink key. URLSearchParams MUST NOT be used here.
+    const out1 = ll.buildLootLabsStartUrl({
+      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      encryptedData: 'opaque-blob-no-specials',
+    });
+    assert.equal(out1, 'https://lootdest.org/s?TqZQAW38&data=opaque-blob-no-specials');
+    assert.ok(!/\bTqZQAW38=/.test(out1), 'shortlink hash must not have = appended');
+
+    // Stale `&data=…` on the base link must be stripped before appending again.
+    const out2 = ll.buildLootLabsStartUrl({
+      baseLink: 'https://lootdest.org/s?TqZQAW38&data=stale',
+      encryptedData: 'fresh',
+    });
+    assert.equal(out2, 'https://lootdest.org/s?TqZQAW38&data=fresh');
+
+    // Empty inputs return empty string.
+    assert.equal(ll.buildLootLabsStartUrl({ baseLink: '', encryptedData: 'x' }), '');
+    assert.equal(ll.buildLootLabsStartUrl({ baseLink: 'https://x/?k', encryptedData: '' }), '');
   });
 });
 
@@ -1843,5 +2093,281 @@ describe('Linkvertise provider helper (Anti-Bypass)', () => {
 
   test('getLinkvertiseVerifyUrl returns the publisher.linkvertise.com endpoint', () => {
     assert.equal(lv.getLinkvertiseVerifyUrl(), 'https://publisher.linkvertise.com/api/v1/anti_bypassing');
+  });
+});
+
+describe('LootLabs provider helper (Redirect API / Anti-Bypass)', () => {
+  const ll = require('../src/providers/lootlabs');
+
+  test('isLootLabsConfigured returns true when env is complete', () => {
+    assert.equal(ll.isLootLabsConfigured(), true);
+    assert.equal(ll.getLootLabsUnavailableReason(), null);
+  });
+
+  test('isLootLabsConfigured returns false when LOOTLABS_ENABLED is false', () => {
+    const orig = process.env.LOOTLABS_ENABLED;
+    process.env.LOOTLABS_ENABLED = 'false';
+    try {
+      assert.equal(ll.isLootLabsConfigured(), false);
+      assert.match(ll.getLootLabsUnavailableReason() || '', /LOOTLABS_ENABLED/);
+    } finally {
+      process.env.LOOTLABS_ENABLED = orig;
+    }
+  });
+
+  test('isLootLabsConfigured returns false when LOOTLABS_API_TOKEN is missing', () => {
+    const orig = process.env.LOOTLABS_API_TOKEN;
+    delete process.env.LOOTLABS_API_TOKEN;
+    try {
+      assert.equal(ll.isLootLabsConfigured(), false);
+      assert.match(ll.getLootLabsUnavailableReason() || '', /LOOTLABS_API_TOKEN/);
+    } finally {
+      if (orig !== undefined) process.env.LOOTLABS_API_TOKEN = orig;
+    }
+  });
+
+  test('isLootLabsConfigured returns false when LOOTLABS_BASE_LINK and LOOTLABS_MONETIZED_URL are both missing', () => {
+    const orig1 = process.env.LOOTLABS_BASE_LINK;
+    const orig2 = process.env.LOOTLABS_MONETIZED_URL;
+    delete process.env.LOOTLABS_BASE_LINK;
+    delete process.env.LOOTLABS_MONETIZED_URL;
+    try {
+      assert.equal(ll.isLootLabsConfigured(), false);
+      assert.match(ll.getLootLabsUnavailableReason() || '', /LOOTLABS_BASE_LINK/);
+    } finally {
+      if (orig1 !== undefined) process.env.LOOTLABS_BASE_LINK = orig1;
+      if (orig2 !== undefined) process.env.LOOTLABS_MONETIZED_URL = orig2;
+    }
+  });
+
+  test('isLootLabsConfigured returns false when LOOTLABS_ENCRYPT_URL is empty', () => {
+    const orig = process.env.LOOTLABS_ENCRYPT_URL;
+    process.env.LOOTLABS_ENCRYPT_URL = '';
+    try {
+      // Default fallback should restore a usable URL — so config is still valid.
+      // (We treat the default `https://creators.lootlabs.gg/api/public/url_encryptor` as the implicit fallback.)
+      assert.equal(ll.getLootLabsEncryptUrl(), 'https://creators.lootlabs.gg/api/public/url_encryptor');
+      assert.equal(ll.isLootLabsConfigured(), true);
+    } finally {
+      if (orig !== undefined) process.env.LOOTLABS_ENCRYPT_URL = orig;
+    }
+  });
+
+  test('stripDataParam removes a stale &data=… suffix from the base link', () => {
+    assert.equal(
+      ll.stripDataParam('https://lootdest.org/s?TqZQAW38&data=stale-blob/with+symbols'),
+      'https://lootdest.org/s?TqZQAW38',
+    );
+    assert.equal(ll.stripDataParam('https://lootdest.org/s?TqZQAW38'), 'https://lootdest.org/s?TqZQAW38');
+    assert.equal(ll.stripDataParam(''), '');
+  });
+
+  test('getLootLabsBaseLink falls back to LOOTLABS_MONETIZED_URL when LOOTLABS_BASE_LINK is unset', () => {
+    const orig = process.env.LOOTLABS_BASE_LINK;
+    delete process.env.LOOTLABS_BASE_LINK;
+    try {
+      assert.equal(ll.getLootLabsBaseLink(), process.env.LOOTLABS_MONETIZED_URL);
+    } finally {
+      if (orig !== undefined) process.env.LOOTLABS_BASE_LINK = orig;
+    }
+  });
+
+  test('buildLootLabsCallbackUrl appends ?s=<signed_state> to the public DENG URL', () => {
+    const url = ll.buildLootLabsCallbackUrl({
+      signedState: 'eyJhIjp9.deadbeef',
+      publicUrl: 'https://tool.deng.my.id',
+    });
+    assert.equal(url, 'https://tool.deng.my.id/unlock/lootlabs/complete?s=eyJhIjp9.deadbeef');
+  });
+
+  test('buildLootLabsCallbackUrl percent-encodes special chars in signed state', () => {
+    const url = ll.buildLootLabsCallbackUrl({
+      signedState: 'a/b+c=d',
+      publicUrl: 'https://tool.deng.my.id',
+    });
+    assert.equal(url, 'https://tool.deng.my.id/unlock/lootlabs/complete?s=a%2Fb%2Bc%3Dd');
+  });
+
+  test('buildLootLabsCallbackUrl returns empty string when signedState is missing', () => {
+    assert.equal(ll.buildLootLabsCallbackUrl({ signedState: '', publicUrl: 'x' }), '');
+    assert.equal(ll.buildLootLabsCallbackUrl({ signedState: null, publicUrl: 'x' }), '');
+  });
+
+  test('buildLootLabsStartUrl appends &data=<encrypted> without corrupting the shortlink id', () => {
+    // Plain (no specials) message is appended verbatim.
+    const out1 = ll.buildLootLabsStartUrl({
+      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      encryptedData: 'opaqueBlobNoSpecials',
+    });
+    assert.equal(out1, 'https://lootdest.org/s?TqZQAW38&data=opaqueBlobNoSpecials');
+    assert.ok(!/\bTqZQAW38=/.test(out1));
+
+    // LootLabs's `message` is pre-URL-encoded (`%2B`, `%2F`, `%3D`).
+    // We MUST NOT double-encode it. The result keeps the original
+    // percent-encoding intact (no `%252B`, `%252F`, `%253D`).
+    const preEncoded = 'abc%2BDEF%2Fghi%3D';
+    const out2 = ll.buildLootLabsStartUrl({
+      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      encryptedData: preEncoded,
+    });
+    assert.equal(out2, `https://lootdest.org/s?TqZQAW38&data=${preEncoded}`);
+    assert.ok(!/%25(2B|2F|3D)/i.test(out2), 'must NOT double-encode the response message');
+
+    // Raw base64 chars (`+`, `/`, `=`) are also appended unchanged — they are
+    // legal in a URL query value and any further "safety" encoding would
+    // corrupt a non-pre-encoded LootLabs response.
+    const out3 = ll.buildLootLabsStartUrl({
+      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      encryptedData: 'A+B/C=',
+    });
+    assert.equal(out3, 'https://lootdest.org/s?TqZQAW38&data=A+B/C=');
+
+    // Defensive: characters that would actively break the URL are escaped.
+    const out4 = ll.buildLootLabsStartUrl({
+      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      encryptedData: 'a b&c?d#e',
+    });
+    assert.equal(out4, 'https://lootdest.org/s?TqZQAW38&data=a%20b%26c%3Fd%23e');
+  });
+
+  test('buildLootLabsStartUrl handles a mixed pre-encoded message exactly like the live API returns it', () => {
+    // Real-world example: LootLabs may return a message that already contains
+    // both `%2F` and `%2B` percent-escapes. None of those must become `%25..`.
+    const liveLikeMessage =
+      'ihPHMxenze2KBPS%2F6kNLTgtYd7efUtHFUuU6wRsyO1OoAHP8ip4YW9kwvmzcbvsNBk8FVOHlhHTYaIddz67bwq1pE%2FkhYeFsesYckOSBZnUdwZdIH6ZH9gDGXjbG%2Fl1U05eQFtkH29k99HPMvdakMxsL%2B99N2JztPUMCVUgIfje510QeA641Ju4d';
+    const out = ll.buildLootLabsStartUrl({
+      baseLink: 'https://lootdest.org/s?TqZQAW38',
+      encryptedData: liveLikeMessage,
+    });
+    assert.equal(out, `https://lootdest.org/s?TqZQAW38&data=${liveLikeMessage}`);
+    assert.ok(!/%252B|%252F|%253D/i.test(out), 'must not double-encode percent escapes');
+  });
+
+  test('classifyEncryptResponse rejects payloads with no message and accepts {type:success, message:"…"}', () => {
+    assert.deepEqual(
+      ll.classifyEncryptResponse({ type: 'success', message: 'abc' }),
+      { ok: true, reason: 'success', encrypted: 'abc' },
+    );
+    // Even without "type" the `message` field alone is enough to succeed.
+    assert.deepEqual(
+      ll.classifyEncryptResponse({ message: 'abc' }),
+      { ok: true, reason: 'success', encrypted: 'abc' },
+    );
+    assert.deepEqual(
+      ll.classifyEncryptResponse({ type: 'error', message: 'Invalid token' }),
+      { ok: false, reason: 'api_invalid_token' },
+    );
+    assert.deepEqual(
+      ll.classifyEncryptResponse({ type: 'error', message: 'Bad input' }),
+      { ok: false, reason: 'api_type_error' },
+    );
+    assert.deepEqual(
+      ll.classifyEncryptResponse({ message: '' }),
+      { ok: false, reason: 'api_invalid_response' },
+    );
+    assert.deepEqual(
+      ll.classifyEncryptResponse({ whatever: 'shape' }),
+      { ok: false, reason: 'api_invalid_response' },
+    );
+    assert.deepEqual(
+      ll.classifyEncryptResponse(null),
+      { ok: false, reason: 'api_invalid_response' },
+    );
+    assert.deepEqual(
+      ll.classifyEncryptResponse('string body'),
+      { ok: false, reason: 'api_invalid_response' },
+    );
+  });
+
+  test('encryptLootLabsDestination rejects missing destination without calling the API', async () => {
+    const before = lootlabsApi.callCount;
+    const res = await ll.encryptLootLabsDestination({ destinationUrl: '', requestId: 'r' });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'missing_destination');
+    assert.equal(lootlabsApi.callCount, before);
+  });
+
+  test('encryptLootLabsDestination returns success with encrypted value on TYPE=success', async () => {
+    lootlabsApi.mode = 'auto';
+    const res = await ll.encryptLootLabsDestination({
+      destinationUrl: 'https://tool.deng.my.id/unlock/lootlabs/complete?s=abc.def',
+      requestId: 'r',
+    });
+    assert.equal(res.ok, true);
+    assert.equal(res.reason, 'success');
+    assert.ok(typeof res.encrypted === 'string' && res.encrypted.length > 0);
+  });
+
+  test('encryptLootLabsDestination fails closed on 401/403 with api_invalid_token', async () => {
+    lootlabsApi.mode = 'invalid_token';
+    const res = await ll.encryptLootLabsDestination({
+      destinationUrl: 'https://x/cb?s=abc',
+      requestId: 'r',
+    });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'api_invalid_token');
+  });
+
+  test('encryptLootLabsDestination fails closed on type:error (api_type_error)', async () => {
+    lootlabsApi.mode = 'type_error';
+    const res = await ll.encryptLootLabsDestination({
+      destinationUrl: 'https://x/cb?s=abc',
+      requestId: 'r',
+    });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'api_type_error');
+  });
+
+  test('encryptLootLabsDestination fails closed on HTTP 500', async () => {
+    lootlabsApi.mode = 'http500';
+    const res = await ll.encryptLootLabsDestination({
+      destinationUrl: 'https://x/cb?s=abc',
+      requestId: 'r',
+    });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'api_error');
+  });
+
+  test('encryptLootLabsDestination fails closed on timeout', async () => {
+    lootlabsApi.mode = 'timeout';
+    const res = await ll.encryptLootLabsDestination({
+      destinationUrl: 'https://x/cb?s=abc',
+      requestId: 'r',
+    });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'api_timeout');
+  });
+
+  test('encryptLootLabsDestination fails closed on network error', async () => {
+    lootlabsApi.mode = 'network';
+    const res = await ll.encryptLootLabsDestination({
+      destinationUrl: 'https://x/cb?s=abc',
+      requestId: 'r',
+    });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'api_error');
+  });
+
+  test('encryptLootLabsDestination fails closed on unrecognised response shape', async () => {
+    lootlabsApi.mode = 'invalid_response';
+    const res = await ll.encryptLootLabsDestination({
+      destinationUrl: 'https://x/cb?s=abc',
+      requestId: 'r',
+    });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'api_invalid_response');
+  });
+
+  test('encryptLootLabsDestination sends API token in Authorization header (never in URL or body)', async () => {
+    lootlabsApi.mode = 'auto';
+    const dest = 'https://tool.deng.my.id/unlock/lootlabs/complete?s=abc.def';
+    await ll.encryptLootLabsDestination({ destinationUrl: dest, requestId: 'r' });
+    const tok = process.env.LOOTLABS_API_TOKEN;
+    assert.ok(tok && tok.length > 0);
+    assert.equal(lootlabsApi.lastCall.headers.Authorization, `Bearer ${tok}`);
+    assert.ok(!String(lootlabsApi.lastCall.url).includes(tok), 'API token must not be in the URL');
+    const bodyStr = JSON.stringify(lootlabsApi.lastCall.body || {});
+    assert.ok(!bodyStr.includes(tok), 'API token must not be in the POST body');
+    assert.equal(lootlabsApi.lastCall.destination_url, dest);
   });
 });

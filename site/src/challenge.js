@@ -16,12 +16,14 @@ const KEY_EXPIRY_HOURS = parseInt(process.env.UNREDEEMED_KEY_EXPIRY_HOURS || '24
 const AD_MIN_COMPLETION_SECONDS = parseInt(process.env.AD_MIN_COMPLETION_SECONDS || '30', 10);
 const RETURN_TOKEN_TTL_MS = 30 * 60 * 1000;
 
-// Log configuration once at startup (only outside tests to avoid noise)
+// Log configuration once at startup (only outside tests to avoid noise).
+// We never log secret VALUES — only boolean presence and lengths.
 if (process.env.NODE_ENV !== 'test') {
   console.log(
-    '[challenge/cfg] AD_MIN_COMPLETION_SECONDS=%d LOOTLABS_TEMPLATE_URL_present=%s AD_RETURN_SIGNING_SECRET_len=%d',
+    '[challenge/cfg] AD_MIN_COMPLETION_SECONDS=%d LOOTLABS_API_TOKEN_present=%s LOOTLABS_BASE_LINK_present=%s AD_RETURN_SIGNING_SECRET_len=%d',
     AD_MIN_COMPLETION_SECONDS,
-    !!process.env.LOOTLABS_TEMPLATE_URL,
+    !!(process.env.LOOTLABS_API_TOKEN || process.env.LOOTLABS_API_KEY),
+    !!(process.env.LOOTLABS_BASE_LINK || process.env.LOOTLABS_MONETIZED_URL),
     (process.env.AD_RETURN_SIGNING_SECRET || '').length,
   );
 }
@@ -493,6 +495,48 @@ async function markLinkvertisePendingById(challengeId, req, siteUser, { targetLi
   return data;
 }
 
+/**
+ * Mark a challenge as pending LootLabs verification.
+ *
+ * Unlike `markPendingAdById`, this DOES NOT issue a signed return token —
+ * LootLabs returns control with `?s=<signed_state>` where the signed state
+ * was created and embedded in the destination URL that LootLabs encrypted.
+ *
+ * The payload only records safe audit metadata (base link host, callback
+ * path, started_at). The signed state is NEVER stored anywhere — it lives
+ * only in the encrypted blob returned by LootLabs.
+ */
+async function markLootLabsPendingById(challengeId, req, siteUser, { baseLink = '', callbackPath = '' } = {}) {
+  const issuedAt = new Date();
+  const payload = {
+    lootlabs_started: true,
+    base_link_host: urlHost(baseLink) || 'lootdest.org',
+    callback_path: callbackPath || '/unlock/lootlabs/complete',
+    encrypted_data_present: true,
+    provider_started_at: issuedAt.toISOString(),
+    redirect_started: true,
+    provider_redirect_host: urlHost(baseLink) || 'lootdest.org',
+  };
+
+  const { data, error } = await supabase
+    .from('license_ad_challenges')
+    .update({
+      status: 'pending_ad',
+      provider_payload: payload,
+    })
+    .eq('id', challengeId)
+    .eq('site_user_id', siteUser.id)
+    .eq('session_hash', hashSession(req))
+    .in('status', ['provider_selected', 'pending_ad'])
+    .select()
+    .single();
+
+  if (error || !data) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Challenge not found or already advanced');
+  }
+  return data;
+}
+
 async function getActiveSessionChallenge(req, expectedProvider) {
   const challengeId = req.session?.pendingChallenge;
   if (!challengeId || !req.session?.user) {
@@ -590,6 +634,63 @@ async function getActiveLinkvertiseChallenge(req) {
   const payload = normalizeJson(owned.provider_payload);
   if (payload.linkvertise_started !== true) {
     throw safeError('PROVIDER_RETURN_UNVERIFIED', 'Linkvertise challenge not started');
+  }
+  return owned;
+}
+
+/**
+ * Load the active LootLabs challenge based on a verified signed-state
+ * `cid` (challenge id) and validate every ownership rule before key
+ * generation is attempted. The signed state itself MUST have already been
+ * verified with `verifyChallenge()` by the caller; this function only
+ * resolves the matching DB row and checks ownership / provider / status /
+ * expiry / no-key.
+ *
+ * Throws codeful safeError on any mismatch (PROVIDER_CHALLENGE_*).
+ */
+async function getActiveLootLabsChallengeById(challengeId, req) {
+  if (!challengeId || !req.session?.user) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'No active LootLabs challenge in session');
+  }
+
+  const { data: owned, error } = await supabase
+    .from('license_ad_challenges')
+    .select('*')
+    .eq('id', challengeId)
+    .maybeSingle();
+
+  if (error || !owned) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'LootLabs challenge missing');
+  }
+  if (owned.site_user_id !== req.session.user.id || owned.session_hash !== hashSession(req)) {
+    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'LootLabs challenge owner mismatch');
+  }
+  if (
+    owned.discord_user_id &&
+    req.session.user.discord_user_id &&
+    owned.discord_user_id !== req.session.user.discord_user_id
+  ) {
+    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'LootLabs challenge Discord owner mismatch');
+  }
+  if (owned.provider !== 'lootlabs') {
+    throw safeError('PROVIDER_MISMATCH', 'LootLabs challenge provider mismatch');
+  }
+  if (owned.license_key_id) {
+    throw safeError('CHALLENGE_ALREADY_USED', 'LootLabs challenge already produced a key');
+  }
+  if (new Date(owned.expires_at) < new Date()) {
+    throw safeError('PROVIDER_CHALLENGE_EXPIRED', 'LootLabs challenge expired');
+  }
+  if (CONSUMED_STATUSES.includes(owned.status)) {
+    throw safeError('CHALLENGE_ALREADY_USED', 'LootLabs challenge already used');
+  }
+  if (!COMPLETABLE_STATUSES.includes(owned.status)) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'LootLabs challenge is not pending');
+  }
+
+  const payload = normalizeJson(owned.provider_payload);
+  if (payload.lootlabs_started !== true) {
+    throw safeError('PROVIDER_RETURN_UNVERIFIED', 'LootLabs challenge not started');
   }
   return owned;
 }
@@ -711,7 +812,9 @@ module.exports = {
   completeActiveProviderChallenge,
   markPendingAdById,
   markLinkvertisePendingById,
+  markLootLabsPendingById,
   getActiveLinkvertiseChallenge,
+  getActiveLootLabsChallengeById,
   hashSession,
   classifyChallengeInsertError,
 };

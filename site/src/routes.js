@@ -19,6 +19,8 @@ const {
 const challenge = require('./challenge');
 const supabase = require('./db');
 const linkvertise = require('./providers/linkvertise');
+const lootlabs = require('./providers/lootlabs');
+const { signChallenge, verifyChallenge } = require('./crypto');
 
 const router = express.Router();
 
@@ -109,13 +111,11 @@ function enabledProviders() {
 }
 
 function providerIsReady(provider) {
-  const cfg = getProviderConfig(provider);
-  if (!cfg || !cfg.enabled || !cfg.monetizedUrl || !cfg.completeUrl) return false;
-  // LootLabs requires a template URL that supports {url} substitution so the
-  // signed return token can be embedded in the provider destination. Without
-  // it, lootdest.org cannot redirect back to the DENG portal after the ad.
   if (provider === 'lootlabs') {
-    return Boolean(cleanEnv('LOOTLABS_TEMPLATE_URL', ''));
+    // LootLabs Redirect API / Anti-Bypass: requires LOOTLABS_ENABLED=true,
+    // a base shortlink, an API token, and an encrypt URL. The helper module
+    // is the source of truth.
+    return lootlabs.isLootLabsConfigured();
   }
   if (provider === 'linkvertise') {
     // Linkvertise is only ready when Target-Link Anti-Bypass is properly
@@ -123,6 +123,8 @@ function providerIsReady(provider) {
     // token set in env). The helper module is the source of truth.
     return linkvertise.isLinkvertiseConfigured();
   }
+  const cfg = getProviderConfig(provider);
+  if (!cfg || !cfg.enabled || !cfg.monetizedUrl || !cfg.completeUrl) return false;
   return true;
 }
 
@@ -467,6 +469,51 @@ async function handleProvider(req, res) {
       });
       redirectUrl = targetLinkUrl;
       req.session.activeAdChallengeId = row.id;
+    } else if (provider === 'lootlabs') {
+      // LootLabs Redirect API / Anti-Bypass flow:
+      //   1. Sign a one-time state {cid, provider, exp}.
+      //   2. Build the DENG callback URL with `?s=<signed_state>`.
+      //   3. Encrypt that URL server-side through LootLabs' encrypt API
+      //      (API token sent in Authorization header, never in URL/logs).
+      //   4. Append `&data=<encrypted>` to the canonical lootdest.org link
+      //      WITHOUT touching the shortlink id.
+      const ttlMs = 30 * 60 * 1000; // 30 minutes
+      const signedState = signChallenge(row.id, 'lootlabs', Date.now() + ttlMs);
+      const callbackUrl = lootlabs.buildLootLabsCallbackUrl({
+        signedState,
+        publicUrl: publicUrl(),
+      });
+
+      const requestId = require('crypto').randomBytes(6).toString('hex');
+      const enc = await lootlabs.encryptLootLabsDestination({
+        destinationUrl: callbackUrl,
+        requestId,
+      });
+      if (!enc.ok) {
+        console.warn(
+          '[key/provider] provider=lootlabs encrypt_failed reason=%s rid=%s',
+          enc.reason, requestId,
+        );
+        const code = LOOTLABS_REASON_TO_CODE[enc.reason] || 'PROVIDER_RETURN_UNVERIFIED';
+        if (wantsJson(req)) return res.status(503).json({ error: code, message: messageFor(code) });
+        safeFlash(req, 'error', messageFor(code));
+        return res.redirect('/license');
+      }
+
+      const baseLink = lootlabs.getLootLabsBaseLink();
+      const startUrl = lootlabs.buildLootLabsStartUrl({
+        encryptedData: enc.encrypted,
+        baseLink,
+      });
+
+      await challenge.markLootLabsPendingById(row.id, req, user, {
+        baseLink,
+        callbackPath: '/unlock/lootlabs/complete',
+      });
+
+      redirectUrl = startUrl;
+      req.session.activeAdChallengeId = row.id;
+      returnTokenLen = 0; // no plaintext return token in the redirect
     } else {
       const started = await challenge.markPendingAdById(row.id, req, user, providerCfg.monetizedUrl);
       redirectUrl = providerRedirectUrl(providerCfg, started.return_token);
@@ -475,7 +522,7 @@ async function handleProvider(req, res) {
 
     req.session.pendingProvider = provider;
 
-    // Safe debug log: URL host only (never full signed token or complete URL)
+    // Safe debug log: URL host only (never full signed token, never encrypted data, never API token)
     let redirectHost = '';
     try { redirectHost = new URL(redirectUrl).hostname; } catch {}
     console.log(
@@ -487,8 +534,8 @@ async function handleProvider(req, res) {
     );
 
     if (wantsJson(req)) {
-      // Linkvertise verification happens via callback hash, never via a t= token,
-      // so JSON callers only ever see the public redirect URL (no token leakage).
+      // Verification happens via callback (Linkvertise hash / LootLabs signed
+      // state). The JSON caller only sees the public redirect URL.
       return res.json({ provider, redirect_url: redirectUrl });
     }
 
@@ -571,6 +618,17 @@ const LINKVERTISE_REASON_TO_CODE = Object.freeze({
   api_false: 'PROVIDER_RETURN_UNVERIFIED',
   api_invalid_token: 'PROVIDER_NOT_CONFIGURED',
   api_invalid_response: 'PROVIDER_RETURN_UNVERIFIED',
+  success: 'success',
+});
+
+const LOOTLABS_REASON_TO_CODE = Object.freeze({
+  lootlabs_not_configured: 'PROVIDER_NOT_CONFIGURED',
+  missing_destination: 'PROVIDER_RETURN_UNVERIFIED',
+  api_timeout: 'PROVIDER_RETURN_UNVERIFIED',
+  api_error: 'PROVIDER_RETURN_UNVERIFIED',
+  api_invalid_token: 'PROVIDER_NOT_CONFIGURED',
+  api_invalid_response: 'PROVIDER_RETURN_UNVERIFIED',
+  api_type_error: 'PROVIDER_RETURN_UNVERIFIED',
   success: 'success',
 });
 
@@ -657,6 +715,99 @@ async function handleLinkvertiseComplete(req, res) {
     const code = codeFromError(err, 'KEY_GENERATION_FAILED');
     console.warn('[unlock/linkvertise/complete] rid=%s reason=consume_failed code=%s', requestId, code);
     logSafeError('unlock/linkvertise/complete', code, err);
+    safeFlash(req, 'error', messageFor(code));
+    return res.redirect('/license');
+  }
+}
+
+/**
+ * LootLabs Redirect API / Anti-Bypass completion handler.
+ *
+ * Flow:
+ *  1. require logged-in session
+ *  2. require `s` query param (HMAC-signed state created at /key/provider/lootlabs)
+ *  3. verifyChallenge(s) → {cid, p:'lootlabs', exp}
+ *  4. load challenge by cid, verify session/ownership/Discord/provider/status/expiry/no-key
+ *  5. atomically consume challenge and generate exactly one key
+ *
+ * The signed state is the only client-visible identifier. The challenge status
+ * machine (pending_ad → ad_completed → key_generated) provides the one-time
+ * consumption guarantee, so a replayed `?s=` returns ALREADY_USED.
+ */
+async function handleLootLabsComplete(req, res) {
+  const requestId = require('crypto').randomBytes(6).toString('hex');
+  const signedState = typeof req.query.s === 'string' ? req.query.s : '';
+  const safePrefix = lootlabs.safeSignedStatePrefix(signedState);
+
+  console.log(
+    '[unlock/lootlabs/complete] rid=%s state_present=%s state_prefix=%s',
+    requestId, !!signedState, safePrefix,
+  );
+
+  if (!lootlabs.isLootLabsConfigured()) {
+    console.warn('[unlock/lootlabs/complete] rid=%s reason=lootlabs_not_configured', requestId);
+    safeFlash(req, 'error', messageFor('PROVIDER_NOT_CONFIGURED'));
+    return res.redirect('/license');
+  }
+
+  if (!signedState) {
+    console.warn('[unlock/lootlabs/complete] rid=%s reason=missing_state', requestId);
+    safeFlash(req, 'error', messageFor('PROVIDER_RETURN_TOKEN_MISSING'));
+    return res.redirect('/license');
+  }
+
+  let decoded;
+  try {
+    decoded = verifyChallenge(signedState);
+  } catch (err) {
+    console.warn('[unlock/lootlabs/complete] rid=%s reason=verify_threw error=%s', requestId, (err && err.code) || 'unknown');
+    safeFlash(req, 'error', messageFor('PROVIDER_RETURN_TOKEN_INVALID'));
+    return res.redirect('/license');
+  }
+  if (!decoded || decoded.p !== 'lootlabs' || !decoded.cid) {
+    console.warn('[unlock/lootlabs/complete] rid=%s reason=bad_state_format', requestId);
+    safeFlash(req, 'error', messageFor('PROVIDER_RETURN_TOKEN_INVALID'));
+    return res.redirect('/license');
+  }
+  if (typeof decoded.exp === 'number' && Date.now() > decoded.exp) {
+    console.warn('[unlock/lootlabs/complete] rid=%s reason=state_expired', requestId);
+    safeFlash(req, 'error', messageFor('PROVIDER_RETURN_TOKEN_EXPIRED'));
+    return res.redirect('/license');
+  }
+
+  let row;
+  try {
+    row = await challenge.getActiveLootLabsChallengeById(decoded.cid, req);
+  } catch (err) {
+    const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
+    console.warn('[unlock/lootlabs/complete] rid=%s reason=session_or_challenge code=%s', requestId, code);
+    logSafeError('unlock/lootlabs/complete', code, err);
+    safeFlash(req, 'error', messageFor(code));
+    return res.redirect('/license');
+  }
+
+  try {
+    const { key, alreadyDone } = await challenge.completeAdAndGenerateKey(row);
+    if (alreadyDone && req.session.generatedKey) {
+      return res.redirect('/key/result');
+    }
+    if (alreadyDone) {
+      console.warn('[unlock/lootlabs/complete] rid=%s reason=already_completed', requestId);
+      safeFlash(req, 'error', messageFor('PROVIDER_CHALLENGE_ALREADY_USED'));
+      return res.redirect('/license');
+    }
+    console.log('[unlock/lootlabs/complete] rid=%s status=success', requestId);
+    req.session.generatedKey = key;
+    req.session.generatedKeyAt = Date.now();
+    delete req.session.pendingChallenge;
+    delete req.session.pendingProvider;
+    delete req.session.pendingSignedChallenge;
+    delete req.session.activeAdChallengeId;
+    return res.redirect('/key/result');
+  } catch (err) {
+    const code = codeFromError(err, 'KEY_GENERATION_FAILED');
+    console.warn('[unlock/lootlabs/complete] rid=%s reason=consume_failed code=%s', requestId, code);
+    logSafeError('unlock/lootlabs/complete', code, err);
     safeFlash(req, 'error', messageFor(code));
     return res.redirect('/license');
   }
@@ -868,7 +1019,7 @@ router.get('/unlock/linkvertise/start', requireLogin, repairSiteUser, (req, res)
   return res.redirect('/license');
 });
 
-router.get('/unlock/lootlabs/complete', requireLogin, repairSiteUser, (req, res) => handleProviderComplete(req, res, 'lootlabs'));
+router.get('/unlock/lootlabs/complete', requireLogin, repairSiteUser, handleLootLabsComplete);
 router.get('/unlock/linkvertise/complete', requireLogin, repairSiteUser, handleLinkvertiseComplete);
 
 router.get('/unlock/linkvertise/done', requireLogin, (_req, res) => {
