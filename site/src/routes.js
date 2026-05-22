@@ -50,6 +50,10 @@ const SAFE_MESSAGES = {
   PROVIDER_CHALLENGE_EXPIRED: 'This key generation session expired. Please start again.',
   PROVIDER_CHALLENGE_OWNER_MISMATCH: 'Please start key generation again.',
   PROVIDER_CHALLENGE_ALREADY_USED: 'Please start key generation again.',
+  PROVIDER_RETURN_UNVERIFIED: 'Could not verify ad completion. Please complete the ad step again.',
+  PROVIDER_WAIT_INCOMPLETE: 'Please complete the ad step before continuing.',
+  PROVIDER_MISMATCH: 'Invalid or expired key generation session. Please start again.',
+  CHALLENGE_ALREADY_USED: 'Invalid or expired key generation session. Please start again.',
   KEY_GENERATION_FAILED: 'Could not generate key. Please try again.',
   UNEXPECTED_ERROR: 'Could not start key generation. Please try again.',
 };
@@ -115,7 +119,21 @@ function logSafeError(scope, code, err) {
     ? ' constraint=license_ad_challenges_site_user_id_fkey'
     : '';
   const table = detail.includes('license_ad_challenges') ? ' table=license_ad_challenges' : '';
-  console.error(`[${scope}] code=${code}${table}${constraint} message=${detail.slice(0, 240)}`);
+  const expected = new Set([
+    'COOLDOWN_ACTIVE',
+    'TOO_MANY_ATTEMPTS',
+    'PROVIDER_RETURN_UNVERIFIED',
+    'PROVIDER_WAIT_INCOMPLETE',
+    'PROVIDER_MISMATCH',
+    'PROVIDER_CHALLENGE_MISSING',
+    'PROVIDER_CHALLENGE_EXPIRED',
+    'PROVIDER_CHALLENGE_OWNER_MISMATCH',
+    'PROVIDER_CHALLENGE_ALREADY_USED',
+    'CHALLENGE_ALREADY_USED',
+  ]);
+  const line = `[${scope}] code=${code}${table}${constraint} message=${detail.slice(0, 240)}`;
+  if (expected.has(code)) console.log(line);
+  else console.error(line);
 }
 
 const authLimiter = rateLimit({
@@ -335,10 +353,10 @@ async function handleProvider(req, res) {
 
   try {
     const row = await challenge.selectProvider(challengeId, provider, req, user);
-    await challenge.markPendingAdById(row.id, req, user);
+    const providerCfg = getProviderConfig(provider);
+    await challenge.markPendingAdById(row.id, req, user, providerCfg.monetizedUrl);
 
     req.session.pendingProvider = provider;
-    const providerCfg = getProviderConfig(provider);
 
     if (wantsJson(req)) {
       return res.json({
@@ -383,6 +401,8 @@ async function handleUnlock(req, res, provider) {
       row = await challenge.verifyChallengeForRequest(signed, req, selected);
     }
 
+    challenge.assertProviderReturnProof(req, row, selected);
+
     const { key, alreadyDone } = await challenge.completeAdAndGenerateKey(row);
     if (alreadyDone && req.session.generatedKey) {
       return res.redirect('/key/result');
@@ -399,7 +419,7 @@ async function handleUnlock(req, res, provider) {
     delete req.session.pendingSignedChallenge;
     return res.redirect('/key/result');
   } catch (err) {
-    const code = codeFromError(err, 'KEY_GENERATION_FAILED');
+    const code = codeFromError(err, 'PROVIDER_RETURN_UNVERIFIED');
     logSafeError(`unlock/${selected}`, code, err);
     safeFlash(req, 'error', messageFor(code));
     return res.redirect('/license');
@@ -430,7 +450,7 @@ async function handleProviderComplete(req, res, provider) {
     delete req.session.pendingSignedChallenge;
     return res.redirect('/key/result');
   } catch (err) {
-    const code = codeFromError(err, 'KEY_GENERATION_FAILED');
+    const code = codeFromError(err, 'PROVIDER_RETURN_UNVERIFIED');
     logSafeError(`unlock/${selected}/complete`, code, err);
     safeFlash(req, 'error', messageFor(code));
     return res.redirect('/license');

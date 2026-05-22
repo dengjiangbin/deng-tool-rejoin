@@ -24,6 +24,7 @@ process.env.LINKVERTISE_COMPLETE_URL = 'http://localhost:8791/unlock/linkvertise
 process.env.LOOTLABS_ENABLED = 'true';
 process.env.LOOTLABS_MONETIZED_URL = 'https://lootdest.org/s?TqZQAW38';
 process.env.LOOTLABS_COMPLETE_URL = 'http://localhost:8791/unlock/lootlabs/complete';
+process.env.AD_MIN_COMPLETION_SECONDS = '30';
 
 class MemoryQuery {
   constructor(db, table) {
@@ -208,7 +209,7 @@ require.cache[require.resolve('axios')] = {
 const request = require('supertest');
 const app = require('../src/app');
 const { signChallenge } = require('../src/crypto');
-const { classifyChallengeInsertError } = require('../src/challenge');
+const { AD_MIN_COMPLETION_SECONDS, classifyChallengeInsertError } = require('../src/challenge');
 
 function resetDb() {
   memoryDb.site_users.splice(0);
@@ -329,6 +330,26 @@ async function chooseProvider(agent, provider = 'linkvertise') {
   });
   assert.equal(res.status, 303);
   return { started, res };
+}
+
+function ageProviderStart(seconds = AD_MIN_COMPLETION_SECONDS + 1, index = 0) {
+  const row = memoryDb.license_ad_challenges[index];
+  assert.ok(row, 'challenge row must exist before aging provider start');
+  row.provider_payload = {
+    ...(row.provider_payload || {}),
+    redirect_started: true,
+    provider_started_at: new Date(Date.now() - seconds * 1000).toISOString(),
+  };
+}
+
+function providerReferer(provider) {
+  return provider === 'lootlabs'
+    ? 'https://lootdest.org/s?TqZQAW38'
+    : 'https://link-hub.net/5914830/XEpUhZ8TdtyV';
+}
+
+async function completeProvider(agent, provider = 'linkvertise', referer = providerReferer(provider)) {
+  return agent.get(`/unlock/${provider}/complete`).set('Referer', referer);
 }
 
 beforeEach(resetDb);
@@ -621,11 +642,14 @@ describe('Luarmor-style key flow', () => {
     const agent = request.agent(app);
     await login(agent);
     for (const route of ['/unlock/linkvertise/complete', '/unlock/lootlabs/complete']) {
-      const res = await agent.get(route);
+      const res = await agent.get(route).set('Accept', 'text/html');
       assert.equal(res.status, 302);
       assert.equal(res.headers.location, '/license');
     }
     assert.equal(memoryDb.license_keys.length, 0);
+    const rendered = await agent.get('/license');
+    assert.match(rendered.text, /Please start key generation again\./);
+    assert.doesNotMatch(rendered.text, /^\{"error"/);
   });
 
   test('expired active provider challenge fails safely', async () => {
@@ -633,7 +657,8 @@ describe('Luarmor-style key flow', () => {
     await login(agent);
     await chooseProvider(agent, 'linkvertise');
     memoryDb.license_ad_challenges[0].expires_at = new Date(Date.now() - 1000).toISOString();
-    const res = await agent.get('/unlock/linkvertise/complete');
+    ageProviderStart();
+    const res = await completeProvider(agent, 'linkvertise');
     assert.equal(res.status, 302);
     assert.equal(res.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
@@ -644,7 +669,8 @@ describe('Luarmor-style key flow', () => {
     await login(agent);
     await chooseProvider(agent, 'linkvertise');
     memoryDb.license_ad_challenges[0].site_user_id = randomUUID();
-    const res = await agent.get('/unlock/linkvertise/complete');
+    ageProviderStart();
+    const res = await completeProvider(agent, 'linkvertise');
     assert.equal(res.status, 302);
     assert.equal(res.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
@@ -659,6 +685,8 @@ describe('Luarmor-style key flow', () => {
     assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
     assert.equal(memoryDb.license_ad_challenges[0].provider, 'linkvertise');
     assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
+    assert.equal(memoryDb.license_ad_challenges[0].provider_payload.redirect_started, true);
+    assert.ok(memoryDb.license_ad_challenges[0].provider_payload.provider_started_at);
   });
 
   test('LootLabs provider redirects to configured monetized URL', async () => {
@@ -673,6 +701,8 @@ describe('Luarmor-style key flow', () => {
       assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
       assert.equal(memoryDb.license_ad_challenges[0].provider, 'lootlabs');
       assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
+      assert.equal(memoryDb.license_ad_challenges[0].provider_payload.redirect_started, true);
+      assert.ok(memoryDb.license_ad_challenges[0].provider_payload.provider_started_at);
     } finally {
       process.env.LOOTLABS_MONETIZED_URL = originalUrl;
     }
@@ -703,12 +733,67 @@ describe('Luarmor-style key flow', () => {
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
+  test('manual complete URL without provider referer is blocked after provider selection', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    await chooseProvider(agent, 'linkvertise');
+    ageProviderStart();
+
+    const res = await agent.get('/unlock/linkvertise/complete').set('Accept', 'text/html');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+    const rendered = await agent.get('/license');
+    assert.match(rendered.text, /Could not verify ad completion\. Please complete the ad step again\./);
+    assert.doesNotMatch(rendered.text, /^\{"error"/);
+  });
+
+  test('provider complete URL before minimum ad wait is blocked', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    await chooseProvider(agent, 'lootlabs');
+
+    const res = await completeProvider(agent, 'lootlabs');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+    const rendered = await agent.get('/license');
+    assert.match(rendered.text, /Please complete the ad step before continuing\./);
+  });
+
+  test('wrong provider complete route is blocked even with allowed referer', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    await chooseProvider(agent, 'linkvertise');
+    ageProviderStart();
+
+    const res = await completeProvider(agent, 'lootlabs');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+    const rendered = await agent.get('/license');
+    assert.match(rendered.text, /Invalid or expired key generation session\. Please start again\./);
+  });
+
+  test('provider complete URL with wrong referer host is blocked', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    await chooseProvider(agent, 'linkvertise');
+    ageProviderStart();
+
+    const res = await completeProvider(agent, 'linkvertise', 'https://tool.deng.my.id/license');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+  });
+
   test('valid unlock generates one key, keeps it out of the URL, and shows redeem instructions', async () => {
     const agent = request.agent(app);
     await login(agent);
     await chooseProvider(agent, 'linkvertise');
+    ageProviderStart();
 
-    const unlock = await agent.get('/unlock/linkvertise/complete');
+    const unlock = await completeProvider(agent, 'linkvertise');
     assert.equal(unlock.status, 302);
     assert.equal(unlock.headers.location, '/key/result');
     assert.equal(memoryDb.license_keys.length, 1);
@@ -726,8 +811,9 @@ describe('Luarmor-style key flow', () => {
     const agent = request.agent(app);
     await login(agent);
     await chooseProvider(agent, 'linkvertise');
+    ageProviderStart();
 
-    const tampered = await agent.get('/unlock/lootlabs/complete');
+    const tampered = await completeProvider(agent, 'lootlabs');
     assert.equal(tampered.status, 302);
     assert.equal(memoryDb.license_keys.length, 0);
 
@@ -741,9 +827,10 @@ describe('Luarmor-style key flow', () => {
     const agent = request.agent(app);
     await login(agent);
     await chooseProvider(agent, 'linkvertise');
+    ageProviderStart();
 
-    await agent.get('/unlock/linkvertise/complete');
-    await agent.get('/unlock/linkvertise/complete');
+    await completeProvider(agent, 'linkvertise');
+    await completeProvider(agent, 'linkvertise');
     assert.equal(memoryDb.license_keys.length, 1);
   });
 
@@ -751,7 +838,8 @@ describe('Luarmor-style key flow', () => {
     const agent = request.agent(app);
     await login(agent);
     await chooseProvider(agent, 'linkvertise');
-    await agent.get('/unlock/linkvertise/complete');
+    ageProviderStart();
+    await completeProvider(agent, 'linkvertise');
 
     const page = await agent.get('/license');
     const csrf = csrfFrom(page.text);
@@ -764,7 +852,8 @@ describe('Luarmor-style key flow', () => {
     const agent = request.agent(app);
     await login(agent);
     await chooseProvider(agent, 'linkvertise');
-    await agent.get('/unlock/linkvertise/complete');
+    ageProviderStart();
+    await completeProvider(agent, 'linkvertise');
     const license = await agent.get('/license');
     assert.match(license.text, /\*\*\*\*/);
     assert.match(license.text, /Linkvertise/);

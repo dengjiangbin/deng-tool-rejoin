@@ -12,6 +12,23 @@ const { generateDengKey } = require('./keyGen');
 const COOLDOWN_SECONDS = parseInt(process.env.KEY_GENERATION_COOLDOWN_SECONDS || '60', 10);
 const CHALLENGE_TTL_MS = 30 * 60 * 1000;
 const KEY_EXPIRY_HOURS = parseInt(process.env.UNREDEEMED_KEY_EXPIRY_HOURS || '24', 10);
+const AD_MIN_COMPLETION_SECONDS = parseInt(process.env.AD_MIN_COMPLETION_SECONDS || '30', 10);
+
+const ALLOWED_PROVIDER_REFERERS = {
+  linkvertise: [
+    'link-hub.net',
+    'linkvertise.com',
+    'publisher.linkvertise.com',
+  ],
+  lootlabs: [
+    'lootdest.org',
+    'lootlabs.gg',
+    'loot-link.com',
+  ],
+};
+
+const CONSUMED_STATUSES = ['ad_completed', 'key_generated', 'completed', 'used'];
+const COMPLETABLE_STATUSES = ['provider_selected', 'pending_ad', 'ad_started'];
 
 function safeError(code, message) {
   const err = new Error(message || code);
@@ -142,6 +159,93 @@ function hashUA(req) {
   return sha256(req.headers['user-agent'] || '');
 }
 
+function normalizeJson(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(String(value));
+  } catch {
+    return {};
+  }
+}
+
+function urlHost(value) {
+  if (!value) return '';
+  try {
+    return new URL(String(value)).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function hostAllowed(host, provider) {
+  const normalized = String(host || '').toLowerCase();
+  if (!normalized) return false;
+  return (ALLOWED_PROVIDER_REFERERS[provider] || []).some((allowed) => (
+    normalized === allowed || normalized.endsWith(`.${allowed}`)
+  ));
+}
+
+function providerReturnHost(req) {
+  const refererHost = urlHost(req.headers.referer || req.headers.referrer || '');
+  if (refererHost) return { host: refererHost, source: 'referer' };
+  const originHost = urlHost(req.headers.origin || '');
+  if (originHost) return { host: originHost, source: 'origin' };
+  return { host: '', source: 'missing' };
+}
+
+function buildProviderPayload(providerUrl, previous = {}) {
+  return {
+    ...normalizeJson(previous),
+    redirect_started: true,
+    provider_started_at: new Date().toISOString(),
+    provider_redirect_host: urlHost(providerUrl),
+    ad_min_completion_seconds: AD_MIN_COMPLETION_SECONDS,
+  };
+}
+
+function assertProviderReturnProof(req, row, expectedProvider) {
+  if (!row || row.provider !== expectedProvider) {
+    throw safeError('PROVIDER_MISMATCH', 'Provider route does not match active challenge');
+  }
+
+  if (
+    row.discord_user_id &&
+    req.session?.user?.discord_user_id &&
+    row.discord_user_id !== req.session.user.discord_user_id
+  ) {
+    throw safeError('PROVIDER_MISMATCH', 'Discord owner does not match active challenge');
+  }
+
+  const payload = normalizeJson(row.provider_payload);
+  if (payload.redirect_started !== true || !payload.provider_started_at) {
+    throw safeError('PROVIDER_RETURN_UNVERIFIED', 'Provider redirect was not started');
+  }
+
+  const startedMs = new Date(payload.provider_started_at).getTime();
+  if (!Number.isFinite(startedMs)) {
+    throw safeError('PROVIDER_RETURN_UNVERIFIED', 'Provider redirect timestamp is invalid');
+  }
+
+  const elapsedSeconds = Math.floor((Date.now() - startedMs) / 1000);
+  if (elapsedSeconds < AD_MIN_COMPLETION_SECONDS) {
+    throw safeError('PROVIDER_WAIT_INCOMPLETE', 'Provider completion returned too quickly');
+  }
+
+  const { host, source } = providerReturnHost(req);
+  if (!host || !hostAllowed(host, expectedProvider)) {
+    throw safeError(
+      'PROVIDER_RETURN_UNVERIFIED',
+      `Provider return host not verified: source=${source} host=${host || 'missing'}`,
+    );
+  }
+
+  return {
+    elapsedSeconds,
+    returnHost: host,
+  };
+}
+
 function rowBelongsToRequest(row, req) {
   return Boolean(
     row &&
@@ -238,10 +342,13 @@ async function markPendingAd(signedToken) {
   return data;
 }
 
-async function markPendingAdById(challengeId, req, siteUser) {
+async function markPendingAdById(challengeId, req, siteUser, providerUrl = '') {
   const { data, error } = await supabase
     .from('license_ad_challenges')
-    .update({ status: 'pending_ad' })
+    .update({
+      status: 'pending_ad',
+      provider_payload: buildProviderPayload(providerUrl),
+    })
     .eq('id', challengeId)
     .eq('site_user_id', siteUser.id)
     .eq('session_hash', hashSession(req))
@@ -271,26 +378,31 @@ async function getActiveSessionChallenge(req, expectedProvider) {
   if (owned.site_user_id !== req.session.user.id || owned.session_hash !== hashSession(req)) {
     throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'Provider challenge owner mismatch');
   }
+  if (
+    owned.discord_user_id &&
+    req.session.user.discord_user_id &&
+    owned.discord_user_id !== req.session.user.discord_user_id
+  ) {
+    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'Provider challenge Discord owner mismatch');
+  }
   if (owned.provider !== expectedProvider) {
-    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Provider challenge mismatch');
+    throw safeError('PROVIDER_MISMATCH', 'Provider challenge mismatch');
   }
   if (new Date(owned.expires_at) < new Date()) {
     throw safeError('PROVIDER_CHALLENGE_EXPIRED', 'Provider challenge expired');
   }
-  if (owned.status === 'key_generated' || owned.status === 'ad_completed') {
-    throw safeError('PROVIDER_CHALLENGE_ALREADY_USED', 'Provider challenge already used');
+  if (CONSUMED_STATUSES.includes(owned.status)) {
+    throw safeError('CHALLENGE_ALREADY_USED', 'Provider challenge already used');
   }
-  if (!['provider_selected', 'pending_ad'].includes(owned.status)) {
+  if (!COMPLETABLE_STATUSES.includes(owned.status)) {
     throw safeError('PROVIDER_CHALLENGE_MISSING', 'Provider challenge is not ready');
   }
   return owned;
 }
 
 async function completeActiveProviderChallenge(req, expectedProvider) {
-  let row = await getActiveSessionChallenge(req, expectedProvider);
-  if (row.status === 'provider_selected') {
-    row = await markPendingAdById(row.id, req, req.session.user);
-  }
+  const row = await getActiveSessionChallenge(req, expectedProvider);
+  assertProviderReturnProof(req, row, expectedProvider);
   return completeAdAndGenerateKey(row);
 }
 
@@ -395,7 +507,9 @@ async function completeAdAndGenerateKey(challengeRow) {
 
 module.exports = {
   COOLDOWN_SECONDS,
+  AD_MIN_COMPLETION_SECONDS,
   KEY_EXPIRY_HOURS,
+  assertProviderReturnProof,
   checkCooldown,
   createChallenge,
   selectProvider,
