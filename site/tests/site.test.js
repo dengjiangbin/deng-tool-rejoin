@@ -414,12 +414,33 @@ describe('theme and dashboard UI', () => {
     assert.match(license.text, /My Generated Keys/);
   });
 
-  test('theme stylesheet uses dark navy panels and teal active navigation', () => {
+  test('theme stylesheet uses light blue-pink gradient and readable text', () => {
     const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
-    assert.match(css, /#050816|#070b18/i);
-    assert.match(css, /#00c7a3|#00e0b8/i);
+    assert.match(css, /#dbeafe|#fce7f3/i);
+    assert.match(css, /#60a5fa|#f9a8d4/i);
     assert.match(css, /\.nav-link\.active/);
     assert.match(css, /@media \(max-width: 760px\)/);
+  });
+
+  test('dashboard does not show removed stat cards', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/dashboard');
+    assert.equal(res.status, 200);
+    assert.doesNotMatch(res.text, /Cooldown Status/);
+    assert.doesNotMatch(res.text, /Redeemed Keys/);
+    assert.doesNotMatch(res.text, /Active License/);
+    assert.doesNotMatch(res.text, /Latest Key Status/);
+    assert.doesNotMatch(res.text, /Tool Version/);
+    assert.doesNotMatch(res.text, /See tool status/);
+  });
+
+  test('My License page does not show Expires if unused display', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/license');
+    assert.equal(res.status, 200);
+    assert.doesNotMatch(res.text, /Expires if unused/);
   });
 });
 

@@ -12,41 +12,15 @@
 <div class="stats-grid">
   <div class="stat-card">
     <div class="stat-body">
-      <p class="stat-label">Active License</p>
-      <p class="stat-value"><span class="badge badge-green"><%= stats.unredeemed > 0 ? 'Ready' : 'None' %></span></p>
-    </div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-body">
       <p class="stat-label">Unredeemed Keys</p>
       <p class="stat-value"><%= stats.unredeemed %></p>
     </div>
   </div>
-  <div class="stat-card">
-    <div class="stat-body">
-      <p class="stat-label">Redeemed Keys</p>
-      <p class="stat-value">See tool status</p>
-    </div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-body">
-      <p class="stat-label">Cooldown Status</p>
-      <p class="stat-value"><%= stats.cooldownSeconds %>s</p>
-    </div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-body">
-      <p class="stat-label">Latest Key Status</p>
-      <p class="stat-value"><%= stats.latest ? (stats.latest.status === 'key_generated' ? 'Generated' : stats.latest.status) : 'No key' %></p>
-    </div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-body">
-      <p class="stat-label">Tool Version</p>
-      <p class="stat-value">v1.0.0</p>
-    </div>
-  </div>
 </div>
+
+<section class="section-card">
+  <p class="section-desc">Generate a license key from <a href="/license">My License</a>, then redeem it inside DENG Tool: Rejoin to activate the tool.</p>
+</section>
 
 <section class="section-card">
   <div class="section-header">
