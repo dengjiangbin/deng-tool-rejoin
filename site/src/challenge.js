@@ -47,7 +47,37 @@ async function ensureSyntheticLicenseUser(siteUserId) {
   return syntheticId;
 }
 
+async function ensureDiscordLicenseUser(discordUserId) {
+  if (!discordUserId) return null;
+  const { data: existing, error: readError } = await supabase
+    .from('license_users')
+    .select('discord_user_id')
+    .eq('discord_user_id', discordUserId)
+    .maybeSingle();
+
+  if (readError) throw new Error(`Discord owner lookup failed: ${readError.message}`);
+  if (existing) return discordUserId;
+
+  const { error } = await supabase
+    .from('license_users')
+    .insert({
+      discord_user_id: discordUserId,
+      discord_username: 'DENG Tool Portal User',
+      max_keys: 999999,
+      is_owner: false,
+      is_blocked: false,
+    });
+  if (error && !String(error.message || '').toLowerCase().includes('duplicate')) {
+    throw new Error(`Discord owner compatibility row failed: ${error.message}`);
+  }
+  return discordUserId;
+}
+
 async function insertLicenseKey(payload, siteUserId, discordUserId) {
+  if (payload.owner_discord_id) {
+    await ensureDiscordLicenseUser(payload.owner_discord_id);
+  }
+
   const { error } = await supabase.from('license_keys').insert(payload);
   if (!error) return;
 
