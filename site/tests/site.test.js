@@ -530,10 +530,16 @@ describe('Luarmor-style key flow', () => {
   test('LootLabs provider redirects to configured monetized URL', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { res } = await chooseProvider(agent, 'lootlabs');
-    assert.equal(res.headers.location, 'https://lootdest.org/s?TqZQAW38');
-    assert.equal(memoryDb.license_ad_challenges[0].provider, 'lootlabs');
-    assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
+    const originalUrl = process.env.LOOTLABS_MONETIZED_URL;
+    process.env.LOOTLABS_MONETIZED_URL = '';
+    try {
+      const { res } = await chooseProvider(agent, 'lootlabs');
+      assert.equal(res.headers.location, 'https://lootdest.org/s?TqZQAW38');
+      assert.equal(memoryDb.license_ad_challenges[0].provider, 'lootlabs');
+      assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
+    } finally {
+      process.env.LOOTLABS_MONETIZED_URL = originalUrl;
+    }
   });
 
   test('direct key result cannot generate or reveal a key', async () => {

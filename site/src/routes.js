@@ -51,7 +51,9 @@ const SAFE_MESSAGES = {
 
 function cleanEnv(name, fallback = '') {
   const raw = Object.prototype.hasOwnProperty.call(process.env, name) ? process.env[name] : fallback;
-  return String(raw || '').trim().replace(/^['"]|['"]$/g, '').trim();
+  const cleaned = String(raw || '').trim().replace(/^['"]|['"]$/g, '').trim();
+  if (cleaned) return cleaned;
+  return String(fallback || '').trim().replace(/^['"]|['"]$/g, '').trim();
 }
 
 function envEnabled(name, fallback = 'false') {
