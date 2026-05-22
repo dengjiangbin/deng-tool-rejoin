@@ -1,57 +1,45 @@
 <% locals.activePage = 'license' %>
 
-<div class="key-result-page">
-  <div class="key-result-card">
-    <div class="key-success-icon">✅</div>
-    <h2 class="key-result-title">Your Key Is Ready!</h2>
+<div class="key-result-page" data-portal-step="key-result">
+  <section class="key-result-card">
+    <div class="key-success-mark">OK</div>
+    <h1 class="key-result-title">Your Key Is Ready</h1>
     <p class="key-result-desc">
-      Copy your key below and redeem it in the DENG Tool Rejoin panel. 
-      <strong>This key will only be shown once.</strong>
+      Copy the key below. The key is server-rendered for your authorized session and is not stored in the URL.
     </p>
 
     <div class="key-display-wrap">
       <code class="key-display" id="key-value"><%= key %></code>
-      <button class="btn-copy" id="btn-copy" data-key="<%= key %>" 
-              onclick="copyKey(this)" aria-label="Copy key">
-        <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z"/><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z"/></svg>
+      <button class="btn-copy" id="btn-copy" data-key="<%= key %>" onclick="copyKey(this)" aria-label="Copy key">
         Copy
       </button>
     </div>
 
-    <div class="key-info-row">
-      <div class="key-info-item">
-        <span class="key-info-label">⏲ Expires in</span>
-        <span class="key-info-val">24 hours (if not redeemed)</span>
-      </div>
-      <div class="key-info-item">
-        <span class="key-info-label">📋 Format</span>
-        <span class="key-info-val">DENG-XXXX-XXXX-XXXX-XXXX</span>
-      </div>
+    <div class="instruction-card">
+      <p>Redeem this key inside DENG Tool: Rejoin to use the tool.</p>
+      <p>This key expires if not redeemed within 24 hours.</p>
+      <p>Open DENG Tool: Rejoin, paste this license key, then continue setup.</p>
     </div>
 
     <div class="key-actions">
       <a href="/license" class="btn btn-outline">Back to My License</a>
       <a href="/dashboard" class="btn btn-primary">Dashboard</a>
     </div>
-
-    <p class="key-warning">
-      🔒 <strong>Store this key safely.</strong> It will not be displayed again.
-    </p>
-  </div>
+  </section>
 </div>
 
 <script>
 function copyKey(btn) {
   var key = btn.dataset.key;
   navigator.clipboard.writeText(key).then(function() {
-    btn.textContent = '✓ Copied!';
+    btn.textContent = 'Copied';
     btn.classList.add('copied');
     setTimeout(function() {
-      btn.innerHTML = '<svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z"/><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z"/></svg> Copy';
+      btn.textContent = 'Copy';
       btn.classList.remove('copied');
-    }, 2500);
+    }, 2200);
   }).catch(function() {
-    btn.textContent = 'Failed – copy manually';
+    btn.textContent = 'Copy manually';
   });
 }
 </script>

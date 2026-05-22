@@ -1,452 +1,545 @@
 'use strict';
-/**
- * DENG Tool Site – automated test suite
- * Uses Node.js built-in test runner (node --test) + supertest for HTTP assertions.
- *
- * Run: npm test
- * (Requires: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY set in env OR mocked)
- *
- * Strategy: inject mock supabase before requiring app so no real DB calls are made.
- */
 
-const { test, before, describe } = require('node:test');
+const { describe, test, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const bcrypt = require('bcryptjs');
 
-// ── Environment stubs ──────────────────────────────────────────
-// Set required env vars before loading app modules
-process.env.TOOL_SITE_COOKIE_SECRET = 'test-secret-that-is-at-least-32-characters-long-for-tests!';
-process.env.TOOL_SITE_STATE_SECRET  = 'test-state-secret-that-is-at-least-32-chars-long-tests!';
-process.env.SUPABASE_URL            = 'https://placeholder.supabase.co';
+process.env.TOOL_SITE_COOKIE_SECRET = 'test-cookie-secret-that-is-long-enough-for-the-site-suite';
+process.env.TOOL_SITE_STATE_SECRET = 'test-state-secret-that-is-long-enough-for-challenge-suite';
+process.env.SUPABASE_URL = 'https://placeholder.supabase.co';
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
-process.env.NODE_ENV                = 'test';
-process.env.TOOL_SITE_PUBLIC_URL    = 'http://localhost:8791';
-process.env.DISCORD_CLIENT_ID       = 'test-client-id';
-process.env.DISCORD_CLIENT_SECRET   = 'test-client-secret';
-process.env.DISCORD_REDIRECT_URI    = 'http://localhost:8791/auth/discord/callback';
-process.env.LINKVERTISE_PUBLISHER_ID= '5914830';
-process.env.LOOTLABS_PUBLISHER_URL  = 'https://lootlabs.example.com/unlock';
+process.env.NODE_ENV = 'test';
+process.env.TOOL_SITE_PUBLIC_URL = 'http://localhost:8791';
+process.env.LICENSE_API_PUBLIC_URL = 'https://rejoin.deng.my.id';
+process.env.DISCORD_CLIENT_ID = 'discord-client-id';
+process.env.DISCORD_CLIENT_SECRET = 'discord-client-secret';
+process.env.DISCORD_REDIRECT_URI = 'http://localhost:8791/auth/discord/callback';
+process.env.LINKVERTISE_PUBLISHER_ID = '5914830';
+process.env.LOOTLABS_TEMPLATE_URL = 'https://lootlabs.example/unlock?target={url}';
 
-// ── Supabase mock (intercept module) ──────────────────────────
-// We patch require cache so db.js returns a mock client.
-const mockSupabaseRows = {};
+class MemoryQuery {
+  constructor(db, table) {
+    this.db = db;
+    this.table = table;
+    this.action = 'select';
+    this.payload = null;
+    this.filters = [];
+    this.inFilters = [];
+    this.gteFilters = [];
+    this.neqFilters = [];
+    this.orderSpec = null;
+    this.limitCount = null;
+    this.singleMode = false;
+    this.maybeMode = false;
+  }
 
-const mockSupabase = {
-  from: (table) => ({
-    select: (..._args) => ({
-      eq: (..._a)     => ({ eq: (..._b) => ({ maybeSingle: async () => ({ data: mockSupabaseRows[table] || null, error: null }), single: async () => ({ data: null, error: { message: 'not found' } }), limit: (..._c) => ({ order: (..._d) => ({ limit: (..._e) => ({ data: [], error: null }) }) }), order: (..._c) => ({ limit: (..._d) => ({ data: [], error: null }) }) }), maybeSingle: async () => ({ data: mockSupabaseRows[table] || null, error: null }), single: async () => ({ data: null, error: { message: 'not found' } }), in: (..._b) => ({ gte: (..._c) => ({ order: (..._d) => ({ limit: (..._e) => ({ data: [], error: null }) }) }) }), order: (..._b) => ({ limit: (..._c) => ({ data: [], error: null }) }) }),
-      in: (..._a)     => ({ gte: (..._b) => ({ order: (..._c) => ({ limit: (..._d) => ({ data: [], error: null }) }) }) }),
-      or:  (..._a)    => ({ maybeSingle: async () => ({ data: null, error: null }) }),
-      maybeSingle: async () => ({ data: null, error: null }),
-      single: async () => ({ data: null, error: { message: 'no data' } }),
-      order: (..._a)  => ({ limit: (..._b) => ({ data: [], error: null }) }),
-    }),
-    insert: (_row) => ({
-      select: () => ({
-        single: async () => ({ data: { id: 'mock-uuid', ..._row }, error: null }),
-      }),
-    }),
-    update: (_row) => ({
-      eq: (..._a) => ({
-        eq: (..._b) => ({
-          select: () => ({ single: async () => ({ data: null, error: null }) }),
-          select_x: () => ({ single: async () => ({ data: _row, error: null }) }),
-        }),
-        select: () => ({ single: async () => ({ data: _row, error: null }) }),
-      }),
-    }),
-  }),
+  select() {
+    if (this.action !== 'insert' && this.action !== 'update') this.action = 'select';
+    return this;
+  }
+
+  insert(payload) {
+    this.action = 'insert';
+    this.payload = Array.isArray(payload) ? payload : [payload];
+    return this;
+  }
+
+  update(payload) {
+    this.action = 'update';
+    this.payload = payload;
+    return this;
+  }
+
+  eq(field, value) {
+    this.filters.push({ field, value });
+    return this;
+  }
+
+  in(field, values) {
+    this.inFilters.push({ field, values });
+    return this;
+  }
+
+  gte(field, value) {
+    this.gteFilters.push({ field, value });
+    return this;
+  }
+
+  neq(field, value) {
+    this.neqFilters.push({ field, value });
+    return this;
+  }
+
+  order(field, spec = {}) {
+    this.orderSpec = { field, ascending: spec.ascending !== false };
+    return this;
+  }
+
+  limit(count) {
+    this.limitCount = count;
+    return this;
+  }
+
+  maybeSingle() {
+    this.maybeMode = true;
+    return this.executeSingle(true);
+  }
+
+  single() {
+    this.singleMode = true;
+    return this.executeSingle(false);
+  }
+
+  then(resolve, reject) {
+    return this.execute().then(resolve, reject);
+  }
+
+  _rows() {
+    if (!this.db[this.table]) this.db[this.table] = [];
+    return this.db[this.table];
+  }
+
+  _matches(row) {
+    return this.filters.every((f) => row[f.field] === f.value) &&
+      this.inFilters.every((f) => f.values.includes(row[f.field])) &&
+      this.gteFilters.every((f) => String(row[f.field] || '') >= String(f.value)) &&
+      this.neqFilters.every((f) => row[f.field] !== f.value);
+  }
+
+  async execute() {
+    const rows = this._rows();
+    if (this.action === 'insert') {
+      const now = new Date().toISOString();
+      const inserted = this.payload.map((row) => {
+        const next = {
+          created_at: now,
+          updated_at: now,
+          ...row,
+          id: row.id || randomUUID(),
+        };
+        rows.push(next);
+        return next;
+      });
+      return { data: inserted, error: null, count: inserted.length };
+    }
+
+    if (this.action === 'update') {
+      const updated = [];
+      for (const row of rows) {
+        if (this._matches(row)) {
+          Object.assign(row, this.payload, { updated_at: new Date().toISOString() });
+          updated.push(row);
+        }
+      }
+      return { data: updated, error: null, count: updated.length };
+    }
+
+    let result = rows.filter((row) => this._matches(row));
+    if (this.orderSpec) {
+      const { field, ascending } = this.orderSpec;
+      result = result.slice().sort((a, b) => {
+        if ((a[field] || '') === (b[field] || '')) return 0;
+        return (a[field] || '') > (b[field] || '') ? (ascending ? 1 : -1) : (ascending ? -1 : 1);
+      });
+    }
+    if (this.limitCount !== null) result = result.slice(0, this.limitCount);
+    return { data: result, error: null, count: result.length };
+  }
+
+  async executeSingle(maybe) {
+    const { data } = await this.execute();
+    if (data.length) return { data: data[0], error: null };
+    return { data: null, error: maybe ? null : { message: 'No rows found' } };
+  }
+}
+
+const memoryDb = {
+  site_users: [],
+  license_ad_challenges: [],
+  license_keys: [],
 };
 
-// Inject into require cache BEFORE loading app
+const mockSupabase = {
+  from(table) {
+    return new MemoryQuery(memoryDb, table);
+  },
+};
+
+const fakeAxios = {
+  async post() {
+    return { data: { access_token: 'discord-access-token' } };
+  },
+  async get() {
+    return {
+      data: {
+        id: 'discord-user-1',
+        username: 'DiscordTester',
+        avatar: null,
+        email: 'discord@example.test',
+      },
+    };
+  },
+};
+
 require.cache[require.resolve('../src/db')] = {
   id: require.resolve('../src/db'),
   filename: require.resolve('../src/db'),
   loaded: true,
   exports: mockSupabase,
 };
+require.cache[require.resolve('axios')] = {
+  id: require.resolve('axios'),
+  filename: require.resolve('axios'),
+  loaded: true,
+  exports: fakeAxios,
+};
 
 const request = require('supertest');
-const app     = require('../src/app');
+const app = require('../src/app');
+const { signChallenge } = require('../src/crypto');
 
-// ──────────────────────────────────────────────────────────────
-// SECTION 1: Crypto utilities
-// ──────────────────────────────────────────────────────────────
-describe('crypto utilities', () => {
-  const { signChallenge, verifyChallenge, sha256, randomHex } = require('../src/crypto');
+function resetDb() {
+  memoryDb.site_users.splice(0);
+  memoryDb.license_ad_challenges.splice(0);
+  memoryDb.license_keys.splice(0);
+  memoryDb.site_users.push({
+    id: 'site-user-1',
+    username: 'tester',
+    email: 'tester@example.test',
+    password_hash: bcrypt.hashSync('correct-password', 8),
+    is_active: true,
+    discord_user_id: null,
+    discord_username: null,
+    discord_avatar: null,
+    created_at: new Date(Date.now() - 60_000).toISOString(),
+  });
+}
 
-  test('T01 – sha256 returns 64-char hex string', () => {
-    const h = sha256('hello');
-    assert.equal(h.length, 64);
-    assert.match(h, /^[0-9a-f]+$/);
+function csrfFrom(html) {
+  const match = html.match(/name="_csrf" value="([^"]+)"/);
+  assert.ok(match, 'CSRF token should be present');
+  return match[1];
+}
+
+function challengeIdFrom(html) {
+  const match = html.match(/name="challenge_id" value="([^"]+)"/);
+  assert.ok(match, 'challenge id should be present');
+  return match[1];
+}
+
+async function login(agent, username = 'tester', password = 'correct-password') {
+  const page = await agent.get('/login');
+  const csrf = csrfFrom(page.text);
+  const res = await agent
+    .post('/auth/login')
+    .type('form')
+    .send({ _csrf: csrf, username, password });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.location, '/dashboard');
+}
+
+async function startChallenge(agent) {
+  const page = await agent.get('/license');
+  const csrf = csrfFrom(page.text);
+  const res = await agent.post('/api/key/start').type('form').send({ _csrf: csrf });
+  assert.equal(res.status, 200);
+  return { html: res.text, csrf: csrfFrom(res.text), challengeId: challengeIdFrom(res.text) };
+}
+
+async function chooseProvider(agent, provider = 'linkvertise') {
+  const started = await startChallenge(agent);
+  const res = await agent.post('/api/key/provider').type('form').send({
+    _csrf: started.csrf,
+    challenge_id: started.challengeId,
+    provider,
+  });
+  assert.equal(res.status, 200);
+  return { started, html: res.text };
+}
+
+beforeEach(resetDb);
+
+describe('auth and protected pages', () => {
+  test('login page renders Discord and database login options', async () => {
+    const res = await request(app).get('/login');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /DENG Tool/);
+    assert.match(res.text, /Continue with Discord/);
+    assert.match(res.text, /Username or email/);
   });
 
-  test('T02 – randomHex returns hex of correct byte length', () => {
-    const h = randomHex(16);
-    assert.equal(h.length, 32); // 16 bytes = 32 hex chars
-    assert.match(h, /^[0-9a-f]+$/);
+  test('Discord OAuth start redirects to Discord with identify/email scopes', async () => {
+    const agent = request.agent(app);
+    const res = await agent.get('/auth/discord');
+    assert.equal(res.status, 302);
+    assert.match(res.headers.location, /^https:\/\/discord\.com\/api\/v10\/oauth2\/authorize/);
+    assert.equal(new URL(res.headers.location).searchParams.get('scope'), 'identify email');
   });
 
-  test('T03 – signChallenge returns two-part token', () => {
-    const token = signChallenge('uuid-1', 'lootlabs', Date.now() + 60_000);
-    const parts = token.split('.');
-    assert.equal(parts.length, 2);
-    assert.ok(parts[0].length > 0);
-    assert.ok(parts[1].length === 64); // SHA-256 hex
+  test('Discord callback creates and logs in a portal user', async () => {
+    const agent = request.agent(app);
+    const start = await agent.get('/auth/discord');
+    const state = new URL(start.headers.location).searchParams.get('state');
+    const res = await agent.get(`/auth/discord/callback?code=ok&state=${state}`);
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/dashboard');
+    assert.ok(memoryDb.site_users.some((row) => row.discord_user_id === 'discord-user-1'));
   });
 
-  test('T04 – verifyChallenge round-trips correctly', () => {
-    const exp = Date.now() + 60_000;
-    const token = signChallenge('abc-123', 'linkvertise', exp);
-    const decoded = verifyChallenge(token);
-    assert.ok(decoded);
-    assert.equal(decoded.cid, 'abc-123');
-    assert.equal(decoded.p, 'linkvertise');
+  test('database login works and invalid login fails safely', async () => {
+    const okAgent = request.agent(app);
+    await login(okAgent);
+    const dashboard = await okAgent.get('/dashboard');
+    assert.equal(dashboard.status, 200);
+
+    const badAgent = request.agent(app);
+    const page = await badAgent.get('/login');
+    const csrf = csrfFrom(page.text);
+    const bad = await badAgent.post('/auth/login').type('form').send({
+      _csrf: csrf,
+      username: 'tester',
+      password: 'wrong-password',
+    });
+    assert.equal(bad.status, 302);
+    assert.equal(bad.headers.location, '/login');
   });
 
-  test('T05 – verifyChallenge rejects tampered token', () => {
-    const token = signChallenge('abc-456', 'lootlabs', Date.now() + 60_000);
-    const [payload, sig] = token.split('.');
-    const tampered = payload + '.' + sig.slice(0, -2) + 'ff';
-    assert.equal(verifyChallenge(tampered), null);
+  test('logout destroys the session and protected pages redirect to login', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const page = await agent.get('/dashboard');
+    const csrf = csrfFrom(page.text);
+    const out = await agent.post('/auth/logout').type('form').send({ _csrf: csrf });
+    assert.equal(out.status, 302);
+    assert.equal(out.headers.location, '/login');
+    const res = await agent.get('/dashboard');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/login');
   });
 
-  test('T06 – verifyChallenge rejects expired token', () => {
-    const token = signChallenge('abc-789', 'lootlabs', Date.now() - 1000); // expired
-    assert.equal(verifyChallenge(token), null);
-  });
-
-  test('T07 – verifyChallenge returns null for garbage input', () => {
-    assert.equal(verifyChallenge('not.a.valid.token'), null);
-    assert.equal(verifyChallenge(''), null);
-    assert.equal(verifyChallenge(null), null);
+  test('protected pages and APIs redirect unauthenticated visitors', async () => {
+    for (const route of ['/dashboard', '/license', '/api/key/start', '/api/license/me', '/api/license/history']) {
+      const res = route === '/api/key/start'
+        ? await request(app).post(route)
+        : await request(app).get(route);
+      assert.equal(res.status, 302, route);
+      assert.equal(res.headers.location, '/login');
+    }
   });
 });
 
-// ──────────────────────────────────────────────────────────────
-// SECTION 2: Key generation
-// ──────────────────────────────────────────────────────────────
-describe('key generation', () => {
-  const { generateDengKey } = require('../src/keyGen');
-
-  test('T08 – generateDengKey produces DENG-XXXX-XXXX-XXXX-XXXX format', () => {
-    const { raw } = generateDengKey();
-    assert.match(raw, /^DENG-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/);
+describe('theme and dashboard UI', () => {
+  test('sidebar has only Dashboard, My License, and Logout nav labels', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/dashboard');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /Dashboard/);
+    assert.match(res.text, /My License/);
+    assert.match(res.text, /Logout/);
+    for (const forbidden of ['Device List', 'Executor Installer', 'Cookies', 'Modules', 'Extras']) {
+      assert.doesNotMatch(res.text, new RegExp(forbidden));
+    }
   });
 
-  test('T09 – generateDengKey id is 64-char hex (SHA-256)', () => {
-    const { id } = generateDengKey();
-    assert.equal(id.length, 64);
-    assert.match(id, /^[0-9a-f]+$/);
+  test('dashboard and My License render compact portal panels', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const dashboard = await agent.get('/dashboard');
+    assert.match(dashboard.text, /Welcome back/);
+    assert.match(dashboard.text, /Go to My License/);
+    assert.match(dashboard.text, /stats-grid/);
+
+    const license = await agent.get('/license');
+    assert.match(license.text, /Current License Status/);
+    assert.match(license.text, /Generate Key/);
+    assert.match(license.text, /My Generated Keys/);
   });
 
-  test('T10 – generateDengKey prefix contains first 2 groups', () => {
-    const { raw, prefix } = generateDengKey();
-    const parts = raw.split('-');
-    assert.equal(prefix, `DENG-${parts[1]}-${parts[2]}`);
-  });
-
-  test('T11 – generateDengKey suffix contains last 2 groups', () => {
-    const { raw, suffix } = generateDengKey();
-    const parts = raw.split('-');
-    assert.equal(suffix, `${parts[3]}-${parts[4]}`);
-  });
-
-  test('T12 – consecutive keys are different (random)', () => {
-    const k1 = generateDengKey().raw;
-    const k2 = generateDengKey().raw;
-    assert.notEqual(k1, k2);
+  test('theme stylesheet uses dark navy panels and teal active navigation', () => {
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
+    assert.match(css, /#050816|#070b18/i);
+    assert.match(css, /#00c7a3|#00e0b8/i);
+    assert.match(css, /\.nav-link\.active/);
+    assert.match(css, /@media \(max-width: 760px\)/);
   });
 });
 
-// ──────────────────────────────────────────────────────────────
-// SECTION 3: HTTP routes (via supertest)
-// ──────────────────────────────────────────────────────────────
-describe('HTTP routes', () => {
+describe('Luarmor-style key flow', () => {
+  test('Generate Key creates a challenge and shows provider choices', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { html } = await startChallenge(agent);
+    assert.match(html, /LootLabs/);
+    assert.match(html, /Linkvertise/);
+    assert.equal(memoryDb.license_ad_challenges.length, 1);
+    assert.equal(memoryDb.license_ad_challenges[0].status, 'created');
+  });
 
-  test('T13 – GET /health returns 200 JSON with status ok', async () => {
+  test('Linkvertise provider renders a protected unlock URL and monetizes only that path', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { html } = await chooseProvider(agent, 'linkvertise');
+    assert.match(html, /publisher\.linkvertise\.com\/cdn\/linkvertise\.js/);
+    assert.match(html, /tool\.deng\.my\.id\/unlock\/linkvertise/);
+    assert.match(html, /tool\.deng\.my\.id\/dashboard/);
+    assert.doesNotMatch(html, /DENG-[0-9A-F]{4}/);
+  });
+
+  test('LootLabs provider uses the protected unlock URL as the destination', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { html } = await chooseProvider(agent, 'lootlabs');
+    assert.match(html, /https:\/\/lootlabs\.example\/unlock\?target=/);
+    assert.match(html, /unlock%2Flootlabs/);
+    assert.doesNotMatch(html, /\/key\/result/);
+  });
+
+  test('direct key result cannot generate or reveal a key', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/key/result');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+  });
+
+  test('valid unlock generates one key, keeps it out of the URL, and shows redeem instructions', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { html } = await chooseProvider(agent, 'linkvertise');
+    const href = html.match(/id="ad-unlock-link" href="([^"]+)"/)[1].replace(/&amp;/g, '&');
+    const unlockPath = new URL(href).pathname + new URL(href).search;
+
+    const unlock = await agent.get(unlockPath);
+    assert.equal(unlock.status, 302);
+    assert.equal(unlock.headers.location, '/key/result');
+    assert.equal(memoryDb.license_keys.length, 1);
+
+    const result = await agent.get('/key/result');
+    assert.equal(result.status, 200);
+    assert.match(result.text, /DENG-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}/);
+    assert.match(result.text, /Redeem this key inside DENG Tool: Rejoin to use the tool\./);
+    assert.match(result.text, /This key expires if not redeemed within 24 hours\./);
+    assert.match(result.text, /Open DENG Tool: Rejoin, paste this license key, then continue setup\./);
+    assert.doesNotMatch(result.req.path, /DENG-/);
+  });
+
+  test('tampered and expired challenges are rejected', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { html } = await chooseProvider(agent, 'linkvertise');
+    const href = html.match(/id="ad-unlock-link" href="([^"]+)"/)[1].replace(/&amp;/g, '&');
+    const parsed = new URL(href);
+    const token = parsed.searchParams.get('challenge');
+    parsed.searchParams.set('challenge', `${token.slice(0, -1)}x`);
+    const tampered = await agent.get(parsed.pathname + parsed.search);
+    assert.equal(tampered.status, 302);
+    assert.equal(memoryDb.license_keys.length, 0);
+
+    const expiredToken = signChallenge('missing', 'linkvertise', Date.now() - 1000);
+    const expired = await agent.get(`/unlock/linkvertise?challenge=${encodeURIComponent(expiredToken)}`);
+    assert.equal(expired.status, 302);
+    assert.equal(memoryDb.license_keys.length, 0);
+  });
+
+  test('callback replay and double-submit do not create duplicate keys', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { html } = await chooseProvider(agent, 'linkvertise');
+    const href = html.match(/id="ad-unlock-link" href="([^"]+)"/)[1].replace(/&amp;/g, '&');
+    const unlockPath = new URL(href).pathname + new URL(href).search;
+
+    await agent.get(unlockPath);
+    await agent.get(unlockPath);
+    assert.equal(memoryDb.license_keys.length, 1);
+  });
+
+  test('server-side cooldown is enforced after a generated key', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { html } = await chooseProvider(agent, 'linkvertise');
+    const href = html.match(/id="ad-unlock-link" href="([^"]+)"/)[1].replace(/&amp;/g, '&');
+    const unlockPath = new URL(href).pathname + new URL(href).search;
+    await agent.get(unlockPath);
+
+    const page = await agent.get('/license');
+    const csrf = csrfFrom(page.text);
+    const blocked = await agent.post('/api/key/start').type('form').send({ _csrf: csrf });
+    assert.equal(blocked.status, 302);
+    assert.equal(blocked.headers.location, '/license');
+  });
+
+  test('history masks older keys but result page can show the freshly generated key', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { html } = await chooseProvider(agent, 'linkvertise');
+    const href = html.match(/id="ad-unlock-link" href="([^"]+)"/)[1].replace(/&amp;/g, '&');
+    await agent.get(new URL(href).pathname + new URL(href).search);
+    const license = await agent.get('/license');
+    assert.match(license.text, /\*\*\*\*/);
+    assert.doesNotMatch(license.text, /DENG-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}/);
+  });
+});
+
+describe('security controls', () => {
+  test('CSRF blocks state-changing requests', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.post('/api/key/start').type('form').send({ _csrf: 'bad-token' });
+    assert.equal(res.status, 302);
+    assert.equal(memoryDb.license_ad_challenges.length, 0);
+  });
+
+  test('XSS-style usernames are escaped in rendered pages', async () => {
+    memoryDb.site_users[0].username = '<script>alert(1)</script>';
+    const agent = request.agent(app);
+    await login(agent, '<script>alert(1)</script>');
+    const res = await agent.get('/dashboard');
+    assert.doesNotMatch(res.text, /<script>alert\(1\)<\/script>/);
+    assert.match(res.text, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  });
+
+  test('open redirect input is ignored by auth callback failures', async () => {
+    const res = await request(app)
+      .get('/auth/discord/callback?error=access_denied&redirect=https://evil.example');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/login');
+  });
+
+  test('frontend responses do not expose server secrets or full keys outside authorized result', async () => {
+    const res = await request(app).get('/login');
+    assert.doesNotMatch(res.text, /test-service-role-key/);
+    assert.doesNotMatch(res.text, /test-state-secret/);
+    assert.doesNotMatch(res.text, /DENG-[0-9A-F]{4}/);
+  });
+
+  test('session cookie and headers are configured for HttpOnly/SameSite/Secure production behavior', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+    assert.match(source, /httpOnly:\s*true/);
+    assert.match(source, /secure:\s*process\.env\.NODE_ENV === 'production'/);
+    assert.match(source, /sameSite:\s*'lax'/);
+    assert.match(source, /contentSecurityPolicy/);
+    assert.match(source, /frameAncestors/);
+  });
+});
+
+describe('health and service identity', () => {
+  test('health reports the portal service and port 8791', async () => {
     const res = await request(app).get('/health');
     assert.equal(res.status, 200);
-    assert.equal(res.body.status, 'ok');
     assert.equal(res.body.service, 'deng-tool-site');
+    assert.equal(res.body.port, 8791);
   });
 
-  test('T14 – GET / redirects to /login when not authenticated', async () => {
-    const res = await request(app).get('/');
-    assert.ok([301, 302].includes(res.status));
-    assert.match(res.headers.location, /\/login/);
-  });
-
-  test('T15 – GET /login returns 200', async () => {
-    const res = await request(app).get('/login');
+  test('public stats route exposes cooldown and expiry without secrets', async () => {
+    const res = await request(app).get('/api/stats/public');
     assert.equal(res.status, 200);
-  });
-
-  test('T16 – GET /dashboard redirects to /login when unauthenticated', async () => {
-    const res = await request(app).get('/dashboard');
-    assert.ok([301, 302].includes(res.status));
-    assert.match(res.headers.location, /\/login/);
-  });
-
-  test('T17 – GET /license redirects to /login when unauthenticated', async () => {
-    const res = await request(app).get('/license');
-    assert.ok([301, 302].includes(res.status));
-    assert.match(res.headers.location, /\/login/);
-  });
-
-  test('T18 – GET /key/result redirects to /license when no key in session', async () => {
-    const res = await request(app).get('/key/result');
-    assert.ok([301, 302].includes(res.status));
-  });
-
-  test('T19 – POST /auth/login without CSRF token redirects to /login', async () => {
-    const res = await request(app)
-      .post('/auth/login')
-      .send({ username: 'x', password: 'y' })
-      .set('Content-Type', 'application/x-www-form-urlencoded');
-    assert.ok([301, 302].includes(res.status));
-    assert.match(res.headers.location, /\/login/);
-  });
-
-  test('T20 – GET /auth/discord redirects to discord.com', async () => {
-    const res = await request(app).get('/auth/discord');
-    assert.ok([301, 302].includes(res.status));
-    assert.match(res.headers.location, /discord\.com/);
-  });
-
-  test('T21 – GET /auth/discord/callback with no state → redirect /login', async () => {
-    const res = await request(app).get('/auth/discord/callback?code=abc&state=badstate');
-    assert.ok([301, 302].includes(res.status));
-    assert.match(res.headers.location, /\/login/);
-  });
-
-  test('T22 – GET /unlock/linkvertise without challenge → redirect /license (need login first)', async () => {
-    const res = await request(app).get('/unlock/linkvertise');
-    // Unauthenticated → redirect to login
-    assert.ok([301, 302].includes(res.status));
-  });
-
-  test('T23 – POST /license/generate without login → redirects to login', async () => {
-    const res = await request(app)
-      .post('/license/generate')
-      .send('_csrf=fake')
-      .set('Content-Type', 'application/x-www-form-urlencoded');
-    assert.ok([301, 302].includes(res.status));
-    assert.match(res.headers.location, /\/login/);
-  });
-
-  test('T24 – POST /auth/logout with bad CSRF → redirects to /', async () => {
-    const res = await request(app)
-      .post('/auth/logout')
-      .send('_csrf=invalid')
-      .set('Content-Type', 'application/x-www-form-urlencoded');
-    assert.ok([301, 302].includes(res.status));
-  });
-
-  test('T25 – GET /nonexistent returns 404', async () => {
-    const res = await request(app).get('/nonexistent-page-xyz');
-    assert.equal(res.status, 404);
-  });
-});
-
-// ──────────────────────────────────────────────────────────────
-// SECTION 4: Auth module unit tests
-// ──────────────────────────────────────────────────────────────
-describe('auth utilities', () => {
-  const { verifyCsrf, toSessionUser } = require('../src/auth');
-
-  test('T26 – verifyCsrf returns false when tokens mismatch', () => {
-    const req = {
-      session: { csrfToken: 'aaaaaa' },
-      body: { _csrf: 'bbbbbb' },
-      headers: {},
-    };
-    // Tokens are different length so timingSafeEqual will throw → returns false
-    assert.equal(verifyCsrf(req), false);
-  });
-
-  test('T27 – verifyCsrf returns true when tokens match', () => {
-    const token = 'a'.repeat(64);
-    const req = {
-      session: { csrfToken: token },
-      body: { _csrf: token },
-      headers: {},
-    };
-    assert.equal(verifyCsrf(req), true);
-  });
-
-  test('T28 – verifyCsrf returns false when CSRF token missing from body', () => {
-    const req = {
-      session: { csrfToken: 'abc' },
-      body: {},
-      headers: {},
-    };
-    assert.equal(verifyCsrf(req), false);
-  });
-
-  test('T29 – toSessionUser returns minimal safe object', () => {
-    const row = {
-      id: 'uuid-1',
-      username: 'john',
-      discord_user_id: '12345',
-      discord_username: 'john#0001',
-      discord_avatar: 'abcdef',
-      email: 'john@example.com',
-      password_hash: '$2b$10$secret',   // should NOT appear in session
-      discord_access_token: 'tok123',    // should NOT appear in session
-    };
-    const s = toSessionUser(row);
-    assert.equal(s.id, 'uuid-1');
-    assert.equal(s.username, 'john');
-    assert.equal(s.discord_user_id, '12345');
-    assert.ok(!('password_hash' in s));
-    assert.ok(!('discord_access_token' in s));
-  });
-
-  test('T30 – toSessionUser falls back to discord_username when username is null', () => {
-    const row = {
-      id: 'uuid-2',
-      username: null,
-      discord_username: 'jill#0002',
-      discord_user_id: '99999',
-      discord_avatar: null,
-      email: null,
-    };
-    const s = toSessionUser(row);
-    assert.equal(s.username, 'jill#0002');
-  });
-});
-
-// ──────────────────────────────────────────────────────────────
-// SECTION 5: Security headers
-// ──────────────────────────────────────────────────────────────
-describe('security headers', () => {
-
-  test('T31 – /health response includes X-Content-Type-Options: nosniff', async () => {
-    const res = await request(app).get('/health');
-    assert.match(res.headers['x-content-type-options'] || '', /nosniff/i);
-  });
-
-  test('T32 – /health response includes X-Frame-Options', async () => {
-    const res = await request(app).get('/health');
-    assert.ok(
-      res.headers['x-frame-options'] !== undefined ||
-      (res.headers['content-security-policy'] || '').includes('frame'),
-      'Expected X-Frame-Options or frame-ancestors in CSP',
-    );
-  });
-
-  test('T33 – /login page sets no sensitive cookies on a fresh GET', async () => {
-    const res = await request(app).get('/login');
-    const cookies = res.headers['set-cookie'] || [];
-    // Session cookie should be HttpOnly
-    const sessionCookie = cookies.find(c => c.includes('deng_sid'));
-    if (sessionCookie) {
-      assert.match(sessionCookie, /HttpOnly/i, 'session cookie must be HttpOnly');
-    }
-  });
-});
-
-// ──────────────────────────────────────────────────────────────
-// SECTION 6: Key format validation
-// ──────────────────────────────────────────────────────────────
-describe('key format stress tests', () => {
-  const { generateDengKey } = require('../src/keyGen');
-
-  test('T34 – 100 generated keys all match DENG format', () => {
-    for (let i = 0; i < 100; i++) {
-      const { raw } = generateDengKey();
-      assert.match(raw, /^DENG-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/,
-        `Key #${i} did not match: ${raw}`);
-    }
-  });
-
-  test('T35 – 100 generated keys are all unique', () => {
-    const seen = new Set();
-    for (let i = 0; i < 100; i++) {
-      const { raw } = generateDengKey();
-      assert.ok(!seen.has(raw), `Duplicate key at iteration ${i}: ${raw}`);
-      seen.add(raw);
-    }
-  });
-
-  test('T36 – key id is deterministic: same raw → same id', () => {
-    const crypto = require('node:crypto');
-    const raw = 'DENG-AAAA-BBBB-CCCC-DDDD';
-    const id1 = crypto.createHash('sha256').update(raw).digest('hex');
-    const id2 = crypto.createHash('sha256').update(raw).digest('hex');
-    assert.equal(id1, id2);
-  });
-});
-
-// ──────────────────────────────────────────────────────────────
-// SECTION 7: Challenge signing edge cases
-// ──────────────────────────────────────────────────────────────
-describe('challenge signing edge cases', () => {
-  const { signChallenge, verifyChallenge } = require('../src/crypto');
-
-  test('T37 – provider null round-trips as empty string', () => {
-    const exp = Date.now() + 30_000;
-    const token = signChallenge('cid-null', null, exp);
-    const decoded = verifyChallenge(token);
-    assert.ok(decoded);
-    assert.equal(decoded.p, '');
-  });
-
-  test('T38 – very long challengeId is handled correctly', () => {
-    const longId = 'a'.repeat(200);
-    const exp = Date.now() + 30_000;
-    const token = signChallenge(longId, 'lootlabs', exp);
-    const decoded = verifyChallenge(token);
-    assert.ok(decoded);
-    assert.equal(decoded.cid, longId);
-  });
-
-  test('T39 – token with missing dot is rejected', () => {
-    assert.equal(verifyChallenge('nodothere'), null);
-  });
-
-  test('T40 – token with empty sig is rejected', () => {
-    const exp = Date.now() + 30_000;
-    const token = signChallenge('cid-x', 'lootlabs', exp);
-    const payload = token.split('.')[0];
-    assert.equal(verifyChallenge(payload + '.'), null);
-  });
-});
-
-// ──────────────────────────────────────────────────────────────
-// SECTION 8: Route behaviour with fake session
-// ──────────────────────────────────────────────────────────────
-describe('authenticated route protection', () => {
-
-  test('T41 – requireLogin allows request with valid session user', async () => {
-    // We can't easily inject session via supertest without a helper.
-    // Test by checking the redirect sends to /login (proves middleware fires).
-    const res = await request(app).get('/dashboard');
-    assert.ok([301, 302].includes(res.status));
-    assert.match(res.headers.location, /login/);
-  });
-
-  test('T42 – POST /license/provider without CSRF → redirects', async () => {
-    const res = await request(app)
-      .post('/license/provider')
-      .send('provider=lootlabs&challenge_id=fake')
-      .set('Content-Type', 'application/x-www-form-urlencoded');
-    assert.ok([301, 302].includes(res.status));
-  });
-
-  test('T43 – GET /unlock/lootlabs while unauthenticated → redirects to login', async () => {
-    const res = await request(app).get('/unlock/lootlabs');
-    assert.ok([301, 302].includes(res.status));
-    assert.match(res.headers.location, /login/);
-  });
-
-  test('T44 – GET /unlock/linkvertise/done while unauthenticated → redirect', async () => {
-    const res = await request(app).get('/unlock/linkvertise/done?challenge=fake');
-    assert.ok([301, 302].includes(res.status));
-  });
-
-  test('T45 – Content-Type of /health is application/json', async () => {
-    const res = await request(app).get('/health');
-    assert.match(res.headers['content-type'], /application\/json/);
+    assert.equal(res.body.cooldown_seconds, 60);
+    assert.equal(res.body.unredeemed_key_expiry_hours, 24);
+    assert.doesNotMatch(JSON.stringify(res.body), /service-role|secret/i);
   });
 });

@@ -1,7 +1,21 @@
 'use strict';
-/* global document, navigator */
+/* global document, localStorage, navigator */
 
-// ── Cooldown timer ────────────────────────────────────────────
+(function initProgressMemory() {
+  try {
+    var stepEl = document.querySelector('[data-portal-step]');
+    if (!stepEl) return;
+    var state = {
+      step: stepEl.dataset.portalStep || '',
+      provider: stepEl.dataset.provider || '',
+      updatedAt: Date.now()
+    };
+    localStorage.setItem('deng_tool_key_progress', JSON.stringify(state));
+  } catch {
+    // Local storage is only a harmless UX hint. Server state is authoritative.
+  }
+}());
+
 (function initCooldown() {
   var notice = document.querySelector('.cooldown-notice');
   if (!notice) return;
@@ -13,28 +27,22 @@
   if (btn) btn.disabled = true;
 
   var remaining = seconds;
-
   function tick() {
     if (!counter) return;
     var m = Math.floor(remaining / 60);
     var s = remaining % 60;
-    counter.textContent = m > 0
-      ? m + 'm ' + String(s).padStart(2, '0') + 's'
-      : s + 's';
-
+    counter.textContent = m > 0 ? m + 'm ' + String(s).padStart(2, '0') + 's' : s + 's';
     if (remaining <= 0) {
       notice.style.display = 'none';
       if (btn) btn.disabled = false;
       return;
     }
-    remaining--;
+    remaining -= 1;
     setTimeout(tick, 1000);
   }
-
   tick();
 }());
 
-// ── Auto-dismiss alerts ───────────────────────────────────────
 (function initAlerts() {
   var alerts = document.querySelectorAll('.alert');
   alerts.forEach(function(el) {

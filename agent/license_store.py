@@ -118,6 +118,26 @@ def _seconds_since(iso_str: str | None) -> float | None:
         return None
 
 
+def _license_record_has_owner(record: dict[str, Any]) -> bool:
+    """Return True when a key is owned by Discord or a web portal account."""
+    owner_id = record.get("owner_discord_id")
+    site_user_id = record.get("site_user_id")
+    return bool(str(owner_id or "").strip() or str(site_user_id or "").strip())
+
+
+def _iso_expired(iso_str: str | None) -> bool:
+    if not iso_str:
+        return False
+    try:
+        normalized = str(iso_str).replace("Z", "+00:00")
+        exp_dt = datetime.fromisoformat(normalized)
+        if exp_dt.tzinfo is None:
+            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > exp_dt
+    except (ValueError, TypeError):
+        return False
+
+
 # ── Base interface ─────────────────────────────────────────────────────────────
 
 class BaseLicenseStore(ABC):
@@ -907,21 +927,15 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 app_version="install",
             )
             return RESULT_REVOKED
-        expires = record.get("expires_at")
-        if expires:
-            try:
-                exp_dt = datetime.fromisoformat(expires)
-                if datetime.now(timezone.utc) > exp_dt:
-                    self.log_license_check(
-                        key_id=key_hash,
-                        install_id_hash=install_id_hash,
-                        result=RESULT_EXPIRED,
-                        device_model="bootstrap",
-                        app_version="install",
-                    )
-                    return RESULT_EXPIRED
-            except (ValueError, TypeError):
-                pass
+        if _iso_expired(record.get("expires_at")):
+            self.log_license_check(
+                key_id=key_hash,
+                install_id_hash=install_id_hash,
+                result=RESULT_EXPIRED,
+                device_model="bootstrap",
+                app_version="install",
+            )
+            return RESULT_EXPIRED
         owner_id = record.get("owner_discord_id")
         if owner_id is None or str(owner_id).strip() == "":
             self.log_license_check(
@@ -1322,6 +1336,10 @@ class SupabaseLicenseStore(BaseLicenseStore):
         record = res.data[0]
         if record.get("status") == "revoked":
             raise KeyNotFoundError("This key has been revoked.")
+        if _iso_expired(record.get("expires_at")):
+            raise ExpiredKeyError(
+                "This key has expired (not claimed within 24 hours of creation)."
+            )
         owner = record.get("owner_discord_id")
         if owner == discord_user_id:
             from . import license_key_export as lke
@@ -1367,9 +1385,17 @@ class SupabaseLicenseStore(BaseLicenseStore):
             raise UserLimitError(
                 f"You have reached your license key limit ({max_keys})."
             )
-        self._client.table("license_keys").update(
-            {"owner_discord_id": discord_user_id}
-        ).eq("id", key_hash).execute()
+        update_payload = {"owner_discord_id": discord_user_id, "expires_at": None}
+        try:
+            update_payload["redeemed_at"] = _utc_now()
+            self._client.table("license_keys").update(update_payload).eq("id", key_hash).execute()
+        except Exception as exc:
+            err = str(exc).lower()
+            if "redeemed_at" in err or "column" in err or "pgrst204" in err:
+                update_payload.pop("redeemed_at", None)
+                self._client.table("license_keys").update(update_payload).eq("id", key_hash).execute()
+            else:
+                raise
         self.audit_admin_action(
             discord_user_id,
             "redeem_key",
@@ -1699,7 +1725,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
         key_hash = hash_license_key(normalized)
         key_res = (
             self._client.table("license_keys")
-            .select("status, expires_at, owner_discord_id")
+            .select("status, expires_at, owner_discord_id, site_user_id")
             .eq("id", key_hash)
             .execute()
         )
@@ -1737,8 +1763,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
                     return RESULT_EXPIRED
             except (ValueError, TypeError):
                 pass
-        owner_id = record.get("owner_discord_id")
-        if owner_id is None or str(owner_id).strip() == "":
+        if not _license_record_has_owner(record):
             self.log_license_check(
                 key_id=key_hash,
                 install_id_hash=install_id_hash,
@@ -1821,7 +1846,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
         key_hash = hash_license_key(normalized)
         key_res = (
             self._client.table("license_keys")
-            .select("status, expires_at, owner_discord_id")
+            .select("status, expires_at, owner_discord_id, site_user_id")
             .eq("id", key_hash)
             .execute()
         )
@@ -1838,20 +1863,13 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 result=RESULT_REVOKED, device_model=device_model, app_version=app_version,
             )
             return RESULT_REVOKED
-        expires = record.get("expires_at")
-        if expires:
-            try:
-                exp_dt = datetime.fromisoformat(expires)
-                if datetime.now(timezone.utc) > exp_dt:
-                    self.log_license_check(
-                        key_id=key_hash, install_id_hash=install_id_hash,
-                        result=RESULT_EXPIRED, device_model=device_model, app_version=app_version,
-                    )
-                    return RESULT_EXPIRED
-            except (ValueError, TypeError):
-                pass
-        owner_id = record.get("owner_discord_id")
-        if owner_id is None or str(owner_id).strip() == "":
+        if _iso_expired(record.get("expires_at")):
+            self.log_license_check(
+                key_id=key_hash, install_id_hash=install_id_hash,
+                result=RESULT_EXPIRED, device_model=device_model, app_version=app_version,
+            )
+            return RESULT_EXPIRED
+        if not _license_record_has_owner(record):
             self.log_license_check(
                 key_id=key_hash,
                 install_id_hash=install_id_hash,
@@ -1912,6 +1930,22 @@ class SupabaseLicenseStore(BaseLicenseStore):
             key_id=key_hash, install_id_hash=install_id_hash,
             result=RESULT_ACTIVE, device_model=device_model, app_version=app_version,
         )
+        if record.get("expires_at"):
+            try:
+                self._client.table("license_keys").update(
+                    {"expires_at": None, "redeemed_at": _utc_now()}
+                ).eq("id", key_hash).execute()
+            except Exception as exc:
+                err = str(exc).lower()
+                if "redeemed_at" in err or "column" in err or "pgrst204" in err:
+                    try:
+                        self._client.table("license_keys").update(
+                            {"expires_at": None}
+                        ).eq("id", key_hash).execute()
+                    except Exception:
+                        pass
+                else:
+                    pass
         return RESULT_ACTIVE
 
     def log_license_check(self, **kwargs: Any) -> None:

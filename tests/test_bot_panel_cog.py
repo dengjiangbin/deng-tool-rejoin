@@ -150,45 +150,30 @@ class TestPanelViewFiveButtons(unittest.TestCase):
 
 # ── PanelView — Generate Key ──────────────────────────────────────────────────
 
-class TestPanelViewGenerate(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self._tmp = TemporaryDirectory()
-        self.store = _make_store(self._tmp.name)
+class TestPanelViewGenerate(unittest.TestCase):
+    def test_generate_key_is_web_portal_link_button(self) -> None:
+        with TemporaryDirectory() as tmp, patch.dict(os.environ, {"TOOL_SITE_URL": "https://tool.deng.my.id"}):
+            store = _make_store(tmp)
+            view = PanelView(store)
+            generate = next(c for c in view.children if getattr(c, "label", "") == "Generate Key")
+            self.assertEqual(generate.url, "https://tool.deng.my.id")
+            self.assertIsNone(getattr(generate, "custom_id", None))
 
-    async def asyncTearDown(self) -> None:
-        self._tmp.cleanup()
+    def test_generate_key_button_does_not_generate_inside_discord(self) -> None:
+        with TemporaryDirectory() as tmp:
+            store = _make_store(tmp)
+            view = PanelView(store)
+            generate = next(c for c in view.children if getattr(c, "label", "") == "Generate Key")
+            self.assertEqual(getattr(generate, "url", None), os.environ.get("TOOL_SITE_URL", "https://tool.deng.my.id"))
+            self.assertEqual(store.count_user_keys("42"), 0)
 
-    async def test_generate_creates_key_and_responds_ephemeral(self) -> None:
-        inter = _fake_interaction()
-        view = PanelView(self.store)
-        await view.btn_generate.callback(inter)
-        inter.response.defer.assert_called_once_with(ephemeral=True)
-        inter.followup.send.assert_called_once()
-        _, kwargs = inter.followup.send.call_args
-        self.assertTrue(kwargs.get("ephemeral"))
-
-    async def test_generate_embed_contains_key(self) -> None:
-        inter = _fake_interaction()
-        view = PanelView(self.store)
-        await view.btn_generate.callback(inter)
-        _, kwargs = inter.followup.send.call_args
-        content = kwargs.get("content") or ""
-        self.assertIn("DENG-", content)
-
-    async def test_generate_cooldown_on_second(self) -> None:
-        """Second generate within 60s should show cooldown response (unlimited keys)."""
-        inter = _fake_interaction(user=_fake_user(uid=42))
-        view = PanelView(self.store)
-        # First generate succeeds
-        await view.btn_generate.callback(inter)
-        # Second generate hits 60s cooldown (not a key limit — keys are unlimited)
-        inter2 = _fake_interaction(user=_fake_user(uid=42))
-        await view.btn_generate.callback(inter2)
-        _, kwargs = inter2.followup.send.call_args
-        embed = kwargs["embed"]
-        # Cooldown response shows "⏳ Please Wait", not "❌ Key Limit Reached"
-        self.assertIn("Wait", embed.title)
-        self.assertTrue(kwargs.get("ephemeral"))
+    def test_generate_key_link_uses_portal_domain_default(self) -> None:
+        """The Generate Key control defaults to the portal URL."""
+        with TemporaryDirectory() as tmp:
+            store = _make_store(tmp)
+            view = PanelView(store)
+            generate = next(c for c in view.children if getattr(c, "label", "") == "Generate Key")
+            self.assertEqual(getattr(generate, "url", None), os.environ.get("TOOL_SITE_URL", "https://tool.deng.my.id"))
 
 
 # ── PanelView — Reset HWID ────────────────────────────────────────────────────
@@ -214,10 +199,10 @@ class TestPanelViewResetHWID(unittest.IsolatedAsyncioTestCase):
     async def test_reset_opens_selector_when_key_exists(self) -> None:
         """Having an unbound key → selector view is opened via send_message."""
         uid = 88
-        inter_gen = _fake_interaction(user=_fake_user(uid=uid))
         inter_reset = _fake_interaction(user=_fake_user(uid=uid))
         view = PanelView(self.store)
-        await view.btn_generate.callback(inter_gen)
+        self.store.get_or_create_user(str(uid))
+        self.store.create_key_for_user(str(uid))
         await view.btn_reset_hwid.callback(inter_reset)
         inter_reset.response.send_message.assert_called_once()
         _, kwargs = inter_reset.response.send_message.call_args
@@ -363,10 +348,10 @@ class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
         self.assertIn("license keys", (embeds[0].description or "").lower())
 
     async def test_key_stats_shows_unused(self) -> None:
-        inter_g = _fake_interaction(user=_fake_user(uid=502))
         inter_s = _fake_interaction(user=_fake_user(uid=502))
         view = PanelView(self.store)
-        await view.btn_generate.callback(inter_g)
+        self.store.get_or_create_user("502")
+        self.store.create_key_for_user("502")
         await view.btn_key_stats.callback(inter_s)
         _, kwargs = inter_s.followup.send.call_args
         texts = " ".join((e.description or "") for e in (kwargs.get("embeds") or []))
@@ -418,8 +403,14 @@ class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
         self.store.get_or_create_user(str(uid))
         self.store.set_user_max_keys(str(uid), 10)
         gen_view = PanelView(self.store)
-        for _ in range(6):
-            await gen_view.btn_generate.callback(_fake_interaction(user=_fake_user(uid=uid)))
+        import agent.license_store as _ls
+        _orig = _ls.GENERATION_COOLDOWN_SECONDS
+        _ls.GENERATION_COOLDOWN_SECONDS = 0
+        try:
+            for _ in range(6):
+                self.store.create_key_for_user(str(uid))
+        finally:
+            _ls.GENERATION_COOLDOWN_SECONDS = _orig
         inter_s = _fake_interaction(user=_fake_user(uid=uid))
         await gen_view.btn_key_stats.callback(inter_s)
         stats_view = inter_s.followup.send.call_args[1]["view"]
@@ -622,14 +613,11 @@ class TestSecurity(unittest.IsolatedAsyncioTestCase):
         self.assertIn(normalize_license_key(full_key), content)
         self.assertNotIn("...", content)
 
-    async def test_generate_key_shown_once_in_full(self) -> None:
-        inter = _fake_interaction(user=_fake_user(uid=700))
+    async def test_generate_key_is_not_returned_by_discord_button(self) -> None:
         view = PanelView(self.store)
-        await view.btn_generate.callback(inter)
-        _, kwargs = inter.followup.send.call_args
-        content = kwargs.get("content") or ""
-        # Full key IS in generate response (one-time display)
-        self.assertIn("DENG-", content)
+        generate = next(c for c in view.children if getattr(c, "label", "") == "Generate Key")
+        self.assertEqual(getattr(generate, "url", None), os.environ.get("TOOL_SITE_URL", "https://tool.deng.my.id"))
+        self.assertEqual(self.store.count_user_keys("700"), 0)
 
 
 # ── Admin status command ──────────────────────────────────────────────────────

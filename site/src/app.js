@@ -7,8 +7,10 @@ const ejsLayouts   = require('express-ejs-layouts');
 const path         = require('path');
 
 const routes = require('./routes');
+const { FileSessionStore } = require('./sessionStore');
 
 const app = express();
+app.disable('x-powered-by');
 
 // ---------------------------------------------------------------
 // Security headers (helmet)
@@ -24,10 +26,18 @@ app.use(helmet({
       ],
       styleSrc:  ["'self'", "'unsafe-inline'"],
       imgSrc:    ["'self'", 'data:', 'https://cdn.discordapp.com'],
-      connectSrc:["'self'"],
+      connectSrc:[
+        "'self'",
+        'https://publisher.linkvertise.com',
+        'https://linkvertise.com',
+        'https://*.linkvertise.com',
+      ],
       frameSrc:  ["'none'"],
       objectSrc: ["'none'"],
-      upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
+      baseUri:   ["'self'"],
+      formAction:["'self'"],
+      frameAncestors: ["'none'"],
+      upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : [],
     },
   },
   hsts: process.env.NODE_ENV === 'production'
@@ -46,6 +56,7 @@ app.set('trust proxy', 1);
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
+  skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
@@ -68,6 +79,10 @@ if (!sessionSecret || sessionSecret.length < 32) {
 
 app.use(session({
   name: 'deng_sid',
+  store: new FileSessionStore({
+    dir: process.env.TOOL_SITE_SESSION_DIR,
+    ttlMs: 7 * 24 * 60 * 60 * 1000,
+  }),
   secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
@@ -94,6 +109,9 @@ app.set('layout extractScripts', true);
 app.use('/public', express.static(path.join(__dirname, '..', 'public'), {
   maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
 }));
+app.use('/assets', express.static(path.join(__dirname, '..', 'public'), {
+  maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
+}));
 
 // ---------------------------------------------------------------
 // CSRF middleware – attach token to res.locals for all EJS views
@@ -112,6 +130,7 @@ app.use((req, res, next) => {
   res.locals.flash = req.session.flash || {};
   res.locals.csrfToken = req.session.csrfToken;
   res.locals.user = req.session.user || null;
+  res.locals.publicUrl = process.env.TOOL_SITE_PUBLIC_URL || 'https://tool.deng.my.id';
   delete req.session.flash;
   next();
 });

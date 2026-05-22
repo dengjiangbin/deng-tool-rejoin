@@ -1,27 +1,66 @@
 'use strict';
 /**
- * Challenge lifecycle management.
- * Each attempt creates one row in license_ad_challenges.
- * Status machine: created → provider_selected → pending_ad → ad_completed → key_generated
+ * Challenge lifecycle management for the Luarmor-style key flow.
+ *
+ * Status machine:
+ *   created -> provider_selected -> pending_ad -> ad_completed -> key_generated
  */
-const supabase       = require('./db');
-const { signChallenge, sha256, randomHex } = require('./crypto');
+const supabase = require('./db');
+const { signChallenge, verifyChallenge, sha256, randomHex } = require('./crypto');
 const { generateDengKey } = require('./keyGen');
 
-const COOLDOWN_SECONDS   = parseInt(process.env.KEY_GENERATION_COOLDOWN_SECONDS || '60', 10);
-const CHALLENGE_TTL_MS   = 30 * 60 * 1000;               // 30 minute window to complete flow
-const KEY_EXPIRY_HOURS   = parseInt(process.env.UNREDEEMED_KEY_EXPIRY_HOURS || '24', 10);
+const COOLDOWN_SECONDS = parseInt(process.env.KEY_GENERATION_COOLDOWN_SECONDS || '60', 10);
+const CHALLENGE_TTL_MS = 30 * 60 * 1000;
+const KEY_EXPIRY_HOURS = parseInt(process.env.UNREDEEMED_KEY_EXPIRY_HOURS || '24', 10);
 
-// ---------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------
-
-/** Return ISO string KEY_EXPIRY_HOURS from now */
 function keyExpiresAt() {
   return new Date(Date.now() + KEY_EXPIRY_HOURS * 3600 * 1000).toISOString();
 }
 
-/** Hash the express-session cookie value for fingerprinting */
+function missingColumn(error, columnName) {
+  const text = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+  return text.includes(columnName.toLowerCase()) || text.includes('pgrst204') || text.includes('column');
+}
+
+function syntheticLicenseOwnerId(siteUserId) {
+  return `site:${siteUserId}`;
+}
+
+async function ensureSyntheticLicenseUser(siteUserId) {
+  const syntheticId = syntheticLicenseOwnerId(siteUserId);
+  const { error } = await supabase
+    .from('license_users')
+    .upsert({
+      discord_user_id: syntheticId,
+      discord_username: 'DENG Tool Portal User',
+      max_keys: 999999,
+      is_owner: false,
+      is_blocked: false,
+    }, { onConflict: 'discord_user_id' });
+  if (error) throw new Error(`Portal owner compatibility row failed: ${error.message}`);
+  return syntheticId;
+}
+
+async function insertLicenseKey(payload, siteUserId, discordUserId) {
+  const { error } = await supabase.from('license_keys').insert(payload);
+  if (!error) return;
+
+  if (!missingColumn(error, 'site_user_id')) {
+    throw error;
+  }
+
+  const fallback = { ...payload };
+  delete fallback.site_user_id;
+  if (!fallback.owner_discord_id) {
+    fallback.owner_discord_id = await ensureSyntheticLicenseUser(siteUserId);
+  } else if (!discordUserId) {
+    fallback.owner_discord_id = await ensureSyntheticLicenseUser(siteUserId);
+  }
+
+  const retry = await supabase.from('license_keys').insert(fallback);
+  if (retry.error) throw retry.error;
+}
+
 function hashSession(req) {
   return sha256(req.sessionID || 'unknown');
 }
@@ -35,19 +74,21 @@ function hashUA(req) {
   return sha256(req.headers['user-agent'] || '');
 }
 
-// ---------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------
+function rowBelongsToRequest(row, req) {
+  return Boolean(
+    row &&
+    req.session &&
+    req.session.user &&
+    row.site_user_id === req.session.user.id &&
+    row.session_hash === hashSession(req),
+  );
+}
 
-/**
- * Enforce cooldown: reject if user generated a key within COOLDOWN_SECONDS.
- * Returns { allowed: boolean, secondsLeft: number }
- */
 async function checkCooldown(siteUserId) {
   const since = new Date(Date.now() - COOLDOWN_SECONDS * 1000).toISOString();
   const { data } = await supabase
     .from('license_ad_challenges')
-    .select('created_at')
+    .select('created_at, completed_at')
     .eq('site_user_id', siteUserId)
     .in('status', ['ad_completed', 'key_generated'])
     .gte('created_at', since)
@@ -55,30 +96,23 @@ async function checkCooldown(siteUserId) {
     .limit(1);
 
   if (data && data.length > 0) {
-    const lastMs   = new Date(data[0].created_at).getTime();
+    const lastMs = new Date(data[0].completed_at || data[0].created_at).getTime();
     const secondsLeft = Math.ceil((lastMs + COOLDOWN_SECONDS * 1000 - Date.now()) / 1000);
     return { allowed: false, secondsLeft: Math.max(0, secondsLeft) };
   }
   return { allowed: true, secondsLeft: 0 };
 }
 
-/**
- * Create a fresh challenge row (status='created').
- * Returns the full DB row.
- */
 async function createChallenge(req, siteUser) {
-  const stateHash = sha256(randomHex(32));
-  const expiresAt = new Date(Date.now() + CHALLENGE_TTL_MS).toISOString();
-
   const row = {
-    site_user_id:    siteUser.id,
+    site_user_id: siteUser.id,
     discord_user_id: siteUser.discord_user_id || null,
-    status:          'created',
-    session_hash:    hashSession(req),
-    ip_hash:         hashIp(req),
+    status: 'created',
+    session_hash: hashSession(req),
+    ip_hash: hashIp(req),
     user_agent_hash: hashUA(req),
-    state_hash:      stateHash,
-    expires_at:      expiresAt,
+    state_hash: sha256(randomHex(32)),
+    expires_at: new Date(Date.now() + CHALLENGE_TTL_MS).toISOString(),
   };
 
   const { data, error } = await supabase
@@ -91,42 +125,35 @@ async function createChallenge(req, siteUser) {
   return data;
 }
 
-/**
- * Select a provider for an existing challenge (status: created → provider_selected).
- * Returns updated row or throws.
- */
-async function selectProvider(challengeId, provider, req) {
+async function selectProvider(challengeId, provider, req, siteUser) {
   if (!['lootlabs', 'linkvertise'].includes(provider)) {
     throw new Error('Invalid provider');
   }
 
-  const expMs = Date.now() + CHALLENGE_TTL_MS;
-  const signed       = signChallenge(challengeId, provider, expMs);
-  const signedHash   = sha256(signed);
+  const signed = signChallenge(challengeId, provider, Date.now() + CHALLENGE_TTL_MS);
+  const signedHash = sha256(signed);
 
-  // Optimistic lock: only update if status is still 'created'
   const { data, error } = await supabase
     .from('license_ad_challenges')
     .update({
-      status:                 'provider_selected',
+      status: 'provider_selected',
       provider,
-      signed_challenge:       signed,
-      signed_challenge_hash:  signedHash,
-      session_hash:           hashSession(req),
+      signed_challenge_hash: signedHash,
+      session_hash: hashSession(req),
     })
     .eq('id', challengeId)
-    .eq('status', 'created')    // only succeeds if not already progressed
+    .eq('site_user_id', siteUser.id)
+    .eq('session_hash', hashSession(req))
+    .eq('status', 'created')
     .select()
     .single();
 
-  if (error || !data) throw new Error('Challenge no longer available (race condition or expired)');
-  return data;
+  if (error || !data) {
+    throw new Error('Challenge no longer available.');
+  }
+  return { ...data, signed_challenge: signed };
 }
 
-/**
- * Mark a challenge as 'pending_ad' (user is on the ad page).
- * Validates that the signed token is still valid.
- */
 async function markPendingAd(signedToken) {
   const sigHash = sha256(signedToken);
   const { data, error } = await supabase
@@ -141,9 +168,6 @@ async function markPendingAd(signedToken) {
   return data;
 }
 
-/**
- * Load a challenge by its signed-challenge hash (for unlock callbacks).
- */
 async function getChallengeByToken(signedToken) {
   const sigHash = sha256(signedToken);
   const { data, error } = await supabase
@@ -153,21 +177,31 @@ async function getChallengeByToken(signedToken) {
     .single();
 
   if (error || !data) return null;
-  if (new Date(data.expires_at) < new Date()) return null;  // expired
+  if (new Date(data.expires_at) < new Date()) return null;
   return data;
 }
 
-/**
- * Complete an ad challenge and generate a DENG key.
- * Performs an optimistic lock so duplicate callbacks are idempotent.
- *
- * Returns { key: string } on first call,
- *         { key: null, alreadyDone: true } on replay.
- */
+async function verifyChallengeForRequest(signedToken, req, expectedProvider) {
+  const decoded = verifyChallenge(signedToken);
+  if (!decoded || decoded.p !== expectedProvider) return null;
+
+  const row = await getChallengeByToken(signedToken);
+  if (!row) return null;
+  if (row.id !== decoded.cid) return null;
+  if (row.provider !== expectedProvider) return null;
+  if (!rowBelongsToRequest(row, req)) return null;
+  if (!['provider_selected', 'pending_ad'].includes(row.status)) return null;
+  return row;
+}
+
 async function completeAdAndGenerateKey(challengeRow) {
   const { id: challengeId, site_user_id, discord_user_id } = challengeRow;
 
-  // Atomically advance from pending_ad → ad_completed
+  const cooldown = await checkCooldown(site_user_id);
+  if (!cooldown.allowed) {
+    throw new Error(`Cooldown active. Try again in ${cooldown.secondsLeft}s.`);
+  }
+
   const { data: adDone, error: adErr } = await supabase
     .from('license_ad_challenges')
     .update({ status: 'ad_completed' })
@@ -177,7 +211,6 @@ async function completeAdAndGenerateKey(challengeRow) {
     .single();
 
   if (adErr || !adDone) {
-    // Check if already completed
     const { data: existing } = await supabase
       .from('license_ad_challenges')
       .select('status')
@@ -189,25 +222,22 @@ async function completeAdAndGenerateKey(challengeRow) {
     throw new Error('Challenge state conflict');
   }
 
-  // Generate key
   const { raw, id: keyId, prefix, suffix } = generateDengKey();
   const now = new Date().toISOString();
+  const expiresAt = keyExpiresAt();
 
-  // Store in license_keys (matches existing schema)
-  const { error: keyErr } = await supabase
-    .from('license_keys')
-    .insert({
-      id:               keyId,       // SHA-256 of raw key
-      prefix:           prefix,
-      suffix:           suffix,
+  try {
+    await insertLicenseKey({
+      id: keyId,
+      prefix,
+      suffix,
       owner_discord_id: discord_user_id || null,
-      status:           'active',
-      plan:             'free',
-      expires_at:       keyExpiresAt(),  // 24h unredeemed expiry
-    });
-
-  if (keyErr) {
-    // Roll back challenge status
+      site_user_id: site_user_id || null,
+      status: 'active',
+      plan: 'free',
+      expires_at: expiresAt,
+    }, site_user_id, discord_user_id);
+  } catch (keyErr) {
     await supabase
       .from('license_ad_challenges')
       .update({ status: 'failed', failure_reason: keyErr.message })
@@ -215,16 +245,15 @@ async function completeAdAndGenerateKey(challengeRow) {
     throw new Error(`Key store failed: ${keyErr.message}`);
   }
 
-  // Atomically mark key_generated (optimistic lock)
   const { data: finalRow, error: finalErr } = await supabase
     .from('license_ad_challenges')
     .update({
-      status:         'key_generated',
+      status: 'key_generated',
       license_key_id: keyId,
-      key_prefix:     prefix,
-      key_suffix:     suffix,
-      key_expires_at: keyExpiresAt(),
-      completed_at:   now,
+      key_prefix: prefix,
+      key_suffix: suffix,
+      key_expires_at: expiresAt,
+      completed_at: now,
     })
     .eq('id', challengeId)
     .eq('status', 'ad_completed')
@@ -232,18 +261,21 @@ async function completeAdAndGenerateKey(challengeRow) {
     .single();
 
   if (finalErr || !finalRow) {
-    // Key was stored but row couldn't update — log but don't fail user
-    console.error('[challenge] Warning: key stored but challenge row not finalized:', finalErr);
+    console.error('[challenge] key stored but challenge row not finalized');
   }
 
   return { key: raw, alreadyDone: false };
 }
 
 module.exports = {
+  COOLDOWN_SECONDS,
+  KEY_EXPIRY_HOURS,
   checkCooldown,
   createChallenge,
   selectProvider,
   markPendingAd,
   getChallengeByToken,
+  verifyChallengeForRequest,
   completeAdAndGenerateKey,
+  hashSession,
 };

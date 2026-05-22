@@ -1,46 +1,34 @@
 'use strict';
 /**
- * All HTTP routes for the DENG Tool web portal.
- *
- * Route map:
- *   GET  /                       → redirect to /dashboard or /login
- *   GET  /login                  → login page
- *   POST /auth/login             → local auth
- *   GET  /auth/discord           → Discord OAuth redirect
- *   GET  /auth/discord/callback  → Discord OAuth callback
- *   POST /auth/logout            → destroy session
- *   GET  /dashboard              → protected dashboard page
- *   GET  /license                → protected My License page
- *   POST /license/generate       → start key generation flow
- *   POST /license/provider       → choose provider (lootlabs|linkvertise)
- *   GET  /unlock/linkvertise     → intermediate page (Linkvertise script)
- *   GET  /unlock/lootlabs        → LootLabs callback landing
- *   GET  /key/result             → show generated key (once)
- *   GET  /health                 → JSON health endpoint (public)
+ * HTTP routes for the DENG Tool portal.
  */
-const express    = require('express');
-const rateLimit  = require('express-rate-limit');
+const express = require('express');
+const rateLimit = require('express-rate-limit');
 
 const auth = require('./auth');
 const {
-  requireLogin, verifyCsrf,
-  buildDiscordAuthUrl, exchangeDiscordCode, fetchDiscordUser,
-  upsertDiscordUser, localLogin, toSessionUser,
+  requireLogin,
+  verifyCsrf,
+  buildDiscordAuthUrl,
+  exchangeDiscordCode,
+  fetchDiscordUser,
+  upsertDiscordUser,
+  localLogin,
+  toSessionUser,
 } = auth;
 const challenge = require('./challenge');
-const { verifyChallenge } = require('./crypto');
-const supabase  = require('./db');
+const supabase = require('./db');
 
 const router = express.Router();
-const PUBLIC_URL = process.env.TOOL_SITE_PUBLIC_URL || 'https://tool.deng.my.id';
-const LOOTLABS_URL = process.env.LOOTLABS_PUBLISHER_URL || '';
 
-// ---------------------------------------------------------------
-// Per-route rate limiters
-// ---------------------------------------------------------------
+const PUBLIC_URL = (process.env.TOOL_SITE_PUBLIC_URL || 'https://tool.deng.my.id').replace(/\/+$/, '');
+const LINKVERTISE_PUBLISHER_ID = process.env.LINKVERTISE_PUBLISHER_ID || '5914830';
+const LOOTLABS_TEMPLATE_URL = process.env.LOOTLABS_TEMPLATE_URL || process.env.LOOTLABS_PUBLISHER_URL || '';
+
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
+  skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many login attempts, please wait.' },
@@ -49,122 +37,304 @@ const authLimiter = rateLimit({
 const generateLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5,
+  skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many key generation attempts.' },
 });
 
-// ---------------------------------------------------------------
-// Public: root redirect
-// ---------------------------------------------------------------
+function wantsJson(req) {
+  return (req.headers.accept || '').includes('application/json') ||
+    (req.headers['content-type'] || '').includes('application/json');
+}
+
+function safeFlash(req, key, value) {
+  req.session.flash = { ...(req.session.flash || {}), [key]: value };
+}
+
+function maskKeyRow(row) {
+  const prefix = row.key_prefix || 'DENG-????-????';
+  const suffix = row.key_suffix || '????-????';
+  return `${prefix}-****-${String(suffix).split('-').pop() || '????'}`;
+}
+
+function friendlyStatus(row) {
+  if (!row) return 'Unknown';
+  if (row.status === 'key_generated') {
+    if (row.key_expires_at && new Date(row.key_expires_at) < new Date()) return 'Expired';
+    return 'Unredeemed';
+  }
+  if (row.status === 'failed') return 'Failed';
+  if (row.status === 'expired') return 'Expired';
+  if (row.status === 'revoked') return 'Revoked';
+  return 'Pending';
+}
+
+function summarizeHistory(history) {
+  const rows = history || [];
+  const unredeemed = rows.filter((row) => friendlyStatus(row) === 'Unredeemed').length;
+  const expired = rows.filter((row) => friendlyStatus(row) === 'Expired').length;
+  return {
+    total: rows.length,
+    unredeemed,
+    expired,
+    latest: rows[0] || null,
+    cooldownSeconds: challenge.COOLDOWN_SECONDS,
+    keyExpiryHours: challenge.KEY_EXPIRY_HOURS,
+  };
+}
+
+async function loadHistory(siteUserId, limit = 20) {
+  const { data, error } = await supabase
+    .from('license_ad_challenges')
+    .select('id, key_prefix, key_suffix, status, provider, created_at, key_expires_at, completed_at, license_key_id')
+    .eq('site_user_id', siteUserId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message || 'history query failed');
+  return data || [];
+}
+
+function buildUnlockUrl(provider, signed) {
+  return `${PUBLIC_URL}/unlock/${provider}?challenge=${encodeURIComponent(signed)}`;
+}
+
+function buildLootlabsUrl(unlockUrl) {
+  if (!LOOTLABS_TEMPLATE_URL) return unlockUrl;
+  if (LOOTLABS_TEMPLATE_URL.includes('{url}')) {
+    return LOOTLABS_TEMPLATE_URL.replace('{url}', encodeURIComponent(unlockUrl));
+  }
+  return unlockUrl;
+}
+
+function ensureProvider(provider) {
+  return ['lootlabs', 'linkvertise'].includes(provider) ? provider : '';
+}
+
+async function handleKeyStart(req, res) {
+  if (!verifyCsrf(req)) {
+    if (wantsJson(req)) return res.status(403).json({ error: 'invalid_csrf' });
+    safeFlash(req, 'error', 'Invalid request token.');
+    return res.redirect('/license');
+  }
+
+  const { user } = req.session;
+  try {
+    const { allowed, secondsLeft } = await challenge.checkCooldown(user.id);
+    if (!allowed) {
+      if (wantsJson(req)) {
+        return res.status(429).json({ error: 'cooldown', secondsLeft });
+      }
+      req.session.flash = {
+        error: `Please wait ${secondsLeft}s before generating another key.`,
+        cooldown: secondsLeft,
+      };
+      return res.redirect('/license');
+    }
+
+    const row = await challenge.createChallenge(req, user);
+    req.session.pendingChallenge = row.id;
+
+    if (wantsJson(req)) return res.json({ challenge_id: row.id, status: row.status });
+    return res.render('choose_provider', {
+      title: 'Choose Unlock Method - DENG Tool',
+      challengeId: row.id,
+    });
+  } catch (err) {
+    console.error('[api/key/start]', err.message || err);
+    if (wantsJson(req)) return res.status(500).json({ error: 'start_failed' });
+    safeFlash(req, 'error', 'Could not start key generation. Please try again.');
+    return res.redirect('/license');
+  }
+}
+
+async function handleProvider(req, res) {
+  if (!verifyCsrf(req)) {
+    if (wantsJson(req)) return res.status(403).json({ error: 'invalid_csrf' });
+    safeFlash(req, 'error', 'Invalid request token.');
+    return res.redirect('/license');
+  }
+
+  const provider = ensureProvider(String(req.body.provider || ''));
+  const challengeId = String(req.body.challenge_id || '');
+  const { user } = req.session;
+
+  if (!provider) {
+    safeFlash(req, 'error', 'Invalid provider selection.');
+    return res.redirect('/license');
+  }
+  if (!challengeId || challengeId !== req.session.pendingChallenge) {
+    safeFlash(req, 'error', 'Challenge mismatch. Please start again.');
+    return res.redirect('/license');
+  }
+
+  try {
+    const row = await challenge.selectProvider(challengeId, provider, req, user);
+    const signed = row.signed_challenge;
+    await challenge.markPendingAd(signed);
+
+    req.session.pendingProvider = provider;
+    req.session.pendingSignedChallenge = signed;
+
+    const unlockUrl = buildUnlockUrl(provider, signed);
+    const adUrl = provider === 'lootlabs' ? buildLootlabsUrl(unlockUrl) : unlockUrl;
+
+    if (wantsJson(req)) {
+      return res.json({ provider, unlock_url: unlockUrl, ad_url: adUrl });
+    }
+
+    return res.render('provider_unlock', {
+      title: 'Unlock Key - DENG Tool',
+      provider,
+      unlockUrl,
+      adUrl,
+      publicUrl: PUBLIC_URL,
+      publisherId: LINKVERTISE_PUBLISHER_ID,
+    });
+  } catch (err) {
+    console.error('[api/key/provider]', err.message || err);
+    safeFlash(req, 'error', 'Failed to set up ad unlock. Please try again.');
+    return res.redirect('/license');
+  }
+}
+
+async function handleUnlock(req, res, provider) {
+  const selected = ensureProvider(provider);
+  if (!selected) {
+    safeFlash(req, 'error', 'Invalid unlock provider.');
+    return res.redirect('/license');
+  }
+
+  const signed = String(req.query.challenge || req.session.pendingSignedChallenge || '');
+  if (!signed) {
+    safeFlash(req, 'error', 'Missing challenge token. Please start again.');
+    return res.redirect('/license');
+  }
+
+  try {
+    let row = await challenge.verifyChallengeForRequest(signed, req, selected);
+    if (!row) {
+      safeFlash(req, 'error', 'Challenge expired or invalid. Please start again.');
+      return res.redirect('/license');
+    }
+
+    if (row.status === 'provider_selected') {
+      await challenge.markPendingAd(signed);
+      row = await challenge.verifyChallengeForRequest(signed, req, selected);
+    }
+
+    const { key, alreadyDone } = await challenge.completeAdAndGenerateKey(row);
+    if (alreadyDone && req.session.generatedKey) {
+      return res.redirect('/key/result');
+    }
+    if (alreadyDone) {
+      safeFlash(req, 'error', 'This challenge was already used.');
+      return res.redirect('/license');
+    }
+
+    req.session.generatedKey = key;
+    req.session.generatedKeyAt = Date.now();
+    delete req.session.pendingChallenge;
+    delete req.session.pendingProvider;
+    delete req.session.pendingSignedChallenge;
+    return res.redirect('/key/result');
+  } catch (err) {
+    console.error(`[unlock/${selected}]`, err.message || err);
+    safeFlash(req, 'error', 'Failed to complete key generation.');
+    return res.redirect('/license');
+  }
+}
+
 router.get('/', (req, res) => {
-  if (req.session.user) return res.redirect('/dashboard');
-  res.redirect('/login');
+  res.redirect(req.session.user ? '/dashboard' : '/login');
 });
 
-// ---------------------------------------------------------------
-// Health check (public)
-// ---------------------------------------------------------------
 router.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'deng-tool-site', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    service: 'deng-tool-site',
+    port: parseInt(process.env.TOOL_SITE_PORT || '8791', 10),
+    timestamp: new Date().toISOString(),
+  });
 });
 
-// ---------------------------------------------------------------
-// Login page
-// ---------------------------------------------------------------
 router.get('/login', (req, res) => {
   if (req.session.user) return res.redirect('/dashboard');
-  res.render('login', { title: 'Sign In – DENG Tool' });
+  return res.render('login', { title: 'Sign In - DENG Tool' });
 });
 
-// ---------------------------------------------------------------
-// Local login (POST)
-// ---------------------------------------------------------------
 router.post('/auth/login', authLimiter, async (req, res) => {
   if (!verifyCsrf(req)) {
-    req.session.flash = { error: 'Invalid request. Please try again.' };
+    safeFlash(req, 'error', 'Invalid request. Please try again.');
     return res.redirect('/login');
   }
 
   const { username, password } = req.body;
   if (!username || !password) {
-    req.session.flash = { error: 'Username and password are required.' };
+    safeFlash(req, 'error', 'Username and password are required.');
     return res.redirect('/login');
   }
 
   try {
-    const user = await localLogin(String(username).trim(), String(password));
+    const user = await localLogin(String(username), String(password));
     if (!user) {
-      req.session.flash = { error: 'Invalid username or password.' };
+      safeFlash(req, 'error', 'Invalid username or password.');
       return res.redirect('/login');
     }
-    // Regenerate session to prevent fixation
-    req.session.regenerate((err) => {
+    return req.session.regenerate((err) => {
       if (err) throw err;
       req.session.user = toSessionUser(user);
       req.session.flash = { success: `Welcome back, ${req.session.user.username}!` };
       res.redirect('/dashboard');
     });
   } catch (err) {
-    console.error('[auth/login]', err);
-    req.session.flash = { error: 'Login service unavailable. Please try again.' };
+    console.error('[auth/login]', err.message || err);
+    safeFlash(req, 'error', 'Login service unavailable. Please try again.');
+    return res.redirect('/login');
+  }
+});
+
+router.get('/auth/discord', (req, res) => {
+  try {
+    res.redirect(buildDiscordAuthUrl(req));
+  } catch (err) {
+    console.error('[auth/discord]', err.message || err);
+    safeFlash(req, 'error', 'Discord login is not configured yet. Use database login.');
     res.redirect('/login');
   }
 });
 
-// ---------------------------------------------------------------
-// Discord OAuth2 – start
-// ---------------------------------------------------------------
-router.get('/auth/discord', (req, res) => {
-  const url = buildDiscordAuthUrl(req);
-  res.redirect(url);
-});
-
-// ---------------------------------------------------------------
-// Discord OAuth2 – callback
-// ---------------------------------------------------------------
 router.get('/auth/discord/callback', authLimiter, async (req, res) => {
   const { code, state, error } = req.query;
-
   if (error) {
-    req.session.flash = { error: `Discord denied access: ${error}` };
+    safeFlash(req, 'error', `Discord denied access: ${error}`);
     return res.redirect('/login');
   }
 
   const storedState = req.session.oauthState;
   delete req.session.oauthState;
-
-  if (!storedState || String(state) !== storedState) {
-    req.session.flash = { error: 'Invalid OAuth state. Please try again.' };
-    return res.redirect('/login');
-  }
-
-  if (!code) {
-    req.session.flash = { error: 'No authorization code received.' };
+  if (!storedState || String(state) !== storedState || !code) {
+    safeFlash(req, 'error', 'Invalid OAuth state. Please try again.');
     return res.redirect('/login');
   }
 
   try {
-    const tokens      = await exchangeDiscordCode(String(code));
+    const tokens = await exchangeDiscordCode(String(code));
     const discordUser = await fetchDiscordUser(tokens.access_token);
-    const siteUser    = await upsertDiscordUser(discordUser, tokens);
-
-    req.session.regenerate((err) => {
+    const siteUser = await upsertDiscordUser(discordUser, tokens);
+    return req.session.regenerate((err) => {
       if (err) throw err;
       req.session.user = toSessionUser(siteUser);
       req.session.flash = { success: `Welcome, ${req.session.user.username}!` };
       res.redirect('/dashboard');
     });
   } catch (err) {
-    console.error('[auth/discord/callback]', err);
-    req.session.flash = { error: 'Discord sign-in failed. Please try again.' };
-    res.redirect('/login');
+    console.error('[auth/discord/callback]', err.message || err);
+    safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
+    return res.redirect('/login');
   }
 });
 
-// ---------------------------------------------------------------
-// Logout (POST only, CSRF-protected)
-// ---------------------------------------------------------------
 router.post('/auth/logout', (req, res) => {
   if (!verifyCsrf(req)) return res.redirect('/');
   req.session.destroy(() => {
@@ -173,280 +343,104 @@ router.post('/auth/logout', (req, res) => {
   });
 });
 
-// ---------------------------------------------------------------
-// Dashboard (protected)
-// ---------------------------------------------------------------
 router.get('/dashboard', requireLogin, async (req, res) => {
-  const { user } = req.session;
   try {
-    // Recent key history for the user
-    const { data: history } = await supabase
-      .from('license_ad_challenges')
-      .select('key_prefix, key_suffix, status, created_at, key_expires_at, completed_at')
-      .eq('site_user_id', user.id)
-      .in('status', ['key_generated'])
-      .order('created_at', { ascending: false })
-      .limit(5);
-
+    const history = await loadHistory(req.session.user.id, 8);
     res.render('dashboard', {
-      title:   'Dashboard – DENG Tool',
-      history: history || [],
+      title: 'Dashboard - DENG Tool',
+      history,
+      stats: summarizeHistory(history),
     });
   } catch (err) {
-    console.error('[dashboard]', err);
-    res.render('dashboard', { title: 'Dashboard – DENG Tool', history: [] });
+    console.error('[dashboard]', err.message || err);
+    res.render('dashboard', {
+      title: 'Dashboard - DENG Tool',
+      history: [],
+      stats: summarizeHistory([]),
+    });
   }
 });
 
-// ---------------------------------------------------------------
-// My License (protected)
-// ---------------------------------------------------------------
 router.get('/license', requireLogin, async (req, res) => {
-  const { user } = req.session;
   try {
-    const { data: history } = await supabase
-      .from('license_ad_challenges')
-      .select('key_prefix, key_suffix, status, created_at, key_expires_at, provider')
-      .eq('site_user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(20);
-
+    const history = await loadHistory(req.session.user.id, 20);
+    const cooldown = await challenge.checkCooldown(req.session.user.id);
     res.render('license', {
-      title:   'My License – DENG Tool',
-      history: history || [],
+      title: 'My License - DENG Tool',
+      history,
+      stats: summarizeHistory(history),
+      cooldown,
+      maskKeyRow,
+      friendlyStatus,
     });
   } catch (err) {
-    console.error('[license]', err);
-    res.render('license', { title: 'My License – DENG Tool', history: [] });
-  }
-});
-
-// ---------------------------------------------------------------
-// Generate Key flow – step 1: create challenge
-// ---------------------------------------------------------------
-router.post('/license/generate', requireLogin, generateLimiter, async (req, res) => {
-  if (!verifyCsrf(req)) {
-    req.session.flash = { error: 'Invalid request token.' };
-    return res.redirect('/license');
-  }
-
-  const { user } = req.session;
-  try {
-    const { allowed, secondsLeft } = await challenge.checkCooldown(user.id);
-    if (!allowed) {
-      req.session.flash = { error: `Please wait ${secondsLeft}s before generating another key.`, cooldown: secondsLeft };
-      return res.redirect('/license');
-    }
-
-    const row = await challenge.createChallenge(req, user);
-    req.session.pendingChallenge = row.id;
-
-    res.render('choose_provider', {
-      title:       'Choose Unlock Method – DENG Tool',
-      challengeId: row.id,
+    console.error('[license]', err.message || err);
+    res.render('license', {
+      title: 'My License - DENG Tool',
+      history: [],
+      stats: summarizeHistory([]),
+      cooldown: { allowed: true, secondsLeft: 0 },
+      maskKeyRow,
+      friendlyStatus,
     });
-  } catch (err) {
-    console.error('[license/generate]', err);
-    req.session.flash = { error: 'Could not start key generation. Please try again.' };
-    res.redirect('/license');
   }
 });
 
-// ---------------------------------------------------------------
-// Generate Key flow – step 2: choose provider
-// ---------------------------------------------------------------
-router.post('/license/provider', requireLogin, generateLimiter, async (req, res) => {
-  if (!verifyCsrf(req)) {
-    req.session.flash = { error: 'Invalid request token.' };
-    return res.redirect('/license');
-  }
+router.post('/api/key/start', requireLogin, generateLimiter, handleKeyStart);
+router.post('/license/generate', requireLogin, generateLimiter, handleKeyStart);
+router.post('/api/key/provider', requireLogin, generateLimiter, handleProvider);
+router.post('/license/provider', requireLogin, generateLimiter, handleProvider);
 
-  const { provider, challenge_id } = req.body;
-  const { user } = req.session;
+router.get('/unlock/lootlabs', requireLogin, (req, res) => handleUnlock(req, res, 'lootlabs'));
+router.get('/unlock/linkvertise', requireLogin, (req, res) => handleUnlock(req, res, 'linkvertise'));
 
-  if (!['lootlabs', 'linkvertise'].includes(provider)) {
-    req.session.flash = { error: 'Invalid provider selection.' };
-    return res.redirect('/license');
-  }
-
-  // Verify challenge belongs to this session/user
-  if (!challenge_id || challenge_id !== req.session.pendingChallenge) {
-    req.session.flash = { error: 'Challenge mismatch. Please start again.' };
-    return res.redirect('/license');
-  }
-
-  try {
-    const row = await challenge.selectProvider(challenge_id, provider, req);
-    const signed = row.signed_challenge;
-
-    if (provider === 'lootlabs') {
-      // Store signed token in session so the /unlock/lootlabs callback can verify
-      req.session.pendingLootlabs = signed;
-      if (!LOOTLABS_URL) {
-        req.session.flash = { error: 'LootLabs is not configured.' };
-        return res.redirect('/license');
-      }
-      return res.redirect(LOOTLABS_URL);
-    }
-
-    if (provider === 'linkvertise') {
-      // Redirect to intermediate page that embeds Linkvertise script
-      return res.redirect(`/unlock/linkvertise?challenge=${encodeURIComponent(signed)}`);
-    }
-  } catch (err) {
-    console.error('[license/provider]', err);
-    req.session.flash = { error: 'Failed to set up ad unlock. Please try again.' };
-    res.redirect('/license');
-  }
+router.get('/unlock/linkvertise/done', requireLogin, (_req, res) => {
+  res.redirect('/license');
 });
 
-// ---------------------------------------------------------------
-// Unlock: Linkvertise intermediate page
-// ---------------------------------------------------------------
-router.get('/unlock/linkvertise', requireLogin, async (req, res) => {
-  const { challenge: signed } = req.query;
-  if (!signed) {
-    req.session.flash = { error: 'Missing challenge token.' };
-    return res.redirect('/license');
-  }
-
-  const decoded = verifyChallenge(String(signed));
-  if (!decoded) {
-    req.session.flash = { error: 'Challenge token expired or invalid.' };
-    return res.redirect('/license');
-  }
-
-  try {
-    await challenge.markPendingAd(String(signed));
-  } catch {
-    // Non-fatal — may already be in pending_ad state
-  }
-
-  const callbackUrl = encodeURIComponent(`${PUBLIC_URL}/unlock/linkvertise/done?challenge=${encodeURIComponent(signed)}`);
-  const publisherId = process.env.LINKVERTISE_PUBLISHER_ID || '5914830';
-
-  res.render('unlock_linkvertise', {
-    title:        'Unlock – DENG Tool',
-    signed,
-    callbackUrl,
-    publisherId,
-  });
-});
-
-// ---------------------------------------------------------------
-// Unlock: Linkvertise done callback
-// ---------------------------------------------------------------
-router.get('/unlock/linkvertise/done', requireLogin, async (req, res) => {
-  const { challenge: signed } = req.query;
-  if (!signed) {
-    req.session.flash = { error: 'Missing challenge token.' };
-    return res.redirect('/license');
-  }
-
-  const decoded = verifyChallenge(String(signed));
-  if (!decoded) {
-    req.session.flash = { error: 'Challenge expired. Please start again.' };
-    return res.redirect('/license');
-  }
-
-  try {
-    const row = await challenge.getChallengeByToken(String(signed));
-    if (!row) {
-      req.session.flash = { error: 'Challenge not found or expired.' };
-      return res.redirect('/license');
-    }
-
-    if (row.site_user_id !== req.session.user.id) {
-      req.session.flash = { error: 'Challenge does not belong to your account.' };
-      return res.redirect('/license');
-    }
-
-    const { key, alreadyDone } = await challenge.completeAdAndGenerateKey(row);
-
-    if (alreadyDone) {
-      req.session.flash = { error: 'This challenge was already used.' };
-      return res.redirect('/license');
-    }
-
-    // Store key in session for one-time display, then clear pending state
-    req.session.generatedKey = key;
-    delete req.session.pendingChallenge;
-    res.redirect('/key/result');
-  } catch (err) {
-    console.error('[unlock/linkvertise/done]', err);
-    req.session.flash = { error: 'Failed to complete key generation.' };
-    res.redirect('/license');
-  }
-});
-
-// ---------------------------------------------------------------
-// Unlock: LootLabs callback landing
-// ---------------------------------------------------------------
-router.get('/unlock/lootlabs', requireLogin, async (req, res) => {
-  const signed = req.session.pendingLootlabs;
-  if (!signed) {
-    req.session.flash = { error: 'No pending LootLabs challenge found. Please start again.' };
-    return res.redirect('/license');
-  }
-
-  const decoded = verifyChallenge(signed);
-  if (!decoded) {
-    req.session.flash = { error: 'Challenge expired. Please start again.' };
-    delete req.session.pendingLootlabs;
-    return res.redirect('/license');
-  }
-
-  try {
-    const row = await challenge.getChallengeByToken(signed);
-    if (!row) {
-      req.session.flash = { error: 'Challenge not found or expired.' };
-      delete req.session.pendingLootlabs;
-      return res.redirect('/license');
-    }
-
-    if (row.site_user_id !== req.session.user.id) {
-      req.session.flash = { error: 'Challenge mismatch.' };
-      delete req.session.pendingLootlabs;
-      return res.redirect('/license');
-    }
-
-    // May still be in provider_selected; advance to pending_ad first if needed
-    if (row.status === 'provider_selected') {
-      try { await challenge.markPendingAd(signed); } catch { /* ok */ }
-    }
-
-    const freshRow = await challenge.getChallengeByToken(signed);
-    const { key, alreadyDone } = await challenge.completeAdAndGenerateKey(freshRow || row);
-
-    delete req.session.pendingLootlabs;
-
-    if (alreadyDone) {
-      req.session.flash = { error: 'This challenge was already used.' };
-      return res.redirect('/license');
-    }
-
-    req.session.generatedKey = key;
-    delete req.session.pendingChallenge;
-    res.redirect('/key/result');
-  } catch (err) {
-    console.error('[unlock/lootlabs]', err);
-    req.session.flash = { error: 'Key generation failed. Please try again.' };
-    res.redirect('/license');
-  }
-});
-
-// ---------------------------------------------------------------
-// Key result (shown once, then cleared from session)
-// ---------------------------------------------------------------
 router.get('/key/result', requireLogin, (req, res) => {
   const key = req.session.generatedKey;
   if (!key) {
-    req.session.flash = { error: 'No key available. Please generate a new one.' };
+    safeFlash(req, 'error', 'No key available. Please generate a new one.');
     return res.redirect('/license');
   }
-  // Consume immediately — shown exactly once
-  delete req.session.generatedKey;
-  res.render('key_result', { title: 'Your Key – DENG Tool', key });
+  res.render('key_result', { title: 'Your Key - DENG Tool', key });
+});
+
+router.get('/api/stats/public', (_req, res) => {
+  res.json({
+    service: 'deng-tool-site',
+    cooldown_seconds: challenge.COOLDOWN_SECONDS,
+    unredeemed_key_expiry_hours: challenge.KEY_EXPIRY_HOURS,
+    tool_version: '1.0.0',
+  });
+});
+
+router.get('/api/license/me', requireLogin, async (req, res) => {
+  try {
+    const history = await loadHistory(req.session.user.id, 20);
+    res.json({ account: req.session.user, stats: summarizeHistory(history) });
+  } catch {
+    res.status(500).json({ error: 'license_summary_failed' });
+  }
+});
+
+router.get('/api/license/history', requireLogin, async (req, res) => {
+  try {
+    const history = await loadHistory(req.session.user.id, 20);
+    res.json({
+      history: history.map((row) => ({
+        id: row.id,
+        key: maskKeyRow(row),
+        status: friendlyStatus(row),
+        provider: row.provider || null,
+        created_at: row.created_at,
+        key_expires_at: row.key_expires_at,
+      })),
+    });
+  } catch {
+    res.status(500).json({ error: 'license_history_failed' });
+  }
 });
 
 module.exports = router;

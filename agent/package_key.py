@@ -201,7 +201,7 @@ def write_package_key_file(
 ) -> dict[str, Any]:
     """Write the package key to the internal license file.
 
-    Does NOT use pm clear.
+    Does not clear package data.
     Does NOT delete any other files.
     Does NOT touch shared_prefs, databases, cookies, tokens, or login data.
     Only replaces the exact license file content.

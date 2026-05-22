@@ -57,6 +57,9 @@ function verifyCsrf(req) {
  * Stores the state in session for later validation.
  */
 function buildDiscordAuthUrl(req) {
+  if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET || !DISCORD_REDIRECT_URI) {
+    throw new Error('Discord OAuth is not configured');
+  }
   const state = crypto.randomBytes(24).toString('hex');
   req.session.oauthState = state;
 
@@ -106,7 +109,7 @@ async function fetchDiscordUser(accessToken) {
  * Upsert a site_user row from Discord OAuth data.
  * Returns the site_users row.
  */
-async function upsertDiscordUser(discordUser, tokens) {
+async function upsertDiscordUser(discordUser, _tokens) {
   const now = new Date().toISOString();
 
   // Check if user already exists by discord_user_id
@@ -122,8 +125,8 @@ async function upsertDiscordUser(discordUser, tokens) {
       .update({
         discord_username:     discordUser.username,
         discord_avatar:       discordUser.avatar || null,
-        discord_access_token: tokens.access_token,
-        discord_refresh_token:tokens.refresh_token || null,
+        discord_access_token: null,
+        discord_refresh_token:null,
         last_login_at:        now,
       })
       .eq('id', existing.id)
@@ -140,8 +143,8 @@ async function upsertDiscordUser(discordUser, tokens) {
       discord_user_id:      discordUser.id,
       discord_username:     discordUser.username,
       discord_avatar:       discordUser.avatar || null,
-      discord_access_token: tokens.access_token,
-      discord_refresh_token:tokens.refresh_token || null,
+      discord_access_token: null,
+      discord_refresh_token:null,
       email:                discordUser.email || null,
       last_login_at:        now,
     })
@@ -162,12 +165,25 @@ async function upsertDiscordUser(discordUser, tokens) {
 async function localLogin(usernameOrEmail, password) {
   if (!usernameOrEmail || !password) return null;
 
-  // Look up by username OR email
-  const { data, error } = await supabase
+  const login = String(usernameOrEmail).trim();
+
+  // Avoid raw PostgREST .or() filters with user input.  Two exact-match
+  // lookups are boring, parameterized by the client library, and safer.
+  let { data, error } = await supabase
     .from('site_users')
     .select('*')
-    .or(`username.eq."${usernameOrEmail}",email.eq."${usernameOrEmail}"`)
+    .eq('username', login)
     .maybeSingle();
+
+  if (!data && !error) {
+    const emailLookup = await supabase
+      .from('site_users')
+      .select('*')
+      .eq('email', login)
+      .maybeSingle();
+    data = emailLookup.data;
+    error = emailLookup.error;
+  }
 
   if (error || !data || !data.password_hash || !data.is_active) return null;
 
