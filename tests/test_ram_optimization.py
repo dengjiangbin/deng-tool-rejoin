@@ -68,6 +68,11 @@ def _make_supervisor(cfg: dict[str, Any] | None = None) -> Any:
         "ram_trim_interval_sec": 120,
         "ram_restart_cooldown_sec": 180,
         "ram_aggressive_mode": False,
+        # Opt-in: the restart-path tests below all assume the operator
+        # has flipped this flag.  Production default is False (Bug 1 fix,
+        # probe p-52aeb6420f) — covered by the dedicated regression class
+        # ``TestBug1OnlineProtectedFromRamRestart``.
+        "ram_restart_when_online_enabled": True,
         "roblox_package": "com.roblox.client",
         "packages": [{"package": "com.roblox.client", "username": "TestUser"}],
         "private_server_url": "",
@@ -680,6 +685,126 @@ class TestRamRestartThresholdDefault(unittest.TestCase):
         from agent.config import default_config
         cfg = default_config()
         self.assertEqual(cfg.get("ram_target_aggressive_mb"), 300)
+
+
+# ── BUG 1: probe p-52aeb6420f regression ─────────────────────────────────────
+
+
+class TestBug1OnlineProtectedFromRamRestart(unittest.TestCase):
+    """An Online + in-game package must never be relaunched by the RAM path.
+
+    Probe ``p-52aeb6420f`` (Samsung SM-N9810, Android 10) showed Roblox
+    using 1.3–1.4 GB on a 720p device, well above the default 900 MB RAM
+    threshold.  With the old code, this triggered a force-stop +
+    private-URL relaunch every ``ram_restart_cooldown_sec`` (default
+    180 s) for every Online package — an endless relaunch loop on a
+    healthy session.
+
+    Per user spec for Bug 1::
+
+        If state is Online and process is alive:
+          - do not relaunch
+          - do not reopen private URL
+          - do not force close
+
+    The fix: gate the restart code path behind the opt-in flag
+    ``ram_restart_when_online_enabled`` (default ``False``).  Cache trim
+    is still allowed because it is non-disruptive.
+    """
+
+    def test_default_config_does_not_opt_in_to_online_ram_restart(self):
+        """``default_config()`` must NOT enable RAM-restart for Online."""
+        from agent.config import default_config
+        cfg = default_config()
+        self.assertFalse(
+            cfg.get("ram_restart_when_online_enabled", False),
+            "Bug 1 regression: default must be False so Online packages "
+            "are never relaunched solely because of RAM usage.",
+        )
+
+    def test_online_above_threshold_does_not_force_stop_or_relaunch(self):
+        """Online + 1.3 GB RAM + cooldown clear → no force-stop, no relaunch."""
+        sup = _make_supervisor({"ram_restart_when_online_enabled": False})
+        now = time.monotonic()
+        sup._online_start_ts[_PKG] = now - 9999
+
+        with patch("agent.supervisor.android") as mock_android:
+            # Probe-realistic value: 1.3 GB (≫ 900 MB threshold).
+            mock_android.get_package_ram_usage.return_value = _ram_result(1328)
+            mock_android.clear_package_cache_verified.return_value = {
+                "success": True, "skipped": False, "skipped_reason": "", "error": "",
+            }
+            with patch.object(sup, "_do_launch") as mock_launch:
+                with patch.object(sup, "_set_status") as mock_status:
+                    sup._check_ram_optimization(_PKG, _ENTRY, now)
+            # Cache trim still runs (non-disruptive).
+            mock_android.clear_package_cache_verified.assert_called_once_with(_PKG)
+            # NO force-stop, NO relaunch, NO status change.
+            mock_android.force_stop_package.assert_not_called()
+            mock_launch.assert_not_called()
+            mock_status.assert_not_called()
+
+    def test_online_above_threshold_emits_skipped_event(self):
+        """Inhibition must be observable via [DENG_REJOIN_RAM_RESTART_SKIPPED]."""
+        sup = _make_supervisor({"ram_restart_when_online_enabled": False})
+        now = time.monotonic()
+        sup._online_start_ts[_PKG] = now - 9999
+
+        with patch("agent.supervisor.android") as mock_android:
+            mock_android.get_package_ram_usage.return_value = _ram_result(1404)
+            mock_android.clear_package_cache_verified.return_value = {
+                "success": True, "skipped": False, "skipped_reason": "", "error": "",
+            }
+            with patch("agent.supervisor.log_event") as mock_log:
+                sup._check_ram_optimization(_PKG, _ENTRY, now)
+
+        emitted_tags = [
+            args[2] for (args, _) in mock_log.call_args_list
+            if len(args) >= 3 and isinstance(args[2], str)
+        ]
+        self.assertIn(
+            "[DENG_REJOIN_RAM_RESTART_SKIPPED]", emitted_tags,
+            f"Expected RAM_RESTART_SKIPPED probe event; got {emitted_tags}",
+        )
+
+    def test_loop_does_not_relaunch_online_package_over_multiple_rounds(self):
+        """Repeated _check_ram_optimization invocations must not relaunch."""
+        sup = _make_supervisor({"ram_restart_when_online_enabled": False})
+        base = time.monotonic()
+        sup._online_start_ts[_PKG] = base - 9999
+
+        with patch("agent.supervisor.android") as mock_android:
+            mock_android.get_package_ram_usage.return_value = _ram_result(1350)
+            mock_android.clear_package_cache_verified.return_value = {
+                "success": True, "skipped": False, "skipped_reason": "", "error": "",
+            }
+            with patch.object(sup, "_do_launch") as mock_launch:
+                # Simulate 30 supervisor rounds (5 minutes at 10s interval),
+                # bumping the clock past the cooldown each round so the old
+                # cooldown gate alone wouldn't be enough.
+                for i in range(30):
+                    now = base + i * 200  # > 180 s cooldown
+                    sup._ram_last_check_at.pop(_PKG, None)  # bypass trim rate-limit
+                    sup._ram_last_trim_at.pop(_PKG, None)
+                    sup._check_ram_optimization(_PKG, _ENTRY, now)
+                mock_launch.assert_not_called()
+
+    def test_opt_in_restores_legacy_behaviour(self):
+        """With the flag explicitly True, the old restart path still works."""
+        sup = _make_supervisor({"ram_restart_when_online_enabled": True})
+        now = time.monotonic()
+        sup._online_start_ts[_PKG] = now - 9999
+
+        with patch("agent.supervisor.android") as mock_android:
+            mock_android.get_package_ram_usage.return_value = _ram_result(1500)
+            mock_android.clear_package_cache_verified.return_value = {
+                "success": True, "skipped": False, "skipped_reason": "", "error": "",
+            }
+            with patch.object(sup, "_do_launch", return_value=True) as mock_launch:
+                with patch.object(sup, "_set_grace"):
+                    with patch.object(sup, "_set_status"):
+                        sup._check_ram_optimization(_PKG, _ENTRY, now)
+                mock_launch.assert_called_once_with(_PKG, _ENTRY, "ram_restart")
 
 
 if __name__ == "__main__":

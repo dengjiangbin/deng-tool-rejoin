@@ -3,7 +3,12 @@
 This module handles PER-PACKAGE keys that are written to each Roblox/package
 internal license file:
 
-    /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/license
+    /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/Cache/license
+
+Note (probe p-52aeb6420f): the license file lives in the ``Cache`` sub-
+directory of ``Internals``, NOT directly under ``Internals``.  Earlier
+builds wrote ``…/Internals/license`` which the Roblox clone runtime did
+not pick up — the cloner reads ``…/Internals/Cache/license`` only.
 
 IMPORTANT: This is completely separate from the DENG Tool license system.
 - Does NOT use the DENG Tool license server.
@@ -14,12 +19,18 @@ IMPORTANT: This is completely separate from the DENG Tool license system.
 
 Package keys are FREE_ prefixed keys written directly to each Roblox/package
 Android data folder's internal license file.
+
+The file name is exactly ``license`` (no extension).  Content type is
+``application/octet-stream``.  The file is written atomically with the
+``FREE_*`` key string (no JSON, no headers, no trailing newline).
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shlex
+import stat
 import tempfile
 import logging
 from typing import Any
@@ -31,9 +42,17 @@ _log = logging.getLogger("deng.rejoin.package_key")
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 _PACKAGE_KEY_FREE_PREFIX = "FREE_"
-_PACKAGE_KEY_LICENSE_SUBPATH = "files/gloop/external/Internals/license"
-_PACKAGE_KEY_LICENSE_DIR = "files/gloop/external/Internals"
+# IMPORTANT: ``Internals/Cache/license`` — the ``Cache`` segment is required
+# (probe p-52aeb6420f).  ``Internals`` and ``Cache`` are both case-sensitive
+# (matches the on-device folder names exactly).
+_PACKAGE_KEY_LICENSE_SUBPATH = "files/gloop/external/Internals/Cache/license"
+_PACKAGE_KEY_LICENSE_DIR = "files/gloop/external/Internals/Cache"
+_PACKAGE_KEY_INTERNALS_DIR = "files/gloop/external/Internals"  # parent of Cache
 _ANDROID_DATA_BASE = "/storage/emulated/0/Android/data"
+# Content type the cloner expects for the license blob.  Surfaced via
+# :func:`package_key_license_mime_type` so the Menu 4 file-info card can
+# display it without hard-coding the string in the UI layer.
+_PACKAGE_KEY_LICENSE_MIME = "application/octet-stream"
 
 # ── Validation ────────────────────────────────────────────────────────────────
 
@@ -79,19 +98,42 @@ def mask_package_key(key: str) -> str:
 def package_key_license_path(package: str) -> str:
     """Return the absolute path to the internal license file for a package.
 
-    Formula:
-        /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/license
+    Formula::
 
-    Note: 'Internals' is case-sensitive — do NOT change to 'internals'.
+        /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/Cache/license
+
+    Both ``Internals`` and ``Cache`` are case-sensitive — do NOT lowercase.
     """
     pkg = _validate_package_name(package)
     return f"{_ANDROID_DATA_BASE}/{pkg}/{_PACKAGE_KEY_LICENSE_SUBPATH}"
 
 
 def package_key_license_dir(package: str) -> str:
-    """Return the parent directory of the internal license file for a package."""
+    """Return the parent directory of the internal license file for a package.
+
+    Formula::
+
+        /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/Cache
+    """
     pkg = _validate_package_name(package)
     return f"{_ANDROID_DATA_BASE}/{pkg}/{_PACKAGE_KEY_LICENSE_DIR}"
+
+
+def package_key_internals_dir(package: str) -> str:
+    """Return the ``Internals`` directory (parent of ``Cache``) for a package."""
+    pkg = _validate_package_name(package)
+    return f"{_ANDROID_DATA_BASE}/{pkg}/{_PACKAGE_KEY_INTERNALS_DIR}"
+
+
+def package_key_license_mime_type() -> str:
+    """Return the MIME type used to render the license blob (``application/octet-stream``).
+
+    The package key file is a small opaque ASCII payload (``FREE_<id>``).
+    The cloner reads it as octet-stream; we expose the constant here so the
+    Menu 4 file-info display can show ``Type: application/octet-stream``
+    without baking the string into the UI layer.
+    """
+    return _PACKAGE_KEY_LICENSE_MIME
 
 
 def is_valid_package_key(key: str) -> bool:
@@ -128,15 +170,29 @@ def resolve_package_key(config: dict[str, Any], package: str) -> str | None:
 
 
 def _write_via_python(path: str, key: str) -> tuple[bool, str]:
-    """Attempt to write the key using Python file I/O. Returns (success, error)."""
+    """Attempt to write the key using Python file I/O. Returns (success, error).
+
+    Creates the parent ``…/Internals/Cache`` directory if missing, then
+    writes atomically via a temp file in the same directory followed by
+    ``os.replace`` so a partial write never leaves an empty/half file in
+    place.
+    """
     try:
         parent = os.path.dirname(path)
         os.makedirs(parent, exist_ok=True)
-        # Write atomically via a temp file in the same directory.
+        # Write atomically via a temp file in the same directory so a crash
+        # mid-write leaves the previous contents intact.
         tmp_fd, tmp_path = tempfile.mkstemp(dir=parent, prefix=".deng-pkg-key-")
         try:
             with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
                 fh.write(key)
+                fh.flush()
+                try:
+                    os.fsync(fh.fileno())
+                except OSError:
+                    # fsync may not work on FUSE-mounted external storage;
+                    # the atomic rename below is the actual safety net.
+                    pass
             os.replace(tmp_path, path)
         except Exception:
             try:
@@ -144,6 +200,12 @@ def _write_via_python(path: str, key: str) -> tuple[bool, str]:
             except OSError:
                 pass
             raise
+        try:
+            # 0o644 — owner rw, group/other r.  Matches what the cloner
+            # writes when it generates the file natively.
+            os.chmod(path, 0o644)
+        except OSError:
+            pass
         return True, ""
     except OSError as exc:
         return False, str(exc)
@@ -285,6 +347,117 @@ def _read_license_file(path: str, root_tool: str | None) -> str | None:
         if res.ok:
             return (res.stdout or "").strip()
     return None
+
+
+# ── Public Menu 4 file-info ───────────────────────────────────────────────────
+
+
+def package_key_license_info(
+    package: str,
+    *,
+    root_enabled: bool = True,
+) -> dict[str, Any]:
+    """Return a small file-info dict for the package's license file.
+
+    Used by the Menu 4 "Key" UI to show whether the file exists and to
+    display human-readable metadata (size, permissions, MD5).  Never raises.
+
+    Returned keys:
+        package        — validated package name
+        path           — absolute expected path
+        dir            — parent dir (``…/Internals/Cache``)
+        file_name      — always ``"license"``
+        mime_type      — ``application/octet-stream``
+        exists         — bool
+        size_bytes     — int or None
+        modified_iso   — UTC ISO timestamp or ""
+        permissions    — ``"rw-r--r--"``-style string, or "" when stat failed
+        md5            — hex digest of the file content, or "" on read failure
+        key_masked     — masked content (``FREE_...XXXX``) — NEVER the full key
+        read_method    — ``"python"`` | ``"root"`` | ``"unavailable"``
+        error          — error message (empty on success)
+
+    The full key is NEVER returned by this helper.  Callers that need the
+    raw key for comparison should use :func:`_read_license_file` directly
+    (it stays module-private).
+    """
+    info: dict[str, Any] = {
+        "package":      "",
+        "path":         "",
+        "dir":          "",
+        "file_name":    "license",
+        "mime_type":    _PACKAGE_KEY_LICENSE_MIME,
+        "exists":       False,
+        "size_bytes":   None,
+        "modified_iso": "",
+        "permissions":  "",
+        "md5":          "",
+        "key_masked":   "",
+        "read_method":  "unavailable",
+        "error":        "",
+    }
+    try:
+        pkg = _validate_package_name(package)
+    except ValueError as exc:
+        info["error"] = str(exc)
+        return info
+    info["package"] = pkg
+    info["path"]    = package_key_license_path(pkg)
+    info["dir"]     = package_key_license_dir(pkg)
+
+    # ── stat (python first, root fallback) ─────────────────────────────────
+    try:
+        st = os.stat(info["path"])
+        info["exists"]      = True
+        info["size_bytes"]  = int(st.st_size)
+        info["permissions"] = stat.filemode(st.st_mode)[1:]  # drop the leading file-type char
+        try:
+            from datetime import datetime, timezone
+            info["modified_iso"] = (
+                datetime.fromtimestamp(st.st_mtime, tz=timezone.utc)
+                        .strftime("%Y-%m-%dT%H:%M:%SZ")
+            )
+        except Exception:  # noqa: BLE001
+            info["modified_iso"] = ""
+    except FileNotFoundError:
+        # Try via root before giving up — external storage often refuses
+        # unprivileged stat under scoped storage.
+        if root_enabled:
+            try:
+                from . import android as _android
+                ri = _android.detect_root()
+                if ri.available and ri.tool:
+                    res = _android.run_root_command(
+                        ["sh", "-c", f"ls -l {shlex.quote(info['path'])} 2>/dev/null"],
+                        root_tool=ri.tool, timeout=6,
+                    )
+                    if res.ok and (res.stdout or "").strip():
+                        info["exists"] = True
+                        info["read_method"] = "root"
+            except Exception:  # noqa: BLE001
+                pass
+    except OSError as exc:
+        info["error"] = str(exc)
+
+    # ── read content for MD5 + masked key ─────────────────────────────────
+    root_tool = None
+    if root_enabled:
+        try:
+            from . import android as _android
+            ri = _android.detect_root()
+            root_tool = ri.tool if ri.available else None
+        except Exception:  # noqa: BLE001
+            root_tool = None
+
+    content = _read_license_file(info["path"], root_tool)
+    if content is not None:
+        info["exists"]     = True
+        info["md5"]        = hashlib.md5(content.encode("utf-8")).hexdigest()
+        info["key_masked"] = mask_package_key(content)
+        info["read_method"] = (
+            "root" if info["read_method"] == "root" else "python"
+        )
+    return info
 
 
 def ensure_package_key_for_start(

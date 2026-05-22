@@ -169,8 +169,9 @@ def default_config() -> dict[str, Any]:
         "package_start_times": {},
         # ── Package keys (per-package internal license, NOT DENG Tool license) ──
         # These are written to each Roblox/package Android data folder:
-        #   /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/license
-        # This is COMPLETELY separate from the DENG Tool license system.
+        #   /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/Cache/license
+        # The ``Cache`` segment is required (probe p-52aeb6420f).  This is
+        # COMPLETELY separate from the DENG Tool license system.
         "package_keys": {
             "global": "",
             "per_package": {},

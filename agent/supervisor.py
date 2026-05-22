@@ -19,50 +19,123 @@ from .monitor import check_package_health, check_roblox_health
 from .roblox_health import categorize_unhealthy
 
 
+def _load_stored_rect_for_package(cfg: dict[str, Any], package: str):
+    """Return the WindowRect that the initial Start computed for *package*.
+
+    Bug 3 (probe ``p-52aeb6420f``): a single-package relaunch (RAM restart
+    / Dead / No Heartbeat recovery) used to recompute the layout as if
+    only THIS package existed — collapsing a 3-pkg grid into a single
+    1-pkg rect.  Visually this looked like "all packages went to the
+    same slot".  The original Start path persists the full layout to
+    ``cfg["last_layout_preview"]`` (and ``cfg["_layout_rects"]`` for the
+    in-memory variant); we look that up and rebuild the matching
+    :class:`WindowRect` so the relaunched window keeps its original slot.
+
+    Returns ``None`` when no stored rect matches *package*.  Callers must
+    fall back to the 1-package layout in that case.
+    """
+    try:
+        from . import window_layout
+    except Exception:  # noqa: BLE001
+        return None
+    sources = (cfg.get("_layout_rects"), cfg.get("last_layout_preview"))
+    for source in sources:
+        if not isinstance(source, list):
+            continue
+        for entry in source:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("package") != package:
+                continue
+            try:
+                return window_layout.WindowRect(
+                    package=str(entry.get("package", "")),
+                    left=int(entry.get("left", 0)),
+                    top=int(entry.get("top", 0)),
+                    right=int(entry.get("right", 0)),
+                    bottom=int(entry.get("bottom", 0)),
+                )
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
 def _reapply_layout_for_package(package: str) -> None:
     """Best-effort layout re-apply for ONE package during recovery.
 
-    Computes the package's slot in the current display layout, writes the
-    XML keys + Set-enable booleans, AND triggers a direct (post-launch)
-    resize via root so the relaunched window really lands at the desired
-    bounds.  Never raises.  All details go to the file logger.
+    1. Look up the package's original slot rect from
+       ``cfg["last_layout_preview"]`` (or ``cfg["_layout_rects"]``).
+       This preserves the deterministic per-package slot across single-
+       package relaunches (Bug 3, probe ``p-52aeb6420f``).
+    2. If no stored slot is found (cold supervisor, layout never ran),
+       fall back to the 1-package right-pane layout the legacy code
+       used.  This keeps single-package installs working.
+    3. Write XML + Set-enable booleans, then trigger a direct (post-
+       launch) resize via root so the relaunched window really lands at
+       the stored bounds.
+
+    Never raises.  All details go to the file logger.  Emits
+    ``[DENG_REJOIN_REAPPLY_LAYOUT]`` so the slot-preservation fix is
+    visible in probes.
     """
     try:
         from . import window_layout
         from . import window_apply
         from .config import DEFAULT_SCREEN_MODE, validate_screen_mode
-        display = window_layout.detect_display_info()
+        import logging as _logging
+        _slog = _logging.getLogger("deng.rejoin.supervisor")
         cfg = load_config()
-        # We don't know the full selected-package set here; compute a 1-package
-        # layout fallback that uses the right-pane rules.  This keeps the
-        # window landscape-shaped on its own; the next full Start cycle will
-        # rebalance for multi-package layouts.
-        # Use termux_log_fraction=0.0 so the layout uses full screen width
-        # (probe p-cf20e97a18: consistent with _prepare_automatic_layout fix).
-        rects = window_layout.calculate_split_layout(
-            [package], display.width, display.height,
-            termux_log_fraction=0.0,
-            screen_mode=validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE)),
-        )
-        if rects:
-            window_apply.apply_window_layout_silent(
-                rects, force_stop_before=False, verify_after=False, retries=0,
+
+        # ── Preferred path: reuse the slot that initial Start computed.
+        stored = _load_stored_rect_for_package(cfg, package)
+        rect_source = "stored_slot"
+        if stored is not None:
+            rects = [stored]
+        else:
+            # Fallback: 1-package right-pane layout.
+            display = window_layout.detect_display_info()
+            rects = window_layout.calculate_split_layout(
+                [package], display.width, display.height,
+                termux_log_fraction=0.0,
+                screen_mode=validate_screen_mode(
+                    cfg.get("screen_mode", DEFAULT_SCREEN_MODE)
+                ),
             )
-            # Layer 3: direct resize via root, with freeform mode flip.
-            # This is what actually moves the visible window without
-            # waiting for the next force-stop / relaunch cycle.
-            try:
-                ok, detail = window_apply.force_resize_package(package, rects[0])
-                import logging as _logging
-                _logging.getLogger("deng.rejoin.supervisor").debug(
-                    "force_resize_package(%s) ok=%s detail=%s",
-                    package, ok, detail,
-                )
-            except Exception as exc:  # noqa: BLE001
-                import logging as _logging
-                _logging.getLogger("deng.rejoin.supervisor").debug(
-                    "force_resize_package(%s) error: %s", package, exc,
-                )
+            rect_source = "fallback_single_package"
+
+        if not rects:
+            return
+
+        # Emit the slot-preservation probe so Bug 3 regressions are
+        # easy to spot.  We log via the dedicated logger so this lands
+        # in agent.log alongside [DENG_REJOIN_LAYOUT_BOUNDS].
+        try:
+            r0 = rects[0]
+            _slog.info(
+                "[DENG_REJOIN_REAPPLY_LAYOUT] package=%s rect_source=%s"
+                " desired_x=%d desired_y=%d desired_w=%d desired_h=%d",
+                package, rect_source,
+                r0.left, r0.top, r0.win_w, r0.win_h,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        window_apply.apply_window_layout_silent(
+            rects, force_stop_before=False, verify_after=False, retries=0,
+        )
+        # Direct resize via root, with freeform mode flip.  This is what
+        # actually moves the visible window without waiting for the next
+        # force-stop / relaunch cycle.
+        try:
+            ok, detail = window_apply.force_resize_package(package, rects[0])
+            _slog.debug(
+                "force_resize_package(%s) ok=%s detail=%s",
+                package, ok, detail,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _slog.debug(
+                "force_resize_package(%s) error: %s", package, exc,
+            )
     except Exception as exc:  # noqa: BLE001
         import logging as _logging
         _logging.getLogger("deng.rejoin.supervisor").debug(
@@ -1851,9 +1924,26 @@ class WatchdogSupervisor:
           2. Check at most once per ram_trim_interval_sec.
           3. RAM ≤ effective target  →  no action.
           4. RAM > effective target  →  try safe cache trim (non-disruptive).
-          5. RAM > ram_restart_threshold_mb AND cooldown expired → force-stop + relaunch.
+          5. RAM > ram_restart_threshold_mb AND cooldown expired AND
+             ``ram_restart_when_online_enabled`` is set → force-stop + relaunch.
 
-        Probe tags: [DENG_REJOIN_RAM_CHECK] [DENG_REJOIN_RAM_TRIM] [DENG_REJOIN_RAM_RESTART]
+        Probe p-52aeb6420f evidence: Roblox uses 1.3–1.4 GB on the SM-N9810
+        (Android 10) so the default 900 MB threshold tripped EVERY package
+        on EVERY cooldown cycle (180 s), force-closing Online-and-in-game
+        packages forever.  Per user spec, Online + in-game packages MUST
+        NOT be relaunched.  We honour that by gating the restart path on
+        ``ram_restart_when_online_enabled`` (default ``False``).  The
+        non-disruptive cache trim still fires above the soft target so we
+        don't lose the RAM optimisation entirely.
+
+        Probe tags:
+          [DENG_REJOIN_RAM_CHECK]
+          [DENG_REJOIN_RAM_TRIM]
+          [DENG_REJOIN_RAM_RESTART]
+          [DENG_REJOIN_RAM_RESTART_SKIPPED]   ← new — emitted when the
+              restart path would have fired but is inhibited because the
+              package is Online and ``ram_restart_when_online_enabled``
+              is False (the default).
         """
         cfg = self.cfg
         if not cfg.get("ram_optimization_enabled", True):
@@ -1884,6 +1974,10 @@ class WatchdogSupervisor:
         restart_threshold = int(cfg.get("ram_restart_threshold_mb", 900))
         aggressive_mode   = bool(cfg.get("ram_aggressive_mode", False))
         restart_cooldown  = int(cfg.get("ram_restart_cooldown_sec", 180))
+        # Opt-in flag — default False per user spec: an Online + in-game
+        # package must not be relaunched solely because of RAM.  Operators
+        # who explicitly want the old behaviour can flip this to True.
+        restart_when_online = bool(cfg.get("ram_restart_when_online_enabled", False))
         effective_target  = target_aggressive if aggressive_mode else target_normal
 
         log_event(
@@ -1923,7 +2017,25 @@ class WatchdogSupervisor:
         if usage_mb <= restart_threshold:
             return  # Below restart threshold — trim is sufficient.
 
-        # ── RAM restart ───────────────────────────────────────────────────────
+        # ── RAM restart (opt-in only) ────────────────────────────────────────
+        # _check_ram_optimization is only reached from _handle_state when
+        # state == STATUS_ONLINE (probe p-52aeb6420f), so a "true Online
+        # package" reaching this point is by definition healthy and
+        # in-game.  Per user spec, do NOT relaunch.  We log a single
+        # cooldown-aware skip event so the inhibition is visible in probes
+        # and Bug 1 regressions are easy to spot.
+        if not restart_when_online:
+            log_event(
+                logger, "info", "[DENG_REJOIN_RAM_RESTART_SKIPPED]",
+                package=pkg,
+                usage_mb=round(usage_mb, 1),
+                usage_display=usage_display,
+                restart_threshold_mb=restart_threshold,
+                reason="online_state_protected",
+                policy="ram_restart_when_online_enabled=false",
+            )
+            return
+
         ram_cooldown_until = self._ram_cooldown_until.get(pkg, 0.0)
         nhb_cooldown_until = self._nhb_cooldown_until.get(pkg, 0.0)
         cooldown_until = max(ram_cooldown_until, nhb_cooldown_until)

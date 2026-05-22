@@ -928,13 +928,57 @@ def _refresh_detected_fields(config_data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _enforce_termux_left_layout(config_data: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Resize Termux to the left 50% pane, silently, with probe logging."""
+    """Resize Termux to the left dock pane, silently, with probe logging.
+
+    Bug 2 (probe ``p-52aeb6420f``): on the SM-N9810 the Termux dock-resize
+    path called ``cmd activity set-task-windowing-mode 5`` and ``am stack
+    resize`` against the Termux task while Termux was the user's active
+    foreground session.  Even when individual commands returned non-zero
+    (which they did on this device), the partial state changes manifested
+    visually as Termux + other apps disappearing, black bars, and a
+    portrait-shaped layout — the user perceived this as "Termux closed"
+    and "device went home".
+
+    Per user spec we now treat the dock-resize as **opt-in**:
+
+      - default: SKIP entirely (no commands sent to Termux's task).
+      - opt-in:  set ``termux_dock_enabled=True`` in config to restore the
+        old behaviour for operators who explicitly want the dock layout.
+
+    A ``[DENG_REJOIN_TERMUX_LAYOUT]`` event with ``success=skipped`` is
+    still emitted so probes can confirm the inhibition is in effect.
+    Termux is never force-stopped from this code path.
+    """
     result: dict[str, Any] = {}
     try:
-        from . import termux_minimize as _tm
         from .logger import configure_logging, log_event
 
         cfg = config_data or {}
+        dock_enabled = bool(cfg.get("termux_dock_enabled", False))
+        if not dock_enabled:
+            logger = configure_logging()
+            log_event(
+                logger,
+                "info",
+                "[DENG_REJOIN_TERMUX_LAYOUT]",
+                screen_w=0,
+                screen_h=0,
+                termux_package="com.termux",
+                desired_bounds="",
+                actual_before="",
+                actual_after="",
+                success="skipped",
+                method="opt-in disabled (termux_dock_enabled=false)",
+                reason="bug2_protection_probe_p-52aeb6420f",
+            )
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "termux_dock_enabled is false (default)",
+            }
+
+        from . import termux_minimize as _tm
+
         frac = float(cfg.get("termux_dock_fraction", 0.50))
         frac = 0.50 if abs(frac - 0.50) > 0.001 else frac
         before = None
@@ -2460,8 +2504,8 @@ def _config_menu_screen_mode(draft: dict[str, Any]) -> dict[str, Any]:
 # These functions handle PER-PACKAGE keys written to each Roblox/package
 # internal license file — NOT the DENG Tool license key.
 #
-# File path formula:
-#   /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/license
+# File path formula (probe p-52aeb6420f — ``Cache`` segment required):
+#   /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/Cache/license
 #
 # This does NOT touch:
 #   - DENG Tool license file / license server / Supabase / Discord panel
@@ -4420,7 +4464,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 effective_private_server_url(runtime_entry, runtime_cfg) or ""
             ).strip())
             # Ensure package key file is correct before launch.
-            # This writes: /storage/emulated/0/Android/data/{pkg}/files/gloop/external/Internals/license
+            # Writes: /storage/emulated/0/Android/data/{pkg}/files/gloop/external/Internals/Cache/license
             # Only if a FREE_ key is configured; does NOT touch DENG Tool license.
             try:
                 from .package_key import ensure_package_key_for_start as _epkfs

@@ -6,9 +6,12 @@ Covers:
   3.  mask_package_key: short suffix shows FREE_****.
   4.  mask_package_key: empty key returns empty.
   5.  mask_package_key: non-FREE_ key shows first 4 + ****.
-  6.  package_key_license_path returns correct path.
-  7.  package_key_license_path: Internals is case-sensitive exact match.
+  6.  package_key_license_path returns correct path (incl. Cache segment).
+  7.  package_key_license_path: Internals/Cache are case-sensitive exact match.
   8.  package_key_license_path: invalid package name raises ValueError.
+  8a. package_key_license_path: uses per-package substitution (probe p-52aeb6420f).
+  8b. package_key_license_path: file name is exactly ``license`` (no .json).
+  8c. package_key_license_dir / internals_dir / mime_type helpers.
   9.  is_valid_package_key: FREE_ prefix → True.
   10. is_valid_package_key: lowercase free_ → False.
   11. is_valid_package_key: empty → False.
@@ -97,18 +100,59 @@ class PackageKeyLicensePathTests(unittest.TestCase):
         self.fn = package_key_license_path
 
     def test_returns_correct_path(self):
+        # Probe p-52aeb6420f required the ``Cache`` segment between
+        # ``Internals`` and ``license``.
         path = self.fn("com.roblox.client")
         expected = (
             "/storage/emulated/0/Android/data/com.roblox.client"
-            "/files/gloop/external/Internals/license"
+            "/files/gloop/external/Internals/Cache/license"
         )
         self.assertEqual(path, expected)
+
+    def test_path_contains_cache_segment(self):
+        # ``Cache`` is required — the on-device folder name is capitalised.
+        path = self.fn("com.moons.litesc")
+        self.assertIn("/Internals/Cache/license", path)
+        # Ensure we never use the old `Internals/license` (no Cache segment).
+        self.assertNotIn("/Internals/license", path)
 
     def test_internals_is_capitalized(self):
         # 'Internals' must be capital-I (case sensitive)
         path = self.fn("com.roblox.client")
         self.assertIn("/Internals/", path)
         self.assertNotIn("/internals/", path)
+
+    def test_cache_is_capitalized(self):
+        path = self.fn("com.roblox.client")
+        # ``Cache`` (capital C) must follow ``Internals/`` directly.
+        self.assertIn("/Internals/Cache/", path)
+        self.assertNotIn("/internals/cache/", path)
+
+    def test_path_uses_actual_package_name(self):
+        # The package segment must be substituted, NOT hardcoded.  The
+        # screenshot example com.moons.litesc must not leak into other
+        # packages.
+        a = self.fn("com.roblox.client")
+        b = self.fn("com.some.clone")
+        self.assertIn("/com.roblox.client/", a)
+        self.assertIn("/com.some.clone/", b)
+        self.assertNotIn("com.moons.litesc", a)
+        self.assertNotIn("com.moons.litesc", b)
+
+    def test_file_name_is_exactly_license(self):
+        path = self.fn("com.roblox.client")
+        # No JSON, no extension, no Termux home, no shorthand.
+        self.assertTrue(path.endswith("/license"))
+        self.assertFalse(path.endswith(".json"))
+        self.assertFalse(path.endswith("/license.json"))
+
+    def test_path_is_absolute_external_storage(self):
+        path = self.fn("com.roblox.client")
+        self.assertTrue(path.startswith("/storage/emulated/0/Android/data/"))
+        # Forbidden patterns from the spec.
+        self.assertNotIn("/Termux/", path)
+        self.assertNotIn("$HOME", path)
+        self.assertNotIn("/Cache/license/license", path)  # no double Cache
 
     def test_invalid_package_raises_value_error(self):
         with self.assertRaises(ValueError):
@@ -117,6 +161,30 @@ class PackageKeyLicensePathTests(unittest.TestCase):
     def test_empty_package_raises_value_error(self):
         with self.assertRaises(ValueError):
             self.fn("")
+
+
+# ── package_key_license_dir / mime_type ───────────────────────────────────────
+
+class PackageKeyLicenseDirAndMimeTests(unittest.TestCase):
+
+    def test_dir_is_cache_parent(self):
+        from agent.package_key import package_key_license_dir
+        d = package_key_license_dir("com.roblox.client")
+        self.assertEqual(
+            d,
+            "/storage/emulated/0/Android/data/com.roblox.client"
+            "/files/gloop/external/Internals/Cache",
+        )
+
+    def test_internals_dir_is_cache_parent(self):
+        from agent.package_key import package_key_internals_dir
+        d = package_key_internals_dir("com.moons.litesc")
+        self.assertTrue(d.endswith("/Internals"))
+        self.assertNotIn("/Cache", d)
+
+    def test_mime_type_is_octet_stream(self):
+        from agent.package_key import package_key_license_mime_type
+        self.assertEqual(package_key_license_mime_type(), "application/octet-stream")
 
 
 # ── 9–11: is_valid_package_key ───────────────────────────────────────────────
@@ -328,6 +396,78 @@ class LicenseIsolationTests(unittest.TestCase):
                     )
             # No calls to agent.license should have occurred.
             mock_lic.assert_not_called()
+
+
+# ── package_key_license_info ──────────────────────────────────────────────────
+
+class PackageKeyLicenseInfoTests(unittest.TestCase):
+    """Menu 4 file-info helper.
+
+    Covers:
+      - Returns the expected ``…/Internals/Cache/license`` path.
+      - ``exists=False`` when missing, with no crash and no error.
+      - ``exists=True`` + size/md5/key_masked when present.
+      - Full key NEVER appears in the returned dict.
+      - ``mime_type`` is ``application/octet-stream``.
+      - ``file_name`` is ``"license"`` (no extension).
+    """
+
+    def test_missing_file_returns_exists_false(self):
+        from agent.package_key import package_key_license_info
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_path = os.path.join(tmpdir, "Cache", "license")
+            with unittest.mock.patch(
+                "agent.package_key.package_key_license_path", return_value=fake_path,
+            ):
+                info = package_key_license_info("com.roblox.client", root_enabled=False)
+        self.assertFalse(info["exists"])
+        self.assertEqual(info["file_name"], "license")
+        self.assertEqual(info["mime_type"], "application/octet-stream")
+        self.assertEqual(info["package"], "com.roblox.client")
+        self.assertEqual(info["error"], "")
+        self.assertEqual(info["key_masked"], "")
+        self.assertEqual(info["md5"], "")
+
+    def test_existing_file_returns_size_md5_and_masked_key(self):
+        from agent.package_key import package_key_license_info
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "Cache")
+            os.makedirs(cache_dir)
+            fake_path = os.path.join(cache_dir, "license")
+            content = "FREE_ABCDEFGH1234"
+            with open(fake_path, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            with unittest.mock.patch(
+                "agent.package_key.package_key_license_path", return_value=fake_path,
+            ):
+                info = package_key_license_info("com.roblox.client", root_enabled=False)
+        self.assertTrue(info["exists"])
+        self.assertEqual(info["size_bytes"], len(content))
+        self.assertEqual(info["md5"], hashlib.md5(content.encode()).hexdigest())
+        self.assertEqual(info["key_masked"], "FREE_...1234")
+        # Full key must NEVER appear.
+        self.assertNotIn(content, info["key_masked"])
+        self.assertNotIn(content, str(info))
+
+    def test_dir_path_is_internals_cache(self):
+        from agent.package_key import package_key_license_info
+        # We don't need a real file — just inspect what the helper reports.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_path = os.path.join(tmpdir, "license")
+            with unittest.mock.patch(
+                "agent.package_key.package_key_license_path", return_value=fake_path,
+            ):
+                info = package_key_license_info("com.roblox.client", root_enabled=False)
+        # dir comes from package_key_license_dir which is unaffected by the
+        # patched path helper.
+        self.assertTrue(info["dir"].endswith("/Internals/Cache"))
+
+    def test_invalid_package_returns_error_no_crash(self):
+        from agent.package_key import package_key_license_info
+        info = package_key_license_info("../evil", root_enabled=False)
+        self.assertFalse(info["exists"])
+        self.assertNotEqual(info["error"], "")
 
 
 if __name__ == "__main__":
