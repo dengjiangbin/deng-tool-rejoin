@@ -3,7 +3,7 @@
     <div class="auth-brand">
       <div class="auth-brand-icon" aria-hidden="true">DT</div>
       <h1 class="auth-brand-name">DENG <span class="brand-accent">Tool</span></h1>
-      <p class="auth-tagline">Secure portal for DENG Tool: Rejoin licenses.</p>
+      <p class="auth-tagline">Secure portal for DENG Tool: Rejoin</p>
     </div>
 
     <% if (flash && flash.error) { %>
@@ -13,26 +13,6 @@
       <div class="alert alert-success" role="alert"><%= flash.success %></div>
     <% } %>
 
-    <a href="/auth/discord" class="btn btn-discord">Continue with Discord</a>
-
-    <div class="auth-divider"><span>or sign in with database login</span></div>
-
-    <form method="POST" action="/auth/login" class="auth-form" novalidate>
-      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-
-      <div class="form-group">
-        <label for="username" class="form-label">Username or email</label>
-        <input type="text" id="username" name="username" class="form-input"
-               autocomplete="username" required maxlength="254" placeholder="your_username">
-      </div>
-
-      <div class="form-group">
-        <label for="password" class="form-label">Password</label>
-        <input type="password" id="password" name="password" class="form-input"
-               autocomplete="current-password" required maxlength="128" placeholder="Password">
-      </div>
-
-      <button type="submit" class="btn btn-primary btn-block">Sign In</button>
-    </form>
+    <a href="/auth/discord" class="btn btn-discord">Continue With Discord</a>
   </section>
 </div>

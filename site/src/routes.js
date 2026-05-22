@@ -13,7 +13,6 @@ const {
   exchangeDiscordCode,
   fetchDiscordUser,
   upsertDiscordUser,
-  localLogin,
   toSessionUser,
 } = auth;
 const challenge = require('./challenge');
@@ -263,43 +262,14 @@ router.get('/login', (req, res) => {
   return res.render('login', { title: 'Sign In - DENG Tool' });
 });
 
-router.post('/auth/login', authLimiter, async (req, res) => {
-  if (!verifyCsrf(req)) {
-    safeFlash(req, 'error', 'Invalid request. Please try again.');
-    return res.redirect('/login');
-  }
 
-  const { username, password } = req.body;
-  if (!username || !password) {
-    safeFlash(req, 'error', 'Username and password are required.');
-    return res.redirect('/login');
-  }
-
-  try {
-    const user = await localLogin(String(username), String(password));
-    if (!user) {
-      safeFlash(req, 'error', 'Invalid username or password.');
-      return res.redirect('/login');
-    }
-    return req.session.regenerate((err) => {
-      if (err) throw err;
-      req.session.user = toSessionUser(user);
-      req.session.flash = { success: `Welcome back, ${req.session.user.username}!` };
-      res.redirect('/dashboard');
-    });
-  } catch (err) {
-    console.error('[auth/login]', err.message || err);
-    safeFlash(req, 'error', 'Login service unavailable. Please try again.');
-    return res.redirect('/login');
-  }
-});
 
 router.get('/auth/discord', (req, res) => {
   try {
     res.redirect(buildDiscordAuthUrl(req));
   } catch (err) {
     console.error('[auth/discord]', err.message || err);
-    safeFlash(req, 'error', 'Discord login is not configured yet. Use database login.');
+    safeFlash(req, 'error', 'Discord login is not configured.');
     res.redirect('/login');
   }
 });

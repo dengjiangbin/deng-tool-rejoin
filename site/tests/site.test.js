@@ -5,7 +5,6 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const bcrypt = require('bcryptjs');
 
 process.env.TOOL_SITE_COOKIE_SECRET = 'test-cookie-secret-that-is-long-enough-for-the-site-suite';
 process.env.TOOL_SITE_STATE_SECRET = 'test-state-secret-that-is-long-enough-for-challenge-suite';
@@ -168,6 +167,8 @@ const mockSupabase = {
   },
 };
 
+// fakeAxios is declared as a plain object so individual tests can temporarily
+// override .get() to exercise different Discord identity responses.
 const fakeAxios = {
   async post() {
     return { data: { access_token: 'discord-access-token' } };
@@ -178,7 +179,7 @@ const fakeAxios = {
         id: 'discord-user-1',
         username: 'DiscordTester',
         avatar: null,
-        email: 'discord@example.test',
+        email: null,
       },
     };
   },
@@ -205,17 +206,6 @@ function resetDb() {
   memoryDb.site_users.splice(0);
   memoryDb.license_ad_challenges.splice(0);
   memoryDb.license_keys.splice(0);
-  memoryDb.site_users.push({
-    id: 'site-user-1',
-    username: 'tester',
-    email: 'tester@example.test',
-    password_hash: bcrypt.hashSync('correct-password', 8),
-    is_active: true,
-    discord_user_id: null,
-    discord_username: null,
-    discord_avatar: null,
-    created_at: new Date(Date.now() - 60_000).toISOString(),
-  });
 }
 
 function csrfFrom(html) {
@@ -230,13 +220,12 @@ function challengeIdFrom(html) {
   return match[1];
 }
 
-async function login(agent, username = 'tester', password = 'correct-password') {
-  const page = await agent.get('/login');
-  const csrf = csrfFrom(page.text);
-  const res = await agent
-    .post('/auth/login')
-    .type('form')
-    .send({ _csrf: csrf, username, password });
+/** Log in via Discord OAuth using the mock fakeAxios identity. */
+async function login(agent) {
+  const start = await agent.get('/auth/discord');
+  assert.equal(start.status, 302);
+  const state = new URL(start.headers.location).searchParams.get('state');
+  const res = await agent.get(`/auth/discord/callback?code=ok&state=${state}`);
   assert.equal(res.status, 302);
   assert.equal(res.headers.location, '/dashboard');
 }
@@ -263,20 +252,31 @@ async function chooseProvider(agent, provider = 'linkvertise') {
 beforeEach(resetDb);
 
 describe('auth and protected pages', () => {
-  test('login page renders Discord and database login options', async () => {
+  test('login page shows Discord-only login with required text and no database login', async () => {
     const res = await request(app).get('/login');
     assert.equal(res.status, 200);
     assert.match(res.text, /DENG Tool/);
-    assert.match(res.text, /Continue with Discord/);
-    assert.match(res.text, /Username or email/);
+    assert.match(res.text, /Secure portal for DENG Tool: Rejoin/);
+    assert.match(res.text, /Continue With Discord/);
+    // Database login must be absent
+    assert.doesNotMatch(res.text, /Username or email/);
+    assert.doesNotMatch(res.text, /password/);
+    assert.doesNotMatch(res.text, /sign in with database/i);
+    assert.doesNotMatch(res.text, /sign up/i);
+    assert.doesNotMatch(res.text, /register/i);
+    assert.doesNotMatch(res.text, /\/auth\/login/);
   });
 
-  test('Discord OAuth start redirects to Discord with identify/email scopes', async () => {
+  test('Discord OAuth start redirects to Discord with identify scope only', async () => {
     const agent = request.agent(app);
     const res = await agent.get('/auth/discord');
     assert.equal(res.status, 302);
     assert.match(res.headers.location, /^https:\/\/discord\.com\/api\/v10\/oauth2\/authorize/);
-    assert.equal(new URL(res.headers.location).searchParams.get('scope'), 'identify email');
+    const url = new URL(res.headers.location);
+    assert.equal(url.searchParams.get('scope'), 'identify');
+    assert.equal(url.searchParams.get('response_type'), 'code');
+    assert.equal(url.searchParams.get('client_id'), 'discord-client-id');
+    assert.ok(url.searchParams.get('state'), 'state nonce must be present');
   });
 
   test('Discord callback creates and logs in a portal user', async () => {
@@ -289,22 +289,19 @@ describe('auth and protected pages', () => {
     assert.ok(memoryDb.site_users.some((row) => row.discord_user_id === 'discord-user-1'));
   });
 
-  test('database login works and invalid login fails safely', async () => {
-    const okAgent = request.agent(app);
-    await login(okAgent);
-    const dashboard = await okAgent.get('/dashboard');
-    assert.equal(dashboard.status, 200);
-
-    const badAgent = request.agent(app);
-    const page = await badAgent.get('/login');
-    const csrf = csrfFrom(page.text);
-    const bad = await badAgent.post('/auth/login').type('form').send({
-      _csrf: csrf,
-      username: 'tester',
-      password: 'wrong-password',
-    });
-    assert.equal(bad.status, 302);
-    assert.equal(bad.headers.location, '/login');
+  test('database login route is removed and returns 404', async () => {
+    const routes = [
+      { method: 'post', path: '/auth/login' },
+      { method: 'post', path: '/auth/local' },
+      { method: 'post', path: '/auth/database' },
+      { method: 'post', path: '/login' },
+      { method: 'post', path: '/signup' },
+      { method: 'post', path: '/register' },
+    ];
+    for (const { method, path: p } of routes) {
+      const res = await request(app)[method](p).type('form').send({ _csrf: 'x' });
+      assert.ok([404, 410].includes(res.status), `${method.toUpperCase()} ${p} should be 404/410, got ${res.status}`);
+    }
   });
 
   test('logout destroys the session and protected pages redirect to login', async () => {
@@ -495,12 +492,19 @@ describe('security controls', () => {
   });
 
   test('XSS-style usernames are escaped in rendered pages', async () => {
-    memoryDb.site_users[0].username = '<script>alert(1)</script>';
-    const agent = request.agent(app);
-    await login(agent, '<script>alert(1)</script>');
-    const res = await agent.get('/dashboard');
-    assert.doesNotMatch(res.text, /<script>alert\(1\)<\/script>/);
-    assert.match(res.text, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+    const originalGet = fakeAxios.get;
+    fakeAxios.get = async () => ({
+      data: { id: 'xss-user-1', username: '<script>alert(1)</script>', avatar: null },
+    });
+    try {
+      const agent = request.agent(app);
+      await login(agent);
+      const res = await agent.get('/dashboard');
+      assert.doesNotMatch(res.text, /<script>alert\(1\)<\/script>/);
+      assert.match(res.text, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+    } finally {
+      fakeAxios.get = originalGet;
+    }
   });
 
   test('open redirect input is ignored by auth callback failures', async () => {

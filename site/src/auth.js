@@ -4,18 +4,16 @@
  *  - requireLogin middleware
  *  - verifyCsrf helper
  *  - Discord OAuth2 helpers (manual, no Passport)
- *  - Local bcrypt login
  */
 const crypto  = require('crypto');
 const axios   = require('axios');
-const bcrypt  = require('bcryptjs');
 const supabase = require('./db');
 
 const DISCORD_CLIENT_ID     = process.env.DISCORD_CLIENT_ID     || '';
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
 const DISCORD_REDIRECT_URI  = process.env.DISCORD_REDIRECT_URI  || '';
 const DISCORD_API           = 'https://discord.com/api/v10';
-const SCOPES                = 'identify email';
+const SCOPES                = 'identify';
 
 // ---------------------------------------------------------------
 // Middleware
@@ -57,7 +55,12 @@ function verifyCsrf(req) {
  * Stores the state in session for later validation.
  */
 function buildDiscordAuthUrl(req) {
-  if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET || !DISCORD_REDIRECT_URI) {
+  const missing = [];
+  if (!DISCORD_CLIENT_ID) missing.push('DISCORD_CLIENT_ID');
+  if (!DISCORD_CLIENT_SECRET) missing.push('DISCORD_CLIENT_SECRET');
+  if (!DISCORD_REDIRECT_URI) missing.push('DISCORD_REDIRECT_URI');
+  if (missing.length) {
+    console.error('[auth] Discord OAuth not configured, missing env:', missing.join(', '));
     throw new Error('Discord OAuth is not configured');
   }
   const state = crypto.randomBytes(24).toString('hex');
@@ -154,50 +157,7 @@ async function upsertDiscordUser(discordUser, _tokens) {
   return data;
 }
 
-// ---------------------------------------------------------------
-// Local (username/password) Auth
-// ---------------------------------------------------------------
 
-/**
- * Find a site_user by username or email, then verify their password.
- * Returns the user row on success, or null on failure.
- */
-async function localLogin(usernameOrEmail, password) {
-  if (!usernameOrEmail || !password) return null;
-
-  const login = String(usernameOrEmail).trim();
-
-  // Avoid raw PostgREST .or() filters with user input.  Two exact-match
-  // lookups are boring, parameterized by the client library, and safer.
-  let { data, error } = await supabase
-    .from('site_users')
-    .select('*')
-    .eq('username', login)
-    .maybeSingle();
-
-  if (!data && !error) {
-    const emailLookup = await supabase
-      .from('site_users')
-      .select('*')
-      .eq('email', login)
-      .maybeSingle();
-    data = emailLookup.data;
-    error = emailLookup.error;
-  }
-
-  if (error || !data || !data.password_hash || !data.is_active) return null;
-
-  const match = await bcrypt.compare(password, data.password_hash);
-  if (!match) return null;
-
-  // Update last_login_at
-  await supabase
-    .from('site_users')
-    .update({ last_login_at: new Date().toISOString() })
-    .eq('id', data.id);
-
-  return data;
-}
 
 /**
  * Create a minimal session user object (avoid storing full token in session).
@@ -220,6 +180,5 @@ module.exports = {
   exchangeDiscordCode,
   fetchDiscordUser,
   upsertDiscordUser,
-  localLogin,
   toSessionUser,
 };
