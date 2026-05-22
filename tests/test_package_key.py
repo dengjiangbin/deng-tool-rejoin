@@ -32,10 +32,13 @@ Covers:
 """
 from __future__ import annotations
 
+import hashlib
+import io
 import os
 import tempfile
 import unittest
 import unittest.mock
+from contextlib import redirect_stdout
 from typing import Any
 
 
@@ -427,10 +430,10 @@ class PackageKeyLicenseInfoTests(unittest.TestCase):
         self.assertEqual(info["error"], "")
         self.assertEqual(info["key_masked"], "")
         self.assertEqual(info["md5"], "")
+        self.assertIn("fs_type", info)
 
     def test_existing_file_returns_size_md5_and_masked_key(self):
         from agent.package_key import package_key_license_info
-        import hashlib
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_dir = os.path.join(tmpdir, "Cache")
             os.makedirs(cache_dir)
@@ -449,6 +452,9 @@ class PackageKeyLicenseInfoTests(unittest.TestCase):
         # Full key must NEVER appear.
         self.assertNotIn(content, info["key_masked"])
         self.assertNotIn(content, str(info))
+        self.assertIn("modified_iso", info)
+        self.assertIn("permissions", info)
+        self.assertIn("fs_type", info)
 
     def test_dir_path_is_internals_cache(self):
         from agent.package_key import package_key_license_info
@@ -468,6 +474,163 @@ class PackageKeyLicenseInfoTests(unittest.TestCase):
         info = package_key_license_info("../evil", root_enabled=False)
         self.assertFalse(info["exists"])
         self.assertNotEqual(info["error"], "")
+
+
+class Menu4PackageKeyUiTests(unittest.TestCase):
+    def _cfg(self, packages: list[str]) -> dict[str, Any]:
+        return {
+            "roblox_package": packages[0],
+            "roblox_packages": [
+                {
+                    "package": pkg,
+                    "app_name": "",
+                    "enabled": True,
+                    "username_source": "not_set",
+                }
+                for pkg in packages
+            ],
+            "package_keys": {"global": "", "per_package": {}},
+        }
+
+    def test_multiple_packages_show_selector_and_all_packages(self):
+        from agent import commands
+
+        cfg = self._cfg(["com.moons.litesc", "com.moons.litesd", "com.moons.litese"])
+        out = io.StringIO()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
+             unittest.mock.patch("agent.commands.safe_io.safe_prompt", return_value="0"), \
+             redirect_stdout(out):
+            result = commands._config_menu_key(cfg)
+
+        text = out.getvalue()
+        self.assertIs(result, cfg)
+        self.assertIn("Select Package For Package Key", text)
+        self.assertIn("1. com.moons.litesc", text)
+        self.assertIn("2. com.moons.litesd", text)
+        self.assertIn("3. com.moons.litese", text)
+        self.assertIn("A. All Packages", text)
+        self.assertIn("0. Back", text)
+
+    def test_single_package_opens_package_key_menu_directly(self):
+        from agent import commands
+
+        cfg = self._cfg(["com.roblox.client"])
+        out = io.StringIO()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
+             unittest.mock.patch("agent.commands.safe_io.safe_prompt", return_value="0"), \
+             redirect_stdout(out):
+            commands._config_menu_key(cfg)
+
+        text = out.getvalue()
+        self.assertIn("Package Key menu:", text)
+        self.assertIn("1. Enter / Update Package Key", text)
+        self.assertIn("2. Show Package Key File Info", text)
+        self.assertIn("3. Remove Saved Package Key", text)
+        self.assertNotIn("Select Package For Package Key", text)
+
+    def test_file_info_output_contains_required_fields_and_cache_path(self):
+        from agent import commands
+
+        content = "FREE_ABCDEFGH1234"
+        info = {
+            "package": "com.moons.litesc",
+            "file_name": "license",
+            "mime_type": "application/octet-stream",
+            "exists": True,
+            "size_bytes": len(content),
+            "modified_iso": "2026-05-23T00:00:00Z",
+            "permissions": "rw-r--r--",
+            "path": (
+                "/storage/emulated/0/Android/data/com.moons.litesc"
+                "/files/gloop/external/Internals/Cache/license"
+            ),
+            "dir": (
+                "/storage/emulated/0/Android/data/com.moons.litesc"
+                "/files/gloop/external/Internals/Cache"
+            ),
+            "fs_type": "fuseblk",
+            "md5": hashlib.md5(content.encode()).hexdigest(),
+            "error": "",
+        }
+        out = io.StringIO()
+        with unittest.mock.patch("agent.package_key.package_key_license_info", return_value=info), \
+             redirect_stdout(out):
+            commands._print_package_key_file_info("com.moons.litesc")
+
+        text = out.getvalue()
+        self.assertIn("Package Key File Info", text)
+        self.assertIn("Package: com.moons.litesc", text)
+        self.assertIn("File name: license", text)
+        self.assertIn("Type: application/octet-stream", text)
+        self.assertIn("Size: 17 bytes", text)
+        self.assertIn("Last modification: 2026-05-23T00:00:00Z", text)
+        self.assertIn("Permissions: rw-r--r--", text)
+        self.assertIn("/Internals/Cache/license", text)
+        self.assertNotIn("/Internals/license", text)
+        self.assertIn("FS path: /storage/emulated/0/Android/data/com.moons.litesc/files/gloop/external/Internals/Cache", text)
+        self.assertIn("FS type: fuseblk", text)
+        self.assertIn(f"MD5: {info['md5']}", text)
+        self.assertNotIn(content, text)
+
+    def test_missing_file_output_does_not_crash_and_shows_expected_path(self):
+        from agent import commands
+
+        path = (
+            "/storage/emulated/0/Android/data/com.roblox.client"
+            "/files/gloop/external/Internals/Cache/license"
+        )
+        info = {
+            "package": "com.roblox.client",
+            "mime_type": "application/octet-stream",
+            "exists": False,
+            "path": path,
+            "dir": path.rsplit("/", 1)[0],
+            "fs_type": "unknown",
+            "error": "",
+        }
+        out = io.StringIO()
+        with unittest.mock.patch("agent.package_key.package_key_license_info", return_value=info), \
+             redirect_stdout(out):
+            commands._print_package_key_file_info("com.roblox.client")
+
+        text = out.getvalue()
+        self.assertIn("Package key file not found.", text)
+        self.assertIn(f"Full path: {path}", text)
+        self.assertIn("FS path: /storage/emulated/0/Android/data/com.roblox.client/files/gloop/external/Internals/Cache", text)
+
+    def test_all_packages_save_writes_each_package_specific_cache_path(self):
+        from agent import commands
+
+        cfg = self._cfg(["com.moons.litesc", "com.moons.litesd"])
+        writes: list[tuple[str, str]] = []
+
+        def fake_write(pkg: str, key: str):
+            writes.append((pkg, key))
+            return {
+                "success": True,
+                "path": (
+                    f"/storage/emulated/0/Android/data/{pkg}"
+                    "/files/gloop/external/Internals/Cache/license"
+                ),
+            }
+
+        with unittest.mock.patch("agent.package_key.write_package_key_file", side_effect=fake_write), \
+             unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
+            result = commands._save_package_key_for_packages(
+                cfg,
+                ["com.moons.litesc", "com.moons.litesd"],
+                "FREE_TESTKEY1234",
+                save_global=True,
+            )
+
+        self.assertEqual(
+            writes,
+            [
+                ("com.moons.litesc", "FREE_TESTKEY1234"),
+                ("com.moons.litesd", "FREE_TESTKEY1234"),
+            ],
+        )
+        self.assertEqual(result["package_keys"]["global"], "FREE_TESTKEY1234")
 
 
 if __name__ == "__main__":

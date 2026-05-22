@@ -240,34 +240,20 @@ def run() -> int:
     and does not use the deferred-install mechanism.  If this function is reached, the
     user has an **old launcher bundle** (installed before the direct-install update).
 
-    Direct them to re-run the installer to get the full package.
+    If the full entrypoint exists, immediately exec it.  Otherwise fail
+    generically without the old "launcher outdated" wording that made fresh
+    installs look wrapper-only.
     """
     app_home = _app_home()
-    marker = _requested_path(app_home)
-
-    reinstall_cmd = "curl -fsSL https://rejoin.deng.my.id/install/test/latest -o install.sh && bash install.sh"
-
-    if marker.is_file():
-        print(
-            "Your launcher is outdated and cannot complete the install.\n"
-            "Please re-run the installer to download the full DENG Tool: Rejoin package:\n"
-            f"\n  {reinstall_cmd}\n",
-            file=sys.stderr,
-        )
-    else:
-        # No marker — tool may already be installed but pointing to this stub.
-        main_py = app_home / "agent" / "deng_tool_rejoin.py"
-        if main_py.is_file():
-            # Real entrypoint is present; exec it directly.
-            exe = sys.executable
-            os.execv(exe, [exe, str(main_py), *sys.argv[1:]])
-            raise RuntimeError("execv returned unexpectedly")  # pragma: no cover
-        print(
-            "DENG Tool: Rejoin is not fully installed.\n"
-            "Run the installer to set up the full package:\n"
-            f"\n  {reinstall_cmd}\n",
-            file=sys.stderr,
-        )
+    main_py = app_home / "agent" / "deng_tool_rejoin.py"
+    if main_py.is_file():
+        exe = sys.executable
+        os.execv(exe, [exe, str(main_py), *sys.argv[1:]])
+        raise RuntimeError("execv returned unexpectedly")  # pragma: no cover
+    print(
+        "DENG Tool: Rejoin is not fully installed. Run the installer again.",
+        file=sys.stderr,
+    )
     return 1
 
 

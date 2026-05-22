@@ -205,11 +205,27 @@ class TestBug3DeterministicSlotsAcrossPackageCounts(unittest.TestCase):
 
     def _slots_for(self, n: int, screen_mode: str = "landscape"):
         from agent import window_layout
+        from unittest.mock import patch
         packages = [f"com.test.pkg{i}" for i in range(n)]
-        rects = window_layout.calculate_split_layout(
-            packages, 1280, 720, termux_log_fraction=0.0, screen_mode=screen_mode,
-        )
+        with patch("agent.window_layout._detect_status_bar_height", return_value=25):
+            rects = window_layout.calculate_split_layout(
+                packages, 1280, 720, termux_log_fraction=0.0, screen_mode=screen_mode,
+            )
         return [(r.package, r.left, r.top, r.right, r.bottom) for r in rects]
+
+    def _grid_for(self, n: int) -> list[list[int]]:
+        slots = self._slots_for(n)
+        positions = {
+            (426, 25): (0, 1), (852, 25): (0, 2),
+            (0, 256): (1, 0), (426, 256): (1, 1), (852, 256): (1, 2),
+            (0, 487): (2, 0), (426, 487): (2, 1), (852, 487): (2, 2),
+            (0, 25): (0, 0),
+        }
+        grid = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+        for idx, (_pkg, left, top, _right, _bottom) in enumerate(slots, 1):
+            row, col = positions[(left, top)]
+            grid[row][col] = idx
+        return grid
 
     def test_two_packages_get_unique_slots(self):
         slots = self._slots_for(2)
@@ -247,6 +263,22 @@ class TestBug3DeterministicSlotsAcrossPackageCounts(unittest.TestCase):
         bounds = {(l, t, r, b) for (_, l, t, r, b) in slots}
         # No package gets the same rect (the symptom from the bug report).
         self.assertEqual(len(bounds), 3, slots)
+
+    def test_one_through_nine_match_required_landscape_grid_rules(self):
+        expected = {
+            1: [[0, 1, 0], [0, 0, 0], [0, 0, 0]],
+            2: [[0, 1, 2], [0, 0, 0], [0, 0, 0]],
+            3: [[0, 1, 2], [0, 3, 0], [0, 0, 0]],
+            4: [[0, 1, 2], [0, 3, 4], [0, 0, 0]],
+            5: [[0, 1, 2], [0, 3, 4], [0, 5, 0]],
+            6: [[0, 1, 2], [0, 3, 4], [0, 5, 6]],
+            7: [[0, 1, 2], [3, 4, 5], [6, 7, 0]],
+            8: [[0, 1, 2], [3, 4, 5], [6, 7, 8]],
+            9: [[1, 2, 3], [4, 5, 6], [7, 8, 9]],
+        }
+        for n, grid in expected.items():
+            with self.subTest(package_count=n):
+                self.assertEqual(self._grid_for(n), grid)
 
 
 if __name__ == "__main__":

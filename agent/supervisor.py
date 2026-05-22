@@ -22,9 +22,8 @@ from .roblox_health import categorize_unhealthy
 def _load_stored_rect_for_package(cfg: dict[str, Any], package: str):
     """Return the WindowRect that the initial Start computed for *package*.
 
-    Bug 3 (probe ``p-52aeb6420f``): a single-package relaunch (RAM restart
-    / Dead / No Heartbeat recovery) used to recompute the layout as if
-    only THIS package existed — collapsing a 3-pkg grid into a single
+    Bug 3 (probe ``p-52aeb6420f``): a single-package recovery used to
+    recompute the layout as if only THIS package existed — collapsing a 3-pkg grid into a single
     1-pkg rect.  Visually this looked like "all packages went to the
     same slot".  The original Start path persists the full layout to
     ``cfg["last_layout_preview"]`` (and ``cfg["_layout_rects"]`` for the
@@ -1924,26 +1923,22 @@ class WatchdogSupervisor:
           2. Check at most once per ram_trim_interval_sec.
           3. RAM ≤ effective target  →  no action.
           4. RAM > effective target  →  try safe cache trim (non-disruptive).
-          5. RAM > ram_restart_threshold_mb AND cooldown expired AND
-             ``ram_restart_when_online_enabled`` is set → force-stop + relaunch.
+          5. RAM > ram_restart_threshold_mb → log high RAM, but do not stop
+             or relaunch an Online package.
 
         Probe p-52aeb6420f evidence: Roblox uses 1.3–1.4 GB on the SM-N9810
         (Android 10) so the default 900 MB threshold tripped EVERY package
         on EVERY cooldown cycle (180 s), force-closing Online-and-in-game
         packages forever.  Per user spec, Online + in-game packages MUST
-        NOT be relaunched.  We honour that by gating the restart path on
-        ``ram_restart_when_online_enabled`` (default ``False``).  The
-        non-disruptive cache trim still fires above the soft target so we
-        don't lose the RAM optimisation entirely.
+        NOT be relaunched.  The non-disruptive cache trim still fires above
+        the soft target, but high RAM alone never force-stops, relaunches,
+        or reopens the private URL.
 
         Probe tags:
           [DENG_REJOIN_RAM_CHECK]
           [DENG_REJOIN_RAM_TRIM]
-          [DENG_REJOIN_RAM_RESTART]
-          [DENG_REJOIN_RAM_RESTART_SKIPPED]   ← new — emitted when the
-              restart path would have fired but is inhibited because the
-              package is Online and ``ram_restart_when_online_enabled``
-              is False (the default).
+          [DENG_REJOIN_RAM_RESTART_SKIPPED]   ← emitted when high RAM is
+              reported for an Online package; no kill/relaunch is allowed.
         """
         cfg = self.cfg
         if not cfg.get("ram_optimization_enabled", True):
@@ -1973,11 +1968,6 @@ class WatchdogSupervisor:
         target_aggressive = int(cfg.get("ram_target_aggressive_mb", 300))
         restart_threshold = int(cfg.get("ram_restart_threshold_mb", 900))
         aggressive_mode   = bool(cfg.get("ram_aggressive_mode", False))
-        restart_cooldown  = int(cfg.get("ram_restart_cooldown_sec", 180))
-        # Opt-in flag — default False per user spec: an Online + in-game
-        # package must not be relaunched solely because of RAM.  Operators
-        # who explicitly want the old behaviour can flip this to True.
-        restart_when_online = bool(cfg.get("ram_restart_when_online_enabled", False))
         effective_target  = target_aggressive if aggressive_mode else target_normal
 
         log_event(
@@ -2017,70 +2007,22 @@ class WatchdogSupervisor:
         if usage_mb <= restart_threshold:
             return  # Below restart threshold — trim is sufficient.
 
-        # ── RAM restart (opt-in only) ────────────────────────────────────────
+        # ── RAM restart forbidden for Online packages ────────────────────────
         # _check_ram_optimization is only reached from _handle_state when
         # state == STATUS_ONLINE (probe p-52aeb6420f), so a "true Online
         # package" reaching this point is by definition healthy and
-        # in-game.  Per user spec, do NOT relaunch.  We log a single
-        # cooldown-aware skip event so the inhibition is visible in probes
-        # and Bug 1 regressions are easy to spot.
-        if not restart_when_online:
-            log_event(
-                logger, "info", "[DENG_REJOIN_RAM_RESTART_SKIPPED]",
-                package=pkg,
-                usage_mb=round(usage_mb, 1),
-                usage_display=usage_display,
-                restart_threshold_mb=restart_threshold,
-                reason="online_state_protected",
-                policy="ram_restart_when_online_enabled=false",
-            )
-            return
-
-        ram_cooldown_until = self._ram_cooldown_until.get(pkg, 0.0)
-        nhb_cooldown_until = self._nhb_cooldown_until.get(pkg, 0.0)
-        cooldown_until = max(ram_cooldown_until, nhb_cooldown_until)
-        if now < cooldown_until:
-            log_event(
-                logger, "debug", "[DENG_REJOIN_RAM_RESTART_COOLDOWN]",
-                package=pkg,
-                usage_mb=round(usage_mb, 1),
-                restart_threshold_mb=restart_threshold,
-                remaining_sec=round(cooldown_until - now, 1),
-                status="waiting",
-            )
-            return
-
-        # Set cooldowns before acting to prevent concurrent restarts.
-        self._ram_cooldown_until[pkg] = now + restart_cooldown
-        self._nhb_cooldown_until[pkg] = now + restart_cooldown
+        # in-game.  Per user spec, do NOT relaunch.  We log a skip event so
+        # the high-RAM observation remains visible in probes.
         log_event(
-            logger, "warning", "[DENG_REJOIN_RAM_RESTART]",
+            logger, "info", "[DENG_REJOIN_RAM_RESTART_SKIPPED]",
             package=pkg,
             usage_mb=round(usage_mb, 1),
             usage_display=usage_display,
             restart_threshold_mb=restart_threshold,
-            cooldown_sec=restart_cooldown,
-            reason="ram_above_threshold",
+            reason="online_state_protected",
+            policy="high_ram_report_only",
         )
-        self._set_status(pkg, STATUS_RELAUNCHING)
-        if callable(render_callback):
-            try:
-                render_callback()
-            except Exception:  # noqa: BLE001
-                pass
-        try:
-            android.force_stop_package(pkg)
-            time.sleep(1.5)
-        except Exception:  # noqa: BLE001
-            pass
-        success = self._do_launch(pkg, entry, "ram_restart")
-        if success:
-            self._revive_count[pkg] = self._revive_count.get(pkg, 0) + 1
-            self._set_grace(pkg, now)
-            self._set_status(pkg, STATUS_LAUNCHING)
-            self._online_start_ts.pop(pkg, None)
-        else:
-            self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
+        return
 
     # ─── Main loop ────────────────────────────────────────────────────────────
 

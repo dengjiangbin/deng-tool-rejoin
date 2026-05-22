@@ -426,6 +426,7 @@ class InstallTestLatestBootstrapTests(unittest.TestCase):
         self.assertIn("text/", headers.get("Content-Type", ""))
         text = body.decode("utf-8")
         self.assertIn("DENG Tool: Rejoin Installing", text)
+        self.assertNotIn("DENG Tool: Rejoin Test Installer", text)
         # "Channel: internal test" removed from public output per Section C (keep clean)
         self.assertNotIn("Channel: internal test", text)
         self.assertIn("Version: main-dev", text)
@@ -436,7 +437,10 @@ class InstallTestLatestBootstrapTests(unittest.TestCase):
         self.assertNotIn("[################", text)
         self.assertNotIn("[------", text)
         self.assertNotIn(".install_requested", text)
-        self.assertNotIn("deferred_bundle_install", text)
+        self.assertNotIn("launcher bundle verified", text)
+        self.assertNotIn("wrapper path", text)
+        self.assertNotIn("command -v deng-rejoin", text)
+        self.assertNotIn("your launcher is outdated", text)
         self.assertNotIn("GITHUB_TOKEN", text)
         self.assertNotIn("SUPABASE_SERVICE_ROLE_KEY", text)
         self.assertNotIn("LICENSE_KEY_EXPORT_SECRET", text)
@@ -529,6 +533,10 @@ class InstallBootstrapSanityTests(unittest.TestCase):
         self.assertNotIn("read -s", tl)
         self.assertNotIn("supabase_service_role_key", tl)
         self.assertNotIn("raw.githubusercontent.com", tl)
+        self.assertNotIn("deng tool: rejoin test installer", tl)
+        self.assertNotIn("launcher bundle verified", tl)
+        self.assertNotIn("wrapper-only", tl)
+        self.assertNotIn("your launcher is outdated", tl)
 
     def test_public_bootstrap_passes_bash_n(self) -> None:
         from agent.bootstrap_installer import render_public_bootstrap
@@ -580,7 +588,6 @@ class InstallBootstrapSanityTests(unittest.TestCase):
         self.assertIn('mkdir -p "${PREFIX}/bin"', s)
         self.assertIn("$HOME/bin", s)
         self.assertNotIn("$HOME/.local/bin", s)
-        self.assertIn("command -v deng-rejoin", s)
         self.assertIn("hash -r", s)
         self.assertIn("Failed to create deng-rejoin wrapper.", s)
         self.assertIn('.install_api', s)
@@ -589,13 +596,18 @@ class InstallBootstrapSanityTests(unittest.TestCase):
         self.assertNotIn("[################", s)
         self.assertIn("install/test/package.tar.gz", s)
         self.assertIn("deng_tool_rejoin.py", s)
+        self.assertNotIn("DENG Tool: Rejoin Test Installer", s)
+        self.assertNotIn("Launcher bundle verified", s)
+        self.assertNotIn("Wrapper path", s)
+        self.assertNotIn("command -v deng-rejoin", s)
+        self.assertNotIn("Your launcher is outdated", s)
         # Wrapper must use DENG_REJOIN_HOME env with fallback
         self.assertIn(
             'export DENG_REJOIN_INSTALL_API="${DENG_REJOIN_INSTALL_API:-https://rejoin.deng.my.id}"',
             s,
         )
 
-    def test_install_complete_only_after_command_check(self) -> None:
+    def test_install_complete_only_after_runtime_checks(self) -> None:
         from agent.bootstrap_installer import render_direct_install_bootstrap
 
         s = render_direct_install_bootstrap(
@@ -603,8 +615,8 @@ class InstallBootstrapSanityTests(unittest.TestCase):
             package_sha256="a" * 64,
         )
         done = s.index("Install complete.")
-        self.assertLess(s.index("command -v deng-rejoin"), done)
         self.assertLess(s.index(".install_api"), done)
+        self.assertLess(s.index('"$BIN/deng-rejoin" version'), done)
 
     def test_packed_launcher_tarball_has_resolve_install_api(self) -> None:
         tar_path = PROJECT / "releases" / "launcher" / "deng-rejoin-launcher.tar.gz"
@@ -682,7 +694,6 @@ class InstallTermuxSimulationTests(unittest.TestCase):
                 timeout=120,
             )
             self.assertEqual(r.returncode, 0, msg=r.stderr + r.stdout)
-            self.assertIn("Launcher bundle verified.", r.stdout)
             self.assertIn("Install complete.", r.stdout)
 
             which_r = subprocess.run(

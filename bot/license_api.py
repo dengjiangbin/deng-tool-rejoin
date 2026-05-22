@@ -502,7 +502,6 @@ def _route_public_install(
             script = render_direct_install_bootstrap(
                 base_url=base,
                 package_sha256=_sha,
-                installer_title="DENG Tool: Rejoin Test Installer",
                 banner_lines=("Version: main-dev",),
             )
             return (

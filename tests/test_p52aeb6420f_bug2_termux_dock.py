@@ -99,6 +99,24 @@ class TestBug2TermuxDockOptIn(unittest.TestCase):
         mock_root.assert_not_called()
         mock_min.assert_not_called()
 
+    def test_cmd_start_defaults_termux_dock_disabled(self):
+        """Normal Start must not opt in to Termux docking when config omits the flag."""
+        import inspect
+        import agent.commands as commands
+
+        src = inspect.getsource(commands.cmd_start)
+        self.assertIn('cfg.get("termux_dock_enabled", False)', src)
+        self.assertNotIn('cfg.get("termux_dock_enabled", True)', src)
+
+    def test_cmd_start_does_not_run_global_kill_all(self):
+        """Normal Start must not close all/cached apps as a layout workaround."""
+        import inspect
+        import agent.commands as commands
+
+        src = inspect.getsource(commands.cmd_start)
+        self.assertNotIn("kill_all_background_apps(", src)
+        self.assertIn("[DENG_REJOIN_START_SAFETY]", src)
+
 
 if __name__ == "__main__":
     unittest.main()

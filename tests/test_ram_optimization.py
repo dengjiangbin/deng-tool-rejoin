@@ -6,29 +6,29 @@ Covers:
   3.  RAM check skipped within trim_interval (rate-limit guard).
   4.  RAM ≤ effective target → no action taken (normal mode).
   5.  RAM > target, ≤ restart threshold → trim attempted (normal mode).
-  6.  RAM > restart threshold + cooldown expired → restart triggered.
-  7.  RAM > restart threshold + in RAM cooldown → restart skipped.
-  8.  RAM > restart threshold + in NHB cooldown → restart skipped.
-  9.  RAM > restart threshold → cooldown set on both _ram_cooldown_until and _nhb_cooldown_until.
+  6.  RAM > restart threshold never restarts Online packages.
+  7.  RAM > restart threshold + in RAM cooldown still does not restart.
+  8.  RAM > restart threshold + in NHB cooldown still does not restart.
+  9.  RAM > restart threshold does not set restart cooldowns.
   10. Aggressive mode uses target_aggressive_mb threshold.
   11. Trim result is logged with correct probe tag.
-  12. Restart result is logged with correct probe tag.
-  13. force_stop_package called before relaunch on RAM restart.
-  14. _do_launch called with reason="ram_restart".
-  15. On successful RAM restart, _revive_count incremented.
-  16. On failed RAM restart, _failure_count incremented.
-  17. On successful RAM restart, _online_start_ts cleared.
-  18. On successful RAM restart, grace period set via _set_grace.
+  12. Restart-skipped result is logged with correct probe tag.
+  13. force_stop_package is never called by RAM optimization.
+  14. _do_launch is never called by RAM optimization.
+  15. RAM optimization does not increment revive_count.
+  16. RAM optimization does not increment failure_count.
+  17. RAM optimization does not clear _online_start_ts.
+  18. RAM optimization does not set launch grace.
   19. Ram check updates _ram_last_check_at timestamp.
   20. Trim updates _ram_last_trim_at timestamp.
   21. config defaults used when keys missing.
   22. RAM check probe tag [DENG_REJOIN_RAM_CHECK] emitted.
   23. RAM trim probe tag [DENG_REJOIN_RAM_TRIM] emitted.
-  24. RAM restart probe tag [DENG_REJOIN_RAM_RESTART] emitted.
-  25. RAM cooldown probe tag [DENG_REJOIN_RAM_RESTART_COOLDOWN] emitted when in cooldown.
+  24. RAM restart-skipped probe tag [DENG_REJOIN_RAM_RESTART_SKIPPED] emitted.
+  25. RAM cooldown is ignored because RAM restarts are disabled.
   26. No trim attempt when RAM already ≤ target in normal mode.
-  27. STATUS_RELAUNCHING set before _do_launch on RAM restart.
-  28. STATUS_LAUNCHING set after successful RAM restart.
+  27. STATUS_RELAUNCHING is not set for high RAM.
+  28. STATUS_LAUNCHING is not set for high RAM.
   29. _check_ram_optimization called from _handle_state for STATUS_ONLINE.
   30. _check_ram_optimization NOT called for STATUS_DEAD.
   31. _check_ram_optimization NOT called for STATUS_NO_HEARTBEAT (handled separately).
@@ -68,11 +68,6 @@ def _make_supervisor(cfg: dict[str, Any] | None = None) -> Any:
         "ram_trim_interval_sec": 120,
         "ram_restart_cooldown_sec": 180,
         "ram_aggressive_mode": False,
-        # Opt-in: the restart-path tests below all assume the operator
-        # has flipped this flag.  Production default is False (Bug 1 fix,
-        # probe p-52aeb6420f) — covered by the dedicated regression class
-        # ``TestBug1OnlineProtectedFromRamRestart``.
-        "ram_restart_when_online_enabled": True,
         "roblox_package": "com.roblox.client",
         "packages": [{"package": "com.roblox.client", "username": "TestUser"}],
         "private_server_url": "",
@@ -242,12 +237,12 @@ class TestRamTrimTriggered(unittest.TestCase):
             mock_android.force_stop_package.assert_not_called()
 
 
-# ── 6: RAM > restart threshold, cooldown expired → restart ───────────────────
+# ── 6: RAM > restart threshold never restarts Online package ──────────────────
 
 class TestRamRestartTriggered(unittest.TestCase):
 
     def test_restart_triggered_above_threshold(self):
-        """RAM=950 MB > restart_threshold=900 and no cooldown → restart."""
+        """RAM=950 MB > restart_threshold=900 → report only, no restart."""
         sup = _make_supervisor()
         now = time.monotonic()
         sup._online_start_ts[_PKG] = now - 9999
@@ -257,11 +252,14 @@ class TestRamRestartTriggered(unittest.TestCase):
             mock_android.clear_package_cache_verified.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
-            with patch.object(sup, "_do_launch", return_value=True) as mock_launch:
-                with patch.object(sup, "_set_grace"):
-                    with patch.object(sup, "_set_status"):
+            with patch.object(sup, "_do_launch") as mock_launch:
+                with patch.object(sup, "_set_grace") as mock_grace:
+                    with patch.object(sup, "_set_status") as mock_status:
                         sup._check_ram_optimization(_PKG, _ENTRY, now)
-                mock_launch.assert_called_once_with(_PKG, _ENTRY, "ram_restart")
+                mock_android.force_stop_package.assert_not_called()
+                mock_launch.assert_not_called()
+                mock_grace.assert_not_called()
+                mock_status.assert_not_called()
 
 
 # ── 7: RAM restart blocked by RAM cooldown ────────────────────────────────────
@@ -304,11 +302,11 @@ class TestRamRestartBlockedByNhbCooldown(unittest.TestCase):
                 mock_launch.assert_not_called()
 
 
-# ── 9: Cooldown set on both dicts ─────────────────────────────────────────────
+# ── 9: Cooldowns are not set by RAM report-only path ──────────────────────────
 
 class TestRamRestartSetsBothCooldowns(unittest.TestCase):
 
-    def test_both_cooldowns_set_on_restart(self):
+    def test_both_cooldowns_not_set_on_high_ram(self):
         sup = _make_supervisor()
         now = time.monotonic()
         sup._online_start_ts[_PKG] = now - 9999
@@ -318,14 +316,14 @@ class TestRamRestartSetsBothCooldowns(unittest.TestCase):
             mock_android.clear_package_cache_verified.return_value = {
                 "success": True, "skipped": False, "skipped_reason": "", "error": "",
             }
-            with patch.object(sup, "_do_launch", return_value=True):
+            with patch.object(sup, "_do_launch") as mock_launch:
                 with patch.object(sup, "_set_grace"):
                     with patch.object(sup, "_set_status"):
                         sup._check_ram_optimization(_PKG, _ENTRY, now)
+                mock_launch.assert_not_called()
 
-        cooldown_sec = 180  # default ram_restart_cooldown_sec
-        self.assertGreaterEqual(sup._ram_cooldown_until.get(_PKG, 0), now + cooldown_sec - 1)
-        self.assertGreaterEqual(sup._nhb_cooldown_until.get(_PKG, 0), now + cooldown_sec - 1)
+        self.assertNotIn(_PKG, sup._ram_cooldown_until)
+        self.assertNotIn(_PKG, sup._nhb_cooldown_until)
 
 
 # ── 10: Aggressive mode ───────────────────────────────────────────────────────
@@ -358,11 +356,11 @@ class TestRamAggressiveMode(unittest.TestCase):
             mock_android.clear_package_cache_verified.assert_not_called()
 
 
-# ── 13: force_stop_package called before relaunch ─────────────────────────────
+# ── 13: RAM optimization never force-stops before relaunch ────────────────────
 
 class TestRamRestartForceStop(unittest.TestCase):
 
-    def test_force_stop_called_before_launch(self):
+    def test_force_stop_not_called_before_launch(self):
         sup = _make_supervisor()
         now = time.monotonic()
         sup._online_start_ts[_PKG] = now - 9999
@@ -387,7 +385,7 @@ class TestRamRestartForceStop(unittest.TestCase):
                             mock_time.sleep = lambda _: None
                             sup._check_ram_optimization(_PKG, _ENTRY, now)
 
-        self.assertEqual(call_order, ["stop", "launch"])
+        self.assertEqual(call_order, [])
 
 
 # ── 15–16: revive/failure counts ──────────────────────────────────────────────
@@ -413,20 +411,20 @@ class TestRamRestartCounts(unittest.TestCase):
                             sup._check_ram_optimization(_PKG, _ENTRY, now)
         return sup
 
-    def test_revive_count_incremented_on_success(self):
+    def test_revive_count_not_incremented_on_high_ram(self):
         sup = self._run_restart(launch_ok=True)
-        self.assertEqual(sup._revive_count.get(_PKG, 0), 1)
+        self.assertEqual(sup._revive_count.get(_PKG, 0), 0)
 
-    def test_failure_count_incremented_on_failure(self):
+    def test_failure_count_not_incremented_on_high_ram(self):
         sup = self._run_restart(launch_ok=False)
-        self.assertEqual(sup._failure_count.get(_PKG, 0), 1)
+        self.assertEqual(sup._failure_count.get(_PKG, 0), 0)
 
 
-# ── 17: online_start_ts cleared on restart ────────────────────────────────────
+# ── 17: online_start_ts preserved on high RAM ─────────────────────────────────
 
 class TestRamRestartClearsOnlineTs(unittest.TestCase):
 
-    def test_online_start_ts_cleared_after_restart(self):
+    def test_online_start_ts_preserved_after_high_ram(self):
         sup = _make_supervisor()
         now = time.monotonic()
         sup._online_start_ts[_PKG] = now - 9999
@@ -444,7 +442,7 @@ class TestRamRestartClearsOnlineTs(unittest.TestCase):
                             mock_time.sleep = lambda _: None
                             sup._check_ram_optimization(_PKG, _ENTRY, now)
 
-        self.assertNotIn(_PKG, sup._online_start_ts)
+        self.assertIn(_PKG, sup._online_start_ts)
 
 
 # ── 19–20: Timestamp updates ──────────────────────────────────────────────────
@@ -601,14 +599,16 @@ class TestMultiPackageCooldowns(unittest.TestCase):
                         with patch("agent.supervisor.time") as mock_time:
                             mock_time.monotonic.return_value = now
                             mock_time.sleep = lambda _: None
-                            # pkg1 in cooldown → no restart.
+                            # pkg1 in cooldown -> no restart.
                             sup._check_ram_optimization(pkg1, entry1, now)
-                            # pkg2 no cooldown → restart.
+                            # pkg2 no cooldown -> high-RAM report only.
                             sup._check_ram_optimization(pkg2, entry2, now)
 
         launch_packages = [c.args[0] for c in mock_launch.call_args_list]
         self.assertNotIn(pkg1, launch_packages)
-        self.assertIn(pkg2, launch_packages)
+        self.assertNotIn(pkg2, launch_packages)
+        mock_android.clear_package_cache_verified.assert_any_call(pkg1)
+        mock_android.clear_package_cache_verified.assert_any_call(pkg2)
 
 
 # ── 37: Trim failure does not abort ───────────────────────────────────────────
@@ -707,20 +707,15 @@ class TestBug1OnlineProtectedFromRamRestart(unittest.TestCase):
           - do not reopen private URL
           - do not force close
 
-    The fix: gate the restart code path behind the opt-in flag
-    ``ram_restart_when_online_enabled`` (default ``False``).  Cache trim
+    The fix: remove the Online RAM restart path completely.  Cache trim
     is still allowed because it is non-disruptive.
     """
 
-    def test_default_config_does_not_opt_in_to_online_ram_restart(self):
-        """``default_config()`` must NOT enable RAM-restart for Online."""
+    def test_default_config_does_not_define_online_ram_restart_opt_in(self):
+        """``default_config()`` must not expose an Online RAM restart opt-in."""
         from agent.config import default_config
         cfg = default_config()
-        self.assertFalse(
-            cfg.get("ram_restart_when_online_enabled", False),
-            "Bug 1 regression: default must be False so Online packages "
-            "are never relaunched solely because of RAM usage.",
-        )
+        self.assertNotIn("ram_restart_when_online_enabled", cfg)
 
     def test_online_above_threshold_does_not_force_stop_or_relaunch(self):
         """Online + 1.3 GB RAM + cooldown clear → no force-stop, no relaunch."""
@@ -789,8 +784,8 @@ class TestBug1OnlineProtectedFromRamRestart(unittest.TestCase):
                     sup._check_ram_optimization(_PKG, _ENTRY, now)
                 mock_launch.assert_not_called()
 
-    def test_opt_in_restores_legacy_behaviour(self):
-        """With the flag explicitly True, the old restart path still works."""
+    def test_opt_in_does_not_restore_legacy_behaviour(self):
+        """Even an old opt-in config cannot relaunch Online due to high RAM."""
         sup = _make_supervisor({"ram_restart_when_online_enabled": True})
         now = time.monotonic()
         sup._online_start_ts[_PKG] = now - 9999
@@ -804,7 +799,8 @@ class TestBug1OnlineProtectedFromRamRestart(unittest.TestCase):
                 with patch.object(sup, "_set_grace"):
                     with patch.object(sup, "_set_status"):
                         sup._check_ram_optimization(_PKG, _ENTRY, now)
-                mock_launch.assert_called_once_with(_PKG, _ENTRY, "ram_restart")
+                mock_android.force_stop_package.assert_not_called()
+                mock_launch.assert_not_called()
 
 
 if __name__ == "__main__":

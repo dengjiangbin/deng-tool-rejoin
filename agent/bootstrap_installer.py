@@ -270,7 +270,6 @@ def render_direct_install_bootstrap(
     *,
     base_url: str,
     package_sha256: str,
-    installer_title: str = "DENG Tool: Rejoin Installer",
     banner_lines: tuple[str, ...] = (),
 ) -> str:
     """Generate a bash installer that downloads the full package directly.
@@ -303,7 +302,6 @@ def render_direct_install_bootstrap(
     if banner_lines:
         banner_part = "\n".join(f'echo "{_escape_double(line)}"' for line in banner_lines) + "\n"
 
-    safe_title = _escape_double(installer_title)
     safe_sha = _escape_double(package_sha256)
 
     pre_heredoc = (
@@ -443,17 +441,6 @@ def render_direct_install_bootstrap(
         '[ -f "$APP_HOME/agent/deng_tool_rejoin.py" ] || { echo "Failed: deng_tool_rejoin.py missing." >&2; exit 1; }\n'
         '[ -f "$APP_HOME/BUILD-INFO.json" ] || { echo "Failed: BUILD-INFO.json missing in package." >&2; exit 1; }\n'
         '[ -f "$APP_HOME/.installed-build.json" ] || { echo "Failed: .installed-build.json was not written." >&2; exit 1; }\n'
-        'DR_RESOLVED=""\n'
-        'if command -v deng-rejoin >/dev/null 2>&1; then\n'
-        '  DR_RESOLVED="$(command -v deng-rejoin)"\n'
-        "fi\n"
-        'if [ -z "$DR_RESOLVED" ]; then\n'
-        '  echo "command -v deng-rejoin did not resolve after install." >&2\n'
-        '  if [ "$USING_HOME_BIN" -eq 1 ]; then\n'
-        "    echo 'Run: export PATH=\"$HOME/bin:$PATH\" && hash -r && deng-rejoin' >&2\n"
-        "  fi\n"
-        "  exit 1\n"
-        "fi\n"
         # Import check on the new modules.  If any of these fail, the install
         # is corrupted or the tarball is missing files.
         'if ! PYTHONPATH="$APP_HOME" python3 -c '

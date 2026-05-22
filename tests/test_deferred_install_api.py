@@ -227,8 +227,8 @@ class DeferredRunLegacyHandlingTests(unittest.TestCase):
 
         shutil.rmtree(self._td, ignore_errors=True)
 
-    def test_run_with_install_requested_shows_reinstall_message(self) -> None:
-        """Old launcher with .install_requested must tell the user to re-install."""
+    def test_run_with_install_requested_shows_generic_incomplete_message(self) -> None:
+        """Old launcher must not print the broken outdated-launcher wording."""
         (self._app / ".install_requested").write_text("test-latest\n", encoding="utf-8")
         old_env = os.environ.get("DENG_REJOIN_HOME")
         try:
@@ -246,7 +246,9 @@ class DeferredRunLegacyHandlingTests(unittest.TestCase):
                 os.environ["DENG_REJOIN_HOME"] = old_env
         self.assertEqual(rc, 1)
         msg = buf.getvalue()
-        self.assertIn("install.sh", msg)
+        self.assertIn("not fully installed", msg)
+        self.assertNotIn("Your launcher is outdated", msg)
+        self.assertNotIn("cannot complete the install", msg)
         self.assertNotIn("Paste your license key", msg)
         self.assertNotIn("license key", msg.lower())
 
@@ -268,7 +270,9 @@ class DeferredRunLegacyHandlingTests(unittest.TestCase):
                 os.environ["DENG_REJOIN_HOME"] = old_env
         self.assertEqual(rc, 1)
         msg = buf.getvalue()
-        self.assertIn("install.sh", msg)
+        self.assertIn("not fully installed", msg)
+        self.assertNotIn("Your launcher is outdated", msg)
+        self.assertNotIn("cannot complete the install", msg)
 
 
 class DirectInstallBootstrapTests(unittest.TestCase):
@@ -280,8 +284,7 @@ class DirectInstallBootstrapTests(unittest.TestCase):
         return render_direct_install_bootstrap(
             base_url="https://rejoin.deng.my.id",
             package_sha256="a" * 64,
-            installer_title="DENG Tool: Rejoin Test Installer",
-            banner_lines=("Channel: internal test", "Version: main-dev"),
+            banner_lines=("Version: main-dev",),
         )
 
     def test_script_has_shebang(self) -> None:
@@ -306,8 +309,6 @@ class DirectInstallBootstrapTests(unittest.TestCase):
         script = self._get_script().lower()
         self.assertNotIn("license key", script)
         self.assertNotIn("paste your", script)
-        self.assertNotIn("install_requested", script)
-        self.assertNotIn("deferred_bundle_install", script)
         self.assertNotIn("/api/install/authorize", script)
 
     def test_script_has_wrapper(self) -> None:

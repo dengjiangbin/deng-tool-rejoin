@@ -227,7 +227,6 @@ class TestInstallerScript(unittest.TestCase):
         return render_direct_install_bootstrap(
             base_url="https://rejoin.deng.my.id",
             package_sha256=sha,
-            installer_title="DENG Tool: Rejoin Test Installer",
             banner_lines=("Version: main-dev",),
         )
 
@@ -288,6 +287,7 @@ class TestInstallerScript(unittest.TestCase):
     def test_final_proof_block_present(self):
         script = self._make_script()
         self.assertIn("DENG Tool: Rejoin Installing", script)
+        self.assertNotIn("DENG Tool: Rejoin Test Installer", script)
         self.assertIn("Version: main-dev", script)
         self.assertIn("Install complete.", script)
         self.assertNotIn("100%", script)

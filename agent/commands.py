@@ -2513,104 +2513,9 @@ def _config_menu_screen_mode(draft: dict[str, Any]) -> dict[str, Any]:
 
 
 def _config_menu_key(draft: dict[str, Any]) -> dict[str, Any]:
-    """Key submenu: configure package key for All Package(s) or Per Package."""
+    """Menu 4 package-key submenu."""
     if not _is_interactive():
         return draft
-    while True:
-        print()
-        print("--------------------------------")
-        print("Key Setup")
-        print("--------------------------------")
-        print("1. All Package(s)")
-        print("2. Per Package")
-        print("3. Back")
-        print("--------------------------------")
-        raw = safe_io.safe_prompt("Choose [3]: ", default="3")
-        if raw is None:
-            break
-        choice = raw.strip() or "3"
-        if choice in ("0", "3"):
-            break
-        elif choice == "1":
-            draft = _config_key_all_packages(draft)
-        elif choice == "2":
-            draft = _config_key_per_package(draft)
-        else:
-            print("Please choose 1-2 or 3.")
-            safe_io.press_enter()
-    return draft
-
-
-def _config_key_all_packages(draft: dict[str, Any]) -> dict[str, Any]:
-    """Set the same package key for all configured packages."""
-    from .package_key import (
-        mask_package_key,
-        write_package_key_file,
-        is_valid_package_key,
-    )
-    from .config import enabled_package_entries
-
-    print()
-    print("--------------------------------")
-    print("All Package(s) — Package Key")
-    print("--------------------------------")
-    print("This writes the package key to each configured package internal license file.")
-    print("This is NOT the DENG Tool license key.")
-    print("Leave blank to cancel.")
-    print()
-    raw = safe_io.safe_prompt("Enter package key: ", default="")
-    if raw is None:
-        print("Package key setup cancelled.")
-        return draft
-    key = raw.strip()
-    if not key:
-        print("Package key setup cancelled.")
-        return draft
-
-    if not is_valid_package_key(key):
-        print("Package key must start with FREE_ for this version.")
-        safe_io.press_enter()
-        return draft
-
-    entries = enabled_package_entries(draft)
-    if not entries:
-        print("No package(s) configured yet. Add package(s) first.")
-        safe_io.press_enter()
-        return draft
-
-    any_ok = False
-    for entry in entries:
-        pkg = entry["package"]
-        result = write_package_key_file(pkg, key)
-        if result["success"]:
-            any_ok = True
-        else:
-            err = result.get("error", "")
-            print(f"  Warning: could not write package key for {pkg}: {err[:80]}")
-
-    # Save the global package key in config (NOT DENG Tool license key).
-    pkg_keys = dict(draft.get("package_keys") or {})
-    if not isinstance(pkg_keys, dict):
-        pkg_keys = {}
-    pkg_keys["global"] = key
-    if "per_package" not in pkg_keys or not isinstance(pkg_keys.get("per_package"), dict):
-        pkg_keys["per_package"] = {}
-    draft["package_keys"] = pkg_keys
-    draft = save_config(draft)
-
-    masked = mask_package_key(key)
-    print(f"Package key saved for all package(s): {masked}")
-    safe_io.press_enter()
-    return draft
-
-
-def _config_key_per_package(draft: dict[str, Any]) -> dict[str, Any]:
-    """Set a package key for a specific configured package."""
-    from .package_key import (
-        mask_package_key,
-        write_package_key_file,
-        is_valid_package_key,
-    )
     from .config import enabled_package_entries
 
     entries = enabled_package_entries(draft)
@@ -2619,77 +2524,158 @@ def _config_key_per_package(draft: dict[str, Any]) -> dict[str, Any]:
         print("No package(s) configured yet. Add package(s) first.")
         safe_io.press_enter()
         return draft
+    if len(entries) == 1:
+        return _package_key_menu_for_package(draft, entries[0]["package"])
 
     while True:
         print()
-        print("--------------------------------")
-        print("Per Package — Package Key")
-        print("--------------------------------")
-        for i, e in enumerate(entries, 1):
-            pkg = e["package"]
-            short = _short_package_display(pkg)
-            existing_key = _resolve_per_package_key_display(draft, pkg)
-            print(f"  {i}. {short}{existing_key}")
-        print("  B. Back")
-        print("--------------------------------")
-        raw = safe_io.safe_prompt("Choose package [B]: ", default="B")
+        print("Select Package For Package Key")
+        print()
+        for i, entry in enumerate(entries, 1):
+            print(f"{i}. {entry['package']}")
+        print("A. All Packages")
+        print("0. Back")
+        raw = safe_io.safe_prompt("Choose [0]: ", default="0")
         if raw is None:
             break
-        choice = raw.strip() or "B"
-        if choice.upper() in ("B", "0"):
+        choice = raw.strip() or "0"
+        if choice == "0":
             break
-        # Parse index choice
+        if choice.upper() == "A":
+            draft = _package_key_menu_for_all_packages(draft, [e["package"] for e in entries])
+            continue
         try:
             idx = int(choice) - 1
             if idx < 0 or idx >= len(entries):
-                raise ValueError("out of range")
-        except (ValueError, TypeError):
-            print("Please enter a package number or B to go back.")
+                raise ValueError
+        except (TypeError, ValueError):
+            print("Please choose a package, A, or 0.")
             safe_io.press_enter()
-            continue
+        else:
+            draft = _package_key_menu_for_package(draft, entries[idx]["package"])
+    return draft
 
-        entry = entries[idx]
-        pkg = entry["package"]
-        short = _short_package_display(pkg)
 
-        print()
-        print(f"Package: {short}")
-        print("Leave blank to cancel.")
-        print()
-        raw_key = safe_io.safe_prompt(f"Enter package key for {short}: ", default="")
-        if raw_key is None:
-            break
-        key = raw_key.strip()
-        if not key:
-            print("Cancelled.")
-            continue
+def _print_package_key_file_info(package: str) -> None:
+    from .package_key import package_key_license_info
 
-        if not is_valid_package_key(key):
-            print("Package key must start with FREE_ for this version.")
-            safe_io.press_enter()
-            continue
+    info = package_key_license_info(package)
+    print()
+    print("Package Key File Info")
+    print(f"Package: {info.get('package') or package}")
+    print("File name: license")
+    print(f"Type: {info.get('mime_type') or 'application/octet-stream'}")
+    if not info.get("exists"):
+        print("Package key file not found.")
+        print(f"Full path: {info.get('path')}")
+        print(f"FS path: {info.get('dir')}")
+        print(f"FS type: {info.get('fs_type') or ''}")
+        if info.get("error"):
+            print(f"Error: {info.get('error')}")
+        return
+    print(f"Size: {info.get('size_bytes')} bytes")
+    print(f"Last modification: {info.get('modified_iso') or ''}")
+    print(f"Permissions: {info.get('permissions') or ''}")
+    print(f"Full path: {info.get('path')}")
+    print(f"FS path: {info.get('dir')}")
+    print(f"FS type: {info.get('fs_type') or ''}")
+    print(f"MD5: {info.get('md5') or ''}")
 
+
+def _save_package_key_for_packages(
+    draft: dict[str, Any], packages: list[str], key: str, *, save_global: bool
+) -> dict[str, Any]:
+    from .package_key import write_package_key_file
+
+    for pkg in packages:
         result = write_package_key_file(pkg, key)
         if not result["success"]:
             err = result.get("error", "")
-            print(f"Could not write package key for {short}: {err[:80]}")
+            print(f"Could not write package key for {pkg}: {err[:80]}")
+    pkg_keys = dict(draft.get("package_keys") or {})
+    if not isinstance(pkg_keys, dict):
+        pkg_keys = {}
+    if not isinstance(pkg_keys.get("per_package"), dict):
+        pkg_keys["per_package"] = {}
+    if save_global:
+        pkg_keys["global"] = key
+    else:
+        for pkg in packages:
+            pkg_keys["per_package"][pkg] = key
+    draft["package_keys"] = pkg_keys
+    return save_config(draft)
+
+
+def _package_key_menu_for_package(draft: dict[str, Any], package: str) -> dict[str, Any]:
+    return _package_key_menu_for_packages(draft, [package], package_label=package, save_global=False)
+
+
+def _package_key_menu_for_all_packages(draft: dict[str, Any], packages: list[str]) -> dict[str, Any]:
+    return _package_key_menu_for_packages(draft, packages, package_label="All Packages", save_global=True)
+
+
+def _package_key_menu_for_packages(
+    draft: dict[str, Any],
+    packages: list[str],
+    *,
+    package_label: str,
+    save_global: bool,
+) -> dict[str, Any]:
+    from .package_key import is_valid_package_key, mask_package_key, package_key_license_path
+
+    while True:
+        print()
+        print("Package Key menu:")
+        print()
+        print("1. Enter / Update Package Key")
+        print("2. Show Package Key File Info")
+        print("3. Remove Saved Package Key")
+        print("0. Back")
+        raw = safe_io.safe_prompt("Choose [0]: ", default="0")
+        if raw is None:
+            break
+        choice = raw.strip() or "0"
+        if choice == "0":
+            break
+        if choice == "1":
+            print()
+            print(f"Package: {package_label}")
+            print("Leave blank to cancel.")
+            key = (safe_io.safe_prompt("Enter / Update Package Key: ", default="") or "").strip()
+            if not key:
+                print("Cancelled.")
+                continue
+            if not is_valid_package_key(key):
+                print("Package key must start with FREE_ for this version.")
+                safe_io.press_enter()
+                continue
+            draft = _save_package_key_for_packages(draft, packages, key, save_global=save_global)
+            print(f"Package key saved: {mask_package_key(key)}")
             safe_io.press_enter()
-            continue
-
-        # Save per-package key in config (NOT DENG Tool license key).
-        pkg_keys = dict(draft.get("package_keys") or {})
-        if not isinstance(pkg_keys, dict):
-            pkg_keys = {"global": ""}
-        if not isinstance(pkg_keys.get("per_package"), dict):
-            pkg_keys["per_package"] = {}
-        pkg_keys["per_package"][pkg] = key
-        draft["package_keys"] = pkg_keys
-        draft = save_config(draft)
-
-        masked = mask_package_key(key)
-        print(f"Package key saved for {short}: {masked}")
-        safe_io.press_enter()
-
+        elif choice == "2":
+            for pkg in packages:
+                _print_package_key_file_info(pkg)
+                if len(packages) == 1 and package_key_license_path(pkg):
+                    print("Enter / Update Package Key from this menu to create it.")
+            safe_io.press_enter()
+        elif choice == "3":
+            pkg_keys = dict(draft.get("package_keys") or {})
+            per_pkg = pkg_keys.get("per_package") if isinstance(pkg_keys.get("per_package"), dict) else {}
+            if save_global:
+                pkg_keys["global"] = ""
+                for pkg in packages:
+                    per_pkg.pop(pkg, None)
+            else:
+                for pkg in packages:
+                    per_pkg.pop(pkg, None)
+            pkg_keys["per_package"] = per_pkg
+            draft["package_keys"] = pkg_keys
+            draft = save_config(draft)
+            print("Saved package key removed.")
+            safe_io.press_enter()
+        else:
+            print("Please choose 1, 2, 3, or 0.")
+            safe_io.press_enter()
     return draft
 
 
@@ -3724,12 +3710,12 @@ def _prepare_automatic_layout(
                 _landscape_rule = ""
             else:
                 _cols, _rows = 3, 3
-                if len(filtered_packages) <= 6:
-                    _slot_order = "empty,1,2,empty,3,4,empty,5,6"
-                    _landscape_rule = "lte6_right_columns"
-                else:
-                    _slot_order = "1,2,3,4,5,6,7,8,9"
-                    _landscape_rule = "full_3x3"
+                _rule = getattr(_wl, "LANDSCAPE_SLOT_RULES", {}).get(
+                    len(filtered_packages),
+                    (1, 2, 3, 4, 5, 6, 7, 8, 9),
+                )
+                _slot_order = ",".join(str(x) if x else "empty" for x in _rule)
+                _landscape_rule = f"count_{len(filtered_packages)}_3x3"
             _pane_w = max(160, display.width - _left_end)
             _usable_h = max(90, display.height - _sb_h)
             _cell_w = max(160, _pane_w // _cols)
@@ -4307,12 +4293,14 @@ def cmd_start(args: argparse.Namespace) -> int:
         packages_sl = [e["package"] for e in entries]
         keep_alive  = ["com.termux"] + packages_sl
 
-        # 1a) Clear cached/background processes (am kill-all is safe: only
-        #     kills CACHED-state background apps, never foreground services).
-        try:
-            android.kill_all_background_apps(keep_alive)
-        except Exception:  # noqa: BLE001
-            _start_log.debug("start: kill_all_background_apps error (non-fatal)")
+        # 1a) Do not run a global background kill during normal Start.
+        # Probe p-52aeb6420f showed post-launch visual disruption; keep Start
+        # bounded to selected package prep only.
+        _start_log.info(
+            "[DENG_REJOIN_START_SAFETY] action=skip_global_kill "
+            "reason=normal_start_must_not_close_all_apps keep_alive=%s",
+            ",".join(keep_alive),
+        )
 
         # 1b) Also force-stop any OTHER detected Roblox packages not in our list.
         try:
@@ -4417,7 +4405,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         # 4) Dock Termux silently (no public phase change).
         _termux_minimize_result: dict[str, Any] = {}
         try:
-            _dock_enabled = bool(cfg.get("termux_dock_enabled", True))
+            _dock_enabled = bool(cfg.get("termux_dock_enabled", False))
             if _dock_enabled:
                 _termux_minimize_result = _enforce_termux_left_layout(cfg)
                 _start_log.debug("termux_minimize: %s", _termux_minimize_result)

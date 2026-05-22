@@ -118,10 +118,10 @@ class PostInstallVerificationTests(unittest.TestCase):
         self.assertIn('grep -q "^artifact_sha256: "', s)
         self.assertIn("installed SHA mismatch", s)
 
-    def test_wrapper_must_resolve_after_install(self) -> None:
+    def test_wrapper_resolution_diagnostics_stay_out_of_installer(self) -> None:
         s = _script()
-        self.assertIn("command -v deng-rejoin", s)
-        self.assertIn("did not resolve after install", s)
+        self.assertNotIn("command -v deng-rejoin", s)
+        self.assertNotIn("did not resolve after install", s)
 
 
 class OrderingTests(unittest.TestCase):

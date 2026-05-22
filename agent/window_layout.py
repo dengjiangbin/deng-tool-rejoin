@@ -557,8 +557,17 @@ def _detect_status_bar_height() -> int:
     return _status_bar_height_cache
 
 
-LANDSCAPE_SLOT_ORDER: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 8, 9)
-LANDSCAPE_LTE6_SLOT_ORDER: tuple[int, ...] = (0, 1, 2, 0, 3, 4, 0, 5, 6)
+LANDSCAPE_SLOT_RULES: dict[int, tuple[int, ...]] = {
+    1: (0, 1, 0, 0, 0, 0, 0, 0, 0),
+    2: (0, 1, 2, 0, 0, 0, 0, 0, 0),
+    3: (0, 1, 2, 0, 3, 0, 0, 0, 0),
+    4: (0, 1, 2, 0, 3, 4, 0, 0, 0),
+    5: (0, 1, 2, 0, 3, 4, 0, 5, 0),
+    6: (0, 1, 2, 0, 3, 4, 0, 5, 6),
+    7: (0, 1, 2, 3, 4, 5, 6, 7, 0),
+    8: (0, 1, 2, 3, 4, 5, 6, 7, 8),
+    9: (1, 2, 3, 4, 5, 6, 7, 8, 9),
+}
 PORTRAIT_SLOT_ORDER: tuple[int, ...] = (7, 8, 9, 10, 1, 2, 3, 4, 5, 6)
 
 
@@ -611,7 +620,7 @@ def _release_grid_rects(
         mode_label = "portrait"
     else:
         cols, rows = 3, 3
-        slot_order = LANDSCAPE_SLOT_ORDER
+        slot_order = LANDSCAPE_SLOT_RULES.get(len(pkgs), LANDSCAPE_SLOT_RULES[9])
         mode_label = "landscape"
 
     capacity = cols * rows
@@ -631,11 +640,8 @@ def _release_grid_rects(
         W, H, (0, 0, left_end, H), "", roblox_grid_area,
     )
     rects: list[WindowRect] = []
-    if mode_label == "landscape" and len(pkgs) <= 6:
-        slot_order = LANDSCAPE_LTE6_SLOT_ORDER
-        landscape_rule = "lte6_right_columns"
-    elif mode_label == "landscape":
-        landscape_rule = "full_3x3"
+    if mode_label == "landscape":
+        landscape_rule = f"count_{len(pkgs)}_3x3"
     else:
         landscape_rule = ""
     for index, pkg in enumerate(pkgs, start=1):

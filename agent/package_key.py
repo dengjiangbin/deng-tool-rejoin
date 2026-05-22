@@ -33,6 +33,7 @@ import shlex
 import stat
 import tempfile
 import logging
+import subprocess
 from typing import Any
 
 from .constants import PACKAGE_NAME_REGEX
@@ -349,6 +350,46 @@ def _read_license_file(path: str, root_tool: str | None) -> str | None:
     return None
 
 
+def _detect_fs_type(path: str) -> str:
+    """Best-effort filesystem type for Menu 4 file info."""
+    if not path:
+        return ""
+    try:
+        res = subprocess.run(
+            ["stat", "-f", "-c", "%T", path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=3,
+        )
+        out = (res.stdout or "").strip()
+        if res.returncode == 0 and out:
+            return out
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        parent = path
+        while parent and not os.path.exists(parent):
+            nxt = os.path.dirname(parent)
+            if nxt == parent:
+                break
+            parent = nxt
+        if parent:
+            res = subprocess.run(
+                ["stat", "-f", "-c", "%T", parent],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=3,
+            )
+            out = (res.stdout or "").strip()
+            if res.returncode == 0 and out:
+                return out
+    except Exception:  # noqa: BLE001
+        pass
+    return "unknown"
+
+
 # ── Public Menu 4 file-info ───────────────────────────────────────────────────
 
 
@@ -394,6 +435,7 @@ def package_key_license_info(
         "md5":          "",
         "key_masked":   "",
         "read_method":  "unavailable",
+        "fs_type":      "",
         "error":        "",
     }
     try:
@@ -404,6 +446,7 @@ def package_key_license_info(
     info["package"] = pkg
     info["path"]    = package_key_license_path(pkg)
     info["dir"]     = package_key_license_dir(pkg)
+    info["fs_type"] = _detect_fs_type(info["dir"])
 
     # ── stat (python first, root fallback) ─────────────────────────────────
     try:

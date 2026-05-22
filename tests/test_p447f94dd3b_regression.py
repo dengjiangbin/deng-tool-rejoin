@@ -40,6 +40,22 @@ class TestSplitLayoutP447(unittest.TestCase):
             (640, 487), (853, 487), (1066, 487),
         ])
 
+    def test_landscape_7_uses_requested_empty_top_left_and_bottom_right(self) -> None:
+        rects = self._rects(7)
+        self.assertEqual([(r.left, r.top) for r in rects], [
+            (853, 25), (1066, 25),
+            (640, 256), (853, 256), (1066, 256),
+            (640, 487), (853, 487),
+        ])
+
+    def test_landscape_8_uses_requested_empty_top_left_only(self) -> None:
+        rects = self._rects(8)
+        self.assertEqual([(r.left, r.top) for r in rects], [
+            (853, 25), (1066, 25),
+            (640, 256), (853, 256), (1066, 256),
+            (640, 487), (853, 487), (1066, 487),
+        ])
+
     def test_roblox_grid_never_uses_left_termux_half(self) -> None:
         for mode, w, h, n in (("landscape", 1280, 720, 6), ("portrait", 720, 1280, 10)):
             rects = self._rects(n, mode=mode, w=w, h=h)
