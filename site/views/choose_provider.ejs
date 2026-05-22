@@ -39,12 +39,12 @@
   <section class="provider-card">
     <div class="provider-mark">LV</div>
     <h2 class="provider-name">Linkvertise</h2>
-    <p class="provider-desc">Complete the Linkvertise unlock, then return through the protected completion route.</p>
+    <p class="provider-desc">Complete the Linkvertise ad step, then return automatically to unlock your key.</p>
     <form method="POST" action="/key/provider/linkvertise">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
       <input type="hidden" name="challenge_id" value="<%= challengeId %>">
       <input type="hidden" name="provider" value="linkvertise">
-      <button type="submit" class="btn btn-outline btn-block btn-provider">Linkvertise</button>
+      <button type="submit" class="btn btn-primary btn-block btn-provider">Continue with Linkvertise</button>
     </form>
   </section>
   <% } else { %>
@@ -52,7 +52,7 @@
     <div class="provider-mark">LV</div>
     <h2 class="provider-name">Linkvertise</h2>
     <p class="alert alert-error" role="note" style="font-size:.9rem;margin:12px 0">
-      Linkvertise is temporarily unavailable.<br>Please use LootLabs.
+      Linkvertise is temporarily unavailable.
     </p>
     <button class="btn btn-outline btn-block btn-provider" disabled aria-disabled="true">Unavailable</button>
   </section>

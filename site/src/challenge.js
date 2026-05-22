@@ -455,6 +455,44 @@ async function markPendingAdById(challengeId, req, siteUser, providerUrl = '') {
   return { ...data, return_token: returnToken };
 }
 
+/**
+ * Mark a challenge as pending Linkvertise verification.
+ *
+ * Unlike `markPendingAdById`, this DOES NOT issue a signed return token —
+ * Linkvertise returns control with `?hash=<linkvertise_hash>` instead. The
+ * payload only records that the provider was started server-side, plus the
+ * target link host and callback URL for safe audit logging.
+ */
+async function markLinkvertisePendingById(challengeId, req, siteUser, { targetLinkUrl = '', callbackUrl = '' } = {}) {
+  const issuedAt = new Date();
+  const payload = {
+    linkvertise_started: true,
+    target_link_host: urlHost(targetLinkUrl) || 'link-hub.net',
+    callback_url: callbackUrl || '',
+    provider_started_at: issuedAt.toISOString(),
+    redirect_started: true,
+    provider_redirect_host: urlHost(targetLinkUrl),
+  };
+
+  const { data, error } = await supabase
+    .from('license_ad_challenges')
+    .update({
+      status: 'pending_ad',
+      provider_payload: payload,
+    })
+    .eq('id', challengeId)
+    .eq('site_user_id', siteUser.id)
+    .eq('session_hash', hashSession(req))
+    .in('status', ['provider_selected', 'pending_ad'])
+    .select()
+    .single();
+
+  if (error || !data) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Challenge not found or already advanced');
+  }
+  return data;
+}
+
 async function getActiveSessionChallenge(req, expectedProvider) {
   const challengeId = req.session?.pendingChallenge;
   if (!challengeId || !req.session?.user) {
@@ -499,6 +537,61 @@ async function completeActiveProviderChallenge(req, expectedProvider, returnToke
   const row = await getActiveSessionChallenge(req, expectedProvider);
   assertProviderReturnProof(req, row, expectedProvider, returnToken);
   return completeAdAndGenerateKey(row);
+}
+
+/**
+ * Load the active Linkvertise challenge for this request based on
+ * `req.session.activeAdChallengeId` and validate every ownership rule that
+ * applies before Linkvertise hash verification is attempted.
+ *
+ * Throws codeful safeError on any mismatch (PROVIDER_CHALLENGE_*, etc).
+ */
+async function getActiveLinkvertiseChallenge(req) {
+  const challengeId = req.session?.activeAdChallengeId || req.session?.pendingChallenge;
+  if (!challengeId || !req.session?.user) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'No active Linkvertise challenge in session');
+  }
+
+  const { data: owned, error } = await supabase
+    .from('license_ad_challenges')
+    .select('*')
+    .eq('id', challengeId)
+    .maybeSingle();
+
+  if (error || !owned) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Linkvertise challenge missing');
+  }
+  if (owned.site_user_id !== req.session.user.id || owned.session_hash !== hashSession(req)) {
+    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'Linkvertise challenge owner mismatch');
+  }
+  if (
+    owned.discord_user_id &&
+    req.session.user.discord_user_id &&
+    owned.discord_user_id !== req.session.user.discord_user_id
+  ) {
+    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'Linkvertise challenge Discord owner mismatch');
+  }
+  if (owned.provider !== 'linkvertise') {
+    throw safeError('PROVIDER_MISMATCH', 'Linkvertise challenge provider mismatch');
+  }
+  if (owned.license_key_id) {
+    throw safeError('CHALLENGE_ALREADY_USED', 'Linkvertise challenge already produced a key');
+  }
+  if (new Date(owned.expires_at) < new Date()) {
+    throw safeError('PROVIDER_CHALLENGE_EXPIRED', 'Linkvertise challenge expired');
+  }
+  if (CONSUMED_STATUSES.includes(owned.status)) {
+    throw safeError('CHALLENGE_ALREADY_USED', 'Linkvertise challenge already used');
+  }
+  if (!COMPLETABLE_STATUSES.includes(owned.status)) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Linkvertise challenge is not pending');
+  }
+
+  const payload = normalizeJson(owned.provider_payload);
+  if (payload.linkvertise_started !== true) {
+    throw safeError('PROVIDER_RETURN_UNVERIFIED', 'Linkvertise challenge not started');
+  }
+  return owned;
 }
 
 async function getChallengeByToken(signedToken) {
@@ -617,6 +710,8 @@ module.exports = {
   completeAdAndGenerateKey,
   completeActiveProviderChallenge,
   markPendingAdById,
+  markLinkvertisePendingById,
+  getActiveLinkvertiseChallenge,
   hashSession,
   classifyChallengeInsertError,
 };

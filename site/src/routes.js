@@ -18,14 +18,15 @@ const {
 } = auth;
 const challenge = require('./challenge');
 const supabase = require('./db');
+const linkvertise = require('./providers/linkvertise');
 
 const router = express.Router();
 
 const DEFAULT_PROVIDER_CONFIG = {
   linkvertise: {
-    // Linkvertise Full Script cannot prevent direct navigation to the signed
-    // completion URL (the href is necessarily visible in the DOM). Disabled by
-    // default until a server-side callback / verified API approach is available.
+    // Linkvertise Target-Link Anti-Bypass approach: the start URL is the
+    // configured link-hub.net link, the completion URL is the dashboard
+    // callback. Verification happens server-side via the Anti-Bypass API.
     enabled: 'false',
     monetizedUrl: 'https://link-hub.net/5914830/XEpUhZ8TdtyV',
     completeUrl: 'https://tool.deng.my.id/unlock/linkvertise/complete',
@@ -115,6 +116,12 @@ function providerIsReady(provider) {
   // it, lootdest.org cannot redirect back to the DENG portal after the ad.
   if (provider === 'lootlabs') {
     return Boolean(cleanEnv('LOOTLABS_TEMPLATE_URL', ''));
+  }
+  if (provider === 'linkvertise') {
+    // Linkvertise is only ready when Target-Link Anti-Bypass is properly
+    // configured (LINKVERTISE_ENABLED=true, target link set, anti-bypass
+    // token set in env). The helper module is the source of truth.
+    return linkvertise.isLinkvertiseConfigured();
   }
   return true;
 }
@@ -238,11 +245,11 @@ function providerRedirectUrl(providerCfg, returnToken) {
     return lootlabsProviderUrl(returnToken);
   }
   if (providerCfg.provider === 'linkvertise') {
-    // Linkvertise Full Script approach: redirect to our internal start page.
-    // The start page includes the Linkvertise publisher JS which monetises
-    // the link whose href is already set to the signed completion URL.
-    // This preserves the signed token through the provider flow.
-    return `${publicUrl()}/unlock/linkvertise/start?t=${encodeURIComponent(returnToken)}`;
+    // Linkvertise Target-Link Anti-Bypass: redirect directly to the real
+    // link-hub.net target. NEVER append the anti-bypass token to the URL,
+    // and NEVER append a signed completion token — Linkvertise will return
+    // to the configured callback URL with `?hash=<linkvertise_hash>`.
+    return linkvertise.getLinkvertiseTargetLinkUrl();
   }
   // Generic fallback for any future provider
   const url = new URL(providerCfg.monetizedUrl);
@@ -444,8 +451,27 @@ async function handleProvider(req, res) {
   try {
     const row = await challenge.selectProvider(challengeId, provider, req, user);
     const providerCfg = getProviderConfig(provider);
-    const started = await challenge.markPendingAdById(row.id, req, user, providerCfg.monetizedUrl);
-    const redirectUrl = providerRedirectUrl(providerCfg, started.return_token);
+
+    let redirectUrl;
+    let returnTokenLen = 0;
+
+    if (provider === 'linkvertise') {
+      // Linkvertise Target-Link Anti-Bypass flow: no signed return token,
+      // verification happens server-side using the hash that Linkvertise
+      // appends to the configured callback URL.
+      const targetLinkUrl = linkvertise.getLinkvertiseTargetLinkUrl();
+      const callbackUrl = linkvertise.getLinkvertiseCallbackUrl();
+      await challenge.markLinkvertisePendingById(row.id, req, user, {
+        targetLinkUrl,
+        callbackUrl,
+      });
+      redirectUrl = targetLinkUrl;
+      req.session.activeAdChallengeId = row.id;
+    } else {
+      const started = await challenge.markPendingAdById(row.id, req, user, providerCfg.monetizedUrl);
+      redirectUrl = providerRedirectUrl(providerCfg, started.return_token);
+      returnTokenLen = (started.return_token || '').length;
+    }
 
     req.session.pendingProvider = provider;
 
@@ -457,15 +483,13 @@ async function handleProvider(req, res) {
       provider,
       String(challengeId).slice(0, 8),
       redirectHost,
-      (started.return_token || '').length,
+      returnTokenLen,
     );
 
     if (wantsJson(req)) {
-      return res.json({
-        provider,
-        redirect_url: redirectUrl,
-        complete_url: tokenizedCompleteUrl(provider, started.return_token),
-      });
+      // Linkvertise verification happens via callback hash, never via a t= token,
+      // so JSON callers only ever see the public redirect URL (no token leakage).
+      return res.json({ provider, redirect_url: redirectUrl });
     }
 
     return res.redirect(303, redirectUrl);
@@ -522,19 +546,117 @@ async function handleProviderComplete(req, res, provider) {
       return res.redirect('/license');
     }
 
-    if (selected === 'linkvertise') {
-      console.log('[linkvertise_complete_success] referer_host=%s', refererHost);
-    }
     console.log('[unlock/%s/complete] status=success referer_host=%s', selected, refererHost);
     req.session.generatedKey = key;
     req.session.generatedKeyAt = Date.now();
     delete req.session.pendingChallenge;
     delete req.session.pendingProvider;
     delete req.session.pendingSignedChallenge;
+    delete req.session.activeAdChallengeId;
     return res.redirect('/key/result');
   } catch (err) {
     const code = codeFromError(err, 'PROVIDER_RETURN_UNVERIFIED');
     logSafeError(`unlock/${selected}/complete`, code, err);
+    safeFlash(req, 'error', messageFor(code));
+    return res.redirect('/license');
+  }
+}
+
+const LINKVERTISE_REASON_TO_CODE = Object.freeze({
+  linkvertise_not_configured: 'PROVIDER_NOT_CONFIGURED',
+  missing_hash: 'PROVIDER_RETURN_TOKEN_MISSING',
+  bad_hash_format: 'PROVIDER_RETURN_TOKEN_INVALID',
+  api_timeout: 'PROVIDER_RETURN_UNVERIFIED',
+  api_error: 'PROVIDER_RETURN_UNVERIFIED',
+  api_false: 'PROVIDER_RETURN_UNVERIFIED',
+  api_invalid_token: 'PROVIDER_NOT_CONFIGURED',
+  api_invalid_response: 'PROVIDER_RETURN_UNVERIFIED',
+  success: 'success',
+});
+
+/**
+ * Linkvertise Target-Link Anti-Bypass completion handler.
+ *
+ * Flow:
+ *  1. require logged-in session
+ *  2. require `hash` query param + format check
+ *  3. load active linkvertise challenge from session (activeAdChallengeId)
+ *  4. verify ownership/Discord/provider/status/expiry/no-key
+ *  5. call linkvertise Anti-Bypass API
+ *  6. only on TRUE: atomically consume challenge, generate one key, attach to history
+ */
+async function handleLinkvertiseComplete(req, res) {
+  const requestId = require('crypto').randomBytes(6).toString('hex');
+  const hash = typeof req.query.hash === 'string' ? req.query.hash : '';
+  const safePrefix = hash && hash.length >= 8 ? hash.slice(0, 8) : '';
+
+  console.log(
+    '[unlock/linkvertise/complete] rid=%s hash_present=%s hash_prefix=%s',
+    requestId, !!hash, safePrefix,
+  );
+
+  if (!linkvertise.isLinkvertiseConfigured()) {
+    console.warn('[unlock/linkvertise/complete] rid=%s reason=linkvertise_not_configured', requestId);
+    safeFlash(req, 'error', messageFor('PROVIDER_NOT_CONFIGURED'));
+    return res.redirect('/license');
+  }
+
+  if (!hash) {
+    console.warn('[unlock/linkvertise/complete] rid=%s reason=missing_hash', requestId);
+    safeFlash(req, 'error', messageFor('PROVIDER_RETURN_TOKEN_MISSING'));
+    return res.redirect('/license');
+  }
+  if (!linkvertise.isValidHashFormat(hash)) {
+    console.warn('[unlock/linkvertise/complete] rid=%s reason=bad_hash_format hash_prefix=%s', requestId, safePrefix);
+    safeFlash(req, 'error', messageFor('PROVIDER_RETURN_TOKEN_INVALID'));
+    return res.redirect('/license');
+  }
+
+  let row;
+  try {
+    row = await challenge.getActiveLinkvertiseChallenge(req);
+  } catch (err) {
+    const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
+    console.warn('[unlock/linkvertise/complete] rid=%s reason=session_or_challenge code=%s', requestId, code);
+    logSafeError('unlock/linkvertise/complete', code, err);
+    safeFlash(req, 'error', messageFor(code));
+    return res.redirect('/license');
+  }
+
+  const verification = await linkvertise.verifyLinkvertiseAntiBypass({ hash, requestId });
+  console.log(
+    '[unlock/linkvertise/complete] rid=%s result=%s ok=%s',
+    requestId, verification.reason, verification.ok,
+  );
+
+  if (!verification.ok) {
+    const code = LINKVERTISE_REASON_TO_CODE[verification.reason] || 'PROVIDER_RETURN_UNVERIFIED';
+    safeFlash(req, 'error', messageFor(code));
+    return res.redirect('/license');
+  }
+
+  try {
+    const { key, alreadyDone } = await challenge.completeAdAndGenerateKey(row);
+    if (alreadyDone && req.session.generatedKey) {
+      return res.redirect('/key/result');
+    }
+    if (alreadyDone) {
+      console.warn('[unlock/linkvertise/complete] rid=%s reason=already_completed', requestId);
+      safeFlash(req, 'error', messageFor('PROVIDER_CHALLENGE_ALREADY_USED'));
+      return res.redirect('/license');
+    }
+    console.log('[unlock/linkvertise/complete] rid=%s status=success', requestId);
+    req.session.generatedKey = key;
+    req.session.generatedKeyAt = Date.now();
+    delete req.session.pendingChallenge;
+    delete req.session.pendingProvider;
+    delete req.session.pendingSignedChallenge;
+    delete req.session.activeAdChallengeId;
+    return res.redirect('/key/result');
+  } catch (err) {
+    const code = codeFromError(err, 'KEY_GENERATION_FAILED');
+    console.warn('[unlock/linkvertise/complete] rid=%s reason=consume_failed code=%s', requestId, code);
+    logSafeError('unlock/linkvertise/complete', code, err);
     safeFlash(req, 'error', messageFor(code));
     return res.redirect('/license');
   }
@@ -739,37 +861,15 @@ router.post('/key/provider/:provider', requireLogin, repairSiteUser, handleProvi
 router.get('/unlock/lootlabs', requireLogin, repairSiteUser, (req, res) => handleUnlock(req, res, 'lootlabs'));
 router.get('/unlock/linkvertise', requireLogin, repairSiteUser, (req, res) => handleUnlock(req, res, 'linkvertise'));
 
-/**
- * Linkvertise Full Script intermediate page.
- * The provider POST redirects here (internal 303). This page renders the
- * Linkvertise publisher JS with a link whose href points to our signed
- * completion URL. The Linkvertise script monetises the click; after the
- * ad flow the user lands on /unlock/linkvertise/complete?t=<signed_token>.
- */
+// Legacy Linkvertise Full Script start route — kept reachable only to emit a
+// styled failure so any bookmarked URL cannot bypass anti-bypass verification.
 router.get('/unlock/linkvertise/start', requireLogin, repairSiteUser, (req, res) => {
-  const returnToken = String(req.query.t || '');
-  if (!returnToken || !challenge.verifyReturnToken(returnToken)) {
-    safeFlash(req, 'error', messageFor('PROVIDER_RETURN_TOKEN_INVALID'));
-    return res.redirect('/license');
-  }
-  // Linkvertise Full Script cannot prevent direct navigation to the signed
-  // completion URL — the href must appear in the DOM for wrapping, making it
-  // bypassable client-side. Always render the unavailable page.
-  // If LINKVERTISE_ENABLED is forced to 'true' in env and a real server-side
-  // callback approach is later implemented, this route can be updated.
-  console.log('[linkvertise_start_rendered] token_len=%d', returnToken.length);
-  return res.render('unlock_linkvertise', {
-    title: 'Ad Step – DENG Tool',
-    linkvertiseDisabled: true,
-  });
+  safeFlash(req, 'error', messageFor('PROVIDER_CHALLENGE_MISSING'));
+  return res.redirect('/license');
 });
 
 router.get('/unlock/lootlabs/complete', requireLogin, repairSiteUser, (req, res) => handleProviderComplete(req, res, 'lootlabs'));
-router.get('/unlock/linkvertise/complete', requireLogin, repairSiteUser, (req, res) => {
-  const returnToken = String(req.query.t || '');
-  console.log('[linkvertise_complete_attempt] token_present=%s', !!returnToken);
-  return handleProviderComplete(req, res, 'linkvertise');
-});
+router.get('/unlock/linkvertise/complete', requireLogin, repairSiteUser, handleLinkvertiseComplete);
 
 router.get('/unlock/linkvertise/done', requireLogin, (_req, res) => {
   res.redirect('/license');

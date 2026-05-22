@@ -20,7 +20,11 @@ process.env.DISCORD_REDIRECT_URI = 'http://localhost:8791/auth/discord/callback'
 process.env.LINKVERTISE_PUBLISHER_ID = '5914830';
 process.env.LINKVERTISE_ENABLED = 'true';
 process.env.LINKVERTISE_MONETIZED_URL = 'https://link-hub.net/5914830/XEpUhZ8TdtyV';
+process.env.LINKVERTISE_TARGET_LINK_URL = 'https://link-hub.net/5914830/XEpUhZ8TdtyV';
 process.env.LINKVERTISE_COMPLETE_URL = 'http://localhost:8791/unlock/linkvertise/complete';
+process.env.LINKVERTISE_CALLBACK_URL = 'http://localhost:8791/unlock/linkvertise/complete';
+process.env.LINKVERTISE_VERIFY_URL = 'https://publisher.linkvertise.com/api/v1/anti_bypassing';
+process.env.LINKVERTISE_ANTI_BYPASS_TOKEN = 'test-anti-bypass-token-very-long-do-not-log-1234567890abcdef';
 process.env.LOOTLABS_ENABLED = 'true';
 process.env.LOOTLABS_MONETIZED_URL = 'https://lootdest.org/s?TqZQAW38';
 process.env.LOOTLABS_COMPLETE_URL = 'http://localhost:8791/unlock/lootlabs/complete';
@@ -177,10 +181,86 @@ const mockSupabase = {
   },
 };
 
+// Mocked Linkvertise Anti-Bypass API. Models the real behaviour:
+//   - mode='auto' (default): TRUE iff the hash was registered in validHashes,
+//     and the hash is consumed (deleted) on first successful verify.
+//   - mode='true'          : always TRUE
+//   - mode='false'         : always FALSE
+//   - mode='invalid_token' : returns "invalid token" payload
+//   - mode='http500'       : returns HTTP 500
+//   - mode='timeout'       : rejects with ECONNABORTED
+//   - mode='network'       : rejects with ECONNRESET
+//   - mode='invalid_response': returns unrecognised JSON shape
+const linkvertiseApi = {
+  mode: 'auto',
+  validHashes: new Set(),
+  lastCall: null,
+  callCount: 0,
+};
+
+function resetLinkvertiseApi() {
+  linkvertiseApi.mode = 'auto';
+  linkvertiseApi.validHashes.clear();
+  linkvertiseApi.lastCall = null;
+  linkvertiseApi.callCount = 0;
+}
+
+function extractFormValue(body, key) {
+  if (!body || typeof body !== 'string') return '';
+  for (const part of body.split('&')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    if (decodeURIComponent(part.slice(0, eq)) === key) {
+      return decodeURIComponent(part.slice(eq + 1));
+    }
+  }
+  return '';
+}
+
+function linkvertiseMockResponse(url, body) {
+  linkvertiseApi.callCount += 1;
+  linkvertiseApi.lastCall = { url, body: String(body || '') };
+  const hash = extractFormValue(linkvertiseApi.lastCall.body, 'hash');
+  // Mirror the real live API shape: `{ "status": true | false }`.
+  switch (linkvertiseApi.mode) {
+    case 'true':
+      return Promise.resolve({ status: 200, data: { status: true } });
+    case 'false':
+      return Promise.resolve({ status: 200, data: { status: false } });
+    case 'invalid_token':
+      return Promise.resolve({ status: 200, data: { error: 'Invalid token' } });
+    case 'http500':
+      return Promise.resolve({ status: 500, data: 'server error' });
+    case 'invalid_response':
+      return Promise.resolve({ status: 200, data: { whatever: 'shape' } });
+    case 'timeout': {
+      const err = new Error('timeout of 8000ms exceeded');
+      err.code = 'ECONNABORTED';
+      return Promise.reject(err);
+    }
+    case 'network': {
+      const err = new Error('socket hang up');
+      err.code = 'ECONNRESET';
+      return Promise.reject(err);
+    }
+    case 'auto':
+    default:
+      if (linkvertiseApi.validHashes.has(hash)) {
+        linkvertiseApi.validHashes.delete(hash);
+        return Promise.resolve({ status: 200, data: { status: true } });
+      }
+      return Promise.resolve({ status: 200, data: { status: false } });
+  }
+}
+
 // fakeAxios is declared as a plain object so individual tests can temporarily
-// override .get() to exercise different Discord identity responses.
+// override .get() to exercise different Discord identity responses, and so
+// .post() can route Linkvertise Anti-Bypass calls to the mock above.
 const fakeAxios = {
-  async post() {
+  async post(url, body) {
+    if (typeof url === 'string' && url.includes('anti_bypassing')) {
+      return linkvertiseMockResponse(url, body);
+    }
     return { data: { access_token: 'discord-access-token' } };
   },
   async get() {
@@ -333,37 +413,49 @@ async function chooseProvider(agent, provider = 'lootlabs') {
   assert.equal(res.status, 303);
   const location = res.headers.location;
   const basePublicUrl = process.env.TOOL_SITE_PUBLIC_URL || 'http://localhost:8791';
-  const locationUrl = new URL(location, basePublicUrl);
 
-  let returnToken;
-  let returnUrl;
-
-  if (provider === 'linkvertise' && location.includes('/unlock/linkvertise/start')) {
-    // Full Script approach: token is directly in the internal start URL
-    returnToken = locationUrl.searchParams.get('t');
-    assert.ok(returnToken, 'Linkvertise start URL must include return token directly');
-    returnUrl = `${basePublicUrl}/unlock/linkvertise/complete?t=${encodeURIComponent(returnToken)}`;
-  } else {
-    // LootLabs template or generic: token nested in destination/return_url param
-    const destParam =
-      locationUrl.searchParams.get('return_url') ||
-      locationUrl.searchParams.get('deng_return') ||
-      locationUrl.searchParams.get('destination') ||
-      locationUrl.searchParams.get('target') ||
-      locationUrl.searchParams.get('url');
-    assert.ok(destParam, 'provider redirect must include signed return URL');
-    returnUrl = destParam;
-    returnToken = new URL(returnUrl).searchParams.get('t');
+  if (provider === 'linkvertise') {
+    // Linkvertise Target-Link Anti-Bypass: redirect goes straight to the real
+    // link-hub.net target URL. There is NO signed `t=` token in the URL —
+    // verification happens server-side via Linkvertise's Anti-Bypass API
+    // using the `hash` query param that Linkvertise appends to the callback.
+    assert.equal(location, process.env.LINKVERTISE_TARGET_LINK_URL);
+    // Simulate Linkvertise issuing a hash to this visitor for this challenge
+    // and pre-register it with the mocked Anti-Bypass API so a later POST to
+    // /unlock/linkvertise/complete?hash=<hash> verifies TRUE exactly once.
+    const hash = validLinkvertiseHash(started.challengeId);
+    linkvertiseApi.validHashes.add(hash);
+    return { started, res, location, returnUrl: null, returnToken: hash, linkvertiseHash: hash };
   }
+
+  const locationUrl = new URL(location, basePublicUrl);
+  // LootLabs template or generic: token nested in destination/return_url param
+  const destParam =
+    locationUrl.searchParams.get('return_url') ||
+    locationUrl.searchParams.get('deng_return') ||
+    locationUrl.searchParams.get('destination') ||
+    locationUrl.searchParams.get('target') ||
+    locationUrl.searchParams.get('url');
+  assert.ok(destParam, 'provider redirect must include signed return URL');
+  const returnUrl = destParam;
+  const returnToken = new URL(returnUrl).searchParams.get('t');
 
   assert.ok(returnToken, 'signed return token must be present');
   assert.ok(returnToken.length > 80, 'return token must be long enough to be a valid HMAC token');
   return { started, res, location, returnUrl, returnToken };
 }
 
+/** Generate a syntactically valid (64 url-safe chars) Linkvertise hash. */
+function validLinkvertiseHash(seed = '') {
+  const base = require('node:crypto').createHash('sha256').update(`lv:${seed || Date.now()}`).digest('hex');
+  return base.padEnd(64, 'a').slice(0, 64);
+}
+
 function ageProviderStart(seconds = AD_MIN_COMPLETION_SECONDS + 1, index = 0) {
   const row = memoryDb.license_ad_challenges[index];
   assert.ok(row, 'challenge row must exist before aging provider start');
+  // IMPORTANT: spread previous payload first so Linkvertise-specific markers
+  // (linkvertise_started, target_link_host, callback_url) are preserved.
   row.provider_payload = {
     ...(row.provider_payload || {}),
     redirect_started: true,
@@ -381,15 +473,40 @@ function providerReferer(provider) {
 }
 
 async function completeProvider(agent, provider = 'linkvertise', returnToken = '', referer = providerReferer(provider)) {
+  // For Linkvertise we treat `returnToken` as the Linkvertise hash that the
+  // provider appends to the callback URL as `?hash=...`. For LootLabs we
+  // keep the legacy `?t=<signed_token>` behaviour.
+  if (provider === 'linkvertise') {
+    const suffix = returnToken ? `?hash=${encodeURIComponent(returnToken)}` : '';
+    const req = agent.get(`/unlock/linkvertise/complete${suffix}`);
+    if (referer) req.set('Referer', referer);
+    return req;
+  }
   const suffix = returnToken ? `?t=${encodeURIComponent(returnToken)}` : '';
   return agent.get(`/unlock/${provider}/complete${suffix}`).set('Referer', referer);
+}
+
+/**
+ * Linkvertise-specific completion helper. Returns a fresh valid hash by
+ * default and lets the caller override `linkvertiseApi.mode` to simulate
+ * TRUE / FALSE / timeout etc.
+ */
+async function completeLinkvertise(agent, { hash, referer = '' } = {}) {
+  const h = hash || validLinkvertiseHash();
+  const req = agent.get(`/unlock/linkvertise/complete?hash=${encodeURIComponent(h)}`);
+  if (referer) req.set('Referer', referer);
+  const res = await req;
+  return { res, hash: h };
 }
 
 function tamperToken(token) {
   return `${token.slice(0, -1)}${token.endsWith('a') ? 'b' : 'a'}`;
 }
 
-beforeEach(resetDb);
+beforeEach(() => {
+  resetDb();
+  resetLinkvertiseApi();
+});
 
 describe('auth and protected pages', () => {
   test('login page shows Discord-only login with required text and no database login', async () => {
@@ -689,45 +806,52 @@ describe('Luarmor-style key flow', () => {
     assert.doesNotMatch(rendered.text, /^\{"error"/);
   });
 
-  test('expired active provider challenge fails safely', async () => {
+  test('expired active provider challenge fails safely (Linkvertise)', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
     memoryDb.license_ad_challenges[0].expires_at = new Date(Date.now() - 1000).toISOString();
-    ageProviderStart();
-    const res = await completeProvider(agent, 'linkvertise', returnToken);
+    const res = await completeProvider(agent, 'linkvertise', hash);
     assert.equal(res.status, 302);
     assert.equal(res.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
-  test('wrong user challenge ownership fails safely', async () => {
+  test('wrong user challenge ownership fails safely (Linkvertise)', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
     memoryDb.license_ad_challenges[0].site_user_id = randomUUID();
-    ageProviderStart();
-    const res = await completeProvider(agent, 'linkvertise', returnToken);
+    const res = await completeProvider(agent, 'linkvertise', hash);
     assert.equal(res.status, 302);
     assert.equal(res.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
-  test('Linkvertise Full Script provider redirects to internal start page with signed token', async () => {
+  test('Linkvertise Target-Link Anti-Bypass start redirects 303 directly to link-hub.net', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { res, location, returnToken } = await chooseProvider(agent, 'linkvertise');
+    const { res, location } = await chooseProvider(agent, 'linkvertise');
     assert.equal(res.status, 303);
-    // Linkvertise Full Script: must redirect to internal /unlock/linkvertise/start, NOT to link-hub.net
-    assert.match(location, /\/unlock\/linkvertise\/start\?t=/);
-    assert.ok(!location.includes('link-hub.net'), 'must NOT redirect directly to static link-hub.net campaign URL');
-    assert.ok(returnToken.length > 80);
+    // Must redirect EXACTLY to the configured link-hub.net Target-Link URL
+    assert.equal(location, 'https://link-hub.net/5914830/XEpUhZ8TdtyV');
+    assert.ok(location.includes('link-hub.net'));
+    // Must NOT include the anti-bypass token in the URL
+    assert.doesNotMatch(location, /anti.?bypass|token=/i);
+    // Must NOT include a signed return token in the URL
+    assert.doesNotMatch(location, /[?&]t=/);
+    // Must NOT redirect to an internal Full Script start page
+    assert.doesNotMatch(location, /\/unlock\/linkvertise\/start/);
+    // Must NOT redirect to the completion URL
+    assert.doesNotMatch(location, /\/unlock\/linkvertise\/complete/);
     assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
     assert.equal(memoryDb.license_ad_challenges[0].provider, 'linkvertise');
     assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
-    assert.equal(memoryDb.license_ad_challenges[0].provider_payload.redirect_started, true);
-    assert.ok(memoryDb.license_ad_challenges[0].provider_payload.provider_started_at);
-    assert.equal(memoryDb.license_ad_challenges[0].provider_payload.return_token_hash.length, 64);
+    const payload = memoryDb.license_ad_challenges[0].provider_payload;
+    assert.equal(payload.linkvertise_started, true);
+    assert.equal(payload.target_link_host, 'link-hub.net');
+    assert.equal(payload.callback_url, 'http://localhost:8791/unlock/linkvertise/complete');
+    assert.ok(payload.provider_started_at);
   });
 
   test('LootLabs template URL provider embeds signed return URL in destination param', async () => {
@@ -754,8 +878,8 @@ describe('Luarmor-style key flow', () => {
     await login(agent);
     const first = await chooseProvider(agent, 'linkvertise');
     assert.equal(first.res.status, 303);
-    // Linkvertise Full Script: first click goes to internal start page, not static link-hub.net
-    assert.match(first.location, /\/unlock\/linkvertise\/start\?t=/);
+    // Linkvertise Target-Link: first click goes straight to the real link-hub.net
+    assert.equal(first.location, 'https://link-hub.net/5914830/XEpUhZ8TdtyV');
     assert.notEqual(first.location, '/license');
 
     // Repeated same-provider click: must still 303 (safe reissue)
@@ -765,7 +889,7 @@ describe('Luarmor-style key flow', () => {
       provider: 'linkvertise',
     });
     assert.equal(second.status, 303);
-    assert.match(second.headers.location, /\/unlock\/linkvertise\/start\?t=/);
+    assert.equal(second.headers.location, 'https://link-hub.net/5914830/XEpUhZ8TdtyV');
     assert.notEqual(second.headers.location, '/license');
     assert.equal(memoryDb.license_ad_challenges.length, 1);
     assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
@@ -789,17 +913,19 @@ describe('Luarmor-style key flow', () => {
     assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
   });
 
-  test('missing AD_RETURN_SIGNING_SECRET fails provider redirect closed', async () => {
+  test('missing AD_RETURN_SIGNING_SECRET fails LootLabs provider redirect closed', async () => {
+    // LootLabs still uses the signed return token; Linkvertise has its own
+    // Anti-Bypass verification and no longer depends on AD_RETURN_SIGNING_SECRET.
     const agent = request.agent(app);
     await login(agent);
     const started = await startChallenge(agent);
     const originalSecret = process.env.AD_RETURN_SIGNING_SECRET;
     delete process.env.AD_RETURN_SIGNING_SECRET;
     try {
-      const res = await agent.post('/key/provider/linkvertise').type('form').send({
+      const res = await agent.post('/key/provider/lootlabs').type('form').send({
         _csrf: started.csrf,
         challenge_id: started.challengeId,
-        provider: 'linkvertise',
+        provider: 'lootlabs',
       });
       assert.equal(res.status, 302);
       assert.equal(res.headers.location, '/license');
@@ -809,35 +935,26 @@ describe('Luarmor-style key flow', () => {
     }
   });
 
-  test('Linkvertise start page shows unavailable message and no raw completion button', async () => {
-    // Linkvertise Full Script can be bypassed (completion URL visible in DOM → directly clickable).
-    // The start page must show the unavailable message; it must NOT show the publisher JS
-    // or a button/link containing the raw signed completion URL.
+  test('legacy Linkvertise Full Script start page is unreachable (redirects, no raw completion button)', async () => {
+    // After moving to the Target-Link Anti-Bypass flow, the internal start
+    // page must no longer render a raw completion link / Full Script JS.
     const agent = request.agent(app);
     await login(agent);
-    const { location } = await chooseProvider(agent, 'linkvertise');
-    const startPath = new URL(location).pathname + new URL(location).search;
-    const startPage = await agent.get(startPath);
-    assert.equal(startPage.status, 200);
-    // Must show unavailable message
-    assert.match(startPage.text, /temporarily unavailable/i);
-    // Must NOT expose raw completion URL as a clickable href
-    assert.doesNotMatch(startPage.text, /href="[^"]*unlock\/linkvertise\/complete[^"]*"/);
-    // Must NOT include Linkvertise publisher JS
-    assert.doesNotMatch(startPage.text, /publisher\.linkvertise\.com\/cdn\/linkvertise\.js/);
-    // Must NOT show a raw Start Ad Step button
-    assert.doesNotMatch(startPage.text, /Start Ad Step/i);
+    const res = await agent.get('/unlock/linkvertise/start');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
   });
 
-  test('Linkvertise Full Script start page with invalid or missing token redirects to license', async () => {
+  test('legacy /unlock/linkvertise/start with any input redirects to license (never generates a key)', async () => {
     const agent = request.agent(app);
     await login(agent);
-    for (const bad of ['', 'fake.token', 'abc123']) {
+    for (const bad of ['', 'fake.token', 'abc123', 'anything', 'evil-payload']) {
       const suffix = bad ? `?t=${encodeURIComponent(bad)}` : '';
       const res = await agent.get(`/unlock/linkvertise/start${suffix}`);
       assert.equal(res.status, 302);
       assert.equal(res.headers.location, '/license');
     }
+    assert.equal(memoryDb.license_keys.length, 0);
   });
 
   test('LootLabs is disabled as provider when LOOTLABS_TEMPLATE_URL is not configured', async () => {
@@ -913,89 +1030,146 @@ describe('Luarmor-style key flow', () => {
     assert.doesNotMatch(rendered.text, /^\{"error"/);
   });
 
-  test('Linkvertise completion succeeds without provider referer (Linkvertise does not forward Referer)', async () => {
-    // Linkvertise Full Script does not forward the Referer header when it
-    // redirects back to the completion URL. The signed HMAC token + session
-    // binding + time check provide equivalent protection.
+  test('Linkvertise completion succeeds via hash (Anti-Bypass TRUE) without referer requirement', async () => {
+    // Linkvertise does not forward the Referer header to the completion URL.
+    // With the Target-Link Anti-Bypass flow, the Linkvertise API server-side
+    // hash verification provides equivalent (stronger) protection.
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
 
     // No Referer header — simulates Linkvertise behaviour
     const res = await agent
-      .get(`/unlock/linkvertise/complete?t=${encodeURIComponent(returnToken)}`)
+      .get(`/unlock/linkvertise/complete?hash=${encodeURIComponent(hash)}`)
       .set('Accept', 'text/html');
-    assert.equal(res.status, 302, 'Linkvertise completion without referer should succeed');
+    assert.equal(res.status, 302, 'Linkvertise completion via hash should succeed');
+    assert.equal(res.headers.location, '/key/result');
+    assert.equal(memoryDb.license_keys.length, 1);
+    // Verify Linkvertise Anti-Bypass API was actually called with the hash
+    assert.equal(linkvertiseApi.callCount, 1);
+    assert.ok(linkvertiseApi.lastCall.body.includes(`hash=${encodeURIComponent(hash)}`));
+    // Token must be sent in body, never in URL
+    assert.ok(!linkvertiseApi.lastCall.url.includes('token='));
+    assert.match(linkvertiseApi.lastCall.body, /token=/);
+  });
+
+  test('Linkvertise completion with non-Linkvertise referer still succeeds when Anti-Bypass TRUE', async () => {
+    // Linkvertise no longer relies on referer. The Anti-Bypass hash is the
+    // authoritative proof, so a non-Linkvertise referer alone is not enough
+    // to reject — only the API result matters.
+    const agent = request.agent(app);
+    await login(agent);
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+
+    const res = await completeProvider(agent, 'linkvertise', hash, 'https://evil.example.com/');
+    assert.equal(res.status, 302);
     assert.equal(res.headers.location, '/key/result');
     assert.equal(memoryDb.license_keys.length, 1);
   });
 
-  test('Linkvertise completion with wrong referer is still rejected', async () => {
-    // A non-empty, non-Linkvertise referer is not exempt — it indicates spoofing.
-    const agent = request.agent(app);
-    await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
-
-    const res = await completeProvider(agent, 'linkvertise', returnToken, 'https://evil.example.com/');
-    assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/license');
-    assert.equal(memoryDb.license_keys.length, 0);
-  });
-
-  test('manual complete URLs without signed token are blocked even with a pending challenge', async () => {
+  test('Linkvertise completion without hash is blocked even with a pending challenge', async () => {
     const agent = request.agent(app);
     await login(agent);
     await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
 
     const res = await completeProvider(agent, 'linkvertise', '');
     assert.equal(res.status, 302);
     assert.equal(res.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
+    // Linkvertise API must not have been called when there's no hash
+    assert.equal(linkvertiseApi.callCount, 0);
   });
 
-  test('fake and tampered signed return tokens are blocked', async () => {
+  test('fake and tampered Linkvertise hashes are blocked', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
 
+    // 1. Malformed hash ('fake.token' is not 64 url-safe chars) — blocked at
+    //    format check, no API call should be made.
     const fake = await completeProvider(agent, 'linkvertise', 'fake.token');
     assert.equal(fake.status, 302);
+    assert.equal(fake.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
+    assert.equal(linkvertiseApi.callCount, 0);
 
-    const tampered = await completeProvider(agent, 'linkvertise', tamperToken(returnToken));
+    // 2. Tampered hash (still 64 url-safe chars, but the byte was flipped) —
+    //    format passes, but Linkvertise returns FALSE for an unknown hash.
+    const tampered = await completeProvider(agent, 'linkvertise', tamperToken(hash));
     assert.equal(tampered.status, 302);
+    assert.equal(tampered.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
+    assert.ok(linkvertiseApi.callCount >= 1, 'tampered hash should reach the Linkvertise API');
   });
 
-  test('expired signed return token is blocked', async () => {
+  test('Linkvertise Anti-Bypass FALSE blocks key generation', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
-    memoryDb.license_ad_challenges[0].provider_payload.return_token_expires_at =
-      new Date(Date.now() - 1000).toISOString();
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+    linkvertiseApi.mode = 'false';
 
-    const res = await completeProvider(agent, 'linkvertise', returnToken);
+    const res = await completeProvider(agent, 'linkvertise', hash);
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+    assert.equal(linkvertiseApi.callCount, 1);
+  });
+
+  test('Linkvertise Anti-Bypass API timeout blocks key generation (fail-closed)', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+    linkvertiseApi.mode = 'timeout';
+
+    const res = await completeProvider(agent, 'linkvertise', hash);
     assert.equal(res.status, 302);
     assert.equal(res.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
-  test('return token for a different challenge or user is blocked', async () => {
+  test('Linkvertise Anti-Bypass HTTP 500 blocks key generation (fail-closed)', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const first = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
-    const second = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart(AD_MIN_COMPLETION_SECONDS + 1, 1);
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+    linkvertiseApi.mode = 'http500';
 
-    const wrongChallenge = await completeProvider(agent, 'linkvertise', first.returnToken);
-    assert.equal(wrongChallenge.status, 302);
+    const res = await completeProvider(agent, 'linkvertise', hash);
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
+  });
+
+  test('Linkvertise Anti-Bypass "invalid token" response blocks key generation', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+    linkvertiseApi.mode = 'invalid_token';
+
+    const res = await completeProvider(agent, 'linkvertise', hash);
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+  });
+
+  test('Linkvertise challenge expiry blocks completion even with a valid hash', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+    memoryDb.license_ad_challenges[0].expires_at = new Date(Date.now() - 1000).toISOString();
+
+    const res = await completeProvider(agent, 'linkvertise', hash);
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+  });
+
+  test('a different Discord user cannot complete another user\'s pending Linkvertise challenge', async () => {
+    // A second Discord user logging in with a fresh session has no
+    // activeAdChallengeId, so even a syntactically valid hash cannot bind
+    // to another user's pending challenge.
+    const agent = request.agent(app);
+    await login(agent);
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
 
     const other = request.agent(app);
     const originalGet = fakeAxios.get;
@@ -1004,12 +1178,16 @@ describe('Luarmor-style key flow', () => {
     });
     try {
       await login(other);
-      const otherStart = await chooseProvider(other, 'linkvertise');
-      ageProviderStart(AD_MIN_COMPLETION_SECONDS + 1, 2);
-      const wrongUser = await completeProvider(other, 'linkvertise', second.returnToken);
+      // Other user has NO pending challenge but tries to use the first
+      // user's hash — must be rejected by the session ownership check
+      // before any API call.
+      const wrongUser = await completeProvider(other, 'linkvertise', hash);
       assert.equal(wrongUser.status, 302);
+      assert.equal(wrongUser.headers.location, '/license');
       assert.equal(memoryDb.license_keys.length, 0);
 
+      // Other user properly starts their own challenge then completes it.
+      const otherStart = await chooseProvider(other, 'linkvertise');
       const validOther = await completeProvider(other, 'linkvertise', otherStart.returnToken);
       assert.equal(validOther.status, 302);
       assert.equal(validOther.headers.location, '/key/result');
@@ -1032,13 +1210,14 @@ describe('Luarmor-style key flow', () => {
     assert.match(rendered.text, /Please complete the ad step before continuing\./);
   });
 
-  test('wrong provider complete route is blocked even with allowed referer', async () => {
+  test('wrong provider complete route is blocked for a Linkvertise challenge', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
 
-    const res = await completeProvider(agent, 'lootlabs', returnToken);
+    // LootLabs route invoked with a Linkvertise-bound active challenge → must
+    // be rejected by the provider mismatch check.
+    const res = await completeProvider(agent, 'lootlabs', hash);
     assert.equal(res.status, 302);
     assert.equal(res.headers.location, '/license');
     assert.equal(memoryDb.license_keys.length, 0);
@@ -1046,28 +1225,19 @@ describe('Luarmor-style key flow', () => {
     assert.match(rendered.text, /Invalid or expired key generation session\. Please start again\./);
   });
 
-  test('provider complete URL with wrong referer host is blocked', async () => {
+  test('valid Linkvertise unlock generates one key, keeps it out of the URL, and shows redeem instructions', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
 
-    const res = await completeProvider(agent, 'linkvertise', returnToken, 'https://tool.deng.my.id/license');
-    assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/license');
-    assert.equal(memoryDb.license_keys.length, 0);
-  });
-
-  test('valid unlock generates one key, keeps it out of the URL, and shows redeem instructions', async () => {
-    const agent = request.agent(app);
-    await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
-
-    const unlock = await completeProvider(agent, 'linkvertise', returnToken);
+    const unlock = await completeProvider(agent, 'linkvertise', hash);
     assert.equal(unlock.status, 302);
     assert.equal(unlock.headers.location, '/key/result');
     assert.equal(memoryDb.license_keys.length, 1);
+    assert.equal(linkvertiseApi.callCount, 1);
+    // Anti-Bypass token must travel in the request BODY, never the URL
+    assert.doesNotMatch(linkvertiseApi.lastCall.url, /token=/);
+    assert.match(linkvertiseApi.lastCall.body, /token=/);
 
     const result = await agent.get('/key/result');
     assert.equal(result.status, 200);
@@ -1090,39 +1260,43 @@ describe('Luarmor-style key flow', () => {
     assert.equal(memoryDb.license_keys.length, 1);
   });
 
-  test('tampered and expired challenges are rejected', async () => {
+  test('tampered LootLabs token and legacy Linkvertise URL are rejected', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
 
-    const tampered = await completeProvider(agent, 'lootlabs', returnToken);
+    // LootLabs route called with Linkvertise hash as ?t= — fails provider
+    // mismatch (and bad signed token shape).
+    const tampered = await completeProvider(agent, 'lootlabs', hash);
     assert.equal(tampered.status, 302);
     assert.equal(memoryDb.license_keys.length, 0);
 
+    // Legacy signed challenge query on /unlock/linkvertise → just redirects.
     const expiredToken = signChallenge('missing', 'linkvertise', Date.now() - 1000);
     const expired = await agent.get(`/unlock/linkvertise?challenge=${encodeURIComponent(expiredToken)}`);
     assert.equal(expired.status, 302);
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
-  test('callback replay and double-submit do not create duplicate keys', async () => {
+  test('callback replay and double-submit do not create duplicate keys (Linkvertise)', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
 
-    await completeProvider(agent, 'linkvertise', returnToken);
-    await completeProvider(agent, 'linkvertise', returnToken);
+    const first = await completeProvider(agent, 'linkvertise', hash);
+    assert.equal(first.headers.location, '/key/result');
+    // Same hash replayed: Linkvertise hash is single-use AND the challenge
+    // is already consumed — both lines of defence must prevent a second key.
+    const second = await completeProvider(agent, 'linkvertise', hash);
+    assert.notEqual(second.headers.location, '/key/result');
     assert.equal(memoryDb.license_keys.length, 1);
   });
 
-  test('server-side cooldown is enforced after a generated key', async () => {
+  test('server-side cooldown is enforced after a generated key (Linkvertise)', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
-    await completeProvider(agent, 'linkvertise', returnToken);
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+    await completeProvider(agent, 'linkvertise', hash);
 
     const page = await agent.get('/license');
     const csrf = csrfFrom(page.text);
@@ -1134,9 +1308,8 @@ describe('Luarmor-style key flow', () => {
   test('authenticated license history shows full unmasked keys for the key owner', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
-    await completeProvider(agent, 'linkvertise', returnToken);
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+    await completeProvider(agent, 'linkvertise', hash);
     const license = await agent.get('/license');
     assert.equal(license.status, 200);
     // Full key must appear in the history table
@@ -1242,24 +1415,57 @@ describe('health and service identity', () => {
 });
 
 describe('provider UI and security gate', () => {
-  test('Linkvertise disabled by default in choose_provider UI', async () => {
-    // Linkvertise must be shown as unavailable in the provider choice page because
-    // the Full Script approach cannot prevent direct navigation to the completion URL.
-    // In tests, LINKVERTISE_ENABLED=true, so the server accepts the POST, but the
-    // underlying issue (start page shows unavailable) is tested separately.
-    // This test verifies the disabled-state card renders when provider is not ready.
+  test('Linkvertise disabled in choose_provider UI when LINKVERTISE_ENABLED is false', async () => {
     const originalEnabled = process.env.LINKVERTISE_ENABLED;
     process.env.LINKVERTISE_ENABLED = 'false';
     try {
       const agent = request.agent(app);
       await login(agent);
       const { html } = await startChallenge(agent);
-      // Disabled Linkvertise card must show the unavailable message
       assert.match(html, /Linkvertise is temporarily unavailable/i);
-      // Must not have a submit form for Linkvertise
       assert.doesNotMatch(html, /action="\/key\/provider\/linkvertise"/);
     } finally {
       process.env.LINKVERTISE_ENABLED = originalEnabled;
+    }
+  });
+
+  test('Linkvertise disabled when LINKVERTISE_ANTI_BYPASS_TOKEN is missing', async () => {
+    const original = process.env.LINKVERTISE_ANTI_BYPASS_TOKEN;
+    delete process.env.LINKVERTISE_ANTI_BYPASS_TOKEN;
+    try {
+      const agent = request.agent(app);
+      await login(agent);
+      const { html, csrf, challengeId } = await startChallenge(agent);
+      assert.match(html, /Linkvertise is temporarily unavailable/i);
+      assert.doesNotMatch(html, /action="\/key\/provider\/linkvertise"/);
+
+      // Even forging a POST must be refused with PROVIDER_NOT_CONFIGURED.
+      const res = await agent.post('/key/provider/linkvertise').type('form').send({
+        _csrf: csrf,
+        challenge_id: challengeId,
+        provider: 'linkvertise',
+      });
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.location, '/license');
+    } finally {
+      process.env.LINKVERTISE_ANTI_BYPASS_TOKEN = original;
+    }
+  });
+
+  test('Linkvertise disabled when LINKVERTISE_TARGET_LINK_URL (and fallback) are missing', async () => {
+    const origTarget = process.env.LINKVERTISE_TARGET_LINK_URL;
+    const origMonetized = process.env.LINKVERTISE_MONETIZED_URL;
+    delete process.env.LINKVERTISE_TARGET_LINK_URL;
+    delete process.env.LINKVERTISE_MONETIZED_URL;
+    try {
+      const agent = request.agent(app);
+      await login(agent);
+      const { html } = await startChallenge(agent);
+      assert.match(html, /Linkvertise is temporarily unavailable/i);
+      assert.doesNotMatch(html, /action="\/key\/provider\/linkvertise"/);
+    } finally {
+      if (origTarget !== undefined) process.env.LINKVERTISE_TARGET_LINK_URL = origTarget;
+      if (origMonetized !== undefined) process.env.LINKVERTISE_MONETIZED_URL = origMonetized;
     }
   });
 
@@ -1282,9 +1488,8 @@ describe('provider UI and security gate', () => {
   test('key result page shows DENG logo image not generic OK badge', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
-    await completeProvider(agent, 'linkvertise', returnToken);
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+    await completeProvider(agent, 'linkvertise', hash);
 
     const result = await agent.get('/key/result');
     assert.equal(result.status, 200);
@@ -1296,9 +1501,8 @@ describe('provider UI and security gate', () => {
   test('cooldown notice is never rendered blank (secondsLeft=0 shows no notice)', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
-    await completeProvider(agent, 'linkvertise', returnToken);
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+    await completeProvider(agent, 'linkvertise', hash);
 
     // Simulate cooldown having already expired at render time
     const row = memoryDb.license_ad_challenges[0];
@@ -1312,15 +1516,17 @@ describe('provider UI and security gate', () => {
     assert.doesNotMatch(license.text, /Cooldown active:\s*<span[^>]*class="countdown"[^>]*><\/span>/);
   });
 
-  test('direct Linkvertise completion without session challenge does not generate key', async () => {
+  test('direct Linkvertise completion from a different session does not generate key', async () => {
     // Directly hitting the completion URL without going through the provider
-    // flow must be blocked even with a valid-looking signed token.
+    // flow in this session must be blocked, even with an otherwise-valid hash
+    // and even if a real Linkvertise call would have returned TRUE.
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
 
-    // A second fresh agent (same user, different session) tries the old token
+    // A second fresh agent (same Discord user, different session) tries the
+    // first session's hash — must be rejected because the second session has
+    // no activeAdChallengeId.
     const other = request.agent(app);
     const originalGet = fakeAxios.get;
     fakeAxios.get = async () => ({
@@ -1328,14 +1534,30 @@ describe('provider UI and security gate', () => {
     });
     try {
       await login(other);
-      // Direct completion with token that belongs to a different session
-      const res = await other.get(`/unlock/linkvertise/complete?t=${encodeURIComponent(returnToken)}`);
+      const res = await other.get(`/unlock/linkvertise/complete?hash=${encodeURIComponent(hash)}`);
       assert.equal(res.status, 302);
       assert.equal(res.headers.location, '/license');
       assert.equal(memoryDb.license_keys.length, 0);
     } finally {
       fakeAxios.get = originalGet;
     }
+  });
+
+  test('direct /unlock/linkvertise/complete (no hash, no t=) is blocked even with logged-in session', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    // No challenge ever started → both ownership check and hash check refuse.
+    for (const url of [
+      '/unlock/linkvertise/complete',
+      '/unlock/linkvertise/complete?hash=fake',
+      '/unlock/linkvertise/complete?t=anything',
+      '/unlock/linkvertise/complete?t=anything&hash=fake',
+    ]) {
+      const res = await agent.get(url);
+      assert.equal(res.status, 302, `${url} should redirect`);
+      assert.equal(res.headers.location, '/license');
+    }
+    assert.equal(memoryDb.license_keys.length, 0);
   });
 
   test('missing AD_RETURN_SIGNING_SECRET blocks LootLabs provider redirect', async () => {
@@ -1361,9 +1583,8 @@ describe('provider UI and security gate', () => {
   test('full key visible in authenticated dashboard activity history', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { returnToken } = await chooseProvider(agent, 'linkvertise');
-    ageProviderStart();
-    await completeProvider(agent, 'linkvertise', returnToken);
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+    await completeProvider(agent, 'linkvertise', hash);
 
     const dashboard = await agent.get('/dashboard');
     assert.equal(dashboard.status, 200);
@@ -1379,6 +1600,21 @@ describe('provider UI and security gate', () => {
     const res2 = await request(app).get('/license');
     assert.equal(res2.status, 302);
     assert.equal(res2.headers.location, '/login');
+  });
+
+  test('Linkvertise Anti-Bypass token is NEVER included in the redirect URL or in any rendered HTML', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { res } = await chooseProvider(agent, 'linkvertise');
+    // 1. Redirect Location header must not contain the token
+    const location = res.headers.location || '';
+    assert.doesNotMatch(location, new RegExp(process.env.LINKVERTISE_ANTI_BYPASS_TOKEN));
+    // 2. The license page itself must not contain the token either
+    const license = await agent.get('/license');
+    assert.doesNotMatch(license.text, new RegExp(process.env.LINKVERTISE_ANTI_BYPASS_TOKEN));
+    // 3. Choose-provider page must not contain the token
+    const { html } = await startChallenge(agent);
+    assert.doesNotMatch(html, new RegExp(process.env.LINKVERTISE_ANTI_BYPASS_TOKEN));
   });
 
   test('LootLabs static fallback URL does not corrupt shortlink hash with = suffix', async () => {
@@ -1400,5 +1636,196 @@ describe('provider UI and security gate', () => {
     } finally {
       if (originalTmpl !== undefined) process.env.LOOTLABS_TEMPLATE_URL = originalTmpl;
     }
+  });
+});
+
+describe('Linkvertise provider helper (Anti-Bypass)', () => {
+  const lv = require('../src/providers/linkvertise');
+
+  test('isLinkvertiseConfigured returns true when env is complete', () => {
+    assert.equal(lv.isLinkvertiseConfigured(), true);
+    assert.equal(lv.getLinkvertiseUnavailableReason(), null);
+  });
+
+  test('isLinkvertiseConfigured returns false when LINKVERTISE_ENABLED is false', () => {
+    const original = process.env.LINKVERTISE_ENABLED;
+    process.env.LINKVERTISE_ENABLED = 'false';
+    try {
+      assert.equal(lv.isLinkvertiseConfigured(), false);
+      assert.match(lv.getLinkvertiseUnavailableReason(), /LINKVERTISE_ENABLED/);
+    } finally {
+      process.env.LINKVERTISE_ENABLED = original;
+    }
+  });
+
+  test('isLinkvertiseConfigured returns false when LINKVERTISE_ANTI_BYPASS_TOKEN is missing', () => {
+    const original = process.env.LINKVERTISE_ANTI_BYPASS_TOKEN;
+    delete process.env.LINKVERTISE_ANTI_BYPASS_TOKEN;
+    try {
+      assert.equal(lv.isLinkvertiseConfigured(), false);
+      assert.match(lv.getLinkvertiseUnavailableReason(), /ANTI_BYPASS_TOKEN/);
+    } finally {
+      process.env.LINKVERTISE_ANTI_BYPASS_TOKEN = original;
+    }
+  });
+
+  test('isLinkvertiseConfigured returns false when LINKVERTISE_TARGET_LINK_URL is missing', () => {
+    const orig1 = process.env.LINKVERTISE_TARGET_LINK_URL;
+    const orig2 = process.env.LINKVERTISE_MONETIZED_URL;
+    delete process.env.LINKVERTISE_TARGET_LINK_URL;
+    delete process.env.LINKVERTISE_MONETIZED_URL;
+    try {
+      assert.equal(lv.isLinkvertiseConfigured(), false);
+      assert.match(lv.getLinkvertiseUnavailableReason(), /TARGET_LINK_URL/);
+    } finally {
+      if (orig1 !== undefined) process.env.LINKVERTISE_TARGET_LINK_URL = orig1;
+      if (orig2 !== undefined) process.env.LINKVERTISE_MONETIZED_URL = orig2;
+    }
+  });
+
+  test('isValidHashFormat accepts exactly 64 url-safe chars and rejects everything else', () => {
+    assert.equal(lv.isValidHashFormat('a'.repeat(64)), true);
+    assert.equal(lv.isValidHashFormat('A1b2-_'.padEnd(64, 'x')), true);
+    assert.equal(lv.isValidHashFormat(''), false);
+    assert.equal(lv.isValidHashFormat('short'), false);
+    assert.equal(lv.isValidHashFormat('a'.repeat(63)), false);
+    assert.equal(lv.isValidHashFormat('a'.repeat(65)), false);
+    assert.equal(lv.isValidHashFormat('a.b'.padEnd(64, 'x')), false);
+    assert.equal(lv.isValidHashFormat('a/b'.padEnd(64, 'x')), false);
+    assert.equal(lv.isValidHashFormat('a b'.padEnd(64, 'x')), false);
+  });
+
+  test('verifyLinkvertiseAntiBypass rejects missing hash without making API call', async () => {
+    const before = linkvertiseApi.callCount;
+    const res = await lv.verifyLinkvertiseAntiBypass({ hash: '', requestId: 'r' });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'missing_hash');
+    assert.equal(linkvertiseApi.callCount, before);
+  });
+
+  test('verifyLinkvertiseAntiBypass rejects bad-format hash without making API call', async () => {
+    const before = linkvertiseApi.callCount;
+    const res = await lv.verifyLinkvertiseAntiBypass({ hash: 'too-short', requestId: 'r' });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'bad_hash_format');
+    assert.equal(linkvertiseApi.callCount, before);
+  });
+
+  test('verifyLinkvertiseAntiBypass returns success on TRUE response', async () => {
+    linkvertiseApi.mode = 'true';
+    const hash = 'b'.repeat(64);
+    const res = await lv.verifyLinkvertiseAntiBypass({ hash, requestId: 'r' });
+    assert.equal(res.ok, true);
+    assert.equal(res.reason, 'success');
+  });
+
+  test('verifyLinkvertiseAntiBypass returns api_false on FALSE response', async () => {
+    linkvertiseApi.mode = 'false';
+    const hash = 'c'.repeat(64);
+    const res = await lv.verifyLinkvertiseAntiBypass({ hash, requestId: 'r' });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'api_false');
+  });
+
+  test('verifyLinkvertiseAntiBypass returns api_invalid_token on "invalid token" response', async () => {
+    linkvertiseApi.mode = 'invalid_token';
+    const hash = 'd'.repeat(64);
+    const res = await lv.verifyLinkvertiseAntiBypass({ hash, requestId: 'r' });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'api_invalid_token');
+  });
+
+  test('verifyLinkvertiseAntiBypass fails closed on timeout', async () => {
+    linkvertiseApi.mode = 'timeout';
+    const hash = 'e'.repeat(64);
+    const res = await lv.verifyLinkvertiseAntiBypass({ hash, requestId: 'r' });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'api_timeout');
+  });
+
+  test('verifyLinkvertiseAntiBypass fails closed on network error', async () => {
+    linkvertiseApi.mode = 'network';
+    const hash = 'f'.repeat(64);
+    const res = await lv.verifyLinkvertiseAntiBypass({ hash, requestId: 'r' });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'api_error');
+  });
+
+  test('verifyLinkvertiseAntiBypass fails closed on HTTP 500', async () => {
+    linkvertiseApi.mode = 'http500';
+    const hash = '1'.repeat(64);
+    const res = await lv.verifyLinkvertiseAntiBypass({ hash, requestId: 'r' });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'api_error');
+  });
+
+  test('verifyLinkvertiseAntiBypass fails closed on unrecognised response shape', async () => {
+    linkvertiseApi.mode = 'invalid_response';
+    const hash = '2'.repeat(64);
+    const res = await lv.verifyLinkvertiseAntiBypass({ hash, requestId: 'r' });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'api_invalid_response');
+  });
+
+  test('classifyApiResponse handles real Linkvertise {"status": true/false} JSON shape', () => {
+    // Empirically the live API returns this object shape (not bare true/false).
+    assert.deepEqual(lv.classifyApiResponse({ status: true }), { ok: true, reason: 'success' });
+    assert.deepEqual(lv.classifyApiResponse({ status: false }), { ok: false, reason: 'api_false' });
+  });
+
+  test('classifyApiResponse keeps accepting bare true/false bodies for back-compat', () => {
+    assert.deepEqual(lv.classifyApiResponse(true), { ok: true, reason: 'success' });
+    assert.deepEqual(lv.classifyApiResponse(false), { ok: false, reason: 'api_false' });
+    assert.deepEqual(lv.classifyApiResponse('true'), { ok: true, reason: 'success' });
+    assert.deepEqual(lv.classifyApiResponse('false'), { ok: false, reason: 'api_false' });
+  });
+
+  test('classifyApiResponse treats "invalid token" inside the error/message fields as api_invalid_token', () => {
+    assert.deepEqual(
+      lv.classifyApiResponse({ error: 'Invalid token' }),
+      { ok: false, reason: 'api_invalid_token' },
+    );
+    assert.deepEqual(
+      lv.classifyApiResponse({ message: 'Invalid token provided' }),
+      { ok: false, reason: 'api_invalid_token' },
+    );
+    assert.deepEqual(
+      lv.classifyApiResponse('Invalid token'),
+      { ok: false, reason: 'api_invalid_token' },
+    );
+  });
+
+  test('verifyLinkvertiseAntiBypass sends token in body, never in URL', async () => {
+    linkvertiseApi.mode = 'true';
+    const hash = '3'.repeat(64);
+    await lv.verifyLinkvertiseAntiBypass({ hash, requestId: 'r' });
+    assert.doesNotMatch(linkvertiseApi.lastCall.url, /token=/);
+    assert.match(linkvertiseApi.lastCall.body, /token=/);
+    assert.match(linkvertiseApi.lastCall.body, /hash=/);
+  });
+
+  test('getLinkvertiseTargetLinkUrl returns the configured Target-Link', () => {
+    assert.equal(lv.getLinkvertiseTargetLinkUrl(), 'https://link-hub.net/5914830/XEpUhZ8TdtyV');
+  });
+
+  test('getLinkvertiseTargetLinkUrl returns "" when no env var is set (no hardcoded default)', () => {
+    const orig1 = process.env.LINKVERTISE_TARGET_LINK_URL;
+    const orig2 = process.env.LINKVERTISE_MONETIZED_URL;
+    delete process.env.LINKVERTISE_TARGET_LINK_URL;
+    delete process.env.LINKVERTISE_MONETIZED_URL;
+    try {
+      assert.equal(lv.getLinkvertiseTargetLinkUrl(), '');
+    } finally {
+      if (orig1 !== undefined) process.env.LINKVERTISE_TARGET_LINK_URL = orig1;
+      if (orig2 !== undefined) process.env.LINKVERTISE_MONETIZED_URL = orig2;
+    }
+  });
+
+  test('getLinkvertiseCallbackUrl returns the configured callback URL', () => {
+    assert.equal(lv.getLinkvertiseCallbackUrl(), 'http://localhost:8791/unlock/linkvertise/complete');
+  });
+
+  test('getLinkvertiseVerifyUrl returns the publisher.linkvertise.com endpoint', () => {
+    assert.equal(lv.getLinkvertiseVerifyUrl(), 'https://publisher.linkvertise.com/api/v1/anti_bypassing');
   });
 });
