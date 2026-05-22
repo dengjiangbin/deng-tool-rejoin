@@ -36,7 +36,18 @@ app.use(helmet({
       frameSrc:  ["'none'"],
       objectSrc: ["'none'"],
       baseUri:   ["'self'"],
-      formAction:["'self'"],
+      // form-action also restricts redirects that follow a form submission.
+      // The provider POST returns a 303 to the ad provider host, so the
+      // provider domains MUST be allow-listed here or the browser will
+      // silently block the redirect (CSP report only, no visible error).
+      formAction: [
+        "'self'",
+        'https://link-hub.net',
+        'https://linkvertise.com',
+        'https://*.linkvertise.com',
+        'https://lootdest.org',
+        'https://*.lootlabs.gg',
+      ],
       frameAncestors: ["'none'"],
       upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : [],
     },

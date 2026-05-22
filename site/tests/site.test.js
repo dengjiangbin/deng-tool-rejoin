@@ -1617,6 +1617,22 @@ describe('provider UI and security gate', () => {
     assert.doesNotMatch(html, new RegExp(process.env.LINKVERTISE_ANTI_BYPASS_TOKEN));
   });
 
+  test('Content-Security-Policy form-action allows the Linkvertise / LootLabs ad provider hosts so post-form 303 redirects are not silently blocked', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/license');
+    const csp = String(res.headers['content-security-policy'] || '');
+    assert.ok(csp.length > 0, 'CSP header must be present');
+    // Extract the form-action directive value.
+    const match = csp.match(/(?:^|;)\s*form-action\s+([^;]+)/i);
+    assert.ok(match, "CSP must include a form-action directive (otherwise it falls back to default-src 'self' and blocks ad redirects)");
+    const formAction = match[1].trim();
+    assert.ok(/'self'/.test(formAction), "form-action must include 'self' for portal POSTs");
+    assert.ok(/link-hub\.net/.test(formAction), 'form-action must allow link-hub.net so the Linkvertise Target-Link 303 redirect is not blocked by CSP');
+    assert.ok(/linkvertise\.com/.test(formAction), 'form-action must allow linkvertise.com (apex and subdomains) for any in-flow Linkvertise redirect');
+    assert.ok(/lootdest\.org/.test(formAction), 'form-action must allow lootdest.org so the LootLabs 303 redirect is not blocked by CSP');
+  });
+
   test('LootLabs static fallback URL does not corrupt shortlink hash with = suffix', async () => {
     const agent = request.agent(app);
     await login(agent);
