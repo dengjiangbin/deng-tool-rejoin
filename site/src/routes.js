@@ -51,6 +51,10 @@ const SAFE_MESSAGES = {
   PROVIDER_CHALLENGE_OWNER_MISMATCH: 'Please start key generation again.',
   PROVIDER_CHALLENGE_ALREADY_USED: 'Please start key generation again.',
   PROVIDER_RETURN_UNVERIFIED: 'Could not verify ad completion. Please complete the ad step again.',
+  PROVIDER_RETURN_SECRET_MISSING: 'Ad unlock security is not configured yet.',
+  PROVIDER_RETURN_TOKEN_MISSING: 'Invalid or expired key generation session. Please start again.',
+  PROVIDER_RETURN_TOKEN_INVALID: 'Invalid or expired key generation session. Please start again.',
+  PROVIDER_RETURN_TOKEN_EXPIRED: 'This key generation session expired. Please start again.',
   PROVIDER_WAIT_INCOMPLETE: 'Please complete the ad step before continuing.',
   PROVIDER_MISMATCH: 'Invalid or expired key generation session. Please start again.',
   CHALLENGE_ALREADY_USED: 'Invalid or expired key generation session. Please start again.',
@@ -123,6 +127,9 @@ function logSafeError(scope, code, err) {
     'COOLDOWN_ACTIVE',
     'TOO_MANY_ATTEMPTS',
     'PROVIDER_RETURN_UNVERIFIED',
+    'PROVIDER_RETURN_TOKEN_MISSING',
+    'PROVIDER_RETURN_TOKEN_INVALID',
+    'PROVIDER_RETURN_TOKEN_EXPIRED',
     'PROVIDER_WAIT_INCOMPLETE',
     'PROVIDER_MISMATCH',
     'PROVIDER_CHALLENGE_MISSING',
@@ -172,6 +179,22 @@ const generateLimiter = rateLimit({
 
 function safeFlash(req, key, value) {
   req.session.flash = { ...(req.session.flash || {}), [key]: value };
+}
+
+function tokenizedCompleteUrl(provider, returnToken) {
+  const cfg = getProviderConfig(provider);
+  const base = cfg?.completeUrl || `${publicUrl()}/unlock/${provider}/complete`;
+  const url = new URL(base);
+  url.searchParams.set('t', returnToken);
+  return url.toString();
+}
+
+function providerRedirectUrl(providerCfg, returnToken) {
+  const url = new URL(providerCfg.monetizedUrl);
+  const complete = tokenizedCompleteUrl(providerCfg.provider, returnToken);
+  url.searchParams.set('return_url', complete);
+  url.searchParams.set('deng_return', complete);
+  return url.toString();
 }
 
 async function repairSiteUser(req, _res, next) {
@@ -354,19 +377,20 @@ async function handleProvider(req, res) {
   try {
     const row = await challenge.selectProvider(challengeId, provider, req, user);
     const providerCfg = getProviderConfig(provider);
-    await challenge.markPendingAdById(row.id, req, user, providerCfg.monetizedUrl);
+    const started = await challenge.markPendingAdById(row.id, req, user, providerCfg.monetizedUrl);
+    const redirectUrl = providerRedirectUrl(providerCfg, started.return_token);
 
     req.session.pendingProvider = provider;
 
     if (wantsJson(req)) {
       return res.json({
         provider,
-        redirect_url: providerCfg.monetizedUrl,
-        complete_url: providerCfg.completeUrl,
+        redirect_url: redirectUrl,
+        complete_url: tokenizedCompleteUrl(provider, started.return_token),
       });
     }
 
-    return res.redirect(303, providerCfg.monetizedUrl);
+    return res.redirect(303, redirectUrl);
   } catch (err) {
     const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
     logSafeError('api/key/provider', code, err);
@@ -383,47 +407,8 @@ async function handleUnlock(req, res, provider) {
     return res.redirect('/license');
   }
 
-  const signed = String(req.query.challenge || req.session.pendingSignedChallenge || '');
-  if (!signed) {
-    safeFlash(req, 'error', 'Missing challenge token. Please start again.');
-    return res.redirect('/license');
-  }
-
-  try {
-    let row = await challenge.verifyChallengeForRequest(signed, req, selected);
-    if (!row) {
-      safeFlash(req, 'error', 'Challenge expired or invalid. Please start again.');
-      return res.redirect('/license');
-    }
-
-    if (row.status === 'provider_selected') {
-      await challenge.markPendingAd(signed);
-      row = await challenge.verifyChallengeForRequest(signed, req, selected);
-    }
-
-    challenge.assertProviderReturnProof(req, row, selected);
-
-    const { key, alreadyDone } = await challenge.completeAdAndGenerateKey(row);
-    if (alreadyDone && req.session.generatedKey) {
-      return res.redirect('/key/result');
-    }
-    if (alreadyDone) {
-      safeFlash(req, 'error', 'This challenge was already used.');
-      return res.redirect('/license');
-    }
-
-    req.session.generatedKey = key;
-    req.session.generatedKeyAt = Date.now();
-    delete req.session.pendingChallenge;
-    delete req.session.pendingProvider;
-    delete req.session.pendingSignedChallenge;
-    return res.redirect('/key/result');
-  } catch (err) {
-    const code = codeFromError(err, 'PROVIDER_RETURN_UNVERIFIED');
-    logSafeError(`unlock/${selected}`, code, err);
-    safeFlash(req, 'error', messageFor(code));
-    return res.redirect('/license');
-  }
+  safeFlash(req, 'error', messageFor('PROVIDER_RETURN_TOKEN_MISSING'));
+  return res.redirect('/license');
 }
 
 async function handleProviderComplete(req, res, provider) {
@@ -434,7 +419,8 @@ async function handleProviderComplete(req, res, provider) {
   }
 
   try {
-    const { key, alreadyDone } = await challenge.completeActiveProviderChallenge(req, selected);
+    const returnToken = String(req.query.t || '');
+    const { key, alreadyDone } = await challenge.completeActiveProviderChallenge(req, selected, returnToken);
     if (alreadyDone && req.session.generatedKey) {
       return res.redirect('/key/result');
     }

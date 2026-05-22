@@ -8,11 +8,13 @@
 const supabase = require('./db');
 const { signChallenge, verifyChallenge, sha256, randomHex } = require('./crypto');
 const { generateDengKey } = require('./keyGen');
+const crypto = require('crypto');
 
 const COOLDOWN_SECONDS = parseInt(process.env.KEY_GENERATION_COOLDOWN_SECONDS || '60', 10);
 const CHALLENGE_TTL_MS = 30 * 60 * 1000;
 const KEY_EXPIRY_HOURS = parseInt(process.env.UNREDEEMED_KEY_EXPIRY_HOURS || '24', 10);
 const AD_MIN_COMPLETION_SECONDS = parseInt(process.env.AD_MIN_COMPLETION_SECONDS || '30', 10);
+const RETURN_TOKEN_TTL_MS = 30 * 60 * 1000;
 
 const ALLOWED_PROVIDER_REFERERS = {
   linkvertise: [
@@ -34,6 +36,12 @@ function safeError(code, message) {
   const err = new Error(message || code);
   err.code = code;
   return err;
+}
+
+function returnSigningSecret() {
+  const secret = process.env.AD_RETURN_SIGNING_SECRET || '';
+  if (secret.length >= 32) return secret;
+  throw safeError('PROVIDER_RETURN_SECRET_MISSING', 'AD_RETURN_SIGNING_SECRET is not configured');
 }
 
 function classifyChallengeInsertError(error) {
@@ -178,6 +186,32 @@ function urlHost(value) {
   }
 }
 
+function signReturnTokenNonce(nonce) {
+  return crypto
+    .createHmac('sha256', returnSigningSecret())
+    .update(nonce)
+    .digest('hex');
+}
+
+function createReturnToken() {
+  const nonce = randomHex(32);
+  const sig = signReturnTokenNonce(nonce);
+  return `${nonce}.${sig}`;
+}
+
+function verifyReturnToken(token) {
+  if (!token || typeof token !== 'string') return false;
+  const dot = token.indexOf('.');
+  if (dot < 16 || dot === token.length - 1) return false;
+  const nonce = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  if (!/^[a-f0-9]{64}$/i.test(nonce) || !/^[a-f0-9]{64}$/i.test(sig)) return false;
+
+  const expected = Buffer.from(signReturnTokenNonce(nonce), 'hex');
+  const actual = Buffer.from(sig, 'hex');
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+}
+
 function hostAllowed(host, provider) {
   const normalized = String(host || '').toLowerCase();
   if (!normalized) return false;
@@ -194,19 +228,30 @@ function providerReturnHost(req) {
   return { host: '', source: 'missing' };
 }
 
-function buildProviderPayload(providerUrl, previous = {}) {
+function buildProviderPayload(providerUrl, returnToken, previous = {}) {
+  const issuedAt = new Date();
   return {
     ...normalizeJson(previous),
     redirect_started: true,
-    provider_started_at: new Date().toISOString(),
+    provider_started_at: issuedAt.toISOString(),
     provider_redirect_host: urlHost(providerUrl),
     ad_min_completion_seconds: AD_MIN_COMPLETION_SECONDS,
+    return_token_hash: sha256(returnToken),
+    return_token_issued_at: issuedAt.toISOString(),
+    return_token_expires_at: new Date(issuedAt.getTime() + RETURN_TOKEN_TTL_MS).toISOString(),
   };
 }
 
-function assertProviderReturnProof(req, row, expectedProvider) {
+function assertProviderReturnProof(req, row, expectedProvider, returnToken) {
   if (!row || row.provider !== expectedProvider) {
     throw safeError('PROVIDER_MISMATCH', 'Provider route does not match active challenge');
+  }
+
+  if (!returnToken) {
+    throw safeError('PROVIDER_RETURN_TOKEN_MISSING', 'Provider return token missing');
+  }
+  if (!verifyReturnToken(returnToken)) {
+    throw safeError('PROVIDER_RETURN_TOKEN_INVALID', 'Provider return token signature invalid');
   }
 
   if (
@@ -220,6 +265,12 @@ function assertProviderReturnProof(req, row, expectedProvider) {
   const payload = normalizeJson(row.provider_payload);
   if (payload.redirect_started !== true || !payload.provider_started_at) {
     throw safeError('PROVIDER_RETURN_UNVERIFIED', 'Provider redirect was not started');
+  }
+  if (!payload.return_token_hash || payload.return_token_hash !== sha256(returnToken)) {
+    throw safeError('PROVIDER_RETURN_TOKEN_INVALID', 'Provider return token does not match active challenge');
+  }
+  if (!payload.return_token_expires_at || new Date(payload.return_token_expires_at) < new Date()) {
+    throw safeError('PROVIDER_RETURN_TOKEN_EXPIRED', 'Provider return token expired');
   }
 
   const startedMs = new Date(payload.provider_started_at).getTime();
@@ -323,6 +374,28 @@ async function selectProvider(challengeId, provider, req, siteUser) {
     .single();
 
   if (error || !data) {
+    const { data: existing } = await supabase
+      .from('license_ad_challenges')
+      .select('*')
+      .eq('id', challengeId)
+      .eq('site_user_id', siteUser.id)
+      .eq('session_hash', hashSession(req))
+      .maybeSingle();
+
+    if (
+      existing &&
+      existing.provider === provider &&
+      COMPLETABLE_STATUSES.includes(existing.status) &&
+      new Date(existing.expires_at) >= new Date()
+    ) {
+      return { ...existing, signed_challenge: signed };
+    }
+    if (existing && existing.provider && existing.provider !== provider) {
+      throw safeError('PROVIDER_MISMATCH', 'Challenge is already locked to another provider');
+    }
+    if (existing && CONSUMED_STATUSES.includes(existing.status)) {
+      throw safeError('CHALLENGE_ALREADY_USED', 'Challenge already used');
+    }
     throw safeError('PROVIDER_CHALLENGE_MISSING', 'Challenge no longer available.');
   }
   return { ...data, signed_challenge: signed };
@@ -343,21 +416,22 @@ async function markPendingAd(signedToken) {
 }
 
 async function markPendingAdById(challengeId, req, siteUser, providerUrl = '') {
+  const returnToken = createReturnToken();
   const { data, error } = await supabase
     .from('license_ad_challenges')
     .update({
       status: 'pending_ad',
-      provider_payload: buildProviderPayload(providerUrl),
+      provider_payload: buildProviderPayload(providerUrl, returnToken),
     })
     .eq('id', challengeId)
     .eq('site_user_id', siteUser.id)
     .eq('session_hash', hashSession(req))
-    .eq('status', 'provider_selected')
+    .in('status', ['provider_selected', 'pending_ad'])
     .select()
     .single();
 
   if (error || !data) throw safeError('PROVIDER_CHALLENGE_MISSING', 'Challenge not found or already advanced');
-  return data;
+  return { ...data, return_token: returnToken };
 }
 
 async function getActiveSessionChallenge(req, expectedProvider) {
@@ -400,9 +474,9 @@ async function getActiveSessionChallenge(req, expectedProvider) {
   return owned;
 }
 
-async function completeActiveProviderChallenge(req, expectedProvider) {
+async function completeActiveProviderChallenge(req, expectedProvider, returnToken) {
   const row = await getActiveSessionChallenge(req, expectedProvider);
-  assertProviderReturnProof(req, row, expectedProvider);
+  assertProviderReturnProof(req, row, expectedProvider, returnToken);
   return completeAdAndGenerateKey(row);
 }
 
@@ -509,7 +583,10 @@ module.exports = {
   COOLDOWN_SECONDS,
   AD_MIN_COMPLETION_SECONDS,
   KEY_EXPIRY_HOURS,
+  RETURN_TOKEN_TTL_MS,
   assertProviderReturnProof,
+  createReturnToken,
+  verifyReturnToken,
   checkCooldown,
   createChallenge,
   selectProvider,
