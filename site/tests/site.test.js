@@ -164,6 +164,7 @@ const memoryDb = {
   site_users: [],
   license_ad_challenges: [],
   license_keys: [],
+  license_users: [],
 };
 
 const mockSupabase = {
@@ -206,11 +207,13 @@ require.cache[require.resolve('axios')] = {
 const request = require('supertest');
 const app = require('../src/app');
 const { signChallenge } = require('../src/crypto');
+const { classifyChallengeInsertError } = require('../src/challenge');
 
 function resetDb() {
   memoryDb.site_users.splice(0);
   memoryDb.license_ad_challenges.splice(0);
   memoryDb.license_keys.splice(0);
+  memoryDb.license_users.splice(0);
 }
 
 function csrfFrom(html) {
@@ -429,10 +432,25 @@ describe('theme and dashboard UI', () => {
     assert.match(license.text, /Recent Generated Keys/);
   });
 
-  test('theme stylesheet uses light blue-pink gradient and readable text', () => {
+  test('logo image replaces DT placeholders on login and dashboard', async () => {
+    const loginPage = await request(app).get('/login');
+    assert.match(loginPage.text, /\/public\/img\/deng-logo\.png\?v=/);
+    assert.doesNotMatch(loginPage.text, />DT</);
+    assert.doesNotMatch(loginPage.text, /favicon\.svg/);
+
+    const agent = request.agent(app);
+    await login(agent);
+    const dashboard = await agent.get('/dashboard');
+    assert.match(dashboard.text, /\/public\/img\/deng-logo\.png\?v=/);
+    assert.doesNotMatch(dashboard.text, />DT</);
+  });
+
+  test('theme stylesheet uses logo-inspired neon blue-pink gradient and readable text', () => {
     const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
-    assert.match(css, /#dbeafe|#fce7f3/i);
-    assert.match(css, /#60a5fa|#f9a8d4/i);
+    assert.match(css, /#00cfff|#17a0dd/i);
+    assert.match(css, /#ff2fb3|#c0187a/i);
+    assert.match(css, /#6143b2/i);
+    assert.match(css, /rgba\(255,\s*255,\s*255,\s*0\.82\)/i);
     assert.match(css, /\.nav-link\.active/);
     assert.match(css, /@media \(max-width: 760px\)/);
     assert.doesNotMatch(css, /#050816|#0b1020|#00C7A3/i);
@@ -483,6 +501,41 @@ describe('Luarmor-style key flow', () => {
     assert.doesNotMatch(html, /Could not start key generation/);
     assert.equal(memoryDb.license_ad_challenges.length, 1);
     assert.equal(memoryDb.license_ad_challenges[0].status, 'created');
+  });
+
+  test('Generate Key repairs stale fallback site_user_id before challenge insert', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const page = await agent.get('/license');
+    const csrf = csrfFrom(page.text);
+    const staleId = memoryDb.site_users[0].id;
+    const realId = randomUUID();
+    memoryDb.site_users[0].id = realId;
+
+    const res = await agent.post('/api/key/start').type('form').send({ _csrf: csrf });
+    assert.equal(res.status, 200);
+    assert.notEqual(staleId, realId);
+    assert.equal(memoryDb.license_ad_challenges.length, 1);
+    assert.equal(memoryDb.license_ad_challenges[0].site_user_id, realId);
+    assert.match(res.text, /Linkvertise/);
+    assert.match(res.text, /LootLabs/);
+  });
+
+  test('challenge insert error classification distinguishes FK from table missing', () => {
+    assert.equal(classifyChallengeInsertError({
+      code: '23503',
+      message: 'insert or update on table "license_ad_challenges" violates foreign key constraint "license_ad_challenges_site_user_id_fkey"',
+    }), 'DB_FOREIGN_KEY_FAILED');
+
+    assert.equal(classifyChallengeInsertError({
+      code: 'PGRST205',
+      message: "Could not find the table 'public.license_ad_challenges' in the schema cache",
+    }), 'CHALLENGE_TABLE_MISSING');
+
+    assert.equal(classifyChallengeInsertError({
+      code: '42501',
+      message: 'permission denied for table license_ad_challenges',
+    }), 'DB_PERMISSION_DENIED');
   });
 
   test('provider complete routes require an active session challenge', async () => {

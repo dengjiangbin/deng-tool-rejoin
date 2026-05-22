@@ -19,6 +19,38 @@ function safeError(code, message) {
   return err;
 }
 
+function classifyChallengeInsertError(error) {
+  const text = `${error?.code || ''} ${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+  if (
+    text.includes('23503') ||
+    text.includes('violates foreign key constraint') ||
+    text.includes('foreign key') ||
+    text.includes('license_ad_challenges_site_user_id_fkey')
+  ) {
+    return 'DB_FOREIGN_KEY_FAILED';
+  }
+  if (
+    text.includes('schema cache') ||
+    text.includes('could not find the table') ||
+    text.includes('does not exist') ||
+    text.includes('relation') ||
+    text.includes('42p01') ||
+    text.includes('pgrst204') ||
+    text.includes('pgrst205')
+  ) {
+    return 'CHALLENGE_TABLE_MISSING';
+  }
+  if (
+    text.includes('42501') ||
+    text.includes('permission denied') ||
+    text.includes('rls') ||
+    text.includes('row-level security')
+  ) {
+    return 'DB_PERMISSION_DENIED';
+  }
+  return 'CHALLENGE_INSERT_FAILED';
+}
+
 function keyExpiresAt() {
   return new Date(Date.now() + KEY_EXPIRY_HOURS * 3600 * 1000).toISOString();
 }
@@ -158,11 +190,7 @@ async function createChallenge(req, siteUser) {
     .single();
 
   if (error) {
-    const text = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`.toLowerCase();
-    if (text.includes('license_ad_challenges') || text.includes('schema cache') || text.includes('relation')) {
-      throw safeError('CHALLENGE_TABLE_MISSING', `Failed to create challenge: ${error.message}`);
-    }
-    throw safeError('CHALLENGE_INSERT_FAILED', `Failed to create challenge: ${error.message}`);
+    throw safeError(classifyChallengeInsertError(error), `Failed to create challenge: ${error.message}`);
   }
   return data;
 }
@@ -378,4 +406,5 @@ module.exports = {
   completeActiveProviderChallenge,
   markPendingAdById,
   hashSession,
+  classifyChallengeInsertError,
 };

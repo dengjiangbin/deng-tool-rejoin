@@ -1,14 +1,20 @@
 :root {
-  --bg: #dbeafe;
-  --bg-2: #fce7f3;
+  --bg-a: #dff6ff;
+  --bg-b: #ffe4f6;
+  --bg-c: #eef2ff;
   --sidebar: #ffffff;
   --card: rgba(255, 255, 255, 0.82);
   --card-2: rgba(255, 255, 255, 0.55);
-  --border: rgba(255, 255, 255, 0.65);
+  --border: rgba(23, 160, 221, 0.22);
+  --pink-border: rgba(255, 47, 179, 0.20);
   --border-2: rgba(148, 163, 184, 0.4);
-  --blue: #60a5fa;
-  --blue-2: #3b82f6;
-  --pink: #f9a8d4;
+  --cyan: #00cfff;
+  --blue: #17a0dd;
+  --blue-2: #0ea5e9;
+  --deep-blue: #0663ae;
+  --pink: #ff2fb3;
+  --magenta: #c0187a;
+  --purple: #6143b2;
   --green: #16a34a;
   --amber: #d97706;
   --red: #ef4444;
@@ -29,7 +35,10 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  background: linear-gradient(135deg, #dbeafe 0%, #fce7f3 100%);
+  background:
+    radial-gradient(circle at 15% 10%, rgba(0, 207, 255, 0.35), transparent 34%),
+    radial-gradient(circle at 85% 15%, rgba(255, 47, 179, 0.32), transparent 34%),
+    linear-gradient(135deg, #dff6ff 0%, #eef2ff 45%, #ffe4f6 100%);
   background-attachment: fixed;
   color: var(--text);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -42,10 +51,10 @@ body::before {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at 12% 18%, rgba(191, 219, 254, 0.68), transparent 34%),
-    radial-gradient(circle at 86% 12%, rgba(251, 207, 232, 0.62), transparent 32%),
-    radial-gradient(circle at 72% 88%, rgba(224, 242, 254, 0.58), transparent 30%),
-    radial-gradient(circle at 28% 76%, rgba(250, 232, 255, 0.54), transparent 29%);
+    radial-gradient(circle at 12% 18%, rgba(180, 217, 242, 0.62), transparent 34%),
+    radial-gradient(circle at 86% 12%, rgba(253, 244, 255, 0.72), transparent 32%),
+    radial-gradient(circle at 72% 88%, rgba(0, 207, 255, 0.16), transparent 30%),
+    radial-gradient(circle at 28% 76%, rgba(212, 82, 180, 0.18), transparent 29%);
   z-index: -1;
 }
 
@@ -96,16 +105,35 @@ input {
   align-items: center;
   justify-content: center;
   color: white;
-  background: linear-gradient(135deg, var(--blue), var(--pink));
-  box-shadow: 0 4px 16px rgba(96, 165, 250, 0.25);
+  background: linear-gradient(135deg, var(--cyan), var(--blue), var(--pink));
+  box-shadow: 0 8px 28px rgba(23, 160, 221, 0.24), 0 8px 30px rgba(255, 47, 179, 0.14);
   font-weight: 900;
 }
 
 .brand-mark {
-  width: 38px;
-  height: 38px;
+  width: 46px;
+  height: 46px;
   border-radius: 11px;
   font-size: 0.82rem;
+}
+
+.logo-mark,
+.auth-brand-icon {
+  background: transparent;
+  box-shadow: none;
+}
+
+.logo-mark img,
+.brand-logo img {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+}
+
+.login-logo img {
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
 }
 
 .brand-name {
@@ -115,7 +143,7 @@ input {
 }
 
 .brand-accent {
-  color: var(--blue-2);
+  color: var(--magenta);
 }
 
 .nav-list {
@@ -150,8 +178,8 @@ input {
 
 .nav-link.active {
   color: white;
-  background: linear-gradient(135deg, var(--blue), var(--pink));
-  box-shadow: 0 4px 16px rgba(96, 165, 250, 0.2);
+  background: linear-gradient(135deg, var(--cyan), var(--blue), var(--pink));
+  box-shadow: 0 10px 30px rgba(23, 160, 221, 0.20), 0 10px 30px rgba(255, 47, 179, 0.14);
 }
 
 .nav-icon {
@@ -244,8 +272,11 @@ input {
 .stat-card {
   background: rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.65);
-  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(23, 160, 221, 0.22);
+  box-shadow:
+    0 20px 60px rgba(23, 160, 221, 0.16),
+    0 20px 60px rgba(255, 47, 179, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .auth-card {
@@ -259,8 +290,8 @@ input {
 }
 
 .auth-brand-icon {
-  width: 48px;
-  height: 48px;
+  width: 88px;
+  height: 88px;
   border-radius: 14px;
   margin: 0 auto 12px;
 }
@@ -432,7 +463,7 @@ input {
 
 .generate-card,
 .status-card {
-  border-color: rgba(96, 165, 250, 0.35);
+  border-color: rgba(23, 160, 221, 0.28);
 }
 
 .provider-grid {
@@ -534,7 +565,8 @@ input {
 
 .btn-primary {
   color: white;
-  background: linear-gradient(135deg, var(--blue), var(--pink));
+  background: linear-gradient(135deg, #00cfff 0%, #17a0dd 42%, #ff2fb3 100%);
+  box-shadow: 0 12px 30px rgba(23, 160, 221, 0.20), 0 12px 30px rgba(255, 47, 179, 0.13);
 }
 
 .btn-outline {
@@ -551,7 +583,7 @@ input {
 .btn-discord {
   width: 100%;
   color: white;
-  background: #5865f2;
+  background: linear-gradient(135deg, #2563eb, #8b5cf6, #ff2fb3);
 }
 
 .btn-block {

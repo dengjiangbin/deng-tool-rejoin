@@ -24,13 +24,28 @@ const SCOPES                = 'identify';
  * These occur when migration 005_site_portal.sql has not been applied.
  */
 function isSchemaMissingError(err) {
-  const msg = (err && err.message) || '';
+  const msg = `${(err && err.code) || ''} ${(err && err.message) || ''} ${(err && err.details) || ''} ${(err && err.hint) || ''}`.toLowerCase();
   return (
     msg.includes('schema cache') ||
+    msg.includes('could not find the table') ||
     msg.includes('does not exist') ||
     msg.includes('relation') ||
-    /site_users|license_ad_challenges/.test(msg)
+    msg.includes('42p01') ||
+    msg.includes('pgrst204') ||
+    msg.includes('pgrst205')
   );
+}
+
+function codedError(code, message) {
+  const err = new Error(message || code);
+  err.code = code;
+  return err;
+}
+
+function saveSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
 }
 
 /**
@@ -156,7 +171,7 @@ async function fetchDiscordUser(accessToken) {
  * Upsert a site_user row from Discord OAuth data.
  * Returns the site_users row.
  */
-async function upsertDiscordUser(discordUser, _tokens) {
+async function upsertDiscordUser(discordUser, _tokens, options = {}) {
   const now = new Date().toISOString();
 
   try {
@@ -201,7 +216,7 @@ async function upsertDiscordUser(discordUser, _tokens) {
     if (error) throw new Error(`DB insert failed: ${error.message}`);
     return data;
   } catch (err) {
-    if (isSchemaMissingError(err)) {
+    if (isSchemaMissingError(err) && options.allowFallback !== false) {
       console.warn(
         '[auth] category=site_users_schema_missing discord_id=%s – using Discord-only session.' +
         ' Apply migration: supabase/migrations/005_site_portal.sql',
@@ -229,12 +244,57 @@ async function upsertDiscordUser(discordUser, _tokens) {
 function toSessionUser(row) {
   return {
     id:               row.id,
+    site_user_id:     row.id,
     username:         row.username || row.discord_username || `user_${row.id.slice(0, 8)}`,
     discord_user_id:  row.discord_user_id || null,
     discord_username: row.discord_username || null,
     discord_avatar:   row.discord_avatar || null,
     email:            row.email || null,
   };
+}
+
+async function ensureRealSiteUser(req) {
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.discord_user_id) {
+    throw codedError('AUTH_REQUIRED', 'Discord session is required');
+  }
+
+  const discordUser = {
+    id:          sessionUser.discord_user_id,
+    username:    sessionUser.discord_username || sessionUser.username || `user_${String(sessionUser.discord_user_id).slice(-4)}`,
+    global_name: sessionUser.username || sessionUser.discord_username || null,
+    avatar:      sessionUser.discord_avatar || null,
+    email:       sessionUser.email || null,
+  };
+
+  let siteUser;
+  try {
+    siteUser = await upsertDiscordUser(discordUser, {}, { allowFallback: false });
+  } catch (err) {
+    if (isSchemaMissingError(err)) {
+      throw codedError('CHALLENGE_TABLE_MISSING', `site_users schema missing: ${err.message}`);
+    }
+    throw codedError('SITE_USER_UPSERT_FAILED', `site user upsert failed: ${err.message}`);
+  }
+
+  if (!siteUser || !siteUser.id) {
+    throw codedError('SITE_USER_UPSERT_FAILED', 'site user upsert returned no id');
+  }
+
+  const repairedUser = {
+    ...toSessionUser(siteUser),
+    site_user_id: siteUser.id,
+  };
+  const changed = (
+    sessionUser.id !== repairedUser.id ||
+    sessionUser.site_user_id !== repairedUser.site_user_id ||
+    sessionUser.username !== repairedUser.username
+  );
+
+  req.session.user = repairedUser;
+  req.session.site_user_id = siteUser.id;
+  if (changed) await saveSession(req);
+  return siteUser;
 }
 
 module.exports = {
@@ -244,5 +304,6 @@ module.exports = {
   exchangeDiscordCode,
   fetchDiscordUser,
   upsertDiscordUser,
+  ensureRealSiteUser,
   toSessionUser,
 };

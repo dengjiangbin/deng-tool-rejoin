@@ -13,6 +13,7 @@ const {
   exchangeDiscordCode,
   fetchDiscordUser,
   upsertDiscordUser,
+  ensureRealSiteUser,
   toSessionUser,
 } = auth;
 const challenge = require('./challenge');
@@ -39,6 +40,9 @@ const SAFE_MESSAGES = {
   AUTH_REQUIRED: 'Please login with Discord first.',
   COOLDOWN_ACTIVE: 'Please wait before generating another key.',
   CHALLENGE_TABLE_MISSING: 'Key generation database is not ready yet.',
+  DB_FOREIGN_KEY_FAILED: 'Could not prepare your license account. Please try again.',
+  DB_PERMISSION_DENIED: 'Key generation database permission error.',
+  SITE_USER_UPSERT_FAILED: 'Could not prepare your license account. Please try again.',
   CHALLENGE_INSERT_FAILED: 'Could not start key generation. Please try again.',
   PROVIDER_NOT_CONFIGURED: 'This ad provider is not configured yet.',
   PROVIDER_CHALLENGE_MISSING: 'Please start key generation again.',
@@ -106,7 +110,11 @@ function messageFor(code) {
 
 function logSafeError(scope, code, err) {
   const detail = err && err.message ? err.message : String(err || '');
-  console.error(`[${scope}] code=${code} message=${detail.slice(0, 240)}`);
+  const constraint = detail.includes('license_ad_challenges_site_user_id_fkey')
+    ? ' constraint=license_ad_challenges_site_user_id_fkey'
+    : '';
+  const table = detail.includes('license_ad_challenges') ? ' table=license_ad_challenges' : '';
+  console.error(`[${scope}] code=${code}${table}${constraint} message=${detail.slice(0, 240)}`);
 }
 
 const authLimiter = rateLimit({
@@ -134,6 +142,16 @@ function wantsJson(req) {
 
 function safeFlash(req, key, value) {
   req.session.flash = { ...(req.session.flash || {}), [key]: value };
+}
+
+async function repairSiteUser(req, _res, next) {
+  try {
+    await ensureRealSiteUser(req);
+  } catch (err) {
+    const code = codeFromError(err, 'SITE_USER_UPSERT_FAILED');
+    logSafeError('site_user/repair', code, err);
+  }
+  next();
 }
 
 function maskKeyRow(row) {
@@ -198,8 +216,10 @@ async function handleKeyStart(req, res) {
     return res.redirect('/license');
   }
 
-  const { user } = req.session;
   try {
+    await ensureRealSiteUser(req);
+    const { user } = req.session;
+
     if (enabledProviders().length === 0) {
       const err = new Error('No enabled ad providers');
       err.code = 'NO_PROVIDER_CONFIGURED';
@@ -234,7 +254,7 @@ async function handleKeyStart(req, res) {
   } catch (err) {
     const code = codeFromError(err, err?.code === 'NO_PROVIDER_CONFIGURED' ? 'NO_PROVIDER_CONFIGURED' : 'CHALLENGE_INSERT_FAILED');
     logSafeError('api/key/start', code, err);
-    const status = code === 'NO_PROVIDER_CONFIGURED' ? 503 : (code === 'CHALLENGE_TABLE_MISSING' ? 503 : 500);
+    const status = ['NO_PROVIDER_CONFIGURED', 'CHALLENGE_TABLE_MISSING', 'DB_PERMISSION_DENIED'].includes(code) ? 503 : 500;
     if (wantsJson(req)) return res.status(status).json({ error: code, message: messageFor(code) });
     safeFlash(req, 'error', messageFor(code));
     return res.redirect('/license');
@@ -492,7 +512,7 @@ router.post('/auth/logout', (req, res) => {
   });
 });
 
-router.get('/dashboard', requireLogin, async (req, res) => {
+router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
   try {
     const history = await loadHistory(req.session.user.id, 8);
     res.render('dashboard', {
@@ -510,7 +530,7 @@ router.get('/dashboard', requireLogin, async (req, res) => {
   }
 });
 
-router.get('/license', requireLogin, async (req, res) => {
+router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
   try {
     const history = await loadHistory(req.session.user.id, 20);
     const cooldown = await challenge.checkCooldown(req.session.user.id);
@@ -535,7 +555,7 @@ router.get('/license', requireLogin, async (req, res) => {
   }
 });
 
-router.get('/key/provider', requireLogin, (req, res) => {
+router.get('/key/provider', requireLogin, repairSiteUser, (req, res) => {
   if (!req.session.pendingChallenge) {
     safeFlash(req, 'error', messageFor('PROVIDER_CHALLENGE_MISSING'));
     return res.redirect('/license');
@@ -549,15 +569,15 @@ router.get('/key/provider', requireLogin, (req, res) => {
 
 router.post('/api/key/start', requireLogin, generateLimiter, handleKeyStart);
 router.post('/license/generate', requireLogin, generateLimiter, handleKeyStart);
-router.post('/api/key/provider', requireLogin, generateLimiter, handleProvider);
-router.post('/api/key/provider/:provider', requireLogin, generateLimiter, handleProvider);
-router.post('/license/provider', requireLogin, generateLimiter, handleProvider);
-router.post('/license/provider/:provider', requireLogin, generateLimiter, handleProvider);
+router.post('/api/key/provider', requireLogin, repairSiteUser, generateLimiter, handleProvider);
+router.post('/api/key/provider/:provider', requireLogin, repairSiteUser, generateLimiter, handleProvider);
+router.post('/license/provider', requireLogin, repairSiteUser, generateLimiter, handleProvider);
+router.post('/license/provider/:provider', requireLogin, repairSiteUser, generateLimiter, handleProvider);
 
-router.get('/unlock/lootlabs', requireLogin, (req, res) => handleUnlock(req, res, 'lootlabs'));
-router.get('/unlock/linkvertise', requireLogin, (req, res) => handleUnlock(req, res, 'linkvertise'));
-router.get('/unlock/lootlabs/complete', requireLogin, (req, res) => handleProviderComplete(req, res, 'lootlabs'));
-router.get('/unlock/linkvertise/complete', requireLogin, (req, res) => handleProviderComplete(req, res, 'linkvertise'));
+router.get('/unlock/lootlabs', requireLogin, repairSiteUser, (req, res) => handleUnlock(req, res, 'lootlabs'));
+router.get('/unlock/linkvertise', requireLogin, repairSiteUser, (req, res) => handleUnlock(req, res, 'linkvertise'));
+router.get('/unlock/lootlabs/complete', requireLogin, repairSiteUser, (req, res) => handleProviderComplete(req, res, 'lootlabs'));
+router.get('/unlock/linkvertise/complete', requireLogin, repairSiteUser, (req, res) => handleProviderComplete(req, res, 'linkvertise'));
 
 router.get('/unlock/linkvertise/done', requireLogin, (_req, res) => {
   res.redirect('/license');
@@ -581,7 +601,7 @@ router.get('/api/stats/public', (_req, res) => {
   });
 });
 
-router.get('/api/license/me', requireLogin, async (req, res) => {
+router.get('/api/license/me', requireLogin, repairSiteUser, async (req, res) => {
   try {
     const history = await loadHistory(req.session.user.id, 20);
     res.json({ account: req.session.user, stats: summarizeHistory(history) });
@@ -590,7 +610,7 @@ router.get('/api/license/me', requireLogin, async (req, res) => {
   }
 });
 
-router.get('/api/license/history', requireLogin, async (req, res) => {
+router.get('/api/license/history', requireLogin, repairSiteUser, async (req, res) => {
   try {
     const history = await loadHistory(req.session.user.id, 20);
     res.json({

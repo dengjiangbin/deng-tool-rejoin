@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><%= typeof title !== 'undefined' ? title : 'DENG Tool' %></title>
-  <link rel="icon" type="image/svg+xml" href="/public/favicon.svg">
+  <link rel="icon" type="image/png" href="/public/img/deng-logo.png?v=<%= assetVersion %>">
   <link rel="stylesheet" href="/public/css/style.css?v=<%= assetVersion %>">
 </head>
 <body class="<%= user ? 'app-layout' : 'auth-layout' %>">
@@ -12,7 +12,9 @@
 <% if (user) { %>
   <nav class="sidebar" aria-label="Main navigation">
     <div class="sidebar-brand">
-      <span class="brand-mark" aria-hidden="true">DT</span>
+      <span class="brand-mark logo-mark" aria-hidden="true">
+        <img src="/public/img/deng-logo.png?v=<%= assetVersion %>" alt="">
+      </span>
       <span class="brand-name">DENG <span class="brand-accent">Tool</span></span>
     </div>
 
