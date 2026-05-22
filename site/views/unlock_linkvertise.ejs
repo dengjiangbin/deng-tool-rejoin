@@ -1,0 +1,31 @@
+<% locals.activePage = 'license' %>
+
+<div class="unlock-page">
+  <section class="unlock-card section-card" data-portal-step="linkvertise-unlock">
+    <div class="key-success-mark" aria-hidden="true">LV</div>
+    <h1 class="unlock-title">Ad Step &ndash; Linkvertise</h1>
+    <p class="unlock-desc">
+      Click the button below to complete the Linkvertise ad step.
+      After completing the ad you will be returned here automatically with your key ready.
+    </p>
+
+    <div style="margin:28px 0 18px;text-align:center;">
+      <a id="lv-link" href="<%= completeUrl %>" class="btn btn-primary btn-generate">
+        Start Ad Step &rarr;
+      </a>
+    </div>
+
+    <p class="unlock-note">
+      The Linkvertise script is loaded on this page and will wrap the button above into
+      a secure monetisation redirect. Your key is waiting on the other side.
+    </p>
+
+    <div style="margin-top:20px;text-align:center;">
+      <a href="/license" class="back-link">Cancel and return to My License</a>
+    </div>
+  </section>
+</div>
+
+<%# Linkvertise Full Script publisher integration %>
+<script>var linkvertise_publisher_id = <%= publisherId %>;</script>
+<script src="https://publisher.linkvertise.com/cdn/linkvertise.js"></script>

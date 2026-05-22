@@ -24,6 +24,7 @@ process.env.LINKVERTISE_COMPLETE_URL = 'http://localhost:8791/unlock/linkvertise
 process.env.LOOTLABS_ENABLED = 'true';
 process.env.LOOTLABS_MONETIZED_URL = 'https://lootdest.org/s?TqZQAW38';
 process.env.LOOTLABS_COMPLETE_URL = 'http://localhost:8791/unlock/lootlabs/complete';
+process.env.LOOTLABS_TEMPLATE_URL = 'https://lootlabs.example/unlock?target={url}';
 process.env.AD_MIN_COMPLETION_SECONDS = '30';
 process.env.AD_RETURN_SIGNING_SECRET = 'test-return-signing-secret-that-is-long-enough';
 
@@ -322,7 +323,7 @@ async function startChallenge(agent) {
   return { html: res.text, csrf: csrfFrom(res.text), challengeId: challengeIdFrom(res.text) };
 }
 
-async function chooseProvider(agent, provider = 'linkvertise') {
+async function chooseProvider(agent, provider = 'lootlabs') {
   const started = await startChallenge(agent);
   const res = await agent.post(`/key/provider/${provider}`).type('form').send({
     _csrf: started.csrf,
@@ -331,11 +332,32 @@ async function chooseProvider(agent, provider = 'linkvertise') {
   });
   assert.equal(res.status, 303);
   const location = res.headers.location;
-  const providerUrl = new URL(location);
-  const returnUrl = providerUrl.searchParams.get('return_url') || providerUrl.searchParams.get('deng_return');
-  assert.ok(returnUrl, 'provider redirect must include signed return URL');
-  const returnToken = new URL(returnUrl).searchParams.get('t');
-  assert.ok(returnToken, 'signed return URL must include return token');
+  const basePublicUrl = process.env.TOOL_SITE_PUBLIC_URL || 'http://localhost:8791';
+  const locationUrl = new URL(location, basePublicUrl);
+
+  let returnToken;
+  let returnUrl;
+
+  if (provider === 'linkvertise' && location.includes('/unlock/linkvertise/start')) {
+    // Full Script approach: token is directly in the internal start URL
+    returnToken = locationUrl.searchParams.get('t');
+    assert.ok(returnToken, 'Linkvertise start URL must include return token directly');
+    returnUrl = `${basePublicUrl}/unlock/linkvertise/complete?t=${encodeURIComponent(returnToken)}`;
+  } else {
+    // LootLabs template or generic: token nested in destination/return_url param
+    const destParam =
+      locationUrl.searchParams.get('return_url') ||
+      locationUrl.searchParams.get('deng_return') ||
+      locationUrl.searchParams.get('destination') ||
+      locationUrl.searchParams.get('target') ||
+      locationUrl.searchParams.get('url');
+    assert.ok(destParam, 'provider redirect must include signed return URL');
+    returnUrl = destParam;
+    returnToken = new URL(returnUrl).searchParams.get('t');
+  }
+
+  assert.ok(returnToken, 'signed return token must be present');
+  assert.ok(returnToken.length > 80, 'return token must be long enough to be a valid HMAC token');
   return { started, res, location, returnUrl, returnToken };
 }
 
@@ -350,9 +372,12 @@ function ageProviderStart(seconds = AD_MIN_COMPLETION_SECONDS + 1, index = 0) {
 }
 
 function providerReferer(provider) {
+  // Reflect the actual referer each provider sends after monetisation:
+  // - Linkvertise Full Script: user returns from linkvertise.com
+  // - LootLabs: user returns from lootdest.org (template URL provider)
   return provider === 'lootlabs'
-    ? 'https://lootdest.org/s?TqZQAW38'
-    : 'https://link-hub.net/5914830/XEpUhZ8TdtyV';
+    ? 'https://lootdest.org/'
+    : 'https://linkvertise.com/';
 }
 
 async function completeProvider(agent, provider = 'linkvertise', returnToken = '', referer = providerReferer(provider)) {
@@ -688,13 +713,14 @@ describe('Luarmor-style key flow', () => {
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
-  test('Linkvertise provider redirects to configured monetized URL', async () => {
+  test('Linkvertise Full Script provider redirects to internal start page with signed token', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { res, returnUrl, returnToken } = await chooseProvider(agent, 'linkvertise');
+    const { res, location, returnToken } = await chooseProvider(agent, 'linkvertise');
     assert.equal(res.status, 303);
-    assert.ok(res.headers.location.startsWith('https://link-hub.net/5914830/XEpUhZ8TdtyV'));
-    assert.match(returnUrl, /^http:\/\/localhost:8791\/unlock\/linkvertise\/complete\?t=/);
+    // Linkvertise Full Script: must redirect to internal /unlock/linkvertise/start, NOT to link-hub.net
+    assert.match(location, /\/unlock\/linkvertise\/start\?t=/);
+    assert.ok(!location.includes('link-hub.net'), 'must NOT redirect directly to static link-hub.net campaign URL');
     assert.ok(returnToken.length > 80);
     assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
     assert.equal(memoryDb.license_ad_challenges[0].provider, 'linkvertise');
@@ -704,26 +730,23 @@ describe('Luarmor-style key flow', () => {
     assert.equal(memoryDb.license_ad_challenges[0].provider_payload.return_token_hash.length, 64);
   });
 
-  test('LootLabs provider redirects to configured monetized URL', async () => {
+  test('LootLabs template URL provider embeds signed return URL in destination param', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const originalUrl = process.env.LOOTLABS_MONETIZED_URL;
-    process.env.LOOTLABS_MONETIZED_URL = '';
-    try {
-      const { res, returnUrl, returnToken } = await chooseProvider(agent, 'lootlabs');
-      assert.equal(res.status, 303);
-      assert.ok(res.headers.location.startsWith('https://lootdest.org/s?TqZQAW38'));
-      assert.match(returnUrl, /^http:\/\/localhost:8791\/unlock\/lootlabs\/complete\?t=/);
-      assert.ok(returnToken.length > 80);
-      assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
-      assert.equal(memoryDb.license_ad_challenges[0].provider, 'lootlabs');
-      assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
-      assert.equal(memoryDb.license_ad_challenges[0].provider_payload.redirect_started, true);
-      assert.ok(memoryDb.license_ad_challenges[0].provider_payload.provider_started_at);
-      assert.equal(memoryDb.license_ad_challenges[0].provider_payload.return_token_hash.length, 64);
-    } finally {
-      process.env.LOOTLABS_MONETIZED_URL = originalUrl;
-    }
+    const { res, location, returnUrl, returnToken } = await chooseProvider(agent, 'lootlabs');
+    assert.equal(res.status, 303);
+    // With LOOTLABS_TEMPLATE_URL set, location must use the template base
+    assert.ok(location.startsWith('https://lootlabs.example/unlock?'), `expected template URL, got: ${location}`);
+    assert.ok(!location.includes('lootdest.org'), 'must use template URL, not static lootdest shortlink');
+    // The destination param must decode to the signed complete URL
+    assert.match(returnUrl, /^http:\/\/localhost:8791\/unlock\/lootlabs\/complete\?t=/);
+    assert.ok(returnToken.length > 80);
+    assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
+    assert.equal(memoryDb.license_ad_challenges[0].provider, 'lootlabs');
+    assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
+    assert.equal(memoryDb.license_ad_challenges[0].provider_payload.redirect_started, true);
+    assert.ok(memoryDb.license_ad_challenges[0].provider_payload.provider_started_at);
+    assert.equal(memoryDb.license_ad_challenges[0].provider_payload.return_token_hash.length, 64);
   });
 
   test('first provider click immediately redirects and repeated click does not corrupt the challenge', async () => {
@@ -731,21 +754,24 @@ describe('Luarmor-style key flow', () => {
     await login(agent);
     const first = await chooseProvider(agent, 'linkvertise');
     assert.equal(first.res.status, 303);
-    assert.notEqual(first.res.headers.location, '/license');
+    // Linkvertise Full Script: first click goes to internal start page, not static link-hub.net
+    assert.match(first.location, /\/unlock\/linkvertise\/start\?t=/);
+    assert.notEqual(first.location, '/license');
 
+    // Repeated same-provider click: must still 303 (safe reissue)
     const second = await agent.post('/key/provider/linkvertise').type('form').send({
       _csrf: first.started.csrf,
       challenge_id: first.started.challengeId,
       provider: 'linkvertise',
     });
     assert.equal(second.status, 303);
-    assert.ok(second.headers.location.startsWith('https://link-hub.net/5914830/XEpUhZ8TdtyV'));
+    assert.match(second.headers.location, /\/unlock\/linkvertise\/start\?t=/);
     assert.notEqual(second.headers.location, '/license');
     assert.equal(memoryDb.license_ad_challenges.length, 1);
     assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
   });
 
-  test('provider selection works as a mobile top-level form redirect', async () => {
+  test('provider selection works as a mobile top-level form redirect using template URL', async () => {
     const agent = request.agent(app);
     await login(agent);
     const started = await startChallenge(agent);
@@ -758,7 +784,8 @@ describe('Luarmor-style key flow', () => {
         provider: 'lootlabs',
       });
     assert.equal(res.status, 303);
-    assert.ok(res.headers.location.startsWith('https://lootdest.org/s?TqZQAW38'));
+    // Must use template URL, not the static lootdest shortlink
+    assert.ok(res.headers.location.startsWith('https://lootlabs.example/unlock?'), `expected template URL, got: ${res.headers.location}`);
     assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
   });
 
@@ -779,6 +806,56 @@ describe('Luarmor-style key flow', () => {
       assert.equal(memoryDb.license_keys.length, 0);
     } finally {
       process.env.AD_RETURN_SIGNING_SECRET = originalSecret;
+    }
+  });
+
+  test('Linkvertise Full Script start page renders publisher JS and signed completion link', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { location, returnToken } = await chooseProvider(agent, 'linkvertise');
+    // Follow the internal redirect to the start page using a path-only URL
+    // (location is absolute http://localhost:8791/... but test server is on a random port)
+    const startPath = new URL(location).pathname + new URL(location).search;
+    const startPage = await agent.get(startPath);
+    assert.equal(startPage.status, 200);
+    assert.match(startPage.text, /publisher\.linkvertise\.com\/cdn\/linkvertise\.js/);
+    assert.match(startPage.text, /linkvertise_publisher_id\s*=\s*5914830/);
+    // The link on the start page must contain the signed token
+    assert.match(startPage.text, /unlock\/linkvertise\/complete\?t=/);
+    assert.ok(startPage.text.includes(encodeURIComponent(returnToken)) || startPage.text.includes(returnToken),
+      'start page must contain the return token in the link href');
+    assert.doesNotMatch(startPage.text, /DENG-[0-9A-F]{4}/);
+  });
+
+  test('Linkvertise Full Script start page with invalid or missing token redirects to license', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    for (const bad of ['', 'fake.token', 'abc123']) {
+      const suffix = bad ? `?t=${encodeURIComponent(bad)}` : '';
+      const res = await agent.get(`/unlock/linkvertise/start${suffix}`);
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.location, '/license');
+    }
+  });
+
+  test('LootLabs template URL fallback uses static URL with return params when template not set', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const originalTmpl = process.env.LOOTLABS_TEMPLATE_URL;
+    delete process.env.LOOTLABS_TEMPLATE_URL;
+    try {
+      const started = await startChallenge(agent);
+      const res = await agent.post('/key/provider/lootlabs').type('form').send({
+        _csrf: started.csrf,
+        challenge_id: started.challengeId,
+        provider: 'lootlabs',
+      });
+      assert.equal(res.status, 303);
+      // Fallback: static URL with return_url/deng_return appended
+      assert.ok(res.headers.location.includes('lootdest.org'), `expected fallback to lootdest.org, got: ${res.headers.location}`);
+      assert.ok(res.headers.location.includes('return_url=') || res.headers.location.includes('deng_return='));
+    } finally {
+      process.env.LOOTLABS_TEMPLATE_URL = originalTmpl;
     }
   });
 

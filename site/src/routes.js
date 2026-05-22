@@ -189,7 +189,39 @@ function tokenizedCompleteUrl(provider, returnToken) {
   return url.toString();
 }
 
+/**
+ * Build a LootLabs redirect URL that embeds the signed return URL.
+ * Prefers LOOTLABS_TEMPLATE_URL (contains {url} placeholder) so that the
+ * provider destination is set per-challenge rather than hard-coded.
+ */
+function lootlabsProviderUrl(returnToken) {
+  const completeUrl = tokenizedCompleteUrl('lootlabs', returnToken);
+  const templateUrl = cleanEnv('LOOTLABS_TEMPLATE_URL', '');
+  if (templateUrl) {
+    return templateUrl.replace('{url}', encodeURIComponent(completeUrl));
+  }
+  // Fallback: append return params to the static monetised URL.
+  // NOTE: static shortlinks (lootdest.org/s?...) do not forward these params
+  // in production – configure LOOTLABS_TEMPLATE_URL for a working deployment.
+  const cfg = getProviderConfig('lootlabs');
+  const url = new URL(cfg.monetizedUrl);
+  url.searchParams.set('return_url', completeUrl);
+  url.searchParams.set('deng_return', completeUrl);
+  return url.toString();
+}
+
 function providerRedirectUrl(providerCfg, returnToken) {
+  if (providerCfg.provider === 'lootlabs') {
+    return lootlabsProviderUrl(returnToken);
+  }
+  if (providerCfg.provider === 'linkvertise') {
+    // Linkvertise Full Script approach: redirect to our internal start page.
+    // The start page includes the Linkvertise publisher JS which monetises
+    // the link whose href is already set to the signed completion URL.
+    // This preserves the signed token through the provider flow.
+    return `${publicUrl()}/unlock/linkvertise/start?t=${encodeURIComponent(returnToken)}`;
+  }
+  // Generic fallback for any future provider
   const url = new URL(providerCfg.monetizedUrl);
   const complete = tokenizedCompleteUrl(providerCfg.provider, returnToken);
   url.searchParams.set('return_url', complete);
@@ -637,6 +669,30 @@ router.post('/key/provider/:provider', requireLogin, repairSiteUser, handleProvi
 
 router.get('/unlock/lootlabs', requireLogin, repairSiteUser, (req, res) => handleUnlock(req, res, 'lootlabs'));
 router.get('/unlock/linkvertise', requireLogin, repairSiteUser, (req, res) => handleUnlock(req, res, 'linkvertise'));
+
+/**
+ * Linkvertise Full Script intermediate page.
+ * The provider POST redirects here (internal 303). This page renders the
+ * Linkvertise publisher JS with a link whose href points to our signed
+ * completion URL. The Linkvertise script monetises the click; after the
+ * ad flow the user lands on /unlock/linkvertise/complete?t=<signed_token>.
+ */
+router.get('/unlock/linkvertise/start', requireLogin, repairSiteUser, (req, res) => {
+  const returnToken = String(req.query.t || '');
+  if (!returnToken || !challenge.verifyReturnToken(returnToken)) {
+    safeFlash(req, 'error', messageFor('PROVIDER_RETURN_TOKEN_INVALID'));
+    return res.redirect('/license');
+  }
+  const cfg = getProviderConfig('linkvertise');
+  const publisherId = parseInt(String(cfg ? cfg.publisherId : '5914830'), 10) || 5914830;
+  const completeUrl = tokenizedCompleteUrl('linkvertise', returnToken);
+  return res.render('unlock_linkvertise', {
+    title: 'Ad Step – DENG Tool',
+    publisherId,
+    completeUrl,
+  });
+});
+
 router.get('/unlock/lootlabs/complete', requireLogin, repairSiteUser, (req, res) => handleProviderComplete(req, res, 'lootlabs'));
 router.get('/unlock/linkvertise/complete', requireLogin, repairSiteUser, (req, res) => handleProviderComplete(req, res, 'linkvertise'));
 

@@ -28,6 +28,7 @@ app.use(helmet({
       scriptSrc: [
         "'self'",
         "'unsafe-inline'",          // needed for small inline scripts in EJS
+        'https://publisher.linkvertise.com', // Linkvertise Full Script provider
       ],
       styleSrc:  ["'self'", "'unsafe-inline'"],
       imgSrc:    ["'self'", 'data:', 'https://cdn.discordapp.com'],
