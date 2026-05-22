@@ -8,9 +8,15 @@ const path         = require('path');
 
 const routes = require('./routes');
 const { FileSessionStore } = require('./sessionStore');
+const packageJson = require('../package.json');
 
 const app = express();
 app.disable('x-powered-by');
+const assetVersion = (
+  process.env.TOOL_SITE_ASSET_VERSION ||
+  process.env.GIT_COMMIT ||
+  `${packageJson.version}-${Date.now()}`
+).replace(/[^A-Za-z0-9._-]/g, '');
 
 // ---------------------------------------------------------------
 // Security headers (helmet)
@@ -22,16 +28,10 @@ app.use(helmet({
       scriptSrc: [
         "'self'",
         "'unsafe-inline'",          // needed for small inline scripts in EJS
-        'https://publisher.linkvertise.com',
       ],
       styleSrc:  ["'self'", "'unsafe-inline'"],
       imgSrc:    ["'self'", 'data:', 'https://cdn.discordapp.com'],
-      connectSrc:[
-        "'self'",
-        'https://publisher.linkvertise.com',
-        'https://linkvertise.com',
-        'https://*.linkvertise.com',
-      ],
+      connectSrc:["'self'"],
       frameSrc:  ["'none'"],
       objectSrc: ["'none'"],
       baseUri:   ["'self'"],
@@ -131,6 +131,7 @@ app.use((req, res, next) => {
   res.locals.csrfToken = req.session.csrfToken;
   res.locals.user = req.session.user || null;
   res.locals.publicUrl = process.env.TOOL_SITE_PUBLIC_URL || 'https://tool.deng.my.id';
+  res.locals.assetVersion = assetVersion;
   delete req.session.flash;
   next();
 });

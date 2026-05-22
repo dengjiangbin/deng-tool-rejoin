@@ -58,7 +58,7 @@ function discordFallbackId(discordId) {
  */
 function requireLogin(req, res, next) {
   if (req.session && req.session.user) return next();
-  req.session.flash = { error: 'Please sign in to continue.' };
+  req.session.flash = { error: 'Please login with Discord first.' };
   res.redirect('/login');
 }
 

@@ -36,6 +36,19 @@ body {
   line-height: 1.5;
 }
 
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(191, 219, 254, 0.68), transparent 34%),
+    radial-gradient(circle at 86% 12%, rgba(251, 207, 232, 0.62), transparent 32%),
+    radial-gradient(circle at 72% 88%, rgba(224, 242, 254, 0.58), transparent 30%),
+    radial-gradient(circle at 28% 76%, rgba(250, 232, 255, 0.54), transparent 29%);
+  z-index: -1;
+}
+
 a {
   color: var(--blue-2);
   text-decoration: none;
@@ -387,6 +400,12 @@ input {
   color: var(--text);
   font-size: 1.08rem;
   font-weight: 800;
+}
+
+.stat-note {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .section-card {

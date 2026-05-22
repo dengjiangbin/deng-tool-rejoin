@@ -20,9 +20,92 @@ const supabase = require('./db');
 
 const router = express.Router();
 
-const PUBLIC_URL = (process.env.TOOL_SITE_PUBLIC_URL || 'https://tool.deng.my.id').replace(/\/+$/, '');
-const LINKVERTISE_PUBLISHER_ID = process.env.LINKVERTISE_PUBLISHER_ID || '5914830';
-const LOOTLABS_TEMPLATE_URL = process.env.LOOTLABS_TEMPLATE_URL || process.env.LOOTLABS_PUBLISHER_URL || '';
+const DEFAULT_PROVIDER_CONFIG = {
+  linkvertise: {
+    enabled: 'true',
+    monetizedUrl: 'https://link-hub.net/5914830/XEpUhZ8TdtyV',
+    completeUrl: 'https://tool.deng.my.id/unlock/linkvertise/complete',
+    publisherId: '5914830',
+  },
+  lootlabs: {
+    enabled: 'true',
+    monetizedUrl: 'https://lootdest.org/s?TqZQAW38',
+    completeUrl: 'https://tool.deng.my.id/unlock/lootlabs/complete',
+  },
+};
+
+const SAFE_MESSAGES = {
+  NO_PROVIDER_CONFIGURED: 'No ad provider is configured yet.',
+  AUTH_REQUIRED: 'Please login with Discord first.',
+  COOLDOWN_ACTIVE: 'Please wait before generating another key.',
+  CHALLENGE_TABLE_MISSING: 'Key generation database is not ready yet.',
+  CHALLENGE_INSERT_FAILED: 'Could not start key generation. Please try again.',
+  PROVIDER_NOT_CONFIGURED: 'This ad provider is not configured yet.',
+  PROVIDER_CHALLENGE_MISSING: 'Please start key generation again.',
+  PROVIDER_CHALLENGE_EXPIRED: 'This key generation session expired. Please start again.',
+  PROVIDER_CHALLENGE_OWNER_MISMATCH: 'Please start key generation again.',
+  PROVIDER_CHALLENGE_ALREADY_USED: 'Please start key generation again.',
+  KEY_GENERATION_FAILED: 'Could not generate key. Please try again.',
+  UNEXPECTED_ERROR: 'Could not start key generation. Please try again.',
+};
+
+function cleanEnv(name, fallback = '') {
+  const raw = Object.prototype.hasOwnProperty.call(process.env, name) ? process.env[name] : fallback;
+  return String(raw || '').trim().replace(/^['"]|['"]$/g, '').trim();
+}
+
+function envEnabled(name, fallback = 'false') {
+  return ['1', 'true', 'yes', 'on'].includes(cleanEnv(name, fallback).toLowerCase());
+}
+
+function publicUrl() {
+  return cleanEnv('TOOL_SITE_PUBLIC_URL', 'https://tool.deng.my.id').replace(/\/+$/, '');
+}
+
+function getProviderConfig(provider) {
+  if (provider === 'linkvertise') {
+    return {
+      provider,
+      enabled: envEnabled('LINKVERTISE_ENABLED', DEFAULT_PROVIDER_CONFIG.linkvertise.enabled),
+      monetizedUrl: cleanEnv('LINKVERTISE_MONETIZED_URL', DEFAULT_PROVIDER_CONFIG.linkvertise.monetizedUrl),
+      completeUrl: cleanEnv('LINKVERTISE_COMPLETE_URL', DEFAULT_PROVIDER_CONFIG.linkvertise.completeUrl),
+      publisherId: cleanEnv('LINKVERTISE_PUBLISHER_ID', DEFAULT_PROVIDER_CONFIG.linkvertise.publisherId),
+    };
+  }
+  if (provider === 'lootlabs') {
+    return {
+      provider,
+      enabled: envEnabled('LOOTLABS_ENABLED', DEFAULT_PROVIDER_CONFIG.lootlabs.enabled),
+      monetizedUrl: cleanEnv('LOOTLABS_MONETIZED_URL', DEFAULT_PROVIDER_CONFIG.lootlabs.monetizedUrl),
+      completeUrl: cleanEnv('LOOTLABS_COMPLETE_URL', DEFAULT_PROVIDER_CONFIG.lootlabs.completeUrl),
+    };
+  }
+  return null;
+}
+
+function enabledProviders() {
+  return ['linkvertise', 'lootlabs']
+    .map(getProviderConfig)
+    .filter((item) => item && item.enabled && item.monetizedUrl && item.completeUrl);
+}
+
+function providerIsReady(provider) {
+  const cfg = getProviderConfig(provider);
+  return Boolean(cfg && cfg.enabled && cfg.monetizedUrl && cfg.completeUrl);
+}
+
+function codeFromError(err, fallback = 'UNEXPECTED_ERROR') {
+  return err && err.code && SAFE_MESSAGES[err.code] ? err.code : fallback;
+}
+
+function messageFor(code) {
+  return SAFE_MESSAGES[code] || SAFE_MESSAGES.UNEXPECTED_ERROR;
+}
+
+function logSafeError(scope, code, err) {
+  const detail = err && err.message ? err.message : String(err || '');
+  console.error(`[${scope}] code=${code} message=${detail.slice(0, 240)}`);
+}
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -102,18 +185,6 @@ async function loadHistory(siteUserId, limit = 20) {
   return data || [];
 }
 
-function buildUnlockUrl(provider, signed) {
-  return `${PUBLIC_URL}/unlock/${provider}?challenge=${encodeURIComponent(signed)}`;
-}
-
-function buildLootlabsUrl(unlockUrl) {
-  if (!LOOTLABS_TEMPLATE_URL) return unlockUrl;
-  if (LOOTLABS_TEMPLATE_URL.includes('{url}')) {
-    return LOOTLABS_TEMPLATE_URL.replace('{url}', encodeURIComponent(unlockUrl));
-  }
-  return unlockUrl;
-}
-
 function ensureProvider(provider) {
   return ['lootlabs', 'linkvertise'].includes(provider) ? provider : '';
 }
@@ -127,13 +198,23 @@ async function handleKeyStart(req, res) {
 
   const { user } = req.session;
   try {
+    if (enabledProviders().length === 0) {
+      const err = new Error('No enabled ad providers');
+      err.code = 'NO_PROVIDER_CONFIGURED';
+      throw err;
+    }
+
     const { allowed, secondsLeft } = await challenge.checkCooldown(user.id);
     if (!allowed) {
       if (wantsJson(req)) {
-        return res.status(429).json({ error: 'cooldown', secondsLeft });
+        return res.status(429).json({
+          error: 'COOLDOWN_ACTIVE',
+          message: messageFor('COOLDOWN_ACTIVE'),
+          secondsLeft,
+        });
       }
       req.session.flash = {
-        error: `Please wait ${secondsLeft}s before generating another key.`,
+        error: messageFor('COOLDOWN_ACTIVE'),
         cooldown: secondsLeft,
       };
       return res.redirect('/license');
@@ -146,11 +227,14 @@ async function handleKeyStart(req, res) {
     return res.render('choose_provider', {
       title: 'Choose Unlock Method - DENG Tool',
       challengeId: row.id,
+      providers: enabledProviders(),
     });
   } catch (err) {
-    console.error('[api/key/start]', err.message || err);
-    if (wantsJson(req)) return res.status(500).json({ error: 'start_failed' });
-    safeFlash(req, 'error', 'Could not start key generation. Please try again.');
+    const code = codeFromError(err, err?.code === 'NO_PROVIDER_CONFIGURED' ? 'NO_PROVIDER_CONFIGURED' : 'CHALLENGE_INSERT_FAILED');
+    logSafeError('api/key/start', code, err);
+    const status = code === 'NO_PROVIDER_CONFIGURED' ? 503 : (code === 'CHALLENGE_TABLE_MISSING' ? 503 : 500);
+    if (wantsJson(req)) return res.status(status).json({ error: code, message: messageFor(code) });
+    safeFlash(req, 'error', messageFor(code));
     return res.redirect('/license');
   }
 }
@@ -162,45 +246,48 @@ async function handleProvider(req, res) {
     return res.redirect('/license');
   }
 
-  const provider = ensureProvider(String(req.body.provider || ''));
-  const challengeId = String(req.body.challenge_id || '');
+  const provider = ensureProvider(String(req.params.provider || req.body.provider || ''));
+  const challengeId = String(req.body.challenge_id || req.session.pendingChallenge || '');
   const { user } = req.session;
 
   if (!provider) {
     safeFlash(req, 'error', 'Invalid provider selection.');
     return res.redirect('/license');
   }
+  if (!providerIsReady(provider)) {
+    const code = 'PROVIDER_NOT_CONFIGURED';
+    if (wantsJson(req)) return res.status(503).json({ error: code, message: messageFor(code) });
+    safeFlash(req, 'error', messageFor(code));
+    return res.redirect('/license');
+  }
   if (!challengeId || challengeId !== req.session.pendingChallenge) {
-    safeFlash(req, 'error', 'Challenge mismatch. Please start again.');
+    const code = 'PROVIDER_CHALLENGE_MISSING';
+    if (wantsJson(req)) return res.status(400).json({ error: code, message: messageFor(code) });
+    safeFlash(req, 'error', messageFor(code));
     return res.redirect('/license');
   }
 
   try {
     const row = await challenge.selectProvider(challengeId, provider, req, user);
-    const signed = row.signed_challenge;
-    await challenge.markPendingAd(signed);
+    await challenge.markPendingAdById(row.id, req, user);
 
     req.session.pendingProvider = provider;
-    req.session.pendingSignedChallenge = signed;
-
-    const unlockUrl = buildUnlockUrl(provider, signed);
-    const adUrl = provider === 'lootlabs' ? buildLootlabsUrl(unlockUrl) : unlockUrl;
+    const providerCfg = getProviderConfig(provider);
 
     if (wantsJson(req)) {
-      return res.json({ provider, unlock_url: unlockUrl, ad_url: adUrl });
+      return res.json({
+        provider,
+        redirect_url: providerCfg.monetizedUrl,
+        complete_url: providerCfg.completeUrl,
+      });
     }
 
-    return res.render('provider_unlock', {
-      title: 'Unlock Key - DENG Tool',
-      provider,
-      unlockUrl,
-      adUrl,
-      publicUrl: PUBLIC_URL,
-      publisherId: LINKVERTISE_PUBLISHER_ID,
-    });
+    return res.redirect(providerCfg.monetizedUrl);
   } catch (err) {
-    console.error('[api/key/provider]', err.message || err);
-    safeFlash(req, 'error', 'Failed to set up ad unlock. Please try again.');
+    const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
+    logSafeError('api/key/provider', code, err);
+    if (wantsJson(req)) return res.status(400).json({ error: code, message: messageFor(code) });
+    safeFlash(req, 'error', messageFor(code));
     return res.redirect('/license');
   }
 }
@@ -246,8 +333,40 @@ async function handleUnlock(req, res, provider) {
     delete req.session.pendingSignedChallenge;
     return res.redirect('/key/result');
   } catch (err) {
-    console.error(`[unlock/${selected}]`, err.message || err);
-    safeFlash(req, 'error', 'Failed to complete key generation.');
+    const code = codeFromError(err, 'KEY_GENERATION_FAILED');
+    logSafeError(`unlock/${selected}`, code, err);
+    safeFlash(req, 'error', messageFor(code));
+    return res.redirect('/license');
+  }
+}
+
+async function handleProviderComplete(req, res, provider) {
+  const selected = ensureProvider(provider);
+  if (!selected) {
+    safeFlash(req, 'error', messageFor('PROVIDER_CHALLENGE_MISSING'));
+    return res.redirect('/license');
+  }
+
+  try {
+    const { key, alreadyDone } = await challenge.completeActiveProviderChallenge(req, selected);
+    if (alreadyDone && req.session.generatedKey) {
+      return res.redirect('/key/result');
+    }
+    if (alreadyDone) {
+      safeFlash(req, 'error', messageFor('PROVIDER_CHALLENGE_ALREADY_USED'));
+      return res.redirect('/license');
+    }
+
+    req.session.generatedKey = key;
+    req.session.generatedKeyAt = Date.now();
+    delete req.session.pendingChallenge;
+    delete req.session.pendingProvider;
+    delete req.session.pendingSignedChallenge;
+    return res.redirect('/key/result');
+  } catch (err) {
+    const code = codeFromError(err, 'KEY_GENERATION_FAILED');
+    logSafeError(`unlock/${selected}/complete`, code, err);
+    safeFlash(req, 'error', messageFor(code));
     return res.redirect('/license');
   }
 }
@@ -414,13 +533,29 @@ router.get('/license', requireLogin, async (req, res) => {
   }
 });
 
+router.get('/key/provider', requireLogin, (req, res) => {
+  if (!req.session.pendingChallenge) {
+    safeFlash(req, 'error', messageFor('PROVIDER_CHALLENGE_MISSING'));
+    return res.redirect('/license');
+  }
+  return res.render('choose_provider', {
+    title: 'Choose Unlock Method - DENG Tool',
+    challengeId: req.session.pendingChallenge,
+    providers: enabledProviders(),
+  });
+});
+
 router.post('/api/key/start', requireLogin, generateLimiter, handleKeyStart);
 router.post('/license/generate', requireLogin, generateLimiter, handleKeyStart);
 router.post('/api/key/provider', requireLogin, generateLimiter, handleProvider);
+router.post('/api/key/provider/:provider', requireLogin, generateLimiter, handleProvider);
 router.post('/license/provider', requireLogin, generateLimiter, handleProvider);
+router.post('/license/provider/:provider', requireLogin, generateLimiter, handleProvider);
 
 router.get('/unlock/lootlabs', requireLogin, (req, res) => handleUnlock(req, res, 'lootlabs'));
 router.get('/unlock/linkvertise', requireLogin, (req, res) => handleUnlock(req, res, 'linkvertise'));
+router.get('/unlock/lootlabs/complete', requireLogin, (req, res) => handleProviderComplete(req, res, 'lootlabs'));
+router.get('/unlock/linkvertise/complete', requireLogin, (req, res) => handleProviderComplete(req, res, 'linkvertise'));
 
 router.get('/unlock/linkvertise/done', requireLogin, (_req, res) => {
   res.redirect('/license');

@@ -3,32 +3,45 @@
 <div class="page-header">
   <div>
     <p class="eyebrow">DENG Tool Portal</p>
-    <h1 class="page-title">Dashboard</h1>
-    <p class="page-subtitle">Welcome back, <strong><%= user.username %></strong>.</p>
+    <h1 class="page-title">Dashboard Overview</h1>
+    <p class="page-subtitle">Welcome back, <strong><%= user.username %></strong>. Manage your DENG Tool: Rejoin key flow from one clean panel.</p>
   </div>
-  <a href="/license" class="btn btn-primary">Go to My License</a>
+  <a href="/license" class="btn btn-primary">Generate Key</a>
 </div>
 
 <div class="stats-grid">
   <div class="stat-card">
     <div class="stat-body">
-      <p class="stat-label">Unredeemed Keys</p>
+      <p class="stat-label">Total Licenses</p>
+      <p class="stat-value"><%= stats.total %></p>
+      <p class="stat-note">Lifetime generated / owned keys</p>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-body">
+      <p class="stat-label">Unused Keys</p>
       <p class="stat-value"><%= stats.unredeemed %></p>
+      <p class="stat-note">Ready to redeem in Rejoin</p>
     </div>
   </div>
 </div>
 
 <section class="section-card">
-  <p class="section-desc">Generate a license key from <a href="/license">My License</a>, then redeem it inside DENG Tool: Rejoin to activate the tool.</p>
+  <div class="section-header compact">
+    <div>
+      <h2 class="section-title">News & Updates</h2>
+      <p class="section-desc">DENG Tool: Rejoin Portal is now live.</p>
+    </div>
+  </div>
 </section>
 
 <section class="section-card">
   <div class="section-header">
     <div>
-      <h2 class="section-title">Recent Key Activity</h2>
-      <p class="section-desc">Dashboard keys are masked. Open My License after unlock to view a fresh key.</p>
+      <h2 class="section-title">Your Activity</h2>
+      <p class="section-desc">Account access and generated keys are tied to your Discord login.</p>
     </div>
-    <a href="/license" class="btn btn-sm btn-outline">Go to My License</a>
+    <a href="/license" class="btn btn-sm btn-outline">My License</a>
   </div>
 
   <% if (history && history.length > 0) { %>
@@ -56,8 +69,8 @@
     </div>
   <% } else { %>
     <div class="empty-state">
-      <p class="empty-title">No keys yet</p>
-      <p class="empty-text">Generate your first key from My License.</p>
+      <p class="empty-title">Joined Program</p>
+      <p class="empty-text">Security Status: Account Protected</p>
       <a href="/license" class="btn btn-primary btn-sm">Generate Key</a>
     </div>
   <% } %>

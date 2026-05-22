@@ -17,7 +17,12 @@ process.env.DISCORD_CLIENT_ID = 'discord-client-id';
 process.env.DISCORD_CLIENT_SECRET = 'discord-client-secret';
 process.env.DISCORD_REDIRECT_URI = 'http://localhost:8791/auth/discord/callback';
 process.env.LINKVERTISE_PUBLISHER_ID = '5914830';
-process.env.LOOTLABS_TEMPLATE_URL = 'https://lootlabs.example/unlock?target={url}';
+process.env.LINKVERTISE_ENABLED = 'true';
+process.env.LINKVERTISE_MONETIZED_URL = 'https://link-hub.net/5914830/XEpUhZ8TdtyV';
+process.env.LINKVERTISE_COMPLETE_URL = 'http://localhost:8791/unlock/linkvertise/complete';
+process.env.LOOTLABS_ENABLED = 'true';
+process.env.LOOTLABS_MONETIZED_URL = 'https://lootdest.org/s?TqZQAW38';
+process.env.LOOTLABS_COMPLETE_URL = 'http://localhost:8791/unlock/lootlabs/complete';
 
 class MemoryQuery {
   constructor(db, table) {
@@ -240,13 +245,13 @@ async function startChallenge(agent) {
 
 async function chooseProvider(agent, provider = 'linkvertise') {
   const started = await startChallenge(agent);
-  const res = await agent.post('/api/key/provider').type('form').send({
+  const res = await agent.post(`/api/key/provider/${provider}`).type('form').send({
     _csrf: started.csrf,
     challenge_id: started.challengeId,
     provider,
   });
-  assert.equal(res.status, 200);
-  return { started, html: res.text };
+  assert.equal(res.status, 302);
+  return { started, res };
 }
 
 beforeEach(resetDb);
@@ -404,14 +409,24 @@ describe('theme and dashboard UI', () => {
     const agent = request.agent(app);
     await login(agent);
     const dashboard = await agent.get('/dashboard');
-    assert.match(dashboard.text, /Welcome back/);
-    assert.match(dashboard.text, /Go to My License/);
+    assert.match(dashboard.text, /Dashboard Overview/);
+    assert.match(dashboard.text, /Generate Key/);
+    assert.match(dashboard.text, /News & Updates/);
+    assert.match(dashboard.text, /Your Activity/);
     assert.match(dashboard.text, /stats-grid/);
+    assert.doesNotMatch(dashboard.text, /Buy License/);
 
     const license = await agent.get('/license');
-    assert.match(license.text, /Current License Status/);
+    assert.doesNotMatch(license.text, /Current License Status/);
+    assert.doesNotMatch(license.text, /Freshly generated keys are shown here as masked history/);
+    assert.doesNotMatch(license.text, /No active generated key/);
+    assert.doesNotMatch(license.text, /Unredeemed 0/);
+    assert.doesNotMatch(license.text, /Expired 0/);
+    assert.doesNotMatch(license.text, /Expires if unused/);
+    assert.doesNotMatch(license.text, /24h/);
+    assert.match(license.text, /Generate DENG Tool: Rejoin Key/);
     assert.match(license.text, /Generate Key/);
-    assert.match(license.text, /My Generated Keys/);
+    assert.match(license.text, /Recent Generated Keys/);
   });
 
   test('theme stylesheet uses light blue-pink gradient and readable text', () => {
@@ -420,6 +435,13 @@ describe('theme and dashboard UI', () => {
     assert.match(css, /#60a5fa|#f9a8d4/i);
     assert.match(css, /\.nav-link\.active/);
     assert.match(css, /@media \(max-width: 760px\)/);
+    assert.doesNotMatch(css, /#050816|#0b1020|#00C7A3/i);
+  });
+
+  test('layout includes cache-busted stylesheet URL', async () => {
+    const res = await request(app).get('/login');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /\/public\/css\/style\.css\?v=[A-Za-z0-9._-]+/);
   });
 
   test('dashboard does not show removed stat cards', async () => {
@@ -433,6 +455,7 @@ describe('theme and dashboard UI', () => {
     assert.doesNotMatch(res.text, /Latest Key Status/);
     assert.doesNotMatch(res.text, /Tool Version/);
     assert.doesNotMatch(res.text, /See tool status/);
+    assert.doesNotMatch(res.text, /Buy License/);
   });
 
   test('My License page does not show Expires if unused display', async () => {
@@ -440,7 +463,13 @@ describe('theme and dashboard UI', () => {
     await login(agent);
     const res = await agent.get('/license');
     assert.equal(res.status, 200);
+    assert.doesNotMatch(res.text, /Current License Status/);
+    assert.doesNotMatch(res.text, /No active generated key/);
+    assert.doesNotMatch(res.text, /Unredeemed 0/);
+    assert.doesNotMatch(res.text, /Expired 0/);
     assert.doesNotMatch(res.text, /Expires if unused/);
+    assert.doesNotMatch(res.text, /24h/);
+    assert.match(res.text, /Generate DENG Tool: Rejoin Key/);
   });
 });
 
@@ -451,27 +480,60 @@ describe('Luarmor-style key flow', () => {
     const { html } = await startChallenge(agent);
     assert.match(html, /LootLabs/);
     assert.match(html, /Linkvertise/);
+    assert.doesNotMatch(html, /Could not start key generation/);
     assert.equal(memoryDb.license_ad_challenges.length, 1);
     assert.equal(memoryDb.license_ad_challenges[0].status, 'created');
   });
 
-  test('Linkvertise provider renders a protected unlock URL and monetizes only that path', async () => {
+  test('provider complete routes require an active session challenge', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { html } = await chooseProvider(agent, 'linkvertise');
-    assert.match(html, /publisher\.linkvertise\.com\/cdn\/linkvertise\.js/);
-    assert.match(html, /tool\.deng\.my\.id\/unlock\/linkvertise/);
-    assert.match(html, /tool\.deng\.my\.id\/dashboard/);
-    assert.doesNotMatch(html, /DENG-[0-9A-F]{4}/);
+    for (const route of ['/unlock/linkvertise/complete', '/unlock/lootlabs/complete']) {
+      const res = await agent.get(route);
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.location, '/license');
+    }
+    assert.equal(memoryDb.license_keys.length, 0);
   });
 
-  test('LootLabs provider uses the protected unlock URL as the destination', async () => {
+  test('expired active provider challenge fails safely', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { html } = await chooseProvider(agent, 'lootlabs');
-    assert.match(html, /https:\/\/lootlabs\.example\/unlock\?target=/);
-    assert.match(html, /unlock%2Flootlabs/);
-    assert.doesNotMatch(html, /\/key\/result/);
+    await chooseProvider(agent, 'linkvertise');
+    memoryDb.license_ad_challenges[0].expires_at = new Date(Date.now() - 1000).toISOString();
+    const res = await agent.get('/unlock/linkvertise/complete');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+  });
+
+  test('wrong user challenge ownership fails safely', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    await chooseProvider(agent, 'linkvertise');
+    memoryDb.license_ad_challenges[0].site_user_id = randomUUID();
+    const res = await agent.get('/unlock/linkvertise/complete');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    assert.equal(memoryDb.license_keys.length, 0);
+  });
+
+  test('Linkvertise provider redirects to configured monetized URL', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { res } = await chooseProvider(agent, 'linkvertise');
+    assert.equal(res.headers.location, 'https://link-hub.net/5914830/XEpUhZ8TdtyV');
+    assert.equal(memoryDb.license_ad_challenges[0].provider, 'linkvertise');
+    assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
+  });
+
+  test('LootLabs provider redirects to configured monetized URL', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { res } = await chooseProvider(agent, 'lootlabs');
+    assert.equal(res.headers.location, 'https://lootdest.org/s?TqZQAW38');
+    assert.equal(memoryDb.license_ad_challenges[0].provider, 'lootlabs');
+    assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
   });
 
   test('direct key result cannot generate or reveal a key', async () => {
@@ -486,11 +548,9 @@ describe('Luarmor-style key flow', () => {
   test('valid unlock generates one key, keeps it out of the URL, and shows redeem instructions', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { html } = await chooseProvider(agent, 'linkvertise');
-    const href = html.match(/id="ad-unlock-link" href="([^"]+)"/)[1].replace(/&amp;/g, '&');
-    const unlockPath = new URL(href).pathname + new URL(href).search;
+    await chooseProvider(agent, 'linkvertise');
 
-    const unlock = await agent.get(unlockPath);
+    const unlock = await agent.get('/unlock/linkvertise/complete');
     assert.equal(unlock.status, 302);
     assert.equal(unlock.headers.location, '/key/result');
     assert.equal(memoryDb.license_keys.length, 1);
@@ -507,12 +567,9 @@ describe('Luarmor-style key flow', () => {
   test('tampered and expired challenges are rejected', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { html } = await chooseProvider(agent, 'linkvertise');
-    const href = html.match(/id="ad-unlock-link" href="([^"]+)"/)[1].replace(/&amp;/g, '&');
-    const parsed = new URL(href);
-    const token = parsed.searchParams.get('challenge');
-    parsed.searchParams.set('challenge', `${token.slice(0, -1)}x`);
-    const tampered = await agent.get(parsed.pathname + parsed.search);
+    await chooseProvider(agent, 'linkvertise');
+
+    const tampered = await agent.get('/unlock/lootlabs/complete');
     assert.equal(tampered.status, 302);
     assert.equal(memoryDb.license_keys.length, 0);
 
@@ -525,22 +582,18 @@ describe('Luarmor-style key flow', () => {
   test('callback replay and double-submit do not create duplicate keys', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { html } = await chooseProvider(agent, 'linkvertise');
-    const href = html.match(/id="ad-unlock-link" href="([^"]+)"/)[1].replace(/&amp;/g, '&');
-    const unlockPath = new URL(href).pathname + new URL(href).search;
+    await chooseProvider(agent, 'linkvertise');
 
-    await agent.get(unlockPath);
-    await agent.get(unlockPath);
+    await agent.get('/unlock/linkvertise/complete');
+    await agent.get('/unlock/linkvertise/complete');
     assert.equal(memoryDb.license_keys.length, 1);
   });
 
   test('server-side cooldown is enforced after a generated key', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { html } = await chooseProvider(agent, 'linkvertise');
-    const href = html.match(/id="ad-unlock-link" href="([^"]+)"/)[1].replace(/&amp;/g, '&');
-    const unlockPath = new URL(href).pathname + new URL(href).search;
-    await agent.get(unlockPath);
+    await chooseProvider(agent, 'linkvertise');
+    await agent.get('/unlock/linkvertise/complete');
 
     const page = await agent.get('/license');
     const csrf = csrfFrom(page.text);
@@ -552,9 +605,8 @@ describe('Luarmor-style key flow', () => {
   test('history masks older keys but result page can show the freshly generated key', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const { html } = await chooseProvider(agent, 'linkvertise');
-    const href = html.match(/id="ad-unlock-link" href="([^"]+)"/)[1].replace(/&amp;/g, '&');
-    await agent.get(new URL(href).pathname + new URL(href).search);
+    await chooseProvider(agent, 'linkvertise');
+    await agent.get('/unlock/linkvertise/complete');
     const license = await agent.get('/license');
     assert.match(license.text, /\*\*\*\*/);
     assert.doesNotMatch(license.text, /DENG-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}/);

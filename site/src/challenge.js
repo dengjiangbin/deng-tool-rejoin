@@ -13,6 +13,12 @@ const COOLDOWN_SECONDS = parseInt(process.env.KEY_GENERATION_COOLDOWN_SECONDS ||
 const CHALLENGE_TTL_MS = 30 * 60 * 1000;
 const KEY_EXPIRY_HOURS = parseInt(process.env.UNREDEEMED_KEY_EXPIRY_HOURS || '24', 10);
 
+function safeError(code, message) {
+  const err = new Error(message || code);
+  err.code = code;
+  return err;
+}
+
 function keyExpiresAt() {
   return new Date(Date.now() + KEY_EXPIRY_HOURS * 3600 * 1000).toISOString();
 }
@@ -121,7 +127,13 @@ async function createChallenge(req, siteUser) {
     .select()
     .single();
 
-  if (error) throw new Error(`Failed to create challenge: ${error.message}`);
+  if (error) {
+    const text = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`.toLowerCase();
+    if (text.includes('license_ad_challenges') || text.includes('schema cache') || text.includes('relation')) {
+      throw safeError('CHALLENGE_TABLE_MISSING', `Failed to create challenge: ${error.message}`);
+    }
+    throw safeError('CHALLENGE_INSERT_FAILED', `Failed to create challenge: ${error.message}`);
+  }
   return data;
 }
 
@@ -149,7 +161,7 @@ async function selectProvider(challengeId, provider, req, siteUser) {
     .single();
 
   if (error || !data) {
-    throw new Error('Challenge no longer available.');
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Challenge no longer available.');
   }
   return { ...data, signed_challenge: signed };
 }
@@ -166,6 +178,62 @@ async function markPendingAd(signedToken) {
 
   if (error || !data) throw new Error('Challenge not found or already advanced');
   return data;
+}
+
+async function markPendingAdById(challengeId, req, siteUser) {
+  const { data, error } = await supabase
+    .from('license_ad_challenges')
+    .update({ status: 'pending_ad' })
+    .eq('id', challengeId)
+    .eq('site_user_id', siteUser.id)
+    .eq('session_hash', hashSession(req))
+    .eq('status', 'provider_selected')
+    .select()
+    .single();
+
+  if (error || !data) throw safeError('PROVIDER_CHALLENGE_MISSING', 'Challenge not found or already advanced');
+  return data;
+}
+
+async function getActiveSessionChallenge(req, expectedProvider) {
+  const challengeId = req.session?.pendingChallenge;
+  if (!challengeId || !req.session?.user) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'No active provider challenge in session');
+  }
+
+  const { data: owned, error } = await supabase
+    .from('license_ad_challenges')
+    .select('*')
+    .eq('id', challengeId)
+    .maybeSingle();
+
+  if (error || !owned) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Provider challenge missing');
+  }
+  if (owned.site_user_id !== req.session.user.id || owned.session_hash !== hashSession(req)) {
+    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'Provider challenge owner mismatch');
+  }
+  if (owned.provider !== expectedProvider) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Provider challenge mismatch');
+  }
+  if (new Date(owned.expires_at) < new Date()) {
+    throw safeError('PROVIDER_CHALLENGE_EXPIRED', 'Provider challenge expired');
+  }
+  if (owned.status === 'key_generated' || owned.status === 'ad_completed') {
+    throw safeError('PROVIDER_CHALLENGE_ALREADY_USED', 'Provider challenge already used');
+  }
+  if (!['provider_selected', 'pending_ad'].includes(owned.status)) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Provider challenge is not ready');
+  }
+  return owned;
+}
+
+async function completeActiveProviderChallenge(req, expectedProvider) {
+  let row = await getActiveSessionChallenge(req, expectedProvider);
+  if (row.status === 'provider_selected') {
+    row = await markPendingAdById(row.id, req, req.session.user);
+  }
+  return completeAdAndGenerateKey(row);
 }
 
 async function getChallengeByToken(signedToken) {
@@ -199,7 +267,7 @@ async function completeAdAndGenerateKey(challengeRow) {
 
   const cooldown = await checkCooldown(site_user_id);
   if (!cooldown.allowed) {
-    throw new Error(`Cooldown active. Try again in ${cooldown.secondsLeft}s.`);
+    throw safeError('COOLDOWN_ACTIVE', `Cooldown active. Try again in ${cooldown.secondsLeft}s.`);
   }
 
   const { data: adDone, error: adErr } = await supabase
@@ -219,7 +287,7 @@ async function completeAdAndGenerateKey(challengeRow) {
     if (existing && ['ad_completed', 'key_generated'].includes(existing.status)) {
       return { key: null, alreadyDone: true };
     }
-    throw new Error('Challenge state conflict');
+    throw safeError('PROVIDER_CHALLENGE_ALREADY_USED', 'Challenge state conflict');
   }
 
   const { raw, id: keyId, prefix, suffix } = generateDengKey();
@@ -242,7 +310,7 @@ async function completeAdAndGenerateKey(challengeRow) {
       .from('license_ad_challenges')
       .update({ status: 'failed', failure_reason: keyErr.message })
       .eq('id', challengeId);
-    throw new Error(`Key store failed: ${keyErr.message}`);
+    throw safeError('KEY_GENERATION_FAILED', `Key store failed: ${keyErr.message}`);
   }
 
   const { data: finalRow, error: finalErr } = await supabase
@@ -277,5 +345,7 @@ module.exports = {
   getChallengeByToken,
   verifyChallengeForRequest,
   completeAdAndGenerateKey,
+  completeActiveProviderChallenge,
+  markPendingAdById,
   hashSession,
 };
