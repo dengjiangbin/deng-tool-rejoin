@@ -318,8 +318,12 @@ class PanelAndDocsConsistencyTests(unittest.TestCase):
         from agent.license_panel import BUTTON_SELECT_VERSION, build_panel_buttons, build_panel_embed
 
         self.assertEqual(build_panel_embed()["title"], "DENG Tool: Rejoin Panel")
-        ids = [b["custom_id"] for b in build_panel_buttons()[0]["components"]]
-        self.assertIn("license_panel:generate", ids)
+        buttons = build_panel_buttons()[0]["components"]
+        generate = buttons[0]
+        self.assertEqual(generate.get("style"), 5)
+        self.assertEqual(generate.get("url"), "https://tool.deng.my.id")
+        self.assertNotIn("custom_id", generate)
+        ids = [b["custom_id"] for b in buttons[1:]]
         self.assertIn(BUTTON_SELECT_VERSION, ids)
 
     def test_public_install_doc_avoids_update_command(self) -> None:

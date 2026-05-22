@@ -39,6 +39,7 @@ const SAFE_MESSAGES = {
   NO_PROVIDER_CONFIGURED: 'No ad provider is configured yet.',
   AUTH_REQUIRED: 'Please login with Discord first.',
   COOLDOWN_ACTIVE: 'Please wait before generating another key.',
+  TOO_MANY_ATTEMPTS: 'Too many key generation attempts. Please wait before trying again.',
   CHALLENGE_TABLE_MISSING: 'Key generation database is not ready yet.',
   DB_FOREIGN_KEY_FAILED: 'Could not prepare your license account. Please try again.',
   DB_PERMISSION_DENIED: 'Key generation database permission error.',
@@ -126,19 +127,30 @@ const authLimiter = rateLimit({
   message: { error: 'Too many login attempts, please wait.' },
 });
 
-const generateLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 5,
-  skip: () => process.env.NODE_ENV === 'test',
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many key generation attempts.' },
-});
-
 function wantsJson(req) {
   return (req.headers.accept || '').includes('application/json') ||
     (req.headers['content-type'] || '').includes('application/json');
 }
+
+function rateLimitsDisabled() {
+  return process.env.NODE_ENV === 'test' && process.env.ENABLE_RATE_LIMIT_TEST !== '1';
+}
+
+const generateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  skip: rateLimitsDisabled,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    const code = 'TOO_MANY_ATTEMPTS';
+    if (wantsJson(req)) {
+      return res.status(429).json({ error: code, message: messageFor(code) });
+    }
+    safeFlash(req, 'error', messageFor(code));
+    return res.redirect(303, '/license');
+  },
+});
 
 function safeFlash(req, key, value) {
   req.session.flash = { ...(req.session.flash || {}), [key]: value };
@@ -160,21 +172,29 @@ function maskKeyRow(row) {
   return `${prefix}-****-${String(suffix).split('-').pop() || '????'}`;
 }
 
+function providerLabel(provider) {
+  if (provider === 'linkvertise') return 'Linkvertise';
+  if (provider === 'lootlabs') return 'LootLabs';
+  return 'Provider';
+}
+
 function friendlyStatus(row) {
   if (!row) return 'Unknown';
+  if (row.license_status === 'expired' || row.status === 'expired') return 'Expired';
+  if (row.license_status === 'revoked' || row.status === 'revoked') return 'Expired';
+  if (row.redeemed_at || row.license_status === 'redeemed' || row.license_status === 'used') return 'Redeemed';
   if (row.status === 'key_generated') {
     if (row.key_expires_at && new Date(row.key_expires_at) < new Date()) return 'Expired';
-    return 'Unredeemed';
+    return 'Generated';
   }
-  if (row.status === 'failed') return 'Failed';
-  if (row.status === 'expired') return 'Expired';
-  if (row.status === 'revoked') return 'Revoked';
+  if (row.status === 'ad_completed') return 'Completed';
+  if (row.status === 'failed') return 'Expired';
   return 'Pending';
 }
 
 function summarizeHistory(history) {
   const rows = history || [];
-  const unredeemed = rows.filter((row) => friendlyStatus(row) === 'Unredeemed').length;
+  const unredeemed = rows.filter((row) => friendlyStatus(row) === 'Generated').length;
   const expired = rows.filter((row) => friendlyStatus(row) === 'Expired').length;
   return {
     total: rows.length,
@@ -191,6 +211,7 @@ async function loadHistory(siteUserId, limit = 20) {
     .from('license_ad_challenges')
     .select('id, key_prefix, key_suffix, status, provider, created_at, key_expires_at, completed_at, license_key_id')
     .eq('site_user_id', siteUserId)
+    .eq('status', 'key_generated')
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) {
@@ -202,7 +223,29 @@ async function loadHistory(siteUserId, limit = 20) {
     }
     return [];
   }
-  return data || [];
+  const generated = (data || []).filter((row) => row.license_key_id);
+  const keyIds = generated.map((row) => row.license_key_id).filter(Boolean);
+  if (keyIds.length === 0) return [];
+
+  const { data: keys, error: keyError } = await supabase
+    .from('license_keys')
+    .select('id, status, redeemed_at, expires_at')
+    .in('id', keyIds);
+
+  const byId = new Map();
+  if (!keyError && keys) {
+    for (const key of keys) byId.set(key.id, key);
+  }
+
+  return generated.map((row) => {
+    const key = byId.get(row.license_key_id) || {};
+    return {
+      ...row,
+      license_status: key.status || null,
+      redeemed_at: key.redeemed_at || null,
+      key_expires_at: row.key_expires_at || key.expires_at || null,
+    };
+  });
 }
 
 function ensureProvider(provider) {
@@ -250,6 +293,7 @@ async function handleKeyStart(req, res) {
       title: 'Choose Unlock Method - DENG Tool',
       challengeId: row.id,
       providers: enabledProviders(),
+      providerLabel,
     });
   } catch (err) {
     const code = codeFromError(err, err?.code === 'NO_PROVIDER_CONFIGURED' ? 'NO_PROVIDER_CONFIGURED' : 'CHALLENGE_INSERT_FAILED');
@@ -304,7 +348,7 @@ async function handleProvider(req, res) {
       });
     }
 
-    return res.redirect(providerCfg.monetizedUrl);
+    return res.redirect(303, providerCfg.monetizedUrl);
   } catch (err) {
     const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
     logSafeError('api/key/provider', code, err);
@@ -519,6 +563,9 @@ router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
       title: 'Dashboard - DENG Tool',
       history,
       stats: summarizeHistory(history),
+      maskKeyRow,
+      friendlyStatus,
+      providerLabel,
     });
   } catch (err) {
     console.error('[dashboard]', err.message || err);
@@ -526,6 +573,9 @@ router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
       title: 'Dashboard - DENG Tool',
       history: [],
       stats: summarizeHistory([]),
+      maskKeyRow,
+      friendlyStatus,
+      providerLabel,
     });
   }
 });
@@ -541,6 +591,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
       cooldown,
       maskKeyRow,
       friendlyStatus,
+      providerLabel,
     });
   } catch (err) {
     console.error('[license]', err.message || err);
@@ -551,6 +602,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
       cooldown: { allowed: true, secondsLeft: 0 },
       maskKeyRow,
       friendlyStatus,
+      providerLabel,
     });
   }
 });
@@ -564,15 +616,18 @@ router.get('/key/provider', requireLogin, repairSiteUser, (req, res) => {
     title: 'Choose Unlock Method - DENG Tool',
     challengeId: req.session.pendingChallenge,
     providers: enabledProviders(),
+    providerLabel,
   });
 });
 
 router.post('/api/key/start', requireLogin, generateLimiter, handleKeyStart);
 router.post('/license/generate', requireLogin, generateLimiter, handleKeyStart);
-router.post('/api/key/provider', requireLogin, repairSiteUser, generateLimiter, handleProvider);
-router.post('/api/key/provider/:provider', requireLogin, repairSiteUser, generateLimiter, handleProvider);
-router.post('/license/provider', requireLogin, repairSiteUser, generateLimiter, handleProvider);
-router.post('/license/provider/:provider', requireLogin, repairSiteUser, generateLimiter, handleProvider);
+router.post('/api/key/provider', requireLogin, repairSiteUser, handleProvider);
+router.post('/api/key/provider/:provider', requireLogin, repairSiteUser, handleProvider);
+router.post('/license/provider', requireLogin, repairSiteUser, handleProvider);
+router.post('/license/provider/:provider', requireLogin, repairSiteUser, handleProvider);
+router.post('/key/provider', requireLogin, repairSiteUser, handleProvider);
+router.post('/key/provider/:provider', requireLogin, repairSiteUser, handleProvider);
 
 router.get('/unlock/lootlabs', requireLogin, repairSiteUser, (req, res) => handleUnlock(req, res, 'lootlabs'));
 router.get('/unlock/linkvertise', requireLogin, repairSiteUser, (req, res) => handleUnlock(req, res, 'linkvertise'));
@@ -618,7 +673,7 @@ router.get('/api/license/history', requireLogin, repairSiteUser, async (req, res
         id: row.id,
         key: maskKeyRow(row),
         status: friendlyStatus(row),
-        provider: row.provider || null,
+        provider: providerLabel(row.provider),
         created_at: row.created_at,
         key_expires_at: row.key_expires_at,
       })),

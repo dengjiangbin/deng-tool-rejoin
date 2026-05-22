@@ -66,11 +66,16 @@ class PanelButtonTests(unittest.TestCase):
     def test_button_custom_ids(self):
         """Test 35 – button custom_ids match constants."""
         components = build_panel_buttons()
-        ids = [btn["custom_id"] for btn in components[0]["components"]]
+        buttons = components[0]["components"]
+        generate = buttons[0]
+        self.assertEqual(generate["label"], "Generate Key")
+        self.assertEqual(generate["style"], 5)
+        self.assertEqual(generate["url"], "https://tool.deng.my.id")
+        self.assertNotIn("custom_id", generate)
+        ids = [btn["custom_id"] for btn in buttons[1:]]
         self.assertEqual(
             ids,
             [
-                BUTTON_GENERATE,
                 BUTTON_RESET_HWID,
                 BUTTON_REDEEM,
                 BUTTON_KEY_STATS,
@@ -82,7 +87,7 @@ class PanelButtonTests(unittest.TestCase):
         """Test 36 – all buttons are enabled (not disabled) by default."""
         components = build_panel_buttons()
         for btn in components[0]["components"]:
-            self.assertFalse(btn["disabled"])
+            self.assertFalse(btn.get("disabled", False))
 
 
 class PanelResponseTests(unittest.TestCase):

@@ -58,9 +58,9 @@
         <tbody>
           <% history.forEach(row => { %>
             <tr>
-              <td class="key-cell"><code><%= row.key_prefix ? row.key_prefix + '-****-****' : 'Pending' %></code></td>
-              <td><span class="badge badge-provider"><%= row.provider || 'Pending' %></span></td>
-              <td><span class="badge badge-gray"><%= row.status === 'key_generated' ? 'Generated' : row.status %></span></td>
+              <td class="key-cell"><code><%= maskKeyRow(row) %></code></td>
+              <td><span class="badge badge-provider"><%= providerLabel(row.provider) %></span></td>
+              <td><span class="badge <%= friendlyStatus(row) === 'Generated' ? 'badge-green' : (friendlyStatus(row) === 'Expired' ? 'badge-red' : 'badge-gray') %>"><%= friendlyStatus(row) %></span></td>
               <td class="muted-cell"><%= new Date(row.created_at).toLocaleString() %></td>
             </tr>
           <% }) %>

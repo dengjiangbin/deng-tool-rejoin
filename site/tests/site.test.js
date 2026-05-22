@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const zlib = require('node:zlib');
 
 process.env.TOOL_SITE_COOKIE_SECRET = 'test-cookie-secret-that-is-long-enough-for-the-site-suite';
 process.env.TOOL_SITE_STATE_SECRET = 'test-state-secret-that-is-long-enough-for-challenge-suite';
@@ -228,6 +229,79 @@ function challengeIdFrom(html) {
   return match[1];
 }
 
+function countOpaqueNearBlackPng(filePath) {
+  const png = fs.readFileSync(filePath);
+  assert.ok(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])));
+  let pos = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let interlace = 0;
+  const idat = [];
+  while (pos < png.length) {
+    const len = png.readUInt32BE(pos); pos += 4;
+    const type = png.toString('ascii', pos, pos + 4); pos += 4;
+    const data = png.subarray(pos, pos + len); pos += len;
+    pos += 4;
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+      interlace = data[12];
+    } else if (type === 'IDAT') {
+      idat.push(Buffer.from(data));
+    } else if (type === 'IEND') {
+      break;
+    }
+  }
+  assert.equal(bitDepth, 8);
+  assert.equal(colorType, 6);
+  assert.equal(interlace, 0);
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const bpp = 4;
+  const stride = width * bpp;
+  const pixels = Buffer.alloc(height * stride);
+  let src = 0;
+  let dst = 0;
+  const paeth = (a, b, c) => {
+    const p = a + b - c;
+    const pa = Math.abs(p - a);
+    const pb = Math.abs(p - b);
+    const pc = Math.abs(p - c);
+    if (pa <= pb && pa <= pc) return a;
+    return pb <= pc ? b : c;
+  };
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[src];
+    src += 1;
+    for (let x = 0; x < stride; x += 1) {
+      const left = x >= bpp ? pixels[dst + x - bpp] : 0;
+      const up = y > 0 ? pixels[dst + x - stride] : 0;
+      const upLeft = y > 0 && x >= bpp ? pixels[dst + x - stride - bpp] : 0;
+      const value = raw[src];
+      src += 1;
+      if (filter === 0) pixels[dst + x] = value;
+      else if (filter === 1) pixels[dst + x] = (value + left) & 255;
+      else if (filter === 2) pixels[dst + x] = (value + up) & 255;
+      else if (filter === 3) pixels[dst + x] = (value + Math.floor((left + up) / 2)) & 255;
+      else if (filter === 4) pixels[dst + x] = (value + paeth(left, up, upLeft)) & 255;
+      else throw new Error(`Unsupported PNG filter ${filter}`);
+    }
+    dst += stride;
+  }
+  let opaqueNearBlack = 0;
+  for (let i = 0; i < pixels.length; i += 4) {
+    const max = Math.max(pixels[i], pixels[i + 1], pixels[i + 2]);
+    const min = Math.min(pixels[i], pixels[i + 1], pixels[i + 2]);
+    if (pixels[i + 3] > 0 && (max < 70 || (max < 96 && max - min < 28))) {
+      opaqueNearBlack += 1;
+    }
+  }
+  return opaqueNearBlack;
+}
+
 /** Log in via Discord OAuth using the mock fakeAxios identity. */
 async function login(agent) {
   const start = await agent.get('/auth/discord');
@@ -248,12 +322,12 @@ async function startChallenge(agent) {
 
 async function chooseProvider(agent, provider = 'linkvertise') {
   const started = await startChallenge(agent);
-  const res = await agent.post(`/api/key/provider/${provider}`).type('form').send({
+  const res = await agent.post(`/key/provider/${provider}`).type('form').send({
     _csrf: started.csrf,
     challenge_id: started.challengeId,
     provider,
   });
-  assert.equal(res.status, 302);
+  assert.equal(res.status, 303);
   return { started, res };
 }
 
@@ -445,6 +519,11 @@ describe('theme and dashboard UI', () => {
     assert.doesNotMatch(dashboard.text, />DT</);
   });
 
+  test('logo PNG has transparent near-black pixels instead of black backing', () => {
+    const opaqueNearBlack = countOpaqueNearBlackPng(path.join(__dirname, '..', 'public', 'img', 'deng-logo.png'));
+    assert.equal(opaqueNearBlack, 0);
+  });
+
   test('theme stylesheet uses logo-inspired neon blue-pink gradient and readable text', () => {
     const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
     assert.match(css, /#00cfff|#17a0dd/i);
@@ -575,7 +654,9 @@ describe('Luarmor-style key flow', () => {
     const agent = request.agent(app);
     await login(agent);
     const { res } = await chooseProvider(agent, 'linkvertise');
+    assert.equal(res.status, 303);
     assert.equal(res.headers.location, 'https://link-hub.net/5914830/XEpUhZ8TdtyV');
+    assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
     assert.equal(memoryDb.license_ad_challenges[0].provider, 'linkvertise');
     assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
   });
@@ -587,12 +668,30 @@ describe('Luarmor-style key flow', () => {
     process.env.LOOTLABS_MONETIZED_URL = '';
     try {
       const { res } = await chooseProvider(agent, 'lootlabs');
+      assert.equal(res.status, 303);
       assert.equal(res.headers.location, 'https://lootdest.org/s?TqZQAW38');
+      assert.doesNotMatch(res.headers['content-type'] || '', /json/i);
       assert.equal(memoryDb.license_ad_challenges[0].provider, 'lootlabs');
       assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
     } finally {
       process.env.LOOTLABS_MONETIZED_URL = originalUrl;
     }
+  });
+
+  test('pending provider attempts are hidden from public history and totals', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    await chooseProvider(agent, 'lootlabs');
+    assert.equal(memoryDb.license_ad_challenges[0].status, 'pending_ad');
+
+    const license = await agent.get('/license');
+    assert.match(license.text, /No keys generated yet\./);
+    assert.doesNotMatch(license.text, /DENG-\?\?\?\?-\?\?\?\?/);
+    assert.doesNotMatch(license.text, /pending_ad|provider_selected|lootlabs/i);
+
+    const dashboard = await agent.get('/dashboard');
+    assert.match(dashboard.text, /Total Licenses[\s\S]*?<p class="stat-value">0<\/p>/);
+    assert.doesNotMatch(dashboard.text, /pending_ad|provider_selected|lootlabs/i);
   });
 
   test('direct key result cannot generate or reveal a key', async () => {
@@ -668,7 +767,36 @@ describe('Luarmor-style key flow', () => {
     await agent.get('/unlock/linkvertise/complete');
     const license = await agent.get('/license');
     assert.match(license.text, /\*\*\*\*/);
+    assert.match(license.text, /Linkvertise/);
+    assert.match(license.text, /Generated/);
+    assert.doesNotMatch(license.text, />linkvertise</);
+    assert.doesNotMatch(license.text, /pending_ad/);
     assert.doesNotMatch(license.text, /DENG-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}/);
+  });
+
+  test('too many attempts render a portal error instead of a raw JSON page for browser flow', async () => {
+    process.env.ENABLE_RATE_LIMIT_TEST = '1';
+    const agent = request.agent(app);
+    try {
+      await login(agent);
+      const page = await agent.get('/license');
+      const csrf = csrfFrom(page.text);
+      let blocked = null;
+      for (let i = 0; i < 6; i += 1) {
+        blocked = await agent.post('/api/key/start')
+          .set('Accept', 'text/html')
+          .type('form')
+          .send({ _csrf: csrf });
+      }
+      assert.equal(blocked.status, 303);
+      assert.equal(blocked.headers.location, '/license');
+      assert.doesNotMatch(blocked.headers['content-type'] || '', /json/i);
+      const rendered = await agent.get('/license');
+      assert.match(rendered.text, /Too many key generation attempts\. Please wait before trying again\./);
+      assert.doesNotMatch(rendered.text, /^\{"error"/);
+    } finally {
+      delete process.env.ENABLE_RATE_LIMIT_TEST;
+    }
   });
 });
 

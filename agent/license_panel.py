@@ -14,7 +14,7 @@ Panel life-cycle
 5. Admin runs /license_panel clear          → removes panel config (not the message)
 
 Button custom IDs (use these as constants in your button handler):
-    BUTTON_GENERATE   = "license_panel:generate"
+    Generate Key is a URL button and has no custom_id.
     BUTTON_RESET_HWID = "license_panel:reset_hwid"
     BUTTON_REDEEM     = "license_panel:redeem"
     BUTTON_KEY_STATS  = "license_panel:key_stats"
@@ -157,11 +157,10 @@ def build_panel_buttons() -> list[dict[str, Any]]:
             "components": [
                 {
                     "type": 2,
-                    "style": 1,
+                    "style": 5,
                     "label": "Generate Key",
-                    "custom_id": BUTTON_GENERATE,
+                    "url": "https://tool.deng.my.id",
                     "emoji": {"name": "\U0001f511"},
-                    "disabled": False,
                 },
                 {
                     "type": 2,

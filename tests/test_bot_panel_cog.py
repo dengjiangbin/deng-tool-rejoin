@@ -152,7 +152,7 @@ class TestPanelViewFiveButtons(unittest.TestCase):
 
 class TestPanelViewGenerate(unittest.TestCase):
     def test_generate_key_is_web_portal_link_button(self) -> None:
-        with TemporaryDirectory() as tmp, patch.dict(os.environ, {"TOOL_SITE_URL": "https://tool.deng.my.id"}):
+        with TemporaryDirectory() as tmp, patch.dict(os.environ, {"TOOL_SITE_URL": "https://example.invalid"}):
             store = _make_store(tmp)
             view = PanelView(store)
             generate = next(c for c in view.children if getattr(c, "label", "") == "Generate Key")
@@ -164,7 +164,7 @@ class TestPanelViewGenerate(unittest.TestCase):
             store = _make_store(tmp)
             view = PanelView(store)
             generate = next(c for c in view.children if getattr(c, "label", "") == "Generate Key")
-            self.assertEqual(getattr(generate, "url", None), os.environ.get("TOOL_SITE_URL", "https://tool.deng.my.id"))
+            self.assertEqual(getattr(generate, "url", None), "https://tool.deng.my.id")
             self.assertEqual(store.count_user_keys("42"), 0)
 
     def test_generate_key_link_uses_portal_domain_default(self) -> None:
@@ -173,7 +173,7 @@ class TestPanelViewGenerate(unittest.TestCase):
             store = _make_store(tmp)
             view = PanelView(store)
             generate = next(c for c in view.children if getattr(c, "label", "") == "Generate Key")
-            self.assertEqual(getattr(generate, "url", None), os.environ.get("TOOL_SITE_URL", "https://tool.deng.my.id"))
+            self.assertEqual(getattr(generate, "url", None), "https://tool.deng.my.id")
 
 
 # ── PanelView — Reset HWID ────────────────────────────────────────────────────
@@ -616,7 +616,7 @@ class TestSecurity(unittest.IsolatedAsyncioTestCase):
     async def test_generate_key_is_not_returned_by_discord_button(self) -> None:
         view = PanelView(self.store)
         generate = next(c for c in view.children if getattr(c, "label", "") == "Generate Key")
-        self.assertEqual(getattr(generate, "url", None), os.environ.get("TOOL_SITE_URL", "https://tool.deng.my.id"))
+        self.assertEqual(getattr(generate, "url", None), "https://tool.deng.my.id")
         self.assertEqual(self.store.count_user_keys("700"), 0)
 
 

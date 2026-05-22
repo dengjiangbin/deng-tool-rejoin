@@ -11,7 +11,7 @@ Slash commands
 
 Button handlers
 ---------------
-  Generate Key   (custom_id = "license_panel:generate")
+  Generate Key   (Discord link button -> https://tool.deng.my.id)
   Reset HWID     (custom_id = "license_panel:reset_hwid")
   Redeem Key     (custom_id = "license_panel:redeem")
   Select Version (custom_id = "license_panel:select_version")
@@ -784,12 +784,11 @@ class PanelView(discord.ui.View):
 
         # "Generate Key" is a link button that opens the web portal.
         # Link buttons do not send interactions, so no handler is needed.
-        import os as _os
         self.add_item(discord.ui.Button(
             style=discord.ButtonStyle.link,
             label="Generate Key",
             emoji="🔑",
-            url=_os.environ.get("TOOL_SITE_URL", "https://tool.deng.my.id"),
+            url="https://tool.deng.my.id",
             row=0,
         ))
 
