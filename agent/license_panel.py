@@ -78,57 +78,22 @@ def build_panel_embed() -> dict[str, Any]:
 
     Structure
     ─────────
-    • Title  : "DENG Tool: Rejoin Panel"
-    • Color  : 0x2F80ED (brand blue)
-    • Fields : 5 instruction cards — Generate, Reset HWID, Redeem, Key Stats, Select Version
-    • Footer : "DENG Tool · All responses are private"
+    • Title       : "DENG Tool: Rejoin Panel"
+    • Description : compact mobile-friendly button guide (no inline fields)
+    • Footer      : "DENG Tool • https://tool.deng.my.id"
     """
     return {
         "title": "DENG Tool: Rejoin Panel",
         "color": 0x2F80ED,
         "description": (
-            "Generate or redeem your license key, reset your device binding, "
-            "and choose which DENG Tool: Rejoin version to install.\n"
-            "All key-related responses are **private** — only you will see them."
+            "Manage your key and package version.\n\n"
+            "\U0001f511 Generate Key \u2014 Take you to our portal to generate the keys.\n"
+            "\u267b\ufe0f Reset HWID \u2014 Move key to new device, 5 mins cooldown.\n"
+            "\U0001f39f\ufe0f Redeem Key \u2014 Make an existing key your own.\n"
+            "\U0001f4ca Key Stats \u2014 View status and export keys.\n"
+            "\U0001f4e6 Select Version \u2014 Choose which package version to install."
         ),
-        "fields": [
-            {
-                "name": "\U0001f511 Generate Key",
-                "value": (
-                    "Create a new license key.\n"
-                    "Each account is allowed **1 key** by default.\n"
-                    "Store it somewhere safe — it is only shown once."
-                ),
-                "inline": True,
-            },
-            {
-                "name": "\u267b\ufe0f Reset HWID",
-                "value": (
-                    "Unbind your current device so you can move your key to a new install.\n"
-                    "Limited to **5 resets every 24 hours**.\n"
-                    "Wait at least 5 minutes after your last session."
-                ),
-                "inline": True,
-            },
-            {
-                "name": "\U0001f39f\ufe0f Redeem Key",
-                "value": (
-                    "Attach an existing key to your Discord account.\n"
-                    "Paste the full key (e.g. `DENG-XXXX-XXXX-XXXX-XXXX`)."
-                ),
-                "inline": True,
-            },
-            {
-                "name": "\U0001f4ca Key Stats",
-                "value": (
-                    "Private summary of keys linked to your Discord account.\n"
-                    "**Used / Device bound** or **Unused / Ready for first device**.\n"
-                    "**Download Keys** exports a short text list."
-                ),
-                "inline": True,
-            },
-        ],
-        "footer": {"text": "DENG Tool \u00b7 All responses are private"},
+        "footer": {"text": "DENG Tool \u2022 https://tool.deng.my.id"},
         "timestamp": None,   # Caller should set this to current UTC ISO string
     }
 
@@ -271,18 +236,8 @@ def build_reset_success_response() -> dict[str, Any]:
 
 
 def build_reset_limit_response(resets_used: int, max_resets: int) -> dict[str, Any]:
-    """Ephemeral embed when HWID reset limit is reached."""
-    return {
-        "ephemeral": True,
-        "embed": {
-            "title": "\u26d4 Reset Limit Reached",
-            "color": 0xE74C3C,
-            "description": (
-                f"You have used **{resets_used}/{max_resets}** HWID resets in the last 24 hours.\n"
-                "Please wait before trying again."
-            ),
-        },
-    }
+    """Legacy helper — daily reset limits are no longer enforced."""
+    return build_reset_active_warning_response(300)
 
 
 def build_reset_active_warning_response(elapsed_seconds: int) -> dict[str, Any]:
@@ -365,7 +320,7 @@ def build_key_list_response(key_records: list[dict]) -> dict[str, Any]:
                     "**Full key is not recoverable for copying from the server.** "
                     "If this is an older key, export storage may not have been enabled when it was created. "
                     f"Reference only (not a complete key): **{ref}**\n"
-                    "Use **Recover Full Key** in Key Stats if you still have the key text."
+                    "Redeem the same key again if you still have the full key text."
                 )
             lines.append(
                 f"{status_icon} {key_block}\n"
@@ -397,8 +352,7 @@ def build_reset_no_binding_response() -> dict[str, Any]:
             "description": (
                 "No device is currently bound to your key.\n"
                 "Start the tool once on your device to activate the binding, "
-                "then you can reset it here if needed.\n\n"
-                "_This does not count against your 5 daily HWID resets._"
+                "then you can reset it here if needed."
             ),
         },
     }
@@ -485,7 +439,7 @@ def build_reset_selector_embed(keys_with_state: list[dict]) -> dict[str, Any]:
             "title": "\u267b\ufe0f Reset HWID \u2014 Select Key",
             "color": 0x2F80ED,
             "description": description,
-            "footer": {"text": "DENG Tool \u00b7 Limited to 5 resets per 24 hours per key"},
+            "footer": {"text": "DENG Tool \u2022 Wait 5 minutes after last session before resetting"},
         },
     }
 

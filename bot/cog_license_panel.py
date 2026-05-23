@@ -32,7 +32,6 @@ from discord import app_commands
 from discord.ext import commands
 
 from agent.branding import apply_branding_to_embed_dict
-from agent.license_key_export import is_export_secret_configured
 from agent.license_owner_recovery import visible_license_rows_for_panel
 from agent.key_stats_format import (
     build_license_admin_stats_description,
@@ -57,7 +56,6 @@ from agent.license_panel import (
     build_redeem_error_response,
     build_redeem_success_response,
     build_reset_active_warning_response,
-    build_reset_limit_response,
     build_reset_mixed_summary_embed,
     build_reset_no_binding_response,
     build_reset_no_keys_response,
@@ -71,17 +69,14 @@ from agent.rejoin_versions import (
     list_public_rejoin_versions,
 )
 from agent.license_store import (
-    MAX_HWID_RESETS_PER_24H,
     ActiveKeyWarning,
     BaseLicenseStore,
-    ExportStorageUnavailable,
     ExpiredKeyError,
     GenerationCooldownError,
     KeyAlreadySelfOwned,
     KeyNotFoundError,
     KeyOwnershipError,
     NoActiveBindingError,
-    ResetLimitError,
     UserLimitError,
     get_license_stats_for_discord_user,
 )
@@ -265,82 +260,6 @@ class RedeemModal(discord.ui.Modal, title="Redeem License Key"):
             pass
 
 
-class RecoverKeyExportModal(discord.ui.Modal, title="Recover Full Key"):
-    """Modal: user pastes full key; verified by hash and stored as ciphertext."""
-
-    key_input: discord.ui.TextInput = discord.ui.TextInput(
-        label="Full license key",
-        placeholder="DENG-XXXX-XXXX-XXXX-XXXX",
-        min_length=19,
-        max_length=29,
-        style=discord.TextStyle.short,
-    )
-
-    def __init__(self, store: BaseLicenseStore) -> None:
-        super().__init__()
-        self._store = store
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        from agent.license import LicenseKeyError, normalize_license_key
-
-        from agent.license_panel import format_copy_license_key_content
-
-        uid = str(interaction.user.id)
-        raw_key = self.key_input.value.strip()
-        await interaction.response.defer(ephemeral=True)
-        try:
-            normalized = normalize_license_key(raw_key)
-        except LicenseKeyError as exc:
-            await interaction.followup.send(f"❌ {exc}", ephemeral=True)
-            return
-        try:
-            result = self._store.recover_key_export_for_user(uid, raw_key)
-        except ExportStorageUnavailable as exc:
-            await interaction.followup.send(f"❌ {exc}", ephemeral=True)
-            return
-        except KeyNotFoundError as exc:
-            await interaction.followup.send(f"❌ {exc}", ephemeral=True)
-            return
-        except KeyOwnershipError:
-            await interaction.followup.send(
-                "❌ That key does not belong to your account.",
-                ephemeral=True,
-            )
-            return
-        copy_only = format_copy_license_key_content(normalized)
-        if result == "already_exportable":
-            emb = discord.Embed(
-                title="Recover Full Key",
-                description=(
-                    "✅ Full key export was already enabled.\n"
-                    "Open **Key Stats** anytime to manage or download your keys."
-                ),
-                color=0x27AE60,
-            )
-            await interaction.followup.send(content=copy_only, embed=emb, ephemeral=True)
-        else:
-            emb = discord.Embed(
-                title="Recover Full Key",
-                description=(
-                    "✅ Full key saved securely for export.\n"
-                    "Open **Key Stats** anytime to view or download your keys."
-                ),
-                color=0x27AE60,
-            )
-            await interaction.followup.send(content=copy_only, embed=emb, ephemeral=True)
-
-    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
-        log.exception(
-            "RecoverKeyExportModal error for user %s: %s", interaction.user.id, error
-        )
-        try:
-            await interaction.followup.send(
-                "❌ An unexpected error occurred. Please try again.", ephemeral=True
-            )
-        except discord.HTTPException:
-            pass
-
-
 # ── HWID reset selector views ─────────────────────────────────────────────────
 
 class ResetHwidSelect(discord.ui.Select):
@@ -461,14 +380,6 @@ class ConfirmResetButton(discord.ui.Button):
                     "masked_key": masked,
                     "success": False,
                     "message": "No device binding to clear.",
-                })
-            except ResetLimitError:
-                count = self._store.get_reset_count_24h(key_id)
-                results.append({
-                    "display_key": display_key,
-                    "masked_key": masked,
-                    "success": False,
-                    "message": f"Reset limit reached ({count}/{MAX_HWID_RESETS_PER_24H} today).",
                 })
             except ActiveKeyWarning as exc:
                 # ActiveKeyWarning is no longer raised (cooldown is based on reset history only),
@@ -626,26 +537,6 @@ class KeyStatsDownloadButton(discord.ui.Button):
         await interaction.response.send_message(embed=dl_embed, file=file, ephemeral=True)
 
 
-class KeyStatsRecoverExportButton(discord.ui.Button):
-    """Open modal to paste full key and enable encrypted export for old keys."""
-
-    def __init__(self, host: "KeyStatsView") -> None:
-        super().__init__(
-            label="Recover Full Key",
-            style=discord.ButtonStyle.secondary,
-            custom_id="license_panel:ks_recover",
-        )
-        self._host = host
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        if str(interaction.user.id) != self._host._owner_id:
-            await interaction.response.send_message(
-                "This key stats view is not yours.", ephemeral=True
-            )
-            return
-        await interaction.response.send_modal(RecoverKeyExportModal(self._host._store))
-
-
 class KeyStatsPrevButton(discord.ui.Button):
     def __init__(self, host: "KeyStatsView", *, disabled: bool) -> None:
         super().__init__(
@@ -714,8 +605,6 @@ class KeyStatsView(discord.ui.View):
             KeyStatsNextButton(self, disabled=self._page >= total_pages - 1 or n == 0)
         )
         self.add_item(KeyStatsDownloadButton(self, disabled=n == 0))
-        if n > 0 and is_export_secret_configured():
-            self.add_item(KeyStatsRecoverExportButton(self))
         self.add_item(KeyStatsCloseButton(self))
 
     async def on_timeout(self) -> None:
@@ -1015,7 +904,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
 
             embed_dict = build_panel_embed()
             embed_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
-            apply_branding_to_embed_dict(embed_dict, include_thumbnail=True)
+            apply_branding_to_embed_dict(embed_dict, include_thumbnail=False)
             embed = discord.Embed.from_dict(embed_dict)
             view = PanelView(store)
             msg = await channel.send(embed=embed, view=view)
@@ -1086,7 +975,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
 
             embed_dict = build_panel_embed()
             embed_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
-            apply_branding_to_embed_dict(embed_dict, include_thumbnail=True)
+            apply_branding_to_embed_dict(embed_dict, include_thumbnail=False)
             embed = discord.Embed.from_dict(embed_dict)
             view = PanelView(store)
             await msg.edit(embed=embed, view=view)
@@ -1364,7 +1253,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                         msg = await channel.fetch_message(msg_id)
                         embed_dict = build_panel_embed()
                         embed_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
-                        apply_branding_to_embed_dict(embed_dict, include_thumbnail=True)
+                        apply_branding_to_embed_dict(embed_dict, include_thumbnail=False)
                         await msg.edit(embed=discord.Embed.from_dict(embed_dict), view=view)
                         log.info(
                             "Refreshed persistent panel message: guild=%s message=%s",

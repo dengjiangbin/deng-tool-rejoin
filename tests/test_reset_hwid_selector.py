@@ -194,15 +194,14 @@ class TestCanResetRecentlyActive(unittest.TestCase):
         self.assertIsNone(reason, f"No blocking reason expected but got: {reason!r}")
 
 
-# ── Group 4: can_reset rules — reset limit ────────────────────────────────────
+# ── Group 4: can_reset rules — no daily reset limit ───────────────────────────
 
 class TestCanResetLimitExceeded(unittest.TestCase):
-    """Tests 14-15: key at reset limit → can_reset=False."""
+    """Tests 14-15: daily reset limit removed — bound keys stay resettable."""
 
     def setUp(self):
         self.store, _, self.key_id = _setup_user_with_key("444")
         _bind_key(self.store, self.key_id)
-        # Inject MAX_HWID_RESETS_PER_24H reset log entries
         db = self.store._load()
         db.setdefault("reset_logs", [])
         from agent.license_store import _utc_now
@@ -216,17 +215,18 @@ class TestCanResetLimitExceeded(unittest.TestCase):
             })
         self.store._save(db)
 
-    def test_14_limit_can_reset_false(self):
-        """Test 14 – key at reset limit has can_reset=False."""
+    def test_14_limit_can_reset_true(self):
+        """Test 14 – prior reset history no longer blocks reset."""
         result = self.store.list_user_keys_with_binding_state("444")
-        self.assertFalse(result[0]["can_reset"])
+        self.assertTrue(result[0]["can_reset"])
 
-    def test_15_limit_reason_mentions_limit(self):
-        """Test 15 – reason mentions reset limit for exhausted key."""
+    def test_15_limit_reason_not_daily_cap(self):
+        """Test 15 – selector reason must not mention daily reset limit."""
         result = self.store.list_user_keys_with_binding_state("444")
         reason = result[0]["reason_if_not_resettable"]
-        self.assertIsNotNone(reason)
-        self.assertIn("Reset limit", reason)
+        if reason:
+            self.assertNotIn("Reset limit", reason)
+            self.assertNotIn("24 hours", reason)
 
 
 # ── Group 5: revoked keys are excluded ────────────────────────────────────────

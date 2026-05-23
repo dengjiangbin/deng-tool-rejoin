@@ -204,15 +204,14 @@ class TestResetHwidActiveRecently(unittest.TestCase):
 
 
 class TestResetHwidRateLimit(unittest.TestCase):
-    """Test 6 – reset count >= 5 blocks with ResetLimitError."""
+    """Test 6 – daily reset cap removed; sixth reset still succeeds."""
 
-    def test_sixth_reset_blocked(self):
+    def test_sixth_reset_allowed(self):
         uid = "u006"
         store, full_key, key_hash = _bound_store_with_key(uid, active_binding=True, last_seen_old=True)
 
         for _ in range(MAX_HWID_RESETS_PER_24H):
             store.reset_hwid(uid, key_hash)
-            # Re-bind for next iteration
             db = store._load()
             db["bindings"][key_hash] = {
                 "install_id_hash": "deadbeef" * 8,
@@ -225,8 +224,8 @@ class TestResetHwidRateLimit(unittest.TestCase):
             }
             store._save(db)
 
-        with self.assertRaises(ResetLimitError):
-            store.reset_hwid(uid, key_hash)
+        store.reset_hwid(uid, key_hash)
+        self.assertGreaterEqual(store.get_reset_count_24h(key_hash), MAX_HWID_RESETS_PER_24H + 1)
 
 
 class TestResetHwidWritesLog(unittest.TestCase):
@@ -606,11 +605,13 @@ class TestResetButtonMessages(unittest.TestCase):
         # Should be confirmatory
         self.assertIn("HWID", title)
 
-    def test_limit_response_shows_count(self):
+    def test_limit_response_uses_cooldown_wording(self):
         from agent.license_panel import build_reset_limit_response
         payload = build_reset_limit_response(5, 5)
-        desc = payload["embed"]["description"]
-        self.assertIn("5/5", desc)
+        desc = payload["embed"]["description"].lower()
+        self.assertIn("5 minute", desc)
+        self.assertNotIn("24 hours", desc)
+        self.assertNotIn("5/5", desc)
 
     def test_active_warning_shows_elapsed(self):
         from agent.license_panel import build_reset_active_warning_response
@@ -746,12 +747,10 @@ class TestResetCooldownBasedOnResetHistoryOnly(unittest.TestCase):
         db2 = store._load()
         self.assertFalse(db2["bindings"][key_hash]["is_active"])
 
-    def test_reset_cooldown_blocks_only_after_actual_reset(self):
-        """Reset limit is enforced only after actual HWID reset actions, not after license checks."""
-        from datetime import timezone as tz
+    def test_reset_still_allowed_after_many_logged_resets(self):
+        """Many prior reset logs no longer block additional HWID resets."""
         from agent.license_store import _utc_now
         store, _, key_hash = _bound_store_with_key("bug1_b", active_binding=True, last_seen_old=False)
-        # Add 5 reset log entries (the 24h limit)
         db = store._load()
         for _ in range(MAX_HWID_RESETS_PER_24H):
             db["reset_logs"].append({
@@ -762,9 +761,8 @@ class TestResetCooldownBasedOnResetHistoryOnly(unittest.TestCase):
                 "created_at": _utc_now(),
             })
         store._save(db)
-        from agent.license_store import ResetLimitError
-        with self.assertRaises(ResetLimitError):
-            store.reset_hwid("bug1_b", key_hash)
+        store.reset_hwid("bug1_b", key_hash)
+        self.assertGreaterEqual(store.get_reset_count_24h(key_hash), MAX_HWID_RESETS_PER_24H + 1)
 
     def test_24h_limit_counts_resets_only_not_license_checks(self):
         """24h limit counts only reset_logs entries, not bind/check events."""

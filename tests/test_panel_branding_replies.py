@@ -20,15 +20,15 @@ from bot.cog_license_panel import _embed_from_payload
 
 
 class PanelVersusReplyBrandingTests(unittest.TestCase):
-    def test_main_panel_payload_gets_thumbnail_when_configured(self) -> None:
+    def test_main_panel_payload_omits_thumbnail_for_mobile(self) -> None:
         d = build_panel_embed()
         with patch.dict(
             os.environ,
             {"DENG_BRANDING_LOGO_URL": "https://example.com/hub.png"},
             clear=False,
         ):
-            apply_branding_to_embed_dict(d, include_thumbnail=True)
-        self.assertEqual(d["thumbnail"]["url"], "https://example.com/hub.png")
+            apply_branding_to_embed_dict(d, include_thumbnail=False)
+        self.assertNotIn("thumbnail", d)
 
     def test_ephemeral_reply_payload_has_no_thumbnail_with_same_env(self) -> None:
         with patch.dict(

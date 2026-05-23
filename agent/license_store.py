@@ -670,9 +670,6 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             if not active_binding:
                 can_reset = False
                 reason = "No device bound — start the tool first"
-            elif reset_count >= MAX_HWID_RESETS_PER_24H:
-                can_reset = False
-                reason = f"Reset limit reached ({reset_count}/{MAX_HWID_RESETS_PER_24H} today)"
             else:
                 # Cooldown is based only on actual reset history, not on last_seen_at.
                 # First reset is always allowed immediately if no previous reset has occurred.
@@ -791,12 +788,6 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             )
         # Check reset count — based only on actual HWID reset history, never on last_seen_at.
         # A key used for license verification 1 minute ago must still be resettable on first attempt.
-        resets_24h = self.get_reset_count_24h(key_id)
-        if resets_24h >= MAX_HWID_RESETS_PER_24H:
-            raise ResetLimitError(
-                f"HWID reset limit reached ({MAX_HWID_RESETS_PER_24H} per 24 hours). "
-                "Please wait before trying again."
-            )
         old_hash = existing_binding.get("install_id_hash")
         # Deactivate binding
         db["bindings"][key_id]["is_active"] = False
@@ -1579,9 +1570,6 @@ class SupabaseLicenseStore(BaseLicenseStore):
             if not active_binding:
                 can_reset = False
                 reason = "No device bound — start the tool first"
-            elif reset_count >= MAX_HWID_RESETS_PER_24H:
-                can_reset = False
-                reason = f"Reset limit reached ({reset_count}/{MAX_HWID_RESETS_PER_24H} today)"
             else:
                 # Cooldown is based only on actual reset history, not on last_seen_at.
                 # First reset is always allowed immediately if no previous reset has occurred.
@@ -1745,13 +1733,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 "No device is currently bound to this key. "
                 "Start the tool once to activate your device binding."
             )
-        resets_24h = self.get_reset_count_24h(key_id)
-        if resets_24h >= MAX_HWID_RESETS_PER_24H:
-            raise ResetLimitError(
-                f"HWID reset limit reached ({MAX_HWID_RESETS_PER_24H} per 24 hours). "
-                "Please wait before trying again."
-            )
-        # No last_seen_at cooldown — HWID reset is gated only on reset history (5/24h), not heartbeat.
+        # No last_seen_at cooldown — HWID reset is gated only on reset history, not heartbeat.
         old_hash = binding_row.get("install_id_hash")
         self._client.table("device_bindings").update(
             {"is_active": False}

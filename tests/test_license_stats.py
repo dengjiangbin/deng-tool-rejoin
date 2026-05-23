@@ -224,12 +224,11 @@ class TestResetHwidCountingRule(unittest.TestCase):
         logs = [e for e in db.get("reset_logs", []) if e["key_id"] == key_hash]
         self.assertEqual(len(logs), 0, "No log when key was never bound")
 
-    def test_failed_reset_does_not_increment(self):
-        """A reset that hits the rate limit leaves the count unchanged from before."""
-        from agent.license_store import ResetLimitError, MAX_HWID_RESETS_PER_24H, _utc_now
+    def test_reset_after_many_logs_still_increments(self):
+        """Additional resets are allowed even when many reset logs already exist."""
+        from agent.license_store import MAX_HWID_RESETS_PER_24H, _utc_now
         uid = "hwid_c6"
         store, full_key, key_hash = self._make_bound(uid)
-        # Pre-fill reset logs to the limit
         db = store._load()
         for _ in range(MAX_HWID_RESETS_PER_24H):
             db["reset_logs"].append({
@@ -241,10 +240,9 @@ class TestResetHwidCountingRule(unittest.TestCase):
             })
         store._save(db)
         count_before = store.get_reset_count_24h(key_hash)
-        with self.assertRaises(ResetLimitError):
-            store.reset_hwid(uid, key_hash)
+        store.reset_hwid(uid, key_hash)
         count_after = store.get_reset_count_24h(key_hash)
-        self.assertEqual(count_before, count_after, "Failed reset must not add a log entry")
+        self.assertEqual(count_after, count_before + 1)
 
 
 class TestKeyExecutedPublicReleaseFilter(unittest.TestCase):

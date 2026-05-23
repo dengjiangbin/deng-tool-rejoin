@@ -257,12 +257,11 @@ class StoreHwidResetTests(unittest.TestCase):
         except FileNotFoundError:
             pass
 
-    def test_reset_hwid_allows_up_to_limit(self):
-        """Test 16 – up to 5 resets in 24h are allowed."""
+    def test_reset_hwid_allows_many_resets(self):
+        """Test 16 – daily reset cap removed; repeated resets are allowed."""
         from agent.license_store import MAX_HWID_RESETS_PER_24H
-        for i in range(MAX_HWID_RESETS_PER_24H):
+        for i in range(MAX_HWID_RESETS_PER_24H + 1):
             self.store.reset_hwid(self.uid, self.key_hash)
-            # Re-bind so the next reset has something to clear; keep last_seen_at=None
             db = self.store._load()
             db["bindings"][self.key_hash] = {
                 "install_id_hash": "bbbb" * 8,
@@ -274,10 +273,10 @@ class StoreHwidResetTests(unittest.TestCase):
                 "is_active": True,
             }
             self.store._save(db)
-        self.assertEqual(self.store.get_reset_count_24h(self.key_hash), MAX_HWID_RESETS_PER_24H)
+        self.assertGreaterEqual(self.store.get_reset_count_24h(self.key_hash), MAX_HWID_RESETS_PER_24H + 1)
 
-    def test_reset_hwid_blocked_at_limit(self):
-        """Test 17 – 6th reset raises ResetLimitError."""
+    def test_reset_hwid_not_blocked_after_many_resets(self):
+        """Test 17 – no ResetLimitError after exceeding old daily cap."""
         from agent.license_store import MAX_HWID_RESETS_PER_24H
         for _ in range(MAX_HWID_RESETS_PER_24H):
             self.store.reset_hwid(self.uid, self.key_hash)
@@ -292,8 +291,7 @@ class StoreHwidResetTests(unittest.TestCase):
                 "is_active": True,
             }
             self.store._save(db)
-        with self.assertRaises(ResetLimitError):
-            self.store.reset_hwid(self.uid, self.key_hash)
+        self.store.reset_hwid(self.uid, self.key_hash)
 
     def test_reset_hwid_warns_if_recently_active(self):
         """Test 18 – reset must SUCCEED when last_seen_at is recent but no prior reset exists.

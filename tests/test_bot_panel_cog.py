@@ -275,29 +275,29 @@ class TestPanelViewResetHWID(unittest.IsolatedAsyncioTestCase):
         # Reason text should appear in description
         self.assertIn("wait 5 min", embed.description)
 
-    async def test_confirm_reset_limit_exceeded(self) -> None:
-        """ConfirmResetButton with can_reset=False (limit) shows limit reason."""
+    async def test_confirm_reset_shows_blocking_reason(self) -> None:
+        """ConfirmResetButton with can_reset=False shows the provided reason."""
         uid_str = "101"
         self.store.get_or_create_user(uid_str, "TestUser")
         raw_key = self.store.create_key_for_user(uid_str)
         from agent.license import hash_license_key, normalize_license_key
         key_id = hash_license_key(normalize_license_key(raw_key))
-        reason = f"Reset limit reached ({MAX_HWID_RESETS_PER_24H}/{MAX_HWID_RESETS_PER_24H} today)"
+        reason = "No device bound — start the tool first"
         key_state = {
             "key_id": key_id,
             "masked_key": "DENG-????...????",
             "status": "active",
-            "active_binding": True,
-            "device_model": "Phone",
+            "active_binding": False,
+            "device_model": "",
             "device_label": "",
             "last_seen_at": None,
-            "reset_count_24h": MAX_HWID_RESETS_PER_24H,
+            "reset_count_24h": 0,
             "can_reset": False,
             "reason_if_not_resettable": reason,
         }
         sel_view = ResetHwidSelectView(self.store, uid_str, [key_state])
         select = next(c for c in sel_view.children if isinstance(c, ResetHwidSelect))
-        select._values = [key_id]  # values is a read-only property backed by _values
+        select._values = [key_id]
         confirm_btn = next(c for c in sel_view.children if isinstance(c, ConfirmResetButton))
         inter = _fake_interaction(user=_fake_user(uid=101))
         await confirm_btn.callback(inter)
@@ -305,7 +305,8 @@ class TestPanelViewResetHWID(unittest.IsolatedAsyncioTestCase):
         _, kwargs = inter.response.edit_message.call_args
         embed = kwargs["embed"]
         self.assertIn("HWID", embed.title)
-        self.assertIn("Reset limit", embed.description)
+        self.assertIn("start the tool first", embed.description)
+        self.assertNotIn("Reset limit", embed.description)
 
 
 # ── PanelView — Redeem Key ────────────────────────────────────────────────────
