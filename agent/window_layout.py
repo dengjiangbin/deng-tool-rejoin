@@ -135,10 +135,13 @@ APP_CLONER_POSITION_ALIASES: dict[str, tuple[str, ...]] = {
         "app_cloner_current_window_left",   # ← Moons: last known position (also write for safety)
         "app_cloner_window_position_left",
         "app_cloner_window_position_landscape_left",
+        "app_cloner_window_position_portrait_left",
         "app_cloner_window_position_x",
+        "app_cloner_window_position_portrait_x",
         "app_cloner_window_x",
         "app_cloner_saved_bounds_left",
         "app_cloner_saved_bounds_landscape_left",
+        "app_cloner_saved_bounds_portrait_left",
         "app_cloner_task_bounds_left",
     ),
     "top": (
@@ -146,10 +149,13 @@ APP_CLONER_POSITION_ALIASES: dict[str, tuple[str, ...]] = {
         "app_cloner_current_window_top",
         "app_cloner_window_position_top",
         "app_cloner_window_position_landscape_top",
+        "app_cloner_window_position_portrait_top",
         "app_cloner_window_position_y",
+        "app_cloner_window_position_portrait_y",
         "app_cloner_window_y",
         "app_cloner_saved_bounds_top",
         "app_cloner_saved_bounds_landscape_top",
+        "app_cloner_saved_bounds_portrait_top",
         "app_cloner_task_bounds_top",
     ),
     "right": (
@@ -157,8 +163,10 @@ APP_CLONER_POSITION_ALIASES: dict[str, tuple[str, ...]] = {
         "app_cloner_current_window_right",
         "app_cloner_window_position_right",
         "app_cloner_window_position_landscape_right",
+        "app_cloner_window_position_portrait_right",
         "app_cloner_saved_bounds_right",
         "app_cloner_saved_bounds_landscape_right",
+        "app_cloner_saved_bounds_portrait_right",
         "app_cloner_task_bounds_right",
     ),
     "bottom": (
@@ -166,21 +174,27 @@ APP_CLONER_POSITION_ALIASES: dict[str, tuple[str, ...]] = {
         "app_cloner_current_window_bottom",
         "app_cloner_window_position_bottom",
         "app_cloner_window_position_landscape_bottom",
+        "app_cloner_window_position_portrait_bottom",
         "app_cloner_saved_bounds_bottom",
         "app_cloner_saved_bounds_landscape_bottom",
+        "app_cloner_saved_bounds_portrait_bottom",
         "app_cloner_task_bounds_bottom",
     ),
     "width": (
         "app_cloner_window_width",
         "app_cloner_window_size_width",
         "app_cloner_window_size_landscape_width",
+        "app_cloner_window_size_portrait_width",
         "app_cloner_custom_screen_size_width",
+        "app_cloner_custom_screen_size_portrait_width",
     ),
     "height": (
         "app_cloner_window_height",
         "app_cloner_window_size_height",
         "app_cloner_window_size_landscape_height",
+        "app_cloner_window_size_portrait_height",
         "app_cloner_custom_screen_size_height",
+        "app_cloner_custom_screen_size_portrait_height",
     ),
 }
 
@@ -205,6 +219,30 @@ APP_CLONER_ENABLE_ALIASES: tuple[str, ...] = (
     "app_cloner_orientation_landscape",
     "app_cloner_set_orientation_landscape",
     # Auto-DPI landscape flag (Kaeru clue: "look for Set in auto-DPI pot/land")
+    "app_cloner_auto_dpi_landscape",
+    "app_cloner_set_auto_dpi_landscape",
+    "app_cloner_set_dpi_landscape",
+)
+
+APP_CLONER_PORTRAIT_ENABLE_ALIASES: tuple[str, ...] = (
+    "app_cloner_set_window_position_portrait",
+    "app_cloner_set_window_position_portrait_enabled",
+    "app_cloner_window_position_portrait_enabled",
+    "app_cloner_set_window_size_portrait",
+    "app_cloner_set_window_size_portrait_enabled",
+    "app_cloner_window_size_portrait_enabled",
+    "app_cloner_force_portrait",
+    "app_cloner_orientation_portrait",
+    "app_cloner_set_orientation_portrait",
+    "app_cloner_auto_dpi_portrait",
+    "app_cloner_set_auto_dpi_portrait",
+    "app_cloner_set_dpi_portrait",
+)
+
+APP_CLONER_LANDSCAPE_ENABLE_ALIASES: tuple[str, ...] = (
+    "app_cloner_force_landscape",
+    "app_cloner_orientation_landscape",
+    "app_cloner_set_orientation_landscape",
     "app_cloner_auto_dpi_landscape",
     "app_cloner_set_auto_dpi_landscape",
     "app_cloner_set_dpi_landscape",
@@ -503,6 +541,80 @@ def validate_layout_rects(
     return errors
 
 
+PORTRAIT_MIN_WIDTH_FRACTION: float = 0.45
+PORTRAIT_MIN_HEIGHT_FRACTION: float = 0.16
+PORTRAIT_ABSOLUTE_MIN_H: int = 180
+
+
+def normalize_display_for_screen_mode(width: int, height: int, screen_mode: str) -> tuple[int, int]:
+    """Return logical dimensions normalized for portrait-only planning.
+
+    Landscape callers keep the dimensions they pass in.  Existing landscape
+    code already uses rotation-aware display detection and several tests depend
+    on that behavior for preview/compat helpers.
+    """
+    w = max(1, int(width))
+    h = max(1, int(height))
+    mode = str(screen_mode or "").strip().lower()
+    if mode == "portrait" and w > h:
+        return h, w
+    return w, h
+
+
+def rects_overlap(a: WindowRect, b: WindowRect) -> bool:
+    return not (
+        a.right <= b.left or b.right <= a.left or
+        a.bottom <= b.top or b.bottom <= a.top
+    )
+
+
+def rect_inside_bounds(rect: WindowRect, bounds: tuple[int, int, int, int]) -> bool:
+    l, t, r, b = bounds
+    return rect.left >= l and rect.top >= t and rect.right <= r and rect.bottom <= b
+
+
+def rect_center(rect: WindowRect) -> tuple[int, int]:
+    return (rect.left + rect.win_w // 2, rect.top + rect.win_h // 2)
+
+
+def validate_portrait_touch_layout(
+    rects: Iterable[WindowRect],
+    display_w: int,
+    display_h: int,
+    *,
+    termux_bounds: tuple[int, int, int, int] | None = None,
+) -> list[str]:
+    """Validate portrait slots for touch usability, not just visual placement."""
+    rect_list = list(rects)
+    W, H = normalize_display_for_screen_mode(display_w, display_h, "portrait")
+    min_w = max(_MIN_WIN_W, int(W * PORTRAIT_MIN_WIDTH_FRACTION))
+    min_h = max(_MIN_WIN_H, int(H * PORTRAIT_MIN_HEIGHT_FRACTION), PORTRAIT_ABSOLUTE_MIN_H)
+    errors: list[str] = []
+    usable_bounds = (0, 0, W, H)
+    for i, r in enumerate(rect_list):
+        if r.win_w < min_w:
+            errors.append(f"rect[{i}] {r.package}: touch width too small ({r.win_w}<{min_w})")
+        if r.win_h < min_h:
+            errors.append(f"rect[{i}] {r.package}: touch height too small ({r.win_h}<{min_h})")
+        if not rect_inside_bounds(r, usable_bounds):
+            errors.append(f"rect[{i}] {r.package}: offscreen ({r.left},{r.top},{r.right},{r.bottom})")
+        cx, cy = rect_center(r)
+        if not (r.left <= cx < r.right and r.top <= cy < r.bottom):
+            errors.append(f"rect[{i}] {r.package}: touch center outside rect ({cx},{cy})")
+        if termux_bounds is not None:
+            tx0, ty0, tx1, ty1 = termux_bounds
+            termux_rect = WindowRect("com.termux", tx0, ty0, tx1, ty1)
+            if rects_overlap(r, termux_rect):
+                errors.append(f"rect[{i}] {r.package}: overlaps termux reserved bounds")
+    for i in range(len(rect_list)):
+        for j in range(i + 1, len(rect_list)):
+            if rects_overlap(rect_list[i], rect_list[j]):
+                errors.append(
+                    f"rect[{i}] {rect_list[i].package} overlaps rect[{j}] {rect_list[j].package}"
+                )
+    return errors
+
+
 # Minimum top-of-screen safe area to avoid placing windows behind the
 # Android status bar.  Probe p-ea167faf5f confirmed the status bar frame
 # is mFrame=[0,0][1280,25] — i.e. 25 px tall.  We detect this dynamically
@@ -600,11 +712,10 @@ def _release_grid_rects(
     pkgs = [p for p in packages]
     if not pkgs:
         return []
-    W = max(1, int(display_w))
-    H = max(1, int(display_h))
     configured_mode = str(mode or "landscape").strip().lower()
     if configured_mode not in {"landscape", "portrait"}:
         configured_mode = "landscape"
+    W, H = normalize_display_for_screen_mode(display_w, display_h, configured_mode)
     orientation = detect_layout_orientation(W, H)
     top_inset = _detect_status_bar_height()
     configured_left_end = round(W * max(0.0, min(0.9, float(left_fraction))))
@@ -704,6 +815,19 @@ def _release_grid_rects(
             roblox_grid_area,
             [(r.left, r.top, r.right, r.bottom) for r in rects],
         )
+        _portrait_errors = validate_portrait_touch_layout(rects, W, H)
+        if _portrait_errors:
+            _log.warning(
+                "[DENG_REJOIN_PORTRAIT_TOUCH_LAYOUT] result=warning errors=%s",
+                "; ".join(_portrait_errors),
+            )
+        else:
+            _log.info(
+                "[DENG_REJOIN_PORTRAIT_TOUCH_LAYOUT] result=ok min_width=%d min_height=%d centers=%s",
+                max(_MIN_WIN_W, int(W * PORTRAIT_MIN_WIDTH_FRACTION)),
+                max(_MIN_WIN_H, int(H * PORTRAIT_MIN_HEIGHT_FRACTION), PORTRAIT_ABSOLUTE_MIN_H),
+                [(r.package, rect_center(r)) for r in rects],
+            )
 
     _log.info(
         "[DENG_REJOIN_LAYOUT_GRID] mode=%s package_count=%d grid=%dx%d slot_order=%s "
@@ -929,7 +1053,11 @@ def _ensure_bool_child(root_el: ET.Element, name: str, value: bool) -> bool:
 
 
 def _apply_layout_keys_to_root(
-    root_el: ET.Element, rect: WindowRect, *, known_keys: Iterable[str] | None = None
+    root_el: ET.Element,
+    rect: WindowRect,
+    *,
+    known_keys: Iterable[str] | None = None,
+    screen_mode: str = "landscape",
 ) -> int:
     """Apply every layout-relevant key to a parsed XML root.
 
@@ -944,6 +1072,9 @@ def _apply_layout_keys_to_root(
     Returns the number of keys created/modified.
     """
     values = _values_from_rect(rect)
+    mode = str(screen_mode or "landscape").strip().lower()
+    if mode not in {"landscape", "portrait"}:
+        mode = "landscape"
     changed = 0
 
     # 1. Legacy compat: update old "current_window" mapping if present (string/int)
@@ -969,9 +1100,28 @@ def _apply_layout_keys_to_root(
                 changed += 1
 
     # 3. Critical "Set" enable booleans — these must be true so App Cloner
-    #    actually honors the position/size ints on next launch.
-    for name in APP_CLONER_ENABLE_ALIASES:
+    #    actually honors the position/size ints on next launch.  Orientation
+    #    flags are mode-specific: writing force-landscape during portrait was
+    #    enough for some clone builds to ignore portrait bounds entirely.
+    base_enable_aliases = tuple(
+        name for name in APP_CLONER_ENABLE_ALIASES
+        if name not in APP_CLONER_LANDSCAPE_ENABLE_ALIASES
+    )
+    enable_aliases = (
+        base_enable_aliases + APP_CLONER_PORTRAIT_ENABLE_ALIASES
+        if mode == "portrait"
+        else base_enable_aliases + APP_CLONER_LANDSCAPE_ENABLE_ALIASES
+    )
+    for name in enable_aliases:
         if _ensure_bool_child(root_el, name, True):
+            changed += 1
+    disable_aliases = (
+        APP_CLONER_LANDSCAPE_ENABLE_ALIASES
+        if mode == "portrait"
+        else APP_CLONER_PORTRAIT_ENABLE_ALIASES
+    )
+    for name in disable_aliases:
+        if _ensure_bool_child(root_el, name, False):
             changed += 1
 
     # 3b. Override last/manual position keys (Layer 5 from the spec).
@@ -994,7 +1144,7 @@ def _apply_layout_keys_to_root(
                 continue
             if any(name in aliases for aliases in APP_CLONER_POSITION_ALIASES.values()):
                 continue  # already handled in step 2
-            if name in APP_CLONER_ENABLE_ALIASES:
+            if name in enable_aliases or name in disable_aliases:
                 continue  # already handled in step 3
             cats = _classify(name)
             target_value: int | None = None
@@ -1024,9 +1174,15 @@ def _apply_layout_keys_to_root(
                     "freeform",
                     "auto_dpi",
                     "orient_landscape",
+                    "orient_portrait",
                 )
             ):
-                if _ensure_bool_child(root_el, name, True):
+                lname = name.lower()
+                value = not (
+                    (mode == "portrait" and "landscape" in lname) or
+                    (mode == "landscape" and "portrait" in lname)
+                )
+                if _ensure_bool_child(root_el, name, value):
                     changed += 1
 
     return changed
@@ -1051,6 +1207,7 @@ def update_app_cloner_xml(
     rect: WindowRect,
     *,
     known_keys: Iterable[str] | None = None,
+    screen_mode: str = "landscape",
 ) -> tuple[bool, str]:
     """Write window position+size+enable flags via direct file access.
 
@@ -1071,7 +1228,9 @@ def update_app_cloner_xml(
                 pass
             tree    = ET.parse(path)
             root_el = tree.getroot()
-            changed = _apply_layout_keys_to_root(root_el, rect, known_keys=known_keys)
+            changed = _apply_layout_keys_to_root(
+                root_el, rect, known_keys=known_keys, screen_mode=screen_mode,
+            )
             if changed == 0:
                 attempted.append(f"{path.name}: no keys changed (already desired)")
                 continue
@@ -1108,6 +1267,7 @@ def update_app_cloner_xml_root(
     timeout:    int = 10,
     *,
     known_keys: Iterable[str] | None = None,
+    screen_mode: str = "landscape",
 ) -> tuple[bool, str]:
     """Write clone-wrapper window prefs via root.
 
@@ -1153,7 +1313,9 @@ def update_app_cloner_xml_root(
                 except ET.ParseError as exc:
                     attempted.append(f"{path.name}: parse error: {exc}")
                     continue
-            changed = _apply_layout_keys_to_root(root_el, rect, known_keys=known_keys)
+            changed = _apply_layout_keys_to_root(
+                root_el, rect, known_keys=known_keys, screen_mode=screen_mode,
+            )
             if changed == 0:
                 attempted.append(f"{path.name}: no keys changed (already desired)")
                 continue
@@ -1241,9 +1403,13 @@ def apply_layout_to_packages(
     write_msgs: list[str] = []
     for rect in rects:
         try:
-            ok, msg = update_app_cloner_xml(rect.package, rect)
+            ok, msg = update_app_cloner_xml(
+                rect.package, rect, screen_mode=screen_mode,
+            )
             if not ok and root_tool:
-                ok, msg = update_app_cloner_xml_root(rect.package, rect, root_tool)
+                ok, msg = update_app_cloner_xml_root(
+                    rect.package, rect, root_tool, screen_mode=screen_mode,
+                )
             write_msgs.append(f"{rect.package}: {msg}")
         except Exception as exc:  # noqa: BLE001
             _log.debug("Layout write skipped for %s: %s", rect.package, exc)

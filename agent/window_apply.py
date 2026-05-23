@@ -39,6 +39,9 @@ from . import android
 from .window_layout import (
     WindowRect,
     _is_layout_excluded,
+    rect_center,
+    rect_inside_bounds,
+    rects_overlap,
     update_app_cloner_xml,
     update_app_cloner_xml_root,
 )
@@ -63,6 +66,10 @@ class ApplyResult:
     actual_bounds: tuple[int, int, int, int] | None = None  # (l, t, r, b)
     actual_method: str = ""
     direct_resize_ok: bool = False
+    touch_probe_ok: bool | None = None
+    touch_probe_center: tuple[int, int] | None = None
+    touch_probe_detail: str = ""
+    validation: list[str] = field(default_factory=list)
     final_ok: bool = False
     status: str = LAYOUT_FAILED   # one of LAYOUT_APPLIED/UNVERIFIED/FAILED/SKIPPED
     detail: str = ""
@@ -581,13 +588,21 @@ def _write_one_package(
     root_tool: str | None,
     known_keys: Iterable[str] | None,
     result: ApplyResult,
+    screen_mode: str = "landscape",
 ) -> bool:
     """Pre-write the XML for one rect.  Updates ``result`` in place.
 
     Returns True if at least one write method succeeded.
     """
     try:
-        ok, msg = update_app_cloner_xml(rect.package, rect, known_keys=known_keys)
+        if screen_mode == "portrait":
+            ok, msg = update_app_cloner_xml(
+                rect.package, rect, known_keys=known_keys, screen_mode=screen_mode,
+            )
+        else:
+            ok, msg = update_app_cloner_xml(
+                rect.package, rect, known_keys=known_keys,
+            )
         result.attempts.append(f"xml-direct: {msg}")
         if ok:
             result.pre_write_ok = True
@@ -597,9 +612,17 @@ def _write_one_package(
         result.attempts.append(f"xml-direct-error: {exc}")
     if root_tool:
         try:
-            ok, msg = update_app_cloner_xml_root(
-                rect.package, rect, root_tool, known_keys=known_keys
-            )
+            if screen_mode == "portrait":
+                ok, msg = update_app_cloner_xml_root(
+                    rect.package, rect, root_tool,
+                    known_keys=known_keys,
+                    screen_mode=screen_mode,
+                )
+            else:
+                ok, msg = update_app_cloner_xml_root(
+                    rect.package, rect, root_tool,
+                    known_keys=known_keys,
+                )
             result.attempts.append(f"xml-root: {msg}")
             if ok:
                 result.pre_write_ok = True
@@ -624,6 +647,74 @@ def _discover_known_keys(packages: Sequence[str], root_tool: str | None) -> dict
         return {pkg: [] for pkg in packages}
 
 
+def _rect_from_bounds(package: str, bounds: tuple[int, int, int, int]) -> WindowRect:
+    return WindowRect(package, bounds[0], bounds[1], bounds[2], bounds[3])
+
+
+def _display_bounds() -> tuple[int, int, int, int]:
+    try:
+        from .window_layout import detect_display_info
+        display = detect_display_info()
+        return (0, 0, int(display.width), int(display.height))
+    except Exception:  # noqa: BLE001
+        return (0, 0, 99999, 99999)
+
+
+def _validate_actual_layout(
+    results: Sequence[ApplyResult],
+    *,
+    screen_mode: str,
+) -> None:
+    mode = str(screen_mode or "landscape").strip().lower()
+    display_bounds = _display_bounds()
+    actual_rects: list[tuple[ApplyResult, WindowRect]] = []
+    for result in results:
+        if result.actual_bounds is None:
+            continue
+        rect = _rect_from_bounds(result.package, result.actual_bounds)
+        actual_rects.append((result, rect))
+        if not rect_inside_bounds(rect, display_bounds):
+            result.validation.append("Offscreen")
+        if mode == "portrait":
+            desired_w = max(1, result.desired.win_w)
+            desired_h = max(1, result.desired.win_h)
+            if rect.win_w < max(160, int(desired_w * 0.85)):
+                result.validation.append("Too Small")
+            if rect.win_h < max(180, int(desired_h * 0.85)):
+                result.validation.append("Too Small")
+    for i in range(len(actual_rects)):
+        result_i, rect_i = actual_rects[i]
+        for j in range(i + 1, len(actual_rects)):
+            result_j, rect_j = actual_rects[j]
+            if rects_overlap(rect_i, rect_j):
+                result_i.validation.append(f"Overlap:{result_j.package}")
+                result_j.validation.append(f"Overlap:{result_i.package}")
+
+
+def _tap_center_probe(
+    package: str,
+    bounds: tuple[int, int, int, int],
+    root_tool: str | None,
+) -> tuple[bool, tuple[int, int], str]:
+    rect = _rect_from_bounds(package, bounds)
+    center = rect_center(rect)
+    if not root_tool:
+        return False, center, "no root"
+    try:
+        cx, cy = center
+        res = android.run_root_command(
+            ["input", "tap", str(cx), str(cy)],
+            root_tool=root_tool,
+            timeout=3,
+        )
+        if res.ok:
+            return True, center, "input tap ok"
+        detail = (res.stderr or res.stdout or "input tap failed").strip()[:120]
+        return False, center, detail
+    except Exception as exc:  # noqa: BLE001
+        return False, center, str(exc)[:120]
+
+
 def apply_window_layout(
     rects: Sequence[WindowRect],
     *,
@@ -633,6 +724,8 @@ def apply_window_layout(
     retries: int = 1,
     tolerance: int = 32,
     wait_for_window_seconds: float = 6.0,
+    screen_mode: str = "landscape",
+    touch_probe: bool = False,
 ) -> list[ApplyResult]:
     """Apply landscape-block layout to a list of WindowRect.
 
@@ -650,6 +743,9 @@ def apply_window_layout(
 
     Returns one :class:`ApplyResult` per rect.  Never raises.  Never prints.
     """
+    mode = str(screen_mode or "landscape").strip().lower()
+    if mode not in {"landscape", "portrait"}:
+        mode = "landscape"
     caps = _capability_probes()
     _log.debug("apply_window_layout caps=%s", caps)
 
@@ -696,6 +792,7 @@ def apply_window_layout(
             root_tool=root_tool,
             known_keys=known_keys_map.get(rect.package, []),
             result=result,
+            screen_mode=mode,
         )
 
         # Step 2: force-stop so prefs reload on next launch
@@ -776,6 +873,7 @@ def apply_window_layout(
                     root_tool=root_tool,
                     known_keys=known_keys_map.get(result.package, []),
                     result=result,
+                    screen_mode=mode,
                 )
                 if rewrote:
                     try:
@@ -789,6 +887,29 @@ def apply_window_layout(
 
         if all_ok:
             break
+
+    _validate_actual_layout(results, screen_mode=mode)
+
+    if mode == "portrait" and touch_probe:
+        for r in results:
+            if r.status == LAYOUT_SKIPPED or r.actual_bounds is None:
+                continue
+            ok, center, detail = _tap_center_probe(r.package, r.actual_bounds, root_tool)
+            r.touch_probe_ok = ok
+            r.touch_probe_center = center
+            r.touch_probe_detail = detail
+            r.attempts.append(
+                f"touch-probe: center={center} result={'ok' if ok else 'fail'} detail={detail}"
+            )
+            _log.info(
+                "[DENG_REJOIN_TOUCH_PROBE] package=%s center=%s result=%s detail=%s",
+                r.package, center, "ok" if ok else "fail", detail,
+            )
+
+    for r in results:
+        if r.status != LAYOUT_SKIPPED and r.validation:
+            r.final_ok = False
+            r.status = LAYOUT_FAILED
 
     # Finalize details
     for r in results:
@@ -805,7 +926,8 @@ def apply_window_layout(
         else:
             r.detail = (
                 f"layout not honored "
-                f"(pre_write={r.pre_write_ok}, actual_bounds={r.actual_bounds})"
+                f"(pre_write={r.pre_write_ok}, actual_bounds={r.actual_bounds}, "
+                f"validation={','.join(r.validation) or 'Mismatch'})"
             )
 
     return results
@@ -818,6 +940,7 @@ def apply_window_layout_silent(
     relaunch_after: bool = False,
     verify_after: bool = True,
     retries: int = 1,
+    screen_mode: str = "landscape",
 ) -> tuple[int, int]:
     """Silent wrapper: returns (success_count, total_count).  Never raises.
 
@@ -830,6 +953,7 @@ def apply_window_layout_silent(
             relaunch_after=relaunch_after,
             verify_after=verify_after,
             retries=retries,
+            screen_mode=screen_mode,
         )
     except Exception as exc:  # noqa: BLE001
         _log.debug("apply_window_layout_silent error: %s", exc)

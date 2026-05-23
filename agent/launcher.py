@@ -247,17 +247,39 @@ def perform_rejoin(
         _bounds_rect: tuple[int, int, int, int] | None = None
         try:
             from . import window_layout
-            _display = window_layout.detect_display_info()
-            _all_pkgs = [e["package"] for e in ents] or [package]
-            if package not in _all_pkgs:
-                _all_pkgs.append(package)
-            _dock_frac = 0.50
             from .config import DEFAULT_SCREEN_MODE, validate_screen_mode
-            _rects = window_layout.calculate_split_layout(
-                _all_pkgs, _display.width, _display.height,
-                termux_log_fraction=_dock_frac,
-                screen_mode=validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE)),
-            )
+            _screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
+            _rects = []
+            for _source in (cfg.get("_layout_rects"), cfg.get("last_layout_preview")):
+                if not isinstance(_source, list):
+                    continue
+                for _item in _source:
+                    if not isinstance(_item, dict) or _item.get("package") != package:
+                        continue
+                    try:
+                        _rects = [window_layout.WindowRect(
+                            package=str(_item["package"]),
+                            left=int(_item["left"]),
+                            top=int(_item["top"]),
+                            right=int(_item["right"]),
+                            bottom=int(_item["bottom"]),
+                        )]
+                    except (KeyError, TypeError, ValueError):
+                        _rects = []
+                    break
+                if _rects:
+                    break
+            if not _rects:
+                _display = window_layout.detect_display_info()
+                _all_pkgs = [e["package"] for e in ents] or [package]
+                if package not in _all_pkgs:
+                    _all_pkgs.append(package)
+                _dock_frac = float(cfg.get("termux_dock_fraction", 0.0) or 0.0)
+                _rects = window_layout.calculate_split_layout(
+                    _all_pkgs, _display.width, _display.height,
+                    termux_log_fraction=_dock_frac,
+                    screen_mode=_screen_mode,
+                )
             _r_for_pkg = next(
                 (r for r in (_rects or []) if getattr(r, "package", None) == package),
                 None,

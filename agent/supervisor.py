@@ -120,7 +120,13 @@ def _reapply_layout_for_package(package: str) -> None:
             pass
 
         window_apply.apply_window_layout_silent(
-            rects, force_stop_before=False, verify_after=False, retries=0,
+            rects,
+            force_stop_before=False,
+            verify_after=False,
+            retries=0,
+            screen_mode=validate_screen_mode(
+                cfg.get("screen_mode", DEFAULT_SCREEN_MODE)
+            ),
         )
         # Direct resize via root, with freeform mode flip.  This is what
         # actually moves the visible window without waiting for the next

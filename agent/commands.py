@@ -4395,6 +4395,7 @@ def _prepare_automatic_layout(
                 relaunch_after=False,
                 verify_after=False,        # verification deferred to post-launch
                 retries=0,
+                screen_mode=_screen_mode,
             )
             for r in results:
                 _layout_log.debug(
@@ -4465,14 +4466,36 @@ def _verify_layout_post_launch(
     out: dict[str, bool] = {}
     diag_rows: list[dict[str, Any]] = []
     try:
-        display = window_layout.detect_display_info()
-        _dock_frac2 = 0.50
-        rects = window_layout.calculate_split_layout(
-            [e["package"] for e in entries if not window_layout._is_layout_excluded(e["package"])],
-            display.width, display.height,
-            termux_log_fraction=_dock_frac2,
-            screen_mode=validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE)),
-        )
+        _screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
+        stored_rects = cfg.get("_layout_rects") or cfg.get("last_layout_preview")
+        rects = []
+        if isinstance(stored_rects, list):
+            selected = {
+                e["package"] for e in entries
+                if not window_layout._is_layout_excluded(e["package"])
+            }
+            for item in stored_rects:
+                if not isinstance(item, dict) or item.get("package") not in selected:
+                    continue
+                try:
+                    rects.append(window_layout.WindowRect(
+                        package=str(item["package"]),
+                        left=int(item["left"]),
+                        top=int(item["top"]),
+                        right=int(item["right"]),
+                        bottom=int(item["bottom"]),
+                    ))
+                except (KeyError, TypeError, ValueError):
+                    continue
+        if not rects:
+            display = window_layout.detect_display_info()
+            _dock_frac2 = float(cfg.get("termux_dock_fraction", 0.0) or 0.0)
+            rects = window_layout.calculate_split_layout(
+                [e["package"] for e in entries if not window_layout._is_layout_excluded(e["package"])],
+                display.width, display.height,
+                termux_log_fraction=_dock_frac2,
+                screen_mode=_screen_mode,
+            )
         from . import window_apply
         results = window_apply.apply_window_layout(
             rects,
@@ -4480,6 +4503,8 @@ def _verify_layout_post_launch(
             relaunch_after=False,
             verify_after=True,
             retries=0,  # MUST be 0: retries>0 force-stops running apps
+            screen_mode=_screen_mode,
+            touch_probe=(_screen_mode == "portrait"),
         )
         for r in results:
             out[r.package] = r.final_ok
@@ -4495,6 +4520,10 @@ def _verify_layout_post_launch(
                 "pre_write_ok":   r.pre_write_ok,
                 "pre_write_method": r.pre_write_method,
                 "direct_resize_ok": r.direct_resize_ok,
+                "validation":      r.validation,
+                "touch_probe_ok":  r.touch_probe_ok,
+                "touch_probe_center": r.touch_probe_center,
+                "touch_probe_detail": r.touch_probe_detail,
                 "attempts":       r.attempts,
                 "final_ok":       r.final_ok,
             })
