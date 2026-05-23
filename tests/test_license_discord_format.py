@@ -21,6 +21,7 @@ from agent.key_stats_format import (
     is_active_visible_license_row,
 )
 from agent.license import hash_license_key, normalize_license_key
+from agent.license_key_export import clear_export_key_cache
 from agent.license_store import LocalJsonLicenseStore, get_license_stats_for_discord_user
 
 
@@ -154,11 +155,13 @@ class TestActiveVisibleFiltering(unittest.TestCase):
             clear=False,
         )
         self._env_patch.start()
+        clear_export_key_cache()
         self.store = _tmp_store()
         self.uid = "110184213604499456"
         self.store.get_or_create_user(self.uid)
 
     def tearDown(self) -> None:
+        clear_export_key_cache()
         self._env_patch.stop()
 
     def test_revoked_key_hidden(self) -> None:

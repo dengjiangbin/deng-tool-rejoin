@@ -511,18 +511,27 @@ class KeyStatsDownloadButton(discord.ui.Button):
             return
         from io import BytesIO
 
-        from agent.key_stats_format import build_key_stats_download_body
+        from agent.key_stats_format import build_key_stats_download_body, license_export_filename
 
+        def _display_name(user: Any) -> str:
+            for attr in ("display_name", "global_name", "name"):
+                value = getattr(user, attr, None)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return ""
+
+        username = _display_name(interaction.user)
         rows = visible_license_rows_for_panel(
             self._host._store.get_user_key_export_rows(self._host._owner_id)
         )
         body = build_key_stats_download_body(
             discord_user_id=self._host._owner_id,
             rows=rows,
+            username=username,
         )
         buf = BytesIO(body.encode("utf-8"))
         buf.seek(0)
-        filename = f"my_keys_{self._host._owner_id}.txt"
+        filename = license_export_filename(username, self._host._owner_id)
         file = discord.File(buf, filename=filename)
         dl_embed_dict: dict[str, Any] = {
             "title": "Your Keys Download",

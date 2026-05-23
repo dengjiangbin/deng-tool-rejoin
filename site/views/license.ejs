@@ -33,9 +33,9 @@
         Generate Key
       </button>
     </form>
-    <button type="button" class="btn btn-outline" data-open-license-modal="reset">Reset HWID</button>
-    <button type="button" class="btn btn-outline" data-open-license-modal="redeem">Redeem Key</button>
-    <button type="button" class="btn btn-outline" data-download-keys>Download Key</button>
+    <button type="button" class="btn btn-primary" data-open-license-modal="reset">Reset HWID</button>
+    <button type="button" class="btn btn-primary" data-open-license-modal="redeem">Redeem Key</button>
+    <button type="button" class="btn btn-primary" data-download-keys>Download Key</button>
   </div>
 
   <div class="license-message" data-license-message hidden></div>
@@ -65,7 +65,7 @@
             <td class="key-cell"><code><%= fullKeyRow(row) %></code></td>
             <td><span class="badge badge-provider"><%= providerLabel(row.provider) %></span></td>
             <td><span class="badge <%= friendlyStatus(row) === 'Generated' ? 'badge-green' : (friendlyStatus(row) === 'Expired' ? 'badge-red' : 'badge-gray') %>"><%= friendlyStatus(row) %></span></td>
-            <td class="muted-cell"><%= new Date(row.created_at).toLocaleString() %></td>
+            <td class="muted-cell"><%= formatWibTimestamp(row.created_at) %></td>
           </tr>
           <% }) %>
         </tbody>

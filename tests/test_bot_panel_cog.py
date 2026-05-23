@@ -64,6 +64,8 @@ def _make_store(tmp_dir: str) -> LocalJsonLicenseStore:
 def _fake_user(uid: int = 111, name: str = "TestUser#0001") -> MagicMock:
     user = MagicMock()
     user.id = uid
+    user.display_name = name
+    user.name = name
     user.__str__ = lambda self: name
     return user
 
@@ -435,7 +437,11 @@ class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
         await dl.callback(inter2)
         inter2.response.send_message.assert_called_once()
         _, dk = inter2.response.send_message.call_args
-        self.assertEqual(dk["file"].filename, f"my_keys_{uid}.txt")
+        self.assertRegex(
+            dk["file"].filename,
+            rf"TestUser#0001 - DENG Tool Rejoin License Keys - \d{{1,2}} [A-Za-z]+ 20\d{{2}}\.txt",
+        )
+        self.assertNotIn(f"my_keys_{uid}", dk["file"].filename)
 
 
 # ── RedeemModal ───────────────────────────────────────────────────────────────

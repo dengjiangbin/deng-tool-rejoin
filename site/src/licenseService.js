@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const supabase = require('./db');
 const { decryptLicenseKeyCiphertext, encryptLicenseKeyPlaintext } = require('./licenseCrypto');
+const { formatWibTimestamp } = require('./licenseFormat');
 
 const FULL_KEY_UNAVAILABLE = 'Full key unavailable for this old key';
 const KEY_RE = /^DENG-([0-9A-F]{4})-?([0-9A-F]{4})-?([0-9A-F]{4})-?([0-9A-F]{4})$/i;
@@ -114,6 +115,7 @@ function providerLabel(provider) {
   if (provider === 'linkvertise') return 'Linkvertise';
   if (provider === 'lootlabs') return 'LootLabs';
   if (provider === 'discord') return 'Discord Panel';
+  if (provider === 'website') return 'Website';
   return 'License';
 }
 
@@ -129,7 +131,7 @@ function formatLicenseStatus(row) {
 }
 
 function deviceStatus(row) {
-  return isBound(row) ? 'Bound To A Device' : 'No Device Linked';
+  return isBound(row) ? 'Bound' : 'No Device Linked';
 }
 
 async function fetchByKeyId(table, columns, keyIds, field = 'key_id') {
@@ -357,19 +359,12 @@ async function resetLicenseHwid(discordUserId, keyIdOrKey) {
   return { status: 'reset', message: 'HWID Reset Successful. You Can Bind This Key On A New Device.' };
 }
 
-function formatDate(value) {
-  if (!value) return 'None';
-  const ts = Date.parse(value);
-  if (Number.isNaN(ts)) return String(value);
-  return new Date(ts).toISOString();
-}
-
 function downloadUserKeys(discordUserId, rows, username = '') {
   const activeRows = filterActiveLicenses(rows || []);
   const lines = [
     'DENG Tool: Rejoin Keys',
     `User: ${username || discordUserId}`,
-    `Generated: ${new Date().toISOString()}`,
+    `Generated: ${formatWibTimestamp(new Date())}`,
     '',
   ];
   if (!activeRows.length) {
@@ -381,10 +376,9 @@ function downloadUserKeys(discordUserId, rows, username = '') {
     lines.push(`${idx + 1}. Key: ${full}`);
     lines.push(`   Status: ${deviceStatus(row)}`);
     lines.push(`   Device: ${row.device_display || 'None'}`);
-    lines.push(`   Created: ${formatDate(row.created_at)}`);
-    lines.push(`   Redeemed: ${formatDate(row.redeemed_at)}`);
+    lines.push(`   Created: ${formatWibTimestamp(row.created_at)}`);
+    lines.push(`   Redeemed: ${formatWibTimestamp(row.redeemed_at)}`);
     lines.push(`   Provider: ${providerLabel(row.provider)}`);
-    lines.push(`   Recoverable: ${recoverableFullKey(row) ? 'yes' : 'no'}`);
     lines.push('');
   });
   return `${lines.join('\n').trimEnd()}\n`;
@@ -427,6 +421,7 @@ module.exports = {
   getUserLicenses,
   getUserLicenseStats,
   downloadUserKeys,
+  formatWibTimestamp,
   getRecoverableFullKey: recoverableFullKey,
   isActiveLicense,
   normalizeLicenseKey,

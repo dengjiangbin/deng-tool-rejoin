@@ -2,13 +2,82 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 # Embed colors (Discord integer colors)
 COLOR_STATS_UNUSED = 0x27AE60
 COLOR_STATS_USED = 0x2F80ED
 COLOR_STATS_BAD = 0xE74C3C
+try:
+    WIB_TZ = ZoneInfo("Asia/Jakarta")
+except ZoneInfoNotFoundError:  # pragma: no cover - Windows hosts may lack tzdata.
+    WIB_TZ = timezone(timedelta(hours=7), "Asia/Jakarta")
+ID_MONTHS = (
+    "Januari",
+    "Februari",
+    "Maret",
+    "April",
+    "Mei",
+    "Juni",
+    "Juli",
+    "Agustus",
+    "September",
+    "Oktober",
+    "November",
+    "Desember",
+)
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def format_wib_timestamp(value: Any) -> str:
+    dt = _parse_datetime(value)
+    if dt is None:
+        return "None"
+    local = dt.astimezone(WIB_TZ)
+    hour = local.hour % 12 or 12
+    period = "AM" if local.hour < 12 else "PM"
+    month = ID_MONTHS[local.month - 1]
+    return f"{local.day} {month} {local.year}, {hour}:{local.minute:02d}:{local.second:02d} {period}"
+
+
+def format_wib_date(value: Any = None) -> str:
+    dt = _parse_datetime(value or datetime.now(timezone.utc))
+    if dt is None:
+        return "None"
+    local = dt.astimezone(WIB_TZ)
+    return f"{local.day} {ID_MONTHS[local.month - 1]} {local.year}"
+
+
+def sanitize_filename_username(value: Any, fallback_id: Any = "") -> str:
+    text = str(value or "")
+    for char in '/\\:*?"<>|':
+        text = text.replace(char, " ")
+    cleaned = " ".join(text.split())
+    if cleaned:
+        return cleaned
+    fallback = str(fallback_id or "").strip()
+    return f"user-{fallback}" if fallback else "user"
+
+
+def license_export_filename(username: Any, discord_user_id: Any, generated_at: Any = None) -> str:
+    safe_user = sanitize_filename_username(username, discord_user_id)
+    return f"{safe_user} - DENG Tool Rejoin License Keys - {format_wib_date(generated_at)}.txt"
 
 
 def relative_time_ago(iso_str: str | None) -> str | None:
@@ -302,57 +371,44 @@ def build_license_admin_stats_description(
     return "\n".join(lines)
 
 
-def build_key_stats_download_body(*, discord_user_id: str, rows: list[dict[str, Any]]) -> str:
-    from datetime import datetime, timezone
+def _provider_label(provider: Any) -> str:
+    provider_text = str(provider or "discord").lower()
+    if provider_text == "linkvertise":
+        return "Linkvertise"
+    if provider_text == "lootlabs":
+        return "LootLabs"
+    if provider_text == "website":
+        return "Website"
+    return "Discord Panel"
 
-    now = datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S UTC")
+
+def _download_device_status(row: dict[str, Any]) -> str:
+    return "Bound" if _license_row_is_bound(row) else "No Device Linked"
+
+
+def build_key_stats_download_body(
+    *, discord_user_id: str, rows: list[dict[str, Any]], username: str | None = None
+) -> str:
+    now = format_wib_timestamp(datetime.now(timezone.utc))
     header = [
-        f"License Keys For User ID: {discord_user_id}",
+        "DENG Tool: Rejoin Keys",
+        f"User: {username or discord_user_id}",
         f"Generated: {now}",
-        f"Total Keys: {len(rows)}",
-        "=" * 43,
         "",
     ]
     body: list[str] = []
     for i, row in enumerate(rows, start=1):
         full = row.get("full_key_plaintext")
-        masked = row.get("masked_key") or "???"
-        used = bool(row.get("used"))
-        lic = (row.get("license_status") or "active").lower()
-
-        if lic == "revoked":
-            status_word = "Revoked"
-        elif lic == "expired":
-            status_word = "Expired"
-        elif used:
-            status_word = "Used / Device bound"
-        else:
-            status_word = "Unused / Ready for first device"
-
         if full:
-            body.append(f"{i}. {full} - {status_word}")
+            body.append(f"{i}. Key: {full}")
         else:
-            body.append(f"{i}. [Full key not available for copy] - {status_word}")
-            if lic not in {"revoked", "expired"}:
-                body.append(
-                    "   Full key is not recoverable for this key because export storage "
-                    "was not enabled when it was created (or ciphertext is missing)."
-                )
-            else:
-                body.append(f"   Reference: {masked}")
-
-        if device := row.get("device_display"):
-            if used and lic not in {"revoked", "expired"}:
-                body.append(f"   Device: {device}")
-
-        last_seen = row.get("last_seen_at")
-        if used and lic not in {"revoked", "expired"}:
-            if last_seen:
-                rel = relative_time_ago(last_seen)
-                body.append(f"   Last Active: {rel or last_seen[:19]}")
-            else:
-                body.append("   Last Active: Never")
-
+            body.append(f"{i}. Key: Full Key Unavailable For This Old Key")
+        device = row.get("device_display") if _license_row_is_bound(row) else None
+        body.append(f"   Status: {_download_device_status(row)}")
+        body.append(f"   Device: {device or 'None'}")
+        body.append(f"   Created: {format_wib_timestamp(row.get('created_at'))}")
+        body.append(f"   Redeemed: {format_wib_timestamp(row.get('redeemed_at'))}")
+        body.append(f"   Provider: {_provider_label(row.get('provider'))}")
         body.append("")
 
     return "\n".join(header + body).rstrip() + "\n"

@@ -369,6 +369,12 @@ const request = require('supertest');
 const app = require('../src/app');
 const { signChallenge } = require('../src/crypto');
 const { AD_MIN_COMPLETION_SECONDS, classifyChallengeInsertError } = require('../src/challenge');
+const {
+  formatWibDate,
+  formatWibTimestamp,
+  licenseExportFilename,
+  sanitizeFilenameUsername,
+} = require('../src/licenseFormat');
 
 function resetDb() {
   memoryDb.site_users.splice(0);
@@ -784,12 +790,25 @@ describe('theme and dashboard UI', () => {
   test('dashboard and My License render compact portal panels', async () => {
     const agent = request.agent(app);
     await login(agent);
+    memoryDb.license_keys.push({
+      id: 'history-wib',
+      prefix: 'DENG-WIB',
+      suffix: '0001',
+      owner_discord_id: 'discord-user-1',
+      status: 'active',
+      plan: 'standard',
+      created_at: '2026-05-22T07:14:05.740Z',
+      redeemed_at: null,
+      expires_at: null,
+    });
     const dashboard = await agent.get('/dashboard');
     assert.match(dashboard.text, /Dashboard Overview/);
     assert.match(dashboard.text, /Generate Key/);
     assert.match(dashboard.text, /News & Updates/);
     assert.match(dashboard.text, /Your Activity/);
     assert.match(dashboard.text, /stats-grid/);
+    assert.match(dashboard.text, /22 Mei 2026, 2:14:05 PM/);
+    assert.doesNotMatch(dashboard.text, /5\/22\/2026|2026-05-22T/);
     assert.doesNotMatch(dashboard.text, /Buy License/);
 
     const license = await agent.get('/license');
@@ -803,6 +822,8 @@ describe('theme and dashboard UI', () => {
     assert.match(license.text, /Generate DENG Tool: Rejoin Key/);
     assert.match(license.text, /Generate Key/);
     assert.match(license.text, /Recent Generated Keys/);
+    assert.match(license.text, /22 Mei 2026, 2:14:05 PM/);
+    assert.doesNotMatch(license.text, /5\/22\/2026|2026-05-22T/);
   });
 
   test('logo image replaces DT placeholders on login and dashboard', async () => {
@@ -828,6 +849,8 @@ describe('theme and dashboard UI', () => {
     assert.match(css, /#00cfff|#17a0dd/i);
     assert.match(css, /#ff2fb3|#c0187a/i);
     assert.match(css, /#6143b2/i);
+    assert.match(css, /--button-gradient:\s*linear-gradient\(90deg,\s*#05c8ff 0%,\s*#7b5cff 50%,\s*#ff2bae 100%\)/i);
+    assert.match(css, /var\(--button-gradient\) padding-box,\s*var\(--button-gradient\) border-box/i);
     assert.match(css, /rgba\(255,\s*255,\s*255,\s*0\.82\)/i);
     assert.match(css, /\.nav-link\.active/);
     assert.match(css, /@media \(max-width: 760px\)/);
@@ -878,6 +901,10 @@ describe('theme and dashboard UI', () => {
     assert.match(res.text, /Redeem Key/);
     assert.match(res.text, /Download Key/);
     assert.match(res.text, /class="license-actions"/);
+    assert.match(res.text, /class="btn btn-primary btn-generate"[^>]*>\s*Generate Key/);
+    assert.match(res.text, /class="btn btn-primary"[^>]*data-open-license-modal="reset"[^>]*>Reset HWID/);
+    assert.match(res.text, /class="btn btn-primary"[^>]*data-open-license-modal="redeem"[^>]*>Redeem Key/);
+    assert.match(res.text, /class="btn btn-primary"[^>]*data-download-keys[^>]*>Download Key/);
     assert.doesNotMatch(res.text, /Key Stats/);
     assert.doesNotMatch(res.text, /Select Package/);
     assert.doesNotMatch(res.text, /Select Version/);
@@ -889,6 +916,47 @@ describe('theme and dashboard UI', () => {
     assert.match(css, /\.license-actions/);
     assert.match(css, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
     assert.match(css, /grid-template-columns:\s*1fr/);
+  });
+
+  test('primary website action buttons share fixed gradient class', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const dashboard = await agent.get('/dashboard');
+    const license = await agent.get('/license');
+    const provider = await startChallenge(agent).then((result) => ({ status: 200, text: result.html }));
+    assert.equal(dashboard.status, 200);
+    assert.equal(license.status, 200);
+    assert.match(dashboard.text, /class="btn btn-primary"[^>]*>Generate Key/);
+    assert.match(license.text, /data-download-keys/);
+    assert.match(provider.text, /class="btn btn-primary btn-block btn-provider"[^>]*>Continue with LootLabs/);
+    assert.match(provider.text, /class="btn btn-primary btn-block btn-provider"[^>]*>Continue with Linkvertise/);
+    assert.doesNotMatch(license.text, /class="btn btn-outline"[^>]*(Reset HWID|Redeem Key|Download Key)/);
+  });
+});
+
+describe('license WIB formatting helpers', () => {
+  test('UTC timestamp converts to WIB with Indonesian month and AM/PM', () => {
+    assert.equal(formatWibTimestamp('2026-05-22T07:14:05.740Z'), '22 Mei 2026, 2:14:05 PM');
+    assert.equal(formatWibTimestamp('2026-05-15T20:40:35.000Z'), '16 Mei 2026, 3:40:35 AM');
+    assert.equal(formatWibTimestamp('2026-05-23T13:20:40.000Z'), '23 Mei 2026, 8:20:40 PM');
+    assert.equal(formatWibTimestamp(null), 'None');
+    assert.equal(formatWibDate('2026-05-23T17:00:00.000Z'), '24 Mei 2026');
+  });
+
+  test('download filename uses sanitized Discord username and WIB date without time', () => {
+    assert.equal(
+      licenseExportFilename('deng', '110184213604499456', '2026-05-23T17:00:00.000Z'),
+      'deng - DENG Tool Rejoin License Keys - 24 Mei 2026.txt',
+    );
+    assert.equal(sanitizeFilenameUsername(' DENG/Test  Name ', '1'), 'DENG Test Name');
+    assert.equal(
+      licenseExportFilename('DENG/Test', '110184213604499456', '2026-05-23T17:00:00.000Z'),
+      'DENG Test - DENG Tool Rejoin License Keys - 24 Mei 2026.txt',
+    );
+    assert.equal(
+      licenseExportFilename(' /:*?"<>| ', '110184213604499456', '2026-05-23T17:00:00.000Z'),
+      'user-110184213604499456 - DENG Tool Rejoin License Keys - 24 Mei 2026.txt',
+    );
   });
 });
 
@@ -1861,16 +1929,28 @@ describe('My License action APIs', () => {
   test('Download Key exports only logged-in user active keys with safe full-key fallback', async () => {
     const agent = request.agent(app);
     await login(agent);
-    const now = new Date().toISOString();
+    const now = '2026-05-22T07:14:05.740Z';
+    const redeemedAt = '2026-05-22T07:21:40.000Z';
     const activeFull = 'DENG-AAAA-1111-BBBB-2222';
     const activeFullId = licenseKeyId(activeFull);
+    const boundFull = 'DENG-68C9-0BA2-F745-E506';
+    const boundFullId = licenseKeyId(boundFull);
     memoryDb.license_keys.push(
-      { id: activeFullId, prefix: 'DENG-AAAA', suffix: '2222', owner_discord_id: 'discord-user-1', status: 'active', plan: 'standard', created_at: now, redeemed_at: now, expires_at: null },
-      { id: 'old-unrecoverable', prefix: 'DENG-3333', suffix: '4444', owner_discord_id: 'discord-user-1', status: 'active', plan: 'standard', created_at: now, redeemed_at: now, expires_at: null },
-      { id: 'other-user-export', prefix: 'DENG-9999', suffix: '0000', owner_discord_id: 'discord-user-2', status: 'active', plan: 'standard', created_at: now, redeemed_at: now, expires_at: null },
-      { id: 'revoked-export', prefix: 'DENG-8888', suffix: '0000', owner_discord_id: 'discord-user-1', status: 'revoked', plan: 'standard', created_at: now, redeemed_at: now, expires_at: null },
+      { id: activeFullId, prefix: 'DENG-AAAA', suffix: '2222', owner_discord_id: 'discord-user-1', status: 'active', plan: 'standard', created_at: now, redeemed_at: redeemedAt, expires_at: null },
+      { id: boundFullId, prefix: 'DENG-68C9', suffix: 'E506', owner_discord_id: 'discord-user-1', status: 'active', plan: 'standard', created_at: '2026-05-14T20:40:35.000Z', redeemed_at: '2026-05-14T20:41:40.000Z', expires_at: null },
+      { id: 'old-unrecoverable', prefix: 'DENG-3333', suffix: '4444', owner_discord_id: 'discord-user-1', status: 'active', plan: 'standard', created_at: now, redeemed_at: null, expires_at: null },
+      { id: 'other-user-export', prefix: 'DENG-9999', suffix: '0000', owner_discord_id: 'discord-user-2', status: 'active', plan: 'standard', created_at: now, redeemed_at: redeemedAt, expires_at: null },
+      { id: 'revoked-export', prefix: 'DENG-8888', suffix: '0000', owner_discord_id: 'discord-user-1', status: 'revoked', plan: 'standard', created_at: now, redeemed_at: redeemedAt, expires_at: null },
       { id: 'expired-export', prefix: 'DENG-7777', suffix: '0000', owner_discord_id: 'discord-user-1', status: 'active', plan: 'standard', created_at: now, redeemed_at: null, expires_at: new Date(Date.now() - 1000).toISOString() },
     );
+    memoryDb.device_bindings.push({
+      key_id: boundFullId,
+      install_id_hash: 'bound-hwid',
+      device_model: 'SM-N9810',
+      device_label: 'Phone',
+      last_seen_at: '2026-05-15T01:00:00.000Z',
+      is_active: true,
+    });
     memoryDb.license_ad_challenges.push({
       id: 'challenge-export',
       license_key_id: activeFullId,
@@ -1881,13 +1961,42 @@ describe('My License action APIs', () => {
       created_at: now,
       key_expires_at: null,
     });
+    memoryDb.license_ad_challenges.push({
+      id: 'challenge-bound-export',
+      license_key_id: boundFullId,
+      key_prefix: 'DENG-68C9-0BA2',
+      key_suffix: 'F745-E506',
+      provider: 'discord',
+      completed_at: '2026-05-14T20:40:35.000Z',
+      created_at: '2026-05-14T20:40:35.000Z',
+      key_expires_at: null,
+    });
 
     const res = await agent.get('/api/license/download');
     assert.equal(res.status, 200);
-    assert.match(res.headers['content-disposition'], /attachment/);
+    const disposition = decodeURIComponent(res.headers['content-disposition']);
+    assert.match(disposition, /attachment/);
+    assert.match(disposition, /DiscordTester - DENG Tool Rejoin License Keys - \d{1,2} [A-Za-z]+ 20\d{2}\.txt/);
+    assert.doesNotMatch(disposition, /deng-rejoin-keys|T\d{2}-\d{2}-\d{2}|\.?\d{3}Z/);
     assert.match(res.text, /DENG Tool: Rejoin Keys/);
+    assert.match(res.text, /User: DiscordTester/);
+    assert.match(res.text, /Generated: \d{1,2} [A-Za-z]+ 20\d{2}, \d{1,2}:\d{2}:\d{2} (AM|PM)/);
     assert.match(res.text, new RegExp(activeFull));
+    assert.match(res.text, new RegExp(boundFull));
     assert.match(res.text, /Full key unavailable for this old key/i);
+    assert.match(res.text, /Status: No Device Linked/);
+    assert.match(res.text, /Status: Bound/);
+    assert.match(res.text, /Device: None/);
+    assert.match(res.text, /Device: SM-N9810/);
+    assert.match(res.text, /Created: 22 Mei 2026, 2:14:05 PM/);
+    assert.match(res.text, /Redeemed: 22 Mei 2026, 2:21:40 PM/);
+    assert.match(res.text, /Created: 15 Mei 2026, 3:40:35 AM/);
+    assert.match(res.text, /Redeemed: 15 Mei 2026, 3:41:40 AM/);
+    assert.match(res.text, /Redeemed: None/);
+    assert.match(res.text, /Provider: LootLabs/);
+    assert.match(res.text, /Provider: Discord Panel/);
+    assert.doesNotMatch(res.text, /Recoverable:/);
+    assert.doesNotMatch(res.text, /\d{4}-\d{2}-\d{2}T/);
     assert.doesNotMatch(res.text, /other-user-export|DENG-9999|revoked-export|DENG-8888|expired-export|DENG-7777/);
   });
 });
@@ -1906,6 +2015,23 @@ describe('health and service identity', () => {
     assert.equal(res.body.cooldown_seconds, 60);
     assert.equal(res.body.unredeemed_key_expiry_hours, 24);
     assert.doesNotMatch(JSON.stringify(res.body), /service-role|secret/i);
+  });
+
+  test('license history API includes WIB formatted timestamps for clients', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
+    await completeProvider(agent, 'linkvertise', hash);
+    memoryDb.license_keys[0].created_at = '2026-05-22T07:14:05.740Z';
+    memoryDb.license_keys[0].redeemed_at = '2026-05-22T07:21:40.000Z';
+    memoryDb.license_keys[0].expires_at = '2026-05-23T17:00:00.000Z';
+    memoryDb.license_ad_challenges[0].completed_at = '2026-05-22T07:14:05.740Z';
+    memoryDb.license_ad_challenges[0].key_expires_at = '2026-05-23T17:00:00.000Z';
+    const res = await agent.get('/api/license/history');
+    assert.equal(res.status, 200);
+    assert.ok(res.body.history.length > 0);
+    assert.equal(res.body.history[0].created_at_formatted, '22 Mei 2026, 2:14:05 PM');
+    assert.equal(res.body.history[0].key_expires_at_formatted, '24 Mei 2026, 12:00:00 AM');
   });
 });
 

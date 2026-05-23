@@ -17,9 +17,13 @@ from agent.key_stats_format import (
     build_key_stats_description,
     build_key_stats_download_body,
     build_key_stats_embed_dict,
+    format_wib_date,
+    format_wib_timestamp,
     format_stats_embed_title,
     format_stats_header_plain,
     format_stats_page_content_header,
+    license_export_filename,
+    sanitize_filename_username,
 )
 from agent.license_store import (
     KeyAlreadySelfOwned,
@@ -274,7 +278,32 @@ class TestLocalStoreStats(unittest.TestCase):
 
 
 class TestDownloadBody(unittest.TestCase):
-    def test_filename_pattern_in_content_user_line(self) -> None:
+    def test_wib_timestamp_and_filename_helpers(self) -> None:
+        self.assertEqual(
+            format_wib_timestamp("2026-05-22T07:14:05.740Z"),
+            "22 Mei 2026, 2:14:05 PM",
+        )
+        self.assertEqual(
+            format_wib_timestamp("2026-05-15T20:40:35+00:00"),
+            "16 Mei 2026, 3:40:35 AM",
+        )
+        self.assertEqual(
+            format_wib_timestamp("2026-05-23T13:20:40+00:00"),
+            "23 Mei 2026, 8:20:40 PM",
+        )
+        self.assertEqual(format_wib_timestamp(None), "None")
+        self.assertEqual(format_wib_date("2026-05-23T17:00:00+00:00"), "24 Mei 2026")
+        self.assertEqual(sanitize_filename_username(" DENG/Test  Name ", "1"), "DENG Test Name")
+        self.assertEqual(
+            license_export_filename("DENG/Test", "110184213604499456", "2026-05-23T17:00:00+00:00"),
+            "DENG Test - DENG Tool Rejoin License Keys - 24 Mei 2026.txt",
+        )
+        self.assertEqual(
+            license_export_filename(' /:*?"<>| ', "110184213604499456", "2026-05-23T17:00:00+00:00"),
+            "user-110184213604499456 - DENG Tool Rejoin License Keys - 24 Mei 2026.txt",
+        )
+
+    def test_download_body_uses_license_export_format(self) -> None:
         rows = [
             {
                 "masked_key": "DENG-EF95...DCD2",
@@ -285,48 +314,62 @@ class TestDownloadBody(unittest.TestCase):
                 "used": False,
                 "device_display": None,
                 "last_seen_at": None,
-                "created_at": "2026-01-01T00:00:00+00:00",
+                "created_at": "2026-05-22T07:14:05+00:00",
+                "redeemed_at": None,
+                "provider": "website",
             }
         ]
-        body = build_key_stats_download_body(discord_user_id="110184213604499456", rows=rows)
-        self.assertIn("License Keys For User ID: 110184213604499456", body)
-        self.assertIn("Total Keys: 1", body)
-        self.assertIn("Unused / Ready for first device", body)
-        self.assertNotIn("Not Available", body)
-        self.assertNotIn("Full key export", body.lower())
+        body = build_key_stats_download_body(
+            discord_user_id="110184213604499456", rows=rows, username="deng"
+        )
+        self.assertIn("DENG Tool: Rejoin Keys", body)
+        self.assertIn("User: deng", body)
+        self.assertRegex(body, r"Generated: \d{1,2} [A-Za-z]+ 20\d{2}, \d{1,2}:\d{2}:\d{2} (AM|PM)")
+        self.assertIn("1. Key: Full Key Unavailable For This Old Key", body)
+        self.assertIn("Status: No Device Linked", body)
+        self.assertIn("Device: None", body)
+        self.assertIn("Created: 22 Mei 2026, 2:14:05 PM", body)
+        self.assertIn("Redeemed: None", body)
+        self.assertIn("Provider: Website", body)
         self.assertNotIn("key_hash", body.lower())
-        self.assertNotIn("Created", body)
-        self.assertIn("Full key not available for copy", body)
-        self.assertIn("not recoverable", body.lower())
+        self.assertNotIn("Recoverable:", body)
+        self.assertNotIn("2026-05-22T", body)
 
     def test_download_full_key_when_exportable(self) -> None:
         rows = [
             {
                 "masked_key": "DENG-AA...BB",
-                "full_key_plaintext": "DENG-1111-2222-3333-4444",
+                "full_key_plaintext": "DENG-68C9-0BA2-F745-E506",
                 "has_stored_ciphertext": True,
                 "export_storage_configured": True,
                 "license_status": "active",
                 "used": True,
-                "device_display": "SM-S9160",
+                "device_display": "SM-N9810",
                 "last_seen_at": "2026-05-01T00:00:00+00:00",
-                "created_at": "2026-01-01T00:00:00+00:00",
+                "created_at": "2026-05-14T20:40:35+00:00",
+                "redeemed_at": "2026-05-14T20:41:40+00:00",
+                "provider": "discord",
             }
         ]
-        body = build_key_stats_download_body(discord_user_id="1", rows=rows)
-        self.assertIn("DENG-1111-2222-3333-4444", body)
-        self.assertIn("Used / Device bound", body)
+        body = build_key_stats_download_body(discord_user_id="1", rows=rows, username="deng")
+        self.assertIn("DENG-68C9-0BA2-F745-E506", body)
+        self.assertIn("Status: Bound", body)
+        self.assertIn("Device: SM-N9810", body)
+        self.assertIn("Created: 15 Mei 2026, 3:40:35 AM", body)
+        self.assertIn("Redeemed: 15 Mei 2026, 3:41:40 AM", body)
+        self.assertIn("Provider: Discord Panel", body)
         self.assertNotIn("DENG-AA...BB", body)
-        self.assertNotIn("Created", body)
+        self.assertNotIn("Used / Device bound", body)
 
     def test_no_other_user_keys_in_slice(self) -> None:
         rows = [{"masked_key": "K1", "full_key_plaintext": None, "has_stored_ciphertext": False,
                  "export_storage_configured": True,
                  "license_status": "active", "used": True, "device_display": "D",
-                 "last_seen_at": None, "created_at": "2026-01-01T00:00:00+00:00"}]
+                 "last_seen_at": None, "created_at": "2026-01-01T00:00:00+00:00",
+                 "redeemed_at": "2026-01-01T00:01:00+00:00"}]
         body = build_key_stats_download_body(discord_user_id="999", rows=rows)
         self.assertNotIn("888", body)
-        self.assertIn("Used / Device bound", body)
+        self.assertIn("Status: Bound", body)
         self.assertIn("Device: D", body)
 
 

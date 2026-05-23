@@ -19,6 +19,7 @@ const {
 const challenge = require('./challenge');
 const supabase = require('./db');
 const licenseService = require('./licenseService');
+const { formatWibTimestamp, licenseExportFilename } = require('./licenseFormat');
 const linkvertise = require('./providers/linkvertise');
 const lootlabs = require('./providers/lootlabs');
 const { signChallenge, verifyChallenge } = require('./crypto');
@@ -339,13 +340,16 @@ function summarizeHistory(history) {
   };
 }
 
-async function loadHistory(siteUserId, limit = 20) {
+async function loadHistory(siteUserId, limit = 20, fallbackDiscordUserId = '') {
   const { data } = await supabase
     .from('site_users')
     .select('discord_user_id')
     .eq('id', siteUserId)
     .maybeSingle();
-  return licenseService.getUserLicenses(data?.discord_user_id, { limit })
+  const owner = data?.discord_user_id || fallbackDiscordUserId;
+  const byOwner = owner ? await licenseService.getUserLicenses(owner, { limit }) : [];
+  if (byOwner.length > 0) return licenseService.filterActiveLicenses(byOwner);
+  return licenseService.getUserLicenses(siteUserId, { limit })
     .then(licenseService.filterActiveLicenses);
 }
 
@@ -918,7 +922,7 @@ router.post('/auth/logout', (req, res) => {
 
 router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
   try {
-    const history = await loadHistory(req.session.user.id, 8);
+    const history = await loadHistory(req.session.user.id, 8, discordOwnerId(req));
     res.render('dashboard', {
       title: 'Dashboard - DENG Tool',
       history,
@@ -927,6 +931,7 @@ router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
       fullKeyRow,
       friendlyStatus,
       providerLabel,
+      formatWibTimestamp,
     });
   } catch (err) {
     console.error('[dashboard]', err.message || err);
@@ -938,13 +943,14 @@ router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
       fullKeyRow,
       friendlyStatus,
       providerLabel,
+      formatWibTimestamp,
     });
   }
 });
 
 router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
   try {
-    const history = await loadHistory(req.session.user.id, 20);
+    const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req));
     const cooldown = await challenge.checkCooldown(req.session.user.id);
     res.render('license', {
       title: 'My License - DENG Tool',
@@ -955,6 +961,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
       fullKeyRow,
       friendlyStatus,
       providerLabel,
+      formatWibTimestamp,
     });
   } catch (err) {
     console.error('[license]', err.message || err);
@@ -967,6 +974,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
       fullKeyRow,
       friendlyStatus,
       providerLabel,
+      formatWibTimestamp,
     });
   }
 });
@@ -1030,7 +1038,7 @@ router.get('/api/stats/public', (_req, res) => {
 
 router.get('/api/license/me', requireLogin, repairSiteUser, async (req, res) => {
   try {
-    const history = await loadHistory(req.session.user.id, 20);
+    const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req));
     const stats = summarizeHistory(history);
     res.json({ account: req.session.user, stats });
   } catch {
@@ -1040,7 +1048,7 @@ router.get('/api/license/me', requireLogin, repairSiteUser, async (req, res) => 
 
 router.get('/api/license/history', requireLogin, repairSiteUser, async (req, res) => {
   try {
-    const history = await loadHistory(req.session.user.id, 20);
+    const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req));
     res.json({
       history: history.map((row) => ({
         id: row.id,
@@ -1048,7 +1056,9 @@ router.get('/api/license/history', requireLogin, repairSiteUser, async (req, res
         status: friendlyStatus(row),
         provider: providerLabel(row.provider),
         created_at: row.created_at,
+        created_at_formatted: formatWibTimestamp(row.created_at),
         key_expires_at: row.key_expires_at,
+        key_expires_at_formatted: formatWibTimestamp(row.key_expires_at),
         device: row.device_display || null,
       })),
     });
@@ -1109,10 +1119,11 @@ router.get('/api/license/download', requireLicenseDownloadLogin, repairSiteUser,
     const owner = discordOwnerId(req);
     if (!owner) return res.status(401).type('text/plain').send('Please login with Discord first.\n');
     const rows = await licenseService.getActiveUserLicenses(owner, { limit: 500 });
-    const body = licenseService.downloadUserKeys(owner, rows, req.session.user.username || owner);
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const username = req.session.user.username || owner;
+    const body = licenseService.downloadUserKeys(owner, rows, username);
+    const filename = licenseExportFilename(username, owner);
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="deng-rejoin-keys-${stamp}.txt"`);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
     res.send(body);
   } catch (err) {
     const status = err?.status || 500;
