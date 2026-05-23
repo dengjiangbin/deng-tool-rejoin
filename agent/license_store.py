@@ -721,6 +721,8 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 "device_display": device,
                 "last_seen_at": binding.get("last_seen_at"),
                 "created_at": record.get("created_at"),
+                "expires_at": record.get("expires_at"),
+                "redeemed_at": record.get("redeemed_at"),
                 "plan": plan,
                 "reset_count_24h": reset_count,
             })
@@ -1179,46 +1181,29 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         integrations.  All counts are computed from the local JSON store.
 
         Returns dict with:
-          key_generated_count  — active keys created by this user
-          key_redeemed_count   — keys that were redeemed/activated (redeemed_at set OR currently bound)
-          unbound_key_count    — owned keys with no active device binding
-          bound_key_count      — owned keys with an active device binding
+          key_generated_count  — active visible keys owned by this user
+          key_redeemed_count   — active visible keys redeemed/activated
+          unbound_key_count    — active visible keys with no active device binding
+          bound_key_count      — active visible keys with an active device binding
           reset_hwid_count     — total HWID resets on this user's keys
           key_executed_count   — public-release tool executions (always 0 for local store)
         """
+        from agent.key_stats_format import (
+            compute_active_visible_stats,
+            filter_active_visible_license_rows,
+        )
+
+        rows = self.list_user_keys_for_stats(discord_user_id)
+        active_rows = filter_active_visible_license_rows(rows)
+        counts = compute_active_visible_stats(active_rows)
         db = self._load()
-        generated = 0
-        redeemed = 0
-        unbound = 0
-        bound = 0
-        for key_hash, record in db["keys"].items():
-            owner = record.get("owner_discord_id")
-            creator = record.get("created_by")
-            status = record.get("status", "active")
-            # Generated: only count active keys (not revoked/permanently dead)
-            if creator == discord_user_id and status == "active":
-                generated += 1
-            if owner != discord_user_id:
-                continue
-            binding = db.get("bindings", {}).get(key_hash, {})
-            # Redeemed: count if explicitly redeemed (redeemed_at set) OR currently
-            # bound (handles keys bound before migration 003 added redeemed_at).
-            if record.get("redeemed_at") or binding.get("is_active"):
-                redeemed += 1
-            if binding.get("is_active"):
-                bound += 1
-            else:
-                unbound += 1
         reset_count = sum(
             1 for entry in db.get("reset_logs", [])
             if entry.get("owner_discord_id") == discord_user_id
         )
         return {
             "discord_user_id": discord_user_id,
-            "key_generated_count": generated,
-            "key_redeemed_count": redeemed,
-            "unbound_key_count": unbound,
-            "bound_key_count": bound,
+            **counts,
             "reset_hwid_count": reset_count,
             "key_executed_count": 0,  # local store: execution tracking not available
         }
@@ -1623,7 +1608,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
             res = (
                 self._client.table("license_keys")
                 .select(
-                    "id, prefix, suffix, status, plan, created_at, key_ciphertext, key_export_available"
+                    "id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, key_ciphertext, key_export_available"
                 )
                 .eq("owner_discord_id", discord_user_id)
                 .execute()
@@ -1632,7 +1617,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
         except Exception:
             res = (
                 self._client.table("license_keys")
-                .select("id, prefix, suffix, status, plan, created_at")
+                .select("id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at")
                 .eq("owner_discord_id", discord_user_id)
                 .execute()
             )
@@ -1668,6 +1653,8 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 "device_display": device,
                 "last_seen_at": binding.get("last_seen_at"),
                 "created_at": record.get("created_at"),
+                "expires_at": record.get("expires_at"),
+                "redeemed_at": record.get("redeemed_at"),
                 "plan": plan,
                 "reset_count_24h": reset_count,
             })
@@ -2178,54 +2165,22 @@ class SupabaseLicenseStore(BaseLicenseStore):
     def get_license_stats_for_discord_user(
         self, discord_user_id: str
     ) -> dict[str, Any]:
+        from agent.key_stats_format import (
+            compute_active_visible_stats,
+            filter_active_visible_license_rows,
+        )
+
         try:
-            gen_res = (
-                self._client.table("license_keys")
-                .select("id", count="exact")
-                .eq("created_by", discord_user_id)
-                .eq("status", "active")
-                .execute()
-            )
-            generated = gen_res.count or 0
+            rows = self.list_user_keys_for_stats(discord_user_id)
+            active_rows = filter_active_visible_license_rows(rows)
+            counts = compute_active_visible_stats(active_rows)
         except Exception:
-            generated = 0
-        try:
-            red_res = (
-                self._client.table("license_keys")
-                .select("id", count="exact")
-                .eq("owner_discord_id", discord_user_id)
-                .not_.is_("redeemed_at", "null")
-                .execute()
-            )
-            redeemed_direct = red_res.count or 0
-        except Exception:
-            redeemed_direct = 0
-        try:
-            bound_res = (
-                self._client.table("device_bindings")
-                .select("key_id", count="exact")
-                .eq("license_keys.owner_discord_id", discord_user_id)
-                .eq("is_active", True)
-                .execute()
-            )
-            bound = bound_res.count or 0
-        except Exception:
-            bound = 0
-        # Redeemed: count keys with redeemed_at set, or treat active bound keys as
-        # at least redeemed (handles keys bound before migration 003 added redeemed_at).
-        redeemed = max(redeemed_direct, bound)
-        try:
-            owned_res = (
-                self._client.table("license_keys")
-                .select("id", count="exact")
-                .eq("owner_discord_id", discord_user_id)
-                .neq("status", "revoked")
-                .execute()
-            )
-            total_owned = owned_res.count or 0
-        except Exception:
-            total_owned = 0
-        unbound = max(0, total_owned - bound)
+            counts = {
+                "key_generated_count": 0,
+                "key_redeemed_count": 0,
+                "unbound_key_count": 0,
+                "bound_key_count": 0,
+            }
         try:
             reset_res = (
                 self._client.table("hwid_reset_logs")
@@ -2249,10 +2204,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
             exec_count = 0
         return {
             "discord_user_id": discord_user_id,
-            "key_generated_count": generated,
-            "key_redeemed_count": redeemed,
-            "unbound_key_count": unbound,
-            "bound_key_count": bound,
+            **counts,
             "reset_hwid_count": reset_count,
             "key_executed_count": exec_count,
         }

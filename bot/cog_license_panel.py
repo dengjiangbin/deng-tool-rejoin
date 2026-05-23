@@ -34,6 +34,12 @@ from discord.ext import commands
 from agent.branding import apply_branding_to_embed_dict
 from agent.license_key_export import is_export_secret_configured
 from agent.license_owner_recovery import visible_license_rows_for_panel
+from agent.key_stats_format import (
+    build_license_admin_stats_description,
+    build_license_event_log_description,
+    build_reset_hwid_log_description,
+    filter_active_visible_license_rows,
+)
 from agent.license_panel import (
     BUTTON_GENERATE,
     BUTTON_KEY_STATS,
@@ -172,25 +178,25 @@ async def _post_license_log(
             "reset_hwid": "Reset Key",
         }.get(event_type, "Key")
 
-        fields = [
-            {"name": "User", "value": f"<@{uid}>", "inline": True},
-            {"name": key_field_name, "value": f"`{key_serial}`", "inline": True},
-            {"name": "Current Key Generated", "value": str(stats["key_generated_count"]), "inline": True},
-            {"name": "Current Key Redeemed", "value": str(stats["key_redeemed_count"]), "inline": True},
-            {"name": "Current Unbound Key", "value": str(stats["unbound_key_count"]), "inline": True},
-            {"name": "Current Bound Key", "value": str(stats["bound_key_count"]), "inline": True},
-            {"name": "Current Reset HWID", "value": f"{stats['reset_hwid_count']} times", "inline": True},
-        ]
+        if event_type == "reset_hwid":
+            description = build_reset_hwid_log_description(
+                user_mention=f"<@{uid}>",
+                reset_key=key_serial,
+                stats=stats,
+            )
+        else:
+            description = build_license_event_log_description(
+                user_mention=f"<@{uid}>",
+                key_field_label=key_field_name,
+                key_value=key_serial,
+                stats=stats,
+            )
+
         embed = discord.Embed(
             title=title,
+            description=description,
             color=discord.Color.from_rgb(0, 0, 0),
         )
-        for field in fields:
-            embed.add_field(
-                name=field["name"],
-                value=field["value"],
-                inline=field.get("inline", True),
-            )
         embed.set_footer(text="DENG Tool: Rejoin")
         await channel.send(embed=embed)
     except Exception as exc:  # noqa: BLE001
@@ -438,14 +444,14 @@ class ConfirmResetButton(discord.ui.Button):
                     "success": True,
                     "message": "Device binding cleared.",
                 })
-                if interaction.guild:
+                if interaction.guild and fk:
                     import asyncio
                     asyncio.ensure_future(
                         _post_license_log(
                             interaction.guild, self._store,
                             title="Reset HWID Log",
                             user=interaction.user,
-                            key_serial=display_key,
+                            key_serial=fk,
                             event_type="reset_hwid",
                         )
                     )
@@ -1310,37 +1316,20 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
             uid = str(user.id)
             store.get_or_create_user(uid, str(user))
             stats = get_license_stats_for_discord_user(store, uid)
+            active_rows = filter_active_visible_license_rows(
+                store.list_user_keys_for_stats(uid)
+            )
+            description = build_license_admin_stats_description(
+                user_label=f"<@{uid}> ({uid})",
+                stats=stats,
+                active_rows=active_rows,
+            )
 
             embed = discord.Embed(
                 title=f"License Stats — {user.display_name}",
+                description=description,
                 color=discord.Color.from_rgb(0, 0, 0),
             )
-            embed.add_field(name="User", value=f"<@{uid}> (`{uid}`)", inline=False)
-            embed.add_field(name="Generated (Active)", value=str(stats["key_generated_count"]), inline=True)
-            embed.add_field(name="Redeemed", value=str(stats["key_redeemed_count"]), inline=True)
-            embed.add_field(name="Unbound", value=str(stats["unbound_key_count"]), inline=True)
-            embed.add_field(name="Bound", value=str(stats["bound_key_count"]), inline=True)
-            embed.add_field(name="HWID Resets", value=f"{stats['reset_hwid_count']} times", inline=True)
-            embed.add_field(name="Key Executed (Public)", value=str(stats.get("key_executed_count", 0)), inline=True)
-
-            # List active keys for the user (owner can see full keys where available)
-            try:
-                keys = store.list_user_keys(uid)
-                if keys:
-                    lines = []
-                    for k in keys[:10]:
-                        fk = k.get("full_key_plaintext")
-                        display = fk or k.get("masked_key", "???")
-                        status = k.get("status", "?")
-                        bound = k.get("bound_device") or "(unbound)"
-                        lines.append(f"`{display}` — {status} — {bound}")
-                    key_list = "\n".join(lines)
-                    if len(keys) > 10:
-                        key_list += f"\n…and {len(keys) - 10} more"
-                    embed.add_field(name=f"Keys ({len(keys)})", value=key_list[:1024], inline=False)
-            except Exception:  # noqa: BLE001
-                pass
-
             embed.set_footer(text="DENG Tool: Rejoin")
             store.audit_admin_action(
                 str(interaction.user.id), "admin_view_license",

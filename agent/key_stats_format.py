@@ -154,6 +154,154 @@ def build_key_stats_description(rows_slice: list[dict[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
+def _iso_expired(iso_str: str | None) -> bool:
+    if not iso_str:
+        return False
+    try:
+        normalized = str(iso_str).replace("Z", "+00:00")
+        exp_dt = datetime.fromisoformat(normalized)
+        if exp_dt.tzinfo is None:
+            exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > exp_dt
+    except (ValueError, TypeError):
+        return False
+
+
+def _license_row_status(row: dict[str, Any]) -> str:
+    return str(row.get("license_status") or row.get("status") or "active").lower()
+
+
+def _license_row_is_bound(row: dict[str, Any]) -> bool:
+    if row.get("used") or row.get("active_binding"):
+        return True
+    device = (row.get("device_display") or row.get("bound_device") or "").strip()
+    return bool(device and device != "(unbound)")
+
+
+def is_active_visible_license_row(row: dict[str, Any]) -> bool:
+    """Return True when a key belongs in authorized admin Keys lists."""
+    status = _license_row_status(row)
+    if status in {"revoked", "expired", "deleted", "disabled"}:
+        return False
+    if row.get("is_deleted") or row.get("deleted"):
+        return False
+    if row.get("is_disabled") or row.get("disabled"):
+        return False
+    if row.get("is_hidden") or row.get("archived") or row.get("hidden"):
+        return False
+    if row.get("redeemed_at") or _license_row_is_bound(row):
+        return True
+    if status != "active":
+        return False
+    if _iso_expired(row.get("expires_at")):
+        return False
+    return True
+
+
+def filter_active_visible_license_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in rows if is_active_visible_license_row(row)]
+
+
+def compute_active_visible_stats(active_rows: list[dict[str, Any]]) -> dict[str, int]:
+    generated = len(active_rows)
+    bound = sum(1 for row in active_rows if _license_row_is_bound(row))
+    redeemed = sum(
+        1 for row in active_rows if row.get("redeemed_at") or _license_row_is_bound(row)
+    )
+    return {
+        "key_generated_count": generated,
+        "key_redeemed_count": redeemed,
+        "unbound_key_count": max(0, generated - bound),
+        "bound_key_count": bound,
+    }
+
+
+def authorized_full_license_key(row: dict[str, Any]) -> str | None:
+    """Return full key for authorized Discord admin output, never masked."""
+    full = row.get("full_key_plaintext") or row.get("full_key")
+    if not full:
+        return None
+    text = str(full).strip()
+    if "..." in text or "…" in text:
+        return None
+    return text
+
+
+def format_authorized_active_key_line(row: dict[str, Any]) -> str:
+    full = authorized_full_license_key(row)
+    if not full:
+        raise ValueError("authorized admin output requires a full license key")
+    if _license_row_is_bound(row):
+        device = (row.get("device_display") or row.get("bound_device") or "").strip()
+        device_label = device if device and device != "(unbound)" else "(bound)"
+    else:
+        device_label = "(unbound)"
+    return f"{full} — active — {device_label}"
+
+
+def build_reset_hwid_log_description(
+    *,
+    user_mention: str,
+    reset_key: str,
+    stats: dict[str, Any],
+) -> str:
+    return "\n".join(
+        [
+            f"**User:** {user_mention}",
+            f"**Reset Key:** {reset_key}",
+            f"**Current Key Generated:** {stats['key_generated_count']}",
+            f"**Current Key Redeemed:** {stats['key_redeemed_count']}",
+            f"**Current Unbound Key:** {stats['unbound_key_count']}",
+            f"**Current Bound Key:** {stats['bound_key_count']}",
+            f"**Current Reset HWID:** {stats['reset_hwid_count']} times",
+        ]
+    )
+
+
+def build_license_event_log_description(
+    *,
+    user_mention: str,
+    key_field_label: str,
+    key_value: str,
+    stats: dict[str, Any],
+) -> str:
+    return "\n".join(
+        [
+            f"**User:** {user_mention}",
+            f"**{key_field_label}:** {key_value}",
+            f"**Current Key Generated:** {stats['key_generated_count']}",
+            f"**Current Key Redeemed:** {stats['key_redeemed_count']}",
+            f"**Current Unbound Key:** {stats['unbound_key_count']}",
+            f"**Current Bound Key:** {stats['bound_key_count']}",
+            f"**Current Reset HWID:** {stats['reset_hwid_count']} times",
+        ]
+    )
+
+
+def build_license_admin_stats_description(
+    *,
+    user_label: str,
+    stats: dict[str, Any],
+    active_rows: list[dict[str, Any]],
+) -> str:
+    lines = [
+        f"**User:** {user_label}",
+        f"**Generated (Active):** {stats['key_generated_count']}",
+        f"**Redeemed:** {stats['key_redeemed_count']}",
+        f"**Unbound:** {stats['unbound_key_count']}",
+        f"**Bound:** {stats['bound_key_count']}",
+        f"**HWID Resets:** {stats['reset_hwid_count']} times",
+        f"**Key Executed (Public):** {stats.get('key_executed_count', 0)}",
+        "",
+        f"**Keys ({len(active_rows)})**",
+    ]
+    if active_rows:
+        lines.extend(format_authorized_active_key_line(row) for row in active_rows)
+    else:
+        lines.append("No active keys.")
+    return "\n".join(lines)
+
+
 def build_key_stats_download_body(*, discord_user_id: str, rows: list[dict[str, Any]]) -> str:
     from datetime import datetime, timezone
 
