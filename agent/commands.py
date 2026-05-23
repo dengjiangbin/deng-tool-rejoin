@@ -2599,9 +2599,12 @@ def _config_menu_key(draft: dict[str, Any]) -> dict[str, Any]:
     return draft
 
 
-def _read_auto_execute_script() -> str:
+def _read_auto_execute_script(script_number: int | None = None) -> str:
     print()
-    print("Paste Auto Execute script.")
+    if script_number is None:
+        print("Paste Auto Execute script.")
+    else:
+        print(f"Paste Auto Execute script #{script_number}.")
     print("Finish with a blank line. Leave first line blank to cancel.")
     lines: list[str] = []
     while True:
@@ -2612,6 +2615,32 @@ def _read_auto_execute_script() -> str:
             break
         lines.append(raw)
     return "\n".join(lines).strip()
+
+
+def _add_auto_execute_scripts_interactive(scripts: list[str]) -> tuple[list[str], list[str]]:
+    """Collect one or more scripts, numbered from the next saved slot."""
+    from .auto_execute import MAX_AUTO_EXECUTE_SCRIPTS, script_id
+
+    added: list[str] = []
+    script_number = len(scripts) + 1
+    while len(scripts) < MAX_AUTO_EXECUTE_SCRIPTS:
+        if not _prompt_yes_no(f"Add script #{script_number}", default=True):
+            break
+        script = _read_auto_execute_script(script_number)
+        if not script:
+            print("Cancelled.")
+            break
+        if script in scripts:
+            print("Script already saved.")
+            script_number = len(scripts) + 1
+            continue
+        scripts.append(script)
+        added.append(script)
+        print(f"Auto Execute script #{script_number} saved: {script_id(script)}")
+        script_number += 1
+    if len(scripts) >= MAX_AUTO_EXECUTE_SCRIPTS:
+        print("Auto Execute script limit reached.")
+    return scripts, added
 
 
 def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
@@ -2642,19 +2671,13 @@ def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
         if choice == "0":
             break
         if choice == "1":
-            script = _read_auto_execute_script()
-            if not script:
-                print("Cancelled.")
+            scripts, added = _add_auto_execute_scripts_interactive(scripts)
+            if not added:
                 safe_io.press_enter()
                 continue
-            if script in scripts:
-                print("Script already saved.")
-                safe_io.press_enter()
-                continue
-            scripts.append(script)
             draft["auto_execute_scripts"] = normalize_scripts(scripts)
             draft = save_config(draft)
-            print(f"Auto Execute script saved: {script_id(script)}")
+            print(f"Saved {len(added)} Auto Execute script(s).")
             safe_io.press_enter()
         elif choice == "2":
             if not scripts:

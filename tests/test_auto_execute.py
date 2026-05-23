@@ -67,10 +67,15 @@ class AutoExecuteMenuTests(unittest.TestCase):
         from agent import commands
 
         cfg = {"auto_execute_scripts": []}
-        prompts = iter(["1", 'loadstring(game:HttpGet("https://example.com/Deng.lua"))()', "", "0"])
+        prompts = iter(["1", "y", 'loadstring(game:HttpGet("https://example.com/Deng.lua"))()', "", "n", "0"])
+        prompt_texts: list[str] = []
         out = io.StringIO()
+        def fake_prompt(prompt="", **_kwargs):
+            prompt_texts.append(prompt)
+            return next(prompts)
+
         with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", side_effect=lambda *_a, **_k: next(prompts)), \
+             patch("agent.commands.safe_io.safe_prompt", side_effect=fake_prompt), \
              patch("agent.commands.safe_io.press_enter"), \
              patch("agent.commands.save_config", side_effect=lambda c: c), \
              redirect_stdout(out):
@@ -80,7 +85,32 @@ class AutoExecuteMenuTests(unittest.TestCase):
             result["auto_execute_scripts"],
             ['loadstring(game:HttpGet("https://example.com/Deng.lua"))()'],
         )
-        self.assertIn("Auto Execute script saved", out.getvalue())
+        self.assertTrue(any("Add script #1" in prompt for prompt in prompt_texts))
+        self.assertIn("Saved 1 Auto Execute script(s).", out.getvalue())
+
+    def test_auto_execute_menu_adds_multiple_numbered_scripts(self):
+        from agent import commands
+
+        cfg = {"auto_execute_scripts": []}
+        prompts = iter(["1", "y", "print(1)", "", "y", "print(2)", "", "n", "0"])
+        prompt_texts: list[str] = []
+        out = io.StringIO()
+        def fake_prompt(prompt="", **_kwargs):
+            prompt_texts.append(prompt)
+            return next(prompts)
+
+        with patch("agent.commands._is_interactive", return_value=True), \
+             patch("agent.commands.safe_io.safe_prompt", side_effect=fake_prompt), \
+             patch("agent.commands.safe_io.press_enter"), \
+             patch("agent.commands.save_config", side_effect=lambda c: c), \
+             redirect_stdout(out):
+            result = commands._config_menu_auto_execute(cfg)
+
+        self.assertEqual(result["auto_execute_scripts"], ["print(1)", "print(2)"])
+        text = out.getvalue()
+        self.assertTrue(any("Add script #1" in prompt for prompt in prompt_texts))
+        self.assertTrue(any("Add script #2" in prompt for prompt in prompt_texts))
+        self.assertIn("Saved 2 Auto Execute script(s).", text)
 
 
 class SupervisorAutoExecuteTests(unittest.TestCase):
