@@ -101,6 +101,34 @@ class TestRunCurlSuccess(unittest.TestCase):
         self.assertEqual(http_status, 200)
         self.assertIn(b'"a":1', body_bytes)
 
+    def test_curl_uses_android_subprocess_lock_when_available(self):
+        class TrackingLock:
+            def __init__(self):
+                self.entered = False
+                self.inside_run = False
+
+            def __enter__(self):
+                self.entered = True
+                self.inside_run = True
+
+            def __exit__(self, exc_type, exc, tb):
+                self.inside_run = False
+
+        lock = TrackingLock()
+
+        def fake_run(*args, **kwargs):
+            self.assertTrue(lock.inside_run)
+            return _make_run_result(0, b'{"ok":true}\n200')
+
+        with patch("agent.safe_http.shutil.which", return_value="/usr/bin/curl"), \
+             patch("agent.android.subprocess_lock", return_value=lock), \
+             patch("subprocess.run", side_effect=fake_run):
+            http_status, body_bytes = self.sh._run_curl(["https://example.com"])
+
+        self.assertTrue(lock.entered)
+        self.assertEqual(http_status, 200)
+        self.assertIn(b'"ok"', body_bytes)
+
 
 class TestRunCurlErrors(unittest.TestCase):
     def setUp(self):
@@ -405,6 +433,7 @@ class TestFaulthandlerFileOnly(unittest.TestCase):
         def track_enable(*args, file=None, **kw):
             if file is None:
                 called_without_file.append(True)
+            self.assertFalse(kw.get("all_threads", False))
             # Don't actually enable faulthandler in tests.
 
         # Reset any stored file reference from a previous call.

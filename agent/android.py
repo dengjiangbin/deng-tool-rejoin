@@ -26,6 +26,15 @@ from typing import Any, Iterable
 # for 2-3 workers is acceptable vs. the crash risk.
 _subprocess_lock = threading.Lock()
 
+
+def subprocess_lock() -> threading.Lock:
+    """Return the single global lock for subprocess/fork work.
+
+    Start, watchdog, Android/root commands, and Termux curl HTTP calls share
+    this lock to avoid concurrent fork/exec in Termux + Python 3.13.
+    """
+    return _subprocess_lock
+
 from .config import ConfigError, is_valid_package_name, normalize_package_detection_hint, validate_package_name
 from .constants import (
     DEFAULT_ROBLOX_PACKAGE,

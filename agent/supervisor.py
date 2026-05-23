@@ -9,7 +9,6 @@ import traceback
 from typing import Any
 
 from . import android, db
-from . import auto_execute
 from .backoff import calculate_backoff_seconds
 from .config import effective_private_server_url, load_config, validate_config
 from .launcher import launch_package_for_current_config, perform_rejoin
@@ -1314,7 +1313,6 @@ class WatchdogSupervisor:
         self._ram_last_check_at: dict[str, float] = {}   # last RAM measurement ts
         self._ram_last_trim_at: dict[str, float] = {}    # last cache trim ts
         self._ram_cooldown_until: dict[str, float] = {}  # no RAM restart until this ts
-        self._auto_execute_ran: set[tuple[str, str]] = set()
 
         # ── Per-package presence tracking ─────────────────────────────────────
         self._presence_user_ids: dict[str, int] = {}
@@ -2087,13 +2085,11 @@ class WatchdogSupervisor:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
 
         elif state == STATUS_ONLINE:
-            if not hasattr(self, "_auto_execute_ran"):
-                self._auto_execute_ran = set()
-            auto_execute.run_auto_execute_for_package(
-                self.cfg,
-                pkg,
-                self._auto_execute_ran,
-                logger=logger,
+            log_event(
+                logger, "info", "[DENG_REJOIN_ONLINE_STABLE]",
+                package=pkg,
+                action="monitor_only",
+                unsafe_auto_execute_disabled="true",
             )
             # Run adaptive RAM optimization while the package is healthy.
             self._check_ram_optimization(pkg, entry, now, render_callback=render_callback)
@@ -2245,6 +2241,7 @@ class WatchdogSupervisor:
         log_event(
             logger, "info", "watchdog_supervisor_started",
             packages=self.packages,
+            session_id=str(self.cfg.get("start_session_id") or ""),
         )
         db.insert_event(
             "INFO", "watchdog_supervisor_started",
@@ -2296,6 +2293,19 @@ class WatchdogSupervisor:
                 entry = self.entry_by_pkg[pkg]
                 self.checking_label = f"Checking Package {idx}/{total}"
                 check_started = time.monotonic()
+                try:
+                    from . import safe_io as _safe_io
+                    _safe_io.set_crash_context(
+                        phase="package_check",
+                        session_id=str(self.cfg.get("start_session_id") or ""),
+                        screen_mode=str(self.cfg.get("screen_mode") or ""),
+                        package_count=total,
+                        package=pkg,
+                        package_index=idx,
+                        watchdog_round=self._round,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
                 log_event(
                     logger, "info", "[DENG_REJOIN_PACKAGE_CHECK_START]",
                     round=self._round,

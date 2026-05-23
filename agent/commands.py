@@ -4262,6 +4262,9 @@ def _prepare_automatic_layout(
         # col0 naturally empty for Termux, giving packages 2/3 of the screen.
         _dock_frac = 0.0
         _screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
+        if cfg.get("last_layout_mode") and cfg.get("last_layout_mode") != _screen_mode:
+            cfg.pop("last_layout_preview", None)
+            cfg.pop("_layout_rects", None)
         filtered_packages = [p for p in packages if not window_layout._is_layout_excluded(p)]
         rects = window_layout.calculate_split_layout(
             filtered_packages,
@@ -4365,6 +4368,7 @@ def _prepare_automatic_layout(
             pass
 
         try:
+            cfg["last_layout_mode"] = _screen_mode
             cfg["last_layout_preview"] = [r.as_dict() for r in rects]
             save_config(cfg)
         except Exception:  # noqa: BLE001
@@ -4467,7 +4471,11 @@ def _verify_layout_post_launch(
     diag_rows: list[dict[str, Any]] = []
     try:
         _screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
-        stored_rects = cfg.get("_layout_rects") or cfg.get("last_layout_preview")
+        stored_rects = (
+            cfg.get("_layout_rects") or cfg.get("last_layout_preview")
+            if cfg.get("last_layout_mode") in (None, _screen_mode)
+            else None
+        )
         rects = []
         if isinstance(stored_rects, list):
             selected = {
@@ -4613,6 +4621,8 @@ def cmd_start(args: argparse.Namespace) -> int:
     _shutdown_reason = "normal_exit"
     _supervisor_ref: WatchdogSupervisor | None = None
     _lifecycle_state = "STARTING"
+    _start_session_id = f"start-{int(time.time() * 1000)}-{os.getpid()}"
+    _start_screen_mode = DEFAULT_SCREEN_MODE
     # Silence all internal loggers so warnings/errors go to file, never stdout.
     from .logger import silence_public_loggers
     silence_public_loggers()
@@ -4621,10 +4631,17 @@ def cmd_start(args: argparse.Namespace) -> int:
         nonlocal _lifecycle_state
         try:
             from .logger import configure_logging, log_event
+            safe_io.set_crash_context(
+                phase=to_state.lower(),
+                reason=reason,
+                session_id=_start_session_id,
+                screen_mode=_start_screen_mode,
+            )
             log_event(
                 configure_logging(),
                 "info",
                 "[DENG_REJOIN_LIFECYCLE]",
+                session_id=_start_session_id,
                 **{"from": _lifecycle_state, "to": to_state, "reason": reason},
             )
         except Exception:  # noqa: BLE001
@@ -4675,6 +4692,21 @@ def cmd_start(args: argparse.Namespace) -> int:
         _transition_lifecycle("STARTING", "cmd_start")
         cfg = load_config()
         cfg = _ensure_install_id_saved(cfg)
+        _start_screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
+        try:
+            from .build_info import collect_version_info
+            _version_info = collect_version_info()
+        except Exception:  # noqa: BLE001
+            _version_info = {}
+        safe_io.set_crash_context(
+            phase="starting",
+            session_id=_start_session_id,
+            screen_mode=_start_screen_mode,
+            package_count=len(enabled_package_entries(cfg)),
+            git_commit=_version_info.get("git_commit_short", ""),
+            artifact_sha=_version_info.get("artifact_sha256_short", ""),
+            build_probe_id=_version_info.get("probe_id", ""),
+        )
         _enforce_configured_screen_mode(cfg)
         _enforce_termux_left_layout(cfg)
 
@@ -4702,6 +4734,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         _report_key_execution_if_public(cfg)
 
         entries = enabled_package_entries(cfg)
+        safe_io.set_crash_context(package_count=len(entries))
         if not cfg.get("first_setup_completed"):
             print("First-time setup is required before starting.")
             if _is_interactive():
@@ -5283,6 +5316,14 @@ def cmd_start(args: argparse.Namespace) -> int:
         _hci_raw = int(_sup_sub.get("health_check_interval_seconds", 10))
         _sup_sub["health_check_interval_seconds"] = max(10, _hci_raw)
         _live_cfg["supervisor"] = _sup_sub
+        _live_cfg["start_session_id"] = _start_session_id
+        _live_cfg["screen_mode"] = _start_screen_mode
+        safe_io.set_crash_context(
+            phase="supervisor_start",
+            session_id=_start_session_id,
+            screen_mode=_start_screen_mode,
+            package_count=len(runtime_entries),
+        )
         # [DENG_REJOIN_WATCHDOG_FIX] Use WatchdogSupervisor: sequential per-package
         # loop, process-check-first, 4 states only, never stops after Online.
         _supervisor = WatchdogSupervisor(runtime_entries, _live_cfg, initial_status=initial_status)
@@ -5345,6 +5386,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             Runtime column shows elapsed time since package first became Online.
             Usage column shows per-package RAM consumption.
             """
+            safe_io.set_crash_context(phase="render_loop", session_id=_start_session_id)
             import time as _ts_time
             _now_ts = _ts_time.time()
 

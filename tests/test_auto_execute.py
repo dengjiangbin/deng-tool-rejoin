@@ -174,24 +174,19 @@ class AutoExecuteMenuTests(unittest.TestCase):
 
 
 class SupervisorAutoExecuteTests(unittest.TestCase):
-    def test_handle_online_runs_auto_execute_before_ram_check(self):
+    def test_handle_online_does_not_trigger_auto_execute_in_start_supervisor(self):
         from agent.supervisor import STATUS_ONLINE
         from tests.test_ram_optimization import _ENTRY, _PKG, _make_supervisor
 
         sup = _make_supervisor({"auto_execute_scripts": ["print(1)"]})
-        sup._auto_execute_ran = set()
         sup._check_ram_optimization = MagicMock()
 
         with patch("agent.supervisor.effective_private_server_url", return_value=""), \
-             patch("agent.supervisor.auto_execute.run_auto_execute_for_package") as run:
+             patch("agent.supervisor.log_event") as log:
             sup._handle_state(_PKG, _ENTRY, STATUS_ONLINE, STATUS_ONLINE, 123.0)
 
-        run.assert_called_once_with(
-            sup.cfg,
-            _PKG,
-            sup._auto_execute_ran,
-            logger=sup._logger,
-        )
+        event_names = [call.args[2] for call in log.call_args_list]
+        self.assertIn("[DENG_REJOIN_ONLINE_STABLE]", event_names)
         sup._check_ram_optimization.assert_called_once()
 
 

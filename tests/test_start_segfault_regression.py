@@ -81,6 +81,16 @@ class StartSegfaultRegressionTests(unittest.TestCase):
         self.assertIn("FAULT_HANDLER_LOG_PATH", source)
         self.assertIn("crash_faulthandler.log", str(FAULT_HANDLER_LOG_PATH))
         self.assertIn("faulthandler.enable", source)
+        self.assertIn("all_threads=False", source)
+        self.assertIn("os.set_inheritable", source)
+        self.assertIn("setup_faulthandler._crash_file", source)
+
+    def test_start_records_crash_phase_context(self) -> None:
+        source = inspect.getsource(commands.cmd_start)
+        self.assertIn("safe_io.set_crash_context", source)
+        self.assertIn("session_id", source)
+        self.assertIn("screen_mode", source)
+        self.assertIn("package_count", source)
 
     def test_repeated_start_guard_uses_lockfile(self) -> None:
         source = inspect.getsource(commands.cmd_start)
@@ -95,6 +105,14 @@ class StartSegfaultRegressionTests(unittest.TestCase):
             result = android.run_command(["pidof", "com.moons.litesc"], timeout=1)
         self.assertTrue(result.timed_out)
         self.assertEqual(result.returncode, 124)
+
+    def test_safe_http_curl_uses_same_subprocess_lock(self) -> None:
+        from agent import safe_http
+
+        source = inspect.getsource(safe_http._run_curl)
+        self.assertIn("android", source)
+        self.assertIn("subprocess_lock", source)
+        self.assertIn("with lock", source)
 
     def test_no_termux_os_system_clear_anywhere_in_agent_start_modules(self) -> None:
         combined = "\n".join(

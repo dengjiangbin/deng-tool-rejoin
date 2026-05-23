@@ -38,6 +38,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from typing import Any
 
 # ── Platform detection ────────────────────────────────────────────────────────
 
@@ -167,6 +168,43 @@ def safe_clear_screen(*, clear_scrollback: bool = False) -> None:
 
 # ── Crash-log setup ───────────────────────────────────────────────────────────
 
+_crash_context: dict[str, str] = {}
+
+
+def _sanitize_crash_context_value(value: Any) -> str:
+    text = str(value if value is not None else "")
+    return text.replace("\n", " ").replace("\r", " ")[:240]
+
+
+def set_crash_context(**fields: Any) -> None:
+    """Record current Start phase context for native crash diagnostics.
+
+    The context is appended to ``data/logs/crash_faulthandler.log`` immediately,
+    so even native crashes that bypass Python exception handling leave the last
+    known phase, screen mode, package count, and build identifiers behind.
+    """
+    try:
+        for key, value in fields.items():
+            _crash_context[str(key)] = _sanitize_crash_context_value(value)
+        _write_crash_context_line()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _write_crash_context_line() -> None:
+    try:
+        from .constants import FAULT_HANDLER_LOG_PATH  # noqa: PLC0415
+
+        FAULT_HANDLER_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        parts = [
+            f"{key}={_crash_context.get(key, '')!r}"
+            for key in sorted(_crash_context)
+        ]
+        with FAULT_HANDLER_LOG_PATH.open("a", encoding="utf-8", errors="replace") as fh:
+            fh.write(f"[DENG_REJOIN_CRASH_CONTEXT] {' '.join(parts)}\n")
+    except Exception:  # noqa: BLE001
+        pass
+
 
 def setup_faulthandler() -> None:
     """Enable Python faulthandler to log crash tracebacks to a local log file.
@@ -206,9 +244,14 @@ def setup_faulthandler() -> None:
                 _crash_file = open(  # noqa: SIM115
                     crash_path_str, "a", encoding="utf-8", errors="replace"
                 )
+                try:
+                    os.set_inheritable(_crash_file.fileno(), False)
+                except Exception:  # noqa: BLE001
+                    pass
                 # Store reference — prevents premature GC close.
-                _setup_faulthandler._crash_file = _crash_file  # type: ignore[attr-defined]
-                faulthandler.enable(file=_crash_file)
+                setup_faulthandler._crash_file = _crash_file  # type: ignore[attr-defined]
+                faulthandler.enable(file=_crash_file, all_threads=False)
+                set_crash_context(phase="entrypoint")
                 return  # Successfully enabled; done.
             except Exception:  # noqa: BLE001
                 continue

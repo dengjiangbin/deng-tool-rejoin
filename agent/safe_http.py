@@ -142,13 +142,28 @@ def _run_curl(
     ] + args
 
     try:
-        proc = subprocess.run(
-            full_cmd,
-            input=stdin_bytes,
-            capture_output=True,
-            timeout=timeout + 10,   # python-side timeout > curl --max-time
-            shell=False,            # never shell=True
-        )
+        try:
+            from . import android as _android  # noqa: PLC0415
+            lock = _android.subprocess_lock()
+        except Exception:  # noqa: BLE001
+            lock = None
+        if lock is None:
+            proc = subprocess.run(
+                full_cmd,
+                input=stdin_bytes,
+                capture_output=True,
+                timeout=timeout + 10,   # python-side timeout > curl --max-time
+                shell=False,            # never shell=True
+            )
+        else:
+            with lock:
+                proc = subprocess.run(
+                    full_cmd,
+                    input=stdin_bytes,
+                    capture_output=True,
+                    timeout=timeout + 10,   # python-side timeout > curl --max-time
+                    shell=False,            # never shell=True
+                )
     except subprocess.TimeoutExpired:
         raise SafeHttpNetworkError("Network request timed out (curl process timeout).") from None
     except (OSError, FileNotFoundError) as exc:
