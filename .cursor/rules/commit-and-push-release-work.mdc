@@ -1,14 +1,14 @@
 ---
-description: Commit and push completed DENG Tool runtime work when requested
+description: Commit and push completed DENG Tool project work when requested
 alwaysApply: true
 ---
 
-# Commit And Push Runtime Work
+# Commit And Push Project Work
 
-When the user asks for runtime/tool changes that must be visible after reinstall or deployment, do not stop at local edits.
+When the user asks for completed project changes to be committed/pushed, do not stop at local edits.
 
-- Run focused validation and any required artifact build/update steps.
-- Commit the completed changes with a clear message.
-- Push the commit to the requested branch/remote when the user explicitly asks for push or says the work is not complete unless pushed.
+- Run focused validation and any required build, artifact, or deployment update steps.
+- Commit the completed changes with a clear message once validation passes.
+- Push the commit to the requested branch/remote when the user explicitly asks for push, says the work is incomplete unless pushed, or asks to complete a fix for this project.
 - If a pushed install/test artifact is needed for reinstall visibility, rebuild/update it before committing.
-- Never claim reinstall visibility until the artifact/manifest or deployment path has been updated.
+- Never claim changes are complete when required commits, pushes, artifacts, manifests, or deployments are still pending.
