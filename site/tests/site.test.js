@@ -787,6 +787,24 @@ describe('theme and dashboard UI', () => {
     }
   });
 
+  test('authenticated layout uses real nav icons and theme toggle', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/dashboard');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /data-theme-toggle/);
+    assert.match(res.text, /deng_tool_theme/);
+    assert.match(res.text, /prefers-color-scheme: light/);
+    assert.match(res.text, /aria-label="Switch theme"/);
+    assert.match(res.text, /theme-icon-sun/);
+    assert.match(res.text, /theme-icon-moon/);
+    assert.match(res.text, /<rect x="3" y="3" width="7" height="8" rx="2"><\/rect>/);
+    assert.match(res.text, /<circle cx="7\.5" cy="14\.5" r="3\.5"><\/circle>/);
+    assert.doesNotMatch(res.text, /<span class="nav-icon" aria-hidden="true">D<\/span>/);
+    assert.doesNotMatch(res.text, /<span class="nav-icon" aria-hidden="true">K<\/span>/);
+    assert.doesNotMatch(res.text, /<span class="nav-icon" aria-hidden="true">ML<\/span>/);
+  });
+
   test('dashboard and My License render compact portal panels', async () => {
     const agent = request.agent(app);
     await login(agent);
@@ -851,10 +869,20 @@ describe('theme and dashboard UI', () => {
     assert.match(css, /#6143b2/i);
     assert.match(css, /--button-gradient:\s*linear-gradient\(90deg,\s*#05c8ff 0%,\s*#7b5cff 50%,\s*#ff2bae 100%\)/i);
     assert.match(css, /var\(--button-gradient\) padding-box,\s*var\(--button-gradient\) border-box/i);
-    assert.match(css, /rgba\(255,\s*255,\s*255,\s*0\.82\)/i);
+    assert.match(css, /:root\[data-theme="light"\]/);
+    assert.match(css, /--body-bg:/);
+    assert.match(css, /color-scheme:\s*dark/);
     assert.match(css, /\.nav-link\.active/);
     assert.match(css, /@media \(max-width: 760px\)/);
-    assert.doesNotMatch(css, /#050816|#0b1020|#00C7A3/i);
+    assert.doesNotMatch(css, /#00C7A3/i);
+  });
+
+  test('theme toggle placement is desktop stacked and mobile beside logout', () => {
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
+    assert.match(css, /\.sidebar-actions\s*\{\s*display:\s*grid;\s*gap:\s*10px;/);
+    assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.sidebar-actions\s*\{\s*grid-template-columns:\s*auto auto;/);
+    assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.sidebar-actions\s*\{\s*grid-template-columns:\s*1fr 1fr;/);
+    assert.match(css, /\.theme-toggle \[data-theme-label\]\s*\{\s*display:\s*none;/);
   });
 
   test('layout includes cache-busted stylesheet URL', async () => {
