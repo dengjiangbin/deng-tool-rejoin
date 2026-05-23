@@ -86,7 +86,7 @@ class AutoExecuteMenuTests(unittest.TestCase):
             ['loadstring(game:HttpGet("https://example.com/Deng.lua"))()'],
         )
         self.assertTrue(any("Add Script #1? (Y/N)" in prompt for prompt in prompt_texts))
-        self.assertIn("Saved 1 Auto Execute script(s).", out.getvalue())
+        self.assertIn("Saved 1 Auto Execute Script(s)", out.getvalue())
 
     def test_auto_execute_menu_adds_multiple_numbered_scripts(self):
         from agent import commands
@@ -110,7 +110,7 @@ class AutoExecuteMenuTests(unittest.TestCase):
         text = out.getvalue()
         self.assertTrue(any("Add Script #1? (Y/N)" in prompt for prompt in prompt_texts))
         self.assertTrue(any("Add Script #2? (Y/N)" in prompt for prompt in prompt_texts))
-        self.assertIn("Saved 2 Auto Execute script(s).", text)
+        self.assertIn("Saved 2 Auto Execute Script(s)", text)
 
 
 class SupervisorAutoExecuteTests(unittest.TestCase):

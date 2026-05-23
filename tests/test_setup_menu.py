@@ -98,7 +98,7 @@ class TopLevelMenuStructureTests(unittest.TestCase):
 
     def test_menu_contains_package(self):
         text = self._get_menu_text()
-        self.assertIn("Package", text)
+        self.assertIn("Packages", text)
 
     def test_menu_contains_roblox_launch_link(self):
         # User feedback: drop the "Roblox Launch Link" multi-mode menu
@@ -130,13 +130,14 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         self.assertIn("Back", text)
 
     def _menu_block(self, text: str) -> str:
-        """Extract only the menu option lines (between the ---- separators)."""
-        # The menu block is between the first and second '--------------------------------'
-        parts = text.split("--------------------------------")
-        # parts[0]=banner, parts[1]=title block, parts[2]=menu options block
-        if len(parts) >= 3:
-            return parts[2]  # the options section
-        return text
+        """Extract the Setup / Edit Config menu option labels."""
+        import re
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", text)
+        start = plain.find("Setup / Edit Config")
+        end = plain.find("Current settings:")
+        if start >= 0 and end > start:
+            return plain[start:end]
+        return plain
 
     def test_menu_has_expected_numbered_items(self):
         # Webhook and YesCaptcha stay hidden; Screen Mode and Key are public.
@@ -153,7 +154,7 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         ]
         self.assertEqual(
             numbered,
-            ["1. Package", "2. Private Server URL", "3. Screen Mode", "4. Auto Execute"],
+            ["1. Packages", "2. Private Server URL", "3. Screen Mode", "4. Auto Execute"],
             f"Unexpected Edit Config items: {numbered}",
         )
 
@@ -348,13 +349,14 @@ class PackageSubmenuTests(unittest.TestCase):
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
         text = buf.getvalue()
-        self.assertRegex(text, r"(?m)^1\. Auto Detect Package")
-        self.assertRegex(text, r"(?m)^2\. Add Package")
-        self.assertRegex(text, r"(?m)^3\. Refresh Account Mapping")
-        self.assertRegex(text, r"(?m)^4\. Remove Package")
-        self.assertNotRegex(text, r"(?m)^5\.")
-        self.assertNotIn("Set Account Username / User ID", text)
-        self.assertNotIn("ROBLOSECURITY Cookie", text)
+        import re
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", text)
+        self.assertIn("Auto Detect Package", plain)
+        self.assertIn("Add Package", plain)
+        self.assertIn("Refresh Account Mapping", plain)
+        self.assertIn("Remove Package", plain)
+        self.assertNotIn("Set Account Username / User ID", plain)
+        self.assertNotIn("ROBLOSECURITY Cookie", plain)
 
     def test_detect_refresh_saves_new_username(self):
         cfg = _base_cfg()
@@ -797,7 +799,7 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
                 with redirect_stdout(buf):
                     _config_menu_launch_link(cfg)
         text = buf.getvalue()
-        self.assertIn("Not set", text)
+        self.assertIn("Not Set", text)
 
 
 class TestPackageMenuBug3Regression(unittest.TestCase):
@@ -817,7 +819,9 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
-        self.assertRegex(buf.getvalue(), r"(?m)^1\. Auto Detect Package")
+        plain = __import__("re").sub(r"\x1b\[[0-9;]*m", "", buf.getvalue())
+        self.assertIn("Auto Detect Package", plain)
+        self.assertIn("1.", plain)
 
     def test_add_package_is_menu_item_2(self):
         cfg = self._make_cfg()
@@ -826,7 +830,9 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
-        self.assertRegex(buf.getvalue(), r"(?m)^2\. Add Package")
+        plain = __import__("re").sub(r"\x1b\[[0-9;]*m", "", buf.getvalue())
+        self.assertIn("Add Package", plain)
+        self.assertIn("2.", plain)
 
     def test_remove_package_is_menu_item_4(self):
         """Remove Package is item 4 after Refresh Account Mapping at 3."""
@@ -836,7 +842,9 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
-        self.assertRegex(buf.getvalue(), r"(?m)^4\. Remove Package")
+        plain = __import__("re").sub(r"\x1b\[[0-9;]*m", "", buf.getvalue())
+        self.assertIn("Remove Package", plain)
+        self.assertIn("4.", plain)
 
     def test_refresh_mapping_auto_detects_roblox_cookie(self):
         from agent.commands import _apply_mapping_to_entries

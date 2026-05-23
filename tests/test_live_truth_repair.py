@@ -53,10 +53,10 @@ class LicensePromptTextTests(unittest.TestCase):
             ok = commands._ensure_remote_license_menu_loop(cfg, argparse.Namespace(), use_color=False)
         self.assertFalse(ok)
         text = out.getvalue()
-        self.assertIn("[*] Verifying License...", text)
-        self.assertIn("[!] No license key found.", text)
+        self.assertIn("[?] Verifying License:", text)
+        self.assertIn("[!] No License Key Found.", text)
         self.assertNotIn("\x1b[", text)
-        prompt.assert_called_with("Enter License Key: ")
+        self.assertIn("Enter License Key", prompt.call_args[0][0])
 
     def test_no_saved_key_prompt_color(self) -> None:
         cfg = self._cfg_without_key()
@@ -67,8 +67,8 @@ class LicensePromptTextTests(unittest.TestCase):
              redirect_stdout(out):
             commands._ensure_remote_license_menu_loop(cfg, argparse.Namespace(), use_color=True)
         text = out.getvalue()
-        self.assertIn("\033[1;96m[*] Verifying License...", text)
-        self.assertIn("\033[1;93m[!] No license key found.", text)
+        self.assertIn("\033[1;96m[?] Verifying License:", text)
+        self.assertIn("\033[1;93m[!] No License Key Found.", text)
 
     def test_valid_cached_key_still_rechecks_remote_before_menu(self) -> None:
         cfg = self._cfg_without_key()
@@ -80,7 +80,7 @@ class LicensePromptTextTests(unittest.TestCase):
                 ok = commands._ensure_remote_license_menu_loop(cfg, argparse.Namespace(), use_color=False)
         self.assertTrue(ok)
         check.assert_called_once()
-        self.assertNotIn("No license key found", out.getvalue())
+        self.assertNotIn("No License Key Found", out.getvalue())
 
 
 class InstallerUiTests(unittest.TestCase):

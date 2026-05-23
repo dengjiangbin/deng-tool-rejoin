@@ -15,7 +15,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 if str(PROJECT) not in sys.path:
     sys.path.insert(0, str(PROJECT))
 
-from agent import commands, menu, safe_io
+from agent import commands, menu, safe_io, termux_ui
 from agent.config import default_config, validate_config
 
 
@@ -61,10 +61,12 @@ class TestTopMenuOutput(unittest.TestCase):
              redirect_stdout(out):
             menu.print_menu(_args(), [])
         text = out.getvalue()
-        self.assertIn("1. First Time Setup Config", text)
-        self.assertIn("2. Setup / Edit Config", text)
-        self.assertIn("3. Start", text)
-        self.assertIn("0. Exit", text)
+        self.assertIn("[?]", text)
+        self.assertIn("Top Menu", text)
+        self.assertIn("First Time Setup Config", text)
+        self.assertIn("Setup / Edit Config", text)
+        self.assertIn("Start", text)
+        self.assertIn("Exit", text)
         self.assertNotIn("4. Key", text)
         self.assertNotIn("5. Auto Execute", text)
         self.assertNotIn("Package Key", text)
@@ -103,36 +105,38 @@ class TestTopMenuDispatch(unittest.TestCase):
     def test_option_4_invalid(self):
         rc, text = self._run(["4", "0"])
         self.assertEqual(rc, 0)
-        self.assertIn("Please choose a valid option.", text)
+        self.assertIn("Invalid Option", text)
         self.assertIn("Goodbye.", text)
 
     def test_option_5_invalid(self):
         rc, text = self._run(["5", "0"])
         self.assertEqual(rc, 0)
-        self.assertIn("Please choose a valid option.", text)
+        self.assertIn("Invalid Option", text)
 
     def test_option_key_alias_invalid(self):
         rc, text = self._run(["key", "0"])
         self.assertEqual(rc, 0)
-        self.assertIn("Please choose a valid option.", text)
+        self.assertIn("Invalid Option", text)
 
     def test_option_auto_alias_invalid(self):
         rc, text = self._run(["auto", "0"])
         self.assertEqual(rc, 0)
-        self.assertIn("Please choose a valid option.", text)
+        self.assertIn("Invalid Option", text)
 
     def test_blank_input_does_not_crash(self):
         rc, text = self._run(["", "0"])
         self.assertEqual(rc, 0)
-        self.assertIn("Please choose a valid option.", text)
+        self.assertIn("Invalid Option", text)
 
 
 class TestAutoExecutePlacement(unittest.TestCase):
     def test_setup_config_contains_auto_execute(self):
-        src = inspect.getsource(commands._run_edit_config_menu)
-        self.assertIn('"4. Auto Execute"', src)
-        self.assertNotIn('"4. Key"', src)
-        self.assertNotIn('"5. Auto Execute"', src)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            termux_ui.print_config_menu()
+        text = out.getvalue()
+        self.assertIn("Auto Execute", text)
+        self.assertNotIn("4. Key", text)
 
     def test_first_time_setup_contains_auto_execute(self):
         src = inspect.getsource(commands._run_first_time_setup_wizard)

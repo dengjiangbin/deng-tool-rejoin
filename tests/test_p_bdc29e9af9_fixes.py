@@ -16,7 +16,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 if str(PROJECT) not in sys.path:
     sys.path.insert(0, str(PROJECT))
 
-from agent import commands, menu, safe_io
+from agent import commands, menu, safe_io, termux_ui
 from agent.config import default_config, validate_config
 from agent.license import HWID_RESET_REENTRY_MESSAGE, hash_license_key, mask_license_key, normalize_license_key
 from agent.license_store import (
@@ -163,9 +163,11 @@ class TestTopMenuPlacement(unittest.TestCase):
 
     def test_setup_config_has_auto_execute_as_option_4(self):
         src = inspect.getsource(commands._run_edit_config_menu)
-        self.assertIn('"4. Auto Execute"', src)
-        self.assertNotIn('"4. Key"', src)
-        self.assertNotIn('"5. Auto Execute"', src)
+        ui_src = inspect.getsource(termux_ui.print_config_menu)
+        self.assertIn("print_config_menu", src)
+        self.assertIn('menu_number("4", "Auto Execute")', ui_src)
+        self.assertNotIn('"4. Key"', ui_src)
+        self.assertNotIn('"5. Auto Execute"', ui_src)
 
     def test_first_time_setup_mentions_auto_execute(self):
         src = inspect.getsource(commands._run_first_time_setup_wizard)

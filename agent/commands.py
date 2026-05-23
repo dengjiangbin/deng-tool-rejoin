@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import account_detect, android, db, root_access, safe_io
+from . import account_detect, android, db, root_access, safe_io, termux_ui
 from .banner import banner_text, print_banner
 from .config import (
     ConfigError,
@@ -81,6 +81,8 @@ from .license import (
 
 # Set True only after a successful validate-only check or manual bind this process.
 _license_session_validated = False
+# Set True when the user manually entered a license key and verification succeeded.
+_license_manual_verification_success = False
 from . import snapshot, webhook, window_layout
 from .url_utils import UrlValidationError, detect_launch_mode_from_url, mask_urls_in_text, validate_launch_url
 
@@ -130,27 +132,26 @@ def _print_dev_license_skipped(use_color: bool) -> None:
 
 def _print_license_ok(use_color: bool) -> None:
     if use_color:
-        print(f"{_ANSI_GREEN}License OK{_ANSI_RESET}")
+        print(termux_ui.success_line("License OK"))
     else:
         print("OK: License Verified")
 
 
 def _print_license_err(message: str, use_color: bool) -> None:
+    short = message.strip()
     if use_color:
-        print(f"{_ANSI_RED}{message}{_ANSI_RESET}")
+        print(termux_ui.error_line(short))
     else:
-        print(message if message.upper().startswith("ERROR:") else f"ERROR: {message}")
+        print(short if short.upper().startswith("ERROR:") else f"ERROR: {short}")
 
 
 def _print_missing_license_prompt(use_color: bool) -> None:
-    verifying = "[*] Verifying License..."
-    missing = "[!] No license key found."
     if use_color:
-        print(f"{_ANSI_CYAN}{verifying}{_ANSI_RESET}")
-        print(f"{_ANSI_YELLOW}{missing}{_ANSI_RESET}")
+        print(termux_ui.prompt_prefix("Verifying License"))
+        print(termux_ui.warning_line("No License Key Found"))
     else:
-        print(verifying)
-        print(missing)
+        print("[?] Verifying License:")
+        print("[!] No License Key Found.")
 
 
 def _persist_license_status(cfg: dict[str, Any], status: str) -> dict[str, Any]:
@@ -678,11 +679,11 @@ def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespac
             print_beginner_menu_license_prompt()
             if not keystore.prompt_and_verify_key():
                 return False
-            _print_license_ok(use_color)
+            global _license_manual_verification_success
+            _license_manual_verification_success = True
             return True
         ok, msg = keystore.verify_key(key)
         if ok:
-            _print_license_ok(use_color)
             return True
         _print_license_err(msg, use_color)
         if not _is_interactive():
@@ -728,7 +729,7 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
                 print_beginner_license_gate_help()
                 return False
             _print_missing_license_prompt(use_color)
-            raw = safe_io.safe_prompt("Enter License Key: ")
+            raw = safe_io.safe_prompt(f"{termux_ui.prompt_prefix('Enter License Key')} ")
             if raw is None:
                 return False
             if not raw:
@@ -758,9 +759,10 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             result, msg = "error", str(exc)
 
         if result == "active":
-            global _license_session_validated
+            global _license_session_validated, _license_manual_verification_success
             _license_session_validated = True
-            # Silent success on normal startup — clean menu appears next.
+            if manual_key_entry:
+                _license_manual_verification_success = True
             try:
                 _persist_license_status(cfg, "active")
             except Exception:  # noqa: BLE001
@@ -2049,28 +2051,29 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         return draft
     while True:
         print()
-        print("--------------------------------")
-        print("Package")
-        print("--------------------------------")
         entries = validate_package_entries(
             draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
         )
         enabled_entries = [e for e in entries if e.get("enabled", True)]
-        print("Current Packages:")
+        current_lines = ["Current Packages:"]
         if enabled_entries:
             for idx, entry in enumerate(enabled_entries, start=1):
                 username = _package_username_display(entry)
-                print(f"  {idx}. {entry['package']} — {username}")
+                current_lines.append(f"  {idx}. {entry['package']} — {username}")
         else:
-            print("  No Packages Configured.")
-        print()
-        print("1. Auto Detect Package")
-        print("2. Add Package")
-        print("3. Refresh Account Mapping")
-        print("4. Remove Package")
-        print("0. Back")
-        print("--------------------------------")
-        _mc = safe_io.safe_prompt("Choose [0]: ", default="0")
+            current_lines.append("  No Packages Configured.")
+        termux_ui.print_submenu(
+            "Packages",
+            [
+                ("1", "Auto Detect Package"),
+                ("2", "Add Package"),
+                ("3", "Refresh Account Mapping"),
+                ("4", "Remove Package"),
+                ("0", "Back"),
+            ],
+            current_lines=current_lines,
+        )
+        _mc = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
         if _mc is None:
             break
         choice = _mc.strip() or "0"
@@ -2085,7 +2088,7 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         elif choice == "4":
             draft = _package_menu_remove(draft)
         else:
-            print("Please choose 1-4 or 0.")
+            termux_ui.print_invalid_option()
     return draft
 
 
@@ -2679,22 +2682,22 @@ def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
     if not _is_interactive():
         return draft
     while True:
-        print()
-        print("--------------------------------")
-        print("Private Server URL")
-        print("--------------------------------")
         current_url = draft.get("launch_url", "") or ""
         if current_url:
-            print(f"Current: {_safe_url_label(current_url)}")
+            current_line = f"Current: {_safe_url_label(current_url)}"
         else:
-            print("Current: Not set. Clones will open Roblox without joining a server.")
-        print()
-        print("1. Set Private Server URL")
-        print("2. Clear Private Server URL")
-        print("3. Show Current URL")
-        print("0. Back")
-        print("--------------------------------")
-        _llc = safe_io.safe_prompt("Choose [0]: ", default="0")
+            current_line = "Current: Not Set. Clones Will Open Roblox Without Joining A Server."
+        termux_ui.print_submenu(
+            "Private Server URL",
+            [
+                ("1", "Set Private Server URL"),
+                ("2", "Clear Private Server URL"),
+                ("3", "Show Current URL"),
+                ("0", "Back"),
+            ],
+            current_lines=[current_line],
+        )
+        _llc = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
         if _llc is None:
             break
         choice = _llc.strip() or "0"
@@ -2703,12 +2706,12 @@ def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
         elif choice == "1":
             _setup_launch_link(draft)
             draft = save_config(draft)
-            print("Private Server URL Saved.")
+            termux_ui.print_success("Private Server URL Saved")
         elif choice == "2":
             draft["launch_mode"] = "app"
             draft["launch_url"] = ""
             draft = save_config(draft)
-            print("Private Server URL Cleared.")
+            termux_ui.print_success("Private Server URL Cleared")
         elif choice == "3":
             url = draft.get("launch_url") or ""
             if url:
@@ -2717,21 +2720,18 @@ def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
                 print("  Not set.")
             safe_io.press_enter()
         else:
-            print("Please choose 1-3 or 0.")
+            termux_ui.print_invalid_option()
     return draft
 
 
 def _config_menu_screen_mode(draft: dict[str, Any]) -> dict[str, Any]:
     if not _is_interactive():
         return draft
-    print()
-    print("--------------------------------")
-    print("Screen Mode")
-    print("--------------------------------")
+    termux_ui.print_submenu_header("Screen Mode")
     print(f"Current: {_screen_mode_label(draft.get('screen_mode', DEFAULT_SCREEN_MODE))}")
     _setup_screen_mode(draft)
     draft = save_config(draft)
-    print("Screen Mode Saved.")
+    termux_ui.print_success("Screen Mode Saved")
     return draft
 
 
@@ -2865,19 +2865,20 @@ def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
     while True:
         scripts = normalize_scripts(draft.get("auto_execute_scripts"))
         draft["auto_execute_scripts"] = scripts
-        print()
-        print("Auto Execute")
-        print("--------------------------------")
-        print(f"Saved Scripts: {len(scripts)}")
+        current_lines = [f"Saved Scripts: {len(scripts)}"]
         for idx, script in enumerate(scripts, 1):
-            print(f"{idx}. {script_preview(script)} [{script_id(script)}]")
-        print()
-        print("1. Add Script")
-        print("2. Remove Script")
-        print("3. Remove All Scripts")
-        print("0. Back")
-        print("--------------------------------")
-        raw = safe_io.safe_prompt("Choose [0]: ", default="0")
+            current_lines.append(f"  {idx}. {script_preview(script)} [{script_id(script)}]")
+        termux_ui.print_submenu(
+            "Auto Execute",
+            [
+                ("1", "Add Script"),
+                ("2", "Remove Script"),
+                ("3", "Remove All Scripts"),
+                ("0", "Back"),
+            ],
+            current_lines=current_lines,
+        )
+        raw = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
         if raw is None:
             break
         choice = raw.strip() or "0"
@@ -2890,7 +2891,7 @@ def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
                 continue
             draft["auto_execute_scripts"] = normalize_scripts(scripts)
             draft = save_config(draft)
-            print(f"Saved {len(added)} Auto Execute script(s).")
+            termux_ui.print_success(f"Saved {len(added)} Auto Execute Script(s)")
             safe_io.press_enter()
         elif choice == "2":
             if not scripts:
@@ -2927,7 +2928,7 @@ def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
                 print("Cancelled.")
             safe_io.press_enter()
         else:
-            print("Please choose 1, 2, 3, or 0.")
+            termux_ui.print_invalid_option()
             safe_io.press_enter()
     return draft
 
@@ -3298,10 +3299,9 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
         _print_config_summary(draft)
         return draft, False
 
-    print_banner(use_color=not args.no_color)
-    print("First Time Setup Config")
-    print()
-    print("This will prepare your device for DENG Tool: Rejoin.")
+    print_banner(use_color=True)
+    termux_ui.header("First Time Setup Config")
+    print("This Will Prepare Your Device For DENG Tool: Rejoin.")
     print()
     print("You will set:")
     print("  1. Roblox package / clone app (pick from detection, or manual fallback)")
@@ -3348,9 +3348,9 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     try:
         saved = save_config(draft)
     except ConfigError as exc:
-        print(f"Setup could not be saved: {exc}")
+        termux_ui.print_error(f"Setup Could Not Be Saved: {exc}")
         return None, False
-    print("First-time setup complete.")
+    termux_ui.print_success("First-Time Setup Complete")
     _print_config_summary(saved)
     if start_after_save or _prompt_yes_no("Start DENG now?", True):
         cmd_start(args)
@@ -3360,34 +3360,18 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
 def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace) -> tuple[dict[str, Any] | None, bool]:
     draft = _refresh_detected_fields(dict(config_data))
     if not _is_interactive():
-        print_banner(use_color=not args.no_color)
-        print("--------------------------------")
-        print("DENG Tool: Rejoin Config")
-        print("--------------------------------")
-        print("1. Package")
-        print("2. Private Server URL")
-        print("3. Screen Mode")
-        print("4. Auto Execute")
-        print("0. Back")
-        print("--------------------------------")
+        print_banner(use_color=True)
+        termux_ui.print_config_menu()
         print("\nCurrent settings:")
         _print_config_summary(draft)
         return draft, False
 
     # Print banner once before the loop; do NOT reprint inside the loop to
     # prevent the logo from appearing multiple times as the user navigates.
-    print_banner(use_color=not args.no_color)
+    print_banner(use_color=True)
     while True:
-        print("--------------------------------")
-        print("DENG Tool: Rejoin Config")
-        print("--------------------------------")
-        print("1. Package")
-        print("2. Private Server URL")
-        print("3. Screen Mode")
-        print("4. Auto Execute")
-        print("0. Back")
-        print("--------------------------------")
-        choice = safe_io.safe_prompt("Choose [0]: ", default="0")
+        termux_ui.print_config_menu()
+        choice = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
         if choice is None:
             print("\nNo interactive input was available. Run this command in Termux to edit settings.")
             print("\nCurrent settings:")
@@ -3405,7 +3389,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         elif choice == "4":
             draft = _config_menu_auto_execute(draft)
         else:
-            print("Please choose 1-4 or 0.")
+            termux_ui.print_invalid_option()
             safe_io.press_enter()
 
 
@@ -3804,22 +3788,8 @@ def _visible_len(s: str) -> int:
 
 
 def _clear_terminal(*, clear_scrollback: bool = False) -> None:
-    """Clear the visible terminal/dashboard. Compatible with Termux and Unix.
-
-    Uses ANSI escape codes on non-Windows to avoid the fork/exec path that
-    ``os.system("clear")`` would take.  On Termux/Python 3.13 that fork is a
-    known source of SIGSEGV — especially while background threads are live.
-    ANSI is instant and fork-free.
-    """
-    try:
-        if os.name == "nt":
-            os.system("cls")  # Windows only — no Termux risk here
-        else:
-            import sys as _sys
-            _sys.stdout.write("\033[2J\033[3J\033[H" if clear_scrollback else "\033[2J\033[H")
-            _sys.stdout.flush()
-    except Exception:  # noqa: BLE001
-        pass
+    """Clear the visible terminal/dashboard. Compatible with Termux and Unix."""
+    safe_io.safe_clear_screen(clear_scrollback=clear_scrollback)
 
 
 def _colorize_status(status: str, *, use_color: bool = True) -> str:
@@ -6095,11 +6065,10 @@ def _run_top_menu_with_clean_exit(args: argparse.Namespace) -> int:
 
 def cmd_menu(args: argparse.Namespace) -> int:
     """Open the main menu, gated by a license check on first run."""
+    global _license_manual_verification_success
     ensure_app_dirs()
     use_color = not args.no_color
 
-    # Clear terminal so the menu opens on a clean screen (user request).
-    _clear_terminal()
     try:
         _menu_cfg = load_config()
     except ConfigError:
@@ -6110,11 +6079,17 @@ def cmd_menu(args: argparse.Namespace) -> int:
     # Notify user if a recent crash was detected (but never show the stack).
     crash_notice = safe_io.check_and_report_crash_log()
     if crash_notice:
-        print(f"\n⚠  {crash_notice}\n")
+        if use_color:
+            print()
+            print(termux_ui.warning_line(crash_notice.split("\n", 1)[0]))
+            print()
+        else:
+            print(f"\n⚠  {crash_notice}\n")
 
     # Dev mode: skip license gate entirely
     if keystore.DEV_MODE:
         _print_dev_license_skipped(use_color)
+        safe_io.safe_clear_screen()
         return _run_top_menu_with_clean_exit(args)
 
     # Load config (use defaults if not yet created)
@@ -6124,6 +6099,7 @@ def cmd_menu(args: argparse.Namespace) -> int:
 
     # Skip gate when license checking is disabled in config
     if lic.get("disabled_by_user") or not lic.get("enabled", True):
+        safe_io.safe_clear_screen()
         return _run_top_menu_with_clean_exit(args)
 
     cfg = _ensure_install_id_saved(cfg)
@@ -6136,6 +6112,10 @@ def cmd_menu(args: argparse.Namespace) -> int:
     if not ok:
         return 1
 
+    if _license_manual_verification_success:
+        termux_ui.print_license_success(pause_seconds=0.8)
+        _license_manual_verification_success = False
+    safe_io.safe_clear_screen()
     return _run_top_menu_with_clean_exit(args)
 
 

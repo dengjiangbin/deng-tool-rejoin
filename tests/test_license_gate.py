@@ -45,7 +45,7 @@ class LicenseGateMenuTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         text = out.getvalue()
         # Menu must open
-        self.assertIn("Menu:", text)
+        self.assertIn("Top Menu", text)
         self.assertIn("First Time Setup Config", text)
         self.assertIn("Goodbye.", text)
 
@@ -97,7 +97,7 @@ class LicenseGateMenuTests(unittest.TestCase):
         self.assertNotEqual(rc, 0)
         text = out.getvalue()
         # Menu must NOT open when license fails
-        self.assertNotIn("Menu:", text)
+        self.assertNotIn("Top Menu", text)
         self.assertNotIn("Goodbye.", text)
 
     def test_dev_mode_skips_license_and_opens_menu(self):
@@ -114,7 +114,7 @@ class LicenseGateMenuTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         text = out.getvalue()
-        self.assertIn("Menu:", text)
+        self.assertIn("Top Menu", text)
         self.assertIn("Goodbye.", text)
 
     def test_no_args_defaults_to_menu_and_requires_license(self):
@@ -184,7 +184,7 @@ class MenuItemsTests(unittest.TestCase):
         with unittest.mock.patch("agent.menu.load_config", side_effect=ConfigError("not found")):
             lines = _menu_prelude_lines()
         self.assertEqual(len(lines), 1)
-        self.assertIn("Setup required", lines[0])
+        self.assertIn("Setup Required", lines[0])
 
     def test_setup_status_block_not_shown_on_clean_menu(self):
         """After license gate passes, Setup Status block must NOT appear in menu output."""

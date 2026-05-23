@@ -8,7 +8,8 @@ import sys
 
 from .constants import PRODUCT_NAME, VERSION
 
-RED = "\033[31m"
+CYAN = "\033[1;96m"
+BLUE = "\033[1;94m"
 RESET = "\033[0m"
 
 ASCII_DENG = r"""
@@ -38,20 +39,20 @@ def visible_width(text: str) -> int:
 
 
 def banner_text(use_color: bool | None = None) -> str:
-    """Build the DENG banner with optional ANSI red styling.
-
-    Each line gets its own RESET to prevent background-strip artifacts in Termux
-    (the BOLD attribute was removed to avoid black-bar rendering with box-drawing chars).
-    """
+    """Build the DENG banner with optional bold bright cyan styling."""
     if use_color is None:
         use_color = supports_color()
     if use_color:
-        colored_lines = [f"{RED}{line}{RESET}" for line in ASCII_DENG.splitlines()]
+        colored_lines = [f"{CYAN}{line}{RESET}" for line in ASCII_DENG.splitlines()]
         logo = "\n".join(colored_lines)
     else:
         logo = ASCII_DENG
     logo_width = max(visible_width(line) for line in ASCII_DENG.splitlines())
-    subtitle = f"{PRODUCT_NAME.replace('DENG Tool: ', 'Tool: ')} v{VERSION}".center(logo_width)
+    subtitle_text = f"{PRODUCT_NAME.replace('DENG Tool: ', 'Tool: ')} v{VERSION}"
+    if use_color:
+        subtitle = f"{BLUE}{subtitle_text.center(logo_width)}{RESET}"
+    else:
+        subtitle = subtitle_text.center(logo_width)
     return f"{logo}\n{subtitle}"
 
 

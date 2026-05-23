@@ -79,6 +79,7 @@ class TestQuietLicenseCachePath(unittest.TestCase):
     def test_offline_grace_does_not_print_license_ok(self) -> None:
         """Transient remote failure + cached active → silent success."""
         from agent import commands
+        commands._license_session_validated = True
         cfg = {
             "license": {
                 "key": "ABCD-1234",

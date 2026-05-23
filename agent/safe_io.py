@@ -146,6 +146,25 @@ def press_enter(msg: str = "\nPress Enter to continue...") -> None:
     safe_prompt(msg)
 
 
+def safe_clear_screen(*, clear_scrollback: bool = False) -> None:
+    """Clear the visible terminal using ANSI only (Termux-safe, fork-free).
+
+    Does not call HOME, force-stop Termux, close apps, or run wm/orientation
+    commands.  Failures are swallowed so callers can continue safely.
+    """
+    try:
+        if os.name == "nt":
+            os.system("cls")  # Windows only — no Termux risk here
+        else:
+            if clear_scrollback:
+                sys.stdout.write("\033[2J\033[3J\033[H")
+            else:
+                sys.stdout.write("\033[2J\033[H")
+            sys.stdout.flush()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # ── Crash-log setup ───────────────────────────────────────────────────────────
 
 

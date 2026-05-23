@@ -777,16 +777,19 @@ class TestPublicMenuItems(unittest.TestCase):
 
     def test_edit_config_menu_has_screen_mode_option_plus_back(self) -> None:
         import agent.commands as cmd
+        import agent.termux_ui as tui
         src = inspect.getsource(cmd._run_edit_config_menu)
-        self.assertIn('"1. Package"', src)
-        self.assertIn('"2. Private Server URL"', src)
-        self.assertIn('"3. Screen Mode"', src)
-        self.assertIn('"4. Auto Execute"', src)
-        self.assertNotIn('"4. Key"', src)
-        self.assertNotIn('"5. Auto Execute"', src)
-        self.assertIn('"0. Back"', src)
-        self.assertNotIn('"3. Webhook"', src)
-        self.assertNotIn('"4. YesCaptcha"', src)
+        ui_src = inspect.getsource(tui.print_config_menu)
+        self.assertIn("print_config_menu", src)
+        self.assertIn('menu_number("1", "Packages")', ui_src)
+        self.assertIn('menu_number("2", "Private Server URL")', ui_src)
+        self.assertIn('menu_number("3", "Screen Mode")', ui_src)
+        self.assertIn('menu_number("4", "Auto Execute")', ui_src)
+        self.assertNotIn('"4. Key"', ui_src)
+        self.assertNotIn('"5. Auto Execute"', ui_src)
+        self.assertIn('menu_number("0", "Back")', ui_src)
+        self.assertNotIn('"3. Webhook"', ui_src)
+        self.assertNotIn('"4. YesCaptcha"', ui_src)
 
 
 # ─── 9. Private URL canonical key ────────────────────────────────────────────
