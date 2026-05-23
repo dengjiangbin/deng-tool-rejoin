@@ -2864,7 +2864,7 @@ def _config_menu_key(draft: dict[str, Any]) -> dict[str, Any]:
 def _prompt_yes_no_capitalized(text: str) -> bool | None:
     """Kaeru-style Y/N prompt with first-letter capitalization."""
     while True:
-        result = safe_io.safe_prompt(f"{text}? (Y/N): ")
+        result = safe_io.safe_prompt(f"{text}? (Y/N) ")
         if result is None:
             return None
         value = result.strip().upper()
@@ -2880,8 +2880,7 @@ def _prompt_yes_no_capitalized(text: str) -> bool | None:
 
 def _read_auto_execute_script(script_number: int) -> str | None:
     print()
-    print(f"Paste Script #{script_number} Below.")
-    print("Type END On A New Line When Finished.")
+    print("Paste Script, Then Type END On A New Line:")
     lines: list[str] = []
     while True:
         raw = safe_io.safe_prompt("", default="", allow_blank=True)
@@ -2919,7 +2918,7 @@ def _add_auto_execute_scripts_interactive(scripts: list[str]) -> tuple[list[str]
             continue
         scripts.append(script)
         added.append(script)
-        print(f"Auto Execute script #{script_number} saved: {script_id(script)}")
+        print("Script Saved.")
         script_number += 1
     if len(scripts) >= MAX_AUTO_EXECUTE_SCRIPTS:
         print("Auto Execute script limit reached.")
@@ -2927,7 +2926,7 @@ def _add_auto_execute_scripts_interactive(scripts: list[str]) -> tuple[list[str]
 
 
 def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
-    """Menu 5: manage saved Auto Execute scripts."""
+    """Menu 4: manage saved Auto Execute scripts."""
     if not _is_interactive():
         return draft
     from .auto_execute import normalize_scripts, script_id, script_preview

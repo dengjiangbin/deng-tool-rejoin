@@ -19,12 +19,11 @@ MENU_ITEMS = (
     ("1", "First Time Setup Config", "first-setup"),
     ("2", "Setup / Edit Config", "config"),
     ("3", "Start", "start"),
-    ("4", "Auto Execute", "auto-execute"),
     ("0", "Exit", "exit"),
 )
 
 # Top menu accepts only these numeric choices — no aliases for removed options.
-_TOP_MENU_CHOICES = frozenset({"0", "1", "2", "3", "4"})
+_TOP_MENU_CHOICES = frozenset({"0", "1", "2", "3"})
 
 
 def _is_interactive() -> bool:

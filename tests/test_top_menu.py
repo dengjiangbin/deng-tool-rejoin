@@ -36,7 +36,6 @@ class TestTopMenuOutput(unittest.TestCase):
                 ("1", "First Time Setup Config"),
                 ("2", "Setup / Edit Config"),
                 ("3", "Start"),
-                ("4", "Auto Execute"),
                 ("0", "Exit"),
             ],
         )
@@ -64,8 +63,9 @@ class TestTopMenuOutput(unittest.TestCase):
         self.assertIn("First Time Setup Config", text)
         self.assertIn("Setup / Edit Config", text)
         self.assertIn("Start", text)
-        self.assertIn("Auto Execute", text)
         self.assertIn("Exit", text)
+        self.assertNotIn("4. Auto Execute", text)
+        self.assertNotIn("Auto Execute", text)
         self.assertNotIn("4. Key", text)
         self.assertNotIn("Package Key", text)
 
@@ -88,7 +88,7 @@ class TestTopMenuDispatch(unittest.TestCase):
             "config": lambda _a: 0,
             "start": lambda _a: 0,
             "package-key": lambda _a: (_ for _ in ()).throw(AssertionError("package-key must not run")),
-            "auto-execute": lambda _a: 0,
+            "auto-execute": lambda _a: (_ for _ in ()).throw(AssertionError("auto-execute must not run from top menu")),
         }
         with patch("agent.menu.load_config", return_value=cfg), \
              patch("agent.menu.print_banner"), \
@@ -99,10 +99,10 @@ class TestTopMenuDispatch(unittest.TestCase):
             rc = menu.run_menu(_args(), handlers)
         return rc, out.getvalue()
 
-    def test_option_4_auto_execute_opens(self):
-        rc, text = self._run(["4", "", "0"])
+    def test_option_4_invalid_does_not_open_auto_execute(self):
+        rc, text = self._run(["4", "0"])
         self.assertEqual(rc, 0)
-        self.assertNotIn("Invalid Option", text)
+        self.assertIn("Invalid Option", text)
         self.assertIn("Goodbye.", text)
 
     def test_option_44_invalid(self):
@@ -132,9 +132,11 @@ class TestTopMenuDispatch(unittest.TestCase):
 
 
 class TestAutoExecutePlacement(unittest.TestCase):
-    def test_top_menu_contains_auto_execute(self):
+    def test_top_menu_does_not_contain_auto_execute(self):
         labels = [item[1] for item in menu.MENU_ITEMS]
-        self.assertIn("Auto Execute", labels)
+        commands_map = {item[2] for item in menu.MENU_ITEMS}
+        self.assertNotIn("Auto Execute", labels)
+        self.assertNotIn("auto-execute", commands_map)
 
     def test_setup_config_contains_auto_execute(self):
         out = io.StringIO()
@@ -181,12 +183,32 @@ class TestAutoExecutePlacement(unittest.TestCase):
             commands._config_menu_auto_execute(cfg)
         self.assertIn("No saved scripts", out.getvalue())
 
+    def test_auto_execute_corrupt_config_recovery_does_not_crash(self):
+        cfg = validate_config(default_config())
+        cfg["auto_execute_scripts"] = ["print(1)"]
+        with patch("agent.commands._is_interactive", return_value=True), \
+             patch("agent.commands.safe_io.safe_prompt", side_effect=["3", "YES", "0"]), \
+             patch("agent.commands.safe_io.press_enter"), \
+             patch("agent.commands.save_config", side_effect=commands.ConfigError("bad")), \
+             redirect_stdout(io.StringIO()) as out:
+            result = commands._config_menu_auto_execute(cfg)
+        self.assertIsInstance(result, dict)
+        self.assertIn("Auto Execute config was missing or corrupt", out.getvalue())
+
+    def test_auto_execute_keyboard_interrupt_returns_safely(self):
+        cfg = validate_config(default_config())
+        with patch("agent.commands._is_interactive", return_value=True), \
+             patch("agent.commands.safe_io.safe_prompt", side_effect=KeyboardInterrupt), \
+             redirect_stdout(io.StringIO()):
+            result = commands._config_menu_auto_execute(cfg)
+        self.assertIsInstance(result, dict)
+
 
 class TestPackageKeyNotInTopMenu(unittest.TestCase):
     def test_package_key_not_in_menu_items(self):
         commands_map = {item[2] for item in menu.MENU_ITEMS}
         self.assertNotIn("package-key", commands_map)
-        self.assertIn("auto-execute", commands_map)
+        self.assertNotIn("auto-execute", commands_map)
 
     def test_package_key_handler_not_reachable_from_top_menu(self):
         src = inspect.getsource(menu.run_menu)
@@ -266,7 +288,6 @@ class TestTopMenuExit(unittest.TestCase):
             "first-setup": lambda _a: 0,
             "config": fake_config,
             "start": lambda _a: 0,
-            "auto-execute": lambda _a: 0,
         }
         with patch("agent.menu.load_config", return_value=cfg), \
              patch("agent.menu.print_banner"), \

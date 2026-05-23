@@ -86,6 +86,8 @@ class AutoExecuteMenuTests(unittest.TestCase):
             ['loadstring(game:HttpGet("https://example.com/Deng.lua"))()'],
         )
         self.assertTrue(any("Add Script #1? (Y/N)" in prompt for prompt in prompt_texts))
+        self.assertIn("Paste Script, Then Type END On A New Line:", out.getvalue())
+        self.assertIn("Script Saved.", out.getvalue())
         self.assertIn("Saved 1 Auto Execute Script(s)", out.getvalue())
 
     def test_auto_execute_menu_adds_multiple_numbered_scripts(self):

@@ -163,7 +163,6 @@ def print_top_menu(*, prelude_lines: list[str] | None = None) -> None:
     _emit(menu_number("1", "First Time Setup Config"))
     _emit(menu_number("2", "Setup / Edit Config"))
     _emit(menu_number("3", "Start"))
-    _emit(menu_number("4", "Auto Execute"))
     _emit(menu_number("0", "Exit"))
     _emit()
 

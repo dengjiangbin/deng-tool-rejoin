@@ -758,15 +758,15 @@ class TestWebhookHiddenFromPublicUI(unittest.TestCase):
 class TestPublicMenuItems(unittest.TestCase):
 
     def test_main_menu_has_expected_items(self) -> None:
-        """Main menu must include public Auto Execute as option 4."""
+        """Main menu must keep Auto Execute out of the top-level options."""
         import agent.menu as menu
         labels = [item[1] for item in menu.MENU_ITEMS]
         numbers = [item[0] for item in menu.MENU_ITEMS]
-        self.assertEqual(numbers, ["1", "2", "3", "4", "0"])
+        self.assertEqual(numbers, ["1", "2", "3", "0"])
         self.assertIn("First Time Setup Config", labels)
         self.assertIn("Setup / Edit Config", labels)
         self.assertIn("Start", labels)
-        self.assertIn("Auto Execute", labels)
+        self.assertNotIn("Auto Execute", labels)
         self.assertIn("Exit", labels)
         self.assertNotIn("Key", labels)
         self.assertNotIn("Package Key", labels)
