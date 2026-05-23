@@ -153,12 +153,12 @@ class TestStartupLicenseGate(unittest.TestCase):
 
 
 class TestTopMenuPlacement(unittest.TestCase):
-    def test_top_menu_has_exact_four_options(self):
+    def test_top_menu_has_auto_execute_option_4(self):
         labels = [item[1] for item in menu.MENU_ITEMS]
         numbers = [item[0] for item in menu.MENU_ITEMS]
-        self.assertEqual(numbers, ["1", "2", "3", "0"])
+        self.assertEqual(numbers, ["1", "2", "3", "4", "0"])
         self.assertNotIn("Key", labels)
-        self.assertNotIn("Auto Execute", labels)
+        self.assertIn("Auto Execute", labels)
         self.assertNotIn("Package Key", labels)
 
     def test_setup_config_has_auto_execute_as_option_4(self):
@@ -177,7 +177,7 @@ class TestTopMenuPlacement(unittest.TestCase):
     def test_handlers_include_package_key_not_in_top_menu(self):
         menu_commands = {item[2] for item in menu.MENU_ITEMS}
         self.assertNotIn("package-key", menu_commands)
-        self.assertNotIn("auto-execute", menu_commands)
+        self.assertIn("auto-execute", menu_commands)
         self.assertIn("package-key", commands._handlers())
 
 

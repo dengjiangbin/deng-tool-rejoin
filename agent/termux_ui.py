@@ -7,6 +7,7 @@ Termux menus. Colors are always applied for menu rendering.
 from __future__ import annotations
 
 import re
+import shutil
 import sys
 import time
 
@@ -18,6 +19,8 @@ YELLOW = "\033[1;93m"
 RED = "\033[1;91m"
 CYAN = "\033[1;96m"
 BLUE = "\033[1;94m"
+PINK = "\033[1;95m"
+COLOR_LOGO = PINK
 WHITE = "\033[1;97m"
 RESET = "\033[0m"
 
@@ -43,8 +46,16 @@ def _emit(text: str = "") -> None:
             print(text.encode("ascii", errors="replace").decode("ascii"))
 
 
-def separator(char: str = "=", width: int = 50) -> str:
-    return f"{CYAN}{char * width}{RESET}"
+def separator(char: str = "=", width: int | None = None) -> str:
+    """Return a visible-width separator, ignoring ANSI codes in measurements."""
+    glyph = (str(char or "-"))[0]
+    if width is None:
+        try:
+            width = shutil.get_terminal_size(fallback=(60, 24)).columns
+        except Exception:  # noqa: BLE001
+            width = 60
+    width = max(40, min(int(width or 60), 72))
+    return f"{CYAN}{glyph * width}{RESET}"
 
 
 def header(title: str, *, width: int = 50) -> None:
@@ -152,6 +163,7 @@ def print_top_menu(*, prelude_lines: list[str] | None = None) -> None:
     _emit(menu_number("1", "First Time Setup Config"))
     _emit(menu_number("2", "Setup / Edit Config"))
     _emit(menu_number("3", "Start"))
+    _emit(menu_number("4", "Auto Execute"))
     _emit(menu_number("0", "Exit"))
     _emit()
 
@@ -208,4 +220,4 @@ def config_saved_message() -> None:
 
 
 def product_header_line() -> str:
-    return f"{CYAN}{PRODUCT_NAME}{RESET}"
+    return f"{COLOR_LOGO}{PRODUCT_NAME}{RESET}"

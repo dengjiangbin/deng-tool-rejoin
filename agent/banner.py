@@ -8,8 +8,9 @@ import sys
 
 from .constants import PRODUCT_NAME, VERSION
 
-CYAN = "\033[1;96m"
 BLUE = "\033[1;94m"
+PINK = "\033[1;95m"
+COLOR_LOGO = PINK
 RESET = "\033[0m"
 
 ASCII_DENG = r"""
@@ -39,11 +40,11 @@ def visible_width(text: str) -> int:
 
 
 def banner_text(use_color: bool | None = None) -> str:
-    """Build the DENG banner with optional bold bright cyan styling."""
+    """Build the DENG banner with optional bold bright pink logo styling."""
     if use_color is None:
         use_color = supports_color()
     if use_color:
-        colored_lines = [f"{CYAN}{line}{RESET}" for line in ASCII_DENG.splitlines()]
+        colored_lines = [f"{COLOR_LOGO}{line}{RESET}" for line in ASCII_DENG.splitlines()]
         logo = "\n".join(colored_lines)
     else:
         logo = ASCII_DENG

@@ -194,16 +194,17 @@ class TestMenuStructureProtection(unittest.TestCase):
                 "First Time Setup Config",
                 "Setup / Edit Config",
                 "Start",
+                "Auto Execute",
                 "Exit",
             ],
         )
 
-    def test_top_menu_no_key_or_auto_execute(self) -> None:
+    def test_top_menu_no_key_and_auto_execute_is_option_4(self) -> None:
         labels = [item[1] for item in menu.MENU_ITEMS]
         numbers = [item[0] for item in menu.MENU_ITEMS]
         self.assertNotIn("Key", labels)
-        self.assertNotIn("Auto Execute", labels)
-        self.assertNotIn("4", numbers)
+        self.assertIn("Auto Execute", labels)
+        self.assertIn("4", numbers)
         self.assertNotIn("5", numbers)
 
     def test_setup_config_contains_auto_execute(self) -> None:

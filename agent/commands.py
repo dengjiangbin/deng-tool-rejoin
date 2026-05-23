@@ -120,6 +120,7 @@ _ANSI_BOLD    = "\033[1m"      # plain bold (no color)
 _ANSI_DIM     = "\033[2;37m"   # dim grey (Unknown only — intentionally low-contrast)
 _ANSI_RESET   = "\033[0m"
 _ANSI_RE      = re.compile(r"\x1b\[[0-9;]*m")
+_CONFIG_RECOVERED_DEFAULTS = False
 
 
 def _print_dev_license_skipped(use_color: bool) -> None:
@@ -143,6 +144,20 @@ def _print_license_err(message: str, use_color: bool) -> None:
         print(termux_ui.error_line(short))
     else:
         print(short if short.upper().startswith("ERROR:") else f"ERROR: {short}")
+
+
+def _load_config_for_menu() -> dict[str, Any]:
+    """Load config for public menus, recreating defaults on missing/corrupt data."""
+    global _CONFIG_RECOVERED_DEFAULTS
+    try:
+        return load_config()
+    except ConfigError:
+        _CONFIG_RECOVERED_DEFAULTS = True
+        cfg = default_config()
+        try:
+            return save_config(cfg)
+        except Exception:  # noqa: BLE001
+            return cfg
 
 
 def _print_missing_license_prompt(use_color: bool) -> None:
@@ -1276,9 +1291,9 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
 
 def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejoin Setup") -> None:
     cfg = safe_config_view(validate_config(config_data))
-    print("--------------------------------")
+    print(termux_ui.separator("-"))
     print(title)
-    print("--------------------------------")
+    print(termux_ui.separator("-"))
     print(f"1. Device Name: {cfg['device_name']}")
     print(f"2. Roblox Package: {cfg['roblox_package']}")
     print(f"3. Private Server URL: {_safe_url_label(cfg['launch_url'])}")
@@ -1290,7 +1305,7 @@ def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejo
     print("9. Save and Finish")
     print("A. Advanced Info")
     print("0. Cancel")
-    print("--------------------------------")
+    print(termux_ui.separator("-"))
 
 
 def _choose_package() -> str:
@@ -1460,6 +1475,25 @@ def _mapping_status_for(
     return "Detected"
 
 
+def _safe_table_cell(value: Any, *, limit: int = 40, fallback: str = "-") -> str:
+    """Return a printable table cell that cannot break row width assumptions."""
+    text = str(value if value is not None else fallback)
+    text = _ANSI_RE.sub("", text).replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    text = " ".join(text.split()) or fallback
+    if len(text) > limit:
+        return text[: max(1, limit - 3)] + "..."
+    return text
+
+
+def _print_account_mapping_plain(rows: list[tuple[str, str, str, str, str, str]]) -> None:
+    for row in rows or [("", "-", "-", "-", "-", "Not Mapped")]:
+        cells = tuple(_safe_table_cell(row[i] if i < len(row) else "-", limit=48) for i in range(6))
+        print(
+            f"  {cells[0] or '-'} | Package: {cells[1]} | Username: {cells[2]} | "
+            f"User ID: {cells[3]} | Source: {cells[4]} | Status: {cells[5]}"
+        )
+
+
 def _run_account_mapping_table(
     entries: list[dict[str, Any]],
     draft: dict[str, Any],
@@ -1476,21 +1510,16 @@ def _run_account_mapping_table(
     """
     if not entries:
         return entries
+    entries = [dict(e) for e in entries if isinstance(e, dict)]
+    if not entries:
+        return []
 
     # --- Show one-time root availability message ---
     if show_root_message and _is_interactive():
         if not root_access.has_root():
             print()
-            print(
-                "  Root access was not available, so DENG Tool could not inspect"
-                " protected Roblox app data."
-            )
-            print(
-                "  Username/User ID detection will rely on public data and"
-                " manual entry instead."
-            )
-            print(
-                "  Root not required for Start — only improves setup detection."
+            termux_ui.print_warning(
+                "Root access was not available. Username/User ID detection will use fallback/manual mapping."
             )
 
     # --- Run detection for entries that don't have a user_id yet ---
@@ -1498,7 +1527,10 @@ def _run_account_mapping_table(
         print("Detecting accounts...", flush=True)
     detected: list[tuple[int, str]] = []
     for entry in entries:
-        uid, src = _try_detect_user_id(entry, draft)
+        try:
+            uid, src = _try_detect_user_id(entry, draft)
+        except Exception:  # noqa: BLE001
+            uid, src = 0, "not_found"
         detected.append((uid, src))
 
     # --- Run presence validation (use cached cookie only — no root scan here) ---
@@ -1511,7 +1543,10 @@ def _run_account_mapping_table(
             continue
         cookie = str(entry.get("roblox_cookie") or "").strip()
         if uid > 0:
-            presence_statuses.append(_validate_user_id_with_presence(uid, cookie=cookie))
+            try:
+                presence_statuses.append(_validate_user_id_with_presence(uid, cookie=cookie))
+            except Exception:  # noqa: BLE001
+                presence_statuses.append("API Unavailable")
         else:
             presence_statuses.append("")
 
@@ -1523,25 +1558,30 @@ def _run_account_mapping_table(
     def _mapping_rows() -> list[tuple[str, str, str, str, str, str]]:
         rows: list[tuple[str, str, str, str, str, str]] = []
         for i, entry in enumerate(entries):
-            uid, src = detected[i]
+            uid, src = detected[i] if i < len(detected) else (0, "not_found")
             username = _package_username_display(entry) or "-"
             uid_disp = str(uid) if uid > 0 else "-"
             src_disp = src or "-"
             status = _row_status(i, entry)
             rows.append((
                 str(i + 1),
-                _short_package_display(str(entry.get("package") or "")),
-                username[:20],
-                uid_disp,
-                src_disp[:14],
-                status,
+                _safe_table_cell(_short_package_display(str(entry.get("package") or "-")), limit=36),
+                _safe_table_cell(username, limit=20),
+                _safe_table_cell(uid_disp, limit=18),
+                _safe_table_cell(src_disp, limit=14),
+                _safe_table_cell(status, limit=22),
             ))
         return rows
 
     def _print_mapping_table() -> None:
         print()
         print("Account Mapping")
-        print(build_account_mapping_table(_mapping_rows()))
+        rows = _mapping_rows()
+        try:
+            print(build_account_mapping_table(rows))
+        except Exception:  # noqa: BLE001
+            termux_ui.print_warning("Table rendering failed; showing simple mapping list.")
+            _print_account_mapping_plain(rows)
         print()
         print("  A. Accept all  |  1-N. Edit entry  |  B. Back")
         print()
@@ -1747,12 +1787,12 @@ def _choose_packages_menu(
         return selected, hints
 
     print()
-    print("--------------------------------")
+    print(termux_ui.separator("-"))
     print("Roblox Package Setup")
-    print("--------------------------------")
+    print(termux_ui.separator("-"))
     print("1. Auto detect Roblox packages")
     print("2. Enter package name manually")
-    print("--------------------------------")
+    print(termux_ui.separator("-"))
     _ch = safe_io.safe_prompt("Choose [1]: ", default="1")
     choice = (_ch or "1").strip() or "1"
 
@@ -2077,18 +2117,25 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         if _mc is None:
             break
         choice = _mc.strip() or "0"
-        if choice == "0":
+        try:
+            if choice == "0":
+                break
+            elif choice == "1":
+                draft = _package_menu_auto_detect(draft)
+            elif choice == "2":
+                draft = _package_menu_add(draft)
+            elif choice == "3":
+                draft = _package_menu_refresh_mapping(draft)
+            elif choice == "4":
+                draft = _package_menu_remove(draft)
+            else:
+                termux_ui.print_invalid_option()
+        except (KeyboardInterrupt, EOFError):
+            print()
             break
-        elif choice == "1":
-            draft = _package_menu_auto_detect(draft)
-        elif choice == "2":
-            draft = _package_menu_add(draft)
-        elif choice == "3":
-            draft = _package_menu_refresh_mapping(draft)
-        elif choice == "4":
-            draft = _package_menu_remove(draft)
-        else:
-            termux_ui.print_invalid_option()
+        except Exception as exc:  # noqa: BLE001
+            termux_ui.print_error(f"Package menu error: {str(exc)[:120]}")
+            safe_io.press_enter()
     return draft
 
 
@@ -2505,54 +2552,77 @@ def _package_menu_refresh_mapping(draft: dict[str, Any]) -> dict[str, Any]:
     print()
     print("Refresh Account Mapping")
     print()
-    entries = validate_package_entries(
-        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
-    )
+    try:
+        entries = validate_package_entries(
+            draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
+        )
+    except ConfigError as exc:
+        termux_ui.print_error(f"Could not read package mapping: {exc}")
+        safe_io.press_enter()
+        return draft
+
     enabled_entries = [e for e in entries if e.get("enabled", True)]
     if not enabled_entries:
-        print("No packages configured.")
+        termux_ui.print_warning("No packages configured")
         safe_io.press_enter()
         return draft
 
     print(f"Re-running detection for {len(enabled_entries)} package(s)...")
-    root_access.clear_cache()
+    try:
+        root_access.clear_cache()
+    except Exception:  # noqa: BLE001
+        termux_ui.print_warning("Root cache refresh failed; continuing with fallback mapping")
 
-    # Reset detected entries so detection runs fresh (keep existing username but clear user_id source)
     fresh_entries: list[dict[str, Any]] = []
+    skipped: list[str] = []
     for entry in enabled_entries:
         e = dict(entry)
-        # Keep username, clear user_id so detection re-runs
+        pkg = str(e.get("package") or "").strip() or "Unknown"
+        e["package"] = pkg
         e.pop("account_mapping_status", None)
         e.pop("account_mapping_source", None)
         e.pop("account_mapping_updated_at", None)
         e.pop("roblox_cookie", None)
-        # Also attempt username re-detection if none set
         if not str(e.get("account_username") or "").strip():
             try:
                 det = account_detect.detect_account_username(
-                    str(e.get("package") or ""),
+                    pkg,
                     entry=e,
-                    config=None,
+                    config=draft,
                     use_root=True,
                 )
                 if det and det.username:
                     e["account_username"] = validate_account_username(det.username)
                     e["username_source"] = validate_username_source(det.source, det.username)
-            except Exception:  # noqa: BLE001
-                pass
+            except PermissionError:
+                skipped.append(f"{pkg}: permission denied")
+            except Exception:
+                skipped.append(f"{pkg}: username detection unavailable")
         fresh_entries.append(e)
 
-    refreshed = _run_account_mapping_table(fresh_entries, draft, show_root_message=True)
+    try:
+        refreshed = _run_account_mapping_table(fresh_entries, draft, show_root_message=True)
+    except Exception as exc:  # noqa: BLE001
+        termux_ui.print_error(f"Refresh failed: {str(exc)[:120]}")
+        safe_io.press_enter()
+        return draft
     if not refreshed:
-        print("Refresh cancelled.")
+        termux_ui.print_warning("Refresh cancelled")
+        safe_io.press_enter()
         return draft
 
-    # Merge back into all entries (including disabled ones)
-    refreshed_by_pkg = {e["package"]: e for e in refreshed}
-    merged = [refreshed_by_pkg.get(e["package"], e) for e in entries]
+    refreshed_by_pkg = {str(e.get("package") or ""): e for e in refreshed if isinstance(e, dict)}
+    merged = [refreshed_by_pkg.get(str(e.get("package") or ""), e) for e in entries]
     draft["roblox_packages"] = merged
-    draft = save_config(draft)
-    print("Account mapping refreshed and saved.")
+    try:
+        draft = save_config(draft)
+    except ConfigError as exc:
+        termux_ui.print_error(f"Refresh completed but could not save config: {exc}")
+        safe_io.press_enter()
+        return draft
+    if skipped:
+        termux_ui.print_warning(f"Partial refresh: skipped {len(skipped)} detection step(s)")
+    termux_ui.print_success("Account mapping refreshed and saved")
     safe_io.press_enter()
     return draft
 
@@ -2863,72 +2933,90 @@ def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
     from .auto_execute import normalize_scripts, script_id, script_preview
 
     while True:
-        scripts = normalize_scripts(draft.get("auto_execute_scripts"))
-        draft["auto_execute_scripts"] = scripts
-        current_lines = [f"Saved Scripts: {len(scripts)}"]
-        for idx, script in enumerate(scripts, 1):
-            current_lines.append(f"  {idx}. {script_preview(script)} [{script_id(script)}]")
-        termux_ui.print_submenu(
-            "Auto Execute",
-            [
-                ("1", "Add Script"),
-                ("2", "Remove Script"),
-                ("3", "Remove All Scripts"),
-                ("0", "Back"),
-            ],
-            current_lines=current_lines,
-        )
-        raw = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
-        if raw is None:
-            break
-        choice = raw.strip() or "0"
-        if choice == "0":
-            break
-        if choice == "1":
-            scripts, added = _add_auto_execute_scripts_interactive(scripts)
-            if not added:
-                safe_io.press_enter()
-                continue
-            draft["auto_execute_scripts"] = normalize_scripts(scripts)
-            draft = save_config(draft)
-            termux_ui.print_success(f"Saved {len(added)} Auto Execute Script(s)")
-            safe_io.press_enter()
-        elif choice == "2":
-            if not scripts:
-                print("No saved scripts.")
-                safe_io.press_enter()
-                continue
-            idx_raw = safe_io.safe_prompt("Remove script number [0]: ", default="0")
-            if idx_raw is None:
-                continue
-            try:
-                idx = int((idx_raw or "0").strip()) - 1
-                if idx < 0 or idx >= len(scripts):
-                    raise ValueError
-            except (TypeError, ValueError):
-                print("Cancelled.")
-                safe_io.press_enter()
-                continue
-            removed = scripts.pop(idx)
+        try:
+            scripts = normalize_scripts(draft.get("auto_execute_scripts"))
             draft["auto_execute_scripts"] = scripts
-            draft = save_config(draft)
-            print(f"Removed Auto Execute script: {script_id(removed)}")
-            safe_io.press_enter()
-        elif choice == "3":
-            if not scripts:
-                print("No saved scripts.")
-                safe_io.press_enter()
-                continue
-            confirm = safe_io.safe_prompt("Remove all Auto Execute scripts? Type YES: ", default="")
-            if (confirm or "").strip() == "YES":
-                draft["auto_execute_scripts"] = []
-                draft = save_config(draft)
-                print("All Auto Execute scripts removed.")
+            current_lines = [f"Saved Scripts: {len(scripts)}"]
+            if scripts:
+                for idx, script in enumerate(scripts, 1):
+                    current_lines.append(f"  {idx}. {script_preview(script)} [{script_id(script)}]")
             else:
-                print("Cancelled.")
+                current_lines.append("  No saved scripts.")
+            termux_ui.print_submenu(
+                "Auto Execute",
+                [
+                    ("1", "Add Script"),
+                    ("2", "Remove Script"),
+                    ("3", "Remove All Scripts"),
+                    ("0", "Back"),
+                ],
+                current_lines=current_lines,
+            )
+            raw = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
+            if raw is None:
+                break
+            choice = raw.strip() or "0"
+            if choice == "0":
+                break
+            if choice == "1":
+                scripts, added = _add_auto_execute_scripts_interactive(scripts)
+                if not added:
+                    safe_io.press_enter()
+                    continue
+                draft["auto_execute_scripts"] = normalize_scripts(scripts)
+                draft = save_config(draft)
+                termux_ui.print_success(f"Saved {len(added)} Auto Execute Script(s)")
+                safe_io.press_enter()
+            elif choice == "2":
+                if not scripts:
+                    termux_ui.print_warning("No saved scripts")
+                    safe_io.press_enter()
+                    continue
+                idx_raw = safe_io.safe_prompt("Remove script number [0]: ", default="0")
+                if idx_raw is None:
+                    continue
+                try:
+                    idx = int((idx_raw or "0").strip()) - 1
+                    if idx < 0 or idx >= len(scripts):
+                        raise ValueError
+                except (TypeError, ValueError):
+                    print("Cancelled.")
+                    safe_io.press_enter()
+                    continue
+                removed = scripts.pop(idx)
+                draft["auto_execute_scripts"] = scripts
+                draft = save_config(draft)
+                print(f"Removed Auto Execute script: {script_id(removed)}")
+                safe_io.press_enter()
+            elif choice == "3":
+                if not scripts:
+                    termux_ui.print_warning("No saved scripts")
+                    safe_io.press_enter()
+                    continue
+                confirm = safe_io.safe_prompt("Remove all Auto Execute scripts? Type YES: ", default="")
+                if (confirm or "").strip() == "YES":
+                    draft["auto_execute_scripts"] = []
+                    draft = save_config(draft)
+                    print("All Auto Execute scripts removed.")
+                else:
+                    print("Cancelled.")
+                safe_io.press_enter()
+            else:
+                termux_ui.print_invalid_option()
+                safe_io.press_enter()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            break
+        except ConfigError:
+            termux_ui.print_warning("Auto Execute config was missing or corrupt; recreated safe defaults")
+            draft["auto_execute_scripts"] = []
+            try:
+                draft = save_config(draft)
+            except Exception:  # noqa: BLE001
+                pass
             safe_io.press_enter()
-        else:
-            termux_ui.print_invalid_option()
+        except Exception as exc:  # noqa: BLE001
+            termux_ui.print_error(f"Auto Execute menu error: {str(exc)[:120]}")
             safe_io.press_enter()
     return draft
 
@@ -3078,9 +3166,9 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
         return draft
     while True:
         print()
-        print("--------------------------------")
+        print(termux_ui.separator("-"))
         print("Webhook")
-        print("--------------------------------")
+        print(termux_ui.separator("-"))
         url = draft.get("webhook_url", "") or ""
         masked_url = webhook.mask_webhook_url(url) if url else "Not Set"
         interval = draft.get("webhook_interval_seconds", 300)
@@ -3100,7 +3188,7 @@ def _config_menu_webhook(draft: dict[str, Any]) -> dict[str, Any]:
         print("4. Snapshot")
         print("5. Test Webhook")
         print("0. Back")
-        print("--------------------------------")
+        print(termux_ui.separator("-"))
         _whc = safe_io.safe_prompt("Choose [0]: ", default="0")
         if _whc is None:
             break
@@ -3211,9 +3299,9 @@ def _config_menu_yescaptcha(draft: dict[str, Any]) -> dict[str, Any]:
         return draft
     while True:
         print()
-        print("--------------------------------")
+        print(termux_ui.separator("-"))
         print("YesCaptcha")
-        print("--------------------------------")
+        print(termux_ui.separator("-"))
         current_key = draft.get("yescaptcha_key", "") or ""
         if current_key:
             masked = current_key[:4] + "..." if len(current_key) > 4 else "****"
@@ -3225,7 +3313,7 @@ def _config_menu_yescaptcha(draft: dict[str, Any]) -> dict[str, Any]:
         print("2. Clear YesCaptcha API Key")
         print("3. Check Balance / Points")
         print("0. Back")
-        print("--------------------------------")
+        print(termux_ui.separator("-"))
         _yc = safe_io.safe_prompt("Choose [0]: ", default="0")
         if _yc is None:
             break
@@ -3923,6 +4011,11 @@ def build_account_mapping_table(rows: list[tuple[str, str, str, str, str, str]])
     headers = ("#", "Package", "Username", "User ID", "Source", "Status")
     if not rows:
         rows = [("", "", "", "", "", "")]
+    safe_rows: list[tuple[str, str, str, str, str, str]] = []
+    for row in rows:
+        padded = tuple(_safe_table_cell(row[i] if i < len(row) else "-") for i in range(6))
+        safe_rows.append(padded)
+    rows = safe_rows
     widths = [
         max(len(headers[i]), max((_visible_len(r[i]) for r in rows), default=0))
         for i in range(6)
@@ -5555,7 +5648,9 @@ def cmd_reset(args: argparse.Namespace) -> int:
 
 
 def cmd_config(args: argparse.Namespace) -> int:
-    cfg = load_config()
+    cfg = _load_config_for_menu()
+    if _CONFIG_RECOVERED_DEFAULTS:
+        termux_ui.print_warning("Config file was missing or corrupt; recreated safe defaults")
     saved, _did_save = _run_edit_config_menu(cfg, args)
     if saved is None:
         return 0
@@ -6037,10 +6132,9 @@ def cmd_new_user_help(args: argparse.Namespace) -> int:
 
 def cmd_auto_execute(args: argparse.Namespace) -> int:
     print_banner(use_color=not args.no_color)
-    try:
-        cfg = load_config()
-    except ConfigError:
-        cfg = default_config()
+    cfg = _load_config_for_menu()
+    if _CONFIG_RECOVERED_DEFAULTS:
+        termux_ui.print_warning("Config file was missing or corrupt; recreated safe defaults")
     if not _is_interactive():
         _print_config_summary(cfg)
         return 0
@@ -6069,10 +6163,7 @@ def cmd_menu(args: argparse.Namespace) -> int:
     ensure_app_dirs()
     use_color = not args.no_color
 
-    try:
-        _menu_cfg = load_config()
-    except ConfigError:
-        _menu_cfg = default_config()
+    _menu_cfg = _load_config_for_menu()
     _enforce_configured_screen_mode(_menu_cfg)
     _enforce_termux_left_layout(_menu_cfg)
 

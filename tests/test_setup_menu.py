@@ -49,6 +49,7 @@ from contextlib import redirect_stdout
 
 from agent import android
 from agent.commands import (
+    build_account_mapping_table,
     _config_menu_launch_link,
     _config_menu_package,
     _config_menu_webhook,
@@ -58,6 +59,7 @@ from agent.commands import (
     _package_menu_add,
     _package_menu_detect_refresh,
     _package_menu_list,
+    _package_menu_refresh_mapping,
     _package_menu_remove,
     _package_menu_set_username,
     _prompt_launch_url,
@@ -857,6 +859,61 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
         ):
             out = _apply_mapping_to_entries(entries, detected, ["Validated"], config={})
         self.assertEqual(out[0]["roblox_cookie"], "_|WARNING:-DO-NOT-SHARE-THIS.AUTO")
+
+    def test_refresh_mapping_handles_empty_mapping(self):
+        cfg = self._make_cfg([{
+            "package": "com.roblox.client",
+            "account_username": "",
+            "enabled": False,
+            "username_source": "not_set",
+        }])
+        with unittest.mock.patch("agent.commands.safe_io.press_enter"), \
+             redirect_stdout(io.StringIO()) as out:
+            result = _package_menu_refresh_mapping(cfg)
+        self.assertIs(result, cfg)
+        self.assertIn("No packages configured", out.getvalue())
+
+    def test_refresh_mapping_handles_none_fields_and_back(self):
+        cfg = self._make_cfg([{
+            "package": "com.roblox.client",
+            "account_username": None,
+            "enabled": True,
+            "username_source": None,
+        }])
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
+             unittest.mock.patch("agent.commands.account_detect.detect_account_username", return_value=None), \
+             unittest.mock.patch("agent.commands._try_detect_user_id", return_value=(0, "not_found")), \
+             unittest.mock.patch("agent.commands.root_access.has_root", return_value=False), \
+             unittest.mock.patch("agent.commands.safe_io.safe_prompt", return_value="b"), \
+             unittest.mock.patch("agent.commands.safe_io.press_enter"), \
+             redirect_stdout(io.StringIO()):
+            result = _package_menu_refresh_mapping(cfg)
+        self.assertIsInstance(result, dict)
+
+    def test_refresh_mapping_handles_long_package_names(self):
+        long_pkg = "com." + ("verylong" * 10)
+        table = build_account_mapping_table([
+            ("1", long_pkg, "user", None, "root_prefs", "Detected"),
+        ])
+        self.assertIn("...", table)
+
+    def test_refresh_mapping_table_rows_match_column_count(self):
+        table = build_account_mapping_table([
+            ("1", "com.roblox.client", "user", "123", "manual", "Validated"),
+            ("2", None, None, None, None, None),
+        ])
+        for line in table.splitlines():
+            if line.startswith("│"):
+                self.assertEqual(line.count("│"), 7)
+
+    def test_refresh_mapping_failure_returns_to_menu(self):
+        cfg = self._make_cfg([package_entry("com.roblox.client", "Main", True)])
+        with unittest.mock.patch("agent.commands._run_account_mapping_table", side_effect=RuntimeError("timeout")), \
+             unittest.mock.patch("agent.commands.safe_io.press_enter"), \
+             redirect_stdout(io.StringIO()) as out:
+            result = _package_menu_refresh_mapping(cfg)
+        self.assertIs(result, cfg)
+        self.assertIn("Refresh failed", out.getvalue())
 
     def test_add_package_auto_detects_roblox_cookie(self):
         from agent.commands import _auto_detect_cookies_for_entries

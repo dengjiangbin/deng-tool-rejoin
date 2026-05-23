@@ -1,0 +1,40 @@
+from __future__ import annotations
+
+import re
+import unittest
+
+from agent import banner, termux_ui
+
+
+class LogoColorRegressionTests(unittest.TestCase):
+    def test_logo_color_constant_is_pink_not_cyan(self):
+        self.assertIn("95", banner.COLOR_LOGO)
+        self.assertNotIn("96", banner.COLOR_LOGO)
+        self.assertEqual(termux_ui.COLOR_LOGO, termux_ui.PINK)
+
+    def test_banner_uses_pink_logo(self):
+        text = banner.banner_text(use_color=True)
+        first_line = text.splitlines()[0]
+        self.assertTrue(first_line.startswith(banner.COLOR_LOGO))
+        self.assertNotIn("\033[1;96m", first_line)
+
+
+class SeparatorRegressionTests(unittest.TestCase):
+    def test_separator_visible_width_not_half_length(self):
+        sep = termux_ui.separator("-", width=60)
+        plain = termux_ui.ANSI_RE.sub("", sep)
+        self.assertEqual(len(plain), 60)
+        self.assertGreaterEqual(len(plain), 40)
+
+    def test_separator_ignores_ansi_codes_for_visible_length(self):
+        sep = termux_ui.separator("-", width=50)
+        self.assertEqual(termux_ui.visible_len(sep), 50)
+        self.assertEqual(len(re.sub(r"\x1b\[[0-9;]*m", "", sep)), 50)
+
+    def test_separator_clamps_to_termux_safe_width(self):
+        self.assertEqual(termux_ui.visible_len(termux_ui.separator("-", width=10)), 40)
+        self.assertEqual(termux_ui.visible_len(termux_ui.separator("-", width=200)), 72)
+
+
+if __name__ == "__main__":
+    unittest.main()
