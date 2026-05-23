@@ -225,3 +225,27 @@ def check_and_report_crash_log(max_age_seconds: int = 3600) -> str | None:
         )
     except Exception:  # noqa: BLE001
         return None
+
+
+def termux_exit_clean() -> None:
+    """Bypass Python finalization on Termux to avoid libc-shutdown segfaults.
+
+    Real-device evidence (probe ``p-47fa33562a``, ``p-bdc29e9af9``): on Termux
+    + Python 3.13, clean menu/supervisor shutdown sometimes segfaults during
+    interpreter teardown.  ``os._exit(0)`` skips the buggy native finalizers.
+
+    Non-Termux contexts return without exiting so unittest can inspect results.
+    """
+    if not os.environ.get("TERMUX_VERSION"):
+        return
+    if os.environ.get("DENG_DISABLE_TERMUX_HARD_EXIT") == "1":
+        return
+    try:
+        sys.stdout.flush()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        sys.stderr.flush()
+    except Exception:  # noqa: BLE001
+        pass
+    os._exit(0)

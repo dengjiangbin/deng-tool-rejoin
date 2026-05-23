@@ -71,6 +71,7 @@ from .platform_detect import detect_public_download_dir, get_android_release, ge
 from .supervisor import MultiPackageSupervisor, WatchdogSupervisor, Supervisor
 from . import keystore
 from .license import (
+    HWID_RESET_REENTRY_MESSAGE,
     WRONG_DEVICE_USER_MESSAGE,
     check_remote_license_status,
     get_device_summary,
@@ -245,7 +246,18 @@ def _license_should_offline_grace(lic: dict[str, Any]) -> bool:
     return 0 <= age <= _LICENSE_OFFLINE_GRACE_SECONDS
 
 
-def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35) -> tuple[str, str]:
+def _clear_cached_license_key(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Remove the locally cached license key after a definitive server rejection."""
+    lic = cfg.setdefault("license", {})
+    lic["key"] = ""
+    cfg["license_key"] = ""
+    try:
+        return save_config(cfg)
+    except Exception:  # noqa: BLE001
+        return cfg
+
+
+def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35, bind_allowed: bool = False) -> tuple[str, str]:
     """Run the remote license check inside a child Python process.
 
     Real-device cause: on Termux/Python 3.13.13, the network code path in
@@ -266,6 +278,7 @@ def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35) ->
         "install_id": (cfg.setdefault("license", {}).get("install_id") or "").strip(),
         "device_label": str(cfg.setdefault("license", {}).get("device_label") or "")[:80],
         "server_url": (cfg.setdefault("license", {}).get("server_url") or "").strip(),
+        "bind_allowed": bool(bind_allowed),
     }
     # Real-device evidence (probe p-09484eaab4): the child Python was
     # exiting with rc=1 because ``python3 -c "from agent.license ..."``
@@ -309,6 +322,7 @@ def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35) ->
         "        srv, license_key=p['key'], install_id=p['install_id'],\n"
         "        device_model=model, app_version=VERSION,\n"
         "        device_label=p['device_label'],\n"
+        "        bind_allowed=bool(p.get('bind_allowed')),\n"
         "    )\n"
         "except Exception as exc:\n"
         "    r, m = 'server_unavailable', f'check exception: {exc}'\n"
@@ -365,7 +379,7 @@ def _ensure_install_id_saved(cfg: dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
-def _remote_license_check_direct(cfg: dict[str, Any]) -> tuple[str, str]:
+def _remote_license_check_direct(cfg: dict[str, Any], *, bind_allowed: bool = False) -> tuple[str, str]:
     """Run the remote license check in-process (legacy path).
 
     On Termux/Python 3.13.13 this code path can segfault the *parent*
@@ -387,6 +401,7 @@ def _remote_license_check_direct(cfg: dict[str, Any]) -> tuple[str, str]:
         device_model=device.get("model") or "unknown",
         app_version=VERSION,
         device_label=str(lic.get("device_label") or ""),
+        bind_allowed=bind_allowed,
     )
 
 
@@ -423,17 +438,21 @@ def _should_isolate_license_check() -> bool:
     return False
 
 
-def _remote_license_run_check(cfg: dict[str, Any]) -> tuple[str, str]:
+def _remote_license_run_check(cfg: dict[str, Any], *, bind_allowed: bool = False) -> tuple[str, str]:
     """Public entry — dispatches to subprocess-isolated path on Termux.
 
     Backwards-compatible signature (used by every caller and mocked by
     many tests).  Production callers on Termux/Android transparently
     get SIGSEGV isolation; dev/CI callers get the legacy in-process
     behaviour so unit tests continue to work.
+
+    Startup validation must pass ``bind_allowed=False`` so cached keys
+    cannot silently rebind after HWID reset. Manual key entry passes
+    ``bind_allowed=True``.
     """
     if _should_isolate_license_check():
-        return _remote_license_check_isolated(cfg)
-    return _remote_license_check_direct(cfg)
+        return _remote_license_check_isolated(cfg, bind_allowed=bind_allowed)
+    return _remote_license_check_direct(cfg, bind_allowed=bind_allowed)
 
 
 def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool) -> bool:
@@ -457,6 +476,12 @@ def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool
             pass
     if result == "wrong_device":
         _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
+    elif result == "requires_manual_rebind":
+        _print_license_err(HWID_RESET_REENTRY_MESSAGE, use_color)
+        try:
+            _clear_cached_license_key(cfg)
+        except Exception:  # noqa: BLE001
+            pass
     elif result == "key_not_redeemed":
         _print_license_err(msg, use_color)
     elif result == "missing_key":
@@ -556,6 +581,7 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
     attempt = 0
     while attempt < _MAX_RETRIES:
         attempt += 1
+        manual_key_entry = False
         # Always reload config fresh to pick up any changes from save_config
         try:
             cfg = load_config()
@@ -596,13 +622,11 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
                 _print_license_err(f"Could not save license key: {exc}", use_color)
                 continue
             key = norm
+            manual_key_entry = True
 
         try:
-            # _remote_license_run_check dispatches to a child subprocess
-            # on Termux/Android (probe p-39924732cd: in-process network
-            # code can SIGSEGV the parent).  Tests / dev machines keep
-            # the legacy in-process behaviour.
-            result, msg = _remote_license_run_check(cfg)
+            # Cached startup checks are validate-only. Manual key entry may bind.
+            result, msg = _remote_license_run_check(cfg, bind_allowed=manual_key_entry)
         except Exception as exc:  # noqa: BLE001
             _print_license_err(f"License check failed: {exc}", use_color)
             result, msg = "error", str(exc)
@@ -636,6 +660,13 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
                 cfg = _persist_license_status(cfg, result)
             except Exception:  # noqa: BLE001
                 pass
+
+        if result == "requires_manual_rebind":
+            _print_license_err(HWID_RESET_REENTRY_MESSAGE, use_color)
+            cfg = _clear_cached_license_key(cfg)
+            if not _is_interactive():
+                return False
+            continue
 
         if result == "wrong_device":
             _print_license_err(WRONG_DEVICE_USER_MESSAGE, use_color)
@@ -2586,22 +2617,40 @@ def _config_menu_key(draft: dict[str, Any]) -> dict[str, Any]:
     return draft
 
 
-def _read_auto_execute_script(script_number: int | None = None) -> str:
+def _prompt_yes_no_capitalized(text: str) -> bool | None:
+    """Kaeru-style Y/N prompt with first-letter capitalization."""
+    while True:
+        result = safe_io.safe_prompt(f"{text}? (Y/N): ")
+        if result is None:
+            return None
+        value = result.strip().upper()
+        if not value:
+            print("Please answer Y or N.")
+            continue
+        if value == "Y":
+            return True
+        if value == "N":
+            return False
+        print("Please answer Y or N.")
+
+
+def _read_auto_execute_script(script_number: int) -> str | None:
     print()
-    if script_number is None:
-        print("Paste Auto Execute script.")
-    else:
-        print(f"Paste Auto Execute script #{script_number}.")
-    print("Finish with a blank line. Leave first line blank to cancel.")
+    print(f"Paste Script #{script_number} Below.")
+    print("Type END On A New Line When Finished.")
     lines: list[str] = []
     while True:
-        raw = safe_io.safe_prompt("> ", default="", allow_blank=True)
+        raw = safe_io.safe_prompt("", default="", allow_blank=True)
         if raw is None:
-            return ""
-        if raw == "":
+            return None
+        if raw == "END":
             break
         lines.append(raw)
-    return "\n".join(lines).strip()
+    content = "\n".join(lines)
+    if not content.strip():
+        print("Script Cannot Be Empty.")
+        return ""
+    return content
 
 
 def _add_auto_execute_scripts_interactive(scripts: list[str]) -> tuple[list[str], list[str]]:
@@ -2611,15 +2660,18 @@ def _add_auto_execute_scripts_interactive(scripts: list[str]) -> tuple[list[str]
     added: list[str] = []
     script_number = len(scripts) + 1
     while len(scripts) < MAX_AUTO_EXECUTE_SCRIPTS:
-        if not _prompt_yes_no(f"Add script #{script_number}", default=True):
+        answer = _prompt_yes_no_capitalized(f"Add Script #{script_number}")
+        if answer is None:
+            break
+        if not answer:
             break
         script = _read_auto_execute_script(script_number)
-        if not script:
-            print("Cancelled.")
+        if script is None:
             break
+        if not script:
+            continue
         if script in scripts:
             print("Script already saved.")
-            script_number = len(scripts) + 1
             continue
         scripts.append(script)
         added.append(script)
@@ -3084,13 +3136,14 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     print("  4. Discord webhook setup")
     print("  5. Phone snapshot for webhook (only when webhook is enabled)")
     print("  6. Webhook info interval (only when webhook is enabled)")
-    print("  7. Save and start")
+    print("  7. Auto Execute scripts (optional)")
+    print("  8. Save and start")
     print()
     print("Package detection:")
     print("  The tool scans installed Roblox apps against safe hints. Pick from the table.")
     print("  Manual package entry is only a fallback if nothing is found.")
     print()
-    print("Step 1 of 7: Roblox Package Setup")
+    print("Step 1 of 8: Roblox Package Setup")
     packages, hints = _choose_packages_menu(
         list(draft.get("roblox_packages") or [package_entry(draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE), "", True, "not_set")]),
         list(draft.get("package_detection_hints") or DEFAULT_ROBLOX_PACKAGE_HINTS),
@@ -3101,18 +3154,22 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     active_entries = enabled_package_entries(draft)
     draft["roblox_package"] = active_entries[0]["package"]
     draft["selected_package_mode"] = "multiple" if len(active_entries) > 1 else "single"
-    print("\nStep 2 of 7: Roblox Public / Private Server Link")
+    print("\nStep 2 of 8: Roblox Public / Private Server Link")
     _setup_launch_link(draft)
-    print("\nStep 3 of 7: Screen Mode")
+    print("\nStep 3 of 8: Screen Mode")
     _setup_screen_mode(draft)
-    print("\nStep 4 of 7: Discord Webhook Setup")
+    print("\nStep 4 of 8: Discord Webhook Setup")
     _setup_webhook(draft)
     if draft.get("webhook_enabled"):
-        print("\nStep 5 of 7: Phone Snapshot For Webhook")
+        print("\nStep 5 of 8: Phone Snapshot For Webhook")
         _setup_snapshot(draft)
-        print("\nStep 6 of 7: Webhook Info Interval")
+        print("\nStep 6 of 8: Webhook Info Interval")
         _setup_webhook_interval(draft)
-    print("\nStep 7 of 7: Save And Start")
+    print("\nStep 7 of 8: Auto Execute (Optional)")
+    if _prompt_yes_no_capitalized("Configure Auto Execute Scripts Now") is True:
+        scripts, _added = _add_auto_execute_scripts_interactive(list(draft.get("auto_execute_scripts") or []))
+        draft["auto_execute_scripts"] = scripts
+    print("\nStep 8 of 8: Save And Start")
     draft["first_setup_completed"] = True
     try:
         saved = save_config(draft)
@@ -3136,8 +3193,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("1. Package")
         print("2. Private Server URL")
         print("3. Screen Mode")
-        print("4. Key")
-        print("5. Auto Execute")
+        print("4. Auto Execute")
         print("0. Back")
         print("--------------------------------")
         print("\nCurrent settings:")
@@ -3154,8 +3210,7 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("1. Package")
         print("2. Private Server URL")
         print("3. Screen Mode")
-        print("4. Key")
-        print("5. Auto Execute")
+        print("4. Auto Execute")
         print("0. Back")
         print("--------------------------------")
         choice = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -3174,11 +3229,9 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         elif choice == "3":
             draft = _config_menu_screen_mode(draft)
         elif choice == "4":
-            draft = _config_menu_key(draft)
-        elif choice == "5":
             draft = _config_menu_auto_execute(draft)
         else:
-            print("Please choose 1-5 or 0.")
+            print("Please choose 1-4 or 0.")
             safe_io.press_enter()
 
 
@@ -4138,35 +4191,22 @@ def _run_preparation_phase(
 
 
 def _termux_exit_clean() -> None:
-    """Bypass Python finalization on Termux to avoid libc-shutdown segfaults.
+    """Bypass Python finalization on Termux to avoid libc-shutdown segfaults."""
+    safe_io.termux_exit_clean()
 
-    Real-device evidence (probe ``p-47fa33562a``): on Termux + Python
-    3.13, after a clean supervisor shutdown the process sometimes
-    segfaults during interpreter teardown (atexit handlers, threading
-    join, file-handle close on the curl subprocess pipes).  The user
-    sees ``Segmentation fault`` even though every worker had already
-    stopped cleanly.  Using ``os._exit(0)`` after we've flushed logs
-    and persisted state skips the buggy native finalizers — the kernel
-    reclaims the file descriptors and the process exits with code 0.
 
-    Non-Termux contexts (CI, tests, dev boxes) return without exiting
-    so unittest can still introspect the return value and exit cleanly
-    via the normal interpreter shutdown.
-    """
-    if not os.environ.get("TERMUX_VERSION"):
-        return
-    if os.environ.get("DENG_DISABLE_TERMUX_HARD_EXIT") == "1":
-        return  # escape hatch for debugging
-    # Flush stdout/stderr so the dashboard's final state isn't lost.
+def cmd_package_key(args: argparse.Namespace) -> int:
+    """Top menu Package Key entry — separate from license key."""
+    print_banner(use_color=not args.no_color)
     try:
-        sys.stdout.flush()
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        sys.stderr.flush()
-    except Exception:  # noqa: BLE001
-        pass
-    os._exit(0)
+        cfg = load_config()
+    except ConfigError:
+        cfg = default_config()
+    if not _is_interactive():
+        print("Run this command in interactive Termux to manage package keys.")
+        return 0
+    _config_menu_key(cfg)
+    return 0
 
 
 def cmd_start(args: argparse.Namespace) -> int:
@@ -6059,6 +6099,7 @@ def _handlers() -> dict[str, Any]:
         "logs": cmd_logs,
         "version": cmd_version,
         "menu": cmd_menu,
+        "package-key": cmd_package_key,
         "auto-execute": cmd_auto_execute,
         "license": cmd_license,
         "new-user-help": cmd_new_user_help,

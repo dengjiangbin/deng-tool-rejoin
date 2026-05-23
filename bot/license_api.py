@@ -200,6 +200,7 @@ _RESULT_MESSAGES: dict[str, str] = {
     "inactive": "License inactive.",
     "missing_key": "No license key provided.",
     "server_unavailable": "License server temporarily unavailable.",
+    "requires_manual_rebind": "License key must be entered again after HWID reset.",
     "no_release": "No release found for this channel.",
     "token_expired": "Download token expired or already used.",
 }
@@ -1224,6 +1225,7 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         device_model = (body.get("device_model") or "unknown")[:120]
         app_version = (body.get("app_version") or "unknown")[:40]
         device_label = (body.get("device_label") or "").strip()[:80]
+        bind_allowed = bool(body.get("bind_allowed"))
 
         if not raw_key:
             payload, status = _build_response("missing_key", 400)
@@ -1246,6 +1248,7 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
             store = get_default_store()
             result = store.bind_or_check_device(
                 raw_key, install_id_hash, device_model, app_version, device_label,
+                bind_allowed=bind_allowed,
             )
         except Exception as exc:  # noqa: BLE001
             log.error("License check error: %s", exc)

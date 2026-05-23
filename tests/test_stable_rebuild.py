@@ -741,15 +741,16 @@ class TestWebhookHiddenFromPublicUI(unittest.TestCase):
         src = self._edit_config_source()
         self.assertNotIn("_config_menu_webhook", src)
 
-    def test_first_time_setup_has_7_steps(self) -> None:
+    def test_first_time_setup_has_8_steps(self) -> None:
         src = self._wizard_source()
-        self.assertIn("Step 1 of 7", src)
-        self.assertIn("Step 2 of 7", src)
-        self.assertIn("Step 3 of 7", src)
-        self.assertIn("Step 4 of 7", src)
-        self.assertIn("Step 5 of 7", src)
-        self.assertIn("Step 6 of 7", src)
-        self.assertIn("Step 7 of 7", src)
+        self.assertIn("Step 1 of 8", src)
+        self.assertIn("Step 2 of 8", src)
+        self.assertIn("Step 3 of 8", src)
+        self.assertIn("Step 4 of 8", src)
+        self.assertIn("Step 5 of 8", src)
+        self.assertIn("Step 6 of 8", src)
+        self.assertIn("Step 7 of 8", src)
+        self.assertIn("Step 8 of 8", src)
 
 
 # ─── 8. Public setup menu ──────────────────────────────────────────────────────
@@ -763,7 +764,9 @@ class TestPublicMenuItems(unittest.TestCase):
         self.assertIn("First Time Setup Config", labels)
         self.assertIn("Setup / Edit Config", labels)
         self.assertIn("Start", labels)
+        self.assertIn("Key", labels)
         self.assertIn("Exit", labels)
+        self.assertNotIn("Auto Execute", labels)
         # Must NOT have YesCaptcha or Webhook in top-level menu
         for label in labels:
             self.assertNotIn("YesCaptcha", label)
@@ -776,8 +779,9 @@ class TestPublicMenuItems(unittest.TestCase):
         self.assertIn('"1. Package"', src)
         self.assertIn('"2. Private Server URL"', src)
         self.assertIn('"3. Screen Mode"', src)
-        self.assertIn('"4. Key"', src)
-        self.assertIn('"5. Auto Execute"', src)
+        self.assertIn('"4. Auto Execute"', src)
+        self.assertNotIn('"4. Key"', src)
+        self.assertNotIn('"5. Auto Execute"', src)
         self.assertIn('"0. Back"', src)
         self.assertNotIn('"3. Webhook"', src)
         self.assertNotIn('"4. YesCaptcha"', src)

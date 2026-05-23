@@ -647,9 +647,16 @@ class TestLicenseGateStability(unittest.TestCase):
         cfg.setdefault("license", {})["key"] = "DENG-1234-5678-9ABC-DEF0"
         args = _args()
         results_iter = iter(check_results)
+        prompts_iter = iter(input_values)
 
-        def fake_check(c):
+        def fake_check(c, *, bind_allowed=False):
             return next(results_iter, ("error", "no more results"))
+
+        def fake_prompt(prompt="", **_kwargs):
+            try:
+                return next(prompts_iter)
+            except StopIteration:
+                return None
 
         buf = io.StringIO()
         with unittest.mock.patch("agent.commands._remote_license_run_check", side_effect=fake_check), \
@@ -657,7 +664,7 @@ class TestLicenseGateStability(unittest.TestCase):
              unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
              unittest.mock.patch("agent.commands.load_config", side_effect=lambda: dict(cfg)), \
              unittest.mock.patch("agent.commands.save_config", side_effect=lambda x: x), \
-             unittest.mock.patch("builtins.input", side_effect=_input_seq(*input_values)), \
+             unittest.mock.patch("agent.commands.safe_io.safe_prompt", side_effect=fake_prompt), \
              redirect_stdout(buf):
             result = _ensure_remote_license_menu_loop(cfg, args, False)
         return result, buf.getvalue()

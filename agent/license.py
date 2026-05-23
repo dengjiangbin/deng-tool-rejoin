@@ -175,6 +175,10 @@ WRONG_DEVICE_USER_MESSAGE = (
     "Wrong device. Open DENG Tool: Rejoin Panel and use Reset HWID."
 )
 
+HWID_RESET_REENTRY_MESSAGE = (
+    "License key must be entered again after HWID reset."
+)
+
 KEY_NOT_REDEEMED_API_MESSAGE = (
     "This key has not been redeemed yet. Redeem it in the DENG Tool: Rejoin Panel first."
 )
@@ -290,11 +294,16 @@ def check_remote_license_status(
     app_version: str,
     device_label: str = "",
     timeout: int = 30,
+    bind_allowed: bool = False,
 ) -> tuple[str, str]:
     """Call the public license API; return ``(result, message)``.
 
     Sends only: hashed install id, key, device model, version, optional label —
     never Supabase secrets, tokens, or cookies.
+
+    Startup checks must pass ``bind_allowed=False`` so the server validates an
+    existing binding without silently rebinding after HWID reset. Manual key
+    entry must pass ``bind_allowed=True``.
     """
     base = (server_url or DEFAULT_LICENSE_SERVER_URL).strip().rstrip("/")
     url = f"{base}/api/license/check"
@@ -304,6 +313,7 @@ def check_remote_license_status(
         "install_id_hash": install_id_hash,
         "device_model": (device_model or "unknown")[:120],
         "app_version": (app_version or VERSION or "unknown")[:40],
+        "bind_allowed": bool(bind_allowed),
     }
     label = (device_label or "").strip()[:80]
     if label:
@@ -318,6 +328,8 @@ def check_remote_license_status(
     message = str(resp.get("message") or "").strip()
     if result == "wrong_device":
         return result, WRONG_DEVICE_USER_MESSAGE
+    if result == "requires_manual_rebind":
+        return result, HWID_RESET_REENTRY_MESSAGE
     if result == "key_not_redeemed":
         return result, REDEEM_IN_PANEL_HINT
     if not message:
@@ -330,5 +342,6 @@ def check_remote_license_status(
             "server_unavailable": "License server temporarily unavailable.",
             "missing_key": "No license key provided.",
             "key_not_redeemed": KEY_NOT_REDEEMED_API_MESSAGE,
+            "requires_manual_rebind": HWID_RESET_REENTRY_MESSAGE,
         }.get(result, result)
     return result, message

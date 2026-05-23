@@ -19,7 +19,7 @@ MENU_ITEMS = (
     ("1", "First Time Setup Config", "first-setup"),
     ("2", "Setup / Edit Config", "config"),
     ("3", "Start", "start"),
-    ("5", "Auto Execute", "auto-execute"),
+    ("4", "Key", "package-key"),
     ("0", "Exit", "exit"),
 )
 
@@ -86,11 +86,15 @@ def run_menu(args: argparse.Namespace, handlers: dict[str, Handler]) -> int:
             continue
         if command == "exit":
             print("Goodbye.")
+            safe_io.termux_exit_clean()
             return 0
         try:
             result = handlers[command](args)
         except KeyboardInterrupt:
             print("\nInterrupted — returning to menu.")
+            result = 0
+        except EOFError:
+            print("\nEOF — returning to menu.")
             result = 0
         except Exception:  # noqa: BLE001
             print("\nAn error occurred — returning to menu.")
@@ -101,3 +105,4 @@ def run_menu(args: argparse.Namespace, handlers: dict[str, Handler]) -> int:
         ret = safe_io.safe_prompt("\nPress Enter to return to menu...")
         if ret is None:
             return result
+        return result

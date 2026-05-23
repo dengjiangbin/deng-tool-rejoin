@@ -46,6 +46,7 @@ RESULT_NOT_FOUND           = "not_found"
 RESULT_INACTIVE            = "inactive"
 RESULT_MISSING_KEY         = "missing_key"
 RESULT_SERVER_UNAVAILABLE  = "server_unavailable"
+RESULT_REQUIRES_MANUAL_REBIND = "requires_manual_rebind"
 
 MAX_HWID_RESETS_PER_24H    = 5
 ACTIVE_HEARTBEAT_WINDOW_S  = 300          # 5 minutes
@@ -222,10 +223,15 @@ class BaseLicenseStore(ABC):
         device_model: str,
         app_version: str,
         device_label: str = "",
+        *,
+        bind_allowed: bool = True,
     ) -> str:
         """Bind or verify a device against a key.
         Returns a RESULT_* string.
         Never raises; errors are returned as result codes.
+
+        When ``bind_allowed`` is False the store must validate an existing
+        active binding only — it must not create or reactivate bindings.
         """
 
     @abstractmethod
@@ -820,6 +826,8 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         device_model: str,
         app_version: str,
         device_label: str = "",
+        *,
+        bind_allowed: bool = True,
     ) -> str:
         lbl = (device_label or "").strip()[:80]
         try:
@@ -879,6 +887,24 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             db["bindings"][key_hash]["last_status"] = RESULT_ACTIVE
             db["bindings"][key_hash]["device_model"] = (device_model or "")[:120] or binding.get("device_model", "")
             db["bindings"][key_hash]["device_label"] = lbl
+        elif not bind_allowed:
+            self.log_license_check(
+                key_id=key_hash, install_id_hash=install_id_hash,
+                result=RESULT_REQUIRES_MANUAL_REBIND, device_model=device_model, app_version=app_version,
+            )
+            return RESULT_REQUIRES_MANUAL_REBIND
+        elif binding and not binding.get("is_active"):
+            # Inactive binding (e.g. after HWID reset) — manual rebind only.
+            now_ts = _utc_now()
+            db["bindings"][key_hash].update({
+                "install_id_hash": install_id_hash,
+                "device_label": lbl,
+                "device_model": (device_model or "")[:120],
+                "bound_at": now_ts,
+                "last_seen_at": now_ts,
+                "last_status": RESULT_ACTIVE,
+                "is_active": True,
+            })
         else:
             # New binding — also mark the key as redeemed (first activation)
             now_ts = _utc_now()
@@ -1837,6 +1863,8 @@ class SupabaseLicenseStore(BaseLicenseStore):
         device_model: str,
         app_version: str,
         device_label: str = "",
+        *,
+        bind_allowed: bool = True,
     ) -> str:
         lbl = (device_label or "").strip()[:80]
         try:
@@ -1902,8 +1930,14 @@ class SupabaseLicenseStore(BaseLicenseStore):
                         "device_label": lbl,
                     }
                 ).eq("key_id", key_hash).execute()
+            elif not bind_allowed:
+                self.log_license_check(
+                    key_id=key_hash, install_id_hash=install_id_hash,
+                    result=RESULT_REQUIRES_MANUAL_REBIND, device_model=device_model, app_version=app_version,
+                )
+                return RESULT_REQUIRES_MANUAL_REBIND
             else:
-                # Inactive binding — reactivate with current device
+                # Inactive binding — reactivate with current device (manual rebind)
                 self._client.table("device_bindings").update(
                     {
                         "install_id_hash": install_id_hash,
@@ -1914,6 +1948,12 @@ class SupabaseLicenseStore(BaseLicenseStore):
                         "is_active": True,
                     }
                 ).eq("key_id", key_hash).execute()
+        elif not bind_allowed:
+            self.log_license_check(
+                key_id=key_hash, install_id_hash=install_id_hash,
+                result=RESULT_REQUIRES_MANUAL_REBIND, device_model=device_model, app_version=app_version,
+            )
+            return RESULT_REQUIRES_MANUAL_REBIND
         else:
             self._client.table("device_bindings").insert(
                 {

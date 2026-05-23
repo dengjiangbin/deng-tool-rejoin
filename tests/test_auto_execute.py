@@ -67,7 +67,7 @@ class AutoExecuteMenuTests(unittest.TestCase):
         from agent import commands
 
         cfg = {"auto_execute_scripts": []}
-        prompts = iter(["1", "y", 'loadstring(game:HttpGet("https://example.com/Deng.lua"))()', "", "n", "0"])
+        prompts = iter(["1", "Y", 'loadstring(game:HttpGet("https://example.com/Deng.lua"))()', "END", "N", "0"])
         prompt_texts: list[str] = []
         out = io.StringIO()
         def fake_prompt(prompt="", **_kwargs):
@@ -85,14 +85,14 @@ class AutoExecuteMenuTests(unittest.TestCase):
             result["auto_execute_scripts"],
             ['loadstring(game:HttpGet("https://example.com/Deng.lua"))()'],
         )
-        self.assertTrue(any("Add script #1" in prompt for prompt in prompt_texts))
+        self.assertTrue(any("Add Script #1? (Y/N)" in prompt for prompt in prompt_texts))
         self.assertIn("Saved 1 Auto Execute script(s).", out.getvalue())
 
     def test_auto_execute_menu_adds_multiple_numbered_scripts(self):
         from agent import commands
 
         cfg = {"auto_execute_scripts": []}
-        prompts = iter(["1", "y", "print(1)", "", "y", "print(2)", "", "n", "0"])
+        prompts = iter(["1", "Y", "print(1)", "END", "Y", "print(2)", "END", "N", "0"])
         prompt_texts: list[str] = []
         out = io.StringIO()
         def fake_prompt(prompt="", **_kwargs):
@@ -108,8 +108,8 @@ class AutoExecuteMenuTests(unittest.TestCase):
 
         self.assertEqual(result["auto_execute_scripts"], ["print(1)", "print(2)"])
         text = out.getvalue()
-        self.assertTrue(any("Add script #1" in prompt for prompt in prompt_texts))
-        self.assertTrue(any("Add script #2" in prompt for prompt in prompt_texts))
+        self.assertTrue(any("Add Script #1? (Y/N)" in prompt for prompt in prompt_texts))
+        self.assertTrue(any("Add Script #2? (Y/N)" in prompt for prompt in prompt_texts))
         self.assertIn("Saved 2 Auto Execute script(s).", text)
 
 

@@ -797,7 +797,7 @@ class TestLicenseRetryFlowSafety(unittest.TestCase):
 
         call_idx = {"n": 0}
 
-        def mock_remote_check(cfg):
+        def mock_remote_check(cfg, *, bind_allowed=False):
             i = call_idx["n"]
             call_idx["n"] += 1
             if i < len(remote_results):
@@ -807,14 +807,20 @@ class TestLicenseRetryFlowSafety(unittest.TestCase):
         input_iter = iter(inputs)
         args = argparse.Namespace(no_color=True)
 
-        with patch("agent.commands.load_config", return_value={"license": {"key": ""}, "install_id": "test"}):
+        def fake_prompt(prompt="", **_kwargs):
+            try:
+                return next(input_iter)
+            except StopIteration:
+                return None
+
+        with patch("agent.commands.load_config", return_value={"license": {"key": ""}, "license_key": "", "install_id": "test"}):
             with patch("agent.commands.save_config", side_effect=lambda c: c):
                 with patch("agent.commands._ensure_install_id_saved", side_effect=lambda c: c):
                     with patch("agent.commands._remote_license_run_check", side_effect=mock_remote_check):
                         with patch("agent.commands.validate_license_key", side_effect=lambda k: k):
                             with patch("agent.commands._is_interactive", return_value=True):
                                 with patch("agent.commands._persist_license_status", side_effect=lambda c, s: c):
-                                    with patch("builtins.input", side_effect=input_iter):
+                                    with patch("agent.commands.safe_io.safe_prompt", side_effect=fake_prompt):
                                         buf = io.StringIO()
                                         sys.stdout = buf
                                         try:

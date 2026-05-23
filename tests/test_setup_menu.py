@@ -153,7 +153,7 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         ]
         self.assertEqual(
             numbered,
-            ["1. Package", "2. Private Server URL", "3. Screen Mode", "4. Key", "5. Auto Execute"],
+            ["1. Package", "2. Private Server URL", "3. Screen Mode", "4. Auto Execute"],
             f"Unexpected Edit Config items: {numbered}",
         )
 
