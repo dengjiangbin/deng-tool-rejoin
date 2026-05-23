@@ -5330,16 +5330,12 @@ def cmd_start(args: argparse.Namespace) -> int:
                 return _fmt_runtime(max(0.0, _now_ts - start_ts))
 
             def _get_usage(pkg: str) -> str:
-                """Return per-package RAM usage string (e.g. '256MB') or '0MB'."""
+                """Return stable display usage without live Android subprocess polling."""
                 raw_state = _live_map.get(pkg, "Unknown")
                 disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
                 if disp in ("Dead", "Preparing", "Clear Cache"):
                     return "0MB"
-                try:
-                    result = android.get_package_ram_usage(pkg)
-                    return str(result.get("usage_mb", "0MB"))
-                except Exception:  # noqa: BLE001
-                    return "0MB"
+                return ""
 
             lines = [banner_text(use_color=use_color), ""]
             ram_label = _get_ram_label()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import signal
-import shlex
 import threading
 import time
 import traceback
@@ -1444,20 +1443,13 @@ class WatchdogSupervisor:
                 root_running = False
             if not root_running:
                 try:
-                    qpkg = shlex.quote(package)
-                    script = (
-                        "for p in /proc/[0-9]*/cmdline; do "
-                        "tr '\\0' ' ' < \"$p\" 2>/dev/null | "
-                        f"grep -F -q -- {qpkg} && echo hit && exit 0; "
-                        "done; exit 1"
-                    )
                     process_check_attempted = True
                     res = android.run_root_command(
-                        ["sh", "-c", script],
+                        android.process_cmdline_scan_args(package),
                         root_tool=root_tool,
                         timeout=3,
                     )
-                    root_running = bool(res.ok and "hit" in (res.stdout or ""))
+                    root_running = bool(res.ok and (res.stdout or "").strip())
                 except Exception:  # noqa: BLE001
                     root_running = False
         else:

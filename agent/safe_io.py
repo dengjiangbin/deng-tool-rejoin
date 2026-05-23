@@ -186,10 +186,11 @@ def setup_faulthandler() -> None:
         import faulthandler  # noqa: PLC0415
         from pathlib import Path  # noqa: PLC0415
 
-        from .constants import CRASH_LOG_PATH  # noqa: PLC0415
+        from .constants import CRASH_LOG_PATH, FAULT_HANDLER_LOG_PATH  # noqa: PLC0415
 
         # Try the preferred path first, then a /tmp fallback.
         candidate_paths = [
+            str(FAULT_HANDLER_LOG_PATH),
             str(CRASH_LOG_PATH),
             "/tmp/deng-rejoin-crash.log",
             str(Path.home() / ".deng-rejoin-crash.log"),

@@ -80,6 +80,28 @@ def _stringify_args(args: Iterable[str]) -> list[str]:
     return [str(arg) for arg in args]
 
 
+def process_cmdline_scan_args(package: str) -> list[str]:
+    """Return a safe /proc cmdline scan command for one package.
+
+    The package name is passed as ``$1`` rather than embedded in the shell
+    program.  That lets the script skip its own shell process and parent ``su``
+    process, avoiding the self-match that made killed packages look alive in
+    probe p-03b5e2269a.
+    """
+    package = validate_package_name(package)
+    script = (
+        "target=$1; self=$$; parent=$PPID; "
+        "for f in /proc/[0-9]*/cmdline; do "
+        "pid=${f%/cmdline}; pid=${pid##*/}; "
+        "[ \"$pid\" = \"$self\" ] && continue; "
+        "[ \"$pid\" = \"$parent\" ] && continue; "
+        "cmd=$(tr '\\000' ' ' < \"$f\" 2>/dev/null) || continue; "
+        "case \"$cmd\" in *\"$target\"*) echo \"$pid\"; exit 0;; esac; "
+        "done; exit 1"
+    )
+    return ["sh", "-c", script, "deng-proc-scan", package]
+
+
 # Android system binaries that live in /system/bin (or /system/xbin) but
 # are NOT in Termux's default PATH.  Without this resolution every call to
 # dumpsys/wm/cmd/settings/etc. fails with ENOENT in Termux, silently
@@ -1089,15 +1111,8 @@ def is_process_running(package: str) -> bool:
     # 4. Direct /proc cmdline scan — handles long clone package names where
     # both pidof and ps -A see a truncated comm.  Single shell pipeline.
     try:
-        scan = run_command(
-            ["sh", "-c",
-             "for p in /proc/[0-9]*/cmdline; do "
-             "  tr '\\0' ' ' < \"$p\" 2>/dev/null | "
-             f" grep -F -q '{package}' && echo hit && exit 0; "
-             "done; exit 1"],
-            timeout=PROCESS_TIMEOUT_SECONDS,
-        )
-        if scan.ok and "hit" in scan.stdout:
+        scan = run_command(process_cmdline_scan_args(package), timeout=PROCESS_TIMEOUT_SECONDS)
+        if scan.ok and scan.stdout.strip():
             return True
     except Exception:  # noqa: BLE001
         pass
@@ -1122,14 +1137,11 @@ def is_process_running_any(package: str, root_tool: str | None = None) -> bool:
         root_tool = info.tool
     try:
         res = run_root_command(
-            ["sh", "-c",
-             f"for p in /proc/[0-9]*/cmdline; do "
-             f"  tr '\\0' ' ' <\"$p\" 2>/dev/null | grep -F -q '{package}' && "
-             f"  echo hit && exit 0; "
-             f"done; exit 1"],
-            root_tool=root_tool, timeout=PROCESS_TIMEOUT_SECONDS,
+            process_cmdline_scan_args(package),
+            root_tool=root_tool,
+            timeout=PROCESS_TIMEOUT_SECONDS,
         )
-        return res.ok and "hit" in res.stdout
+        return res.ok and bool((res.stdout or "").strip())
     except Exception:  # noqa: BLE001
         return False
 
@@ -1148,7 +1160,7 @@ def is_process_running_root(package: str) -> bool:
         if res.ok and bool(res.stdout.strip()):
             return True
         ps_res = run_root_command(
-            ["sh", "-c", f"ps -A 2>/dev/null | grep -F '{package}'"],
+            ["sh", "-c", "ps -A 2>/dev/null | grep -F -- \"$1\" | grep -v grep", "deng-ps-scan", package],
             root_tool=root_info.tool,
             timeout=6,
         )
