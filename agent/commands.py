@@ -4363,7 +4363,7 @@ def _termux_exit_clean() -> None:
 
 
 def cmd_package_key(args: argparse.Namespace) -> int:
-    """Top menu Package Key entry — separate from license key."""
+    """Manage per-package license files (not shown in the top menu)."""
     print_banner(use_color=not args.no_color)
     try:
         cfg = load_config()
@@ -6037,6 +6037,21 @@ def cmd_auto_execute(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_top_menu_with_clean_exit(args: argparse.Namespace) -> int:
+    """Run the top menu once; on clean exit use the single Termux teardown workaround."""
+    try:
+        rc = run_menu(args, _handlers())
+    except KeyboardInterrupt:
+        print("Goodbye.")
+        rc = 0
+    except EOFError:
+        print("Goodbye.")
+        rc = 0
+    if rc == 0:
+        _termux_exit_clean()
+    return rc
+
+
 def cmd_menu(args: argparse.Namespace) -> int:
     """Open the main menu, gated by a license check on first run."""
     ensure_app_dirs()
@@ -6059,7 +6074,7 @@ def cmd_menu(args: argparse.Namespace) -> int:
     # Dev mode: skip license gate entirely
     if keystore.DEV_MODE:
         _print_dev_license_skipped(use_color)
-        return run_menu(args, _handlers())
+        return _run_top_menu_with_clean_exit(args)
 
     # Load config (use defaults if not yet created)
     cfg = _menu_cfg
@@ -6068,7 +6083,7 @@ def cmd_menu(args: argparse.Namespace) -> int:
 
     # Skip gate when license checking is disabled in config
     if lic.get("disabled_by_user") or not lic.get("enabled", True):
-        return run_menu(args, _handlers())
+        return _run_top_menu_with_clean_exit(args)
 
     cfg = _ensure_install_id_saved(cfg)
     mode = str(lic.get("mode") or "remote").strip().lower()
@@ -6080,7 +6095,7 @@ def cmd_menu(args: argparse.Namespace) -> int:
     if not ok:
         return 1
 
-    return run_menu(args, _handlers())
+    return _run_top_menu_with_clean_exit(args)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

@@ -534,6 +534,7 @@ class TestLicenseGateNetworkResilience(unittest.TestCase):
              patch("agent.commands._ensure_install_id_saved", side_effect=lambda c: c), \
              patch("agent.commands.save_config", return_value={**cfg, "license": {"key": new_key, "mode": "remote"}}), \
              patch("agent.commands._remote_license_run_check", side_effect=lambda c: next(responses)), \
+             patch("agent.commands._remote_license_run_bind", return_value=("active", "License active.")), \
              patch("agent.commands._is_interactive", return_value=True), \
              patch("agent.commands._persist_license_status", return_value=cfg), \
              patch("agent.commands.print_beginner_menu_license_prompt"), \

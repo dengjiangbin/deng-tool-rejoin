@@ -758,16 +758,18 @@ class TestWebhookHiddenFromPublicUI(unittest.TestCase):
 class TestPublicMenuItems(unittest.TestCase):
 
     def test_main_menu_has_only_expected_items(self) -> None:
-        """Main menu must contain exactly the expected 4 items."""
+        """Main menu must contain exactly the four public options."""
         import agent.menu as menu
         labels = [item[1] for item in menu.MENU_ITEMS]
+        numbers = [item[0] for item in menu.MENU_ITEMS]
+        self.assertEqual(numbers, ["1", "2", "3", "0"])
         self.assertIn("First Time Setup Config", labels)
         self.assertIn("Setup / Edit Config", labels)
         self.assertIn("Start", labels)
-        self.assertIn("Key", labels)
         self.assertIn("Exit", labels)
+        self.assertNotIn("Key", labels)
         self.assertNotIn("Auto Execute", labels)
-        # Must NOT have YesCaptcha or Webhook in top-level menu
+        self.assertNotIn("Package Key", labels)
         for label in labels:
             self.assertNotIn("YesCaptcha", label)
             self.assertNotIn("Webhook", label)

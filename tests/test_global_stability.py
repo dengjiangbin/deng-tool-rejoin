@@ -660,6 +660,7 @@ class TestLicenseGateStability(unittest.TestCase):
 
         buf = io.StringIO()
         with unittest.mock.patch("agent.commands._remote_license_run_check", side_effect=fake_check), \
+             unittest.mock.patch("agent.commands._remote_license_run_bind", side_effect=fake_check), \
              unittest.mock.patch("agent.commands._ensure_install_id_saved", side_effect=lambda x: x), \
              unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
              unittest.mock.patch("agent.commands.load_config", side_effect=lambda: dict(cfg)), \

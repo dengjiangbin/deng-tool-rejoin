@@ -19,9 +19,11 @@ MENU_ITEMS = (
     ("1", "First Time Setup Config", "first-setup"),
     ("2", "Setup / Edit Config", "config"),
     ("3", "Start", "start"),
-    ("4", "Key", "package-key"),
     ("0", "Exit", "exit"),
 )
+
+# Top menu accepts only these numeric choices — no aliases for removed options.
+_TOP_MENU_CHOICES = frozenset({"0", "1", "2", "3"})
 
 
 def _is_interactive() -> bool:
@@ -59,11 +61,10 @@ def print_menu(args: argparse.Namespace, prelude_lines: list[str] | None = None)
 
 
 def run_menu(args: argparse.Namespace, handlers: dict[str, Handler]) -> int:
-    """Show a simple public menu and call existing command handlers.
+    """Show the public top menu and dispatch to command handlers.
 
-    Safety: all input() calls are replaced with safe_io.safe_prompt() to
-    bypass the readline C extension and prevent Termux/Android segfaults.
-    KeyboardInterrupt and EOF both exit cleanly.
+    Top menu is strictly: 1 First Time Setup, 2 Config, 3 Start, 0 Exit.
+    All input uses safe_io.safe_prompt() to avoid readline segfaults on Termux.
     """
     prelude = _menu_prelude_lines()
     if not _is_interactive():
@@ -72,37 +73,54 @@ def run_menu(args: argparse.Namespace, handlers: dict[str, Handler]) -> int:
         return 0
 
     while True:
-        print_menu(args, prelude)
-        choice_raw = safe_io.safe_prompt("\nChoose option: ")
-        if choice_raw is None:
-            print("\nNo interactive input was available. Run this command in Termux to choose an option.")
-            return 0
-        choice = choice_raw.strip()
-        command = next((item[2] for item in MENU_ITEMS if item[0] == choice), None)
-        if command is None:
-            print("Please choose a valid option.")
-            safe_io.press_enter()
-            prelude = _menu_prelude_lines()
-            continue
-        if command == "exit":
-            print("Goodbye.")
-            safe_io.termux_exit_clean()
-            return 0
         try:
-            result = handlers[command](args)
+            print_menu(args, prelude)
+            choice_raw = safe_io.safe_prompt("\nChoose option: ")
+            if choice_raw is None:
+                print("\nGoodbye.")
+                return 0
+            choice = choice_raw.strip()
+            if choice not in _TOP_MENU_CHOICES:
+                print("Please choose a valid option.")
+                safe_io.press_enter()
+                prelude = _menu_prelude_lines()
+                continue
+
+            command = next((item[2] for item in MENU_ITEMS if item[0] == choice), None)
+            if command is None:
+                print("Please choose a valid option.")
+                safe_io.press_enter()
+                prelude = _menu_prelude_lines()
+                continue
+
+            if command == "exit":
+                print("Goodbye.")
+                return 0
+
+            try:
+                result = handlers[command](args)
+            except KeyboardInterrupt:
+                print("\nGoodbye.")
+                return 0
+            except EOFError:
+                print("\nGoodbye.")
+                return 0
+            except Exception:  # noqa: BLE001
+                print("\nAn error occurred — returning to menu.")
+                result = 1
+
+            prelude = _menu_prelude_lines()
+            if command == "start":
+                return result
+
+            ret = safe_io.safe_prompt("\nPress Enter to return to menu...")
+            if ret is None:
+                print("\nGoodbye.")
+                return 0
+            continue
         except KeyboardInterrupt:
-            print("\nInterrupted — returning to menu.")
-            result = 0
+            print("\nGoodbye.")
+            return 0
         except EOFError:
-            print("\nEOF — returning to menu.")
-            result = 0
-        except Exception:  # noqa: BLE001
-            print("\nAn error occurred — returning to menu.")
-            result = 1
-        prelude = _menu_prelude_lines()
-        if command == "start":
-            return result
-        ret = safe_io.safe_prompt("\nPress Enter to return to menu...")
-        if ret is None:
-            return result
-        return result
+            print("\nGoodbye.")
+            return 0

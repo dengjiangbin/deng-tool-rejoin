@@ -153,13 +153,13 @@ class TestStartupLicenseGate(unittest.TestCase):
 
 
 class TestTopMenuPlacement(unittest.TestCase):
-    def test_top_menu_has_package_key_not_auto_execute(self):
+    def test_top_menu_has_exact_four_options(self):
         labels = [item[1] for item in menu.MENU_ITEMS]
         numbers = [item[0] for item in menu.MENU_ITEMS]
-        self.assertIn("Key", labels)
-        self.assertIn("4", numbers)
+        self.assertEqual(numbers, ["1", "2", "3", "0"])
+        self.assertNotIn("Key", labels)
         self.assertNotIn("Auto Execute", labels)
-        self.assertNotIn("5", numbers)
+        self.assertNotIn("Package Key", labels)
 
     def test_setup_config_has_auto_execute_as_option_4(self):
         src = inspect.getsource(commands._run_edit_config_menu)
@@ -172,10 +172,11 @@ class TestTopMenuPlacement(unittest.TestCase):
         self.assertIn("Auto Execute", src)
         self.assertIn("Step 7 of 8: Auto Execute (Optional)", src)
 
-    def test_handlers_include_package_key_not_top_auto_execute(self):
-        handlers = commands._handlers()
-        self.assertIn("package-key", handlers)
-        self.assertNotIn("auto-execute", menu.MENU_ITEMS[3][2] if len(menu.MENU_ITEMS) > 3 else "")
+    def test_handlers_include_package_key_not_in_top_menu(self):
+        menu_commands = {item[2] for item in menu.MENU_ITEMS}
+        self.assertNotIn("package-key", menu_commands)
+        self.assertNotIn("auto-execute", menu_commands)
+        self.assertIn("package-key", commands._handlers())
 
 
 class TestAutoExecuteKaeruInput(unittest.TestCase):
@@ -234,22 +235,24 @@ class TestTopMenuExit(unittest.TestCase):
              patch("agent.menu.print_banner"), \
              patch("agent.menu._is_interactive", return_value=True), \
              patch("agent.menu.safe_io.safe_prompt", side_effect=["0"]), \
-             patch("agent.menu.safe_io.termux_exit_clean") as hard_exit, \
+             patch("agent.commands._termux_exit_clean") as hard_exit, \
              redirect_stdout(io.StringIO()):
-            rc = menu.run_menu(_args(), commands._handlers())
+            rc = commands._run_top_menu_with_clean_exit(_args())
         self.assertEqual(rc, 0)
         hard_exit.assert_called_once()
 
     def test_eof_from_menu_returns_zero(self):
         cfg = validate_config(default_config())
         cfg["roblox_packages"] = [{"package": "com.roblox.client", "enabled": True}]
+        out = io.StringIO()
         with patch("agent.menu.load_config", return_value=cfg), \
              patch("agent.menu.print_banner"), \
              patch("agent.menu._is_interactive", return_value=True), \
              patch("agent.menu.safe_io.safe_prompt", return_value=None), \
-             redirect_stdout(io.StringIO()):
+             redirect_stdout(out):
             rc = menu.run_menu(_args(), commands._handlers())
         self.assertEqual(rc, 0)
+        self.assertIn("Goodbye.", out.getvalue())
 
     def test_termux_exit_clean_noops_off_termux(self):
         with patch.dict("os.environ", {}, clear=True):
@@ -257,9 +260,9 @@ class TestTopMenuExit(unittest.TestCase):
 
 
 class TestMenuExit(unittest.TestCase):
-    def test_run_menu_uses_termux_exit_clean(self):
+    def test_run_menu_does_not_call_termux_exit_clean(self):
         src = inspect.getsource(menu.run_menu)
-        self.assertIn("termux_exit_clean", src)
+        self.assertNotIn("termux_exit_clean", src)
 
 
 class TestValidateConfig(unittest.TestCase):

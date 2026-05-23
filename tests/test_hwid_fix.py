@@ -817,16 +817,17 @@ class TestLicenseRetryFlowSafety(unittest.TestCase):
             with patch("agent.commands.save_config", side_effect=lambda c: c):
                 with patch("agent.commands._ensure_install_id_saved", side_effect=lambda c: c):
                     with patch("agent.commands._remote_license_run_check", side_effect=mock_remote_check):
-                        with patch("agent.commands.validate_license_key", side_effect=lambda k: k):
-                            with patch("agent.commands._is_interactive", return_value=True):
-                                with patch("agent.commands._persist_license_status", side_effect=lambda c, s: c):
-                                    with patch("agent.commands.safe_io.safe_prompt", side_effect=fake_prompt):
-                                        buf = io.StringIO()
-                                        sys.stdout = buf
-                                        try:
-                                            result = _ensure_remote_license_menu_loop({}, args, False)
-                                        finally:
-                                            sys.stdout = sys.__stdout__
+                        with patch("agent.commands._remote_license_run_bind", side_effect=mock_remote_check):
+                            with patch("agent.commands.validate_license_key", side_effect=lambda k: k):
+                                with patch("agent.commands._is_interactive", return_value=True):
+                                    with patch("agent.commands._persist_license_status", side_effect=lambda c, s: c):
+                                        with patch("agent.commands.safe_io.safe_prompt", side_effect=fake_prompt):
+                                            buf = io.StringIO()
+                                            sys.stdout = buf
+                                            try:
+                                                result = _ensure_remote_license_menu_loop({}, args, False)
+                                            finally:
+                                                sys.stdout = sys.__stdout__
         return result
 
     def test_wrong_device_does_not_crash(self):
