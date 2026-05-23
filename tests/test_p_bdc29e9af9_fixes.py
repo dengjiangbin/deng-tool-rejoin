@@ -44,7 +44,7 @@ def _bound_store_after_reset(uid: str = "u_probe"):
     store = _tmp_store()
     store.get_or_create_user(uid)
     full_key = store.create_key_for_user(uid)
-    store.bind_or_check_device(full_key, "aa" * 32, "Pixel 6", "1.0", bind_allowed=True)
+    store.bind_or_check_device(full_key, "aa" * 32, "Pixel 6", "1.0")
     key_hash = hash_license_key(normalize_license_key(full_key))
     store.reset_hwid(uid, key_hash)
     return store, full_key, key_hash
@@ -56,38 +56,41 @@ class TestValidateOnlyBinding(unittest.TestCase):
         uid = "bound1"
         store.get_or_create_user(uid)
         full_key = store.create_key_for_user(uid)
-        store.bind_or_check_device(full_key, "bb" * 32, "Pixel", "1.0", bind_allowed=True)
-        result = store.bind_or_check_device(full_key, "bb" * 32, "Pixel", "1.0", bind_allowed=False)
+        store.bind_or_check_device(full_key, "bb" * 32, "Pixel", "1.0")
+        result = store.validate_existing_binding(full_key, "bb" * 32, "Pixel", "1.0")
         self.assertEqual(result, RESULT_ACTIVE)
 
     def test_cached_key_after_hwid_reset_blocked_on_validate_only(self):
         store, full_key, _ = _bound_store_after_reset()
-        result = store.bind_or_check_device(full_key, "bb" * 32, "Pixel", "1.0", bind_allowed=False)
+        result = store.validate_existing_binding(full_key, "bb" * 32, "Pixel", "1.0")
         self.assertEqual(result, RESULT_REQUIRES_MANUAL_REBIND)
 
     def test_validate_only_does_not_reactivate_binding(self):
         store, full_key, key_hash = _bound_store_after_reset()
-        store.bind_or_check_device(full_key, "bb" * 32, "Pixel", "1.0", bind_allowed=False)
+        store.validate_existing_binding(full_key, "bb" * 32, "Pixel", "1.0")
         db = store._load()
         self.assertFalse(db["bindings"][key_hash].get("is_active"))
 
     def test_manual_bind_after_reset_allowed_once(self):
         store, full_key, key_hash = _bound_store_after_reset()
-        result = store.bind_or_check_device(full_key, "bb" * 32, "Pixel", "1.0", bind_allowed=True)
+        result = store.bind_or_check_device(full_key, "bb" * 32, "Pixel", "1.0")
         self.assertEqual(result, RESULT_ACTIVE)
         db = store._load()
         self.assertTrue(db["bindings"][key_hash].get("is_active"))
 
-    def test_server_rejects_bind_when_bind_allowed_false(self):
-        store, full_key, _ = _bound_store_after_reset()
-        before = store._load()
-        result = store.bind_or_check_device(full_key, "cc" * 32, "Pixel", "1.0", bind_allowed=False)
-        after = store._load()
+    def test_validate_only_does_not_mutate_binding_row(self):
+        store, full_key, key_hash = _bound_store_after_reset()
+        before = store._load()["bindings"][key_hash].copy()
+        result = store.validate_existing_binding(full_key, "cc" * 32, "Pixel", "1.0")
+        after = store._load()["bindings"][key_hash]
         self.assertEqual(result, RESULT_REQUIRES_MANUAL_REBIND)
-        self.assertEqual(before.get("bindings"), after.get("bindings"))
+        self.assertEqual(before, after)
 
 
 class TestStartupLicenseGate(unittest.TestCase):
+    def setUp(self) -> None:
+        commands._license_session_validated = False
+
     def test_cached_key_after_reset_blocks_menu_and_clears_key(self):
         cfg = default_config()
         cfg.setdefault("license", {})["key"] = "DENG-AAAA-BBBB-CCCC-DDDD"
@@ -112,42 +115,36 @@ class TestStartupLicenseGate(unittest.TestCase):
         self.assertIn(HWID_RESET_REENTRY_MESSAGE, out.getvalue())
         self.assertIn("", saved_keys)
 
-    def test_startup_validate_only_does_not_pass_bind_allowed(self):
+    def test_startup_validate_only_uses_check_not_bind(self):
         cfg = default_config()
         cfg.setdefault("license", {})["key"] = "DENG-1111-2222-3333-4444"
-        seen: list[bool] = []
-
-        def capture(_cfg, *, bind_allowed=False):
-            seen.append(bind_allowed)
-            return ("active", "ok")
+        seen: list[str] = []
 
         with patch("agent.commands.load_config", return_value=cfg), \
              patch("agent.commands.save_config", side_effect=lambda x: x), \
              patch("agent.commands._ensure_install_id_saved", side_effect=lambda x: x), \
              patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands._remote_license_run_check", side_effect=capture):
+             patch("agent.commands._remote_license_run_check", side_effect=lambda _c: seen.append("check") or ("active", "ok")), \
+             patch("agent.commands._remote_license_run_bind", side_effect=lambda _c: seen.append("bind") or ("active", "ok")):
             ok = commands._ensure_remote_license_menu_loop(cfg, _args(), False)
         self.assertTrue(ok)
-        self.assertEqual(seen, [False])
+        self.assertEqual(seen, ["check"])
 
-    def test_manual_key_entry_uses_bind_allowed_true(self):
+    def test_manual_key_entry_uses_bind_endpoint(self):
         cfg = default_config()
-        seen: list[bool] = []
-
-        def capture(_cfg, *, bind_allowed=False):
-            seen.append(bind_allowed)
-            return ("active", "ok")
+        seen: list[str] = []
 
         prompts = iter(["DENG-AAAA-BBBB-CCCC-DDDD"])
         with patch("agent.commands.load_config", return_value=default_config()), \
              patch("agent.commands.save_config", side_effect=lambda x: x), \
              patch("agent.commands._ensure_install_id_saved", side_effect=lambda x: x), \
              patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands._remote_license_run_check", side_effect=capture), \
+             patch("agent.commands._remote_license_run_check", side_effect=lambda _c: seen.append("check") or ("active", "ok")), \
+             patch("agent.commands._remote_license_run_bind", side_effect=lambda _c: seen.append("bind") or ("active", "ok")), \
              patch("agent.commands.safe_io.safe_prompt", side_effect=lambda *a, **k: next(prompts)):
             ok = commands._ensure_remote_license_menu_loop(cfg, _args(), False)
         self.assertTrue(ok)
-        self.assertEqual(seen, [True])
+        self.assertEqual(seen, ["bind"])
 
     def test_key_masked_in_helper(self):
         masked = mask_license_key("DENG-68C9-0BA2-F745-E506")
@@ -256,8 +253,19 @@ class TestTopMenuExit(unittest.TestCase):
 
     def test_termux_exit_clean_noops_off_termux(self):
         with patch.dict("os.environ", {}, clear=True):
-            # Must not raise or exit
             safe_io.termux_exit_clean()
+
+
+class TestMenuExit(unittest.TestCase):
+    def test_run_menu_uses_termux_exit_clean(self):
+        src = inspect.getsource(menu.run_menu)
+        self.assertIn("termux_exit_clean", src)
+
+
+class TestValidateConfig(unittest.TestCase):
+    def test_default_config_validates(self):
+        cfg = default_config()
+        validate_config(cfg)
 
 
 if __name__ == "__main__":

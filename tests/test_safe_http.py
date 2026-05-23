@@ -506,7 +506,7 @@ class TestLicenseGateNetworkResilience(unittest.TestCase):
         with patch("agent.commands.load_config", side_effect=lambda: copy.deepcopy(base_cfg)), \
              patch("agent.commands._ensure_install_id_saved", side_effect=lambda c: c), \
              patch("agent.commands.save_config", side_effect=lambda c: c), \
-             patch("agent.commands._remote_license_run_check", side_effect=lambda c, bind_allowed=False: next(responses)), \
+             patch("agent.commands._remote_license_run_check", side_effect=lambda c: next(responses)), \
              patch("agent.commands._is_interactive", return_value=True), \
              patch("agent.commands._persist_license_status", side_effect=lambda c, r: c), \
              patch("agent.commands.print_beginner_menu_license_prompt"), \
@@ -533,7 +533,7 @@ class TestLicenseGateNetworkResilience(unittest.TestCase):
         with patch("agent.commands.load_config", side_effect=lambda: next(load_cfg_sequence)), \
              patch("agent.commands._ensure_install_id_saved", side_effect=lambda c: c), \
              patch("agent.commands.save_config", return_value={**cfg, "license": {"key": new_key, "mode": "remote"}}), \
-             patch("agent.commands._remote_license_run_check", side_effect=lambda c, bind_allowed=False: next(responses)), \
+             patch("agent.commands._remote_license_run_check", side_effect=lambda c: next(responses)), \
              patch("agent.commands._is_interactive", return_value=True), \
              patch("agent.commands._persist_license_status", return_value=cfg), \
              patch("agent.commands.print_beginner_menu_license_prompt"), \
@@ -572,7 +572,7 @@ class TestBannerNotSpammedOnRetry(unittest.TestCase):
         with patch("agent.commands.load_config", side_effect=lambda: copy.deepcopy(base_cfg)), \
              patch("agent.commands._ensure_install_id_saved", side_effect=lambda c: c), \
              patch("agent.commands.save_config", side_effect=lambda c: c), \
-             patch("agent.commands._remote_license_run_check", side_effect=lambda c, bind_allowed=False: next(responses)), \
+             patch("agent.commands._remote_license_run_check", side_effect=lambda c: next(responses)), \
              patch("agent.commands._is_interactive", return_value=True), \
              patch("agent.commands._persist_license_status", side_effect=lambda c, r: c), \
              patch("agent.commands.print_banner") as mock_banner, \

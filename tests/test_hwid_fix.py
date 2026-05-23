@@ -797,7 +797,7 @@ class TestLicenseRetryFlowSafety(unittest.TestCase):
 
         call_idx = {"n": 0}
 
-        def mock_remote_check(cfg, *, bind_allowed=False):
+        def mock_remote_check(cfg):
             i = call_idx["n"]
             call_idx["n"] += 1
             if i < len(remote_results):

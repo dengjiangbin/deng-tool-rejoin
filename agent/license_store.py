@@ -216,6 +216,22 @@ class BaseLicenseStore(ABC):
         """ISO timestamp of the last heartbeat for a key, or None."""
 
     @abstractmethod
+    def validate_existing_binding(
+        self,
+        raw_key: str,
+        install_id_hash: str,
+        device_model: str = "",
+        app_version: str = "",
+        device_label: str = "",
+    ) -> str:
+        """Read-only validation for ``/api/license/check``.
+
+        Must never create, update, or reactivate device bindings.
+        Returns ``active`` only when an active binding matches *install_id_hash*.
+        Returns ``requires_manual_rebind`` when unbound or inactive (HWID reset).
+        """
+
+    @abstractmethod
     def bind_or_check_device(
         self,
         raw_key: str,
@@ -223,15 +239,11 @@ class BaseLicenseStore(ABC):
         device_model: str,
         app_version: str,
         device_label: str = "",
-        *,
-        bind_allowed: bool = True,
     ) -> str:
-        """Bind or verify a device against a key.
-        Returns a RESULT_* string.
-        Never raises; errors are returned as result codes.
+        """Bind or rebind a device to a key (``/api/license/bind`` only).
 
-        When ``bind_allowed`` is False the store must validate an existing
-        active binding only — it must not create or reactivate bindings.
+        Creates a new binding or reactivates an inactive binding after HWID reset.
+        Never raises; errors are returned as result codes.
         """
 
     @abstractmethod
@@ -819,6 +831,66 @@ class LocalJsonLicenseStore(BaseLicenseStore):
 
     # ── Device binding ────────────────────────────────────────────────────────
 
+    def validate_existing_binding(
+        self,
+        raw_key: str,
+        install_id_hash: str,
+        device_model: str = "",
+        app_version: str = "",
+        device_label: str = "",
+    ) -> str:
+        """Validate-only: never writes bindings or key rows."""
+        try:
+            normalized = normalize_license_key(raw_key)
+        except LicenseKeyError:
+            return RESULT_NOT_FOUND
+        key_hash = hash_license_key(normalized)
+        db = self._load()
+        record = db["keys"].get(key_hash)
+        if not record:
+            return RESULT_NOT_FOUND
+        if record.get("status") == "revoked":
+            return RESULT_REVOKED
+        expires = record.get("expires_at")
+        if expires:
+            try:
+                exp_dt = datetime.fromisoformat(expires)
+                if datetime.now(timezone.utc) > exp_dt:
+                    return RESULT_EXPIRED
+            except (ValueError, TypeError):
+                pass
+        owner_id = record.get("owner_discord_id")
+        if owner_id is None or str(owner_id).strip() == "":
+            return RESULT_KEY_NOT_REDEEMED
+        binding = db.get("bindings", {}).get(key_hash)
+        if binding and binding.get("is_active"):
+            bound_hash = binding.get("install_id_hash")
+            if bound_hash and bound_hash != install_id_hash:
+                return RESULT_WRONG_DEVICE
+            return RESULT_ACTIVE
+        return RESULT_REQUIRES_MANUAL_REBIND
+
+    def get_binding_snapshot(self, raw_key: str) -> dict[str, Any]:
+        """Return masked binding state for audit tests (read-only)."""
+        try:
+            normalized = normalize_license_key(raw_key)
+        except LicenseKeyError:
+            return {"found": False}
+        key_hash = hash_license_key(normalized)
+        db = self._load()
+        record = db["keys"].get(key_hash) or {}
+        binding = db.get("bindings", {}).get(key_hash) or {}
+        inst = str(binding.get("install_id_hash") or "")
+        return {
+            "found": True,
+            "key_id_prefix": key_hash[:8],
+            "is_active": bool(binding.get("is_active")),
+            "install_id_hash_prefix": inst[:8] if inst else "",
+            "bound_at": binding.get("bound_at"),
+            "redeemed_at": record.get("redeemed_at"),
+            "updated_at": record.get("updated_at"),
+        }
+
     def bind_or_check_device(
         self,
         raw_key: str,
@@ -826,8 +898,6 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         device_model: str,
         app_version: str,
         device_label: str = "",
-        *,
-        bind_allowed: bool = True,
     ) -> str:
         lbl = (device_label or "").strip()[:80]
         try:
@@ -887,12 +957,6 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             db["bindings"][key_hash]["last_status"] = RESULT_ACTIVE
             db["bindings"][key_hash]["device_model"] = (device_model or "")[:120] or binding.get("device_model", "")
             db["bindings"][key_hash]["device_label"] = lbl
-        elif not bind_allowed:
-            self.log_license_check(
-                key_id=key_hash, install_id_hash=install_id_hash,
-                result=RESULT_REQUIRES_MANUAL_REBIND, device_model=device_model, app_version=app_version,
-            )
-            return RESULT_REQUIRES_MANUAL_REBIND
         elif binding and not binding.get("is_active"):
             # Inactive binding (e.g. after HWID reset) — manual rebind only.
             now_ts = _utc_now()
@@ -1856,6 +1920,49 @@ class SupabaseLicenseStore(BaseLicenseStore):
 
     # ── Device binding ────────────────────────────────────────────────────────
 
+    def validate_existing_binding(
+        self,
+        raw_key: str,
+        install_id_hash: str,
+        device_model: str = "",
+        app_version: str = "",
+        device_label: str = "",
+    ) -> str:
+        try:
+            normalized = normalize_license_key(raw_key)
+        except LicenseKeyError:
+            return RESULT_NOT_FOUND
+        key_hash = hash_license_key(normalized)
+        key_res = (
+            self._client.table("license_keys")
+            .select("status, expires_at, owner_discord_id, site_user_id")
+            .eq("id", key_hash)
+            .execute()
+        )
+        if not key_res.data:
+            return RESULT_NOT_FOUND
+        record = key_res.data[0]
+        if record.get("status") == "revoked":
+            return RESULT_REVOKED
+        if _iso_expired(record.get("expires_at")):
+            return RESULT_EXPIRED
+        if not _license_record_has_owner(record):
+            return RESULT_KEY_NOT_REDEEMED
+        b_res = (
+            self._client.table("device_bindings")
+            .select("install_id_hash,is_active")
+            .eq("key_id", key_hash)
+            .execute()
+        )
+        if b_res.data:
+            binding = b_res.data[0]
+            if binding.get("is_active"):
+                bound_hash = binding.get("install_id_hash")
+                if bound_hash and bound_hash != install_id_hash:
+                    return RESULT_WRONG_DEVICE
+                return RESULT_ACTIVE
+        return RESULT_REQUIRES_MANUAL_REBIND
+
     def bind_or_check_device(
         self,
         raw_key: str,
@@ -1863,8 +1970,6 @@ class SupabaseLicenseStore(BaseLicenseStore):
         device_model: str,
         app_version: str,
         device_label: str = "",
-        *,
-        bind_allowed: bool = True,
     ) -> str:
         lbl = (device_label or "").strip()[:80]
         try:
@@ -1930,14 +2035,8 @@ class SupabaseLicenseStore(BaseLicenseStore):
                         "device_label": lbl,
                     }
                 ).eq("key_id", key_hash).execute()
-            elif not bind_allowed:
-                self.log_license_check(
-                    key_id=key_hash, install_id_hash=install_id_hash,
-                    result=RESULT_REQUIRES_MANUAL_REBIND, device_model=device_model, app_version=app_version,
-                )
-                return RESULT_REQUIRES_MANUAL_REBIND
             else:
-                # Inactive binding — reactivate with current device (manual rebind)
+                # Inactive binding — reactivate with current device (manual bind only)
                 self._client.table("device_bindings").update(
                     {
                         "install_id_hash": install_id_hash,
@@ -1948,12 +2047,6 @@ class SupabaseLicenseStore(BaseLicenseStore):
                         "is_active": True,
                     }
                 ).eq("key_id", key_hash).execute()
-        elif not bind_allowed:
-            self.log_license_check(
-                key_id=key_hash, install_id_hash=install_id_hash,
-                result=RESULT_REQUIRES_MANUAL_REBIND, device_model=device_model, app_version=app_version,
-            )
-            return RESULT_REQUIRES_MANUAL_REBIND
         else:
             self._client.table("device_bindings").insert(
                 {

@@ -294,16 +294,11 @@ def check_remote_license_status(
     app_version: str,
     device_label: str = "",
     timeout: int = 30,
-    bind_allowed: bool = False,
 ) -> tuple[str, str]:
-    """Call the public license API; return ``(result, message)``.
+    """Call ``POST /api/license/check`` (validate-only); return ``(result, message)``.
 
-    Sends only: hashed install id, key, device model, version, optional label —
-    never Supabase secrets, tokens, or cookies.
-
-    Startup checks must pass ``bind_allowed=False`` so the server validates an
-    existing binding without silently rebinding after HWID reset. Manual key
-    entry must pass ``bind_allowed=True``.
+    This endpoint must never bind or rebind. Manual binding uses
+    :func:`bind_remote_license_key`.
     """
     base = (server_url or DEFAULT_LICENSE_SERVER_URL).strip().rstrip("/")
     url = f"{base}/api/license/check"
@@ -313,7 +308,60 @@ def check_remote_license_status(
         "install_id_hash": install_id_hash,
         "device_model": (device_model or "unknown")[:120],
         "app_version": (app_version or VERSION or "unknown")[:40],
-        "bind_allowed": bool(bind_allowed),
+    }
+    label = (device_label or "").strip()[:80]
+    if label:
+        payload["device_label"] = label
+
+    try:
+        resp = _license_api_post_json(url, payload, timeout=timeout)
+    except Exception:  # noqa: BLE001
+        return "server_unavailable", "License server temporarily unavailable."
+
+    result = str(resp.get("result") or "server_unavailable").strip().lower()
+    message = str(resp.get("message") or "").strip()
+    if result == "wrong_device":
+        return result, WRONG_DEVICE_USER_MESSAGE
+    if result == "requires_manual_rebind":
+        return result, HWID_RESET_REENTRY_MESSAGE
+    if result == "key_not_redeemed":
+        return result, REDEEM_IN_PANEL_HINT
+    if not message:
+        message = {
+            "active": "License active.",
+            "not_found": "Key not found.",
+            "revoked": "This key has been revoked.",
+            "expired": "This key has expired.",
+            "inactive": "License inactive.",
+            "server_unavailable": "License server temporarily unavailable.",
+            "missing_key": "No license key provided.",
+            "key_not_redeemed": KEY_NOT_REDEEMED_API_MESSAGE,
+            "requires_manual_rebind": HWID_RESET_REENTRY_MESSAGE,
+        }.get(result, result)
+    return result, message
+
+
+def bind_remote_license_key(
+    server_url: str,
+    *,
+    license_key: str,
+    install_id: str,
+    device_model: str,
+    app_version: str,
+    device_label: str = "",
+    timeout: int = 30,
+) -> tuple[str, str]:
+    """Call ``POST /api/license/bind`` after explicit manual key entry."""
+    base = (server_url or DEFAULT_LICENSE_SERVER_URL).strip().rstrip("/")
+    url = f"{base}/api/license/bind"
+    install_id_hash = hash_install_id(install_id.strip())
+    payload: dict[str, Any] = {
+        "key": normalize_license_key(license_key),
+        "install_id_hash": install_id_hash,
+        "device_model": (device_model or "unknown")[:120],
+        "app_version": (app_version or VERSION or "unknown")[:40],
+        "manual_entry": True,
+        "bind_allowed": True,
     }
     label = (device_label or "").strip()[:80]
     if label:

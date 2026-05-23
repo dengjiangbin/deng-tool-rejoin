@@ -73,10 +73,14 @@ from . import keystore
 from .license import (
     HWID_RESET_REENTRY_MESSAGE,
     WRONG_DEVICE_USER_MESSAGE,
+    bind_remote_license_key,
     check_remote_license_status,
     get_device_summary,
     sync_install_id_with_config,
 )
+
+# Set True only after a successful validate-only check or manual bind this process.
+_license_session_validated = False
 from . import snapshot, webhook, window_layout
 from .url_utils import UrlValidationError, detect_launch_mode_from_url, mask_urls_in_text, validate_launch_url
 
@@ -248,16 +252,20 @@ def _license_should_offline_grace(lic: dict[str, Any]) -> bool:
 
 def _clear_cached_license_key(cfg: dict[str, Any]) -> dict[str, Any]:
     """Remove the locally cached license key after a definitive server rejection."""
+    global _license_session_validated
+    _license_session_validated = False
     lic = cfg.setdefault("license", {})
     lic["key"] = ""
     cfg["license_key"] = ""
+    lic.pop("last_status", None)
+    lic.pop("last_check_at", None)
     try:
         return save_config(cfg)
     except Exception:  # noqa: BLE001
         return cfg
 
 
-def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35, bind_allowed: bool = False) -> tuple[str, str]:
+def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35) -> tuple[str, str]:
     """Run the remote license check inside a child Python process.
 
     Real-device cause: on Termux/Python 3.13.13, the network code path in
@@ -278,7 +286,6 @@ def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35, bi
         "install_id": (cfg.setdefault("license", {}).get("install_id") or "").strip(),
         "device_label": str(cfg.setdefault("license", {}).get("device_label") or "")[:80],
         "server_url": (cfg.setdefault("license", {}).get("server_url") or "").strip(),
-        "bind_allowed": bool(bind_allowed),
     }
     # Real-device evidence (probe p-09484eaab4): the child Python was
     # exiting with rc=1 because ``python3 -c "from agent.license ..."``
@@ -301,8 +308,8 @@ def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35, bi
         "    sys.path.insert(0, _home)\n"
         "try:\n"
         "    from agent.license import (\n"
-        "        check_remote_license_status, hash_install_id,\n"
-        "        DEFAULT_LICENSE_SERVER_URL, get_public_device_model,\n"
+        "        check_remote_license_status, bind_remote_license_key,\n"
+        "        hash_install_id, DEFAULT_LICENSE_SERVER_URL, get_public_device_model,\n"
         "    )\n"
         "    from agent.constants import VERSION\n"
         "except Exception as _imp_exc:\n"
@@ -318,12 +325,19 @@ def _remote_license_check_isolated(cfg: dict[str, Any], *, timeout: int = 35, bi
         "except Exception:\n"
         "    model = 'unknown'\n"
         "try:\n"
-        "    r, m = check_remote_license_status(\n"
-        "        srv, license_key=p['key'], install_id=p['install_id'],\n"
-        "        device_model=model, app_version=VERSION,\n"
-        "        device_label=p['device_label'],\n"
-        "        bind_allowed=bool(p.get('bind_allowed')),\n"
-        "    )\n"
+        "    op = p.get('op') or 'check'\n"
+        "    if op == 'bind':\n"
+        "        r, m = bind_remote_license_key(\n"
+        "            srv, license_key=p['key'], install_id=p['install_id'],\n"
+        "            device_model=model, app_version=VERSION,\n"
+        "            device_label=p['device_label'],\n"
+        "        )\n"
+        "    else:\n"
+        "        r, m = check_remote_license_status(\n"
+        "            srv, license_key=p['key'], install_id=p['install_id'],\n"
+        "            device_model=model, app_version=VERSION,\n"
+        "            device_label=p['device_label'],\n"
+        "        )\n"
         "except Exception as exc:\n"
         "    r, m = 'server_unavailable', f'check exception: {exc}'\n"
         "sys.stdout.write(json.dumps({'result': r, 'message': m}))\n"
@@ -379,8 +393,8 @@ def _ensure_install_id_saved(cfg: dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
-def _remote_license_check_direct(cfg: dict[str, Any], *, bind_allowed: bool = False) -> tuple[str, str]:
-    """Run the remote license check in-process (legacy path).
+def _remote_license_check_direct(cfg: dict[str, Any]) -> tuple[str, str]:
+    """Run validate-only ``/api/license/check`` in-process (legacy path).
 
     On Termux/Python 3.13.13 this code path can segfault the *parent*
     process (probe ``p-39924732cd`` showed ``rc=-11`` here).  Prefer
@@ -401,8 +415,119 @@ def _remote_license_check_direct(cfg: dict[str, Any], *, bind_allowed: bool = Fa
         device_model=device.get("model") or "unknown",
         app_version=VERSION,
         device_label=str(lic.get("device_label") or ""),
-        bind_allowed=bind_allowed,
     )
+
+
+def _remote_license_bind_direct(cfg: dict[str, Any]) -> tuple[str, str]:
+    """Run explicit ``POST /api/license/bind`` after manual key entry."""
+    lic = cfg.setdefault("license", {})
+    key = (lic.get("key") or "").strip()
+    if not key:
+        return "missing_key", "No license key configured."
+    install_id = sync_install_id_with_config(lic)
+    device = get_device_summary()
+    srv = (lic.get("server_url") or "").strip() or DEFAULT_LICENSE_SERVER_URL
+    return bind_remote_license_key(
+        srv,
+        license_key=key,
+        install_id=install_id,
+        device_model=device.get("model") or "unknown",
+        app_version=VERSION,
+        device_label=str(lic.get("device_label") or ""),
+    )
+
+
+def _remote_license_bind_isolated(cfg: dict[str, Any], *, timeout: int = 35) -> tuple[str, str]:
+    """Run manual bind inside a child process (same SIGSEGV isolation as check)."""
+    import subprocess as _sp  # noqa: PLC0415
+
+    payload = {
+        "op": "bind",
+        "key": (cfg.setdefault("license", {}).get("key") or "").strip(),
+        "install_id": (cfg.setdefault("license", {}).get("install_id") or "").strip(),
+        "device_label": str(cfg.setdefault("license", {}).get("device_label") or "")[:80],
+        "server_url": (cfg.setdefault("license", {}).get("server_url") or "").strip(),
+    }
+    try:
+        from pathlib import Path as _Path  # noqa: PLC0415
+        _agent_parent = str(_Path(__file__).resolve().parent.parent)
+    except Exception:  # noqa: BLE001
+        _agent_parent = os.path.expanduser("~/.deng-tool/rejoin")
+    code = (
+        "import json, os, sys\n"
+        f"sys.path.insert(0, {_agent_parent!r})\n"
+        "_home = os.environ.get('DENG_REJOIN_HOME')\n"
+        "if _home and _home not in sys.path:\n"
+        "    sys.path.insert(0, _home)\n"
+        "try:\n"
+        "    from agent.license import (\n"
+        "        check_remote_license_status, bind_remote_license_key,\n"
+        "        hash_install_id, DEFAULT_LICENSE_SERVER_URL, get_public_device_model,\n"
+        "    )\n"
+        "    from agent.constants import VERSION\n"
+        "except Exception as _imp_exc:\n"
+        "    sys.stdout.write(json.dumps({\n"
+        "        'result': 'server_unavailable',\n"
+        "        'message': f'license import error: {_imp_exc}',\n"
+        "    }))\n"
+        "    sys.exit(0)\n"
+        "p = json.loads(sys.stdin.read())\n"
+        "srv = p['server_url'] or DEFAULT_LICENSE_SERVER_URL\n"
+        "try:\n"
+        "    model = get_public_device_model() or 'unknown'\n"
+        "except Exception:\n"
+        "    model = 'unknown'\n"
+        "try:\n"
+        "    op = p.get('op') or 'check'\n"
+        "    if op == 'bind':\n"
+        "        r, m = bind_remote_license_key(\n"
+        "            srv, license_key=p['key'], install_id=p['install_id'],\n"
+        "            device_model=model, app_version=VERSION,\n"
+        "            device_label=p['device_label'],\n"
+        "        )\n"
+        "    else:\n"
+        "        r, m = check_remote_license_status(\n"
+        "            srv, license_key=p['key'], install_id=p['install_id'],\n"
+        "            device_model=model, app_version=VERSION,\n"
+        "            device_label=p['device_label'],\n"
+        "        )\n"
+        "except Exception as exc:\n"
+        "    r, m = 'server_unavailable', f'bind exception: {exc}'\n"
+        "sys.stdout.write(json.dumps({'result': r, 'message': m}))\n"
+    )
+    env = dict(os.environ)
+    prev_pp = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        _agent_parent + (os.pathsep + prev_pp if prev_pp else "")
+    )
+    try:
+        proc = _sp.run(
+            [sys.executable, "-c", code],
+            input=json.dumps(payload).encode("utf-8"),
+            stdout=_sp.PIPE,
+            stderr=_sp.PIPE,
+            timeout=timeout,
+            check=False,
+            env=env,
+        )
+    except _sp.TimeoutExpired:
+        return "server_unavailable", "License bind subprocess timed out."
+    except OSError as exc:
+        return "server_unavailable", f"License bind subprocess launch error: {exc}"
+
+    if proc.returncode < 0:
+        return "server_unavailable", f"License bind crashed safely (signal {-proc.returncode})."
+    if proc.returncode != 0:
+        stderr_line = (proc.stderr or b"").decode("utf-8", errors="replace").splitlines()
+        hint = stderr_line[0][:80] if stderr_line else ""
+        return "server_unavailable", f"License bind exited rc={proc.returncode} ({hint})"
+    try:
+        data = json.loads((proc.stdout or b"").decode("utf-8", errors="replace") or "{}")
+    except json.JSONDecodeError:
+        return "server_unavailable", "License bind returned invalid JSON."
+    result = str(data.get("result") or "server_unavailable").strip().lower()
+    message = str(data.get("message") or "").strip()
+    return result, message
 
 
 def _should_isolate_license_check() -> bool:
@@ -438,21 +563,18 @@ def _should_isolate_license_check() -> bool:
     return False
 
 
-def _remote_license_run_check(cfg: dict[str, Any], *, bind_allowed: bool = False) -> tuple[str, str]:
-    """Public entry — dispatches to subprocess-isolated path on Termux.
-
-    Backwards-compatible signature (used by every caller and mocked by
-    many tests).  Production callers on Termux/Android transparently
-    get SIGSEGV isolation; dev/CI callers get the legacy in-process
-    behaviour so unit tests continue to work.
-
-    Startup validation must pass ``bind_allowed=False`` so cached keys
-    cannot silently rebind after HWID reset. Manual key entry passes
-    ``bind_allowed=True``.
-    """
+def _remote_license_run_check(cfg: dict[str, Any]) -> tuple[str, str]:
+    """Validate-only ``/api/license/check`` — never binds or rebinds."""
     if _should_isolate_license_check():
-        return _remote_license_check_isolated(cfg, bind_allowed=bind_allowed)
-    return _remote_license_check_direct(cfg, bind_allowed=bind_allowed)
+        return _remote_license_check_isolated(cfg)
+    return _remote_license_check_direct(cfg)
+
+
+def _remote_license_run_bind(cfg: dict[str, Any]) -> tuple[str, str]:
+    """Explicit manual bind via ``POST /api/license/bind`` only."""
+    if _should_isolate_license_check():
+        return _remote_license_bind_isolated(cfg)
+    return _remote_license_bind_direct(cfg)
 
 
 def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool) -> bool:
@@ -461,9 +583,11 @@ def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool
     Quiet by design: valid licenses produce NO public output so the clean
     logo + menu appears without "License OK" spam on every startup.
     """
+    global _license_session_validated
     result, msg = _remote_license_run_check(cfg)
     if result == "active":
         # Silent success — do not print "License OK" on every startup.
+        _license_session_validated = True
         _persist_license_status(cfg, "active")
         return True
     # Cache integrity: see _ensure_remote_license_menu_loop for rationale.
@@ -625,13 +749,17 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             manual_key_entry = True
 
         try:
-            # Cached startup checks are validate-only. Manual key entry may bind.
-            result, msg = _remote_license_run_check(cfg, bind_allowed=manual_key_entry)
+            if manual_key_entry:
+                result, msg = _remote_license_run_bind(cfg)
+            else:
+                result, msg = _remote_license_run_check(cfg)
         except Exception as exc:  # noqa: BLE001
             _print_license_err(f"License check failed: {exc}", use_color)
             result, msg = "error", str(exc)
 
         if result == "active":
+            global _license_session_validated
+            _license_session_validated = True
             # Silent success on normal startup — clean menu appears next.
             try:
                 _persist_license_status(cfg, "active")
@@ -639,12 +767,14 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
                 pass
             return True
 
-        # Offline grace: a transient failure (server unavailable, child
-        # crash) must not lock out a user whose cached license is still
-        # ``active`` and was confirmed within the grace window.  Keep the
-        # last_status / last_check_at untouched so the next attempt can
-        # still re-verify.
-        if result in _LICENSE_TRANSIENT_RESULTS and _license_should_offline_grace(lic):
+        # Offline grace only after a successful validate/bind this session,
+        # so stale ``last_status == active`` cannot bypass HWID reset when
+        # the server is temporarily unreachable.
+        if (
+            result in _LICENSE_TRANSIENT_RESULTS
+            and _license_session_validated
+            and _license_should_offline_grace(lic)
+        ):
             return True  # Silent — cached license still valid, no user action needed
 
         # Cache integrity: ONLY persist *definitive* answers

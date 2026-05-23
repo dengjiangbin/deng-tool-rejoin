@@ -1211,7 +1211,7 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
     if not _is_authorized(environ):
         return respond(json.dumps({"error": "Unauthorized"}).encode(), 401)
 
-    # ── Check / Heartbeat ─────────────────────────────────────────────────────
+    # ── Check / Heartbeat (validate-only — NEVER bind) ───────────────────────
     if path in ("/api/license/check", "/api/license/heartbeat"):
         if method != "POST":
             return respond(json.dumps({"error": "POST required"}).encode(), 405)
@@ -1225,7 +1225,6 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         device_model = (body.get("device_model") or "unknown")[:120]
         app_version = (body.get("app_version") or "unknown")[:40]
         device_label = (body.get("device_label") or "").strip()[:80]
-        bind_allowed = bool(body.get("bind_allowed"))
 
         if not raw_key:
             payload, status = _build_response("missing_key", 400)
@@ -1246,9 +1245,9 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         try:
             from agent.license_store import get_default_store
             store = get_default_store()
-            result = store.bind_or_check_device(
+            # SECURITY: validate-only — bind_allowed/manual_entry are ignored.
+            result = store.validate_existing_binding(
                 raw_key, install_id_hash, device_model, app_version, device_label,
-                bind_allowed=bind_allowed,
             )
         except Exception as exc:  # noqa: BLE001
             log.error("License check error: %s", exc)
@@ -1256,6 +1255,51 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
             return respond(payload, status)
 
         log.info("License result: %s for key %s", result, _mask_key(raw_key))
+        payload, status = _build_response(result)
+        return respond(payload, status)
+
+    # ── Manual bind (only path that may mutate HWID/binding) ──────────────────
+    if path == "/api/license/bind":
+        if method != "POST":
+            return respond(json.dumps({"error": "POST required"}).encode(), 405)
+
+        body = _read_json_body(environ)
+        if not body:
+            return respond(json.dumps({"error": "Invalid JSON body"}).encode(), 400)
+
+        raw_key = (body.get("key") or "").strip()
+        install_id_hash = (body.get("install_id_hash") or "").strip()
+        device_model = (body.get("device_model") or "unknown")[:120]
+        app_version = (body.get("app_version") or "unknown")[:40]
+        device_label = (body.get("device_label") or "").strip()[:80]
+        manual_entry = bool(body.get("manual_entry"))
+        bind_allowed = bool(body.get("bind_allowed"))
+
+        if not raw_key:
+            payload, status = _build_response("missing_key", 400)
+            return respond(payload, status)
+
+        if len(install_id_hash) != 64:
+            install_id_hash = _hash_install_id(install_id_hash)
+
+        if not (manual_entry and bind_allowed):
+            payload, status = _build_response("requires_manual_rebind", 403)
+            return respond(payload, status)
+
+        log.info("License bind for key %s device_model=%s", _mask_key(raw_key), device_model)
+
+        try:
+            from agent.license_store import get_default_store
+            store = get_default_store()
+            result = store.bind_or_check_device(
+                raw_key, install_id_hash, device_model, app_version, device_label,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.error("License bind error: %s", exc)
+            payload, status = _build_response("server_unavailable", 500)
+            return respond(payload, status)
+
+        log.info("License bind result: %s for key %s", result, _mask_key(raw_key))
         payload, status = _build_response(result)
         return respond(payload, status)
 
@@ -1299,7 +1343,7 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
                 if len(install_id_hash) != 64:
                     install_id_hash = _hash_install_id(install_id_hash)
                 device_model = (body.get("device_model") or "unknown")[:120]
-                result = store.bind_or_check_device(raw_key, install_id_hash, device_model, version)
+                result = store.validate_existing_binding(raw_key, install_id_hash, device_model, version)
                 if result != RESULT_ACTIVE:
                     return respond(json.dumps({"recorded": False, "reason": result}).encode())
             except Exception:  # noqa: BLE001
@@ -1370,7 +1414,7 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         try:
             from agent.license_store import get_default_store
             store = get_default_store()
-            lic_result = store.bind_or_check_device(
+            lic_result = store.validate_existing_binding(
                 raw_key, install_id_hash, device_model, app_version, device_label,
             )
         except Exception as exc:  # noqa: BLE001

@@ -649,7 +649,7 @@ class TestLicenseGateStability(unittest.TestCase):
         results_iter = iter(check_results)
         prompts_iter = iter(input_values)
 
-        def fake_check(c, *, bind_allowed=False):
+        def fake_check(c):
             return next(results_iter, ("error", "no more results"))
 
         def fake_prompt(prompt="", **_kwargs):
