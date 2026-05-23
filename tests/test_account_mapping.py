@@ -1026,5 +1026,61 @@ class TestApplyMappingInvalidIdNotSaved(unittest.TestCase):
         self.assertNotEqual(result[0]["account_mapping_updated_at"], "")
 
 
+class TestAccountMappingTableFormat(unittest.TestCase):
+    """Account mapping table uses aligned box layout and safe Termux prompts."""
+
+    def test_build_account_mapping_table_uses_box_drawing(self):
+        from agent.commands import build_account_mapping_table
+
+        text = build_account_mapping_table([
+            ("1", "..litesc", "enigmavov", "10957545286", "api_resolved", "Validated"),
+            ("2", "..litesd", "enigmavov1", "10957547289", "api_resolved", "Validated"),
+        ])
+        self.assertIn("┌", text)
+        self.assertIn("├", text)
+        self.assertIn("└", text)
+        self.assertIn("Package", text)
+        self.assertIn("User ID", text)
+        self.assertIn("Validated", text)
+        self.assertNotIn("{:<", text)
+
+    def test_interactive_mapping_uses_safe_prompt_not_input(self):
+        import inspect
+        from agent import commands
+
+        src = inspect.getsource(commands._run_account_mapping_table)
+        self.assertIn("safe_io.safe_prompt", src)
+        self.assertNotIn('input("  > ")', src)
+        self.assertIn("build_account_mapping_table", src)
+
+    def test_interactive_mapping_accepts_without_crash(self):
+        from agent.commands import _run_account_mapping_table
+        from agent.config import package_entry
+
+        entries = [
+            package_entry("com.moons.litesc", account_username="enigmavov", roblox_user_id=10957545286),
+            package_entry("com.moons.litesd", account_username="enigmavov1", roblox_user_id=10957547289),
+        ]
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
+             unittest.mock.patch("agent.commands._try_detect_user_id", side_effect=[
+                 (10957545286, "config"),
+                 (10957547289, "config"),
+             ]), \
+             unittest.mock.patch("agent.commands.build_account_mapping_table", return_value="TABLE"), \
+             unittest.mock.patch("agent.commands.safe_io.safe_prompt", side_effect=["a"]):
+            result = _run_account_mapping_table(entries, {})
+        self.assertEqual(len(result), 2)
+
+    def test_presence_loop_does_not_root_scan_cookies(self):
+        import inspect
+        from agent import commands
+
+        src = inspect.getsource(commands._run_account_mapping_table)
+        loop_start = src.index("# --- Run presence validation")
+        row_start = src.index("def _row_status")
+        presence_block = src[loop_start:row_start]
+        self.assertNotIn("detect_roblox_cookie", presence_block)
+
+
 if __name__ == "__main__":
     unittest.main()

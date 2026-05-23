@@ -1492,12 +1492,14 @@ def _run_account_mapping_table(
             )
 
     # --- Run detection for entries that don't have a user_id yet ---
+    if _is_interactive():
+        print("Detecting accounts...", flush=True)
     detected: list[tuple[int, str]] = []
     for entry in entries:
         uid, src = _try_detect_user_id(entry, draft)
         detected.append((uid, src))
 
-    # --- Run presence validation ---
+    # --- Run presence validation (use cached cookie only — no root scan here) ---
     presence_statuses: list[str] = []
     for i, entry in enumerate(entries):
         uid, src = detected[i]
@@ -1505,18 +1507,7 @@ def _run_account_mapping_table(
             existing = str(entries[i].get("account_mapping_status") or "")
             presence_statuses.append(existing if existing in MAPPING_STATUSES else "Validated")
             continue
-        cookie = ""
-        try:
-            from . import roblox_cookie_detect as _rcd
-
-            cookie = _rcd.detect_roblox_cookie(
-                str(entry.get("package") or ""),
-                entry=entry,
-                config=draft,
-                use_root=True,
-            )
-        except Exception:  # noqa: BLE001
-            cookie = ""
+        cookie = str(entry.get("roblox_cookie") or "").strip()
         if uid > 0:
             presence_statuses.append(_validate_user_id_with_presence(uid, cookie=cookie))
         else:
@@ -1527,25 +1518,35 @@ def _run_account_mapping_table(
         ps = presence_statuses[i]
         return _mapping_status_for(uid, src, entry, presence_status=ps)
 
+    def _mapping_rows() -> list[tuple[str, str, str, str, str, str]]:
+        rows: list[tuple[str, str, str, str, str, str]] = []
+        for i, entry in enumerate(entries):
+            uid, src = detected[i]
+            username = _package_username_display(entry) or "-"
+            uid_disp = str(uid) if uid > 0 else "-"
+            src_disp = src or "-"
+            status = _row_status(i, entry)
+            rows.append((
+                str(i + 1),
+                _short_package_display(str(entry.get("package") or "")),
+                username[:20],
+                uid_disp,
+                src_disp[:14],
+                status,
+            ))
+        return rows
+
     def _print_mapping_table() -> None:
         print()
         print("Account Mapping")
-        print("-" * 82)
-        fmt = "  {:<3} {:<26} {:<16} {:<12} {:<14} {}"
-        print(fmt.format("#", "Package", "Username", "User ID", "Source", "Status"))
-        print("  " + "-" * 80)
-        for i, entry in enumerate(entries):
-            uid, src = detected[i]
-            pkg = str(entry.get("package") or "")
-            pkg_short = (pkg[:24] + "..") if len(pkg) > 26 else pkg
-            username = _package_username_display(entry)
-            uid_disp = str(uid) if uid > 0 else "-"
-            src_disp = (src[:12] + "..") if len(src) > 14 else src
-            status = _row_status(i, entry)
-            print(fmt.format(i + 1, pkg_short, username[:16], uid_disp, src_disp, status))
-        print("-" * 82)
+        print(build_account_mapping_table(_mapping_rows()))
+        print()
         print("  A. Accept all  |  1-N. Edit entry  |  B. Back")
         print()
+        try:
+            sys.stdout.flush()
+        except Exception:  # noqa: BLE001
+            pass
 
     if not _is_interactive():
         # Non-interactive: apply detected mappings silently with full metadata.
@@ -1553,11 +1554,11 @@ def _run_account_mapping_table(
 
     while True:
         _print_mapping_table()
-        try:
-            raw = safe_io.safe_prompt("Choose [A]: ", default="a").strip().lower() or "a"
-        except (EOFError, KeyboardInterrupt):
+        raw_input = safe_io.safe_prompt("Choose [A]: ", default="a")
+        if raw_input is None:
             print()
             break
+        raw = raw_input.strip().lower() or "a"
 
         if raw in ("a", ""):
             break
@@ -1568,6 +1569,7 @@ def _run_account_mapping_table(
             idx = int(raw) - 1
             if not (0 <= idx < len(entries)):
                 print(f"  Invalid number. Enter 1-{len(entries)}, A, or B.")
+                safe_io.press_enter()
                 continue
             entry = dict(entries[idx])
             uid_cur, _ = detected[idx]
@@ -1580,10 +1582,14 @@ def _run_account_mapping_table(
                 print(f"  Current user ID:  {uid_cur}")
             print("  Enter Roblox username or numeric user ID (blank to skip):")
             try:
-                inp = input("  > ").strip()
-            except (EOFError, KeyboardInterrupt):
+                sys.stdout.flush()
+            except Exception:  # noqa: BLE001
+                pass
+            inp_raw = safe_io.safe_prompt("  > ", allow_blank=True)
+            if inp_raw is None:
                 print()
                 continue
+            inp = inp_raw.strip()
             if not inp:
                 detected[idx] = (0, "skipped")
                 presence_statuses[idx] = ""
@@ -1620,6 +1626,7 @@ def _run_account_mapping_table(
             entries[idx] = entry
         else:
             print("  Enter A, B, or a package number.")
+            safe_io.press_enter()
 
     return _apply_mapping_to_entries(entries, detected, presence_statuses, config=draft)
 
@@ -3932,6 +3939,40 @@ def build_start_table(rows: list[tuple], *, use_color: bool = False) -> str:
         _header_row(headers),
         _hline("├", "┼", "┤"),
         *(_data_row(colored_rows[i], str_rows[i]) for i in range(len(colored_rows))),
+        _hline("└", "┴", "┘"),
+    ]
+    return "\n".join(lines)
+
+
+def build_account_mapping_table(rows: list[tuple[str, str, str, str, str, str]]) -> str:
+    """Build the account mapping table: #, Package, Username, User ID, Source, Status.
+
+    Uses the same box-drawing layout as :func:`build_start_table` so columns
+    stay aligned on narrow Termux screens.
+    """
+    headers = ("#", "Package", "Username", "User ID", "Source", "Status")
+    if not rows:
+        rows = [("", "", "", "", "", "")]
+    widths = [
+        max(len(headers[i]), max((_visible_len(r[i]) for r in rows), default=0))
+        for i in range(6)
+    ]
+
+    def _cell(s: str, w: int) -> str:
+        pad = w - _visible_len(s)
+        return f" {s}{' ' * max(0, pad)} "
+
+    def _hline(left: str, mid: str, right: str) -> str:
+        return left + mid.join("─" * (w + 2) for w in widths) + right
+
+    def _row(cells: tuple[str, ...]) -> str:
+        return "│" + "│".join(_cell(str(cells[i]), widths[i]) for i in range(6)) + "│"
+
+    lines = [
+        _hline("┌", "┬", "┐"),
+        _row(headers),
+        _hline("├", "┼", "┤"),
+        *(_row(r) for r in rows),
         _hline("└", "┴", "┘"),
     ]
     return "\n".join(lines)
