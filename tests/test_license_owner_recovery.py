@@ -60,10 +60,11 @@ class TestMigrationProbe(unittest.TestCase):
 
 
 class TestVisibleRows(unittest.TestCase):
-    def test_revoked_hidden_from_panel_rows(self) -> None:
+    def test_inactive_hidden_from_panel_rows(self) -> None:
         rows = [
-            {"license_status": "active", "masked_key": "A"},
+            {"license_status": "active", "masked_key": "A", "expires_at": "2099-01-01T00:00:00+00:00"},
             {"license_status": "revoked", "masked_key": "B"},
+            {"license_status": "expired", "masked_key": "C"},
         ]
         vis = visible_license_rows_for_panel(rows)
         self.assertEqual(len(vis), 1)

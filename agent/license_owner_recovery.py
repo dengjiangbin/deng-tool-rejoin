@@ -18,6 +18,7 @@ from .license import (
     hash_license_key,
     normalize_license_key,
 )
+from .key_stats_format import is_active_visible_license_row
 from .license_store import (
     BaseLicenseStore,
     LocalJsonLicenseStore,
@@ -36,13 +37,8 @@ class OwnerRecoveryError(RuntimeError):
 
 
 def visible_license_rows_for_panel(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Hide revoked keys from Key Stats / Download UI (rows remain in the database)."""
-    out: list[dict[str, Any]] = []
-    for r in rows:
-        if str(r.get("license_status") or "").lower() == "revoked":
-            continue
-        out.append(r)
-    return out
+    """Hide inactive keys from Key Stats / Download UI (rows remain in the database)."""
+    return [r for r in rows if is_active_visible_license_row(r)]
 
 
 def parse_single_owner_target_from_env() -> str | None:

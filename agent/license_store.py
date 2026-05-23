@@ -705,7 +705,11 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             ciphertext = record.get("key_ciphertext") or ""
             has_blob = bool(ciphertext)
             full_plain = lke.decrypt_license_key_ciphertext(ciphertext) if has_blob else None
-            device = (binding.get("device_model") or binding.get("device_label") or "").strip() or None
+            device = (
+                (binding.get("device_model") or binding.get("device_label") or "").strip()
+                if active_binding
+                else ""
+            ) or None
             reset_count = self.get_reset_count_24h(key_hash)
             plan = record.get("plan", "standard") or "standard"
             rows.append({
@@ -936,6 +940,7 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             return RESULT_KEY_NOT_REDEEMED
         # Check device binding
         binding = db.get("bindings", {}).get(key_hash)
+        now_ts = _utc_now()
         if binding and binding.get("is_active"):
             bound_hash = binding.get("install_id_hash")
             if bound_hash and bound_hash != install_id_hash:
@@ -945,14 +950,12 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                 )
                 return RESULT_WRONG_DEVICE
             # Same device — update heartbeat + device info
-            now_ts = _utc_now()
             db["bindings"][key_hash]["last_seen_at"] = now_ts
             db["bindings"][key_hash]["last_status"] = RESULT_ACTIVE
             db["bindings"][key_hash]["device_model"] = (device_model or "")[:120] or binding.get("device_model", "")
             db["bindings"][key_hash]["device_label"] = lbl
         elif binding and not binding.get("is_active"):
             # Inactive binding (e.g. after HWID reset) — manual rebind only.
-            now_ts = _utc_now()
             db["bindings"][key_hash].update({
                 "install_id_hash": install_id_hash,
                 "device_label": lbl,
@@ -964,7 +967,6 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             })
         else:
             # New binding — also mark the key as redeemed (first activation)
-            now_ts = _utc_now()
             db.setdefault("bindings", {})[key_hash] = {
                 "install_id_hash": install_id_hash,
                 "device_label": lbl,
@@ -977,6 +979,9 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             if not record.get("redeemed_at"):
                 db["keys"][key_hash]["redeemed_at"] = now_ts
                 db["keys"][key_hash]["updated_at"] = now_ts
+        if not db["keys"][key_hash].get("redeemed_at"):
+            db["keys"][key_hash]["redeemed_at"] = now_ts
+            db["keys"][key_hash]["updated_at"] = now_ts
         self._save(db)
         self.log_license_check(
             key_id=key_hash, install_id_hash=install_id_hash,
@@ -1628,7 +1633,11 @@ class SupabaseLicenseStore(BaseLicenseStore):
             ciphertext = (record.get("key_ciphertext") or "") if "key_ciphertext" in record else ""
             has_blob = bool(ciphertext)
             full_plain = lke.decrypt_license_key_ciphertext(ciphertext) if has_blob else None
-            device = (binding.get("device_model") or binding.get("device_label") or "").strip() or None
+            device = (
+                (binding.get("device_model") or binding.get("device_label") or "").strip()
+                if active_binding
+                else ""
+            ) or None
             reset_count = self.get_reset_count_24h(key_id)
             plan = record.get("plan", "standard") or "standard"
             rows.append({
@@ -1986,6 +1995,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
             .eq("key_id", key_hash)
             .execute()
         )
+        now_ts = _utc_now()
         if b_res.data:
             binding = b_res.data[0]
             if binding.get("is_active"):
@@ -1998,7 +2008,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
                     return RESULT_WRONG_DEVICE
                 self._client.table("device_bindings").update(
                     {
-                        "last_seen_at": _utc_now(),
+                        "last_seen_at": now_ts,
                         "last_status": RESULT_ACTIVE,
                         "device_model": (device_model or "")[:120],
                         "device_label": lbl,
@@ -2011,7 +2021,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
                         "install_id_hash": install_id_hash,
                         "device_model": (device_model or "")[:120],
                         "device_label": lbl,
-                        "last_seen_at": _utc_now(),
+                        "last_seen_at": now_ts,
                         "last_status": RESULT_ACTIVE,
                         "is_active": True,
                     }
@@ -2023,7 +2033,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
                     "install_id_hash": install_id_hash,
                     "device_label": lbl,
                     "device_model": (device_model or "")[:120],
-                    "last_seen_at": _utc_now(),
+                    "last_seen_at": now_ts,
                     "last_status": RESULT_ACTIVE,
                     "is_active": True,
                 }
@@ -2032,10 +2042,10 @@ class SupabaseLicenseStore(BaseLicenseStore):
             key_id=key_hash, install_id_hash=install_id_hash,
             result=RESULT_ACTIVE, device_model=device_model, app_version=app_version,
         )
-        if record.get("expires_at"):
+        if record.get("expires_at") or not record.get("redeemed_at"):
             try:
                 self._client.table("license_keys").update(
-                    {"expires_at": None, "redeemed_at": _utc_now()}
+                    {"expires_at": None, "redeemed_at": record.get("redeemed_at") or now_ts}
                 ).eq("id", key_hash).execute()
             except Exception as exc:
                 err = str(exc).lower()

@@ -176,6 +176,9 @@ const memoryDb = {
   license_ad_challenges: [],
   license_keys: [],
   license_users: [],
+  device_bindings: [],
+  hwid_reset_logs: [],
+  license_key_executions: [],
 };
 
 const mockSupabase = {
@@ -372,6 +375,9 @@ function resetDb() {
   memoryDb.license_ad_challenges.splice(0);
   memoryDb.license_keys.splice(0);
   memoryDb.license_users.splice(0);
+  memoryDb.device_bindings.splice(0);
+  memoryDb.hwid_reset_logs.splice(0);
+  memoryDb.license_key_executions.splice(0);
 }
 
 function csrfFrom(html) {
@@ -1427,6 +1433,10 @@ describe('Luarmor-style key flow', () => {
     assert.equal(unlock.status, 302);
     assert.equal(unlock.headers.location, '/key/result');
     assert.equal(memoryDb.license_keys.length, 1);
+    assert.equal(memoryDb.license_keys[0].owner_discord_id, 'discord-user-1');
+    assert.equal(memoryDb.license_keys[0].prefix.split('-').length, 2);
+    assert.match(memoryDb.license_keys[0].suffix, /^[0-9A-F]{4}$/);
+    assert.equal(memoryDb.license_keys[0].plan, 'standard');
     assert.equal(linkvertiseApi.callCount, 1);
     // Anti-Bypass token must travel in the request BODY, never the URL
     assert.doesNotMatch(linkvertiseApi.lastCall.url, /token=/);
@@ -1518,9 +1528,76 @@ describe('Luarmor-style key flow', () => {
     // Masked keys must NOT appear
     assert.doesNotMatch(license.text, /\*\*\*\*/);
     assert.match(license.text, /Linkvertise/);
-    assert.match(license.text, /Generated/);
+    assert.match(license.text, /Unbound/);
     assert.doesNotMatch(license.text, />linkvertise</);
     assert.doesNotMatch(license.text, /pending_ad/);
+  });
+
+  test('My License reads canonical license_keys by Discord owner, not portal-only challenge history', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    memoryDb.license_keys.push({
+      id: 'discord-owned-key',
+      prefix: 'DENG-AAAA',
+      suffix: 'DDDD',
+      owner_discord_id: 'discord-user-1',
+      status: 'active',
+      plan: 'standard',
+      created_at: new Date().toISOString(),
+      redeemed_at: new Date().toISOString(),
+      expires_at: null,
+    });
+
+    const license = await agent.get('/license');
+    assert.equal(license.status, 200);
+    assert.match(license.text, /Full key unavailable for this old key/);
+    assert.match(license.text, /Unbound/);
+  });
+
+  test('dashboard stats use the same active license filter as Discord stats', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const now = new Date().toISOString();
+    memoryDb.license_keys.push(
+      {
+        id: 'active-unbound',
+        prefix: 'DENG-1111',
+        suffix: '4444',
+        owner_discord_id: 'discord-user-1',
+        status: 'active',
+        plan: 'standard',
+        created_at: now,
+        redeemed_at: null,
+        expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+      },
+      {
+        id: 'revoked-hidden',
+        prefix: 'DENG-9999',
+        suffix: '0000',
+        owner_discord_id: 'discord-user-1',
+        status: 'revoked',
+        plan: 'standard',
+        created_at: now,
+        redeemed_at: null,
+        expires_at: null,
+      },
+      {
+        id: 'expired-hidden',
+        prefix: 'DENG-8888',
+        suffix: '0000',
+        owner_discord_id: 'discord-user-1',
+        status: 'active',
+        plan: 'standard',
+        created_at: now,
+        redeemed_at: null,
+        expires_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+      },
+    );
+
+    const dashboard = await agent.get('/dashboard');
+    assert.equal(dashboard.status, 200);
+    assert.match(dashboard.text, /Total Licenses[\s\S]*?<p class="stat-value">1<\/p>/);
+    assert.doesNotMatch(dashboard.text, /revoked-hidden|expired-hidden/);
   });
 
   test('too many attempts render a portal error instead of a raw JSON page for browser flow', async () => {
@@ -1595,6 +1672,20 @@ describe('security controls', () => {
     assert.match(source, /sameSite:\s*'lax'/);
     assert.match(source, /contentSecurityPolicy/);
     assert.match(source, /frameAncestors/);
+  });
+});
+
+describe('canonical license service', () => {
+  test('active/status helper matches Discord rules for revoked, expired, bound, and unbound keys', () => {
+    const svc = require('../src/licenseService');
+    assert.equal(svc.isActiveLicense({ status: 'revoked' }), false);
+    assert.equal(svc.isActiveLicense({ status: 'active', expires_at: new Date(Date.now() - 1).toISOString() }), false);
+    assert.equal(svc.isActiveLicense({ status: 'active', redeemed_at: new Date().toISOString() }), true);
+    assert.equal(svc.isActiveLicense({ status: 'active', active_binding: true }), true);
+    assert.equal(svc.isActiveLicense({ status: 'active', expires_at: new Date(Date.now() + 1000).toISOString() }), true);
+    assert.equal(svc.formatLicenseStatus({ status: 'active', active_binding: true }), 'Bound');
+    assert.equal(svc.formatLicenseStatus({ status: 'active', redeemed_at: new Date().toISOString(), license_key_id: 'owned' }), 'Unbound');
+    assert.equal(svc.formatLicenseStatus({ status: 'active', license_key_id: 'owned' }), 'Unbound');
   });
 });
 

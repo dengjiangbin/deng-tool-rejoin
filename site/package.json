@@ -10,8 +10,8 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test tests/site.test.js",
-    "lint": "node --check server.js && node --check src/app.js && node --check src/auth.js && node --check src/challenge.js && node --check src/crypto.js && node --check src/db.js && node --check src/keyGen.js && node --check src/routes.js && node --check src/sessionStore.js && node --check src/providers/linkvertise.js && node --check src/providers/lootlabs.js",
-    "build": "node --check server.js && node --check src/app.js && node --check src/auth.js && node --check src/challenge.js && node --check src/routes.js && node --check src/sessionStore.js && node --check src/providers/linkvertise.js && node --check src/providers/lootlabs.js"
+    "lint": "node --check server.js && node --check src/app.js && node --check src/auth.js && node --check src/challenge.js && node --check src/crypto.js && node --check src/db.js && node --check src/keyGen.js && node --check src/licenseCrypto.js && node --check src/licenseService.js && node --check src/routes.js && node --check src/sessionStore.js && node --check src/providers/linkvertise.js && node --check src/providers/lootlabs.js",
+    "build": "node --check server.js && node --check src/app.js && node --check src/auth.js && node --check src/challenge.js && node --check src/licenseCrypto.js && node --check src/licenseService.js && node --check src/routes.js && node --check src/sessionStore.js && node --check src/providers/linkvertise.js && node --check src/providers/lootlabs.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.44.4",

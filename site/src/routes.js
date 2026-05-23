@@ -18,6 +18,7 @@ const {
 } = auth;
 const challenge = require('./challenge');
 const supabase = require('./db');
+const licenseService = require('./licenseService');
 const linkvertise = require('./providers/linkvertise');
 const lootlabs = require('./providers/lootlabs');
 const { signChallenge, verifyChallenge } = require('./crypto');
@@ -272,6 +273,7 @@ async function repairSiteUser(req, _res, next) {
 }
 
 function maskKeyRow(row) {
+  if (row.masked_key) return row.masked_key;
   const prefix = row.key_prefix || 'DENG-????-????';
   const suffix = row.key_suffix || '????-????';
   return `${prefix}-****-${String(suffix).split('-').pop() || '????'}`;
@@ -284,85 +286,37 @@ function maskKeyRow(row) {
  * Never use this in URLs, logs, or public Discord messages.
  */
 function fullKeyRow(row) {
+  if (row.key_display) return row.key_display;
   const prefix = row.key_prefix || 'DENG-????-????';
   const suffix = row.key_suffix || '????-????';
   return `${prefix}-${suffix}`;
 }
 
 function providerLabel(provider) {
-  if (provider === 'linkvertise') return 'Linkvertise';
-  if (provider === 'lootlabs') return 'LootLabs';
-  return 'Provider';
+  return licenseService.providerLabel(provider);
 }
 
 function friendlyStatus(row) {
-  if (!row) return 'Unknown';
-  if (row.license_status === 'expired' || row.status === 'expired') return 'Expired';
-  if (row.license_status === 'revoked' || row.status === 'revoked') return 'Expired';
-  if (row.redeemed_at || row.license_status === 'redeemed' || row.license_status === 'used') return 'Redeemed';
-  if (row.status === 'key_generated') {
-    if (row.key_expires_at && new Date(row.key_expires_at) < new Date()) return 'Expired';
-    return 'Generated';
-  }
-  if (row.status === 'ad_completed') return 'Completed';
-  if (row.status === 'failed') return 'Expired';
-  return 'Pending';
+  return licenseService.formatLicenseStatus(row);
 }
 
 function summarizeHistory(history) {
-  const rows = history || [];
-  const unredeemed = rows.filter((row) => friendlyStatus(row) === 'Generated').length;
-  const expired = rows.filter((row) => friendlyStatus(row) === 'Expired').length;
+  const stats = licenseService.computeStats(history || []);
   return {
-    total: rows.length,
-    unredeemed,
-    expired,
-    latest: rows[0] || null,
+    ...stats,
     cooldownSeconds: challenge.COOLDOWN_SECONDS,
     keyExpiryHours: challenge.KEY_EXPIRY_HOURS,
   };
 }
 
 async function loadHistory(siteUserId, limit = 20) {
-  const { data, error } = await supabase
-    .from('license_ad_challenges')
-    .select('id, key_prefix, key_suffix, status, provider, created_at, key_expires_at, completed_at, license_key_id')
-    .eq('site_user_id', siteUserId)
-    .eq('status', 'key_generated')
-    .order('created_at', { ascending: false })
-    .limit(limit);
-  if (error) {
-    const msg = error.message || '';
-    if (msg.includes('schema cache') || msg.includes('does not exist') || msg.includes('license_ad_challenges')) {
-      console.warn('[routes] license_ad_challenges table not found – apply migration 005_site_portal.sql');
-    } else {
-      console.error('[routes/loadHistory]', msg);
-    }
-    return [];
-  }
-  const generated = (data || []).filter((row) => row.license_key_id);
-  const keyIds = generated.map((row) => row.license_key_id).filter(Boolean);
-  if (keyIds.length === 0) return [];
-
-  const { data: keys, error: keyError } = await supabase
-    .from('license_keys')
-    .select('id, status, redeemed_at, expires_at')
-    .in('id', keyIds);
-
-  const byId = new Map();
-  if (!keyError && keys) {
-    for (const key of keys) byId.set(key.id, key);
-  }
-
-  return generated.map((row) => {
-    const key = byId.get(row.license_key_id) || {};
-    return {
-      ...row,
-      license_status: key.status || null,
-      redeemed_at: key.redeemed_at || null,
-      key_expires_at: row.key_expires_at || key.expires_at || null,
-    };
-  });
+  const { data } = await supabase
+    .from('site_users')
+    .select('discord_user_id')
+    .eq('id', siteUserId)
+    .maybeSingle();
+  return licenseService.getUserLicenses(data?.discord_user_id, { limit })
+    .then(licenseService.filterActiveLicenses);
 }
 
 function ensureProvider(provider) {
@@ -1047,7 +1001,8 @@ router.get('/api/stats/public', (_req, res) => {
 router.get('/api/license/me', requireLogin, repairSiteUser, async (req, res) => {
   try {
     const history = await loadHistory(req.session.user.id, 20);
-    res.json({ account: req.session.user, stats: summarizeHistory(history) });
+    const stats = summarizeHistory(history);
+    res.json({ account: req.session.user, stats });
   } catch {
     res.status(500).json({ error: 'license_summary_failed' });
   }
@@ -1064,6 +1019,7 @@ router.get('/api/license/history', requireLogin, repairSiteUser, async (req, res
         provider: providerLabel(row.provider),
         created_at: row.created_at,
         key_expires_at: row.key_expires_at,
+        device: row.device_display || null,
       })),
     });
   } catch {

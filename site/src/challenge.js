@@ -8,6 +8,7 @@
 const supabase = require('./db');
 const { signChallenge, verifyChallenge, sha256, randomHex } = require('./crypto');
 const { generateDengKey } = require('./keyGen');
+const { encryptLicenseKeyPlaintext } = require('./licenseCrypto');
 const crypto = require('crypto');
 
 const COOLDOWN_SECONDS = parseInt(process.env.KEY_GENERATION_COOLDOWN_SECONDS || '60', 10);
@@ -147,8 +148,28 @@ async function insertLicenseKey(payload, siteUserId, discordUserId) {
     await ensureDiscordLicenseUser(payload.owner_discord_id);
   }
 
-  const { error } = await supabase.from('license_keys').insert(payload);
+  let { error } = await supabase.from('license_keys').insert(payload);
   if (!error) return;
+
+  if (missingColumn(error, 'key_ciphertext') || missingColumn(error, 'key_export_available')) {
+    const retryPayload = { ...payload };
+    delete retryPayload.key_ciphertext;
+    delete retryPayload.key_export_available;
+    const retryExport = await supabase.from('license_keys').insert(retryPayload);
+    error = retryExport.error;
+    if (!error) return;
+    payload = retryPayload;
+  }
+
+  if (missingColumn(error, 'redeemed_at') || missingColumn(error, 'created_by')) {
+    const retryPayload = { ...payload };
+    delete retryPayload.redeemed_at;
+    delete retryPayload.created_by;
+    const retryCompat = await supabase.from('license_keys').insert(retryPayload);
+    error = retryCompat.error;
+    if (!error) return;
+    payload = retryPayload;
+  }
 
   if (!missingColumn(error, 'site_user_id')) {
     throw error;
@@ -749,9 +770,10 @@ async function completeAdAndGenerateKey(challengeRow) {
     throw safeError('PROVIDER_CHALLENGE_ALREADY_USED', 'Challenge state conflict');
   }
 
-  const { raw, id: keyId, prefix, suffix } = generateDengKey();
+  const { raw, id: keyId, prefix, suffix, displayPrefix, displaySuffix } = generateDengKey();
   const now = new Date().toISOString();
   const expiresAt = keyExpiresAt();
+  const keyCiphertext = encryptLicenseKeyPlaintext(raw);
 
   try {
     await insertLicenseKey({
@@ -761,8 +783,11 @@ async function completeAdAndGenerateKey(challengeRow) {
       owner_discord_id: discord_user_id || null,
       site_user_id: site_user_id || null,
       status: 'active',
-      plan: 'free',
+      plan: 'standard',
       expires_at: expiresAt,
+      redeemed_at: null,
+      created_by: discord_user_id || null,
+      ...(keyCiphertext ? { key_ciphertext: keyCiphertext, key_export_available: true } : { key_export_available: false }),
     }, site_user_id, discord_user_id);
   } catch (keyErr) {
     await supabase
@@ -777,8 +802,8 @@ async function completeAdAndGenerateKey(challengeRow) {
     .update({
       status: 'key_generated',
       license_key_id: keyId,
-      key_prefix: prefix,
-      key_suffix: suffix,
+      key_prefix: displayPrefix,
+      key_suffix: displaySuffix,
       key_expires_at: expiresAt,
       completed_at: now,
     })

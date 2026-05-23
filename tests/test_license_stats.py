@@ -21,7 +21,7 @@ if str(PROJECT) not in sys.path:
     sys.path.insert(0, str(PROJECT))
 
 from agent.license import hash_license_key, normalize_license_key
-from agent.license_store import LocalJsonLicenseStore, get_license_stats_for_discord_user
+from agent.license_store import RESULT_ACTIVE, LocalJsonLicenseStore, get_license_stats_for_discord_user
 
 
 def _tmp_store() -> LocalJsonLicenseStore:
@@ -368,6 +368,31 @@ class TestRedeemedCountIncludesBoundKeys(unittest.TestCase):
         # Generated excludes revoked, Redeemed counts redeemed_at of owned keys
         # (ownership is retained even when revoked for stats purposes)
         self.assertEqual(stats["key_generated_count"], 0, "Revoked not generated")
+
+    def test_first_bind_marks_discord_generated_key_redeemed(self):
+        store = _tmp_store()
+        uid = "red_u5"
+        store.get_or_create_user(uid)
+        full_key = store.create_key_for_user(uid)
+        key_hash = hash_license_key(normalize_license_key(full_key))
+        db = store._load()
+        db["keys"][key_hash]["redeemed_at"] = None
+        db["keys"][key_hash]["expires_at"] = None
+        store._save(db)
+
+        result = store.bind_or_check_device(
+            full_key,
+            "install-hash",
+            "device",
+            "app",
+            "label",
+        )
+        self.assertEqual(result, RESULT_ACTIVE)
+        db2 = store._load()
+        self.assertTrue(db2["keys"][key_hash].get("redeemed_at"))
+        stats = get_license_stats_for_discord_user(store, uid)
+        self.assertEqual(stats["key_redeemed_count"], 1)
+        self.assertEqual(stats["bound_key_count"], 1)
 
 
 class TestExecutedLabelDisplay(unittest.TestCase):
