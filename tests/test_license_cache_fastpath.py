@@ -159,10 +159,10 @@ class IsolatedRemoteCheckTest(unittest.TestCase):
         self.assertIn("timed out", msg.lower())
 
 
-class LicenseMenuLoopFastPathTest(unittest.TestCase):
-    """End-to-end: cmd_menu loop short-circuits on a fresh cached active license."""
+class LicenseMenuLoopFreshCheckTest(unittest.TestCase):
+    """End-to-end: menu loop rechecks remote even with fresh cached active license."""
 
-    def test_recent_active_skips_remote_check(self) -> None:
+    def test_recent_active_rechecks_remote_before_menu(self) -> None:
         from agent import commands  # noqa: PLC0415
         cfg = {
             "license": {
@@ -174,7 +174,8 @@ class LicenseMenuLoopFastPathTest(unittest.TestCase):
         }
         with mock.patch.object(commands, "load_config", return_value=cfg), \
              mock.patch.object(commands, "_ensure_install_id_saved", side_effect=lambda c: c), \
-             mock.patch.object(commands, "_remote_license_run_check") as dispatcher, \
+             mock.patch.object(commands, "_remote_license_run_check",
+                               return_value=("active", "ok")) as dispatcher, \
              mock.patch.object(commands, "_remote_license_check_isolated") as iso, \
              mock.patch.object(commands, "_remote_license_check_direct") as direct, \
              mock.patch.object(commands, "_print_license_ok"):
@@ -183,8 +184,8 @@ class LicenseMenuLoopFastPathTest(unittest.TestCase):
                 cfg, argparse.Namespace(), use_color=False,
             )
         self.assertTrue(ok)
-        # Crucially, no network code path was entered.
-        dispatcher.assert_not_called()
+        # HWID reset protection: cached active is not enough to open the menu.
+        dispatcher.assert_called_once()
         iso.assert_not_called()
         direct.assert_not_called()
 

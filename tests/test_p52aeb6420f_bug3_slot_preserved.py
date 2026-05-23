@@ -281,5 +281,102 @@ class TestBug3DeterministicSlotsAcrossPackageCounts(unittest.TestCase):
                 self.assertEqual(self._grid_for(n), grid)
 
 
+class TestPortraitTwoByFiveSlots(unittest.TestCase):
+    """Portrait mode uses full-screen 2x5 rules, not landscape right-pane slots."""
+
+    def _rects_for(self, n: int, *, width: int = 720, height: int = 1280):
+        from agent import window_layout
+        packages = [f"com.test.pkg{i}" for i in range(1, n + 1)]
+        with patch("agent.window_layout._detect_status_bar_height", return_value=25):
+            return window_layout.calculate_split_layout(
+                packages,
+                width,
+                height,
+                termux_log_fraction=0.50,
+                screen_mode="portrait",
+            )
+
+    def _grid_for(self, n: int) -> list[list[int]]:
+        rects = self._rects_for(n)
+        cell_w = 720 // 2
+        cell_h = 1280 // 5
+        grid = [[0, 0] for _ in range(5)]
+        for index, rect in enumerate(rects, start=1):
+            row = rect.top // cell_h
+            col = rect.left // cell_w
+            grid[row][col] = index
+        return grid
+
+    def test_one_through_ten_match_required_portrait_grid_rules(self):
+        expected = {
+            1:  [[0, 0], [0, 0], [1, 0], [0, 0], [0, 0]],
+            2:  [[0, 0], [0, 0], [1, 2], [0, 0], [0, 0]],
+            3:  [[0, 0], [0, 0], [1, 2], [3, 0], [0, 0]],
+            4:  [[0, 0], [0, 0], [1, 2], [3, 4], [0, 0]],
+            5:  [[0, 0], [0, 0], [1, 2], [3, 4], [5, 0]],
+            6:  [[0, 0], [0, 0], [1, 2], [3, 4], [5, 6]],
+            7:  [[0, 0], [1, 2], [3, 4], [5, 6], [7, 0]],
+            8:  [[0, 0], [1, 2], [3, 4], [5, 6], [7, 8]],
+            9:  [[1, 2], [3, 4], [5, 6], [7, 8], [9, 0]],
+            10: [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]],
+        }
+        for n, grid in expected.items():
+            with self.subTest(package_count=n):
+                self.assertEqual(self._grid_for(n), grid)
+
+    def test_portrait_has_no_duplicate_slots(self):
+        for n in range(1, 11):
+            with self.subTest(package_count=n):
+                rects = self._rects_for(n)
+                bounds = {(r.left, r.top, r.right, r.bottom) for r in rects}
+                self.assertEqual(len(bounds), n, rects)
+
+    def test_portrait_uses_full_width_and_height_without_termux_column(self):
+        rects = self._rects_for(10)
+        self.assertEqual(min(r.left for r in rects), 0)
+        self.assertEqual(max(r.right for r in rects), 720)
+        self.assertEqual(min(r.top for r in rects), 0)
+        self.assertEqual(max(r.bottom for r in rects), 1280)
+        self.assertEqual({r.win_w for r in rects}, {360})
+        self.assertEqual({r.win_h for r in rects}, {256})
+
+    def test_portrait_does_not_use_landscape_three_by_three_rules(self):
+        portrait = self._grid_for(6)
+        self.assertEqual(portrait, [[0, 0], [0, 0], [1, 2], [3, 4], [5, 6]])
+        rects = self._rects_for(6)
+        self.assertEqual(len({r.top for r in rects}), 3)
+        self.assertEqual({r.left for r in rects}, {0, 360})
+
+    def test_portrait_relaunch_preserves_stored_slot(self):
+        from agent.supervisor import _load_stored_rect_for_package
+
+        rects = self._rects_for(5)
+        cfg = {"last_layout_preview": [r.as_dict() for r in rects], "screen_mode": "portrait"}
+        stored = _load_stored_rect_for_package(cfg, "com.test.pkg5")
+        self.assertIsNotNone(stored)
+        self.assertEqual(
+            (stored.left, stored.top, stored.right, stored.bottom),
+            (0, 1024, 360, 1280),
+        )
+
+    def test_portrait_retry_preserves_stored_slot_for_one_package(self):
+        from agent.supervisor import _reapply_layout_for_package
+
+        rects = self._rects_for(4)
+        cfg = {"last_layout_preview": [r.as_dict() for r in rects], "screen_mode": "portrait"}
+        with patch("agent.supervisor.load_config", return_value=cfg), \
+             patch("agent.window_apply.apply_window_layout_silent"), \
+             patch("agent.window_apply.force_resize_package",
+                   return_value=(True, "bounds verified")) as mock_force:
+            _reapply_layout_for_package("com.test.pkg3")
+
+        mock_force.assert_called_once()
+        applied_rect = mock_force.call_args.args[1]
+        self.assertEqual(
+            (applied_rect.left, applied_rect.top, applied_rect.right, applied_rect.bottom),
+            (0, 768, 360, 1024),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

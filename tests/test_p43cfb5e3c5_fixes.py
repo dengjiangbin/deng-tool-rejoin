@@ -360,16 +360,12 @@ class TestPublicUICleanliness(unittest.TestCase):
         table = self._make_table()
         self.assertNotIn("Checking Package", table)
 
-    def test_no_in_lobby_in_display_map_values(self) -> None:
-        """_STATE_DISPLAY_MAP must not produce 'In-Lobby' as a display value."""
+    def test_in_lobby_is_allowed_display_map_value(self) -> None:
+        """Authenticated presence can now expose In-Lobby as a diagnostic state."""
         import ast, inspect
         import agent.commands as _mod
         src = inspect.getsource(_mod.cmd_start)
-        # Find the _STATE_DISPLAY_MAP literal and check its values
-        # Simpler: just assert 'In-Lobby' is not a value in the source map literal
-        # by looking for any quoted value = 'In-Lobby'
-        self.assertNotIn('"In-Lobby"', src,
-                         "_STATE_DISPLAY_MAP must not map any state to In-Lobby")
+        self.assertIn('"In-Lobby"', src)
 
     def test_no_joining_in_display_map_values(self) -> None:
         """_STATE_DISPLAY_MAP must not produce 'Joining' as a display value."""
@@ -392,8 +388,11 @@ class TestPublicUICleanliness(unittest.TestCase):
         start = src.find("_STATE_DISPLAY_MAP")
         end   = src.find("}", start) + 1
         map_src = src[start:end]
-        allowed = {"Online", "No Heartbeat", "Dead", "Launching",
-                   "Relaunching", "Preparing", "Clear Cache", "Failed"}
+        allowed = {
+            "Online", "No Heartbeat", "Dead", "Launching",
+            "Relaunching", "Preparing", "Clear Cache", "Failed",
+            "In-Lobby", "Join Failed", "Wrong Game / Wrong Server",
+        }
         # Find all string literals that appear after a ':' (the values)
         import re
         vals = re.findall(r':\s*"([^"]+)"', map_src)

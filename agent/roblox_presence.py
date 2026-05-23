@@ -51,11 +51,12 @@ import logging
 import re
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import Iterable, Mapping, Sequence
 
 from . import safe_http
+from .url_utils import RobloxExpectedTarget
 
 _log = logging.getLogger("deng.rejoin.roblox_presence")
 
@@ -98,6 +99,8 @@ class PresenceResult:
     presence_type: PresenceType = PresenceType.UNKNOWN
     place_id: int | None = None
     root_place_id: int | None = None
+    universe_id: int | None = None
+    game_id: str = ""
     last_location: str = ""
     last_online_iso: str = ""
 
@@ -118,6 +121,21 @@ class PresenceResult:
     @property
     def is_unknown(self) -> bool:
         return self.presence_type == PresenceType.UNKNOWN
+
+
+@dataclass(frozen=True)
+class PresenceResolution:
+    state: str
+    reason: str
+    server_verification: str = "unavailable"
+    expected_place_id: int | None = None
+    expected_root_place_id: int | None = None
+    expected_universe_id: int | None = None
+    expected_private_code: str = ""
+    actual_place_id: int | None = None
+    actual_root_place_id: int | None = None
+    actual_universe_id: int | None = None
+    actual_game_id: str = ""
 
 
 # ─── in-memory caches ────────────────────────────────────────────────────────
@@ -263,16 +281,26 @@ def _parse_presence_row(row: Mapping[str, object]) -> PresenceResult | None:
         ptype = PresenceType(int(pres_raw))
     except (TypeError, ValueError):
         ptype = PresenceType.UNKNOWN
-    place_id = row.get("placeId")
-    root_place = row.get("rootPlaceId")
+    place_id = _coerce_int(row.get("placeId"))
+    root_place = _coerce_int(row.get("rootPlaceId"))
+    universe_id = _coerce_int(row.get("universeId"))
     return PresenceResult(
         user_id=uid,
         presence_type=ptype,
-        place_id=int(place_id) if isinstance(place_id, int) else None,
-        root_place_id=int(root_place) if isinstance(root_place, int) else None,
+        place_id=place_id,
+        root_place_id=root_place,
+        universe_id=universe_id,
+        game_id=str(row.get("gameId") or "")[:128],
         last_location=str(row.get("lastLocation") or "")[:80],
         last_online_iso=str(row.get("lastOnline") or "")[:32],
     )
+
+
+def _coerce_int(value: object) -> int | None:
+    if isinstance(value, int) and value > 0:
+        return value
+    text = str(value or "").strip()
+    return int(text) if text.isdigit() and int(text) > 0 else None
 
 
 def fetch_presence(
@@ -414,6 +442,130 @@ def classify_presence_result(result: PresenceResult | None) -> str:
         return "unknown"
     except Exception:  # noqa: BLE001
         return "unknown"
+
+
+def resolve_presence_state(
+    presence: PresenceResult | None,
+    expected: RobloxExpectedTarget | None = None,
+    *,
+    process_alive: bool,
+    launch_elapsed_seconds: float | None = None,
+    join_timeout_seconds: float = 90.0,
+    local_warning_detected: bool = False,
+    local_stuck_detected: bool = False,
+) -> PresenceResolution:
+    """Resolve authenticated presence + local signals into a public state.
+
+    This helper is intentionally conservative: API failure/UNKNOWN never asks
+    callers to relaunch. Dead is controlled by Android process evidence before
+    this function is normally called, but the process flag is accepted so unit
+    tests and future callers share the same invariant.
+    """
+    target = expected or RobloxExpectedTarget()
+    if not process_alive:
+        return PresenceResolution(
+            state="Dead",
+            reason="android_process_not_alive",
+            server_verification="not_checked",
+        )
+
+    if local_stuck_detected:
+        return PresenceResolution(
+            state="No Heartbeat",
+            reason="local_stuck_detector",
+            server_verification="local_override",
+        )
+    if local_warning_detected:
+        return PresenceResolution(
+            state="Join Failed",
+            reason="local_warning_detector",
+            server_verification="local_override",
+        )
+
+    is_in_game = bool(getattr(presence, "is_in_game", False))
+    is_offline = bool(getattr(presence, "is_offline", False))
+    is_lobby = bool(getattr(presence, "is_lobby", False))
+    is_unknown = bool(getattr(presence, "is_unknown", False))
+
+    if presence is None or is_unknown:
+        return PresenceResolution(
+            state="Unknown",
+            reason="presence_unavailable_or_unknown",
+            server_verification="unavailable",
+        )
+
+    actual_place = presence.place_id
+    actual_root = presence.root_place_id
+    actual_universe = presence.universe_id
+    common = {
+        "expected_place_id": target.expected_place_id,
+        "expected_root_place_id": target.expected_root_place_id,
+        "expected_universe_id": target.expected_universe_id,
+        "expected_private_code": target.expected_private_code,
+        "actual_place_id": actual_place,
+        "actual_root_place_id": actual_root,
+        "actual_universe_id": actual_universe,
+        "actual_game_id": presence.game_id,
+    }
+
+    if is_in_game:
+        expected_pairs = [
+            ("place", target.expected_place_id, actual_place),
+            ("root_place", target.expected_root_place_id, actual_root),
+            ("universe", target.expected_universe_id, actual_universe),
+        ]
+        known_expectations = [(name, exp, got) for name, exp, got in expected_pairs if exp is not None]
+        missing = [(name, exp) for name, exp, got in known_expectations if got is None]
+        mismatches = [
+            (name, exp, got)
+            for name, exp, got in known_expectations
+            if got is not None and int(got) != int(exp)
+        ]
+        if mismatches:
+            return PresenceResolution(
+                state="Wrong Game / Wrong Server",
+                reason="presence_target_mismatch",
+                server_verification="mismatch",
+                **common,
+            )
+        if missing:
+            return PresenceResolution(
+                state="Online",
+                reason="presence_playing_partial_target_fields",
+                server_verification="partial",
+                **common,
+            )
+        return PresenceResolution(
+            state="Online",
+            reason="presence_playing_target_match" if known_expectations else "presence_playing_no_expected_target",
+            server_verification="matched" if known_expectations else "partial",
+            **common,
+        )
+
+    if is_offline:
+        return PresenceResolution(
+            state="Dead",
+            reason="presence_offline",
+            server_verification="presence_offline",
+            **common,
+        )
+
+    if is_lobby:
+        elapsed = float(launch_elapsed_seconds or 0.0)
+        timed_out = launch_elapsed_seconds is not None and elapsed >= float(join_timeout_seconds)
+        return PresenceResolution(
+            state="Join Failed" if timed_out else "In-Lobby",
+            reason="presence_online_not_playing_timeout" if timed_out else "presence_online_not_playing",
+            server_verification="not_playing",
+            **common,
+        )
+
+    return PresenceResolution(
+        state="Unknown",
+        reason="presence_type_not_supported",
+        server_verification="unavailable",
+        **common,
+    )
 
 
 def get_presence_state_for_package(package_entry: dict | None) -> str:  # type: ignore[type-arg]

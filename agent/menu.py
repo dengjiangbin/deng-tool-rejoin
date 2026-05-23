@@ -19,6 +19,7 @@ MENU_ITEMS = (
     ("1", "First Time Setup Config", "first-setup"),
     ("2", "Setup / Edit Config", "config"),
     ("3", "Start", "start"),
+    ("5", "Auto Execute", "auto-execute"),
     ("0", "Exit", "exit"),
 )
 

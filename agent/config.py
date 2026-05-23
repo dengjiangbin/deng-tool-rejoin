@@ -167,6 +167,7 @@ def default_config() -> dict[str, Any]:
         "yescaptcha_key": "",
         "webhook_tags": [],
         "package_start_times": {},
+        "auto_execute_scripts": [],
         # ── Package keys (per-package internal license, NOT DENG Tool license) ──
         # These are written to each Roblox/package Android data folder:
         #   /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/Cache/license
@@ -264,6 +265,28 @@ def validate_username_source(source: Any, username: str = "") -> str:
     return cleaned
 
 
+def validate_roblosecurity_cookie(value: Any) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return ""
+    if cleaned.startswith(".ROBLOSECURITY="):
+        cleaned = cleaned.split("=", 1)[1].strip()
+    if any(ord(char) < 32 for char in cleaned):
+        raise ConfigError("ROBLOSECURITY cookie cannot contain control characters")
+    if len(cleaned) > 4096:
+        raise ConfigError("ROBLOSECURITY cookie is too long")
+    return cleaned
+
+
+def mask_roblosecurity_cookie(value: Any) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return ""
+    if len(cleaned) <= 12:
+        return "***"
+    return f"{cleaned[:4]}...{cleaned[-4:]}"
+
+
 def _validate_roblox_user_id(value: Any) -> int:
     """Coerce *value* to a positive int Roblox user-id, else 0.
 
@@ -277,6 +300,16 @@ def _validate_roblox_user_id(value: Any) -> int:
     except (TypeError, ValueError):
         return 0
     return as_int if as_int > 0 else 0
+
+
+def _validate_optional_positive_int(value: Any) -> int:
+    if value in (None, ""):
+        return 0
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("expected Roblox target ids must be positive integers") from exc
+    return number if number > 0 else 0
 
 
 def _validate_mapping_status(status: Any) -> str:
@@ -306,6 +339,10 @@ def package_entry(
     auto_reopen_enabled: bool = True,
     auto_reconnect_enabled: bool = True,
     roblox_user_id: int | str = 0,
+    roblox_cookie: str = "",
+    expected_place_id: int | str = 0,
+    expected_root_place_id: int | str = 0,
+    expected_universe_id: int | str = 0,
     account_mapping_source: str = "",
     account_mapping_status: str = "Not Mapped",
     account_mapping_updated_at: str = "",
@@ -323,6 +360,10 @@ def package_entry(
         "auto_reopen_enabled": bool(auto_reopen_enabled),
         "auto_reconnect_enabled": bool(auto_reconnect_enabled),
         "roblox_user_id": _validate_roblox_user_id(roblox_user_id),
+        "roblox_cookie": validate_roblosecurity_cookie(roblox_cookie),
+        "expected_place_id": _validate_optional_positive_int(expected_place_id),
+        "expected_root_place_id": _validate_optional_positive_int(expected_root_place_id),
+        "expected_universe_id": _validate_optional_positive_int(expected_universe_id),
         "account_mapping_source": _validate_mapping_source(account_mapping_source),
         "account_mapping_status": _validate_mapping_status(account_mapping_status),
         "account_mapping_updated_at": _validate_mapping_timestamp(account_mapping_updated_at),
@@ -362,6 +403,13 @@ def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
                 source = source or "manual"
             # Migrate legacy userId field names → roblox_user_id
             raw_uid = raw_entry.get("roblox_user_id") or raw_entry.get("userId") or raw_entry.get("user_id") or 0
+            raw_cookie = (
+                raw_entry.get("roblox_cookie")
+                or raw_entry.get("ROBLOSECURITY")
+                or raw_entry.get(".ROBLOSECURITY")
+                or raw_entry.get("roblosecurity")
+                or ""
+            )
             entry = package_entry(
                 str(raw_entry.get("package") or ""),
                 str(username or ""),
@@ -373,6 +421,10 @@ def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
                 auto_reopen_enabled=_as_bool(raw_entry.get("auto_reopen_enabled", True)),
                 auto_reconnect_enabled=_as_bool(raw_entry.get("auto_reconnect_enabled", True)),
                 roblox_user_id=raw_uid,
+                roblox_cookie=str(raw_cookie or ""),
+                expected_place_id=raw_entry.get("expected_place_id") or raw_entry.get("expected_placeId") or 0,
+                expected_root_place_id=raw_entry.get("expected_root_place_id") or raw_entry.get("expected_rootPlaceId") or 0,
+                expected_universe_id=raw_entry.get("expected_universe_id") or raw_entry.get("expected_universeId") or 0,
                 account_mapping_source=str(raw_entry.get("account_mapping_source") or ""),
                 account_mapping_status=str(raw_entry.get("account_mapping_status") or "Not Mapped"),
                 account_mapping_updated_at=str(raw_entry.get("account_mapping_updated_at") or ""),
@@ -741,6 +793,16 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         if is_valid_package_name(str(k))
     }
 
+    # Auto Execute scripts are local user-provided Roblox commands.  They are
+    # sent after a package is confirmed Online/in-game.
+    try:
+        from .auto_execute import normalize_scripts
+        merged["auto_execute_scripts"] = normalize_scripts(
+            merged.get("auto_execute_scripts")
+        )
+    except Exception:  # noqa: BLE001
+        merged["auto_execute_scripts"] = []
+
     # ── Package keys (per-package internal license, NOT DENG Tool license) ──
     raw_pkg_keys = merged.get("package_keys")
     if not isinstance(raw_pkg_keys, dict):
@@ -849,6 +911,7 @@ def safe_config_view(config_data: dict[str, Any]) -> dict[str, Any]:
             if isinstance(item, dict):
                 row = dict(item)
                 row["private_server_url"] = mask_launch_url(row.get("private_server_url")) or ""
+                row["roblox_cookie"] = mask_roblosecurity_cookie(row.get("roblox_cookie"))
                 masked_pkgs.append(row)
             else:
                 masked_pkgs.append(item)

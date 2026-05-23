@@ -126,10 +126,10 @@ class TestPublicStates(unittest.TestCase):
         "Joining", "Join Unconfirmed", "In Server", "Lobby",
         "Launching", "Online", "Reconnecting", "Dead", "Disconnected",
         "Offline", "Preparing", "Background", "Warning", "Unknown",
-        "Failed", "Layout",
+        "Failed", "Layout", "In-Lobby", "Join Failed", "Wrong Game / Wrong Server",
     ]
     _ALLOWED_PUBLIC = {"Layout", "Launching", "Relaunching", "Online", "Reopening", "Failed",
-                       "No Heartbeat", "Dead"}
+                       "No Heartbeat", "Dead", "In-Lobby", "Join Failed", "Wrong Game / Wrong Server"}
 
     def _get_display_map(self):
         # Extract _STATE_DISPLAY_MAP from cmd_start source via AST.
@@ -389,6 +389,97 @@ class TestRobloxPresenceAPI(unittest.TestCase):
         rp.classify_presence_result(None)
         rp.classify_presence_result(rp.PresenceResult(user_id=0))
 
+    def test_presence_parses_universe_and_game_id(self) -> None:
+        rp = self.rp
+        row = {
+            "userPresenceType": 2,
+            "userId": "123",
+            "placeId": "456",
+            "rootPlaceId": 456,
+            "universeId": "789",
+            "gameId": "server-guid",
+            "lastLocation": "Expected Game",
+        }
+        parsed = rp._parse_presence_row(row)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.place_id, 456)
+        self.assertEqual(parsed.root_place_id, 456)
+        self.assertEqual(parsed.universe_id, 789)
+        self.assertEqual(parsed.game_id, "server-guid")
+
+    def test_resolve_presence_online_when_expected_target_matches(self) -> None:
+        from agent.url_utils import parse_expected_target_from_url
+
+        rp = self.rp
+        presence = rp.PresenceResult(
+            user_id=1,
+            presence_type=rp.PresenceType.IN_GAME,
+            place_id=123,
+            root_place_id=123,
+            universe_id=999,
+        )
+        target = parse_expected_target_from_url(
+            "https://www.roblox.com/games/123/name?privateServerLinkCode=ABC",
+            expected_universe_id=999,
+        )
+        resolved = rp.resolve_presence_state(presence, target, process_alive=True)
+        self.assertEqual(resolved.state, "Online")
+        self.assertEqual(resolved.server_verification, "matched")
+
+    def test_resolve_presence_wrong_game_on_target_mismatch(self) -> None:
+        from agent.url_utils import parse_expected_target_from_url
+
+        rp = self.rp
+        presence = rp.PresenceResult(
+            user_id=1,
+            presence_type=rp.PresenceType.IN_GAME,
+            place_id=456,
+        )
+        target = parse_expected_target_from_url("https://www.roblox.com/games/123/name")
+        resolved = rp.resolve_presence_state(presence, target, process_alive=True)
+        self.assertEqual(resolved.state, "Wrong Game / Wrong Server")
+        self.assertEqual(resolved.server_verification, "mismatch")
+
+    def test_resolve_presence_lobby_and_join_timeout(self) -> None:
+        rp = self.rp
+        presence = rp.PresenceResult(user_id=1, presence_type=rp.PresenceType.ONLINE)
+        lobby = rp.resolve_presence_state(
+            presence, process_alive=True, launch_elapsed_seconds=10, join_timeout_seconds=90
+        )
+        failed = rp.resolve_presence_state(
+            presence, process_alive=True, launch_elapsed_seconds=120, join_timeout_seconds=90
+        )
+        self.assertEqual(lobby.state, "In-Lobby")
+        self.assertEqual(failed.state, "Join Failed")
+
+    def test_parse_expected_target_from_private_server_url(self) -> None:
+        from agent.url_utils import parse_expected_target_from_url
+
+        target = parse_expected_target_from_url(
+            "https://www.roblox.com/games/123/name?privateServerLinkCode=SECRET",
+            expected_root_place_id=123,
+            expected_universe_id=456,
+        )
+        self.assertEqual(target.expected_place_id, 123)
+        self.assertEqual(target.expected_root_place_id, 123)
+        self.assertEqual(target.expected_universe_id, 456)
+        self.assertEqual(target.expected_private_code, "SECRET")
+
+    def test_parse_expected_target_from_share_url_keeps_private_code(self) -> None:
+        from agent.url_utils import parse_expected_target_from_url
+
+        target = parse_expected_target_from_url(
+            "https://www.roblox.com/share?code=ABC123&type=Server"
+        )
+        self.assertIsNone(target.expected_place_id)
+        self.assertEqual(target.expected_private_code, "ABC123")
+
+    def test_resolve_presence_unknown_does_not_force_recovery_state(self) -> None:
+        rp = self.rp
+        presence = rp.PresenceResult(user_id=1, presence_type=rp.PresenceType.UNKNOWN)
+        resolved = rp.resolve_presence_state(presence, process_alive=True)
+        self.assertEqual(resolved.state, "Unknown")
+
 
 class TestPresenceSupervisorIntegration(unittest.TestCase):
     """Supervisor uses Presence API as confirmation layer without crashing."""
@@ -488,6 +579,73 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
         self.assertIsNone(pres)
         # Must not crash, state set to unavailable or unknown
         self.assertIn(worker.last_presence_state, ("unavailable", "unknown"))
+
+    def test_watchdog_presence_wrong_game_sets_diagnostic_state_only(self) -> None:
+        import agent.supervisor as sup
+        from agent import roblox_presence as rp
+
+        entry = {
+            "package": "com.roblox.client",
+            "roblox_user_id": 123,
+            "expected_place_id": 111,
+        }
+        cfg = {"supervisor": {}, "foreground_grace_seconds": 90}
+        watcher = sup.WatchdogSupervisor([entry], cfg)
+        with mock.patch.object(
+            watcher,
+            "_fast_alive_evidence",
+            return_value={
+                "alive": True,
+                "running": True,
+                "root_running": False,
+                "foreground": True,
+                "window": True,
+                "surface": True,
+                "task": False,
+                "foreground_package": "com.roblox.client",
+            },
+        ), mock.patch.object(
+            rp,
+            "fetch_presence_one",
+            return_value=rp.PresenceResult(
+                user_id=123,
+                presence_type=rp.PresenceType.IN_GAME,
+                place_id=222,
+            ),
+        ):
+            state, detail = watcher._detect_package_state("com.roblox.client", entry)
+
+        self.assertEqual(state, sup.STATUS_WRONG_GAME)
+        self.assertEqual(detail["reason"], "presence_target_mismatch")
+
+    def test_watchdog_presence_unknown_keeps_local_online_hint(self) -> None:
+        import agent.supervisor as sup
+        from agent import roblox_presence as rp
+
+        entry = {"package": "com.roblox.client", "roblox_user_id": 123}
+        watcher = sup.WatchdogSupervisor([entry], {"supervisor": {}})
+        with mock.patch.object(
+            watcher,
+            "_fast_alive_evidence",
+            return_value={
+                "alive": True,
+                "running": True,
+                "root_running": False,
+                "foreground": True,
+                "window": True,
+                "surface": True,
+                "task": False,
+                "foreground_package": "com.roblox.client",
+            },
+        ), mock.patch.object(
+            rp,
+            "fetch_presence_one",
+            return_value=rp.PresenceResult(user_id=123, presence_type=rp.PresenceType.UNKNOWN),
+        ):
+            state, detail = watcher._detect_package_state("com.roblox.client", entry)
+
+        self.assertEqual(state, sup.STATUS_ONLINE)
+        self.assertEqual(detail["reason"], "foreground_window_surface_hint")
 
 
 # ─── 6. YesCaptcha hidden from public UI ─────────────────────────────────────
@@ -619,7 +777,8 @@ class TestPublicMenuItems(unittest.TestCase):
         self.assertIn('"2. Private Server URL"', src)
         self.assertIn('"3. Screen Mode"', src)
         self.assertIn('"4. Key"', src)
-        self.assertIn('"5. Back"', src)
+        self.assertIn('"5. Auto Execute"', src)
+        self.assertIn('"0. Back"', src)
         self.assertNotIn('"3. Webhook"', src)
         self.assertNotIn('"4. YesCaptcha"', src)
 

@@ -175,11 +175,12 @@ class StartTableUxTests(unittest.TestCase):
 
         self.assertIn("Screen mode: Portrait", output.getvalue())
 
-    def test_no_script_execution_config_key(self):
+    def test_no_legacy_script_execution_config_keys(self):
         cfg = validate_config(default_config())
         lowered_keys = " ".join(cfg.keys()).lower()
-        self.assertNotIn("script", lowered_keys)
         self.assertNotIn("executor", lowered_keys)
+        self.assertIn("auto_execute_scripts", cfg)
+        self.assertEqual(cfg["auto_execute_scripts"], [])
         self.assertIn(cfg["screen_mode"], {"landscape", "portrait"})
         forbidden_keys = {
             "script_injection",

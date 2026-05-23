@@ -233,6 +233,17 @@ class TestForceResizePackage(unittest.TestCase):
             ok, detail = window_apply.force_resize_package("p", self._rect())
         self.assertFalse(ok)
 
+    def test_failure_when_readback_is_still_fullscreen(self) -> None:
+        with mock.patch.object(window_apply, "_direct_resize_via_root",
+                              return_value=(True, "ok")), \
+             mock.patch.object(android, "detect_root",
+                              return_value=android.RootInfo(True, "su", "")), \
+             mock.patch.object(window_apply, "read_actual_bounds",
+                              return_value=((0, 0, 720, 1280), "dumpsys")):
+            ok, detail = window_apply.force_resize_package("p", self._rect())
+        self.assertFalse(ok)
+        self.assertIn("bounds still", detail)
+
     def test_no_root_returns_false(self) -> None:
         with mock.patch.object(android, "detect_root",
                               return_value=android.RootInfo(False, None, "")):

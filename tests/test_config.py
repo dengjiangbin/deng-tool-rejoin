@@ -96,6 +96,10 @@ class ConfigTests(unittest.TestCase):
                     "enabled": True,
                     "username_source": "not_set",
                     "roblox_user_id": 0,
+                    "roblox_cookie": "",
+                    "expected_place_id": 0,
+                    "expected_root_place_id": 0,
+                    "expected_universe_id": 0,
                     **_mapping_defaults,
                 },
                 {
@@ -109,6 +113,10 @@ class ConfigTests(unittest.TestCase):
                     "enabled": True,
                     "username_source": "not_set",
                     "roblox_user_id": 0,
+                    "roblox_cookie": "",
+                    "expected_place_id": 0,
+                    "expected_root_place_id": 0,
+                    "expected_universe_id": 0,
                     **_mapping_defaults,
                 },
             ],
@@ -138,6 +146,47 @@ class ConfigTests(unittest.TestCase):
         cfg[old_key] = "script_injection"
         validated = validate_config(cfg)
         self.assertNotIn(old_key, validated)
+
+    def test_auto_execute_scripts_are_normalized(self):
+        cfg = default_config()
+        cfg["auto_execute_scripts"] = [
+            "",
+            "  loadstring(game:HttpGet(\"https://example.com/a.lua\"))()  ",
+            "loadstring(game:HttpGet(\"https://example.com/a.lua\"))()",
+            "print('second')",
+        ]
+        validated = validate_config(cfg)
+        self.assertEqual(
+            validated["auto_execute_scripts"],
+            [
+                'loadstring(game:HttpGet("https://example.com/a.lua"))()',
+                "print('second')",
+            ],
+        )
+
+    def test_roblosecurity_cookie_is_normalized_and_masked(self):
+        from agent.config import safe_config_view
+
+        cfg = default_config()
+        cfg["roblox_packages"] = [
+            {
+                "package": "com.roblox.client",
+                "account_username": "Main",
+                "enabled": True,
+                "roblox_cookie": ".ROBLOSECURITY=_|WARNING:-DO-NOT-SHARE-THIS.TESTCOOKIE",
+                "expected_place_id": "123",
+                "expected_root_place_id": "456",
+                "expected_universe_id": "789",
+            }
+        ]
+        validated = validate_config(cfg)
+        pkg = validated["roblox_packages"][0]
+        self.assertEqual(pkg["roblox_cookie"], "_|WARNING:-DO-NOT-SHARE-THIS.TESTCOOKIE")
+        self.assertEqual(pkg["expected_place_id"], 123)
+        self.assertEqual(pkg["expected_root_place_id"], 456)
+        self.assertEqual(pkg["expected_universe_id"], 789)
+        safe = safe_config_view(validated)
+        self.assertNotIn("TESTCOOKIE", safe["roblox_packages"][0]["roblox_cookie"])
 
     def test_launch_url_still_promotes_to_private_server_url(self):
         cfg = default_config()

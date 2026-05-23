@@ -29,9 +29,9 @@ def _iso(delta_seconds: float) -> str:
 
 
 class TestQuietLicenseCachePath(unittest.TestCase):
-    """Cache fast-path must return True silently (no _print_license_ok)."""
+    """License menu startup stays silent while requiring fresh remote truth."""
 
-    def test_cache_fastpath_does_not_print_license_ok(self) -> None:
+    def test_recent_active_rechecks_remote_without_license_ok(self) -> None:
         from agent import commands
         cfg = {
             "license": {
@@ -43,15 +43,15 @@ class TestQuietLicenseCachePath(unittest.TestCase):
         }
         with patch.object(commands, "load_config", return_value=cfg), \
              patch.object(commands, "_ensure_install_id_saved", side_effect=lambda c: c), \
-             patch.object(commands, "_remote_license_run_check") as rcheck, \
+             patch.object(commands, "_remote_license_run_check", return_value=("active", "ok")) as rcheck, \
              patch.object(commands, "_print_license_ok") as ok_print:
             import argparse
             ok = commands._ensure_remote_license_menu_loop(
                 cfg, argparse.Namespace(), use_color=False,
             )
         self.assertTrue(ok)
-        rcheck.assert_not_called()
-        ok_print.assert_not_called()   # must be SILENT on cache hit
+        rcheck.assert_called_once()
+        ok_print.assert_not_called()   # must be SILENT on verified active
 
     def test_remote_active_does_not_print_license_ok(self) -> None:
         """After network confirms active, should still be silent."""

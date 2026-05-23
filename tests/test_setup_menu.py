@@ -153,7 +153,7 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         ]
         self.assertEqual(
             numbered,
-            ["1. Package", "2. Private Server URL", "3. Screen Mode", "4. Key"],
+            ["1. Package", "2. Private Server URL", "3. Screen Mode", "4. Key", "5. Auto Execute"],
             f"Unexpected Edit Config items: {numbered}",
         )
 
@@ -299,8 +299,7 @@ class PackageSubmenuTests(unittest.TestCase):
         self.assertIn("Username", text)
 
     def test_package_submenu_has_detect_refresh_usernames(self):
-        """Detect / Refresh Usernames was removed from the public package menu (not a public item).
-        The public menu now only has: Auto Detect Package, Add Package, Remove Package, Back."""
+        """Refresh Username / Edit Username stay hidden; account mapping remains public."""
         cfg = _base_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
@@ -310,9 +309,10 @@ class PackageSubmenuTests(unittest.TestCase):
         text = buf.getvalue()
         # Must NOT be present in the public menu
         self.assertNotIn("Detect / Refresh Usernames", text)
-        # The three public items must be present
+        # The public items must be present
         self.assertIn("Auto Detect Package", text)
         self.assertIn("Add Package", text)
+        self.assertIn("ROBLOSECURITY Cookie", text)
         self.assertIn("Remove Package", text)
 
     def test_package_submenu_does_not_offer_set_edit_username(self):
@@ -339,7 +339,7 @@ class PackageSubmenuTests(unittest.TestCase):
 
     def test_package_submenu_lists_expected_numbered_options(self):
         """Public package menu options: Auto Detect (1), Add (2),
-        Refresh Account Mapping (3), Remove (4), Back (0).
+        Refresh Account Mapping (3), ROBLOSECURITY Cookie (4), Remove (5), Back (0).
         Manual entry is an advanced fallback within Refresh, not a top-level item.
         """
         cfg = _base_cfg()
@@ -352,8 +352,9 @@ class PackageSubmenuTests(unittest.TestCase):
         self.assertRegex(text, r"(?m)^1\. Auto Detect Package")
         self.assertRegex(text, r"(?m)^2\. Add Package")
         self.assertRegex(text, r"(?m)^3\. Refresh Account Mapping")
-        self.assertRegex(text, r"(?m)^4\. Remove Package")
-        self.assertNotRegex(text, r"(?m)^5\.")
+        self.assertRegex(text, r"(?m)^4\. ROBLOSECURITY Cookie")
+        self.assertRegex(text, r"(?m)^5\. Remove Package")
+        self.assertNotRegex(text, r"(?m)^6\.")
         self.assertNotIn("Set Account Username / User ID", text)
 
     def test_detect_refresh_saves_new_username(self):
@@ -828,15 +829,24 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
                     _config_menu_package(cfg)
         self.assertRegex(buf.getvalue(), r"(?m)^2\. Add Package")
 
-    def test_remove_package_is_menu_item_4(self):
-        """Remove Package is now item 4 (after Refresh Account Mapping at 3)."""
+    def test_remove_package_is_menu_item_5(self):
+        """Remove Package is item 5 after ROBLOSECURITY Cookie at 4."""
         cfg = self._make_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
-        self.assertRegex(buf.getvalue(), r"(?m)^4\. Remove Package")
+        self.assertRegex(buf.getvalue(), r"(?m)^5\. Remove Package")
+
+    def test_roblosecurity_cookie_is_menu_item_4(self):
+        cfg = self._make_cfg()
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("builtins.input", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_package(cfg)
+        self.assertRegex(buf.getvalue(), r"(?m)^4\. ROBLOSECURITY Cookie")
 
     def test_no_refresh_username_in_public_menu(self):
         """Refresh Username / Edit Username must NOT be in the public package menu."""
@@ -953,6 +963,19 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
                     with redirect_stdout(buf):
                         result = _package_menu_remove(cfg)
         mock_save.assert_not_called()
+
+    def test_roblosecurity_cookie_menu_saves_cookie(self):
+        from agent.commands import _package_menu_set_roblosecurity
+
+        cfg = self._make_cfg([
+            package_entry("com.roblox.client", "Main", True),
+        ])
+        with unittest.mock.patch("builtins.input", side_effect=["1", ".ROBLOSECURITY=SECRETCOOKIE", ""]):
+            with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    result = _package_menu_set_roblosecurity(cfg)
+        self.assertEqual(result["roblox_packages"][0]["roblox_cookie"], "SECRETCOOKIE")
 
     def test_blank_input_does_not_crash(self):
         """Blank input at any package menu prompt must not raise."""

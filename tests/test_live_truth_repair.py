@@ -70,15 +70,16 @@ class LicensePromptTextTests(unittest.TestCase):
         self.assertIn("\033[1;96m[*] Verifying License...", text)
         self.assertIn("\033[1;93m[!] No license key found.", text)
 
-    def test_valid_cached_key_does_not_show_missing_key_warning(self) -> None:
+    def test_valid_cached_key_still_rechecks_remote_before_menu(self) -> None:
         cfg = self._cfg_without_key()
         cfg["license"]["key"] = "DENG-AAAA-BBBB-CCCC-DDDD"
         with mock.patch("agent.commands.load_config", return_value=cfg), \
-             mock.patch("agent.commands._license_cache_is_fresh_active", return_value=True):
+             mock.patch("agent.commands._remote_license_run_check", return_value=("active", "ok")) as check:
             out = io.StringIO()
             with redirect_stdout(out):
                 ok = commands._ensure_remote_license_menu_loop(cfg, argparse.Namespace(), use_color=False)
         self.assertTrue(ok)
+        check.assert_called_once()
         self.assertNotIn("No license key found", out.getvalue())
 
 

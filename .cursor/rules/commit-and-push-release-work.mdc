@@ -1,0 +1,14 @@
+---
+description: Commit and push completed DENG Tool runtime work when requested
+alwaysApply: true
+---
+
+# Commit And Push Runtime Work
+
+When the user asks for runtime/tool changes that must be visible after reinstall or deployment, do not stop at local edits.
+
+- Run focused validation and any required artifact build/update steps.
+- Commit the completed changes with a clear message.
+- Push the commit to the requested branch/remote when the user explicitly asks for push or says the work is not complete unless pushed.
+- If a pushed install/test artifact is needed for reinstall visibility, rebuild/update it before committing.
+- Never claim reinstall visibility until the artifact/manifest or deployment path has been updated.

@@ -38,6 +38,7 @@ from .config import (
     validate_package_detection_hints,
     validate_package_entries,
     validate_package_name,
+    validate_roblosecurity_cookie,
     validate_screen_mode,
     validate_username_source,
 )
@@ -91,6 +92,7 @@ COMMANDS = {
     "logs",
     "version",
     "menu",
+    "auto-execute",
     "license",
     "new-user-help",
     "enable-boot",
@@ -567,15 +569,6 @@ def _ensure_remote_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespa
             pass  # non-fatal; continue with current cfg
 
         lic = cfg.setdefault("license", {})
-
-        # Cache fast-path: if we successfully checked the license recently,
-        # skip the remote call entirely.  Real-device evidence shows the
-        # network code path can segfault Python intermittently on Termux
-        # (probe p-39924732cd, rc=-11 at STEP:license_remote_check); the
-        # cached result is enough to open the menu safely.
-        # Silent: no "License OK" output — the user's clean menu appears directly.
-        if _license_cache_is_fresh_active(lic):
-            return True
 
         key = (lic.get("key") or "").strip()
 
@@ -1111,6 +1104,11 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print("  Automatic based on selected package count and device DPI")
     if len(enabled_entries) > 1:
         print("  Multi-package: 50% left reserved for Termux status panel, 50% right for Roblox")
+    print()
+    scripts = cfg.get("auto_execute_scripts") or []
+    count = len(scripts) if isinstance(scripts, list) else 0
+    print("Auto Execute:")
+    print(f"  Saved scripts: {count}")
 
 
 def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejoin Setup") -> None:
@@ -1840,7 +1838,8 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         print("1. Auto Detect Package")
         print("2. Add Package")
         print("3. Refresh Account Mapping")
-        print("4. Remove Package")
+        print("4. ROBLOSECURITY Cookie")
+        print("5. Remove Package")
         print("0. Back")
         print("--------------------------------")
         _mc = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -1856,9 +1855,11 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         elif choice == "3":
             draft = _package_menu_refresh_mapping(draft)
         elif choice == "4":
+            draft = _package_menu_set_roblosecurity(draft)
+        elif choice == "5":
             draft = _package_menu_remove(draft)
         else:
-            print("Please choose 1-4 or 0.")
+            print("Please choose 1-5 or 0.")
     return draft
 
 
@@ -2058,6 +2059,48 @@ def _package_menu_set_user_id(draft: dict[str, Any]) -> dict[str, Any]:
         print(f"Saved user ID {new_uid} for {target['package']}.")
     else:
         print(f"Saved username for {target['package']}.")
+    safe_io.press_enter()
+    return draft
+
+
+def _package_menu_set_roblosecurity(draft: dict[str, Any]) -> dict[str, Any]:
+    """Set/clear per-package .ROBLOSECURITY for authenticated Presence checks."""
+    print()
+    print("ROBLOSECURITY Cookie")
+    print("Used only for authenticated Roblox Presence detection. It is masked in UI/logs.")
+    entries = validate_package_entries(
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
+    )
+    if not entries:
+        print("No packages configured.")
+        return draft
+    for idx, entry in enumerate(entries, start=1):
+        status = "set" if entry.get("roblox_cookie") else "not set"
+        print(f"  {idx}. {entry['package']} — ROBLOSECURITY: {status}")
+    print("  0. Back")
+    choice = (safe_io.safe_prompt("Choose package [0]: ", default="0") or "0").strip() or "0"
+    if choice == "0" or not choice.isdigit():
+        return draft
+    i = int(choice) - 1
+    if not (0 <= i < len(entries)):
+        print("Invalid choice.")
+        return draft
+    target = dict(entries[i])
+    print()
+    print(f"Package: {target['package']}")
+    print("Paste the cookie value, with or without '.ROBLOSECURITY='.")
+    print("Leave blank to clear the saved cookie.")
+    raw = safe_io.safe_prompt("ROBLOSECURITY: ")
+    try:
+        target["roblox_cookie"] = validate_roblosecurity_cookie(raw or "")
+    except ConfigError as exc:
+        print(f"Invalid ROBLOSECURITY: {exc}")
+        safe_io.press_enter()
+        return draft
+    entries = [target if e["package"] == target["package"] else dict(e) for e in entries]
+    draft["roblox_packages"] = entries
+    draft = save_config(draft)
+    print("ROBLOSECURITY saved." if target["roblox_cookie"] else "ROBLOSECURITY cleared.")
     safe_io.press_enter()
     return draft
 
@@ -2556,6 +2599,103 @@ def _config_menu_key(draft: dict[str, Any]) -> dict[str, Any]:
     return draft
 
 
+def _read_auto_execute_script() -> str:
+    print()
+    print("Paste Auto Execute script.")
+    print("Finish with a blank line. Leave first line blank to cancel.")
+    lines: list[str] = []
+    while True:
+        raw = safe_io.safe_prompt("> ", default="", allow_blank=True)
+        if raw is None:
+            return ""
+        if raw == "":
+            break
+        lines.append(raw)
+    return "\n".join(lines).strip()
+
+
+def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
+    """Menu 5: manage saved Auto Execute scripts."""
+    if not _is_interactive():
+        return draft
+    from .auto_execute import normalize_scripts, script_id, script_preview
+
+    while True:
+        scripts = normalize_scripts(draft.get("auto_execute_scripts"))
+        draft["auto_execute_scripts"] = scripts
+        print()
+        print("Auto Execute")
+        print("--------------------------------")
+        print(f"Saved Scripts: {len(scripts)}")
+        for idx, script in enumerate(scripts, 1):
+            print(f"{idx}. {script_preview(script)} [{script_id(script)}]")
+        print()
+        print("1. Add Script")
+        print("2. Remove Script")
+        print("3. Remove All Scripts")
+        print("0. Back")
+        print("--------------------------------")
+        raw = safe_io.safe_prompt("Choose [0]: ", default="0")
+        if raw is None:
+            break
+        choice = raw.strip() or "0"
+        if choice == "0":
+            break
+        if choice == "1":
+            script = _read_auto_execute_script()
+            if not script:
+                print("Cancelled.")
+                safe_io.press_enter()
+                continue
+            if script in scripts:
+                print("Script already saved.")
+                safe_io.press_enter()
+                continue
+            scripts.append(script)
+            draft["auto_execute_scripts"] = normalize_scripts(scripts)
+            draft = save_config(draft)
+            print(f"Auto Execute script saved: {script_id(script)}")
+            safe_io.press_enter()
+        elif choice == "2":
+            if not scripts:
+                print("No saved scripts.")
+                safe_io.press_enter()
+                continue
+            idx_raw = safe_io.safe_prompt("Remove script number [0]: ", default="0")
+            if idx_raw is None:
+                continue
+            try:
+                idx = int((idx_raw or "0").strip()) - 1
+                if idx < 0 or idx >= len(scripts):
+                    raise ValueError
+            except (TypeError, ValueError):
+                print("Cancelled.")
+                safe_io.press_enter()
+                continue
+            removed = scripts.pop(idx)
+            draft["auto_execute_scripts"] = scripts
+            draft = save_config(draft)
+            print(f"Removed Auto Execute script: {script_id(removed)}")
+            safe_io.press_enter()
+        elif choice == "3":
+            if not scripts:
+                print("No saved scripts.")
+                safe_io.press_enter()
+                continue
+            confirm = safe_io.safe_prompt("Remove all Auto Execute scripts? Type YES: ", default="")
+            if (confirm or "").strip() == "YES":
+                draft["auto_execute_scripts"] = []
+                draft = save_config(draft)
+                print("All Auto Execute scripts removed.")
+            else:
+                print("Cancelled.")
+            safe_io.press_enter()
+        else:
+            print("Please choose 1, 2, 3, or 0.")
+            safe_io.press_enter()
+    return draft
+
+
 def _print_package_key_file_info(package: str) -> None:
     from .package_key import package_key_license_info
 
@@ -2987,7 +3127,8 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("2. Private Server URL")
         print("3. Screen Mode")
         print("4. Key")
-        print("5. Back")
+        print("5. Auto Execute")
+        print("0. Back")
         print("--------------------------------")
         print("\nCurrent settings:")
         _print_config_summary(draft)
@@ -3004,16 +3145,17 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
         print("2. Private Server URL")
         print("3. Screen Mode")
         print("4. Key")
-        print("5. Back")
+        print("5. Auto Execute")
+        print("0. Back")
         print("--------------------------------")
-        choice = safe_io.safe_prompt("Choose [5]: ", default="5")
+        choice = safe_io.safe_prompt("Choose [0]: ", default="0")
         if choice is None:
             print("\nNo interactive input was available. Run this command in Termux to edit settings.")
             print("\nCurrent settings:")
             _print_config_summary(draft)
             return draft, False
-        choice = choice.strip() or "5"
-        if choice in ("0", "5"):
+        choice = choice.strip() or "0"
+        if choice == "0":
             return draft, True
         if choice == "1":
             draft = _config_menu_package(draft)
@@ -3023,8 +3165,10 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
             draft = _config_menu_screen_mode(draft)
         elif choice == "4":
             draft = _config_menu_key(draft)
+        elif choice == "5":
+            draft = _config_menu_auto_execute(draft)
         else:
-            print("Please choose 1-4 or 5.")
+            print("Please choose 1-5 or 0.")
             safe_io.press_enter()
 
 
@@ -3458,8 +3602,10 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
         "No Heartbeat":      _ANSI_RED,      # running but not playing normally
+        "In-Lobby":          _ANSI_YELLOW,
         ("Join" + "ing"):    _ANSI_CYAN,     # legacy alias
         "Join Failed":       _ANSI_RED,
+        "Wrong Game / Wrong Server": _ANSI_RED,
         # ── Prep-phase labels (visible while Start prepares each clone) ──
         "Preparing":    _ANSI_CYAN,
         "Clear Cache":  _ANSI_CYAN,
@@ -3582,12 +3728,14 @@ _STATE_TO_SUMMARY: dict[str, str] = {
     "In Server":         "online",         # confirmed in target server
     ("Join " + "Unconfirmed"):  "launching",
     "No Heartbeat":      "no heartbeat",   # was in game, heartbeat stalled
+    "In-Lobby":          "in lobby",
     ("Join" + "ing"):    "launching",
     "Reconnecting":      "reconnecting",
     "Launching":         "launching",
     "Relaunching":       "reconnecting",
     "Failed":            "failed",
     "Join Failed":       "failed",
+    "Wrong Game / Wrong Server": "failed",
     "Dead":              "dead",           # process confirmed gone
     "Offline":           "offline",
     "Closed":            "offline",
@@ -4702,6 +4850,9 @@ def cmd_start(args: argparse.Namespace) -> int:
             # Live watchdog states — keep as-is.
             "No Heartbeat":     "No Heartbeat",
             "Online":           "Online",
+            "In-Lobby":         "In-Lobby",
+            "Join Failed":      "Join Failed",
+            "Wrong Game / Wrong Server": "Wrong Game / Wrong Server",
             "Dead":             "Dead",
             "Relaunching":       "Relaunching",
             "Launching":         "Launching",
@@ -5656,6 +5807,19 @@ def cmd_new_user_help(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_auto_execute(args: argparse.Namespace) -> int:
+    print_banner(use_color=not args.no_color)
+    try:
+        cfg = load_config()
+    except ConfigError:
+        cfg = default_config()
+    if not _is_interactive():
+        _print_config_summary(cfg)
+        return 0
+    _config_menu_auto_execute(cfg)
+    return 0
+
+
 def cmd_menu(args: argparse.Namespace) -> int:
     """Open the main menu, gated by a license check on first run."""
     ensure_app_dirs()
@@ -5717,6 +5881,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--logs", action="store_true")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--menu", action="store_true")
+    parser.add_argument("--auto-execute", dest="auto_execute", action="store_true")
     parser.add_argument("--license", action="store_true", help="enter or update your license key")
     parser.add_argument("--new-user-help", dest="new_user_help", action="store_true", help="print the built-in tutorial for beginners")
     parser.add_argument("--enable-boot", action="store_true")
@@ -5800,6 +5965,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "logs": ns.logs,
         "version": ns.version,
         "menu": ns.menu,
+        "auto-execute": ns.auto_execute,
         "license": ns.license,
         "new-user-help": ns.new_user_help,
         "enable-boot": ns.enable_boot,
@@ -5883,6 +6049,7 @@ def _handlers() -> dict[str, Any]:
         "logs": cmd_logs,
         "version": cmd_version,
         "menu": cmd_menu,
+        "auto-execute": cmd_auto_execute,
         "license": cmd_license,
         "new-user-help": cmd_new_user_help,
         "enable-boot": cmd_enable_boot,

@@ -568,7 +568,18 @@ LANDSCAPE_SLOT_RULES: dict[int, tuple[int, ...]] = {
     8: (0, 1, 2, 3, 4, 5, 6, 7, 8),
     9: (1, 2, 3, 4, 5, 6, 7, 8, 9),
 }
-PORTRAIT_SLOT_ORDER: tuple[int, ...] = (7, 8, 9, 10, 1, 2, 3, 4, 5, 6)
+PORTRAIT_SLOT_RULES: dict[int, tuple[int, ...]] = {
+    1:  (0, 0, 0, 0, 1, 0, 0, 0, 0, 0),
+    2:  (0, 0, 0, 0, 1, 2, 0, 0, 0, 0),
+    3:  (0, 0, 0, 0, 1, 2, 3, 0, 0, 0),
+    4:  (0, 0, 0, 0, 1, 2, 3, 4, 0, 0),
+    5:  (0, 0, 0, 0, 1, 2, 3, 4, 5, 0),
+    6:  (0, 0, 0, 0, 1, 2, 3, 4, 5, 6),
+    7:  (0, 0, 1, 2, 3, 4, 5, 6, 7, 0),
+    8:  (0, 0, 1, 2, 3, 4, 5, 6, 7, 8),
+    9:  (1, 2, 3, 4, 5, 6, 7, 8, 9, 0),
+    10: (1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+}
 
 
 def _slot_index_for_package(index: int, slot_order: tuple[int, ...]) -> int:
@@ -596,11 +607,7 @@ def _release_grid_rects(
         configured_mode = "landscape"
     orientation = detect_layout_orientation(W, H)
     top_inset = _detect_status_bar_height()
-    left_end = round(W * max(0.0, min(0.9, float(left_fraction))))
-    px0 = left_end
-    py0 = max(0, top_inset)
-    px1 = W
-    py1 = H
+    configured_left_end = round(W * max(0.0, min(0.9, float(left_fraction))))
 
     _log.info(
         "[DENG_REJOIN_LAYOUT_ENGINE] engine=release_grid legacy_fallback_used=false"
@@ -609,35 +616,55 @@ def _release_grid_rects(
         "[DENG_REJOIN_LAYOUT_ORIENTATION] orientation=%s screen_w=%d screen_h=%d",
         orientation, W, H,
     )
+    if configured_mode == "portrait":
+        cols, rows = 2, 5
+        slot_order = PORTRAIT_SLOT_RULES.get(len(pkgs), PORTRAIT_SLOT_RULES[10])
+        mode_label = "portrait"
+        left_end = 0
+        px0 = 0
+        py0 = 0
+        px1 = W
+        py1 = H
+    else:
+        cols, rows = 3, 3
+        slot_order = LANDSCAPE_SLOT_RULES.get(len(pkgs), LANDSCAPE_SLOT_RULES[9])
+        mode_label = "landscape"
+        left_end = configured_left_end
+        px0 = left_end
+        py0 = max(0, top_inset)
+        px1 = W
+        py1 = H
+
     _log.info(
         "[DENG_REJOIN_LAYOUT_BORDER] detected_border_h=%d fallback_border_h=%d applied_top_y=%d",
         top_inset, SAFE_TOP_INSET_PX, py0,
     )
 
-    if configured_mode == "portrait":
-        cols, rows = 2, 5
-        slot_order = PORTRAIT_SLOT_ORDER
-        mode_label = "portrait"
-    else:
-        cols, rows = 3, 3
-        slot_order = LANDSCAPE_SLOT_RULES.get(len(pkgs), LANDSCAPE_SLOT_RULES[9])
-        mode_label = "landscape"
-
     capacity = cols * rows
     if len(pkgs) > capacity:
         raise ValueError(f"{mode_label} release grid supports up to {capacity} packages")
 
-    pane_w = max(_MIN_WIN_W * cols, px1 - px0)
-    pane_h = max(_MIN_WIN_H * rows, py1 - py0)
-    cell_w = max(_MIN_WIN_W, pane_w // cols)
-    cell_h = max(_MIN_WIN_H, pane_h // rows)
-    win_h = max(_MIN_WIN_H, min(cell_h, int(cell_w / LANDSCAPE_MIN_RATIO)))
+    if mode_label == "portrait":
+        pane_w = max(1, px1 - px0)
+        pane_h = max(1, py1 - py0)
+        cell_w = max(1, pane_w // cols)
+        cell_h = max(1, pane_h // rows)
+        win_h = cell_h
+        roblox_area_label = "full_screen"
+    else:
+        pane_w = max(_MIN_WIN_W * cols, px1 - px0)
+        pane_h = max(_MIN_WIN_H * rows, py1 - py0)
+        cell_w = max(_MIN_WIN_W, pane_w // cols)
+        cell_h = max(_MIN_WIN_H, pane_h // rows)
+        win_h = max(_MIN_WIN_H, min(cell_h, int(cell_w / LANDSCAPE_MIN_RATIO)))
+        roblox_area_label = "right_50"
     roblox_grid_area = (px0, py0, px1, py1)
     _log.info(
         "[DENG_REJOIN_SPLIT_LAYOUT] screen_w=%d screen_h=%d termux_area=left_50 "
-        "roblox_area=right_50 termux_desired=%s termux_actual=%s "
-        "roblox_grid_area=%s full_width_used=false",
-        W, H, (0, 0, left_end, H), "", roblox_grid_area,
+        "roblox_area=%s termux_desired=%s termux_actual=%s "
+        "roblox_grid_area=%s full_width_used=%s",
+        W, H, roblox_area_label, (0, 0, left_end, H), "", roblox_grid_area,
+        str(mode_label == "portrait").lower(),
     )
     rects: list[WindowRect] = []
     if mode_label == "landscape":
@@ -651,7 +678,10 @@ def _release_grid_rects(
         left = px0 + col * cell_w
         top = py0 + row * cell_h
         right = px1 if col == cols - 1 else min(px1, left + cell_w)
-        bottom = min(py1, top + win_h)
+        if mode_label == "portrait" and row == rows - 1:
+            bottom = py1
+        else:
+            bottom = min(py1, top + win_h)
         rects.append(WindowRect(pkg, left, top, right, bottom))
 
     if mode_label == "landscape":
@@ -660,6 +690,16 @@ def _release_grid_rects(
             "slot_map=%s roblox_grid_area=%s bounds=%s",
             len(pkgs),
             landscape_rule,
+            ",".join(str(x) if x else "empty" for x in slot_order),
+            roblox_grid_area,
+            [(r.left, r.top, r.right, r.bottom) for r in rects],
+        )
+    else:
+        _log.info(
+            "[DENG_REJOIN_PORTRAIT_SLOT_MAP] package_count=%d rule=count_%d_2x5 grid=2x5 "
+            "slot_map=%s roblox_grid_area=%s bounds=%s",
+            len(pkgs),
+            len(pkgs),
             ",".join(str(x) if x else "empty" for x in slot_order),
             roblox_grid_area,
             [(r.left, r.top, r.right, r.bottom) for r in rects],

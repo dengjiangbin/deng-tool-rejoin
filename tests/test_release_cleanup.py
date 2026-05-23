@@ -143,10 +143,14 @@ class TestReleaseGridLayouts(unittest.TestCase):
                 self._pkgs(10), 720, 1280, termux_log_fraction=0.50, screen_mode="portrait",
             )
         by_pkg = {r.package: r for r in rects}
-        self.assertLess(by_pkg["com.moons.lite7"].top, by_pkg["com.moons.lite1"].top)
+        self.assertEqual(by_pkg["com.moons.lite1"].top, 0)
+        self.assertEqual(by_pkg["com.moons.lite7"].top, 768)
         self.assertEqual(by_pkg["com.moons.lite1"].left, by_pkg["com.moons.lite3"].left)
         self.assertEqual(by_pkg["com.moons.lite10"].top, by_pkg["com.moons.lite9"].top)
         self.assertGreater(by_pkg["com.moons.lite10"].left, by_pkg["com.moons.lite9"].left)
+        self.assertEqual(min(r.left for r in rects), 0)
+        self.assertEqual(max(r.right for r in rects), 720)
+        self.assertEqual(max(r.bottom for r in rects), 1280)
 
 
 class TestReleasePublicCleanup(unittest.TestCase):

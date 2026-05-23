@@ -56,14 +56,20 @@ class TestSplitLayoutP447(unittest.TestCase):
             (640, 487), (853, 487), (1066, 487),
         ])
 
-    def test_roblox_grid_never_uses_left_termux_half(self) -> None:
-        for mode, w, h, n in (("landscape", 1280, 720, 6), ("portrait", 720, 1280, 10)):
-            rects = self._rects(n, mode=mode, w=w, h=h)
-            left_end = round(w * 0.50)
-            for rect in rects:
-                self.assertGreaterEqual(rect.left, left_end)
-                self.assertGreater(rect.right, rect.left)
-                self.assertLessEqual(rect.right, w)
+    def test_landscape_roblox_grid_never_uses_left_termux_half(self) -> None:
+        rects = self._rects(6, mode="landscape", w=1280, h=720)
+        left_end = round(1280 * 0.50)
+        for rect in rects:
+            self.assertGreaterEqual(rect.left, left_end)
+            self.assertGreater(rect.right, rect.left)
+            self.assertLessEqual(rect.right, 1280)
+
+    def test_portrait_roblox_grid_uses_full_screen(self) -> None:
+        rects = self._rects(10, mode="portrait", w=720, h=1280)
+        self.assertEqual(min(r.left for r in rects), 0)
+        self.assertEqual(max(r.right for r in rects), 720)
+        self.assertEqual(min(r.top for r in rects), 0)
+        self.assertEqual(max(r.bottom for r in rects), 1280)
 
 
 class TestOrientationOverrideP447(unittest.TestCase):

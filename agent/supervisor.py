@@ -10,6 +10,7 @@ import traceback
 from typing import Any
 
 from . import android, db
+from . import auto_execute
 from .backoff import calculate_backoff_seconds
 from .config import effective_private_server_url, load_config, validate_config
 from .launcher import launch_package_for_current_config, perform_rejoin
@@ -155,6 +156,9 @@ STATUS_RECONNECTING      = "Reconnecting"
 STATUS_WARNING           = "Warning"
 STATUS_FAILED            = "Failed"
 STATUS_UNKNOWN           = "Unknown"
+STATUS_IN_LOBBY          = "In-Lobby"
+STATUS_JOIN_FAILED       = "Join Failed"
+STATUS_WRONG_GAME        = "Wrong Game / Wrong Server"
 # Richer state constants for improved UX
 STATUS_LOBBY             = "Lobby"             # App open at home/lobby, no URL join active
 STATUS_IN_SERVER         = "In Server"         # Strong evidence: game experience loaded
@@ -1290,6 +1294,7 @@ class WatchdogSupervisor:
         self._ram_last_check_at: dict[str, float] = {}   # last RAM measurement ts
         self._ram_last_trim_at: dict[str, float] = {}    # last cache trim ts
         self._ram_cooldown_until: dict[str, float] = {}  # no RAM restart until this ts
+        self._auto_execute_ran: set[tuple[str, str]] = set()
 
         # ── Per-package presence tracking ─────────────────────────────────────
         self._presence_user_ids: dict[str, int] = {}
@@ -1298,6 +1303,7 @@ class WatchdogSupervisor:
         self._presence_id_resolved: set[str] = set()  # username→id done
         self._presence_lookup_attempt_at: dict[str, float] = {}
         self._presence_last_detail: dict[str, dict[str, Any]] = {}
+        self._presence_expected_targets: dict[str, Any] = {}
         self._root_info = android.detect_root()
 
         for e in self.entries:
@@ -1314,6 +1320,16 @@ class WatchdogSupervisor:
             self._presence_cookies[pkg] = (
                 str(e.get("roblox_cookie") or "").strip() or None
             )
+            try:
+                from .url_utils import parse_expected_target_from_url
+                self._presence_expected_targets[pkg] = parse_expected_target_from_url(
+                    effective_private_server_url(e, self.cfg),
+                    expected_place_id=e.get("expected_place_id") or self.cfg.get("expected_place_id"),
+                    expected_root_place_id=e.get("expected_root_place_id") or self.cfg.get("expected_root_place_id"),
+                    expected_universe_id=e.get("expected_universe_id") or self.cfg.get("expected_universe_id"),
+                )
+            except Exception:  # noqa: BLE001
+                self._presence_expected_targets[pkg] = None
 
         self._logger = configure_logging(level=cfg.get("log_level", "INFO"))
         self.stop_source: str = ""
@@ -1484,9 +1500,22 @@ class WatchdogSupervisor:
             "roblox_user_id_source": "config" if self._presence_user_ids.get(pkg) else "",
             "roblox_presence_type": "",
             "roblox_place_id": "",
+            "roblox_root_place_id": "",
             "roblox_universe_id": "",
+            "roblox_game_id": "",
+            "expected_place_id": "",
+            "expected_root_place_id": "",
+            "expected_universe_id": "",
+            "expected_private_code": "",
+            "server_verification": "unavailable",
             "presence_error": "",
         }
+        target = self._presence_expected_targets.get(pkg)
+        if target is not None:
+            detail["expected_place_id"] = getattr(target, "expected_place_id", None) or ""
+            detail["expected_root_place_id"] = getattr(target, "expected_root_place_id", None) or ""
+            detail["expected_universe_id"] = getattr(target, "expected_universe_id", None) or ""
+            detail["expected_private_code"] = "configured" if getattr(target, "expected_private_code", "") else ""
         self._presence_last_detail[pkg] = detail
         try:
             from . import roblox_presence as _rp
@@ -1538,7 +1567,9 @@ class WatchdogSupervisor:
             detail["roblox_api_status"] = "success"
             detail["roblox_presence_type"] = getattr(ptype, "name", str(ptype))
             detail["roblox_place_id"] = getattr(presence, "place_id", "") or ""
-            detail["roblox_universe_id"] = getattr(presence, "root_place_id", "") or ""
+            detail["roblox_root_place_id"] = getattr(presence, "root_place_id", "") or ""
+            detail["roblox_universe_id"] = getattr(presence, "universe_id", "") or ""
+            detail["roblox_game_id"] = getattr(presence, "game_id", "") or ""
             return presence
         except Exception as exc:  # noqa: BLE001
             detail["roblox_api_used"] = "true" if detail.get("roblox_user_id") else "false"
@@ -1607,6 +1638,7 @@ class WatchdogSupervisor:
         presence_offline = False
         presence_unknown = False
         presence = None
+        presence_resolution = None
 
         try:
             presence = self._fetch_presence(pkg)
@@ -1619,8 +1651,48 @@ class WatchdogSupervisor:
                     presence_unknown = True
         except Exception:  # noqa: BLE001
             pass
+        try:
+            from . import roblox_presence as _rp
+            presence_resolution = _rp.resolve_presence_state(
+                presence,
+                self._presence_expected_targets.get(pkg),
+                process_alive=True,
+                launch_elapsed_seconds=(
+                    time.time() - max(0.0, self._grace_until.get(pkg, 0.0) - self.DEFAULT_GRACE_SECONDS)
+                    if self._grace_until.get(pkg, 0.0) and time.time() >= self._grace_until.get(pkg, 0.0)
+                    else None
+                ),
+                join_timeout_seconds=float(self.cfg.get("foreground_grace_seconds", self.DEFAULT_GRACE_SECONDS)),
+                local_warning_detected=False,
+                local_stuck_detected=False,
+            )
+            pres_detail = self._presence_last_detail.get(pkg, {})
+            pres_detail["server_verification"] = presence_resolution.server_verification
+            pres_detail["expected_place_id"] = presence_resolution.expected_place_id or pres_detail.get("expected_place_id", "")
+            pres_detail["expected_root_place_id"] = presence_resolution.expected_root_place_id or pres_detail.get("expected_root_place_id", "")
+            pres_detail["expected_universe_id"] = presence_resolution.expected_universe_id or pres_detail.get("expected_universe_id", "")
+        except Exception:  # noqa: BLE001
+            presence_resolution = None
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
+
+        if in_game and presence_resolution is not None and presence_resolution.state == STATUS_WRONG_GAME:
+            self._nhb_offline_count[pkg] = 0
+            detail = {
+                "process_running": "true",
+                "in_game": "true",
+                "heartbeat_ok": "false",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": "",
+                "in_game_proof": "true",
+                "heartbeat_age_sec": "",
+                "reason": presence_resolution.reason,
+            }
+            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_WRONG_GAME)
+            return STATUS_WRONG_GAME, detail
 
         if in_game:
             # Reset offline counter when confirmed in-game.
@@ -1636,7 +1708,7 @@ class WatchdogSupervisor:
                 "activity": "",
                 "in_game_proof": "true",
                 "heartbeat_age_sec": "",
-                "reason": "roblox_presence_in_game",
+                "reason": getattr(presence_resolution, "reason", "roblox_presence_in_game"),
             }
             self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_ONLINE)
             return STATUS_ONLINE, detail
@@ -1666,6 +1738,41 @@ class WatchdogSupervisor:
                 self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_NO_HEARTBEAT)
                 return STATUS_NO_HEARTBEAT, detail
 
+        if presence_resolution is not None and presence_resolution.state == STATUS_IN_LOBBY:
+            self._nhb_offline_count[pkg] = 0
+            detail = {
+                "process_running": "true",
+                "in_game": "false",
+                "heartbeat_ok": "true",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": "",
+                "in_game_proof": "false",
+                "heartbeat_age_sec": heartbeat_age_sec,
+                "reason": presence_resolution.reason,
+            }
+            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_IN_LOBBY)
+            return STATUS_IN_LOBBY, detail
+
+        if presence_resolution is not None and presence_resolution.state == STATUS_JOIN_FAILED:
+            detail = {
+                "process_running": "true",
+                "in_game": "false",
+                "heartbeat_ok": "false",
+                "warning_detected": "true",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": "",
+                "in_game_proof": "false",
+                "heartbeat_age_sec": heartbeat_age_sec,
+                "reason": presence_resolution.reason,
+            }
+            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_JOIN_FAILED)
+            return STATUS_JOIN_FAILED, detail
+
         if not presence_offline and (presence is None or presence_unknown) and local_in_game_hint:
             self._nhb_offline_count[pkg] = 0
             detail = {
@@ -1683,6 +1790,23 @@ class WatchdogSupervisor:
             }
             self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_ONLINE)
             return STATUS_ONLINE, detail
+
+        if presence_resolution is not None and presence_resolution.state == STATUS_UNKNOWN:
+            detail = {
+                "process_running": "true",
+                "in_game": "unknown",
+                "heartbeat_ok": "unknown",
+                "warning_detected": "false",
+                "elapsed_ms": elapsed_ms,
+                "root_available": str(root_available).lower(),
+                "foreground_package": foreground_package,
+                "activity": "",
+                "in_game_proof": "unknown",
+                "heartbeat_age_sec": heartbeat_age_sec,
+                "reason": presence_resolution.reason,
+            }
+            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_UNKNOWN)
+            return STATUS_UNKNOWN, detail
 
         # D. Process alive, but no confirmed in-game signal.  This is a
         # recovery state now: close/relaunch only this package instead of
@@ -1729,7 +1853,14 @@ class WatchdogSupervisor:
             roblox_api_status=presence_detail.get("roblox_api_status", "skipped"),
             roblox_presence_type=presence_detail.get("roblox_presence_type", ""),
             roblox_place_id=presence_detail.get("roblox_place_id", ""),
+            roblox_root_place_id=presence_detail.get("roblox_root_place_id", ""),
             roblox_universe_id=presence_detail.get("roblox_universe_id", ""),
+            roblox_game_id=presence_detail.get("roblox_game_id", ""),
+            expected_place_id=presence_detail.get("expected_place_id", ""),
+            expected_root_place_id=presence_detail.get("expected_root_place_id", ""),
+            expected_universe_id=presence_detail.get("expected_universe_id", ""),
+            expected_private_code=presence_detail.get("expected_private_code", ""),
+            server_verification=presence_detail.get("server_verification", "unavailable"),
             in_game_proof=detail.get("in_game_proof", "unknown"),
             heartbeat_age_sec=detail.get("heartbeat_age_sec", ""),
             heartbeat_ok=detail.get("heartbeat_ok", "unknown"),
@@ -1904,6 +2035,14 @@ class WatchdogSupervisor:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
 
         elif state == STATUS_ONLINE:
+            if not hasattr(self, "_auto_execute_ran"):
+                self._auto_execute_ran = set()
+            auto_execute.run_auto_execute_for_package(
+                self.cfg,
+                pkg,
+                self._auto_execute_ran,
+                logger=logger,
+            )
             # Run adaptive RAM optimization while the package is healthy.
             self._check_ram_optimization(pkg, entry, now, render_callback=render_callback)
 
@@ -2172,6 +2311,10 @@ class WatchdogSupervisor:
                     self._last_online_ts.pop(pkg, None)
                     self._online_start_ts.pop(pkg, None)
                     _maybe_render(force=True)
+
+                if state in {STATUS_IN_LOBBY, STATUS_JOIN_FAILED, STATUS_WRONG_GAME, STATUS_UNKNOWN}:
+                    _maybe_render(force=True)
+                    continue
 
                 # Grace window: skip recovery immediately after a launch.
                 if not self._in_grace(pkg, now):

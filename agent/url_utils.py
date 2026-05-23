@@ -30,8 +30,35 @@ class UrlValidationResult:
     warning: str | None = None
 
 
+@dataclass(frozen=True)
+class RobloxExpectedTarget:
+    original_url: str = ""
+    expected_place_id: int | None = None
+    expected_root_place_id: int | None = None
+    expected_universe_id: int | None = None
+    expected_private_code: str = ""
+
+    @property
+    def has_game_target(self) -> bool:
+        return any(
+            value is not None
+            for value in (
+                self.expected_place_id,
+                self.expected_root_place_id,
+                self.expected_universe_id,
+            )
+        )
+
+
 def _normalized_host(parsed: ParseResult) -> str:
     return (parsed.hostname or "").lower().strip(".")
+
+
+def _int_or_none(value: object) -> int | None:
+    if isinstance(value, int) and value > 0:
+        return value
+    text = str(value or "").strip()
+    return int(text) if text.isdigit() and int(text) > 0 else None
 
 
 def detect_launch_mode_from_url(url: str | None) -> str:
@@ -153,6 +180,85 @@ def to_roblox_deep_link(url: str | None) -> str | None:
     # Path we don't know how to translate — return original; the OS will
     # still launch it via the Roblox app's https intent filters.
     return raw
+
+
+def parse_expected_target_from_url(
+    url: str | None,
+    *,
+    expected_place_id: object = None,
+    expected_root_place_id: object = None,
+    expected_universe_id: object = None,
+) -> RobloxExpectedTarget:
+    """Extract verifiable target hints from a Roblox launch/private-server URL.
+
+    Share links often expose only an opaque private code. Legacy game URLs and
+    some deep links expose a placeId. Root-place and universe ids can be passed
+    explicitly by config when known; missing fields are valid and mean partial
+    verification only.
+    """
+    raw = str(url or "").strip()
+    place_id = _int_or_none(expected_place_id)
+    root_place_id = _int_or_none(expected_root_place_id)
+    universe_id = _int_or_none(expected_universe_id)
+    private_code = ""
+    if not raw:
+        return RobloxExpectedTarget(
+            original_url="",
+            expected_place_id=place_id,
+            expected_root_place_id=root_place_id,
+            expected_universe_id=universe_id,
+        )
+    try:
+        parsed = urlparse(raw)
+        params = dict(parse_qsl(parsed.query or "", keep_blank_values=True))
+        for key in (
+            "privateServerLinkCode",
+            "linkCode",
+            "gameInstanceId",
+            "accessCode",
+            "code",
+        ):
+            if params.get(key):
+                private_code = str(params[key]).strip()
+                break
+
+        if place_id is None:
+            for key in ("placeId", "placeid", "rootPlaceId", "rootplaceid"):
+                parsed_place = _int_or_none(params.get(key))
+                if parsed_place is not None:
+                    place_id = parsed_place
+                    break
+
+        path = (parsed.path or "").rstrip("/")
+        if place_id is None:
+            match = re.match(r"^/games/(\d+)(?:/|$)", path + "/")
+            if match:
+                place_id = int(match.group(1))
+
+        if parsed.scheme.lower() == "roblox" and place_id is None:
+            # Some accepted deep links are shaped like:
+            #   roblox://placeId=123&privateServerLinkCode=abc
+            haystack = raw
+            match = re.search(r"(?:^|[/?&])placeId=(\d+)", haystack, re.IGNORECASE)
+            if match:
+                place_id = int(match.group(1))
+            if not private_code:
+                match = re.search(
+                    r"(?:^|[/?&])(privateServerLinkCode|linkCode|gameInstanceId|code)=([^&]+)",
+                    haystack,
+                    re.IGNORECASE,
+                )
+                if match:
+                    private_code = match.group(2).strip()
+    except Exception:  # noqa: BLE001
+        pass
+    return RobloxExpectedTarget(
+        original_url=raw,
+        expected_place_id=place_id,
+        expected_root_place_id=root_place_id,
+        expected_universe_id=universe_id,
+        expected_private_code=private_code[:256],
+    )
 
 
 def validate_launch_url(url: str | None, launch_mode: str | None = None, *, allow_uncertain: bool = False) -> UrlValidationResult:
