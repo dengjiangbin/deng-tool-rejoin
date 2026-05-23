@@ -26,12 +26,19 @@
     </div>
   <% } %>
 
-  <form method="POST" action="/api/key/start">
-    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-    <button type="submit" class="btn btn-primary btn-generate" id="btn-generate">
-      Generate Key
-    </button>
-  </form>
+  <div class="license-actions" data-license-actions data-csrf="<%= csrfToken %>">
+    <form method="POST" action="/api/key/start" class="license-action-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <button type="submit" class="btn btn-primary btn-generate" id="btn-generate">
+        Generate Key
+      </button>
+    </form>
+    <button type="button" class="btn btn-outline" data-open-license-modal="reset">Reset HWID</button>
+    <button type="button" class="btn btn-outline" data-open-license-modal="redeem">Redeem Key</button>
+    <button type="button" class="btn btn-outline" data-download-keys>Download Key</button>
+  </div>
+
+  <div class="license-message" data-license-message hidden></div>
 </section>
 
 <section class="section-card">
@@ -70,3 +77,46 @@
     </div>
   <% } %>
 </section>
+
+<div class="modal-backdrop" data-license-modal="reset" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="reset-hwid-title">
+    <div class="modal-header">
+      <div>
+        <h2 class="section-title" id="reset-hwid-title">Reset HWID</h2>
+        <p class="section-desc">Move A Key To A New Device.</p>
+      </div>
+      <button type="button" class="modal-close" data-close-license-modal aria-label="Close">X</button>
+    </div>
+    <div class="license-modal-body">
+      <div class="license-key-list" data-reset-key-list>
+        <p class="empty-text">Loading keys...</p>
+      </div>
+      <div class="license-message" data-reset-message hidden></div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-outline" data-close-license-modal>Cancel</button>
+      <button type="button" class="btn btn-primary" data-confirm-reset>Confirm Reset</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" data-license-modal="redeem" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="redeem-key-title">
+    <div class="modal-header">
+      <div>
+        <h2 class="section-title" id="redeem-key-title">Redeem Key</h2>
+        <p class="section-desc">Claim An Existing DENG Tool: Rejoin Key.</p>
+      </div>
+      <button type="button" class="modal-close" data-close-license-modal aria-label="Close">X</button>
+    </div>
+    <div class="license-modal-body">
+      <label class="form-label" for="redeem-license-key">Enter License Key</label>
+      <input id="redeem-license-key" class="form-input" type="text" autocomplete="off" placeholder="DENG-XXXX-XXXX-XXXX-XXXX" data-redeem-key-input>
+      <div class="license-message" data-redeem-message hidden></div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-outline" data-close-license-modal>Cancel</button>
+      <button type="button" class="btn btn-primary" data-confirm-redeem>Redeem Key</button>
+    </div>
+  </div>
+</div>

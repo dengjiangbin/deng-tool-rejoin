@@ -9,6 +9,18 @@
 </div>
 
 <%
+  var PROVIDER_META = {
+    lootlabs: {
+      label: 'LootLabs',
+      logo: '/images/providers/lootlabs.png',
+      alt: 'LootLabs Logo',
+    },
+    linkvertise: {
+      label: 'Linkvertise',
+      logo: '/images/providers/linkvertise.png',
+      alt: 'Linkvertise Logo',
+    },
+  };
   var lootlabsEnabled = providers.some(function(p){ return p.provider === 'lootlabs'; });
   var linkvertiseEnabled = providers.some(function(p){ return p.provider === 'linkvertise'; });
 %>
@@ -16,8 +28,10 @@
 <div class="provider-grid" data-portal-step="provider-choice">
   <% if (lootlabsEnabled) { %>
   <section class="provider-card">
-    <div class="provider-mark">LL</div>
-    <h2 class="provider-name">LootLabs</h2>
+    <div class="provider-mark provider-logo-wrap">
+      <img class="provider-logo" src="<%= PROVIDER_META.lootlabs.logo %>" alt="<%= PROVIDER_META.lootlabs.alt %>" loading="lazy" decoding="async">
+    </div>
+    <h2 class="provider-name"><%= PROVIDER_META.lootlabs.label %></h2>
     <p class="provider-desc">Complete the LootLabs ad step, then return automatically to unlock your key.</p>
     <form method="POST" action="/key/provider/lootlabs">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -28,8 +42,10 @@
   </section>
   <% } else { %>
   <section class="provider-card provider-card-disabled" aria-disabled="true">
-    <div class="provider-mark">LL</div>
-    <h2 class="provider-name">LootLabs</h2>
+    <div class="provider-mark provider-logo-wrap">
+      <img class="provider-logo" src="<%= PROVIDER_META.lootlabs.logo %>" alt="<%= PROVIDER_META.lootlabs.alt %>" loading="lazy" decoding="async">
+    </div>
+    <h2 class="provider-name"><%= PROVIDER_META.lootlabs.label %></h2>
     <p class="alert alert-error" role="note" style="font-size:.9rem;margin:12px 0">
       LootLabs is temporarily unavailable.
     </p>
@@ -39,8 +55,10 @@
 
   <% if (linkvertiseEnabled) { %>
   <section class="provider-card">
-    <div class="provider-mark">LV</div>
-    <h2 class="provider-name">Linkvertise</h2>
+    <div class="provider-mark provider-logo-wrap">
+      <img class="provider-logo" src="<%= PROVIDER_META.linkvertise.logo %>" alt="<%= PROVIDER_META.linkvertise.alt %>" loading="lazy" decoding="async">
+    </div>
+    <h2 class="provider-name"><%= PROVIDER_META.linkvertise.label %></h2>
     <p class="provider-desc">Complete the Linkvertise ad step, then return automatically to unlock your key.</p>
     <form method="POST" action="/key/provider/linkvertise">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -51,8 +69,10 @@
   </section>
   <% } else { %>
   <section class="provider-card provider-card-disabled" aria-disabled="true">
-    <div class="provider-mark">LV</div>
-    <h2 class="provider-name">Linkvertise</h2>
+    <div class="provider-mark provider-logo-wrap">
+      <img class="provider-logo" src="<%= PROVIDER_META.linkvertise.logo %>" alt="<%= PROVIDER_META.linkvertise.alt %>" loading="lazy" decoding="async">
+    </div>
+    <h2 class="provider-name"><%= PROVIDER_META.linkvertise.label %></h2>
     <p class="alert alert-error" role="note" style="font-size:.9rem;margin:12px 0">
       Linkvertise is temporarily unavailable.
     </p>

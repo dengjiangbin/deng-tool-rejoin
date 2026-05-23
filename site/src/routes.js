@@ -197,6 +197,15 @@ const generateLimiter = rateLimit({
   },
 });
 
+const licenseActionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  skip: rateLimitsDisabled,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'too_many_license_actions', message: 'Too many license actions. Please wait before trying again.' },
+});
+
 function safeFlash(req, key, value) {
   req.session.flash = { ...(req.session.flash || {}), [key]: value };
 }
@@ -298,6 +307,27 @@ function providerLabel(provider) {
 
 function friendlyStatus(row) {
   return licenseService.formatLicenseStatus(row);
+}
+
+function discordOwnerId(req) {
+  return String(req.session?.user?.discord_user_id || '').trim();
+}
+
+function handleLicenseApiError(res, err, fallback = 'license_action_failed') {
+  const status = err?.status || 500;
+  const code = err?.code || fallback;
+  const message = err?.message || 'License action failed. Please try again.';
+  return res.status(status).json({ error: code, message });
+}
+
+function requireLicenseApiLogin(req, res, next) {
+  if (req.session && req.session.user) return next();
+  return res.status(401).json({ error: 'auth_required', message: messageFor('AUTH_REQUIRED') });
+}
+
+function requireLicenseDownloadLogin(req, res, next) {
+  if (req.session && req.session.user) return next();
+  return res.status(401).type('text/plain').send(`${messageFor('AUTH_REQUIRED')}\n`);
 }
 
 function summarizeHistory(history) {
@@ -1024,6 +1054,69 @@ router.get('/api/license/history', requireLogin, repairSiteUser, async (req, res
     });
   } catch {
     res.status(500).json({ error: 'license_history_failed' });
+  }
+});
+
+router.get('/api/license/resettable', requireLicenseApiLogin, repairSiteUser, licenseActionLimiter, async (req, res) => {
+  try {
+    const owner = discordOwnerId(req);
+    if (!owner) return res.status(401).json({ error: 'auth_required', message: messageFor('AUTH_REQUIRED') });
+    const rows = await licenseService.getActiveUserLicenses(owner, { limit: 200 });
+    res.json({
+      keys: rows.map((row) => ({
+        id: row.id,
+        key: fullKeyRow(row),
+        status: friendlyStatus(row),
+        device_status: row.active_binding ? 'Bound To A Device' : 'No Device Linked',
+        device_label: row.device_display || null,
+        can_reset: Boolean(row.active_binding),
+        reason: row.active_binding ? null : 'No Resettable Keys Found.',
+      })),
+    });
+  } catch (err) {
+    handleLicenseApiError(res, err);
+  }
+});
+
+router.post('/api/license/reset-hwid', requireLicenseApiLogin, repairSiteUser, licenseActionLimiter, async (req, res) => {
+  if (!verifyCsrf(req)) return res.status(403).json({ error: 'invalid_csrf', message: 'Invalid request token.' });
+  try {
+    const owner = discordOwnerId(req);
+    if (!owner) return res.status(401).json({ error: 'auth_required', message: messageFor('AUTH_REQUIRED') });
+    const result = await licenseService.resetLicenseHwid(owner, req.body?.key_id || req.body?.key || '');
+    const history = await licenseService.getActiveUserLicenses(owner, { limit: 200 });
+    res.json({ ...result, history_count: history.length });
+  } catch (err) {
+    handleLicenseApiError(res, err, 'reset_hwid_failed');
+  }
+});
+
+router.post('/api/license/redeem', requireLicenseApiLogin, repairSiteUser, licenseActionLimiter, async (req, res) => {
+  if (!verifyCsrf(req)) return res.status(403).json({ error: 'invalid_csrf', message: 'Invalid request token.' });
+  try {
+    const owner = discordOwnerId(req);
+    if (!owner) return res.status(401).json({ error: 'auth_required', message: messageFor('AUTH_REQUIRED') });
+    const result = await licenseService.redeemLicenseKey(owner, req.body?.key || '');
+    const history = await licenseService.getActiveUserLicenses(owner, { limit: 200 });
+    res.json({ ...result, history_count: history.length });
+  } catch (err) {
+    handleLicenseApiError(res, err, 'redeem_key_failed');
+  }
+});
+
+router.get('/api/license/download', requireLicenseDownloadLogin, repairSiteUser, licenseActionLimiter, async (req, res) => {
+  try {
+    const owner = discordOwnerId(req);
+    if (!owner) return res.status(401).type('text/plain').send('Please login with Discord first.\n');
+    const rows = await licenseService.getActiveUserLicenses(owner, { limit: 500 });
+    const body = licenseService.downloadUserKeys(owner, rows, req.session.user.username || owner);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="deng-rejoin-keys-${stamp}.txt"`);
+    res.send(body);
+  } catch (err) {
+    const status = err?.status || 500;
+    res.status(status).type('text/plain').send(`${err?.message || 'License export failed.'}\n`);
   }
 });
 

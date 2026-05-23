@@ -1,9 +1,11 @@
 'use strict';
 
+const crypto = require('crypto');
 const supabase = require('./db');
-const { decryptLicenseKeyCiphertext } = require('./licenseCrypto');
+const { decryptLicenseKeyCiphertext, encryptLicenseKeyPlaintext } = require('./licenseCrypto');
 
 const FULL_KEY_UNAVAILABLE = 'Full key unavailable for this old key';
+const KEY_RE = /^DENG-([0-9A-F]{4})-?([0-9A-F]{4})-?([0-9A-F]{4})-?([0-9A-F]{4})$/i;
 
 function isoExpired(value) {
   if (!value) return false;
@@ -35,6 +37,35 @@ function isActiveLicense(row) {
 
 function filterActiveLicenses(rows) {
   return (rows || []).filter(isActiveLicense);
+}
+
+function serviceError(code, message, status = 400, extra = {}) {
+  const err = new Error(message || code);
+  err.code = code;
+  err.status = status;
+  Object.assign(err, extra);
+  return err;
+}
+
+function normalizeLicenseKey(raw) {
+  const cleaned = String(raw || '').trim().toUpperCase();
+  const match = cleaned.match(KEY_RE);
+  if (!match) {
+    throw serviceError('invalid_key_format', 'Invalid license key format.');
+  }
+  return `DENG-${match[1]}-${match[2]}-${match[3]}-${match[4]}`;
+}
+
+function hashLicenseKey(raw) {
+  const normalized = normalizeLicenseKey(raw);
+  return crypto.createHash('sha256').update(normalized).digest('hex');
+}
+
+function recoverableFullKey(row) {
+  const full = row?.full_key || row?.full_key_plaintext || '';
+  const text = String(full || '').trim();
+  if (!text || text.includes('...') || text.includes('…')) return null;
+  return text;
 }
 
 function computeStats(activeRows, { resetCount = 0, executionCount = 0 } = {}) {
@@ -95,6 +126,10 @@ function formatLicenseStatus(row) {
   if (row.owner_discord_id || row.license_key_id) return 'Unbound';
   if (row.redeemed_at) return 'Unbound';
   return 'Generated';
+}
+
+function deviceStatus(row) {
+  return isBound(row) ? 'Bound To A Device' : 'No Device Linked';
 }
 
 async function fetchByKeyId(table, columns, keyIds, field = 'key_id') {
@@ -171,9 +206,188 @@ async function getUserLicenses(discordUserId, { limit = 20 } = {}) {
       used: activeBinding,
       active_binding: activeBinding,
       device_display: activeBinding ? (device || '(bound)') : '',
+      device_status: activeBinding ? 'Bound To A Device' : 'No Device Linked',
       last_seen_at: activeBinding ? binding.last_seen_at : null,
     };
   });
+}
+
+async function getActiveUserLicenses(discordUserId, opts = {}) {
+  return filterActiveLicenses(await getUserLicenses(discordUserId, { limit: opts.limit || 200 }));
+}
+
+async function getRawLicenseById(keyId) {
+  const { data, error } = await supabase
+    .from('license_keys')
+    .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, key_ciphertext, key_export_available')
+    .eq('id', keyId)
+    .maybeSingle();
+  if (error) throw serviceError('database_error', 'License database error.', 500);
+  return data || null;
+}
+
+async function getBindingByKeyId(keyId) {
+  const { data, error } = await supabase
+    .from('device_bindings')
+    .select('key_id, install_id_hash, device_model, device_label, last_seen_at, is_active')
+    .eq('key_id', keyId)
+    .maybeSingle();
+  if (error) throw serviceError('database_error', 'License database error.', 500);
+  return data || null;
+}
+
+async function ensureLicenseUser(discordUserId) {
+  const owner = String(discordUserId || '').trim();
+  if (!owner) throw serviceError('auth_required', 'Please login with Discord first.', 401);
+  const { data, error } = await supabase
+    .from('license_users')
+    .select('discord_user_id, max_keys, is_blocked')
+    .eq('discord_user_id', owner)
+    .maybeSingle();
+  if (error) throw serviceError('database_error', 'License database error.', 500);
+  if (data) return data;
+  const insert = await supabase.from('license_users').insert({
+    discord_user_id: owner,
+    discord_username: 'DENG Tool Portal User',
+    max_keys: 999999,
+    is_owner: false,
+    is_blocked: false,
+  });
+  if (insert.error && !String(insert.error.message || '').toLowerCase().includes('duplicate')) {
+    throw serviceError('database_error', 'License database error.', 500);
+  }
+  return { discord_user_id: owner, max_keys: 999999, is_blocked: false };
+}
+
+async function redeemLicenseKey(discordUserId, rawKey) {
+  const owner = String(discordUserId || '').trim();
+  if (!owner) throw serviceError('auth_required', 'Please login with Discord first.', 401);
+  let normalized;
+  let keyId;
+  try {
+    normalized = normalizeLicenseKey(rawKey);
+    keyId = hashLicenseKey(normalized);
+  } catch {
+    throw serviceError('invalid_key_format', 'Invalid license key format.');
+  }
+
+  const record = await getRawLicenseById(keyId);
+  if (!record) throw serviceError('key_not_found', 'Key not found.');
+  const status = licenseStatus(record);
+  if (status === 'revoked' || status === 'deleted' || status === 'disabled') {
+    throw serviceError('key_not_redeemable', 'This key is revoked or disabled.');
+  }
+  if (status === 'expired' || isoExpired(record.expires_at)) {
+    throw serviceError('key_expired', 'This key has expired.');
+  }
+
+  if (record.owner_discord_id === owner) {
+    const encrypted = encryptLicenseKeyPlaintext(normalized);
+    if (encrypted && !decryptLicenseKeyCiphertext(record.key_ciphertext || '')) {
+      await supabase.from('license_keys').update({
+        key_ciphertext: encrypted,
+        key_export_available: true,
+      }).eq('id', keyId);
+    }
+    return { status: 'already_owned', key: normalized, message: 'This key is already redeemed by you.' };
+  }
+  if (record.owner_discord_id && record.owner_discord_id !== owner) {
+    throw serviceError('key_owned_by_another_user', 'This key belongs to another user.', 403);
+  }
+
+  const user = await ensureLicenseUser(owner);
+  if (user.is_blocked) throw serviceError('user_blocked', 'This Discord account cannot redeem keys.', 403);
+  const maxKeys = Number(user.max_keys || 999999);
+  const { data: existingKeys, error: countError } = await supabase
+    .from('license_keys')
+    .select('id')
+    .eq('owner_discord_id', owner);
+  if (countError) throw serviceError('database_error', 'License database error.', 500);
+  if ((existingKeys || []).length >= maxKeys) {
+    throw serviceError('key_limit_reached', `You have reached your license key limit (${maxKeys}).`, 403);
+  }
+
+  const encrypted = encryptLicenseKeyPlaintext(normalized);
+  const payload = {
+    owner_discord_id: owner,
+    expires_at: null,
+    redeemed_at: new Date().toISOString(),
+    ...(encrypted ? { key_ciphertext: encrypted, key_export_available: true } : {}),
+  };
+  const { error } = await supabase.from('license_keys').update(payload).eq('id', keyId);
+  if (error) throw serviceError('database_error', 'Could not redeem key. Please try again.', 500);
+  return { status: 'redeemed', key: normalized, message: 'Key Redeemed Successfully.' };
+}
+
+async function resetLicenseHwid(discordUserId, keyIdOrKey) {
+  const owner = String(discordUserId || '').trim();
+  if (!owner) throw serviceError('auth_required', 'Please login with Discord first.', 401);
+  const raw = String(keyIdOrKey || '').trim();
+  const keyId = raw.startsWith('DENG-') ? hashLicenseKey(raw) : raw;
+  if (!/^[a-f0-9]{64}$/i.test(keyId)) throw serviceError('key_not_found', 'Key not found.');
+
+  const record = await getRawLicenseById(keyId);
+  if (!record) throw serviceError('key_not_found', 'Key not found.');
+  if (record.owner_discord_id !== owner) {
+    throw serviceError('key_not_owned', 'You do not own this key.', 403);
+  }
+  if (!isActiveLicense(record)) {
+    throw serviceError('key_not_resettable', 'This key is revoked, expired, or inactive.');
+  }
+
+  const binding = await getBindingByKeyId(keyId);
+  if (!binding || !binding.is_active) {
+    throw serviceError('no_device_linked', 'No device is currently linked to this key.');
+  }
+
+  const { error: updateError } = await supabase
+    .from('device_bindings')
+    .update({ is_active: false })
+    .eq('key_id', keyId);
+  if (updateError) throw serviceError('database_error', 'Could not reset HWID. Please try again.', 500);
+
+  const { error: logError } = await supabase.from('hwid_reset_logs').insert({
+    key_id: keyId,
+    owner_discord_id: owner,
+    old_install_id_hash: binding.install_id_hash || null,
+    reason: 'user_requested',
+  });
+  if (logError) throw serviceError('database_error', 'HWID was reset, but reset logging failed.', 500);
+
+  return { status: 'reset', message: 'HWID Reset Successful. You Can Bind This Key On A New Device.' };
+}
+
+function formatDate(value) {
+  if (!value) return 'None';
+  const ts = Date.parse(value);
+  if (Number.isNaN(ts)) return String(value);
+  return new Date(ts).toISOString();
+}
+
+function downloadUserKeys(discordUserId, rows, username = '') {
+  const activeRows = filterActiveLicenses(rows || []);
+  const lines = [
+    'DENG Tool: Rejoin Keys',
+    `User: ${username || discordUserId}`,
+    `Generated: ${new Date().toISOString()}`,
+    '',
+  ];
+  if (!activeRows.length) {
+    lines.push('No active recoverable keys found.');
+    return `${lines.join('\n')}\n`;
+  }
+  activeRows.forEach((row, idx) => {
+    const full = recoverableFullKey(row) || FULL_KEY_UNAVAILABLE;
+    lines.push(`${idx + 1}. Key: ${full}`);
+    lines.push(`   Status: ${deviceStatus(row)}`);
+    lines.push(`   Device: ${row.device_display || 'None'}`);
+    lines.push(`   Created: ${formatDate(row.created_at)}`);
+    lines.push(`   Redeemed: ${formatDate(row.redeemed_at)}`);
+    lines.push(`   Provider: ${providerLabel(row.provider)}`);
+    lines.push(`   Recoverable: ${recoverableFullKey(row) ? 'yes' : 'no'}`);
+    lines.push('');
+  });
+  return `${lines.join('\n').trimEnd()}\n`;
 }
 
 function missingColumn(error) {
@@ -209,8 +423,14 @@ module.exports = {
   computeStats,
   filterActiveLicenses,
   formatLicenseStatus,
+  getActiveUserLicenses,
   getUserLicenses,
   getUserLicenseStats,
+  downloadUserKeys,
+  getRecoverableFullKey: recoverableFullKey,
   isActiveLicense,
+  normalizeLicenseKey,
   providerLabel,
+  redeemLicenseKey,
+  resetLicenseHwid,
 };

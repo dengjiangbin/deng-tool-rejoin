@@ -124,6 +124,9 @@ app.use('/public', express.static(path.join(__dirname, '..', 'public'), {
 app.use('/assets', express.static(path.join(__dirname, '..', 'public'), {
   maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
 }));
+app.use('/images', express.static(path.join(__dirname, '..', 'public', 'images'), {
+  maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
+}));
 
 // ---------------------------------------------------------------
 // CSRF middleware – attach token to res.locals for all EJS views

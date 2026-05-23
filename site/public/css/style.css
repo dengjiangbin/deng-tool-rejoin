@@ -494,6 +494,19 @@ input {
   margin-bottom: 12px;
 }
 
+.provider-logo-wrap {
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 28px rgba(23, 160, 221, 0.16), 0 8px 30px rgba(255, 47, 179, 0.1);
+  overflow: hidden;
+}
+
+.provider-logo {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  display: block;
+}
+
 .table-wrap {
   overflow-x: auto;
 }
@@ -610,6 +623,124 @@ input {
 
 .btn-generate {
   min-width: 220px;
+}
+
+.license-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.license-action-form {
+  display: inline-flex;
+}
+
+.license-actions .btn {
+  min-width: 150px;
+}
+
+.license-message {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.license-message-error {
+  color: var(--red);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.license-message-success {
+  color: var(--green);
+  background: rgba(22, 163, 74, 0.09);
+  border: 1px solid rgba(22, 163, 74, 0.25);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(6px);
+}
+
+.modal-backdrop[hidden],
+.license-message[hidden] {
+  display: none;
+}
+
+.modal-card {
+  width: min(560px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 22px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 26px 80px rgba(15, 23, 42, 0.28);
+}
+
+.modal-header,
+.modal-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.modal-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.license-modal-body {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.license-key-list {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.license-key-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+}
+
+.license-key-option strong {
+  display: block;
+  color: var(--blue-2);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.88rem;
+  word-break: break-all;
+}
+
+.license-key-option small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .alert {
@@ -803,6 +934,17 @@ input {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .license-actions,
+  .license-action-form,
+  .license-actions .btn {
+    width: 100%;
+  }
+
+  .license-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 480px) {
@@ -816,5 +958,14 @@ input {
   .key-display-wrap {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .license-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
   }
 }

@@ -386,6 +386,10 @@ function csrfFrom(html) {
   return match[1];
 }
 
+function licenseKeyId(rawKey) {
+  return require('node:crypto').createHash('sha256').update(rawKey.toUpperCase()).digest('hex');
+}
+
 function challengeIdFrom(html) {
   const match = html.match(/name="challenge_id" value="([^"]+)"/);
   assert.ok(match, 'challenge id should be present');
@@ -862,6 +866,29 @@ describe('theme and dashboard UI', () => {
     assert.doesNotMatch(res.text, /Expires if unused/);
     assert.doesNotMatch(res.text, /24h/);
     assert.match(res.text, /Generate DENG Tool: Rejoin Key/);
+  });
+
+  test('My License action row renders only requested license buttons', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/license');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /Generate Key/);
+    assert.match(res.text, /Reset HWID/);
+    assert.match(res.text, /Redeem Key/);
+    assert.match(res.text, /Download Key/);
+    assert.match(res.text, /class="license-actions"/);
+    assert.doesNotMatch(res.text, /Key Stats/);
+    assert.doesNotMatch(res.text, /Select Package/);
+    assert.doesNotMatch(res.text, /Select Version/);
+    assert.doesNotMatch(res.text, /Package Version/);
+  });
+
+  test('license action CSS keeps buttons responsive and mobile-wrapping', () => {
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
+    assert.match(css, /\.license-actions/);
+    assert.match(css, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+    assert.match(css, /grid-template-columns:\s*1fr/);
   });
 });
 
@@ -1686,6 +1713,182 @@ describe('canonical license service', () => {
     assert.equal(svc.formatLicenseStatus({ status: 'active', active_binding: true }), 'Bound');
     assert.equal(svc.formatLicenseStatus({ status: 'active', redeemed_at: new Date().toISOString(), license_key_id: 'owned' }), 'Unbound');
     assert.equal(svc.formatLicenseStatus({ status: 'active', license_key_id: 'owned' }), 'Unbound');
+  });
+});
+
+describe('My License action APIs', () => {
+  test('new license action endpoints reject unauthenticated requests', async () => {
+    const getResettable = await request(app).get('/api/license/resettable');
+    const reset = await request(app).post('/api/license/reset-hwid').send({ key_id: 'x' });
+    const redeem = await request(app).post('/api/license/redeem').send({ key: 'x' });
+    const download = await request(app).get('/api/license/download');
+    assert.equal(getResettable.status, 401);
+    assert.equal(reset.status, 401);
+    assert.equal(redeem.status, 401);
+    assert.equal(download.status, 401);
+  });
+
+  test('Reset HWID lists only logged-in user active resettable keys and resets canonical binding', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const page = await agent.get('/license');
+    const csrf = csrfFrom(page.text);
+    const now = new Date().toISOString();
+    const ownedKey = 'DENG-1111-2222-3333-4444';
+    const ownedId = licenseKeyId(ownedKey);
+    const otherKey = 'DENG-9999-9999-9999-0000';
+    const otherId = licenseKeyId(otherKey);
+    const revokedKey = 'DENG-8888-8888-8888-0000';
+    const revokedId = licenseKeyId(revokedKey);
+    memoryDb.license_keys.push(
+      {
+        id: ownedId,
+        prefix: 'DENG-1111',
+        suffix: '4444',
+        owner_discord_id: 'discord-user-1',
+        status: 'active',
+        plan: 'standard',
+        created_at: now,
+        redeemed_at: now,
+        expires_at: null,
+      },
+      {
+        id: otherId,
+        prefix: 'DENG-9999',
+        suffix: '0000',
+        owner_discord_id: 'discord-user-2',
+        status: 'active',
+        plan: 'standard',
+        created_at: now,
+        redeemed_at: now,
+        expires_at: null,
+      },
+      {
+        id: revokedId,
+        prefix: 'DENG-8888',
+        suffix: '0000',
+        owner_discord_id: 'discord-user-1',
+        status: 'revoked',
+        plan: 'standard',
+        created_at: now,
+        redeemed_at: now,
+        expires_at: null,
+      },
+    );
+    memoryDb.device_bindings.push(
+      { key_id: ownedId, install_id_hash: 'old-hwid', device_model: 'SM-S901B', device_label: 'Phone', last_seen_at: now, is_active: true },
+      { key_id: otherId, install_id_hash: 'other-hwid', device_model: 'Other', last_seen_at: now, is_active: true },
+      { key_id: revokedId, install_id_hash: 'dead-hwid', device_model: 'Dead', last_seen_at: now, is_active: true },
+    );
+
+    const list = await agent.get('/api/license/resettable');
+    assert.equal(list.status, 200);
+    assert.equal(list.body.keys.length, 1);
+    assert.equal(list.body.keys[0].id, ownedId);
+    assert.equal(list.body.keys[0].device_status, 'Bound To A Device');
+
+    const wrongOwner = await agent.post('/api/license/reset-hwid')
+      .set('X-CSRF-Token', csrf)
+      .send({ key_id: otherId });
+    assert.equal(wrongOwner.status, 403);
+
+    const revoked = await agent.post('/api/license/reset-hwid')
+      .set('X-CSRF-Token', csrf)
+      .send({ key_id: revokedId });
+    assert.equal(revoked.status, 400);
+
+    const reset = await agent.post('/api/license/reset-hwid')
+      .set('X-CSRF-Token', csrf)
+      .send({ key_id: ownedId });
+    assert.equal(reset.status, 200);
+    assert.equal(reset.body.message, 'HWID Reset Successful. You Can Bind This Key On A New Device.');
+    assert.equal(memoryDb.device_bindings.find((row) => row.key_id === ownedId).is_active, false);
+    assert.equal(memoryDb.hwid_reset_logs.length, 1);
+    assert.equal(memoryDb.hwid_reset_logs[0].owner_discord_id, 'discord-user-1');
+    assert.equal(memoryDb.hwid_reset_logs[0].old_install_id_hash, 'old-hwid');
+
+    const noDevice = await agent.post('/api/license/reset-hwid')
+      .set('X-CSRF-Token', csrf)
+      .send({ key_id: ownedId });
+    assert.equal(noDevice.status, 400);
+    assert.equal(noDevice.body.error, 'no_device_linked');
+  });
+
+  test('Redeem Key validates format and ownership, handles self-owned, and claims unowned keys', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const page = await agent.get('/license');
+    const csrf = csrfFrom(page.text);
+    const now = new Date().toISOString();
+    const redeemable = 'DENG-AAAA-BBBB-CCCC-DDDD';
+    const selfOwned = 'DENG-1111-AAAA-2222-BBBB';
+    const otherOwned = 'DENG-9999-AAAA-2222-BBBB';
+    const expired = 'DENG-EEEE-FFFF-AAAA-BBBB';
+    memoryDb.license_users.push({ discord_user_id: 'discord-user-1', max_keys: 999999, is_blocked: false });
+    memoryDb.license_keys.push(
+      { id: licenseKeyId(redeemable), prefix: 'DENG-AAAA', suffix: 'DDDD', owner_discord_id: null, status: 'active', plan: 'standard', created_at: now, expires_at: new Date(Date.now() + 3600 * 1000).toISOString(), redeemed_at: null },
+      { id: licenseKeyId(selfOwned), prefix: 'DENG-1111', suffix: 'BBBB', owner_discord_id: 'discord-user-1', status: 'active', plan: 'standard', created_at: now, expires_at: null, redeemed_at: now },
+      { id: licenseKeyId(otherOwned), prefix: 'DENG-9999', suffix: 'BBBB', owner_discord_id: 'discord-user-2', status: 'active', plan: 'standard', created_at: now, expires_at: null, redeemed_at: now },
+      { id: licenseKeyId(expired), prefix: 'DENG-EEEE', suffix: 'BBBB', owner_discord_id: null, status: 'active', plan: 'standard', created_at: now, expires_at: new Date(Date.now() - 1000).toISOString(), redeemed_at: null },
+    );
+
+    const invalid = await agent.post('/api/license/redeem').set('X-CSRF-Token', csrf).send({ key: 'bad-key' });
+    assert.equal(invalid.status, 400);
+    assert.equal(invalid.body.error, 'invalid_key_format');
+
+    const expiredRes = await agent.post('/api/license/redeem').set('X-CSRF-Token', csrf).send({ key: expired });
+    assert.equal(expiredRes.status, 400);
+    assert.equal(expiredRes.body.error, 'key_expired');
+
+    const other = await agent.post('/api/license/redeem').set('X-CSRF-Token', csrf).send({ key: otherOwned });
+    assert.equal(other.status, 403);
+    assert.equal(other.body.error, 'key_owned_by_another_user');
+
+    const self = await agent.post('/api/license/redeem').set('X-CSRF-Token', csrf).send({ key: selfOwned });
+    assert.equal(self.status, 200);
+    assert.equal(self.body.status, 'already_owned');
+    assert.match(self.body.message, /already redeemed by you/i);
+
+    const redeemed = await agent.post('/api/license/redeem').set('X-CSRF-Token', csrf).send({ key: redeemable });
+    assert.equal(redeemed.status, 200);
+    assert.equal(redeemed.body.status, 'redeemed');
+    const row = memoryDb.license_keys.find((item) => item.id === licenseKeyId(redeemable));
+    assert.equal(row.owner_discord_id, 'discord-user-1');
+    assert.equal(row.expires_at, null);
+    assert.ok(row.redeemed_at);
+  });
+
+  test('Download Key exports only logged-in user active keys with safe full-key fallback', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const now = new Date().toISOString();
+    const activeFull = 'DENG-AAAA-1111-BBBB-2222';
+    const activeFullId = licenseKeyId(activeFull);
+    memoryDb.license_keys.push(
+      { id: activeFullId, prefix: 'DENG-AAAA', suffix: '2222', owner_discord_id: 'discord-user-1', status: 'active', plan: 'standard', created_at: now, redeemed_at: now, expires_at: null },
+      { id: 'old-unrecoverable', prefix: 'DENG-3333', suffix: '4444', owner_discord_id: 'discord-user-1', status: 'active', plan: 'standard', created_at: now, redeemed_at: now, expires_at: null },
+      { id: 'other-user-export', prefix: 'DENG-9999', suffix: '0000', owner_discord_id: 'discord-user-2', status: 'active', plan: 'standard', created_at: now, redeemed_at: now, expires_at: null },
+      { id: 'revoked-export', prefix: 'DENG-8888', suffix: '0000', owner_discord_id: 'discord-user-1', status: 'revoked', plan: 'standard', created_at: now, redeemed_at: now, expires_at: null },
+      { id: 'expired-export', prefix: 'DENG-7777', suffix: '0000', owner_discord_id: 'discord-user-1', status: 'active', plan: 'standard', created_at: now, redeemed_at: null, expires_at: new Date(Date.now() - 1000).toISOString() },
+    );
+    memoryDb.license_ad_challenges.push({
+      id: 'challenge-export',
+      license_key_id: activeFullId,
+      key_prefix: 'DENG-AAAA-1111',
+      key_suffix: 'BBBB-2222',
+      provider: 'lootlabs',
+      completed_at: now,
+      created_at: now,
+      key_expires_at: null,
+    });
+
+    const res = await agent.get('/api/license/download');
+    assert.equal(res.status, 200);
+    assert.match(res.headers['content-disposition'], /attachment/);
+    assert.match(res.text, /DENG Tool: Rejoin Keys/);
+    assert.match(res.text, new RegExp(activeFull));
+    assert.match(res.text, /Full key unavailable for this old key/i);
+    assert.doesNotMatch(res.text, /other-user-export|DENG-9999|revoked-export|DENG-8888|expired-export|DENG-7777/);
   });
 });
 
