@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -121,6 +122,9 @@ _ANSI_DIM     = "\033[2;37m"   # dim grey (Unknown only — intentionally low-co
 _ANSI_RESET   = "\033[0m"
 _ANSI_RE      = re.compile(r"\x1b\[[0-9;]*m")
 _CONFIG_RECOVERED_DEFAULTS = False
+_REFRESH_MAPPING_NORMAL_BUDGET_SECONDS = 20.0
+_REFRESH_MAPPING_HARD_BUDGET_SECONDS = 30.0
+_REFRESH_MAPPING_PER_PACKAGE_TIMEOUT_SECONDS = 5
 
 
 def _print_dev_license_skipped(use_color: bool) -> None:
@@ -2545,86 +2549,171 @@ def _package_menu_remove(draft: dict[str, Any]) -> dict[str, Any]:
 
 
 def _package_menu_refresh_mapping(draft: dict[str, Any]) -> dict[str, Any]:
-    """Refresh Account Mapping: re-run root detection, username resolution, and Presence validation.
+    """Refresh package/account mapping with plain bounded output only.
 
-    Only available in Package Setup menu. NOT called from Start or supervisor.
+    Probe p-d35129b645 showed this path could leave Termux unusable after
+    table rendering/account detection.  This flow intentionally avoids Rich
+    tables, nested prompts, dynamic redraw, and unbounded scans.
     """
-    print()
-    print("Refresh Account Mapping")
-    print()
+    started = time.monotonic()
+    hard_deadline = started + _REFRESH_MAPPING_HARD_BUDGET_SECONDS
+    normal_deadline = started + _REFRESH_MAPPING_NORMAL_BUDGET_SECONDS
+
+    def _restore_terminal() -> None:
+        try:
+            sys.stdout.write("\033[0m\033[?25h\n")
+            sys.stdout.flush()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _safe_reason(exc: BaseException) -> str:
+        text = str(exc).strip() or exc.__class__.__name__
+        text = _ANSI_RE.sub("", text).replace("\r", " ").replace("\n", " ")
+        return text[:90]
+
+    def _load_refresh_entries() -> list[dict[str, Any]]:
+        raw_entries = draft.get("roblox_packages") or []
+        try:
+            return validate_package_entries(raw_entries)
+        except ConfigError:
+            if not isinstance(raw_entries, (list, tuple)):
+                return []
+            recovered: list[dict[str, Any]] = []
+            for raw in raw_entries:
+                if isinstance(raw, dict):
+                    recovered.append(dict(raw))
+                elif isinstance(raw, str):
+                    recovered.append({"package": raw, "account_username": "", "enabled": True})
+            return recovered
+
     try:
-        entries = validate_package_entries(
-            draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
-        )
-    except ConfigError as exc:
-        termux_ui.print_error(f"Could not read package mapping: {exc}")
-        safe_io.press_enter()
-        return draft
+        print()
+        termux_ui.print_warning("Refreshing Package Mapping...")
+        entries = _load_refresh_entries()
 
-    enabled_entries = [e for e in entries if e.get("enabled", True)]
-    if not enabled_entries:
-        termux_ui.print_warning("No packages configured")
-        safe_io.press_enter()
-        return draft
+        enabled_entries = [dict(e) for e in entries if isinstance(e, dict) and e.get("enabled", True)]
+        if not enabled_entries:
+            termux_ui.print_warning("No Packages Configured")
+            return draft
 
-    print(f"Re-running detection for {len(enabled_entries)} package(s)...")
-    try:
-        root_access.clear_cache()
-    except Exception:  # noqa: BLE001
-        termux_ui.print_warning("Root cache refresh failed; continuing with fallback mapping")
+        refreshed_by_pkg: dict[str, dict[str, Any]] = {}
+        skipped_count = 0
+        try:
+            root_access.clear_cache()
+        except Exception:  # noqa: BLE001
+            termux_ui.print_warning("Root Cache Refresh Failed; Using Safe Fallback")
 
-    fresh_entries: list[dict[str, Any]] = []
-    skipped: list[str] = []
-    for entry in enabled_entries:
-        e = dict(entry)
-        pkg = str(e.get("package") or "").strip() or "Unknown"
-        e["package"] = pkg
-        e.pop("account_mapping_status", None)
-        e.pop("account_mapping_source", None)
-        e.pop("account_mapping_updated_at", None)
-        e.pop("roblox_cookie", None)
-        if not str(e.get("account_username") or "").strip():
+        for idx, entry in enumerate(enabled_entries, start=1):
+            if time.monotonic() >= hard_deadline:
+                termux_ui.print_warning("Refresh Mapping Timed Out; Remaining Packages Skipped")
+                break
+
+            original_pkg = str(entry.get("package") or "").strip()
             try:
-                det = account_detect.detect_account_username(
-                    pkg,
-                    entry=e,
-                    config=draft,
-                    use_root=True,
-                )
-                if det and det.username:
-                    e["account_username"] = validate_account_username(det.username)
-                    e["username_source"] = validate_username_source(det.source, det.username)
-            except PermissionError:
-                skipped.append(f"{pkg}: permission denied")
-            except Exception:
-                skipped.append(f"{pkg}: username detection unavailable")
-        fresh_entries.append(e)
+                pkg = validate_package_name(original_pkg)
+            except ConfigError:
+                skipped_count += 1
+                print(f"{idx}. Unknown — Skipped — Invalid Package")
+                continue
 
-    try:
-        refreshed = _run_account_mapping_table(fresh_entries, draft, show_root_message=True)
+            item_started = time.monotonic()
+            item_deadline = min(hard_deadline, item_started + _REFRESH_MAPPING_PER_PACKAGE_TIMEOUT_SECONDS)
+            updated = dict(entry)
+            status = "Detected"
+            reason = ""
+            username = validate_account_username(updated.get("account_username", "")) or ""
+
+            try:
+                # Respect a known username first.  Only run root/user detection
+                # when needed and while the total operation still has budget.
+                if not username and time.monotonic() < item_deadline:
+                    detect_cfg = dict(draft)
+                    settings = dict((detect_cfg.get("account_detection") or {}))
+                    settings["scan_timeout_seconds"] = max(1, min(2, int(item_deadline - time.monotonic()) or 1))
+                    settings["max_file_size_kb"] = min(int(settings.get("max_file_size_kb", 128) or 128), 128)
+                    detect_cfg["account_detection"] = settings
+                    det = account_detect.detect_account_username(
+                        pkg,
+                        entry=updated,
+                        config=detect_cfg,
+                        use_root=True,
+                    )
+                    if det and det.username:
+                        username = validate_account_username(det.username) or ""
+                        updated["account_username"] = username
+                        updated["username_source"] = validate_username_source(det.source, det.username)
+                        updated["account_mapping_source"] = str(det.source or "detected")
+                if time.monotonic() >= item_deadline:
+                    status = "Skipped"
+                    reason = "Timeout"
+                    skipped_count += 1
+            except (PermissionError, FileNotFoundError):
+                status = "Skipped"
+                reason = "Permission Denied"
+                skipped_count += 1
+            except (TimeoutError, subprocess.TimeoutExpired):
+                status = "Skipped"
+                reason = "Timeout"
+                skipped_count += 1
+            except (UnicodeDecodeError, OSError, ValueError, ConfigError) as exc:
+                status = "Skipped"
+                reason = _safe_reason(exc)
+                skipped_count += 1
+            except Exception as exc:  # noqa: BLE001
+                status = "Skipped"
+                reason = _safe_reason(exc)
+                skipped_count += 1
+
+            if not username:
+                username = "Unknown"
+            updated["package"] = pkg
+            updated["account_username"] = "" if username == "Unknown" else username
+            updated["account_mapping_status"] = status if status == "Skipped" else "Detected"
+            if reason:
+                updated["account_mapping_source"] = reason
+            updated["account_mapping_updated_at"] = datetime.now(timezone.utc).isoformat()
+            refreshed_by_pkg[pkg] = updated
+            short_pkg = _short_package_display(pkg)
+            suffix = f" — {reason}" if reason else ""
+            print(f"{idx}. {short_pkg} — {status} — User: {username}{suffix}", flush=True)
+
+            if time.monotonic() >= normal_deadline:
+                termux_ui.print_warning("Refresh Mapping Time Budget Reached; Saved Partial Results")
+                break
+
+        merged = [refreshed_by_pkg.get(str(e.get("package") or ""), e) for e in entries]
+        draft["roblox_packages"] = merged
+        active = [e for e in merged if isinstance(e, dict) and e.get("enabled", True)]
+        if active:
+            draft["roblox_package"] = active[0]["package"]
+            draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
+        try:
+            save_config(draft)
+        except ConfigError as exc:
+            termux_ui.print_error(f"Refresh Mapping Finished But Could Not Save Config: {_safe_reason(exc)}")
+            return draft
+        if skipped_count:
+            termux_ui.print_warning(f"Refresh Mapping Finished With {skipped_count} Skipped Step(s)")
+        else:
+            print(f"{termux_ui.GREEN}[✓] Refresh Mapping Finished.{termux_ui.RESET}")
+        return draft
+    except KeyboardInterrupt:
+        print()
+        termux_ui.print_warning("Refresh Mapping Cancelled")
+        return draft
+    except EOFError:
+        print()
+        termux_ui.print_warning("Refresh Mapping Stopped")
+        return draft
     except Exception as exc:  # noqa: BLE001
-        termux_ui.print_error(f"Refresh failed: {str(exc)[:120]}")
-        safe_io.press_enter()
+        termux_ui.print_error(f"Refresh Mapping Failed: {str(exc)[:120]}")
         return draft
-    if not refreshed:
-        termux_ui.print_warning("Refresh cancelled")
-        safe_io.press_enter()
-        return draft
-
-    refreshed_by_pkg = {str(e.get("package") or ""): e for e in refreshed if isinstance(e, dict)}
-    merged = [refreshed_by_pkg.get(str(e.get("package") or ""), e) for e in entries]
-    draft["roblox_packages"] = merged
-    try:
-        draft = save_config(draft)
-    except ConfigError as exc:
-        termux_ui.print_error(f"Refresh completed but could not save config: {exc}")
-        safe_io.press_enter()
-        return draft
-    if skipped:
-        termux_ui.print_warning(f"Partial refresh: skipped {len(skipped)} detection step(s)")
-    termux_ui.print_success("Account mapping refreshed and saved")
-    safe_io.press_enter()
-    return draft
+    finally:
+        _restore_terminal()
+        try:
+            safe_io.press_enter(f"{termux_ui.prompt_prefix('Press Enter To Continue')} ")
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:

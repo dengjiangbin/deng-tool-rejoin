@@ -878,7 +878,7 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
              redirect_stdout(io.StringIO()) as out:
             result = _package_menu_refresh_mapping(cfg)
         self.assertIs(result, cfg)
-        self.assertIn("No packages configured", out.getvalue())
+        self.assertIn("No Packages Configured", out.getvalue())
 
     def test_refresh_mapping_handles_none_fields_and_back(self):
         cfg = self._make_cfg([{
@@ -914,13 +914,13 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
                 self.assertEqual(line.count("│"), 7)
 
     def test_refresh_mapping_failure_returns_to_menu(self):
-        cfg = self._make_cfg([package_entry("com.roblox.client", "Main", True)])
-        with unittest.mock.patch("agent.commands._run_account_mapping_table", side_effect=RuntimeError("timeout")), \
+        cfg = self._make_cfg([package_entry("com.roblox.client", "", True, "not_set")])
+        with unittest.mock.patch("agent.commands.account_detect.detect_account_username", side_effect=RuntimeError("timeout")), \
              unittest.mock.patch("agent.commands.safe_io.press_enter"), \
              redirect_stdout(io.StringIO()) as out:
             result = _package_menu_refresh_mapping(cfg)
         self.assertIs(result, cfg)
-        self.assertIn("Refresh failed", out.getvalue())
+        self.assertIn("Refresh Mapping Finished With", out.getvalue())
 
     def test_add_package_auto_detects_roblox_cookie(self):
         from agent.commands import _auto_detect_cookies_for_entries
