@@ -536,8 +536,23 @@ class _PackageWorker(threading.Thread):
             if not self._roblox_user_id:
                 self.last_presence_state = "unavailable"
                 return None
+            cookie = self._roblox_cookie
+            if not cookie:
+                try:
+                    from . import roblox_cookie_detect as _rcd
+
+                    cookie = _rcd.detect_roblox_cookie(
+                        self.package,
+                        entry=self.entry,
+                        config=self.cfg,
+                        use_root=True,
+                    )
+                    if cookie:
+                        self._roblox_cookie = cookie
+                except Exception:  # noqa: BLE001
+                    cookie = None
             pres = _rp.fetch_presence_one(
-                self._roblox_user_id, cookie=self._roblox_cookie,
+                self._roblox_user_id, cookie=cookie,
             )
             self.last_presence_check_at = time.time()
             # Classify and store the presence state using the module helper.
@@ -1300,6 +1315,7 @@ class WatchdogSupervisor:
         self._presence_user_ids: dict[str, int] = {}
         self._presence_usernames: dict[str, str] = {}
         self._presence_cookies: dict[str, str | None] = {}
+        self._presence_cookie_lookup_at: dict[str, float] = {}
         self._presence_id_resolved: set[str] = set()  # username→id done
         self._presence_lookup_attempt_at: dict[str, float] = {}
         self._presence_last_detail: dict[str, dict[str, Any]] = {}
@@ -1561,8 +1577,30 @@ class WatchdogSupervisor:
                 detail["roblox_api_status"] = "skipped"
                 detail["presence_error"] = "missing_user_id"
                 return None
+            cookie = self._presence_cookies.get(pkg)
+            if not cookie:
+                last_cookie_attempt = self._presence_cookie_lookup_at.get(pkg, 0.0)
+                if (time.monotonic() - last_cookie_attempt) >= 120.0:
+                    self._presence_cookie_lookup_at[pkg] = time.monotonic()
+                    try:
+                        from . import roblox_cookie_detect as _rcd
+
+                        cookie = _rcd.detect_roblox_cookie(
+                            pkg,
+                            entry=next(
+                                (e for e in self.entries if str(e.get("package")) == pkg),
+                                None,
+                            ),
+                            config=self.cfg,
+                            use_root=True,
+                        )
+                        if cookie:
+                            self._presence_cookies[pkg] = cookie
+                            detail["roblox_cookie_source"] = "auto_detect"
+                    except Exception:  # noqa: BLE001
+                        pass
             detail["roblox_api_used"] = "true"
-            presence = _rp.fetch_presence_one(uid, cookie=self._presence_cookies.get(pkg))
+            presence = _rp.fetch_presence_one(uid, cookie=cookie)
             ptype = getattr(presence, "presence_type", None)
             detail["roblox_api_status"] = "success"
             detail["roblox_presence_type"] = getattr(ptype, "name", str(ptype))

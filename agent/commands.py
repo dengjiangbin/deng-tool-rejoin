@@ -1248,7 +1248,7 @@ def _try_detect_user_id(entry: dict[str, Any], draft: dict[str, Any]) -> tuple[i
     return 0, "not_found"
 
 
-def _validate_user_id_with_presence(user_id: int) -> str:
+def _validate_user_id_with_presence(user_id: int, *, cookie: str = "") -> str:
     """Quick non-blocking presence check to validate a detected user ID.
 
     Returns one of: "Validated", "API Unavailable", "Invalid".
@@ -1258,7 +1258,8 @@ def _validate_user_id_with_presence(user_id: int) -> str:
         return "Invalid"
     try:
         from . import roblox_presence as _rp
-        result = _rp.fetch_presence_one(user_id)
+        auth_cookie = validate_roblosecurity_cookie(cookie) if cookie else None
+        result = _rp.fetch_presence_one(user_id, cookie=auth_cookie or None)
         if result is not None:
             return "Validated"
         return "API Unavailable"
@@ -1337,13 +1338,26 @@ def _run_account_mapping_table(
 
     # --- Run presence validation ---
     presence_statuses: list[str] = []
-    for uid, src in detected:
+    for i, entry in enumerate(entries):
+        uid, src = detected[i]
         if src == "config":
-            existing = str(entries[len(presence_statuses)].get("account_mapping_status") or "")
+            existing = str(entries[i].get("account_mapping_status") or "")
             presence_statuses.append(existing if existing in MAPPING_STATUSES else "Validated")
             continue
+        cookie = ""
+        try:
+            from . import roblox_cookie_detect as _rcd
+
+            cookie = _rcd.detect_roblox_cookie(
+                str(entry.get("package") or ""),
+                entry=entry,
+                config=draft,
+                use_root=True,
+            )
+        except Exception:  # noqa: BLE001
+            cookie = ""
         if uid > 0:
-            presence_statuses.append(_validate_user_id_with_presence(uid))
+            presence_statuses.append(_validate_user_id_with_presence(uid, cookie=cookie))
         else:
             presence_statuses.append("")
 
@@ -1374,7 +1388,7 @@ def _run_account_mapping_table(
 
     if not _is_interactive():
         # Non-interactive: apply detected mappings silently with full metadata.
-        return _apply_mapping_to_entries(entries, detected, presence_statuses)
+        return _apply_mapping_to_entries(entries, detected, presence_statuses, config=draft)
 
     while True:
         _print_mapping_table()
@@ -1446,15 +1460,19 @@ def _run_account_mapping_table(
         else:
             print("  Enter A, B, or a package number.")
 
-    return _apply_mapping_to_entries(entries, detected, presence_statuses)
+    return _apply_mapping_to_entries(entries, detected, presence_statuses, config=draft)
 
 
 def _apply_mapping_to_entries(
     entries: list[dict[str, Any]],
     detected: list[tuple[int, str]],
     presence_statuses: list[str],
+    *,
+    config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Apply detected user IDs and mapping metadata to a list of package entries."""
+    from . import roblox_cookie_detect as _rcd
+
     now_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     out = []
     for i, entry in enumerate(entries):
@@ -1469,6 +1487,20 @@ def _apply_mapping_to_entries(
 
         if uid > 0:
             e["roblox_user_id"] = uid
+
+        pkg = str(e.get("package") or "").strip()
+        if pkg and not str(e.get("roblox_cookie") or "").strip():
+            try:
+                cookie = _rcd.detect_roblox_cookie(
+                    pkg,
+                    entry=e,
+                    config=config,
+                    use_root=True,
+                )
+                if cookie:
+                    e["roblox_cookie"] = validate_roblosecurity_cookie(cookie)
+            except Exception:  # noqa: BLE001
+                pass
 
         if src not in ("config", "not_found", ""):
             e["account_mapping_source"] = src
@@ -1838,8 +1870,7 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         print("1. Auto Detect Package")
         print("2. Add Package")
         print("3. Refresh Account Mapping")
-        print("4. ROBLOSECURITY Cookie")
-        print("5. Remove Package")
+        print("4. Remove Package")
         print("0. Back")
         print("--------------------------------")
         _mc = safe_io.safe_prompt("Choose [0]: ", default="0")
@@ -1855,11 +1886,9 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         elif choice == "3":
             draft = _package_menu_refresh_mapping(draft)
         elif choice == "4":
-            draft = _package_menu_set_roblosecurity(draft)
-        elif choice == "5":
             draft = _package_menu_remove(draft)
         else:
-            print("Please choose 1-5 or 0.")
+            print("Please choose 1-4 or 0.")
     return draft
 
 
@@ -2059,48 +2088,6 @@ def _package_menu_set_user_id(draft: dict[str, Any]) -> dict[str, Any]:
         print(f"Saved user ID {new_uid} for {target['package']}.")
     else:
         print(f"Saved username for {target['package']}.")
-    safe_io.press_enter()
-    return draft
-
-
-def _package_menu_set_roblosecurity(draft: dict[str, Any]) -> dict[str, Any]:
-    """Set/clear per-package .ROBLOSECURITY for authenticated Presence checks."""
-    print()
-    print("ROBLOSECURITY Cookie")
-    print("Used only for authenticated Roblox Presence detection. It is masked in UI/logs.")
-    entries = validate_package_entries(
-        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
-    )
-    if not entries:
-        print("No packages configured.")
-        return draft
-    for idx, entry in enumerate(entries, start=1):
-        status = "set" if entry.get("roblox_cookie") else "not set"
-        print(f"  {idx}. {entry['package']} — ROBLOSECURITY: {status}")
-    print("  0. Back")
-    choice = (safe_io.safe_prompt("Choose package [0]: ", default="0") or "0").strip() or "0"
-    if choice == "0" or not choice.isdigit():
-        return draft
-    i = int(choice) - 1
-    if not (0 <= i < len(entries)):
-        print("Invalid choice.")
-        return draft
-    target = dict(entries[i])
-    print()
-    print(f"Package: {target['package']}")
-    print("Paste the cookie value, with or without '.ROBLOSECURITY='.")
-    print("Leave blank to clear the saved cookie.")
-    raw = safe_io.safe_prompt("ROBLOSECURITY: ")
-    try:
-        target["roblox_cookie"] = validate_roblosecurity_cookie(raw or "")
-    except ConfigError as exc:
-        print(f"Invalid ROBLOSECURITY: {exc}")
-        safe_io.press_enter()
-        return draft
-    entries = [target if e["package"] == target["package"] else dict(e) for e in entries]
-    draft["roblox_packages"] = entries
-    draft = save_config(draft)
-    print("ROBLOSECURITY saved." if target["roblox_cookie"] else "ROBLOSECURITY cleared.")
     safe_io.press_enter()
     return draft
 
