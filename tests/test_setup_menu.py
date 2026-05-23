@@ -850,6 +850,39 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
             out = _apply_mapping_to_entries(entries, detected, ["Validated"], config={})
         self.assertEqual(out[0]["roblox_cookie"], "_|WARNING:-DO-NOT-SHARE-THIS.AUTO")
 
+    def test_add_package_auto_detects_roblox_cookie(self):
+        from agent.commands import _auto_detect_cookies_for_entries
+
+        entries = [package_entry("com.roblox.client", "user1", True, "manual")]
+        with unittest.mock.patch(
+            "agent.roblox_cookie_detect.detect_roblox_cookie",
+            return_value="_|WARNING:-DO-NOT-SHARE-THIS.ADDFLOW",
+        ), unittest.mock.patch("agent.commands._is_interactive", return_value=False):
+            out = _auto_detect_cookies_for_entries(entries, {})
+        self.assertEqual(out[0]["roblox_cookie"], "_|WARNING:-DO-NOT-SHARE-THIS.ADDFLOW")
+
+    def test_auto_detect_package_runs_cookie_detection_before_mapping(self):
+        from agent.commands import _package_menu_auto_detect
+
+        cfg = self._make_cfg()
+        candidates = [android.RobloxPackageCandidate("com.new.clone", "Clone", True)]
+        cookie_calls: list[str] = []
+
+        def fake_cookie(entries, config, **kwargs):
+            cookie_calls.extend(str(e.get("package") or "") for e in entries)
+            return entries
+
+        with unittest.mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=candidates), \
+             unittest.mock.patch("agent.commands._detect_or_prompt_account_username", side_effect=lambda e, _d: e), \
+             unittest.mock.patch("agent.commands._auto_detect_cookies_for_entries", side_effect=fake_cookie) as auto_cookie, \
+             unittest.mock.patch("agent.commands._run_account_mapping_table", side_effect=lambda e, _d: e), \
+             unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c), \
+             unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
+             unittest.mock.patch("builtins.input", side_effect=["a"]):
+            _package_menu_auto_detect(cfg)
+        auto_cookie.assert_called_once()
+        self.assertEqual(cookie_calls, ["com.new.clone"])
+
     def test_no_refresh_username_in_public_menu(self):
         """Refresh Username / Edit Username must NOT be in the public package menu."""
         cfg = self._make_cfg()
@@ -862,6 +895,28 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
         self.assertNotIn("Refresh Username", text)
         self.assertNotIn("Edit Username", text)
         self.assertNotIn("Detect / Refresh Usernames", text)
+
+    def test_add_package_runs_cookie_detection_before_save(self):
+        from agent.commands import _package_menu_add
+
+        cfg = self._make_cfg()
+        detected = [android.RobloxPackageCandidate("com.new.pkg", "New App", True)]
+        cookie_calls: list[str] = []
+
+        def fake_cookie(entries, config, **kwargs):
+            cookie_calls.extend(str(e.get("package") or "") for e in entries)
+            return entries
+
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
+             unittest.mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=detected), \
+             unittest.mock.patch("agent.commands._detect_or_prompt_account_username", side_effect=lambda e, _d: e), \
+             unittest.mock.patch("agent.commands._auto_detect_cookies_for_entries", side_effect=fake_cookie) as auto_cookie, \
+             unittest.mock.patch("agent.commands._run_account_mapping_table", side_effect=lambda e, _d: e), \
+             unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c), \
+             unittest.mock.patch("builtins.input", side_effect=["1", "y"]):
+            _package_menu_add(cfg)
+        auto_cookie.assert_called_once()
+        self.assertEqual(cookie_calls, ["com.new.pkg"])
 
     def test_add_package_runs_detection_first(self):
         """Add Package must call detection before asking what to add."""
@@ -891,9 +946,17 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
                             "agent.commands._detect_or_prompt_account_username",
                             side_effect=lambda entry, _cfg: {**entry, "account_username": "Unknown"},
                         ):
-                            buf = io.StringIO()
-                            with redirect_stdout(buf):
-                                result = _package_menu_add(cfg)
+                            with unittest.mock.patch(
+                                "agent.commands._auto_detect_cookies_for_entries",
+                                side_effect=lambda entries, *a, **k: entries,
+                            ):
+                                with unittest.mock.patch(
+                                    "agent.commands._run_account_mapping_table",
+                                    side_effect=lambda entries, *a, **k: entries,
+                                ):
+                                    buf = io.StringIO()
+                                    with redirect_stdout(buf):
+                                        result = _package_menu_add(cfg)
         pkgs = [e["package"] for e in result.get("roblox_packages", [])]
         self.assertIn("com.manual.pkg", pkgs)
 

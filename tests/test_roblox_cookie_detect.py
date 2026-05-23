@@ -34,6 +34,19 @@ class RobloxCookieDetectTests(unittest.TestCase):
         cookie = rcd.detect_roblox_cookie("com.roblox.client", entry=entry, use_root=False)
         self.assertEqual(cookie, "_|WARNING:-DO-NOT-SHARE-THIS.CONFIGCOOKIE")
 
+    def test_detect_roblox_cookie_force_rescan_skips_existing_entry(self) -> None:
+        entry = {"roblox_cookie": "_|WARNING:-DO-NOT-SHARE-THIS.OLDVALUE"}
+        with patch("agent.roblox_cookie_detect.root_access.has_root", return_value=True), \
+             patch("agent.roblox_cookie_detect._root_scan_shared_prefs", return_value="_|WARNING:-DO-NOT-SHARE-THIS.NEWVALUE"), \
+             patch("agent.roblox_cookie_detect._root_scan_webview_cookies", return_value=""):
+            cookie = rcd.detect_roblox_cookie(
+                "com.roblox.client",
+                entry=entry,
+                use_root=True,
+                force_rescan=True,
+            )
+        self.assertEqual(cookie, "_|WARNING:-DO-NOT-SHARE-THIS.NEWVALUE")
+
     def test_detect_roblox_cookie_scans_shared_prefs_via_root(self) -> None:
         xml = (
             '<?xml version="1.0" encoding="utf-8" standalone="yes" ?>'

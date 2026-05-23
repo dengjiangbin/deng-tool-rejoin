@@ -1494,6 +1494,48 @@ def _run_account_mapping_table(
     return _apply_mapping_to_entries(entries, detected, presence_statuses, config=draft)
 
 
+def _auto_detect_cookies_for_entries(
+    entries: list[dict[str, Any]],
+    config: dict[str, Any] | None = None,
+    *,
+    force_refresh: bool = False,
+    announce: bool = True,
+) -> list[dict[str, Any]]:
+    """Detect and attach .ROBLOSECURITY cookies for package entries via root."""
+    from . import roblox_cookie_detect as _rcd
+
+    out: list[dict[str, Any]] = []
+    detected_count = 0
+    for entry in entries:
+        e = dict(entry)
+        pkg = str(e.get("package") or "").strip()
+        if not pkg:
+            out.append(e)
+            continue
+        if force_refresh:
+            e.pop("roblox_cookie", None)
+        elif str(e.get("roblox_cookie") or "").strip():
+            out.append(e)
+            continue
+        try:
+            cookie = _rcd.detect_roblox_cookie(
+                pkg,
+                entry=e,
+                config=config,
+                use_root=True,
+                force_rescan=force_refresh,
+            )
+            if cookie:
+                e["roblox_cookie"] = validate_roblosecurity_cookie(cookie)
+                detected_count += 1
+        except Exception:  # noqa: BLE001
+            pass
+        out.append(e)
+    if announce and detected_count and _is_interactive():
+        print(f"Detected ROBLOSECURITY cookie for {detected_count} package(s).")
+    return out
+
+
 def _apply_mapping_to_entries(
     entries: list[dict[str, Any]],
     detected: list[tuple[int, str]],
@@ -1502,11 +1544,10 @@ def _apply_mapping_to_entries(
     config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Apply detected user IDs and mapping metadata to a list of package entries."""
-    from . import roblox_cookie_detect as _rcd
-
     now_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    mapped = _auto_detect_cookies_for_entries(entries, config, announce=False)
     out = []
-    for i, entry in enumerate(entries):
+    for i, entry in enumerate(mapped):
         e = dict(entry)
         uid, src = detected[i]
         ps = presence_statuses[i] if i < len(presence_statuses) else ""
@@ -1518,20 +1559,6 @@ def _apply_mapping_to_entries(
 
         if uid > 0:
             e["roblox_user_id"] = uid
-
-        pkg = str(e.get("package") or "").strip()
-        if pkg and not str(e.get("roblox_cookie") or "").strip():
-            try:
-                cookie = _rcd.detect_roblox_cookie(
-                    pkg,
-                    entry=e,
-                    config=config,
-                    use_root=True,
-                )
-                if cookie:
-                    e["roblox_cookie"] = validate_roblosecurity_cookie(cookie)
-            except Exception:  # noqa: BLE001
-                pass
 
         if src not in ("config", "not_found", ""):
             e["account_mapping_source"] = src
@@ -1616,7 +1643,9 @@ def _choose_packages_menu(
         default_package = selected[0]["package"] if selected else DEFAULT_ROBLOX_PACKAGE
         manual = _prompt_manual_package(default_package)
         if manual:
-            selected = [_detect_or_prompt_account_username(_entry_for_package(manual, selected))]
+            selected = [_detect_or_prompt_account_username(_entry_for_package(manual, selected), cfg_ctx)]
+            selected = _auto_detect_cookies_for_entries(selected, cfg_ctx)
+            selected = _run_account_mapping_table(selected, cfg_ctx or {})
 
     return selected, hints
 
@@ -2260,6 +2289,12 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
     if not new_entries_to_append:
         return draft
 
+    new_entries_to_append = _auto_detect_cookies_for_entries(new_entries_to_append, draft)
+    new_entries_to_append = _run_account_mapping_table(new_entries_to_append, draft)
+    if not new_entries_to_append:
+        print("Cancelled.")
+        return draft
+
     added_any = False
     for entry in new_entries_to_append:
         if entry["package"] in current_pkgs:
@@ -2350,6 +2385,7 @@ def _package_menu_refresh_mapping(draft: dict[str, Any]) -> dict[str, Any]:
         e.pop("account_mapping_status", None)
         e.pop("account_mapping_source", None)
         e.pop("account_mapping_updated_at", None)
+        e.pop("roblox_cookie", None)
         # Also attempt username re-detection if none set
         if not str(e.get("account_username") or "").strip():
             try:
@@ -2453,6 +2489,7 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
         for c in to_add_candidates
     ]
 
+    to_add_entries = _auto_detect_cookies_for_entries(to_add_entries, draft)
     # Run account mapping table (root-assisted userId detection + confirmation)
     to_add_entries = _run_account_mapping_table(to_add_entries, draft)
 

@@ -153,6 +153,7 @@ def detect_roblox_cookie(
     entry: dict[str, Any] | None = None,
     config: dict[str, Any] | None = None,
     use_root: bool = True,
+    force_rescan: bool = False,
 ) -> str:
     """Detect .ROBLOSECURITY for one package. Returns '' when unavailable."""
     try:
@@ -160,7 +161,7 @@ def detect_roblox_cookie(
     except Exception:
         return ""
 
-    if entry:
+    if entry and not force_rescan:
         existing = str(entry.get("roblox_cookie") or "").strip()
         if existing:
             try:
