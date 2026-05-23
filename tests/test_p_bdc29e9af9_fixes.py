@@ -222,7 +222,7 @@ class TestAutoExecuteKaeruInput(unittest.TestCase):
              redirect_stdout(out):
             script = commands._read_auto_execute_script(1)
         self.assertEqual(script, "")
-        self.assertIn("Script Cannot Be Empty.", out.getvalue())
+        self.assertIn("Script Cannot Be Blank.", out.getvalue())
 
     def test_eof_cancels_script_input(self):
         with patch("agent.commands.safe_io.safe_prompt", return_value=None):

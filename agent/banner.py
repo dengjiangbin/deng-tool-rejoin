@@ -9,7 +9,7 @@ import sys
 from .constants import PRODUCT_NAME, VERSION
 
 BLUE = "\033[1;94m"
-PINK = "\033[1;95m"
+PINK = "\033[38;5;205m"
 COLOR_LOGO = PINK
 RESET = "\033[0m"
 
@@ -40,7 +40,7 @@ def visible_width(text: str) -> int:
 
 
 def banner_text(use_color: bool | None = None) -> str:
-    """Build the DENG banner with optional bold bright pink logo styling."""
+    """Build the DENG banner with optional soft pink logo styling."""
     if use_color is None:
         use_color = supports_color()
     if use_color:

@@ -19,6 +19,15 @@ class AutoExecuteHelperTests(unittest.TestCase):
             ["print(1)", "print(2)"],
         )
 
+    def test_normalize_scripts_removes_hash_only_entries(self):
+        from agent.auto_execute import normalize_scripts
+
+        real_script = 'loadstring(game:HttpGet("https://example.com/Deng.lua"))()'
+        self.assertEqual(
+            normalize_scripts(["a4dfc7ce368c83c8", {"content": ""}, {"content": real_script}]),
+            [real_script],
+        )
+
     def test_send_execute_uses_clipboard_paste_and_enter(self):
         from agent import auto_execute
         from agent.android import CommandResult
@@ -63,11 +72,13 @@ class AutoExecuteHelperTests(unittest.TestCase):
 
 
 class AutoExecuteMenuTests(unittest.TestCase):
+    _DENG_SCRIPT = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/GrexXMeng/Mengs/refs/heads/main/Deng.lua"))()'
+
     def test_auto_execute_menu_add_script_saves_to_config(self):
         from agent import commands
 
         cfg = {"auto_execute_scripts": []}
-        prompts = iter(["1", "Y", 'loadstring(game:HttpGet("https://example.com/Deng.lua"))()', "END", "N", "0"])
+        prompts = iter(["1", "Y", self._DENG_SCRIPT, "END", "N", "0"])
         prompt_texts: list[str] = []
         out = io.StringIO()
         def fake_prompt(prompt="", **_kwargs):
@@ -83,12 +94,15 @@ class AutoExecuteMenuTests(unittest.TestCase):
 
         self.assertEqual(
             result["auto_execute_scripts"],
-            ['loadstring(game:HttpGet("https://example.com/Deng.lua"))()'],
+            [self._DENG_SCRIPT],
         )
         self.assertTrue(any("Add Script #1? (Y/N)" in prompt for prompt in prompt_texts))
         self.assertIn("Paste Script, Then Type END On A New Line:", out.getvalue())
         self.assertIn("Script Saved.", out.getvalue())
         self.assertIn("Saved 1 Auto Execute Script(s)", out.getvalue())
+        self.assertNotEqual(result["auto_execute_scripts"][0], "END")
+        self.assertNotEqual(result["auto_execute_scripts"][0], "a4dfc7ce368c83c8")
+        self.assertNotEqual(result["auto_execute_scripts"][0], "")
 
     def test_auto_execute_menu_adds_multiple_numbered_scripts(self):
         from agent import commands
@@ -113,6 +127,50 @@ class AutoExecuteMenuTests(unittest.TestCase):
         self.assertTrue(any("Add Script #1? (Y/N)" in prompt for prompt in prompt_texts))
         self.assertTrue(any("Add Script #2? (Y/N)" in prompt for prompt in prompt_texts))
         self.assertIn("Saved 2 Auto Execute Script(s)", text)
+
+    def test_auto_execute_rejects_blank_script(self):
+        from agent import commands
+
+        cfg = {"auto_execute_scripts": []}
+        prompts = iter(["1", "Y", "END", "N", "0"])
+        out = io.StringIO()
+        with patch("agent.commands._is_interactive", return_value=True), \
+             patch("agent.commands.safe_io.safe_prompt", side_effect=lambda *a, **k: next(prompts)), \
+             patch("agent.commands.safe_io.press_enter"), \
+             patch("agent.commands.save_config", side_effect=lambda c: c), \
+             redirect_stdout(out):
+            result = commands._config_menu_auto_execute(cfg)
+
+        self.assertEqual(result["auto_execute_scripts"], [])
+        self.assertIn("Script Cannot Be Blank", out.getvalue())
+
+    def test_auto_execute_listing_shows_preview_not_hash(self):
+        from agent import commands
+
+        cfg = {"auto_execute_scripts": [self._DENG_SCRIPT]}
+        out = io.StringIO()
+        with patch("agent.commands._is_interactive", return_value=True), \
+             patch("agent.commands.safe_io.safe_prompt", return_value="0"), \
+             redirect_stdout(out):
+            commands._config_menu_auto_execute(cfg)
+
+        text = out.getvalue()
+        self.assertIn("loadstring(game:HttpGet", text)
+        self.assertNotIn("a4dfc7ce368c83c8", text)
+
+    def test_hash_only_existing_entry_is_cleaned(self):
+        from agent import commands
+
+        cfg = {"auto_execute_scripts": ["a4dfc7ce368c83c8", self._DENG_SCRIPT]}
+        out = io.StringIO()
+        with patch("agent.commands._is_interactive", return_value=True), \
+             patch("agent.commands.safe_io.safe_prompt", return_value="0"), \
+             patch("agent.commands.save_config", side_effect=lambda c: c), \
+             redirect_stdout(out):
+            result = commands._config_menu_auto_execute(cfg)
+
+        self.assertEqual(result["auto_execute_scripts"], [self._DENG_SCRIPT])
+        self.assertIn("Removed Invalid Blank Auto Execute Entry", out.getvalue())
 
 
 class SupervisorAutoExecuteTests(unittest.TestCase):

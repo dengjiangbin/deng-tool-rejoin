@@ -2864,7 +2864,7 @@ def _config_menu_key(draft: dict[str, Any]) -> dict[str, Any]:
 def _prompt_yes_no_capitalized(text: str) -> bool | None:
     """Kaeru-style Y/N prompt with first-letter capitalization."""
     while True:
-        result = safe_io.safe_prompt(f"{text}? (Y/N) ")
+        result = safe_io.safe_prompt(f"{termux_ui.CYAN}[?] {text}? (Y/N){termux_ui.RESET} ")
         if result is None:
             return None
         value = result.strip().upper()
@@ -2880,7 +2880,7 @@ def _prompt_yes_no_capitalized(text: str) -> bool | None:
 
 def _read_auto_execute_script(script_number: int) -> str | None:
     print()
-    print("Paste Script, Then Type END On A New Line:")
+    print(termux_ui.prompt_prefix("Paste Script, Then Type END On A New Line"))
     lines: list[str] = []
     while True:
         raw = safe_io.safe_prompt("", default="", allow_blank=True)
@@ -2889,9 +2889,9 @@ def _read_auto_execute_script(script_number: int) -> str | None:
         if raw == "END":
             break
         lines.append(raw)
-    content = "\n".join(lines)
+    content = "\n".join(lines).rstrip("\n")
     if not content.strip():
-        print("Script Cannot Be Empty.")
+        termux_ui.print_warning("Script Cannot Be Blank")
         return ""
     return content
 
@@ -2918,7 +2918,7 @@ def _add_auto_execute_scripts_interactive(scripts: list[str]) -> tuple[list[str]
             continue
         scripts.append(script)
         added.append(script)
-        print("Script Saved.")
+        print(f"{termux_ui.GREEN}[✓] Script Saved.{termux_ui.RESET}")
         script_number += 1
     if len(scripts) >= MAX_AUTO_EXECUTE_SCRIPTS:
         print("Auto Execute script limit reached.")
@@ -2929,16 +2929,20 @@ def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
     """Menu 4: manage saved Auto Execute scripts."""
     if not _is_interactive():
         return draft
-    from .auto_execute import normalize_scripts, script_id, script_preview
+    from .auto_execute import normalize_scripts, script_preview
 
     while True:
         try:
-            scripts = normalize_scripts(draft.get("auto_execute_scripts"))
+            raw_scripts = draft.get("auto_execute_scripts")
+            scripts = normalize_scripts(raw_scripts)
+            removed_invalid = isinstance(raw_scripts, list) and len(raw_scripts) != len(scripts)
             draft["auto_execute_scripts"] = scripts
             current_lines = [f"Saved Scripts: {len(scripts)}"]
+            if removed_invalid:
+                current_lines.append("  [!] Removed Invalid Blank Auto Execute Entry.")
             if scripts:
                 for idx, script in enumerate(scripts, 1):
-                    current_lines.append(f"  {idx}. {script_preview(script)} [{script_id(script)}]")
+                    current_lines.append(f"  {idx}. {script_preview(script)}")
             else:
                 current_lines.append("  No saved scripts.")
             termux_ui.print_submenu(
@@ -2955,6 +2959,12 @@ def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
             if raw is None:
                 break
             choice = raw.strip() or "0"
+            if removed_invalid:
+                try:
+                    draft = save_config(draft)
+                except Exception:  # noqa: BLE001
+                    pass
+                termux_ui.print_warning("Removed Invalid Blank Auto Execute Entry")
             if choice == "0":
                 break
             if choice == "1":
@@ -2985,7 +2995,7 @@ def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
                 removed = scripts.pop(idx)
                 draft["auto_execute_scripts"] = scripts
                 draft = save_config(draft)
-                print(f"Removed Auto Execute script: {script_id(removed)}")
+                print(f"Removed Auto Execute Script: {script_preview(removed)}")
                 safe_io.press_enter()
             elif choice == "3":
                 if not scripts:

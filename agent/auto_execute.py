@@ -16,6 +16,13 @@ from .logger import configure_logging, log_event
 
 MAX_AUTO_EXECUTE_SCRIPTS = 20
 MAX_AUTO_EXECUTE_SCRIPT_CHARS = 20000
+HASH_ONLY_RE = re.compile(r"^[0-9a-fA-F]{16}$")
+
+
+def is_invalid_script_entry(script: Any) -> bool:
+    """Return True for blank/hash-only entries that are not executable content."""
+    text = str(script or "").strip()
+    return not text or bool(HASH_ONLY_RE.fullmatch(text))
 
 
 def normalize_scripts(value: Any) -> list[str]:
@@ -25,10 +32,14 @@ def normalize_scripts(value: Any) -> list[str]:
     scripts: list[str] = []
     seen: set[str] = set()
     for item in value:
-        script = str(item or "").strip()
-        if not script:
+        if isinstance(item, dict):
+            raw_script = item.get("content") or item.get("script") or ""
+        else:
+            raw_script = item
+        script = str(raw_script or "").replace("\r\n", "\n").replace("\r", "\n")
+        script = script.strip()
+        if is_invalid_script_entry(script):
             continue
-        script = script.replace("\r\n", "\n").replace("\r", "\n")
         if len(script) > MAX_AUTO_EXECUTE_SCRIPT_CHARS:
             script = script[:MAX_AUTO_EXECUTE_SCRIPT_CHARS]
         if script in seen:

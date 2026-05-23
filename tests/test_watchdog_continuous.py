@@ -299,6 +299,49 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(state, STATUS_IN_LOBBY)
         self.assertNotEqual(state, "Joining")
 
+    def test_process_missing_presence_lobby_returns_dead(self):
+        """Local missing-process proof has priority over stale lobby presence."""
+        sup = _make_sup(initial_status={_PKG: STATUS_ONLINE})
+        presence = MagicMock()
+        presence.is_in_game = False
+        presence.is_offline = False
+        presence.is_lobby = True
+        presence.is_unknown = False
+        stale_visual = {
+            "alive": True,
+            "running": False,
+            "root_running": False,
+            "task": False,
+            "window": True,
+            "surface": True,
+            "foreground": False,
+            "process_missing": True,
+        }
+        with patch.object(sup, "_fast_alive_evidence", return_value=stale_visual), \
+             patch.object(sup, "_fetch_presence", return_value=presence) as fetch_presence:
+            state, detail = sup._detect_package_state(_PKG, _make_entry())
+        self.assertEqual(state, STATUS_DEAD)
+        self.assertEqual(detail["process_running"], "false")
+        fetch_presence.assert_not_called()
+
+    def test_missing_process_after_online_relaunches_only_that_package(self):
+        """A previously Online package that disappears becomes Dead and relaunches alone."""
+        entry = _make_entry()
+        sup = _make_sup(packages=[_PKG, _PKG2], initial_status={_PKG: STATUS_ONLINE, _PKG2: STATUS_ONLINE})
+        now = time.time()
+        with patch.object(sup, "_fast_alive_evidence", return_value=_dead_evidence()), \
+             patch.object(sup, "_fetch_presence") as fetch_presence:
+            state, detail = sup._detect_package_state(_PKG, entry)
+        self.assertEqual(state, STATUS_DEAD)
+        self.assertEqual(detail["process_running"], "false")
+        fetch_presence.assert_not_called()
+        with patch("agent.supervisor.launch_package_for_current_config", return_value=RejoinResult(True, root_used=False)) as mock_launch, \
+             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
+            sup._handle_state(_PKG, entry, state, STATUS_ONLINE, now)
+        mock_launch.assert_called_once_with(entry, sup.cfg, "dead_recovery")
+        self.assertEqual(sup.status_map[_PKG], STATUS_LAUNCHING)
+        self.assertEqual(sup.status_map[_PKG2], STATUS_ONLINE)
+
     def test_missing_config_user_id_uses_root_prefs_then_presence_online(self):
         """Per-clone prefs userId should feed Presence API when config userId is missing."""
         sup = _make_sup()

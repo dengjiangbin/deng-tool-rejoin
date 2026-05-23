@@ -1429,9 +1429,11 @@ class WatchdogSupervisor:
 
         running = False
         root_running = False
+        process_check_attempted = False
         root_tool = getattr(self._root_info, "tool", None)
         if getattr(self._root_info, "available", False) and root_tool:
             try:
+                process_check_attempted = True
                 res = android.run_root_command(
                     ["pidof", package],
                     root_tool=root_tool,
@@ -1449,6 +1451,7 @@ class WatchdogSupervisor:
                         f"grep -F -q -- {qpkg} && echo hit && exit 0; "
                         "done; exit 1"
                     )
+                    process_check_attempted = True
                     res = android.run_root_command(
                         ["sh", "-c", script],
                         root_tool=root_tool,
@@ -1459,6 +1462,7 @@ class WatchdogSupervisor:
                     root_running = False
         else:
             try:
+                process_check_attempted = True
                 res = android.run_command(["pidof", package], timeout=2)
                 running = bool(res.ok and res.stdout.strip())
             except Exception:  # noqa: BLE001
@@ -1474,7 +1478,12 @@ class WatchdogSupervisor:
             and (foreground_package == package or package in foreground_package)
         )
 
-        need_visual = foreground or not (running or root_running)
+        # Visual/window/surface hints can be stale after force-close.  They may
+        # support Online only when process detection is unavailable, never when
+        # a process check ran and found no PID.
+        process_alive = bool(running or root_running)
+        process_missing = bool(process_check_attempted and not process_alive)
+        need_visual = foreground or (not process_alive and not process_missing)
         window = False
         surface = False
         if need_visual:
@@ -1487,7 +1496,8 @@ class WatchdogSupervisor:
             except Exception:  # noqa: BLE001
                 surface = False
 
-        strict_alive = bool(running or root_running or window or surface or foreground)
+        visual_alive = bool(window or surface or foreground)
+        strict_alive = bool(process_alive or (visual_alive and not process_missing))
         return {
             "running": running,
             "task": False,
@@ -1498,6 +1508,8 @@ class WatchdogSupervisor:
             "foreground_package": foreground_package,
             "alive": strict_alive,
             "strict_alive": strict_alive,
+            "process_check_attempted": process_check_attempted,
+            "process_missing": process_missing,
         }
 
     # ─── Presence fetching (process-check-first; presence is supplementary) ──
@@ -1640,10 +1652,14 @@ class WatchdogSupervisor:
             evidence = self._fast_alive_evidence(pkg)
         except Exception:  # noqa: BLE001
             evidence = {}
+        process_missing = bool(evidence.get("process_missing"))
         process_running = bool(
-            evidence.get("alive")
-            or evidence.get("running")
-            or evidence.get("root_running")
+            not process_missing
+            and (
+                evidence.get("alive")
+                or evidence.get("running")
+                or evidence.get("root_running")
+            )
         )
 
         foreground_package = str(evidence.get("foreground_package") or "")

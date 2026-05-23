@@ -19,7 +19,7 @@ YELLOW = "\033[1;93m"
 RED = "\033[1;91m"
 CYAN = "\033[1;96m"
 BLUE = "\033[1;94m"
-PINK = "\033[1;95m"
+PINK = "\033[38;5;205m"
 COLOR_LOGO = PINK
 WHITE = "\033[1;97m"
 RESET = "\033[0m"
@@ -46,16 +46,22 @@ def _emit(text: str = "") -> None:
             print(text.encode("ascii", errors="replace").decode("ascii"))
 
 
-def separator(char: str = "=", width: int | None = None) -> str:
-    """Return a visible-width separator, ignoring ANSI codes in measurements."""
+def separator(char: str = "=", width: int | None = None, ratio: float = 0.5) -> str:
+    """Return a short visible-width separator, ignoring ANSI codes."""
     glyph = (str(char or "-"))[0]
     if width is None:
         try:
             width = shutil.get_terminal_size(fallback=(60, 24)).columns
         except Exception:  # noqa: BLE001
             width = 60
-    width = max(40, min(int(width or 60), 72))
-    return f"{CYAN}{glyph * width}{RESET}"
+    base_width = max(1, int(width or 60))
+    try:
+        ratio_value = float(ratio)
+    except (TypeError, ValueError):
+        ratio_value = 0.5
+    visible_width = round(base_width * max(0.1, min(ratio_value, 1.0)))
+    visible_width = max(18, min(visible_width, 36))
+    return f"{CYAN}{glyph * visible_width}{RESET}"
 
 
 def header(title: str, *, width: int = 50) -> None:

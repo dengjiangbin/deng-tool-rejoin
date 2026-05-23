@@ -141,6 +141,13 @@ class TopLevelMenuStructureTests(unittest.TestCase):
             return plain[start:end]
         return plain
 
+    def _after_first_separator(self, text: str) -> str:
+        """Return text after the first rendered separator, independent of width."""
+        import re
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", text)
+        parts = re.split(r"-{3,}", plain, maxsplit=1)
+        return parts[1] if len(parts) > 1 else plain
+
     def test_menu_has_expected_numbered_items(self):
         # Webhook and YesCaptcha stay hidden; Screen Mode and Key are public.
         # "Back" navigation items (e.g. "5. Back") are excluded from this check.
@@ -169,12 +176,12 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         # "Current settings:" is the summary label, not a menu item
         # Menu item label "Current Setting" or "View Current Settings" must be absent
         self.assertNotIn("View Current Settings", text)
-        self.assertNotIn("8. ", text.split("--------------------------------")[1] if "---" in text else text)
+        self.assertNotIn("8. ", self._after_first_separator(text))
 
     def test_menu_does_not_contain_license_key_option(self):
         text = self._get_menu_text()
         # The menu items should not have a License Key entry
-        menu_section = text.split("--------------------------------")[1] if text.count("---") >= 2 else text
+        menu_section = self._after_first_separator(text)
         self.assertNotIn("6. License Key", menu_section)
         self.assertNotIn("7. License Key", menu_section)
 
