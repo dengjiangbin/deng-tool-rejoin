@@ -1,4 +1,4 @@
-"""Sanitized internal main-dev tarball builder."""
+"""Protected internal main-dev tarball builder."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ class ExcludePathTests(unittest.TestCase):
         self.assertTrue(path_should_exclude("tests/test_x.py"))
         self.assertTrue(path_should_exclude("agent/__pycache__/x.pyc"))
 
-    def test_env_example_allowed(self) -> None:
-        self.assertFalse(path_should_exclude("examples/.env.example"))
+    def test_env_example_not_shipped(self) -> None:
+        self.assertTrue(path_should_exclude("examples/.env.example"))
 
     def test_db_suffix_excluded(self) -> None:
         self.assertTrue(path_should_exclude("agent/x.db"))
@@ -43,7 +43,7 @@ class BuilderFixtureTests(unittest.TestCase):
 
     def test_tarball_excludes_junk_and_has_sha256(self) -> None:
         (self.tmp / "agent").mkdir()
-        (self.tmp / "agent" / "deng_tool_rejoin.py").write_text("# ok\n", encoding="utf-8")
+        (self.tmp / "agent" / "commands.py").write_text("VALUE = 1\n", encoding="utf-8")
         (self.tmp / "bot").mkdir()
         (self.tmp / "bot" / "main.py").write_text("x\n", encoding="utf-8")
         (self.tmp / "scripts").mkdir()
@@ -81,7 +81,11 @@ class BuilderFixtureTests(unittest.TestCase):
             names = sorted(tf.getnames())
         joined = "\n".join(names)
         self.assertIn("agent/deng_tool_rejoin.py", names)
-        self.assertIn("examples/.env.example", names)
+        self.assertIn("agent/_protected_runtime.py", names)
+        self.assertIn("agent/.deng_runtime.bin", names)
+        self.assertIn("RELEASE-MANIFEST.json", names)
+        self.assertNotIn("agent/commands.py", names)
+        self.assertNotIn("examples/.env.example", names)
         self.assertNotIn(".env", names)
         self.assertNotIn("data/bad.json", names)
         self.assertNotIn("agent/__pycache__/z.pyc", names)
@@ -131,15 +135,15 @@ class RegistryStableGateTests(unittest.TestCase):
 
 
 class RepoTarballSmokeTests(unittest.TestCase):
-    """Optional smoke test — repo tarball lists expected roots."""
+    """Protected artifact source selection is client-only."""
 
-    def test_repo_iteration_includes_agent_bot(self) -> None:
+    def test_repo_iteration_excludes_server_and_entrypoint_sources(self) -> None:
         root = Path(__file__).resolve().parents[1]
         pairs = iter_internal_test_pack_files(root)
         arcs = {a for a, _ in pairs}
-        self.assertIn("install.sh", arcs)
-        self.assertIn("agent/deng_tool_rejoin.py", arcs)
-        self.assertTrue(any(a.startswith("bot/") for a in arcs))
+        self.assertIn("agent/commands.py", arcs)
+        self.assertNotIn("agent/deng_tool_rejoin.py", arcs)
+        self.assertFalse(any(a.startswith("bot/") for a in arcs))
         self.assertFalse(any(a.startswith("tests/") for a in arcs))
         self.assertFalse(any(a.startswith("data/") for a in arcs))
 

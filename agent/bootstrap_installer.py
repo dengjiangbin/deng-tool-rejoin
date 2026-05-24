@@ -272,139 +272,61 @@ def render_direct_install_bootstrap(
     package_sha256: str,
     banner_lines: tuple[str, ...] = (),
 ) -> str:
-    """Generate a bash installer that downloads the full package directly.
-
-    Behavior (in this order, hard-failing on any step):
-
-    1. Download ``test/package.tar.gz`` with a cache-busting query param.
-    2. Verify SHA-256 matches the manifest value embedded in the script.
-    3. Stop any running ``deng-rejoin`` process (best-effort).
-    4. Preserve user data (``config.json``, ``data/``, ``logs/``,
-       ``license.json``, ``.install_api``, ``backups/``) by leaving them
-       untouched.
-    5. **Delete** the code directories (``agent/``, ``bot/``, ``scripts/``,
-       ``docs/``, ``examples/``, ``assets/``) plus every ``__pycache__/`` and
-       ``*.pyc``.  This guarantees orphan files from the previous build
-       cannot shadow the new install.
-    6. Extract the verified tarball.
-    7. Write ``.installed-build.json`` with the verified SHA, git commit,
-       channel, install time, install API, and the URLs that produced this
-       install.
-    8. Recreate ``$PREFIX/bin/deng-rejoin`` (or ``$HOME/bin/deng-rejoin``).
-    9. Run a Python import probe against the new modules.
-    10. Run ``deng-rejoin version`` to prove the wrapper executes the new
-        installed code and emits the expected commit / SHA.
-    11. Abort cleanly on any failure — the user does not get a half-installed
-        tool.
-    """
+    """Generate a compact POSIX installer for the protected test package."""
     base = base_url.rstrip("/")
-    banner_part = ""
-    if banner_lines:
-        banner_part = "\n".join(f'echo "{_escape_double(line)}"' for line in banner_lines) + "\n"
-
     safe_sha = _escape_double(package_sha256)
 
     pre_heredoc = (
-        'echo "=============================="\n'
         'echo "DENG Tool: Rejoin Installing"\n'
-        'echo "------------------------------"\n'
         'echo "Version: main-dev"\n'
-        'echo "------------------------------"\n'
-        + "command -v curl >/dev/null 2>&1 || { echo \"Install curl first: pkg install -y curl\" >&2; exit 1; }\n"
-        "command -v tar >/dev/null 2>&1 || { echo \"Install tar first: pkg install -y tar\" >&2; exit 1; }\n"
-        "command -v python3 >/dev/null 2>&1 || { echo \"Install python first: pkg install -y python\" >&2; exit 1; }\n"
-        f'export DENG_REJOIN_INSTALL_API="{base}"\n'
-        'APP_HOME="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}"\n'
-        'mkdir -p "$APP_HOME"\n'
-        # Cache-bust the package URL so neither curl, transparent proxies,
-        # nor a CDN edge can hand us a stale tarball.
-        'CACHE_BUSTER="$(date +%s)-$$"\n'
-        'PACKAGE_URL_BASE="$DENG_REJOIN_INSTALL_API/install/test/package.tar.gz"\n'
-        'PACKAGE_URL="$PACKAGE_URL_BASE?t=$CACHE_BUSTER"\n'
-        'INSTALLER_URL="$DENG_REJOIN_INSTALL_API/install/test/latest"\n'
-        f'EXPECTED_SHA256="{safe_sha}"\n'
-        'TMP="$(mktemp)"\n'
-        "trap 'rm -f \"$TMP\"' EXIT\n"
-        'curl -fsSL '
-        '-H "Cache-Control: no-cache" -H "Pragma: no-cache" '
-        '-A "deng-rejoin-installer/1.0" "$PACKAGE_URL" -o "$TMP" || {\n'
-        '  echo "Download failed." >&2\n'
-        '  echo "URL: $PACKAGE_URL_BASE" >&2\n'
-        "  exit 1\n"
-        "}\n"
-        "ACTUAL_SHA=\"$(python3 -c 'import hashlib,sys;d=open(sys.argv[1],\"rb\").read();print(hashlib.sha256(d).hexdigest())' \"$TMP\" 2>/dev/null)\" || ACTUAL_SHA=\"\"\n"
-        'if [ "$ACTUAL_SHA" != "$EXPECTED_SHA256" ]; then\n'
-        '  echo "Package checksum mismatch. The download may be corrupted or stale." >&2\n'
-        '  echo "Expected: $EXPECTED_SHA256" >&2\n'
-        '  echo "Got:      $ACTUAL_SHA" >&2\n'
-        '  echo "This means the installer script and the package are out of sync." >&2\n'
-        "  exit 1\n"
-        "fi\n"
-        # Stop any running deng-rejoin process so we never overwrite live code.
-        '_stop_running() {\n'
-        '  if command -v pkill >/dev/null 2>&1; then\n'
-        "    pkill -f 'agent/deng_tool_rejoin.py' 2>/dev/null || true\n"
-        '  fi\n'
-        '  if [ -f "$APP_HOME/data/rejoin.pid" ]; then\n'
-        '    _pid="$(cat "$APP_HOME/data/rejoin.pid" 2>/dev/null || true)"\n'
-        '    if [ -n "$_pid" ]; then\n'
-        '      kill "$_pid" 2>/dev/null || true\n'
-        '    fi\n'
-        '  fi\n'
-        '}\n'
-        '_stop_running\n'
-        # ── PURGE OLD RUNTIME ───────────────────────────────────────────────
-        # Remove code directories entirely — NOT just extract-over-them.
-        # This guarantees orphan modules from the previous build cannot shadow
-        # the new install.  User data (config, license, logs) lives at the top
-        # level or under data/ which is intentionally NOT in this list.
-        'for _d in agent bot scripts docs examples assets; do\n'
-        '  rm -rf "$APP_HOME/$_d" 2>/dev/null || true\n'
-        'done\n'
-        'rm -f "$APP_HOME/BUILD-INFO.json" "$APP_HOME/.installed-build.json" 2>/dev/null || true\n'
-        # Reliable pycache purge: -depth ensures children before parents,
-        # then a second *.pyc pass catches any stragglers.
-        # POSIX-sh compatible — no bash arrays, no process substitution.
-        'find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
-        'find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
-        # ── EXTRACT FRESH ARTIFACT ──────────────────────────────────────────
-        'tar -xzf "$TMP" -C "$APP_HOME" || { echo "Could not extract package." >&2; exit 1; }\n'
-        # Post-extraction pycache sweep (the tarball must not contain any, but
-        # verify and clean regardless so the install state is always known-clean).
-        'find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
-        'find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
-        'if [ ! -f "$APP_HOME/agent/deng_tool_rejoin.py" ]; then\n'
-        '  echo "Install error: agent/deng_tool_rejoin.py missing from package." >&2\n'
-        "  exit 1\n"
-        "fi\n"
-        '[ -f "$APP_HOME/BUILD-INFO.json" ] || { echo "Install error: BUILD-INFO.json missing — tarball is corrupt." >&2; exit 1; }\n'
-        # Record the verified API base under the install root.
-        "printf '%s\\n' \"$DENG_REJOIN_INSTALL_API\" > \"$APP_HOME/.install_api\"\n"
-        # Write the install-time metadata file.  We parse git_commit and
-        # probe_id out of the just-extracted BUILD-INFO.json so the runtime
-        # can show them without re-running git.
+        'command -v curl >/dev/null 2>&1 || { echo "Install curl first: pkg install -y curl" >&2; exit 1; }\n'
+        'command -v tar >/dev/null 2>&1 || { echo "Install tar first: pkg install -y tar" >&2; exit 1; }\n'
+        'command -v python3 >/dev/null 2>&1 || { echo "Install python first: pkg install -y python" >&2; exit 1; }\n'
+        f'u="{base}";export DENG_REJOIN_INSTALL_API="$u"\n'
+        'h="${DENG_REJOIN_HOME:-$HOME/.deng-tool/rejoin}";mkdir -p "$h"\n'
+        f's="{safe_sha}"\n'
+        't="$(mktemp)";j="$(mktemp)";trap \'rm -f "$t" "$j"\' EXIT\n'
+        'c="$(date +%s)-$$"\n'
+        'curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" -A "deng-rejoin-installer/2.0" "$u/install/test/package-token?t=$c" -o "$j" || { echo "Download setup failed." >&2; exit 1; }\n'
+        'p="$(python3 -c \'import json,sys;print(json.load(open(sys.argv[1])).get("url",""))\' "$j" 2>/dev/null)" || p=""\n'
+        '[ -n "$p" ] || { echo "Download setup failed." >&2; exit 1; }\n'
+        'curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" -A "deng-rejoin-installer/2.0" "$p" -o "$t" || { echo "Package download failed." >&2; exit 1; }\n'
+        'a="$(python3 -c \'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())\' "$t" 2>/dev/null)" || a=""\n'
+        '[ "$a" = "$s" ] || { echo "Package checksum mismatch." >&2; exit 1; }\n'
+        'if command -v pkill >/dev/null 2>&1; then pkill -f "agent/deng_tool_rejoin.py" 2>/dev/null || true; fi\n'
+        'for d in "$h"/a?ent "$h"/b?t "$h"/scr?pts "$h"/d?cs "$h"/ex?mples "$h"/assets "$h"/s?te "$h"/ser?er "$h"/te?ts; do rm -rf "$d" 2>/dev/null || true; done\n'
+        'rm -f "$h/BUILD-INFO.json" "$h/RELEASE-MANIFEST.json" "$h/.installed-build.json" 2>/dev/null || true\n'
+        'find "$h" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
+        'find "$h" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
+        'tar -xzf "$t" -C "$h" || { echo "Could not extract package." >&2; exit 1; }\n'
+        'find "$h" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
+        'find "$h" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
+        '[ -f "$h/agent/deng_tool_rejoin.py" ] || { echo "Install error: runtime missing." >&2; exit 1; }\n'
+        '[ -f "$h/agent/.deng_runtime.bin" ] || { echo "Install error: protected runtime missing." >&2; exit 1; }\n'
+        '[ -f "$h/BUILD-INFO.json" ] || { echo "Install error: BUILD-INFO.json missing." >&2; exit 1; }\n'
+        '[ -f "$h/RELEASE-MANIFEST.json" ] || { echo "Install error: RELEASE-MANIFEST.json missing." >&2; exit 1; }\n'
+        'printf \'%s\\n\' "$u" > "$h/.install_api"\n'
         '_GIT_COMMIT="$(python3 -c \'import json,os,sys; p=sys.argv[1]; '
         'print((json.load(open(p)).get("git_commit","")) if os.path.isfile(p) else "")\' '
-        '"$APP_HOME/BUILD-INFO.json" 2>/dev/null)" || _GIT_COMMIT=""\n'
+        '"$h/BUILD-INFO.json" 2>/dev/null)" || _GIT_COMMIT=""\n'
         '_PROBE_ID="$(python3 -c \'import json,os,sys; p=sys.argv[1]; '
         'print((json.load(open(p)).get("probe_id","")) if os.path.isfile(p) else "")\' '
-        '"$APP_HOME/BUILD-INFO.json" 2>/dev/null)" || _PROBE_ID=""\n'
-        '_FILE_COUNT="$(find "$APP_HOME/agent" -type f | wc -l 2>/dev/null | tr -d "[:space:]" || echo 0)"\n'
+        '"$h/BUILD-INFO.json" 2>/dev/null)" || _PROBE_ID=""\n'
+        '_FILE_COUNT="$(find "$h/agent" -type f | wc -l 2>/dev/null | tr -d "[:space:]" || echo 0)"\n'
         '_INSTALL_TIME_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"\n'
-        'cat > "$APP_HOME/.installed-build.json" <<EOF\n'
+        'cat > "$h/.installed-build.json" <<EOF\n'
         '{\n'
-        '  "artifact_sha256": "$EXPECTED_SHA256",\n'
+        '  "artifact_sha256": "$s",\n'
         '  "git_commit": "$_GIT_COMMIT",\n'
         '  "probe_id": "$_PROBE_ID",\n'
         '  "channel": "main-dev",\n'
         '  "install_time_iso": "$_INSTALL_TIME_ISO",\n'
-        '  "install_api": "$DENG_REJOIN_INSTALL_API",\n'
-        '  "package_url": "$PACKAGE_URL_BASE",\n'
-        '  "installer_url": "$INSTALLER_URL",\n'
+        '  "install_api": "$u",\n'
+        '  "package_url": "tokenized",\n'
+        '  "installer_url": "$u/install/test/latest",\n'
         '  "extracted_file_count": $_FILE_COUNT\n'
         '}\n'
         'EOF\n'
-        # Wrapper install (unchanged choice of $PREFIX/bin vs $HOME/bin).
         "USING_HOME_BIN=0\n"
         'BIN=""\n'
         'if [ -n "${PREFIX:-}" ]; then\n'
@@ -426,8 +348,6 @@ def render_direct_install_bootstrap(
         "    fi\n"
         "  done\n"
         "fi\n"
-        # Remove any stale wrapper before writing the new one so a prior
-        # symlink or read-only file cannot block recreation.
         'rm -f "$BIN/deng-rejoin" 2>/dev/null || true\n'
         "cat > \"$BIN/deng-rejoin\" << 'DENG_REJOIN_WRAPPER'\n"
     )
@@ -438,56 +358,37 @@ def render_direct_install_bootstrap(
         "hash -r 2>/dev/null || true\n"
         '[ -s "$BIN/deng-rejoin" ] || { echo "Failed to create deng-rejoin wrapper." >&2; exit 1; }\n'
         '[ -x "$BIN/deng-rejoin" ] || { echo "Failed: wrapper not executable." >&2; exit 1; }\n'
-        '[ -f "$APP_HOME/agent/deng_tool_rejoin.py" ] || { echo "Failed: deng_tool_rejoin.py missing." >&2; exit 1; }\n'
-        '[ -f "$APP_HOME/BUILD-INFO.json" ] || { echo "Failed: BUILD-INFO.json missing in package." >&2; exit 1; }\n'
-        '[ -f "$APP_HOME/.installed-build.json" ] || { echo "Failed: .installed-build.json was not written." >&2; exit 1; }\n'
-        # Import check on the new modules.  If any of these fail, the install
-        # is corrupted or the tarball is missing files.
-        'if ! PYTHONPATH="$APP_HOME" python3 -c '
+        '[ -f "$h/agent/deng_tool_rejoin.py" ] || { echo "Failed: runtime missing." >&2; exit 1; }\n'
+        '[ -f "$h/BUILD-INFO.json" ] || { echo "Failed: BUILD-INFO.json missing in package." >&2; exit 1; }\n'
+        '[ -f "$h/.installed-build.json" ] || { echo "Failed: .installed-build.json was not written." >&2; exit 1; }\n'
+        'if ! PYTHONPATH="$h" python3 -c '
         "'import agent.commands, agent.supervisor, agent.roblox_presence, agent.freeform_enable, agent.playing_state, agent.dumpsys_cache, agent.window_apply' "
         '2>/dev/null; then\n'
         '  echo "Install verification failed: required modules did not import." >&2\n'
-        '  echo "APP_HOME=$APP_HOME" >&2\n'
         "  exit 1\n"
         "fi\n"
-        # Prove the wrapper executes the new code by invoking `version`.
         '_VERSION_OUT="$("$BIN/deng-rejoin" version 2>/dev/null)" || _VERSION_OUT=""\n'
         'if ! echo "$_VERSION_OUT" | grep -q "^artifact_sha256: " ; then\n'
         '  echo "Install verification failed: deng-rejoin version did not return artifact SHA." >&2\n'
         "  exit 1\n"
         "fi\n"
         '_INSTALLED_SHORT_SHA="$(echo "$_VERSION_OUT" | grep "^artifact_sha256: " | head -n1 | awk \'{print $2}\')"\n'
-        # POSIX-sh substring: bash's ``${VAR:0:12}`` is unsupported by dash.
-        # ``printf '%.12s'`` works in every POSIX printf.
-        "_EXPECTED_SHORT_SHA=\"$(printf '%.12s' \"$EXPECTED_SHA256\")\"\n"
+        "_EXPECTED_SHORT_SHA=\"$(printf '%.12s' \"$s\")\"\n"
         'if [ "$_INSTALLED_SHORT_SHA" != "$_EXPECTED_SHORT_SHA" ]; then\n'
         '  echo "Install verification failed: installed SHA mismatch." >&2\n'
-        '  echo "Expected (short): $_EXPECTED_SHORT_SHA" >&2\n'
-        '  echo "Got (short):      $_INSTALLED_SHORT_SHA" >&2\n'
         "  exit 1\n"
         "fi\n"
-        # ── RUNTIME LEGACY DETECTOR CHECK ──────────────────────────────────
-        # Verify the installed supervisor does not import the old broken
-        # experience_detector module, and does not contain forbidden state names.
-        # Implementation uses grep directly on the extracted supervisor file so
-        # no single-quotes appear inside shell single-quoted strings (POSIX-safe).
         '_LEGACY_IMPORT="NO"\n'
-        '_SV_FILE="$APP_HOME/agent/supervisor.py"\n'
+        '_SV_FILE="$h/agent/supervisor.py"\n'
         'if [ -f "$_SV_FILE" ]; then\n'
         '  if grep -qE "^[[:space:]]*(from|import)[^#]*experience_detector" "$_SV_FILE" 2>/dev/null; then\n'
         '    _LEGACY_IMPORT="YES (WARNING: old detector in supervisor)"\n'
         '  fi\n'
         'fi\n'
-        # ── AGENT FILE PROOF ────────────────────────────────────────────────
-        '_AGENT_FILE="$(PYTHONPATH="$APP_HOME" python3 -c "import agent; print(agent.__file__)" 2>/dev/null)" || _AGENT_FILE=""\n'
-        # ── CLEAN PYCACHE before proof block ────────────────────────────────
-        # Running Python above creates __pycache__; clear it so the proof block
-        # reflects a clean post-install state (no stale bytecode).
-        'find "$APP_HOME" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
-        'find "$APP_HOME" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
-        # ── FINAL PROOF BLOCK ───────────────────────────────────────────────
+        '_AGENT_FILE="$(PYTHONPATH="$h" python3 -c "import agent; print(agent.__file__)" 2>/dev/null)" || _AGENT_FILE=""\n'
+        'find "$h" -depth -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true\n'
+        'find "$h" -name "*.pyc" 2>/dev/null -exec rm -f {} + || true\n'
         'echo "Install complete."\n'
-        'echo "=============================="\n'
     )
 
     return (

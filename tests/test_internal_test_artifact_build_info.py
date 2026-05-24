@@ -29,6 +29,8 @@ class BuildInfoBytesTests(unittest.TestCase):
             self.assertIn(key, obj)
         self.assertEqual(obj["channel"], "main-dev")
         self.assertEqual(obj["product"], "DENG Tool: Rejoin")
+        self.assertEqual(obj["artifact_format_version"], 3)
+        self.assertEqual(obj["protection"], "protected-bytecode-bundle")
 
     def test_payload_is_valid_json(self) -> None:
         raw = _make_build_info_bytes(PROJECT)
@@ -45,6 +47,9 @@ class TarballEmbedsBuildInfoTests(unittest.TestCase):
             with tarfile.open(out, "r:gz") as tf:
                 names = tf.getnames()
             self.assertIn("BUILD-INFO.json", names)
+            self.assertIn("RELEASE-MANIFEST.json", names)
+            self.assertIn("agent/.deng_runtime.bin", names)
+            self.assertNotIn("agent/commands.py", names)
 
     def test_build_info_is_parseable_inside_tarball(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -71,7 +76,13 @@ class VerifyExclusionsTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "BUILD-INFO.json"):
             verify_tarball_exclusions(buf.getvalue())
 
-    def test_accepts_tarball_with_build_info(self) -> None:
+    def test_accepts_protected_tarball(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "pkg.tar.gz"
+            build_internal_test_tarball(PROJECT, out)
+            verify_tarball_exclusions(out.read_bytes())
+
+    def test_rejects_tarball_without_manifest(self) -> None:
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tf:
             data = b"# stub\n"
@@ -82,8 +93,8 @@ class VerifyExclusionsTests(unittest.TestCase):
             ti2 = tarfile.TarInfo(name="BUILD-INFO.json")
             ti2.size = len(bi)
             tf.addfile(ti2, io.BytesIO(bi))
-        # Should not raise.
-        verify_tarball_exclusions(buf.getvalue())
+        with self.assertRaisesRegex(AssertionError, "RELEASE-MANIFEST.json"):
+            verify_tarball_exclusions(buf.getvalue())
 
 
 if __name__ == "__main__":

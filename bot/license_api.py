@@ -512,6 +512,55 @@ def _route_public_install(
                 [("Cache-Control", "no-store")],
             )
 
+        if tail == "test/package-token":
+            _row = get_exact_registry_row("main-dev")
+            if _row is None:
+                return (
+                    json.dumps({"error": "Internal test package not configured."}).encode("utf-8"),
+                    404,
+                    "application/json",
+                    [("Cache-Control", "no-store")],
+                )
+            _pkg_path: Path | None = None
+            _project_pkg = _PROJECT_ROOT / "releases" / "main-dev" / "deng-tool-rejoin-main-dev.tar.gz"
+            if _project_pkg.is_file():
+                _pkg_path = _project_pkg
+            else:
+                _art_root = get_artifact_root()
+                if _art_root is not None:
+                    _cand = artifact_path_for_row(_row, _art_root)
+                    if _cand is not None and _cand.is_file():
+                        _pkg_path = _cand
+            if _pkg_path is None:
+                return (
+                    json.dumps({"error": "Internal test package not found."}).encode("utf-8"),
+                    404,
+                    "application/json",
+                    [("Cache-Control", "no-store")],
+                )
+            _sha = str(_row.get("artifact_sha256") or "").strip()
+            ttl = max(30, int(os.environ.get("LICENSE_DOWNLOAD_TOKEN_TTL_SECONDS", "300")))
+            token = _issue_download_token(
+                _pkg_path,
+                _sha,
+                _pkg_path.name,
+                str(_row.get("version") or "main-dev"),
+                str(_row.get("channel") or "dev"),
+                _pkg_path.stat().st_size,
+                ttl,
+            )
+            payload = {
+                "url": f"{_public_base_url()}/api/download/package/{token}",
+                "sha256": _sha,
+                "expires_in": ttl,
+            }
+            return (
+                json.dumps(payload, sort_keys=True).encode("utf-8"),
+                200,
+                "application/json",
+                [("Cache-Control", "no-store")],
+            )
+
         if tail == "test/version":
             # Return JSON build metadata for the active main-dev artifact.
             # Useful for: installer cache-bust audits, monitoring, and
@@ -640,55 +689,11 @@ def _route_public_install(
             )
 
         if tail == "test/package.tar.gz":
-            # Serve the full internal test package directly (no license auth required).
-            # The package is safe to serve because it contains no secrets (.env, tokens, etc.)
-            # are excluded by build_internal_test_artifact.py.
-            _row = get_exact_registry_row("main-dev")
-            if _row is None:
-                return (
-                    json.dumps({"error": "Internal test package not configured."}).encode("utf-8"),
-                    404,
-                    "application/json",
-                    None,
-                )
-            # Prefer the copy in the deployed repo's releases/ dir; fall back to artifact root.
-            _project_pkg = _PROJECT_ROOT / "releases" / "main-dev" / "deng-tool-rejoin-main-dev.tar.gz"
-            _pkg_path: Path | None = None
-            if _project_pkg.is_file():
-                _pkg_path = _project_pkg
-            else:
-                _art_root = get_artifact_root()
-                if _art_root is not None:
-                    _cand = artifact_path_for_row(_row, _art_root)
-                    if _cand is not None and _cand.is_file():
-                        _pkg_path = _cand
-                        log.warning("serving test package from artifact root (repo bundle missing): %s", _cand)
-            if _pkg_path is None:
-                log.error("test/package.tar.gz not found in repo or artifact root")
-                return (
-                    json.dumps({"error": "Internal test package not found. Run: python scripts/build_internal_test_artifact.py"}).encode("utf-8"),
-                    404,
-                    "application/json",
-                    None,
-                )
-            try:
-                _pkg_data = _pkg_path.read_bytes()
-            except OSError as _exc:
-                log.error("test package read failed: %s", _exc)
-                return (
-                    json.dumps({"error": "read failed"}).encode("utf-8"),
-                    500,
-                    "application/json",
-                    None,
-                )
             return (
-                _pkg_data,
-                200,
-                "application/gzip",
-                [
-                    ("Content-Disposition", 'attachment; filename="deng-tool-rejoin-main-dev.tar.gz"'),
-                    ("Cache-Control", "no-store"),
-                ],
+                json.dumps({"error": "Package URL requires a short-lived token."}).encode("utf-8"),
+                403,
+                "application/json",
+                [("Cache-Control", "no-store")],
             )
 
         if "/" in tail:
@@ -1139,7 +1144,10 @@ def _route_public_install(
             data,
             200,
             ctype,
-            [("Content-Disposition", f'attachment; filename="{filename}"')],
+            [
+                ("Content-Disposition", f'attachment; filename="{filename}"'),
+                ("Cache-Control", "no-store"),
+            ],
         )
 
     return None

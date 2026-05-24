@@ -297,11 +297,12 @@ class DirectInstallBootstrapTests(unittest.TestCase):
 
     def test_script_downloads_full_package(self) -> None:
         script = self._get_script()
-        self.assertIn("install/test/package.tar.gz", script)
+        self.assertIn("install/test/package-token", script)
+        self.assertNotIn("install/test/package.tar.gz", script)
 
     def test_script_verifies_sha256(self) -> None:
         script = self._get_script()
-        self.assertIn("EXPECTED_SHA256", script)
+        self.assertIn('s="', script)
         self.assertIn("sha256", script)
         self.assertIn("checksum", script.lower())
 
@@ -319,7 +320,7 @@ class DirectInstallBootstrapTests(unittest.TestCase):
     def test_script_uses_cloudflare_safe_ua(self) -> None:
         """curl download must use the deng-rejoin-installer User-Agent to bypass Cloudflare BIC."""
         script = self._get_script()
-        self.assertIn("deng-rejoin-installer/1.0", script)
+        self.assertIn("deng-rejoin-installer/2.0", script)
 
     def test_script_does_not_write_install_requested(self) -> None:
         script = self._get_script()

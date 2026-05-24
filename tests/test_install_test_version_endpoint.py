@@ -119,10 +119,8 @@ class TestLatestCacheControlTests(unittest.TestCase):
 
     def test_test_package_serves_no_store(self) -> None:
         status, headers, _ = _wsgi_call("GET", "/install/test/package.tar.gz")
-        # 200 if a built artifact exists, 404 if not — either way the SHA
-        # must not be served from cache.
-        if status == 200:
-            self.assertEqual(headers.get("Cache-Control"), "no-store")
+        self.assertEqual(status, 403)
+        self.assertEqual(headers.get("Cache-Control"), "no-store")
 
 
 if __name__ == "__main__":

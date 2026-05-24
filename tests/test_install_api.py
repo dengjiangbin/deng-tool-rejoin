@@ -23,7 +23,7 @@ import bot.license_api as api_mod
 from agent.license_store import LocalJsonLicenseStore
 
 
-_TEST_LATEST_BANNER_MARKERS = ("DENG Tool: Rejoin Installing", "install/test/package.tar.gz")
+_TEST_LATEST_BANNER_MARKERS = ("DENG Tool: Rejoin Installing", "install/test/package-token")
 _TEST_PACKAGE_ROUTE_AVAILABLE: bool | None = None
 _TEST_LATEST_BANNER_DEPLOYED: bool | None = None
 
@@ -74,8 +74,7 @@ def _wsgi_call(method: str, path: str, body=None, environ_extra: dict | None = N
 def _test_package_route_available() -> bool:
     """Return True iff /install/test/package.tar.gz is wired into _wsgi_app.
 
-    When the route is absent the catch-all 404 fires; we skip rather than
-    fail spec-only endpoint tests that assume the direct-install flow.
+    The hardened route returns 403 instead of serving the package directly.
     """
     global _TEST_PACKAGE_ROUTE_AVAILABLE
     if _TEST_PACKAGE_ROUTE_AVAILABLE is None:
@@ -91,13 +90,7 @@ def _test_package_route_available() -> bool:
 
 
 def _test_latest_banner_deployed() -> bool:
-    """Return True iff /install/test/latest emits the direct-install banner.
-
-    The bootstrap shell has evolved away from the legacy "Installing" banner
-    + ``install/test/package.tar.gz`` direct-download flow toward a launcher
-    bundle path. When the deployed bootstrap doesn't include those legacy
-    markers, the spec tests that assert them are skipped instead of failing.
-    """
+    """Return True iff /install/test/latest emits the protected install script."""
     global _TEST_LATEST_BANNER_DEPLOYED
     if _TEST_LATEST_BANNER_DEPLOYED is None:
         try:
@@ -430,8 +423,9 @@ class InstallTestLatestBootstrapTests(unittest.TestCase):
         # "Channel: internal test" removed from public output per Section C (keep clean)
         self.assertNotIn("Channel: internal test", text)
         self.assertIn("Version: main-dev", text)
-        # New direct-install flow: downloads the full package, no .install_requested
-        self.assertIn("install/test/package.tar.gz", text)
+        # Protected flow: installer requests a short-lived package token.
+        self.assertIn("install/test/package-token", text)
+        self.assertNotIn("install/test/package.tar.gz", text)
         self.assertIn("Install complete.", text)
         self.assertNotIn("100%", text)
         self.assertNotIn("[################", text)
@@ -459,8 +453,9 @@ class InstallTestLatestBootstrapTests(unittest.TestCase):
         # Must NOT ask for license key during install
         self.assertNotIn("license key", text)
         self.assertNotIn("paste your license", text)
-        # Must download the full package from the package endpoint
-        self.assertIn("install/test/package.tar.gz", text)
+        # Must request a short-lived token, not expose the permanent package path.
+        self.assertIn("install/test/package-token", text)
+        self.assertNotIn("install/test/package.tar.gz", text)
         # Must verify SHA256
         self.assertIn("sha256", text)
         # Must NOT use the old deferred install mechanism
@@ -475,50 +470,23 @@ class InstallTestLatestBootstrapTests(unittest.TestCase):
 
 
 class InstallTestPackageEndpointTests(unittest.TestCase):
-    """GET /install/test/package.tar.gz — serves the full internal package without auth."""
+    """GET /install/test/package.tar.gz is blocked without a token."""
 
-    def test_package_endpoint_returns_200_when_artifact_exists(self) -> None:
-        """If the artifact is present (built by build_internal_test_artifact.py), expect 200."""
-        if not _test_package_route_available():
-            self.skipTest(
-                "/install/test/package.tar.gz endpoint not deployed in this "
-                "build; spec-only test runs when the direct-package route is wired."
-            )
-        import tarfile as _tf
-
-        from agent.install_registry import get_artifact_root, get_exact_registry_row, artifact_path_for_row
-
-        row = get_exact_registry_row("main-dev")
-        if row is None:
-            self.skipTest("main-dev not in registry")
-
-        # Check that the artifact actually exists somewhere before testing the endpoint
-        repo_pkg = Path(__file__).resolve().parents[1] / "releases" / "main-dev" / "deng-tool-rejoin-main-dev.tar.gz"
-        art_root = get_artifact_root()
-        artifact_exists = repo_pkg.is_file()
-        if not artifact_exists and art_root:
-            cand = artifact_path_for_row(row, art_root)
-            artifact_exists = cand is not None and cand.is_file()
-
-        if not artifact_exists:
-            self.skipTest("main-dev artifact not built yet; run: python scripts/build_internal_test_artifact.py")
-
+    def test_package_endpoint_returns_403_without_token(self) -> None:
         status, headers, body = _wsgi_call("GET", "/install/test/package.tar.gz")
-        self.assertEqual(status, 200)
-        ct = headers.get("Content-Type", "")
-        self.assertIn("gzip", ct)
-        # Verify the response body is a valid tar.gz with agent/deng_tool_rejoin.py
-        import io
-        with _tf.open(fileobj=io.BytesIO(body), mode="r:gz") as tf:
-            names = tf.getnames()
-        self.assertIn("agent/deng_tool_rejoin.py", names)
+        self.assertEqual(status, 403)
+        self.assertEqual(headers.get("Cache-Control"), "no-store")
+        self.assertIn(b"short-lived token", body)
 
-    def test_package_endpoint_requires_no_license(self) -> None:
-        """The package endpoint must not check Authorization headers or license keys."""
-        # A GET request with no auth headers must not return 401/403 due to auth checks.
-        # (It may return 404 if the artifact isn't built, but never 401/403 from auth.)
-        status, _headers, _body = _wsgi_call("GET", "/install/test/package.tar.gz")
-        self.assertNotEqual(status, 401)
+    def test_package_token_returns_single_use_download_url(self) -> None:
+        status, headers, body = _wsgi_call("GET", "/install/test/package-token")
+        if status == 404:
+            self.skipTest("main-dev artifact not built yet; run: python scripts/build_internal_test_artifact.py")
+        self.assertEqual(status, 200, body)
+        self.assertEqual(headers.get("Cache-Control"), "no-store")
+        payload = json.loads(body)
+        self.assertIn("/api/download/package/", payload["url"])
+        self.assertEqual(len(str(payload["sha256"])), 64)
 
 
 class InstallBootstrapSanityTests(unittest.TestCase):
@@ -594,8 +562,13 @@ class InstallBootstrapSanityTests(unittest.TestCase):
         self.assertIn("rejoin.deng.my.id", s)
         self.assertNotIn("100%", s)
         self.assertNotIn("[################", s)
-        self.assertIn("install/test/package.tar.gz", s)
+        self.assertIn("install/test/package-token", s)
+        self.assertNotIn("install/test/package.tar.gz", s)
         self.assertIn("deng_tool_rejoin.py", s)
+        self.assertNotIn("bot/", s)
+        self.assertNotIn("site/", s)
+        self.assertNotIn("server/", s)
+        self.assertNotIn("data/", s)
         self.assertNotIn("DENG Tool: Rejoin Test Installer", s)
         self.assertNotIn("Launcher bundle verified", s)
         self.assertNotIn("Wrapper path", s)

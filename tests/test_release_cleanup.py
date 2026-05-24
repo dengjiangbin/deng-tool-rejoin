@@ -97,7 +97,7 @@ class TestInstallerShortSeparators(unittest.TestCase):
         # reaching the "Install complete." line.  Verify it's guarded by
         # checking that Install complete. comes AFTER all integrity checks.
         s = _script()
-        idx_sha_check = s.find("ACTUAL_SHA")
+        idx_sha_check = s.find("Package checksum mismatch")
         idx_complete  = s.find("Install complete.")
         self.assertGreater(idx_complete, idx_sha_check,
                            "Install complete. must come after SHA verification")
@@ -105,18 +105,11 @@ class TestInstallerShortSeparators(unittest.TestCase):
     def test_success_output_echo_order_is_exact(self) -> None:
         s = _script()
         expected = (
-            'echo "=============================="\n'
             'echo "DENG Tool: Rejoin Installing"\n'
-            'echo "------------------------------"\n'
             'echo "Version: main-dev"\n'
-            'echo "------------------------------"\n'
         )
         self.assertIn(expected, s)
-        self.assertIn(
-            'echo "Install complete."\n'
-            'echo "=============================="\n',
-            s,
-        )
+        self.assertIn('echo "Install complete."\n', s)
         self.assertNotIn("100%", s)
         self.assertNotIn("spinner", s.lower())
 

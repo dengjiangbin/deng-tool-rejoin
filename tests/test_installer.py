@@ -58,10 +58,10 @@ class TestBuildInfoFields(unittest.TestCase):
                       "product", "artifact_format_version", "probe_id"):
             self.assertIn(field, data, f"missing field: {field}")
 
-    def test_artifact_format_version_is_2(self):
-        """Hardened builds use format version 2 (adds probe_id)."""
+    def test_artifact_format_version_is_3(self):
+        """Protected builds use format version 3."""
         data = json.loads(self._make_build_info_bytes())
-        self.assertEqual(data["artifact_format_version"], 2)
+        self.assertEqual(data["artifact_format_version"], 3)
 
     def test_channel_is_main_dev(self):
         data = json.loads(self._make_build_info_bytes())
@@ -232,13 +232,13 @@ class TestInstallerScript(unittest.TestCase):
 
     def test_sha_mismatch_message_present(self):
         script = self._make_script()
-        self.assertIn("out of sync", script)
+        self.assertIn("Package checksum mismatch", script)
 
     def test_purge_before_extract(self):
         script = self._make_script()
         # Verify rm -rf agent/ comes before tar extraction
-        purge_pos = script.find('rm -rf "$APP_HOME/$_d"')
-        tar_pos = script.find('tar -xzf "$TMP"')
+        purge_pos = script.find('rm -rf "$d"')
+        tar_pos = script.find('tar -xzf "$t"')
         self.assertGreater(tar_pos, purge_pos, "purge must happen before extraction")
 
     def test_pycache_cleanup_uses_depth_flag(self):
@@ -249,7 +249,7 @@ class TestInstallerScript(unittest.TestCase):
     def test_post_extraction_pycache_cleanup_present(self):
         """There must be a pycache cleanup AFTER tar extraction too."""
         script = self._make_script()
-        tar_pos = script.find('tar -xzf "$TMP"')
+        tar_pos = script.find('tar -xzf "$t"')
         post_pycache = script.find("-depth", tar_pos)
         self.assertGreater(post_pycache, tar_pos, "post-extraction pycache cleanup missing")
 
@@ -298,36 +298,13 @@ class TestInstallerScript(unittest.TestCase):
 
     def test_direct_installer_has_single_bottom_separator(self):
         script = self._make_script()
-        # Short 30-char separators (TASK 1 of release cleanup).
         sep_echo = 'echo "=============================="'
         dash_echo = 'echo "------------------------------"'
-        self.assertEqual(script.count(sep_echo), 2)
-        self.assertEqual(script.count(dash_echo), 2)
-        self.assertIn(
-            'echo "=============================="\n'
-            'echo "DENG Tool: Rejoin Installing"\n'
-            'echo "------------------------------"\n'
-            'echo "Version: main-dev"\n'
-            'echo "------------------------------"\n',
-            script,
-        )
-        self.assertIn(
-            'echo "Install complete."\n'
-            'echo "=============================="\n',
-            script,
-        )
-        # No duplicate adjacent separators.
-        self.assertNotIn(
-            'echo "=============================="\n'
-            'echo "=============================="\n'
-            'echo "Install complete."\n',
-            script,
-        )
-        # Old 60-char separator must be gone.
-        self.assertNotIn(
-            'echo "============================================================"',
-            script,
-        )
+        self.assertEqual(script.count(sep_echo), 0)
+        self.assertEqual(script.count(dash_echo), 0)
+        self.assertIn('echo "DENG Tool: Rejoin Installing"\n', script)
+        self.assertIn('echo "Version: main-dev"\n', script)
+        self.assertIn('echo "Install complete."\n', script)
 
     def test_agent_file_proof_present(self):
         script = self._make_script()
@@ -347,7 +324,7 @@ class TestInstallerScript(unittest.TestCase):
 
     def test_cache_buster_present(self):
         script = self._make_script()
-        self.assertIn("CACHE_BUSTER", script)
+        self.assertIn("?t=$c", script)
         self.assertIn("Cache-Control: no-cache", script)
 
 

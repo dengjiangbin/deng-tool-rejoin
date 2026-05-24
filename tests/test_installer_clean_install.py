@@ -29,61 +29,56 @@ def _script(sha: str = "a" * 64) -> str:
 class CacheBustingTests(unittest.TestCase):
     def test_curl_uses_cache_bust_query_param(self) -> None:
         s = _script()
-        # We pin the URL once, then download with ?t=cache-buster suffix.
-        self.assertIn("CACHE_BUSTER=", s)
-        self.assertIn("?t=$CACHE_BUSTER", s)
+        self.assertIn('c="$(date +%s)-$$"', s)
+        self.assertIn("?t=$c", s)
         # Also send the canonical no-cache request headers.
         self.assertIn('-H "Cache-Control: no-cache"', s)
         self.assertIn('-H "Pragma: no-cache"', s)
 
     def test_keeps_cloudflare_safe_ua(self) -> None:
         # The UA bypasses Cloudflare's Browser Integrity Check; keep it.
-        self.assertIn("deng-rejoin-installer/1.0", _script())
+        self.assertIn("deng-rejoin-installer/2.0", _script())
 
 
 class PurgeStepTests(unittest.TestCase):
     def test_purges_known_code_directories(self) -> None:
         s = _script()
-        # The purge loop is the sole guarantee against orphan files from the
-        # previous build.  Every code directory must be named.
-        self.assertIn("for _d in agent bot scripts docs examples assets", s)
-        self.assertIn('rm -rf "$APP_HOME/$_d"', s)
+        self.assertIn('for d in "$h"/a?ent', s)
+        self.assertIn('rm -rf "$d"', s)
 
     def test_purges_pycache_recursively(self) -> None:
         s = _script()
-        self.assertIn('find "$APP_HOME" -depth -name __pycache__ -type d', s)
-        self.assertIn('find "$APP_HOME" -name "*.pyc"', s)
+        self.assertIn('find "$h" -depth -name __pycache__ -type d', s)
+        self.assertIn('find "$h" -name "*.pyc"', s)
 
     def test_removes_previous_build_metadata(self) -> None:
         s = _script()
-        self.assertIn('rm -f "$APP_HOME/BUILD-INFO.json"', s)
-        self.assertIn('"$APP_HOME/.installed-build.json"', s)
+        self.assertIn('rm -f "$h/BUILD-INFO.json"', s)
+        self.assertIn('"$h/.installed-build.json"', s)
 
     def test_stops_running_processes_before_install(self) -> None:
         s = _script()
-        # Best-effort pkill against the wrapper process.
-        self.assertIn("pkill -f 'agent/deng_tool_rejoin.py'", s)
-        # Honour pid file if present.
-        self.assertIn("$APP_HOME/data/rejoin.pid", s)
+        self.assertIn('pkill -f "agent/deng_tool_rejoin.py"', s)
+        self.assertNotIn("data/rejoin.pid", s)
 
 
 class ShaVerifyTests(unittest.TestCase):
     def test_aborts_on_sha_mismatch(self) -> None:
         s = _script()
-        self.assertIn("EXPECTED_SHA256=", s)
-        self.assertIn("ACTUAL_SHA", s)
+        self.assertIn('s="', s)
+        self.assertIn('a="$(python3 -c', s)
         self.assertIn("hashlib.sha256", s)
         self.assertIn("Package checksum mismatch", s)
         # SHA check must come before extraction.
         sha_idx = s.index("Package checksum mismatch")
-        extract_idx = s.index('tar -xzf "$TMP"')
+        extract_idx = s.index('tar -xzf "$t"')
         self.assertLess(sha_idx, extract_idx)
 
 
 class InstalledBuildMetadataTests(unittest.TestCase):
     def test_writes_installed_build_json(self) -> None:
         s = _script()
-        self.assertIn('"$APP_HOME/.installed-build.json"', s)
+        self.assertIn('"$h/.installed-build.json"', s)
         for key in (
             "artifact_sha256",
             "git_commit",
@@ -97,7 +92,7 @@ class InstalledBuildMetadataTests(unittest.TestCase):
             self.assertIn(f'"{key}":', s, msg=f"missing key {key} in installed-build JSON")
 
     def test_records_install_api(self) -> None:
-        self.assertIn('"$APP_HOME/.install_api"', _script())
+        self.assertIn('"$h/.install_api"', _script())
 
 
 class PostInstallVerificationTests(unittest.TestCase):
@@ -128,22 +123,22 @@ class OrderingTests(unittest.TestCase):
     def test_sha_verify_before_purge(self) -> None:
         s = _script()
         sha = s.index("Package checksum mismatch")
-        purge = s.index('rm -rf "$APP_HOME/$_d"')
+        purge = s.index('rm -rf "$d"')
         self.assertLess(sha, purge, msg="must SHA-verify before deleting old code")
 
     def test_purge_before_extract(self) -> None:
         s = _script()
-        purge = s.index('rm -rf "$APP_HOME/$_d"')
-        extract = s.index('tar -xzf "$TMP"')
+        purge = s.index('rm -rf "$d"')
+        extract = s.index('tar -xzf "$t"')
         self.assertLess(purge, extract)
 
     def test_extract_before_installed_build_json(self) -> None:
         s = _script()
-        extract = s.index('tar -xzf "$TMP"')
+        extract = s.index('tar -xzf "$t"')
         # The metadata file is *written* by the heredoc `cat > ...
         # .installed-build.json`.  It also appears earlier in the purge
         # `rm -f` clause; find the write line specifically.
-        meta = s.index('cat > "$APP_HOME/.installed-build.json"')
+        meta = s.index('cat > "$h/.installed-build.json"')
         self.assertLess(extract, meta)
 
     def test_version_check_before_install_complete(self) -> None:
