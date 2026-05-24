@@ -796,6 +796,8 @@ describe('theme and dashboard UI', () => {
     assert.match(res.text, /deng_tool_theme/);
     assert.match(res.text, /prefers-color-scheme: light/);
     assert.match(res.text, /aria-label="Switch theme"/);
+    assert.match(res.text, /theme-toggle-track/);
+    assert.match(res.text, /theme-toggle-knob/);
     assert.match(res.text, /theme-icon-sun/);
     assert.match(res.text, /theme-icon-moon/);
     assert.match(res.text, /<rect x="3" y="3" width="7" height="8" rx="2"><\/rect>/);
@@ -864,6 +866,11 @@ describe('theme and dashboard UI', () => {
 
   test('theme stylesheet uses logo-inspired neon blue-pink gradient and readable text', () => {
     const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
+    assert.match(css, /\.gradient-brand-text/);
+    assert.match(css, /#22d3ee/i);
+    assert.match(css, /#3b82f6/i);
+    assert.match(css, /#ec4899/i);
+    assert.match(css, /#f472b6/i);
     assert.match(css, /#00cfff|#17a0dd/i);
     assert.match(css, /#ff2fb3|#c0187a/i);
     assert.match(css, /#6143b2/i);
@@ -882,7 +889,9 @@ describe('theme and dashboard UI', () => {
     assert.match(css, /\.sidebar-actions\s*\{\s*display:\s*grid;\s*gap:\s*10px;/);
     assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.sidebar-actions\s*\{\s*grid-template-columns:\s*auto auto;/);
     assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.sidebar-actions\s*\{\s*grid-template-columns:\s*1fr 1fr;/);
-    assert.match(css, /\.theme-toggle \[data-theme-label\]\s*\{\s*display:\s*none;/);
+    assert.match(css, /\.theme-toggle-track,\s*\.theme-toggle-knob,\s*\.theme-toggle-icon\s*\{\s*pointer-events:\s*none;/);
+    assert.match(css, /\.theme-toggle-label\s*\{\s*min-width:\s*42px;/);
+    assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.theme-toggle-label\s*\{\s*display:\s*none;/);
   });
 
   test('layout includes cache-busted stylesheet URL', async () => {

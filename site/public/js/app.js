@@ -4,8 +4,7 @@
 (function initThemeToggle() {
   var STORAGE_KEY = 'deng_tool_theme';
   var root = document.documentElement;
-  var toggle = document.querySelector('[data-theme-toggle]');
-  var label = toggle ? toggle.querySelector('[data-theme-label]') : null;
+  var toggles = Array.prototype.slice.call(document.querySelectorAll('[data-theme-toggle]'));
 
   function systemTheme() {
     if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
@@ -24,13 +23,14 @@
   function applyTheme(theme, persist) {
     var next = theme === 'light' ? 'light' : 'dark';
     root.dataset.theme = next;
-    if (toggle) {
+    toggles.forEach(function(toggle) {
+      var label = toggle.querySelector('[data-theme-label]');
       var nextLabel = next === 'light' ? 'Light' : 'Night';
       toggle.setAttribute('aria-label', 'Switch to ' + (next === 'light' ? 'night' : 'light') + ' mode');
       toggle.setAttribute('title', 'Switch to ' + (next === 'light' ? 'Night' : 'Light') + ' mode');
       toggle.setAttribute('aria-pressed', next === 'dark' ? 'true' : 'false');
       if (label) label.textContent = nextLabel;
-    }
+    });
     if (persist) {
       try {
         localStorage.setItem(STORAGE_KEY, next);
@@ -41,9 +41,12 @@
   }
 
   applyTheme(savedTheme() || root.dataset.theme || systemTheme(), false);
-  if (!toggle) return;
-  toggle.addEventListener('click', function() {
-    applyTheme(root.dataset.theme === 'light' ? 'dark' : 'light', true);
+  toggles.forEach(function(toggle) {
+    toggle.addEventListener('click', function(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      applyTheme(root.dataset.theme === 'light' ? 'dark' : 'light', true);
+    });
   });
 }());
 

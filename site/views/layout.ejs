@@ -28,7 +28,7 @@
       <span class="brand-mark logo-mark" aria-hidden="true">
         <img src="/public/img/deng-logo.png?v=<%= assetVersion %>" alt="">
       </span>
-      <span class="brand-name">DENG <span class="brand-accent">Tool</span></span>
+      <span class="brand-name gradient-brand-text">DENG Tool</span>
     </div>
 
     <ul class="nav-list">
@@ -72,26 +72,32 @@
         <span class="user-name text-truncate"><%= user.username %></span>
       </div>
       <div class="sidebar-actions">
-        <button type="button" class="nav-link theme-toggle" data-theme-toggle aria-label="Switch theme" title="Switch theme">
-          <span class="nav-icon theme-icon-sun" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <circle cx="12" cy="12" r="4"></circle>
-              <path d="M12 2v2"></path>
-              <path d="M12 20v2"></path>
-              <path d="m4.93 4.93 1.41 1.41"></path>
-              <path d="m17.66 17.66 1.41 1.41"></path>
-              <path d="M2 12h2"></path>
-              <path d="M20 12h2"></path>
-              <path d="m6.34 17.66-1.41 1.41"></path>
-              <path d="m19.07 4.93-1.41 1.41"></path>
-            </svg>
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch theme" title="Switch theme">
+          <span class="theme-toggle-track" aria-hidden="true">
+            <span class="theme-toggle-text theme-toggle-text-light">Light</span>
+            <span class="theme-toggle-text theme-toggle-text-dark">Dark</span>
+            <span class="theme-toggle-knob">
+              <span class="theme-toggle-icon theme-icon-sun">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <circle cx="12" cy="12" r="4"></circle>
+                  <path d="M12 2v2"></path>
+                  <path d="M12 20v2"></path>
+                  <path d="m4.93 4.93 1.41 1.41"></path>
+                  <path d="m17.66 17.66 1.41 1.41"></path>
+                  <path d="M2 12h2"></path>
+                  <path d="M20 12h2"></path>
+                  <path d="m6.34 17.66-1.41 1.41"></path>
+                  <path d="m19.07 4.93-1.41 1.41"></path>
+                </svg>
+              </span>
+              <span class="theme-toggle-icon theme-icon-moon">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 7 7 0 1 0 20.5 14.5Z"></path>
+                </svg>
+              </span>
+            </span>
           </span>
-          <span class="nav-icon theme-icon-moon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 7 7 0 1 0 20.5 14.5Z"></path>
-            </svg>
-          </span>
-          <span data-theme-label>Night</span>
+          <span class="theme-toggle-label" data-theme-label>Night</span>
         </button>
         <form method="POST" action="/auth/logout">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
