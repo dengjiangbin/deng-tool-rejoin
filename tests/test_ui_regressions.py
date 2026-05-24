@@ -21,6 +21,21 @@ class LogoColorRegressionTests(unittest.TestCase):
         self.assertNotIn("\033[95m", first_line)
         self.assertNotIn("\033[1;95m", first_line)
 
+    def test_banner_contains_small_mons_after_subtitle(self):
+        text = banner.banner_text(use_color=False)
+        lines = text.splitlines()
+        subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
+        self.assertIn("MONS", lines[subtitle_idx + 1])
+        self.assertLessEqual(len(lines[subtitle_idx + 1].strip()), 4)
+
+    def test_banner_mons_uses_grey_when_colored(self):
+        text = banner.banner_text(use_color=True)
+        lines = text.splitlines()
+        subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
+        mons_line = lines[subtitle_idx + 1]
+        self.assertIn("MONS", mons_line)
+        self.assertIn("\033[90m", mons_line)
+
 
 class SeparatorRegressionTests(unittest.TestCase):
     def test_separator_visible_width_not_half_length(self):

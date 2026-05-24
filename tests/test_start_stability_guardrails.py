@@ -18,7 +18,7 @@ class TestStartStabilityGuardrails(unittest.TestCase):
             'os.system("clear")',
             "serialized runner",
             "one `WatchdogSupervisor`",
-            "Auto Execute",
+            "client-side script execution",
             "Landscape and Portrait layout state",
             "10 minutes",
             "Ctrl+C",

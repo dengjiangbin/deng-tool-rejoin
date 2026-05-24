@@ -10,6 +10,7 @@ from .constants import PRODUCT_NAME, VERSION
 
 BLUE = "\033[1;94m"
 PINK = "\033[38;5;205m"
+GREY = "\033[90m"
 COLOR_LOGO = PINK
 RESET = "\033[0m"
 
@@ -52,9 +53,11 @@ def banner_text(use_color: bool | None = None) -> str:
     subtitle_text = f"{PRODUCT_NAME.replace('DENG Tool: ', 'Tool: ')} v{VERSION}"
     if use_color:
         subtitle = f"{BLUE}{subtitle_text.center(logo_width)}{RESET}"
+        mons = f"{GREY}{'MONS'.center(logo_width)}{RESET}"
     else:
         subtitle = subtitle_text.center(logo_width)
-    return f"{logo}\n{subtitle}"
+        mons = "MONS".center(logo_width)
+    return f"{logo}\n{subtitle}\n{mons}"
 
 
 def print_banner(use_color: bool | None = None) -> None:

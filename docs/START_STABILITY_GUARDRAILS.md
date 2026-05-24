@@ -12,7 +12,7 @@ Termux native segfault class seen in probe `p-b66c244cad`.
 5. Start owns exactly one `WatchdogSupervisor` loop and one render callback. Do not add render, watchdog, or status worker threads.
 6. Background workers must not write directly to stdout.
 7. Start must record phase context in `data/logs/crash_faulthandler.log`.
-8. The public Start supervisor must not invoke Auto Execute, `/execute`, clipboard paste, input text, or client-side script execution.
+8. The public Start supervisor must not invoke client-side script execution, clipboard paste, input text, or executor-style commands.
 9. Landscape and Portrait layout state must be isolated by mode; stale bounds from the previous mode must be cleared before computing new bounds.
 10. Do not add a legacy layout fallback that reuses bounds from another screen mode.
 

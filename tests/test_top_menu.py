@@ -138,70 +138,23 @@ class TestAutoExecutePlacement(unittest.TestCase):
         self.assertNotIn("Auto Execute", labels)
         self.assertNotIn("auto-execute", commands_map)
 
-    def test_setup_config_contains_auto_execute(self):
+    def test_setup_config_does_not_contain_auto_execute(self):
         out = io.StringIO()
         with redirect_stdout(out):
             termux_ui.print_config_menu()
         text = out.getvalue()
-        self.assertIn("Auto Execute", text)
+        self.assertNotIn("Auto Execute", text)
         self.assertNotIn("4. Key", text)
 
-    def test_first_time_setup_contains_auto_execute(self):
+    def test_first_time_setup_does_not_contain_auto_execute(self):
         src = inspect.getsource(commands._run_first_time_setup_wizard)
-        self.assertIn("Auto Execute", src)
-        self.assertIn("Step 7 of 8: Auto Execute (Optional)", src)
+        self.assertNotIn("Auto Execute", src)
+        self.assertNotIn("Add Script", src)
 
-    def test_setup_config_auto_execute_opens_submenu(self):
+    def test_setup_config_option_4_is_invalid(self):
         src = inspect.getsource(commands._run_edit_config_menu)
-        self.assertIn('elif choice == "4":', src)
-        self.assertIn("_config_menu_auto_execute(draft)", src)
-
-    def test_auto_execute_invalid_then_back_does_not_crash(self):
-        cfg = validate_config(default_config())
-        with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", side_effect=["x", "0"]), \
-             patch("agent.commands.safe_io.press_enter"), \
-             redirect_stdout(io.StringIO()) as out:
-            result = commands._config_menu_auto_execute(cfg)
-        self.assertIsInstance(result, dict)
-        self.assertIn("Invalid Option", out.getvalue())
-
-    def test_auto_execute_back_returns_safely(self):
-        cfg = validate_config(default_config())
-        with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", return_value="0"), \
-             redirect_stdout(io.StringIO()):
-            result = commands._config_menu_auto_execute(cfg)
-        self.assertIs(result, cfg)
-
-    def test_auto_execute_empty_state_renders(self):
-        cfg = validate_config(default_config())
-        cfg["auto_execute_scripts"] = []
-        with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", return_value="0"), \
-             redirect_stdout(io.StringIO()) as out:
-            commands._config_menu_auto_execute(cfg)
-        self.assertIn("No saved scripts", out.getvalue())
-
-    def test_auto_execute_corrupt_config_recovery_does_not_crash(self):
-        cfg = validate_config(default_config())
-        cfg["auto_execute_scripts"] = ["print(1)"]
-        with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", side_effect=["3", "YES", "0"]), \
-             patch("agent.commands.safe_io.press_enter"), \
-             patch("agent.commands.save_config", side_effect=commands.ConfigError("bad")), \
-             redirect_stdout(io.StringIO()) as out:
-            result = commands._config_menu_auto_execute(cfg)
-        self.assertIsInstance(result, dict)
-        self.assertIn("Auto Execute config was missing or corrupt", out.getvalue())
-
-    def test_auto_execute_keyboard_interrupt_returns_safely(self):
-        cfg = validate_config(default_config())
-        with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", side_effect=KeyboardInterrupt), \
-             redirect_stdout(io.StringIO()):
-            result = commands._config_menu_auto_execute(cfg)
-        self.assertIsInstance(result, dict)
+        self.assertNotIn("_config_menu_auto_execute", src)
+        self.assertNotIn('choice == "4"', src)
 
 
 class TestPackageKeyNotInTopMenu(unittest.TestCase):

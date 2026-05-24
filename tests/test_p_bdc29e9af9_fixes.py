@@ -161,72 +161,24 @@ class TestTopMenuPlacement(unittest.TestCase):
         self.assertNotIn("Auto Execute", labels)
         self.assertNotIn("Package Key", labels)
 
-    def test_setup_config_has_auto_execute_as_option_4(self):
+    def test_setup_config_does_not_have_auto_execute(self):
         src = inspect.getsource(commands._run_edit_config_menu)
         ui_src = inspect.getsource(termux_ui.print_config_menu)
         self.assertIn("print_config_menu", src)
-        self.assertIn('menu_number("4", "Auto Execute")', ui_src)
+        self.assertNotIn("Auto Execute", ui_src)
         self.assertNotIn('"4. Key"', ui_src)
-        self.assertNotIn('"5. Auto Execute"', ui_src)
 
-    def test_first_time_setup_mentions_auto_execute(self):
+    def test_first_time_setup_does_not_mention_auto_execute(self):
         src = inspect.getsource(commands._run_first_time_setup_wizard)
-        self.assertIn("Auto Execute", src)
-        self.assertIn("Step 7 of 8: Auto Execute (Optional)", src)
+        self.assertNotIn("Auto Execute", src)
+        self.assertNotIn("Add Script", src)
 
     def test_handlers_include_package_key_not_in_top_menu(self):
         menu_commands = {item[2] for item in menu.MENU_ITEMS}
         self.assertNotIn("package-key", menu_commands)
         self.assertNotIn("auto-execute", menu_commands)
         self.assertIn("package-key", commands._handlers())
-
-
-class TestAutoExecuteKaeruInput(unittest.TestCase):
-    def test_add_script_prompt_capitalization(self):
-        cfg = {"auto_execute_scripts": []}
-        prompts = iter(["1", "Y", "print(1)", "END", "N", "0"])
-        prompt_texts: list[str] = []
-
-        def fake_prompt(prompt="", **_kwargs):
-            prompt_texts.append(prompt)
-            return next(prompts)
-
-        with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", side_effect=fake_prompt), \
-             patch("agent.commands.safe_io.press_enter"), \
-             patch("agent.commands.save_config", side_effect=lambda c: c), \
-             redirect_stdout(io.StringIO()):
-            result = commands._config_menu_auto_execute(cfg)
-
-        self.assertEqual(result["auto_execute_scripts"], ["print(1)"])
-        self.assertTrue(any("Add Script #1? (Y/N)" in p for p in prompt_texts))
-        self.assertTrue(any("Add Script #2? (Y/N)" in p for p in prompt_texts))
-
-    def test_multiline_script_preserves_blank_lines_without_end(self):
-        cfg = {"auto_execute_scripts": []}
-        lines = ["1", "Y", "line1", "", "line3", "END", "N", "0"]
-        prompts = iter(lines)
-
-        with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", side_effect=lambda *a, **k: next(prompts)), \
-             patch("agent.commands.safe_io.press_enter"), \
-             patch("agent.commands.save_config", side_effect=lambda c: c), \
-             redirect_stdout(io.StringIO()):
-            result = commands._config_menu_auto_execute(cfg)
-
-        self.assertEqual(result["auto_execute_scripts"], ["line1\n\nline3"])
-
-    def test_empty_script_rejected(self):
-        out = io.StringIO()
-        with patch("agent.commands.safe_io.safe_prompt", side_effect=["", "END"]), \
-             redirect_stdout(out):
-            script = commands._read_auto_execute_script(1)
-        self.assertEqual(script, "")
-        self.assertIn("Script Cannot Be Blank.", out.getvalue())
-
-    def test_eof_cancels_script_input(self):
-        with patch("agent.commands.safe_io.safe_prompt", return_value=None):
-            self.assertIsNone(commands._read_auto_execute_script(1))
+        self.assertNotIn("auto-execute", commands._handlers())
 
 
 class TestTopMenuExit(unittest.TestCase):

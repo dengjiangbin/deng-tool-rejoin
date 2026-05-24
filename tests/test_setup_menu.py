@@ -163,9 +163,10 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         ]
         self.assertEqual(
             numbered,
-            ["1. Packages", "2. Private Server URL", "3. Screen Mode", "4. Auto Execute"],
+            ["1. Packages", "2. Private Server URL", "3. Screen Mode"],
             f"Unexpected Edit Config items: {numbered}",
         )
+        self.assertNotIn("Auto Execute", block)
 
     def test_menu_does_not_contain_advanced_info(self):
         text = self._get_menu_text()

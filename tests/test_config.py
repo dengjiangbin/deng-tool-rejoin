@@ -147,7 +147,7 @@ class ConfigTests(unittest.TestCase):
         validated = validate_config(cfg)
         self.assertNotIn(old_key, validated)
 
-    def test_auto_execute_scripts_are_normalized(self):
+    def test_auto_execute_scripts_are_removed_safely(self):
         cfg = default_config()
         cfg["auto_execute_scripts"] = [
             "",
@@ -155,14 +155,12 @@ class ConfigTests(unittest.TestCase):
             "loadstring(game:HttpGet(\"https://example.com/a.lua\"))()",
             "print('second')",
         ]
+        cfg["saved_scripts"] = ["print('hidden')"]
+        cfg["post_launch_action"] = "script"
         validated = validate_config(cfg)
-        self.assertEqual(
-            validated["auto_execute_scripts"],
-            [
-                'loadstring(game:HttpGet("https://example.com/a.lua"))()',
-                "print('second')",
-            ],
-        )
+        self.assertNotIn("auto_execute_scripts", validated)
+        self.assertNotIn("saved_scripts", validated)
+        self.assertNotIn("post_launch_action", validated)
 
     def test_roblosecurity_cookie_is_normalized_and_masked(self):
         from agent.config import safe_config_view

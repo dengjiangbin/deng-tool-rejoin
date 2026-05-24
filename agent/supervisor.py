@@ -2094,7 +2094,6 @@ class WatchdogSupervisor:
                 logger, "info", "[DENG_REJOIN_ONLINE_STABLE]",
                 package=pkg,
                 action="monitor_only",
-                unsafe_auto_execute_disabled="true",
             )
             # Run adaptive RAM optimization while the package is healthy.
             self._check_ram_optimization(pkg, entry, now, render_callback=render_callback)

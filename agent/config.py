@@ -167,7 +167,6 @@ def default_config() -> dict[str, Any]:
         "yescaptcha_key": "",
         "webhook_tags": [],
         "package_start_times": {},
-        "auto_execute_scripts": [],
         # ── Package keys (per-package internal license, NOT DENG Tool license) ──
         # These are written to each Roblox/package Android data folder:
         #   /storage/emulated/0/Android/data/{package}/files/gloop/external/Internals/Cache/license
@@ -793,15 +792,23 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         if is_valid_package_name(str(k))
     }
 
-    # Auto Execute scripts are local user-provided Roblox commands.  They are
-    # sent after a package is confirmed Online/in-game.
-    try:
-        from .auto_execute import normalize_scripts
-        merged["auto_execute_scripts"] = normalize_scripts(
-            merged.get("auto_execute_scripts")
-        )
-    except Exception:  # noqa: BLE001
-        merged["auto_execute_scripts"] = []
+    # Auto Execute is temporarily disabled.  Old configs may still contain
+    # saved script fields; validate/load must ignore them and never execute or
+    # expose them in public UI.
+    for disabled_key in (
+        "auto_execute_scripts",
+        "auto_execute",
+        "autoExecute",
+        "auto_exec",
+        "execute_scripts",
+        "saved_scripts",
+        "post_launch_action",
+        "postLaunchAction",
+        "script_action",
+        "run_script",
+        "lua_script",
+    ):
+        merged.pop(disabled_key, None)
 
     # ── Package keys (per-package internal license, NOT DENG Tool license) ──
     raw_pkg_keys = merged.get("package_keys")

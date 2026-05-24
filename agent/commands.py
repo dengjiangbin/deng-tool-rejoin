@@ -100,7 +100,6 @@ COMMANDS = {
     "logs",
     "version",
     "menu",
-    "auto-execute",
     "license",
     "new-user-help",
     "enable-boot",
@@ -636,49 +635,6 @@ def verify_remote_license_noninteractive(cfg: dict[str, Any], *, use_color: bool
         show_hwid_footer=(result not in ("wrong_device", "key_not_redeemed"))
     )
     return False
-
-
-def _report_key_execution_if_public(cfg: dict[str, Any]) -> None:
-    """Fire-and-forget: report one execution to the license API on public builds.
-
-    Only runs when the build channel is a public stable release.
-    main-dev / internal / test builds are silently skipped.
-    Errors are swallowed — this must never interrupt the Start flow.
-    """
-    try:
-        from agent.build_info import collected_version_info
-        info = collected_version_info()
-        channel = (info.get("channel") or "").strip().lower()
-        version = (info.get("version") or "").strip()
-        # Only public stable builds count.
-        _PUBLIC_CHANNELS = {"stable", "release", "public"}
-        _SKIP_CHANNELS = {"main-dev", "dev", "internal", "test", "test-latest"}
-        if channel in _SKIP_CHANNELS or channel not in _PUBLIC_CHANNELS:
-            return
-        lic = cfg.get("license") or {}
-        raw_key = (lic.get("key") or cfg.get("license_key") or "").strip()
-        install_id = (cfg.get("install_id") or "").strip()
-        if not raw_key or not install_id:
-            return
-        # Hash the install ID if it looks unhashed (not 64-char hex).
-        import hashlib
-        if len(install_id) != 64:
-            install_id = hashlib.sha256(install_id.encode()).hexdigest()
-        import threading
-        def _report() -> None:
-            try:
-                from agent.safe_http import post as _post
-                _post(
-                    "/api/execute",
-                    {"key": raw_key, "install_id_hash": install_id, "version": version, "channel": channel},
-                    timeout=6,
-                )
-            except Exception:  # noqa: BLE001
-                pass
-        t = threading.Thread(target=_report, daemon=True, name="key-exec-report")
-        t.start()
-    except Exception:  # noqa: BLE001
-        pass
 
 
 def _ensure_local_license_menu_loop(cfg: dict[str, Any], args: argparse.Namespace, use_color: bool) -> bool:
@@ -1287,10 +1243,6 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     if len(enabled_entries) > 1:
         print("  Multi-package: 50% left reserved for Termux status panel, 50% right for Roblox")
     print()
-    scripts = cfg.get("auto_execute_scripts") or []
-    count = len(scripts) if isinstance(scripts, list) else 0
-    print("Auto Execute:")
-    print(f"  Saved scripts: {count}")
 
 
 def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejoin Setup") -> None:
@@ -2967,158 +2919,6 @@ def _prompt_yes_no_capitalized(text: str) -> bool | None:
         print("Please answer Y or N.")
 
 
-def _read_auto_execute_script(script_number: int) -> str | None:
-    print()
-    print(termux_ui.prompt_prefix("Paste Script, Then Type END On A New Line"))
-    lines: list[str] = []
-    while True:
-        raw = safe_io.safe_prompt("", default="", allow_blank=True)
-        if raw is None:
-            return None
-        if raw == "END":
-            break
-        lines.append(raw)
-    content = "\n".join(lines).rstrip("\n")
-    if not content.strip():
-        termux_ui.print_warning("Script Cannot Be Blank")
-        return ""
-    return content
-
-
-def _add_auto_execute_scripts_interactive(scripts: list[str]) -> tuple[list[str], list[str]]:
-    """Collect one or more scripts, numbered from the next saved slot."""
-    from .auto_execute import MAX_AUTO_EXECUTE_SCRIPTS, script_id
-
-    added: list[str] = []
-    script_number = len(scripts) + 1
-    while len(scripts) < MAX_AUTO_EXECUTE_SCRIPTS:
-        answer = _prompt_yes_no_capitalized(f"Add Script #{script_number}")
-        if answer is None:
-            break
-        if not answer:
-            break
-        script = _read_auto_execute_script(script_number)
-        if script is None:
-            break
-        if not script:
-            continue
-        if script in scripts:
-            print("Script already saved.")
-            continue
-        scripts.append(script)
-        added.append(script)
-        print(f"{termux_ui.GREEN}[✓] Script Saved.{termux_ui.RESET}")
-        script_number += 1
-    if len(scripts) >= MAX_AUTO_EXECUTE_SCRIPTS:
-        print("Auto Execute script limit reached.")
-    return scripts, added
-
-
-def _config_menu_auto_execute(draft: dict[str, Any]) -> dict[str, Any]:
-    """Menu 4: manage saved Auto Execute scripts."""
-    if not _is_interactive():
-        return draft
-    from .auto_execute import normalize_scripts, script_preview
-
-    while True:
-        try:
-            raw_scripts = draft.get("auto_execute_scripts")
-            scripts = normalize_scripts(raw_scripts)
-            removed_invalid = isinstance(raw_scripts, list) and len(raw_scripts) != len(scripts)
-            draft["auto_execute_scripts"] = scripts
-            current_lines = [f"Saved Scripts: {len(scripts)}"]
-            if removed_invalid:
-                current_lines.append("  [!] Removed Invalid Blank Auto Execute Entry.")
-            if scripts:
-                for idx, script in enumerate(scripts, 1):
-                    current_lines.append(f"  {idx}. {script_preview(script)}")
-            else:
-                current_lines.append("  No saved scripts.")
-            termux_ui.print_submenu(
-                "Auto Execute",
-                [
-                    ("1", "Add Script"),
-                    ("2", "Remove Script"),
-                    ("3", "Remove All Scripts"),
-                    ("0", "Back"),
-                ],
-                current_lines=current_lines,
-            )
-            raw = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
-            if raw is None:
-                break
-            choice = raw.strip() or "0"
-            if removed_invalid:
-                try:
-                    draft = save_config(draft)
-                except Exception:  # noqa: BLE001
-                    pass
-                termux_ui.print_warning("Removed Invalid Blank Auto Execute Entry")
-            if choice == "0":
-                break
-            if choice == "1":
-                scripts, added = _add_auto_execute_scripts_interactive(scripts)
-                if not added:
-                    safe_io.press_enter()
-                    continue
-                draft["auto_execute_scripts"] = normalize_scripts(scripts)
-                draft = save_config(draft)
-                termux_ui.print_success(f"Saved {len(added)} Auto Execute Script(s)")
-                safe_io.press_enter()
-            elif choice == "2":
-                if not scripts:
-                    termux_ui.print_warning("No saved scripts")
-                    safe_io.press_enter()
-                    continue
-                idx_raw = safe_io.safe_prompt("Remove script number [0]: ", default="0")
-                if idx_raw is None:
-                    continue
-                try:
-                    idx = int((idx_raw or "0").strip()) - 1
-                    if idx < 0 or idx >= len(scripts):
-                        raise ValueError
-                except (TypeError, ValueError):
-                    print("Cancelled.")
-                    safe_io.press_enter()
-                    continue
-                removed = scripts.pop(idx)
-                draft["auto_execute_scripts"] = scripts
-                draft = save_config(draft)
-                print(f"Removed Auto Execute Script: {script_preview(removed)}")
-                safe_io.press_enter()
-            elif choice == "3":
-                if not scripts:
-                    termux_ui.print_warning("No saved scripts")
-                    safe_io.press_enter()
-                    continue
-                confirm = safe_io.safe_prompt("Remove all Auto Execute scripts? Type YES: ", default="")
-                if (confirm or "").strip() == "YES":
-                    draft["auto_execute_scripts"] = []
-                    draft = save_config(draft)
-                    print("All Auto Execute scripts removed.")
-                else:
-                    print("Cancelled.")
-                safe_io.press_enter()
-            else:
-                termux_ui.print_invalid_option()
-                safe_io.press_enter()
-        except (KeyboardInterrupt, EOFError):
-            print()
-            break
-        except ConfigError:
-            termux_ui.print_warning("Auto Execute config was missing or corrupt; recreated safe defaults")
-            draft["auto_execute_scripts"] = []
-            try:
-                draft = save_config(draft)
-            except Exception:  # noqa: BLE001
-                pass
-            safe_io.press_enter()
-        except Exception as exc:  # noqa: BLE001
-            termux_ui.print_error(f"Auto Execute menu error: {str(exc)[:120]}")
-            safe_io.press_enter()
-    return draft
-
-
 def _print_package_key_file_info(package: str) -> None:
     from .package_key import package_key_license_info
 
@@ -3496,14 +3296,13 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     print("  4. Discord webhook setup")
     print("  5. Phone snapshot for webhook (only when webhook is enabled)")
     print("  6. Webhook info interval (only when webhook is enabled)")
-    print("  7. Auto Execute scripts (optional)")
-    print("  8. Save and start")
+    print("  7. Save and start")
     print()
     print("Package detection:")
     print("  The tool scans installed Roblox apps against safe hints. Pick from the table.")
     print("  Manual package entry is only a fallback if nothing is found.")
     print()
-    print("Step 1 of 8: Roblox Package Setup")
+    print("Step 1 of 7: Roblox Package Setup")
     packages, hints = _choose_packages_menu(
         list(draft.get("roblox_packages") or [package_entry(draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE), "", True, "not_set")]),
         list(draft.get("package_detection_hints") or DEFAULT_ROBLOX_PACKAGE_HINTS),
@@ -3514,22 +3313,18 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     active_entries = enabled_package_entries(draft)
     draft["roblox_package"] = active_entries[0]["package"]
     draft["selected_package_mode"] = "multiple" if len(active_entries) > 1 else "single"
-    print("\nStep 2 of 8: Roblox Public / Private Server Link")
+    print("\nStep 2 of 7: Roblox Public / Private Server Link")
     _setup_launch_link(draft)
-    print("\nStep 3 of 8: Screen Mode")
+    print("\nStep 3 of 7: Screen Mode")
     _setup_screen_mode(draft)
-    print("\nStep 4 of 8: Discord Webhook Setup")
+    print("\nStep 4 of 7: Discord Webhook Setup")
     _setup_webhook(draft)
     if draft.get("webhook_enabled"):
-        print("\nStep 5 of 8: Phone Snapshot For Webhook")
+        print("\nStep 5 of 7: Phone Snapshot For Webhook")
         _setup_snapshot(draft)
-        print("\nStep 6 of 8: Webhook Info Interval")
+        print("\nStep 6 of 7: Webhook Info Interval")
         _setup_webhook_interval(draft)
-    print("\nStep 7 of 8: Auto Execute (Optional)")
-    if _prompt_yes_no_capitalized("Configure Auto Execute Scripts Now") is True:
-        scripts, _added = _add_auto_execute_scripts_interactive(list(draft.get("auto_execute_scripts") or []))
-        draft["auto_execute_scripts"] = scripts
-    print("\nStep 8 of 8: Save And Start")
+    print("\nStep 7 of 7: Save And Start")
     draft["first_setup_completed"] = True
     try:
         saved = save_config(draft)
@@ -3572,8 +3367,6 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
             draft = _config_menu_launch_link(draft)
         elif choice == "3":
             draft = _config_menu_screen_mode(draft)
-        elif choice == "4":
-            draft = _config_menu_auto_execute(draft)
         else:
             termux_ui.print_invalid_option()
             safe_io.press_enter()
@@ -4727,9 +4520,6 @@ def cmd_start(args: argparse.Namespace) -> int:
                 else:
                     if not verify_remote_license_noninteractive(cfg, use_color=use_color):
                         return 1
-
-        # Report tool execution for public stable builds (silently, non-blocking).
-        _report_key_execution_if_public(cfg)
 
         entries = enabled_package_entries(cfg)
         safe_io.set_crash_context(package_count=len(entries))
@@ -6291,18 +6081,6 @@ def cmd_new_user_help(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_auto_execute(args: argparse.Namespace) -> int:
-    print_banner(use_color=not args.no_color)
-    cfg = _load_config_for_menu()
-    if _CONFIG_RECOVERED_DEFAULTS:
-        termux_ui.print_warning("Config file was missing or corrupt; recreated safe defaults")
-    if not _is_interactive():
-        _print_config_summary(cfg)
-        return 0
-    _config_menu_auto_execute(cfg)
-    return 0
-
-
 def _run_top_menu_with_clean_exit(args: argparse.Namespace) -> int:
     """Run the top menu once; on clean exit use the single Termux teardown workaround."""
     try:
@@ -6386,7 +6164,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--logs", action="store_true")
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--menu", action="store_true")
-    parser.add_argument("--auto-execute", dest="auto_execute", action="store_true")
     parser.add_argument("--license", action="store_true", help="enter or update your license key")
     parser.add_argument("--new-user-help", dest="new_user_help", action="store_true", help="print the built-in tutorial for beginners")
     parser.add_argument("--enable-boot", action="store_true")
@@ -6470,7 +6247,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "logs": ns.logs,
         "version": ns.version,
         "menu": ns.menu,
-        "auto-execute": ns.auto_execute,
         "license": ns.license,
         "new-user-help": ns.new_user_help,
         "enable-boot": ns.enable_boot,
@@ -6555,7 +6331,6 @@ def _handlers() -> dict[str, Any]:
         "version": cmd_version,
         "menu": cmd_menu,
         "package-key": cmd_package_key,
-        "auto-execute": cmd_auto_execute,
         "license": cmd_license,
         "new-user-help": cmd_new_user_help,
         "enable-boot": cmd_enable_boot,

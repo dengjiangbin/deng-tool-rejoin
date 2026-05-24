@@ -1,176 +1,44 @@
-import io
 import unittest
-from contextlib import redirect_stdout
 from unittest.mock import MagicMock, patch
 
 
 class AutoExecuteHelperTests(unittest.TestCase):
-    def test_build_execute_command_wraps_script(self):
-        from agent.auto_execute import build_execute_command
+    def test_build_execute_command_is_disabled(self):
+        from agent.auto_execute import AUTO_EXECUTE_DISABLED_MESSAGE, build_execute_command
 
-        script = 'loadstring(game:HttpGet("https://example.com/Deng.lua"))()'
-        self.assertEqual(build_execute_command(script), f"/execute {script}")
+        with self.assertRaisesRegex(RuntimeError, AUTO_EXECUTE_DISABLED_MESSAGE):
+            build_execute_command("print(1)")
 
-    def test_normalize_scripts_removes_blanks_and_duplicates(self):
+    def test_normalize_scripts_ignores_old_saved_scripts(self):
         from agent.auto_execute import normalize_scripts
 
-        self.assertEqual(
-            normalize_scripts(["", " print(1) ", "print(1)", "print(2)"]),
-            ["print(1)", "print(2)"],
-        )
+        self.assertEqual(normalize_scripts(["", " print(1) ", "print(2)"]), [])
 
-    def test_normalize_scripts_removes_hash_only_entries(self):
-        from agent.auto_execute import normalize_scripts
-
-        real_script = 'loadstring(game:HttpGet("https://example.com/Deng.lua"))()'
-        self.assertEqual(
-            normalize_scripts(["a4dfc7ce368c83c8", {"content": ""}, {"content": real_script}]),
-            [real_script],
-        )
-
-    def test_send_execute_uses_clipboard_paste_and_enter(self):
+    def test_send_execute_command_does_not_touch_android_input(self):
         from agent import auto_execute
-        from agent.android import CommandResult
 
-        calls: list[tuple[str, ...]] = []
-
-        def fake_run(args, **_kwargs):
-            calls.append(tuple(args))
-            return CommandResult(tuple(args), 0, "", "")
-
-        with patch("agent.auto_execute._focus_package", return_value=CommandResult((), 0, "", "")), \
-             patch("agent.auto_execute.android.run_android_command", side_effect=fake_run), \
-             patch("agent.auto_execute.time.sleep"):
+        with patch("agent.android.run_android_command") as run_android:
             result = auto_execute.send_execute_command("com.roblox.client", "print(1)")
 
-        self.assertTrue(result["success"], result)
-        self.assertIn(("input", "keyevent", "KEYCODE_SLASH"), calls)
-        self.assertIn(("input", "keyevent", "279"), calls)
-        self.assertIn(("input", "keyevent", "KEYCODE_ENTER"), calls)
-        clipboard_call = next(c for c in calls if c[:3] == ("sh", "-c", "cmd clipboard set '/execute print(1)'"))
-        self.assertEqual(clipboard_call[2], "cmd clipboard set '/execute print(1)'")
+        self.assertFalse(result["success"], result)
+        self.assertEqual(result["method"], "disabled")
+        self.assertIn("disabled", result["error"].lower())
+        run_android.assert_not_called()
 
-    def test_run_auto_execute_once_per_package_script(self):
+    def test_run_auto_execute_returns_empty_without_sending(self):
         from agent import auto_execute
 
         ran: set[tuple[str, str]] = set()
-        with patch("agent.auto_execute.send_execute_command", return_value={"success": True, "method": "test"} ) as send:
-            auto_execute.run_auto_execute_for_package(
+        with patch("agent.auto_execute.send_execute_command") as send:
+            result = auto_execute.run_auto_execute_for_package(
                 {"auto_execute_scripts": ["print(1)"]},
                 "com.roblox.client",
                 ran,
                 logger=MagicMock(),
             )
-            auto_execute.run_auto_execute_for_package(
-                {"auto_execute_scripts": ["print(1)"]},
-                "com.roblox.client",
-                ran,
-                logger=MagicMock(),
-            )
-
-        send.assert_called_once_with("com.roblox.client", "print(1)")
-
-
-class AutoExecuteMenuTests(unittest.TestCase):
-    _DENG_SCRIPT = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/GrexXMeng/Mengs/refs/heads/main/Deng.lua"))()'
-
-    def test_auto_execute_menu_add_script_saves_to_config(self):
-        from agent import commands
-
-        cfg = {"auto_execute_scripts": []}
-        prompts = iter(["1", "Y", self._DENG_SCRIPT, "END", "N", "0"])
-        prompt_texts: list[str] = []
-        out = io.StringIO()
-        def fake_prompt(prompt="", **_kwargs):
-            prompt_texts.append(prompt)
-            return next(prompts)
-
-        with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", side_effect=fake_prompt), \
-             patch("agent.commands.safe_io.press_enter"), \
-             patch("agent.commands.save_config", side_effect=lambda c: c), \
-             redirect_stdout(out):
-            result = commands._config_menu_auto_execute(cfg)
-
-        self.assertEqual(
-            result["auto_execute_scripts"],
-            [self._DENG_SCRIPT],
-        )
-        self.assertTrue(any("Add Script #1? (Y/N)" in prompt for prompt in prompt_texts))
-        self.assertIn("Paste Script, Then Type END On A New Line:", out.getvalue())
-        self.assertIn("Script Saved.", out.getvalue())
-        self.assertIn("Saved 1 Auto Execute Script(s)", out.getvalue())
-        self.assertNotEqual(result["auto_execute_scripts"][0], "END")
-        self.assertNotEqual(result["auto_execute_scripts"][0], "a4dfc7ce368c83c8")
-        self.assertNotEqual(result["auto_execute_scripts"][0], "")
-
-    def test_auto_execute_menu_adds_multiple_numbered_scripts(self):
-        from agent import commands
-
-        cfg = {"auto_execute_scripts": []}
-        prompts = iter(["1", "Y", "print(1)", "END", "Y", "print(2)", "END", "N", "0"])
-        prompt_texts: list[str] = []
-        out = io.StringIO()
-        def fake_prompt(prompt="", **_kwargs):
-            prompt_texts.append(prompt)
-            return next(prompts)
-
-        with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", side_effect=fake_prompt), \
-             patch("agent.commands.safe_io.press_enter"), \
-             patch("agent.commands.save_config", side_effect=lambda c: c), \
-             redirect_stdout(out):
-            result = commands._config_menu_auto_execute(cfg)
-
-        self.assertEqual(result["auto_execute_scripts"], ["print(1)", "print(2)"])
-        text = out.getvalue()
-        self.assertTrue(any("Add Script #1? (Y/N)" in prompt for prompt in prompt_texts))
-        self.assertTrue(any("Add Script #2? (Y/N)" in prompt for prompt in prompt_texts))
-        self.assertIn("Saved 2 Auto Execute Script(s)", text)
-
-    def test_auto_execute_rejects_blank_script(self):
-        from agent import commands
-
-        cfg = {"auto_execute_scripts": []}
-        prompts = iter(["1", "Y", "END", "N", "0"])
-        out = io.StringIO()
-        with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", side_effect=lambda *a, **k: next(prompts)), \
-             patch("agent.commands.safe_io.press_enter"), \
-             patch("agent.commands.save_config", side_effect=lambda c: c), \
-             redirect_stdout(out):
-            result = commands._config_menu_auto_execute(cfg)
-
-        self.assertEqual(result["auto_execute_scripts"], [])
-        self.assertIn("Script Cannot Be Blank", out.getvalue())
-
-    def test_auto_execute_listing_shows_preview_not_hash(self):
-        from agent import commands
-
-        cfg = {"auto_execute_scripts": [self._DENG_SCRIPT]}
-        out = io.StringIO()
-        with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", return_value="0"), \
-             redirect_stdout(out):
-            commands._config_menu_auto_execute(cfg)
-
-        text = out.getvalue()
-        self.assertIn("loadstring(game:HttpGet", text)
-        self.assertNotIn("a4dfc7ce368c83c8", text)
-
-    def test_hash_only_existing_entry_is_cleaned(self):
-        from agent import commands
-
-        cfg = {"auto_execute_scripts": ["a4dfc7ce368c83c8", self._DENG_SCRIPT]}
-        out = io.StringIO()
-        with patch("agent.commands._is_interactive", return_value=True), \
-             patch("agent.commands.safe_io.safe_prompt", return_value="0"), \
-             patch("agent.commands.save_config", side_effect=lambda c: c), \
-             redirect_stdout(out):
-            result = commands._config_menu_auto_execute(cfg)
-
-        self.assertEqual(result["auto_execute_scripts"], [self._DENG_SCRIPT])
-        self.assertIn("Removed Invalid Blank Auto Execute Entry", out.getvalue())
+        self.assertEqual(result, [])
+        self.assertEqual(ran, set())
+        send.assert_not_called()
 
 
 class SupervisorAutoExecuteTests(unittest.TestCase):

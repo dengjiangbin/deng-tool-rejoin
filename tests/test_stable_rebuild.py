@@ -745,16 +745,11 @@ class TestWebhookHiddenFromPublicUI(unittest.TestCase):
         src = self._edit_config_source()
         self.assertNotIn("_config_menu_webhook", src)
 
-    def test_first_time_setup_has_8_steps(self) -> None:
+    def test_first_time_setup_has_7_steps(self) -> None:
         src = self._wizard_source()
-        self.assertIn("Step 1 of 8", src)
-        self.assertIn("Step 2 of 8", src)
-        self.assertIn("Step 3 of 8", src)
-        self.assertIn("Step 4 of 8", src)
-        self.assertIn("Step 5 of 8", src)
-        self.assertIn("Step 6 of 8", src)
-        self.assertIn("Step 7 of 8", src)
-        self.assertIn("Step 8 of 8", src)
+        for idx in range(1, 8):
+            self.assertIn(f"Step {idx} of 7", src)
+        self.assertNotIn("Step 8 of 8", src)
 
 
 # ─── 8. Public setup menu ──────────────────────────────────────────────────────
@@ -788,9 +783,8 @@ class TestPublicMenuItems(unittest.TestCase):
         self.assertIn('menu_number("1", "Packages")', ui_src)
         self.assertIn('menu_number("2", "Private Server URL")', ui_src)
         self.assertIn('menu_number("3", "Screen Mode")', ui_src)
-        self.assertIn('menu_number("4", "Auto Execute")', ui_src)
+        self.assertNotIn("Auto Execute", ui_src)
         self.assertNotIn('"4. Key"', ui_src)
-        self.assertNotIn('"5. Auto Execute"', ui_src)
         self.assertIn('menu_number("0", "Back")', ui_src)
         self.assertNotIn('"3. Webhook"', ui_src)
         self.assertNotIn('"4. YesCaptcha"', ui_src)

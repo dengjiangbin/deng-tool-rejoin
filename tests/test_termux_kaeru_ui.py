@@ -206,18 +206,18 @@ class TestMenuStructureProtection(unittest.TestCase):
         self.assertNotIn("4", numbers)
         self.assertNotIn("5", numbers)
 
-    def test_setup_config_contains_auto_execute(self) -> None:
+    def test_setup_config_does_not_contain_auto_execute(self) -> None:
         out = io.StringIO()
         with redirect_stdout(out):
             termux_ui.print_config_menu()
         text = out.getvalue()
-        self.assertIn("Auto Execute", text)
+        self.assertNotIn("Auto Execute", text)
         self.assertNotIn("4. Key", text)
 
     def test_setup_config_navigation_source(self) -> None:
         src = inspect.getsource(commands._run_edit_config_menu)
-        self.assertIn("_config_menu_auto_execute", src)
-        self.assertIn('choice == "4"', src)
+        self.assertNotIn("_config_menu_auto_execute", src)
+        self.assertNotIn('choice == "4"', src)
 
 
 class TestSafeClearHelper(unittest.TestCase):
