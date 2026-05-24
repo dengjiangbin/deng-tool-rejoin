@@ -1149,7 +1149,7 @@ def _route_public_install(
                 json.dumps({"error": "Invalid token format."}).encode("utf-8"),
                 400,
                 "application/json",
-                None,
+                [("Cache-Control", "no-store")],
             )
 
         entry = _consume_download_token(raw_token)
@@ -1158,7 +1158,7 @@ def _route_public_install(
                 json.dumps({"error": "Token invalid or expired."}).encode("utf-8"),
                 401,
                 "application/json",
-                None,
+                [("Cache-Control", "no-store")],
             )
 
         pkg_path = Path(entry["path"])
@@ -1170,7 +1170,7 @@ def _route_public_install(
                     json.dumps({"error": "Forbidden."}).encode("utf-8"),
                     403,
                     "application/json",
-                    None,
+                    [("Cache-Control", "no-store")],
                 )
         else:
             return (

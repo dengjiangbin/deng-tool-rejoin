@@ -488,6 +488,12 @@ class InstallTestPackageEndpointTests(unittest.TestCase):
         self.assertIn("/api/download/package/", payload["url"])
         self.assertEqual(len(str(payload["sha256"])), 64)
 
+    def test_invalid_download_token_is_no_store(self) -> None:
+        status, headers, body = _wsgi_call("GET", "/api/download/package/invalid-token")
+        self.assertEqual(status, 401)
+        self.assertEqual(headers.get("Cache-Control"), "no-store")
+        self.assertIn(b"Token invalid or expired", body)
+
 
 class InstallBootstrapSanityTests(unittest.TestCase):
     """Non-interactive bootstrap + launcher tarball."""
