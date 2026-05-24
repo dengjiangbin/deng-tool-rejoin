@@ -23,8 +23,9 @@ class TestPanelMobileCopy(unittest.TestCase):
     def test_panel_description_block(self) -> None:
         embed = build_panel_embed()
         self.assertEqual(embed["title"], "DENG Tool: Rejoin Panel")
-        self.assertEqual(embed["footer"]["text"], "DENG Tool • https://tool.deng.my.id")
+        self.assertEqual(embed["footer"]["text"], "DENG Tool • https://tool.deng.my.id • Secure & Automated")
         self.assertNotIn("fields", embed)
+        self.assertNotIn("timestamp", embed)
 
 
 class TestResetHwidWording(unittest.TestCase):

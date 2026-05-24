@@ -57,6 +57,8 @@ BUTTON_REDEEM     = "license_panel:redeem"
 BUTTON_KEY_STATS  = "license_panel:key_stats"
 BUTTON_SELECT_VERSION = "license_panel:select_version"
 
+PANEL_LOGO_URL = "https://tool.deng.my.id/public/img/deng-logo.png"
+
 # ── Slash command names ────────────────────────────────────────────────────────
 
 SLASH_GROUP       = "license_panel"
@@ -79,22 +81,28 @@ def build_panel_embed() -> dict[str, Any]:
     Structure
     ─────────
     • Title       : "DENG Tool: Rejoin Panel"
-    • Description : compact mobile-friendly button guide (no inline fields)
-    • Footer      : "DENG Tool • https://tool.deng.my.id"
+    • Description : compact mobile-friendly blockquote button guide
+    • Footer      : "DENG Tool • https://tool.deng.my.id • Secure & Automated"
     """
     return {
         "title": "DENG Tool: Rejoin Panel",
         "color": 0x2F80ED,
         "description": (
-            "Manage your key and package version.\n\n"
-            "\U0001f511 Generate Key \u2014 Take you to our portal to generate the keys.\n"
-            "\u267b\ufe0f Reset HWID \u2014 Move key to new device, 5 mins cooldown.\n"
-            "\U0001f39f\ufe0f Redeem Key \u2014 Make an existing key your own.\n"
-            "\U0001f4ca Key Stats \u2014 View status and export keys.\n"
-            "\U0001f4e6 Select Version \u2014 Choose which package version to install."
+            "Manage your key and package version seamlessly with our automated system.\n"
+            "Select an option below to get started:\n\n"
+            "> \U0001f511 Generate Key\n"
+            "> Take you to our portal to generate the keys.\n\n"
+            "> \u267b\ufe0f Reset HWID\n"
+            "> Move key to new device, 5 mins cooldown.\n\n"
+            "> \U0001f39f\ufe0f Redeem Key\n"
+            "> Make an existing key your own.\n\n"
+            "> \U0001f4ca Key Stats\n"
+            "> View status and export keys.\n\n"
+            "> \U0001f4e6 Select Version\n"
+            "> Choose which package version to install."
         ),
-        "footer": {"text": "DENG Tool \u2022 https://tool.deng.my.id"},
-        "timestamp": None,   # Caller should set this to current UTC ISO string
+        "footer": {"text": "DENG Tool \u2022 https://tool.deng.my.id \u2022 Secure & Automated"},
+        "thumbnail": {"url": PANEL_LOGO_URL},
     }
 
 

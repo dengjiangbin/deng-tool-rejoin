@@ -8,6 +8,7 @@ from agent.license_panel import (
     BUTTON_REDEEM,
     BUTTON_RESET_HWID,
     BUTTON_SELECT_VERSION,
+    PANEL_LOGO_URL,
     SLASH_GROUP,
     build_generate_limit_response,
     build_generate_success_response,
@@ -28,11 +29,16 @@ class PanelEmbedTests(unittest.TestCase):
     """Test 31-33: panel embed structure."""
 
     _PANEL_LINES = (
-        "\U0001f511 Generate Key \u2014 Take you to our portal to generate the keys.",
-        "\u267b\ufe0f Reset HWID \u2014 Move key to new device, 5 mins cooldown.",
-        "\U0001f39f\ufe0f Redeem Key \u2014 Make an existing key your own.",
-        "\U0001f4ca Key Stats \u2014 View status and export keys.",
-        "\U0001f4e6 Select Version \u2014 Choose which package version to install.",
+        "> \U0001f511 Generate Key",
+        "> Take you to our portal to generate the keys.",
+        "> \u267b\ufe0f Reset HWID",
+        "> Move key to new device, 5 mins cooldown.",
+        "> \U0001f39f\ufe0f Redeem Key",
+        "> Make an existing key your own.",
+        "> \U0001f4ca Key Stats",
+        "> View status and export keys.",
+        "> \U0001f4e6 Select Version",
+        "> Choose which package version to install.",
     )
 
     def test_panel_embed_title(self):
@@ -49,13 +55,23 @@ class PanelEmbedTests(unittest.TestCase):
     def test_panel_embed_description_copy(self):
         embed = build_panel_embed()
         desc = embed["description"]
-        self.assertIn("Manage your key and package version.", desc)
+        self.assertIn("Manage your key and package version seamlessly with our automated system.", desc)
+        self.assertIn("Select an option below to get started:", desc)
         for line in self._PANEL_LINES:
             self.assertIn(line, desc)
 
     def test_panel_embed_footer(self):
         embed = build_panel_embed()
-        self.assertEqual(embed["footer"]["text"], "DENG Tool \u2022 https://tool.deng.my.id")
+        self.assertEqual(
+            embed["footer"]["text"],
+            "DENG Tool \u2022 https://tool.deng.my.id \u2022 Secure & Automated",
+        )
+
+    def test_panel_embed_uses_website_transparent_logo_without_timestamp(self):
+        embed = build_panel_embed()
+        self.assertEqual(embed["thumbnail"]["url"], PANEL_LOGO_URL)
+        self.assertEqual(PANEL_LOGO_URL, "https://tool.deng.my.id/public/img/deng-logo.png")
+        self.assertNotIn("timestamp", embed)
 
     def test_panel_embed_no_old_limit_or_long_paragraphs(self):
         import json as _json

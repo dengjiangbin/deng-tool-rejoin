@@ -53,6 +53,7 @@ from bot.cog_license_panel import (
     _owner_ids,
     _tester_ids,
 )
+from agent.license_panel import build_panel_buttons, build_panel_embed
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -148,6 +149,30 @@ class TestPanelViewFiveButtons(unittest.TestCase):
             store = _make_store(tmp)
             view = PanelView(store)
             self.assertEqual(len(view.children), 5)
+
+    def test_button_payload_custom_ids_are_unchanged(self) -> None:
+        buttons = build_panel_buttons()[0]["components"]
+        self.assertEqual([btn["label"] for btn in buttons], [
+            "Generate Key",
+            "Reset HWID",
+            "Redeem Key",
+            "Key Stats",
+            "Select Version",
+        ])
+        self.assertEqual([buttons[i]["custom_id"] for i in range(1, 5)], [
+            "license_panel:reset_hwid",
+            "license_panel:redeem",
+            "license_panel:key_stats",
+            "license_panel:select_version",
+        ])
+
+    def test_public_panel_has_no_timestamp_and_website_logo(self) -> None:
+        embed = build_panel_embed()
+        self.assertNotIn("timestamp", embed)
+        self.assertEqual(
+            embed["thumbnail"]["url"],
+            "https://tool.deng.my.id/public/img/deng-logo.png",
+        )
 
 
 # ── PanelView — Generate Key ──────────────────────────────────────────────────

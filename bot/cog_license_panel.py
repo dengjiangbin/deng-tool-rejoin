@@ -912,8 +912,6 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
             await interaction.response.defer(ephemeral=True)
 
             embed_dict = build_panel_embed()
-            embed_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
-            apply_branding_to_embed_dict(embed_dict, include_thumbnail=False)
             embed = discord.Embed.from_dict(embed_dict)
             view = PanelView(store)
             msg = await channel.send(embed=embed, view=view)
@@ -983,8 +981,6 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                 return
 
             embed_dict = build_panel_embed()
-            embed_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
-            apply_branding_to_embed_dict(embed_dict, include_thumbnail=False)
             embed = discord.Embed.from_dict(embed_dict)
             view = PanelView(store)
             await msg.edit(embed=embed, view=view)
@@ -1261,8 +1257,6 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                     try:
                         msg = await channel.fetch_message(msg_id)
                         embed_dict = build_panel_embed()
-                        embed_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
-                        apply_branding_to_embed_dict(embed_dict, include_thumbnail=False)
                         await msg.edit(embed=discord.Embed.from_dict(embed_dict), view=view)
                         log.info(
                             "Refreshed persistent panel message: guild=%s message=%s",
