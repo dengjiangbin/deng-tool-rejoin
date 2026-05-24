@@ -162,6 +162,22 @@ def _strip_path_prefix(path: str) -> str:
 _download_tokens: dict[str, dict] = {}
 _tokens_lock = threading.Lock()
 
+# License capability sessions are intentionally short-lived and in-memory.
+_capability_sessions: dict[str, dict] = {}
+_capability_lock = threading.Lock()
+_CAPABILITY_TTL_SECONDS = 10 * 60
+_SERVER_PROTOCOL = 2
+_MIN_CLIENT_PROTOCOL = 2
+_DEFAULT_CAPABILITIES = {
+    "start": True,
+    "package_supervision": True,
+    "private_url_launch": True,
+    "roblox_state_checks": True,
+    "window_layout_helpers": True,
+    "probe_upload": True,
+    "version_selection": True,
+}
+
 # ── In-memory rate limit (per IP, for /api/download/authorize) ────────────────
 _rate_limit: dict[str, list[float]] = {}
 _rate_limit_lock = threading.Lock()
@@ -217,6 +233,58 @@ def _expire_old_tokens() -> None:
     ]
     for k in expired:
         del _download_tokens[k]
+
+
+def _expire_capability_sessions() -> None:
+    now = time.time()
+    expired = [k for k, v in _capability_sessions.items() if now > v["expires_at"]]
+    for k in expired:
+        del _capability_sessions[k]
+
+
+def _issue_capability_session(
+    *,
+    key: str,
+    install_id_hash: str,
+    client_protocol: int,
+    build_id: str,
+) -> dict:
+    raw = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    now = time.time()
+    payload = {
+        "session_id": raw,
+        "expires_in": _CAPABILITY_TTL_SECONDS,
+        "expires_at": datetime.fromtimestamp(now + _CAPABILITY_TTL_SECONDS, tz=timezone.utc).isoformat(),
+        "server_protocol": _SERVER_PROTOCOL,
+        "min_client_protocol": _MIN_CLIENT_PROTOCOL,
+        "client_protocol": client_protocol,
+        "build_id": build_id,
+        "capabilities": dict(_DEFAULT_CAPABILITIES),
+    }
+    with _capability_lock:
+        _expire_capability_sessions()
+        _capability_sessions[token_hash] = {
+            "key_prefix": _mask_key(key),
+            "install_id_hash": install_id_hash,
+            "client_protocol": client_protocol,
+            "build_id": build_id,
+            "expires_at": now + _CAPABILITY_TTL_SECONDS,
+            "capabilities": dict(_DEFAULT_CAPABILITIES),
+        }
+    return payload
+
+
+def _capability_session_ok(raw_session: str, feature: str) -> bool:
+    if not _TOKEN_SAFE_RE.match(raw_session or ""):
+        return False
+    token_hash = hashlib.sha256(raw_session.encode()).hexdigest()
+    with _capability_lock:
+        _expire_capability_sessions()
+        entry = _capability_sessions.get(token_hash)
+        if not entry:
+            return False
+        return bool((entry.get("capabilities") or {}).get(feature))
 
 
 def _issue_download_token(
@@ -730,15 +798,10 @@ def _route_public_install(
                 "application/json",
                 None,
             )
-        token = (environ.get("HTTP_X_DEV_PROBE_TOKEN") or "").strip()
-        # Token check: env-var override wins, else accept the baked-in value
-        # so an out-of-the-box test install can upload.  The value is not a
-        # secret — the probe content is already sanitized — but it gives us
-        # one knob to disable in case of abuse.
-        expected = os.environ.get("DENG_DEV_PROBE_TOKEN", "deng-rejoin-dev-probe-v1")
-        if token != expected:
+        session = (environ.get("HTTP_X_DENG_SESSION") or "").strip()
+        if not _capability_session_ok(session, "probe_upload"):
             return (
-                json.dumps({"error": "invalid token"}).encode("utf-8"),
+                json.dumps({"error": "valid license session required"}).encode("utf-8"),
                 401,
                 "application/json",
                 None,
@@ -1233,6 +1296,11 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         device_model = (body.get("device_model") or "unknown")[:120]
         app_version = (body.get("app_version") or "unknown")[:40]
         device_label = (body.get("device_label") or "").strip()[:80]
+        try:
+            client_protocol = int(body.get("client_protocol") or 1)
+        except (TypeError, ValueError):
+            client_protocol = 1
+        build_id = str(body.get("build_id") or "")[:80]
 
         if not raw_key:
             payload, status = _build_response("missing_key", 400)
@@ -1242,12 +1310,25 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         # Clients should send the hash directly; this is a fallback.
         if len(install_id_hash) != 64:  # SHA-256 hex = 64 chars
             install_id_hash = _hash_install_id(install_id_hash)
+        if "client_protocol" in body and client_protocol < _MIN_CLIENT_PROTOCOL:
+            return respond(
+                json.dumps(
+                    {
+                        "result": "protocol_too_old",
+                        "message": "Please reinstall using the official command.",
+                        "server_protocol": _SERVER_PROTOCOL,
+                        "min_client_protocol": _MIN_CLIENT_PROTOCOL,
+                    }
+                ).encode(),
+                426,
+            )
 
         log.info(
-            "License %s for key %s device_model=%s",
+            "License validate-only %s for key %s device_model=%s protocol=%s",
             "check" if path.endswith("check") else "heartbeat",
             _mask_key(raw_key),
             device_model,
+            client_protocol,
         )
 
         try:
@@ -1264,6 +1345,15 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
 
         log.info("License result: %s for key %s", result, _mask_key(raw_key))
         payload, status = _build_response(result)
+        if result == "active":
+            data = json.loads(payload.decode("utf-8"))
+            data["session"] = _issue_capability_session(
+                key=raw_key,
+                install_id_hash=install_id_hash,
+                client_protocol=client_protocol,
+                build_id=build_id,
+            )
+            payload = json.dumps(data, sort_keys=True).encode("utf-8")
         return respond(payload, status)
 
     # ── Manual bind (only path that may mutate HWID/binding) ──────────────────
@@ -1282,6 +1372,11 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         device_label = (body.get("device_label") or "").strip()[:80]
         manual_entry = bool(body.get("manual_entry"))
         bind_allowed = bool(body.get("bind_allowed"))
+        try:
+            client_protocol = int(body.get("client_protocol") or 1)
+        except (TypeError, ValueError):
+            client_protocol = 1
+        build_id = str(body.get("build_id") or "")[:80]
 
         if not raw_key:
             payload, status = _build_response("missing_key", 400)
@@ -1293,8 +1388,25 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
         if not (manual_entry and bind_allowed):
             payload, status = _build_response("requires_manual_rebind", 403)
             return respond(payload, status)
+        if "client_protocol" in body and client_protocol < _MIN_CLIENT_PROTOCOL:
+            return respond(
+                json.dumps(
+                    {
+                        "result": "protocol_too_old",
+                        "message": "Please reinstall using the official command.",
+                        "server_protocol": _SERVER_PROTOCOL,
+                        "min_client_protocol": _MIN_CLIENT_PROTOCOL,
+                    }
+                ).encode(),
+                426,
+            )
 
-        log.info("License bind for key %s device_model=%s", _mask_key(raw_key), device_model)
+        log.info(
+            "License explicit bind for key %s device_model=%s protocol=%s",
+            _mask_key(raw_key),
+            device_model,
+            client_protocol,
+        )
 
         try:
             from agent.license_store import get_default_store
@@ -1309,6 +1421,15 @@ def _wsgi_app(environ: dict, start_response):  # noqa: ANN001
 
         log.info("License bind result: %s for key %s", result, _mask_key(raw_key))
         payload, status = _build_response(result)
+        if result == "active":
+            data = json.loads(payload.decode("utf-8"))
+            data["session"] = _issue_capability_session(
+                key=raw_key,
+                install_id_hash=install_id_hash,
+                client_protocol=client_protocol,
+                build_id=build_id,
+            )
+            payload = json.dumps(data, sort_keys=True).encode("utf-8")
         return respond(payload, status)
 
     # ── Key execution report (public releases only) ───────────────────────────

@@ -103,7 +103,7 @@ class PostInstallVerificationTests(unittest.TestCase):
         self.assertIn("agent.playing_state", s)
         self.assertIn("agent.dumpsys_cache", s)
         # Must exit non-zero on import failure.
-        self.assertIn("Install verification failed: required modules did not import", s)
+        self.assertIn("Install verification failed: manifest or runtime integrity check failed", s)
 
     def test_runs_version_and_compares_sha(self) -> None:
         s = _script()

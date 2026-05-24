@@ -99,7 +99,15 @@ class DevProbeUploadEndpointTests(unittest.TestCase):
     def tearDown(self) -> None:
         os.environ.pop("DENG_DEV_PROBE_DIR", None)
 
-    def _post(self, payload: dict, *, gzipped: bool = True, token: str = "deng-rejoin-dev-probe-v1"):
+    def _session(self) -> str:
+        return api_mod._issue_capability_session(
+            key="DENG-AAAA-BBBB-CCCC-DDDD",
+            install_id_hash="ab" * 32,
+            client_protocol=2,
+            build_id="p-test",
+        )["session_id"]
+
+    def _post(self, payload: dict, *, gzipped: bool = True, session: str | None = None):
         body = json.dumps(payload).encode("utf-8")
         encoding_header: dict[str, str] = {}
         if gzipped:
@@ -109,7 +117,7 @@ class DevProbeUploadEndpointTests(unittest.TestCase):
             "POST",
             "/api/dev-probe/upload",
             body=body,
-            headers={"HTTP_X_DEV_PROBE_TOKEN": token, **encoding_header},
+            headers={"HTTP_X_DENG_SESSION": session or self._session(), **encoding_header},
         )
 
     def test_accepts_valid_payload_and_returns_probe_id(self) -> None:
@@ -129,7 +137,7 @@ class DevProbeUploadEndpointTests(unittest.TestCase):
         body = json.dumps({"probe_version": 1}).encode("utf-8")
         status, _, _ = _wsgi_call(
             "POST", "/api/dev-probe/upload", body=body,
-            headers={"HTTP_X_DEV_PROBE_TOKEN": "wrong"},
+            headers={"HTTP_X_DENG_SESSION": "wrong"},
         )
         self.assertEqual(status, 401)
 
@@ -145,7 +153,7 @@ class DevProbeUploadEndpointTests(unittest.TestCase):
             "POST", "/api/dev-probe/upload",
             body=environ_body,
             headers={
-                "HTTP_X_DEV_PROBE_TOKEN": "deng-rejoin-dev-probe-v1",
+                "HTTP_X_DENG_SESSION": self._session(),
                 "CONTENT_LENGTH": str(5 * 1024 * 1024),  # 5 MB > 4 MB cap
             },
         )

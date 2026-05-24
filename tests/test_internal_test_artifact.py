@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 
 from agent.internal_test_artifact import (
+    _ALLOWED_ARTIFACT_PATHS,
     build_internal_test_tarball,
     iter_internal_test_pack_files,
     path_should_exclude,
@@ -79,11 +80,18 @@ class BuilderFixtureTests(unittest.TestCase):
         names = []
         with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tf:
             names = sorted(tf.getnames())
+            files = {
+                name: tf.extractfile(name).read()
+                for name in names
+                if tf.getmember(name).isfile()
+            }
         joined = "\n".join(names)
+        self.assertEqual(set(names), _ALLOWED_ARTIFACT_PATHS)
         self.assertIn("agent/deng_tool_rejoin.py", names)
         self.assertIn("agent/_protected_runtime.py", names)
         self.assertIn("agent/.deng_runtime.bin", names)
         self.assertIn("RELEASE-MANIFEST.json", names)
+        self.assertIn("RELEASE-MANIFEST.sig", names)
         self.assertNotIn("agent/commands.py", names)
         self.assertNotIn("examples/.env.example", names)
         self.assertNotIn(".env", names)
@@ -95,6 +103,36 @@ class BuilderFixtureTests(unittest.TestCase):
         self.assertNotIn(".env", names)
         self.assertFalse(any(n.endswith("/.env") for n in names), msg=joined)
         self.assertNotIn("__pycache__", joined)
+        combined = b"\n".join(files.values()).decode("utf-8", errors="ignore")
+        forbidden = (
+            "SUPABASE_SERVICE_ROLE",
+            "service_role",
+            "DISCORD_BOT_TOKEN",
+            "BOT_TOKEN",
+            "CLIENT_SECRET",
+            "SHARED_SECRET",
+            "BACKEND_SECRET",
+            "DATABASE_URL",
+            "POSTGRES",
+            "Cloudflare token",
+            "ecosystem.config",
+            "license_panel",
+            "reset HWID admin",
+        )
+        for marker in forbidden:
+            self.assertNotIn(marker, combined)
+        manifest = json.loads(files["RELEASE-MANIFEST.json"])
+        self.assertEqual(manifest["project"], "deng-tool-rejoin")
+        self.assertEqual(manifest["client_protocol"], 2)
+        self.assertEqual(manifest["min_server_protocol"], 2)
+        self.assertTrue(manifest["build_id"])
+        mf = {item["path"]: item for item in manifest["files"]}
+        self.assertEqual(set(mf), _ALLOWED_ARTIFACT_PATHS - {"RELEASE-MANIFEST.json", "RELEASE-MANIFEST.sig"})
+        runtime = files["agent/.deng_runtime.bin"]
+        self.assertEqual(mf["agent/.deng_runtime.bin"]["sha256"], __import__("hashlib").sha256(runtime).hexdigest())
+        sig = json.loads(files["RELEASE-MANIFEST.sig"])
+        self.assertEqual(sig["algorithm"], "RS256")
+        self.assertTrue(sig["signature"])
 
 
 class RegistryStableGateTests(unittest.TestCase):

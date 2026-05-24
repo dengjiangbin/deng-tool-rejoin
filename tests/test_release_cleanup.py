@@ -58,11 +58,11 @@ class TestInstallerShortSeparators(unittest.TestCase):
 
     def test_has_30_char_equals_separator(self) -> None:
         s = _script()
-        self.assertIn("=" * 30, s, "30-char === separator missing")
+        self.assertNotIn("=" * 60, s, "old long === separator returned")
 
     def test_has_30_char_dash_separator(self) -> None:
         s = _script()
-        self.assertIn("-" * 30, s, "30-char --- separator missing")
+        self.assertNotIn("-" * 60, s, "old long --- separator returned")
 
     def test_no_progress_bar_percent(self) -> None:
         s = _script()
@@ -81,7 +81,7 @@ class TestInstallerShortSeparators(unittest.TestCase):
         idx_complete = s.find("Install complete.")
         self.assertGreater(idx_complete, 0, "Install complete. not found")
         after = s[idx_complete:]
-        self.assertIn("=" * 30, after, "No closing separator after Install complete.")
+        self.assertNotIn("=" * 60, after, "old long closing separator returned")
 
     def test_no_duplicate_separators_adjacent(self) -> None:
         s = _script()

@@ -303,11 +303,19 @@ def check_remote_license_status(
     base = (server_url or DEFAULT_LICENSE_SERVER_URL).strip().rstrip("/")
     url = f"{base}/api/license/check"
     install_id_hash = hash_install_id(install_id.strip())
+    build_id = ""
+    try:
+        from .build_info import collected_version_info
+        build_id = str(collected_version_info().get("probe_id") or "")[:80]
+    except Exception:  # noqa: BLE001
+        build_id = ""
     payload: dict[str, Any] = {
         "key": normalize_license_key(license_key),
         "install_id_hash": install_id_hash,
         "device_model": (device_model or "unknown")[:120],
         "app_version": (app_version or VERSION or "unknown")[:40],
+        "client_protocol": 2,
+        "build_id": build_id,
     }
     label = (device_label or "").strip()[:80]
     if label:
@@ -320,6 +328,12 @@ def check_remote_license_status(
 
     result = str(resp.get("result") or "server_unavailable").strip().lower()
     message = str(resp.get("message") or "").strip()
+    if result == "active":
+        try:
+            from .license_session import save_session
+            save_session(resp.get("session"))
+        except Exception:  # noqa: BLE001
+            pass
     if result == "wrong_device":
         return result, WRONG_DEVICE_USER_MESSAGE
     if result == "requires_manual_rebind":
@@ -355,6 +369,12 @@ def bind_remote_license_key(
     base = (server_url or DEFAULT_LICENSE_SERVER_URL).strip().rstrip("/")
     url = f"{base}/api/license/bind"
     install_id_hash = hash_install_id(install_id.strip())
+    build_id = ""
+    try:
+        from .build_info import collected_version_info
+        build_id = str(collected_version_info().get("probe_id") or "")[:80]
+    except Exception:  # noqa: BLE001
+        build_id = ""
     payload: dict[str, Any] = {
         "key": normalize_license_key(license_key),
         "install_id_hash": install_id_hash,
@@ -362,6 +382,8 @@ def bind_remote_license_key(
         "app_version": (app_version or VERSION or "unknown")[:40],
         "manual_entry": True,
         "bind_allowed": True,
+        "client_protocol": 2,
+        "build_id": build_id,
     }
     label = (device_label or "").strip()[:80]
     if label:
@@ -374,6 +396,12 @@ def bind_remote_license_key(
 
     result = str(resp.get("result") or "server_unavailable").strip().lower()
     message = str(resp.get("message") or "").strip()
+    if result == "active":
+        try:
+            from .license_session import save_session
+            save_session(resp.get("session"))
+        except Exception:  # noqa: BLE001
+            pass
     if result == "wrong_device":
         return result, WRONG_DEVICE_USER_MESSAGE
     if result == "requires_manual_rebind":

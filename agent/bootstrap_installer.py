@@ -305,6 +305,7 @@ def render_direct_install_bootstrap(
         '[ -f "$h/agent/.deng_runtime.bin" ] || { echo "Install error: protected runtime missing." >&2; exit 1; }\n'
         '[ -f "$h/BUILD-INFO.json" ] || { echo "Install error: BUILD-INFO.json missing." >&2; exit 1; }\n'
         '[ -f "$h/RELEASE-MANIFEST.json" ] || { echo "Install error: RELEASE-MANIFEST.json missing." >&2; exit 1; }\n'
+        '[ -f "$h/RELEASE-MANIFEST.sig" ] || { echo "Install error: RELEASE-MANIFEST.sig missing." >&2; exit 1; }\n'
         'printf \'%s\\n\' "$u" > "$h/.install_api"\n'
         '_GIT_COMMIT="$(python3 -c \'import json,os,sys; p=sys.argv[1]; '
         'print((json.load(open(p)).get("git_commit","")) if os.path.isfile(p) else "")\' '
@@ -360,11 +361,12 @@ def render_direct_install_bootstrap(
         '[ -x "$BIN/deng-rejoin" ] || { echo "Failed: wrapper not executable." >&2; exit 1; }\n'
         '[ -f "$h/agent/deng_tool_rejoin.py" ] || { echo "Failed: runtime missing." >&2; exit 1; }\n'
         '[ -f "$h/BUILD-INFO.json" ] || { echo "Failed: BUILD-INFO.json missing in package." >&2; exit 1; }\n'
+        '[ -f "$h/RELEASE-MANIFEST.sig" ] || { echo "Failed: RELEASE-MANIFEST.sig missing in package." >&2; exit 1; }\n'
         '[ -f "$h/.installed-build.json" ] || { echo "Failed: .installed-build.json was not written." >&2; exit 1; }\n'
         'if ! PYTHONPATH="$h" python3 -c '
-        "'import agent.commands, agent.supervisor, agent.roblox_presence, agent.freeform_enable, agent.playing_state, agent.dumpsys_cache, agent.window_apply' "
+        "'import agent._protected_runtime as r; r._verify(); import agent.commands, agent.supervisor, agent.roblox_presence, agent.freeform_enable, agent.playing_state, agent.dumpsys_cache, agent.window_apply' "
         '2>/dev/null; then\n'
-        '  echo "Install verification failed: required modules did not import." >&2\n'
+        '  echo "Install verification failed: manifest or runtime integrity check failed." >&2\n'
         "  exit 1\n"
         "fi\n"
         '_VERSION_OUT="$("$BIN/deng-rejoin" version 2>/dev/null)" || _VERSION_OUT=""\n'

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import io
 import json
 import sys
@@ -70,6 +71,39 @@ def _wsgi(path: str, body: dict) -> tuple[int, dict]:
     captured_status: list[str] = []
 
     def start_response(status: str, headers: list) -> None:
+        captured_status.append(status)
+
+    chunks = api_mod._wsgi_app(environ, start_response)
+    raw = b"".join(chunks)
+    return int(captured_status[0].split()[0]), json.loads(raw)
+
+
+def _wsgi_raw(
+    path: str,
+    body: bytes,
+    *,
+    headers: dict[str, str] | None = None,
+    content_type: str = "application/json",
+) -> tuple[int, dict]:
+    environ = {
+        "REQUEST_METHOD": "POST",
+        "PATH_INFO": path,
+        "CONTENT_TYPE": content_type,
+        "CONTENT_LENGTH": str(len(body)),
+        "wsgi.input": io.BytesIO(body),
+        "REMOTE_ADDR": "127.0.0.1",
+        "wsgi.errors": sys.stderr,
+        "wsgi.multithread": False,
+        "wsgi.multiprocess": False,
+        "wsgi.run_once": False,
+        "SERVER_NAME": "localhost",
+        "SERVER_PORT": "8787",
+    }
+    for k, v in (headers or {}).items():
+        environ[k] = v
+    captured_status: list[str] = []
+
+    def start_response(status: str, hdrs: list) -> None:
         captured_status.append(status)
 
     chunks = api_mod._wsgi_app(environ, start_response)
@@ -218,6 +252,55 @@ class TestLicenseApiValidateOnly(unittest.TestCase):
             store._load()["bindings"][key_hash].get("install_id_hash"),
             "22" * 32,
         )
+        self.assertIn("session", resp)
+        self.assertTrue(resp["session"]["capabilities"]["probe_upload"])
+
+    def test_explicit_too_old_protocol_rejects(self) -> None:
+        store, full_key, _ = _bound_store_after_reset()
+        self._store = store
+        with patch("agent.license_store.get_default_store", return_value=store):
+            status, resp = _wsgi(
+                "/api/license/check",
+                {
+                    "key": full_key,
+                    "install_id_hash": "aa" * 32,
+                    "device_model": "Pixel",
+                    "app_version": "0.9",
+                    "client_protocol": 1,
+                },
+            )
+        self.assertEqual(status, 426)
+        self.assertEqual(resp.get("result"), "protocol_too_old")
+
+    def test_probe_upload_requires_capability_session(self) -> None:
+        payload = gzip.compress(json.dumps({"probe_version": 1}).encode("utf-8"))
+        status, resp = _wsgi_raw(
+            "/api/dev-probe/upload",
+            payload,
+            headers={"HTTP_CONTENT_ENCODING": "gzip"},
+        )
+        self.assertEqual(status, 401)
+        self.assertIn("session", resp.get("error", ""))
+
+    def test_probe_upload_accepts_server_session(self) -> None:
+        session = api_mod._issue_capability_session(
+            key="DENG-AAAA-BBBB-CCCC-DDDD",
+            install_id_hash="33" * 32,
+            client_protocol=2,
+            build_id="p-test",
+        )
+        payload = gzip.compress(json.dumps({"probe_version": 1}).encode("utf-8"))
+        with patch("agent.dev_probe_store.store_probe", return_value=("p-test", Path("probe.json"))):
+            status, resp = _wsgi_raw(
+                "/api/dev-probe/upload",
+                payload,
+                headers={
+                    "HTTP_CONTENT_ENCODING": "gzip",
+                    "HTTP_X_DENG_SESSION": session["session_id"],
+                },
+            )
+        self.assertEqual(status, 201)
+        self.assertEqual(resp.get("probe_id"), "p-test")
 
 
 class TestStartupClientGate(unittest.TestCase):

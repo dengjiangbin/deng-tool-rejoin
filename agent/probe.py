@@ -1165,7 +1165,14 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 30.0) -> tuple[bool,
     req.add_header("Content-Type", "application/json")
     req.add_header("Content-Encoding", "gzip")
     req.add_header("User-Agent", "deng-rejoin-probe/1")
-    req.add_header("X-Dev-Probe-Token", "deng-rejoin-dev-probe-v1")
+    try:
+        from .license_session import session_id_for_feature
+        session_id = session_id_for_feature("probe_upload")
+    except Exception:  # noqa: BLE001
+        session_id = ""
+    if not session_id:
+        return False, "valid license session required; open deng-rejoin and pass license check first"
+    req.add_header("X-DENG-Session", session_id)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = resp.read().decode("utf-8", errors="replace")
@@ -1196,7 +1203,7 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 30.0) -> tuple[bool,
                 f"Server body: {body_text}"
             )
         if exc.code == 401:
-            return False, f"unauthorized (401) — check DENG_DEV_PROBE_TOKEN. {body_text}"
+            return False, f"unauthorized (401) — valid license session required. {body_text}"
         return False, f"HTTP {exc.code}: {body_text}"
     except urllib.error.URLError as exc:
         return False, f"network error: {exc.reason}"

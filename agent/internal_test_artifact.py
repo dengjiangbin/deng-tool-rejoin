@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import ast
 import datetime as _dt
+import base64
 import hashlib
 import io
 import json
 import marshal
+import os
 import re
 import subprocess
 import tarfile
@@ -20,14 +22,34 @@ MAIN_DEV_ARCHIVE_REL_PATH = "releases/main-dev/deng-tool-rejoin-main-dev.tar.gz"
 _CLIENT_SOURCE_DIR = "agent"
 _PROTECTED_BUNDLE = "agent/.deng_runtime.bin"
 _MANIFEST_NAME = "RELEASE-MANIFEST.json"
+_MANIFEST_SIG_NAME = "RELEASE-MANIFEST.sig"
+_ALLOWED_ARTIFACT_PATHS = frozenset(
+    {
+        "BUILD-INFO.json",
+        _MANIFEST_NAME,
+        _MANIFEST_SIG_NAME,
+        _PROTECTED_BUNDLE,
+        "agent/__init__.py",
+        "agent/_protected_runtime.py",
+        "agent/deng_tool_rejoin.py",
+    }
+)
+_CLIENT_PROTOCOL = 2
+_MIN_SERVER_PROTOCOL = 2
+_SIGNING_KEY_ENV = "DENG_REJOIN_MANIFEST_SIGNING_KEY_PEM"
+_SIGNING_KEY_REL = Path("data") / "rejoin_manifest_signing_key.pem"
 
 _RAW_RUNTIME_FILES = {
-    "agent/__init__.py": '''"""DENG Tool: Rejoin protected client package."""\nfrom . import _protected_runtime as _dpr\n_dpr.install()\n__all__ = ["__version__"]\n__version__ = "1.0.0"\n''',
+    "agent/__init__.py": '''from . import _protected_runtime as _dpr\n_dpr.install()\n__all__ = ["__version__"]\n__version__ = "1.0.0"\n''',
     "agent/deng_tool_rejoin.py": '''#!/usr/bin/env python3\nfrom __future__ import annotations\nimport sys\nfrom pathlib import Path\nif __package__ in {None, ""}:\n    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nimport agent._protected_runtime  # noqa: F401\nfrom agent.commands import main\nif __name__ == "__main__":\n    raise SystemExit(main())\n''',
     "agent/_protected_runtime.py": r'''from __future__ import annotations
-import importlib.abc, importlib.machinery, marshal, sys, zlib
+import base64, hashlib, importlib.abc, importlib.machinery, json, marshal, sys, zlib
 from pathlib import Path
+_N={public_n}
+_E={public_e}
+_MINP=2
 _B=None
+class IntegrityError(RuntimeError): pass
 class _L(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     def find_spec(self, fullname, path=None, target=None):
         if fullname in _m():
@@ -43,9 +65,42 @@ class _L(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         exec(code, module.__dict__)
 def _o(fullname):
     return str(Path(__file__).resolve().parent.parent / (fullname.replace(".","/")+".py"))
+def _err():
+    sys.stderr.write("[!] DENG Tool: Rejoin integrity check failed.\n[!] Your installation may be incomplete, outdated, or modified.\n[*] Please reinstall using the official command:\ncurl -fsSL https://rejoin.deng.my.id/install/test/latest -o install.sh && bash install.sh\n")
+def _b64u(x):
+    return base64.urlsafe_b64decode(x.encode()+b"="*((4-len(x)%4)%4))
+def _canon(obj):
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+def _rsav(sig, msg):
+    k=(_N.bit_length()+7)//8
+    if len(sig)!=k: return False
+    em=pow(int.from_bytes(sig,"big"),_E,_N).to_bytes(k,"big")
+    di=bytes.fromhex("3031300d060960864801650304020105000420")+hashlib.sha256(msg).digest()
+    return em==b"\x00\x01"+b"\xff"*(k-len(di)-3)+b"\x00"+di
+def _verify():
+    root=Path(__file__).resolve().parent.parent
+    mp=root/"RELEASE-MANIFEST.json"; sp=root/"RELEASE-MANIFEST.sig"
+    try:
+        m=json.loads(mp.read_text(encoding="utf-8"))
+        sig=json.loads(sp.read_text(encoding="utf-8"))
+        if m.get("project")!="deng-tool-rejoin" or int(m.get("client_protocol") or 0)<_MINP:
+            raise IntegrityError()
+        if sig.get("algorithm")!="RS256" or not _rsav(_b64u(sig.get("signature","")), _canon(m)):
+            raise IntegrityError()
+        for item in m.get("files", []):
+            p=str(item.get("path") or "")
+            if not p or p.startswith("/") or ".." in p.replace("\\","/").split("/"):
+                raise IntegrityError()
+            raw=(root/p).read_bytes()
+            if len(raw)!=int(item.get("size", -1)) or hashlib.sha256(raw).hexdigest()!=item.get("sha256"):
+                raise IntegrityError()
+    except Exception:
+        _err()
+        raise SystemExit(126)
 def _m():
     global _B
     if _B is None:
+        _verify()
         p=Path(__file__).with_name(".deng_runtime.bin")
         _B=marshal.loads(zlib.decompress(p.read_bytes()))
     return _B
@@ -339,21 +394,115 @@ def _sha256_bytes(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def _make_release_manifest_bytes(entries: dict[str, bytes]) -> bytes:
+def _canonical_json_bytes(payload: dict) -> bytes:
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def _load_or_create_signing_key(repo_root: Path):
+    try:
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("cryptography is required to sign release manifests") from exc
+
+    raw = os.environ.get(_SIGNING_KEY_ENV, "").strip().encode("utf-8")
+    key_path = repo_root / _SIGNING_KEY_REL
+    if not raw:
+        if key_path.exists():
+            raw = key_path.read_bytes()
+        else:
+            key_path.parent.mkdir(parents=True, exist_ok=True)
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            raw = key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+            key_path.write_bytes(raw)
+            try:
+                key_path.chmod(0o600)
+            except OSError:
+                pass
+    return serialization.load_pem_private_key(raw, password=None)
+
+
+def _public_numbers(signing_key) -> tuple[int, int]:
+    nums = signing_key.public_key().public_numbers()
+    return int(nums.n), int(nums.e)
+
+
+def _render_raw_runtime_files(signing_key) -> dict[str, str]:
+    public_n, public_e = _public_numbers(signing_key)
+    rendered = dict(_RAW_RUNTIME_FILES)
+    rendered["agent/_protected_runtime.py"] = rendered["agent/_protected_runtime.py"].format(
+        public_n=public_n,
+        public_e=public_e,
+    )
+    return rendered
+
+
+def _make_release_manifest_bytes(
+    entries: dict[str, bytes | str],
+    *,
+    build_info: dict,
+    artifact_sha256: str | None = None,
+) -> bytes:
     def raw_bytes(data: bytes | str) -> bytes:
         return data.encode("utf-8") if isinstance(data, str) else data
 
     payload = {
+        "project": "deng-tool-rejoin",
         "product": "DENG Tool: Rejoin",
+        "version": "main-dev",
+        "build_id": str(build_info.get("probe_id") or ""),
+        "artifact_sha256": artifact_sha256,
+        "created_at": str(build_info.get("built_at_iso") or ""),
+        "client_protocol": _CLIENT_PROTOCOL,
+        "min_server_protocol": _MIN_SERVER_PROTOCOL,
         "artifact_format_version": 3,
         "protection": "protected-bytecode-bundle",
-        "allowed_top_level": ["agent", "BUILD-INFO.json", _MANIFEST_NAME],
-        "files": {
-            name: {"sha256": _sha256_bytes(raw_bytes(data)), "size_bytes": len(raw_bytes(data))}
+        "allowed_top_level": ["agent", "BUILD-INFO.json", _MANIFEST_NAME, _MANIFEST_SIG_NAME],
+        "files": [
+            {
+                "path": name,
+                "sha256": _sha256_bytes(raw_bytes(data)),
+                "size": len(raw_bytes(data)),
+            }
             for name, data in sorted(entries.items())
-        },
+        ],
     }
-    return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
+    return _canonical_json_bytes(payload)
+
+
+def _sign_manifest(signing_key, manifest_bytes: bytes) -> bytes:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+
+    sig = signing_key.sign(manifest_bytes, padding.PKCS1v15(), hashes.SHA256())
+    payload = {
+        "algorithm": "RS256",
+        "key": "deng-rejoin-manifest-v1",
+        "signature": base64.urlsafe_b64encode(sig).decode("ascii").rstrip("="),
+    }
+    return _canonical_json_bytes(payload)
+
+
+def _tar_bytes(entries: dict[str, bytes | str]) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz", compresslevel=9) as tf:
+        for arcname, data in sorted(entries.items()):
+            ti = tarfile.TarInfo(name=arcname)
+            raw = data.encode("utf-8") if isinstance(data, str) else data
+            ti.size = len(raw)
+            ti.mtime = int(time.time())
+            ti.mode = 0o755 if arcname.endswith("deng_tool_rejoin.py") else 0o644
+            tf.addfile(ti, io.BytesIO(raw))
+    return buf.getvalue()
 
 
 def build_internal_test_tarball(repo_root: Path, output_tar_gz: Path) -> str:
@@ -370,24 +519,18 @@ def build_internal_test_tarball(repo_root: Path, output_tar_gz: Path) -> str:
     if not pairs:
         raise RuntimeError("No client modules matched protected artifact rules.")
 
+    signing_key = _load_or_create_signing_key(repo_root)
     build_info_bytes = _make_build_info_bytes(repo_root)
+    build_info = json.loads(build_info_bytes.decode("utf-8"))
     bundle_bytes = _compile_client_bundle(pairs)
-    entries = dict(_RAW_RUNTIME_FILES)
+    entries = _render_raw_runtime_files(signing_key)
     entries[_PROTECTED_BUNDLE] = bundle_bytes
     entries["BUILD-INFO.json"] = build_info_bytes
-    entries[_MANIFEST_NAME] = _make_release_manifest_bytes(entries)
-
-    buf = io.BytesIO()
+    manifest_bytes = _make_release_manifest_bytes(entries, build_info=build_info)
+    entries[_MANIFEST_NAME] = manifest_bytes
+    entries[_MANIFEST_SIG_NAME] = _sign_manifest(signing_key, manifest_bytes)
+    raw = _tar_bytes(entries)
     digest = hashlib.sha256()
-    with tarfile.open(fileobj=buf, mode="w:gz", compresslevel=9) as tf:
-        for arcname, data in sorted(entries.items()):
-            ti = tarfile.TarInfo(name=arcname)
-            raw = data.encode("utf-8") if isinstance(data, str) else data
-            ti.size = len(raw)
-            ti.mtime = int(time.time())
-            ti.mode = 0o755 if arcname.endswith("deng_tool_rejoin.py") else 0o644
-            tf.addfile(ti, io.BytesIO(raw))
-    raw = buf.getvalue()
     digest.update(raw)
     output_tar_gz.write_bytes(raw)
     return digest.hexdigest()
@@ -417,14 +560,17 @@ def verify_tarball_exclusions(tar_bytes: bytes) -> None:
             raise AssertionError(f"unexpected env file in tarball: {n}")
         if n.endswith(".py") and n not in _RAW_RUNTIME_FILES:
             raise AssertionError(f"unexpected raw python source in tarball: {n}")
-    top_level = {n.split("/", 1)[0] for n in lowered}
-    assert top_level <= {"agent", "build-info.json", "release-manifest.json"}, sorted(top_level)
     if "BUILD-INFO.json" not in names:
         raise AssertionError("tarball missing BUILD-INFO.json — build proof is required")
     if _MANIFEST_NAME not in names:
         raise AssertionError("tarball missing RELEASE-MANIFEST.json")
+    if _MANIFEST_SIG_NAME not in names:
+        raise AssertionError("tarball missing RELEASE-MANIFEST.sig")
     if _PROTECTED_BUNDLE not in names:
         raise AssertionError("tarball missing protected runtime bundle")
+    expected_lower = {p.lower() for p in _ALLOWED_ARTIFACT_PATHS}
+    if set(lowered) != expected_lower:
+        raise AssertionError(f"unexpected artifact file list: {sorted(names)}")
     combined = b"\n".join(file_bytes.values()).decode("utf-8", errors="ignore")
     for marker in _FORBIDDEN_STRING_MARKERS:
         if marker in combined:
