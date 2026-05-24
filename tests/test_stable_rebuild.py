@@ -126,10 +126,9 @@ class TestPublicStates(unittest.TestCase):
         "Joining", "Join Unconfirmed", "In Server", "Lobby",
         "Launching", "Online", "Reconnecting", "Dead", "Disconnected",
         "Offline", "Preparing", "Background", "Warning", "Unknown",
-        "Failed", "Layout", "In-Lobby", "Join Failed", "Wrong Game / Wrong Server",
+        "Failed", "Layout", "Join Failed", "Wrong Game / Wrong Server",
     ]
-    _ALLOWED_PUBLIC = {"Layout", "Launching", "Relaunching", "Online", "Reopening", "Failed",
-                       "No Heartbeat", "Dead", "In-Lobby", "Join Failed", "Wrong Game / Wrong Server"}
+    _ALLOWED_PUBLIC = {"Layout", "Launching", "Online", "Reopening", "Failed", "Dead"}
 
     def _get_display_map(self):
         # Extract _STATE_DISPLAY_MAP from cmd_start source via AST.
@@ -172,9 +171,14 @@ class TestPublicStates(unittest.TestCase):
         self.assertNotEqual(smap["Lobby"], "Lobby")
         self.assertIn(smap["Lobby"], self._ALLOWED_PUBLIC)
 
-    def test_reconnecting_maps_to_no_heartbeat(self) -> None:
+    def test_reconnecting_maps_to_reopening(self) -> None:
         smap = self._get_display_map()
-        self.assertEqual(smap.get("Reconnecting"), "No Heartbeat")
+        self.assertEqual(smap.get("Reconnecting"), "Reopening")
+
+    def test_in_lobby_maps_to_dead(self) -> None:
+        smap = self._get_display_map()
+        displayed = smap.get("In-Lobby", "Dead")
+        self.assertEqual(displayed, "Dead")
 
     def test_dead_stays_dead(self) -> None:
         smap = self._get_display_map()
@@ -449,8 +453,8 @@ class TestRobloxPresenceAPI(unittest.TestCase):
         failed = rp.resolve_presence_state(
             presence, process_alive=True, launch_elapsed_seconds=120, join_timeout_seconds=90
         )
-        self.assertEqual(lobby.state, "In-Lobby")
-        self.assertEqual(failed.state, "Join Failed")
+        self.assertEqual(lobby.state, "Dead")
+        self.assertEqual(failed.state, "Dead")
 
     def test_parse_expected_target_from_private_server_url(self) -> None:
         from agent.url_utils import parse_expected_target_from_url

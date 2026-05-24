@@ -111,6 +111,16 @@ def _safe(label: str, fn, errors: list[dict[str, str]], default: Any = None) -> 
 
 def _run(label: str, args: list[str], errors: list[dict[str, str]], *, root: bool = False, timeout: int = 8) -> CommandResult:
     """Run a command with timeout; record failure under ``errors`` if it dies."""
+    if not args or not str(args[0] or "").strip():
+        errors.append({"step": label, "error": "empty command skipped"})
+        return CommandResult(tuple(str(a) for a in args), 127, "", "empty command skipped", False)
+    if args[0] == "sh" and len(args) >= 2:
+        if args[1] == "-c" and (len(args) < 3 or not str(args[2]).strip()):
+            errors.append({"step": label, "error": "empty shell command skipped"})
+            return CommandResult(tuple(args), 127, "", "empty shell command skipped", False)
+        if args[1] != "-c" and not str(args[1]).strip():
+            errors.append({"step": label, "error": "empty shell script path skipped"})
+            return CommandResult(tuple(args), 127, "", "empty shell script path skipped", False)
     try:
         if root:
             res = run_root_command(args, timeout=timeout)
@@ -1166,12 +1176,15 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 30.0) -> tuple[bool,
     req.add_header("Content-Encoding", "gzip")
     req.add_header("User-Agent", "deng-rejoin-probe/1")
     try:
-        from .license_session import session_id_for_feature
-        session_id = session_id_for_feature("probe_upload")
+        from .license_session import ensure_session_for_feature
+        ok, session_or_error = ensure_session_for_feature("probe_upload")
+        session_id = session_or_error if ok else ""
     except Exception:  # noqa: BLE001
         session_id = ""
     if not session_id:
-        return False, "valid license session required; open deng-rejoin and pass license check first"
+        return False, session_or_error if "session_or_error" in locals() else (
+            "valid license session required; open deng-rejoin and pass license check first"
+        )
     req.add_header("X-DENG-Session", session_id)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:

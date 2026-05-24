@@ -160,7 +160,7 @@ STATUS_RECONNECTING      = "Reconnecting"
 STATUS_WARNING           = "Warning"
 STATUS_FAILED            = "Failed"
 STATUS_UNKNOWN           = "Unknown"
-STATUS_IN_LOBBY          = "In-Lobby"
+STATUS_IN_LOBBY          = STATUS_DEAD
 STATUS_JOIN_FAILED       = "Join Failed"
 STATUS_WRONG_GAME        = "Wrong Game / Wrong Server"
 # Richer state constants for improved UX
@@ -818,6 +818,8 @@ class _PackageWorker(threading.Thread):
                         # Kaeru-style: process alive = Online (stable rebuild p-9e3f2a8d1c).
                         # STATUS_JOINING is a legacy alias; live paths now use STATUS_LAUNCHING.
                         target = self._post_launch_state()
+                    elif prev_before_check == STATUS_LOBBY:
+                        target = STATUS_ONLINE
                     elif prev_before_check in _HEALTHY_STATES:
                         target = prev_before_check  # stay in current healthy state
                     else:
@@ -948,6 +950,9 @@ class _PackageWorker(threading.Thread):
 
                 self.bg_since = None
 
+                if self.status_map.get(self.package) == STATUS_LOBBY:
+                    self._set_status(STATUS_ONLINE, "Legacy lobby state normalized")
+
                 if running:
                     self._sleep(interval)
                     continue
@@ -989,7 +994,7 @@ class _PackageWorker(threading.Thread):
                             "Playing":          STATUS_ONLINE,
                             "In Server":        STATUS_ONLINE,
                             "Online":           STATUS_ONLINE,
-                            "Lobby":            STATUS_ONLINE,
+                            "Lobby":            STATUS_DEAD,
                             "Background":       STATUS_ONLINE,
                             STATUS_JOIN_UNCONFIRMED: STATUS_ONLINE,
                             "Recovering":       STATUS_RECONNECTING,
@@ -1274,19 +1279,19 @@ class WatchdogSupervisor:
             pkg: STATUS_LAUNCHING for pkg in self.packages
         }
         # Normalize initial_status: remove legacy/transient labels.
-        # Running-but-not-in-game is No Heartbeat.
-        # Any lobby-like state from old sessions also maps to No Heartbeat.
+        # Running-but-not-in-game is Dead.
+        # Any lobby-like state from old sessions also maps to Dead.
         if initial_status:
             _legacy_to_launching = {
                 STATUS_JOINING, STATUS_JOIN_UNCONFIRMED, "Join Failed", "Reconnecting",
             }
-            _legacy_to_no_heartbeat = {
+            _legacy_to_dead = {
                 "In" + "-Lobby", "Lobby",
             }
             for pkg, st in initial_status.items():
                 if pkg in self.status_map:
-                    if st in _legacy_to_no_heartbeat:
-                        self.status_map[pkg] = STATUS_NO_HEARTBEAT
+                    if st in _legacy_to_dead:
+                        self.status_map[pkg] = STATUS_DEAD
                     elif st in _legacy_to_launching:
                         self.status_map[pkg] = STATUS_LAUNCHING
                     else:
@@ -1793,7 +1798,7 @@ class WatchdogSupervisor:
             detail = {
                 "process_running": "true",
                 "in_game": "false",
-                "heartbeat_ok": "true",
+                "heartbeat_ok": "false",
                 "warning_detected": "false",
                 "elapsed_ms": elapsed_ms,
                 "root_available": str(root_available).lower(),
@@ -1803,8 +1808,8 @@ class WatchdogSupervisor:
                 "heartbeat_age_sec": heartbeat_age_sec,
                 "reason": presence_resolution.reason,
             }
-            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_IN_LOBBY)
-            return STATUS_IN_LOBBY, detail
+            self._log_state_evidence(pkg, detail, self._presence_last_detail.get(pkg, {}), STATUS_DEAD)
+            return STATUS_DEAD, detail
 
         if presence_resolution is not None and presence_resolution.state == STATUS_JOIN_FAILED:
             detail = {
@@ -2374,7 +2379,7 @@ class WatchdogSupervisor:
                     self._online_start_ts.pop(pkg, None)
                     _maybe_render(force=True)
 
-                if state in {STATUS_IN_LOBBY, STATUS_JOIN_FAILED, STATUS_WRONG_GAME, STATUS_UNKNOWN}:
+                if state in {STATUS_JOIN_FAILED, STATUS_WRONG_GAME, STATUS_UNKNOWN}:
                     _maybe_render(force=True)
                     continue
 

@@ -285,8 +285,8 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(detail2["heartbeat_ok"], "false")
 
     # Test 15
-    def test_process_alive_presence_lobby_returns_in_lobby_not_joining(self):
-        """Presence Online/not Playing is a visible In-Lobby diagnostic before timeout."""
+    def test_process_alive_presence_lobby_returns_dead_not_joining(self):
+        """Presence Online/not Playing is Dead and eligible for recovery."""
         sup = _make_sup()
         presence = MagicMock()
         presence.is_in_game = False
@@ -296,7 +296,7 @@ class TestStateDetection(unittest.TestCase):
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(sup, "_fetch_presence", return_value=presence):
             state, _ = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_IN_LOBBY)
+        self.assertEqual(state, STATUS_DEAD)
         self.assertNotEqual(state, "Joining")
 
     def test_process_missing_presence_lobby_returns_dead(self):

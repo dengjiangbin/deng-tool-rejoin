@@ -551,11 +551,9 @@ def resolve_presence_state(
         )
 
     if is_lobby:
-        elapsed = float(launch_elapsed_seconds or 0.0)
-        timed_out = launch_elapsed_seconds is not None and elapsed >= float(join_timeout_seconds)
         return PresenceResolution(
-            state="Join Failed" if timed_out else "In-Lobby",
-            reason="presence_online_not_playing_timeout" if timed_out else "presence_online_not_playing",
+            state="Dead",
+            reason="presence_online_not_playing",
             server_verification="not_playing",
             **common,
         )

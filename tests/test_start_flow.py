@@ -221,11 +221,11 @@ class StartTableUxTests(unittest.TestCase):
         table = build_start_table(rows)
         self.assertIn("In Server", table)
 
-    def test_final_summary_lobby_maps_to_online(self):
+    def test_final_summary_lobby_maps_to_dead(self):
         from agent.commands import build_final_summary
         entries = [{"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}]
         text = build_final_summary(entries, {"com.roblox.client": "Lobby"})
-        self.assertIn("online", text.lower())
+        self.assertIn("dead", text.lower())
 
     def test_final_summary_in_server_maps_to_online(self):
         from agent.commands import build_final_summary

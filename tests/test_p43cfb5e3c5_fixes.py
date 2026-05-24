@@ -360,12 +360,13 @@ class TestPublicUICleanliness(unittest.TestCase):
         table = self._make_table()
         self.assertNotIn("Checking Package", table)
 
-    def test_in_lobby_is_allowed_display_map_value(self) -> None:
-        """Authenticated presence can now expose In-Lobby as a diagnostic state."""
+    def test_in_lobby_is_not_public_display_value(self) -> None:
+        """Authenticated lobby/not-playing presence must display as Dead."""
         import ast, inspect
         import agent.commands as _mod
         src = inspect.getsource(_mod.cmd_start)
-        self.assertIn('"In-Lobby"', src)
+        self.assertNotIn('"In-Lobby"', src)
+        self.assertNotIn('"In-Lobby",', src)
 
     def test_no_joining_in_display_map_values(self) -> None:
         """_STATE_DISPLAY_MAP must not produce 'Joining' as a display value."""
@@ -389,9 +390,7 @@ class TestPublicUICleanliness(unittest.TestCase):
         end   = src.find("}", start) + 1
         map_src = src[start:end]
         allowed = {
-            "Online", "No Heartbeat", "Dead", "Launching",
-            "Relaunching", "Preparing", "Clear Cache", "Failed",
-            "In-Lobby", "Join Failed", "Wrong Game / Wrong Server",
+            "Online", "Dead", "Launching", "Reopening", "Failed",
         }
         # Find all string literals that appear after a ':' (the values)
         import re

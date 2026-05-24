@@ -39,6 +39,31 @@ class CacheBustingTests(unittest.TestCase):
         # The UA bypasses Cloudflare's Browser Integrity Check; keep it.
         self.assertIn("deng-rejoin-installer/2.0", _script())
 
+    def test_colorful_secure_sections_present(self) -> None:
+        s = _script()
+        for text in (
+            "DENG Tool: Rejoin Installer",
+            "Preparing secure download",
+            "Requesting one-time package token",
+            "Downloading protected package",
+            "Verifying archive SHA256",
+            "Verifying signed manifest",
+            "Verifying runtime integrity",
+            "Manifest signature verified",
+            "Runtime verified",
+            "Run: deng-rejoin",
+        ):
+            self.assertIn(text, s)
+        self.assertIn("\\033[1;96m", s)
+        self.assertIn("=" * 30, s)
+        self.assertIn("-" * 30, s)
+
+    def test_no_permanent_package_url_or_token_leak(self) -> None:
+        s = _script()
+        self.assertIn("/install/test/package-token", s)
+        self.assertNotIn("/install/test/package.tar.gz", s)
+        self.assertNotIn('echo "$p"', s)
+
 
 class PurgeStepTests(unittest.TestCase):
     def test_purges_known_code_directories(self) -> None:

@@ -237,8 +237,8 @@ class TestLaunchingToLobbyTransition(unittest.TestCase):
 
         self.assertEqual(status_map[pkg], STATUS_ONLINE)
 
-    def test_lobby_stays_lobby_on_subsequent_healthy_checks(self):
-        """Once in Lobby, healthy checks must not demote to Online."""
+    def test_legacy_lobby_promotes_to_online_on_healthy_checks(self):
+        """Legacy Lobby is not a public stable state; healthy checks show Online."""
         entry = _make_entry("com.roblox.client", private_url="")
         cfg = _make_cfg("com.roblox.client")
         pkg = "com.roblox.client"
@@ -260,7 +260,7 @@ class TestLaunchingToLobbyTransition(unittest.TestCase):
             worker.launching_since = None  # already healthy; no timeout
             worker.run()
 
-        self.assertEqual(status_map[pkg], STATUS_LOBBY)
+        self.assertEqual(status_map[pkg], STATUS_ONLINE)
 
     def test_in_server_stays_in_server_on_subsequent_healthy_checks(self):
         """Once In Server, healthy checks must not demote to Online."""
@@ -522,11 +522,11 @@ class TestColorizeStatusNewStates(unittest.TestCase):
 class TestStateSummaryNewStates(unittest.TestCase):
     """build_final_summary must handle new state strings."""
 
-    def test_lobby_counts_as_online(self):
+    def test_lobby_counts_as_dead(self):
         from agent.commands import build_final_summary
         entries = [{"package": "com.roblox.client", "account_username": "", "enabled": True, "username_source": "not_set"}]
         text = build_final_summary(entries, {"com.roblox.client": "Lobby"})
-        self.assertIn("online", text.lower())
+        self.assertIn("dead", text.lower())
 
     def test_in_server_counts_as_online(self):
         from agent.commands import build_final_summary

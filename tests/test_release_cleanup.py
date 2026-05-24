@@ -58,11 +58,11 @@ class TestInstallerShortSeparators(unittest.TestCase):
 
     def test_has_30_char_equals_separator(self) -> None:
         s = _script()
-        self.assertNotIn("=" * 60, s, "old long === separator returned")
+        self.assertIn("=" * 30, s, "30-char === separator missing")
 
     def test_has_30_char_dash_separator(self) -> None:
         s = _script()
-        self.assertNotIn("-" * 60, s, "old long --- separator returned")
+        self.assertIn("-" * 30, s, "30-char --- separator missing")
 
     def test_no_progress_bar_percent(self) -> None:
         s = _script()
@@ -81,7 +81,7 @@ class TestInstallerShortSeparators(unittest.TestCase):
         idx_complete = s.find("Install complete.")
         self.assertGreater(idx_complete, 0, "Install complete. not found")
         after = s[idx_complete:]
-        self.assertNotIn("=" * 60, after, "old long closing separator returned")
+        self.assertIn('printf "%b%s%b\\n" "$C" "$sep" "$X"', after, "No closing separator after Install complete.")
 
     def test_no_duplicate_separators_adjacent(self) -> None:
         s = _script()
@@ -104,12 +104,9 @@ class TestInstallerShortSeparators(unittest.TestCase):
 
     def test_success_output_echo_order_is_exact(self) -> None:
         s = _script()
-        expected = (
-            'echo "DENG Tool: Rejoin Installing"\n'
-            'echo "Version: main-dev"\n'
-        )
-        self.assertIn(expected, s)
-        self.assertIn('echo "Install complete."\n', s)
+        self.assertIn("DENG Tool: Rejoin Installer", s)
+        self.assertIn('info "Version: main-dev"', s)
+        self.assertIn('ok "Install complete."', s)
         self.assertNotIn("100%", s)
         self.assertNotIn("spinner", s.lower())
 

@@ -3995,7 +3995,6 @@ def _colorize_status(status: str, *, use_color: bool = True) -> str:
         "Launched":          _ANSI_GREEN,    # Roblox process up, no URL yet
         "Disconnected":      _ANSI_RED,      # Roblox error code detected
         "No Heartbeat":      _ANSI_RED,      # running but not playing normally
-        "In-Lobby":          _ANSI_YELLOW,
         ("Join" + "ing"):    _ANSI_CYAN,     # legacy alias
         "Join Failed":       _ANSI_RED,
         "Wrong Game / Wrong Server": _ANSI_RED,
@@ -4156,11 +4155,10 @@ _FINAL_SUMMARY_ORDER: tuple[tuple[str, str], ...] = (
 
 _STATE_TO_SUMMARY: dict[str, str] = {
     "Online":            "online",
-    "Lobby":             "online",         # healthy at home screen
+    "Lobby":             "dead",
     "In Server":         "online",         # confirmed in target server
     ("Join " + "Unconfirmed"):  "launching",
     "No Heartbeat":      "no heartbeat",   # was in game, heartbeat stalled
-    "In-Lobby":          "in lobby",
     ("Join" + "ing"):    "launching",
     "Reconnecting":      "reconnecting",
     "Launching":         "launching",
@@ -5331,19 +5329,17 @@ def cmd_start(args: argparse.Namespace) -> int:
         _live_map = _supervisor.status_map  # dict mutated in-place by watchdog loop
 
         # Public state map: internal states → user-facing labels.
-        # Allowed public states: Online, No Heartbeat, Dead, Launching,
-        #   Clear Cache, Preparing, Failed.
+        # Allowed public states: Layout, Launching, Online, Reopening, Dead, Failed.
         # Internal/noisy states (Docking, Layout, Waiting, Checking etc.)
         # never reach the live supervisor dashboard.
         _STATE_DISPLAY_MAP: dict[str, str] = {
             # Live watchdog states — keep as-is.
-            "No Heartbeat":     "No Heartbeat",
+            "No Heartbeat":     "Dead",
             "Online":           "Online",
-            "In-Lobby":         "In-Lobby",
-            "Join Failed":      "Join Failed",
-            "Wrong Game / Wrong Server": "Wrong Game / Wrong Server",
+            "Join Failed":      "Failed",
+            "Wrong Game / Wrong Server": "Failed",
             "Dead":             "Dead",
-            "Relaunching":       "Relaunching",
+            "Relaunching":       "Reopening",
             "Launching":         "Launching",
             # Transient post-launch / startup → Launching
             "Preparing":        "Launching",
@@ -5353,10 +5349,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             "In Server":        "Online",
             "Background":       "Online",
             "Warning":          "Online",
-            # App open but not in game -> No Heartbeat.
-            "Lobby":            "No Heartbeat",
+            # App open but not in game -> Dead.
+            "Lobby":            "Dead",
             # Recovery / disconnect states
-            "Reconnecting":     "No Heartbeat",
+            "Reconnecting":     "Reopening",
             "Disconnected":     "Dead",
             "Offline":          "Dead",
         }
