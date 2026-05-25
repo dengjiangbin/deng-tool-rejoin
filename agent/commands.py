@@ -4262,6 +4262,10 @@ def _verify_layout_post_launch(
     diag_rows: list[dict[str, Any]] = []
     try:
         _screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
+        try:
+            _display_state = android.get_display_orientation_state()
+        except Exception:  # noqa: BLE001
+            _display_state = {"orientation": "unknown", "width": 0, "height": 0, "rotation": ""}
         stored_rects = (
             cfg.get("_layout_rects") or cfg.get("last_layout_preview")
             if cfg.get("last_layout_mode") in (None, _screen_mode)
@@ -4301,20 +4305,40 @@ def _verify_layout_post_launch(
             force_stop_before=False,
             relaunch_after=False,
             verify_after=True,
-            retries=0,  # MUST be 0: retries>0 force-stops running apps
+            retries=2,
             screen_mode=_screen_mode,
             touch_probe=(_screen_mode == "portrait"),
         )
         for r in results:
             out[r.package] = r.final_ok
+            _desired_tuple = (r.desired.left, r.desired.top, r.desired.right, r.desired.bottom)
+            _click_result = {
+                "target": r.touch_probe_center,
+                "inside_actual_bounds": bool(
+                    r.touch_probe_center and r.actual_bounds
+                    and r.actual_bounds[0] <= r.touch_probe_center[0] <= r.actual_bounds[2]
+                    and r.actual_bounds[1] <= r.touch_probe_center[1] <= r.actual_bounds[3]
+                ),
+                "tap_ok": r.touch_probe_ok,
+                "detail": r.touch_probe_detail,
+            }
             diag_rows.append({
                 "package":        r.package,
+                "mode":           _screen_mode,
+                "display_size":    {
+                    "width": _display_state.get("width", 0),
+                    "height": _display_state.get("height", 0),
+                },
+                "rotation":        _display_state.get("rotation", ""),
                 "desired":        r.desired.as_dict() if hasattr(r.desired, "as_dict") else {
                     "left": r.desired.left, "top": r.desired.top,
                     "right": r.desired.right, "bottom": r.desired.bottom,
                 },
+                "expected_bounds": _desired_tuple,
                 "actual_bounds":  r.actual_bounds,
                 "actual_method":  r.actual_method,
+                "input_transform": "actual_bounds_center",
+                "click_target_result": _click_result,
                 "status":         r.status,
                 "pre_write_ok":   r.pre_write_ok,
                 "pre_write_method": r.pre_write_method,
@@ -4329,6 +4353,19 @@ def _verify_layout_post_launch(
             _layout_log.debug(
                 "post-launch verify: %s ok=%s actual=%s method=%s attempts=%s",
                 r.package, r.final_ok, r.actual_bounds, r.actual_method, "; ".join(r.attempts),
+            )
+            _layout_log.info(
+                "[DENG_REJOIN_LAYOUT_VERIFY] package=%s mode=%s display=%sx%s rotation=%s"
+                " expected=%s actual=%s input_transform=actual_bounds_center click=%s status=%s",
+                r.package,
+                _screen_mode,
+                _display_state.get("width", 0),
+                _display_state.get("height", 0),
+                _display_state.get("rotation", ""),
+                _desired_tuple,
+                r.actual_bounds,
+                _click_result,
+                r.status,
             )
     except Exception as exc:  # noqa: BLE001
         _layout_log.debug("verify_layout_post_launch error: %s", exc)
@@ -4718,6 +4755,26 @@ def cmd_start(args: argparse.Namespace) -> int:
             "reason=normal_start_must_not_close_all_apps keep_alive=%s",
             ",".join(keep_alive),
         )
+
+        # Cloud Phone Extreme memory behavior is the default and only memory
+        # preparation path for this tool. It is automatic, never selectable,
+        # and keeps Termux/Roblox/core Android packages protected.
+        try:
+            _cloud_mem = android.optimize_cloud_phone_memory(keep_alive)
+            _start_log.info(
+                "[DENG_REJOIN_CLOUD_PHONE_MEMORY] disabled=%s stopped=%s skipped=%s"
+                " failed=%s recovery=%s cooldown_skipped=%s uninstall_used=false",
+                ",".join(str(p) for p in _cloud_mem.get("disabled") or []) or "none",
+                ",".join(str(p) for p in _cloud_mem.get("stopped") or []) or "none",
+                json.dumps(_cloud_mem.get("skipped") or [], separators=(",", ":")),
+                json.dumps(_cloud_mem.get("failed") or [], separators=(",", ":")),
+                _cloud_mem.get("recovery_command", "pm enable com.google.android.gms"),
+                str(_cloud_mem.get("cooldown_skipped", False)).lower(),
+            )
+            if not _cloud_mem.get("cooldown_skipped"):
+                _start_log.info("[*] Recovery: %s", _cloud_mem.get("recovery_command"))
+        except Exception as _exc:  # noqa: BLE001
+            _start_log.debug("cloud phone memory optimization error (non-fatal): %s", _exc)
 
         # 1b) Also force-stop any OTHER detected Roblox packages not in our list.
         try:
@@ -5175,6 +5232,10 @@ def cmd_start(args: argparse.Namespace) -> int:
             safe_io.set_crash_context(phase="render_loop", session_id=_start_session_id)
             import time as _ts_time
             _now_ts = _ts_time.time()
+            _usage_cache = getattr(_live_dashboard, "_usage_cache", None)
+            if not isinstance(_usage_cache, dict):
+                _usage_cache = {}
+                setattr(_live_dashboard, "_usage_cache", _usage_cache)
 
             def _get_runtime(pkg: str) -> str:
                 raw_state = _live_map.get(pkg, "Unknown")
@@ -5187,12 +5248,21 @@ def cmd_start(args: argparse.Namespace) -> int:
                 return _fmt_runtime(max(0.0, _now_ts - start_ts))
 
             def _get_usage(pkg: str) -> str:
-                """Return stable display usage without live Android subprocess polling."""
+                """Return cached per-package RAM usage; never leave the table blank."""
                 raw_state = _live_map.get(pkg, "Unknown")
                 disp = _STATE_DISPLAY_MAP.get(raw_state, raw_state)
                 if disp in ("Dead", "Preparing", "Clear Cache"):
-                    return "0MB"
-                return ""
+                    return "N/A"
+                cached = _usage_cache.get(pkg)
+                if isinstance(cached, tuple) and _now_ts - float(cached[0]) < 9.0:
+                    return str(cached[1] or "N/A")
+                try:
+                    usage = android.get_package_ram_usage(pkg, getattr(_supervisor, "_root_info", None))
+                    label = str(usage.get("usage_mb") or "").strip() or "N/A"
+                except Exception:  # noqa: BLE001
+                    label = "N/A"
+                _usage_cache[pkg] = (_now_ts, label)
+                return label
 
             lines = [banner_text(use_color=use_color), ""]
             ram_label = _get_ram_label()

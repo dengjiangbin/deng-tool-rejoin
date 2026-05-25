@@ -136,6 +136,31 @@ class TestLaunchWithBounds(unittest.TestCase):
                 break
         self.assertTrue(found, "expected an am start call with --activity-launch-bounds")
 
+    def test_private_url_launch_keeps_activity_bounds(self) -> None:
+        rect = (10, 20, 610, 420)
+        captured: list[list[str]] = []
+
+        def fake_run(cmd, timeout=None):
+            captured.append(list(cmd))
+            class _R:
+                ok = True
+                stdout = ""
+                stderr = ""
+                returncode = 0
+            return _R()
+
+        with mock.patch.object(android, "_find_command", lambda *a, **k: "am"), \
+             mock.patch.object(android, "run_command", fake_run):
+            res, label = android.launch_package_with_bounds(
+                "com.example.clone1", rect, private_url="roblox://placeID=1",
+            )
+        self.assertTrue(res.ok)
+        self.assertIn("_url", label)
+        first = captured[0]
+        self.assertIn("--activity-launch-bounds", first)
+        idx = first.index("--activity-launch-bounds")
+        self.assertEqual(first[idx + 1:idx + 5], ["10", "20", "610", "420"])
+
     def test_falls_back_to_no_bounds_when_first_call_fails(self) -> None:
         rect = (0, 0, 1000, 500)
         attempts = [0]

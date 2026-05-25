@@ -66,7 +66,14 @@ def session_id_for_feature(feature: str) -> str:
     return str(data.get("session_id") or "").strip()
 
 
-def ensure_session_for_feature(feature: str, *, allow_validate_refresh: bool = True) -> tuple[bool, str]:
+def ensure_session_for_feature(
+    feature: str,
+    *,
+    allow_validate_refresh: bool = True,
+    force_refresh: bool = False,
+) -> tuple[bool, str]:
+    if force_refresh:
+        clear_session()
     sid = session_id_for_feature(feature)
     if sid:
         return True, sid

@@ -25,16 +25,27 @@ class LogoColorRegressionTests(unittest.TestCase):
         text = banner.banner_text(use_color=False)
         lines = text.splitlines()
         subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
-        self.assertIn("MONS", lines[subtitle_idx + 1])
-        self.assertLessEqual(len(lines[subtitle_idx + 1].strip()), 4)
+        mons_block = lines[subtitle_idx + 1: subtitle_idx + 5]
+        self.assertTrue(any("M O N S" in line for line in mons_block))
+        self.assertGreaterEqual(len(mons_block), 3)
+        self.assertLess(sum(len(line.strip()) for line in mons_block), 30)
+        self.assertNotEqual(lines[subtitle_idx + 1].strip(), "MONS")
+        self.assertFalse(lines[subtitle_idx + 1].startswith(" "))
 
     def test_banner_mons_uses_grey_when_colored(self):
         text = banner.banner_text(use_color=True)
         lines = text.splitlines()
         subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
         mons_line = lines[subtitle_idx + 1]
-        self.assertIn("MONS", mons_line)
         self.assertIn("\033[90m", mons_line)
+
+    def test_deng_logo_remains_larger_than_mons(self):
+        text = banner.banner_text(use_color=False)
+        lines = text.splitlines()
+        subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
+        logo_width = max(len(line) for line in lines[:subtitle_idx])
+        mons_width = max(len(line) for line in lines[subtitle_idx + 1:])
+        self.assertGreater(logo_width, mons_width * 3)
 
 
 class SeparatorRegressionTests(unittest.TestCase):

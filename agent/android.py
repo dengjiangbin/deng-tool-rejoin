@@ -119,7 +119,7 @@ def process_cmdline_scan_args(package: str) -> list[str]:
 # c1q:13/TP1A.220624.014, probe id p-368a65d699).
 _ANDROID_SYSTEM_BINARIES: frozenset[str] = frozenset({
     "am", "cmd", "dumpsys", "getprop", "input", "logcat", "monkey", "pm",
-    "pgrep", "pidof", "ps", "service", "settings", "setprop", "wm",
+    "pgrep", "pidof", "ps", "service", "settings", "setprop", "wm", "ime",
 })
 _ANDROID_BIN_DIRS: tuple[str, ...] = ("/system/bin", "/system/xbin", "/vendor/bin")
 
@@ -1553,7 +1553,7 @@ def get_memory_info() -> dict[str, int]:
 def get_app_memory_mb(package: str) -> float | None:
     """Get approximate RAM usage for a running package in MB via dumpsys meminfo."""
     package = validate_package_name(package)
-    result = run_command(["dumpsys", "meminfo", package], timeout=8)
+    result = run_android_command(["dumpsys", "meminfo", package], timeout=8, prefer_root=False)
     if not result.ok:
         return None
     # Look for "TOTAL PSS:" or similar summary line (KB → MB)
@@ -1576,14 +1576,15 @@ def get_package_ram_usage(
     """Return per-package RAM usage in MB.
 
     Strategy (in order, first success wins):
-    1. ``/proc/<pid>/status`` VmRSS — fastest; requires a readable PID.
-    2. ``dumpsys meminfo <package>`` TOTAL PSS/RSS — reliable but ~1 s.
-    3. Return 0 MB on any failure so the caller can always display something.
+    1. ``/proc/<pid>/smaps_rollup`` RSS/PSS — best if accessible.
+    2. ``/proc/<pid>/status`` VmRSS — fast readable PID fallback.
+    3. ``dumpsys meminfo <package>`` TOTAL PSS/RSS.
+    4. Return ``N/A`` on failure so UI cells are never blank.
 
     Returns a dict with:
       pid           – PID string used (empty if not found)
       rss_kb        – raw kilobytes (0 on failure)
-      usage_mb      – formatted string e.g. "256MB" or "1.2GB"
+      usage_mb      – formatted string e.g. "256 MB", "1.2 GB", or "N/A"
       method        – one of "proc_status" / "dumpsys_meminfo" / "unknown"
       success       – bool
       error         – error string (empty on success)
@@ -1601,23 +1602,44 @@ def get_package_ram_usage(
     error   = ""
 
     try:
-        # ── Strategy 1: /proc/<pid>/status ───────────────────────────────
+        # ── Strategy 1: /proc/<pid>/smaps_rollup / status ────────────────
         _ri = root_info or detect_root()
         pid_str = get_package_pid(package, _ri) if _ri.available else ""
         if pid_str:
-            proc_path = f"/proc/{pid_str}/status"
-            try:
-                with open(proc_path, "r", encoding="utf-8", errors="replace") as fh:
-                    for line in fh:
-                        if line.startswith("VmRSS:"):
-                            parts = line.split()
-                            if len(parts) >= 2 and parts[1].isdigit():
-                                rss_kb = int(parts[1])
-                                method = "proc_status"
-                                success = True
-                                break
-            except OSError:
-                pass  # fall through to strategy 2
+            for proc_name, key_name, method_name in (
+                ("smaps_rollup", "Rss:", "proc_smaps_rollup"),
+                ("status", "VmRSS:", "proc_status"),
+            ):
+                proc_path = f"/proc/{pid_str}/{proc_name}"
+                try:
+                    with open(proc_path, "r", encoding="utf-8", errors="replace") as fh:
+                        content = fh.read()
+                except OSError as exc:
+                    error = str(exc)[:80]
+                    continue
+                for line in content.splitlines():
+                    if line.startswith(key_name):
+                        parts = line.split()
+                        if len(parts) >= 2 and parts[1].isdigit():
+                            rss_kb = int(parts[1])
+                            method = method_name
+                            success = True
+                            break
+                if success:
+                    break
+            if not success:
+                try:
+                    with open(f"/proc/{pid_str}/status", "r", encoding="utf-8", errors="replace") as fh:
+                        for line in fh:
+                            if line.startswith("VmRSS:"):
+                                parts = line.split()
+                                if len(parts) >= 2 and parts[1].isdigit():
+                                    rss_kb = int(parts[1])
+                                    method = "proc_status"
+                                    success = True
+                                    break
+                except OSError:
+                    pass  # fall through to strategy 2
 
         # ── Strategy 2: dumpsys meminfo ───────────────────────────────────
         if not success:
@@ -1632,11 +1654,11 @@ def get_package_ram_usage(
 
     # Format display string
     if rss_kb <= 0:
-        usage_mb = "0MB"
+        usage_mb = "N/A"
     elif rss_kb >= 1024 * 1024:
-        usage_mb = f"{rss_kb / (1024 * 1024):.1f}GB"
+        usage_mb = f"{rss_kb / (1024 * 1024):.1f} GB"
     else:
-        usage_mb = f"{round(rss_kb / 1024)}MB"
+        usage_mb = f"{round(rss_kb / 1024)} MB"
 
     _log.debug(
         "[DENG_REJOIN_PACKAGE_USAGE] package=%s pid=%s method=%s"
@@ -1957,8 +1979,6 @@ def launch_package_with_bounds(
     # Without this, Android resolves https://www.roblox.com/share?... to the
     # browser instead of Roblox (probe p-6f613cbed2: launch_mode='web_url'
     # landed in lobby, not server).
-    if url:
-        return launch_package_with_options(package, url)
     deep_url = (to_roblox_deep_link(url) or url) if url else ""
 
     am = _find_command("am", "/system/bin/am")
@@ -2115,4 +2135,210 @@ def kill_all_background_apps(keep_packages: list[str]) -> dict[str, list[str]]:
     bg = run_android_command(["am", "kill-all"], prefer_root=True, timeout=10)
     if bg.ok:
         result["killed_bg"].append("am kill-all")
+    return result
+
+
+_CLOUD_MEMORY_RECOVERY_COMMAND = "pm enable com.google.android.gms"
+_CLOUD_DISABLE_PACKAGES: frozenset[str] = frozenset({
+    "com.google.android.gms",
+    "com.android.vending",
+    "com.google.android.googlequicksearchbox",
+    "com.google.android.feedback",
+    "com.google.android.partnersetup",
+    "com.google.android.setupwizard",
+})
+_CLOUD_FORCE_STOP_EXACT: frozenset[str] = frozenset({
+    "com.discord",
+    "com.android.chrome",
+    "com.google.android.youtube",
+    "com.zhiliaoapp.musically",
+    "com.ss.android.ugc.trill",
+    "com.sec.android.gallery3d",
+    "com.samsung.android.game.gos",
+    "com.samsung.android.game.gamehome",
+    "com.samsung.android.game.gametools",
+})
+_CLOUD_FORCE_STOP_PREFIXES: tuple[str, ...] = (
+    "com.discord.",
+    "com.chrome.",
+    "com.google.android.youtube.",
+    "com.zhiliaoapp.",
+    "com.samsung.android.app.",
+)
+_CLOUD_PROTECTED_EXACT: frozenset[str] = frozenset({
+    "android",
+    "com.android.systemui",
+    "com.termux",
+    "com.termux.boot",
+    "com.termux.api",
+    "com.topjohnwu.magisk",
+    "me.weishu.kernelsu",
+    "com.kingroot.kinguser",
+    "eu.chainfire.supersu",
+    "com.android.settings",
+    "com.android.shell",
+    "com.android.packageinstaller",
+    "com.google.android.packageinstaller",
+    "com.android.permissioncontroller",
+    "com.android.webview",
+    "com.google.android.webview",
+})
+_CLOUD_PROTECTED_PREFIXES: tuple[str, ...] = (
+    "com.android.providers.",
+    "com.android.phone",
+    "com.android.server.telecom",
+    "com.android.network",
+    "com.android.ims",
+    "com.google.android.apps.messaging",
+)
+_CLOUD_MEMORY_LAST_RUN = 0.0
+_CLOUD_MEMORY_COOLDOWN_SECONDS = 10 * 60
+
+
+def cloud_phone_memory_recovery_command() -> str:
+    return _CLOUD_MEMORY_RECOVERY_COMMAND
+
+
+def _parse_packages(stdout: str) -> list[str]:
+    packages: list[str] = []
+    for line in (stdout or "").splitlines():
+        raw = line.strip()
+        if raw.startswith("package:"):
+            raw = raw[len("package:") :]
+        try:
+            packages.append(validate_package_name(raw))
+        except ConfigError:
+            continue
+    return sorted(set(packages))
+
+
+def _current_launcher_package() -> str:
+    res = run_android_command(
+        [
+            "cmd", "package", "resolve-activity", "--brief",
+            "-a", "android.intent.action.MAIN",
+            "-c", "android.intent.category.HOME",
+        ],
+        timeout=6,
+        prefer_root=False,
+    )
+    text = res.stdout or ""
+    for line in reversed(text.splitlines()):
+        for part in line.replace("/", " ").split():
+            candidate = part.split(":")[0]
+            if "." in candidate and is_valid_package_name(candidate):
+                return candidate
+    return current_foreground_package() or ""
+
+
+def _current_keyboard_package() -> str:
+    for cmd in (
+        ["settings", "get", "secure", "default_input_method"],
+        ["ime", "list", "-s"],
+    ):
+        res = run_android_command(cmd, timeout=6, prefer_root=True)
+        text = (res.stdout or "").strip()
+        if not text or text.lower() == "null":
+            continue
+        raw = text.splitlines()[0].split("/", 1)[0].strip()
+        if is_valid_package_name(raw):
+            return raw
+    return ""
+
+
+def _is_cloud_memory_protected(package: str, protected: set[str]) -> bool:
+    pkg = package.strip()
+    return (
+        pkg in protected
+        or pkg in _CLOUD_PROTECTED_EXACT
+        or any(pkg.startswith(prefix) for prefix in _CLOUD_PROTECTED_PREFIXES)
+    )
+
+
+def _is_package_disabled(package: str, root_tool: str) -> bool:
+    res = run_root_command(["pm", "list", "packages", "-d"], root_tool=root_tool, timeout=8)
+    return package in _parse_packages(res.stdout or "")
+
+
+def optimize_cloud_phone_memory(
+    keep_packages: list[str],
+    *,
+    cooldown_seconds: int = _CLOUD_MEMORY_COOLDOWN_SECONDS,
+) -> dict[str, object]:
+    """Default Cloud Phone Extreme memory preparation.
+
+    This is not a selectable mode. It is the only Start-time memory policy:
+    disable allowed Google packages with ``pm disable-user --user 0`` and
+    force-stop selected nonessential apps. Core Android, Termux, root manager,
+    launcher, keyboard, and Roblox targets are protected.
+    """
+    global _CLOUD_MEMORY_LAST_RUN
+    now = time.monotonic()
+    result: dict[str, object] = {
+        "disabled": [],
+        "stopped": [],
+        "skipped": [],
+        "failed": [],
+        "recovery_command": _CLOUD_MEMORY_RECOVERY_COMMAND,
+        "cooldown_skipped": False,
+    }
+    if now - _CLOUD_MEMORY_LAST_RUN < max(0, int(cooldown_seconds)):
+        result["cooldown_skipped"] = True
+        return result
+
+    root_info = detect_root()
+    if not root_info.available or not root_info.tool:
+        result["failed"] = [{"package": "", "action": "root", "error": "root unavailable"}]
+        return result
+
+    protected = {p for p in keep_packages if p}
+    protected.update({"com.termux"})
+    for dynamic_pkg in (_current_launcher_package(), _current_keyboard_package(), current_foreground_package() or ""):
+        if dynamic_pkg:
+            protected.add(dynamic_pkg)
+
+    installed = _parse_packages(
+        run_android_command(["pm", "list", "packages"], timeout=12, prefer_root=True).stdout
+    )
+    installed_set = set(installed)
+    disabled: list[str] = []
+    stopped: list[str] = []
+    skipped: list[dict[str, str]] = []
+    failed: list[dict[str, str]] = []
+
+    for pkg in sorted(_CLOUD_DISABLE_PACKAGES & installed_set):
+        if _is_cloud_memory_protected(pkg, protected):
+            skipped.append({"package": pkg, "reason": "protected"})
+            continue
+        if _is_package_disabled(pkg, root_info.tool):
+            disabled.append(pkg)
+            continue
+        res = run_root_command(
+            ["pm", "disable-user", "--user", "0", pkg],
+            root_tool=root_info.tool,
+            timeout=10,
+        )
+        if res.ok:
+            disabled.append(pkg)
+        else:
+            failed.append({"package": pkg, "action": "disable-user", "error": (res.stderr or res.stdout)[:120]})
+
+    for pkg in installed:
+        should_stop = pkg in _CLOUD_FORCE_STOP_EXACT or any(pkg.startswith(prefix) for prefix in _CLOUD_FORCE_STOP_PREFIXES)
+        if not should_stop:
+            continue
+        if _is_cloud_memory_protected(pkg, protected):
+            skipped.append({"package": pkg, "reason": "protected"})
+            continue
+        res = force_stop_package(pkg, root_info)
+        if res.ok:
+            stopped.append(pkg)
+        else:
+            failed.append({"package": pkg, "action": "force-stop", "error": (res.stderr or res.stdout)[:120]})
+
+    result["disabled"] = disabled
+    result["stopped"] = stopped
+    result["skipped"] = skipped
+    result["failed"] = failed
+    _CLOUD_MEMORY_LAST_RUN = now
     return result

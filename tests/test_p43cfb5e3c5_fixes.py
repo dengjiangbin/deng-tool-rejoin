@@ -279,7 +279,7 @@ class TestGetPackageRamUsage(unittest.TestCase):
             self.assertIn(key, result, f"Key '{key}' missing from result")
 
     def test_dead_package_returns_zero_mb(self) -> None:
-        """Package with no PID and no meminfo should return 0MB."""
+        """Package with no PID and no meminfo should return N/A."""
         from unittest.mock import patch
         with patch("agent.android.detect_root") as mock_root, \
              patch("agent.android.get_package_pid", return_value=""), \
@@ -287,7 +287,7 @@ class TestGetPackageRamUsage(unittest.TestCase):
             mock_root.return_value = type("RI", (), {"available": False, "tool": None})()
             from agent.android import get_package_ram_usage
             result = get_package_ram_usage("com.test.pkg0")
-        self.assertEqual(result["usage_mb"], "0MB")
+        self.assertEqual(result["usage_mb"], "N/A")
         self.assertEqual(result["rss_kb"], 0)
 
     def test_running_package_with_dumpsys_shows_mb(self) -> None:
@@ -299,7 +299,7 @@ class TestGetPackageRamUsage(unittest.TestCase):
             mock_root.return_value = type("RI", (), {"available": False, "tool": None})()
             from agent.android import get_package_ram_usage
             result = get_package_ram_usage("com.test.pkg0")
-        self.assertEqual(result["usage_mb"], "256MB")
+        self.assertEqual(result["usage_mb"], "256 MB")
         self.assertEqual(result["success"], True)
 
     def test_missing_proc_file_does_not_crash(self) -> None:

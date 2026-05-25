@@ -31,6 +31,33 @@ class TestProbeCapabilityRefresh(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(value, "sess-ok")
 
+    def test_force_refresh_ignores_cached_capability(self) -> None:
+        from agent.license_session import ensure_session_for_feature, save_session
+
+        save_session({"session_id": "server-dead", "expires_in": 60, "capabilities": {"probe_upload": True}})
+        cfg = {
+            "license_key": "DENG-AAAA-BBBB-CCCC-DDDD",
+            "license": {
+                "key": "DENG-AAAA-BBBB-CCCC-DDDD",
+                "install_id": "a" * 32,
+                "server_url": "https://rejoin.deng.my.id",
+                "device_label": "",
+            },
+        }
+
+        def fake_check(*args, **kwargs):
+            from agent.license_session import save_session
+            save_session({"session_id": "fresh-after-401", "expires_in": 60, "capabilities": {"probe_upload": True}})
+            return "active", "License active."
+
+        with mock.patch("agent.config.load_config", return_value=cfg), \
+             mock.patch("agent.license.check_remote_license_status", side_effect=fake_check), \
+             mock.patch("agent.license.get_public_device_model", return_value="Pixel"):
+            ok, value = ensure_session_for_feature("probe_upload", force_refresh=True)
+
+        self.assertTrue(ok)
+        self.assertEqual(value, "fresh-after-401")
+
     def test_expired_capability_refreshes_with_validate_only(self) -> None:
         from agent.license_session import ensure_session_for_feature
 
@@ -112,6 +139,15 @@ class TestProbeCapabilityRefresh(unittest.TestCase):
 
         self.assertFalse(ok)
         self.assertIn("Probe upload requires a valid license session", value)
+
+    def test_no_static_probe_token_constant_exists(self) -> None:
+        import inspect
+        import agent.probe as probe
+
+        src = inspect.getsource(probe.upload_probe)
+        self.assertIn("X-DENG-Session", src)
+        self.assertNotIn("X-Dev-Probe-Token", src)
+        self.assertNotIn("DENG_DEV_PROBE_TOKEN", src)
 
 
 class TestProbeEmptyShellGuard(unittest.TestCase):

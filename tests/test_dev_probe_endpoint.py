@@ -141,6 +141,27 @@ class DevProbeUploadEndpointTests(unittest.TestCase):
         )
         self.assertEqual(status, 401)
 
+    def test_rejects_missing_session(self) -> None:
+        body = gzip.compress(json.dumps({"probe_version": 1}).encode("utf-8"))
+        status, _, _ = _wsgi_call(
+            "POST", "/api/dev-probe/upload", body=body,
+            headers={"HTTP_CONTENT_ENCODING": "gzip"},
+        )
+        self.assertEqual(status, 401)
+
+    def test_rejects_expired_capability_session(self) -> None:
+        session = api_mod._issue_capability_session(
+            key="DENG-AAAA-BBBB-CCCC-DDDD",
+            install_id_hash="ab" * 32,
+            client_protocol=2,
+            build_id="p-test",
+        )["session_id"]
+        token_hash = api_mod.hashlib.sha256(session.encode()).hexdigest()
+        with api_mod._capability_lock:
+            api_mod._capability_sessions[token_hash]["expires_at"] = 0
+        status, _, _ = self._post({"probe_version": 1}, session=session)
+        self.assertEqual(status, 401)
+
     def test_rejects_payload_without_probe_version(self) -> None:
         status, _, body = self._post({"hello": "world"})
         self.assertEqual(status, 400, msg=body[:200])

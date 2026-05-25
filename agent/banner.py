@@ -23,6 +23,13 @@ ASCII_DENG = r"""
 ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝
 """.strip("\n")
 
+ASCII_MONS = r"""
+|\ /|
+| o |
+|/ \|
+M O N S
+""".strip("\n")
+
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
@@ -53,10 +60,10 @@ def banner_text(use_color: bool | None = None) -> str:
     subtitle_text = f"{PRODUCT_NAME.replace('DENG Tool: ', 'Tool: ')} v{VERSION}"
     if use_color:
         subtitle = f"{BLUE}{subtitle_text.center(logo_width)}{RESET}"
-        mons = f"{GREY}{'MONS'.center(logo_width)}{RESET}"
+        mons = "\n".join(f"{GREY}{line}{RESET}" for line in ASCII_MONS.splitlines())
     else:
         subtitle = subtitle_text.center(logo_width)
-        mons = "MONS".center(logo_width)
+        mons = ASCII_MONS
     return f"{logo}\n{subtitle}\n{mons}"
 
 

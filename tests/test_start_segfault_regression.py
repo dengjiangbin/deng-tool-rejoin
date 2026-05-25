@@ -48,9 +48,10 @@ class StartSegfaultRegressionTests(unittest.TestCase):
         self.assertNotIn("threading.Thread", source)
         self.assertNotIn("Thread(", source)
 
-    def test_live_dashboard_does_not_poll_package_ram_subprocess(self) -> None:
+    def test_live_dashboard_caches_package_ram_polling(self) -> None:
         source = inspect.getsource(commands.cmd_start)
-        self.assertNotIn("android.get_package_ram_usage(pkg)", source)
+        self.assertIn("get_package_ram_usage", source)
+        self.assertIn("_usage_cache", source)
         self.assertNotIn('dumpsys", "meminfo"', source)
 
     def test_render_loop_writes_only_from_start_owner(self) -> None:

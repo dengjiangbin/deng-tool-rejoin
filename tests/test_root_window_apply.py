@@ -265,6 +265,24 @@ class TestVerifyBoundsTolerance(unittest.TestCase):
         self.assertFalse(results[0].final_ok)
         self.assertEqual(results[0].status, wa.LAYOUT_FAILED)
 
+    def test_retry_rewrite_does_not_force_stop_running_app(self):
+        import agent.window_apply as wa
+        rect = WindowRect("com.roblox.client", 100, 100, 800, 550)
+        with (
+            patch.object(wa, "update_app_cloner_xml", return_value=(True, "ok")),
+            patch.object(wa.android, "detect_root",
+                         return_value=MagicMock(available=False, tool=None)),
+            patch.object(wa, "read_actual_bounds",
+                         return_value=((500, 500, 1200, 950), "dumpsys_window")),
+            patch.object(wa, "_discover_known_keys", return_value={"com.roblox.client": []}),
+            patch.object(wa, "_wait_for_window", return_value=True),
+            patch.object(wa.android, "force_stop_package") as force_stop,
+        ):
+            results = wa.apply_window_layout([rect], verify_after=True, retries=2)
+        self.assertFalse(results[0].final_ok)
+        self.assertTrue(any("retry-rewrite ok" in a for a in results[0].attempts))
+        force_stop.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

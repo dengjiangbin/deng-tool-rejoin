@@ -43,26 +43,40 @@ class CacheBustingTests(unittest.TestCase):
         s = _script()
         for text in (
             "DENG Tool: Rejoin Installer",
+            "Version: main-dev",
             "Preparing secure download",
             "Requesting one-time package token",
+            "Token accepted",
             "Downloading protected package",
+            "Package downloaded",
             "Verifying archive SHA256",
+            "Archive verified",
+            "Installing files",
+            "Files installed",
             "Verifying signed manifest",
             "Verifying runtime integrity",
             "Manifest signature verified",
             "Runtime verified",
+            "Install complete.",
             "Run: deng-rejoin",
         ):
             self.assertIn(text, s)
         self.assertIn("\\033[1;96m", s)
+        self.assertIn("\\033[1;94m", s)
+        self.assertIn("\\033[1;93m", s)
+        self.assertIn("\\033[1;92m", s)
+        self.assertIn("\\033[1;91m", s)
         self.assertIn("=" * 30, s)
         self.assertIn("-" * 30, s)
 
     def test_no_permanent_package_url_or_token_leak(self) -> None:
         s = _script()
         self.assertIn("/install/test/package-token", s)
+        self.assertIn("/api/download/package/", s)
         self.assertNotIn("/install/test/package.tar.gz", s)
         self.assertNotIn('echo "$p"', s)
+        self.assertNotIn("GITHUB_TOKEN", s)
+        self.assertNotIn("LICENSE_KEY_EXPORT_SECRET", s)
 
 
 class PurgeStepTests(unittest.TestCase):

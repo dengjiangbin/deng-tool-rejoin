@@ -1171,23 +1171,29 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 30.0) -> tuple[bool,
             f"Dropped: {trim_report.get('dropped') or []!r}"
         )
 
-    req = urllib.request.Request(url, data=payload, method="POST")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Content-Encoding", "gzip")
-    req.add_header("User-Agent", "deng-rejoin-probe/1")
+    def _make_request(session_id: str) -> urllib.request.Request:
+        req = urllib.request.Request(url, data=payload, method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Content-Encoding", "gzip")
+        req.add_header("User-Agent", "deng-rejoin-probe/1")
+        req.add_header("X-DENG-Session", session_id)
+        return req
+
     try:
         from .license_session import ensure_session_for_feature
-        ok, session_or_error = ensure_session_for_feature("probe_upload")
-        session_id = session_or_error if ok else ""
     except Exception:  # noqa: BLE001
-        session_id = ""
-    if not session_id:
-        return False, session_or_error if "session_or_error" in locals() else (
-            "valid license session required; open deng-rejoin and pass license check first"
-        )
-    req.add_header("X-DENG-Session", session_id)
+        ensure_session_for_feature = None  # type: ignore[assignment]
+
+    def _session(force_refresh: bool = False) -> tuple[bool, str]:
+        if ensure_session_for_feature is None:
+            return False, "valid license session required; open deng-rejoin and pass license check first"
+        return ensure_session_for_feature("probe_upload", force_refresh=force_refresh)
+
+    ok, session_or_error = _session(False)
+    if not ok:
+        return False, session_or_error
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(_make_request(session_or_error), timeout=timeout) as resp:
             data = resp.read().decode("utf-8", errors="replace")
         try:
             obj = json.loads(data)
@@ -1216,7 +1222,29 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 30.0) -> tuple[bool,
                 f"Server body: {body_text}"
             )
         if exc.code == 401:
-            return False, f"unauthorized (401) — valid license session required. {body_text}"
+            # Server capability sessions are intentionally in-memory. A PM2
+            # reload can invalidate a locally unexpired session, so refresh
+            # through validate-only once before surfacing the rejection.
+            ok2, fresh_or_error = _session(True)
+            if ok2:
+                try:
+                    with urllib.request.urlopen(_make_request(fresh_or_error), timeout=timeout) as resp:
+                        data = resp.read().decode("utf-8", errors="replace")
+                    try:
+                        obj = json.loads(data)
+                    except json.JSONDecodeError:
+                        return False, f"non-JSON response after session refresh: {data[:200]}"
+                    pid = str(obj.get("probe_id") or "").strip()
+                    if pid:
+                        return True, pid
+                    return False, f"no probe_id in response after session refresh: {data[:200]}"
+                except urllib.error.HTTPError as exc2:
+                    try:
+                        retry_body = exc2.read().decode("utf-8", errors="replace")[:300]
+                    except Exception:  # noqa: BLE001
+                        retry_body = ""
+                    return False, f"unauthorized (401) after license refresh. {retry_body}"
+            return False, fresh_or_error
         return False, f"HTTP {exc.code}: {body_text}"
     except urllib.error.URLError as exc:
         return False, f"network error: {exc.reason}"

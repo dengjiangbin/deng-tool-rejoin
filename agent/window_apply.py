@@ -876,11 +876,7 @@ def apply_window_layout(
                     screen_mode=mode,
                 )
                 if rewrote:
-                    try:
-                        android.force_stop_package(result.package)
-                        result.attempts.append("retry-force-stop ok")
-                    except Exception as exc:  # noqa: BLE001
-                        result.attempts.append(f"retry-force-stop error: {exc}")
+                    result.attempts.append("retry-rewrite ok")
             # Default to FAILED for now — the next attempt may upgrade it.
             result.final_ok = False
             result.status = LAYOUT_FAILED
