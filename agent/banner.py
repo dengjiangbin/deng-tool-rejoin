@@ -25,12 +25,14 @@ ASCII_DENG = r"""
 """.strip("\n")
 
 ASCII_MONS_WIDE = r"""
-MM OO NN SS
+█   █  ███  █  █  ███
+██ ██ █   █ ██ █ █
+█ █ █ █   █ █ ██  ██
+█   █ █   █ █  █    █
+█   █  ███  █  █ ███
 """.strip("\n")
 
-ASCII_MONS_NARROW = r"""
-MM OO NN SS
-""".strip("\n")
+ASCII_MONS_NARROW = ASCII_MONS_WIDE
 
 ASCII_MONS = ASCII_MONS_WIDE
 
@@ -58,9 +60,9 @@ def _terminal_width(terminal_width: int | None = None) -> int:
 
 
 def mons_logo_for_width(terminal_width: int | None = None) -> str:
-    """Return the compact MONS pixel mark that fits the current terminal."""
+    """Return the approved compact MONS pixel mark for every terminal width."""
     width = _terminal_width(terminal_width)
-    return ASCII_MONS_NARROW if width < 52 else ASCII_MONS_WIDE
+    return ASCII_MONS_NARROW if width < 24 else ASCII_MONS_WIDE
 
 
 def banner_text(use_color: bool | None = None, terminal_width: int | None = None) -> str:

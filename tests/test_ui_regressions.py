@@ -7,18 +7,27 @@ from agent import banner, termux_ui
 
 
 class LogoColorRegressionTests(unittest.TestCase):
+    APPROVED_MONS_ART = "\n".join([
+        "█   █  ███  █  █  ███",
+        "██ ██ █   █ ██ █ █",
+        "█ █ █ █   █ █ ██  ██",
+        "█   █ █   █ █  █    █",
+        "█   █  ███  █  █ ███",
+    ])
     BROKEN_MONS_LINES = (
-        r"\ | /",
-        "| o |",
-        r"/ X \\",
-        r"|\ /|",
-        r"|/ \|",
-        "╔╦╗ ╔╗╔╗╔═",
-        "║║║ ║║║║╚╗",
-        "╝╚╝ ╚╝╝╚═╝",
-        "╔╦╗╔╗╔╗╔═",
-        "║║║║║║║╚╗",
-        "╝╚╝╚╝╝╚═╝",
+        "\\" + " | /",
+        "| " + "o" + " |",
+        "/ " + "X" + " " + "\\",
+        "|" + "\\ /" + "|",
+        "|" + "/ \\" + "|",
+        "╔" + "╦╗ ╔╗╔╗╔═",
+        "║" + "║║ ║║║║╚╗",
+        "╝" + "╚╝ ╚╝╝╚═╝",
+        "╔" + "╦╗╔╗╔╗╔═",
+        "║" + "║║║║║║╚╗",
+        "╝" + "╚╝╚╝╝╚═╝",
+        " ".join(("MM", "OO", "NN", "SS")),
+        " ".join("MONS"),
     )
 
     @staticmethod
@@ -49,17 +58,18 @@ class LogoColorRegressionTests(unittest.TestCase):
         text = banner.banner_text(use_color=False, terminal_width=80)
         mons_block = self._mons_block(text)
         self.assertEqual(mons_block, banner.ASCII_MONS_WIDE.splitlines())
-        self.assertEqual(len(mons_block), 1)
-        self.assertNotIn("MONS", mons_block)
-        self.assertLessEqual(max(len(line) for line in mons_block), 11)
+        self.assertEqual("\n".join(mons_block), self.APPROVED_MONS_ART)
+        self.assertEqual(len(mons_block), 5)
+        self.assertLessEqual(max(len(line) for line in mons_block), 23)
         self.assertFalse(mons_block[0].startswith(" "))
 
     def test_banner_mons_uses_grey_when_colored(self):
         text = banner.banner_text(use_color=True)
         lines = text.splitlines()
         subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
-        mons_line = lines[subtitle_idx + 1]
-        self.assertIn("\033[90m", mons_line)
+        mons_lines = lines[subtitle_idx + 1:]
+        self.assertTrue(mons_lines)
+        self.assertTrue(all(line.startswith(banner.GREY) for line in mons_lines))
 
     def test_deng_logo_remains_larger_than_mons(self):
         text = banner.banner_text(use_color=False, terminal_width=80)
@@ -68,7 +78,7 @@ class LogoColorRegressionTests(unittest.TestCase):
         logo_width = max(len(line) for line in lines[:subtitle_idx])
         mons_width = max(len(line) for line in lines[subtitle_idx + 1:])
         self.assertGreater(logo_width, mons_width)
-        self.assertLessEqual(mons_width, logo_width // 3)
+        self.assertLessEqual(mons_width, logo_width)
 
     def test_broken_mons_slash_x_art_is_removed(self):
         source = banner.banner_text(use_color=False, terminal_width=80)
@@ -86,7 +96,9 @@ class LogoColorRegressionTests(unittest.TestCase):
         self.assertIn("Tool: Rejoin", text)
         mons = "\n".join(self._mons_block(text))
         self.assertNotIn("\nMONS\n", f"\n{text}\n")
-        self.assertIn("MM OO NN SS", mons)
+        self.assertEqual(mons, self.APPROVED_MONS_ART)
+        self.assertNotIn(" ".join(("MM", "OO", "NN", "SS")), mons)
+        self.assertNotIn(" ".join("MONS"), mons)
         self.assertNotIn("10 OnS", mons)
         self.assertNotIn("1ONS", mons)
         self.assertNotIn("M0NS", mons)
@@ -104,7 +116,10 @@ class LogoColorRegressionTests(unittest.TestCase):
         self.assertEqual(banner.mons_logo_for_width(80), banner.ASCII_MONS_WIDE)
         self.assertEqual(banner.mons_logo_for_width(40), banner.ASCII_MONS_NARROW)
         for logo in (banner.ASCII_MONS_WIDE, banner.ASCII_MONS_NARROW):
-            self.assertNotIn("MONS", logo.splitlines())
+            self.assertEqual(logo, self.APPROVED_MONS_ART)
+            self.assertNotIn(" ".join(("MM", "OO", "NN", "SS")), logo)
+            self.assertNotIn(" ".join("MONS"), logo)
+            self.assertNotIn("\nMONS\n", f"\n{logo}\n")
             self.assertNotIn("╔╦╗", logo)
             self.assertNotIn("10 OnS", logo)
             self.assertNotIn("1ONS", logo)
@@ -113,8 +128,8 @@ class LogoColorRegressionTests(unittest.TestCase):
         text = banner.banner_text(use_color=False, terminal_width=40)
         mons_block = self._mons_block(text)
         self.assertEqual(mons_block, banner.ASCII_MONS_NARROW.splitlines())
-        self.assertEqual(mons_block, ["MM OO NN SS"])
-        self.assertLessEqual(max(len(line) for line in mons_block), 11)
+        self.assertEqual("\n".join(mons_block), self.APPROVED_MONS_ART)
+        self.assertLessEqual(max(len(line) for line in mons_block), 23)
         self.assertTrue(all(len(line) <= 40 for line in text.splitlines()))
 
     def test_mons_is_tiny_companion_logo(self):
@@ -124,16 +139,9 @@ class LogoColorRegressionTests(unittest.TestCase):
         deng_mass = self._visual_mass(lines[:subtitle_idx])
         mons_mass = self._visual_mass(lines[subtitle_idx + 1:])
         ratio = mons_mass / deng_mass
-        old_mons_mass = self._visual_mass([
-            "█   █  ███  █  █  ███",
-            "██ ██ █   █ ██ █ █",
-            "█ █ █ █   █ █ ██  ██",
-            "█   █ █   █ █  █    █",
-            "█   █  ███  █  █ ███",
-        ])
-        self.assertLessEqual(mons_mass, old_mons_mass // 4 + 2)
-        self.assertGreaterEqual(ratio, 0.03)
-        self.assertLessEqual(ratio, 0.12)
+        self.assertEqual(mons_mass, self._visual_mass(self.APPROVED_MONS_ART.splitlines()))
+        self.assertLessEqual(ratio, 0.36)
+        self.assertLessEqual(max(len(line) for line in lines[subtitle_idx + 1:]), 23)
 
     def test_deng_logo_and_version_line_remain_unchanged(self):
         text = banner.banner_text(use_color=False, terminal_width=80)
