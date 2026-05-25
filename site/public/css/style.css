@@ -312,8 +312,11 @@ input {
   z-index: 2;
   width: 52px;
   min-width: 52px;
+  max-width: 52px;
+  flex: 0 0 52px;
   height: 30px;
   min-height: 30px;
+  max-height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -362,7 +365,12 @@ input {
   align-items: center;
   justify-content: center;
   width: 52px;
+  min-width: 52px;
+  max-width: 52px;
+  flex: 0 0 52px;
   height: 30px;
+  min-height: 30px;
+  max-height: 30px;
   padding: 2px;
   border-radius: 999px;
   overflow: hidden;
@@ -377,7 +385,12 @@ input {
   top: 2px;
   left: 2px;
   width: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  flex: 0 0 26px;
   height: 26px;
+  min-height: 26px;
+  max-height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1209,6 +1222,7 @@ input {
   .theme-toggle {
     width: 52px;
     min-width: 52px;
+    max-width: 52px;
   }
 
   .main-content {
@@ -1262,6 +1276,7 @@ input {
   .theme-toggle {
     width: 52px;
     min-width: 52px;
+    max-width: 52px;
     justify-content: center;
     padding: 0;
   }
@@ -1274,4 +1289,44 @@ input {
     align-items: stretch;
     flex-direction: column-reverse;
   }
+}
+
+/* Final compact switch geometry: keep the actual visible shell icon-only on every breakpoint. */
+.theme-toggle {
+  width: 52px;
+  min-width: 52px;
+  max-width: 52px;
+  flex: 0 0 52px;
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  padding: 0;
+}
+
+.theme-toggle-track {
+  width: 52px;
+  min-width: 52px;
+  max-width: 52px;
+  flex: 0 0 52px;
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  padding: 2px;
+}
+
+.theme-toggle-knob {
+  top: 2px;
+  left: 2px;
+  width: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  flex: 0 0 26px;
+  height: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  transform: translateX(24px);
+}
+
+:root[data-theme="light"] .theme-toggle-knob {
+  transform: translateX(0);
 }

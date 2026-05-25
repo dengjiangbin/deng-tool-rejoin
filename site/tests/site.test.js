@@ -947,6 +947,7 @@ describe('theme and dashboard UI', () => {
     const layout = fs.readFileSync(path.join(__dirname, '..', 'views', 'layout.ejs'), 'utf8');
     const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
     const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
+    const appSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
     assert.doesNotMatch(layout, /data-theme-label|theme-toggle-label|theme-toggle-text-light|theme-toggle-text-dark/);
     assert.doesNotMatch(css, /theme-toggle-label|theme-toggle-text-light|theme-toggle-text-dark|text-indent/);
     assert.match(css, /\.theme-toggle\s*\{[\s\S]*width:\s*52px;[\s\S]*padding:\s*0;/);
@@ -957,8 +958,28 @@ describe('theme and dashboard UI', () => {
     assert.doesNotMatch(themeToggleBlocks, /min-width:\s*116px|width:\s*116px|width:\s*66px|min-width:\s*66px|grid-template-columns:\s*auto auto/);
     assert.doesNotMatch(css, /theme-toggle::(?:before|after)[\s\S]*content:\s*["'](?:LIGHT|DARK)/i);
     assert.doesNotMatch(js, /data-theme-label|nextLabel|textContent = nextLabel/);
+    assert.match(appSource, /latestAssetStamp\(\)/);
+    assert.match(appSource, /Cache-Control['"],\s*'no-store'/);
     assert.match(js, /Switch to ' \+ \(next === 'light' \? 'dark' : 'light'\) \+ ' mode'/);
     assert.doesNotMatch(js, /Night|Switch to night/i);
+  });
+
+  test('rendered dashboard serves compact theme CSS with cache busting', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const dashboard = await agent.get('/dashboard');
+    assert.equal(dashboard.status, 200);
+    assert.match(dashboard.text, /<button type="button" class="theme-toggle" data-theme-toggle/);
+    const cssHref = dashboard.text.match(/href="(\/public\/css\/style\.css\?v=([^"]+))"/);
+    assert.ok(cssHref, 'dashboard must link the live theme stylesheet with a cache-busting query');
+    assert.ok(cssHref[2].length > 0, 'stylesheet cache-busting value must not be empty');
+
+    const cssRes = await agent.get(cssHref[1]);
+    assert.equal(cssRes.status, 200);
+    assert.match(String(cssRes.headers['cache-control'] || ''), /no-store/);
+    assert.match(cssRes.text, /\.theme-toggle\s*\{[\s\S]*width:\s*52px;[\s\S]*max-width:\s*52px;/);
+    assert.match(cssRes.text, /\.theme-toggle-track\s*\{[\s\S]*width:\s*52px;[\s\S]*height:\s*30px;/);
+    assert.match(cssRes.text, /\.theme-toggle-knob\s*\{[\s\S]*width:\s*26px;[\s\S]*height:\s*26px;[\s\S]*transform:\s*translateX\(24px\);/);
   });
 
   test('theme toggle script updates accessible state and remains clickable', () => {

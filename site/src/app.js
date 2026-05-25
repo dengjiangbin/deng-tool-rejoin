@@ -5,6 +5,7 @@ const session      = require('express-session');
 const rateLimit    = require('express-rate-limit');
 const ejsLayouts   = require('express-ejs-layouts');
 const path         = require('path');
+const fs           = require('fs');
 
 const routes = require('./routes');
 const { FileSessionStore } = require('./sessionStore');
@@ -12,11 +13,30 @@ const packageJson = require('../package.json');
 
 const app = express();
 app.disable('x-powered-by');
-const assetVersion = (
-  process.env.TOOL_SITE_ASSET_VERSION ||
-  process.env.GIT_COMMIT ||
-  `${packageJson.version}-${Date.now()}`
-).replace(/[^A-Za-z0-9._-]/g, '');
+
+function latestAssetStamp() {
+  const publicDir = path.join(__dirname, '..', 'public');
+  const files = [
+    path.join(publicDir, 'css', 'style.css'),
+    path.join(publicDir, 'js', 'app.js'),
+  ];
+  let newest = 0;
+  files.forEach((file) => {
+    try {
+      newest = Math.max(newest, Math.floor(fs.statSync(file).mtimeMs));
+    } catch {
+      // Missing optional assets should not block server startup.
+    }
+  });
+  return newest || Date.now();
+}
+
+const assetVersion = [
+  process.env.TOOL_SITE_ASSET_VERSION,
+  process.env.GIT_COMMIT,
+  packageJson.version,
+  latestAssetStamp(),
+].filter(Boolean).join('-').replace(/[^A-Za-z0-9._-]/g, '');
 
 // ---------------------------------------------------------------
 // Security headers (helmet)
@@ -120,6 +140,11 @@ app.set('layout extractScripts', true);
 // ---------------------------------------------------------------
 app.use('/public', express.static(path.join(__dirname, '..', 'public'), {
   maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
+  setHeaders: (res, filePath) => {
+    if (/[\\/](css|js)[\\/][^\\/]+\.(css|js)$/.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
+  },
 }));
 app.use('/assets', express.static(path.join(__dirname, '..', 'public'), {
   maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
