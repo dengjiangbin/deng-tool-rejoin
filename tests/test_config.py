@@ -198,6 +198,12 @@ class ConfigTests(unittest.TestCase):
         validated = validate_config(cfg)
         self.assertEqual(validated["screen_mode"], "landscape")
 
+    def test_portrait_density_guard_defaults_without_applying_density(self):
+        cfg = default_config()
+        validated = validate_config(cfg)
+        self.assertTrue(validated["portrait_auto_density_fix"])
+        self.assertEqual(validated["portrait_previous_density"], "")
+
     def test_screen_mode_allowed_values(self):
         for value in ("landscape", "portrait", "potrait"):
             cfg = default_config()

@@ -230,7 +230,7 @@ class LiveDashParseTest(unittest.TestCase):
 
         We assert two things on the captured output:
 
-        * The installer's first banner ("DENG Tool: Rejoin Installer")
+        * The installer's first banner ("DENG Tool: Rejoin Installing")
           is on stdout — that proves dash parsed and ran the very first
           line of the script body.
         * The installer's *own* error message
@@ -262,7 +262,7 @@ class LiveDashParseTest(unittest.TestCase):
 
         # Banner came from the very first installer line.
         self.assertIn(
-            "DENG Tool: Rejoin Installer", combined,
+            "DENG Tool: Rejoin Installing", combined,
             f"dash did not execute the first echo — possible shebang "
             f"or parse failure.\nstdout={stdout!r}\nstderr={stderr!r}",
         )

@@ -42,7 +42,7 @@ class CacheBustingTests(unittest.TestCase):
     def test_colorful_secure_sections_present(self) -> None:
         s = _script()
         for text in (
-            "DENG Tool: Rejoin Installer",
+            "DENG Tool: Rejoin Installing",
             "Version: main-dev",
             "Preparing secure download",
             "Requesting one-time package token",

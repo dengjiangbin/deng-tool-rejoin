@@ -90,7 +90,7 @@ class InstallerUiTests(unittest.TestCase):
             package_sha256="a" * 64,
             banner_lines=("Version: main-dev",),
         )
-        self.assertIn("DENG Tool: Rejoin Installer", script)
+        self.assertIn("DENG Tool: Rejoin Installing", script)
         self.assertIn("Version: main-dev", script)
         self.assertIn("Preparing secure download", script)
         self.assertIn("Files installed", script)

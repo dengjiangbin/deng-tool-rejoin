@@ -33,12 +33,14 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 from . import android
 from .window_layout import (
     WindowRect,
     _is_layout_excluded,
+    parse_wm_density,
+    parse_wm_size,
     rect_center,
     rect_inside_bounds,
     rects_overlap,
@@ -69,6 +71,19 @@ class ApplyResult:
     touch_probe_ok: bool | None = None
     touch_probe_center: tuple[int, int] | None = None
     touch_probe_detail: str = ""
+    task_bounds: tuple[int, int, int, int] | None = None
+    surface_bounds: tuple[int, int, int, int] | None = None
+    input_region: tuple[int, int, int, int] | None = None
+    touchable_region: tuple[int, int, int, int] | None = None
+    window_frame: tuple[int, int, int, int] | None = None
+    content_frame: tuple[int, int, int, int] | None = None
+    stable_frame: tuple[int, int, int, int] | None = None
+    visible_frame: tuple[int, int, int, int] | None = None
+    title_bar_height: int = 0
+    corrected_task_bounds: tuple[int, int, int, int] | None = None
+    density_info: dict[str, Any] = field(default_factory=dict)
+    mismatch_classification: list[str] = field(default_factory=list)
+    layer_readback: dict[str, Any] = field(default_factory=dict)
     validation: list[str] = field(default_factory=list)
     final_ok: bool = False
     status: str = LAYOUT_FAILED   # one of LAYOUT_APPLIED/UNVERIFIED/FAILED/SKIPPED
@@ -110,6 +125,8 @@ def _capability_probes() -> dict[str, bool]:
 # ── Read actual bounds (package-correct) ──────────────────────────────────────
 
 _BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
+_RECT_RE = re.compile(r"Rect\(([-\d]+),\s*([-\d]+)\s*-\s*([-\d]+),\s*([-\d]+)\)")
+_REGION_RECT_RE = re.compile(r"\[([-\d]+),([-\d]+)\]\[([-\d]+),([-\d]+)\]")
 _TASK_ID_RE = re.compile(r"#(\d+)\s")
 _WINDOW_BLOCK_HEADER_RE = re.compile(r"Window\s*\{[^}]*\b([\w.]+)/[\w.]+\b")
 
@@ -126,6 +143,50 @@ def _parse_bounds_line(text: str) -> tuple[int, int, int, int] | None:
         return None
 
 
+def _rect_from_match(match: re.Match[str]) -> tuple[int, int, int, int]:
+    return tuple(int(g) for g in match.groups())  # type: ignore[return-value]
+
+
+def _parse_rect_after_key(block: str, key: str) -> tuple[int, int, int, int] | None:
+    idx = block.find(key)
+    if idx < 0:
+        return None
+    slice_ = block[idx : idx + 260]
+    m = _BOUNDS_RE.search(slice_)
+    if m:
+        return _rect_from_match(m)
+    m = _RECT_RE.search(slice_)
+    if m:
+        return _rect_from_match(m)
+    return None
+
+
+def _parse_region_after_key(block: str, key: str) -> tuple[int, int, int, int] | None:
+    idx = block.find(key)
+    if idx < 0:
+        return None
+    slice_ = block[idx : idx + 420]
+    # Most dumps use Region([l,t][r,b]) for simple rectangular touch areas.
+    rects = [_rect_from_match(m) for m in _REGION_RECT_RE.finditer(slice_)]
+    if rects:
+        left = min(r[0] for r in rects)
+        top = min(r[1] for r in rects)
+        right = max(r[2] for r in rects)
+        bottom = max(r[3] for r in rects)
+        return (left, top, right, bottom)
+    m = _BOUNDS_RE.search(slice_)
+    if m:
+        return _rect_from_match(m)
+    m = _RECT_RE.search(slice_)
+    if m:
+        return _rect_from_match(m)
+    return None
+
+
+def _bounds_to_list(bounds: tuple[int, int, int, int] | None) -> list[int] | None:
+    return list(bounds) if bounds is not None else None
+
+
 @dataclass
 class _WindowEntry:
     package: str
@@ -133,7 +194,14 @@ class _WindowEntry:
     has_surface: bool
     is_focused: bool
     task_id: int | None
-    raw_block: str
+    frame: tuple[int, int, int, int] | None = None
+    content_frame: tuple[int, int, int, int] | None = None
+    stable_frame: tuple[int, int, int, int] | None = None
+    visible_frame: tuple[int, int, int, int] | None = None
+    surface_bounds: tuple[int, int, int, int] | None = None
+    input_region: tuple[int, int, int, int] | None = None
+    touchable_region: tuple[int, int, int, int] | None = None
+    raw_block: str = ""
 
 
 _WINDOW_HEADER_RE = re.compile(r"^\s*(?:Window\b.*|.*\bWindow\s*\{).*$")
@@ -145,8 +213,11 @@ def _is_window_header_line(line: str) -> bool:
     Matches both real Android dumpsys lines (``Window{abc1234 ...}``) and the
     looser sample used in tests (``Window foo {``).
     """
+    stripped = line.lstrip()
+    if stripped.startswith(("mCurrentFocus=", "mFocusedApp=", "mInputMethodTarget=")):
+        return False
     return ("Window{" in line) or ("Window {" in line) or (
-        line.lstrip().startswith("Window") and "{" in line
+        stripped.startswith("Window") and "{" in line
     )
 
 
@@ -175,6 +246,24 @@ def _parse_window_dumpsys(text: str, package: str) -> list[_WindowEntry]:
         i = j
         if package not in block:
             continue
+        frame = _parse_rect_after_key(block, "mFrame=")
+        content_frame = _parse_rect_after_key(block, "mContentFrame=")
+        stable_frame = _parse_rect_after_key(block, "mStableFrame=")
+        visible_frame = (
+            _parse_rect_after_key(block, "mVisibleFrame=")
+            or _parse_rect_after_key(block, "mVisibleInsets")
+        )
+        surface_bounds = (
+            _parse_rect_after_key(block, "mSurfacePosition=")
+            or _parse_rect_after_key(block, "surfacePosition=")
+            or _parse_rect_after_key(block, "mSurfaceFrame=")
+        )
+        input_region = (
+            _parse_region_after_key(block, "touchableRegion=")
+            or _parse_region_after_key(block, "mTouchableRegion=")
+            or _parse_region_after_key(block, "Touchable region=")
+        )
+        touchable_region = input_region
         bounds = None
         for key in ("mFrame=", "containingFrame=", "mBounds=", "Bounds="):
             idx = block.find(key)
@@ -200,6 +289,13 @@ def _parse_window_dumpsys(text: str, package: str) -> list[_WindowEntry]:
             has_surface=has_surface,
             is_focused=is_focused,
             task_id=task_id,
+            frame=frame,
+            content_frame=content_frame,
+            stable_frame=stable_frame,
+            visible_frame=visible_frame,
+            surface_bounds=surface_bounds,
+            input_region=input_region,
+            touchable_region=touchable_region,
             raw_block=block[:1000],
         ))
     # Fallback: if no real Window{} block was found but the text mentions the
@@ -214,6 +310,19 @@ def _parse_window_dumpsys(text: str, package: str) -> list[_WindowEntry]:
                 has_surface="mHasSurface=true" in text,
                 is_focused=False,
                 task_id=None,
+                frame=_parse_rect_after_key(text, "mFrame="),
+                content_frame=_parse_rect_after_key(text, "mContentFrame="),
+                stable_frame=_parse_rect_after_key(text, "mStableFrame="),
+                visible_frame=_parse_rect_after_key(text, "mVisibleFrame="),
+                surface_bounds=_parse_rect_after_key(text, "mSurfaceFrame="),
+                input_region=(
+                    _parse_region_after_key(text, "touchableRegion=")
+                    or _parse_region_after_key(text, "mTouchableRegion=")
+                ),
+                touchable_region=(
+                    _parse_region_after_key(text, "touchableRegion=")
+                    or _parse_region_after_key(text, "mTouchableRegion=")
+                ),
                 raw_block=text[:1000],
             ))
     return entries
@@ -362,6 +471,269 @@ def read_actual_bounds(package: str) -> tuple[tuple[int, int, int, int] | None, 
         pass
 
     return None, "unavailable"
+
+
+def _select_window_entry(package: str) -> _WindowEntry | None:
+    try:
+        res = android.run_command(["dumpsys", "window", "windows"], timeout=6)
+    except Exception:  # noqa: BLE001
+        return None
+    if not res.ok or not res.stdout:
+        return None
+    cands = _parse_window_dumpsys(res.stdout, package)
+    for predicate in (
+        lambda c: c.has_surface and c.is_focused and _is_real_activity_bounds(c.bounds),
+        lambda c: c.has_surface and _is_real_activity_bounds(c.bounds),
+        lambda c: _is_real_activity_bounds(c.bounds),
+        lambda c: c.has_surface and c.bounds,
+        lambda c: c.is_focused and c.bounds,
+        lambda c: c.bounds,
+    ):
+        for c in cands:
+            if predicate(c):
+                return c
+    return None
+
+
+def _select_task_entry(package: str) -> _TaskEntry | None:
+    try:
+        res = android.run_command(["dumpsys", "activity", "activities"], timeout=6)
+    except Exception:  # noqa: BLE001
+        return None
+    if not res.ok or not res.stdout:
+        return None
+    cands = _parse_activity_dumpsys(res.stdout, package)
+    for predicate in (
+        lambda c: c.visible and _is_real_activity_bounds(c.bounds),
+        lambda c: _is_real_activity_bounds(c.bounds),
+        lambda c: c.visible and c.bounds,
+        lambda c: c.bounds,
+    ):
+        for c in cands:
+            if predicate(c):
+                return c
+    return None
+
+
+_SURFACE_RECT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\b(?:crop|bounds|frame|destination|source|layerStackSpace)\s*=\s*(\[[^\n]+?\]|\([^\n]+?\)|Rect\([^\n]+?\))", re.I),
+    re.compile(r"\b(?:pos|position)\s*=\s*\(([-\d.]+),\s*([-\d.]+)\).*?\bsize\s*=\s*\((\d+),\s*(\d+)\)", re.I),
+)
+
+
+def _parse_surface_bounds(text: str, package: str) -> tuple[int, int, int, int] | None:
+    if not text or package not in text:
+        return None
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if package not in line:
+            continue
+        block = "\n".join(lines[i : min(len(lines), i + 10)])
+        for pattern in _SURFACE_RECT_PATTERNS:
+            m = pattern.search(block)
+            if not m:
+                continue
+            if len(m.groups()) == 1:
+                blob = m.group(1)
+                bm = _BOUNDS_RE.search(blob)
+                if bm:
+                    return _rect_from_match(bm)
+                rm = _RECT_RE.search(blob)
+                if rm:
+                    return _rect_from_match(rm)
+            elif len(m.groups()) == 4:
+                x, y = int(float(m.group(1))), int(float(m.group(2)))
+                w, h = int(m.group(3)), int(m.group(4))
+                return (x, y, x + w, y + h)
+        b = _parse_bounds_line(block)
+        if b:
+            return b
+    return None
+
+
+def read_surface_bounds(package: str) -> tuple[tuple[int, int, int, int] | None, str]:
+    try:
+        res = android.run_android_command(["dumpsys", "SurfaceFlinger"], timeout=6)
+    except Exception:  # noqa: BLE001
+        return None, "unavailable"
+    if not res.ok or not res.stdout:
+        return None, "unavailable"
+    bounds = _parse_surface_bounds(res.stdout, package)
+    return (bounds, "dumpsys_surfaceflinger") if bounds else (None, "unavailable")
+
+
+def _read_density_info() -> dict[str, Any]:
+    info: dict[str, Any] = {
+        "wm_size": "",
+        "wm_density": "",
+        "wm_physical_size": None,
+        "wm_override_size": None,
+        "wm_physical_density": None,
+        "wm_override_density": None,
+        "display_rect": None,
+        "rotation": "",
+    }
+    try:
+        size_res = android.run_android_command(["wm", "size"], timeout=4)
+        info["wm_size"] = size_res.stdout or ""
+        physical = re.search(r"Physical size:\s*(\d+x\d+)", size_res.stdout or "")
+        override = re.search(r"Override size:\s*(\d+x\d+)", size_res.stdout or "")
+        if physical:
+            info["wm_physical_size"] = parse_wm_size(physical.group(1))
+        if override:
+            info["wm_override_size"] = parse_wm_size(override.group(1))
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        density_res = android.run_android_command(["wm", "density"], timeout=4)
+        info["wm_density"] = density_res.stdout or ""
+        physical_d = re.search(r"Physical density:\s*(\d+)", density_res.stdout or "")
+        override_d = re.search(r"Override density:\s*(\d+)", density_res.stdout or "")
+        if physical_d:
+            info["wm_physical_density"] = int(physical_d.group(1))
+        if override_d:
+            info["wm_override_density"] = int(override_d.group(1))
+        if not info["wm_physical_density"]:
+            info["wm_physical_density"] = parse_wm_density(density_res.stdout or "")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        display = android.get_display_orientation_state()
+        info["display_rect"] = [0, 0, int(display.get("width") or 0), int(display.get("height") or 0)]
+        info["rotation"] = display.get("rotation", "")
+    except Exception:  # noqa: BLE001
+        pass
+    return info
+
+
+def _content_title_bar_height(
+    frame: tuple[int, int, int, int] | None,
+    content_frame: tuple[int, int, int, int] | None,
+) -> int:
+    if not frame or not content_frame:
+        return 0
+    return max(0, int(content_frame[1]) - int(frame[1]))
+
+
+def _offset_bounds(
+    bounds: tuple[int, int, int, int],
+    *,
+    top_offset: int = 0,
+) -> tuple[int, int, int, int]:
+    return (bounds[0], bounds[1] + top_offset, bounds[2], bounds[3] + top_offset)
+
+
+def _classify_layer_readback(
+    *,
+    desired: WindowRect,
+    task_bounds: tuple[int, int, int, int] | None,
+    surface_bounds: tuple[int, int, int, int] | None,
+    input_region: tuple[int, int, int, int] | None,
+    content_frame: tuple[int, int, int, int] | None,
+    display_bounds: tuple[int, int, int, int],
+    title_bar_height: int,
+    tolerance: int,
+) -> list[str]:
+    classes: list[str] = []
+    desired_tuple = (desired.left, desired.top, desired.right, desired.bottom)
+    task_ok = task_bounds is not None and _bounds_close_enough(task_bounds, desired, tolerance)
+    surface_ok = surface_bounds is not None and _bounds_close_enough(surface_bounds, desired, tolerance)
+    input_ok = input_region is not None and _bounds_close_enough(input_region, desired, tolerance)
+    if task_bounds == display_bounds or surface_bounds == display_bounds or input_region == display_bounds:
+        classes.append("fullscreen_readback")
+    if surface_ok and input_region is not None and not input_ok:
+        classes.append("visual_correct_input_wrong")
+    if task_ok and surface_bounds is not None and not surface_ok:
+        classes.append("task_correct_surface_wrong")
+    if task_ok and input_region is not None and not input_ok:
+        classes.append("task_correct_input_wrong")
+    if title_bar_height > 0:
+        corrected = _offset_bounds(desired_tuple, top_offset=title_bar_height)
+        if input_region and _bounds_close_enough(input_region, _rect_from_bounds(desired.package, corrected), tolerance):
+            classes.append("decor_title_bar_offset")
+        elif content_frame and not _bounds_close_enough(content_frame, desired, tolerance):
+            classes.append("decor_content_frame_offset")
+    if task_bounds and input_region and not _bounds_close_enough(input_region, _rect_from_bounds(desired.package, task_bounds), tolerance):
+        tw = max(1, task_bounds[2] - task_bounds[0])
+        th = max(1, task_bounds[3] - task_bounds[1])
+        iw = max(1, input_region[2] - input_region[0])
+        ih = max(1, input_region[3] - input_region[1])
+        sx = iw / tw
+        sy = ih / th
+        if abs(sx - 1.0) > 0.08 or abs(sy - 1.0) > 0.08:
+            classes.append("density_scale_mismatch")
+    if not classes and (task_bounds or surface_bounds or input_region):
+        if all(
+            b is None or _bounds_close_enough(b, desired, tolerance)
+            for b in (task_bounds, surface_bounds, input_region)
+        ):
+            classes.append("match")
+        else:
+            classes.append("bounds_mismatch")
+    return classes
+
+
+def collect_portrait_layer_readback(
+    package: str,
+    desired: WindowRect,
+    *,
+    tolerance: int = 32,
+) -> dict[str, Any]:
+    """Collect task/window/surface/input evidence for portrait click alignment."""
+    window_entry = _select_window_entry(package)
+    task_entry = _select_task_entry(package)
+    surface_bounds, surface_method = read_surface_bounds(package)
+    task_bounds = task_entry.bounds if task_entry else None
+    window_bounds = window_entry.bounds if window_entry else None
+    if surface_bounds is None and window_entry is not None:
+        surface_bounds = window_entry.surface_bounds or window_entry.bounds
+        surface_method = "dumpsys_window"
+    input_region = None
+    touchable_region = None
+    if window_entry is not None:
+        input_region = window_entry.input_region
+        touchable_region = window_entry.touchable_region
+    frame = window_entry.frame if window_entry else None
+    content = window_entry.content_frame if window_entry else None
+    stable = window_entry.stable_frame if window_entry else None
+    visible = window_entry.visible_frame if window_entry else None
+    title_h = _content_title_bar_height(frame or window_bounds, content)
+    display_bounds = _display_bounds()
+    density_info = _read_density_info()
+    classes = _classify_layer_readback(
+        desired=desired,
+        task_bounds=task_bounds,
+        surface_bounds=surface_bounds,
+        input_region=input_region,
+        content_frame=content,
+        display_bounds=display_bounds,
+        title_bar_height=title_h,
+        tolerance=tolerance,
+    )
+    return {
+        "package": package,
+        "desired_bounds": _bounds_to_list((desired.left, desired.top, desired.right, desired.bottom)),
+        "task_bounds": _bounds_to_list(task_bounds),
+        "window_bounds": _bounds_to_list(window_bounds),
+        "surface_bounds": _bounds_to_list(surface_bounds),
+        "surface_method": surface_method,
+        "input_region": _bounds_to_list(input_region),
+        "touchable_region": _bounds_to_list(touchable_region),
+        "window_frame": _bounds_to_list(frame),
+        "content_frame": _bounds_to_list(content),
+        "stable_frame": _bounds_to_list(stable),
+        "visible_frame": _bounds_to_list(visible),
+        "title_bar_height": title_h,
+        "corrected_task_bounds": _bounds_to_list(
+            _offset_bounds((desired.left, desired.top, desired.right, desired.bottom), top_offset=title_h)
+            if title_h else None
+        ),
+        "density": density_info,
+        "mismatch_classification": classes,
+        "task_id": task_entry.task_id if task_entry else (window_entry.task_id if window_entry else None),
+        "window_has_surface": bool(window_entry.has_surface) if window_entry else False,
+        "window_focused": bool(window_entry.is_focused) if window_entry else False,
+    }
 
 
 def _get_task_id(package: str) -> int | None:
@@ -715,6 +1087,110 @@ def _tap_center_probe(
         return False, center, str(exc)[:120]
 
 
+def _tuple_from_readback(value: Any) -> tuple[int, int, int, int] | None:
+    if isinstance(value, (list, tuple)) and len(value) == 4:
+        try:
+            return tuple(int(v) for v in value)  # type: ignore[return-value]
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _record_portrait_layer_readback(result: ApplyResult, *, tolerance: int) -> None:
+    try:
+        readback = collect_portrait_layer_readback(
+            result.package,
+            result.desired,
+            tolerance=tolerance,
+        )
+    except Exception as exc:  # noqa: BLE001
+        result.attempts.append(f"portrait-layer-readback-error: {exc}")
+        return
+    result.layer_readback = readback
+    result.task_bounds = _tuple_from_readback(readback.get("task_bounds"))
+    result.surface_bounds = _tuple_from_readback(readback.get("surface_bounds"))
+    result.input_region = _tuple_from_readback(readback.get("input_region"))
+    result.touchable_region = _tuple_from_readback(readback.get("touchable_region"))
+    result.window_frame = _tuple_from_readback(readback.get("window_frame"))
+    result.content_frame = _tuple_from_readback(readback.get("content_frame"))
+    result.stable_frame = _tuple_from_readback(readback.get("stable_frame"))
+    result.visible_frame = _tuple_from_readback(readback.get("visible_frame"))
+    result.corrected_task_bounds = _tuple_from_readback(readback.get("corrected_task_bounds"))
+    result.title_bar_height = int(readback.get("title_bar_height") or 0)
+    density = readback.get("density")
+    result.density_info = density if isinstance(density, dict) else {}
+    classes = readback.get("mismatch_classification")
+    result.mismatch_classification = [str(c) for c in classes] if isinstance(classes, list) else []
+    result.attempts.append(
+        "portrait-layer-readback: "
+        f"task={result.task_bounds} surface={result.surface_bounds} "
+        f"input={result.input_region} title_bar={result.title_bar_height} "
+        f"class={','.join(result.mismatch_classification) or 'none'}"
+    )
+
+
+def _portrait_layer_validation_errors(result: ApplyResult, *, tolerance: int) -> list[str]:
+    errors: list[str] = []
+    desired = result.desired
+    display_bounds = _display_bounds()
+    corrected_task = result.corrected_task_bounds
+    for label, bounds in (
+        ("task", result.task_bounds),
+        ("surface", result.surface_bounds),
+        ("input", result.input_region),
+    ):
+        if bounds is None:
+            continue
+        if bounds == display_bounds:
+            errors.append(f"{label} fullscreen")
+        target = corrected_task if label in {"task", "surface"} and corrected_task else None
+        if target is not None:
+            target_ok = _bounds_close_enough(bounds, _rect_from_bounds(desired.package, target), tolerance)
+        else:
+            target_ok = _bounds_close_enough(bounds, desired, tolerance)
+        if not target_ok:
+            errors.append(f"{label} mismatch")
+    if result.title_bar_height > 0 and result.content_frame is not None:
+        # Title bars are allowed only when the exposed content frame still
+        # tracks the desired visible slot closely enough for tap coordinates.
+        if not _bounds_close_enough(result.content_frame, desired, tolerance):
+            errors.append("decor/titlebar content mismatch")
+    bad_classes = {
+        "visual_correct_input_wrong",
+        "task_correct_surface_wrong",
+        "task_correct_input_wrong",
+        "fullscreen_readback",
+        "density_scale_mismatch",
+        "decor_title_bar_offset",
+        "decor_content_frame_offset",
+        "bounds_mismatch",
+    }
+    for cls in result.mismatch_classification:
+        if cls in bad_classes and cls not in {"match"}:
+            readable = cls.replace("_", " ")
+            if readable not in errors:
+                errors.append(readable)
+    return errors
+
+
+def _titlebar_corrected_rect(result: ApplyResult) -> WindowRect | None:
+    if result.title_bar_height <= 0:
+        return None
+    if "decor_title_bar_offset" not in result.mismatch_classification:
+        return None
+    display = _display_bounds()
+    shift = int(result.title_bar_height)
+    left = result.desired.left
+    top = max(display[1], result.desired.top - shift)
+    right = result.desired.right
+    bottom = max(top + 1, result.desired.bottom - shift)
+    if bottom > display[3]:
+        delta = bottom - display[3]
+        top = max(display[1], top - delta)
+        bottom = display[3]
+    return WindowRect(result.package, left, top, right, bottom)
+
+
 def apply_window_layout(
     rects: Sequence[WindowRect],
     *,
@@ -844,7 +1320,36 @@ def apply_window_layout(
             if _bounds_close_enough(bounds, result.desired, tolerance):
                 result.final_ok = True
                 result.status = LAYOUT_APPLIED
-                continue
+                layer_errors: list[str] = []
+                if mode == "portrait":
+                    _record_portrait_layer_readback(result, tolerance=tolerance)
+                    layer_errors = _portrait_layer_validation_errors(result, tolerance=tolerance)
+                    if layer_errors:
+                        result.validation.extend(layer_errors)
+                        result.final_ok = False
+                        result.status = LAYOUT_FAILED
+                        all_ok = False
+                        corrected_rect = _titlebar_corrected_rect(result)
+                        if root_tool and corrected_rect is not None:
+                            ok, detail = _direct_resize_via_root(
+                                result.package, corrected_rect, root_tool
+                            )
+                            result.direct_resize_ok = ok
+                            result.attempts.append(f"titlebar-corrected-resize: {detail}")
+                            if ok:
+                                time.sleep(0.6)
+                                bounds, source = read_actual_bounds(result.package)
+                                result.actual_bounds = bounds
+                                result.actual_method = source
+                                _record_portrait_layer_readback(result, tolerance=tolerance)
+                                layer_errors = _portrait_layer_validation_errors(result, tolerance=tolerance)
+                                if bounds and _bounds_close_enough(bounds, corrected_rect, tolerance) and not layer_errors:
+                                    result.validation = []
+                                    result.final_ok = True
+                                    result.status = LAYOUT_APPLIED
+                                    continue
+                if not layer_errors:
+                    continue
 
             all_ok = False
 
@@ -863,7 +1368,37 @@ def apply_window_layout(
                     if bounds and _bounds_close_enough(bounds, result.desired, tolerance):
                         result.final_ok = True
                         result.status = LAYOUT_APPLIED
-                        continue
+                        layer_errors = []
+                        if mode == "portrait":
+                            _record_portrait_layer_readback(result, tolerance=tolerance)
+                            layer_errors = _portrait_layer_validation_errors(result, tolerance=tolerance)
+                            if layer_errors:
+                                result.validation.extend(layer_errors)
+                                result.final_ok = False
+                                result.status = LAYOUT_FAILED
+                                all_ok = False
+                                corrected_rect = _titlebar_corrected_rect(result)
+                                if root_tool and corrected_rect is not None:
+                                    ok, detail = _direct_resize_via_root(
+                                        result.package, corrected_rect, root_tool
+                                    )
+                                    result.direct_resize_ok = ok
+                                    result.attempts.append(f"titlebar-corrected-resize: {detail}")
+                                    if ok:
+                                        time.sleep(0.6)
+                                        bounds, source = read_actual_bounds(result.package)
+                                        result.actual_bounds = bounds
+                                        result.actual_method = source
+                                        _record_portrait_layer_readback(result, tolerance=tolerance)
+                                        layer_errors = _portrait_layer_validation_errors(result, tolerance=tolerance)
+                                        if bounds and _bounds_close_enough(bounds, corrected_rect, tolerance) and not layer_errors:
+                                            result.validation = []
+                                            result.final_ok = True
+                                            result.status = LAYOUT_APPLIED
+                                            continue
+                                continue
+                        if not layer_errors:
+                            continue
 
             # Step 5: re-write keys then force-stop again so next launch
             # picks up the corrected prefs.
@@ -897,6 +1432,10 @@ def apply_window_layout(
             r.attempts.append(
                 f"touch-probe: center={center} result={'ok' if ok else 'fail'} detail={detail}"
             )
+            if not ok:
+                r.final_ok = False
+                r.status = LAYOUT_FAILED
+                r.validation.append("touch probe failed")
             _log.info(
                 "[DENG_REJOIN_TOUCH_PROBE] package=%s center=%s result=%s detail=%s",
                 r.package, center, "ok" if ok else "fail", detail,

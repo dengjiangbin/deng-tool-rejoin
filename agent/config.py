@@ -111,6 +111,8 @@ def default_config() -> dict[str, Any]:
         },
         "selected_package_mode": "single",
         "screen_mode": DEFAULT_SCREEN_MODE,
+        "portrait_auto_density_fix": True,
+        "portrait_previous_density": "",
         "launch_mode": "app",
         "launch_url": "",
         "webhook_enabled": False,
@@ -580,6 +582,8 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
         selected_package_mode = "multiple"
     merged["selected_package_mode"] = selected_package_mode
     merged["screen_mode"] = validate_screen_mode(merged.get("screen_mode"))
+    merged["portrait_auto_density_fix"] = _as_bool(merged.get("portrait_auto_density_fix", True))
+    merged["portrait_previous_density"] = str(merged.get("portrait_previous_density") or "")
     pd_default = default_config()["package_detection"]
     raw_pd = merged.get("package_detection")
     if not isinstance(raw_pd, dict):

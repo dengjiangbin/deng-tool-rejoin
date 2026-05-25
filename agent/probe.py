@@ -328,6 +328,8 @@ def _capture_dumpsys_for_package(package: str, errors: list[dict[str, str]]) -> 
         ("activity_activities", ["dumpsys", "activity", "activities"]),
         ("activity_recents", ["dumpsys", "activity", "recents"]),
         ("surfaceflinger_list", ["dumpsys", "SurfaceFlinger", "--list"]),
+        ("surfaceflinger_full", ["dumpsys", "SurfaceFlinger"]),
+        ("input_windows", ["dumpsys", "input"]),
     ):
         try:
             res = android.run_android_command(args, timeout=10)
@@ -350,6 +352,41 @@ def _capture_dumpsys_for_package(package: str, errors: list[dict[str, str]]) -> 
         out[label] = "\n".join(matches[:400])[:8000] or "<no package match>"
         out[f"{label}_total_len"] = str(len(full))
     return out
+
+
+def _capture_portrait_input_readback(package: str, errors: list[dict[str, str]]) -> dict[str, Any]:
+    """Capture parsed portrait task/surface/input alignment evidence."""
+    try:
+        from . import window_apply, window_layout
+        cfg = _safe("load_config_for_portrait_readback", _load_config_safe, errors, default={}) or {}
+        display = window_layout.detect_display_info()
+        selected = [
+            e.get("package") for e in cfg.get("roblox_packages", [])
+            if isinstance(e, dict) and e.get("enabled", True) and e.get("package")
+        ]
+        if package not in selected:
+            selected.append(package)
+        screen_mode = str(cfg.get("screen_mode") or "portrait")
+        rects = window_layout.calculate_split_layout(
+            selected,
+            display.width,
+            display.height,
+            termux_log_fraction=float(cfg.get("termux_dock_fraction", 0.0) or 0.0),
+            screen_mode=screen_mode if screen_mode in {"portrait", "landscape"} else "portrait",
+        )
+        desired = next((r for r in rects if r.package == package), None)
+        if desired is None:
+            return {"available": False, "reason": "desired bounds unavailable"}
+        readback = window_apply.collect_portrait_layer_readback(package, desired)
+        readback["available"] = True
+        readback["slot"] = {
+            "row": (rects.index(desired) // 2) if screen_mode == "portrait" else None,
+            "col": (rects.index(desired) % 2) if screen_mode == "portrait" else None,
+        }
+        return readback
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": f"portrait_input_readback {package}", "error": str(exc)[:200]})
+        return {"available": False, "error": str(exc)[:200]}
 
 
 def _capture_shared_prefs(package: str, errors: list[dict[str, str]]) -> dict[str, Any]:
@@ -476,6 +513,12 @@ def _capture_config(errors: list[dict[str, str]]) -> dict[str, Any]:
         # If masking broke JSON (e.g., webhook URL replaced inside a string
         # making the whole string still valid but weird), still return text.
         return {"raw_text": safe[:8000]}
+
+
+def _load_config_safe() -> dict[str, Any]:
+    if not CONFIG_PATH.is_file():
+        return {}
+    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
 def _capture_log_tail(errors: list[dict[str, str]], lines: int = 200) -> str:
@@ -956,6 +999,7 @@ def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]
         pkg_block: dict[str, Any] = {}
         pkg_block["process"] = _capture_process(pkg, errors)
         pkg_block["dumpsys"] = _capture_dumpsys_for_package(pkg, errors)
+        pkg_block["portrait_input_readback"] = _capture_portrait_input_readback(pkg, errors)
         pkg_block["shared_prefs"] = _capture_shared_prefs(pkg, errors)
         pkg_block["presence"] = _capture_presence(entry, errors)
         pkgs[pkg] = pkg_block

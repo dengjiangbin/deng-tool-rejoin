@@ -111,6 +111,41 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
         self.assertTrue(all(r.status == window_apply.LAYOUT_FAILED for r in results))
         self.assertTrue(all(any(v.startswith("Overlap:") for v in r.validation) for r in results))
 
+    def test_rc_zero_task_match_but_input_mismatch_is_failure(self) -> None:
+        rect = WindowRect("com.moons.litesc", 0, 512, 360, 768)
+        layer = {
+            "task_bounds": [0, 512, 360, 768],
+            "surface_bounds": [0, 512, 360, 768],
+            "input_region": [0, 536, 360, 792],
+            "touchable_region": [0, 536, 360, 792],
+            "window_frame": [0, 512, 360, 768],
+            "content_frame": [0, 536, 360, 768],
+            "title_bar_height": 24,
+            "corrected_task_bounds": [0, 536, 360, 792],
+            "density": {"wm_physical_density": 420},
+            "mismatch_classification": [
+                "visual_correct_input_wrong",
+                "decor_title_bar_offset",
+            ],
+        }
+
+        with mock.patch.object(window_apply, "_capability_probes", return_value={}), \
+             mock.patch.object(android, "detect_root", return_value=android.RootInfo(False, None, "")), \
+             mock.patch.object(window_apply, "_discover_known_keys", return_value={}), \
+             mock.patch.object(window_apply, "_write_one_package", side_effect=lambda rect, result, **_: setattr(result, "pre_write_ok", True) or True), \
+             mock.patch.object(window_apply, "_wait_for_window", return_value=True), \
+             mock.patch.object(window_apply, "read_actual_bounds", return_value=((0, 512, 360, 768), "dumpsys_window")), \
+             mock.patch.object(window_apply, "collect_portrait_layer_readback", return_value=layer), \
+             mock.patch.object(window_apply, "_display_bounds", return_value=(0, 0, 720, 1280)):
+            results = window_apply.apply_window_layout(
+                [rect], verify_after=True, retries=0, screen_mode="portrait",
+            )
+
+        self.assertFalse(results[0].final_ok)
+        self.assertEqual(results[0].status, window_apply.LAYOUT_FAILED)
+        self.assertIn("visual correct input wrong", results[0].validation)
+        self.assertEqual(results[0].input_region, (0, 536, 360, 792))
+
     def test_portrait_touch_probe_taps_center_inside_actual_window(self) -> None:
         rect = WindowRect("com.moons.litesc", 0, 512, 360, 768)
         taps: list[list[str]] = []
@@ -139,6 +174,40 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
         self.assertTrue(results[0].final_ok)
         self.assertEqual(results[0].touch_probe_center, (180, 640))
         self.assertEqual(taps[-1], ["input", "tap", "180", "640"])
+
+    def test_touch_probe_failure_marks_portrait_layout_failed(self) -> None:
+        rect = WindowRect("com.moons.litesc", 0, 512, 360, 768)
+
+        def fake_root_command(cmd, root_tool=None, timeout=None):
+            class _R:
+                ok = False
+                stdout = ""
+                stderr = "tap rejected"
+            return _R()
+
+        layer = {
+            "task_bounds": [0, 512, 360, 768],
+            "surface_bounds": [0, 512, 360, 768],
+            "input_region": [0, 512, 360, 768],
+            "mismatch_classification": ["match"],
+        }
+        with mock.patch.object(window_apply, "_capability_probes", return_value={}), \
+             mock.patch.object(android, "detect_root", return_value=android.RootInfo(True, "su", "")), \
+             mock.patch.object(window_apply, "_discover_known_keys", return_value={}), \
+             mock.patch.object(window_apply, "_write_one_package", side_effect=lambda rect, result, **_: setattr(result, "pre_write_ok", True) or True), \
+             mock.patch.object(window_apply, "_wait_for_window", return_value=True), \
+             mock.patch.object(window_apply, "read_actual_bounds", return_value=((0, 512, 360, 768), "dumpsys_window")), \
+             mock.patch.object(window_apply, "collect_portrait_layer_readback", return_value=layer), \
+             mock.patch.object(window_apply, "_display_bounds", return_value=(0, 0, 720, 1280)), \
+             mock.patch.object(android, "run_root_command", side_effect=fake_root_command):
+            results = window_apply.apply_window_layout(
+                [rect], verify_after=True, retries=0,
+                screen_mode="portrait", touch_probe=True,
+            )
+
+        self.assertFalse(results[0].final_ok)
+        self.assertEqual(results[0].status, window_apply.LAYOUT_FAILED)
+        self.assertIn("touch probe failed", results[0].validation)
 
     def test_landscape_slot_order_remains_unchanged(self) -> None:
         expected = [

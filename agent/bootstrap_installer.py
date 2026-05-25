@@ -284,7 +284,7 @@ def render_direct_install_bootstrap(
         'ok(){ printf "%b[+]%b %s\\n" "$G" "$X" "$1"; }\n'
         'fail(){ printf "%b[!]%b %s\\n" "$R" "$X" "$1" >&2; exit 1; }\n'
         'printf "%b%s%b\\n" "$C" "$sep" "$X"\n'
-        'printf "%bDENG Tool: Rejoin Installer%b\\n" "$B" "$X"\n'
+        'printf "%bDENG Tool: Rejoin Installing%b\\n" "$B" "$X"\n'
         'printf "%b%s%b\\n" "$C" "$sep" "$X"\n'
         'info "Version: main-dev"\n'
         'printf "%b%s%b\\n" "$C" "$dash" "$X"\n'

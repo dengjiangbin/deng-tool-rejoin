@@ -55,6 +55,17 @@ Window #0 Window{abc u0 com.roblox.client/com.roblox.client.MainActivity}:
   taskId=1
 """
 
+_DUMPSYS_WINDOW_WITH_INPUT = """\
+mCurrentFocus=Window{abc u0 com.roblox.client/com.roblox.client.MainActivity}
+Window #0 Window{abc u0 com.roblox.client/com.roblox.client.MainActivity}:
+  mFrame=[0,512][360,768]
+  mContentFrame=[0,536][360,768]
+  mStableFrame=[0,512][360,768]
+  mHasSurface=true
+  mTouchableRegion=Region([0,536][360,792])
+  taskId=42
+"""
+
 
 _DUMPSYS_ACTIVITY_TWO_PKGS = """\
   Display #0
@@ -184,6 +195,78 @@ class TestParseWindowDumpsys(unittest.TestCase):
         cands = wa._parse_window_dumpsys(loose, "com.roblox.client")
         self.assertTrue(cands)
         self.assertEqual(cands[0].bounds, (10, 20, 100, 200))
+
+    def test_parses_input_and_content_frames_for_portrait_offset(self):
+        cands = wa._parse_window_dumpsys(_DUMPSYS_WINDOW_WITH_INPUT, "com.roblox.client")
+        self.assertEqual(len(cands), 1)
+        entry = cands[0]
+        self.assertEqual(entry.bounds, (0, 512, 360, 768))
+        self.assertEqual(entry.content_frame, (0, 536, 360, 768))
+        self.assertEqual(entry.input_region, (0, 536, 360, 792))
+        self.assertEqual(entry.task_id, 42)
+
+
+class TestPortraitLayerReadback(unittest.TestCase):
+    def test_collects_input_mismatch_and_title_bar_evidence(self):
+        from agent.window_layout import WindowRect
+
+        activity = """\
+Display #0
+  Stack #0
+    * TaskRecord{bb #42 A=com.roblox.client U=0 visible=true}
+      mBounds=[0,512][360,768]
+"""
+        surface = """\
+Layer com.roblox.client/com.roblox.client.MainActivity
+  bounds=[0,512][360,768]
+"""
+
+        def _mock_run(args, *a, **kw):
+            if args[:2] == ["dumpsys", "window"]:
+                return android.CommandResult(tuple(args), 0, _DUMPSYS_WINDOW_WITH_INPUT, "")
+            if args[:2] == ["dumpsys", "activity"]:
+                return android.CommandResult(tuple(args), 0, activity, "")
+            return android.CommandResult(tuple(args), 1, "", "")
+
+        def _mock_android(args, *a, **kw):
+            if args[:2] == ["dumpsys", "SurfaceFlinger"]:
+                return android.CommandResult(tuple(args), 0, surface, "")
+            if args[:2] == ["wm", "size"]:
+                return android.CommandResult(tuple(args), 0, "Physical size: 720x1280", "")
+            if args[:2] == ["wm", "density"]:
+                return android.CommandResult(tuple(args), 0, "Physical density: 420", "")
+            if args[:2] == ["dumpsys", "display"]:
+                return android.CommandResult(tuple(args), 0, "", "")
+            return android.CommandResult(tuple(args), 1, "", "")
+
+        desired = WindowRect("com.roblox.client", 0, 512, 360, 768)
+        with patch.object(wa.android, "run_command", side_effect=_mock_run), \
+             patch.object(wa.android, "run_android_command", side_effect=_mock_android), \
+             patch.object(wa, "_display_bounds", return_value=(0, 0, 720, 1280)):
+            readback = wa.collect_portrait_layer_readback("com.roblox.client", desired, tolerance=8)
+
+        self.assertEqual(readback["task_bounds"], [0, 512, 360, 768])
+        self.assertEqual(readback["surface_bounds"], [0, 512, 360, 768])
+        self.assertEqual(readback["input_region"], [0, 536, 360, 792])
+        self.assertEqual(readback["title_bar_height"], 24)
+        self.assertIn("visual_correct_input_wrong", readback["mismatch_classification"])
+        self.assertIn("decor_title_bar_offset", readback["mismatch_classification"])
+
+    def test_fullscreen_input_region_classified_as_failure(self):
+        from agent.window_layout import WindowRect
+
+        classes = wa._classify_layer_readback(
+            desired=WindowRect("pkg", 0, 512, 360, 768),
+            task_bounds=(0, 512, 360, 768),
+            surface_bounds=(0, 512, 360, 768),
+            input_region=(0, 0, 720, 1280),
+            content_frame=None,
+            display_bounds=(0, 0, 720, 1280),
+            title_bar_height=0,
+            tolerance=8,
+        )
+        self.assertIn("fullscreen_readback", classes)
+        self.assertIn("visual_correct_input_wrong", classes)
 
 
 if __name__ == "__main__":

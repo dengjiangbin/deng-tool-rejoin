@@ -4337,6 +4337,19 @@ def _verify_layout_post_launch(
                 "expected_bounds": _desired_tuple,
                 "actual_bounds":  r.actual_bounds,
                 "actual_method":  r.actual_method,
+                "task_bounds":    r.task_bounds,
+                "surface_bounds": r.surface_bounds,
+                "input_region":   r.input_region,
+                "touchable_region": r.touchable_region,
+                "window_frame":   r.window_frame,
+                "content_frame":  r.content_frame,
+                "stable_frame":   r.stable_frame,
+                "visible_frame":  r.visible_frame,
+                "title_bar_height": r.title_bar_height,
+                "corrected_task_bounds": r.corrected_task_bounds,
+                "density":        r.density_info,
+                "mismatch_classification": r.mismatch_classification,
+                "layer_readback": r.layer_readback,
                 "input_transform": "actual_bounds_center",
                 "click_target_result": _click_result,
                 "status":         r.status,
@@ -4356,7 +4369,8 @@ def _verify_layout_post_launch(
             )
             _layout_log.info(
                 "[DENG_REJOIN_LAYOUT_VERIFY] package=%s mode=%s display=%sx%s rotation=%s"
-                " expected=%s actual=%s input_transform=actual_bounds_center click=%s status=%s",
+                " expected=%s actual=%s task=%s surface=%s input=%s title_bar=%s"
+                " class=%s input_transform=actual_bounds_center click=%s status=%s",
                 r.package,
                 _screen_mode,
                 _display_state.get("width", 0),
@@ -4364,6 +4378,11 @@ def _verify_layout_post_launch(
                 _display_state.get("rotation", ""),
                 _desired_tuple,
                 r.actual_bounds,
+                r.task_bounds,
+                r.surface_bounds,
+                r.input_region,
+                r.title_bar_height,
+                ",".join(r.mismatch_classification),
                 _click_result,
                 r.status,
             )
