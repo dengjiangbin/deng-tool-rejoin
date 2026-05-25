@@ -32,7 +32,7 @@
       <p class="empty-text">Copy or redeem this key before generating another one.</p>
       <div class="key-display-wrap">
         <code class="key-display" id="existing-key-value"><%= existingUnusedKey.key %></code>
-        <button class="btn-copy" type="button" data-key="<%= existingUnusedKey.key %>" onclick="copyExistingKey(this)" aria-label="Copy key">Copy</button>
+        <button class="btn-copy" type="button" data-copy-key data-key="<%= existingUnusedKey.key %>" aria-label="Copy key">Copy</button>
       </div>
       <% if (existingUnusedKey.expires_at_formatted && existingUnusedKey.expires_at_formatted !== 'None') { %>
         <p class="empty-text">Expires: <%= existingUnusedKey.expires_at_formatted %></p>
@@ -78,7 +78,7 @@
           <tr>
             <td class="key-cell"><code><%= fullKeyRow(row) %></code></td>
             <td><span class="badge badge-provider"><%= providerLabel(row.provider) %></span></td>
-            <td><span class="badge <%= friendlyStatus(row) === 'Generated' ? 'badge-green' : (friendlyStatus(row) === 'Expired' ? 'badge-red' : 'badge-gray') %>"><%= friendlyStatus(row) %></span></td>
+            <td><span class="badge <%= friendlyStatus(row) === 'Unredeemed' ? 'badge-green' : (friendlyStatus(row) === 'Expired' || friendlyStatus(row) === 'Revoked' ? 'badge-red' : 'badge-gray') %>"><%= friendlyStatus(row) %></span></td>
             <td class="muted-cell"><%= formatWibTimestamp(row.created_at) %></td>
           </tr>
           <% }) %>
@@ -113,22 +113,6 @@
     </div>
   </div>
 </div>
-
-<script>
-function copyExistingKey(btn) {
-  var key = btn.dataset.key;
-  navigator.clipboard.writeText(key).then(function() {
-    btn.textContent = 'Copied';
-    btn.classList.add('copied');
-    setTimeout(function() {
-      btn.textContent = 'Copy';
-      btn.classList.remove('copied');
-    }, 2200);
-  }).catch(function() {
-    btn.textContent = 'Copy manually';
-  });
-}
-</script>
 
 <div class="modal-backdrop" data-license-modal="redeem" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="redeem-key-title">

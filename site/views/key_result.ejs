@@ -16,7 +16,7 @@
 
     <div class="key-display-wrap">
       <code class="key-display" id="key-value"><%= key %></code>
-      <button class="btn-copy" id="btn-copy" data-key="<%= key %>" onclick="copyKey(this)" aria-label="Copy key">
+      <button class="btn-copy" id="btn-copy" type="button" data-copy-key data-key="<%= key %>" aria-label="Copy key">
         Copy
       </button>
     </div>
@@ -33,19 +33,3 @@
     </div>
   </section>
 </div>
-
-<script>
-function copyKey(btn) {
-  var key = btn.dataset.key;
-  navigator.clipboard.writeText(key).then(function() {
-    btn.textContent = 'Copied';
-    btn.classList.add('copied');
-    setTimeout(function() {
-      btn.textContent = 'Copy';
-      btn.classList.remove('copied');
-    }, 2200);
-  }).catch(function() {
-    btn.textContent = 'Copy manually';
-  });
-}
-</script>

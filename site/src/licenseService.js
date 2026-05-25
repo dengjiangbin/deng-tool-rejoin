@@ -25,15 +25,59 @@ function isBound(row) {
   return Boolean(device && device !== '(unbound)');
 }
 
-function isActiveLicense(row) {
+function hasOwner(row) {
+  return Boolean(row?.owner_discord_id || row?.site_user_id || row?.license_key_id);
+}
+
+function hasUnredeemedExpiry(row) {
+  return Boolean(row?.expires_at);
+}
+
+function classifyLicenseLifecycle(row) {
   const status = licenseStatus(row);
-  if (['revoked', 'expired', 'deleted', 'disabled'].includes(status)) return false;
-  if (row?.is_deleted || row?.deleted || row?.is_disabled || row?.disabled) return false;
+  const revoked = ['revoked', 'deleted', 'disabled'].includes(status) ||
+    Boolean(row?.is_deleted || row?.deleted || row?.is_disabled || row?.disabled);
+  const bound = !revoked && isBound(row);
+  const redeemed = !revoked && (Boolean(row?.redeemed_at) || bound || (hasOwner(row) && !hasUnredeemedExpiry(row)));
+  const expired = !revoked && (status === 'expired' || (!redeemed && isoExpired(row?.expires_at || row?.key_expires_at)));
+  const unredeemed = !revoked && !expired && !redeemed && !bound && status === 'active';
+  const unbound = !revoked && !expired && redeemed && !bound;
+  const lifecycleStatus = revoked
+    ? 'revoked'
+    : expired
+      ? 'expired'
+      : bound
+        ? 'bound'
+        : unbound
+          ? 'unbound'
+          : unredeemed
+            ? 'unredeemed'
+            : status || 'unknown';
+  const displayStatus = {
+    unredeemed: 'Unredeemed',
+    unbound: 'Unbound',
+    bound: 'Bound',
+    expired: 'Expired',
+    revoked: 'Revoked',
+  }[lifecycleStatus] || 'Unknown';
+  return {
+    lifecycle_status: lifecycleStatus,
+    display_status: displayStatus,
+    is_unredeemed: lifecycleStatus === 'unredeemed',
+    is_redeemed: unbound || bound,
+    is_unbound: lifecycleStatus === 'unbound',
+    is_bound: lifecycleStatus === 'bound',
+    is_expired: lifecycleStatus === 'expired',
+    is_revoked: lifecycleStatus === 'revoked',
+    blocks_generation: lifecycleStatus === 'unredeemed',
+  };
+}
+
+function isActiveLicense(row) {
+  const lifecycle = classifyLicenseLifecycle(row);
+  if (lifecycle.is_revoked || lifecycle.is_expired) return false;
   if (row?.is_hidden || row?.archived || row?.hidden) return false;
-  if (row?.redeemed_at || isBound(row)) return true;
-  if (status !== 'active') return false;
-  if (isoExpired(row?.expires_at)) return false;
-  return true;
+  return lifecycle.is_unredeemed || lifecycle.is_redeemed;
 }
 
 function filterActiveLicenses(rows) {
@@ -72,21 +116,34 @@ function recoverableFullKey(row) {
 function computeStats(activeRows, { resetCount = 0, executionCount = 0 } = {}) {
   const rows = activeRows || [];
   const generated = rows.length;
-  const bound = rows.filter(isBound).length;
-  const redeemed = rows.filter((row) => row.redeemed_at || isBound(row)).length;
+  const lifecycles = rows.map(classifyLicenseLifecycle);
+  const unredeemed = lifecycles.filter((item) => item.is_unredeemed).length;
+  const unbound = lifecycles.filter((item) => item.is_unbound).length;
+  const bound = lifecycles.filter((item) => item.is_bound).length;
+  const redeemed = lifecycles.filter((item) => item.is_redeemed).length;
+  const expired = lifecycles.filter((item) => item.is_expired).length;
+  const revoked = lifecycles.filter((item) => item.is_revoked).length;
+  const primary = unredeemed > 0
+    ? { label: 'Unused Keys', value: unredeemed, note: 'Ready to redeem in Rejoin', kind: 'unused' }
+    : unbound > 0
+      ? { label: 'Unbound Keys', value: unbound, note: 'Ready to bind in Rejoin', kind: 'unbound' }
+      : { label: 'Bound Keys', value: bound, note: 'Bound to a device', kind: 'bound' };
   return {
     total: generated,
-    unredeemed: Math.max(0, generated - bound),
-    expired: 0,
+    unredeemed,
+    expired,
+    revoked,
     key_generated_count: generated,
     key_redeemed_count: redeemed,
-    unbound_key_count: Math.max(0, generated - bound),
+    unused_key_count: unredeemed,
+    unbound_key_count: unbound,
     bound_key_count: bound,
     reset_hwid_count: resetCount,
     key_executed_count: executionCount,
     cooldownSeconds: 0,
     keyExpiryHours: 24,
     latest: rows[0] || null,
+    primary_key_card: primary,
   };
 }
 
@@ -121,17 +178,15 @@ function providerLabel(provider) {
 
 function formatLicenseStatus(row) {
   if (!row) return 'Unknown';
-  const status = licenseStatus(row);
-  if (status === 'revoked') return 'Revoked';
-  if (status === 'expired' || isoExpired(row.expires_at)) return 'Expired';
-  if (isBound(row)) return 'Bound';
-  if (row.owner_discord_id || row.license_key_id) return 'Unbound';
-  if (row.redeemed_at) return 'Unbound';
-  return 'Generated';
+  return classifyLicenseLifecycle(row).display_status;
 }
 
 function deviceStatus(row) {
-  return isBound(row) ? 'Bound' : 'No Device Linked';
+  const lifecycle = classifyLicenseLifecycle(row);
+  if (lifecycle.is_bound) return 'Bound';
+  if (lifecycle.is_unbound) return 'Unbound';
+  if (lifecycle.is_unredeemed) return 'Unredeemed';
+  return lifecycle.display_status;
 }
 
 async function fetchByKeyId(table, columns, keyIds, field = 'key_id') {
@@ -215,7 +270,7 @@ async function hydrateLicenseRows(keyRows, owner = '') {
     const full = encryptedFullKey || challengeFullKey || null;
     const split = splitFullKey(full);
     const device = String(binding.device_model || binding.device_label || '').trim();
-    return {
+    const row = {
       id: record.id,
       license_key_id: record.id,
       prefix: record.prefix,
@@ -242,6 +297,7 @@ async function hydrateLicenseRows(keyRows, owner = '') {
       device_status: activeBinding ? 'Bound To A Device' : 'No Device Linked',
       last_seen_at: activeBinding ? binding.last_seen_at : null,
     };
+    return { ...row, ...classifyLicenseLifecycle(row) };
   });
 }
 
@@ -265,15 +321,21 @@ async function getPortalUserLicenses({ discordUserId = '', siteUserId = '', limi
 }
 
 function isUnusedLicense(row) {
-  return Boolean(row && !row.redeemed_at && !row.used && !row.active_binding);
+  return Boolean(row && classifyLicenseLifecycle(row).blocks_generation);
+}
+
+function isUnredeemedCandidate(row) {
+  const status = licenseStatus(row);
+  if (['revoked', 'deleted', 'disabled'].includes(status)) return false;
+  return Boolean(row && !row.redeemed_at && !isBound(row));
 }
 
 async function markExpiredUnredeemedKeys({ discordUserId = '', siteUserId = '' } = {}) {
   const rows = await getPortalUserLicenses({ discordUserId, siteUserId, limit: 500 });
   const expired = rows.filter((row) => (
-    isUnusedLicense(row) &&
+    isUnredeemedCandidate(row) &&
     licenseStatus(row) === 'active' &&
-    isoExpired(row.expires_at)
+    isoExpired(row.expires_at || row.key_expires_at)
   ));
   await Promise.all(expired.map((row) => (
     supabase.from('license_keys').update({ status: 'expired' }).eq('id', row.id)
@@ -285,9 +347,7 @@ async function findActiveUnredeemedKey({ discordUserId = '', siteUserId = '' } =
   await markExpiredUnredeemedKeys({ discordUserId, siteUserId });
   const rows = await getPortalUserLicenses({ discordUserId, siteUserId, limit: 500 });
   return rows.find((row) => (
-    isUnusedLicense(row) &&
-    licenseStatus(row) === 'active' &&
-    !isoExpired(row.expires_at)
+    isUnusedLicense(row)
   )) || null;
 }
 
@@ -492,6 +552,7 @@ async function getUserLicenseStats(discordUserId, { limit = 200 } = {}) {
 
 module.exports = {
   FULL_KEY_UNAVAILABLE,
+  classifyLicenseLifecycle,
   computeStats,
   findActiveUnredeemedKey,
   filterActiveLicenses,

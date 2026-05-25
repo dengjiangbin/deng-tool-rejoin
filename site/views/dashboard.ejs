@@ -19,9 +19,9 @@
   </div>
   <div class="stat-card">
     <div class="stat-body">
-      <p class="stat-label">Unused Keys</p>
-      <p class="stat-value"><%= stats.unredeemed %></p>
-      <p class="stat-note">Ready to redeem in Rejoin</p>
+      <p class="stat-label"><%= stats.primary_key_card.label %></p>
+      <p class="stat-value"><%= stats.primary_key_card.value %></p>
+      <p class="stat-note"><%= stats.primary_key_card.note %></p>
     </div>
   </div>
 </div>
@@ -60,7 +60,7 @@
             <tr>
               <td class="key-cell"><code><%= fullKeyRow(row) %></code></td>
               <td><span class="badge badge-provider"><%= providerLabel(row.provider) %></span></td>
-              <td><span class="badge <%= friendlyStatus(row) === 'Generated' ? 'badge-green' : (friendlyStatus(row) === 'Expired' ? 'badge-red' : 'badge-gray') %>"><%= friendlyStatus(row) %></span></td>
+              <td><span class="badge <%= friendlyStatus(row) === 'Unredeemed' ? 'badge-green' : (friendlyStatus(row) === 'Expired' || friendlyStatus(row) === 'Revoked' ? 'badge-red' : 'badge-gray') %>"><%= friendlyStatus(row) %></span></td>
               <td class="muted-cell"><%= formatWibTimestamp(row.created_at) %></td>
             </tr>
           <% }) %>

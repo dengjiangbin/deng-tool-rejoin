@@ -305,13 +305,23 @@ function fullKeyRow(row) {
 
 function existingUnusedPayload(row) {
   if (!row) return null;
+  const lifecycle = licenseService.classifyLicenseLifecycle(row);
   return {
     id: row.id,
     key: fullKeyRow(row),
     expires_at: row.expires_at || row.key_expires_at || null,
     expires_at_formatted: formatWibTimestamp(row.expires_at || row.key_expires_at),
     provider: providerLabel(row.provider),
-    status: friendlyStatus(row),
+    lifecycle_status: lifecycle.lifecycle_status,
+    display_status: lifecycle.display_status,
+    is_unredeemed: lifecycle.is_unredeemed,
+    is_redeemed: lifecycle.is_redeemed,
+    is_unbound: lifecycle.is_unbound,
+    is_bound: lifecycle.is_bound,
+    is_expired: lifecycle.is_expired,
+    is_revoked: lifecycle.is_revoked,
+    blocks_generation: lifecycle.blocks_generation,
+    status: lifecycle.display_status,
     message: 'You already have an unused key. Copy or redeem this key before generating another.',
   };
 }
@@ -354,15 +364,15 @@ function summarizeHistory(history) {
   };
 }
 
-async function loadHistory(siteUserId, limit = 20, fallbackDiscordUserId = '') {
+async function loadHistory(siteUserId, limit = 20, fallbackDiscordUserId = '', { activeOnly = true } = {}) {
   const { data } = await supabase
     .from('site_users')
     .select('discord_user_id')
     .eq('id', siteUserId)
     .maybeSingle();
   const owner = data?.discord_user_id || fallbackDiscordUserId;
-  return licenseService.getPortalUserLicenses({ discordUserId: owner, siteUserId, limit })
-    .then(licenseService.filterActiveLicenses);
+  const rows = await licenseService.getPortalUserLicenses({ discordUserId: owner, siteUserId, limit });
+  return activeOnly ? licenseService.filterActiveLicenses(rows) : rows;
 }
 
 function ensureProvider(provider) {
@@ -992,7 +1002,8 @@ router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
 
 router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
   try {
-    const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req));
+    const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req), { activeOnly: false });
+    const activeHistory = licenseService.filterActiveLicenses(history);
     const cooldown = await challenge.checkCooldown(req.session.user.id);
     const existingUnused = await licenseService.findActiveUnredeemedKey({
       discordUserId: discordOwnerId(req),
@@ -1003,7 +1014,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
     res.render('license', {
       title: 'My License - DENG Tool',
       history,
-      stats: summarizeHistory(history),
+      stats: summarizeHistory(activeHistory),
       cooldown,
       existingUnusedKey: existingUnusedPayload(existingUnused) || recoveredExistingKey,
       maskKeyRow,
@@ -1090,9 +1101,25 @@ router.get('/api/stats/public', (_req, res) => {
 
 router.get('/api/license/me', requireLogin, repairSiteUser, async (req, res) => {
   try {
-    const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req));
-    const stats = summarizeHistory(history);
-    res.json({ account: req.session.user, stats });
+    const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req), { activeOnly: false });
+    const stats = summarizeHistory(licenseService.filterActiveLicenses(history));
+    res.json({
+      account: req.session.user,
+      stats,
+      history: history.map((row) => ({
+        id: row.id,
+        status: friendlyStatus(row),
+        lifecycle_status: row.lifecycle_status,
+        display_status: row.display_status,
+        is_unredeemed: row.is_unredeemed,
+        is_redeemed: row.is_redeemed,
+        is_unbound: row.is_unbound,
+        is_bound: row.is_bound,
+        is_expired: row.is_expired,
+        is_revoked: row.is_revoked,
+        blocks_generation: row.blocks_generation,
+      })),
+    });
   } catch {
     res.status(500).json({ error: 'license_summary_failed' });
   }
@@ -1100,13 +1127,22 @@ router.get('/api/license/me', requireLogin, repairSiteUser, async (req, res) => 
 
 router.get('/api/license/history', requireLogin, repairSiteUser, async (req, res) => {
   try {
-    const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req));
+    const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req), { activeOnly: false });
     res.json({
       history: history.map((row) => ({
         id: row.id,
         key: fullKeyRow(row),
         masked_key: maskKeyRow(row),
         status: friendlyStatus(row),
+        lifecycle_status: row.lifecycle_status,
+        display_status: row.display_status,
+        is_unredeemed: row.is_unredeemed,
+        is_redeemed: row.is_redeemed,
+        is_unbound: row.is_unbound,
+        is_bound: row.is_bound,
+        is_expired: row.is_expired,
+        is_revoked: row.is_revoked,
+        blocks_generation: row.blocks_generation,
         provider: providerLabel(row.provider),
         created_at: row.created_at,
         created_at_formatted: formatWibTimestamp(row.created_at),
@@ -1130,6 +1166,15 @@ router.get('/api/license/resettable', requireLicenseApiLogin, repairSiteUser, li
         id: row.id,
         key: fullKeyRow(row),
         status: friendlyStatus(row),
+        lifecycle_status: row.lifecycle_status,
+        display_status: row.display_status,
+        is_unredeemed: row.is_unredeemed,
+        is_redeemed: row.is_redeemed,
+        is_unbound: row.is_unbound,
+        is_bound: row.is_bound,
+        is_expired: row.is_expired,
+        is_revoked: row.is_revoked,
+        blocks_generation: row.blocks_generation,
         device_status: row.active_binding ? 'Bound To A Device' : 'No Device Linked',
         device_label: row.device_display || null,
         can_reset: Boolean(row.active_binding),

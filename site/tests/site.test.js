@@ -929,26 +929,27 @@ describe('theme and dashboard UI', () => {
   test('theme toggle placement is desktop stacked and mobile beside logout', () => {
     const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
     assert.match(css, /\.sidebar-actions\s*\{\s*display:\s*grid;\s*gap:\s*10px;/);
+    assert.match(css, /\.nav-link\s*\{[\s\S]*width:\s*100%;/);
     assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.sidebar-actions\s*\{\s*grid-template-columns:\s*auto auto;/);
     assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.sidebar-actions\s*\{\s*grid-template-columns:\s*1fr 1fr;/);
     assert.match(css, /\.theme-toggle-track,\s*\.theme-toggle-knob,\s*\.theme-toggle-icon\s*\{\s*pointer-events:\s*none;/);
-    assert.match(css, /\.theme-toggle-label\s*\{[\s\S]*min-width:\s*44px;[\s\S]*white-space:\s*nowrap;/);
+    assert.match(css, /\.sr-only\s*\{[\s\S]*width:\s*1px;[\s\S]*clip:\s*rect\(0,\s*0,\s*0,\s*0\);[\s\S]*white-space:\s*nowrap;/);
     assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*min-width:\s*116px;[\s\S]*grid-template-columns:\s*auto auto;[\s\S]*gap:\s*6px;/);
-    assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.theme-toggle-label\s*\{\s*display:\s*inline-flex;/);
-    assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*width:\s*100%;[\s\S]*justify-content:\s*center;[\s\S]*padding-inline:\s*6px;/);
+    assert.match(css, /\.theme-toggle\s*\{[\s\S]*width:\s*116px;[\s\S]*grid-template-columns:\s*auto auto;/);
+    assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*width:\s*auto;[\s\S]*justify-content:\s*center;[\s\S]*padding-inline:\s*6px;/);
   });
 
-  test('theme toggle uses one active label to prevent ghost text bleed', () => {
+  test('theme toggle uses sr-only active label to prevent ghost text bleed', () => {
     const layout = fs.readFileSync(path.join(__dirname, '..', 'views', 'layout.ejs'), 'utf8');
     const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
     const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
-    assert.match(layout, /<span class="theme-toggle-label" data-theme-label>Dark<\/span>/);
-    assert.doesNotMatch(layout, /theme-toggle-text-light|theme-toggle-text-dark/);
-    assert.doesNotMatch(css, /theme-toggle-text-light|theme-toggle-text-dark/);
+    assert.match(layout, /<span class="sr-only" data-theme-label>Dark<\/span>/);
+    assert.doesNotMatch(layout, /theme-toggle-label|theme-toggle-text-light|theme-toggle-text-dark/);
+    assert.doesNotMatch(css, /theme-toggle-label|theme-toggle-text-light|theme-toggle-text-dark|text-indent/);
     assert.match(css, /\.theme-toggle-track\s*\{[\s\S]*width:\s*72px;[\s\S]*overflow:\s*hidden;/);
     assert.match(css, /\.theme-toggle-knob\s*\{[\s\S]*transform:\s*translateX\(32px\);/);
     assert.match(css, /:root\[data-theme="light"\]\s+\.theme-toggle-knob\s*\{[\s\S]*transform:\s*translateX\(0\);/);
-    assert.match(css, /\.theme-toggle-label\s*\{[\s\S]*white-space:\s*nowrap;[\s\S]*pointer-events:\s*none;/);
+    assert.match(css, /\.sr-only\s*\{[\s\S]*overflow:\s*hidden;[\s\S]*clip:\s*rect\(0,\s*0,\s*0,\s*0\);/);
     assert.match(js, /nextLabel = next === 'light' \? 'Light' : 'Dark'/);
     assert.match(js, /Switch to ' \+ \(next === 'light' \? 'dark' : 'light'\) \+ ' mode'/);
     assert.doesNotMatch(js, /Night|Switch to night/i);
@@ -1023,6 +1024,88 @@ describe('theme and dashboard UI', () => {
     assert.equal(toggle.attributes['aria-label'], 'Switch to dark mode');
     assert.equal(toggle.attributes['aria-pressed'], 'false');
     assert.equal(storage.deng_tool_theme, 'light');
+  });
+
+  test('copy key buttons use clipboard API, fallback textarea, and exact key text', () => {
+    const vm = require('node:vm');
+    const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
+    const copied = [];
+    const appended = [];
+    const button = {
+      dataset: { key: 'DENG-E132-C484-51E0-96A7' },
+      textContent: 'Copy',
+      classList: {
+        added: [],
+        removed: [],
+        add(name) { this.added.push(name); },
+        remove(name) { this.removed.push(name); },
+      },
+      listeners: {},
+      addEventListener(type, fn) {
+        this.listeners[type] = fn;
+      },
+    };
+    const textarea = {
+      value: '',
+      style: {},
+      setAttribute() {},
+      focus() {},
+      select() {},
+    };
+    const context = {
+      document: {
+        documentElement: { dataset: { theme: 'dark' } },
+        querySelectorAll(selector) {
+          if (selector === '[data-copy-key]') return [button];
+          if (selector === '[data-theme-toggle]' || selector === '.alert') return [];
+          return [];
+        },
+        querySelector() { return null; },
+        createElement(tag) {
+          assert.equal(tag, 'textarea');
+          return textarea;
+        },
+        execCommand(command) {
+          assert.equal(command, 'copy');
+          copied.push(textarea.value);
+          return true;
+        },
+        body: {
+          appendChild(el) { appended.push(el); },
+          removeChild(el) { assert.equal(el, textarea); },
+        },
+      },
+      navigator: {
+        clipboard: {
+          writeText(text) {
+            copied.push(text);
+            return Promise.resolve();
+          },
+        },
+      },
+      localStorage: { getItem() { return null; }, setItem() {} },
+      window: { matchMedia() { return { matches: false }; }, location: { href: '', reload() {} } },
+      fetch() { throw new Error('fetch should not run during copy init'); },
+      setTimeout(fn) { fn(); return 1; },
+      clearTimeout() {},
+      Promise,
+      Error,
+    };
+
+    vm.runInNewContext(script, context);
+    return button.listeners.click()
+      .then(() => {
+        assert.deepEqual(copied, ['DENG-E132-C484-51E0-96A7']);
+        assert.equal(button.textContent, 'Copy');
+        assert.ok(button.classList.added.includes('copied'));
+        copied.length = 0;
+        delete context.navigator.clipboard;
+        return button.listeners.click();
+      })
+      .then(() => {
+        assert.deepEqual(copied, ['DENG-E132-C484-51E0-96A7']);
+        assert.equal(appended[0], textarea);
+      });
   });
 
   test('layout includes cache-busted stylesheet URL', async () => {
@@ -1192,6 +1275,94 @@ describe('Luarmor-style key flow', () => {
     const { html } = await startChallenge(agent);
     assert.match(html, /LootLabs/);
     assert.equal(memoryDb.license_keys.find((row) => row.id === old.id).status, 'expired');
+    assert.equal(memoryDb.license_ad_challenges.length, 2);
+  });
+
+  test('license lifecycle separates unredeemed, unbound, bound, expired, and revoked keys', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const now = new Date().toISOString();
+    const unredeemed = insertLicenseFixture('DENG-0101-0202-0303-0404', {
+      created_at: now,
+      redeemed_at: null,
+      expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+    });
+    const unbound = insertLicenseFixture('DENG-E132-C484-51E0-96A7', {
+      created_at: now,
+      redeemed_at: now,
+      expires_at: null,
+    });
+    const bound = insertLicenseFixture('DENG-0B0B-1111-2222-3333', {
+      created_at: now,
+      redeemed_at: now,
+      expires_at: null,
+    });
+    insertLicenseFixture('DENG-0E0E-1111-2222-3333', {
+      created_at: now,
+      redeemed_at: null,
+      expires_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+    });
+    insertLicenseFixture('DENG-0F0F-1111-2222-3333', {
+      status: 'revoked',
+      created_at: now,
+      redeemed_at: null,
+      expires_at: null,
+    });
+    memoryDb.device_bindings.push({
+      key_id: bound.id,
+      install_id_hash: 'bound-hwid',
+      device_model: 'Cloud Phone',
+      device_label: 'Cloud Phone',
+      last_seen_at: now,
+      is_active: true,
+    });
+
+    const license = await agent.get('/license');
+    assert.match(license.text, /You already have an unused key\./);
+    assert.match(license.text, /Unredeemed/);
+    assert.match(license.text, /Unbound/);
+    assert.match(license.text, /Bound/);
+    assert.doesNotMatch(license.text, /Status:\s*Generated/);
+
+    const api = await agent.get('/api/license/history');
+    assert.equal(api.status, 200);
+    const byKey = new Map(api.body.history.map((row) => [row.key, row]));
+    assert.equal(byKey.get('DENG-0101-0202-0303-0404').lifecycle_status, 'unredeemed');
+    assert.equal(byKey.get('DENG-0101-0202-0303-0404').blocks_generation, true);
+    assert.equal(byKey.get('DENG-E132-C484-51E0-96A7').lifecycle_status, 'unbound');
+    assert.equal(byKey.get('DENG-E132-C484-51E0-96A7').blocks_generation, false);
+    assert.equal(byKey.get('DENG-0B0B-1111-2222-3333').lifecycle_status, 'bound');
+    assert.equal(api.body.history.some((row) => row.lifecycle_status === 'expired'), true);
+    assert.equal(api.body.history.some((row) => row.lifecycle_status === 'revoked'), true);
+  });
+
+  test('redeemed unbound key shows Unbound card and does not trigger unused warning or block generation', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const past = new Date(Date.now() - 120 * 1000).toISOString();
+    insertLicenseFixture('DENG-E132-C484-51E0-96A7', {
+      created_at: past,
+      redeemed_at: past,
+      expires_at: null,
+    });
+    memoryDb.license_ad_challenges.forEach((row) => {
+      row.created_at = past;
+      row.completed_at = past;
+    });
+
+    const dashboard = await agent.get('/dashboard');
+    assert.match(dashboard.text, /Unbound Keys[\s\S]*?<p class="stat-value">1<\/p>[\s\S]*Ready to bind in Rejoin/);
+    assert.doesNotMatch(dashboard.text, /Unused Keys[\s\S]*?<p class="stat-value">1<\/p>[\s\S]*Ready to redeem in Rejoin/);
+
+    const license = await agent.get('/license');
+    assert.doesNotMatch(license.text, /You already have an unused key\./);
+    assert.doesNotMatch(license.text, /Copy or redeem this key before generating another one\./);
+    assert.match(license.text, /Unbound/);
+
+    const csrf = csrfFrom(license.text);
+    const start = await agent.post('/api/key/start').type('form').send({ _csrf: csrf });
+    assert.equal(start.status, 200);
+    assert.match(start.text, /LootLabs|Linkvertise/);
     assert.equal(memoryDb.license_ad_challenges.length, 2);
   });
 
@@ -1904,6 +2075,8 @@ describe('Luarmor-style key flow', () => {
     await login(agent);
     const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
     await completeProvider(agent, 'linkvertise', hash);
+    memoryDb.license_keys[0].redeemed_at = new Date().toISOString();
+    memoryDb.license_keys[0].expires_at = null;
     const license = await agent.get('/license');
     assert.equal(license.status, 200);
     // Full key must appear in the history table
@@ -2272,7 +2445,7 @@ describe('My License action APIs', () => {
     assert.match(res.text, new RegExp(activeFull));
     assert.match(res.text, new RegExp(boundFull));
     assert.match(res.text, /Full key unavailable for this old key/i);
-    assert.match(res.text, /Status: No Device Linked/);
+    assert.match(res.text, /Status: Unbound/);
     assert.match(res.text, /Status: Bound/);
     assert.match(res.text, /Device: None/);
     assert.match(res.text, /Device: SM-N9810/);

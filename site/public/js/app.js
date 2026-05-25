@@ -107,6 +107,58 @@
   });
 }());
 
+(function initCopyButtons() {
+  function fallbackCopy(text) {
+    return new Promise(function(resolve, reject) {
+      var textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.top = '-1000px';
+      textarea.style.left = '-1000px';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      try {
+        var ok = document.execCommand && document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (ok) resolve();
+        else reject(new Error('copy_failed'));
+      } catch (err) {
+        document.body.removeChild(textarea);
+        reject(err);
+      }
+    });
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(function() {
+        return fallbackCopy(text);
+      });
+    }
+    return fallbackCopy(text);
+  }
+
+  document.querySelectorAll('[data-copy-key]').forEach(function(button) {
+    button.addEventListener('click', function() {
+      var key = button.dataset.key || '';
+      if (!key) return;
+      return copyText(key).then(function() {
+        button.textContent = 'Copied';
+        button.classList.add('copied');
+        clearTimeout(button._copyTimer);
+        button._copyTimer = setTimeout(function() {
+          button.textContent = 'Copy';
+          button.classList.remove('copied');
+        }, 2200);
+      }).catch(function() {
+        button.textContent = 'Copy manually';
+      });
+    });
+  });
+}());
+
 (function initLicenseActions() {
   var root = document.querySelector('[data-license-actions]');
   if (!root) return;
