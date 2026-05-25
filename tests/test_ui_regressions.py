@@ -7,12 +7,17 @@ from agent import banner, termux_ui
 
 
 class LogoColorRegressionTests(unittest.TestCase):
-    APPROVED_MONS_ART = "\n".join([
+    OLD_MONS_ART = "\n".join([
         "█   █  ███  █  █  ███",
         "██ ██ █   █ ██ █ █",
         "█ █ █ █   █ █ ██  ██",
         "█   █ █   █ █  █    █",
         "█   █  ███  █  █ ███",
+    ])
+    APPROVED_MONS_ART = "\n".join([
+        "█▄█ █▀█ █▄█ █▀▀",
+        "█ █ █ █ ███ ▀▀█",
+        "█ █ █▄█ █▀█ ▄▄█",
     ])
     BROKEN_MONS_LINES = (
         "\\" + " | /",
@@ -37,12 +42,8 @@ class LogoColorRegressionTests(unittest.TestCase):
         return lines[subtitle_idx + 1:]
 
     @staticmethod
-    def _visual_mass(lines: list[str]) -> int:
-        return sum(sum(1 for ch in line if not ch.isspace()) for line in lines)
-
-    @classmethod
-    def _weighted_mons_mass(cls, lines: list[str]) -> float:
-        return cls._visual_mass(lines) * banner.MONS_VISUAL_WEIGHT
+    def _footprint(lines: list[str]) -> dict[str, int]:
+        return banner.visible_footprint("\n".join(lines))
 
     def test_logo_color_constant_is_soft_pink_not_bright_magenta_or_cyan(self):
         self.assertIn("38;5;205", banner.COLOR_LOGO)
@@ -63,8 +64,8 @@ class LogoColorRegressionTests(unittest.TestCase):
         mons_block = self._mons_block(text)
         self.assertEqual(mons_block, banner.ASCII_MONS_WIDE.splitlines())
         self.assertEqual("\n".join(mons_block), self.APPROVED_MONS_ART)
-        self.assertEqual(len(mons_block), 5)
-        self.assertLessEqual(max(len(line) for line in mons_block), 23)
+        self.assertEqual(len(mons_block), 3)
+        self.assertLessEqual(max(len(line) for line in mons_block), 15)
         self.assertFalse(mons_block[0].startswith(" "))
 
     def test_banner_mons_uses_grey_when_colored(self):
@@ -81,10 +82,11 @@ class LogoColorRegressionTests(unittest.TestCase):
         text = banner.banner_text(use_color=False, terminal_width=80)
         lines = text.splitlines()
         subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
-        logo_width = max(len(line) for line in lines[:subtitle_idx])
-        mons_width = max(len(line) for line in lines[subtitle_idx + 1:])
-        self.assertGreater(logo_width, mons_width)
-        self.assertLessEqual(mons_width, logo_width)
+        deng_fp = self._footprint(lines[:subtitle_idx])
+        mons_fp = self._footprint(lines[subtitle_idx + 1:])
+        self.assertGreater(deng_fp["height"], mons_fp["height"])
+        self.assertGreater(deng_fp["width"], mons_fp["width"])
+        self.assertLessEqual(mons_fp["area"] / deng_fp["area"], 0.25)
 
     def test_broken_mons_slash_x_art_is_removed(self):
         source = banner.banner_text(use_color=False, terminal_width=80)
@@ -93,6 +95,8 @@ class LogoColorRegressionTests(unittest.TestCase):
         for broken in self.BROKEN_MONS_LINES:
             self.assertNotIn(broken, source)
             self.assertNotIn(broken, module_art)
+        self.assertNotIn(self.OLD_MONS_ART, source)
+        self.assertNotIn(self.OLD_MONS_ART, module_art)
         self.assertNotIn("X", module_art)
         self.assertNotIn("╔╦╗", module_art)
 
@@ -136,34 +140,37 @@ class LogoColorRegressionTests(unittest.TestCase):
         mons_block = self._mons_block(text)
         self.assertEqual(mons_block, banner.ASCII_MONS_NARROW.splitlines())
         self.assertEqual("\n".join(mons_block), self.APPROVED_MONS_ART)
-        self.assertLessEqual(max(len(line) for line in mons_block), 23)
+        self.assertLessEqual(max(len(line) for line in mons_block), 15)
         self.assertTrue(all(len(line) <= 40 for line in text.splitlines()))
 
-    def test_mons_is_tiny_companion_logo(self):
+    def test_mons_actual_terminal_footprint_is_physically_smaller(self):
         text = banner.banner_text(use_color=False, terminal_width=80)
         lines = text.splitlines()
         subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
-        deng_mass = self._visual_mass(lines[:subtitle_idx])
-        mons_mass = self._visual_mass(lines[subtitle_idx + 1:])
-        ratio = mons_mass / deng_mass
-        self.assertEqual(mons_mass, self._visual_mass(self.APPROVED_MONS_ART.splitlines()))
-        self.assertLessEqual(ratio, 0.27)
-        self.assertLessEqual(max(len(line) for line in lines[subtitle_idx + 1:]), 23)
+        deng_fp = self._footprint(lines[:subtitle_idx])
+        old_fp = banner.visible_footprint(self.OLD_MONS_ART)
+        mons_fp = self._footprint(lines[subtitle_idx + 1:])
+        self.assertEqual(mons_fp, banner.visible_footprint(self.APPROVED_MONS_ART))
+        self.assertLess(mons_fp["height"], old_fp["height"])
+        self.assertLess(mons_fp["width"], old_fp["width"])
+        self.assertLess(mons_fp["height"], deng_fp["height"])
+        self.assertLess(mons_fp["width"], deng_fp["width"])
+        self.assertLessEqual(mons_fp["area"] / deng_fp["area"], 0.25)
+        self.assertGreaterEqual(mons_fp["area"] / deng_fp["area"], 0.15)
 
-    def test_colored_mons_weighted_visual_size_is_about_one_fifth_of_deng(self):
+    def test_colored_mons_size_uses_actual_footprint_not_visual_weight(self):
         text = banner.banner_text(use_color=True, terminal_width=80)
         lines = text.splitlines()
         subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
         deng_lines = [banner.ANSI_RE.sub("", line) for line in lines[:subtitle_idx]]
         mons_lines = [banner.ANSI_RE.sub("", line) for line in lines[subtitle_idx + 1:]]
-        deng_mass = self._visual_mass(deng_lines)
-        mons_mass = self._visual_mass(mons_lines)
-        weighted_ratio = self._weighted_mons_mass(mons_lines) / deng_mass
+        deng_fp = self._footprint(deng_lines)
+        mons_fp = self._footprint(mons_lines)
         self.assertEqual("\n".join(mons_lines), self.APPROVED_MONS_ART)
-        self.assertEqual(mons_mass, 47)
-        self.assertAlmostEqual(weighted_ratio, 0.195, delta=0.015)
-        self.assertLessEqual(weighted_ratio, 0.21)
-        self.assertLess(weighted_ratio, mons_mass / deng_mass)
+        self.assertEqual(mons_fp["height"], 3)
+        self.assertEqual(mons_fp["width"], 15)
+        self.assertEqual(mons_fp["area"], 45)
+        self.assertLessEqual(mons_fp["area"] / deng_fp["area"], 0.25)
 
     def test_deng_logo_and_version_line_remain_unchanged(self):
         text = banner.banner_text(use_color=False, terminal_width=80)

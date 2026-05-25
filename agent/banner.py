@@ -13,7 +13,6 @@ BLUE = "\033[1;94m"
 PINK = "\033[38;5;205m"
 GREY = "\033[90m"
 MONS_COLOR = "\033[2;38;5;240m"
-MONS_VISUAL_WEIGHT = 0.75
 COLOR_LOGO = PINK
 RESET = "\033[0m"
 
@@ -26,17 +25,16 @@ ASCII_DENG = r"""
 ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝
 """.strip("\n")
 
-ASCII_MONS_WIDE = r"""
-█   █  ███  █  █  ███
-██ ██ █   █ ██ █ █
-█ █ █ █   █ █ ██  ██
-█   █ █   █ █  █    █
-█   █  ███  █  █ ███
+ASCII_MONS_COMPACT = r"""
+█▄█ █▀█ █▄█ █▀▀
+█ █ █ █ ███ ▀▀█
+█ █ █▄█ █▀█ ▄▄█
 """.strip("\n")
 
-ASCII_MONS_NARROW = ASCII_MONS_WIDE
+ASCII_MONS_WIDE = ASCII_MONS_COMPACT
+ASCII_MONS_NARROW = ASCII_MONS_COMPACT
 
-ASCII_MONS = ASCII_MONS_WIDE
+ASCII_MONS = ASCII_MONS_COMPACT
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -53,6 +51,20 @@ def supports_color() -> bool:
 def visible_width(text: str) -> int:
     """Return printable width after removing ANSI sequences."""
     return len(ANSI_RE.sub("", text))
+
+
+def visible_footprint(text: str) -> dict[str, int]:
+    """Measure the actual terminal row/column footprint of rendered text."""
+    plain_lines = [ANSI_RE.sub("", line) for line in text.splitlines()]
+    lines = [line for line in plain_lines if line.strip()]
+    height = len(lines)
+    width = max((len(line) for line in lines), default=0)
+    return {
+        "height": height,
+        "width": width,
+        "area": height * width,
+        "occupied": sum(1 for line in lines for ch in line if ch != " "),
+    }
 
 
 def _terminal_width(terminal_width: int | None = None) -> int:
