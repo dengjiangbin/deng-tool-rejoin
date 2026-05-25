@@ -26,7 +26,7 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
         self.assertLessEqual(max(r.bottom for r in rects), 1280)
 
     def test_portrait_slots_are_touch_safe_for_required_counts(self) -> None:
-        for count in (1, 2, 3, 4, 6, 9, 10):
+        for count in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
             with self.subTest(count=count):
                 rects = window_layout.calculate_split_layout(
                     _pkgs(count), 720, 1280,
@@ -110,6 +110,15 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
         self.assertTrue(all(not r.final_ok for r in results))
         self.assertTrue(all(r.status == window_apply.LAYOUT_FAILED for r in results))
         self.assertTrue(all(any(v.startswith("Overlap:") for v in r.validation) for r in results))
+        self.assertTrue(all(any("duplicate_final_bounds" in v for v in r.validation) for r in results))
+
+    def test_portrait_touch_validation_catches_duplicate_bounds(self) -> None:
+        rects = [
+            WindowRect("p1", 0, 512, 360, 768),
+            WindowRect("p2", 0, 512, 360, 768),
+        ]
+        errors = window_layout.validate_portrait_touch_layout(rects, 720, 1280)
+        self.assertIn("duplicate bounds", "\n".join(errors))
 
     def test_rc_zero_task_match_but_input_mismatch_is_failure(self) -> None:
         rect = WindowRect("com.moons.litesc", 0, 512, 360, 768)
@@ -164,6 +173,14 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
              mock.patch.object(window_apply, "_write_one_package", side_effect=lambda rect, result, **_: setattr(result, "pre_write_ok", True) or True), \
              mock.patch.object(window_apply, "_wait_for_window", return_value=True), \
              mock.patch.object(window_apply, "read_actual_bounds", return_value=((0, 512, 360, 768), "dumpsys_window")), \
+             mock.patch.object(window_apply, "collect_portrait_layer_readback", return_value={
+                 "task_bounds": [0, 512, 360, 768],
+                 "surface_bounds": [0, 512, 360, 768],
+                 "input_region": [0, 512, 360, 768],
+                 "mismatch_classification": ["match"],
+                 "task_id": 42,
+                 "task_package_expected": True,
+             }), \
              mock.patch.object(window_apply, "_display_bounds", return_value=(0, 0, 720, 1280)), \
              mock.patch.object(android, "run_root_command", side_effect=fake_root_command):
             results = window_apply.apply_window_layout(
@@ -190,6 +207,8 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
             "surface_bounds": [0, 512, 360, 768],
             "input_region": [0, 512, 360, 768],
             "mismatch_classification": ["match"],
+            "task_id": 42,
+            "task_package_expected": True,
         }
         with mock.patch.object(window_apply, "_capability_probes", return_value={}), \
              mock.patch.object(android, "detect_root", return_value=android.RootInfo(True, "su", "")), \

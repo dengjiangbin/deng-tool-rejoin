@@ -43,11 +43,12 @@ from typing import Any
 
 from . import android
 from .android import CommandResult, run_command, run_root_command
-from .constants import CONFIG_PATH, LOG_PATH
+from .constants import CONFIG_PATH, DATA_DIR, LOG_PATH
+from .url_utils import mask_urls_in_text
 
 PROBE_VERSION = 1
-DATA_DIR = Path(os.path.expanduser("~/.deng-tool/rejoin/data"))
 PROBE_DIR = DATA_DIR / "probes"
+UPLOAD_BUNDLE_DIR = DATA_DIR / "probe_upload_bundles"
 
 # ─── Sanitization ──────────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ _SECRET_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
         r"https?://(?:discord(?:app)?\.com|canary\.discord\.com)/api/webhooks/\S+"
     )),
     ("bearer", re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]+")),
+    ("deng_license_key", re.compile(r"\bDENG-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}\b")),
     ("license_key", re.compile(r"(?i)\blic_[A-Za-z0-9_-]{8,}\b")),
     ("rk_key", re.compile(r"\brk_[A-Za-z0-9_-]{8,}\b")),
     ("env_secret_assign", re.compile(
@@ -87,7 +89,7 @@ def mask(text: str | None) -> str:
         return s
     for kind, rx in _SECRET_PATTERNS:
         s = rx.sub(f"<masked:{kind}>", s)
-    return s
+    return mask_urls_in_text(s)
 
 
 def _short_id() -> str:
@@ -1167,7 +1169,48 @@ def save_probe(probe: dict[str, Any]) -> Path:
     PROBE_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     path = PROBE_DIR / f"probe-{ts}-{_short_id()}.json"
-    path.write_text(json.dumps(probe, indent=2, sort_keys=True), encoding="utf-8")
+    safe_probe = sanitize_probe(probe)
+    path.write_text(json.dumps(safe_probe, indent=2, sort_keys=True), encoding="utf-8")
+    return path
+
+
+def sanitize_probe(value: Any) -> Any:
+    """Deep-copy probe content while redacting secrets and private URLs."""
+    if isinstance(value, dict):
+        safe: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if re.search(r"(?i)(cookie|token|secret|password|session_id)$", key_text):
+                if item:
+                    safe[key_text] = f"<masked:{key_text.lower()}>"
+                else:
+                    safe[key_text] = item
+                continue
+            safe[key_text] = sanitize_probe(item)
+        return safe
+    if isinstance(value, list):
+        return [sanitize_probe(item) for item in value]
+    if isinstance(value, tuple):
+        return [sanitize_probe(item) for item in value]
+    if isinstance(value, str):
+        return mask(value)
+    return value
+
+
+def save_upload_bundle(probe: dict[str, Any], *, reason: str = "") -> Path:
+    """Persist a sanitized offline upload bundle for manual support delivery."""
+    UPLOAD_BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = UPLOAD_BUNDLE_DIR / f"probe-upload-bundle-{ts}-{_short_id()}.json"
+    trimmed, trim_report = trim_probe_for_upload(sanitize_probe(probe))
+    bundle = {
+        "bundle_version": 1,
+        "created_at_iso": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "reason": mask(reason)[:500],
+        "upload_trim": trim_report,
+        "probe": trimmed,
+    }
+    path.write_text(json.dumps(bundle, indent=2, sort_keys=True), encoding="utf-8")
     return path
 
 
@@ -1175,13 +1218,11 @@ def save_probe(probe: dict[str, Any]) -> Path:
 
 
 def _resolve_install_api() -> str:
-    api_path = Path(os.path.expanduser("~/.deng-tool/rejoin/.install_api"))
-    if api_path.is_file():
-        try:
-            return api_path.read_text(encoding="utf-8").strip()
-        except OSError:
-            pass
-    return os.environ.get("DENG_REJOIN_INSTALL_API", "").strip()
+    try:
+        from .deferred_bundle_install import resolve_install_api
+        return resolve_install_api().strip()
+    except Exception:  # noqa: BLE001
+        return os.environ.get("DENG_REJOIN_INSTALL_API", "").strip()
 
 
 def upload_probe(probe: dict[str, Any], *, timeout: float = 30.0) -> tuple[bool, str]:
@@ -1204,7 +1245,7 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 30.0) -> tuple[bool,
     # ── Size budget ── trim ANY oversized payload BEFORE we POST so the
     # server's 4 MB cap doesn't reject us with an opaque 413.  This is
     # what was blocking the user after running many tests back-to-back.
-    trimmed, trim_report = trim_probe_for_upload(probe)
+    trimmed, trim_report = trim_probe_for_upload(sanitize_probe(probe))
     body = json.dumps(trimmed, separators=(",", ":")).encode("utf-8")
     payload = gzip.compress(body)
 

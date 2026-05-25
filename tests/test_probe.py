@@ -17,6 +17,7 @@ import os
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -57,11 +58,11 @@ class MaskTests(unittest.TestCase):
         masked = P.mask(text)
         self.assertIn("<masked:license_key>", masked)
 
-    def test_keeps_plain_text_intact(self) -> None:
+    def test_masks_private_launch_url_codes(self) -> None:
         text = "private url: https://www.roblox.com/games/123/Adopt-Me?privateServerLinkCode=abc-xyz"
         masked = P.mask(text)
-        # private URLs are intentionally preserved
-        self.assertIn("privateServerLinkCode=abc-xyz", masked)
+        self.assertNotIn("abc-xyz", masked)
+        self.assertIn("privateServerLinkCode=***MASKED***", masked)
 
     def test_handles_none_and_empty(self) -> None:
         self.assertEqual(P.mask(None), "")
@@ -260,6 +261,91 @@ class UploadProbeTests(unittest.TestCase):
                 ok, info = P.upload_probe({"probe_version": 1})
         self.assertFalse(ok)
         self.assertIn("install API URL not configured", info)
+
+    def test_upload_with_valid_saved_session_succeeds(self) -> None:
+        class _Resp:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self):
+                return b'{"probe_id":"p-ok"}'
+
+        requests = []
+        def fake_urlopen(req, timeout=0):  # noqa: ANN001
+            requests.append(req)
+            return _Resp()
+
+        with patch.object(P, "_resolve_install_api", return_value="https://rejoin.deng.my.id"), \
+             patch("agent.license_session.ensure_session_for_feature", return_value=(True, "sess-ok")), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            ok, info = P.upload_probe({"probe_version": 1, "secret": "DENG-AAAA-BBBB-CCCC-DDDD"})
+        self.assertTrue(ok)
+        self.assertEqual(info, "p-ok")
+        self.assertEqual(requests[0].get_header("X-deng-session"), "sess-ok")
+
+    def test_upload_401_refreshes_expired_server_session(self) -> None:
+        class _Resp:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_args):
+                return False
+            def read(self):
+                return b'{"probe_id":"p-fresh"}'
+
+        calls = []
+        def fake_session(feature, *, force_refresh=False):  # noqa: ANN001
+            calls.append(force_refresh)
+            return True, "fresh" if force_refresh else "stale"
+
+        def fake_urlopen(req, timeout=0):  # noqa: ANN001
+            if req.get_header("X-deng-session") == "stale":
+                raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, None)
+            return _Resp()
+
+        with patch.object(P, "_resolve_install_api", return_value="https://rejoin.deng.my.id"), \
+             patch("agent.license_session.ensure_session_for_feature", side_effect=fake_session), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            ok, info = P.upload_probe({"probe_version": 1})
+        self.assertTrue(ok)
+        self.assertEqual(info, "p-fresh")
+        self.assertEqual(calls, [False, True])
+
+    def test_upload_without_valid_key_or_session_is_clear_error(self) -> None:
+        with patch.object(P, "_resolve_install_api", return_value="https://rejoin.deng.my.id"), \
+             patch("agent.license_session.ensure_session_for_feature", return_value=(False, "no valid saved license key")):
+            ok, info = P.upload_probe({"probe_version": 1})
+        self.assertFalse(ok)
+        self.assertIn("no valid saved license key", info)
+
+    def test_upload_server_error_returns_clear_failure(self) -> None:
+        def fake_urlopen(req, timeout=0):  # noqa: ANN001
+            raise urllib.error.HTTPError(req.full_url, 500, "Server Error", {}, None)
+
+        with patch.object(P, "_resolve_install_api", return_value="https://rejoin.deng.my.id"), \
+             patch("agent.license_session.ensure_session_for_feature", return_value=(True, "sess-ok")), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            ok, info = P.upload_probe({"probe_version": 1})
+        self.assertFalse(ok)
+        self.assertIn("HTTP 500", info)
+
+    def test_probe_and_bundle_redact_secrets_and_private_urls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(P, "PROBE_DIR", Path(tmp) / "probes"), \
+                 patch.object(P, "UPLOAD_BUNDLE_DIR", Path(tmp) / "bundles"):
+                probe = {
+                    "license_key": "DENG-AAAA-BBBB-CCCC-DDDD",
+                    "launch_url": "https://www.roblox.com/games/123/x?privateServerLinkCode=secret",
+                    "cookie": ".ROBLOSECURITY=do-not-share",
+                    "errors": [],
+                }
+                local = P.save_probe(probe)
+                bundle = P.save_upload_bundle(probe, reason="failed")
+                combined = local.read_text(encoding="utf-8") + bundle.read_text(encoding="utf-8")
+        self.assertNotIn("DENG-AAAA-BBBB-CCCC-DDDD", combined)
+        self.assertNotIn("do-not-share", combined)
+        self.assertNotIn("privateServerLinkCode=secret", combined)
+        self.assertIn("***MASKED***", combined)
 
 
 if __name__ == "__main__":

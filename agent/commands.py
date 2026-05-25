@@ -4063,6 +4063,39 @@ def _prepare_automatic_layout(
             termux_log_fraction=_dock_frac,
             screen_mode=_screen_mode,
         )
+        if _screen_mode == "portrait":
+            seen_intended: dict[tuple[int, int, int, int], str] = {}
+            duplicate_msg = ""
+            for r in rects:
+                key = (r.left, r.top, r.right, r.bottom)
+                if key in seen_intended and seen_intended[key] != r.package:
+                    duplicate_msg = (
+                        "duplicate portrait slot assignment: "
+                        f"package {seen_intended[key]} and package {r.package} both assigned to slot X"
+                    )
+                    break
+                seen_intended[key] = r.package
+            if not duplicate_msg and len(rects) >= 3:
+                p1 = rects[0]
+                p3 = rects[2]
+                if (p1.left, p1.top, p1.right, p1.bottom) == (p3.left, p3.top, p3.right, p3.bottom):
+                    duplicate_msg = (
+                        "duplicate portrait slot assignment: "
+                        f"package {p1.package} and package {p3.package} both assigned to slot X "
+                        "(portrait_duplicate_slot_package_1_3)"
+                    )
+            if duplicate_msg:
+                cfg["_layout_abort_reason"] = duplicate_msg
+                cfg["_layout_abort_mode"] = "portrait"
+                try:
+                    save_config(cfg)
+                except Exception:  # noqa: BLE001
+                    pass
+                print("Portrait Layout Error: Two packages were assigned to the same slot. Layout stopped to prevent wrong clicks.")
+                _layout_log.error("[DENG_REJOIN_PORTRAIT_DUPLICATE_SLOT] %s", duplicate_msg)
+                return cfg, "layout_error_duplicate_portrait_slot"
+            cfg.pop("_layout_abort_reason", None)
+            cfg.pop("_layout_abort_mode", None)
         # Derive Termux dock fraction from the actual package bounds so that
         # _enforce_termux_left_layout (called later in cmd_start) minimises
         # Termux to exactly the empty col0 area rather than a hard-coded 50%.
@@ -4080,7 +4113,11 @@ def _prepare_automatic_layout(
             _left_end = min(r.left for r in rects) if rects else 0
             if _screen_mode == "portrait":
                 _cols, _rows = 2, 5
-                _slot_order = "7,8,9,10,1,2,3,4,5,6"
+                _rule = getattr(_wl, "PORTRAIT_SLOT_RULES", {}).get(
+                    len(filtered_packages),
+                    getattr(_wl, "PORTRAIT_SLOT_RULES", {10: (7, 8, 9, 10, 1, 2, 3, 4, 5, 6)})[10],
+                )
+                _slot_order = ",".join(str(x) if x else "empty" for x in _rule)
                 _landscape_rule = ""
             else:
                 _cols, _rows = 3, 3
@@ -4100,13 +4137,14 @@ def _prepare_automatic_layout(
             )
             _layout_log.info(
                 "[DENG_REJOIN_SPLIT_LAYOUT] screen_w=%d screen_h=%d termux_area=left_col0 "
-                "roblox_area=right_cols1_plus termux_desired=%s termux_actual=%s "
+                "roblox_area=%s termux_desired=%s termux_actual=%s "
                 "roblox_grid_area=%s full_width_used=true",
                 display.width,
                 display.height,
+                "full_screen" if _screen_mode == "portrait" else "right_cols1_plus",
                 (0, 0, _left_end, display.height),
                 "",
-                (0, _sb_h, display.width, display.height),
+                (0, 0 if _screen_mode == "portrait" else _sb_h, display.width, display.height),
             )
             if _screen_mode == "landscape":
                 _layout_log.info(
@@ -4139,19 +4177,38 @@ def _prepare_automatic_layout(
         try:
             _seen_bounds: list[tuple[int, int, int, int]] = []
             for _bi, _r in enumerate(rects):
-                _row = _bi // max(1, _cols)
-                _col = _bi % max(1, _cols)
+                _slot = _bi
+                if _screen_mode == "portrait":
+                    try:
+                        _slot = _wl._slot_index_for_package(_bi + 1, _rule)
+                    except Exception:  # noqa: BLE001
+                        _slot = _bi
+                _row = _slot // max(1, _cols)
+                _col = _slot % max(1, _cols)
                 _overlap = any(
                     not (_r.right <= _o[0] or _o[2] <= _r.left or
                          _r.bottom <= _o[1] or _o[3] <= _r.top)
                     for _o in _seen_bounds
                 )
+                _duplicate = (_r.left, _r.top, _r.right, _r.bottom) in _seen_bounds
                 _seen_bounds.append((_r.left, _r.top, _r.right, _r.bottom))
+                if _screen_mode == "portrait" and _duplicate:
+                    prev = next(
+                        (
+                            rects[_i].package for _i, _o in enumerate(_seen_bounds[:-1])
+                            if _o == (_r.left, _r.top, _r.right, _r.bottom)
+                        ),
+                        "unknown",
+                    )
+                    raise RuntimeError(
+                        "duplicate portrait slot assignment: "
+                        f"package {prev} and package {_r.package} both assigned to slot {_slot}"
+                    )
                 _layout_log.info(
-                    "[DENG_REJOIN_LAYOUT_BOUNDS] package=%s index=%d row=%d col=%d"
+                    "[DENG_REJOIN_LAYOUT_BOUNDS] package=%s index=%d slot=%d row=%d col=%d"
                     " desired_x=%d desired_y=%d desired_w=%d desired_h=%d"
                     " actual_before=pending actual_after=pending overlap_detected=%s",
-                    _r.package, _bi, _row, _col,
+                    _r.package, _bi, _slot, _row, _col,
                     _r.left, _r.top, _r.win_w, _r.win_h,
                     "true" if _overlap else "false",
                 )
@@ -4262,6 +4319,21 @@ def _verify_layout_post_launch(
     diag_rows: list[dict[str, Any]] = []
     try:
         _screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
+        if (
+            _screen_mode == "portrait"
+            and cfg.get("_layout_abort_mode") == "portrait"
+            and cfg.get("_layout_abort_reason")
+        ):
+            _layout_log.error(
+                "[DENG_REJOIN_LAYOUT_VERIFY_ABORTED] mode=portrait reason=%s",
+                cfg.get("_layout_abort_reason"),
+            )
+            return {}, [{
+                "mode": "portrait",
+                "status": "Layout Failed",
+                "validation": [str(cfg.get("_layout_abort_reason"))],
+                "final_ok": False,
+            }]
         try:
             _display_state = android.get_display_orientation_state()
         except Exception:  # noqa: BLE001
@@ -4312,6 +4384,12 @@ def _verify_layout_post_launch(
         for r in results:
             out[r.package] = r.final_ok
             _desired_tuple = (r.desired.left, r.desired.top, r.desired.right, r.desired.bottom)
+            _readback_task_id = None
+            if isinstance(r.layer_readback, dict):
+                _readback_task_id = r.layer_readback.get("task_id")
+            _clamped_axes = []
+            if isinstance(r.layer_readback, dict):
+                _clamped_axes = r.layer_readback.get("clamped_axes") or []
             _click_result = {
                 "target": r.touch_probe_center,
                 "inside_actual_bounds": bool(
@@ -4335,6 +4413,9 @@ def _verify_layout_post_launch(
                     "right": r.desired.right, "bottom": r.desired.bottom,
                 },
                 "expected_bounds": _desired_tuple,
+                "task_id":        r.task_id if r.task_id is not None else _readback_task_id,
+                "task_package":   r.layer_readback.get("task_package") if isinstance(r.layer_readback, dict) else "",
+                "task_package_expected": r.task_package_expected,
                 "actual_bounds":  r.actual_bounds,
                 "actual_method":  r.actual_method,
                 "task_bounds":    r.task_bounds,
@@ -4349,6 +4430,7 @@ def _verify_layout_post_launch(
                 "corrected_task_bounds": r.corrected_task_bounds,
                 "density":        r.density_info,
                 "mismatch_classification": r.mismatch_classification,
+                "clamped_axes":    _clamped_axes,
                 "layer_readback": r.layer_readback,
                 "input_transform": "actual_bounds_center",
                 "click_target_result": _click_result,
@@ -4369,8 +4451,8 @@ def _verify_layout_post_launch(
             )
             _layout_log.info(
                 "[DENG_REJOIN_LAYOUT_VERIFY] package=%s mode=%s display=%sx%s rotation=%s"
-                " expected=%s actual=%s task=%s surface=%s input=%s title_bar=%s"
-                " class=%s input_transform=actual_bounds_center click=%s status=%s",
+                " expected=%s actual=%s task_id=%s task=%s surface=%s input=%s title_bar=%s"
+                " class=%s clamped_axes=%s input_transform=actual_bounds_center click=%s status=%s",
                 r.package,
                 _screen_mode,
                 _display_state.get("width", 0),
@@ -4378,14 +4460,40 @@ def _verify_layout_post_launch(
                 _display_state.get("rotation", ""),
                 _desired_tuple,
                 r.actual_bounds,
+                r.task_id if r.task_id is not None else _readback_task_id,
                 r.task_bounds,
                 r.surface_bounds,
                 r.input_region,
                 r.title_bar_height,
                 ",".join(r.mismatch_classification),
+                ",".join(str(x) for x in _clamped_axes),
                 _click_result,
                 r.status,
             )
+        if _screen_mode == "portrait":
+            duplicate_slot_13 = False
+            try:
+                by_pkg = {row["package"]: row for row in diag_rows}
+                p1 = next((e["package"] for e in entries if str(e.get("package", "")).endswith("1")), "")
+                p3 = next((e["package"] for e in entries if str(e.get("package", "")).endswith("3")), "")
+                if p1 and p3 and by_pkg.get(p1, {}).get("expected_bounds") == by_pkg.get(p3, {}).get("expected_bounds"):
+                    duplicate_slot_13 = True
+            except Exception:  # noqa: BLE001
+                duplicate_slot_13 = False
+            wrong_task = any(not bool(row.get("task_package_expected", True)) for row in diag_rows)
+            duplicate_task = any("duplicate_task_id" in ",".join(row.get("validation") or []) for row in diag_rows)
+            duplicate_bounds = any("duplicate_final_bounds" in ",".join(row.get("validation") or []) for row in diag_rows)
+            clamped = any((row.get("clamped_axes") or []) for row in diag_rows)
+            if duplicate_slot_13:
+                for row in diag_rows:
+                    if row.get("package") in {p1, p3}:
+                        row.setdefault("validation", []).append("portrait_duplicate_slot_package_1_3")
+            if wrong_task or duplicate_task:
+                print("Portrait Layout Error: Package task mapping failed. Layout stopped to prevent resizing the wrong package.")
+            elif duplicate_bounds or duplicate_slot_13:
+                print("Portrait Layout Error: Two packages were assigned to the same slot. Layout stopped to prevent wrong clicks.")
+            elif clamped or any(not ok for ok in out.values()):
+                print("Portrait Layout Warning: Some windows were clamped by Android. Run probe for details.")
     except Exception as exc:  # noqa: BLE001
         _layout_log.debug("verify_layout_post_launch error: %s", exc)
     return out, diag_rows
@@ -5808,11 +5916,18 @@ def cmd_probe(args: argparse.Namespace) -> int:
         except Exception:  # noqa: BLE001
             pass
         if ok:
-            sys.stdout.write(f"probe_id: {info}\n")
-            sys.stdout.write("share this id in chat.\n")
+            sys.stdout.write(f"probe uploaded: {info}\n")
+            sys.stdout.write(f"probe path: {path}\n")
         else:
-            sys.stdout.write(f"upload failed: {info}\n")
-            sys.stdout.write(f"probe file: {path}\n")
+            bundle_path = ""
+            try:
+                bundle_path = str(_p.save_upload_bundle(data, reason=str(info)))
+            except Exception as exc:  # noqa: BLE001
+                bundle_path = f"<bundle creation failed: {exc}>"
+            sys.stdout.write(f"probe upload failed: {info}\n")
+            sys.stdout.write(f"local probe saved: {path}\n")
+            sys.stdout.write(f"upload bundle saved: {bundle_path}\n")
+            sys.stdout.write("send this file manually if upload is blocked\n")
             return 1
     else:
         try:

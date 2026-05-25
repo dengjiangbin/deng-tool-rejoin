@@ -591,7 +591,15 @@ def validate_portrait_touch_layout(
     min_h = max(_MIN_WIN_H, int(H * PORTRAIT_MIN_HEIGHT_FRACTION), PORTRAIT_ABSOLUTE_MIN_H)
     errors: list[str] = []
     usable_bounds = (0, 0, W, H)
+    seen: dict[tuple[int, int, int, int], tuple[int, str]] = {}
     for i, r in enumerate(rect_list):
+        key = (r.left, r.top, r.right, r.bottom)
+        if key in seen:
+            prev_i, prev_pkg = seen[key]
+            errors.append(
+                f"rect[{i}] {r.package}: duplicate bounds with rect[{prev_i}] {prev_pkg}"
+            )
+        seen[key] = (i, r.package)
         if r.win_w < min_w:
             errors.append(f"rect[{i}] {r.package}: touch width too small ({r.win_w}<{min_w})")
         if r.win_h < min_h:
@@ -687,10 +695,10 @@ PORTRAIT_SLOT_RULES: dict[int, tuple[int, ...]] = {
     4:  (0, 0, 0, 0, 1, 2, 3, 4, 0, 0),
     5:  (0, 0, 0, 0, 1, 2, 3, 4, 5, 0),
     6:  (0, 0, 0, 0, 1, 2, 3, 4, 5, 6),
-    7:  (0, 0, 1, 2, 3, 4, 5, 6, 7, 0),
-    8:  (0, 0, 1, 2, 3, 4, 5, 6, 7, 8),
-    9:  (1, 2, 3, 4, 5, 6, 7, 8, 9, 0),
-    10: (1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+    7:  (7, 0, 0, 0, 1, 2, 3, 4, 5, 6),
+    8:  (7, 8, 0, 0, 1, 2, 3, 4, 5, 6),
+    9:  (7, 8, 9, 0, 1, 2, 3, 4, 5, 6),
+    10: (7, 8, 9, 10, 1, 2, 3, 4, 5, 6),
 }
 
 
@@ -698,7 +706,7 @@ def _slot_index_for_package(index: int, slot_order: tuple[int, ...]) -> int:
     try:
         return slot_order.index(index)
     except ValueError:
-        return index - 1
+        raise ValueError(f"package index {index} is not present in slot order {slot_order!r}") from None
 
 
 def _release_grid_rects(
@@ -794,6 +802,20 @@ def _release_grid_rects(
         else:
             bottom = min(py1, top + win_h)
         rects.append(WindowRect(pkg, left, top, right, bottom))
+
+    if mode_label == "portrait":
+        seen_bounds: dict[tuple[int, int, int, int], tuple[str, int]] = {}
+        for index, rect in enumerate(rects, start=1):
+            slot = _slot_index_for_package(index, slot_order)
+            key = (rect.left, rect.top, rect.right, rect.bottom)
+            if key in seen_bounds:
+                prev_pkg, prev_slot = seen_bounds[key]
+                same_slot = slot if slot == prev_slot else f"{prev_slot}/{slot}"
+                raise ValueError(
+                    "duplicate portrait slot assignment: "
+                    f"package {prev_pkg} and package {rect.package} both assigned to slot {same_slot}"
+                )
+            seen_bounds[key] = (rect.package, slot)
 
     if mode_label == "landscape":
         _log.info(

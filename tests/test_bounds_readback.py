@@ -159,6 +159,31 @@ class TestActivityReadbackFallback(unittest.TestCase):
         self.assertEqual(bounds, (0, 0, 540, 960))
         self.assertEqual(src, "dumpsys_activity")
 
+    def test_get_task_id_prefers_visible_real_task_over_stale(self):
+        activity = """\
+Display #0
+  Stack #0
+    * TaskRecord{old #11 A=com.roblox.client U=0 visible=false}
+      mBounds=[0,0][1,1]
+    * TaskRecord{new #42 A=com.roblox.client U=0 visible=true}
+      mBounds=[378,16][1904,874]
+"""
+
+        def _mock_run(args, *a, **kw):
+            if args[:2] == ["dumpsys", "activity"]:
+                return android.CommandResult(tuple(args), 0, activity, "")
+            return android.CommandResult(tuple(args), 1, "", "")
+
+        with patch.object(wa.android, "run_command", side_effect=_mock_run):
+            self.assertEqual(wa._get_task_id("com.roblox.client"), 42)
+
+    def test_wait_for_window_ignores_stale_task_only(self):
+        calls = [{"task": True, "window": False, "running": False, "surface": False, "foreground": False}]
+
+        with patch.object(wa.android, "get_package_alive_evidence", side_effect=calls), \
+             patch.object(wa.time, "sleep", return_value=None):
+            self.assertFalse(wa._wait_for_window("com.roblox.client", timeout=0.01))
+
 
 class TestReadbackUnavailable(unittest.TestCase):
     """All commands fail → returns (None, 'unavailable') without raising."""

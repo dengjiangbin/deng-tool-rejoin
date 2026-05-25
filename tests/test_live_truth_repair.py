@@ -31,9 +31,30 @@ class ProbeFirstUploadTests(unittest.TestCase):
             self.assertEqual(json.loads(files[0].read_text(encoding="utf-8"))["probe_version"], 1)
             text = out.getvalue()
             self.assertIn("probe saved:", text)
-            self.assertIn("probe_id: p-test123", text)
+            self.assertIn("probe uploaded: p-test123", text)
+            self.assertIn("probe path:", text)
             self.assertNotIn("no file path", text.lower())
             self.assertNotIn("Re-run:", text)
+
+    def test_probe_upload_failure_creates_bundle_and_clear_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            probe_dir = Path(tmp) / "probes"
+            bundle_dir = Path(tmp) / "bundles"
+            args = argparse.Namespace(upload=True, diag=False)
+            out = io.StringIO()
+            with mock.patch("agent.probe.PROBE_DIR", probe_dir), \
+                 mock.patch("agent.probe.UPLOAD_BUNDLE_DIR", bundle_dir), \
+                 mock.patch("agent.probe.collect_probe", return_value={"probe_version": 1, "errors": []}), \
+                 mock.patch("agent.probe.upload_probe", return_value=(False, "server down")), \
+                 redirect_stdout(out):
+                rc = commands.cmd_probe(args)
+            self.assertEqual(rc, 1)
+            text = out.getvalue()
+            self.assertIn("probe upload failed: server down", text)
+            self.assertIn("local probe saved:", text)
+            self.assertIn("upload bundle saved:", text)
+            self.assertIn("send this file manually if upload is blocked", text)
+            self.assertEqual(len(list(bundle_dir.glob("probe-upload-bundle-*.json"))), 1)
 
 
 class LicensePromptTextTests(unittest.TestCase):

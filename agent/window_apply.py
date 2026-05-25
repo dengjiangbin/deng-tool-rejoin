@@ -80,6 +80,8 @@ class ApplyResult:
     stable_frame: tuple[int, int, int, int] | None = None
     visible_frame: tuple[int, int, int, int] | None = None
     title_bar_height: int = 0
+    task_id: int | None = None
+    task_package_expected: bool = True
     corrected_task_bounds: tuple[int, int, int, int] | None = None
     density_info: dict[str, Any] = field(default_factory=dict)
     mismatch_classification: list[str] = field(default_factory=list)
@@ -641,6 +643,8 @@ def _classify_layer_readback(
     input_ok = input_region is not None and _bounds_close_enough(input_region, desired, tolerance)
     if task_bounds == display_bounds or surface_bounds == display_bounds or input_region == display_bounds:
         classes.append("fullscreen_readback")
+    for axis in _clamp_axes(task_bounds, desired, tolerance):
+        classes.append(f"android_clamped_{axis}")
     if surface_ok and input_region is not None and not input_ok:
         classes.append("visual_correct_input_wrong")
     if task_ok and surface_bounds is not None and not surface_ok:
@@ -671,6 +675,33 @@ def _classify_layer_readback(
         else:
             classes.append("bounds_mismatch")
     return classes
+
+
+def _clamp_axes(
+    actual: tuple[int, int, int, int] | None,
+    desired: WindowRect,
+    tolerance: int,
+) -> list[str]:
+    if actual is None:
+        return []
+    desired_tuple = (desired.left, desired.top, desired.right, desired.bottom)
+    labels = ("x", "y", "width", "height")
+    actual_values = (
+        actual[0],
+        actual[1],
+        actual[2] - actual[0],
+        actual[3] - actual[1],
+    )
+    desired_values = (
+        desired_tuple[0],
+        desired_tuple[1],
+        desired_tuple[2] - desired_tuple[0],
+        desired_tuple[3] - desired_tuple[1],
+    )
+    return [
+        label for label, got, want in zip(labels, actual_values, desired_values)
+        if abs(int(got) - int(want)) > tolerance
+    ]
 
 
 def collect_portrait_layer_readback(
@@ -712,6 +743,7 @@ def collect_portrait_layer_readback(
     )
     return {
         "package": package,
+        "configured_package_expected": True,
         "desired_bounds": _bounds_to_list((desired.left, desired.top, desired.right, desired.bottom)),
         "task_bounds": _bounds_to_list(task_bounds),
         "window_bounds": _bounds_to_list(window_bounds),
@@ -730,7 +762,12 @@ def collect_portrait_layer_readback(
         ),
         "density": density_info,
         "mismatch_classification": classes,
+        "clamped_axes": _clamp_axes(task_bounds, desired, tolerance),
+        "surface_clamped_axes": _clamp_axes(surface_bounds, desired, tolerance),
+        "input_clamped_axes": _clamp_axes(input_region, desired, tolerance),
         "task_id": task_entry.task_id if task_entry else (window_entry.task_id if window_entry else None),
+        "task_package": package if task_entry or window_entry else "",
+        "task_package_expected": bool(task_entry or window_entry),
         "window_has_surface": bool(window_entry.has_surface) if window_entry else False,
         "window_focused": bool(window_entry.is_focused) if window_entry else False,
     }
@@ -738,22 +775,19 @@ def collect_portrait_layer_readback(
 
 def _get_task_id(package: str) -> int | None:
     """Best-effort: find the task id for ``package``."""
+    task_entry = _select_task_entry(package)
+    if task_entry is not None and task_entry.task_id is not None:
+        return task_entry.task_id
+    window_entry = _select_window_entry(package)
+    if window_entry is not None and window_entry.task_id is not None:
+        return window_entry.task_id
     try:
         res = android.run_command(["dumpsys", "activity", "activities"], timeout=6)
         if res.ok:
-            cands = _parse_activity_dumpsys(res.stdout, package)
-            for c in cands:
-                if c.task_id is not None:
-                    return c.task_id
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        res = android.run_command(["dumpsys", "window", "windows"], timeout=6)
-        if res.ok:
-            cands = _parse_window_dumpsys(res.stdout, package)
-            for c in cands:
-                if c.task_id is not None:
-                    return c.task_id
+            text = res.stdout or ""
+            for m in re.finditer(r"TaskRecord\{[^}]*?#(\d+)[^}]*?A=([\w.]+)", text):
+                if m.group(2) == package:
+                    return int(m.group(1))
     except Exception:  # noqa: BLE001
         pass
     return None
@@ -812,7 +846,7 @@ def _wait_for_window(package: str, timeout: float) -> bool:
     while time.time() < deadline:
         try:
             ev = android.get_package_alive_evidence(package)
-            if ev.get("task") or ev.get("window") or ev.get("running"):
+            if ev.get("window") or ev.get("running") or ev.get("surface") or ev.get("foreground"):
                 return True
         except Exception:  # noqa: BLE001
             pass
@@ -1061,6 +1095,27 @@ def _validate_actual_layout(
             if rects_overlap(rect_i, rect_j):
                 result_i.validation.append(f"Overlap:{result_j.package}")
                 result_j.validation.append(f"Overlap:{result_i.package}")
+            if (
+                mode == "portrait"
+                and result_i.actual_bounds is not None
+                and result_i.actual_bounds == result_j.actual_bounds
+            ):
+                result_i.validation.append(f"duplicate_final_bounds:{result_j.package}")
+                result_j.validation.append(f"duplicate_final_bounds:{result_i.package}")
+    if mode == "portrait":
+        seen_task_ids: dict[int, str] = {}
+        for result in results:
+            if result.task_id is None:
+                continue
+            other = seen_task_ids.get(result.task_id)
+            if other and other != result.package:
+                result.validation.append(f"duplicate_task_id:{other}")
+                for prev in results:
+                    if prev.package == other:
+                        prev.validation.append(f"duplicate_task_id:{result.package}")
+                        break
+            else:
+                seen_task_ids[result.task_id] = result.package
 
 
 def _tap_center_probe(
@@ -1117,13 +1172,18 @@ def _record_portrait_layer_readback(result: ApplyResult, *, tolerance: int) -> N
     result.visible_frame = _tuple_from_readback(readback.get("visible_frame"))
     result.corrected_task_bounds = _tuple_from_readback(readback.get("corrected_task_bounds"))
     result.title_bar_height = int(readback.get("title_bar_height") or 0)
+    try:
+        result.task_id = int(readback.get("task_id")) if readback.get("task_id") is not None else None
+    except (TypeError, ValueError):
+        result.task_id = None
+    result.task_package_expected = bool(readback.get("task_package_expected", True))
     density = readback.get("density")
     result.density_info = density if isinstance(density, dict) else {}
     classes = readback.get("mismatch_classification")
     result.mismatch_classification = [str(c) for c in classes] if isinstance(classes, list) else []
     result.attempts.append(
         "portrait-layer-readback: "
-        f"task={result.task_bounds} surface={result.surface_bounds} "
+        f"task_id={result.task_id} task={result.task_bounds} surface={result.surface_bounds} "
         f"input={result.input_region} title_bar={result.title_bar_height} "
         f"class={','.join(result.mismatch_classification) or 'none'}"
     )
@@ -1134,6 +1194,8 @@ def _portrait_layer_validation_errors(result: ApplyResult, *, tolerance: int) ->
     desired = result.desired
     display_bounds = _display_bounds()
     corrected_task = result.corrected_task_bounds
+    if not result.task_package_expected:
+        errors.append("wrong task package")
     for label, bounds in (
         ("task", result.task_bounds),
         ("surface", result.surface_bounds),
@@ -1164,6 +1226,10 @@ def _portrait_layer_validation_errors(result: ApplyResult, *, tolerance: int) ->
         "decor_title_bar_offset",
         "decor_content_frame_offset",
         "bounds_mismatch",
+        "android_clamped_x",
+        "android_clamped_y",
+        "android_clamped_width",
+        "android_clamped_height",
     }
     for cls in result.mismatch_classification:
         if cls in bad_classes and cls not in {"match"}:

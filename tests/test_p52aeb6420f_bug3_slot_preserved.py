@@ -315,10 +315,10 @@ class TestPortraitTwoByFiveSlots(unittest.TestCase):
             4:  [[0, 0], [0, 0], [1, 2], [3, 4], [0, 0]],
             5:  [[0, 0], [0, 0], [1, 2], [3, 4], [5, 0]],
             6:  [[0, 0], [0, 0], [1, 2], [3, 4], [5, 6]],
-            7:  [[0, 0], [1, 2], [3, 4], [5, 6], [7, 0]],
-            8:  [[0, 0], [1, 2], [3, 4], [5, 6], [7, 8]],
-            9:  [[1, 2], [3, 4], [5, 6], [7, 8], [9, 0]],
-            10: [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]],
+            7:  [[7, 0], [0, 0], [1, 2], [3, 4], [5, 6]],
+            8:  [[7, 8], [0, 0], [1, 2], [3, 4], [5, 6]],
+            9:  [[7, 8], [9, 0], [1, 2], [3, 4], [5, 6]],
+            10: [[7, 8], [9, 10], [1, 2], [3, 4], [5, 6]],
         }
         for n, grid in expected.items():
             with self.subTest(package_count=n):
@@ -357,6 +357,34 @@ class TestPortraitTwoByFiveSlots(unittest.TestCase):
         self.assertEqual(
             (stored.left, stored.top, stored.right, stored.bottom),
             (0, 1024, 360, 1280),
+        )
+
+    def test_portrait_fixed_package_slots_required_order(self):
+        rects = self._rects_for(10)
+        cell_w = 720 // 2
+        cell_h = 1280 // 5
+        actual = {}
+        for index, rect in enumerate(rects, start=1):
+            actual[index] = (rect.top // cell_h + 1, rect.left // cell_w + 1)
+        self.assertEqual(actual, {
+            1: (3, 1),
+            2: (3, 2),
+            3: (4, 1),
+            4: (4, 2),
+            5: (5, 1),
+            6: (5, 2),
+            7: (1, 1),
+            8: (1, 2),
+            9: (2, 1),
+            10: (2, 2),
+        })
+
+    def test_portrait_six_packages_do_not_compact_upward(self):
+        rects = self._rects_for(6)
+        self.assertEqual(self._grid_for(6), [[0, 0], [0, 0], [1, 2], [3, 4], [5, 6]])
+        self.assertNotEqual(
+            (rects[0].left, rects[0].top, rects[0].right, rects[0].bottom),
+            (rects[2].left, rects[2].top, rects[2].right, rects[2].bottom),
         )
 
     def test_portrait_retry_preserves_stored_slot_for_one_package(self):
