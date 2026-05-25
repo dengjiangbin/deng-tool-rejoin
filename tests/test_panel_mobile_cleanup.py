@@ -26,6 +26,8 @@ class TestPanelMobileCopy(unittest.TestCase):
         self.assertEqual(embed["footer"]["text"], "DENG Tool • https://tool.deng.my.id • Secure & Automated")
         self.assertNotIn("fields", embed)
         self.assertNotIn("timestamp", embed)
+        self.assertIn("> ♻️ Reset HWID\n> Unbind your keys from the current device, 5-minute cooldown.", embed["description"])
+        self.assertNotIn("Move key to new device, 5 mins cooldown.", embed["description"])
 
 
 class TestResetHwidWording(unittest.TestCase):
@@ -97,6 +99,10 @@ class TestPanelButtonsPreserved(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             view = PanelView(_make_store(tmp))
             self.assertEqual(len(view.children), 5)
+            self.assertEqual(
+                [getattr(c, "label", "") for c in view.children],
+                ["Generate Key", "Reset HWID", "Redeem Key", "Key Stats", "Select Version"],
+            )
 
 
 if __name__ == "__main__":

@@ -149,6 +149,10 @@ class TestPanelViewFiveButtons(unittest.TestCase):
             store = _make_store(tmp)
             view = PanelView(store)
             self.assertEqual(len(view.children), 5)
+            self.assertEqual(
+                [getattr(child, "label", "") for child in view.children],
+                ["Generate Key", "Reset HWID", "Redeem Key", "Key Stats", "Select Version"],
+            )
 
     def test_button_payload_custom_ids_are_unchanged(self) -> None:
         buttons = build_panel_buttons()[0]["components"]
@@ -165,6 +169,25 @@ class TestPanelViewFiveButtons(unittest.TestCase):
             "license_panel:key_stats",
             "license_panel:select_version",
         ])
+
+    def test_panel_view_button_order_style_and_callbacks(self) -> None:
+        with TemporaryDirectory() as tmp:
+            view = PanelView(_make_store(tmp))
+            buttons = view.children
+            self.assertEqual([getattr(btn, "label", "") for btn in buttons], [
+                "Generate Key",
+                "Reset HWID",
+                "Redeem Key",
+                "Key Stats",
+                "Select Version",
+            ])
+            self.assertEqual(getattr(buttons[0], "url", None), "https://tool.deng.my.id")
+            self.assertIsNone(getattr(buttons[0], "custom_id", None))
+            self.assertEqual(str(getattr(buttons[1], "style", "")), "ButtonStyle.danger")
+            self.assertEqual(getattr(buttons[1], "custom_id", None), "license_panel:reset_hwid")
+            self.assertEqual(getattr(buttons[2], "custom_id", None), "license_panel:redeem")
+            self.assertEqual(getattr(buttons[3], "custom_id", None), "license_panel:key_stats")
+            self.assertEqual(getattr(buttons[4], "custom_id", None), "license_panel:select_version")
 
     def test_public_panel_has_no_timestamp_and_website_logo(self) -> None:
         embed = build_panel_embed()

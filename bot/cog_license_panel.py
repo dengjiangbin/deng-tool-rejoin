@@ -685,22 +685,28 @@ class PanelView(discord.ui.View):
     def __init__(self, store: BaseLicenseStore) -> None:
         super().__init__(timeout=None)
         self._store = store
+        self._move_generate_button_first()
 
-        # "Generate Key" is a link button that opens the web portal.
-        # Link buttons do not send interactions, so no handler is needed.
-        self.add_item(discord.ui.Button(
+    def _move_generate_button_first(self) -> None:
+        """discord.py decorator buttons are added before __init__; put the link first."""
+        generate = discord.ui.Button(
             style=discord.ButtonStyle.link,
             label="Generate Key",
             emoji="🔑",
             url="https://tool.deng.my.id",
             row=0,
-        ))
+        )
+        existing = [child for child in self.children if getattr(child, "label", "") != "Generate Key"]
+        self.clear_items()
+        self.add_item(generate)
+        for child in existing:
+            self.add_item(child)
 
     # ── Reset HWID ────────────────────────────────────────────────────────────
 
     @discord.ui.button(
         label="Reset HWID",
-        style=discord.ButtonStyle.secondary,
+        style=discord.ButtonStyle.danger,
         custom_id=BUTTON_RESET_HWID,
         emoji="♻️",
     )
@@ -769,7 +775,6 @@ class PanelView(discord.ui.View):
         style=discord.ButtonStyle.primary,
         custom_id=BUTTON_SELECT_VERSION,
         emoji="\U0001f4e6",
-        row=1,
     )
     async def btn_select_version(
         self,

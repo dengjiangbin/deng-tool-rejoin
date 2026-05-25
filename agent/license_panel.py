@@ -93,7 +93,7 @@ def build_panel_embed() -> dict[str, Any]:
             "> \U0001f511 Generate Key\n"
             "> Take you to our portal to generate the keys.\n\n"
             "> \u267b\ufe0f Reset HWID\n"
-            "> Move key to new device, 5 mins cooldown.\n\n"
+            "> Unbind your keys from the current device, 5-minute cooldown.\n\n"
             "> \U0001f39f\ufe0f Redeem Key\n"
             "> Make an existing key your own.\n\n"
             "> \U0001f4ca Key Stats\n"
@@ -137,7 +137,7 @@ def build_panel_buttons() -> list[dict[str, Any]]:
                 },
                 {
                     "type": 2,
-                    "style": 2,
+                    "style": 4,
                     "label": "Reset HWID",
                     "custom_id": BUTTON_RESET_HWID,
                     "emoji": {"name": "\u267b\ufe0f"},

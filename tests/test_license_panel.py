@@ -32,7 +32,7 @@ class PanelEmbedTests(unittest.TestCase):
         "> \U0001f511 Generate Key",
         "> Take you to our portal to generate the keys.",
         "> \u267b\ufe0f Reset HWID",
-        "> Move key to new device, 5 mins cooldown.",
+        "> Unbind your keys from the current device, 5-minute cooldown.",
         "> \U0001f39f\ufe0f Redeem Key",
         "> Make an existing key your own.",
         "> \U0001f4ca Key Stats",
@@ -59,6 +59,28 @@ class PanelEmbedTests(unittest.TestCase):
         self.assertIn("Select an option below to get started:", desc)
         for line in self._PANEL_LINES:
             self.assertIn(line, desc)
+        self.assertNotIn("Move key to new device, 5 mins cooldown.", desc)
+        self.assertNotIn("Limited to 5 resets every 24 hours", desc)
+
+    def test_panel_embed_description_exact_structure(self):
+        embed = build_panel_embed()
+        self.assertEqual(
+            embed["description"],
+            (
+                "Manage your key and package version seamlessly with our automated system.\n"
+                "Select an option below to get started:\n\n"
+                "> \U0001f511 Generate Key\n"
+                "> Take you to our portal to generate the keys.\n\n"
+                "> \u267b\ufe0f Reset HWID\n"
+                "> Unbind your keys from the current device, 5-minute cooldown.\n\n"
+                "> \U0001f39f\ufe0f Redeem Key\n"
+                "> Make an existing key your own.\n\n"
+                "> \U0001f4ca Key Stats\n"
+                "> View status and export keys.\n\n"
+                "> \U0001f4e6 Select Version\n"
+                "> Choose which package version to install."
+            ),
+        )
 
     def test_panel_embed_footer(self):
         embed = build_panel_embed()
@@ -133,6 +155,20 @@ class PanelButtonTests(unittest.TestCase):
                 BUTTON_SELECT_VERSION,
             ],
         )
+
+    def test_button_order_and_styles(self):
+        components = build_panel_buttons()
+        buttons = components[0]["components"]
+        self.assertEqual(
+            [btn["label"] for btn in buttons],
+            ["Generate Key", "Reset HWID", "Redeem Key", "Key Stats", "Select Version"],
+        )
+        self.assertEqual(buttons[0]["style"], 5)
+        self.assertEqual(buttons[1]["style"], 4)
+        self.assertEqual(buttons[2]["style"], 3)
+        self.assertEqual(buttons[3]["style"], 2)
+        self.assertEqual(buttons[4]["style"], 1)
+        self.assertNotEqual(buttons[3]["label"], "Generate Key")
 
     def test_buttons_not_disabled_by_default(self):
         """Test 36 – all buttons are enabled (not disabled) by default."""
