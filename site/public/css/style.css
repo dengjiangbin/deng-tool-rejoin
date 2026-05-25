@@ -310,13 +310,13 @@ input {
 .theme-toggle {
   position: relative;
   z-index: 2;
-  width: 116px;
-  min-height: 52px;
-  display: grid;
-  grid-template-columns: auto auto;
+  width: 66px;
+  min-width: 66px;
+  min-height: 44px;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
+  justify-content: center;
+  padding: 4px;
   border: 1px solid rgba(34, 211, 238, 0.30);
   border-radius: 999px;
   color: var(--text);
@@ -363,8 +363,8 @@ input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 72px;
-  height: 40px;
+  width: 56px;
+  height: 34px;
   padding: 0;
   border-radius: 999px;
   overflow: hidden;
@@ -376,10 +376,10 @@ input {
 .theme-toggle-knob {
   position: absolute;
   z-index: 1;
-  top: 4px;
-  left: 4px;
-  width: 32px;
-  height: 32px;
+  top: 3px;
+  left: 3px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -387,7 +387,7 @@ input {
   color: #f8fbff;
   background: linear-gradient(145deg, #64748b, #111827);
   box-shadow: 0 6px 16px rgba(2, 6, 23, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.28);
-  transform: translateX(32px);
+  transform: translateX(22px);
   transition: transform 0.24s ease, color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
 }
 
@@ -398,8 +398,8 @@ input {
 }
 
 .theme-toggle-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   stroke: currentColor;
   stroke-width: 2.2;
   stroke-linecap: round;
@@ -1211,10 +1211,8 @@ input {
   }
 
   .theme-toggle {
-    width: auto;
-    min-width: 116px;
-    grid-template-columns: auto auto;
-    gap: 6px;
+    width: 66px;
+    min-width: 66px;
   }
 
   .main-content {
@@ -1266,9 +1264,10 @@ input {
   }
 
   .theme-toggle {
-    width: auto;
+    width: 66px;
+    min-width: 66px;
     justify-content: center;
-    padding-inline: 6px;
+    padding: 4px;
   }
 
   .sidebar-actions .nav-link {

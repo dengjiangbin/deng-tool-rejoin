@@ -838,7 +838,7 @@ describe('theme and dashboard UI', () => {
     assert.match(res.text, /aria-label="Switch theme"/);
     assert.match(res.text, /theme-toggle-track/);
     assert.match(res.text, /theme-toggle-knob/);
-    assert.match(res.text, /data-theme-label>Dark<\/span>/);
+    assert.doesNotMatch(res.text, /data-theme-label/);
     assert.match(res.text, /theme-icon-sun/);
     assert.match(res.text, /theme-icon-moon/);
     assert.doesNotMatch(res.text, /theme-toggle-text-light|theme-toggle-text-dark/);
@@ -928,42 +928,47 @@ describe('theme and dashboard UI', () => {
 
   test('theme toggle placement is desktop stacked and mobile beside logout', () => {
     const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
+    const themeToggleBlocks = Array.from(css.matchAll(/\.theme-toggle\s*\{[^}]*\}/g)).map((match) => match[0]).join('\n');
     assert.match(css, /\.sidebar-actions\s*\{\s*display:\s*grid;\s*gap:\s*10px;/);
     assert.match(css, /\.nav-link\s*\{[\s\S]*width:\s*100%;/);
     assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.sidebar-actions\s*\{\s*grid-template-columns:\s*auto auto;/);
     assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.sidebar-actions\s*\{\s*grid-template-columns:\s*1fr 1fr;/);
     assert.match(css, /\.theme-toggle-track,\s*\.theme-toggle-knob,\s*\.theme-toggle-icon\s*\{\s*pointer-events:\s*none;/);
-    assert.match(css, /\.sr-only\s*\{[\s\S]*width:\s*1px;[\s\S]*clip:\s*rect\(0,\s*0,\s*0,\s*0\);[\s\S]*white-space:\s*nowrap;/);
-    assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*min-width:\s*116px;[\s\S]*grid-template-columns:\s*auto auto;[\s\S]*gap:\s*6px;/);
-    assert.match(css, /\.theme-toggle\s*\{[\s\S]*width:\s*116px;[\s\S]*grid-template-columns:\s*auto auto;/);
-    assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*width:\s*auto;[\s\S]*justify-content:\s*center;[\s\S]*padding-inline:\s*6px;/);
+    assert.match(css, /\.theme-toggle\s*\{[\s\S]*width:\s*66px;[\s\S]*min-width:\s*66px;[\s\S]*display:\s*inline-flex;[\s\S]*justify-content:\s*center;/);
+    assert.match(css, /\.theme-toggle-track\s*\{[\s\S]*width:\s*56px;[\s\S]*height:\s*34px;/);
+    assert.match(css, /\.theme-toggle-knob\s*\{[\s\S]*width:\s*28px;[\s\S]*height:\s*28px;[\s\S]*transform:\s*translateX\(22px\);/);
+    assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*width:\s*66px;[\s\S]*min-width:\s*66px;/);
+    assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*width:\s*66px;[\s\S]*min-width:\s*66px;[\s\S]*justify-content:\s*center;/);
+    assert.doesNotMatch(themeToggleBlocks, /grid-template-columns:\s*auto auto/);
+    assert.doesNotMatch(themeToggleBlocks, /width:\s*116px/);
   });
 
-  test('theme toggle uses sr-only active label to prevent ghost text bleed', () => {
+  test('theme toggle is compact icon-only without ghost label space', () => {
     const layout = fs.readFileSync(path.join(__dirname, '..', 'views', 'layout.ejs'), 'utf8');
     const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
     const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
-    assert.match(layout, /<span class="sr-only" data-theme-label>Dark<\/span>/);
-    assert.doesNotMatch(layout, /theme-toggle-label|theme-toggle-text-light|theme-toggle-text-dark/);
+    assert.doesNotMatch(layout, /data-theme-label|theme-toggle-label|theme-toggle-text-light|theme-toggle-text-dark/);
     assert.doesNotMatch(css, /theme-toggle-label|theme-toggle-text-light|theme-toggle-text-dark|text-indent/);
-    assert.match(css, /\.theme-toggle-track\s*\{[\s\S]*width:\s*72px;[\s\S]*overflow:\s*hidden;/);
-    assert.match(css, /\.theme-toggle-knob\s*\{[\s\S]*transform:\s*translateX\(32px\);/);
+    assert.match(css, /\.theme-toggle\s*\{[\s\S]*width:\s*66px;[\s\S]*padding:\s*4px;/);
+    assert.match(css, /\.theme-toggle-track\s*\{[\s\S]*width:\s*56px;[\s\S]*overflow:\s*hidden;/);
+    assert.match(css, /\.theme-toggle-knob\s*\{[\s\S]*transform:\s*translateX\(22px\);/);
     assert.match(css, /:root\[data-theme="light"\]\s+\.theme-toggle-knob\s*\{[\s\S]*transform:\s*translateX\(0\);/);
-    assert.match(css, /\.sr-only\s*\{[\s\S]*overflow:\s*hidden;[\s\S]*clip:\s*rect\(0,\s*0,\s*0,\s*0\);/);
-    assert.match(js, /nextLabel = next === 'light' \? 'Light' : 'Dark'/);
+    const themeToggleBlocks = Array.from(css.matchAll(/\.theme-toggle\s*\{[^}]*\}/g)).map((match) => match[0]).join('\n');
+    assert.doesNotMatch(themeToggleBlocks, /min-width:\s*116px|width:\s*116px|grid-template-columns:\s*auto auto/);
+    assert.doesNotMatch(js, /data-theme-label|nextLabel|textContent = nextLabel/);
     assert.match(js, /Switch to ' \+ \(next === 'light' \? 'dark' : 'light'\) \+ ' mode'/);
     assert.doesNotMatch(js, /Night|Switch to night/i);
   });
 
-  test('theme toggle script swaps only the active label and remains clickable', () => {
+  test('theme toggle script updates accessible state and remains clickable', () => {
     const vm = require('node:vm');
     const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
-    const label = { textContent: '' };
     const toggle = {
       attributes: {},
       listeners: {},
       querySelector(selector) {
-        return selector === '[data-theme-label]' ? label : null;
+        assert.equal(selector, '[data-theme-label]');
+        return null;
       },
       setAttribute(name, value) {
         this.attributes[name] = value;
@@ -1007,20 +1012,17 @@ describe('theme and dashboard UI', () => {
 
     vm.runInNewContext(script, context);
     assert.equal(root.dataset.theme, 'light');
-    assert.equal(label.textContent, 'Light');
     assert.equal(toggle.attributes['aria-label'], 'Switch to dark mode');
     assert.equal(toggle.attributes['aria-pressed'], 'false');
 
     toggle.listeners.click({ preventDefault() {}, stopPropagation() {} });
     assert.equal(root.dataset.theme, 'dark');
-    assert.equal(label.textContent, 'Dark');
     assert.equal(toggle.attributes['aria-label'], 'Switch to light mode');
     assert.equal(toggle.attributes['aria-pressed'], 'true');
     assert.equal(storage.deng_tool_theme, 'dark');
 
     toggle.listeners.click({ preventDefault() {}, stopPropagation() {} });
     assert.equal(root.dataset.theme, 'light');
-    assert.equal(label.textContent, 'Light');
     assert.equal(toggle.attributes['aria-label'], 'Switch to dark mode');
     assert.equal(toggle.attributes['aria-pressed'], 'false');
     assert.equal(storage.deng_tool_theme, 'light');
