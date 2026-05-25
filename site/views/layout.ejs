@@ -74,8 +74,6 @@
       <div class="sidebar-actions">
         <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch theme" title="Switch theme">
           <span class="theme-toggle-track" aria-hidden="true">
-            <span class="theme-toggle-text theme-toggle-text-light">Light</span>
-            <span class="theme-toggle-text theme-toggle-text-dark">Dark</span>
             <span class="theme-toggle-knob">
               <span class="theme-toggle-icon theme-icon-sun">
                 <svg viewBox="0 0 24 24" focusable="false">
@@ -97,7 +95,7 @@
               </span>
             </span>
           </span>
-          <span class="theme-toggle-label" data-theme-label>Night</span>
+          <span class="theme-toggle-label" data-theme-label>Dark</span>
         </button>
         <form method="POST" action="/auth/logout">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">

@@ -838,8 +838,10 @@ describe('theme and dashboard UI', () => {
     assert.match(res.text, /aria-label="Switch theme"/);
     assert.match(res.text, /theme-toggle-track/);
     assert.match(res.text, /theme-toggle-knob/);
+    assert.match(res.text, /data-theme-label>Dark<\/span>/);
     assert.match(res.text, /theme-icon-sun/);
     assert.match(res.text, /theme-icon-moon/);
+    assert.doesNotMatch(res.text, /theme-toggle-text-light|theme-toggle-text-dark/);
     assert.match(res.text, /<rect x="3" y="3" width="7" height="8" rx="2"><\/rect>/);
     assert.match(res.text, /<circle cx="7\.5" cy="14\.5" r="3\.5"><\/circle>/);
     assert.doesNotMatch(res.text, /<span class="nav-icon" aria-hidden="true">D<\/span>/);
@@ -930,8 +932,97 @@ describe('theme and dashboard UI', () => {
     assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.sidebar-actions\s*\{\s*grid-template-columns:\s*auto auto;/);
     assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.sidebar-actions\s*\{\s*grid-template-columns:\s*1fr 1fr;/);
     assert.match(css, /\.theme-toggle-track,\s*\.theme-toggle-knob,\s*\.theme-toggle-icon\s*\{\s*pointer-events:\s*none;/);
-    assert.match(css, /\.theme-toggle-label\s*\{\s*min-width:\s*42px;/);
-    assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.theme-toggle-label\s*\{\s*display:\s*none;/);
+    assert.match(css, /\.theme-toggle-label\s*\{[\s\S]*min-width:\s*44px;[\s\S]*white-space:\s*nowrap;/);
+    assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*min-width:\s*116px;[\s\S]*grid-template-columns:\s*auto auto;[\s\S]*gap:\s*6px;/);
+    assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.theme-toggle-label\s*\{\s*display:\s*inline-flex;/);
+    assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*width:\s*100%;[\s\S]*justify-content:\s*center;[\s\S]*padding-inline:\s*6px;/);
+  });
+
+  test('theme toggle uses one active label to prevent ghost text bleed', () => {
+    const layout = fs.readFileSync(path.join(__dirname, '..', 'views', 'layout.ejs'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
+    const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
+    assert.match(layout, /<span class="theme-toggle-label" data-theme-label>Dark<\/span>/);
+    assert.doesNotMatch(layout, /theme-toggle-text-light|theme-toggle-text-dark/);
+    assert.doesNotMatch(css, /theme-toggle-text-light|theme-toggle-text-dark/);
+    assert.match(css, /\.theme-toggle-track\s*\{[\s\S]*width:\s*72px;[\s\S]*overflow:\s*hidden;/);
+    assert.match(css, /\.theme-toggle-knob\s*\{[\s\S]*transform:\s*translateX\(32px\);/);
+    assert.match(css, /:root\[data-theme="light"\]\s+\.theme-toggle-knob\s*\{[\s\S]*transform:\s*translateX\(0\);/);
+    assert.match(css, /\.theme-toggle-label\s*\{[\s\S]*white-space:\s*nowrap;[\s\S]*pointer-events:\s*none;/);
+    assert.match(js, /nextLabel = next === 'light' \? 'Light' : 'Dark'/);
+    assert.match(js, /Switch to ' \+ \(next === 'light' \? 'dark' : 'light'\) \+ ' mode'/);
+    assert.doesNotMatch(js, /Night|Switch to night/i);
+  });
+
+  test('theme toggle script swaps only the active label and remains clickable', () => {
+    const vm = require('node:vm');
+    const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
+    const label = { textContent: '' };
+    const toggle = {
+      attributes: {},
+      listeners: {},
+      querySelector(selector) {
+        return selector === '[data-theme-label]' ? label : null;
+      },
+      setAttribute(name, value) {
+        this.attributes[name] = value;
+      },
+      addEventListener(type, fn) {
+        this.listeners[type] = fn;
+      },
+    };
+    const root = { dataset: { theme: 'light' } };
+    const storage = {};
+    const context = {
+      document: {
+        documentElement: root,
+        querySelectorAll(selector) {
+          return selector === '[data-theme-toggle]' ? [toggle] : [];
+        },
+        querySelector() {
+          return null;
+        },
+      },
+      localStorage: {
+        getItem(key) {
+          return storage[key] || null;
+        },
+        setItem(key, value) {
+          storage[key] = value;
+        },
+      },
+      window: {
+        matchMedia() {
+          return { matches: true };
+        },
+        location: { href: '', reload() {} },
+      },
+      fetch() {
+        throw new Error('fetch should not run during theme toggle init');
+      },
+      navigator: {},
+      setTimeout() {},
+    };
+
+    vm.runInNewContext(script, context);
+    assert.equal(root.dataset.theme, 'light');
+    assert.equal(label.textContent, 'Light');
+    assert.equal(toggle.attributes['aria-label'], 'Switch to dark mode');
+    assert.equal(toggle.attributes['aria-pressed'], 'false');
+
+    toggle.listeners.click({ preventDefault() {}, stopPropagation() {} });
+    assert.equal(root.dataset.theme, 'dark');
+    assert.equal(label.textContent, 'Dark');
+    assert.equal(toggle.attributes['aria-label'], 'Switch to light mode');
+    assert.equal(toggle.attributes['aria-pressed'], 'true');
+    assert.equal(storage.deng_tool_theme, 'dark');
+
+    toggle.listeners.click({ preventDefault() {}, stopPropagation() {} });
+    assert.equal(root.dataset.theme, 'light');
+    assert.equal(label.textContent, 'Light');
+    assert.equal(toggle.attributes['aria-label'], 'Switch to dark mode');
+    assert.equal(toggle.attributes['aria-pressed'], 'false');
+    assert.equal(storage.deng_tool_theme, 'light');
   });
 
   test('layout includes cache-busted stylesheet URL', async () => {

@@ -25,9 +25,9 @@
     root.dataset.theme = next;
     toggles.forEach(function(toggle) {
       var label = toggle.querySelector('[data-theme-label]');
-      var nextLabel = next === 'light' ? 'Light' : 'Night';
-      toggle.setAttribute('aria-label', 'Switch to ' + (next === 'light' ? 'night' : 'light') + ' mode');
-      toggle.setAttribute('title', 'Switch to ' + (next === 'light' ? 'Night' : 'Light') + ' mode');
+      var nextLabel = next === 'light' ? 'Light' : 'Dark';
+      toggle.setAttribute('aria-label', 'Switch to ' + (next === 'light' ? 'dark' : 'light') + ' mode');
+      toggle.setAttribute('title', 'Switch to ' + (next === 'light' ? 'Dark' : 'Light') + ' mode');
       toggle.setAttribute('aria-pressed', next === 'dark' ? 'true' : 'false');
       if (label) label.textContent = nextLabel;
     });
