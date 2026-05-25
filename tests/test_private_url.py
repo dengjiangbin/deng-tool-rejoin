@@ -1,7 +1,7 @@
 """Tests for private URL / private server join logic.
 
 Covers:
-  - effective_private_server_url: per-entry override wins over global config
+  - effective_private_server_url: Global mode uses global URL; Separate mode uses per-entry URL
   - URL used for launch command construction (am start -a VIEW -d <url>)
   - Private URL sets initial state to Launching (Joining removed)
   - No private URL sets initial state to Launching or Lobby
@@ -59,6 +59,7 @@ class TestEffectivePrivateServerUrl(unittest.TestCase):
     def test_entry_url_wins_over_global(self):
         entry = _make_entry("com.roblox.client", private_url="roblox://placeId=111")
         cfg = _make_cfg_with_global_url("roblox://placeId=999")
+        cfg["private_url_mode"] = "separate"
         url = effective_private_server_url(entry, cfg)
         self.assertEqual(url, "roblox://placeId=111")
 
@@ -239,6 +240,7 @@ class TestPerformRejoinURLState(unittest.TestCase):
         cfg = default_config()
         cfg["first_setup_completed"] = True
         cfg["launch_mode"] = "app"
+        cfg["private_url_mode"] = "separate"
         cfg["private_server_url"] = "roblox://placeId=GLOBAL"
         entry = _make_entry("com.roblox.client", private_url="roblox://placeId=ENTRY_SPECIFIC")
         cfg["roblox_packages"] = [
@@ -288,6 +290,7 @@ class TestMultiPackageURLHandling(unittest.TestCase):
         cfg = default_config()
         cfg["first_setup_completed"] = True
         cfg["launch_mode"] = "app"
+        cfg["private_url_mode"] = "separate"
         cfg["private_server_url"] = ""
         cfg["roblox_packages"] = [
             {
@@ -335,6 +338,7 @@ class TestMultiPackageURLHandling(unittest.TestCase):
     def test_effective_url_per_entry_independent(self):
         """effective_private_server_url returns the entry-specific URL for each."""
         cfg_base = default_config()
+        cfg_base["private_url_mode"] = "separate"
         cfg_base["private_server_url"] = "roblox://GLOBAL"
 
         entry1 = {"package": "com.roblox.client", "private_server_url": "roblox://P1", "account_username": "U1", "enabled": True, "username_source": "manual"}

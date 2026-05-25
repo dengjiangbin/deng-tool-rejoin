@@ -176,6 +176,20 @@ class DeadPriorityRegressionTests(unittest.TestCase):
             sup._handle_state(_PKG, entry, STATUS_DEAD, STATUS_ONLINE, time.time())
         self.assertEqual(launch.call_args.args, (entry, sup.cfg, "dead_recovery"))
 
+    def test_dead_relaunch_respects_separate_package_url(self) -> None:
+        sup = self._supervisor(url="", initial_status={_PKG: STATUS_ONLINE})
+        sup.cfg["private_url_mode"] = "separate"
+        sup.cfg["private_server_url"] = _URL
+        entry = _entry(_PKG, url="roblox://navigation/share_links?code=package&type=Server")
+        with patch("agent.supervisor.launch_package_for_current_config", return_value=RejoinResult(True, root_used=True)) as launch, \
+             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"), \
+             patch("agent.supervisor.log_event") as log_event:
+            sup._handle_state(_PKG, entry, STATUS_DEAD, STATUS_ONLINE, time.time())
+        self.assertEqual(launch.call_args.args, (entry, sup.cfg, "dead_recovery"))
+        decision = [call for call in log_event.call_args_list if call.args[2] == "[DENG_REJOIN_RECOVERY_DECISION]"][0]
+        self.assertEqual(decision.kwargs["private_url_mode"], "separate")
+        self.assertEqual(decision.kwargs["url_config_source"], "package_specific")
+
 
 class ProcessScanRegressionTests(unittest.TestCase):
     def test_proc_scan_passes_package_as_argv_not_embedded_in_script(self) -> None:

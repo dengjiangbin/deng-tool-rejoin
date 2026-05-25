@@ -4,8 +4,8 @@ Covers:
   A. RAM label defined-before-use: _get_ram_label available during Preparing phase.
   B. get_memory_info safety: no subprocess fallback, all failures return zeros.
   C. Supervisor auto_rejoin_enabled=False no longer disables recovery.
-  D. Private URL fallback: effective_private_server_url returns launch_url when
-     launch_mode is web_url and private_server_url is empty.
+  D. Private URL fallback: effective_private_server_url keeps old global
+     launch_url fallback and uses package URLs only in Separate mode.
   E. Layout constants unchanged (regression guard).
 """
 
@@ -393,7 +393,7 @@ class TestSupervisorAutoRejoinFlag(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# D. Private URL fallback: effective_private_server_url returns launch_url
+# D. Private URL fallback: effective_private_server_url handles URL modes
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -435,12 +435,13 @@ class TestPrivateServerUrlFallback(unittest.TestCase):
         url = effective_private_server_url(entry, merged)
         self.assertEqual(url, "")
 
-    def test_per_package_url_takes_priority_over_global(self) -> None:
+    def test_separate_mode_package_url_takes_priority_over_global(self) -> None:
         from agent.config import effective_private_server_url
         entry  = {
             "private_server_url": "roblox://navigation/share_links?code=PKG&type=Server",
         }
         merged = {
+            "private_url_mode": "separate",
             "private_server_url": "roblox://navigation/share_links?code=GLOBAL&type=Server",
             "launch_url": "roblox://navigation/share_links?code=LAUNCH&type=Server",
             "launch_mode": "web_url",

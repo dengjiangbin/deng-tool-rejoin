@@ -82,7 +82,7 @@ class StartSegfaultRegressionTests(unittest.TestCase):
         self.assertIn("FAULT_HANDLER_LOG_PATH", source)
         self.assertIn("crash_faulthandler.log", str(FAULT_HANDLER_LOG_PATH))
         self.assertIn("faulthandler.enable", source)
-        self.assertIn("all_threads=False", source)
+        self.assertIn("all_threads=True", source)
         self.assertIn("os.set_inheritable", source)
         self.assertIn("setup_faulthandler._crash_file", source)
 

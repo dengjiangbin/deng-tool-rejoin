@@ -711,24 +711,22 @@ class TestWebhookHiddenFromPublicUI(unittest.TestCase):
         import agent.commands as cmd
         return inspect.getsource(cmd._run_edit_config_menu)
 
-    def test_first_time_setup_calls_webhook_step(self) -> None:
+    def test_first_time_setup_does_not_call_webhook_step(self) -> None:
         src = self._wizard_source()
-        self.assertIn("_setup_webhook(draft)", src)
+        self.assertNotIn("_setup_webhook(draft)", src)
 
-    def test_first_time_setup_snapshot_is_conditional_on_webhook(self) -> None:
+    def test_first_time_setup_does_not_call_snapshot_step(self) -> None:
         src = self._wizard_source()
-        self.assertIn('if draft.get("webhook_enabled"):', src)
-        self.assertIn("_setup_snapshot(draft)", src)
+        self.assertNotIn("_setup_snapshot(draft)", src)
 
-    def test_first_time_setup_webhook_interval_is_conditional_on_webhook(self) -> None:
+    def test_first_time_setup_does_not_call_webhook_interval_step(self) -> None:
         src = self._wizard_source()
-        self.assertIn('if draft.get("webhook_enabled"):', src)
-        self.assertIn("_setup_webhook_interval(draft)", src)
+        self.assertNotIn("_setup_webhook_interval(draft)", src)
 
-    def test_first_time_setup_mentions_webhook(self) -> None:
+    def test_first_time_setup_does_not_mention_webhook(self) -> None:
         src = self._wizard_source()
-        self.assertIn("Discord Webhook Setup", src)
-        self.assertIn("_setup_webhook(draft)", src)
+        self.assertNotIn("Discord Webhook Setup", src)
+        self.assertNotIn("Webhook", src)
         self.assertNotIn("_config_menu_webhook(", src)
 
     def test_edit_config_does_not_show_webhook_option(self) -> None:
@@ -745,11 +743,11 @@ class TestWebhookHiddenFromPublicUI(unittest.TestCase):
         src = self._edit_config_source()
         self.assertNotIn("_config_menu_webhook", src)
 
-    def test_first_time_setup_has_7_steps(self) -> None:
+    def test_first_time_setup_has_2_steps(self) -> None:
         src = self._wizard_source()
-        for idx in range(1, 8):
-            self.assertIn(f"Step {idx} of 7", src)
-        self.assertNotIn("Step 8 of 8", src)
+        self.assertIn("Step 1 of 2", src)
+        self.assertIn("Step 2 of 2", src)
+        self.assertNotIn("Step 3", src)
 
 
 # ─── 8. Public setup menu ──────────────────────────────────────────────────────
@@ -774,15 +772,16 @@ class TestPublicMenuItems(unittest.TestCase):
             self.assertNotIn("Webhook", label)
             self.assertNotIn("Captcha", label)
 
-    def test_edit_config_menu_has_screen_mode_option_plus_back(self) -> None:
+    def test_edit_config_menu_has_packages_private_url_and_back_only(self) -> None:
         import agent.commands as cmd
         import agent.termux_ui as tui
         src = inspect.getsource(cmd._run_edit_config_menu)
         ui_src = inspect.getsource(tui.print_config_menu)
         self.assertIn("print_config_menu", src)
         self.assertIn('menu_number("1", "Packages")', ui_src)
-        self.assertIn('menu_number("2", "Private Server URL")', ui_src)
-        self.assertIn('menu_number("3", "Screen Mode")', ui_src)
+        self.assertIn('menu_number("2", "Private URL")', ui_src)
+        self.assertNotIn("Screen Mode", ui_src)
+        self.assertNotIn("Portrait", ui_src)
         self.assertNotIn("Auto Execute", ui_src)
         self.assertNotIn('"4. Key"', ui_src)
         self.assertIn('menu_number("0", "Back")', ui_src)

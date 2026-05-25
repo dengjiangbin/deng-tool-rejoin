@@ -35,7 +35,7 @@ class TestModeSwitchLayoutIsolation(unittest.TestCase):
 
         self.assertEqual(applied, [(426, 25, 852, 256), (852, 25, 1280, 256)])
 
-    def test_portrait_ignores_stale_landscape_bounds_on_verify(self) -> None:
+    def test_old_portrait_config_is_forced_to_landscape_on_verify(self) -> None:
         cfg = {
             "screen_mode": "portrait",
             "last_layout_mode": "landscape",
@@ -56,8 +56,7 @@ class TestModeSwitchLayoutIsolation(unittest.TestCase):
              mock.patch.object(window_apply, "apply_window_layout", side_effect=fake_apply):
             commands._verify_layout_post_launch(cfg, entries)
 
-        self.assertNotEqual(applied, [(426, 25, 852, 256)])
-        self.assertTrue(all(right <= 720 and bottom <= 1280 for _, _, right, bottom in applied))
+        self.assertEqual(applied, [(426, 25, 852, 256)])
 
     def test_landscape_slot_order_is_unchanged_after_portrait_changes(self) -> None:
         packages = [f"pkg{i}" for i in range(1, 7)]

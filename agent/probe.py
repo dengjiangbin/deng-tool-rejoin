@@ -43,7 +43,7 @@ from typing import Any
 
 from . import android
 from .android import CommandResult, run_command, run_root_command
-from .constants import CONFIG_PATH, DATA_DIR, LOG_PATH
+from .constants import CONFIG_PATH, DATA_DIR, LOG_PATH, START_CRASH_STATE_PATH
 from .url_utils import mask_urls_in_text
 
 PROBE_VERSION = 1
@@ -967,6 +967,28 @@ def _capture_last_diagnostics(errors: list[dict[str, str]]) -> dict[str, Any]:
         return {}
 
 
+def _capture_start_crash_state(errors: list[dict[str, str]]) -> dict[str, Any]:
+    """Read the last Start session marker state if it exists."""
+    if not START_CRASH_STATE_PATH.is_file():
+        return {
+            "previous_crash_detected": False,
+            "last_start_step": "",
+        }
+    try:
+        data = json.loads(START_CRASH_STATE_PATH.read_text(encoding="utf-8"))
+        return {
+            **data,
+            "previous_crash_detected": str(data.get("status") or "") == "running",
+            "last_start_step": str(data.get("last_step") or ""),
+        }
+    except (OSError, json.JSONDecodeError) as exc:
+        errors.append({"step": "start_crash_state", "error": str(exc)[:200]})
+        return {
+            "previous_crash_detected": False,
+            "last_start_step": "",
+        }
+
+
 # ─── Public entrypoint ────────────────────────────────────────────────────────
 
 
@@ -1026,6 +1048,7 @@ def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]
     out["installed_build"] = _capture_installed_build(errors)
     out["wrapper"] = _capture_wrapper_script(errors)
     out["last_start_diagnostics"] = _capture_last_diagnostics(errors)
+    out["start_crash_state"] = _capture_start_crash_state(errors)
 
     # ── Third-party tool discovery: the "observe what works" loop ─────────
     # Find any other launcher / multi-clone / window-manager / Kaeru-style

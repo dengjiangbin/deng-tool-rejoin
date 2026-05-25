@@ -250,7 +250,7 @@ def setup_faulthandler() -> None:
                     pass
                 # Store reference — prevents premature GC close.
                 setup_faulthandler._crash_file = _crash_file  # type: ignore[attr-defined]
-                faulthandler.enable(file=_crash_file, all_threads=False)
+                faulthandler.enable(file=_crash_file, all_threads=True)
                 set_crash_context(phase="entrypoint")
                 return  # Successfully enabled; done.
             except Exception:  # noqa: BLE001

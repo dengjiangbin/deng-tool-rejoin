@@ -1,7 +1,7 @@
 """Tests for the clean Setup / Config menu UX.
 
 Requirements covered:
- 1.  Top-level menu has exactly Package, Roblox Launch Link, Webhook, YesCaptcha, Back.
+ 1.  Top-level menu has exactly Packages, Private URL, Back.
  2.  Top-level menu does not contain Advanced Info.
  3.  Top-level menu does not contain Current Setting.
  4.  Top-level menu does not contain License Key.
@@ -18,11 +18,11 @@ Requirements covered:
  15. Add package avoids duplicates.
  16. Unknown username does not block launch.
  17. No "Label" wording in package menu.
- 18. Blank input for Roblox Launch Link skips safely.
- 19. Empty launch link is allowed (not validation error).
- 20. Clear Roblox Launch Link works.
+ 18. Blank input for Private URL skips safely.
+ 19. Empty Private URL is allowed (not validation error).
+ 20. Clearing Global Private URL works.
  21. Invalid non-empty URL is rejected.
- 22. Start can proceed without a launch link.
+ 22. Start can proceed without a Private URL.
  23. Webhook submenu has URL, Interval, Mode, Snapshot.
  24. Snapshot requires webhook URL.
  25. Webhook URL is masked (never full URL shown).
@@ -102,11 +102,9 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         text = self._get_menu_text()
         self.assertIn("Packages", text)
 
-    def test_menu_contains_roblox_launch_link(self):
-        # User feedback: drop the "Roblox Launch Link" multi-mode menu
-        # and replace it with a single "Private Server URL" item.
+    def test_menu_contains_private_url(self):
         text = self._get_menu_text()
-        self.assertIn("Private Server URL", text)
+        self.assertIn("Private URL", text)
 
     def test_menu_does_not_contain_webhook(self):
         # Webhook is hidden from public Edit Config menu in this version.
@@ -149,7 +147,7 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         return parts[1] if len(parts) > 1 else plain
 
     def test_menu_has_expected_numbered_items(self):
-        # Webhook and YesCaptcha stay hidden; Screen Mode and Key are public.
+        # Webhook, YesCaptcha, Screen Mode, and Key stay hidden.
         # "Back" navigation items (e.g. "5. Back") are excluded from this check.
         text = self._get_menu_text()
         block = self._menu_block(text)
@@ -163,10 +161,12 @@ class TopLevelMenuStructureTests(unittest.TestCase):
         ]
         self.assertEqual(
             numbered,
-            ["1. Packages", "2. Private Server URL", "3. Screen Mode"],
+            ["1. Packages", "2. Private URL"],
             f"Unexpected Edit Config items: {numbered}",
         )
         self.assertNotIn("Auto Execute", block)
+        self.assertNotIn("Screen Mode", block)
+        self.assertNotIn("Portrait", block)
 
     def test_menu_does_not_contain_advanced_info(self):
         text = self._get_menu_text()
@@ -431,7 +431,7 @@ class PackageSubmenuTests(unittest.TestCase):
         self.assertIn("Auto Detect Package", buf.getvalue())
 
 
-# ─── 14-18: Roblox Launch Link Submenu ───────────────────────────────────────
+# ─── 14-18: Private URL Submenu ───────────────────────────────────────────────
 
 class LaunchLinkSubmenuTests(unittest.TestCase):
 
@@ -460,19 +460,50 @@ class LaunchLinkSubmenuTests(unittest.TestCase):
         self.assertEqual(validated["launch_url"], "")
         self.assertEqual(validated["launch_mode"], "app")
 
-    def test_clear_launch_link_works(self):
+    def test_clear_global_private_url_works(self):
         cfg = _base_cfg()
+        cfg["private_url_mode"] = "global"
+        cfg["private_server_url"] = "https://www.roblox.com/games/123"
         cfg["launch_mode"] = "web_url"
         cfg["launch_url"] = "https://www.roblox.com/games/123"
-        # Simulate choosing "2. Clear Roblox Launch Link"
+        # Simulate choosing "2. Edit Global Private URL", then blanking it.
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
-            with unittest.mock.patch("builtins.input", side_effect=["2", "0"]):
-                with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
-                    buf = io.StringIO()
-                    with redirect_stdout(buf):
-                        result = _config_menu_launch_link(cfg)
+            with unittest.mock.patch("agent.commands._prompt", return_value=""):
+                with unittest.mock.patch("agent.commands.safe_io.safe_prompt", side_effect=["2", "0"]):
+                    with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
+                        buf = io.StringIO()
+                        with redirect_stdout(buf):
+                            result = _config_menu_launch_link(cfg)
+        self.assertEqual(result["private_server_url"], "")
         self.assertEqual(result["launch_url"], "")
         self.assertEqual(result["launch_mode"], "app")
+
+    def test_global_private_url_menu_shows_mode_and_edit(self):
+        cfg = _base_cfg()
+        cfg["private_url_mode"] = "global"
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("agent.commands.safe_io.safe_prompt", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_launch_link(cfg)
+        text = buf.getvalue()
+        self.assertIn("Private URL", text)
+        self.assertIn("Current Mode: Global", text)
+        self.assertIn("Edit Global Private URL", text)
+
+    def test_separate_private_url_menu_shows_package_actions(self):
+        cfg = _base_cfg()
+        cfg["private_url_mode"] = "separate"
+        with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
+            with unittest.mock.patch("agent.commands.safe_io.safe_prompt", return_value="0"):
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    _config_menu_launch_link(cfg)
+        text = buf.getvalue()
+        self.assertIn("Current Mode: Separate", text)
+        self.assertIn("Edit Package URLs", text)
+        self.assertIn("Set Same URL For All Packages", text)
+        self.assertIn("Clear All Package URLs", text)
 
     def test_invalid_nonempty_url_rejected(self):
         bad_url = "not-a-url"
@@ -489,19 +520,16 @@ class LaunchLinkSubmenuTests(unittest.TestCase):
         self.assertEqual(cfg["launch_url"], "")
         self.assertEqual(cfg["launch_mode"], "app")
 
-    def test_launch_link_optional_message_shown(self):
-        """The simplified URL submenu shows the field name and the
-        'blank to skip' hint instead of the old 'Optional' banner."""
+    def test_private_url_menu_label_shown(self):
+        """The simplified URL submenu shows the Private URL field name."""
         cfg = _base_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
-            with unittest.mock.patch("builtins.input", return_value="0"):
+            with unittest.mock.patch("agent.commands.safe_io.safe_prompt", return_value="0"):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_launch_link(cfg)
         text = buf.getvalue()
-        # The submenu still tells the user the field is skippable —
-        # just under the new, plainer wording the user asked for.
-        self.assertIn("Private Server URL", text)
+        self.assertIn("Private URL", text)
 
 
 # ─── 19-23: Webhook Submenu ───────────────────────────────────────────────────
@@ -796,20 +824,19 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
         text = buf.getvalue()
         self.assertIn("No Packages Configured.", text)
 
-    def test_launch_link_submenu_shows_not_set_when_empty(self):
-        """When no Private Server URL is configured the submenu shows
-        a clear 'Not set' message instead of the old 'Launch The App
-        Normally' banner."""
+    def test_private_url_submenu_shows_blank_app_only_when_empty(self):
+        """When no Private URL is configured the submenu shows app-only status."""
         cfg = _base_cfg()
         cfg["launch_url"] = ""
         cfg["launch_mode"] = "app"
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
-            with unittest.mock.patch("builtins.input", return_value="0"):
+            with unittest.mock.patch("agent.commands.safe_io.safe_prompt", return_value="0"):
                 buf = io.StringIO()
                 with redirect_stdout(buf):
                     _config_menu_launch_link(cfg)
         text = buf.getvalue()
-        self.assertIn("Not Set", text)
+        self.assertIn("Current Mode: Global", text)
+        self.assertIn("Blank / App Only", text)
 
 
 class TestPackageMenuBug3Regression(unittest.TestCase):

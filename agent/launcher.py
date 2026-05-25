@@ -9,7 +9,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 from . import android, db
-from .config import effective_private_server_url, enabled_package_entries, validate_config
+from .config import (
+    effective_private_server_url,
+    enabled_package_entries,
+    private_url_launch_context,
+    validate_config,
+)
 from .logger import configure_logging, log_event
 from .url_utils import mask_launch_url, mask_urls_in_text, to_roblox_deep_link
 
@@ -126,11 +131,8 @@ def perform_rejoin(
     package = entry["package"]
     launch_mode = cfg["launch_mode"]
     launch_url = str(cfg.get("launch_url") or "").strip()
-    effective_url = str(effective_private_server_url(entry, cfg) or "").strip()
-    legacy_url_mode = launch_mode in {"deeplink", "web_url"} and bool(launch_url)
-    # Always use any configured URL for launch — if a URL is set anywhere,
-    # every launch (including reopening dead packages) must use it.
-    url_for_launch = effective_url or launch_url
+    url_context = private_url_launch_context(entry, cfg)
+    url_for_launch = str(url_context.get("url") or "").strip()
     # Kaeru-equivalent fix (probe p-1239f2b5f9): Roblox's https share
     # URL is resolved by Android to the *browser*, which lands the user
     # in the Roblox app's lobby instead of the private server.  The
@@ -152,6 +154,9 @@ def perform_rejoin(
         reason=reason,
         package=package,
         launch_mode=launch_mode,
+        private_url_mode=url_context.get("private_url_mode", "global"),
+        url_mode=url_context.get("url_mode", "app_only"),
+        url_config_source=url_context.get("url_config_source", "blank"),
         url=masked_url or "",
     )
 
@@ -325,6 +330,9 @@ def perform_rejoin(
                 "info",
                 "[DENG_REJOIN_URL_LAUNCH]",
                 package=package,
+                private_url_mode=url_context.get("private_url_mode", "global"),
+                url_mode=url_context.get("url_mode", "app_only"),
+                url_config_source=url_context.get("url_config_source", "blank"),
                 url_present="true",
                 url_host=_url_host_for_log(url_for_launch),
                 url_length=len(url_for_launch),
@@ -343,6 +351,8 @@ def perform_rejoin(
             logger, "info", "launch_result",
             package=package, method=_method, ok=True,
             url_set=bool(url_for_launch), masked_url=masked_url or "",
+            private_url_mode=url_context.get("private_url_mode", "global"),
+            url_config_source=url_context.get("url_config_source", "blank"),
         )
 
         db.insert_rejoin_attempt(

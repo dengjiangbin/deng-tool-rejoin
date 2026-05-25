@@ -435,10 +435,14 @@ class TestPrivateUrlCanonicalisation(unittest.TestCase):
                         "private_server_url must be populated from launch_url")
 
     def test_effective_url_uses_private_server_url_directly(self):
-        """effective_private_server_url prefers private_server_url over launch_url."""
+        """Separate mode uses package private_server_url over global/launch_url."""
         from agent.config import effective_private_server_url
         entry = {"package": "com.roblox.client", "private_server_url": "roblox://test"}
-        merged = {"private_server_url": "roblox://global", "launch_url": "roblox://legacy"}
+        merged = {
+            "private_url_mode": "separate",
+            "private_server_url": "roblox://global",
+            "launch_url": "roblox://legacy",
+        }
         result = effective_private_server_url(entry, merged)
         self.assertEqual(result, "roblox://test")
 

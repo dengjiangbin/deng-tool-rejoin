@@ -135,7 +135,8 @@ class StartTableUxTests(unittest.TestCase):
         self.assertIn("DENG Tool: Rejoin Settings", text)
         self.assertIn("Roblox Packages:", text)
         self.assertIn("Username", text)
-        self.assertIn("Screen Mode: Landscape", text)
+        self.assertIn("Private URL mode:", text)
+        self.assertNotIn("Screen Mode", text)
         self.assertNotIn("Label:", text)
         self.assertNotIn('{"', text)
         self.assertNotIn("Username not set", text)
@@ -152,7 +153,7 @@ class StartTableUxTests(unittest.TestCase):
         self.assertIn("Auto Resize:", text)
         self.assertIn("Automatic based on selected package count and device DPI", text)
 
-    def test_status_shows_screen_mode_friendly_wording(self):
+    def test_status_hides_screen_mode_public_wording(self):
         import agent.commands as commands
 
         args = argparse.Namespace(no_color=True)
@@ -173,14 +174,16 @@ class StartTableUxTests(unittest.TestCase):
              unittest.mock.patch("agent.commands.db.latest_row", return_value=None):
             self.assertEqual(commands.cmd_status(args), 0)
 
-        self.assertIn("Screen mode: Portrait", output.getvalue())
+        text = output.getvalue()
+        self.assertNotIn("Screen mode:", text)
+        self.assertNotIn("Portrait", text)
 
     def test_no_legacy_script_execution_config_keys(self):
         cfg = validate_config(default_config())
         lowered_keys = " ".join(cfg.keys()).lower()
         self.assertNotIn("executor", lowered_keys)
         self.assertNotIn("auto_execute_scripts", cfg)
-        self.assertIn(cfg["screen_mode"], {"landscape", "portrait"})
+        self.assertEqual(cfg["screen_mode"], "landscape")
         forbidden_keys = {
             "script_injection",
             "executor",

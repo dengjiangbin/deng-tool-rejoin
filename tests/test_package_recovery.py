@@ -33,8 +33,20 @@ class PackageDetectionTests(unittest.TestCase):
 
 
 class PrivateUrlTests(unittest.TestCase):
-    def test_package_url_overrides_global(self):
+    def test_global_mode_preserves_old_global_behavior(self):
         cfg = validate_config(default_config())
+        cfg["private_url_mode"] = "global"
+        cfg["private_server_url"] = "https://www.roblox.com/games/1/x?privateServerLinkCode=global"
+        entry = dict(cfg["roblox_packages"][0])
+        entry["private_server_url"] = "https://www.roblox.com/games/1/x?privateServerLinkCode=secretpriv"
+        cfg = validate_config(cfg)
+        eff = effective_private_server_url(entry, cfg)
+        self.assertIn("global", eff)
+        self.assertNotIn("secretpriv", eff)
+
+    def test_separate_mode_package_url_overrides_global(self):
+        cfg = validate_config(default_config())
+        cfg["private_url_mode"] = "separate"
         cfg["private_server_url"] = "https://www.roblox.com/games/1/x?privateServerLinkCode=global"
         entry = dict(cfg["roblox_packages"][0])
         entry["private_server_url"] = "https://www.roblox.com/games/1/x?privateServerLinkCode=secretpriv"

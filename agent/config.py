@@ -52,8 +52,10 @@ class ConfigError(ValueError):
 SELECTED_PACKAGE_MODES = {"single", "multiple"}
 WEBHOOK_MODES = {"new_message", "edit_message"}
 AUTO_RESIZE_MODES = {"off", "auto", "preview"}
-SCREEN_MODES = {"landscape", "portrait"}
+SCREEN_MODES = {"landscape"}
 DEFAULT_SCREEN_MODE = "landscape"
+PRIVATE_URL_MODES = {"global", "separate"}
+DEFAULT_PRIVATE_URL_MODE = "global"
 
 
 def utc_now() -> str:
@@ -94,6 +96,7 @@ def default_config() -> dict[str, Any]:
             "include_launchable_only": True,
         },
         "package_detection_hints": list(DEFAULT_ROBLOX_PACKAGE_HINTS),
+        "private_url_mode": DEFAULT_PRIVATE_URL_MODE,
         "private_server_url": "",
         "optimization": {
             "low_graphics_enabled": True,
@@ -442,18 +445,46 @@ def validate_package_entries(package_entries: Any) -> list[dict[str, Any]]:
     return validated
 
 
+def validate_private_url_mode(value: Any) -> str:
+    cleaned = str(value or DEFAULT_PRIVATE_URL_MODE).strip().lower()
+    aliases = {
+        "one": "global",
+        "single": "global",
+        "shared": "global",
+        "all": "global",
+        "package": "separate",
+        "package_specific": "separate",
+        "per_package": "separate",
+        "separate_private_url": "separate",
+    }
+    cleaned = aliases.get(cleaned, cleaned)
+    return cleaned if cleaned in PRIVATE_URL_MODES else DEFAULT_PRIVATE_URL_MODE
+
+
+def private_url_launch_context(entry: dict[str, Any], merged: dict[str, Any]) -> dict[str, str]:
+    """Return URL + source metadata for global/separate private URL modes."""
+    mode = validate_private_url_mode(merged.get("private_url_mode"))
+    if mode == "separate":
+        url = str(entry.get("private_server_url") or "").strip()
+        source = "package_specific" if url else "blank"
+    else:
+        url = str(merged.get("private_server_url") or "").strip()
+        if not url:
+            legacy_mode = str(merged.get("launch_mode") or "app").strip().lower()
+            if legacy_mode in {"deeplink", "web_url"}:
+                url = str(merged.get("launch_url") or "").strip()
+        source = "global" if url else "blank"
+    return {
+        "private_url_mode": mode,
+        "url": url,
+        "url_mode": "private_url" if url else "app_only",
+        "url_config_source": source,
+    }
+
+
 def effective_private_server_url(entry: dict[str, Any], merged: dict[str, Any]) -> str:
-    """Return per-package private server URL, else global, else legacy launch_url when URL mode."""
-    u = str(entry.get("private_server_url") or "").strip()
-    if u:
-        return u
-    u = str(merged.get("private_server_url") or "").strip()
-    if u:
-        return u
-    mode = str(merged.get("launch_mode") or "app").strip().lower()
-    if mode in {"deeplink", "web_url"}:
-        return str(merged.get("launch_url") or "").strip()
-    return ""
+    """Return the selected launch URL for the configured private URL mode."""
+    return private_url_launch_context(entry, merged)["url"]
 
 
 def validate_package_names(package_names: list[str] | tuple[str, ...]) -> list[str]:
@@ -521,16 +552,8 @@ def _as_int(name: str, value: Any, minimum: int | None = None, maximum: int | No
 
 
 def validate_screen_mode(value: Any) -> str:
-    cleaned = str(value or DEFAULT_SCREEN_MODE).strip().lower()
-    aliases = {
-        "land": "landscape",
-        "landscape_mode": "landscape",
-        "potrait": "portrait",
-        "port": "portrait",
-        "portrait_mode": "portrait",
-    }
-    cleaned = aliases.get(cleaned, cleaned)
-    return cleaned if cleaned in SCREEN_MODES else DEFAULT_SCREEN_MODE
+    """Normalize all public/runtime configs to Landscape-only for this release."""
+    return DEFAULT_SCREEN_MODE
 
 
 def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool = True) -> dict[str, Any]:
@@ -581,7 +604,7 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     if len(active_entries) > 1:
         selected_package_mode = "multiple"
     merged["selected_package_mode"] = selected_package_mode
-    merged["screen_mode"] = validate_screen_mode(merged.get("screen_mode"))
+    merged["screen_mode"] = DEFAULT_SCREEN_MODE
     merged["portrait_auto_density_fix"] = _as_bool(merged.get("portrait_auto_density_fix", True))
     merged["portrait_previous_density"] = str(merged.get("portrait_previous_density") or "")
     pd_default = default_config()["package_detection"]
@@ -630,6 +653,7 @@ def validate_config(input_config: dict[str, Any], *, allow_uncertain_url: bool =
     merged["private_server_url"] = ""
     if _psu_raw:
         merged["private_server_url"] = _validate_optional_private_server_url(_psu_raw, allow_uncertain=allow_uncertain_url)
+    merged["private_url_mode"] = validate_private_url_mode(merged.get("private_url_mode"))
 
     merged["auto_rejoin_enabled"] = _as_bool(merged.get("auto_rejoin_enabled"))
     merged["root_mode_enabled"] = _as_bool(merged.get("root_mode_enabled"))

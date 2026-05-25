@@ -39,12 +39,14 @@ from .config import (
     validate_package_detection_hints,
     validate_package_entries,
     validate_package_name,
+    validate_private_url_mode,
     validate_roblosecurity_cookie,
     validate_screen_mode,
     validate_username_source,
 )
 from .constants import (
     CONFIG_PATH,
+    CRASH_LOG_PATH,
     DB_PATH,
     DEFAULT_LICENSE_SERVER_URL,
     DEFAULT_ROBLOX_PACKAGE,
@@ -55,6 +57,8 @@ from .constants import (
     PID_PATH,
     PRODUCT_NAME,
     RAW_INSTALL_URL,
+    START_CRASH_STATE_PATH,
+    LOG_DIR,
     TERMUX_BOOT_SCRIPT,
     VERSION,
 )
@@ -1162,13 +1166,14 @@ def _enforce_configured_screen_mode(
     config_data: dict[str, Any] | None = None,
     protected_packages: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Apply stored screen mode with root and log probe-only evidence."""
+    """Apply the release's Landscape-only runtime orientation."""
     result: dict[str, Any] = {}
     try:
         from .logger import configure_logging, log_event
 
         cfg = config_data or {}
-        mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
+        mode = DEFAULT_SCREEN_MODE
+        cfg["screen_mode"] = DEFAULT_SCREEN_MODE
         protected = list(protected_packages or [])
         if not protected:
             try:
@@ -1197,7 +1202,7 @@ def _enforce_configured_screen_mode(
                 configure_logging(),
                 "info",
                 "[DENG_REJOIN_ORIENTATION_ENFORCE]",
-                requested=validate_screen_mode((config_data or {}).get("screen_mode", DEFAULT_SCREEN_MODE)),
+                requested=DEFAULT_SCREEN_MODE,
                 actual_before="unknown",
                 actual_after="unknown",
                 root_available="false",
@@ -1230,9 +1235,14 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print(f"  Detection hints: {_hint_list_label(cfg['package_detection_hints'])}")
     print()
     print("Launch:")
-    print(f"  Mode: {_launch_mode_label(cfg['launch_mode'])}")
-    print(f"  URL: {_safe_url_label(cfg['launch_url'])}")
-    print(f"  Screen Mode: {_screen_mode_label(cfg.get('screen_mode', DEFAULT_SCREEN_MODE))}")
+    mode = validate_private_url_mode(cfg.get("private_url_mode"))
+    print(f"  Private URL mode: {'Global' if mode == 'global' else 'Separate'}")
+    if mode == "global":
+        print(f"  Global Private URL: {_safe_url_label(cfg.get('private_server_url'))}")
+    else:
+        for idx, entry in enumerate(enabled_entries, start=1):
+            status = "Set" if str(entry.get("private_server_url") or "").strip() else "Blank / App Only"
+            print(f"  {idx}. {entry['package']}: {status}")
     print()
     print("License:")
     print(f"  Key: {cfg.get('license_key') or 'Not set'}")
@@ -1252,8 +1262,8 @@ def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejo
     print(termux_ui.separator("-"))
     print(f"1. Device Name: {cfg['device_name']}")
     print(f"2. Roblox Package: {cfg['roblox_package']}")
-    print(f"3. Private Server URL: {_safe_url_label(cfg['launch_url'])}")
-    print(f"4. Screen Mode: {_screen_mode_label(cfg.get('screen_mode', DEFAULT_SCREEN_MODE))}")
+    print(f"3. Private URL: {_safe_url_label(cfg.get('private_server_url'))}")
+    print("4. Layout: Landscape")
     print(f"5. Auto Rejoin: {_yes_no(cfg['auto_rejoin_enabled'])}")
     print(f"6. Reconnect Delay: {cfg['reconnect_delay_seconds']} seconds")
     print(f"7. Root Mode: {_yes_no(cfg['root_mode_enabled'])}")
@@ -1859,58 +1869,88 @@ def _prompt_launch_url(current_url: str, launch_mode: str) -> str:
             print("Enter a valid URL or leave blank to skip.")
 
 
-def _setup_launch_link(draft: dict[str, Any]) -> None:
-    """Single-prompt URL setup — no mode toggle.
-
-    The user pastes ONE Private Server URL.  We accept any of:
-
-      * ``https://www.roblox.com/share?code=X&type=Server``    (new share link)
-      * ``https://www.roblox.com/share-links?code=X&type=Server``
-      * ``https://www.roblox.com/games/<id>/<name>?privateServerLinkCode=X``  (legacy)
-      * ``roblox://navigation/share_links?code=X&type=Server``  (deep link)
-      * ``roblox://placeId=<id>&privateServerLinkCode=X``       (legacy deep link)
-      * blank — disable URL-based join, app-only mode
-
-    Internally the URL is converted to its ``roblox://`` deep-link form
-    at launch time (see ``url_utils.to_roblox_deep_link``); the user
-    never has to know about modes.  We pick the storage ``launch_mode``
-    based on the URL scheme so existing config plumbing keeps working.
-    """
-    print()
-    print("Private Server URL")
-    print("Paste a Roblox Private Server URL (or leave blank to skip).")
-    print("Examples:")
-    print("  https://www.roblox.com/share?code=XXXX&type=Server")
-    print("  https://www.roblox.com/games/123/Game?privateServerLinkCode=YYY")
-    print("  roblox://navigation/share_links?code=XXXX&type=Server")
-    current = str(draft.get("launch_url") or "")
-    value = _prompt("Private Server URL (blank to skip)", current).strip()
-
+def _private_url_prompt(default: str = "", *, global_label: bool = False) -> str | None:
+    label = (
+        "[?] Enter Global Private Server URL Or Leave Blank For App Only"
+        if global_label
+        else "[?] Enter Private Server URL Or Leave Blank For App Only"
+    )
+    value = _prompt(label, default).strip()
     if not value:
-        draft["launch_mode"] = "app"
-        draft["launch_url"] = ""
-        print("Skipped. Clones will open the Roblox app without auto-joining a server.")
-        return
-
-    # Pick storage launch_mode by scheme; let validate_launch_url do the
-    # final sanity check.  We accept the URL on any validation warning
-    # (allow_uncertain=True) so the user isn't blocked by an over-strict
-    # path allow-list — at launch time the deep-link converter handles
-    # any unmapped path.
+        return ""
     scheme = value.split(":", 1)[0].lower() if ":" in value else ""
     mode = "deeplink" if scheme == "roblox" else "web_url"
     try:
         result = validate_launch_url(value, mode, allow_uncertain=True)
         if result.warning:
             print(f"Note: {result.warning}")
+        return value
     except UrlValidationError as exc:
         print(f"That URL cannot be used: {exc}")
-        print("Keeping previous launch link settings.")
+        return None
+
+
+def _set_global_private_url(draft: dict[str, Any], value: str) -> None:
+    draft["private_url_mode"] = "global"
+    draft["private_server_url"] = value
+    if value:
+        draft["launch_mode"] = "deeplink" if value.lower().startswith("roblox:") else "web_url"
+        draft["launch_url"] = value
+    else:
+        draft["launch_mode"] = "app"
+        draft["launch_url"] = ""
+
+
+def _setup_global_private_url(draft: dict[str, Any]) -> None:
+    current = str(draft.get("private_server_url") or draft.get("launch_url") or "")
+    value = _private_url_prompt(current, global_label=True)
+    if value is None:
+        print("Keeping previous Global Private URL.")
         return
-    draft["launch_mode"] = mode
-    draft["launch_url"] = value
-    print("Saved. At launch, this URL will be sent to Roblox as a deep link so")
-    print("each clone joins the private server directly.")
+    _set_global_private_url(draft, value)
+    if value:
+        print("Saved. All packages will use the Global Private URL.")
+    else:
+        print("Saved. All packages will open app-only.")
+
+
+def _setup_separate_private_urls(draft: dict[str, Any]) -> None:
+    draft["private_url_mode"] = "separate"
+    entries = validate_package_entries(
+        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
+    )
+    total = len(entries)
+    updated: list[dict[str, Any]] = []
+    for idx, entry in enumerate(entries, start=1):
+        item = dict(entry)
+        print()
+        print(f"Package {idx}/{total}:")
+        print(item["package"])
+        value = _private_url_prompt(str(item.get("private_server_url") or ""))
+        if value is not None:
+            item["private_server_url"] = value
+        updated.append(item)
+    draft["roblox_packages"] = updated
+    draft["launch_mode"] = "app"
+    draft["launch_url"] = ""
+    print("Saved. Each package will use its own Private URL setting.")
+
+
+def _setup_launch_link(draft: dict[str, Any]) -> None:
+    """Configure Global or Separate Private URL mode."""
+    print()
+    print("[?] Private URL Mode")
+    print()
+    print("1. Global Private URL - Use one URL for all packages")
+    print("2. Separate Private URL - Set a different URL for each package")
+    print("0. Back")
+    choice = _prompt("Choose", "1").strip()
+    if choice == "0":
+        return
+    if choice == "2":
+        _setup_separate_private_urls(draft)
+        return
+    _setup_global_private_url(draft)
 
 
 def _setup_webhook(draft: dict[str, Any]) -> None:
@@ -1975,30 +2015,9 @@ def _setup_webhook_interval(draft: dict[str, Any]) -> None:
 
 
 def _setup_screen_mode(draft: dict[str, Any]) -> None:
-    print()
-    print("Screen Mode")
-    print("1. Landscape")
-    print("2. Portrait")
-    current = validate_screen_mode(draft.get("screen_mode", DEFAULT_SCREEN_MODE))
-    default = {
-        "landscape": "1",
-        "portrait": "2",
-    }.get(current, "1")
-    choices = {
-        "1": "landscape",
-        "2": "portrait",
-        "landscape": "landscape",
-        "portrait": "portrait",
-        "potrait": "portrait",
-    }
-    while True:
-        raw = _prompt("Choose screen mode", default).strip().lower()
-        mode = choices.get(raw.replace("-", "_").replace(" ", "_"))
-        if mode:
-            draft["screen_mode"] = mode
-            _enforce_configured_screen_mode(draft)
-            return
-        print("Choose 1 or 2.")
+    """Legacy no-op: public setup no longer exposes layout mode selection."""
+    draft["screen_mode"] = DEFAULT_SCREEN_MODE
+    _enforce_configured_screen_mode(draft)
 
 
 def _setup_yescaptcha_key(draft: dict[str, Any]) -> None:
@@ -2782,30 +2801,31 @@ def _package_menu_list(draft: dict[str, Any]) -> None:
 
 
 def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
-    """Private Server URL submenu — one URL field, no mode toggle.
-
-    User reported the old multi-mode menu was "complicated and broken" —
-    after a launch the clone landed in the Roblox lobby instead of the
-    private server.  We now take a single URL and convert it to a
-    ``roblox://`` deep link at launch time (see
-    :func:`agent.url_utils.to_roblox_deep_link`).
-    """
+    """Private URL submenu with Global and Separate modes."""
     if not _is_interactive():
         return draft
     while True:
-        current_url = draft.get("launch_url", "") or ""
-        if current_url:
-            current_line = f"Current: {_safe_url_label(current_url)}"
-        else:
-            current_line = "Current: Not Set. Clones Will Open Roblox Without Joining A Server."
-        termux_ui.print_submenu(
-            "Private Server URL",
-            [
-                ("1", "Set Private Server URL"),
-                ("2", "Clear Private Server URL"),
-                ("3", "Show Current URL"),
+        mode = validate_private_url_mode(draft.get("private_url_mode"))
+        if mode == "global":
+            global_url = str(draft.get("private_server_url") or draft.get("launch_url") or "")
+            current_line = f"Current Mode: Global ({'Set' if global_url else 'Blank / App Only'})"
+            items = [
+                ("1", "Change Mode"),
+                ("2", "Edit Global Private URL"),
                 ("0", "Back"),
-            ],
+            ]
+        else:
+            current_line = "Current Mode: Separate"
+            items = [
+                ("1", "Change Mode"),
+                ("2", "Edit Package URLs"),
+                ("3", "Set Same URL For All Packages"),
+                ("4", "Clear All Package URLs"),
+                ("0", "Back"),
+            ]
+        termux_ui.print_submenu(
+            "Private URL",
+            items,
             current_lines=[current_line],
         )
         _llc = safe_io.safe_prompt(f"{termux_ui.choose_prompt('0')}: ", default="0")
@@ -2814,35 +2834,120 @@ def _config_menu_launch_link(draft: dict[str, Any]) -> dict[str, Any]:
         choice = _llc.strip() or "0"
         if choice == "0":
             break
-        elif choice == "1":
-            _setup_launch_link(draft)
+        if choice == "1":
+            draft = _private_url_change_mode_menu(draft)
             draft = save_config(draft)
-            termux_ui.print_success("Private Server URL Saved")
-        elif choice == "2":
-            draft["launch_mode"] = "app"
-            draft["launch_url"] = ""
+            termux_ui.print_success("Private URL Mode Saved")
+        elif mode == "global" and choice == "2":
+            _setup_global_private_url(draft)
             draft = save_config(draft)
-            termux_ui.print_success("Private Server URL Cleared")
-        elif choice == "3":
-            url = draft.get("launch_url") or ""
-            if url:
-                print(f"  Private Server URL: {_safe_url_label(url)}")
-            else:
-                print("  Not set.")
-            safe_io.press_enter()
+            termux_ui.print_success("Global Private URL Saved")
+        elif mode == "separate" and choice == "2":
+            draft = _private_url_edit_package_urls(draft)
+        elif mode == "separate" and choice == "3":
+            draft = _private_url_set_same_for_all(draft)
+        elif mode == "separate" and choice == "4":
+            draft = _private_url_clear_all_package_urls(draft)
         else:
             termux_ui.print_invalid_option()
     return draft
 
 
-def _config_menu_screen_mode(draft: dict[str, Any]) -> dict[str, Any]:
-    if not _is_interactive():
+def _private_url_change_mode_menu(draft: dict[str, Any]) -> dict[str, Any]:
+    print()
+    print("Private URL Mode")
+    print()
+    print("1. Global Private URL - One URL for all packages")
+    print("2. Separate Private URL - Different URL per package")
+    print("0. Back")
+    raw = safe_io.safe_prompt("Choose [0]: ", default="0")
+    choice = (raw or "0").strip() or "0"
+    if choice == "0":
         return draft
-    termux_ui.print_submenu_header("Screen Mode")
-    print(f"Current: {_screen_mode_label(draft.get('screen_mode', DEFAULT_SCREEN_MODE))}")
-    _setup_screen_mode(draft)
+    if choice == "2":
+        old_mode = validate_private_url_mode(draft.get("private_url_mode"))
+        draft["private_url_mode"] = "separate"
+        if old_mode == "global" and str(draft.get("private_server_url") or "").strip():
+            copy = _prompt_yes_no("Copy current Global Private URL to all packages?", False)
+            if copy:
+                url = str(draft.get("private_server_url") or "").strip()
+                entries = [dict(e) for e in validate_package_entries(draft.get("roblox_packages"))]
+                for entry in entries:
+                    entry["private_server_url"] = url
+                draft["roblox_packages"] = entries
+        draft["launch_mode"] = "app"
+        draft["launch_url"] = ""
+        return draft
+    if choice == "1":
+        draft["private_url_mode"] = "global"
+        _setup_global_private_url(draft)
+        return draft
+    termux_ui.print_invalid_option()
+    return draft
+
+
+def _private_url_edit_package_urls(draft: dict[str, Any]) -> dict[str, Any]:
+    entries = [dict(e) for e in validate_package_entries(draft.get("roblox_packages"))]
+    while True:
+        print()
+        print("Edit Package URLs")
+        print()
+        for idx, entry in enumerate(entries, start=1):
+            status = "Set" if str(entry.get("private_server_url") or "").strip() else "Blank / App Only"
+            print(f"{idx}. {entry['package']} - {status}")
+        print("0. Back")
+        raw = safe_io.safe_prompt("Choose [0]: ", default="0")
+        choice = (raw or "0").strip() or "0"
+        if choice == "0":
+            break
+        if not choice.isdigit() or not (1 <= int(choice) <= len(entries)):
+            termux_ui.print_invalid_option()
+            continue
+        idx = int(choice) - 1
+        entry = entries[idx]
+        value = _private_url_prompt(str(entry.get("private_server_url") or ""))
+        if value is not None:
+            entry["private_server_url"] = value
+            entries[idx] = entry
+            draft["roblox_packages"] = entries
+            draft["private_url_mode"] = "separate"
+            draft = save_config(draft)
+            termux_ui.print_success("Package Private URL Saved")
+    return draft
+
+
+def _private_url_set_same_for_all(draft: dict[str, Any]) -> dict[str, Any]:
+    value = _private_url_prompt("", global_label=True)
+    if value is None:
+        return draft
+    entries = [dict(e) for e in validate_package_entries(draft.get("roblox_packages"))]
+    for entry in entries:
+        entry["private_server_url"] = value
+    draft["private_url_mode"] = "separate"
+    draft["roblox_packages"] = entries
     draft = save_config(draft)
-    termux_ui.print_success("Screen Mode Saved")
+    termux_ui.print_success("Applied URL To All Packages")
+    return draft
+
+
+def _private_url_clear_all_package_urls(draft: dict[str, Any]) -> dict[str, Any]:
+    if not _prompt_yes_no("Clear all package Private URLs?", False):
+        print("Cancelled.")
+        return draft
+    entries = [dict(e) for e in validate_package_entries(draft.get("roblox_packages"))]
+    for entry in entries:
+        entry["private_server_url"] = ""
+    draft["private_url_mode"] = "separate"
+    draft["roblox_packages"] = entries
+    draft = save_config(draft)
+    termux_ui.print_success("Package Private URLs Cleared")
+    return draft
+
+
+def _config_menu_screen_mode(draft: dict[str, Any]) -> dict[str, Any]:
+    """Legacy no-op kept for old callers; option is not reachable from UI."""
+    draft["screen_mode"] = DEFAULT_SCREEN_MODE
+    draft = save_config(draft)
     return draft
 
 
@@ -3276,7 +3381,7 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
         print("First Time Setup Config")
         print()
         print("This will prepare your device for DENG Tool: Rejoin.")
-        print("You will set Roblox packages (scan or manual), optional private URL, screen mode, webhook, then save.")
+        print("You will set Roblox packages and optional Private URL, then save.")
         print("Package detection scans installed apps; manual entry is fallback.")
         print("Usernames are display-only in the Start table — Unknown is OK.")
         print()
@@ -3291,18 +3396,14 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     print()
     print("You will set:")
     print("  1. Roblox package / clone app (pick from detection, or manual fallback)")
-    print("  2. Roblox public / private server link")
-    print("  3. Screen mode")
-    print("  4. Discord webhook setup")
-    print("  5. Phone snapshot for webhook (only when webhook is enabled)")
-    print("  6. Webhook info interval (only when webhook is enabled)")
-    print("  7. Save and start")
+    print("  2. Private URL")
+    print("  3. Save and start")
     print()
     print("Package detection:")
     print("  The tool scans installed Roblox apps against safe hints. Pick from the table.")
     print("  Manual package entry is only a fallback if nothing is found.")
     print()
-    print("Step 1 of 7: Roblox Package Setup")
+    print("Step 1 of 2: Packages")
     packages, hints = _choose_packages_menu(
         list(draft.get("roblox_packages") or [package_entry(draft.get("roblox_package", DEFAULT_ROBLOX_PACKAGE), "", True, "not_set")]),
         list(draft.get("package_detection_hints") or DEFAULT_ROBLOX_PACKAGE_HINTS),
@@ -3313,18 +3414,9 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     active_entries = enabled_package_entries(draft)
     draft["roblox_package"] = active_entries[0]["package"]
     draft["selected_package_mode"] = "multiple" if len(active_entries) > 1 else "single"
-    print("\nStep 2 of 7: Roblox Public / Private Server Link")
+    draft["screen_mode"] = DEFAULT_SCREEN_MODE
+    print("\nStep 2 of 2: Private URL")
     _setup_launch_link(draft)
-    print("\nStep 3 of 7: Screen Mode")
-    _setup_screen_mode(draft)
-    print("\nStep 4 of 7: Discord Webhook Setup")
-    _setup_webhook(draft)
-    if draft.get("webhook_enabled"):
-        print("\nStep 5 of 7: Phone Snapshot For Webhook")
-        _setup_snapshot(draft)
-        print("\nStep 6 of 7: Webhook Info Interval")
-        _setup_webhook_interval(draft)
-    print("\nStep 7 of 7: Save And Start")
     draft["first_setup_completed"] = True
     try:
         saved = save_config(draft)
@@ -3365,8 +3457,6 @@ def _run_edit_config_menu(config_data: dict[str, Any], args: argparse.Namespace)
             draft = _config_menu_package(draft)
         elif choice == "2":
             draft = _config_menu_launch_link(draft)
-        elif choice == "3":
-            draft = _config_menu_screen_mode(draft)
         else:
             termux_ui.print_invalid_option()
             safe_io.press_enter()
@@ -3673,9 +3763,14 @@ def cmd_status(args: argparse.Namespace) -> int:
     for idx, entry in enumerate(entries, start=1):
         print(f"    {idx}. {_account_username_value(entry):<16} {entry['package']}")
     print(f"  Detection hints: {_hint_list_label(cfg['package_detection_hints'])}")
-    print(f"  Launch mode: {_launch_mode_label(cfg['launch_mode'])}")
-    print(f"  Launch URL: {_safe_url_label(cfg.get('launch_url'))}")
-    print(f"  Screen mode: {_screen_mode_label(cfg.get('screen_mode', DEFAULT_SCREEN_MODE))}")
+    mode = validate_private_url_mode(cfg.get("private_url_mode"))
+    print(f"  Private URL mode: {'Global' if mode == 'global' else 'Separate'}")
+    if mode == "global":
+        print(f"  Global Private URL: {_safe_url_label(cfg.get('private_server_url'))}")
+    else:
+        for idx, entry in enumerate(entries, start=1):
+            status = "Set" if str(entry.get("private_server_url") or "").strip() else "Blank / App Only"
+            print(f"  Package {idx} URL: {status}")
     print()
     print("Rejoin Settings")
     print(f"  First setup completed: {'Yes' if cfg['first_setup_completed'] else 'No'}")
@@ -4052,7 +4147,8 @@ def _prepare_automatic_layout(
         # left_fraction=0.0 the grid spans the full display width; lte6 keeps
         # col0 naturally empty for Termux, giving packages 2/3 of the screen.
         _dock_frac = 0.0
-        _screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
+        _screen_mode = DEFAULT_SCREEN_MODE
+        cfg["screen_mode"] = DEFAULT_SCREEN_MODE
         if cfg.get("last_layout_mode") and cfg.get("last_layout_mode") != _screen_mode:
             cfg.pop("last_layout_preview", None)
             cfg.pop("_layout_rects", None)
@@ -4063,39 +4159,8 @@ def _prepare_automatic_layout(
             termux_log_fraction=_dock_frac,
             screen_mode=_screen_mode,
         )
-        if _screen_mode == "portrait":
-            seen_intended: dict[tuple[int, int, int, int], str] = {}
-            duplicate_msg = ""
-            for r in rects:
-                key = (r.left, r.top, r.right, r.bottom)
-                if key in seen_intended and seen_intended[key] != r.package:
-                    duplicate_msg = (
-                        "duplicate portrait slot assignment: "
-                        f"package {seen_intended[key]} and package {r.package} both assigned to slot X"
-                    )
-                    break
-                seen_intended[key] = r.package
-            if not duplicate_msg and len(rects) >= 3:
-                p1 = rects[0]
-                p3 = rects[2]
-                if (p1.left, p1.top, p1.right, p1.bottom) == (p3.left, p3.top, p3.right, p3.bottom):
-                    duplicate_msg = (
-                        "duplicate portrait slot assignment: "
-                        f"package {p1.package} and package {p3.package} both assigned to slot X "
-                        "(portrait_duplicate_slot_package_1_3)"
-                    )
-            if duplicate_msg:
-                cfg["_layout_abort_reason"] = duplicate_msg
-                cfg["_layout_abort_mode"] = "portrait"
-                try:
-                    save_config(cfg)
-                except Exception:  # noqa: BLE001
-                    pass
-                print("Portrait Layout Error: Two packages were assigned to the same slot. Layout stopped to prevent wrong clicks.")
-                _layout_log.error("[DENG_REJOIN_PORTRAIT_DUPLICATE_SLOT] %s", duplicate_msg)
-                return cfg, "layout_error_duplicate_portrait_slot"
-            cfg.pop("_layout_abort_reason", None)
-            cfg.pop("_layout_abort_mode", None)
+        cfg.pop("_layout_abort_reason", None)
+        cfg.pop("_layout_abort_mode", None)
         # Derive Termux dock fraction from the actual package bounds so that
         # _enforce_termux_left_layout (called later in cmd_start) minimises
         # Termux to exactly the empty col0 area rather than a hard-coded 50%.
@@ -4111,22 +4176,13 @@ def _prepare_automatic_layout(
             _orient = _wl.detect_layout_orientation(display.width, display.height)
             _sb_h   = _wl._detect_status_bar_height()
             _left_end = min(r.left for r in rects) if rects else 0
-            if _screen_mode == "portrait":
-                _cols, _rows = 2, 5
-                _rule = getattr(_wl, "PORTRAIT_SLOT_RULES", {}).get(
-                    len(filtered_packages),
-                    getattr(_wl, "PORTRAIT_SLOT_RULES", {10: (7, 8, 9, 10, 1, 2, 3, 4, 5, 6)})[10],
-                )
-                _slot_order = ",".join(str(x) if x else "empty" for x in _rule)
-                _landscape_rule = ""
-            else:
-                _cols, _rows = 3, 3
-                _rule = getattr(_wl, "LANDSCAPE_SLOT_RULES", {}).get(
-                    len(filtered_packages),
-                    (1, 2, 3, 4, 5, 6, 7, 8, 9),
-                )
-                _slot_order = ",".join(str(x) if x else "empty" for x in _rule)
-                _landscape_rule = f"count_{len(filtered_packages)}_3x3"
+            _cols, _rows = 3, 3
+            _rule = getattr(_wl, "LANDSCAPE_SLOT_RULES", {}).get(
+                len(filtered_packages),
+                (1, 2, 3, 4, 5, 6, 7, 8, 9),
+            )
+            _slot_order = ",".join(str(x) if x else "empty" for x in _rule)
+            _landscape_rule = f"count_{len(filtered_packages)}_3x3"
             _pane_w = max(160, display.width - _left_end)
             _usable_h = max(90, display.height - _sb_h)
             _cell_w = max(160, _pane_w // _cols)
@@ -4141,21 +4197,20 @@ def _prepare_automatic_layout(
                 "roblox_grid_area=%s full_width_used=true",
                 display.width,
                 display.height,
-                "full_screen" if _screen_mode == "portrait" else "right_cols1_plus",
+                "right_cols1_plus",
                 (0, 0, _left_end, display.height),
                 "",
-                (0, 0 if _screen_mode == "portrait" else _sb_h, display.width, display.height),
+                (0, _sb_h, display.width, display.height),
             )
-            if _screen_mode == "landscape":
-                _layout_log.info(
-                    "[DENG_REJOIN_LANDSCAPE_SLOT_MAP] package_count=%d rule=%s grid=3x3 "
-                    "slot_map=%s roblox_grid_area=%s bounds=%s",
-                    len(filtered_packages),
-                    _landscape_rule,
-                    _slot_order,
-                    (0, _sb_h, display.width, display.height),
-                    [(r.left, r.top, r.right, r.bottom) for r in rects],
-                )
+            _layout_log.info(
+                "[DENG_REJOIN_LANDSCAPE_SLOT_MAP] package_count=%d rule=%s grid=3x3 "
+                "slot_map=%s roblox_grid_area=%s bounds=%s",
+                len(filtered_packages),
+                _landscape_rule,
+                _slot_order,
+                (0, _sb_h, display.width, display.height),
+                [(r.left, r.top, r.right, r.bottom) for r in rects],
+            )
             _layout_log.info(
                 "[DENG_REJOIN_LAYOUT_GRID] mode=%s package_count=%d grid=%dx%d slot_order=%s "
                 "top_inset=%d screen_w=%d screen_h=%d termux_bounds=%s package_bounds=%s",
@@ -4178,11 +4233,6 @@ def _prepare_automatic_layout(
             _seen_bounds: list[tuple[int, int, int, int]] = []
             for _bi, _r in enumerate(rects):
                 _slot = _bi
-                if _screen_mode == "portrait":
-                    try:
-                        _slot = _wl._slot_index_for_package(_bi + 1, _rule)
-                    except Exception:  # noqa: BLE001
-                        _slot = _bi
                 _row = _slot // max(1, _cols)
                 _col = _slot % max(1, _cols)
                 _overlap = any(
@@ -4192,18 +4242,6 @@ def _prepare_automatic_layout(
                 )
                 _duplicate = (_r.left, _r.top, _r.right, _r.bottom) in _seen_bounds
                 _seen_bounds.append((_r.left, _r.top, _r.right, _r.bottom))
-                if _screen_mode == "portrait" and _duplicate:
-                    prev = next(
-                        (
-                            rects[_i].package for _i, _o in enumerate(_seen_bounds[:-1])
-                            if _o == (_r.left, _r.top, _r.right, _r.bottom)
-                        ),
-                        "unknown",
-                    )
-                    raise RuntimeError(
-                        "duplicate portrait slot assignment: "
-                        f"package {prev} and package {_r.package} both assigned to slot {_slot}"
-                    )
                 _layout_log.info(
                     "[DENG_REJOIN_LAYOUT_BOUNDS] package=%s index=%d slot=%d row=%d col=%d"
                     " desired_x=%d desired_y=%d desired_w=%d desired_h=%d"
@@ -4304,6 +4342,91 @@ def _save_start_diagnostics(payload: dict[str, Any]) -> None:
         )
 
 
+class StartSessionLogger:
+    """Persist Start step markers for post-crash diagnosis."""
+
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        self.path = LOG_DIR / f"start-session-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"
+        self.last_step = ""
+        self.completed = False
+        self._started_at = datetime.now(timezone.utc).isoformat()
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(
+                f"[START_SESSION] id={self.session_id} pid={os.getpid()} started_at={self._started_at}\n",
+                encoding="utf-8",
+            )
+            self._write_state()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def mark(self, step: str, **fields: Any) -> None:
+        self.last_step = str(step)
+        parts = [f"[START_STEP] {self.last_step}"]
+        for key, value in sorted(fields.items()):
+            text = str(value).replace("\n", " ").replace("\r", " ")[:240]
+            parts.append(f"{key}={text}")
+        try:
+            with self.path.open("a", encoding="utf-8", errors="replace") as fh:
+                fh.write(" ".join(parts) + "\n")
+            safe_io.set_crash_context(
+                start_step=self.last_step,
+                start_session_log=str(self.path),
+                session_id=self.session_id,
+            )
+            self._write_state()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def finish(self, status: str = "completed") -> None:
+        self.completed = True
+        try:
+            with self.path.open("a", encoding="utf-8", errors="replace") as fh:
+                fh.write(f"[START_SESSION_DONE] status={status}\n")
+            self._write_state(status=status)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _write_state(self, *, status: str = "running") -> None:
+        try:
+            START_CRASH_STATE_PATH.write_text(
+                json.dumps(
+                    {
+                        "session_id": self.session_id,
+                        "status": status,
+                        "last_step": self.last_step,
+                        "start_session_log": str(self.path),
+                        "crash_log": str(CRASH_LOG_PATH),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _previous_start_crash_notice() -> str | None:
+    try:
+        if not START_CRASH_STATE_PATH.exists():
+            return None
+        data = json.loads(START_CRASH_STATE_PATH.read_text(encoding="utf-8"))
+        if str(data.get("status") or "") != "running":
+            return None
+        return (
+            "Previous Start may have crashed. "
+            f"Last step: {data.get('last_step') or 'unknown'}. "
+            f"Start session log: {data.get('start_session_log')}. "
+            f"Crash log: {data.get('crash_log') or CRASH_LOG_PATH}."
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _verify_layout_post_launch(
     cfg: dict[str, Any], entries: list[dict[str, Any]]
 ) -> tuple[dict[str, bool], list[dict[str, Any]]]:
@@ -4318,22 +4441,8 @@ def _verify_layout_post_launch(
     out: dict[str, bool] = {}
     diag_rows: list[dict[str, Any]] = []
     try:
-        _screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
-        if (
-            _screen_mode == "portrait"
-            and cfg.get("_layout_abort_mode") == "portrait"
-            and cfg.get("_layout_abort_reason")
-        ):
-            _layout_log.error(
-                "[DENG_REJOIN_LAYOUT_VERIFY_ABORTED] mode=portrait reason=%s",
-                cfg.get("_layout_abort_reason"),
-            )
-            return {}, [{
-                "mode": "portrait",
-                "status": "Layout Failed",
-                "validation": [str(cfg.get("_layout_abort_reason"))],
-                "final_ok": False,
-            }]
+        _screen_mode = DEFAULT_SCREEN_MODE
+        cfg["screen_mode"] = DEFAULT_SCREEN_MODE
         try:
             _display_state = android.get_display_orientation_state()
         except Exception:  # noqa: BLE001
@@ -4379,7 +4488,7 @@ def _verify_layout_post_launch(
             verify_after=True,
             retries=2,
             screen_mode=_screen_mode,
-            touch_probe=(_screen_mode == "portrait"),
+            touch_probe=False,
         )
         for r in results:
             out[r.package] = r.final_ok
@@ -4470,30 +4579,6 @@ def _verify_layout_post_launch(
                 _click_result,
                 r.status,
             )
-        if _screen_mode == "portrait":
-            duplicate_slot_13 = False
-            try:
-                by_pkg = {row["package"]: row for row in diag_rows}
-                p1 = next((e["package"] for e in entries if str(e.get("package", "")).endswith("1")), "")
-                p3 = next((e["package"] for e in entries if str(e.get("package", "")).endswith("3")), "")
-                if p1 and p3 and by_pkg.get(p1, {}).get("expected_bounds") == by_pkg.get(p3, {}).get("expected_bounds"):
-                    duplicate_slot_13 = True
-            except Exception:  # noqa: BLE001
-                duplicate_slot_13 = False
-            wrong_task = any(not bool(row.get("task_package_expected", True)) for row in diag_rows)
-            duplicate_task = any("duplicate_task_id" in ",".join(row.get("validation") or []) for row in diag_rows)
-            duplicate_bounds = any("duplicate_final_bounds" in ",".join(row.get("validation") or []) for row in diag_rows)
-            clamped = any((row.get("clamped_axes") or []) for row in diag_rows)
-            if duplicate_slot_13:
-                for row in diag_rows:
-                    if row.get("package") in {p1, p3}:
-                        row.setdefault("validation", []).append("portrait_duplicate_slot_package_1_3")
-            if wrong_task or duplicate_task:
-                print("Portrait Layout Error: Package task mapping failed. Layout stopped to prevent resizing the wrong package.")
-            elif duplicate_bounds or duplicate_slot_13:
-                print("Portrait Layout Error: Two packages were assigned to the same slot. Layout stopped to prevent wrong clicks.")
-            elif clamped or any(not ok for ok in out.values()):
-                print("Portrait Layout Warning: Some windows were clamped by Android. Run probe for details.")
     except Exception as exc:  # noqa: BLE001
         _layout_log.debug("verify_layout_post_launch error: %s", exc)
     return out, diag_rows
@@ -4577,6 +4662,8 @@ def cmd_start(args: argparse.Namespace) -> int:
     _supervisor_ref: WatchdogSupervisor | None = None
     _lifecycle_state = "STARTING"
     _start_session_id = f"start-{int(time.time() * 1000)}-{os.getpid()}"
+    previous_crash_notice = _previous_start_crash_notice()
+    _start_session = StartSessionLogger(_start_session_id)
     _start_screen_mode = DEFAULT_SCREEN_MODE
     # Silence all internal loggers so warnings/errors go to file, never stdout.
     from .logger import silence_public_loggers
@@ -4642,12 +4729,15 @@ def cmd_start(args: argparse.Namespace) -> int:
             pass
         _start_lock = None
 
+    _start_session.mark("config_load_begin")
     _clear_terminal(clear_scrollback=True)
     try:
         _transition_lifecycle("STARTING", "cmd_start")
         cfg = load_config()
+        _start_session.mark("config_load_done")
         cfg = _ensure_install_id_saved(cfg)
-        _start_screen_mode = validate_screen_mode(cfg.get("screen_mode", DEFAULT_SCREEN_MODE))
+        _start_screen_mode = DEFAULT_SCREEN_MODE
+        cfg["screen_mode"] = DEFAULT_SCREEN_MODE
         try:
             from .build_info import collect_version_info
             _version_info = collect_version_info()
@@ -4664,6 +4754,17 @@ def cmd_start(args: argparse.Namespace) -> int:
         )
         _enforce_configured_screen_mode(cfg)
         _enforce_termux_left_layout(cfg)
+        if previous_crash_notice:
+            try:
+                from .logger import configure_logging, log_event
+                log_event(
+                    configure_logging(),
+                    "warning",
+                    "[DENG_REJOIN_PREVIOUS_START_CRASH]",
+                    message=previous_crash_notice,
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
         # ── License gate ─────────────────────────────────────────────────────
         if not keystore.DEV_MODE:
@@ -4676,13 +4777,16 @@ def cmd_start(args: argparse.Namespace) -> int:
                         if not ok:
                             _print_license_err(f"License key error: {msg}", use_color)
                             print_beginner_license_gate_help()
+                            _start_session.finish("license_failed")
                             return 1
                     else:
                         _print_license_err("No License Key Found", use_color)
                         print_beginner_license_gate_help()
+                        _start_session.finish("license_missing")
                         return 1
                 else:
                     if not verify_remote_license_noninteractive(cfg, use_color=use_color):
+                        _start_session.finish("license_failed")
                         return 1
 
         entries = enabled_package_entries(cfg)
@@ -4691,16 +4795,20 @@ def cmd_start(args: argparse.Namespace) -> int:
             print("First-time setup is required before starting.")
             if _is_interactive():
                 _run_first_time_setup_wizard(cfg, args, start_after_save=True)
+                _start_session.finish("setup_required")
                 return 0
             print("Run: deng-rejoin and choose First Time Setup Config.")
+            _start_session.finish("setup_required")
             return 2
 
         if not entries:
             print("No Roblox Package Selected")
             print()
             print("Run Setup / Edit Config, then choose Roblox Package Setup.")
+            _start_session.finish("no_packages")
             return 2
         _enforce_configured_screen_mode(cfg, [entry["package"] for entry in entries])
+        _start_session.mark("package_preparation_begin", package_count=len(entries))
 
         try:
             from .logger import configure_logging, log_event
@@ -4734,9 +4842,11 @@ def cmd_start(args: argparse.Namespace) -> int:
                 else:
                     print("DENG Tool: Rejoin is already running.")
                     print("Stop the existing Start session, then run Start again.")
+                    _start_session.finish("already_running")
                     return 1
         except Exception as exc:  # noqa: BLE001
             print(f"Could not create Start lock: {exc}")
+            _start_session.finish("lock_failed")
             return 1
 
         # Start launch selection is driven only by URL presence.
@@ -4870,6 +4980,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         #    Only configured/selected packages are targeted; Termux and
         #    system apps are never touched.
         _transition_lifecycle("PREPARING", "prepare_packages")
+        _start_session.mark("package_preparation_begin", package_count=len(entries))
         _set_all_phase("Preparing", "Stopping configured packages...")
         packages_sl = [e["package"] for e in entries]
         keep_alive  = ["com.termux"] + packages_sl
@@ -4952,12 +5063,11 @@ def cmd_start(args: argparse.Namespace) -> int:
         opt = cfg.get("optimization") if isinstance(cfg.get("optimization"), dict) else {}
         # Set all packages to "Clear Cache" and render ONCE before the loop.
         _transition_lifecycle("CLEARING_CACHE", "clear_cache")
+        _start_session.mark("cache_cleanup_begin")
         for entry in entries:
             phase[entry["package"]] = "Clear Cache"
         _render_phase()
-        # Re-apply the selected Screen Mode after background cleanup.  The
-        # previous auto-rotation restore let third-party rotation apps win and
-        # could flip the device away from the user's selected mode.
+        # Re-apply the release's Landscape-only orientation after background cleanup.
         _enforce_configured_screen_mode(cfg, packages_sl)
         for entry in entries:
             pkg = entry["package"]
@@ -4995,13 +5105,18 @@ def cmd_start(args: argparse.Namespace) -> int:
                 prep_gfx[pkg] = "error"
             _start_log.debug("start: prep pkg=%s cache_ok=%s gfx=%s",
                              pkg, _cache_result.get("success"), prep_gfx[pkg])
+        _start_session.mark("cache_cleanup_done")
+        _start_session.mark("low_graphics_done")
 
         # 3) Compute window layout silently (no public phase change).
         try:
+            _start_session.mark("layout_begin")
             cfg, _layout_note = _prepare_automatic_layout(cfg, entries)
+            _start_session.mark("layout_done", note=_layout_note)
             _start_log.debug("start: layout note=%s", _layout_note)
         except Exception as _exc:  # noqa: BLE001
             _start_log.debug("start: layout error (non-fatal): %s", _exc)
+            _start_session.mark("layout_done", error=str(_exc)[:160])
 
         # 4) Dock Termux silently (no public phase change).
         _termux_minimize_result: dict[str, Any] = {}
@@ -5025,9 +5140,11 @@ def cmd_start(args: argparse.Namespace) -> int:
         cfg["package_start_times"] = start_times
 
         # ── Launch URL confirmation (safe — never expose the raw URL) ────────
-        _global_url = str(effective_private_server_url(runtime_entries[0] if runtime_entries else {}, runtime_cfg) or "").strip() \
-            if runtime_entries else str(runtime_cfg.get("private_server_url") or runtime_cfg.get("launch_url") or "").strip()
-        if _global_url:
+        _any_url = any(
+            str(effective_private_server_url(entry, runtime_cfg) or "").strip()
+            for entry in runtime_entries
+        )
+        if _any_url:
             _start_log.info("start: Launch URL configured — sending private server deep link to each clone")
         else:
             _start_log.info("start: No launch URL configured — clones will open Roblox home")
@@ -5037,6 +5154,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         # the loop and render a single clean "all starting" screen.  Only
         # re-render AFTER each launch (to show success/failure result).
         _transition_lifecycle("LAUNCHING", "launch_packages")
+        _start_session.mark("package_launch_begin", package_count=len(entries))
         launch_ok:  dict[str, bool] = {}
         launch_err: dict[str, str]  = {}
         launch_attempted: dict[str, bool] = {}
@@ -5049,9 +5167,9 @@ def cmd_start(args: argparse.Namespace) -> int:
             launch_attempted[package] = True
             package_cfg = dict(runtime_cfg)
             package_cfg["roblox_package"] = package
-            _has_url = bool(str(
-                effective_private_server_url(runtime_entry, runtime_cfg) or ""
-            ).strip())
+            from .config import private_url_launch_context as _purl_ctx
+            _url_context = _purl_ctx(runtime_entry, runtime_cfg)
+            _has_url = _url_context.get("url_mode") == "private_url"
             # Ensure package key file is correct before launch.
             # Writes: /storage/emulated/0/Android/data/{pkg}/files/gloop/external/Internals/Cache/license
             # Only if a FREE_ key is configured; does NOT touch DENG Tool license.
@@ -5082,9 +5200,13 @@ def cmd_start(args: argparse.Namespace) -> int:
             launch_err[package] = result.error or ""
             _start_log.info(
                 "[DENG_REJOIN_LAUNCH_PACKAGE] package=%s launcher=%s"
+                " private_url_mode=%s url_mode=%s url_config_source=%s"
                 " result=%s return_code=%s success=%s",
                 package,
                 "private_url" if _has_url else "app_only",
+                _url_context.get("private_url_mode", "global"),
+                _url_context.get("url_mode", "app_only"),
+                _url_context.get("url_config_source", "blank"),
                 result.error or "ok", 0 if result.success else 1,
                 str(result.success).lower(),
             )
@@ -5110,6 +5232,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 "start: launch pkg=%s ok=%s err=%s",
                 package, result.success, result.error or "",
             )
+        _start_session.mark("package_launch_done", success_count=sum(1 for v in launch_ok.values() if v))
 
         # 6) Grace wait before verifying layout — keep packages shown as
         #    "Launching" (no "Waiting" label shown in public UI).
@@ -5123,10 +5246,13 @@ def cmd_start(args: argparse.Namespace) -> int:
         _layout_verify: dict[str, bool] = {}
         _layout_diag: list[dict[str, Any]] = []
         try:
+            _start_session.mark("layout_begin", phase="post_launch_verify")
             _layout_verify, _layout_diag = _verify_layout_post_launch(cfg, entries)
+            _start_session.mark("layout_done", phase="post_launch_verify")
             _start_log.debug("post-launch layout verify: %s", _layout_verify)
         except Exception as _exc:  # noqa: BLE001
             _start_log.debug("post-launch verify error: %s", _exc)
+            _start_session.mark("layout_done", phase="post_launch_verify", error=str(_exc)[:160])
 
         # ── Save start diagnostics JSON (silent, internal only) ───────────────
         try:
@@ -5147,9 +5273,10 @@ def cmd_start(args: argparse.Namespace) -> int:
                     "task":        bool(ev.get("task")),
                     "foreground":  bool(ev.get("foreground")),
                     "alive":       bool(ev.get("alive")),
-                    "private_url_set": bool(
-                        str(effective_private_server_url(runtime_entry_by_pkg.get(pkg, entry), runtime_cfg) or "").strip()
-                    ),
+                    "private_url_mode": _purl_ctx(runtime_entry_by_pkg.get(pkg, entry), runtime_cfg).get("private_url_mode", "global"),
+                    "url_mode": _purl_ctx(runtime_entry_by_pkg.get(pkg, entry), runtime_cfg).get("url_mode", "app_only"),
+                    "url_config_source": _purl_ctx(runtime_entry_by_pkg.get(pkg, entry), runtime_cfg).get("url_config_source", "blank"),
+                    "private_url_set": _purl_ctx(runtime_entry_by_pkg.get(pkg, entry), runtime_cfg).get("url_mode") == "private_url",
                 })
             try:
                 from . import freeform_enable as _ff
@@ -5273,6 +5400,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             print()
             print(f"  Detail: {best_reason}")
             _release_start_lock("normal_exit")
+            _start_session.finish("launch_failed")
             return 1
 
         # ── Supervisor loop — dashboard takes over entirely ───────────────────
@@ -5301,6 +5429,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         _supervisor = WatchdogSupervisor(runtime_entries, _live_cfg, initial_status=initial_status)
         _supervisor_ref = _supervisor
         _live_map = _supervisor.status_map  # dict mutated in-place by watchdog loop
+        _start_session.mark("supervisor_begin", package_count=len(runtime_entries))
 
         # Public state map: internal states → user-facing labels.
         # Allowed public states: Layout, Launching, Online, Reopening, Dead, Failed.
@@ -5432,6 +5561,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         _unexpected_restart_count = 0
         while True:
             try:
+                _start_session.mark("supervisor_loop")
                 _supervisor.run_forever(
                     render_callback=_live_dashboard,
                     display_interval=3.0,
@@ -5480,6 +5610,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             pass
         _release_start_lock(_shutdown_reason)
         _transition_lifecycle("STOPPED", _shutdown_reason)
+        _start_session.finish(_shutdown_reason)
         # Real-device evidence (probe ``p-47fa33562a``): on Termux, Python
         # finalization after a supervisor stop sometimes segfaults inside
         # libc cleanup (atexit handlers / threading shutdown / file-handle
@@ -5503,6 +5634,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             pass
         _release_start_lock(_shutdown_reason)
         _transition_lifecycle("STOPPED", _shutdown_reason)
+        _start_session.finish(_shutdown_reason)
         try:
             _clear_terminal()
         except Exception:  # noqa: BLE001
@@ -5521,6 +5653,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             pass
         _release_start_lock("fatal_error")
         _transition_lifecycle("STOPPED", "fatal_error")
+        _start_session.finish("fatal_error")
         print(f"Agent start failed: {exc}")
         return 1
 

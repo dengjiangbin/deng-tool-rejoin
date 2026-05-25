@@ -10,7 +10,7 @@ from typing import Any
 
 from . import android, db
 from .backoff import calculate_backoff_seconds
-from .config import effective_private_server_url, load_config, validate_config
+from .config import effective_private_server_url, load_config, private_url_launch_context, validate_config
 from .launcher import launch_package_for_current_config, perform_rejoin
 from .lockfile import LockManager
 from .logger import configure_logging, log_event
@@ -1931,8 +1931,8 @@ class WatchdogSupervisor:
     ) -> bool:
         """Launch the package using the canonical launcher.  Returns success."""
         logger = self._logger
-        url = str(effective_private_server_url(entry, self.cfg) or "").strip()
-        url_configured = bool(url)
+        url_context = private_url_launch_context(entry, self.cfg)
+        url_configured = url_context.get("url_mode") == "private_url"
         launcher_label = "private_url" if url_configured else "app_only"
         t0 = time.monotonic()
         # Ensure package key license file is present before relaunch.
@@ -1964,6 +1964,9 @@ class WatchdogSupervisor:
                 package=pkg,
                 reason=reason,
                 launcher=launcher_label,
+                private_url_mode=url_context.get("private_url_mode", "global"),
+                url_mode=url_context.get("url_mode", "app_only"),
+                url_config_source=url_context.get("url_config_source", "blank"),
                 return_code=0 if result.success else 1,
                 success=str(result.success).lower(),
                 stdout="",
@@ -2000,14 +2003,17 @@ class WatchdogSupervisor:
         - Online      → update last_online_ts, keep monitoring
         """
         logger = self._logger
-        url = str(effective_private_server_url(entry, self.cfg) or "").strip()
-        url_configured = bool(url)
+        url_context = private_url_launch_context(entry, self.cfg)
+        url_configured = url_context.get("url_mode") == "private_url"
 
         if state == STATUS_DEAD:
             action = "private_url_relaunch" if url_configured else "app_only_relaunch"
             log_event(
                 logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
                 package=pkg, state="Dead",
+                private_url_mode=url_context.get("private_url_mode", "global"),
+                url_mode=url_context.get("url_mode", "app_only"),
+                url_config_source=url_context.get("url_config_source", "blank"),
                 private_url_configured=str(url_configured).lower(),
                 action=action,
                 reason="process_not_running",
@@ -2062,6 +2068,9 @@ class WatchdogSupervisor:
             log_event(
                 logger, "info", "[DENG_REJOIN_RECOVERY_DECISION]",
                 package=pkg, state="No Heartbeat",
+                private_url_mode=url_context.get("private_url_mode", "global"),
+                url_mode=url_context.get("url_mode", "app_only"),
+                url_config_source=url_context.get("url_config_source", "blank"),
                 private_url_configured=str(url_configured).lower(),
                 action=action,
                 reason="heartbeat_stalled_or_presence_offline",

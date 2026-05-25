@@ -4,8 +4,10 @@ from agent.config import (
     ConfigError,
     default_config,
     enabled_package_names,
+    effective_private_server_url,
     is_valid_package_name,
     normalize_package_detection_hint,
+    private_url_launch_context,
     validate_config,
 )
 
@@ -191,10 +193,17 @@ class ConfigTests(unittest.TestCase):
         cfg["launch_mode"] = "web_url"
         cfg["launch_url"] = "https://www.roblox.com/share?code=ABC123&type=Server"
         validated = validate_config(cfg)
+        self.assertEqual(validated["private_url_mode"], "global")
         self.assertEqual(validated["private_server_url"], cfg["launch_url"])
 
     def test_default_screen_mode_is_landscape(self):
         cfg = default_config()
+        validated = validate_config(cfg)
+        self.assertEqual(validated["screen_mode"], "landscape")
+
+    def test_old_portrait_config_migrates_to_landscape_only_runtime(self):
+        cfg = default_config()
+        cfg["screen_mode"] = "portrait"
         validated = validate_config(cfg)
         self.assertEqual(validated["screen_mode"], "landscape")
 
@@ -209,7 +218,44 @@ class ConfigTests(unittest.TestCase):
             cfg = default_config()
             cfg["screen_mode"] = value
             validated = validate_config(cfg)
-            self.assertIn(validated["screen_mode"], {"landscape", "portrait"})
+            self.assertEqual(validated["screen_mode"], "landscape")
+
+    def test_private_url_global_mode_uses_global_url_and_ignores_package_url(self):
+        cfg = default_config()
+        cfg["private_url_mode"] = "global"
+        cfg["private_server_url"] = "https://www.roblox.com/share?code=GLOBAL&type=Server"
+        entry = dict(cfg["roblox_packages"][0])
+        entry["private_server_url"] = "https://www.roblox.com/share?code=PACKAGE&type=Server"
+        validated = validate_config(cfg)
+        self.assertIn("GLOBAL", effective_private_server_url(entry, validated))
+        ctx = private_url_launch_context(entry, validated)
+        self.assertEqual(ctx["private_url_mode"], "global")
+        self.assertEqual(ctx["url_config_source"], "global")
+
+    def test_private_url_separate_mode_uses_package_url_only(self):
+        cfg = default_config()
+        cfg["private_url_mode"] = "separate"
+        cfg["private_server_url"] = "https://www.roblox.com/share?code=GLOBAL&type=Server"
+        cfg["roblox_packages"][0]["private_server_url"] = "https://www.roblox.com/share?code=PACKAGE&type=Server"
+        validated = validate_config(cfg)
+        entry = validated["roblox_packages"][0]
+        self.assertIn("PACKAGE", effective_private_server_url(entry, validated))
+        self.assertNotIn("GLOBAL", effective_private_server_url(entry, validated))
+        ctx = private_url_launch_context(entry, validated)
+        self.assertEqual(ctx["private_url_mode"], "separate")
+        self.assertEqual(ctx["url_config_source"], "package_specific")
+
+    def test_private_url_separate_blank_package_is_app_only(self):
+        cfg = default_config()
+        cfg["private_url_mode"] = "separate"
+        cfg["private_server_url"] = "https://www.roblox.com/share?code=GLOBAL&type=Server"
+        cfg["roblox_packages"][0]["private_server_url"] = ""
+        validated = validate_config(cfg)
+        entry = validated["roblox_packages"][0]
+        self.assertEqual(effective_private_server_url(entry, validated), "")
+        ctx = private_url_launch_context(entry, validated)
+        self.assertEqual(ctx["url_mode"], "app_only")
+        self.assertEqual(ctx["url_config_source"], "blank")
 
     def test_webhook_interval_validation(self):
         cfg = default_config()
