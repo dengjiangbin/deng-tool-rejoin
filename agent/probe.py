@@ -381,9 +381,24 @@ def _capture_portrait_input_readback(package: str, errors: list[dict[str, str]])
             return {"available": False, "reason": "desired bounds unavailable"}
         readback = window_apply.collect_portrait_layer_readback(package, desired)
         readback["available"] = True
+        resolved = window_layout.resolve_layout_mode(display.width, display.height, screen_mode)
+        readback["layout_mode"] = {
+            "configured_screen_mode": resolved.configured_screen_mode,
+            "android_reported_orientation": resolved.android_orientation,
+            "final_layout_mode": resolved.final_layout_mode,
+            "coordinate_space": resolved.coordinate_space,
+            "reason": resolved.reason,
+            "raw_display": [resolved.raw_width, resolved.raw_height],
+            "normalized_display": [resolved.normalized_width, resolved.normalized_height],
+        }
+        slot = (
+            window_layout._slot_index_for_package(selected.index(package) + 1, window_layout.PORTRAIT_SLOT_RULES[len(selected)])
+            if screen_mode == "portrait" and 1 <= len(selected) <= 10
+            else None
+        )
         readback["slot"] = {
-            "row": (rects.index(desired) // 2) if screen_mode == "portrait" else None,
-            "col": (rects.index(desired) % 2) if screen_mode == "portrait" else None,
+            "row": (slot // 2) if slot is not None else None,
+            "col": (slot % 2) if slot is not None else None,
         }
         return readback
     except Exception as exc:  # noqa: BLE001
@@ -1256,29 +1271,15 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 30.0) -> tuple[bool,
             f"Dropped: {trim_report.get('dropped') or []!r}"
         )
 
-    def _make_request(session_id: str) -> urllib.request.Request:
+    def _make_request() -> urllib.request.Request:
         req = urllib.request.Request(url, data=payload, method="POST")
         req.add_header("Content-Type", "application/json")
         req.add_header("Content-Encoding", "gzip")
         req.add_header("User-Agent", "deng-rejoin-probe/1")
-        req.add_header("X-DENG-Session", session_id)
         return req
 
     try:
-        from .license_session import ensure_session_for_feature
-    except Exception:  # noqa: BLE001
-        ensure_session_for_feature = None  # type: ignore[assignment]
-
-    def _session(force_refresh: bool = False) -> tuple[bool, str]:
-        if ensure_session_for_feature is None:
-            return False, "valid license session required; open deng-rejoin and pass license check first"
-        return ensure_session_for_feature("probe_upload", force_refresh=force_refresh)
-
-    ok, session_or_error = _session(False)
-    if not ok:
-        return False, session_or_error
-    try:
-        with urllib.request.urlopen(_make_request(session_or_error), timeout=timeout) as resp:
+        with urllib.request.urlopen(_make_request(), timeout=timeout) as resp:
             data = resp.read().decode("utf-8", errors="replace")
         try:
             obj = json.loads(data)
@@ -1307,29 +1308,7 @@ def upload_probe(probe: dict[str, Any], *, timeout: float = 30.0) -> tuple[bool,
                 f"Server body: {body_text}"
             )
         if exc.code == 401:
-            # Server capability sessions are intentionally in-memory. A PM2
-            # reload can invalidate a locally unexpired session, so refresh
-            # through validate-only once before surfacing the rejection.
-            ok2, fresh_or_error = _session(True)
-            if ok2:
-                try:
-                    with urllib.request.urlopen(_make_request(fresh_or_error), timeout=timeout) as resp:
-                        data = resp.read().decode("utf-8", errors="replace")
-                    try:
-                        obj = json.loads(data)
-                    except json.JSONDecodeError:
-                        return False, f"non-JSON response after session refresh: {data[:200]}"
-                    pid = str(obj.get("probe_id") or "").strip()
-                    if pid:
-                        return True, pid
-                    return False, f"no probe_id in response after session refresh: {data[:200]}"
-                except urllib.error.HTTPError as exc2:
-                    try:
-                        retry_body = exc2.read().decode("utf-8", errors="replace")[:300]
-                    except Exception:  # noqa: BLE001
-                        retry_body = ""
-                    return False, f"unauthorized (401) after license refresh. {retry_body}"
-            return False, fresh_or_error
+            return False, f"server rejected upload (401): {body_text}"
         return False, f"HTTP {exc.code}: {body_text}"
     except urllib.error.URLError as exc:
         return False, f"network error: {exc.reason}"

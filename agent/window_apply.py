@@ -729,7 +729,7 @@ def collect_portrait_layer_readback(
     stable = window_entry.stable_frame if window_entry else None
     visible = window_entry.visible_frame if window_entry else None
     title_h = _content_title_bar_height(frame or window_bounds, content)
-    display_bounds = _display_bounds()
+    display_bounds = _display_bounds("portrait")
     density_info = _read_density_info()
     classes = _classify_layer_readback(
         desired=desired,
@@ -1057,11 +1057,12 @@ def _rect_from_bounds(package: str, bounds: tuple[int, int, int, int]) -> Window
     return WindowRect(package, bounds[0], bounds[1], bounds[2], bounds[3])
 
 
-def _display_bounds() -> tuple[int, int, int, int]:
+def _display_bounds(screen_mode: str = "landscape") -> tuple[int, int, int, int]:
     try:
-        from .window_layout import detect_display_info
+        from .window_layout import detect_display_info, resolve_layout_mode
         display = detect_display_info()
-        return (0, 0, int(display.width), int(display.height))
+        resolved = resolve_layout_mode(display.width, display.height, screen_mode)
+        return (0, 0, int(resolved.normalized_width), int(resolved.normalized_height))
     except Exception:  # noqa: BLE001
         return (0, 0, 99999, 99999)
 
@@ -1072,7 +1073,7 @@ def _validate_actual_layout(
     screen_mode: str,
 ) -> None:
     mode = str(screen_mode or "landscape").strip().lower()
-    display_bounds = _display_bounds()
+    display_bounds = _display_bounds(mode)
     actual_rects: list[tuple[ApplyResult, WindowRect]] = []
     for result in results:
         if result.actual_bounds is None:
@@ -1192,7 +1193,7 @@ def _record_portrait_layer_readback(result: ApplyResult, *, tolerance: int) -> N
 def _portrait_layer_validation_errors(result: ApplyResult, *, tolerance: int) -> list[str]:
     errors: list[str] = []
     desired = result.desired
-    display_bounds = _display_bounds()
+    display_bounds = _display_bounds("portrait")
     corrected_task = result.corrected_task_bounds
     if not result.task_package_expected:
         errors.append("wrong task package")
@@ -1244,7 +1245,7 @@ def _titlebar_corrected_rect(result: ApplyResult) -> WindowRect | None:
         return None
     if "decor_title_bar_offset" not in result.mismatch_classification:
         return None
-    display = _display_bounds()
+    display = _display_bounds("portrait")
     shift = int(result.title_bar_height)
     left = result.desired.left
     top = max(display[1], result.desired.top - shift)

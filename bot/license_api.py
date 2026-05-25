@@ -786,10 +786,11 @@ def _route_public_install(
     # ── Dev-probe upload (internal test channel only) ─────────────────────────
     # The cloud-phone client POSTs sanitized device evidence here so the
     # operator can read it on the PM2 host without paste-buffer limits.  The
-    # endpoint is intentionally simple: shared-secret header, size cap, no
-    # license check, channel-locked to ``main-dev``.
+    # endpoint is intentionally diagnostic-only: size/rate capped, no normal
+    # license session, channel-locked to ``main-dev``.
     if path == "/api/dev-probe/upload":
         from agent.dev_probe_store import store_probe
+        from agent.probe import sanitize_probe
 
         if method != "POST":
             return (
@@ -798,11 +799,11 @@ def _route_public_install(
                 "application/json",
                 None,
             )
-        session = (environ.get("HTTP_X_DENG_SESSION") or "").strip()
-        if not _capability_session_ok(session, "probe_upload"):
+        remote_addr = environ.get("REMOTE_ADDR", "unknown")
+        if not _check_rate_limit(remote_addr):
             return (
-                json.dumps({"error": "valid license session required"}).encode("utf-8"),
-                401,
+                json.dumps({"error": "Too many probe uploads. Try again later."}).encode("utf-8"),
+                429,
                 "application/json",
                 None,
             )
@@ -867,6 +868,7 @@ def _route_public_install(
                 "application/json",
                 None,
             )
+        payload = sanitize_probe(payload)
         probe_id, saved_path = store_probe(payload)
         log.info("dev-probe stored: id=%s path=%s size=%d", probe_id, saved_path, len(raw))
         return (

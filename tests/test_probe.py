@@ -262,7 +262,7 @@ class UploadProbeTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("install API URL not configured", info)
 
-    def test_upload_with_valid_saved_session_succeeds(self) -> None:
+    def test_upload_without_license_session_succeeds(self) -> None:
         class _Resp:
             def __enter__(self):
                 return self
@@ -277,56 +277,54 @@ class UploadProbeTests(unittest.TestCase):
             return _Resp()
 
         with patch.object(P, "_resolve_install_api", return_value="https://rejoin.deng.my.id"), \
-             patch("agent.license_session.ensure_session_for_feature", return_value=(True, "sess-ok")), \
+             patch("agent.license_session.ensure_session_for_feature") as gate, \
              patch("urllib.request.urlopen", side_effect=fake_urlopen):
             ok, info = P.upload_probe({"probe_version": 1, "secret": "DENG-AAAA-BBBB-CCCC-DDDD"})
         self.assertTrue(ok)
         self.assertEqual(info, "p-ok")
-        self.assertEqual(requests[0].get_header("X-deng-session"), "sess-ok")
+        gate.assert_not_called()
+        self.assertIsNone(requests[0].get_header("X-deng-session"))
 
-    def test_upload_401_refreshes_expired_server_session(self) -> None:
+    def test_upload_401_does_not_try_license_refresh(self) -> None:
+        def fake_urlopen(req, timeout=0):  # noqa: ANN001
+            raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, None)
+
+        with patch.object(P, "_resolve_install_api", return_value="https://rejoin.deng.my.id"), \
+             patch("agent.license_session.ensure_session_for_feature") as gate, \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            ok, info = P.upload_probe({"probe_version": 1})
+        self.assertFalse(ok)
+        gate.assert_not_called()
+        self.assertIn("server rejected upload (401)", info)
+        self.assertNotIn("license", info.lower())
+        self.assertNotIn("pass license check", info.lower())
+
+    def test_upload_works_when_license_gate_would_fail(self) -> None:
         class _Resp:
             def __enter__(self):
                 return self
             def __exit__(self, *_args):
                 return False
             def read(self):
-                return b'{"probe_id":"p-fresh"}'
-
-        calls = []
-        def fake_session(feature, *, force_refresh=False):  # noqa: ANN001
-            calls.append(force_refresh)
-            return True, "fresh" if force_refresh else "stale"
-
-        def fake_urlopen(req, timeout=0):  # noqa: ANN001
-            if req.get_header("X-deng-session") == "stale":
-                raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", {}, None)
-            return _Resp()
+                return b'{"probe_id":"p-no-license"}'
 
         with patch.object(P, "_resolve_install_api", return_value="https://rejoin.deng.my.id"), \
-             patch("agent.license_session.ensure_session_for_feature", side_effect=fake_session), \
-             patch("urllib.request.urlopen", side_effect=fake_urlopen):
+             patch("agent.license_session.ensure_session_for_feature", side_effect=AssertionError("license gate called")), \
+             patch("urllib.request.urlopen", return_value=_Resp()):
             ok, info = P.upload_probe({"probe_version": 1})
         self.assertTrue(ok)
-        self.assertEqual(info, "p-fresh")
-        self.assertEqual(calls, [False, True])
-
-    def test_upload_without_valid_key_or_session_is_clear_error(self) -> None:
-        with patch.object(P, "_resolve_install_api", return_value="https://rejoin.deng.my.id"), \
-             patch("agent.license_session.ensure_session_for_feature", return_value=(False, "no valid saved license key")):
-            ok, info = P.upload_probe({"probe_version": 1})
-        self.assertFalse(ok)
-        self.assertIn("no valid saved license key", info)
+        self.assertEqual(info, "p-no-license")
 
     def test_upload_server_error_returns_clear_failure(self) -> None:
         def fake_urlopen(req, timeout=0):  # noqa: ANN001
             raise urllib.error.HTTPError(req.full_url, 500, "Server Error", {}, None)
 
         with patch.object(P, "_resolve_install_api", return_value="https://rejoin.deng.my.id"), \
-             patch("agent.license_session.ensure_session_for_feature", return_value=(True, "sess-ok")), \
+             patch("agent.license_session.ensure_session_for_feature") as gate, \
              patch("urllib.request.urlopen", side_effect=fake_urlopen):
             ok, info = P.upload_probe({"probe_version": 1})
         self.assertFalse(ok)
+        gate.assert_not_called()
         self.assertIn("HTTP 500", info)
 
     def test_probe_and_bundle_redact_secrets_and_private_urls(self) -> None:

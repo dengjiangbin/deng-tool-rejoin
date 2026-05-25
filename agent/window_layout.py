@@ -349,6 +349,19 @@ class WindowRect:
         )
 
 
+@dataclass(frozen=True)
+class LayoutModeResolution:
+    configured_screen_mode: str
+    android_orientation: str
+    final_layout_mode: str
+    coordinate_space: str
+    reason: str
+    raw_width: int
+    raw_height: int
+    normalized_width: int
+    normalized_height: int
+
+
 # ── Display detection ─────────────────────────────────────────────────────────
 
 def parse_wm_size(output: str) -> tuple[int, int] | None:
@@ -561,6 +574,27 @@ def normalize_display_for_screen_mode(width: int, height: int, screen_mode: str)
     return w, h
 
 
+def resolve_layout_mode(width: int, height: int, screen_mode: str) -> LayoutModeResolution:
+    """Resolve layout mode from config; Android rotation only informs coordinates."""
+    raw_w = max(1, int(width))
+    raw_h = max(1, int(height))
+    configured = str(screen_mode or "").strip().lower()
+    if configured not in {"portrait", "landscape"}:
+        configured = "landscape"
+    norm_w, norm_h = normalize_display_for_screen_mode(raw_w, raw_h, configured)
+    return LayoutModeResolution(
+        configured_screen_mode=configured,
+        android_orientation=detect_layout_orientation(raw_w, raw_h),
+        final_layout_mode=configured,
+        coordinate_space="portrait_normalized" if configured == "portrait" else "android_reported",
+        reason=f"config_forced_{configured}",
+        raw_width=raw_w,
+        raw_height=raw_h,
+        normalized_width=norm_w,
+        normalized_height=norm_h,
+    )
+
+
 def rects_overlap(a: WindowRect, b: WindowRect) -> bool:
     return not (
         a.right <= b.left or b.right <= a.left or
@@ -695,10 +729,10 @@ PORTRAIT_SLOT_RULES: dict[int, tuple[int, ...]] = {
     4:  (0, 0, 0, 0, 1, 2, 3, 4, 0, 0),
     5:  (0, 0, 0, 0, 1, 2, 3, 4, 5, 0),
     6:  (0, 0, 0, 0, 1, 2, 3, 4, 5, 6),
-    7:  (7, 0, 0, 0, 1, 2, 3, 4, 5, 6),
-    8:  (7, 8, 0, 0, 1, 2, 3, 4, 5, 6),
-    9:  (7, 8, 9, 0, 1, 2, 3, 4, 5, 6),
-    10: (7, 8, 9, 10, 1, 2, 3, 4, 5, 6),
+    7:  (0, 0, 1, 2, 3, 4, 5, 6, 7, 0),
+    8:  (0, 0, 1, 2, 3, 4, 5, 6, 7, 8),
+    9:  (1, 2, 3, 4, 5, 6, 7, 8, 9, 0),
+    10: (1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
 }
 
 
@@ -723,13 +757,27 @@ def _release_grid_rects(
     configured_mode = str(mode or "landscape").strip().lower()
     if configured_mode not in {"landscape", "portrait"}:
         configured_mode = "landscape"
-    W, H = normalize_display_for_screen_mode(display_w, display_h, configured_mode)
-    orientation = detect_layout_orientation(W, H)
+    mode_resolution = resolve_layout_mode(display_w, display_h, configured_mode)
+    W, H = mode_resolution.normalized_width, mode_resolution.normalized_height
+    orientation = mode_resolution.android_orientation
     top_inset = _detect_status_bar_height()
     configured_left_end = round(W * max(0.0, min(0.9, float(left_fraction))))
 
     _log.info(
         "[DENG_REJOIN_LAYOUT_ENGINE] engine=release_grid legacy_fallback_used=false"
+    )
+    _log.info(
+        "[DENG_REJOIN_LAYOUT_MODE] configured_screen_mode=%s android_reported_orientation=%s "
+        "raw_screen=%dx%d final_layout_mode=%s coordinate_space=%s normalized_screen=%dx%d reason=%s",
+        mode_resolution.configured_screen_mode,
+        mode_resolution.android_orientation,
+        mode_resolution.raw_width,
+        mode_resolution.raw_height,
+        mode_resolution.final_layout_mode,
+        mode_resolution.coordinate_space,
+        W,
+        H,
+        mode_resolution.reason,
     )
     _log.info(
         "[DENG_REJOIN_LAYOUT_ORIENTATION] orientation=%s screen_w=%d screen_h=%d",

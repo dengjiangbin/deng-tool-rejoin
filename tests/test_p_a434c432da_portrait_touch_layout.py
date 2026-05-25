@@ -13,6 +13,26 @@ def _pkgs(count: int) -> list[str]:
 
 
 class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
+    def test_configured_portrait_overrides_landscape_android_rect(self) -> None:
+        resolved = window_layout.resolve_layout_mode(1280, 720, "portrait")
+
+        self.assertEqual(resolved.configured_screen_mode, "portrait")
+        self.assertEqual(resolved.android_orientation, "landscape")
+        self.assertEqual(resolved.final_layout_mode, "portrait")
+        self.assertEqual(resolved.coordinate_space, "portrait_normalized")
+        self.assertEqual((resolved.normalized_width, resolved.normalized_height), (720, 1280))
+        self.assertEqual(resolved.reason, "config_forced_portrait")
+
+    def test_configured_landscape_overrides_portrait_android_rect(self) -> None:
+        resolved = window_layout.resolve_layout_mode(720, 1280, "landscape")
+
+        self.assertEqual(resolved.configured_screen_mode, "landscape")
+        self.assertEqual(resolved.android_orientation, "portrait")
+        self.assertEqual(resolved.final_layout_mode, "landscape")
+        self.assertEqual(resolved.coordinate_space, "android_reported")
+        self.assertEqual((resolved.normalized_width, resolved.normalized_height), (720, 1280))
+        self.assertEqual(resolved.reason, "config_forced_landscape")
+
     def test_portrait_orientation_normalizes_landscape_raw_size(self) -> None:
         self.assertEqual(
             window_layout.normalize_display_for_screen_mode(1280, 720, "portrait"),
@@ -24,6 +44,15 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
         self.assertGreater(rects[0].bottom, rects[0].right)
         self.assertLessEqual(max(r.right for r in rects), 720)
         self.assertLessEqual(max(r.bottom for r in rects), 1280)
+
+    def test_portrait_display_bounds_are_normalized_for_readback(self) -> None:
+        with mock.patch.object(
+            window_apply.window_layout if hasattr(window_apply, "window_layout") else window_layout,
+            "detect_display_info",
+            return_value=window_layout.DisplayInfo(width=1280, height=720, density=164),
+        ):
+            self.assertEqual(window_apply._display_bounds("portrait"), (0, 0, 720, 1280))
+            self.assertEqual(window_apply._display_bounds("landscape"), (0, 0, 1280, 720))
 
     def test_portrait_slots_are_touch_safe_for_required_counts(self) -> None:
         for count in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):

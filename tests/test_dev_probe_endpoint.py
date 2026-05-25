@@ -95,6 +95,7 @@ class DevProbeUploadEndpointTests(unittest.TestCase):
         os.environ["DENG_DEV_PROBE_DIR"] = self._tmp.name
         # Make sure the module re-reads on every call.
         os.environ.pop("DENG_DEV_PROBE_TOKEN", None)
+        api_mod._rate_limit.clear()
 
     def tearDown(self) -> None:
         os.environ.pop("DENG_DEV_PROBE_DIR", None)
@@ -113,11 +114,14 @@ class DevProbeUploadEndpointTests(unittest.TestCase):
         if gzipped:
             body = gzip.compress(body)
             encoding_header["HTTP_CONTENT_ENCODING"] = "gzip"
+        headers = dict(encoding_header)
+        if session is not None:
+            headers["HTTP_X_DENG_SESSION"] = session
         return _wsgi_call(
             "POST",
             "/api/dev-probe/upload",
             body=body,
-            headers={"HTTP_X_DENG_SESSION": session or self._session(), **encoding_header},
+            headers=headers,
         )
 
     def test_accepts_valid_payload_and_returns_probe_id(self) -> None:
@@ -133,34 +137,31 @@ class DevProbeUploadEndpointTests(unittest.TestCase):
         self.assertEqual(stored["probe_version"], 1)
         self.assertIn("received_at_iso", stored)
 
-    def test_rejects_missing_token(self) -> None:
+    def test_accepts_without_license_session(self) -> None:
         body = json.dumps({"probe_version": 1}).encode("utf-8")
-        status, _, _ = _wsgi_call(
+        status, _, response = _wsgi_call(
             "POST", "/api/dev-probe/upload", body=body,
-            headers={"HTTP_X_DENG_SESSION": "wrong"},
         )
-        self.assertEqual(status, 401)
+        self.assertEqual(status, 201, msg=response[:200])
 
-    def test_rejects_missing_session(self) -> None:
-        body = gzip.compress(json.dumps({"probe_version": 1}).encode("utf-8"))
-        status, _, _ = _wsgi_call(
-            "POST", "/api/dev-probe/upload", body=body,
-            headers={"HTTP_CONTENT_ENCODING": "gzip"},
-        )
-        self.assertEqual(status, 401)
+    def test_accepts_even_with_wrong_or_expired_session_header(self) -> None:
+        status, _, body = self._post({"probe_version": 1}, session="wrong-or-expired")
+        self.assertEqual(status, 201, msg=body[:200])
 
-    def test_rejects_expired_capability_session(self) -> None:
-        session = api_mod._issue_capability_session(
-            key="DENG-AAAA-BBBB-CCCC-DDDD",
-            install_id_hash="ab" * 32,
-            client_protocol=2,
-            build_id="p-test",
-        )["session_id"]
-        token_hash = api_mod.hashlib.sha256(session.encode()).hexdigest()
-        with api_mod._capability_lock:
-            api_mod._capability_sessions[token_hash]["expires_at"] = 0
-        status, _, _ = self._post({"probe_version": 1}, session=session)
-        self.assertEqual(status, 401)
+    def test_upload_route_redacts_secrets_before_storage(self) -> None:
+        status, _, body = self._post({
+            "probe_version": 1,
+            "license_key": "DENG-AAAA-BBBB-CCCC-DDDD",
+            "cookie": ".ROBLOSECURITY=do-not-share",
+            "launch_url": "https://www.roblox.com/games/123/x?privateServerLinkCode=secret",
+        })
+        self.assertEqual(status, 201, msg=body[:200])
+        payload = json.loads(body)
+        stored = (Path(self._tmp.name) / f"{payload['probe_id']}.json").read_text(encoding="utf-8")
+        self.assertNotIn("DENG-AAAA-BBBB-CCCC-DDDD", stored)
+        self.assertNotIn("do-not-share", stored)
+        self.assertNotIn("privateServerLinkCode=secret", stored)
+        self.assertIn("***MASKED***", stored)
 
     def test_rejects_payload_without_probe_version(self) -> None:
         status, _, body = self._post({"hello": "world"})

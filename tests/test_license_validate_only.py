@@ -272,17 +272,20 @@ class TestLicenseApiValidateOnly(unittest.TestCase):
         self.assertEqual(status, 426)
         self.assertEqual(resp.get("result"), "protocol_too_old")
 
-    def test_probe_upload_requires_capability_session(self) -> None:
-        payload = gzip.compress(json.dumps({"probe_version": 1}).encode("utf-8"))
+    def test_probe_upload_does_not_require_capability_session(self) -> None:
+        payload = gzip.compress(json.dumps({
+            "probe_version": 1,
+            "license_key": "DENG-AAAA-BBBB-CCCC-DDDD",
+        }).encode("utf-8"))
         status, resp = _wsgi_raw(
             "/api/dev-probe/upload",
             payload,
             headers={"HTTP_CONTENT_ENCODING": "gzip"},
         )
-        self.assertEqual(status, 401)
-        self.assertIn("session", resp.get("error", ""))
+        self.assertEqual(status, 201)
+        self.assertTrue(resp.get("probe_id", "").startswith("p-"))
 
-    def test_probe_upload_accepts_server_session(self) -> None:
+    def test_probe_upload_accepts_ignored_server_session_header(self) -> None:
         session = api_mod._issue_capability_session(
             key="DENG-AAAA-BBBB-CCCC-DDDD",
             install_id_hash="33" * 32,

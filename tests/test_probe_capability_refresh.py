@@ -145,7 +145,8 @@ class TestProbeCapabilityRefresh(unittest.TestCase):
         import agent.probe as probe
 
         src = inspect.getsource(probe.upload_probe)
-        self.assertIn("X-DENG-Session", src)
+        self.assertNotIn("ensure_session_for_feature", src)
+        self.assertNotIn("X-DENG-Session", src)
         self.assertNotIn("X-Dev-Probe-Token", src)
         self.assertNotIn("DENG_DEV_PROBE_TOKEN", src)
 
