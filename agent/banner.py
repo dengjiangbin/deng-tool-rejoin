@@ -12,6 +12,8 @@ from .constants import PRODUCT_NAME, VERSION
 BLUE = "\033[1;94m"
 PINK = "\033[38;5;205m"
 GREY = "\033[90m"
+MONS_COLOR = "\033[2;38;5;240m"
+MONS_VISUAL_WEIGHT = 0.75
 COLOR_LOGO = PINK
 RESET = "\033[0m"
 
@@ -79,7 +81,7 @@ def banner_text(use_color: bool | None = None, terminal_width: int | None = None
     mons_logo = mons_logo_for_width(terminal_width)
     if use_color:
         subtitle = f"{BLUE}{subtitle_text.center(logo_width)}{RESET}"
-        mons = "\n".join(f"{GREY}{line}{RESET}" for line in mons_logo.splitlines())
+        mons = "\n".join(f"{MONS_COLOR}{line}{RESET}" for line in mons_logo.splitlines())
     else:
         subtitle = subtitle_text.center(logo_width)
         mons = mons_logo

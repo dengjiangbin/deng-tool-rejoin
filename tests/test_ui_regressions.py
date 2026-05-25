@@ -40,6 +40,10 @@ class LogoColorRegressionTests(unittest.TestCase):
     def _visual_mass(lines: list[str]) -> int:
         return sum(sum(1 for ch in line if not ch.isspace()) for line in lines)
 
+    @classmethod
+    def _weighted_mons_mass(cls, lines: list[str]) -> float:
+        return cls._visual_mass(lines) * banner.MONS_VISUAL_WEIGHT
+
     def test_logo_color_constant_is_soft_pink_not_bright_magenta_or_cyan(self):
         self.assertIn("38;5;205", banner.COLOR_LOGO)
         self.assertNotIn("95", banner.COLOR_LOGO)
@@ -69,7 +73,9 @@ class LogoColorRegressionTests(unittest.TestCase):
         subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
         mons_lines = lines[subtitle_idx + 1:]
         self.assertTrue(mons_lines)
-        self.assertTrue(all(line.startswith(banner.GREY) for line in mons_lines))
+        self.assertTrue(all(line.startswith(banner.MONS_COLOR) for line in mons_lines))
+        self.assertIn("38;5;240", banner.MONS_COLOR)
+        self.assertTrue(all(line.endswith(banner.RESET) for line in mons_lines))
 
     def test_deng_logo_remains_larger_than_mons(self):
         text = banner.banner_text(use_color=False, terminal_width=80)
@@ -106,7 +112,8 @@ class LogoColorRegressionTests(unittest.TestCase):
     def test_mons_does_not_use_red_or_error_color(self):
         text = banner.banner_text(use_color=True, terminal_width=80)
         mons = "\n".join(self._mons_block(text))
-        self.assertIn(banner.GREY, mons)
+        self.assertIn(banner.MONS_COLOR, mons)
+        self.assertIn("38;5;240", banner.MONS_COLOR)
         self.assertNotIn("\033[31m", mons)
         self.assertNotIn("\033[1;31m", mons)
         self.assertNotIn("\033[91m", mons)
@@ -140,8 +147,23 @@ class LogoColorRegressionTests(unittest.TestCase):
         mons_mass = self._visual_mass(lines[subtitle_idx + 1:])
         ratio = mons_mass / deng_mass
         self.assertEqual(mons_mass, self._visual_mass(self.APPROVED_MONS_ART.splitlines()))
-        self.assertLessEqual(ratio, 0.36)
+        self.assertLessEqual(ratio, 0.27)
         self.assertLessEqual(max(len(line) for line in lines[subtitle_idx + 1:]), 23)
+
+    def test_colored_mons_weighted_visual_size_is_about_one_fifth_of_deng(self):
+        text = banner.banner_text(use_color=True, terminal_width=80)
+        lines = text.splitlines()
+        subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
+        deng_lines = [banner.ANSI_RE.sub("", line) for line in lines[:subtitle_idx]]
+        mons_lines = [banner.ANSI_RE.sub("", line) for line in lines[subtitle_idx + 1:]]
+        deng_mass = self._visual_mass(deng_lines)
+        mons_mass = self._visual_mass(mons_lines)
+        weighted_ratio = self._weighted_mons_mass(mons_lines) / deng_mass
+        self.assertEqual("\n".join(mons_lines), self.APPROVED_MONS_ART)
+        self.assertEqual(mons_mass, 47)
+        self.assertAlmostEqual(weighted_ratio, 0.195, delta=0.015)
+        self.assertLessEqual(weighted_ratio, 0.21)
+        self.assertLess(weighted_ratio, mons_mass / deng_mass)
 
     def test_deng_logo_and_version_line_remain_unchanged(self):
         text = banner.banner_text(use_color=False, terminal_width=80)
