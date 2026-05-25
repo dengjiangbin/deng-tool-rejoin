@@ -934,13 +934,13 @@ describe('theme and dashboard UI', () => {
     assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.sidebar-actions\s*\{\s*grid-template-columns:\s*auto auto;/);
     assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.sidebar-actions\s*\{\s*grid-template-columns:\s*1fr 1fr;/);
     assert.match(css, /\.theme-toggle-track,\s*\.theme-toggle-knob,\s*\.theme-toggle-icon\s*\{\s*pointer-events:\s*none;/);
-    assert.match(css, /\.theme-toggle\s*\{[\s\S]*width:\s*66px;[\s\S]*min-width:\s*66px;[\s\S]*display:\s*inline-flex;[\s\S]*justify-content:\s*center;/);
-    assert.match(css, /\.theme-toggle-track\s*\{[\s\S]*width:\s*56px;[\s\S]*height:\s*34px;/);
-    assert.match(css, /\.theme-toggle-knob\s*\{[\s\S]*width:\s*28px;[\s\S]*height:\s*28px;[\s\S]*transform:\s*translateX\(22px\);/);
-    assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*width:\s*66px;[\s\S]*min-width:\s*66px;/);
-    assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*width:\s*66px;[\s\S]*min-width:\s*66px;[\s\S]*justify-content:\s*center;/);
+    assert.match(css, /\.theme-toggle\s*\{[\s\S]*width:\s*52px;[\s\S]*min-width:\s*52px;[\s\S]*height:\s*30px;[\s\S]*display:\s*inline-flex;[\s\S]*justify-content:\s*center;/);
+    assert.match(css, /\.theme-toggle-track\s*\{[\s\S]*width:\s*52px;[\s\S]*height:\s*30px;[\s\S]*padding:\s*2px;/);
+    assert.match(css, /\.theme-toggle-knob\s*\{[\s\S]*top:\s*2px;[\s\S]*left:\s*2px;[\s\S]*width:\s*26px;[\s\S]*height:\s*26px;[\s\S]*transform:\s*translateX\(24px\);/);
+    assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*width:\s*52px;[\s\S]*min-width:\s*52px;/);
+    assert.match(css, /@media \(max-width: 480px\)[\s\S]*\.theme-toggle\s*\{[\s\S]*width:\s*52px;[\s\S]*min-width:\s*52px;[\s\S]*justify-content:\s*center;/);
     assert.doesNotMatch(themeToggleBlocks, /grid-template-columns:\s*auto auto/);
-    assert.doesNotMatch(themeToggleBlocks, /width:\s*116px/);
+    assert.doesNotMatch(themeToggleBlocks, /width:\s*116px|width:\s*66px|min-width:\s*66px/);
   });
 
   test('theme toggle is compact icon-only without ghost label space', () => {
@@ -949,12 +949,13 @@ describe('theme and dashboard UI', () => {
     const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
     assert.doesNotMatch(layout, /data-theme-label|theme-toggle-label|theme-toggle-text-light|theme-toggle-text-dark/);
     assert.doesNotMatch(css, /theme-toggle-label|theme-toggle-text-light|theme-toggle-text-dark|text-indent/);
-    assert.match(css, /\.theme-toggle\s*\{[\s\S]*width:\s*66px;[\s\S]*padding:\s*4px;/);
-    assert.match(css, /\.theme-toggle-track\s*\{[\s\S]*width:\s*56px;[\s\S]*overflow:\s*hidden;/);
-    assert.match(css, /\.theme-toggle-knob\s*\{[\s\S]*transform:\s*translateX\(22px\);/);
+    assert.match(css, /\.theme-toggle\s*\{[\s\S]*width:\s*52px;[\s\S]*padding:\s*0;/);
+    assert.match(css, /\.theme-toggle-track\s*\{[\s\S]*width:\s*52px;[\s\S]*height:\s*30px;[\s\S]*padding:\s*2px;[\s\S]*overflow:\s*hidden;/);
+    assert.match(css, /\.theme-toggle-knob\s*\{[\s\S]*width:\s*26px;[\s\S]*height:\s*26px;[\s\S]*transform:\s*translateX\(24px\);/);
     assert.match(css, /:root\[data-theme="light"\]\s+\.theme-toggle-knob\s*\{[\s\S]*transform:\s*translateX\(0\);/);
     const themeToggleBlocks = Array.from(css.matchAll(/\.theme-toggle\s*\{[^}]*\}/g)).map((match) => match[0]).join('\n');
-    assert.doesNotMatch(themeToggleBlocks, /min-width:\s*116px|width:\s*116px|grid-template-columns:\s*auto auto/);
+    assert.doesNotMatch(themeToggleBlocks, /min-width:\s*116px|width:\s*116px|width:\s*66px|min-width:\s*66px|grid-template-columns:\s*auto auto/);
+    assert.doesNotMatch(css, /theme-toggle::(?:before|after)[\s\S]*content:\s*["'](?:LIGHT|DARK)/i);
     assert.doesNotMatch(js, /data-theme-label|nextLabel|textContent = nextLabel/);
     assert.match(js, /Switch to ' \+ \(next === 'light' \? 'dark' : 'light'\) \+ ' mode'/);
     assert.doesNotMatch(js, /Night|Switch to night/i);
