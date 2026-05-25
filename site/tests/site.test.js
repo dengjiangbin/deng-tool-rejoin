@@ -6,6 +6,7 @@ const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
+const { encryptLicenseKeyPlaintext } = require('../src/licenseCrypto');
 
 process.env.TOOL_SITE_COOKIE_SECRET = 'test-cookie-secret-that-is-long-enough-for-the-site-suite';
 process.env.TOOL_SITE_STATE_SECRET = 'test-state-secret-that-is-long-enough-for-challenge-suite';
@@ -34,6 +35,7 @@ process.env.LOOTLABS_MONETIZED_URL = 'https://lootdest.org/s?TqZQAW38';
 process.env.LOOTLABS_COMPLETE_URL = 'http://localhost:8791/unlock/lootlabs/complete';
 process.env.AD_MIN_COMPLETION_SECONDS = '30';
 process.env.AD_RETURN_SIGNING_SECRET = 'test-return-signing-secret-that-is-long-enough';
+process.env.LICENSE_KEY_EXPORT_SECRET = 'test-license-key-export-secret-that-is-long-enough';
 
 class MemoryQuery {
   constructor(db, table) {
@@ -394,6 +396,44 @@ function csrfFrom(html) {
 
 function licenseKeyId(rawKey) {
   return require('node:crypto').createHash('sha256').update(rawKey.toUpperCase()).digest('hex');
+}
+
+function insertLicenseFixture(rawKey, overrides = {}) {
+  const normalized = rawKey.toUpperCase();
+  const parts = normalized.split('-');
+  const id = licenseKeyId(normalized);
+  const now = new Date().toISOString();
+  const keyCiphertext = encryptLicenseKeyPlaintext(normalized);
+  const row = {
+    id,
+    prefix: `${parts[0]}-${parts[1]}`,
+    suffix: parts[4],
+    owner_discord_id: 'discord-user-1',
+    site_user_id: memoryDb.site_users[0]?.id || null,
+    status: 'active',
+    plan: 'standard',
+    created_at: now,
+    redeemed_at: null,
+    expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+    key_ciphertext: keyCiphertext,
+    key_export_available: Boolean(keyCiphertext),
+    ...overrides,
+  };
+  memoryDb.license_keys.push(row);
+  memoryDb.license_ad_challenges.push({
+    id: `fixture-${id.slice(0, 8)}`,
+    site_user_id: row.site_user_id,
+    discord_user_id: row.owner_discord_id,
+    status: 'key_generated',
+    provider: 'lootlabs',
+    license_key_id: id,
+    key_prefix: `${parts[0]}-${parts[1]}-${parts[2]}`,
+    key_suffix: `${parts[3]}-${parts[4]}`,
+    created_at: row.created_at,
+    completed_at: row.created_at,
+    key_expires_at: row.expires_at,
+  });
+  return row;
 }
 
 function challengeIdFrom(html) {
@@ -1007,6 +1047,99 @@ describe('Luarmor-style key flow', () => {
     assert.doesNotMatch(html, /Could not start key generation/);
     assert.equal(memoryDb.license_ad_challenges.length, 1);
     assert.equal(memoryDb.license_ad_challenges[0].status, 'created');
+  });
+
+  test('Generate Key returns existing active unredeemed key in full without a new ad challenge', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const existing = 'DENG-1111-2222-3333-4444';
+    insertLicenseFixture(existing);
+
+    const page = await agent.get('/license');
+    assert.match(page.text, /You already have an unused key\./);
+    assert.match(page.text, new RegExp(existing));
+    assert.doesNotMatch(page.text, /\*\*\*\*/);
+
+    const csrf = csrfFrom(page.text);
+    const blocked = await agent
+      .post('/api/key/start')
+      .set('Accept', 'application/json')
+      .type('form')
+      .send({ _csrf: csrf });
+    assert.equal(blocked.status, 200);
+    assert.equal(blocked.body.status, 'existing_unused_key');
+    assert.equal(blocked.body.existing_key.key, existing);
+    assert.equal(memoryDb.license_ad_challenges.length, 1);
+    assert.equal(memoryDb.license_keys.length, 1);
+    assert.equal(linkvertiseApi.callCount, 0);
+    assert.equal(lootlabsApi.callCount, 0);
+  });
+
+  test('active unredeemed key message takes priority over cooldown', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const existing = 'DENG-1212-3434-5656-7878';
+    insertLicenseFixture(existing);
+    memoryDb.license_ad_challenges[0].created_at = new Date().toISOString();
+    memoryDb.license_ad_challenges[0].completed_at = new Date().toISOString();
+
+    const page = await agent.get('/license');
+    assert.match(page.text, /You already have an unused key\./);
+    assert.match(page.text, new RegExp(existing));
+    assert.doesNotMatch(page.text, /Cooldown active:/);
+  });
+
+  test('expired unredeemed key is marked expired and does not block generation', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const past = new Date(Date.now() - 25 * 3600 * 1000).toISOString();
+    const old = insertLicenseFixture('DENG-AAAA-BBBB-CCCC-DDDD', {
+      created_at: past,
+      expires_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+    });
+
+    const { html } = await startChallenge(agent);
+    assert.match(html, /LootLabs/);
+    assert.equal(memoryDb.license_keys.find((row) => row.id === old.id).status, 'expired');
+    assert.equal(memoryDb.license_ad_challenges.length, 2);
+  });
+
+  test('redeemed, bound, and revoked keys do not block generation when cooldown allows', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const past = new Date(Date.now() - 120 * 1000).toISOString();
+    const redeemed = insertLicenseFixture('DENG-1000-2000-3000-4000', {
+      created_at: past,
+      redeemed_at: past,
+      expires_at: null,
+    });
+    const bound = insertLicenseFixture('DENG-ABCD-1111-2222-3333', {
+      created_at: past,
+      redeemed_at: past,
+      expires_at: null,
+    });
+    insertLicenseFixture('DENG-9999-8888-7777-6666', {
+      status: 'revoked',
+      created_at: past,
+      expires_at: null,
+    });
+    memoryDb.device_bindings.push({
+      key_id: bound.id,
+      install_id_hash: 'bound-hwid',
+      device_model: 'Cloud Phone',
+      device_label: 'Cloud Phone',
+      last_seen_at: past,
+      is_active: true,
+    });
+    memoryDb.license_ad_challenges.forEach((row) => {
+      row.created_at = past;
+      row.completed_at = past;
+    });
+
+    const { html } = await startChallenge(agent);
+    assert.match(html, /LootLabs/);
+    assert.equal(memoryDb.license_ad_challenges.length, 4);
+    assert.ok(memoryDb.license_keys.find((row) => row.id === redeemed.id).redeemed_at);
   });
 
   test('Generate Key repairs stale fallback site_user_id before challenge insert', async () => {
@@ -1635,11 +1768,38 @@ describe('Luarmor-style key flow', () => {
     assert.equal(memoryDb.license_keys.length, 1);
   });
 
-  test('server-side cooldown is enforced after a generated key (Linkvertise)', async () => {
+  test('two simultaneous provider completions create only one active unredeemed key', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const first = await chooseProvider(agent, 'lootlabs');
+    const second = await chooseProvider(agent, 'lootlabs');
+
+    const [firstComplete, secondComplete] = await Promise.all([
+      completeProvider(agent, 'lootlabs', first.returnToken),
+      completeProvider(agent, 'lootlabs', second.returnToken),
+    ]);
+
+    assert.equal(firstComplete.status, 302);
+    assert.equal(secondComplete.status, 302);
+    assert.equal(firstComplete.headers.location, '/key/result');
+    assert.equal(secondComplete.headers.location, '/key/result');
+    const activeUnused = memoryDb.license_keys.filter((row) => (
+      row.status === 'active' &&
+      !row.redeemed_at &&
+      !memoryDb.device_bindings.some((binding) => binding.key_id === row.id && binding.is_active) &&
+      new Date(row.expires_at).getTime() > Date.now()
+    ));
+    assert.equal(activeUnused.length, 1);
+    assert.equal(memoryDb.license_keys.length, 1);
+  });
+
+  test('server-side cooldown is enforced after a redeemed generated key (Linkvertise)', async () => {
     const agent = request.agent(app);
     await login(agent);
     const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
     await completeProvider(agent, 'linkvertise', hash);
+    memoryDb.license_keys[0].redeemed_at = new Date().toISOString();
+    memoryDb.license_keys[0].expires_at = null;
 
     const page = await agent.get('/license');
     const csrf = csrfFrom(page.text);
@@ -2026,6 +2186,7 @@ describe('My License action APIs', () => {
     assert.match(res.text, /Device: None/);
     assert.match(res.text, /Device: SM-N9810/);
     assert.match(res.text, /Created: 22 Mei 2026, 2:14:05 PM/);
+    assert.match(res.text, /Expires: None/);
     assert.match(res.text, /Redeemed: 22 Mei 2026, 2:21:40 PM/);
     assert.match(res.text, /Created: 15 Mei 2026, 3:40:35 AM/);
     assert.match(res.text, /Redeemed: 15 Mei 2026, 3:41:40 AM/);
@@ -2064,9 +2225,14 @@ describe('health and service identity', () => {
     memoryDb.license_keys[0].expires_at = '2026-05-23T17:00:00.000Z';
     memoryDb.license_ad_challenges[0].completed_at = '2026-05-22T07:14:05.740Z';
     memoryDb.license_ad_challenges[0].key_expires_at = '2026-05-23T17:00:00.000Z';
+    memoryDb.license_ad_challenges[0].key_prefix = memoryDb.license_ad_challenges[0].key_prefix || memoryDb.license_keys[0].prefix;
+    memoryDb.license_ad_challenges[0].key_suffix = memoryDb.license_ad_challenges[0].key_suffix || memoryDb.license_keys[0].suffix;
     const res = await agent.get('/api/license/history');
     assert.equal(res.status, 200);
     assert.ok(res.body.history.length > 0);
+    assert.match(res.body.history[0].key, /DENG-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}/);
+    assert.match(res.body.history[0].masked_key, /^DENG-[0-9A-F]{4}\.\.\.[0-9A-F]{4}$/);
+    assert.notEqual(res.body.history[0].masked_key, res.body.history[0].key);
     assert.equal(res.body.history[0].created_at_formatted, '22 Mei 2026, 2:14:05 PM');
     assert.equal(res.body.history[0].key_expires_at_formatted, '24 Mei 2026, 12:00:00 AM');
   });

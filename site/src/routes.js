@@ -47,6 +47,7 @@ const SAFE_MESSAGES = {
   NO_PROVIDER_CONFIGURED: 'No ad provider is configured yet.',
   AUTH_REQUIRED: 'Please login with Discord first.',
   COOLDOWN_ACTIVE: 'Please wait before generating another key.',
+  EXISTING_UNUSED_KEY: 'You already have an unused key. Copy or redeem this key before generating another.',
   TOO_MANY_ATTEMPTS: 'Too many key generation attempts. Please wait before trying again.',
   CHALLENGE_TABLE_MISSING: 'Key generation database is not ready yet.',
   DB_FOREIGN_KEY_FAILED: 'Could not prepare your license account. Please try again.',
@@ -302,6 +303,19 @@ function fullKeyRow(row) {
   return `${prefix}-${suffix}`;
 }
 
+function existingUnusedPayload(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    key: fullKeyRow(row),
+    expires_at: row.expires_at || row.key_expires_at || null,
+    expires_at_formatted: formatWibTimestamp(row.expires_at || row.key_expires_at),
+    provider: providerLabel(row.provider),
+    status: friendlyStatus(row),
+    message: 'You already have an unused key. Copy or redeem this key before generating another.',
+  };
+}
+
 function providerLabel(provider) {
   return licenseService.providerLabel(provider);
 }
@@ -347,9 +361,7 @@ async function loadHistory(siteUserId, limit = 20, fallbackDiscordUserId = '') {
     .eq('id', siteUserId)
     .maybeSingle();
   const owner = data?.discord_user_id || fallbackDiscordUserId;
-  const byOwner = owner ? await licenseService.getUserLicenses(owner, { limit }) : [];
-  if (byOwner.length > 0) return licenseService.filterActiveLicenses(byOwner);
-  return licenseService.getUserLicenses(siteUserId, { limit })
+  return licenseService.getPortalUserLicenses({ discordUserId: owner, siteUserId, limit })
     .then(licenseService.filterActiveLicenses);
 }
 
@@ -367,6 +379,24 @@ async function handleKeyStart(req, res) {
   try {
     await ensureRealSiteUser(req);
     const { user } = req.session;
+
+    const existingUnused = await licenseService.findActiveUnredeemedKey({
+      discordUserId: discordOwnerId(req),
+      siteUserId: user.id,
+    });
+    if (existingUnused) {
+      const payload = existingUnusedPayload(existingUnused);
+      if (wantsJson(req)) {
+        return res.status(200).json({
+          status: 'existing_unused_key',
+          existing_key: payload,
+          message: payload.message,
+        });
+      }
+      req.session.recoveredExistingKey = payload;
+      safeFlash(req, 'success', payload.message);
+      return res.redirect(303, '/license');
+    }
 
     if (enabledProviders().length === 0) {
       const err = new Error('No enabled ad providers');
@@ -572,7 +602,11 @@ async function handleProviderComplete(req, res, provider) {
   );
 
   try {
-    const { key, alreadyDone } = await challenge.completeActiveProviderChallenge(req, selected, returnToken);
+    const { key, alreadyDone, recoveredExisting } = await challenge.completeActiveProviderChallenge(req, selected, returnToken);
+    if (recoveredExisting && key && !alreadyDone) {
+      req.session.generatedKey = key;
+      req.session.generatedKeyRecovery = true;
+    }
     if (alreadyDone && req.session.generatedKey) {
       return res.redirect('/key/result');
     }
@@ -682,7 +716,11 @@ async function handleLinkvertiseComplete(req, res) {
   }
 
   try {
-    const { key, alreadyDone } = await challenge.completeAdAndGenerateKey(row);
+    const { key, alreadyDone, recoveredExisting } = await challenge.completeAdAndGenerateKey(row);
+    if (recoveredExisting && key && !alreadyDone) {
+      req.session.generatedKey = key;
+      req.session.generatedKeyRecovery = true;
+    }
     if (alreadyDone && req.session.generatedKey) {
       return res.redirect('/key/result');
     }
@@ -775,7 +813,11 @@ async function handleLootLabsComplete(req, res) {
   }
 
   try {
-    const { key, alreadyDone } = await challenge.completeAdAndGenerateKey(row);
+    const { key, alreadyDone, recoveredExisting } = await challenge.completeAdAndGenerateKey(row);
+    if (recoveredExisting && key && !alreadyDone) {
+      req.session.generatedKey = key;
+      req.session.generatedKeyRecovery = true;
+    }
     if (alreadyDone && req.session.generatedKey) {
       return res.redirect('/key/result');
     }
@@ -952,11 +994,18 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
   try {
     const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req));
     const cooldown = await challenge.checkCooldown(req.session.user.id);
+    const existingUnused = await licenseService.findActiveUnredeemedKey({
+      discordUserId: discordOwnerId(req),
+      siteUserId: req.session.user.id,
+    });
+    const recoveredExistingKey = req.session.recoveredExistingKey || null;
+    delete req.session.recoveredExistingKey;
     res.render('license', {
       title: 'My License - DENG Tool',
       history,
       stats: summarizeHistory(history),
       cooldown,
+      existingUnusedKey: existingUnusedPayload(existingUnused) || recoveredExistingKey,
       maskKeyRow,
       fullKeyRow,
       friendlyStatus,
@@ -970,6 +1019,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
       history: [],
       stats: summarizeHistory([]),
       cooldown: { allowed: true, secondsLeft: 0 },
+      existingUnusedKey: null,
       maskKeyRow,
       fullKeyRow,
       friendlyStatus,
@@ -1024,7 +1074,9 @@ router.get('/key/result', requireLogin, (req, res) => {
     safeFlash(req, 'error', 'No key available. Please generate a new one.');
     return res.redirect('/license');
   }
-  res.render('key_result', { title: 'Your Key - DENG Tool', key });
+  const recoveredExisting = Boolean(req.session.generatedKeyRecovery);
+  delete req.session.generatedKeyRecovery;
+  res.render('key_result', { title: 'Your Key - DENG Tool', key, recoveredExisting });
 });
 
 router.get('/api/stats/public', (_req, res) => {
@@ -1052,7 +1104,8 @@ router.get('/api/license/history', requireLogin, repairSiteUser, async (req, res
     res.json({
       history: history.map((row) => ({
         id: row.id,
-        key: maskKeyRow(row),
+        key: fullKeyRow(row),
+        masked_key: maskKeyRow(row),
         status: friendlyStatus(row),
         provider: providerLabel(row.provider),
         created_at: row.created_at,

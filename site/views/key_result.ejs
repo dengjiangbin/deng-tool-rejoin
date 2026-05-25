@@ -5,9 +5,13 @@
     <div class="key-success-logo">
       <img src="/public/img/deng-logo.png?v=<%= assetVersion %>" alt="DENG Tool" class="result-logo-img">
     </div>
-    <h1 class="key-result-title">Your Key Is Ready</h1>
+    <h1 class="key-result-title"><%= recoveredExisting ? 'Your Unused Key' : 'Your Key Is Ready' %></h1>
     <p class="key-result-desc">
-      Copy the key below. The key is server-rendered for your authorized session and is not stored in the URL.
+      <% if (recoveredExisting) { %>
+        You already have an unused key. Copy or redeem this key before generating another one.
+      <% } else { %>
+        Copy the key below. The key is server-rendered for your authorized session and is not stored in the URL.
+      <% } %>
     </p>
 
     <div class="key-display-wrap">

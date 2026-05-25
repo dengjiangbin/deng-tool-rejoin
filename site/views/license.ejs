@@ -20,9 +20,23 @@
     <div class="cooldown-notice" data-seconds="<%= flash.cooldown %>">
       Cooldown active: <span class="countdown"></span>
     </div>
-  <% } else if (cooldown && !cooldown.allowed && cooldown.secondsLeft > 0) { %>
+  <% } else if (!existingUnusedKey && cooldown && !cooldown.allowed && cooldown.secondsLeft > 0) { %>
     <div class="cooldown-notice" data-seconds="<%= cooldown.secondsLeft %>">
       Cooldown active: <span class="countdown"></span>
+    </div>
+  <% } %>
+
+  <% if (existingUnusedKey) { %>
+    <div class="unused-key-recovery">
+      <p class="empty-title">You already have an unused key.</p>
+      <p class="empty-text">Copy or redeem this key before generating another one.</p>
+      <div class="key-display-wrap">
+        <code class="key-display" id="existing-key-value"><%= existingUnusedKey.key %></code>
+        <button class="btn-copy" type="button" data-key="<%= existingUnusedKey.key %>" onclick="copyExistingKey(this)" aria-label="Copy key">Copy</button>
+      </div>
+      <% if (existingUnusedKey.expires_at_formatted && existingUnusedKey.expires_at_formatted !== 'None') { %>
+        <p class="empty-text">Expires: <%= existingUnusedKey.expires_at_formatted %></p>
+      <% } %>
     </div>
   <% } %>
 
@@ -99,6 +113,22 @@
     </div>
   </div>
 </div>
+
+<script>
+function copyExistingKey(btn) {
+  var key = btn.dataset.key;
+  navigator.clipboard.writeText(key).then(function() {
+    btn.textContent = 'Copied';
+    btn.classList.add('copied');
+    setTimeout(function() {
+      btn.textContent = 'Copy';
+      btn.classList.remove('copied');
+    }, 2200);
+  }).catch(function() {
+    btn.textContent = 'Copy manually';
+  });
+}
+</script>
 
 <div class="modal-backdrop" data-license-modal="redeem" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="redeem-key-title">

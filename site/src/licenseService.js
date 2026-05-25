@@ -141,33 +141,63 @@ async function fetchByKeyId(table, columns, keyIds, field = 'key_id') {
   return data || [];
 }
 
-async function getUserLicenses(discordUserId, { limit = 20 } = {}) {
-  const owner = String(discordUserId || '').trim();
-  if (!owner) return [];
-
+async function fetchLicenseRowsByOwner(owner, limit) {
+  const normalized = String(owner || '').trim();
+  if (!normalized) return [];
   let { data: keys, error } = await supabase
     .from('license_keys')
-    .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, key_ciphertext, key_export_available')
-    .eq('owner_discord_id', owner)
+    .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, site_user_id, key_ciphertext, key_export_available')
+    .eq('owner_discord_id', normalized)
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error && missingColumn(error)) {
     const retry = await supabase
       .from('license_keys')
-      .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at')
-      .eq('owner_discord_id', owner)
+      .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, site_user_id')
+      .eq('owner_discord_id', normalized)
       .order('created_at', { ascending: false })
       .limit(limit);
     keys = retry.data;
     error = retry.error;
   }
   if (error) {
-    console.error('[licenseService/getUserLicenses]', error.message || error);
+    console.error('[licenseService/fetchLicenseRowsByOwner]', error.message || error);
     return [];
   }
+  return keys || [];
+}
 
-  const keyRows = keys || [];
-  const keyIds = keyRows.map((row) => row.id).filter(Boolean);
+async function fetchLicenseRowsBySiteUser(siteUserId, limit) {
+  const normalized = String(siteUserId || '').trim();
+  if (!normalized) return [];
+  let { data: keys, error } = await supabase
+    .from('license_keys')
+    .select('id, prefix, suffix, status, plan, created_at, expires_at, redeemed_at, owner_discord_id, site_user_id, key_ciphertext, key_export_available')
+    .eq('site_user_id', normalized)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error && missingColumn(error)) return [];
+  if (error) {
+    console.error('[licenseService/fetchLicenseRowsBySiteUser]', error.message || error);
+    return [];
+  }
+  return keys || [];
+}
+
+function uniqueRows(rows) {
+  const out = [];
+  const seen = new Set();
+  for (const row of rows || []) {
+    if (!row || !row.id || seen.has(row.id)) continue;
+    seen.add(row.id);
+    out.push(row);
+  }
+  return out;
+}
+
+async function hydrateLicenseRows(keyRows, owner = '') {
+  const rows = keyRows || [];
+  const keyIds = rows.map((row) => row.id).filter(Boolean);
   const [bindings, challenges] = await Promise.all([
     fetchByKeyId('device_bindings', 'key_id, device_model, device_label, last_seen_at, is_active', keyIds),
     fetchByKeyId('license_ad_challenges', 'license_key_id, key_prefix, key_suffix, provider, completed_at, created_at, key_expires_at', keyIds, 'license_key_id'),
@@ -176,7 +206,7 @@ async function getUserLicenses(discordUserId, { limit = 20 } = {}) {
   const bindingByKey = new Map(bindings.map((row) => [row.key_id, row]));
   const challengeByKey = new Map(challenges.map((row) => [row.license_key_id, row]));
 
-  return keyRows.map((record) => {
+  return rows.map((record) => {
     const binding = bindingByKey.get(record.id) || {};
     const challenge = challengeByKey.get(record.id) || {};
     const activeBinding = Boolean(binding.is_active);
@@ -199,7 +229,8 @@ async function getUserLicenses(discordUserId, { limit = 20 } = {}) {
       provider: challenge.provider || 'discord',
       status: record.status || 'active',
       license_status: record.status || 'active',
-      owner_discord_id: owner,
+      owner_discord_id: record.owner_discord_id || owner,
+      site_user_id: record.site_user_id || null,
       created_at: challenge.completed_at || challenge.created_at || record.created_at,
       key_expires_at: challenge.key_expires_at || record.expires_at || null,
       expires_at: record.expires_at || null,
@@ -212,6 +243,52 @@ async function getUserLicenses(discordUserId, { limit = 20 } = {}) {
       last_seen_at: activeBinding ? binding.last_seen_at : null,
     };
   });
+}
+
+async function getUserLicenses(discordUserId, { limit = 20 } = {}) {
+  const owner = String(discordUserId || '').trim();
+  if (!owner) return [];
+  return hydrateLicenseRows(await fetchLicenseRowsByOwner(owner, limit), owner);
+}
+
+async function getPortalUserLicenses({ discordUserId = '', siteUserId = '', limit = 20 } = {}) {
+  const owners = [
+    String(discordUserId || '').trim(),
+    siteUserId ? `site:${siteUserId}` : '',
+  ].filter(Boolean);
+  const rowSets = await Promise.all([
+    ...owners.map((owner) => fetchLicenseRowsByOwner(owner, limit)),
+    fetchLicenseRowsBySiteUser(siteUserId, limit),
+  ]);
+  const rows = uniqueRows(rowSets.flat()).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  return hydrateLicenseRows(rows.slice(0, limit), discordUserId || siteUserId);
+}
+
+function isUnusedLicense(row) {
+  return Boolean(row && !row.redeemed_at && !row.used && !row.active_binding);
+}
+
+async function markExpiredUnredeemedKeys({ discordUserId = '', siteUserId = '' } = {}) {
+  const rows = await getPortalUserLicenses({ discordUserId, siteUserId, limit: 500 });
+  const expired = rows.filter((row) => (
+    isUnusedLicense(row) &&
+    licenseStatus(row) === 'active' &&
+    isoExpired(row.expires_at)
+  ));
+  await Promise.all(expired.map((row) => (
+    supabase.from('license_keys').update({ status: 'expired' }).eq('id', row.id)
+  )));
+  return expired.length;
+}
+
+async function findActiveUnredeemedKey({ discordUserId = '', siteUserId = '' } = {}) {
+  await markExpiredUnredeemedKeys({ discordUserId, siteUserId });
+  const rows = await getPortalUserLicenses({ discordUserId, siteUserId, limit: 500 });
+  return rows.find((row) => (
+    isUnusedLicense(row) &&
+    licenseStatus(row) === 'active' &&
+    !isoExpired(row.expires_at)
+  )) || null;
 }
 
 async function getActiveUserLicenses(discordUserId, opts = {}) {
@@ -377,6 +454,7 @@ function downloadUserKeys(discordUserId, rows, username = '') {
     lines.push(`   Status: ${deviceStatus(row)}`);
     lines.push(`   Device: ${row.device_display || 'None'}`);
     lines.push(`   Created: ${formatWibTimestamp(row.created_at)}`);
+    lines.push(`   Expires: ${formatWibTimestamp(row.expires_at || row.key_expires_at)}`);
     lines.push(`   Redeemed: ${formatWibTimestamp(row.redeemed_at)}`);
     lines.push(`   Provider: ${providerLabel(row.provider)}`);
     lines.push('');
@@ -415,9 +493,11 @@ async function getUserLicenseStats(discordUserId, { limit = 200 } = {}) {
 module.exports = {
   FULL_KEY_UNAVAILABLE,
   computeStats,
+  findActiveUnredeemedKey,
   filterActiveLicenses,
   formatLicenseStatus,
   getActiveUserLicenses,
+  getPortalUserLicenses,
   getUserLicenses,
   getUserLicenseStats,
   downloadUserKeys,

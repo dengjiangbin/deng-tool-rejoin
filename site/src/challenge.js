@@ -9,6 +9,7 @@ const supabase = require('./db');
 const { signChallenge, verifyChallenge, sha256, randomHex } = require('./crypto');
 const { generateDengKey } = require('./keyGen');
 const { encryptLicenseKeyPlaintext } = require('./licenseCrypto');
+const licenseService = require('./licenseService');
 const crypto = require('crypto');
 
 const COOLDOWN_SECONDS = parseInt(process.env.KEY_GENERATION_COOLDOWN_SECONDS || '60', 10);
@@ -44,11 +45,39 @@ const ALLOWED_PROVIDER_REFERERS = {
 
 const CONSUMED_STATUSES = ['ad_completed', 'key_generated', 'completed', 'used'];
 const COMPLETABLE_STATUSES = ['provider_selected', 'pending_ad', 'ad_started'];
+const GENERATION_LOCKS = new Map();
 
 function safeError(code, message) {
   const err = new Error(message || code);
   err.code = code;
   return err;
+}
+
+function recoverExistingResult(row) {
+  return {
+    key: licenseService.getRecoverableFullKey(row) || licenseService.FULL_KEY_UNAVAILABLE,
+    alreadyDone: false,
+    recoveredExisting: true,
+    existingKey: row,
+  };
+}
+
+async function withGenerationLock(lockKey, fn) {
+  const key = String(lockKey || 'unknown');
+  const previous = GENERATION_LOCKS.get(key) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => { release = resolve; });
+  const chained = previous.then(() => current, () => current);
+  GENERATION_LOCKS.set(key, chained);
+  await previous.catch(() => {});
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (GENERATION_LOCKS.get(key) === chained) {
+      GENERATION_LOCKS.delete(key);
+    }
+  }
 }
 
 function returnSigningSecret() {
@@ -744,79 +773,96 @@ async function verifyChallengeForRequest(signedToken, req, expectedProvider) {
 
 async function completeAdAndGenerateKey(challengeRow) {
   const { id: challengeId, site_user_id, discord_user_id } = challengeRow;
+  const lockKey = discord_user_id || site_user_id;
 
-  const cooldown = await checkCooldown(site_user_id);
-  if (!cooldown.allowed) {
-    throw safeError('COOLDOWN_ACTIVE', `Cooldown active. Try again in ${cooldown.secondsLeft}s.`);
-  }
-
-  const { data: adDone, error: adErr } = await supabase
-    .from('license_ad_challenges')
-    .update({ status: 'ad_completed' })
-    .eq('id', challengeId)
-    .eq('status', 'pending_ad')
-    .select()
-    .single();
-
-  if (adErr || !adDone) {
-    const { data: existing } = await supabase
-      .from('license_ad_challenges')
-      .select('status')
-      .eq('id', challengeId)
-      .single();
-    if (existing && ['ad_completed', 'key_generated'].includes(existing.status)) {
-      return { key: null, alreadyDone: true };
+  return withGenerationLock(lockKey, async () => {
+    const existingUnused = await licenseService.findActiveUnredeemedKey({ discordUserId: discord_user_id, siteUserId: site_user_id });
+    if (existingUnused) {
+      return recoverExistingResult(existingUnused);
     }
-    throw safeError('PROVIDER_CHALLENGE_ALREADY_USED', 'Challenge state conflict');
-  }
 
-  const { raw, id: keyId, prefix, suffix, displayPrefix, displaySuffix } = generateDengKey();
-  const now = new Date().toISOString();
-  const expiresAt = keyExpiresAt();
-  const keyCiphertext = encryptLicenseKeyPlaintext(raw);
+    const cooldown = await checkCooldown(site_user_id);
+    if (!cooldown.allowed) {
+      throw safeError('COOLDOWN_ACTIVE', `Cooldown active. Try again in ${cooldown.secondsLeft}s.`);
+    }
 
-  try {
-    await insertLicenseKey({
-      id: keyId,
-      prefix,
-      suffix,
-      owner_discord_id: discord_user_id || null,
-      site_user_id: site_user_id || null,
-      status: 'active',
-      plan: 'standard',
-      expires_at: expiresAt,
-      redeemed_at: null,
-      created_by: discord_user_id || null,
-      ...(keyCiphertext ? { key_ciphertext: keyCiphertext, key_export_available: true } : { key_export_available: false }),
-    }, site_user_id, discord_user_id);
-  } catch (keyErr) {
-    await supabase
+    const { data: adDone, error: adErr } = await supabase
       .from('license_ad_challenges')
-      .update({ status: 'failed', failure_reason: keyErr.message })
-      .eq('id', challengeId);
-    throw safeError('KEY_GENERATION_FAILED', `Key store failed: ${keyErr.message}`);
-  }
+      .update({ status: 'ad_completed' })
+      .eq('id', challengeId)
+      .eq('status', 'pending_ad')
+      .select()
+      .single();
 
-  const { data: finalRow, error: finalErr } = await supabase
-    .from('license_ad_challenges')
-    .update({
-      status: 'key_generated',
-      license_key_id: keyId,
-      key_prefix: displayPrefix,
-      key_suffix: displaySuffix,
-      key_expires_at: expiresAt,
-      completed_at: now,
-    })
-    .eq('id', challengeId)
-    .eq('status', 'ad_completed')
-    .select()
-    .single();
+    if (adErr || !adDone) {
+      const { data: existing } = await supabase
+        .from('license_ad_challenges')
+        .select('status')
+        .eq('id', challengeId)
+        .single();
+      if (existing && ['ad_completed', 'key_generated'].includes(existing.status)) {
+        return { key: null, alreadyDone: true };
+      }
+      throw safeError('PROVIDER_CHALLENGE_ALREADY_USED', 'Challenge state conflict');
+    }
 
-  if (finalErr || !finalRow) {
-    console.error('[challenge] key stored but challenge row not finalized');
-  }
+    const existingAfterConsume = await licenseService.findActiveUnredeemedKey({ discordUserId: discord_user_id, siteUserId: site_user_id });
+    if (existingAfterConsume) {
+      return recoverExistingResult(existingAfterConsume);
+    }
 
-  return { key: raw, alreadyDone: false };
+    const { raw, id: keyId, prefix, suffix, displayPrefix, displaySuffix } = generateDengKey();
+    const now = new Date().toISOString();
+    const expiresAt = keyExpiresAt();
+    const keyCiphertext = encryptLicenseKeyPlaintext(raw);
+
+    try {
+      await insertLicenseKey({
+        id: keyId,
+        prefix,
+        suffix,
+        owner_discord_id: discord_user_id || null,
+        site_user_id: site_user_id || null,
+        status: 'active',
+        plan: 'standard',
+        expires_at: expiresAt,
+        redeemed_at: null,
+        created_by: discord_user_id || null,
+        ...(keyCiphertext ? { key_ciphertext: keyCiphertext, key_export_available: true } : { key_export_available: false }),
+      }, site_user_id, discord_user_id);
+    } catch (keyErr) {
+      const duplicate = await licenseService.findActiveUnredeemedKey({ discordUserId: discord_user_id, siteUserId: site_user_id });
+      if (duplicate) {
+        return recoverExistingResult(duplicate);
+      }
+      await supabase
+        .from('license_ad_challenges')
+        .update({ status: 'failed', failure_reason: keyErr.message })
+        .eq('id', challengeId);
+      throw safeError('KEY_GENERATION_FAILED', `Key store failed: ${keyErr.message}`);
+    }
+
+    const { data: finalRow, error: finalErr } = await supabase
+      .from('license_ad_challenges')
+      .update({
+        status: 'key_generated',
+        license_key_id: keyId,
+        key_prefix: displayPrefix,
+        key_suffix: displaySuffix,
+        key_expires_at: expiresAt,
+        completed_at: now,
+      })
+      .eq('id', challengeId)
+      .eq('status', 'ad_completed')
+      .select()
+      .single();
+
+    if (finalErr || !finalRow) {
+      console.error('[challenge] key stored but challenge row not finalized');
+    }
+
+    return { key: raw, alreadyDone: false };
+  });
 }
 
 module.exports = {

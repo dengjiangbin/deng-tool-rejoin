@@ -1055,6 +1055,16 @@ input {
   padding: 10px 12px;
 }
 
+.unused-key-recovery {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px solid rgba(22, 163, 74, 0.25);
+  border-radius: 12px;
+  background: rgba(22, 163, 74, 0.08);
+}
+
 .unlock-page,
 .key-result-page {
   display: flex;
