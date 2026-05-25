@@ -25,15 +25,17 @@ ASCII_DENG = r"""
 """.strip("\n")
 
 ASCII_MONS_WIDE = r"""
-╔╦╗ ╔╗╔╗╔═
-║║║ ║║║║╚╗
-╝╚╝ ╚╝╝╚═╝
+MONS
+█   █  ███  █  █  ███
+██ ██ █   █ ██ █ █
+█ █ █ █   █ █ ██  ██
+█   █ █   █ █  █    █
+█   █  ███  █  █ ███
 """.strip("\n")
 
 ASCII_MONS_NARROW = r"""
-╔╦╗╔╗╔╗╔═
-║║║║║║║╚╗
-╝╚╝╚╝╝╚═╝
+MONS
+▓M▓ ▓O▓ ▓N▓ ▓S▓
 """.strip("\n")
 
 ASCII_MONS = ASCII_MONS_WIDE
