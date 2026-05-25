@@ -49,9 +49,9 @@ class LogoColorRegressionTests(unittest.TestCase):
         text = banner.banner_text(use_color=False, terminal_width=80)
         mons_block = self._mons_block(text)
         self.assertEqual(mons_block, banner.ASCII_MONS_WIDE.splitlines())
-        self.assertGreaterEqual(len(mons_block), 5)
-        self.assertIn("MONS", mons_block[0])
-        self.assertLessEqual(max(len(line) for line in mons_block), 26)
+        self.assertEqual(len(mons_block), 1)
+        self.assertNotIn("MONS", mons_block)
+        self.assertLessEqual(max(len(line) for line in mons_block), 11)
         self.assertFalse(mons_block[0].startswith(" "))
 
     def test_banner_mons_uses_grey_when_colored(self):
@@ -68,7 +68,7 @@ class LogoColorRegressionTests(unittest.TestCase):
         logo_width = max(len(line) for line in lines[:subtitle_idx])
         mons_width = max(len(line) for line in lines[subtitle_idx + 1:])
         self.assertGreater(logo_width, mons_width)
-        self.assertLess(mons_width, logo_width)
+        self.assertLessEqual(mons_width, logo_width // 3)
 
     def test_broken_mons_slash_x_art_is_removed(self):
         source = banner.banner_text(use_color=False, terminal_width=80)
@@ -85,12 +85,8 @@ class LogoColorRegressionTests(unittest.TestCase):
         self.assertIn("██████╗", text)
         self.assertIn("Tool: Rejoin", text)
         mons = "\n".join(self._mons_block(text))
-        self.assertIn("MONS", mons)
-        self.assertIn("█   █", mons)
-        self.assertIn("██ ██", mons)
-        self.assertIn(" ███ ", mons)
-        self.assertIn("██ █", mons)
-        self.assertIn("██", mons)
+        self.assertNotIn("\nMONS\n", f"\n{text}\n")
+        self.assertIn("MM OO NN SS", mons)
         self.assertNotIn("10 OnS", mons)
         self.assertNotIn("1ONS", mons)
         self.assertNotIn("M0NS", mons)
@@ -107,9 +103,8 @@ class LogoColorRegressionTests(unittest.TestCase):
     def test_mons_has_wide_and_narrow_block_rendering(self):
         self.assertEqual(banner.mons_logo_for_width(80), banner.ASCII_MONS_WIDE)
         self.assertEqual(banner.mons_logo_for_width(40), banner.ASCII_MONS_NARROW)
-        self.assertNotEqual(banner.ASCII_MONS_WIDE, banner.ASCII_MONS_NARROW)
         for logo in (banner.ASCII_MONS_WIDE, banner.ASCII_MONS_NARROW):
-            self.assertIn("MONS", logo)
+            self.assertNotIn("MONS", logo.splitlines())
             self.assertNotIn("╔╦╗", logo)
             self.assertNotIn("10 OnS", logo)
             self.assertNotIn("1ONS", logo)
@@ -118,19 +113,27 @@ class LogoColorRegressionTests(unittest.TestCase):
         text = banner.banner_text(use_color=False, terminal_width=40)
         mons_block = self._mons_block(text)
         self.assertEqual(mons_block, banner.ASCII_MONS_NARROW.splitlines())
-        self.assertIn("▓M▓ ▓O▓ ▓N▓ ▓S▓", mons_block)
-        self.assertLessEqual(max(len(line) for line in mons_block), 15)
+        self.assertEqual(mons_block, ["MM OO NN SS"])
+        self.assertLessEqual(max(len(line) for line in mons_block), 11)
         self.assertTrue(all(len(line) <= 40 for line in text.splitlines()))
 
-    def test_mons_is_about_one_seventh_deng_visual_size(self):
+    def test_mons_is_tiny_companion_logo(self):
         text = banner.banner_text(use_color=False, terminal_width=80)
         lines = text.splitlines()
         subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
         deng_mass = self._visual_mass(lines[:subtitle_idx])
         mons_mass = self._visual_mass(lines[subtitle_idx + 1:])
         ratio = mons_mass / deng_mass
-        self.assertGreaterEqual(ratio, 0.14)
-        self.assertLessEqual(ratio, 0.40)
+        old_mons_mass = self._visual_mass([
+            "█   █  ███  █  █  ███",
+            "██ ██ █   █ ██ █ █",
+            "█ █ █ █   █ █ ██  ██",
+            "█   █ █   █ █  █    █",
+            "█   █  ███  █  █ ███",
+        ])
+        self.assertLessEqual(mons_mass, old_mons_mass // 4 + 2)
+        self.assertGreaterEqual(ratio, 0.03)
+        self.assertLessEqual(ratio, 0.12)
 
     def test_deng_logo_and_version_line_remain_unchanged(self):
         text = banner.banner_text(use_color=False, terminal_width=80)

@@ -25,17 +25,11 @@ ASCII_DENG = r"""
 """.strip("\n")
 
 ASCII_MONS_WIDE = r"""
-MONS
-█   █  ███  █  █  ███
-██ ██ █   █ ██ █ █
-█ █ █ █   █ █ ██  ██
-█   █ █   █ █  █    █
-█   █  ███  █  █ ███
+MM OO NN SS
 """.strip("\n")
 
 ASCII_MONS_NARROW = r"""
-MONS
-▓M▓ ▓O▓ ▓N▓ ▓S▓
+MM OO NN SS
 """.strip("\n")
 
 ASCII_MONS = ASCII_MONS_WIDE
