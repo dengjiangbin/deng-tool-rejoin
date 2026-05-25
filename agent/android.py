@@ -402,6 +402,9 @@ _DISPLAY_VIEWPORT_RE = re.compile(
     r"logicalFrame=Rect\(0,\s*0\s*-\s*(\d+),\s*(\d+)\).*?orientation=(\d+)",
     re.IGNORECASE | re.DOTALL,
 )
+_WM_SIZE_RE = re.compile(r"(?:Physical|Override) size:\s*(\d+)x(\d+)", re.IGNORECASE)
+_WM_DENSITY_RE = re.compile(r"(?:Physical|Override) density:\s*(\d+)", re.IGNORECASE)
+_RECT_RE = re.compile(r"Rect\(([-\d]+),\s*([-\d]+)\s*-\s*([-\d]+),\s*([-\d]+)\)")
 
 
 def get_display_orientation_state() -> dict[str, object]:
@@ -431,6 +434,128 @@ def get_display_orientation_state() -> dict[str, object]:
         "height": 0,
         "rotation": "",
         "raw_present": bool(text),
+    }
+
+
+def get_wm_size() -> dict[str, object]:
+    res = run_android_command(["wm", "size"], timeout=6, prefer_root=False)
+    text = res.stdout or ""
+    sizes = [(int(m.group(1)), int(m.group(2))) for m in _WM_SIZE_RE.finditer(text)]
+    width, height = sizes[-1] if sizes else (0, 0)
+    return {
+        "raw": text.strip(),
+        "width": width,
+        "height": height,
+        "orientation": "landscape" if width >= height and width > 0 else ("portrait" if height > width else "unknown"),
+        "ok": res.ok,
+    }
+
+
+def get_wm_density() -> dict[str, object]:
+    res = run_android_command(["wm", "density"], timeout=6, prefer_root=False)
+    text = res.stdout or ""
+    values = [int(m.group(1)) for m in _WM_DENSITY_RE.finditer(text)]
+    return {"raw": text.strip(), "density": values[-1] if values else 0, "ok": res.ok}
+
+
+def get_rotation_settings() -> dict[str, object]:
+    out: dict[str, object] = {}
+    for name in ("user_rotation", "accelerometer_rotation"):
+        res = run_android_command(["settings", "get", "system", name], timeout=6, prefer_root=True)
+        out[name] = (res.stdout or "").strip()
+    return out
+
+
+def get_home_launcher_package() -> str:
+    return _current_launcher_package()
+
+
+def _parse_home_bounds_from_activity(text: str, launcher_package: str) -> tuple[int, int, int, int] | None:
+    if not text or not launcher_package:
+        return None
+    idx = text.find(launcher_package)
+    if idx < 0:
+        return None
+    block = text[max(0, idx - 1200): idx + 5000]
+    for key in ("mBounds=", "mAppBounds="):
+        pos = block.find(key)
+        if pos >= 0:
+            m = _RECT_RE.search(block[pos: pos + 220])
+            if m:
+                return tuple(int(g) for g in m.groups())  # type: ignore[return-value]
+    return None
+
+
+def get_home_launcher_bounds(launcher_package: str | None = None) -> dict[str, object]:
+    pkg = launcher_package or get_home_launcher_package()
+    res = run_android_command(["dumpsys", "activity", "activities"], timeout=8, prefer_root=True)
+    bounds = _parse_home_bounds_from_activity(res.stdout or "", pkg)
+    return {
+        "launcher_package": pkg,
+        "bounds": list(bounds) if bounds else None,
+        "ok": bool(bounds),
+    }
+
+
+def enforce_landscape_home_state(*, phase: str = "before_start", screen_mode_config: str = "landscape") -> dict[str, object]:
+    """Keep display/home in real landscape without resizing launcher/home tasks."""
+    before_display = get_display_orientation_state()
+    before_wm = get_wm_size()
+    density = get_wm_density()
+    rotation = get_rotation_settings()
+    correction_applied: list[str] = []
+    root = detect_root()
+
+    if str(screen_mode_config or "").lower() != "landscape":
+        screen_mode_config = "landscape"
+
+    if before_display.get("orientation") != "landscape":
+        correction_applied.extend(
+            r.get("cmd", "") for r in _apply_user_rotation("landscape", root_info=root) if r.get("cmd")
+        )
+        time.sleep(0.3)
+
+    display = get_display_orientation_state()
+    wm_state = before_wm
+    if display.get("orientation") == "landscape" and before_wm.get("orientation") == "portrait":
+        reset = run_android_command(["wm", "size", "reset"], timeout=8, prefer_root=True)
+        correction_applied.append("wm size reset")
+        if not reset.ok and int(display.get("width") or 0) > int(display.get("height") or 0):
+            width = int(display.get("width") or 0)
+            height = int(display.get("height") or 0)
+            set_res = run_android_command(["wm", "size", f"{width}x{height}"], timeout=8, prefer_root=True)
+            correction_applied.append(f"wm size {width}x{height} rc={set_res.returncode}")
+        time.sleep(0.2)
+        wm_state = get_wm_size()
+
+    launcher = get_home_launcher_package()
+    launcher_bounds = get_home_launcher_bounds(launcher)
+    bounds = launcher_bounds.get("bounds")
+    black_bar_suspected = False
+    if isinstance(bounds, list) and len(bounds) == 4:
+        bw = max(0, int(bounds[2]) - int(bounds[0]))
+        bh = max(0, int(bounds[3]) - int(bounds[1]))
+        dw = int(display.get("width") or 0)
+        dh = int(display.get("height") or 0)
+        black_bar_suspected = bool(dw > dh and bw > 0 and bh > bw)
+
+    return {
+        "phase": phase,
+        "wm_size": wm_state,
+        "wm_density": density,
+        "user_rotation": rotation.get("user_rotation", ""),
+        "accelerometer_rotation": rotation.get("accelerometer_rotation", ""),
+        "display_rect": {
+            "width": display.get("width", 0),
+            "height": display.get("height", 0),
+            "rotation": display.get("rotation", ""),
+            "orientation": display.get("orientation", "unknown"),
+        },
+        "final_layout_mode": "landscape",
+        "screen_mode_config": screen_mode_config,
+        "correction_applied": correction_applied,
+        "launcher_bounds": launcher_bounds,
+        "black_bar_suspected": "yes" if black_bar_suspected else "no",
     }
 
 
@@ -473,7 +598,7 @@ def enforce_screen_orientation(
     third-party orientation controller keeps overriding the selected mode, only
     that controller candidate is force-stopped, then rotation is applied again.
     """
-    requested = "portrait" if str(screen_mode or "").strip().lower() == "portrait" else "landscape"
+    requested = "landscape"
     protected = set(str(p).strip() for p in (protected_packages or []) if str(p).strip())
     protected.add("com.termux")
     root_info = detect_root()
@@ -2088,7 +2213,10 @@ def force_stop_packages_except(
     """
     keep = set(keep_packages)
     all_roblox = find_roblox_packages(detection_hints)
-    to_stop = [p for p in all_roblox if p not in keep]
+    to_stop = [
+        p for p in all_roblox
+        if p not in keep and not _is_protected_system_or_launcher_package(p, keep)
+    ]
     if not to_stop:
         return []
     root_info = detect_root()
@@ -2102,6 +2230,24 @@ def force_stop_packages_except(
             if result2.ok:
                 stopped.append(pkg)
     return stopped
+
+
+def _is_protected_system_or_launcher_package(package: str, protected: set[str] | None = None) -> bool:
+    pkg = package.strip()
+    protected_set = set(protected or set())
+    if pkg in protected_set:
+        return True
+    if pkg in {"android", "com.termux", "com.android.systemui", "com.android.launcher", "com.android.launcher3"}:
+        return True
+    if pkg.startswith(("com.android.", "com.google.", "com.samsung.", "com.sec.")):
+        return True
+    try:
+        launcher = _current_launcher_package()
+        if launcher and pkg == launcher:
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    return False
 
 
 # Packages that must NEVER be killed during the boosting phase.

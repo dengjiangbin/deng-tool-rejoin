@@ -30,6 +30,7 @@ class TestModeSwitchLayoutIsolation(unittest.TestCase):
 
         with mock.patch.object(window_layout, "detect_display_info", return_value=window_layout.DisplayInfo(1280, 720, 164)), \
              mock.patch.object(window_layout, "_detect_status_bar_height", return_value=25), \
+             mock.patch("agent.commands.window_layout.layout_exclusion_reason", return_value=""), \
              mock.patch.object(window_apply, "apply_window_layout", side_effect=fake_apply):
             commands._verify_layout_post_launch(cfg, entries)
 
@@ -53,6 +54,7 @@ class TestModeSwitchLayoutIsolation(unittest.TestCase):
 
         with mock.patch.object(window_layout, "detect_display_info", return_value=window_layout.DisplayInfo(1280, 720, 164)), \
              mock.patch.object(window_layout, "_detect_status_bar_height", return_value=25), \
+             mock.patch("agent.commands.window_layout.layout_exclusion_reason", return_value=""), \
              mock.patch.object(window_apply, "apply_window_layout", side_effect=fake_apply):
             commands._verify_layout_post_launch(cfg, entries)
 

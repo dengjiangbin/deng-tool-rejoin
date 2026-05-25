@@ -64,12 +64,9 @@ class TestSplitLayoutP447(unittest.TestCase):
             self.assertGreater(rect.right, rect.left)
             self.assertLessEqual(rect.right, 1280)
 
-    def test_portrait_roblox_grid_uses_full_screen(self) -> None:
-        rects = self._rects(10, mode="portrait", w=720, h=1280)
-        self.assertEqual(min(r.left for r in rects), 0)
-        self.assertEqual(max(r.right for r in rects), 720)
-        self.assertEqual(min(r.top for r in rects), 0)
-        self.assertEqual(max(r.bottom for r in rects), 1280)
+    def test_portrait_request_uses_landscape_only_capacity(self) -> None:
+        with self.assertRaisesRegex(ValueError, "landscape release grid supports up to 9 packages"):
+            self._rects(10, mode="portrait", w=720, h=1280)
 
 
 class TestOrientationOverrideP447(unittest.TestCase):
@@ -86,12 +83,12 @@ class TestOrientationOverrideP447(unittest.TestCase):
             )
         self.assertEqual([row["package"] for row in found], ["ahapps.controlthescreenorientation"])
 
-    def test_enforce_force_stops_only_orientation_override_when_it_wins(self) -> None:
+    def test_enforce_force_stops_only_orientation_override_when_landscape_fails(self) -> None:
         import agent.android as android
         states = [
             {"orientation": "landscape"},
-            {"orientation": "landscape"},
             {"orientation": "portrait"},
+            {"orientation": "landscape"},
         ]
         with mock.patch.object(android, "detect_root", return_value=android.RootInfo(True, "su", "uid=0")), \
              mock.patch.object(android, "get_display_orientation_state", side_effect=states), \

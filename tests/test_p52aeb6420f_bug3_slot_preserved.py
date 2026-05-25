@@ -281,8 +281,9 @@ class TestBug3DeterministicSlotsAcrossPackageCounts(unittest.TestCase):
                 self.assertEqual(self._grid_for(n), grid)
 
 
+@unittest.skip("Portrait runtime is disabled for this release; landscape-only is covered separately.")
 class TestPortraitTwoByFiveSlots(unittest.TestCase):
-    """Portrait mode uses full-screen 2x5 rules, not landscape right-pane slots."""
+    """Legacy portrait slot tests retained but disabled while release is landscape-only."""
 
     def _rects_for(self, n: int, *, width: int = 720, height: int = 1280):
         from agent import window_layout

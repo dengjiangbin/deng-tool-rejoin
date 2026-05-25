@@ -368,13 +368,13 @@ def _capture_portrait_input_readback(package: str, errors: list[dict[str, str]])
         ]
         if package not in selected:
             selected.append(package)
-        screen_mode = str(cfg.get("screen_mode") or "portrait")
+        screen_mode = "landscape"
         rects = window_layout.calculate_split_layout(
             selected,
             display.width,
             display.height,
             termux_log_fraction=float(cfg.get("termux_dock_fraction", 0.0) or 0.0),
-            screen_mode=screen_mode if screen_mode in {"portrait", "landscape"} else "portrait",
+            screen_mode=screen_mode,
         )
         desired = next((r for r in rects if r.package == package), None)
         if desired is None:
@@ -391,11 +391,7 @@ def _capture_portrait_input_readback(package: str, errors: list[dict[str, str]])
             "raw_display": [resolved.raw_width, resolved.raw_height],
             "normalized_display": [resolved.normalized_width, resolved.normalized_height],
         }
-        slot = (
-            window_layout._slot_index_for_package(selected.index(package) + 1, window_layout.PORTRAIT_SLOT_RULES[len(selected)])
-            if screen_mode == "portrait" and 1 <= len(selected) <= 10
-            else None
-        )
+        slot = None
         readback["slot"] = {
             "row": (slot // 2) if slot is not None else None,
             "col": (slot % 2) if slot is not None else None,
@@ -989,6 +985,36 @@ def _capture_start_crash_state(errors: list[dict[str, str]]) -> dict[str, Any]:
         }
 
 
+def _capture_landscape_debug_state(errors: list[dict[str, str]]) -> dict[str, Any]:
+    """Capture current landscape/home evidence using the same Start checks."""
+    try:
+        from . import android
+
+        state = android.enforce_landscape_home_state(phase="probe", screen_mode_config="landscape")
+        launcher_bounds = state.get("launcher_bounds", {})
+        display_rect = state.get("display_rect", {})
+        bounds = launcher_bounds.get("bounds") if isinstance(launcher_bounds, dict) else None
+        match = "unknown"
+        if isinstance(bounds, list) and len(bounds) == 4 and isinstance(display_rect, dict):
+            bw = max(0, int(bounds[2]) - int(bounds[0]))
+            bh = max(0, int(bounds[3]) - int(bounds[1]))
+            dw = int(display_rect.get("width") or 0)
+            dh = int(display_rect.get("height") or 0)
+            match = "yes" if (dw >= dh and bw >= bh) else "no"
+        return {
+            "[DENG_REJOIN_LANDSCAPE_STATE]": state,
+            "[DENG_REJOIN_HOME_ORIENTATION_CHECK]": {
+                "launcher_package": launcher_bounds.get("launcher_package", "") if isinstance(launcher_bounds, dict) else "",
+                "launcher_bounds": bounds,
+                "expected_landscape_bounds": display_rect,
+                "match": match,
+            },
+        }
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "landscape_debug_state", "error": str(exc)[:200]})
+        return {}
+
+
 # ─── Public entrypoint ────────────────────────────────────────────────────────
 
 
@@ -1049,6 +1075,7 @@ def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]
     out["wrapper"] = _capture_wrapper_script(errors)
     out["last_start_diagnostics"] = _capture_last_diagnostics(errors)
     out["start_crash_state"] = _capture_start_crash_state(errors)
+    out["landscape_debug_state"] = _capture_landscape_debug_state(errors)
 
     # ── Third-party tool discovery: the "observe what works" loop ─────────
     # Find any other launcher / multi-clone / window-manager / Kaeru-style

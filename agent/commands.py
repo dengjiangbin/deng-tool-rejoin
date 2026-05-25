@@ -128,6 +128,7 @@ _CONFIG_RECOVERED_DEFAULTS = False
 _REFRESH_MAPPING_NORMAL_BUDGET_SECONDS = 20.0
 _REFRESH_MAPPING_HARD_BUDGET_SECONDS = 30.0
 _REFRESH_MAPPING_PER_PACKAGE_TIMEOUT_SECONDS = 5
+_SETUP_MAPPING_PER_PACKAGE_TIMEOUT_SECONDS = 3
 
 
 def _print_dev_license_skipped(use_color: bool) -> None:
@@ -989,6 +990,18 @@ def _print_full_discovery_table(candidates: list[android.RobloxPackageCandidate]
         print(f"{idx:<4} {c.package:<40} {c.app_name[:20]:<22} {launch_cell:<10}")
 
 
+def _safe_package_detect_progress() -> None:
+    termux_ui.print_warning("Detecting Packages...")
+    termux_ui.print_warning("Refreshing Account Mapping...")
+    termux_ui.print_warning("This May Take A Few Seconds.")
+
+
+def _safe_reason_text(exc: BaseException) -> str:
+    text = str(exc).strip() or exc.__class__.__name__
+    text = _ANSI_RE.sub("", text).replace("\r", " ").replace("\n", " ")
+    return text[:90]
+
+
 def _interactive_discover_package_entries(
     config_data: dict[str, Any],
     existing_entries: list[dict[str, Any]],
@@ -1012,15 +1025,15 @@ def _interactive_discover_package_entries(
     if len(candidates) == 1:
         c0 = candidates[0]
         print(f"Auto-selected: {c0.package}")
-        entry = _detect_or_prompt_account_username(
-            _entry_for_package(c0.package, existing_entries, app_name=c0.app_name),
-            config_for_detect,
-        )
-        mapped = _run_account_mapping_table([entry], config_for_detect or {})
+        entry = _entry_for_package(c0.package, existing_entries, app_name=c0.app_name)
+        _safe_package_detect_progress()
+        mapped = _safe_refresh_account_mapping_entries([entry], config_for_detect or {})
         return mapped, "ok"
     _print_full_discovery_table(candidates)
     print("  A. Select all")
     _raw = safe_io.safe_prompt("Choose packages (e.g. 1,2 or A) [1]: ", default="1")
+    if _raw is None:
+        return [], "empty_choice"
     raw = (_raw or "1").strip().lower()
     picked: list[android.RobloxPackageCandidate] = []
     if raw == "a":
@@ -1037,14 +1050,9 @@ def _interactive_discover_package_entries(
                         picked.append(c)
     if not picked:
         return [], "empty_choice"
-    base_entries = [
-        _detect_or_prompt_account_username(
-            _entry_for_package(c.package, existing_entries, app_name=c.app_name),
-            config_for_detect,
-        )
-        for c in picked
-    ]
-    mapped = _run_account_mapping_table(base_entries, config_for_detect or {})
+    base_entries = [_entry_for_package(c.package, existing_entries, app_name=c.app_name) for c in picked]
+    _safe_package_detect_progress()
+    mapped = _safe_refresh_account_mapping_entries(base_entries, config_for_detect or {})
     return mapped, "ok"
 
 
@@ -1165,6 +1173,7 @@ def _enforce_termux_left_layout(config_data: dict[str, Any] | None = None) -> di
 def _enforce_configured_screen_mode(
     config_data: dict[str, Any] | None = None,
     protected_packages: list[str] | None = None,
+    phase: str = "before_start",
 ) -> dict[str, Any]:
     """Apply the release's Landscape-only runtime orientation."""
     result: dict[str, Any] = {}
@@ -1174,6 +1183,10 @@ def _enforce_configured_screen_mode(
         cfg = config_data or {}
         mode = DEFAULT_SCREEN_MODE
         cfg["screen_mode"] = DEFAULT_SCREEN_MODE
+        landscape_state = android.enforce_landscape_home_state(
+            phase=phase,
+            screen_mode_config=DEFAULT_SCREEN_MODE,
+        )
         protected = list(protected_packages or [])
         if not protected:
             try:
@@ -1195,6 +1208,23 @@ def _enforce_configured_screen_mode(
             override_action=result.get("override_action", "none"),
             error=result.get("error", ""),
         )
+        log_event(
+            configure_logging(),
+            "info",
+                "[DENG_REJOIN_LANDSCAPE_STATE]",
+                phase=str(landscape_state.get("phase", phase)),
+                wm_size=json.dumps(landscape_state.get("wm_size", {}), sort_keys=True),
+                wm_density=json.dumps(landscape_state.get("wm_density", {}), sort_keys=True),
+            user_rotation=landscape_state.get("user_rotation", ""),
+            accelerometer_rotation=landscape_state.get("accelerometer_rotation", ""),
+                display_rect=json.dumps(landscape_state.get("display_rect", {}), sort_keys=True),
+            final_layout_mode=landscape_state.get("final_layout_mode", "landscape"),
+            screen_mode_config=landscape_state.get("screen_mode_config", DEFAULT_SCREEN_MODE),
+                correction_applied=json.dumps(landscape_state.get("correction_applied", []), sort_keys=True),
+                launcher_bounds=json.dumps(landscape_state.get("launcher_bounds", {}), sort_keys=True),
+            black_bar_suspected=landscape_state.get("black_bar_suspected", "no"),
+        )
+        result["landscape_state"] = landscape_state
     except Exception as exc:  # noqa: BLE001
         try:
             from .logger import configure_logging, log_event
@@ -1390,6 +1420,133 @@ def _try_detect_user_id(entry: dict[str, Any], draft: dict[str, Any]) -> tuple[i
             pass
 
     return 0, "not_found"
+
+
+def _mapping_detect_config(draft: dict[str, Any], seconds_left: float) -> dict[str, Any]:
+    detect_cfg = dict(draft or {})
+    settings = dict((detect_cfg.get("account_detection") or {}))
+    timeout = max(1, min(_SETUP_MAPPING_PER_PACKAGE_TIMEOUT_SECONDS, int(seconds_left) or 1))
+    settings["scan_timeout_seconds"] = timeout
+    settings["max_file_size_kb"] = min(int(settings.get("max_file_size_kb", 128) or 128), 128)
+    detect_cfg["account_detection"] = settings
+    return detect_cfg
+
+
+def _safe_refresh_account_mapping_entries(
+    entries: list[dict[str, Any]],
+    draft: dict[str, Any],
+    *,
+    save: bool = False,
+    selected_only: bool = True,
+    print_rows: bool = True,
+) -> list[dict[str, Any]]:
+    """Bounded package/account mapping refresh shared by setup and Refresh Mapping."""
+    started = time.monotonic()
+    hard_deadline = started + _REFRESH_MAPPING_HARD_BUDGET_SECONDS
+    normal_deadline = started + _REFRESH_MAPPING_NORMAL_BUDGET_SECONDS
+    out: list[dict[str, Any]] = []
+    source_entries = [dict(e) for e in entries if isinstance(e, dict)]
+    try:
+        root_access.clear_cache()
+    except Exception:  # noqa: BLE001
+        if print_rows:
+            termux_ui.print_warning("Root Cache Refresh Failed; Using Safe Fallback")
+
+    for idx, entry in enumerate(source_entries, start=1):
+        if time.monotonic() >= hard_deadline:
+            if print_rows:
+                termux_ui.print_warning("Refresh Mapping Timed Out; Remaining Packages Skipped")
+            break
+
+        original_pkg = str(entry.get("package") or "").strip()
+        updated = dict(entry)
+        status = "Detected"
+        reason = ""
+        try:
+            pkg = validate_package_name(original_pkg)
+        except ConfigError:
+            if print_rows:
+                print(f"{idx}. Unknown — Skipped — Invalid Package")
+            updated["account_mapping_status"] = "Skipped"
+            updated["account_mapping_source"] = "Invalid Package"
+            out.append(updated)
+            continue
+
+        item_deadline = min(
+            hard_deadline,
+            time.monotonic() + _REFRESH_MAPPING_PER_PACKAGE_TIMEOUT_SECONDS,
+        )
+        username = validate_account_username(updated.get("account_username", "")) or ""
+        try:
+            if not username and time.monotonic() < item_deadline:
+                detect_cfg = _mapping_detect_config(draft, item_deadline - time.monotonic())
+                det = account_detect.detect_account_username(
+                    pkg,
+                    entry=updated,
+                    config=detect_cfg,
+                    use_root=True,
+                )
+                if det and det.username:
+                    username = validate_account_username(det.username) or ""
+                    updated["account_username"] = username
+                    updated["username_source"] = validate_username_source(det.source, det.username)
+                    updated["account_mapping_source"] = str(det.source or "detected")
+            if time.monotonic() >= item_deadline:
+                status = "Skipped"
+                reason = "Timeout"
+        except (PermissionError, FileNotFoundError):
+            status = "Skipped"
+            reason = "Permission Denied"
+        except (TimeoutError, subprocess.TimeoutExpired):
+            status = "Skipped"
+            reason = "Timeout"
+        except (UnicodeDecodeError, OSError, ValueError, ConfigError) as exc:
+            status = "Skipped"
+            reason = _safe_reason_text(exc)
+        except Exception as exc:  # noqa: BLE001
+            status = "Skipped"
+            reason = _safe_reason_text(exc)
+
+        if not username:
+            username = "Unknown"
+        updated["package"] = pkg
+        updated["account_username"] = "" if username == "Unknown" else username
+        updated["account_mapping_status"] = status if status == "Skipped" else "Detected"
+        if reason:
+            updated["account_mapping_source"] = reason
+        elif not updated.get("account_mapping_source"):
+            updated["account_mapping_source"] = "detected" if username != "Unknown" else "not_found"
+        updated["account_mapping_updated_at"] = datetime.now(timezone.utc).isoformat()
+        out.append(updated)
+
+        if print_rows:
+            short_pkg = _short_package_display(pkg)
+            suffix = f" — {reason}" if reason else ""
+            print(f"{idx}. {short_pkg} — {status} — User: {username}{suffix}", flush=True)
+        if time.monotonic() >= normal_deadline:
+            if print_rows:
+                termux_ui.print_warning("Refresh Mapping Time Budget Reached; Saved Partial Results")
+            break
+
+    if save:
+        try:
+            if selected_only:
+                refreshed = {str(e.get("package") or ""): e for e in out if isinstance(e, dict)}
+                existing = validate_package_entries(draft.get("roblox_packages") or [])
+                draft["roblox_packages"] = [
+                    refreshed.get(str(e.get("package") or ""), e) for e in existing
+                ]
+            else:
+                draft["roblox_packages"] = out
+            active = [e for e in draft.get("roblox_packages", []) if isinstance(e, dict) and e.get("enabled", True)]
+            if active:
+                draft["roblox_package"] = active[0]["package"]
+                draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
+            save_config(draft)
+        except Exception as exc:  # noqa: BLE001
+            if print_rows:
+                termux_ui.print_error(f"Refresh Mapping Finished But Could Not Save Config: {_safe_reason_text(exc)}")
+    return out
 
 
 def _validate_user_id_with_presence(user_id: int, *, cookie: str = "") -> str:
@@ -1788,9 +1945,15 @@ def _choose_packages_menu(
         default_package = selected[0]["package"] if selected else DEFAULT_ROBLOX_PACKAGE
         manual = _prompt_manual_package(default_package)
         if manual:
-            selected = [_detect_or_prompt_account_username(_entry_for_package(manual, selected), cfg_ctx)]
-            selected = _auto_detect_cookies_for_entries(selected, cfg_ctx)
-            selected = _run_account_mapping_table(selected, cfg_ctx or {})
+            if android.package_installed(manual):
+                print(f"Package Found: {manual}")
+            else:
+                termux_ui.print_warning("Package was not launch-validated; saving manual entry anyway")
+            _safe_package_detect_progress()
+            selected = _safe_refresh_account_mapping_entries(
+                [_entry_for_package(manual, selected)],
+                cfg_ctx or {},
+            )
 
     return selected, hints
 
@@ -2329,6 +2492,7 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
     print()
 
     # Run detection first, filter to not-yet-configured packages
+    _safe_package_detect_progress()
     all_candidates = _gather_roblox_candidates_for_ui(draft)
     fresh_candidates = [c for c in all_candidates if c.package not in current_pkgs]
 
@@ -2348,11 +2512,11 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
         print("  M. Enter package name manually")
         print("  B. Back")
 
-    try:
-        raw = input("Choose (e.g. 1,2 or A, M, B) [M]: ").strip().lower() or "m"
-    except (EOFError, KeyboardInterrupt):
+    raw_in = safe_io.safe_prompt("Choose (e.g. 1,2 or A, M, B) [M]: ", default="m")
+    if raw_in is None:
         print()
         return draft
+    raw = raw_in.strip().lower() or "m"
 
     if raw in ("b", "back", "0"):
         return draft
@@ -2368,17 +2532,21 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
         if manual in current_pkgs:
             print(f"Package already configured: {manual}")
             return draft
-        entry = _detect_or_prompt_account_username(_entry_for_package(manual, current_entries), draft)
+        if android.package_installed(manual):
+            print(f"Package Found: {manual}")
+        else:
+            termux_ui.print_warning("Package was not launch-validated; saving manual entry anyway")
+        entry = _entry_for_package(manual, current_entries)
         username = _package_username_display(entry)
         print()
         print(f"  Package:  {manual}")
         print(f"  Username: {username}")
         print()
-        try:
-            confirm = input("Add this package? [Y/n]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
+        confirm_in = safe_io.safe_prompt("Add this package? [Y/n]: ", default="y")
+        if confirm_in is None:
             print()
             return draft
+        confirm = confirm_in.strip().lower()
         if confirm in ("n", "no"):
             print("Cancelled.")
             return draft
@@ -2387,10 +2555,7 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
     elif raw == "a" and fresh_candidates:
         # Add all detected
         new_entries_to_append = [
-            _detect_or_prompt_account_username(
-                _entry_for_package(c.package, current_entries, app_name=c.app_name),
-                draft,
-            )
+            _entry_for_package(c.package, current_entries, app_name=c.app_name)
             for c in fresh_candidates
         ]
         print()
@@ -2399,11 +2564,11 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
             username = _package_username_display(entry)
             print(f"  {i}. {entry['package']} — Username: {username}")
         print()
-        try:
-            confirm = input("Add all these packages? [Y/n]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
+        confirm_in = safe_io.safe_prompt("Add all these packages? [Y/n]: ", default="y")
+        if confirm_in is None:
             print()
             return draft
+        confirm = confirm_in.strip().lower()
         if confirm in ("n", "no"):
             print("Cancelled.")
             return draft
@@ -2424,10 +2589,7 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
             print("No valid selection.")
             return draft
         new_entries_to_append = [
-            _detect_or_prompt_account_username(
-                _entry_for_package(c.package, current_entries, app_name=c.app_name),
-                draft,
-            )
+            _entry_for_package(c.package, current_entries, app_name=c.app_name)
             for c in picked
         ]
         print()
@@ -2436,11 +2598,11 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
             username = _package_username_display(entry)
             print(f"  {i}. {entry['package']} — Username: {username}")
         print()
-        try:
-            confirm = input("Add these packages? [Y/n]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
+        confirm_in = safe_io.safe_prompt("Add these packages? [Y/n]: ", default="y")
+        if confirm_in is None:
             print()
             return draft
+        confirm = confirm_in.strip().lower()
         if confirm in ("n", "no"):
             print("Cancelled.")
             return draft
@@ -2451,8 +2613,7 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
     if not new_entries_to_append:
         return draft
 
-    new_entries_to_append = _auto_detect_cookies_for_entries(new_entries_to_append, draft)
-    new_entries_to_append = _run_account_mapping_table(new_entries_to_append, draft)
+    new_entries_to_append = _safe_refresh_account_mapping_entries(new_entries_to_append, draft)
     if not new_entries_to_append:
         print("Cancelled.")
         return draft
@@ -2526,21 +2687,12 @@ def _package_menu_refresh_mapping(draft: dict[str, Any]) -> dict[str, Any]:
     table rendering/account detection.  This flow intentionally avoids Rich
     tables, nested prompts, dynamic redraw, and unbounded scans.
     """
-    started = time.monotonic()
-    hard_deadline = started + _REFRESH_MAPPING_HARD_BUDGET_SECONDS
-    normal_deadline = started + _REFRESH_MAPPING_NORMAL_BUDGET_SECONDS
-
     def _restore_terminal() -> None:
         try:
             sys.stdout.write("\033[0m\033[?25h\n")
             sys.stdout.flush()
         except Exception:  # noqa: BLE001
             pass
-
-    def _safe_reason(exc: BaseException) -> str:
-        text = str(exc).strip() or exc.__class__.__name__
-        text = _ANSI_RE.sub("", text).replace("\r", " ").replace("\n", " ")
-        return text[:90]
 
     def _load_refresh_entries() -> list[dict[str, Any]]:
         raw_entries = draft.get("roblox_packages") or []
@@ -2560,6 +2712,7 @@ def _package_menu_refresh_mapping(draft: dict[str, Any]) -> dict[str, Any]:
     try:
         print()
         termux_ui.print_warning("Refreshing Package Mapping...")
+        termux_ui.print_warning("This May Take A Few Seconds")
         entries = _load_refresh_entries()
 
         enabled_entries = [dict(e) for e in entries if isinstance(e, dict) and e.get("enabled", True)]
@@ -2567,91 +2720,14 @@ def _package_menu_refresh_mapping(draft: dict[str, Any]) -> dict[str, Any]:
             termux_ui.print_warning("No Packages Configured")
             return draft
 
-        refreshed_by_pkg: dict[str, dict[str, Any]] = {}
-        skipped_count = 0
-        try:
-            root_access.clear_cache()
-        except Exception:  # noqa: BLE001
-            termux_ui.print_warning("Root Cache Refresh Failed; Using Safe Fallback")
-
-        for idx, entry in enumerate(enabled_entries, start=1):
-            if time.monotonic() >= hard_deadline:
-                termux_ui.print_warning("Refresh Mapping Timed Out; Remaining Packages Skipped")
-                break
-
-            original_pkg = str(entry.get("package") or "").strip()
-            try:
-                pkg = validate_package_name(original_pkg)
-            except ConfigError:
-                skipped_count += 1
-                print(f"{idx}. Unknown — Skipped — Invalid Package")
-                continue
-
-            item_started = time.monotonic()
-            item_deadline = min(hard_deadline, item_started + _REFRESH_MAPPING_PER_PACKAGE_TIMEOUT_SECONDS)
-            updated = dict(entry)
-            status = "Detected"
-            reason = ""
-            username = validate_account_username(updated.get("account_username", "")) or ""
-
-            try:
-                # Respect a known username first.  Only run root/user detection
-                # when needed and while the total operation still has budget.
-                if not username and time.monotonic() < item_deadline:
-                    detect_cfg = dict(draft)
-                    settings = dict((detect_cfg.get("account_detection") or {}))
-                    settings["scan_timeout_seconds"] = max(1, min(2, int(item_deadline - time.monotonic()) or 1))
-                    settings["max_file_size_kb"] = min(int(settings.get("max_file_size_kb", 128) or 128), 128)
-                    detect_cfg["account_detection"] = settings
-                    det = account_detect.detect_account_username(
-                        pkg,
-                        entry=updated,
-                        config=detect_cfg,
-                        use_root=True,
-                    )
-                    if det and det.username:
-                        username = validate_account_username(det.username) or ""
-                        updated["account_username"] = username
-                        updated["username_source"] = validate_username_source(det.source, det.username)
-                        updated["account_mapping_source"] = str(det.source or "detected")
-                if time.monotonic() >= item_deadline:
-                    status = "Skipped"
-                    reason = "Timeout"
-                    skipped_count += 1
-            except (PermissionError, FileNotFoundError):
-                status = "Skipped"
-                reason = "Permission Denied"
-                skipped_count += 1
-            except (TimeoutError, subprocess.TimeoutExpired):
-                status = "Skipped"
-                reason = "Timeout"
-                skipped_count += 1
-            except (UnicodeDecodeError, OSError, ValueError, ConfigError) as exc:
-                status = "Skipped"
-                reason = _safe_reason(exc)
-                skipped_count += 1
-            except Exception as exc:  # noqa: BLE001
-                status = "Skipped"
-                reason = _safe_reason(exc)
-                skipped_count += 1
-
-            if not username:
-                username = "Unknown"
-            updated["package"] = pkg
-            updated["account_username"] = "" if username == "Unknown" else username
-            updated["account_mapping_status"] = status if status == "Skipped" else "Detected"
-            if reason:
-                updated["account_mapping_source"] = reason
-            updated["account_mapping_updated_at"] = datetime.now(timezone.utc).isoformat()
-            refreshed_by_pkg[pkg] = updated
-            short_pkg = _short_package_display(pkg)
-            suffix = f" — {reason}" if reason else ""
-            print(f"{idx}. {short_pkg} — {status} — User: {username}{suffix}", flush=True)
-
-            if time.monotonic() >= normal_deadline:
-                termux_ui.print_warning("Refresh Mapping Time Budget Reached; Saved Partial Results")
-                break
-
+        refreshed = _safe_refresh_account_mapping_entries(enabled_entries, draft, print_rows=True)
+        refreshed_by_pkg: dict[str, dict[str, Any]] = {
+            str(e.get("package") or ""): e for e in refreshed if isinstance(e, dict)
+        }
+        skipped_count = sum(
+            1 for e in refreshed
+            if str(e.get("account_mapping_status") or "") == "Skipped"
+        )
         merged = [refreshed_by_pkg.get(str(e.get("package") or ""), e) for e in entries]
         draft["roblox_packages"] = merged
         active = [e for e in merged if isinstance(e, dict) and e.get("enabled", True)]
@@ -2661,7 +2737,7 @@ def _package_menu_refresh_mapping(draft: dict[str, Any]) -> dict[str, Any]:
         try:
             save_config(draft)
         except ConfigError as exc:
-            termux_ui.print_error(f"Refresh Mapping Finished But Could Not Save Config: {_safe_reason(exc)}")
+            termux_ui.print_error(f"Refresh Mapping Finished But Could Not Save Config: {_safe_reason_text(exc)}")
             return draft
         if skipped_count:
             termux_ui.print_warning(f"Refresh Mapping Finished With {skipped_count} Skipped Step(s)")
@@ -2692,15 +2768,13 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
     print()
     print("Auto Detect Package")
     print()
+    _safe_package_detect_progress()
     candidates = _gather_roblox_candidates_for_ui(draft)
     if not candidates:
         print("No Roblox-like packages were detected.")
         print("Try: install Roblox or your clone APK, open it once, then try again.")
         print("Or use Add Package → manual entry as a fallback.")
-        try:
-            input("\nPress Enter to continue...")
-        except EOFError:
-            pass
+        safe_io.press_enter()
         return draft
 
     current_entries = validate_package_entries(
@@ -2713,20 +2787,17 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
     already_all = len(new_candidates) == 0
     if already_all:
         print("All detected packages are already configured.")
-        try:
-            input("\nPress Enter to continue...")
-        except EOFError:
-            pass
+        safe_io.press_enter()
         return draft
 
     print(f"  A. Select all ({len(new_candidates)} new)")
     print("  B. Back (no change)")
     print()
-    try:
-        raw = input("Choose packages (e.g. 1,2 or A for all) [A]: ").strip().lower() or "a"
-    except (EOFError, KeyboardInterrupt):
+    raw_in = safe_io.safe_prompt("Choose packages (e.g. 1,2 or A for all) [A]: ", default="a")
+    if raw_in is None:
         print()
         return draft
+    raw = raw_in.strip().lower() or "a"
 
     if raw in ("b", "back", "0"):
         return draft
@@ -2750,18 +2821,12 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
         safe_io.press_enter()
         return draft
 
-    # Detect usernames for selected packages
     to_add_entries = [
-        _detect_or_prompt_account_username(
-            _entry_for_package(c.package, current_entries, app_name=c.app_name),
-            draft,
-        )
+        _entry_for_package(c.package, current_entries, app_name=c.app_name)
         for c in to_add_candidates
     ]
-
-    to_add_entries = _auto_detect_cookies_for_entries(to_add_entries, draft)
-    # Run account mapping table (root-assisted userId detection + confirmation)
-    to_add_entries = _run_account_mapping_table(to_add_entries, draft)
+    _safe_package_detect_progress()
+    to_add_entries = _safe_refresh_account_mapping_entries(to_add_entries, draft)
 
     if not to_add_entries:
         print("Cancelled.")
@@ -4152,7 +4217,21 @@ def _prepare_automatic_layout(
         if cfg.get("last_layout_mode") and cfg.get("last_layout_mode") != _screen_mode:
             cfg.pop("last_layout_preview", None)
             cfg.pop("_layout_rects", None)
-        filtered_packages = [p for p in packages if not window_layout._is_layout_excluded(p)]
+        from .logger import log_event as _log_event
+        filtered_packages = []
+        for p in packages:
+            reason = window_layout.layout_exclusion_reason(p)
+            excluded = bool(reason)
+            _log_event(
+                _layout_log,
+                "info",
+                "[DENG_REJOIN_LAYOUT_EXCLUSION]",
+                package=p,
+                reason=reason or "selected_package",
+                excluded=str(excluded).lower(),
+            )
+            if not excluded:
+                filtered_packages.append(p)
         rects = window_layout.calculate_split_layout(
             filtered_packages,
             display.width, display.height,
@@ -4454,10 +4533,26 @@ def _verify_layout_post_launch(
         )
         rects = []
         if isinstance(stored_rects, list):
-            selected = {
-                e["package"] for e in entries
-                if not window_layout._is_layout_excluded(e["package"])
-            }
+            selected = set()
+            try:
+                from .logger import log_event as _log_event
+            except Exception:  # noqa: BLE001
+                _log_event = None
+            for e in entries:
+                pkg = e["package"]
+                reason = window_layout.layout_exclusion_reason(pkg)
+                excluded = bool(reason)
+                if _log_event:
+                    _log_event(
+                        _layout_log,
+                        "info",
+                        "[DENG_REJOIN_LAYOUT_EXCLUSION]",
+                        package=pkg,
+                        reason=reason or "selected_package",
+                        excluded=str(excluded).lower(),
+                    )
+                if not excluded:
+                    selected.add(pkg)
             for item in stored_rects:
                 if not isinstance(item, dict) or item.get("package") not in selected:
                     continue
@@ -4752,7 +4847,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             artifact_sha=_version_info.get("artifact_sha256_short", ""),
             build_probe_id=_version_info.get("probe_id", ""),
         )
-        _enforce_configured_screen_mode(cfg)
+        _enforce_configured_screen_mode(cfg, phase="before_start")
         _enforce_termux_left_layout(cfg)
         if previous_crash_notice:
             try:
@@ -4807,7 +4902,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             print("Run Setup / Edit Config, then choose Roblox Package Setup.")
             _start_session.finish("no_packages")
             return 2
-        _enforce_configured_screen_mode(cfg, [entry["package"] for entry in entries])
+        _enforce_configured_screen_mode(cfg, [entry["package"] for entry in entries], phase="before_start")
         _start_session.mark("package_preparation_begin", package_count=len(entries))
 
         try:
@@ -5068,7 +5163,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             phase[entry["package"]] = "Clear Cache"
         _render_phase()
         # Re-apply the release's Landscape-only orientation after background cleanup.
-        _enforce_configured_screen_mode(cfg, packages_sl)
+        _enforce_configured_screen_mode(cfg, packages_sl, phase="before_launch")
         for entry in entries:
             pkg = entry["package"]
             _cache_result: dict[str, object] = {}
@@ -5254,6 +5349,51 @@ def cmd_start(args: argparse.Namespace) -> int:
             _start_log.debug("post-launch verify error: %s", _exc)
             _start_session.mark("layout_done", phase="post_launch_verify", error=str(_exc)[:160])
 
+        _home_landscape_state: dict[str, Any] = {}
+        try:
+            _home_landscape_state = android.enforce_landscape_home_state(
+                phase="after_start",
+                screen_mode_config=DEFAULT_SCREEN_MODE,
+            )
+            from .logger import log_event as _log_event
+            _log_event(
+                configure_logging(),
+                "info",
+                "[DENG_REJOIN_LANDSCAPE_STATE]",
+                phase=str(_home_landscape_state.get("phase", "after_start")),
+                wm_size=json.dumps(_home_landscape_state.get("wm_size", {}), sort_keys=True),
+                wm_density=json.dumps(_home_landscape_state.get("wm_density", {}), sort_keys=True),
+                user_rotation=_home_landscape_state.get("user_rotation", ""),
+                accelerometer_rotation=_home_landscape_state.get("accelerometer_rotation", ""),
+                display_rect=json.dumps(_home_landscape_state.get("display_rect", {}), sort_keys=True),
+                final_layout_mode=_home_landscape_state.get("final_layout_mode", "landscape"),
+                screen_mode_config=_home_landscape_state.get("screen_mode_config", DEFAULT_SCREEN_MODE),
+                correction_applied=json.dumps(_home_landscape_state.get("correction_applied", []), sort_keys=True),
+                launcher_bounds=json.dumps(_home_landscape_state.get("launcher_bounds", {}), sort_keys=True),
+                black_bar_suspected=_home_landscape_state.get("black_bar_suspected", "no"),
+            )
+            _launcher_bounds = _home_landscape_state.get("launcher_bounds", {})
+            _lb = _launcher_bounds.get("bounds") if isinstance(_launcher_bounds, dict) else None
+            _display_rect = _home_landscape_state.get("display_rect", {})
+            _match = "unknown"
+            if isinstance(_lb, list) and len(_lb) == 4 and isinstance(_display_rect, dict):
+                _bw = max(0, int(_lb[2]) - int(_lb[0]))
+                _bh = max(0, int(_lb[3]) - int(_lb[1]))
+                _dw = int(_display_rect.get("width") or 0)
+                _dh = int(_display_rect.get("height") or 0)
+                _match = "yes" if (_dw >= _dh and _bw >= _bh) else "no"
+            _log_event(
+                configure_logging(),
+                "info",
+                "[DENG_REJOIN_HOME_ORIENTATION_CHECK]",
+                launcher_package=_launcher_bounds.get("launcher_package", "") if isinstance(_launcher_bounds, dict) else "",
+                launcher_bounds=json.dumps(_lb, sort_keys=True),
+                expected_landscape_bounds=json.dumps(_display_rect, sort_keys=True),
+                match=_match,
+            )
+        except Exception as _exc:  # noqa: BLE001
+            _start_log.debug("landscape home check error: %s", _exc)
+
         # ── Save start diagnostics JSON (silent, internal only) ───────────────
         try:
             import time as _t
@@ -5293,6 +5433,7 @@ def cmd_start(args: argparse.Namespace) -> int:
                 "layout_diagnostics": _layout_diag,
                 "evidence":           _evidence_summary,
                 "termux_minimize":    _termux_minimize_result,
+                "landscape_home_state": _home_landscape_state,
                 "launches": {
                     pkg: {"ok": launch_ok.get(pkg, False),
                           "error": launch_err.get(pkg, "") or ""}

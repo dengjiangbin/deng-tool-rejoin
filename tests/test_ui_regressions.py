@@ -14,11 +14,6 @@ class LogoColorRegressionTests(unittest.TestCase):
         "█   █ █   █ █  █    █",
         "█   █  ███  █  █ ███",
     ])
-    APPROVED_MONS_ART = "\n".join([
-        "█▄█ █▀█ █▄█ █▀▀",
-        "█ █ █ █ ███ ▀▀█",
-        "█ █ █▄█ █▀█ ▄▄█",
-    ])
     BROKEN_MONS_LINES = (
         "\\" + " | /",
         "| " + "o" + " |",
@@ -41,136 +36,61 @@ class LogoColorRegressionTests(unittest.TestCase):
         subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
         return lines[subtitle_idx + 1:]
 
-    @staticmethod
-    def _footprint(lines: list[str]) -> dict[str, int]:
-        return banner.visible_footprint("\n".join(lines))
-
-    def test_logo_color_constant_is_soft_pink_not_bright_magenta_or_cyan(self):
+    def test_logo_color_constant_is_soft_pink_with_neon_blue_outline(self):
         self.assertIn("38;5;205", banner.COLOR_LOGO)
         self.assertNotIn("95", banner.COLOR_LOGO)
         self.assertNotIn("96", banner.COLOR_LOGO)
+        self.assertEqual(banner.COLOR_LOGO_OUTLINE, banner.NEON_BLUE)
+        self.assertIn("96", banner.COLOR_LOGO_OUTLINE)
         self.assertEqual(termux_ui.COLOR_LOGO, termux_ui.PINK)
 
-    def test_banner_uses_pink_logo(self):
+    def test_banner_uses_pink_logo_and_neon_blue_outline(self):
         text = banner.banner_text(use_color=True)
         first_line = text.splitlines()[0]
         self.assertTrue(first_line.startswith(banner.COLOR_LOGO))
-        self.assertNotIn("\033[1;96m", first_line)
+        self.assertIn(banner.COLOR_LOGO_OUTLINE, first_line)
+        self.assertNotIn("\033[30m", first_line)
+        self.assertNotIn("\033[90m", first_line)
         self.assertNotIn("\033[95m", first_line)
         self.assertNotIn("\033[1;95m", first_line)
 
-    def test_banner_contains_small_mons_after_subtitle(self):
+    def test_banner_contains_bold_mons_on_tool_line(self):
         text = banner.banner_text(use_color=False, terminal_width=80)
-        mons_block = self._mons_block(text)
-        self.assertEqual(mons_block, banner.ASCII_MONS_WIDE.splitlines())
-        self.assertEqual("\n".join(mons_block), self.APPROVED_MONS_ART)
-        self.assertEqual(len(mons_block), 3)
-        self.assertLessEqual(max(len(line) for line in mons_block), 15)
-        self.assertFalse(mons_block[0].startswith(" "))
+        lines = text.splitlines()
+        tool_lines = [line for line in lines if "Tool: Rejoin v1.0.0" in line]
+        self.assertEqual(tool_lines, ["MONS        Tool: Rejoin v1.0.0"])
+        self.assertEqual(self._mons_block(text), [])
 
-    def test_banner_mons_uses_grey_when_colored(self):
+    def test_colored_banner_mons_uses_bold_text(self):
         text = banner.banner_text(use_color=True)
         lines = text.splitlines()
-        subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
-        mons_lines = lines[subtitle_idx + 1:]
-        self.assertTrue(mons_lines)
-        self.assertTrue(all(line.startswith(banner.MONS_COLOR) for line in mons_lines))
-        self.assertIn("38;5;240", banner.MONS_COLOR)
-        self.assertTrue(all(line.endswith(banner.RESET) for line in mons_lines))
+        tool_line = next(line for line in lines if "Tool: Rejoin" in line)
+        self.assertIn(f"{banner.BOLD}MONS{banner.RESET}", tool_line)
+        self.assertIn(banner.BLUE, tool_line)
+        self.assertEqual(self._mons_block(text), [])
 
     def test_deng_logo_remains_larger_than_mons(self):
         text = banner.banner_text(use_color=False, terminal_width=80)
         lines = text.splitlines()
-        subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
-        deng_fp = self._footprint(lines[:subtitle_idx])
-        mons_fp = self._footprint(lines[subtitle_idx + 1:])
-        self.assertGreater(deng_fp["height"], mons_fp["height"])
-        self.assertGreater(deng_fp["width"], mons_fp["width"])
-        self.assertLessEqual(mons_fp["area"] / deng_fp["area"], 0.25)
+        self.assertEqual(len(lines), len(banner.ASCII_DENG.splitlines()) + 1)
 
     def test_broken_mons_slash_x_art_is_removed(self):
         source = banner.banner_text(use_color=False, terminal_width=80)
         source += "\n" + banner.banner_text(use_color=False, terminal_width=40)
-        module_art = "\n".join((banner.ASCII_MONS_WIDE, banner.ASCII_MONS_NARROW))
         for broken in self.BROKEN_MONS_LINES:
             self.assertNotIn(broken, source)
-            self.assertNotIn(broken, module_art)
         self.assertNotIn(self.OLD_MONS_ART, source)
-        self.assertNotIn(self.OLD_MONS_ART, module_art)
-        self.assertNotIn("X", module_art)
-        self.assertNotIn("╔╦╗", module_art)
+        self.assertFalse(hasattr(banner, "ASCII_MONS"))
+        self.assertFalse(hasattr(banner, "ASCII_MONS_WIDE"))
+        self.assertFalse(hasattr(banner, "ASCII_MONS_NARROW"))
 
-    def test_banner_contains_deng_subtitle_and_block_pixel_mons(self):
+    def test_banner_contains_deng_tool_line_and_no_block_pixel_mons(self):
         text = banner.banner_text(use_color=False, terminal_width=80)
         self.assertIn("██████╗", text)
         self.assertIn("Tool: Rejoin", text)
-        mons = "\n".join(self._mons_block(text))
-        self.assertNotIn("\nMONS\n", f"\n{text}\n")
-        self.assertEqual(mons, self.APPROVED_MONS_ART)
-        self.assertNotIn(" ".join(("MM", "OO", "NN", "SS")), mons)
-        self.assertNotIn(" ".join("MONS"), mons)
-        self.assertNotIn("10 OnS", mons)
-        self.assertNotIn("1ONS", mons)
-        self.assertNotIn("M0NS", mons)
-
-    def test_mons_does_not_use_red_or_error_color(self):
-        text = banner.banner_text(use_color=True, terminal_width=80)
-        mons = "\n".join(self._mons_block(text))
-        self.assertIn(banner.MONS_COLOR, mons)
-        self.assertIn("38;5;240", banner.MONS_COLOR)
-        self.assertNotIn("\033[31m", mons)
-        self.assertNotIn("\033[1;31m", mons)
-        self.assertNotIn("\033[91m", mons)
-        self.assertNotIn("\033[1;91m", mons)
-
-    def test_mons_has_wide_and_narrow_block_rendering(self):
-        self.assertEqual(banner.mons_logo_for_width(80), banner.ASCII_MONS_WIDE)
-        self.assertEqual(banner.mons_logo_for_width(40), banner.ASCII_MONS_NARROW)
-        for logo in (banner.ASCII_MONS_WIDE, banner.ASCII_MONS_NARROW):
-            self.assertEqual(logo, self.APPROVED_MONS_ART)
-            self.assertNotIn(" ".join(("MM", "OO", "NN", "SS")), logo)
-            self.assertNotIn(" ".join("MONS"), logo)
-            self.assertNotIn("\nMONS\n", f"\n{logo}\n")
-            self.assertNotIn("╔╦╗", logo)
-            self.assertNotIn("10 OnS", logo)
-            self.assertNotIn("1ONS", logo)
-
-    def test_narrow_mons_does_not_wrap_badly(self):
-        text = banner.banner_text(use_color=False, terminal_width=40)
-        mons_block = self._mons_block(text)
-        self.assertEqual(mons_block, banner.ASCII_MONS_NARROW.splitlines())
-        self.assertEqual("\n".join(mons_block), self.APPROVED_MONS_ART)
-        self.assertLessEqual(max(len(line) for line in mons_block), 15)
-        self.assertTrue(all(len(line) <= 40 for line in text.splitlines()))
-
-    def test_mons_actual_terminal_footprint_is_physically_smaller(self):
-        text = banner.banner_text(use_color=False, terminal_width=80)
-        lines = text.splitlines()
-        subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
-        deng_fp = self._footprint(lines[:subtitle_idx])
-        old_fp = banner.visible_footprint(self.OLD_MONS_ART)
-        mons_fp = self._footprint(lines[subtitle_idx + 1:])
-        self.assertEqual(mons_fp, banner.visible_footprint(self.APPROVED_MONS_ART))
-        self.assertLess(mons_fp["height"], old_fp["height"])
-        self.assertLess(mons_fp["width"], old_fp["width"])
-        self.assertLess(mons_fp["height"], deng_fp["height"])
-        self.assertLess(mons_fp["width"], deng_fp["width"])
-        self.assertLessEqual(mons_fp["area"] / deng_fp["area"], 0.25)
-        self.assertGreaterEqual(mons_fp["area"] / deng_fp["area"], 0.15)
-
-    def test_colored_mons_size_uses_actual_footprint_not_visual_weight(self):
-        text = banner.banner_text(use_color=True, terminal_width=80)
-        lines = text.splitlines()
-        subtitle_idx = next(i for i, line in enumerate(lines) if "Tool: Rejoin" in line)
-        deng_lines = [banner.ANSI_RE.sub("", line) for line in lines[:subtitle_idx]]
-        mons_lines = [banner.ANSI_RE.sub("", line) for line in lines[subtitle_idx + 1:]]
-        deng_fp = self._footprint(deng_lines)
-        mons_fp = self._footprint(mons_lines)
-        self.assertEqual("\n".join(mons_lines), self.APPROVED_MONS_ART)
-        self.assertEqual(mons_fp["height"], 3)
-        self.assertEqual(mons_fp["width"], 15)
-        self.assertEqual(mons_fp["area"], 45)
-        self.assertLessEqual(mons_fp["area"] / deng_fp["area"], 0.25)
+        self.assertNotIn("█▄█ █▀█ █▄█ █▀▀", text)
+        self.assertNotIn("MM OO NN SS", text)
+        self.assertNotIn("M O N S", text)
 
     def test_deng_logo_and_version_line_remain_unchanged(self):
         text = banner.banner_text(use_color=False, terminal_width=80)
@@ -179,7 +99,7 @@ class LogoColorRegressionTests(unittest.TestCase):
         self.assertEqual(lines[:len(deng_lines)], deng_lines)
         self.assertEqual(
             lines[len(deng_lines)],
-            "Tool: Rejoin v1.0.0".center(max(len(line) for line in deng_lines)),
+            "MONS        Tool: Rejoin v1.0.0",
         )
 
     def test_top_menu_still_renders_after_banner(self):

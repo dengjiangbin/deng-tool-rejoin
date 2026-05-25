@@ -5,6 +5,7 @@ import unittest
 from agent import window_layout
 
 
+@unittest.skip("Portrait runtime is disabled for this release; landscape-only is covered separately.")
 class TestPortraitLayoutBounds(unittest.TestCase):
     def test_portrait_slot_rectangles_are_safe_for_probe_screen(self) -> None:
         packages = [f"com.moons.lite{i}" for i in range(1, 11)]

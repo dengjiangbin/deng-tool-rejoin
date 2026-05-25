@@ -961,27 +961,28 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
             out = _auto_detect_cookies_for_entries(entries, {})
         self.assertEqual(out[0]["roblox_cookie"], "_|WARNING:-DO-NOT-SHARE-THIS.ADDFLOW")
 
-    def test_auto_detect_package_runs_cookie_detection_before_mapping(self):
+    def test_auto_detect_package_uses_safe_mapping_without_cookie_scan(self):
         from agent.commands import _package_menu_auto_detect
 
         cfg = self._make_cfg()
         candidates = [android.RobloxPackageCandidate("com.new.clone", "Clone", True)]
-        cookie_calls: list[str] = []
+        mapping_calls: list[str] = []
 
-        def fake_cookie(entries, config, **kwargs):
-            cookie_calls.extend(str(e.get("package") or "") for e in entries)
+        def fake_mapping(entries, config, **kwargs):
+            mapping_calls.extend(str(e.get("package") or "") for e in entries)
             return entries
 
         with unittest.mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=candidates), \
              unittest.mock.patch("agent.commands._detect_or_prompt_account_username", side_effect=lambda e, _d: e), \
-             unittest.mock.patch("agent.commands._auto_detect_cookies_for_entries", side_effect=fake_cookie) as auto_cookie, \
+             unittest.mock.patch("agent.commands._auto_detect_cookies_for_entries", side_effect=AssertionError("cookie scan")), \
              unittest.mock.patch("agent.commands._run_account_mapping_table", side_effect=lambda e, _d: e), \
+             unittest.mock.patch("agent.commands._safe_refresh_account_mapping_entries", side_effect=fake_mapping) as safe_mapping, \
              unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c), \
              unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
-             unittest.mock.patch("builtins.input", side_effect=["a"]):
+             unittest.mock.patch("agent.commands.safe_io.safe_prompt", side_effect=["a"]):
             _package_menu_auto_detect(cfg)
-        auto_cookie.assert_called_once()
-        self.assertEqual(cookie_calls, ["com.new.clone"])
+        safe_mapping.assert_called_once()
+        self.assertEqual(mapping_calls, ["com.new.clone"])
 
     def test_no_refresh_username_in_public_menu(self):
         """Refresh Username / Edit Username must NOT be in the public package menu."""
@@ -996,27 +997,28 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
         self.assertNotIn("Edit Username", text)
         self.assertNotIn("Detect / Refresh Usernames", text)
 
-    def test_add_package_runs_cookie_detection_before_save(self):
+    def test_add_package_uses_safe_mapping_before_save_without_cookie_scan(self):
         from agent.commands import _package_menu_add
 
         cfg = self._make_cfg()
         detected = [android.RobloxPackageCandidate("com.new.pkg", "New App", True)]
-        cookie_calls: list[str] = []
+        mapping_calls: list[str] = []
 
-        def fake_cookie(entries, config, **kwargs):
-            cookie_calls.extend(str(e.get("package") or "") for e in entries)
+        def fake_mapping(entries, config, **kwargs):
+            mapping_calls.extend(str(e.get("package") or "") for e in entries)
             return entries
 
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
              unittest.mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=detected), \
              unittest.mock.patch("agent.commands._detect_or_prompt_account_username", side_effect=lambda e, _d: e), \
-             unittest.mock.patch("agent.commands._auto_detect_cookies_for_entries", side_effect=fake_cookie) as auto_cookie, \
+             unittest.mock.patch("agent.commands._auto_detect_cookies_for_entries", side_effect=AssertionError("cookie scan")), \
              unittest.mock.patch("agent.commands._run_account_mapping_table", side_effect=lambda e, _d: e), \
+             unittest.mock.patch("agent.commands._safe_refresh_account_mapping_entries", side_effect=fake_mapping) as safe_mapping, \
              unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c), \
-             unittest.mock.patch("builtins.input", side_effect=["1", "y"]):
+             unittest.mock.patch("agent.commands.safe_io.safe_prompt", side_effect=["1", "y"]):
             _package_menu_add(cfg)
-        auto_cookie.assert_called_once()
-        self.assertEqual(cookie_calls, ["com.new.pkg"])
+        safe_mapping.assert_called_once()
+        self.assertEqual(mapping_calls, ["com.new.pkg"])
 
     def test_add_package_runs_detection_first(self):
         """Add Package must call detection before asking what to add."""

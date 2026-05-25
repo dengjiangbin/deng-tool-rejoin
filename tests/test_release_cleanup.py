@@ -127,6 +127,7 @@ class TestReleaseGridLayouts(unittest.TestCase):
         self.assertGreaterEqual(rects[0].left, 640)
 
     def test_portrait_grid_slot_order(self) -> None:
+        self.skipTest("Portrait runtime is disabled for this release.")
         from agent import window_layout as wl
         with unittest.mock.patch("agent.window_layout._detect_status_bar_height", return_value=25):
             rects = wl.calculate_split_layout(

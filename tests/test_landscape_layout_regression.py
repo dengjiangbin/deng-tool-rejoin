@@ -54,7 +54,7 @@ class TestLandscapeLayoutRegression(unittest.TestCase):
 
         with mock.patch("agent.commands.window_layout.detect_display_info", return_value=_Display()), \
              mock.patch("agent.commands.window_layout.calculate_split_layout") as calc, \
-             mock.patch("agent.commands.window_layout._is_layout_excluded", return_value=False), \
+             mock.patch("agent.commands.window_layout.layout_exclusion_reason", return_value=""), \
              mock.patch("agent.commands.window_layout.detect_layout_orientation", return_value="landscape"), \
              mock.patch("agent.commands.window_layout._detect_status_bar_height", return_value=25), \
              mock.patch("agent.window_apply.apply_window_layout") as apply, \

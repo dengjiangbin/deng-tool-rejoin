@@ -8,7 +8,13 @@ from contextlib import ExitStack, redirect_stdout
 from unittest import mock
 
 from agent.config import default_config, package_entry, validate_config
-from agent.commands import _config_menu_package, _package_menu_refresh_mapping
+from agent.commands import (
+    _choose_packages_menu,
+    _config_menu_package,
+    _package_menu_add,
+    _package_menu_auto_detect,
+    _package_menu_refresh_mapping,
+)
 
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
@@ -193,6 +199,53 @@ class TestRefreshMappingFreezeRegression(unittest.TestCase):
         self.assertNotIn("│", out)
         self.assertNotIn("┌", out)
         self.assertNotIn("Package | Username | User ID", out)
+
+    def test_first_time_auto_detect_uses_shared_safe_mapping(self):
+        cfg = _cfg([package_entry("com.roblox.client", "", True, "not_set")])
+        candidate = mock.Mock(package="com.moons.litesc", app_name="Lite C", launchable=True)
+        prompts = iter(["1", "a"])
+        with mock.patch("agent.commands._is_interactive", return_value=True), \
+             mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=[candidate]), \
+             mock.patch("agent.commands.safe_io.safe_prompt", side_effect=lambda *_a, **_k: next(prompts)), \
+             mock.patch("agent.commands._run_account_mapping_table", side_effect=AssertionError("old mapping")), \
+             mock.patch("agent.commands._auto_detect_cookies_for_entries", side_effect=AssertionError("cookie scan")), \
+             mock.patch("agent.commands._safe_refresh_account_mapping_entries",
+                        return_value=[package_entry("com.moons.litesc", "User", True, "detected")]) as shared:
+            selected, _hints = _choose_packages_menu(cfg["roblox_packages"], cfg["package_detection_hints"], cfg)
+        shared.assert_called_once()
+        self.assertEqual(selected[0]["package"], "com.moons.litesc")
+
+    def test_setup_config_auto_detect_uses_shared_safe_mapping(self):
+        cfg = _cfg([package_entry("com.roblox.client", "", True, "not_set")])
+        candidate = mock.Mock(package="com.moons.litesc", app_name="Lite C", launchable=True)
+        with mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=[candidate]), \
+             mock.patch("agent.commands.safe_io.safe_prompt", return_value="a"), \
+             mock.patch("agent.commands.save_config", side_effect=lambda data: data), \
+             mock.patch("agent.commands._run_account_mapping_table", side_effect=AssertionError("old mapping")), \
+             mock.patch("agent.commands._auto_detect_cookies_for_entries", side_effect=AssertionError("cookie scan")), \
+             mock.patch("agent.commands._safe_refresh_account_mapping_entries",
+                        return_value=[package_entry("com.moons.litesc", "User", True, "detected")]) as shared:
+            result = _package_menu_auto_detect(cfg)
+        shared.assert_called_once()
+        self.assertEqual(result["roblox_packages"][-1]["package"], "com.moons.litesc")
+
+    def test_manual_add_uses_shared_safe_mapping_after_validation(self):
+        cfg = _cfg([package_entry("com.roblox.client", "", True, "not_set")])
+        prompts = iter(["m", "y"])
+        with mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=[]), \
+             mock.patch("agent.commands._prompt_manual_package", return_value="com.moons.litesc"), \
+             mock.patch("agent.commands.android.package_installed", return_value=True) as installed, \
+             mock.patch("agent.commands.safe_io.safe_prompt", side_effect=lambda *_a, **_k: next(prompts)), \
+             mock.patch("agent.commands.save_config", side_effect=lambda data: data), \
+             mock.patch("agent.commands._detect_or_prompt_account_username", side_effect=AssertionError("old username detect")), \
+             mock.patch("agent.commands._run_account_mapping_table", side_effect=AssertionError("old mapping")), \
+             mock.patch("agent.commands._auto_detect_cookies_for_entries", side_effect=AssertionError("cookie scan")), \
+             mock.patch("agent.commands._safe_refresh_account_mapping_entries",
+                        return_value=[package_entry("com.moons.litesc", "User", True, "detected")]) as shared:
+            result = _package_menu_add(cfg)
+        installed.assert_called_once_with("com.moons.litesc")
+        shared.assert_called_once()
+        self.assertEqual(result["roblox_packages"][-1]["package"], "com.moons.litesc")
 
 
 if __name__ == "__main__":

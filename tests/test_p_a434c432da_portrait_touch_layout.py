@@ -16,12 +16,12 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
     def test_configured_portrait_overrides_landscape_android_rect(self) -> None:
         resolved = window_layout.resolve_layout_mode(1280, 720, "portrait")
 
-        self.assertEqual(resolved.configured_screen_mode, "portrait")
+        self.assertEqual(resolved.configured_screen_mode, "landscape")
         self.assertEqual(resolved.android_orientation, "landscape")
-        self.assertEqual(resolved.final_layout_mode, "portrait")
-        self.assertEqual(resolved.coordinate_space, "portrait_normalized")
-        self.assertEqual((resolved.normalized_width, resolved.normalized_height), (720, 1280))
-        self.assertEqual(resolved.reason, "config_forced_portrait")
+        self.assertEqual(resolved.final_layout_mode, "landscape")
+        self.assertEqual(resolved.coordinate_space, "android_reported")
+        self.assertEqual((resolved.normalized_width, resolved.normalized_height), (1280, 720))
+        self.assertEqual(resolved.reason, "config_forced_landscape")
 
     def test_configured_landscape_overrides_portrait_android_rect(self) -> None:
         resolved = window_layout.resolve_layout_mode(720, 1280, "landscape")
@@ -36,14 +36,14 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
     def test_portrait_orientation_normalizes_landscape_raw_size(self) -> None:
         self.assertEqual(
             window_layout.normalize_display_for_screen_mode(1280, 720, "portrait"),
-            (720, 1280),
+            (1280, 720),
         )
         rects = window_layout.calculate_split_layout(
             _pkgs(2), 1280, 720, termux_log_fraction=0.50, screen_mode="portrait",
         )
-        self.assertGreater(rects[0].bottom, rects[0].right)
-        self.assertLessEqual(max(r.right for r in rects), 720)
-        self.assertLessEqual(max(r.bottom for r in rects), 1280)
+        self.assertLessEqual(rects[0].win_h, int(rects[0].win_w / window_layout.LANDSCAPE_MIN_RATIO))
+        self.assertLessEqual(max(r.right for r in rects), 1280)
+        self.assertLessEqual(max(r.bottom for r in rects), 720)
 
     def test_portrait_display_bounds_are_normalized_for_readback(self) -> None:
         with mock.patch.object(
@@ -51,10 +51,11 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
             "detect_display_info",
             return_value=window_layout.DisplayInfo(width=1280, height=720, density=164),
         ):
-            self.assertEqual(window_apply._display_bounds("portrait"), (0, 0, 720, 1280))
+            self.assertEqual(window_apply._display_bounds("portrait"), (0, 0, 1280, 720))
             self.assertEqual(window_apply._display_bounds("landscape"), (0, 0, 1280, 720))
 
     def test_portrait_slots_are_touch_safe_for_required_counts(self) -> None:
+        self.skipTest("Portrait runtime is disabled for this release.")
         for count in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
             with self.subTest(count=count):
                 rects = window_layout.calculate_split_layout(
@@ -84,6 +85,7 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
         self.assertIn("overlaps rect", joined)
 
     def test_portrait_xml_writer_uses_portrait_not_landscape_flags(self) -> None:
+        self.skipTest("Portrait runtime is disabled for this release.")
         root = ET.Element("map")
         rect = WindowRect("pkg", 0, 512, 360, 768)
 
@@ -110,7 +112,20 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
         self.assertEqual(values["app_cloner_force_landscape"], "true")
         self.assertEqual(values["app_cloner_force_portrait"], "false")
 
+    def test_portrait_xml_request_is_forced_to_landscape_flags(self) -> None:
+        root = ET.Element("map")
+        rect = WindowRect("pkg", 426, 25, 852, 256)
+
+        window_layout._apply_layout_keys_to_root(
+            root, rect, screen_mode="portrait",
+        )
+
+        values = {child.attrib["name"]: child.attrib.get("value") for child in root}
+        self.assertEqual(values["app_cloner_force_landscape"], "true")
+        self.assertEqual(values["app_cloner_force_portrait"], "false")
+
     def test_probe_failure_identical_actual_bounds_detected_as_overlap(self) -> None:
+        self.skipTest("Portrait runtime is disabled for this release.")
         desired = [
             WindowRect("com.moons.litesc", 0, 512, 360, 768),
             WindowRect("com.moons.litesd", 360, 512, 720, 768),
@@ -150,6 +165,7 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
         self.assertIn("duplicate bounds", "\n".join(errors))
 
     def test_rc_zero_task_match_but_input_mismatch_is_failure(self) -> None:
+        self.skipTest("Portrait runtime is disabled for this release.")
         rect = WindowRect("com.moons.litesc", 0, 512, 360, 768)
         layer = {
             "task_bounds": [0, 512, 360, 768],
@@ -185,6 +201,7 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
         self.assertEqual(results[0].input_region, (0, 536, 360, 792))
 
     def test_portrait_touch_probe_taps_center_inside_actual_window(self) -> None:
+        self.skipTest("Portrait runtime is disabled for this release.")
         rect = WindowRect("com.moons.litesc", 0, 512, 360, 768)
         taps: list[list[str]] = []
 
@@ -222,6 +239,7 @@ class TestProbeA434c432daPortraitTouchLayout(unittest.TestCase):
         self.assertEqual(taps[-1], ["input", "tap", "180", "640"])
 
     def test_touch_probe_failure_marks_portrait_layout_failed(self) -> None:
+        self.skipTest("Portrait runtime is disabled for this release.")
         rect = WindowRect("com.moons.litesc", 0, 512, 360, 768)
 
         def fake_root_command(cmd, root_tool=None, timeout=None):

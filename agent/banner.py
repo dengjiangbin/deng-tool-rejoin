@@ -10,10 +10,12 @@ import sys
 from .constants import PRODUCT_NAME, VERSION
 
 BLUE = "\033[1;94m"
+NEON_BLUE = "\033[1;96m"
 PINK = "\033[38;5;205m"
 GREY = "\033[90m"
-MONS_COLOR = "\033[2;38;5;240m"
+BOLD = "\033[1m"
 COLOR_LOGO = PINK
+COLOR_LOGO_OUTLINE = NEON_BLUE
 RESET = "\033[0m"
 
 ASCII_DENG = r"""
@@ -24,17 +26,6 @@ ASCII_DENG = r"""
 ██████╔╝███████╗██║ ╚████║╚██████╔╝
 ╚═════╝ ╚══════╝╚═╝  ╚═══╝ ╚═════╝
 """.strip("\n")
-
-ASCII_MONS_COMPACT = r"""
-█▄█ █▀█ █▄█ █▀▀
-█ █ █ █ ███ ▀▀█
-█ █ █▄█ █▀█ ▄▄█
-""".strip("\n")
-
-ASCII_MONS_WIDE = ASCII_MONS_COMPACT
-ASCII_MONS_NARROW = ASCII_MONS_COMPACT
-
-ASCII_MONS = ASCII_MONS_COMPACT
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -73,10 +64,19 @@ def _terminal_width(terminal_width: int | None = None) -> int:
     return shutil.get_terminal_size((80, 24)).columns
 
 
-def mons_logo_for_width(terminal_width: int | None = None) -> str:
-    """Return the approved compact MONS pixel mark for every terminal width."""
-    width = _terminal_width(terminal_width)
-    return ASCII_MONS_NARROW if width < 24 else ASCII_MONS_WIDE
+def _color_deng_line(line: str) -> str:
+    """Color DENG fill pink and box/outline glyphs neon blue."""
+    out: list[str] = []
+    active = ""
+    for ch in line:
+        color = COLOR_LOGO_OUTLINE if ch in "╗╔║╝╚═" else COLOR_LOGO
+        if color != active:
+            out.append(color)
+            active = color
+        out.append(ch)
+    if active:
+        out.append(RESET)
+    return "".join(out)
 
 
 def banner_text(use_color: bool | None = None, terminal_width: int | None = None) -> str:
@@ -84,20 +84,18 @@ def banner_text(use_color: bool | None = None, terminal_width: int | None = None
     if use_color is None:
         use_color = supports_color()
     if use_color:
-        colored_lines = [f"{COLOR_LOGO}{line}{RESET}" for line in ASCII_DENG.splitlines()]
+        colored_lines = [_color_deng_line(line) for line in ASCII_DENG.splitlines()]
         logo = "\n".join(colored_lines)
     else:
         logo = ASCII_DENG
     logo_width = max(visible_width(line) for line in ASCII_DENG.splitlines())
     subtitle_text = f"{PRODUCT_NAME.replace('DENG Tool: ', 'Tool: ')} v{VERSION}"
-    mons_logo = mons_logo_for_width(terminal_width)
+    gap = " " * 8
     if use_color:
-        subtitle = f"{BLUE}{subtitle_text.center(logo_width)}{RESET}"
-        mons = "\n".join(f"{MONS_COLOR}{line}{RESET}" for line in mons_logo.splitlines())
+        line = f"{BOLD}MONS{RESET}{gap}{BLUE}{subtitle_text}{RESET}"
     else:
-        subtitle = subtitle_text.center(logo_width)
-        mons = mons_logo
-    return f"{logo}\n{subtitle}\n{mons}"
+        line = f"MONS{gap}{subtitle_text}"
+    return f"{logo}\n{line}"
 
 
 def print_banner(use_color: bool | None = None) -> None:

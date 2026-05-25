@@ -51,6 +51,7 @@ _LAYOUT_EXCLUDE_PREFIXES: tuple[str, ...] = (
     "com.oneplus.",
     "com.oppo.",
     "com.vivo.",
+    "com.sec.",
 )
 
 _LAYOUT_EXCLUDE_EXACT: frozenset[str] = frozenset({
@@ -63,14 +64,27 @@ _LAYOUT_EXCLUDE_EXACT: frozenset[str] = frozenset({
     "com.android.launcher",
     "com.android.launcher3",
     "com.android.systemui",
+    "com.android.settings",
+    "com.sec.android.app.launcher",
+    "com.google.android.apps.nexuslauncher",
+    "com.google.android.apps.pixelmigrate",
 })
 
 
-def _is_layout_excluded(package: str) -> bool:
+def layout_exclusion_reason(package: str) -> str:
     pkg = package.strip().lower()
+    if not pkg:
+        return "empty_package"
     if pkg in _LAYOUT_EXCLUDE_EXACT:
-        return True
-    return any(pkg.startswith(pfx) for pfx in _LAYOUT_EXCLUDE_PREFIXES)
+        return "exact_system_or_launcher"
+    for pfx in _LAYOUT_EXCLUDE_PREFIXES:
+        if pkg.startswith(pfx):
+            return f"prefix:{pfx}"
+    return ""
+
+
+def _is_layout_excluded(package: str) -> bool:
+    return bool(layout_exclusion_reason(package))
 
 
 # ── Layout constants ─────────────────────────────────────────────────────────
@@ -560,17 +574,9 @@ PORTRAIT_ABSOLUTE_MIN_H: int = 180
 
 
 def normalize_display_for_screen_mode(width: int, height: int, screen_mode: str) -> tuple[int, int]:
-    """Return logical dimensions normalized for portrait-only planning.
-
-    Landscape callers keep the dimensions they pass in.  Existing landscape
-    code already uses rotation-aware display detection and several tests depend
-    on that behavior for preview/compat helpers.
-    """
+    """Return logical dimensions for the Landscape-only runtime."""
     w = max(1, int(width))
     h = max(1, int(height))
-    mode = str(screen_mode or "").strip().lower()
-    if mode == "portrait" and w > h:
-        return h, w
     return w, h
 
 
@@ -578,15 +584,13 @@ def resolve_layout_mode(width: int, height: int, screen_mode: str) -> LayoutMode
     """Resolve layout mode from config; Android rotation only informs coordinates."""
     raw_w = max(1, int(width))
     raw_h = max(1, int(height))
-    configured = str(screen_mode or "").strip().lower()
-    if configured not in {"portrait", "landscape"}:
-        configured = "landscape"
+    configured = "landscape"
     norm_w, norm_h = normalize_display_for_screen_mode(raw_w, raw_h, configured)
     return LayoutModeResolution(
         configured_screen_mode=configured,
         android_orientation=detect_layout_orientation(raw_w, raw_h),
         final_layout_mode=configured,
-        coordinate_space="portrait_normalized" if configured == "portrait" else "android_reported",
+        coordinate_space="android_reported",
         reason=f"config_forced_{configured}",
         raw_width=raw_w,
         raw_height=raw_h,
@@ -754,9 +758,7 @@ def _release_grid_rects(
     pkgs = [p for p in packages]
     if not pkgs:
         return []
-    configured_mode = str(mode or "landscape").strip().lower()
-    if configured_mode not in {"landscape", "portrait"}:
-        configured_mode = "landscape"
+    configured_mode = "landscape"
     mode_resolution = resolve_layout_mode(display_w, display_h, configured_mode)
     W, H = mode_resolution.normalized_width, mode_resolution.normalized_height
     orientation = mode_resolution.android_orientation
@@ -783,24 +785,14 @@ def _release_grid_rects(
         "[DENG_REJOIN_LAYOUT_ORIENTATION] orientation=%s screen_w=%d screen_h=%d",
         orientation, W, H,
     )
-    if configured_mode == "portrait":
-        cols, rows = 2, 5
-        slot_order = PORTRAIT_SLOT_RULES.get(len(pkgs), PORTRAIT_SLOT_RULES[10])
-        mode_label = "portrait"
-        left_end = 0
-        px0 = 0
-        py0 = 0
-        px1 = W
-        py1 = H
-    else:
-        cols, rows = 3, 3
-        slot_order = LANDSCAPE_SLOT_RULES.get(len(pkgs), LANDSCAPE_SLOT_RULES[9])
-        mode_label = "landscape"
-        left_end = configured_left_end
-        px0 = left_end
-        py0 = max(0, top_inset)
-        px1 = W
-        py1 = H
+    cols, rows = 3, 3
+    slot_order = LANDSCAPE_SLOT_RULES.get(len(pkgs), LANDSCAPE_SLOT_RULES[9])
+    mode_label = "landscape"
+    left_end = configured_left_end
+    px0 = left_end
+    py0 = max(0, top_inset)
+    px1 = W
+    py1 = H
 
     _log.info(
         "[DENG_REJOIN_LAYOUT_BORDER] detected_border_h=%d fallback_border_h=%d applied_top_y=%d",
@@ -811,27 +803,19 @@ def _release_grid_rects(
     if len(pkgs) > capacity:
         raise ValueError(f"{mode_label} release grid supports up to {capacity} packages")
 
-    if mode_label == "portrait":
-        pane_w = max(1, px1 - px0)
-        pane_h = max(1, py1 - py0)
-        cell_w = max(1, pane_w // cols)
-        cell_h = max(1, pane_h // rows)
-        win_h = cell_h
-        roblox_area_label = "full_screen"
-    else:
-        pane_w = max(_MIN_WIN_W * cols, px1 - px0)
-        pane_h = max(_MIN_WIN_H * rows, py1 - py0)
-        cell_w = max(_MIN_WIN_W, pane_w // cols)
-        cell_h = max(_MIN_WIN_H, pane_h // rows)
-        win_h = max(_MIN_WIN_H, min(cell_h, int(cell_w / LANDSCAPE_MIN_RATIO)))
-        roblox_area_label = "right_50"
+    pane_w = max(_MIN_WIN_W * cols, px1 - px0)
+    pane_h = max(_MIN_WIN_H * rows, py1 - py0)
+    cell_w = max(_MIN_WIN_W, pane_w // cols)
+    cell_h = max(_MIN_WIN_H, pane_h // rows)
+    win_h = max(_MIN_WIN_H, min(cell_h, int(cell_w / LANDSCAPE_MIN_RATIO)))
+    roblox_area_label = "right_50"
     roblox_grid_area = (px0, py0, px1, py1)
     _log.info(
         "[DENG_REJOIN_SPLIT_LAYOUT] screen_w=%d screen_h=%d termux_area=left_50 "
         "roblox_area=%s termux_desired=%s termux_actual=%s "
         "roblox_grid_area=%s full_width_used=%s",
         W, H, roblox_area_label, (0, 0, left_end, H), "", roblox_grid_area,
-        str(mode_label == "portrait").lower(),
+        "false",
     )
     rects: list[WindowRect] = []
     if mode_label == "landscape":
@@ -845,25 +829,8 @@ def _release_grid_rects(
         left = px0 + col * cell_w
         top = py0 + row * cell_h
         right = px1 if col == cols - 1 else min(px1, left + cell_w)
-        if mode_label == "portrait" and row == rows - 1:
-            bottom = py1
-        else:
-            bottom = min(py1, top + win_h)
+        bottom = min(py1, top + win_h)
         rects.append(WindowRect(pkg, left, top, right, bottom))
-
-    if mode_label == "portrait":
-        seen_bounds: dict[tuple[int, int, int, int], tuple[str, int]] = {}
-        for index, rect in enumerate(rects, start=1):
-            slot = _slot_index_for_package(index, slot_order)
-            key = (rect.left, rect.top, rect.right, rect.bottom)
-            if key in seen_bounds:
-                prev_pkg, prev_slot = seen_bounds[key]
-                same_slot = slot if slot == prev_slot else f"{prev_slot}/{slot}"
-                raise ValueError(
-                    "duplicate portrait slot assignment: "
-                    f"package {prev_pkg} and package {rect.package} both assigned to slot {same_slot}"
-                )
-            seen_bounds[key] = (rect.package, slot)
 
     if mode_label == "landscape":
         _log.info(
@@ -1142,9 +1109,7 @@ def _apply_layout_keys_to_root(
     Returns the number of keys created/modified.
     """
     values = _values_from_rect(rect)
-    mode = str(screen_mode or "landscape").strip().lower()
-    if mode not in {"landscape", "portrait"}:
-        mode = "landscape"
+    mode = "landscape"
     changed = 0
 
     # 1. Legacy compat: update old "current_window" mapping if present (string/int)

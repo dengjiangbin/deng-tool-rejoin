@@ -173,11 +173,11 @@ class TestApplyPipelineOrder(unittest.TestCase):
         direct_called = []
         root_called = []
 
-        def _direct(pkg, r, *, known_keys=None):
+        def _direct(pkg, r, *, known_keys=None, screen_mode="landscape"):
             direct_called.append(pkg)
             return True, "ok"
 
-        def _root(pkg, r, tool, timeout=10, *, known_keys=None):
+        def _root(pkg, r, tool, timeout=10, *, known_keys=None, screen_mode="landscape"):
             root_called.append(pkg)
             return True, "ok"
 
