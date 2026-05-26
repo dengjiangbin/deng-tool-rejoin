@@ -377,6 +377,7 @@ const {
   licenseExportFilename,
   sanitizeFilenameUsername,
 } = require('../src/licenseFormat');
+const licenseService = require('../src/licenseService');
 
 function resetDb() {
   memoryDb.site_users.splice(0);
@@ -676,6 +677,7 @@ beforeEach(() => {
   resetDb();
   resetLinkvertiseApi();
   resetLootLabsApi();
+  licenseService._clearPublicStatsCache();
 });
 
 describe('auth and protected pages', () => {
@@ -685,6 +687,12 @@ describe('auth and protected pages', () => {
     assert.match(res.text, /DENG Tool/);
     assert.match(res.text, /Secure portal for DENG Tool: Rejoin/);
     assert.match(res.text, /Continue With Discord/);
+    assert.match(res.text, /Global Stats/);
+    assert.match(res.text, /Generated Keys/);
+    assert.match(res.text, /Unique Users/);
+    assert.match(res.text, /Redeemed Keys/);
+    assert.match(res.text, /Active Devices/);
+    assert.match(res.text, /data-public-stat="generatedKeys"[^>]*>—</);
     // Database login must be absent
     assert.doesNotMatch(res.text, /Username or email/);
     assert.doesNotMatch(res.text, /password/);
@@ -811,6 +819,114 @@ describe('auth and protected pages', () => {
       assert.equal(res.headers.location, '/login');
     }
   });
+
+  test('public stats endpoint returns aggregate counts without login or private data', async () => {
+    memoryDb.site_users.push(
+      { id: 'site-1', discord_user_id: 'discord-user-1', username: 'VisibleUser', created_at: '2026-05-01T00:00:00Z' },
+      { id: 'site-2', discord_user_id: 'discord-user-2', username: 'SecondUser', created_at: '2026-05-01T00:00:00Z' },
+      { id: 'site-test', discord_user_id: 'discord-test', username: 'TestUser', is_test: true },
+    );
+    memoryDb.license_users.push(
+      { discord_user_id: 'discord-user-1', discord_username: 'VisibleUser', is_owner: false, is_blocked: false },
+      { discord_user_id: 'discord-user-2', discord_username: 'SecondUser', is_owner: false, is_blocked: false },
+      { discord_user_id: 'discord-test', discord_username: 'TestUser', is_owner: false, is_test: true },
+      { discord_user_id: 'discord-admin', discord_username: 'AdminUser', is_owner: true },
+    );
+    insertLicenseFixture('DENG-1111-2222-3333-4444', {
+      id: 'key-generated-only',
+      owner_discord_id: '',
+      site_user_id: null,
+      redeemed_at: null,
+    });
+    insertLicenseFixture('DENG-2222-3333-4444-5555', {
+      id: 'key-redeemed-at',
+      owner_discord_id: 'discord-user-1',
+      site_user_id: 'site-1',
+      redeemed_at: '2026-05-02T00:00:00Z',
+    });
+    insertLicenseFixture('DENG-3333-4444-5555-6666', {
+      id: 'key-bound-fallback',
+      owner_discord_id: 'discord-user-2',
+      site_user_id: 'site-2',
+      redeemed_at: null,
+    });
+    insertLicenseFixture('DENG-4444-5555-6666-7777', {
+      id: 'key-revoked',
+      status: 'revoked',
+      owner_discord_id: 'discord-user-1',
+      site_user_id: 'site-1',
+      redeemed_at: '2026-05-02T00:00:00Z',
+    });
+    insertLicenseFixture('DENG-5555-6666-7777-8888', {
+      id: 'key-test',
+      owner_discord_id: 'discord-test',
+      site_user_id: 'site-test',
+      is_test: true,
+      redeemed_at: '2026-05-02T00:00:00Z',
+    });
+    insertLicenseFixture('DENG-6666-7777-8888-9999', {
+      id: 'key-admin',
+      owner_discord_id: 'discord-admin',
+      site_user_id: null,
+      redeemed_at: '2026-05-02T00:00:00Z',
+    });
+    memoryDb.device_bindings.push(
+      { key_id: 'key-bound-fallback', install_id_hash: 'device-secret-1', device_model: 'Private Phone', is_active: true },
+      { key_id: 'key-redeemed-at', install_id_hash: 'device-secret-2', device_model: 'Private Phone 2', is_active: false },
+      { key_id: 'key-revoked', install_id_hash: 'device-secret-3', device_model: 'Private Phone 3', is_active: true },
+      { key_id: 'key-test', install_id_hash: 'device-secret-test', device_model: 'Private Phone T', is_active: true },
+    );
+
+    const res = await request(app).get('/api/public-stats');
+    assert.equal(res.status, 200);
+    assert.deepEqual(Object.keys(res.body).sort(), [
+      'activeDevices',
+      'generatedKeys',
+      'redeemedKeys',
+      'uniqueUsers',
+      'updatedAt',
+    ].sort());
+    assert.equal(res.body.generatedKeys, 3);
+    assert.equal(res.body.uniqueUsers, 2);
+    assert.equal(res.body.redeemedKeys, 2);
+    assert.equal(res.body.activeDevices, 1);
+    assert.match(res.body.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+    const blob = JSON.stringify(res.body);
+    for (const forbidden of [
+      'DENG-',
+      'discord-user-1',
+      'VisibleUser',
+      'Private Phone',
+      'device-secret',
+      'install_id_hash',
+      'provider',
+      'rows',
+      'license_keys',
+      'supabase',
+      'ip',
+    ]) {
+      assert.doesNotMatch(blob, new RegExp(forbidden, 'i'));
+    }
+  });
+
+  test('public stats legacy route uses the same aggregate response', async () => {
+    memoryDb.site_users.push({ id: 'site-1', discord_user_id: 'discord-user-1', username: 'VisibleUser' });
+    insertLicenseFixture('DENG-7777-8888-9999-AAAA', {
+      id: 'key-legacy-route',
+      owner_discord_id: 'discord-user-1',
+      site_user_id: 'site-1',
+      redeemed_at: '2026-05-02T00:00:00Z',
+    });
+    const res = await request(app).get('/api/stats/public');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.generatedKeys, 1);
+    assert.equal(res.body.redeemedKeys, 1);
+    assert.equal(res.body.activeDevices, 0);
+    assert.equal(typeof res.body.updatedAt, 'string');
+    assert.equal(res.body.service, undefined);
+    assert.equal(res.body.cooldown_seconds, undefined);
+  });
 });
 
 describe('theme and dashboard UI', () => {
@@ -899,6 +1015,14 @@ describe('theme and dashboard UI', () => {
     const dashboard = await agent.get('/dashboard');
     assert.match(dashboard.text, /\/public\/img\/deng-logo\.png\?v=/);
     assert.doesNotMatch(dashboard.text, />DT</);
+  });
+
+  test('login global stats CSS is compact responsive glass layout', () => {
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
+    assert.match(css, /\.global-stats-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+    assert.match(css, /\.global-stat-card\s*\{[\s\S]*backdrop-filter:\s*blur\(16px\)/);
+    assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.global-stats-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+    assert.match(css, /\.global-stat-value\s*\{[\s\S]*min-height:/);
   });
 
   test('logo PNG has transparent near-black pixels instead of black backing', () => {
@@ -1130,6 +1254,78 @@ describe('theme and dashboard UI', () => {
         assert.deepEqual(copied, ['DENG-E132-C484-51E0-96A7']);
         assert.equal(appended[0], textarea);
       });
+  });
+
+  test('public stats script formats numbers, polls, and keeps values on failure', async () => {
+    const vm = require('node:vm');
+    const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
+    const statEls = {};
+    ['generatedKeys', 'uniqueUsers', 'redeemedKeys', 'activeDevices'].forEach((key) => {
+      statEls[key] = {
+        textContent: '—',
+        classList: { add() {}, remove() {} },
+      };
+    });
+    let fetchCalls = 0;
+    const intervals = [];
+    const root = {
+      querySelector(selector) {
+        const match = selector.match(/data-public-stat="([^"]+)"/);
+        return match ? statEls[match[1]] : null;
+      },
+    };
+    const context = {
+      document: {
+        documentElement: { dataset: { theme: 'dark' } },
+        querySelector(selector) {
+          return selector === '[data-public-stats]' ? root : null;
+        },
+        querySelectorAll() {
+          return [];
+        },
+      },
+      fetch(url) {
+        fetchCalls += 1;
+        assert.equal(url, '/api/public-stats');
+        if (fetchCalls === 1) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              generatedKeys: 1248,
+              uniqueUsers: 563,
+              redeemedKeys: 812,
+              activeDevices: 427,
+            }),
+          });
+        }
+        return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: 'nope' }) });
+      },
+      localStorage: { getItem() { return null; }, setItem() {} },
+      navigator: {},
+      window: {
+        fetch: true,
+        matchMedia() { return { matches: false }; },
+        setTimeout(fn) { fn(); },
+        setInterval(fn, ms) {
+          intervals.push({ fn, ms });
+          return 1;
+        },
+        location: { href: '', reload() {} },
+      },
+      setTimeout(fn) { fn(); },
+    };
+
+    vm.runInNewContext(script, context);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(statEls.generatedKeys.textContent, '1,248');
+    assert.equal(statEls.uniqueUsers.textContent, '563');
+    assert.equal(statEls.redeemedKeys.textContent, '812');
+    assert.equal(statEls.activeDevices.textContent, '427');
+    assert.equal(intervals[0].ms, 10000);
+
+    intervals[0].fn();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(statEls.generatedKeys.textContent, '1,248');
   });
 
   test('layout includes cache-busted stylesheet URL', async () => {
@@ -2495,12 +2691,21 @@ describe('health and service identity', () => {
     assert.equal(res.body.port, 8791);
   });
 
-  test('public stats route exposes cooldown and expiry without secrets', async () => {
+  test('public stats route exposes aggregate counts without secrets', async () => {
     const res = await request(app).get('/api/stats/public');
     assert.equal(res.status, 200);
-    assert.equal(res.body.cooldown_seconds, 60);
-    assert.equal(res.body.unredeemed_key_expiry_hours, 24);
-    assert.doesNotMatch(JSON.stringify(res.body), /service-role|secret/i);
+    assert.deepEqual(Object.keys(res.body).sort(), [
+      'activeDevices',
+      'generatedKeys',
+      'redeemedKeys',
+      'uniqueUsers',
+      'updatedAt',
+    ].sort());
+    assert.equal(res.body.generatedKeys, 0);
+    assert.equal(res.body.uniqueUsers, 0);
+    assert.equal(res.body.redeemedKeys, 0);
+    assert.equal(res.body.activeDevices, 0);
+    assert.doesNotMatch(JSON.stringify(res.body), /service-role|secret|discord_user|install_id|device_model|device-secret|DENG-/i);
   });
 
   test('license history API includes WIB formatted timestamps for clients', async () => {

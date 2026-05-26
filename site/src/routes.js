@@ -1090,14 +1090,19 @@ router.get('/key/result', requireLogin, (req, res) => {
   res.render('key_result', { title: 'Your Key - DENG Tool', key, recoveredExisting });
 });
 
-router.get('/api/stats/public', (_req, res) => {
-  res.json({
-    service: 'deng-tool-site',
-    cooldown_seconds: challenge.COOLDOWN_SECONDS,
-    unredeemed_key_expiry_hours: challenge.KEY_EXPIRY_HOURS,
-    tool_version: '1.0.0',
-  });
-});
+async function handlePublicStats(_req, res) {
+  try {
+    const payload = await licenseService.getPublicStats();
+    res.set('Cache-Control', 'public, max-age=10, stale-while-revalidate=10');
+    return res.json(payload);
+  } catch (err) {
+    console.error('[api/public-stats]', err?.message || err);
+    return res.status(503).json({ error: 'public_stats_unavailable', message: 'Public stats are unavailable.' });
+  }
+}
+
+router.get('/api/public-stats', handlePublicStats);
+router.get('/api/stats/public', handlePublicStats);
 
 router.get('/api/license/me', requireLogin, repairSiteUser, async (req, res) => {
   try {

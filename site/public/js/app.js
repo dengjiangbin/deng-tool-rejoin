@@ -104,6 +104,65 @@
   });
 }());
 
+(function initPublicStats() {
+  var root = document.querySelector('[data-public-stats]');
+  if (!root || !window.fetch) return;
+
+  var keys = ['generatedKeys', 'uniqueUsers', 'redeemedKeys', 'activeDevices'];
+  var values = {};
+  keys.forEach(function(key) {
+    values[key] = root.querySelector('[data-public-stat="' + key + '"]');
+  });
+
+  function safeNumber(value) {
+    var n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+  }
+
+  function formatNumber(value) {
+    var n = safeNumber(value);
+    if (n === null) return '—';
+    return n.toLocaleString('en-US');
+  }
+
+  function setValue(key, value) {
+    var el = values[key];
+    if (!el) return;
+    var next = formatNumber(value);
+    if (el.textContent === next) return;
+    el.classList.add('is-updating');
+    el.textContent = next;
+    window.setTimeout(function() {
+      el.classList.remove('is-updating');
+    }, 180);
+  }
+
+  function applyStats(stats) {
+    keys.forEach(function(key) {
+      setValue(key, stats && stats[key]);
+    });
+  }
+
+  function loadStats() {
+    fetch('/api/public-stats', {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+      cache: 'no-store'
+    })
+      .then(function(res) {
+        if (!res.ok) throw new Error('public_stats_failed');
+        return res.json();
+      })
+      .then(applyStats)
+      .catch(function() {
+        // Keep the last good values (or the initial dash skeleton) and retry later.
+      });
+  }
+
+  loadStats();
+  window.setInterval(loadStats, 10000);
+}());
+
 (function initCopyButtons() {
   function fallbackCopy(text) {
     return new Promise(function(resolve, reject) {

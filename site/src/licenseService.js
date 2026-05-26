@@ -7,6 +7,8 @@ const { formatWibTimestamp } = require('./licenseFormat');
 
 const FULL_KEY_UNAVAILABLE = 'Full key unavailable for this old key';
 const KEY_RE = /^DENG-([0-9A-F]{4})-?([0-9A-F]{4})-?([0-9A-F]{4})-?([0-9A-F]{4})$/i;
+const PUBLIC_STATS_CACHE_MS = 10_000;
+let publicStatsCache = null;
 
 function isoExpired(value) {
   if (!value) return false;
@@ -82,6 +84,146 @@ function isActiveLicense(row) {
 
 function filterActiveLicenses(rows) {
   return (rows || []).filter(isActiveLicense);
+}
+
+function flagEnabled(row, names) {
+  return names.some((name) => {
+    const value = row ? row[name] : null;
+    if (value === true || value === 1) return true;
+    if (typeof value === 'string') return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+    return false;
+  });
+}
+
+function publicStatsUserAllowed(row) {
+  if (!row) return true;
+  return !flagEnabled(row, [
+    'admin',
+    'dev',
+    'fake',
+    'is_admin',
+    'is_blocked',
+    'is_dev',
+    'is_fake',
+    'is_internal',
+    'is_owner',
+    'is_test',
+    'test',
+  ]);
+}
+
+function publicStatsLicenseAllowed(row, userByDiscord = new Map(), userBySiteId = new Map()) {
+  if (!row) return false;
+  const status = licenseStatus(row);
+  if (['revoked', 'deleted', 'disabled', 'inactive', 'expired'].includes(status)) return false;
+  if (flagEnabled(row, [
+    'archived',
+    'deleted',
+    'disabled',
+    'fake',
+    'hidden',
+    'is_admin',
+    'is_archived',
+    'is_deleted',
+    'is_dev',
+    'is_disabled',
+    'is_fake',
+    'is_hidden',
+    'is_internal',
+    'is_test',
+    'test',
+  ])) return false;
+  const owner = String(row.owner_discord_id || row.created_by || '').trim();
+  if (owner && !publicStatsUserAllowed(userByDiscord.get(owner))) return false;
+  const siteUserId = String(row.site_user_id || '').trim();
+  if (siteUserId && !publicStatsUserAllowed(userBySiteId.get(siteUserId))) return false;
+  return true;
+}
+
+const PUBLIC_STATS_COLUMNS = Object.freeze({
+  device_bindings: 'key_id, install_id_hash, is_active',
+  license_keys: 'id, status, owner_discord_id, site_user_id, created_by, redeemed_at, expires_at, is_deleted, deleted, disabled, is_disabled, is_hidden, hidden, archived, is_archived, is_test, test, is_dev, is_admin, is_fake, fake, is_internal',
+  license_users: 'discord_user_id, is_owner, is_blocked, is_test, test, is_dev, is_admin, is_fake, fake, is_internal',
+  site_users: 'id, discord_user_id, is_test, test, is_dev, is_admin, is_fake, fake, is_internal',
+});
+
+async function selectPublicStatsRows(table) {
+  const columns = PUBLIC_STATS_COLUMNS[table];
+  const { data, error } = await supabase.from(table).select(columns || '*');
+  if (error) throw serviceError('public_stats_unavailable', 'Public stats are unavailable.', 503);
+  return Array.isArray(data) ? data : [];
+}
+
+function buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers }) {
+  const licenseUserByDiscord = new Map();
+  for (const row of licenseUsers || []) {
+    const id = String(row.discord_user_id || '').trim();
+    if (id) licenseUserByDiscord.set(id, row);
+  }
+  const siteUserById = new Map();
+  for (const row of siteUsers || []) {
+    const id = String(row.id || '').trim();
+    if (id) siteUserById.set(id, row);
+  }
+
+  const eligibleKeys = (keys || []).filter((row) => (
+    publicStatsLicenseAllowed(row, licenseUserByDiscord, siteUserById)
+  ));
+  const eligibleKeyIds = new Set(eligibleKeys.map((row) => row.id).filter(Boolean));
+  const activeBindings = (bindings || []).filter((row) => (
+    row &&
+    row.is_active !== false &&
+    eligibleKeyIds.has(row.key_id)
+  ));
+  const activeBindingKeyIds = new Set(activeBindings.map((row) => row.key_id).filter(Boolean));
+
+  const uniqueUsers = new Set();
+  for (const row of siteUsers || []) {
+    if (!publicStatsUserAllowed(row)) continue;
+    if (row.discord_user_id) uniqueUsers.add(`discord:${row.discord_user_id}`);
+    else if (row.id) uniqueUsers.add(`site:${row.id}`);
+  }
+  for (const row of licenseUsers || []) {
+    if (!publicStatsUserAllowed(row)) continue;
+    if (row.discord_user_id) uniqueUsers.add(`discord:${row.discord_user_id}`);
+  }
+  for (const row of eligibleKeys) {
+    if (row.owner_discord_id) uniqueUsers.add(`discord:${row.owner_discord_id}`);
+    else if (row.site_user_id) uniqueUsers.add(`site:${row.site_user_id}`);
+  }
+
+  const activeDevices = new Set();
+  for (const row of activeBindings) {
+    const deviceKey = String(row.install_id_hash || row.key_id || '').trim();
+    if (deviceKey) activeDevices.add(deviceKey);
+  }
+
+  return {
+    generatedKeys: eligibleKeys.length,
+    uniqueUsers: uniqueUsers.size,
+    redeemedKeys: eligibleKeys.filter((row) => Boolean(row.redeemed_at) || activeBindingKeyIds.has(row.id)).length,
+    activeDevices: activeDevices.size,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function getPublicStats({ now = Date.now(), forceRefresh = false } = {}) {
+  if (!forceRefresh && publicStatsCache && now - publicStatsCache.cachedAt < PUBLIC_STATS_CACHE_MS) {
+    return publicStatsCache.payload;
+  }
+  const [keys, bindings, licenseUsers, siteUsers] = await Promise.all([
+    selectPublicStatsRows('license_keys'),
+    selectPublicStatsRows('device_bindings'),
+    selectPublicStatsRows('license_users'),
+    selectPublicStatsRows('site_users'),
+  ]);
+  const payload = buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers });
+  publicStatsCache = { cachedAt: now, payload };
+  return payload;
+}
+
+function clearPublicStatsCache() {
+  publicStatsCache = null;
 }
 
 function serviceError(code, message, status = 400, extra = {}) {
@@ -559,6 +701,7 @@ module.exports = {
   formatLicenseStatus,
   getActiveUserLicenses,
   getPortalUserLicenses,
+  getPublicStats,
   getUserLicenses,
   getUserLicenseStats,
   downloadUserKeys,
@@ -569,4 +712,6 @@ module.exports = {
   providerLabel,
   redeemLicenseKey,
   resetLicenseHwid,
+  _buildPublicStatsPayload: buildPublicStatsPayload,
+  _clearPublicStatsCache: clearPublicStatsCache,
 };
