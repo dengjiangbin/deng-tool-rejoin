@@ -57,6 +57,36 @@ class LaunchTraceBlackScreenTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("process was not detected", result.error or "")
 
+    def test_black_screen_suspected_retries_and_fails_cleanly(self) -> None:
+        import agent.launcher as launcher
+        cfg = self._cfg()
+        launch_calls: list[str] = []
+        events: list[tuple[str, dict]] = []
+
+        def fake_bounds(*_args):
+            launch_calls.append("bounds")
+            return android.CommandResult(("am", "start", "--activity-launch-bounds"), 0, "OK", ""), "am_bounds_mode5"
+
+        def fake_plain(*_args):
+            launch_calls.append("plain")
+            return android.CommandResult(("am", "start"), 0, "OK", ""), "am_start"
+
+        with mock.patch.object(android, "package_installed", return_value=True), \
+             mock.patch.object(android, "force_stop_package", return_value=android.CommandResult(("am", "force-stop"), 0, "", "")), \
+             mock.patch.object(android, "launch_package_with_bounds", side_effect=fake_bounds), \
+             mock.patch.object(android, "launch_package_with_options", side_effect=fake_plain), \
+             mock.patch.object(launcher, "_read_launch_state", return_value={"process_alive": True, "activity_visible": False, "surface_present": False, "black_screen_suspected": True}), \
+             mock.patch.object(launcher, "log_event", side_effect=lambda _logger, _level, event, **kw: events.append((event, kw))), \
+             mock.patch("agent.launcher.db"), \
+             mock.patch("agent.launcher.time.sleep"):
+            result = perform_rejoin(cfg, reason="start")
+        self.assertFalse(result.success)
+        self.assertIn("no visible activity or surface", result.error or "")
+        self.assertEqual(launch_calls, ["bounds", "plain"])
+        trace = [kw for event, kw in events if event == "[DENG_REJOIN_LAUNCH_TRACE]"][-1]
+        self.assertEqual(trace["black_screen_suspected"], "true")
+        self.assertEqual(trace["retry_count"], 1)
+
     def test_global_url_and_separate_blank_modes_preserved(self) -> None:
         import agent.launcher as launcher
         calls: list[tuple[str, str | None]] = []

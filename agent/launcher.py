@@ -432,6 +432,36 @@ def perform_rejoin(
             raise RuntimeError(error)
 
         readiness = _wait_for_launch_ready(package, cfg)
+        retry_count = 0
+        if readiness.get("black_screen_suspected"):
+            retry_count = 1
+            log_event(
+                logger,
+                "warning",
+                "launch_black_screen_retry",
+                package=package,
+                first_method=_method,
+                retry_method="delayed_no_bounds",
+                private_url_mode=url_context.get("private_url_mode", "global"),
+                url_config_source=url_context.get("url_config_source", "blank"),
+            )
+            time.sleep(_launch_wait_seconds(cfg, "launch_black_screen_retry_delay_sec", 1.5, 0.5, 5.0))
+            retry_result, retry_method = android.launch_package_with_options(package, url_for_launch or None)
+            if _result_used_root(retry_result) or retry_method.startswith("root_"):
+                root_used = True
+            if retry_result.ok:
+                result = retry_result
+                _method = retry_method
+                readiness = _wait_for_launch_ready(package, cfg)
+            else:
+                log_event(
+                    logger,
+                    "warning",
+                    "launch_black_screen_retry_failed",
+                    package=package,
+                    method=retry_method,
+                    error=mask_urls_in_text(retry_result.summary),
+                )
         log_event(
             logger,
             "info",
@@ -452,11 +482,13 @@ def perform_rejoin(
             surface_present=str(bool(readiness.get("surface_present"))).lower(),
             black_screen_suspected=str(bool(readiness.get("black_screen_suspected"))).lower(),
             layout_applied_before_surface="false",
-            retry_count=0,
+            retry_count=retry_count,
             final_state="ready" if not readiness.get("black_screen_suspected") else "suspect",
         )
         if not readiness.get("process_alive"):
             raise RuntimeError("Android launch returned success but package process was not detected")
+        if readiness.get("black_screen_suspected"):
+            raise RuntimeError("Android launch returned success but no visible activity or surface was detected")
 
         log_event(
             logger, "info", "launch_result",
