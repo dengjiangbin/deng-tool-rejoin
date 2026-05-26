@@ -61,6 +61,7 @@ from agent.commands import (
     _package_menu_set_username,
     _prompt_launch_url,
     _run_edit_config_menu,
+    _run_first_time_setup_wizard,
 )
 from agent.config import default_config, package_entry, validate_config, validate_package_entries
 
@@ -724,15 +725,77 @@ class LicenseFlowRegressionTests(unittest.TestCase):
         validated = validate_config(cfg)
         self.assertEqual(validated["license_key"], "")
 
-    def test_config_summary_still_shows_license_section(self):
+    def test_config_summary_hides_license_section(self):
         from agent.commands import _print_config_summary
         cfg = _base_cfg()
+        cfg["license_key"] = "DENG-68C9-0BA2-F745-E506"
+        cfg["license"]["key"] = "DENG-68C9-0BA2-F745-E506"
         buf = io.StringIO()
         with redirect_stdout(buf):
             _print_config_summary(cfg)
         text = buf.getvalue()
-        # Status command still shows license info
-        self.assertIn("License", text)
+        self.assertNotIn("License:", text)
+        self.assertNotIn("Key:", text)
+        self.assertEqual(cfg["license_key"], "DENG-68C9-0BA2-F745-E506")
+
+    def test_first_time_setup_final_confirmation_is_public_only(self):
+        cfg = _base_cfg()
+        cfg["roblox_packages"] = [package_entry("com.roblox.client", "", True, "not_set")]
+        cfg["package_detection_hints"] = ["roblox", "moon"]
+        cfg["license_key"] = "DENG-68C9-0BA2-F745-E506"
+        cfg["license"]["key"] = "DENG-68C9-0BA2-F745-E506"
+        cfg["auto_resize_enabled"] = True
+        packages = [
+            package_entry("com.moons.litesc", "", True, "not_set"),
+            package_entry("com.moons.litesd", "", True, "not_set"),
+        ]
+        args = _non_interactive_args()
+        out = io.StringIO()
+        with redirect_stdout(out), \
+             unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
+             unittest.mock.patch("agent.commands.print_banner"), \
+             unittest.mock.patch("agent.commands._choose_packages_menu", return_value=(packages, ["roblox", "moon"])), \
+             unittest.mock.patch("agent.commands._setup_launch_link", side_effect=lambda draft: draft.update({
+                 "private_url_mode": "global",
+                 "private_server_url": "",
+                 "launch_mode": "app",
+                 "launch_url": "",
+             })), \
+             unittest.mock.patch("agent.commands.save_config", side_effect=lambda data: validate_config(data)), \
+             unittest.mock.patch(
+                 "agent.commands._prompt_yes_no",
+                 side_effect=lambda text, default=False: (print(f"{text} [{'Y/n' if default else 'y/N'}]:", end=""), False)[1],
+             ), \
+             unittest.mock.patch("agent.commands.cmd_start", side_effect=AssertionError("start")):
+            saved, did_save = _run_first_time_setup_wizard(cfg, args)
+
+        self.assertTrue(did_save)
+        self.assertIsNotNone(saved)
+        text = out.getvalue()
+        prompt_index = text.index("Start DENG now? [Y/n]:")
+        confirmation = text[:prompt_index]
+        self.assertIn("Roblox Packages:", confirmation)
+        self.assertIn("  1. com.moons.litesc", confirmation)
+        self.assertIn("  2. com.moons.litesd", confirmation)
+        self.assertIn("\n\nPrivate URL mode: Global", confirmation)
+        self.assertIn("Global Private URL: Not set", confirmation)
+        self.assertIn("Start DENG now? [Y/n]:", text)
+        for hidden in (
+            "Detection hints",
+            "Launch:",
+            "License:",
+            "Key:",
+            "Auto Resize:",
+            "Automatic based on selected package count",
+            "device DPI",
+            "Multi-package:",
+            "Termux status panel",
+            "Roblox layout explanation",
+        ):
+            self.assertNotIn(hidden, confirmation)
+        self.assertEqual(saved["package_detection_hints"], ["roblox", "moon"])
+        self.assertEqual(saved["license_key"], "DENG-68C9-0BA2-F745-E506")
+        self.assertTrue(saved["auto_resize_enabled"])
 
 
 # ─── Extra Regression: Current Settings still shown inside submenus ──────────

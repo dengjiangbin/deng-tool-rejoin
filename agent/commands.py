@@ -1242,39 +1242,37 @@ def _enforce_configured_screen_mode(
     return result
 
 
-def _print_config_summary(config_data: dict[str, Any]) -> None:
+def render_public_setup_confirmation(config_data: dict[str, Any]) -> str:
     cfg = safe_config_view(validate_config(config_data))
     entries = validate_package_entries(cfg["roblox_packages"])
     enabled_entries = [entry for entry in entries if entry.get("enabled", True)]
-    print("DENG Tool: Rejoin Settings")
-    print()
-    print("Roblox Packages:")
+    lines: list[str] = ["Roblox Packages:"]
     if enabled_entries:
         for idx, entry in enumerate(enabled_entries, start=1):
-            print(f"  {idx}. {entry['package']}")
+            lines.append(f"  {idx}. {entry['package']}")
     else:
-        print("  Not set")
-    print(f"  Detection hints: {_hint_list_label(cfg['package_detection_hints'])}")
-    print()
-    print("Launch:")
+        lines.append("  Not set")
+    lines.append("")
     mode = validate_private_url_mode(cfg.get("private_url_mode"))
-    print(f"  Private URL mode: {'Global' if mode == 'global' else 'Separate'}")
+    lines.append(f"Private URL mode: {'Global' if mode == 'global' else 'Separate'}")
     if mode == "global":
-        print(f"  Global Private URL: {_safe_url_label(cfg.get('private_server_url'))}")
+        lines.append(f"Global Private URL: {_safe_url_label(cfg.get('private_server_url'))}")
     else:
+        lines.append("Package Private URLs:")
         for idx, entry in enumerate(enabled_entries, start=1):
             status = "Set" if str(entry.get("private_server_url") or "").strip() else "Blank / App Only"
-            print(f"  {idx}. {entry['package']}: {status}")
+            lines.append(f"  {idx}. {entry['package']}: {status}")
+    return "\n".join(lines)
+
+
+def _print_public_setup_confirmation(config_data: dict[str, Any]) -> None:
+    print(render_public_setup_confirmation(config_data))
+
+
+def _print_config_summary(config_data: dict[str, Any]) -> None:
+    print("DENG Tool: Rejoin Settings")
     print()
-    print("License:")
-    print(f"  Key: {cfg.get('license_key') or 'Not set'}")
-    print()
-    # Advanced config is hidden from public summary in this version.
-    print("Auto Resize:")
-    print("  Automatic based on selected package count and device DPI")
-    if len(enabled_entries) > 1:
-        print("  Multi-package: 50% left reserved for Termux status panel, 50% right for Roblox")
-    print()
+    _print_public_setup_confirmation(config_data)
 
 
 def _print_setup_menu(config_data: dict[str, Any], title: str = "DENG Tool: Rejoin Setup") -> None:
@@ -3469,7 +3467,7 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
         termux_ui.print_error(f"Setup Could Not Be Saved: {exc}")
         return None, False
     termux_ui.print_success("First-Time Setup Complete")
-    _print_config_summary(saved)
+    _print_public_setup_confirmation(saved)
     if start_after_save or _prompt_yes_no("Start DENG now?", True):
         cmd_start(args)
     return saved, True

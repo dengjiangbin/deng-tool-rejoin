@@ -13,6 +13,7 @@ from agent.commands import (
       build_final_summary,
       build_start_table,
       build_start_verbose_details,
+      render_public_setup_confirmation,
 )
 from agent.config import default_config, validate_config
 from agent import android as amod
@@ -151,8 +152,46 @@ class StartTableUxTests(unittest.TestCase):
 
         text = output.getvalue()
         self.assertNotIn("Auto Resize / Window Layout Setup", text)
-        self.assertIn("Auto Resize:", text)
-        self.assertIn("Automatic based on selected package count and device DPI", text)
+        self.assertNotIn("Auto Resize:", text)
+        self.assertNotIn("Automatic based on selected package count and device DPI", text)
+        self.assertNotIn("device DPI", text)
+
+    def test_public_setup_confirmation_is_clean_global_summary(self):
+        cfg = validate_config(default_config())
+        cfg["roblox_packages"] = [
+            {"package": "com.moons.litesc", "enabled": True},
+            {"package": "com.moons.litesd", "enabled": True},
+        ]
+        cfg["package_detection_hints"] = ["roblox", "moon"]
+        cfg["license_key"] = "DENG-68C9-0BA2-F745-E506"
+        cfg["license"]["key"] = "DENG-68C9-0BA2-F745-E506"
+        cfg["auto_resize_enabled"] = True
+        cfg["private_url_mode"] = "global"
+        cfg["private_server_url"] = ""
+
+        text = render_public_setup_confirmation(cfg)
+
+        self.assertIn("Roblox Packages:", text)
+        self.assertIn("  1. com.moons.litesc", text)
+        self.assertIn("  2. com.moons.litesd", text)
+        self.assertIn("\n\nPrivate URL mode: Global", text)
+        self.assertIn("Global Private URL: Not set", text)
+        for hidden in (
+            "Detection hints",
+            "Launch:",
+            "License:",
+            "Key:",
+            "Auto Resize:",
+            "Automatic based on selected package count",
+            "device DPI",
+            "Multi-package:",
+            "Termux status panel",
+            "Roblox layout explanation",
+        ):
+            self.assertNotIn(hidden, text)
+        self.assertEqual(cfg["package_detection_hints"], ["roblox", "moon"])
+        self.assertEqual(cfg["license_key"], "DENG-68C9-0BA2-F745-E506")
+        self.assertTrue(cfg["auto_resize_enabled"])
 
     def test_status_hides_screen_mode_public_wording(self):
         import agent.commands as commands
