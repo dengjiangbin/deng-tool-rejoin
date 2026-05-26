@@ -49,7 +49,6 @@ from contextlib import redirect_stdout
 
 from agent import android
 from agent.commands import (
-    build_account_mapping_table,
     _config_menu_launch_link,
     _config_menu_package,
     _config_menu_webhook,
@@ -57,15 +56,12 @@ from agent.commands import (
     _config_yescaptcha_balance,
     _config_yescaptcha_set,
     _package_menu_add,
-    _package_menu_detect_refresh,
     _package_menu_list,
-    _package_menu_refresh_mapping,
     _package_menu_remove,
     _package_menu_set_username,
     _prompt_launch_url,
     _run_edit_config_menu,
 )
-from agent.account_detect import AccountDetectionResult
 from agent.config import default_config, package_entry, validate_config, validate_package_entries
 
 
@@ -349,9 +345,7 @@ class PackageSubmenuTests(unittest.TestCase):
         self.assertNotIn("List Packages", text)
 
     def test_package_submenu_lists_expected_numbered_options(self):
-        """Public package menu options: Auto Detect (1), Add (2),
-        Refresh Account Mapping (3), Remove (4), Back (0).
-        """
+        """Public package menu options: Auto Detect (1), Add (2), Remove (3), Back (0)."""
         cfg = _base_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
@@ -363,24 +357,23 @@ class PackageSubmenuTests(unittest.TestCase):
         plain = re.sub(r"\x1b\[[0-9;]*m", "", text)
         self.assertIn("Auto Detect Package", plain)
         self.assertIn("Add Package", plain)
-        self.assertIn("Refresh Account Mapping", plain)
         self.assertIn("Remove Package", plain)
+        self.assertNotIn("Refresh Account Mapping", plain)
+        self.assertNotIn("Account Mapping", plain)
         self.assertNotIn("Set Account Username / User ID", plain)
         self.assertNotIn("ROBLOSECURITY Cookie", plain)
 
-    def test_detect_refresh_saves_new_username(self):
+    def test_detect_refresh_disabled_noops(self):
+        from agent.commands import _package_menu_detect_refresh
         cfg = _base_cfg()
         cfg["roblox_packages"] = [package_entry("com.roblox.client", "", True, "not_set")]
-        ent = dict(cfg["roblox_packages"][0])
-
-        def _pairs(_pkgs, **kwargs):
-            return [(ent, AccountDetectionResult("founduser", "root_pref"))]
-
-        with unittest.mock.patch("agent.commands.account_detect.detect_account_usernames_for_packages", side_effect=_pairs):
-            with unittest.mock.patch("builtins.input", return_value=""):
-                with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
-                    out = _package_menu_detect_refresh(cfg)
-        self.assertEqual(out["roblox_packages"][0]["account_username"], "founduser")
+        with unittest.mock.patch(
+            "agent.commands.account_detect.detect_account_usernames_for_packages",
+            side_effect=AssertionError("account scan"),
+        ):
+            out = _package_menu_detect_refresh(cfg)
+        self.assertIs(out, cfg)
+        self.assertFalse(out["roblox_packages"][0].get("account_username"))
 
     def test_set_username_manual_saves(self):
         cfg = _base_cfg()
@@ -783,7 +776,7 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
         self.assertIn("Configured", text)
         self.assertNotIn("abcdefghij", text)
 
-    def test_package_submenu_shows_current_packages_with_username(self):
+    def test_package_submenu_shows_current_package_names_only(self):
         cfg = _base_cfg()
         cfg["roblox_packages"] = [package_entry("com.roblox.client", "Main", True)]
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
@@ -793,9 +786,10 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
                     _config_menu_package(cfg)
         text = buf.getvalue()
         self.assertIn("Current Packages", text)
-        self.assertIn("com.roblox.client — Main", text)
+        self.assertIn("com.roblox.client", text)
+        self.assertNotIn(" — Main", text)
 
-    def test_package_submenu_shows_unknown_for_missing_username(self):
+    def test_package_submenu_does_not_show_unknown_username(self):
         cfg = _base_cfg()
         cfg["roblox_packages"] = [package_entry("com.moons.litesc", "", True, "not_set")]
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
@@ -804,7 +798,8 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
         text = buf.getvalue()
-        self.assertIn("com.moons.litesc — Unknown", text)
+        self.assertIn("com.moons.litesc", text)
+        self.assertNotIn("Unknown", text)
 
     def test_package_submenu_no_enabled_packages_shows_none_configured(self):
         cfg = _base_cfg()
@@ -871,8 +866,8 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
         self.assertIn("Add Package", plain)
         self.assertIn("2.", plain)
 
-    def test_remove_package_is_menu_item_4(self):
-        """Remove Package is item 4 after Refresh Account Mapping at 3."""
+    def test_remove_package_is_menu_item_3(self):
+        """Remove Package is item 3 after mapping removal."""
         cfg = self._make_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
@@ -881,108 +876,80 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
                     _config_menu_package(cfg)
         plain = __import__("re").sub(r"\x1b\[[0-9;]*m", "", buf.getvalue())
         self.assertIn("Remove Package", plain)
-        self.assertIn("4.", plain)
+        self.assertIn("3.", plain)
+        self.assertNotIn("Refresh Account Mapping", plain)
 
-    def test_refresh_mapping_auto_detects_roblox_cookie(self):
+    def test_apply_mapping_disabled_does_not_detect_cookie(self):
         from agent.commands import _apply_mapping_to_entries
 
         entries = [package_entry("com.roblox.client", "user1", True, "manual")]
         detected = [(123, "root_prefs")]
         with unittest.mock.patch(
             "agent.roblox_cookie_detect.detect_roblox_cookie",
-            return_value="_|WARNING:-DO-NOT-SHARE-THIS.AUTO",
+            side_effect=AssertionError("cookie scan"),
         ):
             out = _apply_mapping_to_entries(entries, detected, ["Validated"], config={})
-        self.assertEqual(out[0]["roblox_cookie"], "_|WARNING:-DO-NOT-SHARE-THIS.AUTO")
+        self.assertFalse(out[0].get("roblox_cookie"))
 
-    def test_refresh_mapping_handles_empty_mapping(self):
+    def test_refresh_mapping_disabled_noops_without_output(self):
+        from agent.commands import _package_menu_refresh_mapping
+
         cfg = self._make_cfg([{
             "package": "com.roblox.client",
             "account_username": "",
             "enabled": False,
             "username_source": "not_set",
         }])
-        with unittest.mock.patch("agent.commands.safe_io.press_enter"), \
+        with unittest.mock.patch("agent.commands.safe_io.press_enter", side_effect=AssertionError("prompt")), \
              redirect_stdout(io.StringIO()) as out:
             result = _package_menu_refresh_mapping(cfg)
         self.assertIs(result, cfg)
-        self.assertIn("No Packages Configured", out.getvalue())
+        self.assertEqual(out.getvalue(), "")
 
-    def test_refresh_mapping_handles_none_fields_and_back(self):
+    def test_refresh_mapping_disabled_skips_account_scan(self):
+        from agent.commands import _package_menu_refresh_mapping
+
         cfg = self._make_cfg([{
             "package": "com.roblox.client",
             "account_username": None,
             "enabled": True,
             "username_source": None,
         }])
-        with unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
-             unittest.mock.patch("agent.commands.account_detect.detect_account_username", return_value=None), \
-             unittest.mock.patch("agent.commands._try_detect_user_id", return_value=(0, "not_found")), \
-             unittest.mock.patch("agent.commands.root_access.has_root", return_value=False), \
-             unittest.mock.patch("agent.commands.safe_io.safe_prompt", return_value="b"), \
-             unittest.mock.patch("agent.commands.safe_io.press_enter"), \
-             redirect_stdout(io.StringIO()):
-            result = _package_menu_refresh_mapping(cfg)
-        self.assertIsInstance(result, dict)
-
-    def test_refresh_mapping_handles_long_package_names(self):
-        long_pkg = "com." + ("verylong" * 10)
-        table = build_account_mapping_table([
-            ("1", long_pkg, "user", None, "root_prefs", "Detected"),
-        ])
-        self.assertIn("...", table)
-
-    def test_refresh_mapping_table_rows_match_column_count(self):
-        table = build_account_mapping_table([
-            ("1", "com.roblox.client", "user", "123", "manual", "Validated"),
-            ("2", None, None, None, None, None),
-        ])
-        for line in table.splitlines():
-            if line.startswith("│"):
-                self.assertEqual(line.count("│"), 7)
-
-    def test_refresh_mapping_failure_returns_to_menu(self):
-        cfg = self._make_cfg([package_entry("com.roblox.client", "", True, "not_set")])
-        with unittest.mock.patch("agent.commands.account_detect.detect_account_username", side_effect=RuntimeError("timeout")), \
-             unittest.mock.patch("agent.commands.safe_io.press_enter"), \
-             redirect_stdout(io.StringIO()) as out:
+        with unittest.mock.patch("agent.commands.account_detect.detect_account_username", side_effect=AssertionError("username scan")), \
+             unittest.mock.patch("agent.commands._try_detect_user_id", side_effect=AssertionError("user id scan")):
             result = _package_menu_refresh_mapping(cfg)
         self.assertIs(result, cfg)
-        self.assertIn("Refresh Mapping Finished With", out.getvalue())
 
-    def test_add_package_auto_detects_roblox_cookie(self):
+    def test_add_package_cookie_helper_disabled(self):
         from agent.commands import _auto_detect_cookies_for_entries
 
         entries = [package_entry("com.roblox.client", "user1", True, "manual")]
         with unittest.mock.patch(
             "agent.roblox_cookie_detect.detect_roblox_cookie",
-            return_value="_|WARNING:-DO-NOT-SHARE-THIS.ADDFLOW",
+            side_effect=AssertionError("cookie scan"),
         ), unittest.mock.patch("agent.commands._is_interactive", return_value=False):
             out = _auto_detect_cookies_for_entries(entries, {})
-        self.assertEqual(out[0]["roblox_cookie"], "_|WARNING:-DO-NOT-SHARE-THIS.ADDFLOW")
+        self.assertFalse(out[0].get("roblox_cookie"))
 
-    def test_auto_detect_package_uses_safe_mapping_without_cookie_scan(self):
+    def test_auto_detect_package_saves_without_mapping_or_cookie_scan(self):
         from agent.commands import _package_menu_auto_detect
 
         cfg = self._make_cfg()
         candidates = [android.RobloxPackageCandidate("com.new.clone", "Clone", True)]
-        mapping_calls: list[str] = []
-
-        def fake_mapping(entries, config, **kwargs):
-            mapping_calls.extend(str(e.get("package") or "") for e in entries)
-            return entries
 
         with unittest.mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=candidates), \
-             unittest.mock.patch("agent.commands._detect_or_prompt_account_username", side_effect=lambda e, _d: e), \
+             unittest.mock.patch("agent.commands._detect_or_prompt_account_username", side_effect=AssertionError("username scan")), \
              unittest.mock.patch("agent.commands._auto_detect_cookies_for_entries", side_effect=AssertionError("cookie scan")), \
-             unittest.mock.patch("agent.commands._run_account_mapping_table", side_effect=lambda e, _d: e), \
-             unittest.mock.patch("agent.commands._safe_refresh_account_mapping_entries", side_effect=fake_mapping) as safe_mapping, \
+             unittest.mock.patch("agent.commands._run_account_mapping_table", side_effect=AssertionError("mapping table")), \
+             unittest.mock.patch("agent.commands._safe_refresh_account_mapping_entries", side_effect=AssertionError("refresh mapping")), \
              unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c), \
              unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
              unittest.mock.patch("agent.commands.safe_io.safe_prompt", side_effect=["a"]):
-            _package_menu_auto_detect(cfg)
-        safe_mapping.assert_called_once()
-        self.assertEqual(mapping_calls, ["com.new.clone"])
+            result = _package_menu_auto_detect(cfg)
+        added = result["roblox_packages"][-1]
+        self.assertEqual(added["package"], "com.new.clone")
+        self.assertFalse(added.get("roblox_cookie"))
+        self.assertFalse(added.get("roblox_user_id"))
 
     def test_no_refresh_username_in_public_menu(self):
         """Refresh Username / Edit Username must NOT be in the public package menu."""
@@ -997,28 +964,25 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
         self.assertNotIn("Edit Username", text)
         self.assertNotIn("Detect / Refresh Usernames", text)
 
-    def test_add_package_uses_safe_mapping_before_save_without_cookie_scan(self):
+    def test_add_package_saves_without_mapping_or_cookie_scan(self):
         from agent.commands import _package_menu_add
 
         cfg = self._make_cfg()
         detected = [android.RobloxPackageCandidate("com.new.pkg", "New App", True)]
-        mapping_calls: list[str] = []
-
-        def fake_mapping(entries, config, **kwargs):
-            mapping_calls.extend(str(e.get("package") or "") for e in entries)
-            return entries
 
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
              unittest.mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=detected), \
-             unittest.mock.patch("agent.commands._detect_or_prompt_account_username", side_effect=lambda e, _d: e), \
+             unittest.mock.patch("agent.commands._detect_or_prompt_account_username", side_effect=AssertionError("username scan")), \
              unittest.mock.patch("agent.commands._auto_detect_cookies_for_entries", side_effect=AssertionError("cookie scan")), \
-             unittest.mock.patch("agent.commands._run_account_mapping_table", side_effect=lambda e, _d: e), \
-             unittest.mock.patch("agent.commands._safe_refresh_account_mapping_entries", side_effect=fake_mapping) as safe_mapping, \
+             unittest.mock.patch("agent.commands._run_account_mapping_table", side_effect=AssertionError("mapping table")), \
+             unittest.mock.patch("agent.commands._safe_refresh_account_mapping_entries", side_effect=AssertionError("refresh mapping")), \
              unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c), \
              unittest.mock.patch("agent.commands.safe_io.safe_prompt", side_effect=["1", "y"]):
-            _package_menu_add(cfg)
-        safe_mapping.assert_called_once()
-        self.assertEqual(mapping_calls, ["com.new.pkg"])
+            result = _package_menu_add(cfg)
+        added = result["roblox_packages"][-1]
+        self.assertEqual(added["package"], "com.new.pkg")
+        self.assertFalse(added.get("roblox_cookie"))
+        self.assertFalse(added.get("roblox_user_id"))
 
     def test_add_package_runs_detection_first(self):
         """Add Package must call detection before asking what to add."""

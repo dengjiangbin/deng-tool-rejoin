@@ -134,11 +134,12 @@ class StartTableUxTests(unittest.TestCase):
         text = output.getvalue()
         self.assertIn("DENG Tool: Rejoin Settings", text)
         self.assertIn("Roblox Packages:", text)
-        self.assertIn("Username", text)
+        self.assertIn("com.roblox.client", text)
         self.assertIn("Private URL mode:", text)
         self.assertNotIn("Screen Mode", text)
         self.assertNotIn("Label:", text)
         self.assertNotIn('{"', text)
+        self.assertNotIn("Username", text)
         self.assertNotIn("Username not set", text)
 
     def test_public_config_menu_has_no_manual_auto_resize_step(self):

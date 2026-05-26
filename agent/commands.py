@@ -125,10 +125,9 @@ _ANSI_DIM     = "\033[2;37m"   # dim grey (Unknown only — intentionally low-co
 _ANSI_RESET   = "\033[0m"
 _ANSI_RE      = re.compile(r"\x1b\[[0-9;]*m")
 _CONFIG_RECOVERED_DEFAULTS = False
-_REFRESH_MAPPING_NORMAL_BUDGET_SECONDS = 20.0
-_REFRESH_MAPPING_HARD_BUDGET_SECONDS = 30.0
-_REFRESH_MAPPING_PER_PACKAGE_TIMEOUT_SECONDS = 5
-_SETUP_MAPPING_PER_PACKAGE_TIMEOUT_SECONDS = 3
+# Legacy account/cookie mapping scanners are intentionally disabled in this
+# release. Public setup/start paths must save package names only.
+_ACCOUNT_MAPPING_DISABLED = True
 
 
 def _print_dev_license_skipped(use_color: bool) -> None:
@@ -992,7 +991,6 @@ def _print_full_discovery_table(candidates: list[android.RobloxPackageCandidate]
 
 def _safe_package_detect_progress() -> None:
     termux_ui.print_warning("Detecting Packages...")
-    termux_ui.print_warning("Refreshing Account Mapping...")
     termux_ui.print_warning("This May Take A Few Seconds.")
 
 
@@ -1026,9 +1024,7 @@ def _interactive_discover_package_entries(
         c0 = candidates[0]
         print(f"Auto-selected: {c0.package}")
         entry = _entry_for_package(c0.package, existing_entries, app_name=c0.app_name)
-        _safe_package_detect_progress()
-        mapped = _safe_refresh_account_mapping_entries([entry], config_for_detect or {})
-        return mapped, "ok"
+        return [entry], "ok"
     _print_full_discovery_table(candidates)
     print("  A. Select all")
     _raw = safe_io.safe_prompt("Choose packages (e.g. 1,2 or A) [1]: ", default="1")
@@ -1051,9 +1047,7 @@ def _interactive_discover_package_entries(
     if not picked:
         return [], "empty_choice"
     base_entries = [_entry_for_package(c.package, existing_entries, app_name=c.app_name) for c in picked]
-    _safe_package_detect_progress()
-    mapped = _safe_refresh_account_mapping_entries(base_entries, config_for_detect or {})
-    return mapped, "ok"
+    return base_entries, "ok"
 
 
 def _safe_url_label(value: str | None) -> str:
@@ -1255,11 +1249,9 @@ def _print_config_summary(config_data: dict[str, Any]) -> None:
     print("DENG Tool: Rejoin Settings")
     print()
     print("Roblox Packages:")
-    print("  Roblox Username / Account Name")
     if enabled_entries:
         for idx, entry in enumerate(enabled_entries, start=1):
-            username = _account_username_value(entry)
-            print(f"  {idx}. {username:<16} {entry['package']}")
+            print(f"  {idx}. {entry['package']}")
     else:
         print("  Not set")
     print(f"  Detection hints: {_hint_list_label(cfg['package_detection_hints'])}")
@@ -1340,6 +1332,9 @@ def _entry_for_package(package: str, current_entries: list[dict[str, Any]], *, a
 
 
 def _detect_or_prompt_account_username(entry: dict[str, Any], config_data: dict[str, Any] | None = None) -> dict[str, Any]:
+    """LEGACY DISABLED: account username detection is not part of package setup."""
+    if _ACCOUNT_MAPPING_DISABLED:
+        return dict(entry)
     updated = dict(entry)
     if validate_account_username(updated.get("account_username", "")):
         return updated
@@ -1384,11 +1379,13 @@ def _detect_or_prompt_account_username(entry: dict[str, Any], config_data: dict[
 
 
 def _try_detect_user_id(entry: dict[str, Any], draft: dict[str, Any]) -> tuple[int, str]:
-    """Attempt root-assisted user ID detection for one package entry.
+    """LEGACY DISABLED: root/user ID mapping is not part of setup/start.
 
     Returns (user_id, source_label).  user_id=0 means not found.
     Never raises — setup must never crash here.
     """
+    if _ACCOUNT_MAPPING_DISABLED:
+        return 0, "disabled"
     pkg = str(entry.get("package") or "").strip()
     if not pkg:
         return 0, "not_found"
@@ -1440,7 +1437,9 @@ def _safe_refresh_account_mapping_entries(
     selected_only: bool = True,
     print_rows: bool = True,
 ) -> list[dict[str, Any]]:
-    """Bounded package/account mapping refresh shared by setup and Refresh Mapping."""
+    """LEGACY DISABLED: return package entries without account mapping scans."""
+    if _ACCOUNT_MAPPING_DISABLED:
+        return [dict(e) for e in entries if isinstance(e, dict)]
     started = time.monotonic()
     hard_deadline = started + _REFRESH_MAPPING_HARD_BUDGET_SECONDS
     normal_deadline = started + _REFRESH_MAPPING_NORMAL_BUDGET_SECONDS
@@ -1623,7 +1622,7 @@ def _run_account_mapping_table(
     *,
     show_root_message: bool = True,
 ) -> list[dict[str, Any]]:
-    """Show account mapping table for the given package entries and let user edit/confirm.
+    """LEGACY DISABLED: account mapping table is unreachable in this release.
 
     Shows: # | Package | Username | User ID | Source | Status
     Allows: A=accept all, <number>=edit that entry, B=back (cancel mapping only).
@@ -1631,6 +1630,8 @@ def _run_account_mapping_table(
     and account_mapping_source / account_mapping_status / account_mapping_updated_at.
     Never blocks Start — missing mapping is just silently skipped.
     """
+    if _ACCOUNT_MAPPING_DISABLED:
+        return [dict(e) for e in entries if isinstance(e, dict)]
     if not entries:
         return entries
     entries = [dict(e) for e in entries if isinstance(e, dict)]
@@ -1803,7 +1804,9 @@ def _auto_detect_cookies_for_entries(
     force_refresh: bool = False,
     announce: bool = True,
 ) -> list[dict[str, Any]]:
-    """Detect and attach .ROBLOSECURITY cookies for package entries via root."""
+    """LEGACY DISABLED: cookie scanning is not run by setup/start."""
+    if _ACCOUNT_MAPPING_DISABLED:
+        return [dict(e) for e in entries if isinstance(e, dict)]
     from . import roblox_cookie_detect as _rcd
 
     out: list[dict[str, Any]] = []
@@ -1845,7 +1848,9 @@ def _apply_mapping_to_entries(
     *,
     config: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Apply detected user IDs and mapping metadata to a list of package entries."""
+    """LEGACY DISABLED: mapping metadata is no longer applied."""
+    if _ACCOUNT_MAPPING_DISABLED:
+        return [dict(e) for e in entries if isinstance(e, dict)]
     now_ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
     mapped = _auto_detect_cookies_for_entries(entries, config, announce=False)
     out = []
@@ -1949,11 +1954,7 @@ def _choose_packages_menu(
                 print(f"Package Found: {manual}")
             else:
                 termux_ui.print_warning("Package was not launch-validated; saving manual entry anyway")
-            _safe_package_detect_progress()
-            selected = _safe_refresh_account_mapping_entries(
-                [_entry_for_package(manual, selected)],
-                cfg_ctx or {},
-            )
+            selected = [_entry_for_package(manual, selected)]
 
     return selected, hints
 
@@ -2218,12 +2219,7 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
     Options:
       1. Auto Detect Package
       2. Add Package
-      3. Refresh Account Mapping
-      4. Remove Package
       0. Back
-
-    Manual username entry is an advanced fallback within Refresh Account Mapping,
-    not a top-level menu item.
     """
     if not _is_interactive():
         return draft
@@ -2236,8 +2232,7 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         current_lines = ["Current Packages:"]
         if enabled_entries:
             for idx, entry in enumerate(enabled_entries, start=1):
-                username = _package_username_display(entry)
-                current_lines.append(f"  {idx}. {entry['package']} — {username}")
+                current_lines.append(f"  {idx}. {entry['package']}")
         else:
             current_lines.append("  No Packages Configured.")
         termux_ui.print_submenu(
@@ -2245,8 +2240,7 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
             [
                 ("1", "Auto Detect Package"),
                 ("2", "Add Package"),
-                ("3", "Refresh Account Mapping"),
-                ("4", "Remove Package"),
+                ("3", "Remove Package"),
                 ("0", "Back"),
             ],
             current_lines=current_lines,
@@ -2263,8 +2257,6 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
             elif choice == "2":
                 draft = _package_menu_add(draft)
             elif choice == "3":
-                draft = _package_menu_refresh_mapping(draft)
-            elif choice == "4":
                 draft = _package_menu_remove(draft)
             else:
                 termux_ui.print_invalid_option()
@@ -2278,7 +2270,9 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
 
 
 def _package_menu_detect_refresh(draft: dict[str, Any]) -> dict[str, Any]:
-    """Re-run username detection for each package; optionally persist results."""
+    """LEGACY DISABLED: hidden username refresh handler is unreachable."""
+    if _ACCOUNT_MAPPING_DISABLED:
+        return draft
     print()
     print("Detect / Refresh Usernames")
     entries = validate_package_entries(
@@ -2537,10 +2531,8 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
         else:
             termux_ui.print_warning("Package was not launch-validated; saving manual entry anyway")
         entry = _entry_for_package(manual, current_entries)
-        username = _package_username_display(entry)
         print()
         print(f"  Package:  {manual}")
-        print(f"  Username: {username}")
         print()
         confirm_in = safe_io.safe_prompt("Add this package? [Y/n]: ", default="y")
         if confirm_in is None:
@@ -2561,8 +2553,7 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
         print()
         print("Packages to add:")
         for i, entry in enumerate(new_entries_to_append, start=1):
-            username = _package_username_display(entry)
-            print(f"  {i}. {entry['package']} — Username: {username}")
+            print(f"  {i}. {entry['package']}")
         print()
         confirm_in = safe_io.safe_prompt("Add all these packages? [Y/n]: ", default="y")
         if confirm_in is None:
@@ -2595,8 +2586,7 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
         print()
         print("Packages to add:")
         for i, entry in enumerate(new_entries_to_append, start=1):
-            username = _package_username_display(entry)
-            print(f"  {i}. {entry['package']} — Username: {username}")
+            print(f"  {i}. {entry['package']}")
         print()
         confirm_in = safe_io.safe_prompt("Add these packages? [Y/n]: ", default="y")
         if confirm_in is None:
@@ -2611,11 +2601,6 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
         return draft
 
     if not new_entries_to_append:
-        return draft
-
-    new_entries_to_append = _safe_refresh_account_mapping_entries(new_entries_to_append, draft)
-    if not new_entries_to_append:
-        print("Cancelled.")
         return draft
 
     added_any = False
@@ -2649,8 +2634,7 @@ def _package_menu_remove(draft: dict[str, Any]) -> dict[str, Any]:
     print()
     print("Remove Package")
     for idx, entry in enumerate(enabled, start=1):
-        username = _package_username_display(entry)
-        print(f"  {idx}. {entry['package']} — {username}")
+        print(f"  {idx}. {entry['package']}")
     print("  0. Back")
     _rc = safe_io.safe_prompt("Choose package to remove [0]: ", default="0")
     choice = (_rc or "0").strip() or "0"
@@ -2681,12 +2665,14 @@ def _package_menu_remove(draft: dict[str, Any]) -> dict[str, Any]:
 
 
 def _package_menu_refresh_mapping(draft: dict[str, Any]) -> dict[str, Any]:
-    """Refresh package/account mapping with plain bounded output only.
+    """LEGACY DISABLED: hidden mapping refresh handler is unreachable.
 
     Probe p-d35129b645 showed this path could leave Termux unusable after
     table rendering/account detection.  This flow intentionally avoids Rich
     tables, nested prompts, dynamic redraw, and unbounded scans.
     """
+    if _ACCOUNT_MAPPING_DISABLED:
+        return draft
     def _restore_terminal() -> None:
         try:
             sys.stdout.write("\033[0m\033[?25h\n")
@@ -2825,12 +2811,6 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
         _entry_for_package(c.package, current_entries, app_name=c.app_name)
         for c in to_add_candidates
     ]
-    _safe_package_detect_progress()
-    to_add_entries = _safe_refresh_account_mapping_entries(to_add_entries, draft)
-
-    if not to_add_entries:
-        print("Cancelled.")
-        return draft
 
     for entry in to_add_entries:
         if entry["package"] not in current_pkgs:

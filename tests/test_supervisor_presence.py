@@ -1,10 +1,4 @@
-"""Tests verifying the supervisor uses Roblox presence as ground truth.
-
-When Roblox's presence API says the configured account is InGame, the table
-MUST show ``Online`` regardless of what local dumpsys / pidof reports.  This
-is the screenshot bug the user reported: clones visibly playing while local
-heuristics said "Preparing" / "Offline".
-"""
+"""Tests verifying supervisor state with account/presence mapping disabled."""
 
 from __future__ import annotations
 
@@ -73,9 +67,9 @@ def _run_one_iteration(worker: _PackageWorker, *,
 
 
 class TestPresenceDrivesState(unittest.TestCase):
-    """Roblox presence is authoritative — local heuristics never override it."""
+    """Local package health drives state while account mapping is disabled."""
 
-    def test_in_game_presence_makes_status_online(self) -> None:
+    def test_in_game_presence_does_not_override_local_dead_state(self) -> None:
         pkg = "com.example.clone1"
         worker = _PackageWorker(
             entry=_make_entry(pkg, user_id=12345),
@@ -87,15 +81,15 @@ class TestPresenceDrivesState(unittest.TestCase):
             user_id=12345, presence_type=PresenceType.IN_GAME,
             place_id=999, last_location="Test Place",
         )
-        # Even though our mocked health says "roblox_not_running" (i.e.
-        # local dumpsys/pidof failed), the InGame presence MUST win.
         status = _run_one_iteration(
             worker, presence=presence,
             health_state="roblox_not_running",
             meta={"running": False, "task": False, "window": False, "surface": False,
                   "fg_evidence": False, "root_running": False},
         )
-        self.assertEqual(status, STATUS_ONLINE)
+        from agent.supervisor import STATUS_DEAD
+        self.assertEqual(status, STATUS_DEAD)
+        self.assertEqual(worker.last_presence_state, "disabled")
 
     def test_online_presence_not_in_game_falls_through_to_process_check(self) -> None:
         """Kaeru-style stable rebuild: lobby presence is recorded internally but

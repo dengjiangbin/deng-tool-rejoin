@@ -342,33 +342,26 @@ class TestStateDetection(unittest.TestCase):
         self.assertEqual(sup.status_map[_PKG], STATUS_LAUNCHING)
         self.assertEqual(sup.status_map[_PKG2], STATUS_ONLINE)
 
-    def test_missing_config_user_id_uses_root_prefs_then_presence_online(self):
-        """Per-clone prefs userId should feed Presence API when config userId is missing."""
+    def test_missing_config_user_id_does_not_use_root_prefs_or_presence(self):
+        """Account mapping is disabled; local evidence drives state."""
         sup = _make_sup()
-        presence = MagicMock()
-        presence.is_in_game = True
-        presence.is_offline = False
-        presence.is_unknown = False
-        presence.presence_type = MagicMock(name="IN_GAME")
-        presence.place_id = 123
-        presence.root_place_id = 456
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(android, "current_foreground_package", return_value=""), \
-             patch.object(android, "discover_roblox_user_id_from_prefs", return_value=10957542503), \
-             patch("agent.roblox_presence.fetch_presence_one", return_value=presence):
+             patch.object(android, "discover_roblox_user_id_from_prefs", side_effect=AssertionError("prefs scan")), \
+             patch("agent.roblox_presence.fetch_presence_one", side_effect=AssertionError("presence call")):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
-        self.assertEqual(state, STATUS_ONLINE)
-        self.assertIn(detail["reason"], {"roblox_presence_in_game", "presence_playing_no_expected_target"})
-        self.assertEqual(sup._presence_user_ids[_PKG], 10957542503)
-        self.assertEqual(sup._presence_last_detail[_PKG]["roblox_user_id_source"], "prefs")
+        self.assertEqual(state, STATUS_UNKNOWN)
+        self.assertEqual(detail["reason"], "presence_unavailable_or_unknown")
+        self.assertNotIn(_PKG, sup._presence_user_ids)
+        self.assertEqual(sup._presence_last_detail[_PKG]["roblox_api_status"], "disabled")
 
-    def test_username_lookup_failure_does_not_permanently_mark_resolved(self):
-        """One failed username lookup must not freeze future rounds at missing_user_id."""
+    def test_username_lookup_not_attempted_when_mapping_disabled(self):
+        """Username lookup must not run from watchdog/supervisor."""
         sup = _make_sup()
         with patch.object(sup, "_fast_alive_evidence", return_value=_alive_evidence()), \
              patch.object(android, "current_foreground_package", return_value=""), \
-             patch.object(android, "discover_roblox_user_id_from_prefs", return_value=None), \
-             patch("agent.roblox_presence.lookup_user_id", return_value=None):
+             patch.object(android, "discover_roblox_user_id_from_prefs", side_effect=AssertionError("prefs scan")), \
+             patch("agent.roblox_presence.lookup_user_id", side_effect=AssertionError("username lookup")):
             state, detail = sup._detect_package_state(_PKG, _make_entry())
         self.assertEqual(state, STATUS_UNKNOWN)
         self.assertEqual(detail["reason"], "presence_unavailable_or_unknown")

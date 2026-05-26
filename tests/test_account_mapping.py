@@ -298,7 +298,7 @@ class TestAccountDetectionResultHasUserId(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestTryDetectUserId(unittest.TestCase):
-    """_try_detect_user_id falls back safely and never raises."""
+    """_try_detect_user_id is disabled in the public runtime."""
 
     def setUp(self):
         from agent.commands import _try_detect_user_id
@@ -307,24 +307,24 @@ class TestTryDetectUserId(unittest.TestCase):
     def test_returns_existing_config_uid(self):
         entry = package_entry("com.roblox.client", roblox_user_id=54321)
         uid, src = self._fn(entry, {})
-        self.assertEqual(uid, 54321)
-        self.assertEqual(src, "config")
+        self.assertEqual(uid, 0)
+        self.assertEqual(src, "disabled")
 
-    def test_falls_back_to_api_resolve_when_username_known(self):
+    def test_does_not_fall_back_to_api_resolve_when_username_known(self):
         entry = package_entry("com.roblox.client", account_username="Player1")
-        with unittest.mock.patch("agent.account_detect.detect_roblox_user_id", return_value=None), \
-             unittest.mock.patch("agent.roblox_presence.lookup_user_id", return_value=77777):
+        with unittest.mock.patch("agent.account_detect.detect_roblox_user_id", side_effect=AssertionError("prefs scan")), \
+             unittest.mock.patch("agent.roblox_presence.lookup_user_id", side_effect=AssertionError("presence lookup")):
             uid, src = self._fn(entry, {})
-        self.assertEqual(uid, 77777)
-        self.assertEqual(src, "api_resolved")
+        self.assertEqual(uid, 0)
+        self.assertEqual(src, "disabled")
 
     def test_returns_zero_when_no_source(self):
         entry = package_entry("com.roblox.client")
-        with unittest.mock.patch("agent.account_detect.detect_roblox_user_id", return_value=None), \
-             unittest.mock.patch("agent.roblox_presence.lookup_user_id", return_value=None):
+        with unittest.mock.patch("agent.account_detect.detect_roblox_user_id", side_effect=AssertionError("prefs scan")), \
+             unittest.mock.patch("agent.roblox_presence.lookup_user_id", side_effect=AssertionError("presence lookup")):
             uid, src = self._fn(entry, {})
         self.assertEqual(uid, 0)
-        self.assertEqual(src, "not_found")
+        self.assertEqual(src, "disabled")
 
     def test_never_raises(self):
         entry = package_entry("com.roblox.client")
@@ -332,10 +332,11 @@ class TestTryDetectUserId(unittest.TestCase):
              unittest.mock.patch("agent.roblox_presence.lookup_user_id", side_effect=RuntimeError("boom")):
             uid, src = self._fn(entry, {})
         self.assertEqual(uid, 0)
+        self.assertEqual(src, "disabled")
 
 
 class TestRunAccountMappingTable(unittest.TestCase):
-    """_run_account_mapping_table applies detected mappings without interaction in non-interactive mode."""
+    """_run_account_mapping_table is unreachable/disabled in current runtime."""
 
     def setUp(self):
         from agent.commands import _run_account_mapping_table
@@ -344,18 +345,18 @@ class TestRunAccountMappingTable(unittest.TestCase):
     def _non_interactive_patch(self):
         return unittest.mock.patch("agent.commands._is_interactive", return_value=False)
 
-    def test_applies_detected_uid_to_entry(self):
+    def test_does_not_apply_detected_uid_to_entry(self):
         entry = package_entry("com.roblox.client", account_username="Player1")
         with self._non_interactive_patch(), \
-             unittest.mock.patch("agent.commands._try_detect_user_id", return_value=(88888, "root_prefs")):
+             unittest.mock.patch("agent.commands._try_detect_user_id", side_effect=AssertionError("user id scan")):
             result = self._fn([entry], {})
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["roblox_user_id"], 88888)
+        self.assertEqual(result[0].get("roblox_user_id", 0), 0)
 
-    def test_preserves_existing_uid(self):
+    def test_preserves_entry_without_scanning_existing_uid(self):
         entry = package_entry("com.roblox.client", roblox_user_id=12345)
         with self._non_interactive_patch(), \
-             unittest.mock.patch("agent.commands._try_detect_user_id", return_value=(12345, "config")):
+             unittest.mock.patch("agent.commands._try_detect_user_id", side_effect=AssertionError("user id scan")):
             result = self._fn([entry], {})
         self.assertEqual(result[0]["roblox_user_id"], 12345)
 
@@ -367,10 +368,9 @@ class TestRunAccountMappingTable(unittest.TestCase):
     def test_no_uid_found_does_not_crash(self):
         entry = package_entry("com.roblox.client")
         with self._non_interactive_patch(), \
-             unittest.mock.patch("agent.commands._try_detect_user_id", return_value=(0, "not_found")):
+             unittest.mock.patch("agent.commands._try_detect_user_id", side_effect=AssertionError("user id scan")):
             result = self._fn([entry], {})
         self.assertEqual(len(result), 1)
-        # roblox_user_id should remain 0 (not crash)
         self.assertEqual(result[0].get("roblox_user_id", 0), 0)
 
 
@@ -387,7 +387,7 @@ class TestMissingUserIdDoesNotBlockStart(unittest.TestCase):
         self.assertEqual(entry["account_username"], "")
 
     def test_supervisor_falls_back_when_no_uid_no_username(self):
-        """Supervisor's _fetch_roblox_presence returns None when both are absent."""
+        """Supervisor presence is disabled and falls back to local health."""
         from agent.supervisor import _PackageWorker
         entry = package_entry("com.roblox.client")
         status_map = {"com.roblox.client": "Online"}
@@ -398,10 +398,9 @@ class TestMissingUserIdDoesNotBlockStart(unittest.TestCase):
         worker._roblox_username = ""
         with unittest.mock.patch("agent.roblox_presence.fetch_presence_one") as mock_fp:
             result = worker._fetch_roblox_presence()
-        # Should NOT call fetch_presence_one since no uid/username
         mock_fp.assert_not_called()
         self.assertIsNone(result)
-        self.assertEqual(worker.last_presence_state, "unavailable")
+        self.assertEqual(worker.last_presence_state, "disabled")
 
 
 # ---------------------------------------------------------------------------
@@ -409,11 +408,10 @@ class TestMissingUserIdDoesNotBlockStart(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestPresenceApiWithSavedUserId(unittest.TestCase):
-    """When roblox_user_id is saved, supervisor uses it directly."""
+    """Saved account fields do not activate presence/cookie scans in this release."""
 
-    def test_supervisor_uses_roblox_user_id_directly(self):
+    def test_supervisor_ignores_roblox_user_id_directly(self):
         from agent.supervisor import _PackageWorker
-        from agent.roblox_presence import PresenceResult, PresenceType
 
         entry = package_entry("com.roblox.client", roblox_user_id=99887766)
         status_map = {"com.roblox.client": "Online"}
@@ -423,18 +421,15 @@ class TestPresenceApiWithSavedUserId(unittest.TestCase):
         worker._roblox_username = ""
         worker._roblox_cookie = None
 
-        presence = PresenceResult(user_id=99887766, presence_type=PresenceType.IN_GAME)
-        with unittest.mock.patch("agent.roblox_presence.fetch_presence_one", return_value=presence):
+        with unittest.mock.patch("agent.roblox_presence.fetch_presence_one", side_effect=AssertionError("presence call")):
             result = worker._fetch_roblox_presence()
 
-        self.assertIsNotNone(result)
-        self.assertEqual(result.presence_type, PresenceType.IN_GAME)
-        self.assertEqual(worker.last_presence_state, "in_experience")
+        self.assertIsNone(result)
+        self.assertEqual(worker.last_presence_state, "disabled")
 
-    def test_supervisor_resolves_username_to_user_id(self):
-        """When only username is set, supervisor calls lookup_user_id once."""
+    def test_supervisor_does_not_resolve_username_to_user_id(self):
+        """Username mapping is disabled; supervisor must not call lookup_user_id."""
         from agent.supervisor import _PackageWorker
-        from agent.roblox_presence import PresenceResult, PresenceType
 
         entry = package_entry("com.roblox.client", account_username="Player1")
         status_map = {"com.roblox.client": "Online"}
@@ -444,18 +439,16 @@ class TestPresenceApiWithSavedUserId(unittest.TestCase):
         worker._roblox_username = "Player1"
         worker._roblox_cookie = None
 
-        presence = PresenceResult(user_id=11111, presence_type=PresenceType.IN_GAME)
-        with unittest.mock.patch("agent.roblox_presence.lookup_user_id", return_value=11111) as mock_lu, \
-             unittest.mock.patch("agent.roblox_presence.fetch_presence_one", return_value=presence):
+        with unittest.mock.patch("agent.roblox_presence.lookup_user_id", side_effect=AssertionError("username lookup")) as mock_lu, \
+             unittest.mock.patch("agent.roblox_presence.fetch_presence_one", side_effect=AssertionError("presence call")):
             result = worker._fetch_roblox_presence()
 
-        mock_lu.assert_called_once_with("Player1")
-        self.assertIsNotNone(result)
-        # Worker caches the resolved id
-        self.assertEqual(worker._roblox_user_id, 11111)
+        mock_lu.assert_not_called()
+        self.assertIsNone(result)
+        self.assertIsNone(worker._roblox_user_id)
 
     def test_api_failure_does_not_raise(self):
-        """Network errors in presence check are swallowed — process monitoring continues."""
+        """Disabled presence ignores network path entirely."""
         from agent.supervisor import _PackageWorker
 
         entry = package_entry("com.roblox.client", roblox_user_id=12345)
@@ -467,11 +460,11 @@ class TestPresenceApiWithSavedUserId(unittest.TestCase):
         worker._roblox_cookie = None
 
         with unittest.mock.patch("agent.roblox_presence.fetch_presence_one",
-                                 side_effect=urllib.error.URLError("connection failed")):
+                                 side_effect=AssertionError("presence call")):
             result = worker._fetch_roblox_presence()
 
         self.assertIsNone(result)
-        self.assertEqual(worker.last_presence_state, "unavailable")
+        self.assertEqual(worker.last_presence_state, "disabled")
 
     def test_rate_limit_uses_backoff_and_does_not_loop(self):
         """Rate-limited presence response returns Unknown, not a crash or loop."""
@@ -1007,23 +1000,22 @@ class TestApplyMappingInvalidIdNotSaved(unittest.TestCase):
     def test_invalid_id_not_saved(self):
         from agent.commands import _apply_mapping_to_entries
         entry = package_entry("com.roblox.client")
-        # detected=(12345, "root_prefs"), presence_status="Invalid" → status=Invalid, uid not saved
         result = _apply_mapping_to_entries([entry], [(12345, "root_prefs")], ["Invalid"])
         self.assertEqual(result[0].get("roblox_user_id", 0), 0)
-        self.assertEqual(result[0]["account_mapping_status"], "Invalid")
+        self.assertEqual(result[0]["account_mapping_status"], "Not Mapped")
 
-    def test_valid_id_is_saved(self):
+    def test_valid_id_is_not_saved_when_mapping_disabled(self):
         from agent.commands import _apply_mapping_to_entries
         entry = package_entry("com.roblox.client")
         result = _apply_mapping_to_entries([entry], [(12345, "root_prefs")], ["Validated"])
-        self.assertEqual(result[0]["roblox_user_id"], 12345)
-        self.assertEqual(result[0]["account_mapping_status"], "Validated")
+        self.assertEqual(result[0]["roblox_user_id"], 0)
+        self.assertEqual(result[0]["account_mapping_status"], "Not Mapped")
 
-    def test_timestamp_set_on_save(self):
+    def test_timestamp_not_set_when_mapping_disabled(self):
         from agent.commands import _apply_mapping_to_entries
         entry = package_entry("com.roblox.client")
         result = _apply_mapping_to_entries([entry], [(12345, "root_prefs")], ["Validated"])
-        self.assertNotEqual(result[0]["account_mapping_updated_at"], "")
+        self.assertEqual(result[0]["account_mapping_updated_at"], "")
 
 
 class TestAccountMappingTableFormat(unittest.TestCase):
@@ -1049,11 +1041,10 @@ class TestAccountMappingTableFormat(unittest.TestCase):
         from agent import commands
 
         src = inspect.getsource(commands._run_account_mapping_table)
-        self.assertIn("safe_io.safe_prompt", src)
+        self.assertIn("_ACCOUNT_MAPPING_DISABLED", src)
         self.assertNotIn('input("  > ")', src)
-        self.assertIn("build_account_mapping_table", src)
 
-    def test_interactive_mapping_accepts_without_crash(self):
+    def test_interactive_mapping_disabled_returns_entries_without_prompt(self):
         from agent.commands import _run_account_mapping_table
         from agent.config import package_entry
 
@@ -1062,12 +1053,9 @@ class TestAccountMappingTableFormat(unittest.TestCase):
             package_entry("com.moons.litesd", account_username="enigmavov1", roblox_user_id=10957547289),
         ]
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
-             unittest.mock.patch("agent.commands._try_detect_user_id", side_effect=[
-                 (10957545286, "config"),
-                 (10957547289, "config"),
-             ]), \
-             unittest.mock.patch("agent.commands.build_account_mapping_table", return_value="TABLE"), \
-             unittest.mock.patch("agent.commands.safe_io.safe_prompt", side_effect=["a"]):
+             unittest.mock.patch("agent.commands._try_detect_user_id", side_effect=AssertionError("user id scan")), \
+             unittest.mock.patch("agent.commands.build_account_mapping_table", side_effect=AssertionError("table")), \
+             unittest.mock.patch("agent.commands.safe_io.safe_prompt", side_effect=AssertionError("prompt")):
             result = _run_account_mapping_table(entries, {})
         self.assertEqual(len(result), 2)
 
@@ -1076,10 +1064,8 @@ class TestAccountMappingTableFormat(unittest.TestCase):
         from agent import commands
 
         src = inspect.getsource(commands._run_account_mapping_table)
-        loop_start = src.index("# --- Run presence validation")
-        row_start = src.index("def _row_status")
-        presence_block = src[loop_start:row_start]
-        self.assertNotIn("detect_roblox_cookie", presence_block)
+        first_return = src.split("if not entries:", 1)[0]
+        self.assertNotIn("detect_roblox_cookie", first_return)
 
 
 if __name__ == "__main__":

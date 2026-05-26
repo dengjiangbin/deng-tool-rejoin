@@ -360,12 +360,13 @@ class _PackageWorker(threading.Thread):
             self._state_tracker = None
         self._last_evidence: dict[str, Any] = {}
         self._consecutive_offline_checks: int = 0
-        # Roblox presence — ground truth via the public Roblox API.
+        # Account/presence mapping is disabled in this release; supervision
+        # relies on local Android package/process evidence only.
         self._roblox_user_id: int | None = None
         self._roblox_username: str = ""
         self._roblox_cookie: str | None = None
-        self._presence_resolved: bool = False  # username → id resolved yet?
-        self._last_presence_label: str = ""    # for diagnostic logging
+        self._presence_resolved: bool = False
+        self._last_presence_label: str = ""
         # Kaeru-style extended tracking (stable rebuild probe p-9e3f2a8d1c)
         self.last_presence_check_at: float | None = None  # when presence was last fetched
         self.last_presence_state: str = "unknown"         # classify_presence_result() output
@@ -513,65 +514,9 @@ class _PackageWorker(threading.Thread):
         self._presence_suspicious_window_start = 0
 
     def _fetch_roblox_presence(self) -> Any:
-        """Return a :class:`PresenceResult` for the configured account, or None.
-
-        Resolves username → userId once (cached), then asks Roblox's public
-        presence endpoint.  Never raises.  Returns None when no username /
-        no user_id is configured or the API was unreachable AND we have no
-        cached presence — in that case the supervisor falls back to its
-        local heuristics (process-alive check).
-
-        Always updates ``last_presence_check_at`` and ``last_presence_state``
-        so the supervisor can expose them for diagnostics without blocking.
-        """
-        try:
-            from . import roblox_presence as _rp
-        except Exception:  # noqa: BLE001
-            self.last_presence_state = "unavailable"
-            return None
-        try:
-            if not self._roblox_user_id:
-                if not self._roblox_username:
-                    self.last_presence_state = "unavailable"
-                    return None
-                uid = _rp.lookup_user_id(self._roblox_username)
-                if uid:
-                    self._roblox_user_id = uid
-            if not self._roblox_user_id:
-                self.last_presence_state = "unavailable"
-                return None
-            cookie = self._roblox_cookie
-            if not cookie:
-                try:
-                    from . import roblox_cookie_detect as _rcd
-
-                    cookie = _rcd.detect_roblox_cookie(
-                        self.package,
-                        entry=self.entry,
-                        config=self.cfg,
-                        use_root=True,
-                    )
-                    if cookie:
-                        self._roblox_cookie = cookie
-                except Exception:  # noqa: BLE001
-                    cookie = None
-            pres = _rp.fetch_presence_one(
-                self._roblox_user_id, cookie=cookie,
-            )
-            self.last_presence_check_at = time.time()
-            # Classify and store the presence state using the module helper.
-            classified = _rp.classify_presence_result(pres)
-            self.last_presence_state = classified
-            if pres is None or pres.is_unknown:
-                return None
-            return pres
-        except Exception as exc:  # noqa: BLE001
-            self.last_presence_state = "unavailable"
-            log_event(
-                self.logger, "debug", "roblox_presence_error",
-                package=self.package, error=str(exc),
-            )
-            return None
+        """Presence/account mapping is disabled; use local health evidence."""
+        self.last_presence_state = "disabled"
+        return None
 
     def _post_launch_state(self) -> str:
         """Process confirmed alive after launch → Online.
@@ -619,18 +564,9 @@ class _PackageWorker(threading.Thread):
                     grace_seconds=_launching_timeout,
                 )
 
-            # Roblox presence setup — read username + optional user_id/cookie
-            # from the per-package entry, then resolve via the public API.
-            self._roblox_username = str(self.entry.get("account_username") or "").strip()
-            try:
-                uid_raw = self.entry.get("roblox_user_id")
-                if isinstance(uid_raw, int) and uid_raw > 0:
-                    self._roblox_user_id = uid_raw
-                elif isinstance(uid_raw, str) and uid_raw.isdigit():
-                    self._roblox_user_id = int(uid_raw)
-            except Exception:  # noqa: BLE001
-                self._roblox_user_id = None
-            self._roblox_cookie = (str(self.entry.get("roblox_cookie") or "").strip() or None)
+            self._roblox_username = ""
+            self._roblox_user_id = None
+            self._roblox_cookie = None
         except Exception as exc:  # noqa: BLE001
             log_event(self.logger, "error", "worker_setup_error", package=self.package, error=str(exc))
             # Defaults so the loop still runs forever
@@ -1319,7 +1255,7 @@ class WatchdogSupervisor:
         self._ram_last_trim_at: dict[str, float] = {}    # last cache trim ts
         self._ram_cooldown_until: dict[str, float] = {}  # no RAM restart until this ts
 
-        # ── Per-package presence tracking ─────────────────────────────────────
+        # ── Per-package presence tracking (disabled in this release) ──────────
         self._presence_user_ids: dict[str, int] = {}
         self._presence_usernames: dict[str, str] = {}
         self._presence_cookies: dict[str, str | None] = {}
@@ -1332,18 +1268,7 @@ class WatchdogSupervisor:
 
         for e in self.entries:
             pkg = str(e["package"])
-            try:
-                uid_raw = e.get("roblox_user_id")
-                if uid_raw:
-                    self._presence_user_ids[pkg] = int(uid_raw)
-            except (ValueError, TypeError):
-                pass
-            uname = str(e.get("account_username") or "").strip()
-            if uname:
-                self._presence_usernames[pkg] = uname
-            self._presence_cookies[pkg] = (
-                str(e.get("roblox_cookie") or "").strip() or None
-            )
+            self._presence_cookies[pkg] = None
             try:
                 from .url_utils import parse_expected_target_from_url
                 self._presence_expected_targets[pkg] = parse_expected_target_from_url(
@@ -1516,17 +1441,12 @@ class WatchdogSupervisor:
     # ─── Presence fetching (process-check-first; presence is supplementary) ──
 
     def _fetch_presence(self, pkg: str) -> Any:
-        """Fetch Roblox presence for the package's account.  Never raises.
-
-        Returns a PresenceResult or None.  This is always called AFTER
-        process-alive check so that a dead process (force-closed) is caught
-        by step A and presence is never consulted for that case.
-        """
+        """Presence/account mapping is disabled; use local package evidence."""
         detail: dict[str, Any] = {
             "roblox_api_used": "false",
-            "roblox_api_status": "skipped",
-            "roblox_user_id": self._presence_user_ids.get(pkg, 0),
-            "roblox_user_id_source": "config" if self._presence_user_ids.get(pkg) else "",
+            "roblox_api_status": "disabled",
+            "roblox_user_id": 0,
+            "roblox_user_id_source": "",
             "roblox_presence_type": "",
             "roblox_place_id": "",
             "roblox_root_place_id": "",
@@ -1539,94 +1459,8 @@ class WatchdogSupervisor:
             "server_verification": "unavailable",
             "presence_error": "",
         }
-        target = self._presence_expected_targets.get(pkg)
-        if target is not None:
-            detail["expected_place_id"] = getattr(target, "expected_place_id", None) or ""
-            detail["expected_root_place_id"] = getattr(target, "expected_root_place_id", None) or ""
-            detail["expected_universe_id"] = getattr(target, "expected_universe_id", None) or ""
-            detail["expected_private_code"] = "configured" if getattr(target, "expected_private_code", "") else ""
         self._presence_last_detail[pkg] = detail
-        try:
-            from . import roblox_presence as _rp
-        except Exception as exc:  # noqa: BLE001
-            detail["roblox_api_status"] = "failed"
-            detail["presence_error"] = f"import_failed:{exc}"[:160]
-            return None
-        try:
-            uid = int(self._presence_user_ids.get(pkg) or 0)
-
-            # Resolve from rooted per-clone Roblox prefs before username lookup.
-            # This handles cloned packages whose configured display label is not
-            # the exact Roblox username, and avoids using one account for every
-            # clone.  The Android helper extracts numeric ids only.
-            if uid <= 0 and pkg not in self._presence_id_resolved:
-                pref_uid = android.discover_roblox_user_id_from_prefs(pkg, timeout=3)
-                if pref_uid:
-                    uid = int(pref_uid)
-                    self._presence_user_ids[pkg] = uid
-                    detail["roblox_user_id_source"] = "prefs"
-
-            # Resolve username → user_id (cached), but never permanently give
-            # up after one transient network miss.  Retry at a modest cadence.
-            if uid <= 0:
-                uname = self._presence_usernames.get(pkg, "")
-                last_attempt = self._presence_lookup_attempt_at.get(pkg, 0.0)
-                should_try = bool(uname) and (time.monotonic() - last_attempt) >= 30.0
-                if should_try:
-                    self._presence_lookup_attempt_at[pkg] = time.monotonic()
-                    uid_lookup = _rp.lookup_user_id(uname)
-                    if uid_lookup:
-                        uid = int(uid_lookup)
-                        self._presence_user_ids[pkg] = uid
-                        detail["roblox_user_id_source"] = "username"
-
-            if uid > 0:
-                self._presence_id_resolved.add(pkg)
-                detail["roblox_user_id"] = uid
-            elif not self._presence_usernames.get(pkg):
-                self._presence_id_resolved.add(pkg)
-
-            if not uid:
-                detail["roblox_api_status"] = "skipped"
-                detail["presence_error"] = "missing_user_id"
-                return None
-            cookie = self._presence_cookies.get(pkg)
-            if not cookie:
-                last_cookie_attempt = self._presence_cookie_lookup_at.get(pkg, 0.0)
-                if (time.monotonic() - last_cookie_attempt) >= 120.0:
-                    self._presence_cookie_lookup_at[pkg] = time.monotonic()
-                    try:
-                        from . import roblox_cookie_detect as _rcd
-
-                        cookie = _rcd.detect_roblox_cookie(
-                            pkg,
-                            entry=next(
-                                (e for e in self.entries if str(e.get("package")) == pkg),
-                                None,
-                            ),
-                            config=self.cfg,
-                            use_root=True,
-                        )
-                        if cookie:
-                            self._presence_cookies[pkg] = cookie
-                            detail["roblox_cookie_source"] = "auto_detect"
-                    except Exception:  # noqa: BLE001
-                        pass
-            detail["roblox_api_used"] = "true"
-            presence = _rp.fetch_presence_one(uid, cookie=cookie)
-            ptype = getattr(presence, "presence_type", None)
-            detail["roblox_api_status"] = "success"
-            detail["roblox_presence_type"] = getattr(ptype, "name", str(ptype))
-            detail["roblox_place_id"] = getattr(presence, "place_id", "") or ""
-            detail["roblox_root_place_id"] = getattr(presence, "root_place_id", "") or ""
-            detail["roblox_universe_id"] = getattr(presence, "universe_id", "") or ""
-            detail["roblox_game_id"] = getattr(presence, "game_id", "") or ""
-            return presence
-        except Exception as exc:  # noqa: BLE001
-            detail["roblox_api_used"] = "true" if detail.get("roblox_user_id") else "false"
-            detail["roblox_api_status"] = "failed"
-            detail["presence_error"] = str(exc)[:160]
-            return None
+        return None
 
     # ─── State detection ─────────────────────────────────────────────────────
 

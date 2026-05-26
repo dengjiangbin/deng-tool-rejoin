@@ -486,14 +486,14 @@ class TestRobloxPresenceAPI(unittest.TestCase):
 
 
 class TestPresenceSupervisorIntegration(unittest.TestCase):
-    """Supervisor uses Presence API as confirmation layer without crashing."""
+    """Supervisor leaves authenticated presence disabled in this release."""
 
     def setUp(self) -> None:
         from agent import roblox_presence as rp
         rp.clear_presence_cache()
 
-    def test_presence_in_game_keeps_package_online(self) -> None:
-        """When presence says in_experience, supervisor must keep status Online."""
+    def test_presence_in_game_path_disabled(self) -> None:
+        """Saved user IDs must not trigger Presence API calls."""
         from agent import roblox_presence as rp
         import agent.supervisor as sup
 
@@ -505,14 +505,12 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
         worker._roblox_username = "alice"
         worker._roblox_user_id = 12345
 
-        # Mock presence to return InGame
         in_game_result = rp.PresenceResult(user_id=12345, presence_type=rp.PresenceType.IN_GAME)
-        with mock.patch.object(rp, "fetch_presence_one", return_value=in_game_result):
+        with mock.patch.object(rp, "fetch_presence_one", side_effect=AssertionError("presence call")):
             pres = worker._fetch_roblox_presence()
 
-        self.assertIsNotNone(pres)
-        self.assertTrue(pres.is_in_game)
-        self.assertEqual(worker.last_presence_state, "in_experience")
+        self.assertIsNone(pres)
+        self.assertEqual(worker.last_presence_state, "disabled")
 
     def test_presence_unavailable_falls_back_gracefully(self) -> None:
         """When presence API is unavailable, worker must not crash."""
@@ -531,7 +529,7 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
             pres = worker._fetch_roblox_presence()
 
         self.assertIsNone(pres)
-        self.assertEqual(worker.last_presence_state, "unavailable")
+        self.assertEqual(worker.last_presence_state, "disabled")
 
     def test_presence_lobby_does_not_set_joining_status(self) -> None:
         """Presence showing lobby must NOT trigger STATUS_JOINING on the worker."""
@@ -558,7 +556,7 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
         self.assertNotEqual(status_map.get("com.roblox.client"), "Joining")
         self.assertNotEqual(status_map.get("com.roblox.client"), "Lobby")
         # But presence state must be recorded internally
-        self.assertEqual(worker.last_presence_state, "online_not_in_game")
+        self.assertEqual(worker.last_presence_state, "disabled")
 
     def test_presence_rate_limit_does_not_crash(self) -> None:
         """HTTP 429 (rate limited) must not crash the presence fetcher."""
@@ -581,8 +579,7 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
             pres = worker._fetch_roblox_presence()
 
         self.assertIsNone(pres)
-        # Must not crash, state set to unavailable or unknown
-        self.assertIn(worker.last_presence_state, ("unavailable", "unknown"))
+        self.assertEqual(worker.last_presence_state, "disabled")
 
     def test_watchdog_presence_wrong_game_sets_diagnostic_state_only(self) -> None:
         import agent.supervisor as sup
@@ -619,8 +616,8 @@ class TestPresenceSupervisorIntegration(unittest.TestCase):
         ):
             state, detail = watcher._detect_package_state("com.roblox.client", entry)
 
-        self.assertEqual(state, sup.STATUS_WRONG_GAME)
-        self.assertEqual(detail["reason"], "presence_target_mismatch")
+        self.assertEqual(state, sup.STATUS_ONLINE)
+        self.assertEqual(watcher._presence_last_detail["com.roblox.client"]["roblox_api_status"], "disabled")
 
     def test_watchdog_presence_unknown_keeps_local_online_hint(self) -> None:
         import agent.supervisor as sup
