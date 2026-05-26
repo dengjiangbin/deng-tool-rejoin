@@ -136,12 +136,21 @@ class BuilderFixtureTests(unittest.TestCase):
 
 
 class RegistryStableGateTests(unittest.TestCase):
-    def test_v100_disabled_public_stable_placeholder(self) -> None:
-        """v1.0.0 is a disabled placeholder; no public stable release published yet."""
+    def test_v100_public_stable_is_frozen(self) -> None:
+        """v1.0.0 is the immutable public stable release."""
         root = Path(__file__).resolve().parents[1]
         rows = json.loads((root / "data" / "rejoin_versions.json").read_text(encoding="utf-8"))
         stable = next(r for r in rows if r.get("version") == "v1.0.0")
-        self.assertFalse(stable.get("enabled"))
+        self.assertTrue(stable.get("enabled"))
+        self.assertTrue(stable.get("frozen"))
+        self.assertEqual(stable.get("visibility"), "public")
+        self.assertEqual(stable.get("channel"), "stable")
+        self.assertEqual(stable.get("install_ref"), "refs/tags/v1.0.0")
+        self.assertEqual(stable.get("git_ref"), "refs/tags/v1.0.0")
+        self.assertEqual(stable.get("artifact_path"), "releases/v1.0.0/deng-tool-rejoin-v1.0.0.tar.gz")
+        self.assertEqual(len(str(stable.get("artifact_sha256") or "")), 64)
+        self.assertNotIn("refs/heads", json.dumps(stable))
+        self.assertNotIn("test/latest", json.dumps(stable))
 
     def test_main_dev_hidden_from_discord_via_visibility(self) -> None:
         """main-dev is hidden from Discord by visibility=admin, NOT by enabled flag.

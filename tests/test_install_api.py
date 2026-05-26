@@ -1045,8 +1045,8 @@ class InternalArtifactIntegrationTests(unittest.TestCase):
         finally:
             Path(store._path).unlink(missing_ok=True)
 
-    def test_discord_select_version_still_hides_main_dev_when_enabled(self) -> None:
-        """Even with main-dev enabled, Discord Select Version must show no public versions."""
+    def test_discord_select_version_shows_stable_and_hides_main_dev(self) -> None:
+        """Public Select Version shows v1.0.0 while hiding main-dev."""
         from agent.rejoin_versions import merge_version_sources
 
         with patch.dict(
@@ -1055,11 +1055,49 @@ class InternalArtifactIntegrationTests(unittest.TestCase):
             clear=False,
         ):
             versions = merge_version_sources(tag_names=[], include_internal_channels=False)
-        self.assertEqual(
-            len(versions),
-            0,
-            "No public versions expected when main-dev is admin-only and v1.0.0 is disabled",
-        )
+        version_ids = [v.version for v in versions]
+        self.assertIn("v1.0.0", version_ids)
+        self.assertNotIn("main-dev", version_ids)
+
+    def test_real_v100_artifact_sha256_matches_manifest(self) -> None:
+        """Frozen v1.0.0 artifact must exist and match the public manifest row."""
+        import hashlib
+
+        manifest_path = PROJECT / "data" / "rejoin_versions.json"
+        rows = json.loads(manifest_path.read_text(encoding="utf-8"))
+        stable = next((r for r in rows if r.get("version") == "v1.0.0"), None)
+        self.assertIsNotNone(stable)
+        self.assertTrue(stable.get("enabled"))
+        self.assertTrue(stable.get("frozen"))
+        self.assertEqual(stable.get("install_ref"), "refs/tags/v1.0.0")
+        self.assertEqual(stable.get("visibility"), "public")
+        artifact = PROJECT / str(stable.get("artifact_path") or "")
+        self.assertTrue(artifact.is_file(), f"Missing frozen artifact: {artifact}")
+        self.assertEqual(hashlib.sha256(artifact.read_bytes()).hexdigest(), stable.get("artifact_sha256"))
+
+    def test_authorize_v100_with_real_manifest_succeeds(self) -> None:
+        """POST /api/install/authorize can resolve the frozen v1.0.0 artifact."""
+        store, key = _tmp_store_with_redeemed_key()
+        env = {
+            "REJOIN_VERSIONS_MANIFEST": str(PROJECT / "data" / "rejoin_versions.json"),
+            "REJOIN_ARTIFACT_ROOT": str(PROJECT),
+        }
+        try:
+            with patch.dict(os.environ, env, clear=False), \
+                 patch("agent.license_store.get_default_store", return_value=store):
+                st, _, resp = _wsgi_call(
+                    "POST",
+                    "/api/install/authorize",
+                    {"license_key": key, "requested_version": "v1.0.0", "install_id_hash": ""},
+                )
+            self.assertEqual(st, 200, resp.decode())
+            data = json.loads(resp)
+            self.assertEqual(data["result"], "active")
+            self.assertEqual(data["resolved_version"], "v1.0.0")
+            self.assertIn("/api/download/package/", data["download_url"])
+            self.assertEqual(len(str(data.get("sha256") or "")), 64)
+        finally:
+            Path(store._path).unlink(missing_ok=True)
 
     def test_authorize_test_latest_disabled_manifest_returns_404(self) -> None:
         """If main-dev were disabled, authorize must return not_found 404."""
