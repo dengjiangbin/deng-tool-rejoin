@@ -286,7 +286,7 @@ class TestInstallerScript(unittest.TestCase):
 
     def test_final_proof_block_present(self):
         script = self._make_script()
-        self.assertIn("DENG Tool: Rejoin Installing", script)
+        self.assertIn("DENG Tool: Rejoin Installer", script)
         self.assertNotIn("DENG Tool: Rejoin Test Installer", script)
         self.assertIn("Version: main-dev", script)
         self.assertIn("Install complete.", script)
@@ -302,8 +302,9 @@ class TestInstallerScript(unittest.TestCase):
         dash_echo = 'echo "------------------------------"'
         self.assertEqual(script.count(sep_echo), 0)
         self.assertEqual(script.count(dash_echo), 0)
-        self.assertIn("DENG Tool: Rejoin Installing", script)
+        self.assertIn("DENG Tool: Rejoin Installer", script)
         self.assertIn('info "Version: main-dev"', script)
+        self.assertEqual(script.count('info "Version: main-dev"'), 1)
         self.assertIn('ok "Install complete."', script)
 
     def test_agent_file_proof_present(self):

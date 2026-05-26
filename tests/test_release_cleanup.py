@@ -104,7 +104,7 @@ class TestInstallerShortSeparators(unittest.TestCase):
 
     def test_success_output_echo_order_is_exact(self) -> None:
         s = _script()
-        self.assertIn("DENG Tool: Rejoin Installing", s)
+        self.assertIn("DENG Tool: Rejoin Installer", s)
         self.assertIn('info "Version: main-dev"', s)
         self.assertIn('ok "Install complete."', s)
         self.assertNotIn("100%", s)

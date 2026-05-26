@@ -526,7 +526,7 @@ def _route_public_install(
     environ: dict, path: str, method: str
 ) -> tuple[bytes, int, str, list[tuple[str, str]] | None] | None:
     """Handle install bootstrap + artifact authorize + package GET; no bearer auth."""
-    from agent.bootstrap_installer import render_public_bootstrap
+    from agent.bootstrap_installer import render_direct_install_bootstrap, render_public_bootstrap
     from agent.install_registry import (
         artifact_path_for_row,
         get_artifact_root,
@@ -560,7 +560,24 @@ def _route_public_install(
         sig = (qs.get("sig") or [""])[0]
 
         if tail == "latest":
-            script = render_public_bootstrap(base_url=base, requested="latest", bundle_etag=_bundle_etag())
+            row, err = resolve_requested_public_version("latest")
+            if row is None:
+                return (
+                    json.dumps({"error": err or "No public stable release is configured yet."}).encode("utf-8"),
+                    404,
+                    "application/json",
+                    None,
+                )
+            sha = str(row.get("artifact_sha256") or "").strip()
+            version = str(row.get("version") or "latest").strip()
+            script = render_direct_install_bootstrap(
+                base_url=base,
+                package_sha256=sha,
+                version_label=version,
+                channel="stable",
+                token_endpoint="/install/latest/package-token",
+                installer_endpoint="/install/latest",
+            )
             return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
         if tail == "test/latest":
@@ -571,7 +588,10 @@ def _route_public_install(
             script = render_direct_install_bootstrap(
                 base_url=base,
                 package_sha256=_sha,
-                banner_lines=("Version: main-dev",),
+                version_label="main-dev",
+                channel="main-dev",
+                token_endpoint="/install/test/package-token",
+                installer_endpoint="/install/test/latest",
             )
             return (
                 script.encode("utf-8"),
@@ -621,6 +641,49 @@ def _route_public_install(
                 "url": f"{_public_base_url()}/api/download/package/{token}",
                 "sha256": _sha,
                 "expires_in": ttl,
+            }
+            return (
+                json.dumps(payload, sort_keys=True).encode("utf-8"),
+                200,
+                "application/json",
+                [("Cache-Control", "no-store")],
+            )
+
+        if tail.endswith("/package-token"):
+            requested = tail.removesuffix("/package-token").strip("/")
+            _row, _err = resolve_requested_public_version(requested)
+            if _row is None:
+                return (
+                    json.dumps({"error": _err or "Release package not configured."}).encode("utf-8"),
+                    404,
+                    "application/json",
+                    [("Cache-Control", "no-store")],
+                )
+            _art_root = get_artifact_root() or _PROJECT_ROOT
+            _pkg_path = artifact_path_for_row(_row, _art_root)
+            if _pkg_path is None or not _pkg_path.is_file():
+                return (
+                    json.dumps({"error": "Release package not found."}).encode("utf-8"),
+                    404,
+                    "application/json",
+                    [("Cache-Control", "no-store")],
+                )
+            _sha = str(_row.get("artifact_sha256") or "").strip()
+            ttl = max(30, int(os.environ.get("LICENSE_DOWNLOAD_TOKEN_TTL_SECONDS", "300")))
+            token = _issue_download_token(
+                _pkg_path,
+                _sha,
+                _pkg_path.name,
+                str(_row.get("version") or requested),
+                str(_row.get("channel") or "stable"),
+                _pkg_path.stat().st_size,
+                ttl,
+            )
+            payload = {
+                "url": f"{_public_base_url()}/api/download/package/{token}",
+                "sha256": _sha,
+                "expires_in": ttl,
+                "version": str(_row.get("version") or requested),
             }
             return (
                 json.dumps(payload, sort_keys=True).encode("utf-8"),
@@ -756,20 +819,12 @@ def _route_public_install(
                 ],
             )
 
-        if tail == "test/package.tar.gz":
+        if tail == "test/package.tar.gz" or tail.endswith("/package.tar.gz"):
             return (
                 json.dumps({"error": "Package URL requires a short-lived token."}).encode("utf-8"),
                 403,
                 "application/json",
                 [("Cache-Control", "no-store")],
-            )
-
-        if "/" in tail:
-            return (
-                json.dumps({"error": "Not found"}).encode("utf-8"),
-                404,
-                "application/json",
-                None,
             )
 
         if not _INSTALL_TAIL_SAFE.match(tail):
@@ -780,7 +835,24 @@ def _route_public_install(
                 None,
             )
 
-        script = render_public_bootstrap(base_url=base, requested=tail, bundle_etag=_bundle_etag())
+        _row, _err = resolve_requested_public_version(tail)
+        if _row is None:
+            return (
+                json.dumps({"error": _err or "Not found"}).encode("utf-8"),
+                404,
+                "application/json",
+                None,
+            )
+        _sha = str(_row.get("artifact_sha256") or "").strip()
+        _version = str(_row.get("version") or tail).strip()
+        script = render_direct_install_bootstrap(
+            base_url=base,
+            package_sha256=_sha,
+            version_label=_version,
+            channel=str(_row.get("channel") or "stable"),
+            token_endpoint=f"/install/{_version}/package-token",
+            installer_endpoint=f"/install/{_version}",
+        )
         return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 
     # ── Dev-probe upload (internal test channel only) ─────────────────────────

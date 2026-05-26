@@ -271,10 +271,27 @@ def render_direct_install_bootstrap(
     base_url: str,
     package_sha256: str,
     banner_lines: tuple[str, ...] = (),
+    version_label: str = "main-dev",
+    channel: str = "main-dev",
+    token_endpoint: str = "/install/test/package-token",
+    installer_endpoint: str = "/install/test/latest",
 ) -> str:
-    """Generate a compact POSIX installer for the protected test package."""
+    """Generate a compact POSIX installer for a protected package."""
     base = base_url.rstrip("/")
     safe_sha = _escape_double(package_sha256)
+    safe_version = _escape_double(version_label)
+    safe_channel = _escape_double(channel)
+    safe_token_endpoint = _escape_double("/" + token_endpoint.strip("/"))
+    safe_installer_endpoint = _escape_double("/" + installer_endpoint.strip("/"))
+    banner_part = ""
+    if banner_lines:
+        filtered_lines = tuple(
+            line
+            for line in banner_lines
+            if line.strip().lower() != f"version: {version_label}".lower()
+        )
+        if filtered_lines:
+            banner_part = "\n".join(f'info "{_escape_double(line)}"' for line in filtered_lines) + "\n"
 
     pre_heredoc = (
         'C="";B="";Y="";G="";R="";X=""\n'
@@ -284,9 +301,10 @@ def render_direct_install_bootstrap(
         'ok(){ printf "%b[+]%b %s\\n" "$G" "$X" "$1"; }\n'
         'fail(){ printf "%b[!]%b %s\\n" "$R" "$X" "$1" >&2; exit 1; }\n'
         'printf "%b%s%b\\n" "$C" "$sep" "$X"\n'
-        'printf "%bDENG Tool: Rejoin Installing%b\\n" "$B" "$X"\n'
+        'printf "%bDENG Tool: Rejoin Installer%b\\n" "$B" "$X"\n'
         'printf "%b%s%b\\n" "$C" "$sep" "$X"\n'
-        'info "Version: main-dev"\n'
+        f'info "Version: {safe_version}"\n'
+        f"{banner_part}"
         'printf "%b%s%b\\n" "$C" "$dash" "$X"\n'
         'command -v curl >/dev/null 2>&1 || fail "Install curl first: pkg install -y curl"\n'
         'command -v tar >/dev/null 2>&1 || fail "Install tar first: pkg install -y tar"\n'
@@ -298,7 +316,7 @@ def render_direct_install_bootstrap(
         'c="$(date +%s)-$$"\n'
         'info "Preparing secure download..."\n'
         'info "Requesting one-time package token..."\n'
-        'curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" -A "deng-rejoin-installer/2.0" "$u/install/test/package-token?t=$c" -o "$j" || fail "Download setup failed."\n'
+        f'curl -fsSL -H "Cache-Control: no-cache" -H "Pragma: no-cache" -A "deng-rejoin-installer/2.0" "$u{safe_token_endpoint}?t=$c" -o "$j" || fail "Download setup failed."\n'
         'ok "Token accepted"\n'
         'p="$(python3 -c \'import json,sys;print(json.load(open(sys.argv[1])).get("url",""))\' "$j" 2>/dev/null)" || p=""\n'
         '[ -n "$p" ] || fail "Download setup failed."\n'
@@ -326,6 +344,8 @@ def render_direct_install_bootstrap(
         '[ -f "$h/RELEASE-MANIFEST.sig" ] || fail "Install error: RELEASE-MANIFEST.sig missing."\n'
         'ok "Files installed"\n'
         'printf \'%s\\n\' "$u" > "$h/.install_api"\n'
+        f'printf \'%s\\n\' "{safe_version}" > "$h/.install_version"\n'
+        f'printf \'%s\\n\' "{safe_channel}" > "$h/.install_channel"\n'
         '_GIT_COMMIT="$(python3 -c \'import json,os,sys; p=sys.argv[1]; '
         'print((json.load(open(p)).get("git_commit","")) if os.path.isfile(p) else "")\' '
         '"$h/BUILD-INFO.json" 2>/dev/null)" || _GIT_COMMIT=""\n'
@@ -339,11 +359,12 @@ def render_direct_install_bootstrap(
         '  "artifact_sha256": "$s",\n'
         '  "git_commit": "$_GIT_COMMIT",\n'
         '  "probe_id": "$_PROBE_ID",\n'
-        '  "channel": "main-dev",\n'
+        f'  "version": "{safe_version}",\n'
+        f'  "channel": "{safe_channel}",\n'
         '  "install_time_iso": "$_INSTALL_TIME_ISO",\n'
         '  "install_api": "$u",\n'
         '  "package_url": "tokenized",\n'
-        '  "installer_url": "$u/install/test/latest",\n'
+        f'  "installer_url": "$u{safe_installer_endpoint}",\n'
         '  "extracted_file_count": $_FILE_COUNT\n'
         '}\n'
         'EOF\n'

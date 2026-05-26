@@ -920,6 +920,13 @@ class TestPanelSelectVersion(unittest.IsolatedAsyncioTestCase):
             version_values = [opt.value for opt in select.options]
             self.assertNotIn("main-dev", version_values, "main-dev must never appear in the dropdown")
             self.assertIn("v1.0.0", version_values)
+            stable_option = next(opt for opt in select.options if opt.value == "v1.0.0")
+            self.assertEqual(stable_option.label, "\U0001f4e6 v1.0.0")
+            self.assertEqual(stable_option.description, "Install DENG Tool: Rejoin v1.0.0")
+            option_blob = f"{stable_option.label} {stable_option.description}"
+            self.assertNotIn("frozen public stable release", option_blob.lower())
+            self.assertNotIn("refs/tags", option_blob)
+            self.assertNotIn("sha", option_blob.lower())
         finally:
             public_manifest.unlink(missing_ok=True)
 
@@ -974,12 +981,17 @@ class TestVersionPickSelectCallback(unittest.IsolatedAsyncioTestCase):
         kw = inter.response.send_message.call_args[1]
         self.assertIsNone(kw.get("embed"), "No embed must be sent with the version reply")
         content = kw["content"]
+        self.assertIn("Install DENG Tool: Rejoin v1.0.0", content)
         self.assertIn("Desktop Copy:", content)
         self.assertIn("Mobile Copy:", content)
         self.assertTrue(kw["ephemeral"])
         # No metadata in the reply
-        for forbidden in ("Selected version", "Channel:", "Visibility:", "Internal testing", "After install:", "deng-rejoin"):
+        for forbidden in ("Selected version", "Channel:", "Visibility:", "Internal testing", "After install:"):
             self.assertNotIn(forbidden, content, msg=f"Forbidden text found: {forbidden!r}")
+        cmd = "curl -fsSL https://rejoin.deng.my.id/install/v1.0.0 -o install.sh && bash install.sh"
+        mobile = content.split("Mobile Copy:\n", 1)[1]
+        self.assertEqual(mobile, cmd)
+        self.assertNotIn("```", mobile)
 
     async def test_public_version_reply_no_duplicate_copy_blocks(self) -> None:
         """Desktop Copy and Mobile Copy must each appear exactly once."""

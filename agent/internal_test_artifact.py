@@ -47,6 +47,7 @@ import base64, hashlib, importlib.abc, importlib.machinery, json, marshal, sys, 
 from pathlib import Path
 _N={public_n}
 _E={public_e}
+_FALLBACK_INSTALL_ENDPOINT={fallback_install_endpoint!r}
 _MINP=2
 _B=None
 class IntegrityError(RuntimeError): pass
@@ -65,8 +66,37 @@ class _L(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         exec(code, module.__dict__)
 def _o(fullname):
     return str(Path(__file__).resolve().parent.parent / (fullname.replace(".","/")+".py"))
+def _repair_cmd(root):
+    base="https://rejoin.deng.my.id"; endpoint=""
+    try:
+        raw=(root/".installed-build.json").read_text(encoding="utf-8", errors="replace")
+        meta=json.loads(raw)
+        base=str(meta.get("install_api") or base).strip().rstrip("/") or base
+        endpoint=str(meta.get("installer_url") or "").strip()
+        if endpoint.startswith(base):
+            return "curl -fsSL "+endpoint+" -o install.sh && bash install.sh"
+    except Exception:
+        pass
+    try:
+        line=(root/".install_api").read_text(encoding="utf-8", errors="replace").strip().splitlines()[0].strip()
+        if line:
+            base=line.rstrip("/")
+    except Exception:
+        pass
+    try:
+        version=(root/".install_version").read_text(encoding="utf-8", errors="replace").strip().splitlines()[0].strip()
+    except Exception:
+        version=""
+    if version and version!="main-dev":
+        endpoint=base+"/install/"+version
+    elif _FALLBACK_INSTALL_ENDPOINT:
+        endpoint=base+_FALLBACK_INSTALL_ENDPOINT
+    else:
+        endpoint=base+"/install/"+("test"+"/latest")
+    return "curl -fsSL "+endpoint+" -o install.sh && bash install.sh"
 def _err():
-    sys.stderr.write("[!] DENG Tool: Rejoin integrity check failed.\n[!] Your installation may be incomplete, outdated, or modified.\n[*] Please reinstall using the official command:\ncurl -fsSL https://rejoin.deng.my.id/install/test/latest -o install.sh && bash install.sh\n")
+    root=Path(__file__).resolve().parent.parent
+    sys.stderr.write("[!] DENG Tool: Rejoin integrity check failed.\n[!] Your installation may be incomplete, outdated, or modified.\n[*] Please reinstall using the official command:\n"+_repair_cmd(root)+"\n")
 def _b64u(x):
     return base64.urlsafe_b64decode(x.encode()+b"="*((4-len(x)%4)%4))
 def _canon(obj):
@@ -359,7 +389,7 @@ def _git_commit_short(repo_root: Path) -> str:
 
 
 def _make_build_info_bytes(
-    repo_root: Path, *, channel: str = "main-dev",
+    repo_root: Path, *, channel: str = "main-dev", version: str = "main-dev",
 ) -> bytes:
     """Render the BUILD-INFO.json payload embedded into the tarball.
 
@@ -375,10 +405,11 @@ def _make_build_info_bytes(
     built_at_unix = int(time.time())
     # probe_id: short stable ID that uniquely identifies this build.
     # Derived from commit + timestamp so it differs even for same-commit rebuilds.
-    probe_seed = f"{commit}{built_at_unix}{channel}"
+    probe_seed = f"{commit}{built_at_unix}{channel}{version}"
     probe_id = "p-" + hashlib.sha256(probe_seed.encode()).hexdigest()[:16]
     info = {
         "channel": channel,
+        "version": version,
         "git_commit": commit,
         "built_at_iso": built_at_iso,
         "built_at_unix": built_at_unix,
@@ -436,12 +467,13 @@ def _public_numbers(signing_key) -> tuple[int, int]:
     return int(nums.n), int(nums.e)
 
 
-def _render_raw_runtime_files(signing_key) -> dict[str, str]:
+def _render_raw_runtime_files(signing_key, *, fallback_install_endpoint: str = "/install/test/latest") -> dict[str, str]:
     public_n, public_e = _public_numbers(signing_key)
     rendered = dict(_RAW_RUNTIME_FILES)
     rendered["agent/_protected_runtime.py"] = rendered["agent/_protected_runtime.py"].format(
         public_n=public_n,
         public_e=public_e,
+        fallback_install_endpoint=fallback_install_endpoint,
     )
     return rendered
 
@@ -450,6 +482,7 @@ def _make_release_manifest_bytes(
     entries: dict[str, bytes | str],
     *,
     build_info: dict,
+    version: str = "main-dev",
     artifact_sha256: str | None = None,
 ) -> bytes:
     def raw_bytes(data: bytes | str) -> bytes:
@@ -458,7 +491,7 @@ def _make_release_manifest_bytes(
     payload = {
         "project": "deng-tool-rejoin",
         "product": "DENG Tool: Rejoin",
-        "version": "main-dev",
+        "version": version,
         "build_id": str(build_info.get("probe_id") or ""),
         "artifact_sha256": artifact_sha256,
         "created_at": str(build_info.get("built_at_iso") or ""),
@@ -505,7 +538,13 @@ def _tar_bytes(entries: dict[str, bytes | str]) -> bytes:
     return buf.getvalue()
 
 
-def build_internal_test_tarball(repo_root: Path, output_tar_gz: Path) -> str:
+def build_internal_test_tarball(
+    repo_root: Path,
+    output_tar_gz: Path,
+    *,
+    channel: str = "main-dev",
+    version: str = "main-dev",
+) -> str:
     """Write gzip tarball and return lowercase SHA-256 hex digest of the file.
 
     Also embeds a top-level ``BUILD-INFO.json`` with git commit + build time
@@ -520,13 +559,14 @@ def build_internal_test_tarball(repo_root: Path, output_tar_gz: Path) -> str:
         raise RuntimeError("No client modules matched protected artifact rules.")
 
     signing_key = _load_or_create_signing_key(repo_root)
-    build_info_bytes = _make_build_info_bytes(repo_root)
+    build_info_bytes = _make_build_info_bytes(repo_root, channel=channel, version=version)
     build_info = json.loads(build_info_bytes.decode("utf-8"))
     bundle_bytes = _compile_client_bundle(pairs)
-    entries = _render_raw_runtime_files(signing_key)
+    fallback_install_endpoint = f"/install/{version}" if version != "main-dev" else "/install/test/latest"
+    entries = _render_raw_runtime_files(signing_key, fallback_install_endpoint=fallback_install_endpoint)
     entries[_PROTECTED_BUNDLE] = bundle_bytes
     entries["BUILD-INFO.json"] = build_info_bytes
-    manifest_bytes = _make_release_manifest_bytes(entries, build_info=build_info)
+    manifest_bytes = _make_release_manifest_bytes(entries, build_info=build_info, version=version)
     entries[_MANIFEST_NAME] = manifest_bytes
     entries[_MANIFEST_SIG_NAME] = _sign_manifest(signing_key, manifest_bytes)
     raw = _tar_bytes(entries)

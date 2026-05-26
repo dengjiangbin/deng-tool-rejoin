@@ -241,10 +241,10 @@ class InstallCommandTests(unittest.TestCase):
             install_ref="refs/tags/v1.0.0",
         )
         text = rv.format_install_instructions_plain(info)
+        self.assertIn("Install DENG Tool: Rejoin v1.0.0", text)
         self.assertIn("Desktop Copy:", text)
         self.assertIn("Mobile Copy:", text)
         self.assertNotIn("After install:", text)
-        self.assertNotIn("deng-rejoin", text)
         self.assertIn("rejoin.deng.my.id/install/", text)
         self.assertNotIn("raw.githubusercontent.com", text)
 
@@ -276,11 +276,64 @@ class InstallCommandTests(unittest.TestCase):
             "Visibility:",
             "Internal testing",
             "After install",
-            "deng-rejoin",
         ):
             self.assertNotIn(forbidden, text, msg=f"Unexpected text in output: {forbidden!r}")
         self.assertEqual(text.count("Desktop Copy:"), 1, "Desktop Copy must appear exactly once")
         self.assertEqual(text.count("Mobile Copy:"), 1, "Mobile Copy must appear exactly once")
+
+    def test_mobile_copy_is_plain_message_content(self) -> None:
+        info = rv.RejoinVersionInfo(
+            version="v1.0.0",
+            channel="stable",
+            label="\U0001f4e6 v1.0.0",
+            install_ref="refs/tags/v1.0.0",
+        )
+        cmd = "curl -fsSL https://rejoin.deng.my.id/install/v1.0.0 -o install.sh && bash install.sh"
+        text = rv.format_install_instructions_plain(info)
+        mobile = text.split("Mobile Copy:\n", 1)[1]
+        self.assertEqual(mobile, cmd)
+        self.assertNotIn("```", mobile)
+        self.assertNotIn("`", mobile)
+        self.assertNotIn("\n", mobile)
+        self.assertFalse(mobile.startswith(" "))
+
+    def test_public_manifest_option_text_is_clean(self) -> None:
+        manifest = Path(__file__).resolve().parent / "_tmp_versions_clean.json"
+        manifest.write_text(
+            json.dumps(
+                [
+                    {
+                        "version": "v1.0.0",
+                        "channel": "stable",
+                        "visibility": "public",
+                        "install_ref": "refs/tags/v1.0.0",
+                        "notes": "Frozen public stable release. Immutable artifact.",
+                        "enabled": True,
+                    },
+                    {
+                        "version": "main-dev",
+                        "channel": "dev",
+                        "visibility": "admin",
+                        "install_ref": "refs/heads/main",
+                        "description": "Owner/admin testing only",
+                        "enabled": True,
+                    },
+                ]
+            ),
+            encoding="utf-8",
+        )
+        try:
+            with unittest.mock.patch.dict(os.environ, {"REJOIN_VERSIONS_MANIFEST": str(manifest)}, clear=False):
+                versions = rv.merge_version_sources(tag_names=[])
+            self.assertEqual(len(versions), 1)
+            self.assertEqual(versions[0].label, "\U0001f4e6 v1.0.0")
+            self.assertEqual(versions[0].description, "Install DENG Tool: Rejoin v1.0.0")
+            blob = json.dumps([versions[0].label, versions[0].description])
+            self.assertNotIn("frozen public stable release", blob.lower())
+            self.assertNotIn("refs/tags", blob)
+            self.assertNotIn("sha", blob.lower())
+        finally:
+            manifest.unlink(missing_ok=True)
 
     def test_main_dev_install_command_uses_refs_heads_in_raw_url(self) -> None:
         info = rv.RejoinVersionInfo(

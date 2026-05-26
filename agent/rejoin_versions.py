@@ -190,10 +190,10 @@ def merge_version_sources(
         out[ver] = RejoinVersionInfo(
             version=ver,
             channel=ch,
-            label=label[:256],
+            label=(f"\U0001f4e6 {ver}" if not io else label)[:256],
             install_ref=ref,
             recommended=rec,
-            description=desc,
+            description=(f"Install DENG Tool: Rejoin {ver}" if not io else desc),
             internal_only=io,
         )
 
@@ -212,10 +212,10 @@ def merge_version_sources(
         out[ver] = RejoinVersionInfo(
             version=ver,
             channel=ch,
-            label=label[:256],
+            label=(f"\U0001f4e6 {ver}" if not io else label)[:256],
             install_ref=ref,
             recommended=rec,
-            description=desc,
+            description=(f"Install DENG Tool: Rejoin {ver}" if not io else desc),
             internal_only=io,
         )
 
@@ -274,11 +274,13 @@ def format_install_instructions_plain(info: RejoinVersionInfo) -> str:
     """Plain text for Discord — only Desktop Copy and Mobile Copy blocks."""
     cmd = build_public_install_curl_command(info)
     lines = [
+        f"Install DENG Tool: Rejoin {info.version}",
+        "",
         "Desktop Copy:",
         f"```{cmd}```",
         "",
         "Mobile Copy:",
-        f"```{cmd}```",
+        cmd,
     ]
     return "\n".join(lines)
 

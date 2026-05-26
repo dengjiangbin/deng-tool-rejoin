@@ -134,6 +134,27 @@ class BuilderFixtureTests(unittest.TestCase):
         self.assertEqual(sig["algorithm"], "RS256")
         self.assertTrue(sig["signature"])
 
+    def test_stable_version_metadata_can_be_embedded(self) -> None:
+        (self.tmp / "agent").mkdir()
+        (self.tmp / "agent" / "commands.py").write_text("VALUE = 1\n", encoding="utf-8")
+        out = self.tmp / "releases" / "v1.0.0" / "deng-tool-rejoin-v1.0.0.tar.gz"
+
+        build_internal_test_tarball(
+            self.tmp,
+            out,
+            channel="stable",
+            version="v1.0.0",
+        )
+
+        raw = out.read_bytes()
+        verify_tarball_exclusions(raw)
+        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tf:
+            build_info = json.loads(tf.extractfile("BUILD-INFO.json").read())
+            release_manifest = json.loads(tf.extractfile("RELEASE-MANIFEST.json").read())
+        self.assertEqual(build_info["version"], "v1.0.0")
+        self.assertEqual(build_info["channel"], "stable")
+        self.assertEqual(release_manifest["version"], "v1.0.0")
+
 
 class RegistryStableGateTests(unittest.TestCase):
     def test_v100_public_stable_is_frozen(self) -> None:

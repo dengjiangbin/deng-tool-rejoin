@@ -23,7 +23,7 @@ import bot.license_api as api_mod
 from agent.license_store import LocalJsonLicenseStore
 
 
-_TEST_LATEST_BANNER_MARKERS = ("DENG Tool: Rejoin Installing", "install/test/package-token")
+_TEST_LATEST_BANNER_MARKERS = ("DENG Tool: Rejoin Installer", "install/test/package-token")
 _TEST_PACKAGE_ROUTE_AVAILABLE: bool | None = None
 _TEST_LATEST_BANNER_DEPLOYED: bool | None = None
 
@@ -137,16 +137,21 @@ class InstallBootstrapGetTests(unittest.TestCase):
         self.assertIn("text/", headers.get("Content-Type", ""))
         text = body.decode("utf-8")
         self.assertIn("DENG Tool: Rejoin Installer", text)
-        self.assertIn('printf \'%s\\n\' "latest"', text)
-        self.assertIn(".install_requested", text)
-        self.assertIn("Next: run deng-rejoin", text)
+        self.assertIn("Version: v1.0.0", text)
+        self.assertIn("/install/latest/package-token", text)
+        self.assertIn('"installer_url": "$u/install/latest"', text)
+        self.assertIn(".install_version", text)
+        self.assertNotIn(".install_requested", text)
+        self.assertIn("Run: deng-rejoin", text)
         self.assertNotIn("GITHUB_TOKEN", text)
         self.assertNotIn("LICENSE_KEY_EXPORT_SECRET", text)
 
     def test_pinned_version_bootstrap(self) -> None:
         status, _, body = _wsgi_call("GET", "/install/v1.0.0")
         self.assertEqual(status, 200)
-        self.assertIn('printf \'%s\\n\' "v1.0.0"', body.decode("utf-8"))
+        text = body.decode("utf-8")
+        self.assertIn("Version: v1.0.0", text)
+        self.assertIn('printf \'%s\\n\' "v1.0.0" > "$h/.install_version"', text)
 
     def test_latest_resolves_registry_semantics_separate_test_manifest(self) -> None:
         manifest = Path(__file__).resolve().parent / "_tmp_install_manifest_latest.json"
@@ -418,7 +423,7 @@ class InstallTestLatestBootstrapTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("text/", headers.get("Content-Type", ""))
         text = body.decode("utf-8")
-        self.assertIn("DENG Tool: Rejoin Installing", text)
+        self.assertIn("DENG Tool: Rejoin Installer", text)
         self.assertNotIn("DENG Tool: Rejoin Test Installer", text)
         # "Channel: internal test" removed from public output per Section C (keep clean)
         self.assertNotIn("Channel: internal test", text)
@@ -493,6 +498,45 @@ class InstallTestPackageEndpointTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual(headers.get("Cache-Control"), "no-store")
         self.assertIn(b"Token invalid or expired", body)
+
+
+class InstallVersionedStableBootstrapTests(unittest.TestCase):
+    def test_v100_returns_full_protected_installer(self) -> None:
+        status, headers, body = _wsgi_call("GET", "/install/v1.0.0")
+        self.assertEqual(status, 200, body)
+        self.assertIn("text/", headers.get("Content-Type", ""))
+        text = body.decode("utf-8")
+        self.assertIn("DENG Tool: Rejoin Installer", text)
+        self.assertIn("Version: v1.0.0", text)
+        self.assertIn("/install/v1.0.0/package-token", text)
+        self.assertIn('"version": "v1.0.0"', text)
+        self.assertIn('"channel": "stable"', text)
+        self.assertIn('"installer_url": "$u/install/v1.0.0"', text)
+        self.assertIn(".install_version", text)
+        self.assertIn(".install_channel", text)
+        self.assertIn("deng_tool_rejoin.py", text)
+        self.assertNotIn("/install/test/latest", text)
+        self.assertNotIn("install/test/package-token", text)
+        self.assertNotIn(".install_requested", text)
+        self.assertNotIn("Launcher bundle verified", text)
+        self.assertNotIn("resolve_install_api", text)
+        self.assertNotIn("Wrapper path", text)
+        self.assertNotIn("command -v deng-rejoin", text)
+
+    def test_v100_package_token_returns_single_use_download_url(self) -> None:
+        status, headers, body = _wsgi_call("GET", "/install/v1.0.0/package-token")
+        self.assertEqual(status, 200, body)
+        self.assertEqual(headers.get("Cache-Control"), "no-store")
+        payload = json.loads(body)
+        self.assertIn("/api/download/package/", payload["url"])
+        self.assertEqual(payload["version"], "v1.0.0")
+        self.assertEqual(len(str(payload["sha256"])), 64)
+
+    def test_v100_direct_package_url_is_blocked(self) -> None:
+        status, headers, body = _wsgi_call("GET", "/install/v1.0.0/package.tar.gz")
+        self.assertEqual(status, 403)
+        self.assertEqual(headers.get("Cache-Control"), "no-store")
+        self.assertIn(b"short-lived token", body)
 
 
 class InstallBootstrapSanityTests(unittest.TestCase):

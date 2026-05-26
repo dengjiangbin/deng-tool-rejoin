@@ -284,7 +284,6 @@ class DirectInstallBootstrapTests(unittest.TestCase):
         return render_direct_install_bootstrap(
             base_url="https://rejoin.deng.my.id",
             package_sha256="a" * 64,
-            banner_lines=("Version: main-dev",),
         )
 
     def test_script_has_shebang(self) -> None:
@@ -329,6 +328,27 @@ class DirectInstallBootstrapTests(unittest.TestCase):
     def test_script_writes_install_api_file(self) -> None:
         script = self._get_script()
         self.assertIn(".install_api", script)
+
+    def test_versioned_script_uses_selected_version_metadata(self) -> None:
+        from agent.bootstrap_installer import render_direct_install_bootstrap
+
+        script = render_direct_install_bootstrap(
+            base_url="https://rejoin.deng.my.id",
+            package_sha256="b" * 64,
+            version_label="v1.0.0",
+            channel="stable",
+            token_endpoint="/install/v1.0.0/package-token",
+            installer_endpoint="/install/v1.0.0",
+        )
+        self.assertIn("Version: v1.0.0", script)
+        self.assertIn("/install/v1.0.0/package-token", script)
+        self.assertIn('"version": "v1.0.0"', script)
+        self.assertIn('"channel": "stable"', script)
+        self.assertIn('"installer_url": "$u/install/v1.0.0"', script)
+        self.assertIn(".install_version", script)
+        self.assertIn(".install_channel", script)
+        self.assertNotIn("/install/test/latest", script)
+        self.assertNotIn("Launcher bundle verified", script)
 
 
 class CommandsDefaultMenuTests(unittest.TestCase):
