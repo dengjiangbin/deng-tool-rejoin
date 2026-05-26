@@ -411,6 +411,8 @@ class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
     async def test_key_stats_pagination_title(self) -> None:
         uid = 503
         self.store.get_or_create_user(str(uid))
+        # Allow enough keys for pagination test (>2 default)
+        self.store.set_user_key_limit(str(uid), 20, updated_by="test")
         # Bypass 60-second cooldown so we can create 6 keys for pagination test
         import agent.license_store as _ls
         _orig = _ls.GENERATION_COOLDOWN_SECONDS
@@ -429,6 +431,8 @@ class TestPanelViewKeyStats(unittest.IsolatedAsyncioTestCase):
     async def test_key_stats_next_page(self) -> None:
         uid = 504
         self.store.get_or_create_user(str(uid))
+        # Allow enough keys for pagination test (>2 default)
+        self.store.set_user_key_limit(str(uid), 20, updated_by="test")
         # Bypass 60-second cooldown so we can create 6 keys for pagination test
         import agent.license_store as _ls
         _orig = _ls.GENERATION_COOLDOWN_SECONDS

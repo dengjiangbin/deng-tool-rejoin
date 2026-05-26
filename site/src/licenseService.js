@@ -10,6 +10,10 @@ const KEY_RE = /^DENG-([0-9A-F]{4})-?([0-9A-F]{4})-?([0-9A-F]{4})-?([0-9A-F]{4})
 const PUBLIC_STATS_CACHE_MS = 10_000;
 let publicStatsCache = null;
 
+const DEFAULT_GLOBAL_MAX_KEYS = 2;
+const KEY_LIMIT_CACHE_MS = 30_000;
+let keyLimitGlobalCache = null;
+
 function isoExpired(value) {
   if (!value) return false;
   const ts = Date.parse(value);
@@ -578,14 +582,15 @@ async function redeemLicenseKey(discordUserId, rawKey) {
 
   const user = await ensureLicenseUser(owner);
   if (user.is_blocked) throw serviceError('user_blocked', 'This Discord account cannot redeem keys.', 403);
-  const maxKeys = Number(user.max_keys || 999999);
-  const { data: existingKeys, error: countError } = await supabase
-    .from('license_keys')
-    .select('id')
-    .eq('owner_discord_id', owner);
-  if (countError) throw serviceError('database_error', 'License database error.', 500);
-  if ((existingKeys || []).length >= maxKeys) {
-    throw serviceError('key_limit_reached', `You have reached your license key limit (${maxKeys}).`, 403);
+  const limitCheck = await canUserReceiveNewKey(owner, null);
+  if (!limitCheck.allowed) {
+    throw serviceError(
+      'key_limit_reached',
+      `Key Limit Reached. Active Keys: ${limitCheck.activeCount} / ${limitCheck.maxKeys}. ` +
+      'You cannot redeem another key unless your limit is increased or an active key is removed.',
+      403,
+      { activeCount: limitCheck.activeCount, maxKeys: limitCheck.maxKeys },
+    );
   }
 
   const encrypted = encryptLicenseKeyPlaintext(normalized);
@@ -692,6 +697,71 @@ async function getUserLicenseStats(discordUserId, { limit = 200 } = {}) {
   return { rows: active, stats: computeStats(active, { resetCount, executionCount }) };
 }
 
+// ── Key limit helpers (global + per-user from license_key_limits table) ────────
+
+function _clearKeyLimitCache() {
+  keyLimitGlobalCache = null;
+}
+
+async function getGlobalMaxKeys() {
+  const now = Date.now();
+  if (keyLimitGlobalCache && now - keyLimitGlobalCache.cachedAt < KEY_LIMIT_CACHE_MS) {
+    return keyLimitGlobalCache.value;
+  }
+  try {
+    const { data } = await supabase
+      .from('license_key_limits')
+      .select('max_keys')
+      .eq('scope', 'global')
+      .maybeSingle();
+    const value = (data && typeof data.max_keys === 'number') ? data.max_keys : DEFAULT_GLOBAL_MAX_KEYS;
+    keyLimitGlobalCache = { cachedAt: now, value };
+    return value;
+  } catch {
+    return DEFAULT_GLOBAL_MAX_KEYS;
+  }
+}
+
+async function getUserKeyLimit(discordUserId) {
+  if (!discordUserId) return null;
+  try {
+    const { data } = await supabase
+      .from('license_key_limits')
+      .select('max_keys')
+      .eq('scope', 'user')
+      .eq('discord_user_id', String(discordUserId))
+      .maybeSingle();
+    return (data && typeof data.max_keys === 'number') ? data.max_keys : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getEffectiveMaxKeys(discordUserId) {
+  if (discordUserId) {
+    const userLimit = await getUserKeyLimit(discordUserId);
+    if (userLimit !== null) return userLimit;
+  }
+  return getGlobalMaxKeys();
+}
+
+async function countActiveKeysForLimit(discordUserId, siteUserId) {
+  const rows = await getPortalUserLicenses({
+    discordUserId: discordUserId || '',
+    siteUserId: siteUserId || '',
+    limit: 500,
+  });
+  return filterActiveLicenses(rows).length;
+}
+
+async function canUserReceiveNewKey(discordUserId, siteUserId) {
+  const [activeCount, maxKeys] = await Promise.all([
+    countActiveKeysForLimit(discordUserId, siteUserId),
+    getEffectiveMaxKeys(discordUserId),
+  ]);
+  return { allowed: activeCount < maxKeys, activeCount, maxKeys };
+}
+
 module.exports = {
   FULL_KEY_UNAVAILABLE,
   classifyLicenseLifecycle,
@@ -712,6 +782,12 @@ module.exports = {
   providerLabel,
   redeemLicenseKey,
   resetLicenseHwid,
+  getGlobalMaxKeys,
+  getUserKeyLimit,
+  getEffectiveMaxKeys,
+  countActiveKeysForLimit,
+  canUserReceiveNewKey,
   _buildPublicStatsPayload: buildPublicStatsPayload,
   _clearPublicStatsCache: clearPublicStatsCache,
+  _clearKeyLimitCache,
 };

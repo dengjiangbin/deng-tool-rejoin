@@ -159,6 +159,8 @@ class TestActiveVisibleFiltering(unittest.TestCase):
         self.store = _tmp_store()
         self.uid = "110184213604499456"
         self.store.get_or_create_user(self.uid)
+        # Allow more than the default 2 keys so tests can create multiple keys
+        self.store.set_user_key_limit(self.uid, 20, updated_by="test")
 
     def tearDown(self) -> None:
         clear_export_key_cache()

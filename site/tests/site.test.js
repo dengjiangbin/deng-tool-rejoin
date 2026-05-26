@@ -181,6 +181,7 @@ const memoryDb = {
   device_bindings: [],
   hwid_reset_logs: [],
   license_key_executions: [],
+  license_key_limits: [],
 };
 
 const mockSupabase = {
@@ -387,6 +388,7 @@ function resetDb() {
   memoryDb.device_bindings.splice(0);
   memoryDb.hwid_reset_logs.splice(0);
   memoryDb.license_key_executions.splice(0);
+  memoryDb.license_key_limits.splice(0);
 }
 
 function csrfFrom(html) {
@@ -678,6 +680,7 @@ beforeEach(() => {
   resetLinkvertiseApi();
   resetLootLabsApi();
   licenseService._clearPublicStatsCache();
+  licenseService._clearKeyLimitCache();
 });
 
 describe('auth and protected pages', () => {
@@ -1589,6 +1592,18 @@ describe('Luarmor-style key flow', () => {
   test('redeemed, bound, and revoked keys do not block generation when cooldown allows', async () => {
     const agent = request.agent(app);
     await login(agent);
+    // Raise the global key limit above the 2 active keys this test creates so that
+    // the max_key enforcement does not block generation — the test is verifying that
+    // cooldown expiry (not the ownership check) is the gating condition here.
+    memoryDb.license_key_limits.push({
+      id: randomUUID(),
+      scope: 'global',
+      max_keys: 10,
+      discord_user_id: null,
+      updated_by_discord_id: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
     const past = new Date(Date.now() - 120 * 1000).toISOString();
     const redeemed = insertLicenseFixture('DENG-1000-2000-3000-4000', {
       created_at: past,

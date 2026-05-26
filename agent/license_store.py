@@ -51,6 +51,7 @@ RESULT_REQUIRES_MANUAL_REBIND = "requires_manual_rebind"
 MAX_HWID_RESETS_PER_24H    = 5
 ACTIVE_HEARTBEAT_WINDOW_S  = 300          # 5 minutes
 DEFAULT_MAX_KEYS            = 1
+DEFAULT_GLOBAL_MAX_KEYS     = 2           # default global max active keys per user
 GENERATION_COOLDOWN_SECONDS = 60          # minimum seconds between key generations
 UNREDEEMED_KEY_EXPIRY_SECONDS = 86400    # 24 hours — unredeemed keys expire
 
@@ -161,6 +162,61 @@ class BaseLicenseStore(ABC):
     @abstractmethod
     def count_user_keys(self, discord_user_id: str) -> int:
         """Count the active (non-revoked) keys owned by a user."""
+
+    # ── Key limit helpers (new: global + per-user limit table) ────────────────
+
+    def get_global_max_keys(self) -> int:
+        """Return the global default max active keys per user.
+
+        Subclasses backed by Supabase should read from license_key_limits
+        where scope='global'.  The base default is DEFAULT_GLOBAL_MAX_KEYS.
+        """
+        return DEFAULT_GLOBAL_MAX_KEYS
+
+    def get_user_key_limit(self, discord_user_id: str) -> int | None:
+        """Return per-user key limit override, or None if no override exists."""
+        return None
+
+    def get_effective_max_keys(self, discord_user_id: str) -> int:
+        """Return the effective max active keys for a user.
+
+        Per-user override wins over global default.
+        """
+        override = self.get_user_key_limit(discord_user_id)
+        if override is not None:
+            return override
+        return self.get_global_max_keys()
+
+    def count_active_keys_for_limit(self, discord_user_id: str) -> int:
+        """Count active usable keys that count toward the limit.
+
+        Counts:
+        - Owned/bound keys (redeemed + active device)
+        - Owned/unbound keys (redeemed, no active device)
+        - Active unredeemed generated keys (not expired, still copyable)
+
+        Excludes expired, revoked, inactive, deleted, and test/dev keys.
+        """
+        from agent.key_stats_format import filter_active_visible_license_rows
+        rows = self.list_user_keys_for_stats(discord_user_id)
+        return len(filter_active_visible_license_rows(rows))
+
+    def set_global_max_keys(self, max_keys: int, updated_by: str) -> None:
+        """Set the global default max active keys per user.
+
+        Subclasses backed by Supabase should upsert license_key_limits
+        where scope='global'.  Base implementation is a no-op.
+        """
+
+    def set_user_key_limit(
+        self, discord_user_id: str, max_keys: int, updated_by: str
+    ) -> None:
+        """Set a per-user key limit override.
+
+        Subclasses backed by Supabase should upsert license_key_limits
+        where scope='user' and discord_user_id matches.
+        Base implementation is a no-op.
+        """
 
     @abstractmethod
     def create_key_for_user(
@@ -405,6 +461,7 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             "panel_configs": {},
             "license_log_configs": {},
             "audit_logs": [],
+            "key_limits": {"global": DEFAULT_GLOBAL_MAX_KEYS, "users": {}},
         }
 
     # ── User helpers ──────────────────────────────────────────────────────────
@@ -446,8 +503,60 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         db = self._load()
         if discord_user_id not in db["users"]:
             raise KeyNotFoundError(f"User not found: {discord_user_id}")
-        db["users"][discord_user_id]["max_keys"] = max(1, int(max_keys))
+        capped = max(1, int(max_keys))
+        db["users"][discord_user_id]["max_keys"] = capped
         db["users"][discord_user_id]["updated_at"] = _utc_now()
+        # Sync to key_limits so create_key_for_user respects this value
+        limits = self._limits(db)
+        if "users" not in limits:
+            limits["users"] = {}
+        limits["users"][discord_user_id] = {
+            "max_keys": capped,
+            "updated_by": "legacy_set_user_max_keys",
+            "updated_at": _utc_now(),
+        }
+        self._save(db)
+
+    # ── Global/per-user limit table (license_key_limits) ─────────────────────
+
+    def _limits(self, db: dict[str, Any]) -> dict[str, Any]:
+        """Return the key_limits section, creating it if missing."""
+        if "key_limits" not in db:
+            db["key_limits"] = {"global": DEFAULT_GLOBAL_MAX_KEYS, "users": {}}
+        return db["key_limits"]
+
+    def get_global_max_keys(self) -> int:
+        db = self._load()
+        return int(self._limits(db).get("global", DEFAULT_GLOBAL_MAX_KEYS))
+
+    def get_user_key_limit(self, discord_user_id: str) -> int | None:
+        db = self._load()
+        users = self._limits(db).get("users", {})
+        entry = users.get(discord_user_id)
+        if entry is None:
+            return None
+        return int(entry.get("max_keys", DEFAULT_GLOBAL_MAX_KEYS))
+
+    def set_global_max_keys(self, max_keys: int, updated_by: str) -> None:
+        db = self._load()
+        limits = self._limits(db)
+        limits["global"] = int(max_keys)
+        limits["global_updated_by"] = updated_by
+        limits["global_updated_at"] = _utc_now()
+        self._save(db)
+
+    def set_user_key_limit(
+        self, discord_user_id: str, max_keys: int, updated_by: str
+    ) -> None:
+        db = self._load()
+        limits = self._limits(db)
+        if "users" not in limits:
+            limits["users"] = {}
+        limits["users"][discord_user_id] = {
+            "max_keys": int(max_keys),
+            "updated_by": updated_by,
+            "updated_at": _utc_now(),
+        }
         self._save(db)
 
     def count_user_keys(self, discord_user_id: str) -> int:
@@ -482,6 +591,15 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         # Lazy-expire unredeemed generated keys older than 24 hours so they
         # don't silently accumulate in the stats as "active".
         self._expire_unredeemed_keys(discord_user_id)
+
+        # Check max active key limit after expiring old keys
+        effective_max = self.get_effective_max_keys(discord_user_id)
+        active_count = self.count_active_keys_for_limit(discord_user_id)
+        if active_count >= effective_max:
+            raise UserLimitError(
+                f"Key Limit Reached. Active Keys: {active_count} / {effective_max}. "
+                "Ask an admin if you need a higher limit."
+            )
 
         raw_key = generate_license_key()
         key_hash = hash_license_key(raw_key)
@@ -607,6 +725,14 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                         )
 
         self.get_or_create_user(discord_user_id)
+        # Check max active key limit before attaching the key
+        effective_max = self.get_effective_max_keys(discord_user_id)
+        active_count = self.count_active_keys_for_limit(discord_user_id)
+        if active_count >= effective_max:
+            raise UserLimitError(
+                f"Key Limit Reached. Active Keys: {active_count} / {effective_max}. "
+                "You cannot redeem another key unless your limit is increased or an active key is removed."
+            )
         now = _utc_now()
         db["keys"][key_hash]["owner_discord_id"] = discord_user_id
         db["keys"][key_hash]["redeemed_at"] = now
@@ -1300,6 +1426,89 @@ class SupabaseLicenseStore(BaseLicenseStore):
         if not res.data:
             raise KeyNotFoundError(f"User not found: {discord_user_id}")
 
+    # ── Global/per-user limit table (license_key_limits) ─────────────────────
+
+    def get_global_max_keys(self) -> int:
+        try:
+            res = (
+                self._client.table("license_key_limits")
+                .select("max_keys")
+                .eq("scope", "global")
+                .execute()
+            )
+            if res.data:
+                return int(res.data[0]["max_keys"])
+        except Exception:
+            pass
+        return DEFAULT_GLOBAL_MAX_KEYS
+
+    def get_user_key_limit(self, discord_user_id: str) -> int | None:
+        try:
+            res = (
+                self._client.table("license_key_limits")
+                .select("max_keys")
+                .eq("scope", "user")
+                .eq("discord_user_id", discord_user_id)
+                .execute()
+            )
+            if res.data:
+                return int(res.data[0]["max_keys"])
+        except Exception:
+            pass
+        return None
+
+    def set_global_max_keys(self, max_keys: int, updated_by: str) -> None:
+        now = _utc_now()
+        try:
+            res = (
+                self._client.table("license_key_limits")
+                .update({
+                    "max_keys": int(max_keys),
+                    "updated_by_discord_id": updated_by,
+                    "updated_at": now,
+                })
+                .eq("scope", "global")
+                .execute()
+            )
+            if not (res.data):
+                self._client.table("license_key_limits").insert({
+                    "scope": "global",
+                    "max_keys": int(max_keys),
+                    "updated_by_discord_id": updated_by,
+                    "created_at": now,
+                    "updated_at": now,
+                }).execute()
+        except Exception as exc:
+            raise StoreError(f"Failed to set global max keys: {exc}") from exc
+
+    def set_user_key_limit(
+        self, discord_user_id: str, max_keys: int, updated_by: str
+    ) -> None:
+        now = _utc_now()
+        try:
+            res = (
+                self._client.table("license_key_limits")
+                .update({
+                    "max_keys": int(max_keys),
+                    "updated_by_discord_id": updated_by,
+                    "updated_at": now,
+                })
+                .eq("scope", "user")
+                .eq("discord_user_id", discord_user_id)
+                .execute()
+            )
+            if not (res.data):
+                self._client.table("license_key_limits").insert({
+                    "scope": "user",
+                    "discord_user_id": discord_user_id,
+                    "max_keys": int(max_keys),
+                    "updated_by_discord_id": updated_by,
+                    "created_at": now,
+                    "updated_at": now,
+                }).execute()
+        except Exception as exc:
+            raise StoreError(f"Failed to set user key limit: {exc}") from exc
+
     def count_user_keys(self, discord_user_id: str) -> int:
         res = (
             self._client.table("license_keys")
@@ -1334,6 +1543,15 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 raise
             except Exception:
                 pass
+
+        # Check max active key limit
+        effective_max = self.get_effective_max_keys(discord_user_id)
+        active_count = self.count_active_keys_for_limit(discord_user_id)
+        if active_count >= effective_max:
+            raise UserLimitError(
+                f"Key Limit Reached. Active Keys: {active_count} / {effective_max}. "
+                "Ask an admin if you need a higher limit."
+            )
 
         raw_key = generate_license_key()
         key_hash = hash_license_key(raw_key)
@@ -1448,13 +1666,13 @@ class SupabaseLicenseStore(BaseLicenseStore):
             )
         if owner and owner != discord_user_id:
             raise KeyOwnershipError("This key belongs to another user.")
-        # Key is unowned; check limit before attaching
-        user = self.get_or_create_user(discord_user_id)
-        current = self.count_user_keys(discord_user_id)
-        max_keys = user.get("max_keys", DEFAULT_MAX_KEYS)
-        if current >= max_keys:
+        # Check max active key limit before attaching
+        effective_max = self.get_effective_max_keys(discord_user_id)
+        active_count = self.count_active_keys_for_limit(discord_user_id)
+        if active_count >= effective_max:
             raise UserLimitError(
-                f"You have reached your license key limit ({max_keys})."
+                f"Key Limit Reached. Active Keys: {active_count} / {effective_max}. "
+                "You cannot redeem another key unless your limit is increased or an active key is removed."
             )
         update_payload = {"owner_discord_id": discord_user_id, "expires_at": None}
         try:

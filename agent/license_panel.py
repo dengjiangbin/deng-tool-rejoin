@@ -196,16 +196,46 @@ def build_generate_success_response(full_key: str) -> dict[str, Any]:
     }
 
 
-def build_generate_limit_response(max_keys: int) -> dict[str, Any]:
+def build_generate_limit_response(
+    max_keys: int, *, active_count: int | None = None
+) -> dict[str, Any]:
     """Ephemeral embed when a user has reached their key limit."""
+    if active_count is not None:
+        count_line = f"Active Keys: **{active_count} / {max_keys}**\n"
+    else:
+        count_line = f"Active Keys: **{max_keys} / {max_keys}**\n"
     return {
         "ephemeral": True,
         "embed": {
             "title": "\u274c Key Limit Reached",
             "color": 0xE74C3C,
             "description": (
-                f"You already have the maximum number of license keys (**{max_keys}**).\n"
-                "Contact an admin if you need additional keys."
+                "You already reached your key limit.\n\n"
+                + count_line
+                + "\nAsk an admin if you need a higher limit."
+            ),
+        },
+    }
+
+
+def build_redeem_limit_response(
+    max_keys: int, *, active_count: int | None = None
+) -> dict[str, Any]:
+    """Ephemeral embed when a user tries to redeem a key but is at their limit."""
+    if active_count is not None:
+        count_line = f"Active Keys: **{active_count} / {max_keys}**\n"
+    else:
+        count_line = f"Active Keys: **{max_keys} / {max_keys}**\n"
+    return {
+        "ephemeral": True,
+        "embed": {
+            "title": "\u274c Key Limit Reached",
+            "color": 0xE74C3C,
+            "description": (
+                "You already reached your key limit.\n\n"
+                + count_line
+                + "\nYou cannot redeem another key unless your limit is increased "
+                "or an active key is removed."
             ),
         },
     }

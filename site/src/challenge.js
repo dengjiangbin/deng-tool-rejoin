@@ -811,6 +811,19 @@ async function completeAdAndGenerateKey(challengeRow) {
       return recoverExistingResult(existingAfterConsume);
     }
 
+    // Check max active key limit before inserting key
+    const limitCheck = await licenseService.canUserReceiveNewKey(discord_user_id, site_user_id);
+    if (!limitCheck.allowed) {
+      await supabase
+        .from('license_ad_challenges')
+        .update({ status: 'failed', failure_reason: 'key_limit_reached' })
+        .eq('id', challengeId);
+      throw safeError(
+        'KEY_LIMIT_REACHED',
+        `Key Limit Reached. Active Keys: ${limitCheck.activeCount} / ${limitCheck.maxKeys}. Ask an admin if you need a higher limit.`,
+      );
+    }
+
     const { raw, id: keyId, prefix, suffix, displayPrefix, displaySuffix } = generateDengKey();
     const now = new Date().toISOString();
     const expiresAt = keyExpiresAt();

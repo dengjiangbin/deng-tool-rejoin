@@ -352,9 +352,16 @@ def build_license_admin_stats_description(
     user_label: str,
     stats: dict[str, Any],
     active_rows: list[dict[str, Any]],
+    effective_max_keys: int | None = None,
+    max_keys_source: str | None = None,
 ) -> str:
-    lines = [
-        f"**User:** {user_label}",
+    lines = [f"**User:** {user_label}"]
+    if effective_max_keys is not None:
+        active_count = len(active_rows)
+        source_label = " (User Override)" if max_keys_source == "user" else " (Global Default)"
+        lines.append(f"**Max Keys:** {effective_max_keys}{source_label}")
+        lines.append(f"**Active Keys:** {active_count} / {effective_max_keys}")
+    lines += [
         f"**Generated (Active):** {stats['key_generated_count']}",
         f"**Redeemed:** {stats['key_redeemed_count']}",
         f"**Unbound:** {stats['unbound_key_count']}",

@@ -408,6 +408,28 @@ async function handleKeyStart(req, res) {
       return res.redirect(303, '/license');
     }
 
+    // Check max active key limit before starting an ad challenge
+    const limitResult = await licenseService.canUserReceiveNewKey(
+      discordOwnerId(req), user.id
+    );
+    if (!limitResult.allowed) {
+      if (wantsJson(req)) {
+        return res.status(429).json({
+          error: 'KEY_LIMIT_REACHED',
+          message: `Key Limit Reached. You have ${limitResult.activeCount} / ${limitResult.maxKeys} active keys. Ask an admin if you need a higher limit.`,
+          activeCount: limitResult.activeCount,
+          maxKeys: limitResult.maxKeys,
+        });
+      }
+      req.session.flash = {
+        error: `Key Limit Reached. You have ${limitResult.activeCount} / ${limitResult.maxKeys} active keys. Ask an admin if you need a higher limit.`,
+        keyLimitReached: true,
+        activeCount: limitResult.activeCount,
+        maxKeys: limitResult.maxKeys,
+      };
+      return res.redirect('/license');
+    }
+
     if (enabledProviders().length === 0) {
       const err = new Error('No enabled ad providers');
       err.code = 'NO_PROVIDER_CONFIGURED';

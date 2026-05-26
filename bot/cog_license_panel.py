@@ -25,7 +25,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import discord
 from discord import app_commands
@@ -54,6 +54,7 @@ from agent.license_panel import (
     build_panel_embed,
     build_redeem_already_owned_response,
     build_redeem_error_response,
+    build_redeem_limit_response,
     build_redeem_success_response,
     build_reset_active_warning_response,
     build_reset_mixed_summary_embed,
@@ -198,6 +199,46 @@ async def _post_license_log(
         log.debug("_post_license_log error: %s", exc)
 
 
+async def _post_max_key_log(
+    guild: discord.Guild,
+    store: "BaseLicenseStore",
+    admin: discord.User | discord.Member,
+    scope: str,
+    target_user: discord.User | discord.Member | None,
+    old_limit: int | str,
+    new_limit: int,
+) -> None:
+    """Post a Key Limit Updated embed to the configured license log channel."""
+    try:
+        cfg = store.get_license_log_config(str(guild.id))
+        if not cfg:
+            return
+        channel_id = int(cfg.get("channel_id", 0))
+        channel = guild.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return
+
+        lines = [
+            f"**Admin:** <@{admin.id}>",
+            f"**Scope:** {scope}",
+        ]
+        if target_user is not None:
+            lines.append(f"**User:** <@{target_user.id}>")
+        lines += [
+            f"**Old Limit:** {old_limit}",
+            f"**New Limit:** {new_limit}",
+        ]
+        embed = discord.Embed(
+            title="Key Limit Updated",
+            description="\n".join(lines),
+            color=discord.Color.from_rgb(0, 100, 200),
+        )
+        embed.set_footer(text="DENG Tool: Rejoin")
+        await channel.send(embed=embed)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("_post_max_key_log error: %s", exc)
+
+
 # ── Redeem modal ──────────────────────────────────────────────────────────────
 
 class RedeemModal(discord.ui.Modal, title="Redeem License Key"):
@@ -245,7 +286,17 @@ class RedeemModal(discord.ui.Modal, title="Redeem License Key"):
             )
         except ExpiredKeyError as exc:
             payload = build_redeem_error_response(str(exc))
-        except (KeyNotFoundError, KeyOwnershipError, UserLimitError) as exc:
+        except UserLimitError as exc:
+            msg = str(exc)
+            import re as _re
+            m = _re.search(r"(\d+)\s*/\s*(\d+)", msg)
+            if m:
+                payload = build_redeem_limit_response(
+                    int(m.group(2)), active_count=int(m.group(1))
+                )
+            else:
+                payload = build_redeem_error_response(msg)
+        except (KeyNotFoundError, KeyOwnershipError) as exc:
             payload = build_redeem_error_response(str(exc))
 
         await _respond_ephemeral_payload(interaction, payload, followup=True)
@@ -1195,6 +1246,124 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                 msg = "❌ No license log channel configured. Use `/license_log_channel set`."
             await interaction.response.send_message(msg, ephemeral=True)
 
+        # /license max_key ────────────────────────────────────────────────────
+
+        @self._panel_group.command(
+            name="max_key",
+            description="Set the maximum active keys a user can have (owner/admin only).",
+        )
+        @app_commands.describe(
+            scope="global = change the default for all users; user = set a specific user's limit",
+            max_keys="Maximum number of active keys (0 = block all key generation/redemption)",
+            user="Target Discord user (only required when scope = user)",
+        )
+        @app_commands.rename(max_keys="max")
+        @app_commands.choices(scope=[
+            app_commands.Choice(name="global", value="global"),
+            app_commands.Choice(name="user", value="user"),
+        ])
+        async def cmd_max_key(
+            interaction: discord.Interaction,
+            scope: str,
+            max_keys: int,
+            user: Optional[discord.User] = None,
+        ) -> None:
+            if not _is_owner(interaction.user):
+                await interaction.response.send_message(
+                    embed=self._owner_denied(), ephemeral=True
+                )
+                return
+
+            if max_keys < 0:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        title="\u274c Invalid Value",
+                        description="`max` must be 0 or higher.",
+                        color=discord.Color.red(),
+                    ),
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+            actor = str(interaction.user.id)
+
+            try:
+                if scope == "global":
+                    old_max = store.get_global_max_keys()
+                    store.set_global_max_keys(max_keys, updated_by=actor)
+                    if interaction.guild:
+                        await _post_max_key_log(
+                            interaction.guild, store,
+                            interaction.user, "Global", None,
+                            old_max, max_keys,
+                        )
+                    store.audit_admin_action(
+                        actor, "set_global_max_keys",
+                        metadata={"old": old_max, "new": max_keys},
+                    )
+                    embed = discord.Embed(
+                        title="\u2705 Global Key Limit Updated",
+                        description=(
+                            f"Global default max active keys:\n"
+                            f"**{old_max}** \u2192 **{max_keys}**"
+                        ),
+                        color=discord.Color.green(),
+                    )
+                    embed.set_footer(text="DENG Tool: Rejoin")
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+
+                elif scope == "user":
+                    if user is None:
+                        await interaction.followup.send(
+                            embed=discord.Embed(
+                                title="\u274c Missing User",
+                                description="Scope `user` requires specifying a Discord user.",
+                                color=discord.Color.red(),
+                            ),
+                            ephemeral=True,
+                        )
+                        return
+                    uid = str(user.id)
+                    global_max = store.get_global_max_keys()
+                    old_limit = store.get_user_key_limit(uid)
+                    old_display: str | int = (
+                        f"Global {global_max}" if old_limit is None else old_limit
+                    )
+                    store.set_user_key_limit(uid, max_keys, updated_by=actor)
+                    if interaction.guild:
+                        await _post_max_key_log(
+                            interaction.guild, store,
+                            interaction.user, "User", user,
+                            old_display, max_keys,
+                        )
+                    store.audit_admin_action(
+                        actor, "set_user_key_limit",
+                        target_type="user", target_id=uid,
+                        metadata={"old": str(old_display), "new": max_keys},
+                    )
+                    embed = discord.Embed(
+                        title="\u2705 Per-User Key Limit Updated",
+                        description=(
+                            f"User: <@{uid}>\n"
+                            f"Limit: **{old_display}** \u2192 **{max_keys}**"
+                        ),
+                        color=discord.Color.green(),
+                    )
+                    embed.set_footer(text="DENG Tool: Rejoin")
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+
+            except Exception as exc:  # noqa: BLE001
+                log.error("cmd_max_key error: %s", exc)
+                await interaction.followup.send(
+                    embed=discord.Embed(
+                        title="\u274c Error",
+                        description=f"Failed to update key limit: {exc}",
+                        color=discord.Color.red(),
+                    ),
+                    ephemeral=True,
+                )
+
         # /license <user> ─────────────────────────────────────────────────────
 
         @bot.tree.command(
@@ -1219,10 +1388,20 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
             active_rows = filter_active_visible_license_rows(
                 store.list_user_keys_for_stats(uid)
             )
+            # Resolve limit info for admin display
+            try:
+                effective_max = store.get_effective_max_keys(uid)
+                user_override = store.get_user_key_limit(uid)
+                max_keys_source = "user" if user_override is not None else "global"
+            except Exception:
+                effective_max = None
+                max_keys_source = None
             description = build_license_admin_stats_description(
                 user_label=f"<@{uid}> ({uid})",
                 stats=stats,
                 active_rows=active_rows,
+                effective_max_keys=effective_max,
+                max_keys_source=max_keys_source,
             )
 
             embed = discord.Embed(
