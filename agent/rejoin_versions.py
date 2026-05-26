@@ -190,10 +190,10 @@ def merge_version_sources(
         out[ver] = RejoinVersionInfo(
             version=ver,
             channel=ch,
-            label=(f"\U0001f4e6 {ver}" if not io else label)[:256],
+            label=(ver if not io else label)[:256],
             install_ref=ref,
             recommended=rec,
-            description=(f"Install DENG Tool: Rejoin {ver}" if not io else desc),
+            description=(f"Install {ver}" if not io else desc),
             internal_only=io,
         )
 
@@ -212,10 +212,10 @@ def merge_version_sources(
         out[ver] = RejoinVersionInfo(
             version=ver,
             channel=ch,
-            label=(f"\U0001f4e6 {ver}" if not io else label)[:256],
+            label=(ver if not io else label)[:256],
             install_ref=ref,
             recommended=rec,
-            description=(f"Install DENG Tool: Rejoin {ver}" if not io else desc),
+            description=(f"Install {ver}" if not io else desc),
             internal_only=io,
         )
 
@@ -280,7 +280,7 @@ def format_install_instructions_plain(info: RejoinVersionInfo) -> str:
         f"```{cmd}```",
         "",
         "Mobile Copy:",
-        cmd,
+        f"`{cmd}`",
     ]
     return "\n".join(lines)
 

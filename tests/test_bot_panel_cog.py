@@ -921,9 +921,12 @@ class TestPanelSelectVersion(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("main-dev", version_values, "main-dev must never appear in the dropdown")
             self.assertIn("v1.0.0", version_values)
             stable_option = next(opt for opt in select.options if opt.value == "v1.0.0")
-            self.assertEqual(stable_option.label, "\U0001f4e6 v1.0.0")
-            self.assertEqual(stable_option.description, "Install DENG Tool: Rejoin v1.0.0")
+            self.assertEqual(select.placeholder, "Select a specific version to install...")
+            self.assertEqual(stable_option.emoji.name, "\U0001f4dc")
+            self.assertEqual(stable_option.label, "v1.0.0")
+            self.assertEqual(stable_option.description, "Install v1.0.0")
             option_blob = f"{stable_option.label} {stable_option.description}"
+            self.assertNotEqual(stable_option.label, "\U0001f4dc v1.0.0")
             self.assertNotIn("frozen public stable release", option_blob.lower())
             self.assertNotIn("refs/tags", option_blob)
             self.assertNotIn("sha", option_blob.lower())
@@ -990,8 +993,9 @@ class TestVersionPickSelectCallback(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(forbidden, content, msg=f"Forbidden text found: {forbidden!r}")
         cmd = "curl -fsSL https://rejoin.deng.my.id/install/v1.0.0 -o install.sh && bash install.sh"
         mobile = content.split("Mobile Copy:\n", 1)[1]
-        self.assertEqual(mobile, cmd)
+        self.assertEqual(mobile, f"`{cmd}`")
         self.assertNotIn("```", mobile)
+        self.assertEqual(mobile.count("`"), 2)
 
     async def test_public_version_reply_no_duplicate_copy_blocks(self) -> None:
         """Desktop Copy and Mobile Copy must each appear exactly once."""

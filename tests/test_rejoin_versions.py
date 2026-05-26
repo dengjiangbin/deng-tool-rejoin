@@ -281,19 +281,19 @@ class InstallCommandTests(unittest.TestCase):
         self.assertEqual(text.count("Desktop Copy:"), 1, "Desktop Copy must appear exactly once")
         self.assertEqual(text.count("Mobile Copy:"), 1, "Mobile Copy must appear exactly once")
 
-    def test_mobile_copy_is_plain_message_content(self) -> None:
+    def test_mobile_copy_is_single_backtick_inline_code(self) -> None:
         info = rv.RejoinVersionInfo(
             version="v1.0.0",
             channel="stable",
-            label="\U0001f4e6 v1.0.0",
+            label="v1.0.0",
             install_ref="refs/tags/v1.0.0",
         )
         cmd = "curl -fsSL https://rejoin.deng.my.id/install/v1.0.0 -o install.sh && bash install.sh"
         text = rv.format_install_instructions_plain(info)
         mobile = text.split("Mobile Copy:\n", 1)[1]
-        self.assertEqual(mobile, cmd)
+        self.assertEqual(mobile, f"`{cmd}`")
         self.assertNotIn("```", mobile)
-        self.assertNotIn("`", mobile)
+        self.assertEqual(mobile.count("`"), 2)
         self.assertNotIn("\n", mobile)
         self.assertFalse(mobile.startswith(" "))
 
@@ -326,10 +326,12 @@ class InstallCommandTests(unittest.TestCase):
             with unittest.mock.patch.dict(os.environ, {"REJOIN_VERSIONS_MANIFEST": str(manifest)}, clear=False):
                 versions = rv.merge_version_sources(tag_names=[])
             self.assertEqual(len(versions), 1)
-            self.assertEqual(versions[0].label, "\U0001f4e6 v1.0.0")
-            self.assertEqual(versions[0].description, "Install DENG Tool: Rejoin v1.0.0")
+            self.assertEqual(versions[0].label, "v1.0.0")
+            self.assertEqual(versions[0].description, "Install v1.0.0")
             blob = json.dumps([versions[0].label, versions[0].description])
             self.assertNotIn("frozen public stable release", blob.lower())
+            self.assertNotIn("\U0001f4dc", versions[0].label)
+            self.assertNotIn("\U0001f4e6", versions[0].label)
             self.assertNotIn("refs/tags", blob)
             self.assertNotIn("sha", blob.lower())
         finally:

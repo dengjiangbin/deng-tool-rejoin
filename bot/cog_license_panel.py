@@ -651,10 +651,11 @@ class VersionPickSelect(discord.ui.Select):
                     label=v.label[:100],
                     value=v.version[:100],
                     description=desc,
+                    emoji="\U0001f4dc",
                 )
             )
         super().__init__(
-            placeholder="Choose a version…",
+            placeholder="Select a specific version to install...",
             min_values=1,
             max_values=1,
             options=opts,
