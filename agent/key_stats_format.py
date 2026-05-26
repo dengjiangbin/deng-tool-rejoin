@@ -313,18 +313,22 @@ def build_reset_hwid_log_description(
     user_mention: str,
     reset_key: str,
     stats: dict[str, Any],
+    reset_uses_today: int | None = None,
+    max_panel: int | None = None,
 ) -> str:
-    return "\n".join(
-        [
-            f"**User:** {user_mention}",
-            f"**Reset Key:** {reset_key}",
-            f"**Current Key Generated:** {stats['key_generated_count']}",
-            f"**Current Key Redeemed:** {stats['key_redeemed_count']}",
-            f"**Current Unbound Key:** {stats['unbound_key_count']}",
-            f"**Current Bound Key:** {stats['bound_key_count']}",
-            f"**Current Reset HWID:** {stats['reset_hwid_count']} times",
-        ]
-    )
+    lines = [
+        f"**User:** {user_mention}",
+        f"**Reset Key:** {reset_key}",
+        f"**Current Key Generated:** {stats['key_generated_count']}",
+        f"**Current Key Redeemed:** {stats['key_redeemed_count']}",
+        f"**Current Unbound Key:** {stats['unbound_key_count']}",
+        f"**Current Bound Key:** {stats['bound_key_count']}",
+        f"**Current Reset HWID:** {stats['reset_hwid_count']} times",
+    ]
+    if reset_uses_today is not None and max_panel is not None:
+        lines.append(f"**Reset Uses Today:** {reset_uses_today} / {max_panel}")
+        lines.append("**Reset Window:** Daily at 12:00 AM WIB")
+    return "\n".join(lines)
 
 
 def build_license_event_log_description(
@@ -354,6 +358,9 @@ def build_license_admin_stats_description(
     active_rows: list[dict[str, Any]],
     effective_max_keys: int | None = None,
     max_keys_source: str | None = None,
+    effective_max_panel: int | None = None,
+    max_panel_source: str | None = None,
+    panel_resets_today: int | None = None,
 ) -> str:
     lines = [f"**User:** {user_label}"]
     if effective_max_keys is not None:
@@ -361,6 +368,14 @@ def build_license_admin_stats_description(
         source_label = " (User Override)" if max_keys_source == "user" else " (Global Default)"
         lines.append(f"**Max Keys:** {effective_max_keys}{source_label}")
         lines.append(f"**Active Keys:** {active_count} / {effective_max_keys}")
+    if effective_max_panel is not None:
+        panel_source_label = (
+            " (User Override)" if max_panel_source == "user" else " (Global Default)"
+        )
+        lines.append(f"**Max Panel Resets:** {effective_max_panel}{panel_source_label}")
+        if panel_resets_today is not None:
+            lines.append(f"**Reset Uses Today:** {panel_resets_today} / {effective_max_panel}")
+        lines.append("**Resets At:** 12:00 AM WIB")
     lines += [
         f"**Generated (Active):** {stats['key_generated_count']}",
         f"**Redeemed:** {stats['key_redeemed_count']}",

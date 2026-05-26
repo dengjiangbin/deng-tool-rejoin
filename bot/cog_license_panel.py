@@ -52,6 +52,7 @@ from agent.license_panel import (
     build_key_list_response,
     build_not_owner_response,
     build_panel_embed,
+    build_panel_limit_blocked_response,
     build_redeem_already_owned_response,
     build_redeem_error_response,
     build_redeem_limit_response,
@@ -78,6 +79,8 @@ from agent.license_store import (
     KeyNotFoundError,
     KeyOwnershipError,
     NoActiveBindingError,
+    PanelLimitError,
+    StoreError,
     UserLimitError,
     get_license_stats_for_discord_user,
 )
@@ -150,6 +153,8 @@ async def _post_license_log(
     user: discord.User | discord.Member,
     key_serial: str,
     event_type: str,
+    reset_uses_today: int | None = None,
+    max_panel: int | None = None,
 ) -> None:
     """Post a license event log embed to the configured license log channel.
 
@@ -179,6 +184,8 @@ async def _post_license_log(
                 user_mention=f"<@{uid}>",
                 reset_key=key_serial,
                 stats=stats,
+                reset_uses_today=reset_uses_today,
+                max_panel=max_panel,
             )
         else:
             description = build_license_event_log_description(
@@ -237,6 +244,47 @@ async def _post_max_key_log(
         await channel.send(embed=embed)
     except Exception as exc:  # noqa: BLE001
         log.debug("_post_max_key_log error: %s", exc)
+
+
+async def _post_max_panel_log(
+    guild: discord.Guild,
+    store: "BaseLicenseStore",
+    admin: discord.User | discord.Member,
+    scope: str,
+    target_user: discord.User | discord.Member | None,
+    old_limit: int | str,
+    new_limit: int,
+) -> None:
+    """Post a Panel Reset Limit Updated embed to the configured license log channel."""
+    try:
+        cfg = store.get_license_log_config(str(guild.id))
+        if not cfg:
+            return
+        channel_id = int(cfg.get("channel_id", 0))
+        channel = guild.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return
+
+        lines = [
+            f"**Admin:** <@{admin.id}>",
+            f"**Scope:** {scope}",
+        ]
+        if target_user is not None:
+            lines.append(f"**User:** <@{target_user.id}>")
+        lines += [
+            f"**Old Limit:** {old_limit}",
+            f"**New Limit:** {new_limit}",
+            "**Reset Window:** Daily at 12:00 AM WIB",
+        ]
+        embed = discord.Embed(
+            title="Panel Reset Limit Updated",
+            description="\n".join(lines),
+            color=discord.Color.from_rgb(0, 100, 200),
+        )
+        embed.set_footer(text="DENG Tool: Rejoin")
+        await channel.send(embed=embed)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("_post_max_panel_log error: %s", exc)
 
 
 # ── Redeem modal ──────────────────────────────────────────────────────────────
@@ -391,7 +439,22 @@ class ConfirmResetButton(discord.ui.Button):
             )
             return
 
+        # Pre-flight: check daily panel limit before touching any keys
+        allowed, used_today, max_panel_val = self._store.can_user_reset_panel_today(self._uid)
+        if not allowed:
+            for child in self.view.children:
+                child.disabled = True
+            embed = _embed_from_payload(
+                build_panel_limit_blocked_response(max_panel_val, used_count=used_today)
+            )
+            try:
+                await interaction.response.edit_message(embed=embed, view=self.view)
+            except discord.HTTPException:
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
         results: list[dict] = []
+        keys_to_log: list[str] = []
         for key_id in selected_ids:
             state = self._key_map.get(key_id, {})
             fk = state.get("full_key_plaintext")
@@ -415,16 +478,7 @@ class ConfirmResetButton(discord.ui.Button):
                     "message": "Device binding cleared.",
                 })
                 if interaction.guild and fk:
-                    import asyncio
-                    asyncio.ensure_future(
-                        _post_license_log(
-                            interaction.guild, self._store,
-                            title="Reset HWID Log",
-                            user=interaction.user,
-                            key_serial=fk,
-                            event_type="reset_hwid",
-                        )
-                    )
+                    keys_to_log.append(fk)
             except NoActiveBindingError:
                 results.append({
                     "display_key": display_key,
@@ -442,10 +496,43 @@ class ConfirmResetButton(discord.ui.Button):
                     "message": str(exc),
                 })
 
+        # Record one panel use if at least one key was successfully unbound
+        successful_count = sum(1 for r in results if r.get("success"))
+        new_usage_count: int | None = None
+        if successful_count > 0:
+            try:
+                new_usage_count = self._store.record_successful_panel_reset(
+                    self._uid, successful_count
+                )
+            except (PanelLimitError, StoreError):
+                pass
+
+        # Post log for each successfully reset key (with updated usage)
+        if interaction.guild and keys_to_log:
+            import asyncio
+            for fk in keys_to_log:
+                asyncio.ensure_future(
+                    _post_license_log(
+                        interaction.guild, self._store,
+                        title="Reset HWID Log",
+                        user=interaction.user,
+                        key_serial=fk,
+                        event_type="reset_hwid",
+                        reset_uses_today=new_usage_count,
+                        max_panel=max_panel_val,
+                    )
+                )
+
         for child in self.view.children:
             child.disabled = True
 
-        embed = _embed_from_payload(build_reset_mixed_summary_embed(results))
+        embed = _embed_from_payload(
+            build_reset_mixed_summary_embed(
+                results,
+                reset_uses_today=new_usage_count,
+                max_panel=max_panel_val if new_usage_count is not None else None,
+            )
+        )
         try:
             await interaction.response.edit_message(embed=embed, view=self.view)
         except discord.HTTPException:
@@ -771,6 +858,16 @@ class PanelView(discord.ui.View):
         username = str(interaction.user)
 
         self._store.get_or_create_user(uid, username)
+
+        # Check daily panel limit before showing the selector
+        allowed, used_today, max_panel_val = self._store.can_user_reset_panel_today(uid)
+        if not allowed:
+            embed = _embed_from_payload(
+                build_panel_limit_blocked_response(max_panel_val, used_count=used_today)
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
         keys_with_state = self._store.list_user_keys_with_binding_state(uid)
 
         if not keys_with_state:
@@ -1364,7 +1461,123 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                     ephemeral=True,
                 )
 
-        # /license <user> ─────────────────────────────────────────────────────
+        # /license max_panel ──────────────────────────────────────────────────
+
+        @self._panel_group.command(
+            name="max_panel",
+            description="Set the daily Reset HWID panel limit per user (owner/admin only).",
+        )
+        @app_commands.describe(
+            scope="global = change the default for all users; user = set a specific user's limit",
+            max_panel="Maximum Reset HWID panel uses per WIB day (0 = disable for that user)",
+            user="Target Discord user (only required when scope = user)",
+        )
+        @app_commands.rename(max_panel="max")
+        @app_commands.choices(scope=[
+            app_commands.Choice(name="global", value="global"),
+            app_commands.Choice(name="user", value="user"),
+        ])
+        async def cmd_max_panel(
+            interaction: discord.Interaction,
+            scope: str,
+            max_panel: int,
+            user: Optional[discord.User] = None,
+        ) -> None:
+            if not _is_owner(interaction.user):
+                await interaction.response.send_message(
+                    embed=self._owner_denied(), ephemeral=True
+                )
+                return
+
+            if max_panel < 0:
+                await interaction.response.send_message(
+                    embed=discord.Embed(
+                        title="\u274c Invalid Value",
+                        description="`max` must be 0 or higher.",
+                        color=discord.Color.red(),
+                    ),
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+            actor = str(interaction.user.id)
+
+            try:
+                if scope == "global":
+                    old_max = store.get_global_max_panel()
+                    store.set_global_max_panel(max_panel, updated_by=actor)
+                    if interaction.guild:
+                        await _post_max_panel_log(
+                            interaction.guild, store,
+                            interaction.user, "Global", None,
+                            old_max, max_panel,
+                        )
+                    store.audit_admin_action(
+                        actor, "set_global_max_panel",
+                        metadata={"old": old_max, "new": max_panel},
+                    )
+                    embed = discord.Embed(
+                        title="\u2705 Global Panel Reset Limit Updated",
+                        description=(
+                            f"Global default max Reset HWID panel uses per WIB day:\n"
+                            f"**{old_max}** \u2192 **{max_panel}**"
+                        ),
+                        color=discord.Color.green(),
+                    )
+                    embed.set_footer(text="DENG Tool: Rejoin")
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+
+                elif scope == "user":
+                    if user is None:
+                        await interaction.followup.send(
+                            embed=discord.Embed(
+                                title="\u274c Missing User",
+                                description="Scope `user` requires specifying a Discord user.",
+                                color=discord.Color.red(),
+                            ),
+                            ephemeral=True,
+                        )
+                        return
+                    uid = str(user.id)
+                    global_max = store.get_global_max_panel()
+                    old_limit = store.get_user_panel_limit(uid)
+                    old_display: str | int = (
+                        f"Global {global_max}" if old_limit is None else old_limit
+                    )
+                    store.set_user_panel_limit(uid, max_panel, updated_by=actor)
+                    if interaction.guild:
+                        await _post_max_panel_log(
+                            interaction.guild, store,
+                            interaction.user, "User", user,
+                            old_display, max_panel,
+                        )
+                    store.audit_admin_action(
+                        actor, "set_user_panel_limit",
+                        target_type="user", target_id=uid,
+                        metadata={"old": str(old_display), "new": max_panel},
+                    )
+                    embed = discord.Embed(
+                        title="\u2705 Per-User Panel Reset Limit Updated",
+                        description=(
+                            f"User: <@{uid}>\n"
+                            f"Limit: **{old_display}** \u2192 **{max_panel}**"
+                        ),
+                        color=discord.Color.green(),
+                    )
+                    embed.set_footer(text="DENG Tool: Rejoin")
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+
+            except Exception as exc:  # noqa: BLE001
+                log.error("cmd_max_panel error: %s", exc)
+                await interaction.followup.send(
+                    embed=discord.Embed(
+                        title="\u274c Error",
+                        description=f"Failed to update panel reset limit: {exc}",
+                        color=discord.Color.red(),
+                    ),
+                    ephemeral=True,
+                )
 
         @bot.tree.command(
             name="license",
@@ -1388,7 +1601,7 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
             active_rows = filter_active_visible_license_rows(
                 store.list_user_keys_for_stats(uid)
             )
-            # Resolve limit info for admin display
+            # Resolve key limit info for admin display
             try:
                 effective_max = store.get_effective_max_keys(uid)
                 user_override = store.get_user_key_limit(uid)
@@ -1396,12 +1609,25 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
             except Exception:
                 effective_max = None
                 max_keys_source = None
+            # Resolve panel limit info for admin display
+            try:
+                effective_max_panel = store.get_effective_max_panel(uid)
+                panel_override = store.get_user_panel_limit(uid)
+                max_panel_source = "user" if panel_override is not None else "global"
+                panel_resets_today = store.get_panel_reset_usage_today(uid)
+            except Exception:
+                effective_max_panel = None
+                max_panel_source = None
+                panel_resets_today = None
             description = build_license_admin_stats_description(
                 user_label=f"<@{uid}> ({uid})",
                 stats=stats,
                 active_rows=active_rows,
                 effective_max_keys=effective_max,
                 max_keys_source=max_keys_source,
+                effective_max_panel=effective_max_panel,
+                max_panel_source=max_panel_source,
+                panel_resets_today=panel_resets_today,
             )
 
             embed = discord.Embed(

@@ -52,6 +52,7 @@ MAX_HWID_RESETS_PER_24H    = 5
 ACTIVE_HEARTBEAT_WINDOW_S  = 300          # 5 minutes
 DEFAULT_MAX_KEYS            = 1
 DEFAULT_GLOBAL_MAX_KEYS     = 2           # default global max active keys per user
+DEFAULT_GLOBAL_MAX_PANEL    = 1           # default max Reset HWID panel uses per user per WIB day
 GENERATION_COOLDOWN_SECONDS = 60          # minimum seconds between key generations
 UNREDEEMED_KEY_EXPIRY_SECONDS = 86400    # 24 hours — unredeemed keys expire
 
@@ -63,6 +64,9 @@ class StoreError(Exception):
 
 class UserLimitError(StoreError):
     """User has reached their license key limit."""
+
+class PanelLimitError(StoreError):
+    """User has reached their daily Reset HWID panel limit."""
 
 class KeyNotFoundError(StoreError):
     """Key does not exist in the store."""
@@ -118,6 +122,22 @@ def _seconds_since(iso_str: str | None) -> float | None:
         return max(0.0, (datetime.now(timezone.utc) - dt).total_seconds())
     except (ValueError, TypeError):
         return None
+
+
+def get_wib_day(now: datetime | None = None) -> str:
+    """Return the current date in WIB (Asia/Jakarta, UTC+7) as 'YYYY-MM-DD'.
+
+    Uses zoneinfo when available; falls back to a fixed +07:00 offset so the
+    function works on Windows hosts that lack system timezone data.
+    """
+    from datetime import timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        wib = ZoneInfo("Asia/Jakarta")
+    except Exception:
+        wib = timezone(timedelta(hours=7))
+    dt = (now or datetime.now(timezone.utc)).astimezone(wib)
+    return dt.strftime("%Y-%m-%d")
 
 
 def _license_record_has_owner(record: dict[str, Any]) -> bool:
@@ -217,6 +237,60 @@ class BaseLicenseStore(ABC):
         where scope='user' and discord_user_id matches.
         Base implementation is a no-op.
         """
+
+    # ── Panel reset limit helpers (max_panel column in license_key_limits) ────
+
+    def get_global_max_panel(self) -> int:
+        """Return the global default max Reset HWID panel uses per user per WIB day."""
+        return DEFAULT_GLOBAL_MAX_PANEL
+
+    def get_user_panel_limit(self, discord_user_id: str) -> int | None:
+        """Return per-user panel limit override, or None if no override exists."""
+        return None
+
+    def get_effective_max_panel(self, discord_user_id: str) -> int:
+        """Return the effective max panel resets for a user (per-user override wins)."""
+        override = self.get_user_panel_limit(discord_user_id)
+        if override is not None:
+            return override
+        return self.get_global_max_panel()
+
+    def get_panel_reset_usage_today(self, discord_user_id: str) -> int:
+        """Return how many successful Reset HWID panel uses the user has today (WIB)."""
+        return 0
+
+    def can_user_reset_panel_today(
+        self, discord_user_id: str
+    ) -> tuple[bool, int, int]:
+        """Return (allowed, used_count, max_panel).
+
+        allowed = True when the user has not yet reached their daily limit.
+        """
+        max_panel = self.get_effective_max_panel(discord_user_id)
+        used_count = self.get_panel_reset_usage_today(discord_user_id)
+        return (used_count < max_panel, used_count, max_panel)
+
+    def record_successful_panel_reset(
+        self, discord_user_id: str, unbound_key_count: int
+    ) -> int:
+        """Atomically check limit and increment daily panel-reset counter.
+
+        Returns the new used_count on success.
+        Raises PanelLimitError if the user is already at their daily limit.
+        Base implementation is a no-op (always allows, returns 1).
+        """
+        return 1
+
+    def set_global_max_panel(self, max_panel: int, updated_by: str) -> None:
+        """Set the global default max panel resets per user per WIB day.
+
+        Base implementation is a no-op.
+        """
+
+    def set_user_panel_limit(
+        self, discord_user_id: str, max_panel: int, updated_by: str
+    ) -> None:
+        """Set a per-user panel limit override. Base implementation is a no-op."""
 
     @abstractmethod
     def create_key_for_user(
@@ -462,6 +536,8 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             "license_log_configs": {},
             "audit_logs": [],
             "key_limits": {"global": DEFAULT_GLOBAL_MAX_KEYS, "users": {}},
+            "panel_limits": {"global": DEFAULT_GLOBAL_MAX_PANEL, "users": {}},
+            "panel_usage": {},
         }
 
     # ── User helpers ──────────────────────────────────────────────────────────
@@ -558,6 +634,84 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             "updated_at": _utc_now(),
         }
         self._save(db)
+
+    # ── Panel reset limit helpers (LocalJson) ────────────────────────────────
+
+    def _panel_limits(self, db: dict[str, Any]) -> dict[str, Any]:
+        if "panel_limits" not in db:
+            db["panel_limits"] = {"global": DEFAULT_GLOBAL_MAX_PANEL, "users": {}}
+        return db["panel_limits"]
+
+    def get_global_max_panel(self) -> int:
+        db = self._load()
+        return int(self._panel_limits(db).get("global", DEFAULT_GLOBAL_MAX_PANEL))
+
+    def get_user_panel_limit(self, discord_user_id: str) -> int | None:
+        db = self._load()
+        users = self._panel_limits(db).get("users", {})
+        entry = users.get(discord_user_id)
+        if entry is None:
+            return None
+        return int(entry.get("max_panel", DEFAULT_GLOBAL_MAX_PANEL))
+
+    def set_global_max_panel(self, max_panel: int, updated_by: str) -> None:
+        db = self._load()
+        limits = self._panel_limits(db)
+        limits["global"] = int(max_panel)
+        limits["global_updated_by"] = updated_by
+        limits["global_updated_at"] = _utc_now()
+        self._save(db)
+
+    def set_user_panel_limit(
+        self, discord_user_id: str, max_panel: int, updated_by: str
+    ) -> None:
+        db = self._load()
+        limits = self._panel_limits(db)
+        if "users" not in limits:
+            limits["users"] = {}
+        limits["users"][discord_user_id] = {
+            "max_panel": int(max_panel),
+            "updated_by": updated_by,
+            "updated_at": _utc_now(),
+        }
+        self._save(db)
+
+    def get_panel_reset_usage_today(self, discord_user_id: str) -> int:
+        db = self._load()
+        wib_day = get_wib_day()
+        usage = db.get("panel_usage", {})
+        entry = usage.get(f"{discord_user_id}:{wib_day}")
+        if not entry:
+            return 0
+        return int(entry.get("used_count", 0))
+
+    def record_successful_panel_reset(
+        self, discord_user_id: str, unbound_key_count: int
+    ) -> int:
+        db = self._load()
+        wib_day = get_wib_day()
+        if "panel_usage" not in db:
+            db["panel_usage"] = {}
+        key = f"{discord_user_id}:{wib_day}"
+        entry = db["panel_usage"].get(key, {"used_count": 0})
+        current_count = int(entry.get("used_count", 0))
+        # Atomic check + increment
+        max_panel = self.get_effective_max_panel(discord_user_id)
+        if current_count >= max_panel:
+            raise PanelLimitError(
+                f"Daily Reset Limit Reached. Reset Uses: {current_count} / {max_panel}. "
+                "Resets again at 12:00 AM WIB."
+            )
+        new_count = current_count + 1
+        db["panel_usage"][key] = {
+            "discord_user_id": discord_user_id,
+            "reset_day_wib": wib_day,
+            "used_count": new_count,
+            "last_reset_at": _utc_now(),
+            "updated_at": _utc_now(),
+        }
+        self._save(db)
+        return new_count
 
     def count_user_keys(self, discord_user_id: str) -> int:
         db = self._load()
@@ -1508,6 +1662,152 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 }).execute()
         except Exception as exc:
             raise StoreError(f"Failed to set user key limit: {exc}") from exc
+
+    # ── Panel reset limit helpers (Supabase) ─────────────────────────────────
+
+    def get_global_max_panel(self) -> int:
+        try:
+            res = (
+                self._client.table("license_key_limits")
+                .select("max_panel")
+                .eq("scope", "global")
+                .execute()
+            )
+            if res.data and res.data[0].get("max_panel") is not None:
+                return int(res.data[0]["max_panel"])
+        except Exception:
+            pass
+        return DEFAULT_GLOBAL_MAX_PANEL
+
+    def get_user_panel_limit(self, discord_user_id: str) -> int | None:
+        try:
+            res = (
+                self._client.table("license_key_limits")
+                .select("max_panel")
+                .eq("scope", "user")
+                .eq("discord_user_id", discord_user_id)
+                .execute()
+            )
+            if res.data and res.data[0].get("max_panel") is not None:
+                return int(res.data[0]["max_panel"])
+        except Exception:
+            pass
+        return None
+
+    def set_global_max_panel(self, max_panel: int, updated_by: str) -> None:
+        now = _utc_now()
+        try:
+            res = (
+                self._client.table("license_key_limits")
+                .update({
+                    "max_panel": int(max_panel),
+                    "updated_by_discord_id": updated_by,
+                    "updated_at": now,
+                })
+                .eq("scope", "global")
+                .execute()
+            )
+            if not res.data:
+                self._client.table("license_key_limits").insert({
+                    "scope": "global",
+                    "max_keys": DEFAULT_GLOBAL_MAX_KEYS,
+                    "max_panel": int(max_panel),
+                    "updated_by_discord_id": updated_by,
+                    "created_at": now,
+                    "updated_at": now,
+                }).execute()
+        except Exception as exc:
+            raise StoreError(f"Failed to set global max panel: {exc}") from exc
+
+    def set_user_panel_limit(
+        self, discord_user_id: str, max_panel: int, updated_by: str
+    ) -> None:
+        now = _utc_now()
+        try:
+            res = (
+                self._client.table("license_key_limits")
+                .update({
+                    "max_panel": int(max_panel),
+                    "updated_by_discord_id": updated_by,
+                    "updated_at": now,
+                })
+                .eq("scope", "user")
+                .eq("discord_user_id", discord_user_id)
+                .execute()
+            )
+            if not res.data:
+                self._client.table("license_key_limits").insert({
+                    "scope": "user",
+                    "discord_user_id": discord_user_id,
+                    "max_keys": DEFAULT_GLOBAL_MAX_KEYS,
+                    "max_panel": int(max_panel),
+                    "updated_by_discord_id": updated_by,
+                    "created_at": now,
+                    "updated_at": now,
+                }).execute()
+        except Exception as exc:
+            raise StoreError(f"Failed to set user panel limit: {exc}") from exc
+
+    def get_panel_reset_usage_today(self, discord_user_id: str) -> int:
+        try:
+            wib_day = get_wib_day()
+            res = (
+                self._client.table("license_panel_reset_usage")
+                .select("used_count")
+                .eq("discord_user_id", discord_user_id)
+                .eq("reset_day_wib", wib_day)
+                .execute()
+            )
+            if res.data:
+                return int(res.data[0]["used_count"])
+        except Exception:
+            pass
+        return 0
+
+    def record_successful_panel_reset(
+        self, discord_user_id: str, unbound_key_count: int
+    ) -> int:
+        """Atomically check limit and increment daily panel-reset counter."""
+        now = _utc_now()
+        wib_day = get_wib_day()
+        try:
+            res = (
+                self._client.table("license_panel_reset_usage")
+                .select("used_count")
+                .eq("discord_user_id", discord_user_id)
+                .eq("reset_day_wib", wib_day)
+                .execute()
+            )
+            current_count = int(res.data[0]["used_count"]) if res.data else 0
+            max_panel = self.get_effective_max_panel(discord_user_id)
+            if current_count >= max_panel:
+                raise PanelLimitError(
+                    f"Daily Reset Limit Reached. Reset Uses: {current_count} / {max_panel}. "
+                    "Resets again at 12:00 AM WIB."
+                )
+            new_count = current_count + 1
+            if res.data:
+                self._client.table("license_panel_reset_usage").update({
+                    "used_count": new_count,
+                    "last_reset_at": now,
+                    "updated_at": now,
+                }).eq("discord_user_id", discord_user_id).eq(
+                    "reset_day_wib", wib_day
+                ).execute()
+            else:
+                self._client.table("license_panel_reset_usage").insert({
+                    "discord_user_id": discord_user_id,
+                    "reset_day_wib": wib_day,
+                    "used_count": 1,
+                    "last_reset_at": now,
+                    "created_at": now,
+                    "updated_at": now,
+                }).execute()
+            return new_count
+        except PanelLimitError:
+            raise
+        except Exception as exc:
+            raise StoreError(f"Failed to record panel reset: {exc}") from exc
 
     def count_user_keys(self, discord_user_id: str) -> int:
         res = (

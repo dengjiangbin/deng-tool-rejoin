@@ -497,10 +497,16 @@ def build_reset_no_keys_response() -> dict[str, Any]:
     }
 
 
-def build_reset_mixed_summary_embed(results: list[dict]) -> dict[str, Any]:
+def build_reset_mixed_summary_embed(
+    results: list[dict],
+    *,
+    reset_uses_today: int | None = None,
+    max_panel: int | None = None,
+) -> dict[str, Any]:
     """Ephemeral embed listing per-key HWID reset outcomes.
 
     Each result dict: {display_key (str), success (bool), message (str)}.
+    Optionally shows today's panel usage when reset_uses_today and max_panel are provided.
     """
     lines: list[str] = []
     for r in results:
@@ -508,6 +514,11 @@ def build_reset_mixed_summary_embed(results: list[dict]) -> dict[str, Any]:
         dk = r.get("display_key") or r.get("masked_key", "???")
         lines.append(f"{icon} `{dk}` \u2014 {r.get('message', '')}")
     description = "\n".join(lines) if lines else "No keys were processed."
+    if reset_uses_today is not None and max_panel is not None:
+        description += (
+            f"\n\n**Reset Uses Today:** {reset_uses_today} / {max_panel}\n"
+            "**Resets again at:** 12:00 AM WIB"
+        )
     all_ok = bool(results) and all(r.get("success") for r in results)
     none_ok = bool(results) and not any(r.get("success") for r in results)
     color = 0x27AE60 if all_ok else (0xE74C3C if none_ok else 0xF39C12)
@@ -516,6 +527,35 @@ def build_reset_mixed_summary_embed(results: list[dict]) -> dict[str, Any]:
         "embed": {
             "title": "\u267b\ufe0f HWID Reset Results",
             "color": color,
+            "description": description,
+        },
+    }
+
+
+def build_panel_limit_blocked_response(
+    max_panel: int, *, used_count: int | None = None
+) -> dict[str, Any]:
+    """Ephemeral embed when the user has reached their daily Reset HWID panel limit."""
+    count = used_count if used_count is not None else max_panel
+    if max_panel == 0:
+        title = "\u26d4 Reset HWID Disabled"
+        description = (
+            "Your Reset HWID limit is **0 / day**.\n"
+            "Ask an admin if you need access."
+        )
+    else:
+        title = "\U0001f6ab Daily Reset Limit Reached"
+        description = (
+            "You already used your Reset HWID limit for today.\n\n"
+            f"Reset Uses: **{count} / {max_panel}**\n"
+            "Resets again at: **12:00 AM WIB**\n\n"
+            "Ask an admin if you need a higher limit."
+        )
+    return {
+        "ephemeral": True,
+        "embed": {
+            "title": title,
+            "color": 0xE74C3C,
             "description": description,
         },
     }
