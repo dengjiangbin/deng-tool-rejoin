@@ -292,6 +292,18 @@ class BaseLicenseStore(ABC):
     ) -> None:
         """Set a per-user panel limit override. Base implementation is a no-op."""
 
+    # ── Store health / admin status ───────────────────────────────────────────
+
+    def get_store_status(self) -> dict:
+        """Return a safe status dict for admin display.
+
+        Returns a dict with keys:
+          - backend (str): class name
+          - status (str): "ready" or "error"
+          - detail (str | None): short safe detail string, no secrets
+        """
+        return {"backend": type(self).__name__, "status": "ready", "detail": None}
+
     @abstractmethod
     def create_key_for_user(
         self, discord_user_id: str, created_by: str | None = None
@@ -720,6 +732,31 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             if k.get("owner_discord_id") == discord_user_id
             and k.get("status") != "revoked"
         )
+
+    def get_store_status(self) -> dict:
+        try:
+            db = self._load()
+            total_users = len(db.get("users", {}))
+            all_keys = db.get("keys", {})
+            active_keys = sum(
+                1 for k in all_keys.values() if k.get("status") == "active"
+            )
+            total_keys = len(all_keys)
+            return {
+                "backend": type(self).__name__,
+                "status": "ready",
+                "detail": (
+                    f"Users: {total_users} | "
+                    f"Keys: {active_keys} active / {total_keys} total"
+                ),
+                "store_path": str(self._path),
+            }
+        except Exception as exc:
+            return {
+                "backend": type(self).__name__,
+                "status": "error",
+                "detail": str(exc)[:100],
+            }
 
     # ── Key creation and redemption ───────────────────────────────────────────
 
@@ -1818,6 +1855,21 @@ class SupabaseLicenseStore(BaseLicenseStore):
             .execute()
         )
         return res.count or 0
+
+    def get_store_status(self) -> dict:
+        """Perform a lightweight health ping against Supabase.
+
+        Returns a safe dict — no credentials, URLs, or stack traces are included.
+        """
+        try:
+            self._client.table("license_users").select("discord_user_id").limit(1).execute()
+            return {"backend": type(self).__name__, "status": "ready", "detail": None}
+        except Exception:
+            return {
+                "backend": type(self).__name__,
+                "status": "error",
+                "detail": "Connection failed",
+            }
 
     # ── Key creation and redemption ───────────────────────────────────────────
 

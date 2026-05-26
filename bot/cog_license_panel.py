@@ -73,6 +73,8 @@ from agent.rejoin_versions import (
 from agent.license_store import (
     ActiveKeyWarning,
     BaseLicenseStore,
+    DEFAULT_GLOBAL_MAX_KEYS,
+    DEFAULT_GLOBAL_MAX_PANEL,
     ExpiredKeyError,
     GenerationCooldownError,
     KeyAlreadySelfOwned,
@@ -86,6 +88,39 @@ from agent.license_store import (
 )
 
 log = logging.getLogger("deng.rejoin.bot.panel")
+
+
+# ── Admin status helpers ───────────────────────────────────────────────────────
+
+def _format_discord_ts(raw: "str | None") -> str:
+    """Convert an ISO timestamp string to Discord ``<t:UNIX:f>`` format.
+
+    Returns ``"Not set"`` when *raw* is empty, and falls back to a backtick-
+    quoted string when the value cannot be parsed as a datetime.
+    """
+    if not raw or str(raw).strip() in ("—", ""):
+        return "Not set"
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return f"<t:{int(dt.timestamp())}:f>"
+    except (ValueError, TypeError):
+        return f"`{raw}`"
+
+
+def _format_user_mention(user_id_raw: "str | None") -> str:
+    """Return a Discord mention for a user ID, e.g. ``<@110184213604499456>``.
+
+    Falls back to ``<@ID>`` if the ID looks numeric, or a backtick-quoted
+    string for non-numeric values.  Returns ``"Not set"`` when empty.
+    """
+    if not user_id_raw or str(user_id_raw).strip() in ("—", ""):
+        return "Not set"
+    uid = str(user_id_raw).strip()
+    if uid.isdigit():
+        return f"<@{uid}>"
+    return f"`{uid}`"
 
 
 # ── Owner helpers ─────────────────────────────────────────────────────────────
@@ -1209,60 +1244,79 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
 
             # ── Panel config section ──
             if cfg:
-                ch_id = cfg.get("channel_id", "—")
-                msg_id = cfg.get("message_id", "—")
-                updated_by = cfg.get("updated_by", "—")
-                updated_at = cfg.get("updated_at", "—")
+                ch_id = cfg.get("channel_id") or ""
+                msg_id = cfg.get("message_id") or ""
+                updated_by = cfg.get("updated_by") or ""
+                updated_at = cfg.get("updated_at") or ""
 
                 # Verify message still reachable
-                msg_exists = "unknown"
-                if ch_id and msg_id and ch_id != "—" and msg_id != "—":
-                    try:
-                        ch = interaction.guild.get_channel(int(ch_id))
-                        if ch and isinstance(ch, discord.TextChannel):
-                            try:
-                                await ch.fetch_message(int(msg_id))
-                                msg_exists = "✅ reachable"
-                            except discord.NotFound:
-                                msg_exists = "❌ deleted"
-                            except discord.Forbidden:
-                                msg_exists = "⚠️ no access"
-                        else:
-                            msg_exists = "❌ channel not found"
-                    except (ValueError, TypeError):
-                        msg_exists = "⚠️ bad ID"
+                if not msg_id:
+                    msg_status = "Not set"
+                else:
+                    msg_status = "⚠️ unknown"
+                    if ch_id:
+                        try:
+                            ch = interaction.guild.get_channel(int(ch_id))
+                            if ch and isinstance(ch, discord.TextChannel):
+                                try:
+                                    await ch.fetch_message(int(msg_id))
+                                    msg_status = "✅ reachable"
+                                except discord.NotFound:
+                                    msg_status = (
+                                        "❌ deleted\n"
+                                        "> Run `/license_panel post` to repost the panel"
+                                    )
+                                except discord.Forbidden:
+                                    msg_status = "⚠️ no access"
+                            else:
+                                msg_status = "❌ channel not found"
+                        except (ValueError, TypeError):
+                            msg_status = "⚠️ bad ID"
+
+                ch_display = (
+                    f"<#{ch_id}> (`{ch_id}`)" if ch_id else "Not set"
+                )
+                msg_id_display = f"`{msg_id}`" if msg_id else "Not set"
+                set_by_display = _format_user_mention(updated_by)
+                updated_display = _format_discord_ts(updated_at)
 
                 panel_lines = (
-                    f"**Channel:** <#{ch_id}> (`{ch_id}`)\n"
-                    f"**Message ID:** `{msg_id}`\n"
-                    f"**Message:** {msg_exists}\n"
-                    f"**Set by:** `{updated_by}`\n"
-                    f"**Updated:** `{updated_at}`"
+                    f"**Channel:** {ch_display}\n"
+                    f"**Message ID:** {msg_id_display}\n"
+                    f"**Message:** {msg_status}\n"
+                    f"**Set by:** {set_by_display}\n"
+                    f"**Updated:** {updated_display}"
                 )
             else:
                 panel_lines = "*(no panel configured — run `/license_panel set_channel`)*"
 
-            # ── Store stats section ──
-            store_type = type(store).__name__
+            # ── Global config section ──
             try:
-                db = store._load()  # type: ignore[attr-defined]
-                total_users = len(db.get("users", {}))
-                all_keys = db.get("keys", {})
-                active_keys = sum(
-                    1 for k in all_keys.values() if k.get("status") == "active"
-                )
-                total_keys = len(all_keys)
-                audit_entries = len(db.get("audit_logs", []))
-                store_path = str(store._path)  # type: ignore[attr-defined]
-                store_lines = (
-                    f"**Backend:** `{store_type}`\n"
-                    f"**File:** `{store_path}`\n"
-                    f"**Users:** {total_users}\n"
-                    f"**Keys (active / total):** {active_keys} / {total_keys}\n"
-                    f"**Audit log entries:** {audit_entries}"
-                )
-            except Exception as exc:  # noqa: BLE001
-                store_lines = f"**Backend:** `{store_type}`\n⚠️ Could not read store: {exc}"
+                global_max_keys = store.get_global_max_keys()
+            except Exception:
+                global_max_keys = DEFAULT_GLOBAL_MAX_KEYS
+            try:
+                global_max_panel = store.get_global_max_panel()
+            except Exception:
+                global_max_panel = DEFAULT_GLOBAL_MAX_PANEL
+            global_lines = (
+                f"**Max Key Slot:** {global_max_keys}\n"
+                f"**Max Reset:** {global_max_panel}"
+            )
+
+            # ── Store status section ──
+            store_info = store.get_store_status()
+            status_icon = "✅ Ready" if store_info["status"] == "ready" else "⚠️ Error"
+            store_lines = (
+                f"**Backend:** `{store_info['backend']}`\n"
+                f"**Status:** {status_icon}"
+            )
+            if store_info.get("detail"):
+                if store_info["status"] == "ready":
+                    store_lines += f"\n{store_info['detail']}"
+                else:
+                    safe_detail = str(store_info["detail"])[:80]
+                    store_lines += f"\n**Detail:** `{safe_detail}`"
 
             embed = discord.Embed(
                 title="🛠️ License Panel — Admin Status",
@@ -1270,8 +1324,9 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                 timestamp=datetime.now(timezone.utc),
             )
             embed.add_field(name="Panel Config", value=panel_lines, inline=False)
+            embed.add_field(name="Global Config", value=global_lines, inline=False)
             embed.add_field(name="License Store", value=store_lines, inline=False)
-            embed.set_footer(text=f"Guild: {guild_id}")
+            embed.set_footer(text="DENG Tool: Rejoin")
 
             await interaction.followup.send(embed=embed, ephemeral=True)
 
