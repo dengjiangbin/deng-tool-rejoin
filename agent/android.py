@@ -670,13 +670,23 @@ _DISCOVERY_RESULT_CACHE: dict[str, Any] = {"key": None, "t": 0.0, "rows": []}
 _DISCOVERY_CACHE_SECONDS = 12.0
 
 
+DISCOVERY_TOTAL_TIMEOUT_SECONDS: float = 12.0
+
+
 def discover_roblox_package_candidates(
     hints: Iterable[str] | None = None,
     *,
     include_launchable_only: bool = True,
     detection_enabled: bool = True,
+    total_timeout_seconds: float = DISCOVERY_TOTAL_TIMEOUT_SECONDS,
 ) -> list[RobloxPackageCandidate]:
-    """Discovery: name-filter first so dumpsys runs only for likely packages (cached per call)."""
+    """Discovery: name-filter first so dumpsys runs only for likely packages (cached per call).
+
+    The whole pass is also bounded by ``total_timeout_seconds`` so the UI
+    can never hang inside this helper.  Once the deadline is hit, the
+    remaining candidates skip the dumpsys/resolve-activity probes and are
+    returned with name-only metadata (``launchable=True``).
+    """
     if not detection_enabled:
         return []
     detection_hints = _safe_detection_hints(hints)
@@ -687,14 +697,27 @@ def discover_roblox_package_candidates(
         and now - float(_DISCOVERY_RESULT_CACHE["t"]) < _DISCOVERY_CACHE_SECONDS
     ):
         return list(_DISCOVERY_RESULT_CACHE["rows"])
+    deadline = now + max(2.0, float(total_timeout_seconds))
     packages = list_packages()
     label_cache: dict[str, str] = {}
     launch_cache: dict[str, bool] = {}
     candidate_pkgs = [pkg for pkg in packages if pkg == DEFAULT_ROBLOX_PACKAGE or _package_name_matches_hints(pkg, detection_hints)]
     if DEFAULT_ROBLOX_PACKAGE in packages and DEFAULT_ROBLOX_PACKAGE not in candidate_pkgs:
         candidate_pkgs.insert(0, DEFAULT_ROBLOX_PACKAGE)
+    sorted_candidates = sorted(
+        set(candidate_pkgs), key=lambda p: (0 if p == DEFAULT_ROBLOX_PACKAGE else 1, p)
+    )
+    deadline_check_floor = 3  # tiny lists never need a runtime deadline poll
     out: list[RobloxPackageCandidate] = []
-    for pkg in sorted(set(candidate_pkgs), key=lambda p: (0 if p == DEFAULT_ROBLOX_PACKAGE else 1, p)):
+    deadline_hit = False
+    for index, pkg in enumerate(sorted_candidates):
+        if deadline_hit:
+            name_match = _package_name_matches_hints(pkg, detection_hints) or pkg == DEFAULT_ROBLOX_PACKAGE
+            if not name_match:
+                continue
+            app_name = pkg.rsplit(".", 1)[-1]
+            out.append(RobloxPackageCandidate(package=pkg, app_name=app_name, launchable=True))
+            continue
         label = get_application_label_cached(pkg, label_cache)
         app_name = label or pkg.rsplit(".", 1)[-1]
         name_match = _package_name_matches_hints(pkg, detection_hints) or pkg == DEFAULT_ROBLOX_PACKAGE
@@ -705,6 +728,8 @@ def discover_roblox_package_candidates(
         if include_launchable_only and not launchable:
             continue
         out.append(RobloxPackageCandidate(package=pkg, app_name=app_name, launchable=launchable))
+        if index >= deadline_check_floor and time.monotonic() >= deadline:
+            deadline_hit = True
 
     def _sort_key(c: RobloxPackageCandidate) -> tuple[int, str]:
         return (0 if c.package == DEFAULT_ROBLOX_PACKAGE else 1, c.package)

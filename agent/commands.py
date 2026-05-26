@@ -1344,6 +1344,73 @@ def _prompt_optional_package_label(package: str) -> str:
     return validate_account_username(raw or "")
 
 
+def _bounded_post_add_username_detection(
+    draft: dict[str, Any],
+    packages: list[str],
+    *,
+    total_deadline_seconds: float = 5.0,
+    per_package_timeout_seconds: float = 1.5,
+) -> dict[str, Any]:
+    """Run :func:`package_username.safe_detect_username_for_package` for new packages.
+
+    Strictly bounded.  Never calls Refresh Mapping / account_detect /
+    cookie scanners.  Saves detected names to ``account_username`` (only
+    when previously empty) and to ``package_username_cache`` so future
+    renders can show the label without re-detecting.
+    """
+    if not packages:
+        return draft
+    targets = [str(p or "").strip() for p in packages if str(p or "").strip()]
+    if not targets:
+        return draft
+    try:
+        detected = package_username.collect_safe_usernames_for_packages(
+            targets,
+            per_package_timeout_seconds=per_package_timeout_seconds,
+            total_deadline_seconds=total_deadline_seconds,
+        )
+    except Exception as exc:  # noqa: BLE001
+        import logging as _logging
+        _logging.getLogger("deng_tool_rejoin").debug(
+            "bounded post-add username detection failed: %s", exc
+        )
+        return draft
+
+    cache = dict(draft.get("package_username_cache") or {})
+    changed = False
+    entries = draft.get("roblox_packages") or []
+    new_entries: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            new_entries.append(entry)
+            continue
+        pkg = str(entry.get("package") or "")
+        if pkg in detected:
+            name = detected[pkg]
+            if name and name != "Unknown":
+                cache[pkg] = name
+                current = validate_account_username(entry.get("account_username") or "")
+                source = str(entry.get("username_source") or "not_set")
+                if not current or source in {"not_set", "auto"}:
+                    entry = dict(entry)
+                    entry["account_username"] = name
+                    entry["username_source"] = validate_username_source(
+                        "detected_safe_pref", name
+                    )
+                    changed = True
+        new_entries.append(entry)
+    if cache != (draft.get("package_username_cache") or {}):
+        draft["package_username_cache"] = cache
+        changed = True
+    if changed:
+        draft["roblox_packages"] = new_entries
+        try:
+            draft = save_config(draft)
+        except Exception:  # noqa: BLE001
+            pass
+    return draft
+
+
 def _detect_or_prompt_account_username(entry: dict[str, Any], config_data: dict[str, Any] | None = None) -> dict[str, Any]:
     """LEGACY DISABLED: account username detection is not part of package setup."""
     if _ACCOUNT_MAPPING_DISABLED:
@@ -2252,18 +2319,14 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         entries = validate_package_entries(
             draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
         )
-        resolved_entries: list[dict[str, Any]] = []
         username_diag: list[dict[str, Any]] = []
-        changed_usernames = False
         for entry in entries:
             updated, diag = package_username.resolve_package_display_username(
                 entry,
                 draft,
-                allow_detect=True,
+                allow_detect=False,
                 timeout_seconds=1.0,
             )
-            resolved_entries.append(updated)
-            changed_usernames = changed_usernames or updated != entry
             username_diag.append({
                 "package": updated.get("package", ""),
                 "display_username": get_package_display_username(updated, draft),
@@ -2272,13 +2335,6 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
                 "detector_duration_ms": diag.duration_ms,
                 "mapping_refresh_called": False,
             })
-        if changed_usernames:
-            draft["roblox_packages"] = resolved_entries
-            entries = validate_package_entries(resolved_entries)
-            try:
-                draft = save_config(draft)
-            except Exception:  # noqa: BLE001
-                pass
         draft["_package_menu_username_diag"] = username_diag
         enabled_entries = [e for e in entries if e.get("enabled", True)]
         current_lines = ["Current Packages:"]
@@ -2684,6 +2740,14 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
         draft["roblox_package"] = active[0]["package"]
         draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
         draft = save_config(draft)
+        new_packages = [
+            e["package"]
+            for e in new_entries_to_append
+            if e["package"] in current_pkgs
+            and not validate_account_username(e.get("account_username") or "")
+        ]
+        if new_packages:
+            draft = _bounded_post_add_username_detection(draft, new_packages)
         print(f"Saved {sum(1 for e in new_entries_to_append if e['package'] in current_pkgs)} package(s).")
     return draft
 
@@ -2888,6 +2952,10 @@ def _package_menu_auto_detect(draft: dict[str, Any]) -> dict[str, Any]:
     draft["roblox_package"] = active[0]["package"]
     draft["selected_package_mode"] = "multiple" if len(active) > 1 else "single"
     draft = save_config(draft)
+    draft = _bounded_post_add_username_detection(
+        draft,
+        [e["package"] for e in to_add_entries],
+    )
     print(f"Saved {len(to_add_entries)} package(s).")
     return draft
 
