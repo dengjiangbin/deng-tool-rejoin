@@ -275,12 +275,20 @@ def render_direct_install_bootstrap(
     channel: str = "main-dev",
     token_endpoint: str = "/install/test/package-token",
     installer_endpoint: str = "/install/test/latest",
+    requested_channel: str | None = None,
 ) -> str:
     """Generate a compact POSIX installer for a protected package."""
     base = base_url.rstrip("/")
     safe_sha = _escape_double(package_sha256)
     safe_version = _escape_double(version_label)
     safe_channel = _escape_double(channel)
+    requested_metadata_part = ""
+    if requested_channel is not None:
+        safe_requested_channel = _escape_double(requested_channel)
+        requested_metadata_part = (
+            f'  "resolved_version": "{safe_version}",\n'
+            f'  "requested_channel": "{safe_requested_channel}",\n'
+        )
     safe_token_endpoint = _escape_double("/" + token_endpoint.strip("/"))
     safe_installer_endpoint = _escape_double("/" + installer_endpoint.strip("/"))
     banner_part = ""
@@ -360,6 +368,7 @@ def render_direct_install_bootstrap(
         '  "git_commit": "$_GIT_COMMIT",\n'
         '  "probe_id": "$_PROBE_ID",\n'
         f'  "version": "{safe_version}",\n'
+        f"{requested_metadata_part}"
         f'  "channel": "{safe_channel}",\n'
         '  "install_time_iso": "$_INSTALL_TIME_ISO",\n'
         '  "install_api": "$u",\n'

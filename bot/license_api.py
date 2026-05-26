@@ -573,10 +573,12 @@ def _route_public_install(
             script = render_direct_install_bootstrap(
                 base_url=base,
                 package_sha256=sha,
+                banner_lines=("Channel: latest",),
                 version_label=version,
                 channel="stable",
                 token_endpoint="/install/latest/package-token",
                 installer_endpoint="/install/latest",
+                requested_channel="latest",
             )
             return (script.encode("utf-8"), 200, "text/x-shellscript", None)
 

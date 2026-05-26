@@ -76,11 +76,21 @@ def is_public_stable_row(row: dict[str, Any]) -> bool:
 
 
 def resolve_latest_public_stable() -> dict[str, Any] | None:
-    rows = [r for r in load_registry_rows() if is_public_stable_row(r)]
-    if not rows:
+    rows = load_registry_rows()
+    for meta in rows:
+        requested = str(meta.get("stable_latest") or "").strip()
+        if not requested:
+            continue
+        row = get_exact_registry_row(requested)
+        if row is not None and is_public_stable_row(row):
+            return row
         return None
-    rows.sort(key=lambda r: _semver_tuple(str(r.get("version") or "")), reverse=True)
-    return rows[0]
+
+    candidates = [r for r in rows if is_public_stable_row(r)]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda r: _semver_tuple(str(r.get("version") or "")), reverse=True)
+    return candidates[0]
 
 
 def is_admin_internal_row(row: dict[str, Any]) -> bool:

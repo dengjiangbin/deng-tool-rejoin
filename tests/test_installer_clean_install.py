@@ -26,6 +26,18 @@ def _script(sha: str = "a" * 64) -> str:
     )
 
 
+def _latest_script(sha: str = "a" * 64) -> str:
+    return render_direct_install_bootstrap(
+        base_url="https://rejoin.deng.my.id",
+        package_sha256=sha,
+        version_label="v1.0.0",
+        channel="stable",
+        requested_channel="latest",
+        token_endpoint="/install/latest/package-token",
+        installer_endpoint="/install/latest",
+    )
+
+
 class CacheBustingTests(unittest.TestCase):
     def test_curl_uses_cache_bust_query_param(self) -> None:
         s = _script()
@@ -121,6 +133,7 @@ class InstalledBuildMetadataTests(unittest.TestCase):
         for key in (
             "artifact_sha256",
             "git_commit",
+            "version",
             "channel",
             "install_time_iso",
             "install_api",
@@ -129,6 +142,12 @@ class InstalledBuildMetadataTests(unittest.TestCase):
             "extracted_file_count",
         ):
             self.assertIn(f'"{key}":', s, msg=f"missing key {key} in installed-build JSON")
+
+    def test_latest_records_requested_channel_and_resolved_version(self) -> None:
+        s = _latest_script()
+        self.assertIn('"requested_channel": "latest"', s)
+        self.assertIn('"resolved_version": "v1.0.0"', s)
+        self.assertIn('"installer_url": "$u/install/latest"', s)
 
     def test_records_install_api(self) -> None:
         self.assertIn('"$h/.install_api"', _script())

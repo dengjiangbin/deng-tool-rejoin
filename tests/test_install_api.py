@@ -138,10 +138,18 @@ class InstallBootstrapGetTests(unittest.TestCase):
         text = body.decode("utf-8")
         self.assertIn("DENG Tool: Rejoin Installer", text)
         self.assertIn("Version: v1.0.0", text)
+        self.assertIn("Channel: latest", text)
         self.assertIn("/install/latest/package-token", text)
         self.assertIn('"installer_url": "$u/install/latest"', text)
+        self.assertIn('"requested_channel": "latest"', text)
+        self.assertIn('"resolved_version": "v1.0.0"', text)
+        self.assertIn('"channel": "stable"', text)
         self.assertIn(".install_version", text)
         self.assertNotIn(".install_requested", text)
+        self.assertNotIn("/install/test/latest", text)
+        self.assertNotIn("main-dev", text)
+        self.assertNotIn("Launcher bundle verified", text)
+        self.assertNotIn("resolve_install_api", text)
         self.assertIn("Run: deng-rejoin", text)
         self.assertNotIn("GITHUB_TOKEN", text)
         self.assertNotIn("LICENSE_KEY_EXPORT_SECRET", text)
@@ -220,6 +228,81 @@ class InstallBootstrapGetTests(unittest.TestCase):
         finally:
             manifest.unlink(missing_ok=True)
             shutil.rmtree(root, ignore_errors=True)
+
+    def test_latest_uses_explicit_stable_latest_pointer_when_present(self) -> None:
+        manifest = Path(__file__).resolve().parent / "_tmp_install_manifest_pointer.json"
+        root = Path(tempfile.mkdtemp())
+        try:
+            v100_rel = "releases/v1.0.0/pkg.tar.gz"
+            v101_rel = "releases/v1.0.1/pkg.tar.gz"
+            for rel, raw in ((v100_rel, b"v100"), (v101_rel, b"v101")):
+                path = root / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(gzip.compress(raw))
+            rows = [
+                {"stable_latest": "v1.0.0", "test_latest": "main-dev", "kind": "channel_pointers"},
+                {
+                    "version": "v1.0.0",
+                    "channel": "stable",
+                    "visibility": "public",
+                    "install_ref": "refs/tags/v1.0.0",
+                    "artifact_path": v100_rel,
+                    "artifact_sha256": "1" * 64,
+                    "enabled": True,
+                },
+                {
+                    "version": "v1.0.1",
+                    "channel": "stable",
+                    "visibility": "public",
+                    "install_ref": "refs/tags/v1.0.1",
+                    "artifact_path": v101_rel,
+                    "artifact_sha256": "2" * 64,
+                    "enabled": True,
+                },
+                {
+                    "version": "main-dev",
+                    "channel": "dev",
+                    "visibility": "admin",
+                    "install_ref": "refs/heads/main",
+                    "artifact_path": "releases/main-dev/pkg.tar.gz",
+                    "artifact_sha256": "3" * 64,
+                    "enabled": True,
+                },
+            ]
+            _write_versions_manifest(manifest, rows)
+
+            env = {
+                "REJOIN_VERSIONS_MANIFEST": str(manifest),
+                "REJOIN_ARTIFACT_ROOT": str(root),
+            }
+            with patch.dict(os.environ, env, clear=False):
+                status, _, body = _wsgi_call("GET", "/install/latest")
+                self.assertEqual(status, 200, body)
+                text = body.decode("utf-8")
+                self.assertIn("Version: v1.0.0", text)
+                self.assertIn("Channel: latest", text)
+                self.assertIn('/install/latest/package-token', text)
+                self.assertIn('"requested_channel": "latest"', text)
+                self.assertIn('"resolved_version": "v1.0.0"', text)
+                self.assertNotIn("Version: v1.0.1", text)
+                self.assertNotIn("main-dev", text)
+                self.assertNotIn("/install/test/latest", text)
+
+                st, _, token_body = _wsgi_call("GET", "/install/latest/package-token")
+                self.assertEqual(st, 200, token_body)
+                payload = json.loads(token_body)
+                self.assertEqual(payload["version"], "v1.0.0")
+                self.assertEqual(payload["sha256"], "1" * 64)
+        finally:
+            manifest.unlink(missing_ok=True)
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_latest_direct_package_url_is_blocked(self) -> None:
+        status, headers, body = _wsgi_call("GET", "/install/latest/package.tar.gz")
+        self.assertIn(status, {403, 404})
+        self.assertNotIn(b"/api/download/package/", body)
+        self.assertNotIn(b"releases/", body)
+        self.assertNotIn(b".tar.gz", body)
 
     def test_pinned_v100_not_latest_when_latest_moves(self) -> None:
         """Regression: /install/v1.0.0 bootstrap still pins REQUESTED=v1.0.0."""

@@ -173,6 +173,19 @@ class RegistryStableGateTests(unittest.TestCase):
         self.assertNotIn("refs/heads", json.dumps(stable))
         self.assertNotIn("test/latest", json.dumps(stable))
 
+    def test_stable_latest_pointer_targets_v100(self) -> None:
+        """The public latest channel moves only by changing this pointer."""
+        root = Path(__file__).resolve().parents[1]
+        rows = json.loads((root / "data" / "rejoin_versions.json").read_text(encoding="utf-8"))
+        pointers = next(r for r in rows if r.get("kind") == "channel_pointers")
+        self.assertEqual(pointers.get("stable_latest"), "v1.0.0")
+        self.assertEqual(pointers.get("test_latest"), "main-dev")
+        stable = next(r for r in rows if r.get("version") == pointers.get("stable_latest"))
+        self.assertEqual(stable.get("channel"), "stable")
+        self.assertEqual(stable.get("visibility"), "public")
+        self.assertTrue(stable.get("frozen"))
+        self.assertNotEqual(pointers.get("stable_latest"), pointers.get("test_latest"))
+
     def test_main_dev_hidden_from_discord_via_visibility(self) -> None:
         """main-dev is hidden from Discord by visibility=admin, NOT by enabled flag.
 

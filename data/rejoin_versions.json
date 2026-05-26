@@ -1,5 +1,10 @@
 [
   {
+    "stable_latest": "v1.0.0",
+    "test_latest": "main-dev",
+    "kind": "channel_pointers"
+  },
+  {
     "version": "v1.0.0",
     "id": "v1.0.0",
     "channel": "stable",
