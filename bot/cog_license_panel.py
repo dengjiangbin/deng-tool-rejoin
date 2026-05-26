@@ -645,13 +645,13 @@ class VersionPickSelect(discord.ui.Select):
         self._by_ver = {v.version: v for v in versions}
         opts: list[discord.SelectOption] = []
         for v in versions[:25]:
-            desc = (v.description or "").strip()[:100] or None
+            desc = f"Install DENG Tool: Rejoin {v.version}"[:100]
             opts.append(
                 discord.SelectOption(
                     label=v.label[:100],
                     value=v.version[:100],
                     description=desc,
-                    emoji="\U0001f4dc",
+                    emoji="\U0001f4e6",
                 )
             )
         super().__init__(
