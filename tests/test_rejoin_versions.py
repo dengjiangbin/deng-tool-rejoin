@@ -248,6 +248,19 @@ class InstallCommandTests(unittest.TestCase):
         self.assertIn("rejoin.deng.my.id/install/", text)
         self.assertNotIn("raw.githubusercontent.com", text)
 
+    def test_selected_public_version_uses_pinned_install_endpoint(self) -> None:
+        """Select Version copy must install the selected immutable version, not /latest."""
+        info = rv.RejoinVersionInfo(
+            version="v1.0.0",
+            channel="stable",
+            label="Version 1.0.0",
+            install_ref="refs/tags/v1.0.0",
+        )
+        text = rv.format_install_instructions_plain(info)
+        self.assertIn("rejoin.deng.my.id/install/v1.0.0", text)
+        self.assertNotIn("/install/latest", text)
+        self.assertNotIn("/install/test/latest", text)
+
     def test_format_instructions_contains_only_desktop_and_mobile_copy(self) -> None:
         """Output must NOT contain version metadata, channel, visibility, or deng-rejoin."""
         info = rv.RejoinVersionInfo(

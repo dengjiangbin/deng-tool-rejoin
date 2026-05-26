@@ -260,18 +260,13 @@ def build_full_install_command(owner: str, repo: str, install_ref: str) -> str:
 
 def build_public_install_curl_command(info: RejoinVersionInfo) -> str:
     """Public tutorial / panel curl — ``https://rejoin.deng.my.id/install/...``."""
-    from agent.install_registry import public_install_base_url, resolve_latest_public_stable
+    from agent.install_registry import public_install_base_url
 
     base = public_install_base_url().rstrip("/")
     if info.internal_only:
         return f"curl -fsSL {base}/install/test/latest -o install.sh && bash install.sh"
 
-    latest = resolve_latest_public_stable()
-    latest_ver = str(latest.get("version") or "").strip() if latest else ""
-    if latest_ver and latest_ver == info.version.strip():
-        path = "/install/latest"
-    else:
-        path = f"/install/{info.version.strip()}"
+    path = f"/install/{info.version.strip()}"
     return f"curl -fsSL {base}{path} -o install.sh && bash install.sh"
 
 

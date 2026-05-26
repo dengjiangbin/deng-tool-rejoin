@@ -939,6 +939,8 @@ class PanelCopyUsesProtectedUrlTests(unittest.TestCase):
             with patch.dict(os.environ, {"REJOIN_VERSIONS_MANIFEST": str(manifest)}, clear=False):
                 cmd = rv.build_public_install_curl_command(info)
             self.assertIn("rejoin.deng.my.id/install/v1.0.0", cmd)
+            self.assertNotIn("/install/latest", cmd)
+            self.assertNotIn("/install/test/latest", cmd)
             self.assertNotIn("raw.githubusercontent.com", cmd)
         finally:
             manifest.unlink(missing_ok=True)
