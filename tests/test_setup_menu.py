@@ -11,13 +11,13 @@ Requirements covered:
  8.  Package submenu has Add Package.
  9.  Package submenu has Remove Package.
  10. Package submenu has Auto Detect Packages.
- 11. Package submenu has Detect / Refresh Usernames.
- 12. Package submenu does not offer Set / Edit Username or List Packages.
+ 11. Package submenu has no Detect / Refresh Usernames.
+ 12. Package submenu does not offer Set / Edit Username, Edit Username Label, or List Packages.
  13. Current packages appear at top of Package submenu with package — username.
  14. Remove package removes only selected package, preserving others.
  15. Add package avoids duplicates.
  16. Unknown username does not block launch.
- 17. No "Label" wording in package menu.
+ 17. No username label editor in package menu.
  18. Blank input for Private URL skips safely.
  19. Empty Private URL is allowed (not validation error).
  20. Clearing Global Private URL works.
@@ -58,7 +58,6 @@ from agent.commands import (
     _package_menu_add,
     _package_menu_list,
     _package_menu_remove,
-    _package_menu_set_username,
     _prompt_launch_url,
     _run_edit_config_menu,
     _run_first_time_setup_wizard,
@@ -324,7 +323,7 @@ class PackageSubmenuTests(unittest.TestCase):
         self.assertNotIn("ROBLOSECURITY Cookie", text)
         self.assertIn("Remove Package", text)
 
-    def test_package_submenu_offers_display_only_username_label_edit(self):
+    def test_package_submenu_does_not_offer_username_label_edit(self):
         cfg = _base_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
@@ -334,7 +333,7 @@ class PackageSubmenuTests(unittest.TestCase):
         text = buf.getvalue()
         self.assertNotIn("Set / Edit Username", text)
         self.assertNotIn("Set Username", text)
-        self.assertIn("Edit Username Label", text)
+        self.assertNotIn("Edit Username Label", text)
 
     def test_package_submenu_does_not_offer_list_packages(self):
         cfg = _base_cfg()
@@ -360,6 +359,8 @@ class PackageSubmenuTests(unittest.TestCase):
         self.assertIn("Auto Detect Package", plain)
         self.assertIn("Add Package", plain)
         self.assertIn("Remove Package", plain)
+        self.assertNotIn("4.", plain)
+        self.assertNotIn("Edit Username Label", plain)
         self.assertNotIn("Refresh Account Mapping", plain)
         self.assertNotIn("Account Mapping", plain)
         self.assertNotIn("Set Account Username / User ID", plain)
@@ -376,15 +377,6 @@ class PackageSubmenuTests(unittest.TestCase):
             out = _package_menu_detect_refresh(cfg)
         self.assertIs(out, cfg)
         self.assertFalse(out["roblox_packages"][0].get("account_username"))
-
-    def test_set_username_manual_saves(self):
-        cfg = _base_cfg()
-        cfg["roblox_packages"] = [package_entry("com.roblox.client", "", True, "not_set")]
-        with unittest.mock.patch("builtins.input", side_effect=["1", "handuser", ""]):
-            with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
-                out = _package_menu_set_username(cfg)
-        self.assertEqual(out["roblox_packages"][0]["account_username"], "handuser")
-        self.assertEqual(out["roblox_packages"][0]["username_source"], "manual")
 
     def test_list_packages_shows_unknown_for_empty(self):
         cfg = _base_cfg()
@@ -857,7 +849,7 @@ class LicenseFlowRegressionTests(unittest.TestCase):
 
 class CurrentSettingsInSubmenuTests(unittest.TestCase):
 
-    def test_package_submenu_shows_edit_username_label_option(self):
+    def test_package_submenu_hides_edit_username_label_option(self):
         cfg = _base_cfg()
         cfg["roblox_packages"] = [package_entry("com.roblox.client", "Main", True)]
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
@@ -866,7 +858,7 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
         text = buf.getvalue()
-        self.assertIn("Edit Username Label", text)
+        self.assertNotIn("Edit Username Label", text)
 
     def test_webhook_submenu_shows_current_url_masked(self):
         cfg = _base_cfg()
@@ -1123,7 +1115,7 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
             with unittest.mock.patch(
                 "agent.commands._gather_roblox_candidates_for_ui", return_value=[]
             ):
-                with unittest.mock.patch("builtins.input", side_effect=["m", "com.manual.pkg", "", "y"]):
+                with unittest.mock.patch("builtins.input", side_effect=["m", "com.manual.pkg", "y"]):
                     with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
                         with unittest.mock.patch(
                             "agent.commands._detect_or_prompt_account_username",

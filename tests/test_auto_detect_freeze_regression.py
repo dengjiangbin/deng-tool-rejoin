@@ -16,12 +16,13 @@ These tests pin the rules:
   global deadline so it cannot stall the UI when there are many
   packages or root is slow.
 * Manual Add Package never calls the legacy Refresh Mapping helpers and
-  always saves the manual label when the user supplies one.
+  never asks the user for a username label.
 """
 
 from __future__ import annotations
 
 import io
+import re
 import time
 import unittest
 from contextlib import redirect_stdout
@@ -33,7 +34,6 @@ from agent.commands import (
     _config_menu_package,
     _package_menu_add,
     _package_menu_auto_detect,
-    _package_menu_set_username,
 )
 from agent.config import default_config, package_entry, validate_config
 
@@ -160,7 +160,10 @@ class PackageMenuRenderingFreezeTests(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("Auto Detect Package", text)
         self.assertIn("Add Package", text)
-        self.assertIn("Edit Username Label", text)
+        self.assertIn("Remove Package", text)
+        self.assertNotIn("Edit Username Label", text)
+        plain = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text)
+        self.assertIsNone(re.search(r"(?m)^\s*4\.\s+Edit Username", plain))
         self.assertIn("Unknown", text)
         self.assertNotIn("Refresh Mapping", text)
         self.assertNotIn("Account Mapping", text)
@@ -300,7 +303,7 @@ class AutoDetectFreezeRegressionTests(unittest.TestCase):
 class ManualAddFreezeRegressionTests(unittest.TestCase):
     def test_manual_add_does_not_call_refresh_mapping(self) -> None:
         cfg = _cfg([package_entry("com.roblox.client", "", True, "not_set")])
-        prompts = iter(["m", "", "y"])
+        prompts = iter(["m", "y"])
         with mock.patch(
             "agent.commands._gather_roblox_candidates_for_ui", return_value=[]
         ), \
@@ -346,9 +349,9 @@ class ManualAddFreezeRegressionTests(unittest.TestCase):
         added = result["roblox_packages"][-1]
         self.assertEqual(added["package"], "com.moons.litesc")
 
-    def test_manual_add_label_takes_priority_over_safe_detect(self) -> None:
+    def test_manual_add_saves_detected_username_automatically(self) -> None:
         cfg = _cfg([package_entry("com.roblox.client", "", True, "not_set")])
-        prompts = iter(["m", "DENGLABEL", "y"])
+        prompts = iter(["m", "y"])
         with mock.patch(
             "agent.commands._gather_roblox_candidates_for_ui", return_value=[]
         ), \
@@ -368,41 +371,13 @@ class ManualAddFreezeRegressionTests(unittest.TestCase):
              ), \
              mock.patch(
                  "agent.package_username.safe_detect_username_for_package",
-                 side_effect=AssertionError(
-                     "safe detector must not overwrite manual label"
-                 ),
+                 return_value="dengauto",
              ):
             result = _package_menu_add(cfg)
         added = result["roblox_packages"][-1]
         self.assertEqual(added["package"], "com.moons.litesc")
-        self.assertEqual(added["account_username"], "DENGLABEL")
-        self.assertEqual(added["username_source"], "manual")
-
-
-class EditUsernameLabelTests(unittest.TestCase):
-    def test_edit_username_label_saves_manual_value(self) -> None:
-        cfg = _cfg([
-            package_entry("com.moons.litesc", "", True, "not_set"),
-        ])
-        prompts = iter(["1", "deng2", ""])
-        with mock.patch(
-            "agent.commands.safe_io.safe_prompt",
-            side_effect=lambda *_a, **_k: next(prompts),
-        ), \
-             mock.patch(
-                 "agent.commands.safe_io.press_enter", return_value=None
-             ), \
-             mock.patch(
-                 "agent.commands.save_config", side_effect=lambda data: data
-             ):
-            updated = _package_menu_set_username(cfg)
-        target = next(
-            e
-            for e in updated["roblox_packages"]
-            if e["package"] == "com.moons.litesc"
-        )
-        self.assertEqual(target["account_username"], "deng2")
-        self.assertEqual(target["username_source"], "manual")
+        self.assertEqual(added["account_username"], "dengauto")
+        self.assertEqual(added["username_source"], "detected_safe_pref")
 
 
 class BoundedPostAddHelperTests(unittest.TestCase):
@@ -439,7 +414,7 @@ class BoundedPostAddHelperTests(unittest.TestCase):
         self.assertEqual(entry["account_username"], "deng1629")
         self.assertEqual(entry["username_source"], "detected_safe_pref")
 
-    def test_bounded_helper_does_not_overwrite_manual_label(self) -> None:
+    def test_bounded_helper_replaces_legacy_manual_label_when_detected(self) -> None:
         cfg = _cfg([
             package_entry("com.moons.litesc", "DENGLABEL", True, "manual"),
         ])
@@ -458,8 +433,8 @@ class BoundedPostAddHelperTests(unittest.TestCase):
             for e in result["roblox_packages"]
             if e["package"] == "com.moons.litesc"
         )
-        self.assertEqual(entry["account_username"], "DENGLABEL")
-        self.assertEqual(entry["username_source"], "manual")
+        self.assertEqual(entry["account_username"], "detected")
+        self.assertEqual(entry["username_source"], "detected_safe_pref")
 
 
 if __name__ == "__main__":

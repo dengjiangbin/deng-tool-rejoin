@@ -56,21 +56,22 @@ class PackageUsernameSafeTests(unittest.TestCase):
         self.assertEqual(result.username, "Unknown")
         self.assertFalse(updated.get("account_username"))
 
-    def test_manual_add_can_save_optional_label(self) -> None:
+    def test_manual_add_saves_detected_username_automatically(self) -> None:
         cfg = validate_config(default_config())
         cfg["roblox_packages"] = [package_entry("com.roblox.client", "", True, "not_set")]
-        prompts = iter(["m", "manualuser", "y"])
+        prompts = iter(["m", "y"])
         with mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=[]), \
              mock.patch("agent.commands._prompt_manual_package", return_value="com.moons.litesc"), \
              mock.patch("agent.commands.android.package_installed", return_value=True), \
              mock.patch("agent.commands.safe_io.safe_prompt", side_effect=lambda *_a, **_k: next(prompts)), \
              mock.patch("agent.commands.save_config", side_effect=lambda data: data), \
              mock.patch("agent.commands._package_menu_refresh_mapping", side_effect=AssertionError("refresh mapping")), \
-             mock.patch("agent.commands.account_detect.detect_account_username", side_effect=AssertionError("old username scan")):
+             mock.patch("agent.commands.account_detect.detect_account_username", side_effect=AssertionError("old username scan")), \
+             mock.patch("agent.package_username.safe_detect_username_for_package", return_value="autouser"):
             result = _package_menu_add(cfg)
         added = result["roblox_packages"][-1]
-        self.assertEqual(added["account_username"], "manualuser")
-        self.assertEqual(added["username_source"], "manual")
+        self.assertEqual(added["account_username"], "autouser")
+        self.assertEqual(added["username_source"], "detected_safe_pref")
 
     def test_public_menu_does_not_call_cookie_or_webview_scans(self) -> None:
         cfg = validate_config(default_config())

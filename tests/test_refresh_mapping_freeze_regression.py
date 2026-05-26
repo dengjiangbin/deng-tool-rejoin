@@ -94,7 +94,7 @@ class TestRefreshMappingRemoval(unittest.TestCase):
 
     def test_manual_add_saves_package_name_only(self):
         cfg = _cfg([package_entry("com.roblox.client", "", True, "not_set")])
-        prompts = iter(["m", "", "y"])
+        prompts = iter(["m", "y"])
         with mock.patch("agent.commands._gather_roblox_candidates_for_ui", return_value=[]), \
              mock.patch("agent.commands._prompt_manual_package", return_value="com.moons.litesc"), \
              mock.patch("agent.commands.android.package_installed", return_value=True) as installed, \

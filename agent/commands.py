@@ -1336,14 +1336,6 @@ def _entry_for_package(package: str, current_entries: list[dict[str, Any]], *, a
     return package_entry(package, "", True, "not_set", app_name=str(app_name or "")[:120])
 
 
-def _prompt_optional_package_label(package: str) -> str:
-    raw = safe_io.safe_prompt(
-        f"Enter Username/Label For This Package Or Leave Blank ({package}): ",
-        default="",
-    )
-    return validate_account_username(raw or "")
-
-
 def _bounded_post_add_username_detection(
     draft: dict[str, Any],
     packages: list[str],
@@ -1391,7 +1383,7 @@ def _bounded_post_add_username_detection(
                 cache[pkg] = name
                 current = validate_account_username(entry.get("account_username") or "")
                 source = str(entry.get("username_source") or "not_set")
-                if not current or source in {"not_set", "auto"}:
+                if not current or source in {"not_set", "auto", "manual", "config_manual"}:
                     entry = dict(entry)
                     entry["account_username"] = name
                     entry["username_source"] = validate_username_source(
@@ -1448,13 +1440,6 @@ def _detect_or_prompt_account_username(entry: dict[str, Any], config_data: dict[
         updated["username_source"] = validate_username_source(result.source, result.username)
         return updated
     updated["username_source"] = "not_set"
-    if _is_interactive():
-        print(f"DENG could not safely detect a Roblox username/account name for {updated['package']}.")
-        print("This name is only used to make the Start table easy to read.")
-        manual = _prompt(f"Enter Roblox username/account name for {updated['package']}, or press Enter to skip", "").strip()
-        if manual:
-            updated["account_username"] = validate_account_username(manual)
-            updated["username_source"] = "manual"
     return updated
 
 
@@ -1787,7 +1772,7 @@ def _run_account_mapping_table(
             termux_ui.print_warning("Table rendering failed; showing simple mapping list.")
             _print_account_mapping_plain(rows)
         print()
-        print("  A. Accept all  |  1-N. Edit entry  |  B. Back")
+        print("  A. Accept all  |  1-N. Skip entry  |  B. Back")
         print()
         try:
             sys.stdout.flush()
@@ -1826,50 +1811,9 @@ def _run_account_mapping_table(
                 print(f"  Current username: {cur_name}")
             if uid_cur > 0:
                 print(f"  Current user ID:  {uid_cur}")
-            print("  Enter Roblox username or numeric user ID (blank to skip):")
-            try:
-                sys.stdout.flush()
-            except Exception:  # noqa: BLE001
-                pass
-            inp_raw = safe_io.safe_prompt("  > ", allow_blank=True)
-            if inp_raw is None:
-                print()
-                continue
-            inp = inp_raw.strip()
-            if not inp:
-                detected[idx] = (0, "skipped")
-                presence_statuses[idx] = ""
-                continue
-            if inp.isdigit() and int(inp) > 0:
-                new_uid = int(inp)
-                entry["roblox_user_id"] = new_uid
-                detected[idx] = (new_uid, "manual")
-                ps = _validate_user_id_with_presence(new_uid)
-                presence_statuses[idx] = ps
-                print(f"  Set user_id = {new_uid}  [{ps}]")
-            else:
-                try:
-                    from . import roblox_presence as _rp
-                    resolved = _rp.lookup_user_id(inp)
-                except Exception:  # noqa: BLE001
-                    resolved = None
-                try:
-                    entry["account_username"] = validate_account_username(inp)
-                    entry["username_source"] = validate_username_source("manual", inp)
-                except Exception:  # noqa: BLE001
-                    pass
-                if resolved and int(resolved) > 0:
-                    entry["roblox_user_id"] = int(resolved)
-                    detected[idx] = (int(resolved), "manual")
-                    ps = _validate_user_id_with_presence(int(resolved))
-                    presence_statuses[idx] = ps
-                    print(f"  Resolved {inp} -> user_id {resolved}  [{ps}]")
-                else:
-                    print("  Username stored. Could not resolve user ID right now.")
-                    detected[idx] = (0, "manual")
-                    presence_statuses[idx] = ""
-            entries = list(entries)
-            entries[idx] = entry
+            print("  Manual username editing is disabled. This entry will be skipped.")
+            detected[idx] = (0, "skipped")
+            presence_statuses[idx] = ""
         else:
             print("  Enter A, B, or a package number.")
             safe_io.press_enter()
@@ -2351,7 +2295,6 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
                 ("1", "Auto Detect Package"),
                 ("2", "Add Package"),
                 ("3", "Remove Package"),
-                ("4", "Edit Username Label"),
                 ("0", "Back"),
             ],
             current_lines=current_lines,
@@ -2369,8 +2312,6 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
                 draft = _package_menu_add(draft)
             elif choice == "3":
                 draft = _package_menu_remove(draft)
-            elif choice == "4":
-                draft = _package_menu_set_username(draft)
             else:
                 termux_ui.print_invalid_option()
         except (KeyboardInterrupt, EOFError):
@@ -2447,50 +2388,6 @@ def _package_menu_detect_refresh(draft: dict[str, Any]) -> dict[str, Any]:
     return draft
 
 
-def _package_menu_set_username(draft: dict[str, Any]) -> dict[str, Any]:
-    """Manually set account_username for one package.
-
-    Not offered in the Package submenu (detection covers typical cases). Kept for tests/tools.
-    """
-    print()
-    print("Set / Edit Username")
-    entries = validate_package_entries(
-        draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
-    )
-    for idx, entry in enumerate(entries, start=1):
-        print(f"  {idx}. {entry['package']} — {_package_username_display(entry)}")
-    print("  0. Back")
-    _pc = safe_io.safe_prompt("Choose package [0]: ", default="0")
-    choice = (_pc or "0").strip() or "0"
-    if choice == "0" or not choice.isdigit():
-        return draft
-    i = int(choice) - 1
-    if not (0 <= i < len(entries)):
-        print("Invalid choice.")
-        return draft
-    target = dict(entries[i])
-    current = validate_account_username(target.get("account_username", "")) or ""
-    hint = f" [{current}]" if current else ""
-    _ur = safe_io.safe_prompt(f"Roblox username / display name for {target['package']}{hint}: ")
-    raw = (_ur or "").strip()
-    if not raw:
-        print("Skipped.")
-        return draft
-    try:
-        target["account_username"] = validate_account_username(raw)
-        target["username_source"] = validate_username_source("manual", target["account_username"])
-    except ConfigError as exc:
-        print(f"Invalid username: {exc}")
-        safe_io.press_enter()
-        return draft
-    entries = [target if e["package"] == target["package"] else dict(e) for e in entries]
-    draft["roblox_packages"] = entries
-    draft = save_config(draft)
-    print(f"Username saved for {target['package']}.")
-    safe_io.press_enter()
-    return draft
-
-
 def _package_menu_set_user_id(draft: dict[str, Any]) -> dict[str, Any]:
     """Set per-package Roblox user-id (or auto-resolve from a username).
 
@@ -2523,50 +2420,26 @@ def _package_menu_set_user_id(draft: dict[str, Any]) -> dict[str, Any]:
         print("Invalid choice.")
         return draft
     target = dict(entries[i])
-    current_username = str(target.get("account_username") or "").strip()
     current_uid = int(target.get("roblox_user_id") or 0)
     print()
     print(f"Package: {target['package']}")
-    if current_username:
-        print(f"Username: {current_username}")
     if current_uid:
         print(f"User ID:  {current_uid}")
     print()
-    print("Enter a Roblox username (we will auto-resolve to user ID),")
-    print("or a numeric Roblox user ID directly.  Leave blank to cancel.")
-    raw_inp = safe_io.safe_prompt("Username or user ID: ")
+    print("Enter a numeric Roblox user ID directly. Leave blank to cancel.")
+    raw_inp = safe_io.safe_prompt("User ID: ")
     raw = (raw_inp or "").strip()
     if not raw:
         print("Skipped.")
         return draft
 
-    new_uid = 0
-    new_username = current_username
-    if raw.isdigit() and int(raw) > 0:
-        new_uid = int(raw)
-        print(f"Set user ID: {new_uid}")
-    else:
-        # Treat as username; auto-resolve.
-        try:
-            from . import roblox_presence as _rp
-
-            resolved = _rp.lookup_user_id(raw)
-        except Exception as exc:  # noqa: BLE001
-            print(f"Username lookup failed: {exc}")
-            print("Username stored without numeric ID; presence may not activate.")
-            resolved = 0
-        if resolved and int(resolved) > 0:
-            new_uid = int(resolved)
-            new_username = raw
-            print(f"Resolved {raw} -> user_id {new_uid}")
-        else:
-            new_username = raw
-            print("Could not resolve username via Roblox API right now.")
-            print("Username stored — try again later or enter user ID directly.")
+    if not raw.isdigit() or int(raw) <= 0:
+        print("Invalid user ID.")
+        return draft
+    new_uid = int(raw)
+    print(f"Set user ID: {new_uid}")
 
     try:
-        target["account_username"] = validate_account_username(new_username)
-        target["username_source"] = validate_username_source("manual", target["account_username"])
         target["roblox_user_id"] = int(new_uid) if new_uid > 0 else 0
     except ConfigError as exc:
         print(f"Invalid input: {exc}")
@@ -2576,10 +2449,7 @@ def _package_menu_set_user_id(draft: dict[str, Any]) -> dict[str, Any]:
     entries = [target if e["package"] == target["package"] else dict(e) for e in entries]
     draft["roblox_packages"] = entries
     draft = save_config(draft)
-    if new_uid > 0:
-        print(f"Saved user ID {new_uid} for {target['package']}.")
-    else:
-        print(f"Saved username for {target['package']}.")
+    print(f"Saved user ID {new_uid} for {target['package']}.")
     safe_io.press_enter()
     return draft
 
@@ -2644,17 +2514,9 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
         else:
             termux_ui.print_warning("Package was not launch-validated; saving manual entry anyway")
         entry = _entry_for_package(manual, current_entries)
-        try:
-            label = _prompt_optional_package_label(manual)
-        except ConfigError as exc:
-            print(f"Invalid label: {exc}")
-            return draft
-        if label:
-            entry["account_username"] = label
-            entry["username_source"] = "manual"
         print()
         print(f"  Package:  {manual}")
-        print(f"  Label:    {label or 'Unknown'}")
+        print("  Username: Detecting automatically after save")
         print()
         confirm_in = safe_io.safe_prompt("Add this package? [Y/n]: ", default="y")
         if confirm_in is None:
