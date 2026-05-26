@@ -405,9 +405,9 @@ def render_direct_install_bootstrap(
         '[ -f "$h/.installed-build.json" ] || fail "Failed: .installed-build.json was not written."\n'
         'info "Verifying signed manifest..."\n'
         'info "Verifying runtime integrity..."\n'
-        'if ! PYTHONPATH="$h" python3 -c '
+        'if ! (cd "$h" && PYTHONPATH="$h" python3 -c '
         "'import agent._protected_runtime as r; r._verify(); import agent.commands, agent.supervisor, agent.roblox_presence, agent.freeform_enable, agent.playing_state, agent.dumpsys_cache, agent.window_apply' "
-        '2>/dev/null; then\n'
+        '2>/dev/null); then\n'
         '  fail "Install verification failed: manifest or runtime integrity check failed."\n'
         "fi\n"
         'ok "Manifest signature verified"\n'
