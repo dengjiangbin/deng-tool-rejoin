@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import account_detect, android, db, root_access, safe_io, termux_ui
+from . import account_detect, android, db, package_username, root_access, safe_io, termux_ui
 from .banner import banner_text, print_banner
 from .config import (
     ConfigError,
@@ -25,6 +25,7 @@ from .config import (
     enabled_package_entries,
     enabled_package_names,
     ensure_app_dirs,
+    get_package_display_username,
     load_config,
     mask_license_key,
     normalize_package_detection_hint,
@@ -905,13 +906,16 @@ def _package_row_label(entry: dict[str, Any]) -> str:
 
 
 def _account_username_value(entry: dict[str, Any]) -> str:
-    return validate_account_username(entry.get("account_username", "")) or "Unknown"
+    return get_package_display_username(entry)
 
 
 def _package_username_display(entry: dict[str, Any]) -> str:
     """Username for package menus / tables — empty becomes Unknown."""
-    u = validate_account_username(entry.get("account_username", ""))
-    return u if u else "Unknown"
+    return get_package_display_username(entry)
+
+
+def _package_username_display_for_config(entry: dict[str, Any], config_data: dict[str, Any]) -> str:
+    return get_package_display_username(entry, config_data)
 
 
 def _short_package_display(package: Any) -> str:
@@ -1325,8 +1329,19 @@ def _prompt_manual_package(default: str = DEFAULT_ROBLOX_PACKAGE) -> str | None:
 def _entry_for_package(package: str, current_entries: list[dict[str, Any]], *, app_name: str = "") -> dict[str, Any]:
     for entry in current_entries:
         if entry["package"] == package:
-            return dict(entry)
+            existing = dict(entry)
+            if app_name and not str(existing.get("app_name") or "").strip():
+                existing["app_name"] = str(app_name or "")[:120]
+            return existing
     return package_entry(package, "", True, "not_set", app_name=str(app_name or "")[:120])
+
+
+def _prompt_optional_package_label(package: str) -> str:
+    raw = safe_io.safe_prompt(
+        f"Enter Username/Label For This Package Or Leave Blank ({package}): ",
+        default="",
+    )
+    return validate_account_username(raw or "")
 
 
 def _detect_or_prompt_account_username(entry: dict[str, Any], config_data: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2237,11 +2252,41 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
         entries = validate_package_entries(
             draft.get("roblox_packages") or [package_entry(DEFAULT_ROBLOX_PACKAGE, "", True, "not_set")]
         )
+        resolved_entries: list[dict[str, Any]] = []
+        username_diag: list[dict[str, Any]] = []
+        changed_usernames = False
+        for entry in entries:
+            updated, diag = package_username.resolve_package_display_username(
+                entry,
+                draft,
+                allow_detect=True,
+                timeout_seconds=1.0,
+            )
+            resolved_entries.append(updated)
+            changed_usernames = changed_usernames or updated != entry
+            username_diag.append({
+                "package": updated.get("package", ""),
+                "display_username": get_package_display_username(updated, draft),
+                "username_source": updated.get("username_source", "not_set"),
+                "detector_used": diag.detector_used,
+                "detector_duration_ms": diag.duration_ms,
+                "mapping_refresh_called": False,
+            })
+        if changed_usernames:
+            draft["roblox_packages"] = resolved_entries
+            entries = validate_package_entries(resolved_entries)
+            try:
+                draft = save_config(draft)
+            except Exception:  # noqa: BLE001
+                pass
+        draft["_package_menu_username_diag"] = username_diag
         enabled_entries = [e for e in entries if e.get("enabled", True)]
         current_lines = ["Current Packages:"]
         if enabled_entries:
             for idx, entry in enumerate(enabled_entries, start=1):
-                current_lines.append(f"  {idx}. {entry['package']}")
+                current_lines.append(
+                    f"  {idx}. {entry['package']} — username: {_package_username_display_for_config(entry, draft)}"
+                )
         else:
             current_lines.append("  No Packages Configured.")
         termux_ui.print_submenu(
@@ -2250,6 +2295,7 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
                 ("1", "Auto Detect Package"),
                 ("2", "Add Package"),
                 ("3", "Remove Package"),
+                ("4", "Edit Username Label"),
                 ("0", "Back"),
             ],
             current_lines=current_lines,
@@ -2267,6 +2313,8 @@ def _config_menu_package(draft: dict[str, Any]) -> dict[str, Any]:
                 draft = _package_menu_add(draft)
             elif choice == "3":
                 draft = _package_menu_remove(draft)
+            elif choice == "4":
+                draft = _package_menu_set_username(draft)
             else:
                 termux_ui.print_invalid_option()
         except (KeyboardInterrupt, EOFError):
@@ -2540,8 +2588,17 @@ def _package_menu_add(draft: dict[str, Any]) -> dict[str, Any]:
         else:
             termux_ui.print_warning("Package was not launch-validated; saving manual entry anyway")
         entry = _entry_for_package(manual, current_entries)
+        try:
+            label = _prompt_optional_package_label(manual)
+        except ConfigError as exc:
+            print(f"Invalid label: {exc}")
+            return draft
+        if label:
+            entry["account_username"] = label
+            entry["username_source"] = "manual"
         print()
         print(f"  Package:  {manual}")
+        print(f"  Label:    {label or 'Unknown'}")
         print()
         confirm_in = safe_io.safe_prompt("Add this package? [Y/n]: ", default="y")
         if confirm_in is None:
@@ -3883,7 +3940,7 @@ def cmd_once(args: argparse.Namespace) -> int:
 
 def _account_username_for_table(entry: dict[str, Any]) -> str:
     """Return the display username for a Start table row — shows 'Unknown' if not set."""
-    return validate_account_username(entry.get("account_username", "")) or "Unknown"
+    return get_package_display_username(entry)
 
 
 def _set_all_phase_keep_failed(
@@ -4162,7 +4219,9 @@ def build_start_verbose_details(rows: list[dict[str, str]], *, use_color: bool =
 
 
 def _progress_line(index: int, total: int, entry: dict[str, Any], message: str) -> str:
-    username = validate_account_username(entry.get("account_username", "")) or entry["package"]
+    username = get_package_display_username(entry)
+    if username == "Unknown":
+        username = entry["package"]
     return f"[{index}/{total}] {username}: {message}"
 
 
@@ -5282,10 +5341,16 @@ def cmd_start(args: argparse.Namespace) -> int:
             result = perform_rejoin(package_cfg, reason="start", package_entry=runtime_entry)
             launch_ok[package]  = result.success
             launch_err[package] = result.error or ""
+            try:
+                from . import launcher as _launcher_mod
+                _launch_state = _launcher_mod._read_launch_state(package)
+            except Exception:  # noqa: BLE001
+                _launch_state = {}
             _start_log.info(
                 "[DENG_REJOIN_LAUNCH_PACKAGE] package=%s launcher=%s"
                 " private_url_mode=%s url_mode=%s url_config_source=%s"
-                " result=%s return_code=%s success=%s",
+                " result=%s return_code=%s success=%s process_alive=%s"
+                " activity_visible=%s surface_present=%s black_screen_suspected=%s",
                 package,
                 "private_url" if _has_url else "app_only",
                 _url_context.get("private_url_mode", "global"),
@@ -5293,6 +5358,10 @@ def cmd_start(args: argparse.Namespace) -> int:
                 _url_context.get("url_config_source", "blank"),
                 result.error or "ok", 0 if result.success else 1,
                 str(result.success).lower(),
+                str(bool(_launch_state.get("process_alive"))).lower(),
+                str(bool(_launch_state.get("activity_visible"))).lower(),
+                str(bool(_launch_state.get("surface_present"))).lower(),
+                str(bool(_launch_state.get("black_screen_suspected"))).lower(),
             )
             # Try to mute the package audio (per-package, root, non-fatal).
             if result.success:

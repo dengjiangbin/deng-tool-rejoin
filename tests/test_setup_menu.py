@@ -324,7 +324,7 @@ class PackageSubmenuTests(unittest.TestCase):
         self.assertNotIn("ROBLOSECURITY Cookie", text)
         self.assertIn("Remove Package", text)
 
-    def test_package_submenu_does_not_offer_set_edit_username(self):
+    def test_package_submenu_offers_display_only_username_label_edit(self):
         cfg = _base_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
@@ -334,7 +334,7 @@ class PackageSubmenuTests(unittest.TestCase):
         text = buf.getvalue()
         self.assertNotIn("Set / Edit Username", text)
         self.assertNotIn("Set Username", text)
-        self.assertNotIn("Edit Username", text)
+        self.assertIn("Edit Username Label", text)
 
     def test_package_submenu_does_not_offer_list_packages(self):
         cfg = _base_cfg()
@@ -857,7 +857,7 @@ class LicenseFlowRegressionTests(unittest.TestCase):
 
 class CurrentSettingsInSubmenuTests(unittest.TestCase):
 
-    def test_package_submenu_output_has_no_label_wording(self):
+    def test_package_submenu_shows_edit_username_label_option(self):
         cfg = _base_cfg()
         cfg["roblox_packages"] = [package_entry("com.roblox.client", "Main", True)]
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
@@ -866,7 +866,7 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
                 with redirect_stdout(buf):
                     _config_menu_package(cfg)
         text = buf.getvalue()
-        self.assertNotIn("Label", text)
+        self.assertIn("Edit Username Label", text)
 
     def test_webhook_submenu_shows_current_url_masked(self):
         cfg = _base_cfg()
@@ -894,7 +894,7 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
         self.assertIn("Configured", text)
         self.assertNotIn("abcdefghij", text)
 
-    def test_package_submenu_shows_current_package_names_only(self):
+    def test_package_submenu_shows_current_package_username(self):
         cfg = _base_cfg()
         cfg["roblox_packages"] = [package_entry("com.roblox.client", "Main", True)]
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
@@ -905,7 +905,7 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
         text = buf.getvalue()
         self.assertIn("Current Packages", text)
         self.assertIn("com.roblox.client", text)
-        self.assertNotIn(" — Main", text)
+        self.assertIn(" — username: Main", text)
 
     def test_package_submenu_does_not_show_unknown_username(self):
         cfg = _base_cfg()
@@ -917,7 +917,7 @@ class CurrentSettingsInSubmenuTests(unittest.TestCase):
                     _config_menu_package(cfg)
         text = buf.getvalue()
         self.assertIn("com.moons.litesc", text)
-        self.assertNotIn("Unknown", text)
+        self.assertIn("Unknown", text)
 
     def test_package_submenu_no_enabled_packages_shows_none_configured(self):
         cfg = _base_cfg()
@@ -1070,7 +1070,7 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
         self.assertFalse(added.get("roblox_user_id"))
 
     def test_no_refresh_username_in_public_menu(self):
-        """Refresh Username / Edit Username must NOT be in the public package menu."""
+        """Refresh Username must NOT be in the public package menu."""
         cfg = self._make_cfg()
         with unittest.mock.patch("agent.commands._is_interactive", return_value=True):
             with unittest.mock.patch("builtins.input", return_value="0"):
@@ -1079,7 +1079,6 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
                     _config_menu_package(cfg)
         text = buf.getvalue()
         self.assertNotIn("Refresh Username", text)
-        self.assertNotIn("Edit Username", text)
         self.assertNotIn("Detect / Refresh Usernames", text)
 
     def test_add_package_saves_without_mapping_or_cookie_scan(self):
@@ -1124,7 +1123,7 @@ class TestPackageMenuBug3Regression(unittest.TestCase):
             with unittest.mock.patch(
                 "agent.commands._gather_roblox_candidates_for_ui", return_value=[]
             ):
-                with unittest.mock.patch("builtins.input", side_effect=["m", "com.manual.pkg", "y"]):
+                with unittest.mock.patch("builtins.input", side_effect=["m", "com.manual.pkg", "", "y"]):
                     with unittest.mock.patch("agent.commands.save_config", side_effect=lambda c: c):
                         with unittest.mock.patch(
                             "agent.commands._detect_or_prompt_account_username",

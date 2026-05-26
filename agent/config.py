@@ -221,7 +221,7 @@ def _as_bool(value: Any) -> bool:
 
 USERNAME_SOURCES = {
     "manual", "detected_safe_pref", "android_app_label", "not_set", "config_manual",
-    "root_pref", "root_json", "root_scan", "root_sqlite", "root_shared_prefs", "api_resolved",
+    "cache", "root_pref", "root_json", "root_scan", "root_sqlite", "root_shared_prefs", "api_resolved",
 }
 
 # Valid account mapping status labels for package entries.
@@ -267,6 +267,33 @@ def validate_username_source(source: Any, username: str = "") -> str:
     if cleaned != "not_set" and not username:
         return "not_set"
     return cleaned
+
+
+def get_package_display_username(entry: dict[str, Any], config_data: dict[str, Any] | None = None) -> str:
+    """Return the safe display username/label for a package row.
+
+    This helper intentionally uses saved data only. It does not scan cookies,
+    WebView data, shared_prefs, SQLite databases, or any account-mapping flow.
+    """
+    candidates: list[Any] = [
+        entry.get("account_username"),
+        entry.get("username"),
+        entry.get("roblox_username"),
+        entry.get("label"),
+    ]
+    package = str(entry.get("package") or "").strip()
+    if config_data and package:
+        cache = config_data.get("package_username_cache")
+        if isinstance(cache, dict):
+            candidates.append(cache.get(package))
+        legacy_cache = config_data.get("account_username_cache")
+        if isinstance(legacy_cache, dict):
+            candidates.append(legacy_cache.get(package))
+    for candidate in candidates:
+        cleaned = validate_account_username(candidate)
+        if cleaned:
+            return cleaned
+    return "Unknown"
 
 
 def validate_roblosecurity_cookie(value: Any) -> str:

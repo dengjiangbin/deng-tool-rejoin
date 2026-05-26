@@ -224,13 +224,14 @@ def run_root_command(
     args: Iterable[str],
     *,
     timeout: int = COMMAND_TIMEOUT,
+    detect_timeout: int | None = None,
 ) -> RootResult:
     """Run a command via the best available root tool.
 
     Returns a :class:`RootResult`.  ``ok`` is False if root is unavailable,
     the command times out, or any error occurs.  Never raises.
     """
-    cap = detect()
+    cap = detect(timeout=detect_timeout or DETECT_TIMEOUT)
     if not cap.available or not cap.tool:
         return RootResult(
             returncode=127,
@@ -259,6 +260,7 @@ def read_root_file(
     *,
     max_bytes: int = 131_072,
     timeout: int = READ_TIMEOUT,
+    detect_timeout: int | None = None,
 ) -> str | None:
     """Read a root-protected file.  Returns content (capped) or None.
 
@@ -270,7 +272,7 @@ def read_root_file(
     try:
         safe_path = path.replace("'", "'\"'\"'")
         inner = f"test -f '{safe_path}' && head -c {int(max_bytes)} '{safe_path}' 2>/dev/null"
-        result = run_root_command(["sh", "-c", inner], timeout=timeout)
+        result = run_root_command(["sh", "-c", inner], timeout=timeout, detect_timeout=detect_timeout)
         if not result.ok or not result.stdout:
             return None
         return result.stdout

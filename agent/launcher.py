@@ -92,6 +92,90 @@ class LaunchAttemptResult:
         }
 
 
+def _launch_wait_seconds(cfg: dict[str, Any], key: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(cfg.get(key, default))
+    except (TypeError, ValueError):
+        value = default
+    return min(max(value, minimum), maximum)
+
+
+def _command_for_log(args: tuple[str, ...]) -> str:
+    return mask_urls_in_text(" ".join(str(a) for a in args))[:500]
+
+
+def _read_launch_state(package: str) -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "process_alive": True if os.name == "nt" else _proc_scan_alive(package),
+        "activity_visible": False,
+        "surface_present": False,
+        "task_bounds": None,
+        "task_id": None,
+        "window_bounds": None,
+        "resumed_activity": "",
+    }
+    if os.name == "nt":
+        state["activity_visible"] = True
+        return state
+    try:
+        from . import window_apply
+        task = window_apply._select_task_entry(package)  # noqa: SLF001
+        if task is not None:
+            state["activity_visible"] = bool(task.visible or task.bounds)
+            state["task_bounds"] = task.bounds
+            state["task_id"] = task.task_id
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from . import window_apply
+        win = window_apply._select_window_entry(package)  # noqa: SLF001
+        if win is not None:
+            state["window_bounds"] = win.bounds
+            state["surface_present"] = bool(win.has_surface)
+            state["activity_visible"] = bool(state["activity_visible"] or win.bounds)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        res = android.run_command(["dumpsys", "activity", "activities"], timeout=4)
+        text = res.stdout or ""
+        idx = text.find("mResumedActivity")
+        if idx >= 0:
+            state["resumed_activity"] = text[idx: idx + 220].splitlines()[0][:220]
+            if package in state["resumed_activity"]:
+                state["activity_visible"] = True
+    except Exception:  # noqa: BLE001
+        pass
+    return state
+
+
+def _wait_for_launch_ready(package: str, cfg: dict[str, Any]) -> dict[str, Any]:
+    process_deadline = time.monotonic() + _launch_wait_seconds(
+        cfg, "launch_wait_process_sec", 3.0, 0.5, 8.0,
+    )
+    activity_deadline = time.monotonic() + _launch_wait_seconds(
+        cfg, "launch_wait_activity_sec", 5.0, 0.5, 12.0,
+    )
+    last = _read_launch_state(package)
+    while time.monotonic() < process_deadline:
+        last = _read_launch_state(package)
+        if last["process_alive"]:
+            break
+        time.sleep(0.25)
+    while time.monotonic() < activity_deadline:
+        last = _read_launch_state(package)
+        if last["activity_visible"] or last["surface_present"]:
+            break
+        time.sleep(0.35)
+    settle = _launch_wait_seconds(cfg, "launch_settle_before_layout_sec", 1.0, 0.0, 4.0)
+    if settle:
+        time.sleep(settle)
+        last = _read_launch_state(package)
+    last["black_screen_suspected"] = bool(
+        last["process_alive"] and not (last["activity_visible"] or last["surface_present"])
+    )
+    return last
+
+
 def perform_rejoin(
     config_data: dict[str, Any],
     *,
@@ -346,6 +430,33 @@ def perform_rejoin(
         if not result.ok:
             error = mask_urls_in_text(result.summary or "Android launch command failed")
             raise RuntimeError(error)
+
+        readiness = _wait_for_launch_ready(package, cfg)
+        log_event(
+            logger,
+            "info",
+            "[DENG_REJOIN_LAUNCH_TRACE]",
+            package=package,
+            private_url_mode=url_context.get("private_url_mode", "global"),
+            url_source=url_context.get("url_config_source", "blank"),
+            launch_type=url_context.get("url_mode", "app_only"),
+            command=_command_for_log(result.args),
+            rc=result.returncode,
+            stdout_summary=_first_log_lines(mask_urls_in_text(result.stdout), limit=2),
+            stderr_summary=_first_log_lines(mask_urls_in_text(result.stderr), limit=2),
+            process_alive=str(bool(readiness.get("process_alive"))).lower(),
+            resumed_activity=str(readiness.get("resumed_activity") or ""),
+            task_id=str(readiness.get("task_id") or ""),
+            window_bounds=str(readiness.get("window_bounds") or ""),
+            task_bounds=str(readiness.get("task_bounds") or ""),
+            surface_present=str(bool(readiness.get("surface_present"))).lower(),
+            black_screen_suspected=str(bool(readiness.get("black_screen_suspected"))).lower(),
+            layout_applied_before_surface="false",
+            retry_count=0,
+            final_state="ready" if not readiness.get("black_screen_suspected") else "suspect",
+        )
+        if not readiness.get("process_alive"):
+            raise RuntimeError("Android launch returned success but package process was not detected")
 
         log_event(
             logger, "info", "launch_result",

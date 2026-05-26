@@ -1076,6 +1076,28 @@ def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]
     out["last_start_diagnostics"] = _capture_last_diagnostics(errors)
     out["start_crash_state"] = _capture_start_crash_state(errors)
     out["landscape_debug_state"] = _capture_landscape_debug_state(errors)
+    try:
+        from .config import get_package_display_username
+        menu_diag = []
+        if isinstance(cfg, dict):
+            for entry in pkg_entries:
+                if not isinstance(entry, dict):
+                    continue
+                pkg = str(entry.get("package") or "")
+                if not pkg:
+                    continue
+                menu_diag.append({
+                    "package": pkg,
+                    "display_username": get_package_display_username(entry, cfg),
+                    "username_source": entry.get("username_source") or "not_set",
+                    "detector_used": False,
+                    "detector_duration_ms": 0,
+                    "mapping_refresh_called": False,
+                })
+        out["package_menu_diagnostics"] = menu_diag
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "package_menu_diagnostics", "error": str(exc)[:200]})
+        out["package_menu_diagnostics"] = []
 
     # ── Third-party tool discovery: the "observe what works" loop ─────────
     # Find any other launcher / multi-clone / window-manager / Kaeru-style
