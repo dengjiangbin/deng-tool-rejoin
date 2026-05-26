@@ -16,20 +16,23 @@ import unittest
 from unittest import mock
 
 
-# ── 1. Simplified URL setup ──────────────────────────────────────────────────
+# ── 1. Private URL setup ─────────────────────────────────────────────────────
 
 
 class SimplifiedUrlSetupTest(unittest.TestCase):
-    """``_setup_launch_link`` takes a single URL and writes either
-    ``deeplink`` or ``web_url`` mode depending on the scheme.  No more
-    multi-choice menu, no separate Launch Mode prompt."""
+    """``_setup_launch_link`` writes Global Private URL state from the setup menu."""
 
     def _run(self, user_input: str, current: str = "") -> dict:
         from agent import commands as _cmd
-        draft = {"launch_mode": "app", "launch_url": current}
+        draft = {
+            "private_url_mode": "global",
+            "private_server_url": current,
+            "launch_mode": "app",
+            "launch_url": current,
+        }
         # Patch the prompt + validator + I/O so the function runs
         # non-interactively and uses our injected URL.
-        with mock.patch.object(_cmd, "_prompt", return_value=user_input), \
+        with mock.patch.object(_cmd, "_prompt", side_effect=["1", user_input]), \
              mock.patch("agent.commands.validate_launch_url",
                         return_value=mock.MagicMock(warning="")):
             _cmd._setup_launch_link(draft)
@@ -37,18 +40,24 @@ class SimplifiedUrlSetupTest(unittest.TestCase):
 
     def test_blank_clears_url_and_sets_app_mode(self) -> None:
         d = self._run("")
+        self.assertEqual(d["private_url_mode"], "global")
+        self.assertEqual(d["private_server_url"], "")
         self.assertEqual(d["launch_url"], "")
         self.assertEqual(d["launch_mode"], "app")
 
     def test_https_share_url_becomes_web_url_mode(self) -> None:
         url = "https://www.roblox.com/share?code=ABC&type=Server"
         d = self._run(url)
+        self.assertEqual(d["private_url_mode"], "global")
+        self.assertEqual(d["private_server_url"], url)
         self.assertEqual(d["launch_url"], url)
         self.assertEqual(d["launch_mode"], "web_url")
 
     def test_deep_link_becomes_deeplink_mode(self) -> None:
         url = "roblox://navigation/share_links?code=ABC&type=Server"
         d = self._run(url)
+        self.assertEqual(d["private_url_mode"], "global")
+        self.assertEqual(d["private_server_url"], url)
         self.assertEqual(d["launch_url"], url)
         self.assertEqual(d["launch_mode"], "deeplink")
 

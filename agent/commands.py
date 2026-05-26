@@ -2098,21 +2098,32 @@ def _setup_separate_private_urls(draft: dict[str, Any]) -> None:
     print("Saved. Each package will use its own Private URL setting.")
 
 
-def _setup_launch_link(draft: dict[str, Any]) -> None:
+def _setup_launch_link(draft: dict[str, Any], *, allow_back: bool = True) -> None:
     """Configure Global or Separate Private URL mode."""
-    print()
-    print("[?] Private URL Mode")
-    print()
-    print("1. Global Private URL - Use one URL for all packages")
-    print("2. Separate Private URL - Set a different URL for each package")
-    print("0. Back")
-    choice = _prompt("Choose", "1").strip()
-    if choice == "0":
-        return
-    if choice == "2":
-        _setup_separate_private_urls(draft)
-        return
-    _setup_global_private_url(draft)
+    while True:
+        print()
+        print("[?] Private URL Mode")
+        print()
+        print("1. Global Private URL - Use one URL for all packages")
+        print("2. Separate Private URL - Set a different URL for each package")
+        if allow_back:
+            print("0. Back")
+        else:
+            print("3. Skip / Not Set")
+        choice = _prompt("Choose", "1").strip()
+        if allow_back and choice == "0":
+            return
+        if choice == "1":
+            _setup_global_private_url(draft)
+            return
+        if choice == "2":
+            _setup_separate_private_urls(draft)
+            return
+        if not allow_back and choice == "3":
+            _set_global_private_url(draft, "")
+            print("Saved. All packages will open app-only.")
+            return
+        print("Choose 1, 2, or 3." if not allow_back else "Choose 0, 1, or 2.")
 
 
 def _setup_webhook(draft: dict[str, Any]) -> None:
@@ -3459,7 +3470,7 @@ def _run_first_time_setup_wizard(config_data: dict[str, Any], args: argparse.Nam
     draft["selected_package_mode"] = "multiple" if len(active_entries) > 1 else "single"
     draft["screen_mode"] = DEFAULT_SCREEN_MODE
     print("\nStep 2 of 2: Private URL")
-    _setup_launch_link(draft)
+    _setup_launch_link(draft, allow_back=False)
     draft["first_setup_completed"] = True
     try:
         saved = save_config(draft)

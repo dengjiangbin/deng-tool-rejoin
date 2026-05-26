@@ -62,6 +62,7 @@ from agent.commands import (
     _prompt_launch_url,
     _run_edit_config_menu,
     _run_first_time_setup_wizard,
+    _setup_launch_link,
 )
 from agent.config import default_config, package_entry, validate_config, validate_package_entries
 
@@ -525,6 +526,58 @@ class LaunchLinkSubmenuTests(unittest.TestCase):
         text = buf.getvalue()
         self.assertIn("Private URL", text)
 
+    def test_first_time_setup_private_url_step_has_no_back_option(self):
+        cfg = _base_cfg()
+        out = io.StringIO()
+        with unittest.mock.patch("agent.commands._prompt", return_value="3"), redirect_stdout(out):
+            _setup_launch_link(cfg, allow_back=False)
+
+        text = out.getvalue()
+        self.assertIn("[?] Private URL Mode", text)
+        self.assertIn("Skip / Not Set", text)
+        self.assertNotIn("0. Back", text)
+        self.assertNotIn("Back", text)
+        self.assertEqual(cfg["private_url_mode"], "global")
+        self.assertEqual(cfg["private_server_url"], "")
+        self.assertEqual(cfg["launch_mode"], "app")
+        self.assertEqual(cfg["launch_url"], "")
+
+    def test_setup_edit_config_private_url_step_keeps_back_option(self):
+        cfg = _base_cfg()
+        out = io.StringIO()
+        with unittest.mock.patch("agent.commands._prompt", return_value="0"), redirect_stdout(out):
+            _setup_launch_link(cfg)
+
+        text = out.getvalue()
+        self.assertIn("0. Back", text)
+
+    def test_first_time_setup_private_url_global_mode_still_works(self):
+        cfg = _base_cfg()
+        url = "roblox://experiences/start?placeId=123"
+        with unittest.mock.patch("agent.commands._prompt", side_effect=["1", url]):
+            _setup_launch_link(cfg, allow_back=False)
+
+        self.assertEqual(cfg["private_url_mode"], "global")
+        self.assertEqual(cfg["private_server_url"], url)
+        self.assertEqual(cfg["launch_mode"], "deeplink")
+        self.assertEqual(cfg["launch_url"], url)
+
+    def test_first_time_setup_private_url_separate_mode_still_works(self):
+        cfg = _base_cfg()
+        cfg["roblox_packages"] = [
+            package_entry("com.moons.litesc", "", True, "not_set"),
+            package_entry("com.moons.litesd", "", True, "not_set"),
+        ]
+        url = "https://www.roblox.com/games/123/test?privateServerLinkCode=abc"
+        with unittest.mock.patch("agent.commands._prompt", side_effect=["2", url, ""]):
+            _setup_launch_link(cfg, allow_back=False)
+
+        self.assertEqual(cfg["private_url_mode"], "separate")
+        self.assertEqual(cfg["roblox_packages"][0]["private_server_url"], url)
+        self.assertEqual(cfg["roblox_packages"][1]["private_server_url"], "")
+        self.assertEqual(cfg["launch_mode"], "app")
+        self.assertEqual(cfg["launch_url"], "")
+
 
 # ─── 19-23: Webhook Submenu ───────────────────────────────────────────────────
 
@@ -755,12 +808,12 @@ class LicenseFlowRegressionTests(unittest.TestCase):
              unittest.mock.patch("agent.commands._is_interactive", return_value=True), \
              unittest.mock.patch("agent.commands.print_banner"), \
              unittest.mock.patch("agent.commands._choose_packages_menu", return_value=(packages, ["roblox", "moon"])), \
-             unittest.mock.patch("agent.commands._setup_launch_link", side_effect=lambda draft: draft.update({
+             unittest.mock.patch("agent.commands._setup_launch_link", side_effect=lambda draft, **_kwargs: draft.update({
                  "private_url_mode": "global",
                  "private_server_url": "",
                  "launch_mode": "app",
                  "launch_url": "",
-             })), \
+             })) as setup_link, \
              unittest.mock.patch("agent.commands.save_config", side_effect=lambda data: validate_config(data)), \
              unittest.mock.patch(
                  "agent.commands._prompt_yes_no",
@@ -771,6 +824,8 @@ class LicenseFlowRegressionTests(unittest.TestCase):
 
         self.assertTrue(did_save)
         self.assertIsNotNone(saved)
+        setup_link.assert_called_once()
+        self.assertIs(setup_link.call_args.kwargs.get("allow_back"), False)
         text = out.getvalue()
         prompt_index = text.index("Start DENG now? [Y/n]:")
         confirmation = text[:prompt_index]
