@@ -1,11 +1,13 @@
 {
+  "app_name": "DENG Tool: Rejoin APK",
   "version_name": "1.0.0",
   "version_code": 1,
-  "file_name": "",
-  "sha256": "",
-  "size_bytes": 0,
-  "released_at": "",
+  "file_name": "deng-tool-rejoin-apk-v1.0.0.apk",
+  "sha256": "243e4122222d7aeba388a8dfe308747461bb6b7ca0e35ac7c04e89b9938ccf6f",
+  "size_bytes": 1520101,
+  "released_at": "2026-05-28",
   "min_sdk": 26,
+  "purpose": "Monitoring companion app for DENG Tool: Rejoin",
   "changelog": [
     "First public release of DENG Tool: Rejoin APK.",
     "Read-only monitoring: RAM, runtime, state, snapshot, summary.",

@@ -25,6 +25,39 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Release signing pulls credentials from machine-local Gradle properties
+    // (typically ~/.gradle/gradle.properties or -P CLI flags). Nothing
+    // sensitive is committed; the repo only sees property *names*.
+    //
+    // Required properties for a real signed release:
+    //   DENG_KEYSTORE_PATH      absolute path to the .jks keystore
+    //   DENG_KEYSTORE_PASSWORD  keystore password
+    //   DENG_KEY_ALIAS          key alias inside the keystore
+    //   DENG_KEY_PASSWORD       key password
+    //
+    // If any are missing, the release build falls back to debug signing
+    // so local development never breaks.
+    val keystorePath = project.findProperty("DENG_KEYSTORE_PATH") as String?
+    val keystorePassword = project.findProperty("DENG_KEYSTORE_PASSWORD") as String?
+    val keyAlias = project.findProperty("DENG_KEY_ALIAS") as String?
+    val keyPassword = project.findProperty("DENG_KEY_PASSWORD") as String?
+    val hasReleaseSigning = !keystorePath.isNullOrBlank() &&
+        !keystorePassword.isNullOrBlank() &&
+        !keyAlias.isNullOrBlank() &&
+        !keyPassword.isNullOrBlank() &&
+        file(keystorePath!!).exists()
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(keystorePath!!)
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -33,9 +66,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Signing: by default uses debug signing so the build doesn't fail
-            // out-of-the-box. Override with a real keystore for distribution.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         debug {
             applicationIdSuffix = ".debug"

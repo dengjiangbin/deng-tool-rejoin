@@ -21,7 +21,7 @@ class AppNamingTest {
     }
 
     @Test
-    fun `app_name string resource is "DENG Tool: Rejoin APK"`() {
+    fun `app_name string resource is the canonical product name`() {
         val xml = stringsXml()
         assertTrue(
             "app_name must be exactly 'DENG Tool: Rejoin APK' — got: $xml",
@@ -39,7 +39,7 @@ class AppNamingTest {
     }
 
     @Test
-    fun `string resources contain no legacy "DENG Monitor" wording`() {
+    fun `string resources contain no legacy DENG Monitor wording`() {
         val xml = stringsXml()
         assertFalse(
             "strings.xml still contains legacy 'DENG Monitor' wording",

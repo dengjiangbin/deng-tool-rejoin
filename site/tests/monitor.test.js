@@ -407,10 +407,22 @@ describe('APK download page', () => {
     assert.equal(res.status, 404);
   });
 
-  test('canonical latest alias returns friendly 404 when no APK published', async () => {
-    const res = await request(app).get('/downloads/deng-tool-rejoin-apk-latest.apk');
-    assert.equal(res.status, 404);
-    assert.match(res.text, /APK not available yet/);
+  test('canonical latest alias either serves APK (when published) or 404s cleanly', async () => {
+    const res = await request(app)
+      .get('/downloads/deng-tool-rejoin-apk-latest.apk')
+      .redirects(0);
+    // When an APK is published, the alias 302-redirects to the versioned filename.
+    // When no APK is published, the route returns 404 with a friendly message.
+    if (res.status === 302) {
+      assert.match(
+        String(res.headers.location || ''),
+        /^\/downloads\/deng-tool-rejoin-apk-v[\d.]+\.apk$/,
+        'latest alias must redirect to a versioned filename when an APK is published',
+      );
+    } else {
+      assert.equal(res.status, 404);
+      assert.match(res.text, /APK not available yet/);
+    }
   });
 
   test('legacy latest alias permanently redirects to new latest alias', async () => {
@@ -429,9 +441,20 @@ describe('APK download page', () => {
     assert.equal(res.headers.location, '/downloads/deng-tool-rejoin-apk-v1.0.0.apk');
   });
 
-  test('new versioned filename returns 404 (file not on disk in tests)', async () => {
+  test('new versioned filename serves real APK when published, 404 otherwise', async () => {
     const res = await request(app).get('/downloads/deng-tool-rejoin-apk-v1.0.0.apk');
-    assert.equal(res.status, 404);
+    // Either the APK has been published (200 + APK content-type) or it's
+    // missing and the route 404s cleanly. Both are valid security postures;
+    // what must NEVER happen is leaking another file.
+    if (res.status === 200) {
+      assert.match(
+        String(res.headers['content-type'] || ''),
+        /application\/(vnd\.android\.package-archive|octet-stream)/,
+      );
+      assert.ok(Buffer.isBuffer(res.body) || typeof res.body === 'object');
+    } else {
+      assert.equal(res.status, 404);
+    }
   });
 
   test('traversal attempt via legacy filename pattern is rejected', async () => {

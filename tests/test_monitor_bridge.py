@@ -7,7 +7,13 @@ state-vocabulary clamp, payload-size guard, and offline-resilience.
 
 from __future__ import annotations
 
+import sys
 import time
+from pathlib import Path
+
+PROJECT = Path(__file__).resolve().parents[1]
+if str(PROJECT) not in sys.path:
+    sys.path.insert(0, str(PROJECT))
 
 import pytest
 

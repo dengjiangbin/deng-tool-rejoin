@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     Mirrors the DENG Tool website CSS custom properties so the app feels
-    visually identical:
-        --bg-a   #050816
-        --bg-b   #111827
-        --bg-c   #250a26
-        --cyan   #00cfff
-        --pink   #ff2fb3
-        --purple #6143b2
+    visually identical. CSS variable names (without leading dashes):
+        bg-a   #050816
+        bg-b   #111827
+        bg-c   #250a26
+        cyan   #00cfff
+        pink   #ff2fb3
+        purple #6143b2
 -->
 <resources>
     <color name="deng_bg_a">#050816</color>
