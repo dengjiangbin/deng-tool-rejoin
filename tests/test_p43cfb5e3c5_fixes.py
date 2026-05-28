@@ -369,16 +369,29 @@ class TestPublicUICleanliness(unittest.TestCase):
         self.assertNotIn('"In-Lobby",', src)
 
     def test_no_joining_in_display_map_values(self) -> None:
-        """_STATE_DISPLAY_MAP must not produce 'Joining' as a display value."""
-        import inspect
+        """_STATE_DISPLAY_MAP must not produce 'Joining' as a Termux display value.
+
+        v1.0.4 note: Joining IS a real supervisor state now (the bridge
+        sends it to the APK so users see Dead → Launching → Joining →
+        Online). The Termux TERMINAL still collapses Joining to
+        Launching though, because the terminal user already sees the
+        start sequence directly and doesn't need the extra step.
+
+        So this test only forbids "Joining" as a VALUE in the dict.
+        Having it as a KEY (mapped to "Launching") is required.
+        """
+        import inspect, re
         import agent.commands as _mod
         src = inspect.getsource(_mod.cmd_start)
-        # Check that 'Joining' is not a VALUE in the map (a key is OK for remapping)
-        # We look for the pattern:  "Joining",\n (value side of dict literal)
-        # Simplest proxy: Joining should not appear after a colon in the map
-        self.assertNotIn('"Joining"', src.split("_STATE_DISPLAY_MAP")[1].split("}")[0].split(": ", 1)[-1]
-                         if "_STATE_DISPLAY_MAP" in src else "",
-                         "_STATE_DISPLAY_MAP must not map any state to Joining")
+        start = src.find("_STATE_DISPLAY_MAP")
+        end = src.find("}", start) + 1
+        map_src = src[start:end]
+        values = re.findall(r':\s*"([^"]+)"', map_src)
+        self.assertNotIn(
+            "Joining", values,
+            "_STATE_DISPLAY_MAP must not map any state to 'Joining' "
+            "as a Termux terminal display value (KEY is fine).",
+        )
 
     def test_allowed_states_in_display_map_values(self) -> None:
         """_STATE_DISPLAY_MAP values must only be from the allowed public set."""

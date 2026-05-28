@@ -55,10 +55,15 @@ fun DashboardScreen(api: MonitorApi, sessionStore: SessionStore) {
 
             is DeviceFetchState.Ready -> {
                 val st = s.status
+                // v1.0.4: prefer the server-computed connection state.
+                // If the backend doesn't provide it (older deploy), fall
+                // back to the legacy sticky boolean.
                 DeviceHeaderCard(
                     label = st.device.deviceLabel ?: "Cloud Phone",
-                    connected = st.device.statusConnected,
+                    connectionLabel = st.device.connectionLabel,
+                    isConnected = st.device.isConnected,
                     lastSeenAt = st.device.lastSeenAt,
+                    secondsSinceLastSeen = st.device.secondsSinceLastSeen,
                     version = st.device.toolVersion,
                     channel = st.device.channel,
                 )
@@ -90,8 +95,27 @@ fun DashboardScreen(api: MonitorApi, sessionStore: SessionStore) {
                         modifier = Modifier.weight(1f),
                     )
                     StatTile(
-                        label = "Relaunching",
-                        value = st.summary.relaunching.toString(),
+                        // v1.0.4: replaces "Relaunching" — the public
+                        // 5-state model uses Launching.
+                        label = "Launching",
+                        value = (st.summary.launching + st.summary.relaunching).toString(),
+                        accent = DengColors.Cyan,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    StatTile(
+                        label = "Joining",
+                        value = st.summary.joining.toString(),
+                        accent = DengColors.Purple,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatTile(
+                        label = "No Heartbeat",
+                        value = st.summary.noHeartbeat.toString(),
                         accent = DengColors.Warning,
                         modifier = Modifier.weight(1f),
                     )
@@ -121,8 +145,10 @@ fun DashboardScreen(api: MonitorApi, sessionStore: SessionStore) {
 @Composable
 private fun DeviceHeaderCard(
     label: String,
-    connected: Boolean,
+    connectionLabel: String,
+    isConnected: Boolean,
     lastSeenAt: String?,
+    secondsSinceLastSeen: Long?,
     version: String?,
     channel: String?,
 ) {
@@ -130,11 +156,18 @@ private fun DeviceHeaderCard(
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Text(label, style = MaterialTheme.typography.titleLarge, color = DengColors.TextPrimary)
             Spacer(Modifier.weight(1f))
-            StateBadge(if (connected) "Online" else "Dead")
+            // v1.0.4: badge uses the literal Connected / Disconnected
+            // label so users can tell the difference instantly. The
+            // old code reused the package badge (Online/Dead), which
+            // overloaded two unrelated state vocabularies.
+            ConnectionBadge(connectionLabel, isConnected)
         }
         Spacer(Modifier.height(8.dp))
+        val staleSuffix = if (!isConnected && secondsSinceLastSeen != null) {
+            " (no push for ${secondsSinceLastSeen}s)"
+        } else ""
         Text(
-            "Last update: ${my.id.deng.monitor.util.Format.timestamp(lastSeenAt)}",
+            "Last update: ${my.id.deng.monitor.util.Format.timestamp(lastSeenAt)}$staleSuffix",
             style = MaterialTheme.typography.bodySmall,
             color = DengColors.TextMuted,
         )

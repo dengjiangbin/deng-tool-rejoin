@@ -60,9 +60,17 @@ MAX_PACKAGES_PER_PUSH = 64
 
 # Allowed states (mirrors agent.supervisor STATUS_* but kept local on purpose
 # so the bridge does not depend on supervisor imports).
+# v1.0.4: canonical 5 APK-visible states — Dead, Launching, Joining,
+# Online, No Heartbeat. Legacy supervisor vocabulary (Relaunching,
+# Reconnecting, Background, etc.) is still accepted because the bridge
+# is permissive at the wire level — the autostart mapper in
+# `monitor_autostart._SUPERVISOR_TO_PUBLIC_STATE` is what collapses
+# everything down to the public 5 before the bytes leave the device.
+# "In-Lobby" is intentionally absent everywhere now.
 ALLOWED_STATES = frozenset({
     "Online", "Dead", "Relaunching", "No Heartbeat",
-    "Launching", "Unknown", "Offline", "Preparing",
+    "Launching", "Joining",
+    "Unknown", "Offline", "Preparing",
     "Background", "Reconnecting", "Warning", "Failed",
     "Closed", "Launched", "Disconnected",
     "In Server", "Lobby", "Join Unconfirmed",
@@ -232,8 +240,31 @@ class BridgeState:
     consecutive_failures: int = 0
     snapshot_last_sent_at: float = 0.0
     snapshot_last_result: str | None = None
+    # v1.0.4 — extra snapshot diagnostics that propagate to the APK via
+    # the `bridge_status` block on each /push. Surfacing these is what
+    # finally fixed the "Waiting for first snapshot…" forever bug from
+    # v1.0.3: the user can now SEE whether the failure is capture
+    # (screencap not installed, permission denied) or upload (HTTP 401,
+    # timeout) without needing to SSH into the cloud phone.
+    snapshot_last_bytes: int = 0
+    snapshot_last_error: str | None = None
+    snapshot_last_upload_status: str | None = None  # "ok" | "http_NNN" | "network_error"
+    snapshot_provider_called_count: int = 0
+    screencap_available: bool | None = None  # None until first attempt
     monitor_enabled_remote: bool = True
     lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def to_push_status(self) -> dict[str, Any]:
+        """Public, secret-free view of bridge state for the /push payload."""
+        return {
+            "snapshot_last_result": self.snapshot_last_result,
+            "snapshot_last_bytes": int(self.snapshot_last_bytes or 0),
+            "snapshot_last_error": (self.snapshot_last_error or None),
+            "snapshot_last_upload_status": (self.snapshot_last_upload_status or None),
+            "snapshot_provider_called_count": int(self.snapshot_provider_called_count or 0),
+            "screencap_available": self.screencap_available,
+            "last_push_result": (self.last_push_result or None),
+        }
 
 
 class MonitorBridge:
@@ -327,6 +358,15 @@ class MonitorBridge:
             packages=list(packages) if isinstance(packages, list) else [],
             extra=raw.get("extra") if isinstance(raw.get("extra"), dict) else None,
         )
+        # v1.0.4 — attach the bridge's self-view so the APK Snapshot tab
+        # can show a real reason ("capture_failed: screencap unavailable")
+        # instead of "Waiting for first snapshot…" forever. The block is
+        # tiny (~7 string/int fields) so it stays well under
+        # MAX_PAYLOAD_BYTES even with the package list.
+        try:
+            payload["bridge_status"] = self.state.to_push_status()
+        except Exception:  # noqa: BLE001
+            pass
 
         ok = self._post_json("/api/monitor/bridge/push", payload)
         if not ok:
@@ -337,27 +377,55 @@ class MonitorBridge:
         if interval > 0 and self.snapshot_provider:
             elapsed = time.time() - self.state.snapshot_last_sent_at
             if elapsed >= interval:
+                self.state.snapshot_provider_called_count += 1
+                snap: tuple[bytes, str] | None = None
+                capture_error: str | None = None
                 try:
                     snap = self.snapshot_provider()
                 except Exception as exc:  # noqa: BLE001
-                    snap = None
+                    capture_error = f"{exc.__class__.__name__}"
                     logger.debug("snapshot_provider failed: %s", exc)
                 if snap:
                     data, mime = snap
-                    if data and len(data) <= MAX_SNAPSHOT_BYTES:
-                        if self._post_binary(
+                    # We at least got bytes from the provider — screencap works.
+                    self.state.screencap_available = True
+                    self.state.snapshot_last_bytes = len(data) if data else 0
+                    if not data:
+                        self.state.snapshot_last_result = "capture_failed"
+                        self.state.snapshot_last_error = "empty_bytes"
+                        self.state.snapshot_last_sent_at = time.time() - max(0, interval - 5)
+                    elif len(data) > MAX_SNAPSHOT_BYTES:
+                        self.state.snapshot_last_result = "capture_failed"
+                        self.state.snapshot_last_error = (
+                            f"image_too_large_{len(data)}_max_{MAX_SNAPSHOT_BYTES}"
+                        )
+                        self.state.snapshot_last_sent_at = time.time() - max(0, interval - 5)
+                    else:
+                        upload_ok = self._post_binary(
                             "/api/monitor/bridge/snapshot",
                             data,
                             content_type=mime or "image/png",
-                        ):
+                        )
+                        if upload_ok:
                             self.state.snapshot_last_sent_at = time.time()
                             self.state.snapshot_last_result = "success"
+                            self.state.snapshot_last_error = None
+                            self.state.snapshot_last_upload_status = "ok"
                         else:
                             self.state.snapshot_last_result = "upload_failed"
+                            self.state.snapshot_last_upload_status = (
+                                self.state.last_error or "network_error"
+                            )
                 else:
-                    # capture happened but returned None or empty bytes
+                    # Provider returned None — screencap missing / permission
+                    # denied / crashed. Surface the reason in bridge_status
+                    # so the APK shows it instead of a silent placeholder.
+                    self.state.screencap_available = False
                     self.state.snapshot_last_result = "capture_failed"
-                    # Bump the cooldown so we don't spin on a broken capture
+                    self.state.snapshot_last_error = (
+                        capture_error or "screencap_unavailable"
+                    )
+                    # Don't spin on a broken capture; back off slightly.
                     self.state.snapshot_last_sent_at = time.time() - max(0, interval - 5)
 
     # ── HTTP helpers ─────────────────────────────────────────────────────

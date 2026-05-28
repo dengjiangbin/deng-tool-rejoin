@@ -5658,6 +5658,14 @@ def cmd_start(args: argparse.Namespace) -> int:
             "Dead":             "Dead",
             "Relaunching":       "Reopening",
             "Launching":         "Launching",
+            # v1.0.4: Joining is now a real supervisor state but the
+            # Termux terminal user doesn't care about the
+            # open-app / open-URL distinction — they just want
+            # "Launching" until it's "Online". So we collapse it here.
+            # The APK still sees the full Joining state via the
+            # separate _SUPERVISOR_TO_PUBLIC_STATE map.
+            "Joining":          "Launching",
+            "Join Unconfirmed": "Launching",
             # Transient post-launch / startup → Launching
             "Preparing":        "Launching",
             "Unknown":          "Launching",

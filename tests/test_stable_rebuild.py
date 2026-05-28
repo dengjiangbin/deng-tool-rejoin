@@ -152,12 +152,23 @@ class TestPublicStates(unittest.TestCase):
         return {}
 
     def test_no_joining_in_public_display(self) -> None:
+        """v1.0.4: Joining IS a supervisor state now (APK sees the full
+        Dead → Launching → Joining → Online sequence), but the Termux
+        TERMINAL collapses it to Launching to keep the start view
+        simple. Joining is allowed as a KEY in the display map; it
+        must NOT be a display VALUE.
+        """
         smap = self._get_display_map()
-        self.assertNotIn("Joining", smap)
+        if "Joining" in smap:
+            self.assertNotEqual(smap["Joining"], "Joining",
+                "Termux terminal must not show 'Joining' as a display value")
+            self.assertIn(smap["Joining"], self._ALLOWED_PUBLIC)
 
     def test_no_join_unconfirmed_in_public_display(self) -> None:
         smap = self._get_display_map()
-        self.assertNotIn("Join Unconfirmed", smap)
+        if "Join Unconfirmed" in smap:
+            self.assertNotEqual(smap["Join Unconfirmed"], "Join Unconfirmed")
+            self.assertIn(smap["Join Unconfirmed"], self._ALLOWED_PUBLIC)
 
     def test_no_in_server_in_public_display(self) -> None:
         smap = self._get_display_map()

@@ -2,6 +2,7 @@ package my.id.deng.monitor.data
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 
 @Serializable
 data class DeviceSummary(
@@ -9,7 +10,17 @@ data class DeviceSummary(
     @SerialName("device_label") val deviceLabel: String? = null,
     @SerialName("tool_version") val toolVersion: String? = null,
     val channel: String? = null,
+    // v1.0.4: `statusConnected` is the legacy sticky-true boolean —
+    // kept for binary compatibility with old backends but the new code
+    // should read `connected` / `connectionState` which are computed
+    // from `last_seen_at` freshness server-side (30s TTL). The legacy
+    // field was the bug class behind "APK still says Connected after
+    // cloud phone reboot" — the watchdog can't post a "goodbye" so the
+    // truth only lives in how long ago `last_seen_at` was.
     @SerialName("status_connected") val statusConnected: Boolean = false,
+    val connected: Boolean? = null,
+    @SerialName("connection_state") val connectionState: String? = null,
+    @SerialName("seconds_since_last_seen") val secondsSinceLastSeen: Long? = null,
     @SerialName("last_seen_at") val lastSeenAt: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     // v1.0.3: backend tells the APK when the bridge last successfully
@@ -19,7 +30,21 @@ data class DeviceSummary(
     // nullable — `null` means the device has never had a snapshot.
     @SerialName("last_snapshot_captured_at") val lastSnapshotCapturedAt: String? = null,
     @SerialName("last_snapshot_age_seconds") val lastSnapshotAgeSeconds: Long? = null,
-)
+    // v1.0.4: bridge self-reported diagnostics — used by SnapshotScreen
+    // to render real reasons ("capture_failed: screencap_unavailable",
+    // "upload_failed: http_503") instead of "Waiting for first
+    // snapshot…" forever. JsonElement so we can extend the bridge
+    // payload without bumping the APK every time.
+    @SerialName("last_bridge_status") val lastBridgeStatus: JsonElement? = null,
+) {
+    /** Best-effort connection boolean: prefer the computed value. */
+    val isConnected: Boolean
+        get() = connected ?: ((connectionState == "Connected") || statusConnected)
+
+    /** Best-effort display label for the connection. */
+    val connectionLabel: String
+        get() = connectionState ?: if (isConnected) "Connected" else "Disconnected"
+}
 
 @Serializable
 data class DeviceListResponse(
@@ -47,7 +72,11 @@ data class PackageSummary(
     val total: Int = 0,
     val online: Int = 0,
     val dead: Int = 0,
+    // v1.0.4: `relaunching` is kept for back-compat (old backends still
+    // emit it). New `launching` + `joining` cover the 5-state model.
     val relaunching: Int = 0,
+    val launching: Int = 0,
+    val joining: Int = 0,
     @SerialName("no_heartbeat") val noHeartbeat: Int = 0,
     val other: Int = 0,
     @SerialName("total_ram_mb") val totalRamMb: Int = 0,

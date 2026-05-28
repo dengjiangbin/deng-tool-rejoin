@@ -82,12 +82,13 @@ class ProductionManifestSanityTests(unittest.TestCase):
         )
 
     def test_v100_row_is_public_stable_and_matches_published_sha(self) -> None:
-        # Locked to the SHA produced by the v1.0.3 release artifact rebuild.
-        # If the artifact is ever rebuilt the test must be updated in lockstep
-        # so /install/v1.0.0 cannot accidentally start serving a different
-        # tarball than what was QA'd.
+        # Locked to the SHA produced by the v1.0.4 release artifact rebuild
+        # (Termux side picked up the new state vocabulary and whole-screen
+        # snapshot capture). If the artifact is ever rebuilt the test must
+        # be updated in lockstep so /install/v1.0.0 cannot accidentally
+        # start serving a different tarball than what was QA'd.
         EXPECTED_V100_SHA = (
-            "f0522c5882c642e2208705196ab904e312d580e445ab2bf2995e834351030ab1"
+            "ba5f6c2fb47093afcc33fa024161468a766352b4dfa966b4741a900c39a9854f"
         )
         row = next((r for r in self.rows if r.get("version") == "v1.0.0"), None)
         self.assertIsNotNone(row, "v1.0.0 row missing from production manifest")
@@ -135,7 +136,7 @@ class ProductionManifestSanityTests(unittest.TestCase):
         self.assertNotEqual(row.get("version"), "main-dev")
         self.assertNotEqual(
             row.get("artifact_sha256"),
-            "aa6e9a6aa9b439daeecedc5ff868ae57a8b1f4f7fedb6d9592ee68e9a366b3c5",
+            "5609f6025439d4f1eb92308acea1901ce8094c05f71f43c6f8fb1fd551709fe6",
             "/install/latest must NEVER resolve to the main-dev SHA",
         )
 

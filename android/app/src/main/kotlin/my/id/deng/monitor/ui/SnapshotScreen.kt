@@ -16,6 +16,13 @@ import androidx.compose.ui.unit.dp
 import android.graphics.BitmapFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.SessionStore
 import my.id.deng.monitor.ui.theme.DengColors
@@ -32,7 +39,8 @@ fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
 
     val ready = state as? DeviceFetchState.Ready
     val deviceId = ready?.status?.device?.id
-    val intervalSec = ready?.status?.settings?.snapshotIntervalSeconds ?: 0
+    val intervalSec = ready?.status?.settings?.snapshotIntervalSeconds ?: 30
+    val isConnected = ready?.status?.device?.isConnected == true
     // v1.0.3: backend now reports when the bridge last uploaded a
     // snapshot — we use this to differentiate "interval is on, but the
     // bridge hasn't sent the first frame yet" from a genuine empty
@@ -40,6 +48,12 @@ fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
     // copy forever, even when the bridge was actively retrying.
     val lastCapturedAtIso = ready?.status?.device?.lastSnapshotCapturedAt
     val lastCapturedAgeSec = ready?.status?.device?.lastSnapshotAgeSeconds
+    // v1.0.4: bridge-reported diagnostics — what the cloud-phone-side
+    // capture pipeline actually saw. This is the field that finally
+    // breaks the "Waiting for first snapshot…" forever bug: if the
+    // bridge says capture_failed / upload_failed, we show that reason
+    // instead of pretending nothing is happening.
+    val bridgeStatus = parseBridgeStatus(ready?.status?.device?.lastBridgeStatus)
 
     suspend fun fetch() {
         if (deviceId == null) return
@@ -126,25 +140,42 @@ fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
                 } else if (loading) {
                     CircularProgressIndicator(color = DengColors.Cyan, strokeWidth = 2.dp)
                 } else if (intervalSec == 0) {
-                    // Snapshot uploads are explicitly disabled.
                     Text(
                         "Snapshot is off. Enable it in Settings.",
                         color = DengColors.TextMuted,
                     )
+                } else if (!isConnected) {
+                    // v1.0.4: don't claim "Waiting for first snapshot…"
+                    // when the cloud phone hasn't pushed anything in
+                    // 30s — the answer is "we're disconnected from the
+                    // cloud phone first". Snapshot can't possibly
+                    // arrive until the bridge comes back.
+                    Text(
+                        "Waiting for cloud phone to reconnect…",
+                        color = DengColors.TextMuted,
+                    )
+                } else if (bridgeStatus?.captureFailedReason != null) {
+                    // v1.0.4: real reason surfaced from the Termux
+                    // bridge — replaces "Waiting for first snapshot…"
+                    // forever when capture is broken (screencap missing,
+                    // permission denied, etc.).
+                    Text(
+                        "Snapshot capture failed: ${bridgeStatus.captureFailedReason}",
+                        color = DengColors.Danger,
+                    )
+                } else if (bridgeStatus?.uploadFailedReason != null) {
+                    Text(
+                        "Snapshot upload failed: ${bridgeStatus.uploadFailedReason}. Retrying…",
+                        color = DengColors.Warning,
+                    )
                 } else if (lastCapturedAtIso == null) {
-                    // Interval is on, but the bridge has never uploaded a
-                    // snapshot for this device. This is the normal first-run
-                    // state — e.g. user just paired or just turned snapshot
-                    // back on, and we're inside the first interval window.
+                    // Interval is on AND we're connected AND no error
+                    // — we're inside the first interval window.
                     Text(
                         "Waiting for first snapshot…",
                         color = DengColors.TextMuted,
                     )
                 } else {
-                    // We know one was uploaded (backend told us so) but
-                    // /snapshot/latest returned nothing on this attempt —
-                    // most likely a transient retention/race. Tell the user
-                    // honestly instead of pretending we have no idea.
                     Text(
                         "Snapshot temporarily unavailable. Retrying…",
                         color = DengColors.TextMuted,
@@ -166,6 +197,57 @@ fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
                 style = MaterialTheme.typography.bodySmall,
                 color = DengColors.TextMuted,
             )
+            // v1.0.4: tiny one-liner diagnostic so the user can see how
+            // many capture attempts the bridge has made + any safe
+            // error string, without needing to open Termux.
+            if (bridgeStatus != null) {
+                Text(
+                    "Captures attempted: ${bridgeStatus.calledCount} • " +
+                    "Last result: ${bridgeStatus.lastResult ?: "—"}" +
+                    (bridgeStatus.lastBytes?.let { " • ${it / 1024} KB" } ?: ""),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DengColors.TextDim,
+                )
+            }
         }
     }
+}
+
+/**
+ * Subset of `device.last_bridge_status` that the Snapshot screen needs.
+ * Defensive parsing — the backend already scrubs the payload, but we
+ * still treat every field as nullable and string-coerce where it makes
+ * sense so a future schema bump can't crash the APK.
+ */
+private data class BridgeStatusSnapshot(
+    val captureFailedReason: String?,
+    val uploadFailedReason: String?,
+    val calledCount: Int,
+    val lastResult: String?,
+    val lastBytes: Int?,
+)
+
+private fun parseBridgeStatus(raw: JsonElement?): BridgeStatusSnapshot? {
+    val obj = (raw as? JsonObject) ?: return null
+    val s = { key: String -> (obj[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() && it != "null" } }
+    val i = { key: String -> (obj[key] as? JsonPrimitive)?.intOrNull }
+    val lastResult = s("snapshot_last_result")
+    val lastError = s("snapshot_last_error")
+    val uploadStatus = s("snapshot_last_upload_status")
+
+    val captureFailedReason = when {
+        lastResult == "capture_failed" -> lastError ?: "screencap unavailable"
+        else -> null
+    }
+    val uploadFailedReason = when {
+        lastResult == "upload_failed" -> uploadStatus ?: "upload failed"
+        else -> null
+    }
+    return BridgeStatusSnapshot(
+        captureFailedReason = captureFailedReason,
+        uploadFailedReason = uploadFailedReason,
+        calledCount = i("snapshot_provider_called_count") ?: 0,
+        lastResult = lastResult,
+        lastBytes = i("snapshot_last_bytes"),
+    )
 }

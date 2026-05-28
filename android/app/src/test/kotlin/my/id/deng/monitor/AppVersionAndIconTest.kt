@@ -22,20 +22,20 @@ class AppVersionAndIconTest {
     }
 
     @Test
-    fun `versionName is bumped to 1_0_3`() {
+    fun `versionName is bumped to 1_0_4`() {
         val gradle = buildGradle()
         assertTrue(
-            "expected versionName = \"1.0.3\" in build.gradle.kts",
-            gradle.contains(Regex("""versionName\s*=\s*"1\.0\.3"""")),
+            "expected versionName = \"1.0.4\" in build.gradle.kts",
+            gradle.contains(Regex("""versionName\s*=\s*"1\.0\.4"""")),
         )
     }
 
     @Test
-    fun `versionCode is bumped to 4`() {
+    fun `versionCode is bumped to 5`() {
         val gradle = buildGradle()
         assertTrue(
-            "expected versionCode = 4 in build.gradle.kts",
-            gradle.contains(Regex("""versionCode\s*=\s*4\b""")),
+            "expected versionCode = 5 in build.gradle.kts",
+            gradle.contains(Regex("""versionCode\s*=\s*5\b""")),
         )
     }
 
@@ -69,15 +69,15 @@ class AppVersionAndIconTest {
     }
 
     @Test
-    fun `Android string resources hold the v1_0_3 app name and launcher label`() {
+    fun `Android string resources hold the v1_0_4 app name and launcher label`() {
         val xml = File("src/main/res/values/strings.xml").readText(Charsets.UTF_8)
         assertNotNull(xml)
         assertTrue(
-            "app_name must be 'DENG Tool: Rejoin' (v1.0.3 dropped the APK suffix)",
+            "app_name must be 'DENG Tool: Rejoin' (since v1.0.3 dropped the APK suffix)",
             xml.contains(Regex("""<string name="app_name">\s*DENG Tool: Rejoin\s*</string>""")),
         )
         assertTrue(
-            "app_launcher_label must be 'DENG Rejoin' (v1.0.3 family branding)",
+            "app_launcher_label must be 'DENG Rejoin' (since v1.0.3 family branding)",
             xml.contains(Regex("""<string name="app_launcher_label">\s*DENG Rejoin\s*</string>""")),
         )
     }

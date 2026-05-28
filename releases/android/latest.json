@@ -1,22 +1,22 @@
 {
   "app_name": "DENG Tool: Rejoin APK",
-  "version_name": "1.0.3",
-  "version_code": 4,
-  "file_name": "deng-tool-rejoin-apk-v1.0.3.apk",
-  "sha256": "472de29ff183546d02ea2c192a338d66fb2be9cb48f7a712f238c9fac75eabe1",
-  "size_bytes": 1846633,
+  "version_name": "1.0.4",
+  "version_code": 5,
+  "file_name": "deng-tool-rejoin-apk-v1.0.4.apk",
+  "sha256": "CDD1CFDD9B21D9A9BCABCC439E5AAFBEA53611853FD747B5AB0FE80318C88242",
+  "size_bytes": 1863017,
   "released_at": "2026-05-28",
   "min_sdk": 26,
   "purpose": "Monitoring companion app for DENG Tool: Rejoin",
   "changelog": [
-    "Android App Info label is now 'DENG Tool: Rejoin' (dropped the redundant 'APK' suffix that appeared in the installed-app name).",
-    "Home-screen / launcher icon now reads 'DENG Rejoin' so the product family is recognisable at a glance.",
-    "Fixed android.os.NetworkOnMainThreadException when tapping any option in the Settings screen — MonitorApi.execRaw now suspends on Dispatchers.IO so every network call is off the UI thread.",
-    "Snapshot screen no longer says 'No snapshot yet' forever: now distinguishes 'Snapshot is off…', 'Waiting for first snapshot…', 'Snapshot temporarily unavailable. Retrying…', and 'Snapshot fetch failed. Retrying…'.",
-    "Snapshot status line shows the server-reported capture time (Indonesian 12h format) instead of the local fetch time when available.",
-    "Termux bridge: bumped MAX_SNAPSHOT_BYTES from 1.5 MB to 3 MB so full-DPI PNG screencaps from cloud phones (e.g. Samsung A51 1080×2400 ≈ 2 MB) actually upload instead of being silently dropped.",
-    "Backend /api/monitor/devices/:id/status now returns last_snapshot_captured_at and last_snapshot_age_seconds so the APK can render honest snapshot status.",
-    "Backend snapshot upload cap raised to 5 MB (server) so the 3 MB Termux client has headroom on higher-DPI screens.",
-    "Stable v1.0.0 Termux package was rebuilt with the new MAX_SNAPSHOT_BYTES; /install/v1.0.0 and /install/latest both serve the fixed artifact."
+    "Connection status is now computed from a 30-second last_seen_at TTL on the backend — the APK shows 'Disconnected' within ~30 seconds of the cloud phone rebooting or stopping `deng-rejoin`, instead of being stuck on 'Connected' forever.",
+    "Settings selection now updates instantly: optimistic local state is applied the moment a radio is tapped, and the status poller is kicked immediately after a successful save so you no longer have to leave and re-enter the Settings screen to see the saved value.",
+    "Snapshot tab no longer says 'Waiting for first snapshot…' forever — the Termux bridge now reports real capture/upload diagnostics (capture_failed, screencap_unavailable, upload_failed, byte counts) and the APK surfaces them as actionable status lines.",
+    "Snapshot capture is now whole-display: the Termux client tries `screencap -p`, then `/system/bin/screencap -p`, then (opt-in) `su -c \"screencap -p\"`, validates the PNG magic bytes, and never falls back to an app-only capture.",
+    "Package state model rewritten — the APK now shows exactly 5 states: Dead, Launching, Joining, Online, No Heartbeat. The old 'In-Lobby' state has been removed (lobby maps to Dead so the watchdog re-issues a relaunch/rejoin).",
+    "Launching vs Joining are now distinct: Launching = opening the Roblox package, Joining = opening the configured private-server URL.",
+    "Stable v1.0.0 Termux package was rebuilt with the new state vocabulary and whole-screen snapshot path; /install/v1.0.0 and /install/latest both serve the fixed artifact.",
+    "Backend /api/monitor/devices/:id/status now returns connected, connection_state, seconds_since_last_seen, and last_bridge_status alongside the existing last_snapshot_captured_at field.",
+    "Dashboard adds dedicated Launching and Joining tiles; the 'Connected/Disconnected' badge has been split into its own ConnectionBadge so it doesn't conflict with the package state vocabulary."
   ]
 }

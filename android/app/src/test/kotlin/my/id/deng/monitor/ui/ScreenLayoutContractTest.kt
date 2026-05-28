@@ -147,4 +147,106 @@ class ScreenLayoutContractTest {
             src.contains("\${lastSeenAt ?: \"—\"}"),
         )
     }
+
+    // ────────────────────────────────────────────────────────────────────
+    // v1.0.4 contract additions
+    // ────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `DashboardScreen v1_0_4 uses the new ConnectionBadge for device link state`() {
+        val src = ui("DashboardScreen.kt")
+        assertTrue(
+            "DashboardScreen must use ConnectionBadge (not StateBadge) for the connection",
+            src.contains("ConnectionBadge("),
+        )
+        assertFalse(
+            "DashboardScreen must not reuse StateBadge to render the connection state",
+            Regex("""StateBadge\(if \(connected\)""").containsMatchIn(src),
+        )
+    }
+
+    @Test
+    fun `DashboardScreen v1_0_4 reads the computed connectionLabel - not the legacy boolean only`() {
+        val src = ui("DashboardScreen.kt")
+        assertTrue(
+            "DashboardScreen must read DeviceSummary.connectionLabel for the badge text",
+            src.contains("connectionLabel"),
+        )
+        assertTrue(
+            "DashboardScreen must surface secondsSinceLastSeen when disconnected",
+            src.contains("secondsSinceLastSeen"),
+        )
+    }
+
+    @Test
+    fun `Components v1_0_4 StateBadge supports Joining and drops Relaunching-only behaviour`() {
+        val src = ui("Components.kt")
+        assertTrue(
+            "Components.StateBadge must have a branch for \"Joining\"",
+            src.contains("\"Joining\""),
+        )
+        assertTrue(
+            "Components.StateBadge must have a branch for \"Launching\"",
+            src.contains("\"Launching\""),
+        )
+        assertTrue(
+            "Components must expose a ConnectionBadge composable for device link state",
+            src.contains("fun ConnectionBadge("),
+        )
+        assertFalse(
+            "Components must not contain a special \"In-Lobby\" StateBadge branch",
+            src.contains("\"In-Lobby\""),
+        )
+    }
+
+    @Test
+    fun `SettingsScreen v1_0_4 uses the rememberDeviceStatusHandle + refreshNow pattern`() {
+        val src = ui("SettingsScreen.kt")
+        assertTrue(
+            "SettingsScreen must use rememberDeviceStatusHandle for refreshNow access",
+            src.contains("rememberDeviceStatusHandle"),
+        )
+        assertTrue(
+            "SettingsScreen must call handle.refreshNow() after a successful save",
+            src.contains("handle.refreshNow()"),
+        )
+        assertTrue(
+            "SettingsScreen must apply an optimistic update so the radio flips immediately",
+            src.contains("optimistic = next") || src.contains("optimistic = "),
+        )
+    }
+
+    @Test
+    fun `DeviceState v1_0_4 exposes a status handle with refreshNow`() {
+        val src = ui("DeviceState.kt")
+        assertTrue(
+            "DeviceState must define a DeviceStatusHandle with refreshNow()",
+            src.contains("class DeviceStatusHandle"),
+        )
+        assertTrue(
+            "DeviceStatusHandle must expose suspend fun refreshNow",
+            src.contains("suspend fun refreshNow"),
+        )
+    }
+
+    @Test
+    fun `SnapshotScreen v1_0_4 surfaces real capture and upload failure reasons`() {
+        val src = ui("SnapshotScreen.kt")
+        assertTrue(
+            "SnapshotScreen must surface bridge-reported capture_failed reason",
+            src.contains("Snapshot capture failed:"),
+        )
+        assertTrue(
+            "SnapshotScreen must surface bridge-reported upload_failed reason",
+            src.contains("Snapshot upload failed:"),
+        )
+        assertTrue(
+            "SnapshotScreen must explicitly say it's waiting for the cloud phone when disconnected",
+            src.contains("Waiting for cloud phone to reconnect"),
+        )
+        assertTrue(
+            "SnapshotScreen must parse last_bridge_status into a BridgeStatusSnapshot",
+            src.contains("BridgeStatusSnapshot"),
+        )
+    }
 }

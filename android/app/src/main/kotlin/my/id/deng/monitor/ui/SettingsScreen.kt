@@ -29,12 +29,22 @@ private val REFRESH_OPTIONS = listOf(2, 3, 5, 10, 15, 30, 60)
 
 @Composable
 fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore) {
-    val state by rememberDeviceStatus(api, sessionStore)
+    // v1.0.4: we need the *handle* (not just the state) so we can ask
+    // the poller to re-fetch immediately after a successful save.
+    // Previously the radio button only flipped to its new position on
+    // the next regular poll (2–60s later), which felt like the save
+    // had silently failed.
+    val handle = rememberDeviceStatusHandle(api, sessionStore)
+    val state by handle.state
     val scope = rememberCoroutineScope()
 
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var saveOk by remember { mutableStateOf(false) }
+    // Optimistic local override so the radio updates the instant the
+    // PATCH returns 200, even before the next poll. We keep it nullable
+    // and clear it as soon as the server-side row catches up.
+    var optimistic by remember { mutableStateOf<MonitorSettings?>(null) }
 
     // Settings now contains many cards (snapshot interval x5, refresh x7,
     // logout, about) — on small phones / cloud phones they don't fit on one
@@ -65,12 +75,49 @@ fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore) {
             }
             is DeviceFetchState.Ready -> {
                 val device = s.status.device
-                val current = s.status.settings
+                // The server value is the source of truth. The
+                // optimistic value is only "remembered" UNTIL the next
+                // poll comes back agreeing with it, then we drop it so
+                // we don't get permanently stuck on stale local state.
+                val serverSettings = s.status.settings
+                val current = optimistic ?: serverSettings
+                LaunchedEffect(serverSettings) {
+                    val o = optimistic
+                    if (o != null && o == serverSettings) optimistic = null
+                }
 
                 if (error != null) ErrorBanner(error!!)
                 if (saveOk) {
                     DengCard {
                         Text("Settings saved.", color = DengColors.Success)
+                    }
+                }
+
+                // Shared save helper — captures the optimistic update +
+                // immediate poll-refresh dance so both option lists
+                // behave identically.
+                fun saveSettings(next: MonitorSettings) {
+                    error = null
+                    saveOk = false
+                    saving = true
+                    optimistic = next  // instant UI feedback
+                    scope.launch {
+                        runCatching {
+                            api.updateSettings(device.id, next)
+                        }.onFailure { t ->
+                            // Rollback the optimistic flip on failure
+                            // so the radio doesn't lie about state.
+                            optimistic = null
+                            error = (t as? ApiException)?.safeMessage ?: t.javaClass.simpleName
+                        }.onSuccess {
+                            saveOk = true
+                            // Kick the poller immediately so the
+                            // settings card reflects the saved row in
+                            // ~one round-trip instead of one full poll
+                            // interval (2–60s).
+                            handle.refreshNow()
+                        }
+                        saving = false
                     }
                 }
 
@@ -89,17 +136,7 @@ fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore) {
                             selected = current.snapshotIntervalSeconds == sec,
                             enabled = !saving,
                             onSelect = {
-                                error = null
-                                saveOk = false
-                                saving = true
-                                scope.launch {
-                                    runCatching {
-                                        api.updateSettings(device.id, current.copy(snapshotIntervalSeconds = sec))
-                                    }.onFailure { t ->
-                                        error = (t as? ApiException)?.safeMessage ?: t.javaClass.simpleName
-                                    }.onSuccess { saveOk = true }
-                                    saving = false
-                                }
+                                saveSettings(current.copy(snapshotIntervalSeconds = sec))
                             },
                         )
                     }
@@ -120,17 +157,7 @@ fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore) {
                             selected = current.appRefreshIntervalSeconds == sec,
                             enabled = !saving,
                             onSelect = {
-                                error = null
-                                saveOk = false
-                                saving = true
-                                scope.launch {
-                                    runCatching {
-                                        api.updateSettings(device.id, current.copy(appRefreshIntervalSeconds = sec))
-                                    }.onFailure { t ->
-                                        error = (t as? ApiException)?.safeMessage ?: t.javaClass.simpleName
-                                    }.onSuccess { saveOk = true }
-                                    saving = false
-                                }
+                                saveSettings(current.copy(appRefreshIntervalSeconds = sec))
                             },
                         )
                     }

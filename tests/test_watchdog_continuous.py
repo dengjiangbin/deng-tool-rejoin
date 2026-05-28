@@ -187,10 +187,27 @@ class TestConfiguredPrivateServerUrl(unittest.TestCase):
         mock_launch.assert_called_once_with(entry, sup.cfg, "dead_recovery")
 
     # Test 7
-    def test_configured_url_dead_recovery_sets_launching(self):
-        """After successful Dead recovery, status becomes Launching."""
+    def test_configured_url_dead_recovery_sets_joining(self):
+        """v1.0.4: with a private URL configured, Dead recovery moves
+        to STATUS_JOINING (not Launching), because perform_rejoin opens
+        the deep link as part of the same call. This is exactly the
+        Launching-vs-Joining split the APK now surfaces:
+            Launching = opened the Roblox package
+            Joining   = opened the private-server URL
+        Without a URL, the test below confirms it stays Launching.
+        """
+        from agent.supervisor import STATUS_JOINING
         entry = _make_entry(private_url=self._URL)
         sup = _make_sup(private_url=self._URL)
+        with patch("agent.supervisor.launch_package_for_current_config", return_value=RejoinResult(True, root_used=False)), \
+             patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
+            sup._handle_state(_PKG, entry, STATUS_DEAD, STATUS_LAUNCHING, time.time())
+        self.assertEqual(sup.status_map.get(_PKG), STATUS_JOINING)
+
+    def test_no_url_dead_recovery_sets_launching(self):
+        """v1.0.4: without a private URL, Dead recovery stays Launching."""
+        entry = _make_entry(private_url=None)
+        sup = _make_sup(private_url=None)
         with patch("agent.supervisor.launch_package_for_current_config", return_value=RejoinResult(True, root_used=False)), \
              patch("agent.db.insert_event"), patch("agent.db.insert_heartbeat"):
             sup._handle_state(_PKG, entry, STATUS_DEAD, STATUS_LAUNCHING, time.time())

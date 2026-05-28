@@ -297,26 +297,49 @@ def test_status_provider_returns_empty_packages_when_no_supervisor_and_no_config
 
 
 def test_status_provider_maps_supervisor_status_to_public_state():
+    """v1.0.4 — APK-visible vocabulary is exactly five states.
+
+    Online / Dead / Launching / Joining / No Heartbeat. Anything outside
+    that set collapses to Dead so the watchdog (not the APK) owns
+    recovery. In particular "In-Lobby"/"Lobby" must NOT leak out anymore.
+    """
     autostart = _fresh()
     autostart.set_active_supervisor(_FakeSupervisor([
         {"package": "com.foo.bar", "username": "alice", "status": "Online",
          "revive_count": 2, "online_since": time.time() - 120},
         {"package": "com.baz.qux", "username": "bob", "status": "Dead"},
-        # Unknown vocabulary must collapse to Dead (public allowed-state).
+        # Launching now passes through as Launching (was: collapsed to Dead).
         {"package": "com.x.y", "username": "carol", "status": "Launching"},
-        # "Reconnecting" → No Heartbeat.
+        # Reconnecting collapses to No Heartbeat.
         {"package": "com.x.z", "username": "dan", "status": "Reconnecting"},
+        # Joining is its own state in v1.0.4 (was: deprecated, never emitted).
+        {"package": "com.x.w", "username": "eve", "status": "Joining"},
+        # Lobby/In-Lobby must collapse to Dead — never leak to APK.
+        {"package": "com.x.v", "username": "frank", "status": "In-Lobby"},
+        {"package": "com.x.u", "username": "grace", "status": "Lobby"},
     ]))
     payload = autostart._build_status_payload(tool_version="1.0.0", channel="stable")
     pkgs = payload["packages"]
-    assert len(pkgs) == 4
+    assert len(pkgs) == 7
     assert pkgs[0]["state"] == "Online"
     assert pkgs[0]["restart_count"] == 2
-    # Online package picks up an approximate runtime from online_since.
     assert pkgs[0]["runtime_seconds"] >= 100
     assert pkgs[1]["state"] == "Dead"
-    assert pkgs[2]["state"] == "Dead", "non-public state must collapse to Dead"
+    assert pkgs[2]["state"] == "Launching", "Launching now visible to APK"
     assert pkgs[3]["state"] == "No Heartbeat"
+    assert pkgs[4]["state"] == "Joining", "Joining now visible to APK"
+    assert pkgs[5]["state"] == "Dead", "In-Lobby must collapse to Dead"
+    assert pkgs[6]["state"] == "Dead", "Lobby must collapse to Dead"
+
+
+def test_apk_visible_states_is_exactly_five_with_no_in_lobby():
+    """The APK_VISIBLE_STATES allow-list must be the canonical 5 set."""
+    from agent import monitor_autostart
+    assert monitor_autostart.APK_VISIBLE_STATES == frozenset(
+        {"Dead", "Launching", "Joining", "Online", "No Heartbeat"}
+    )
+    assert "In-Lobby" not in monitor_autostart.APK_VISIBLE_STATES
+    assert "Lobby" not in monitor_autostart.APK_VISIBLE_STATES
 
 
 def test_status_provider_swallows_broken_supervisor():

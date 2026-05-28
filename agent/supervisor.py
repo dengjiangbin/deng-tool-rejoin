@@ -166,9 +166,15 @@ STATUS_WRONG_GAME        = "Wrong Game / Wrong Server"
 # Richer state constants for improved UX
 STATUS_LOBBY             = "Lobby"             # App open at home/lobby, no URL join active
 STATUS_IN_SERVER         = "In Server"         # Strong evidence: game experience loaded
-STATUS_JOINING           = "Join" + "ing"      # DEPRECATED — kept for backward compat only.
-                                               # WatchdogSupervisor never produces this state.
-                                               # Use STATUS_LAUNCHING for post-launch transient.
+STATUS_JOINING           = "Joining"            # v1.0.4: REHABILITATED — distinct
+                                                # phase emitted by WatchdogSupervisor when
+                                                # a private-server URL deep link has been
+                                                # opened but no in-game proof yet. The
+                                                # APK shows Dead → Launching (open
+                                                # package) → Joining (open private URL)
+                                                # → Online. Watchdog never emits
+                                                # Joining when no URL is configured —
+                                                # in that case Launching applies.
 STATUS_CLOSED            = "Closed"            # App cleanly not running after a session
 STATUS_JOIN_UNCONFIRMED  = "Join " + "Unconfirmed"  # App healthy but no in-game evidence yet
 # State vocabulary aligned to user-facing terminology:
@@ -1862,7 +1868,14 @@ class WatchdogSupervisor:
             if success:
                 self._revive_count[pkg] = self._revive_count.get(pkg, 0) + 1
                 self._set_grace(pkg, now)
-                self._set_status(pkg, STATUS_LAUNCHING)
+                # v1.0.4: Launching = opened app only; Joining = opened
+                # private-server URL. perform_rejoin already opens the
+                # deep link when a URL is configured, so we report
+                # Joining in that case so the APK can show the right
+                # transition. Without URL, the launch is just "app open".
+                self._set_status(
+                    pkg, STATUS_JOINING if url_configured else STATUS_LAUNCHING
+                )
             else:
                 self._failure_count[pkg] = self._failure_count.get(pkg, 0) + 1
 
@@ -1926,7 +1939,11 @@ class WatchdogSupervisor:
                 self._revive_count[pkg] = self._revive_count.get(pkg, 0) + 1
                 self._nhb_offline_count[pkg] = 0
                 self._set_grace(pkg, now)
-                self._set_status(pkg, STATUS_LAUNCHING)
+                # v1.0.4: same Launching vs Joining split as the Dead
+                # recovery branch above — see comment there.
+                self._set_status(
+                    pkg, STATUS_JOINING if url_configured else STATUS_LAUNCHING
+                )
                 # Reset online_start_ts — package is relaunching.
                 self._online_start_ts.pop(pkg, None)
             else:
@@ -2203,6 +2220,23 @@ class WatchdogSupervisor:
                 )
                 checked += 1
 
+                # v1.0.4 — sticky Launching / Joining during grace.
+                # Before this guard, _detect_package_state would report
+                # Dead/No Heartbeat for ~10–20s after a launch (process
+                # exists but not yet in-game), and that overwrite was
+                # propagating to the APK as Dead. Now we only let
+                # detection overwrite during grace if it confirms Online
+                # — otherwise we preserve the launch/join intent so the
+                # APK shows the real transition.
+                prev_pinned = self._prev_state.get(pkg)
+                pin_states = {STATUS_LAUNCHING, STATUS_JOINING, STATUS_RELAUNCHING}
+                if (
+                    self._in_grace(pkg, now)
+                    and prev_pinned in pin_states
+                    and state not in {STATUS_ONLINE, STATUS_JOIN_FAILED,
+                                      STATUS_WRONG_GAME}
+                ):
+                    state = prev_pinned
                 self._set_status(pkg, state)
                 self._prev_state[pkg] = state
 

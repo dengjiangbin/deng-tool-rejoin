@@ -868,3 +868,155 @@ describe('POST /api/monitor/bridge/issue-from-license', () => {
     assert.equal(dev.channel, 'stable');
   });
 });
+
+
+// ── v1.0.4 — connection TTL, bridge_status, new state vocabulary ─────────────
+
+describe('v1.0.4 connection_state TTL', () => {
+  const { computeConnectionState, DEVICE_CONNECTION_TTL_SECONDS } =
+    require('../src/monitorRoutes.js').__test__;
+
+  test('fresh last_seen_at → Connected', () => {
+    const r = computeConnectionState(new Date().toISOString());
+    assert.equal(r.connected, true);
+    assert.equal(r.connection_state, 'Connected');
+    assert.ok(typeof r.seconds_since_last_seen === 'number');
+    assert.ok(r.seconds_since_last_seen >= 0 && r.seconds_since_last_seen < 5);
+  });
+
+  test('stale last_seen_at → Disconnected even if status_connected was true', () => {
+    const stale = new Date(Date.now() - (DEVICE_CONNECTION_TTL_SECONDS + 60) * 1000).toISOString();
+    const r = computeConnectionState(stale);
+    assert.equal(r.connected, false);
+    assert.equal(r.connection_state, 'Disconnected');
+    assert.ok(r.seconds_since_last_seen > DEVICE_CONNECTION_TTL_SECONDS);
+  });
+
+  test('null last_seen_at → Disconnected', () => {
+    const r = computeConnectionState(null);
+    assert.equal(r.connected, false);
+    assert.equal(r.connection_state, 'Disconnected');
+    assert.equal(r.seconds_since_last_seen, null);
+  });
+
+  test('TTL boundary is exactly 30 seconds (default)', () => {
+    assert.equal(DEVICE_CONNECTION_TTL_SECONDS, 30);
+  });
+});
+
+describe('v1.0.4 summarizePackages — new state vocabulary', () => {
+  const { summarizePackages } = require('../src/monitorRoutes.js').__test__;
+
+  test('counts Launching, Joining, and No Heartbeat separately', () => {
+    const rows = [
+      { state: 'Online', ram_mb: 100 },
+      { state: 'Launching', ram_mb: 50 },
+      { state: 'Joining', ram_mb: 60 },
+      { state: 'No Heartbeat', ram_mb: 70 },
+      { state: 'Dead', ram_mb: 0 },
+      { state: 'Relaunching', ram_mb: 0 }, // legacy → counted in both launching and relaunching
+    ];
+    const s = summarizePackages(rows);
+    assert.equal(s.total, 6);
+    assert.equal(s.online, 1);
+    assert.equal(s.dead, 1);
+    assert.equal(s.launching, 2, 'Launching + legacy Relaunching both count');
+    assert.equal(s.joining, 1);
+    assert.equal(s.no_heartbeat, 1);
+    assert.equal(s.relaunching, 1, 'legacy counter preserved for old APKs');
+  });
+
+  test('In-Lobby (if anyone sends it) lands in "other", never in dead/launching/joining', () => {
+    const s = summarizePackages([{ state: 'In-Lobby', ram_mb: 0 }]);
+    assert.equal(s.other, 1);
+    assert.equal(s.dead, 0);
+    assert.equal(s.launching, 0);
+    assert.equal(s.joining, 0);
+  });
+});
+
+describe('v1.0.4 /status endpoint exposes connection_state and last_bridge_status', () => {
+  const { DEVICE_CONNECTION_TTL_SECONDS } = require('../src/monitorRoutes.js').__test__;
+  beforeEach(() => { mem = makeMemoryDb(); });
+
+  test('/status returns Disconnected after TTL even though status_connected was sticky-true', async () => {
+
+    const seed = seedActiveLicense({ owner: 'disc-ttl' });
+    const issue = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: seed.key, install_id_hash: seed.installIdHash });
+    const token = issue.body.bridge_token;
+
+    // First push flips status_connected to true.
+    await request(app).post('/api/monitor/bridge/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ schema: 1, tool_version: '1.0.0', channel: 'stable', packages: [] });
+
+    const dev = mem.monitor_devices[0];
+    assert.equal(dev.status_connected, true, 'sticky boolean was set');
+    // Now backdate last_seen_at well past the TTL.
+    dev.last_seen_at = new Date(Date.now() - (DEVICE_CONNECTION_TTL_SECONDS + 60) * 1000).toISOString();
+
+    const appToken = seedAppSession('disc-ttl');
+    const status = await request(app)
+      .get(`/api/monitor/devices/${dev.id}/status`)
+      .set('Authorization', `Bearer ${appToken}`);
+    assert.equal(status.status, 200);
+    assert.equal(
+      status.body.device.connected, false,
+      'computed connected boolean overrides sticky status_connected',
+    );
+    assert.equal(status.body.device.connection_state, 'Disconnected');
+    assert.ok(status.body.device.seconds_since_last_seen >= DEVICE_CONNECTION_TTL_SECONDS);
+    // Legacy sticky field is still surfaced unmodified for back-compat.
+    assert.equal(status.body.device.status_connected, true);
+  });
+
+  test('/push accepts bridge_status and /status echoes it back', async () => {
+    const seed = seedActiveLicense({ owner: 'disc-bs' });
+    const issue = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: seed.key, install_id_hash: seed.installIdHash });
+    const token = issue.body.bridge_token;
+
+    const push = await request(app).post('/api/monitor/bridge/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        schema: 1, tool_version: '1.0.0', channel: 'stable',
+        packages: [],
+        bridge_status: {
+          snapshot_last_result: 'capture_failed',
+          snapshot_last_bytes: 0,
+          snapshot_last_error: 'screencap_unavailable',
+          snapshot_provider_called_count: 7,
+          snapshot_last_upload_status: null,
+          screencap_available: false,
+          last_push_result: 'success',
+          // Banned field — must be stripped server-side.
+          bridge_token: 'leaking-token',
+          license_key: 'DENG-XXXX',
+        },
+      });
+    assert.equal(push.status, 200);
+
+    const dev = mem.monitor_devices[0];
+    const bs = dev.last_bridge_status;
+    assert.ok(bs, 'bridge_status persisted to device row');
+    assert.equal(bs.snapshot_last_result, 'capture_failed');
+    assert.equal(bs.snapshot_last_error, 'screencap_unavailable');
+    assert.equal(bs.snapshot_provider_called_count, 7);
+    assert.equal(bs.screencap_available, false);
+    assert.equal(bs.last_push_result, 'success');
+    // Allow-list is enforced — secrets dropped.
+    assert.equal(bs.bridge_token, undefined);
+    assert.equal(bs.license_key, undefined);
+    assert.equal(bs.schema, 1, 'schema marker present');
+
+    const appToken = seedAppSession('disc-bs');
+    const status = await request(app)
+      .get(`/api/monitor/devices/${dev.id}/status`)
+      .set('Authorization', `Bearer ${appToken}`);
+    assert.equal(status.status, 200);
+    assert.equal(status.body.device.last_bridge_status.snapshot_last_result, 'capture_failed');
+  });
+});

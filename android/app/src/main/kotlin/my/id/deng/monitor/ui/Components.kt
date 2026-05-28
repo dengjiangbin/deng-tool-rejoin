@@ -72,14 +72,28 @@ fun DengGradientButton(
     }
 }
 
+/**
+ * Package state badge.
+ *
+ * v1.0.4: the APK-visible state vocabulary is exactly five values —
+ * Dead, Launching, Joining, Online, No Heartbeat. Older state names
+ * (Relaunching, etc.) still get a sensible color so legacy backends
+ * don't render as a grey "unknown" pill, but the canonical 5 cover
+ * everything the Termux supervisor will emit going forward.
+ *
+ * The lobby state is intentionally NOT a branch — per user requirement,
+ * lobby maps to Dead at the bridge level, never reaches the APK.
+ */
 @Composable
 fun StateBadge(state: String) {
     val (bg, fg) = when (state) {
         "Online"        -> DengColors.Success.copy(alpha = 0.18f) to DengColors.Success
         "Dead"          -> DengColors.Danger.copy(alpha = 0.18f) to DengColors.Danger
-        "Relaunching"   -> DengColors.Warning.copy(alpha = 0.18f) to DengColors.Warning
+        "Launching"     -> DengColors.Cyan.copy(alpha = 0.18f) to DengColors.Cyan
+        "Joining"       -> DengColors.Purple.copy(alpha = 0.18f) to DengColors.Purple
         "No Heartbeat"  -> DengColors.Warning.copy(alpha = 0.18f) to DengColors.Warning
-        "Launching"    -> DengColors.Cyan.copy(alpha = 0.18f) to DengColors.Cyan
+        // Legacy / transitional — keep colored so users see SOMETHING.
+        "Relaunching"   -> DengColors.Cyan.copy(alpha = 0.18f) to DengColors.Cyan
         else            -> DengColors.TextMuted.copy(alpha = 0.18f) to DengColors.TextMuted
     }
     Surface(
@@ -88,6 +102,32 @@ fun StateBadge(state: String) {
     ) {
         Text(
             text = state,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            color = fg,
+            style = MaterialTheme.typography.labelMedium,
+        )
+    }
+}
+
+/**
+ * Device-level connection badge ("Connected" / "Disconnected").
+ *
+ * v1.0.4: split out from StateBadge because the package state
+ * vocabulary (Dead / Online / Launching / Joining / No Heartbeat) and
+ * the device link state are unrelated concepts. The Dashboard used to
+ * reuse StateBadge with "Online"/"Dead" — that was confusing because
+ * a cloud phone could be "Connected" while every package was "Dead".
+ */
+@Composable
+fun ConnectionBadge(label: String, connected: Boolean) {
+    val (bg, fg) = if (connected) {
+        DengColors.Success.copy(alpha = 0.18f) to DengColors.Success
+    } else {
+        DengColors.Danger.copy(alpha = 0.18f) to DengColors.Danger
+    }
+    Surface(color = bg, shape = RoundedCornerShape(999.dp)) {
+        Text(
+            text = label,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
             color = fg,
             style = MaterialTheme.typography.labelMedium,

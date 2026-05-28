@@ -122,13 +122,19 @@ function safePackageRowForApp(row) {
   };
 }
 
+// v1.0.4: canonical 5 APK-visible states — Dead, Launching, Joining,
+// Online, No Heartbeat. Older `Relaunching` rolls into `launching` for
+// summary purposes (the Termux supervisor still emits it briefly).
+// `In-Lobby` was removed per user requirement.
 function summarizePackages(rows) {
   const out = {
     total: rows.length,
     online: 0,
     dead: 0,
-    relaunching: 0,
+    launching: 0,
+    joining: 0,
     no_heartbeat: 0,
+    relaunching: 0,  // legacy counter, kept for old APKs that still read it
     other: 0,
     total_ram_mb: 0,
     average_ram_mb: 0,
@@ -138,13 +144,44 @@ function summarizePackages(rows) {
     switch (r.state) {
       case 'Online':       out.online++; break;
       case 'Dead':         out.dead++; break;
-      case 'Relaunching':  out.relaunching++; break;
+      case 'Launching':    out.launching++; break;
+      case 'Joining':      out.joining++; break;
       case 'No Heartbeat': out.no_heartbeat++; break;
+      // Old supervisor vocabulary that may still arrive briefly.
+      // Counted both into `launching` (new APK) and `relaunching`
+      // (legacy field) so neither view goes blank.
+      case 'Relaunching':  out.launching++; out.relaunching++; break;
       default:             out.other++;
     }
   }
   out.average_ram_mb = rows.length ? Math.round(out.total_ram_mb / rows.length) : 0;
   return out;
+}
+
+// v1.0.4: how stale `last_seen_at` may get before we tell the APK the
+// device is Disconnected. Termux pushes every ~2s, so 30s = 15 missed
+// pushes — long enough to ride out a flaky cell connection, short
+// enough that a cloud-phone reboot or `deng-rejoin` exit is visible.
+const DEVICE_CONNECTION_TTL_SECONDS = 30;
+
+function computeConnectionState(lastSeenAt) {
+  // Returns { connected, connection_state, seconds_since_last_seen }.
+  // Anchored to the server clock — clients can never spoof "I'm fresh"
+  // by lying about their wall-clock.
+  if (!lastSeenAt) {
+    return { connected: false, connection_state: 'Disconnected', seconds_since_last_seen: null };
+  }
+  const t = new Date(lastSeenAt).getTime();
+  if (!Number.isFinite(t)) {
+    return { connected: false, connection_state: 'Disconnected', seconds_since_last_seen: null };
+  }
+  const age = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  const fresh = age <= DEVICE_CONNECTION_TTL_SECONDS;
+  return {
+    connected: fresh,
+    connection_state: fresh ? 'Connected' : 'Disconnected',
+    seconds_since_last_seen: age,
+  };
 }
 
 // ── Auth middlewares ────────────────────────────────────────────────────────
@@ -277,17 +314,50 @@ router.post('/api/monitor/bridge/push',
     const device = req.bridgeDevice;
     const nowTs = new Date().toISOString();
 
+    // v1.0.4: accept an optional `bridge_status` object from the Termux
+    // bridge so the APK Snapshot screen can render real capture / upload
+    // results instead of "Waiting for first snapshot…" forever. Stored
+    // as a small JSON blob on monitor_devices.last_bridge_status (added
+    // by migration 010). We scrub it server-side because the bridge is
+    // user-controlled — only known-safe keys + size cap survive.
+    const incomingStatus = body.bridge_status;
+    let bridgeStatusClean = null;
+    if (incomingStatus && typeof incomingStatus === 'object' && !Array.isArray(incomingStatus)) {
+      const pick = (v, max = 64) =>
+        typeof v === 'string' ? v.slice(0, max) : (typeof v === 'number' && Number.isFinite(v) ? v : null);
+      bridgeStatusClean = {
+        // Snapshot pipeline diagnostics (most important for the user's bug).
+        snapshot_last_result: pick(incomingStatus.snapshot_last_result, 64),
+        snapshot_last_bytes: Math.max(0, Math.min(10_000_000, parseInt(incomingStatus.snapshot_last_bytes, 10) || 0)) || null,
+        snapshot_last_error: pick(incomingStatus.snapshot_last_error, 200),
+        snapshot_provider_called_count: Math.max(0, Math.min(1_000_000, parseInt(incomingStatus.snapshot_provider_called_count, 10) || 0)) || 0,
+        snapshot_last_upload_status: pick(incomingStatus.snapshot_last_upload_status, 16),
+        screencap_available: typeof incomingStatus.screencap_available === 'boolean'
+          ? incomingStatus.screencap_available : null,
+        // Push pipeline diagnostics (we already track this via timestamps,
+        // but the bridge's own view is useful for debugging time skew).
+        last_push_result: pick(incomingStatus.last_push_result, 32),
+        // Schema marker so callers can detect old / new payloads.
+        schema: 1,
+        // Server-side trust timestamp — clients can't lie about when we
+        // received this row.
+        received_at: nowTs,
+      };
+    }
+
     // Update device heartbeat / version metadata
     try {
+      const update = {
+        status_connected: true,
+        last_seen_at: nowTs,
+        tool_version: typeof body.tool_version === 'string' ? body.tool_version.slice(0, 32) : null,
+        channel: typeof body.channel === 'string' && ['stable','beta','dev','latest','test'].includes(body.channel)
+          ? body.channel : 'stable',
+        last_disconnect_reason: null,
+      };
+      if (bridgeStatusClean) update.last_bridge_status = bridgeStatusClean;
       await supabase.from('monitor_devices')
-        .update({
-          status_connected: true,
-          last_seen_at: nowTs,
-          tool_version: typeof body.tool_version === 'string' ? body.tool_version.slice(0, 32) : null,
-          channel: typeof body.channel === 'string' && ['stable','beta','dev','latest','test'].includes(body.channel)
-            ? body.channel : 'stable',
-          last_disconnect_reason: null,
-        })
+        .update(update)
         .eq('id', device.id);
     } catch (err) {
       console.error('[monitor] device update failed', err?.message || err);
@@ -399,7 +469,14 @@ router.get('/api/monitor/devices', requireAppAuth, async (req, res) => {
       .order('last_seen_at', { ascending: false });
     if (error) throw error;
     res.set('Cache-Control', 'no-store');
-    return res.json({ devices: data || [] });
+    // v1.0.4: enrich each row with computed connection_state so the APK's
+    // device-picker (when it lands) can show Disconnected for stale rows
+    // without an extra round-trip.
+    const enriched = (data || []).map((d) => ({
+      ...d,
+      ...computeConnectionState(d.last_seen_at),
+    }));
+    return res.json({ devices: enriched });
   } catch (err) {
     console.error('[monitor] list devices failed', err?.message || err);
     return serverError(res, 'list_devices_failed');
@@ -410,7 +487,14 @@ async function loadOwnedDevice(req, deviceId) {
   if (!deviceId || typeof deviceId !== 'string') return null;
   const { data } = await supabase
     .from('monitor_devices')
-    .select('id, owner_discord_user_id, device_label, tool_version, channel, status_connected, last_seen_at, created_at')
+    .select(
+      // v1.0.4: include last_bridge_status (snapshot capture diagnostics
+      // pushed by the Termux bridge) so /status can surface real reasons
+      // to the APK instead of the v1.0.3 "Waiting for first snapshot…"
+      // silent state. Older deploys without migration 010 simply have
+      // null in that column and the APK falls back to its previous copy.
+      'id, owner_discord_user_id, device_label, tool_version, channel, status_connected, last_seen_at, created_at, last_bridge_status',
+    )
     .eq('id', deviceId)
     .maybeSingle();
   if (!data || data.owner_discord_user_id !== req.appOwner) return null;
@@ -453,6 +537,11 @@ router.get('/api/monitor/devices/:id/status', requireAppAuth, async (req, res) =
         lastSnapshotAgeSeconds = Math.floor(ageMs / 1000);
       }
     }
+    // v1.0.4: computed connection state — the raw status_connected
+    // boolean used to be sticky-true forever after the first push, which
+    // is why the APK still said Connected after the cloud phone was
+    // rebooted. Now we anchor on last_seen_at + DEVICE_CONNECTION_TTL_SECONDS.
+    const conn = computeConnectionState(device.last_seen_at);
     res.set('Cache-Control', 'no-store');
     return res.json({
       device: {
@@ -460,10 +549,17 @@ router.get('/api/monitor/devices/:id/status', requireAppAuth, async (req, res) =
         device_label: device.device_label,
         tool_version: device.tool_version,
         channel: device.channel,
+        // Legacy field — kept for backwards compatibility with older APKs.
+        // New APKs (v1.0.4+) should read `connected` / `connection_state`.
         status_connected: device.status_connected,
+        connected: conn.connected,
+        connection_state: conn.connection_state,
+        seconds_since_last_seen: conn.seconds_since_last_seen,
         last_seen_at: device.last_seen_at,
         last_snapshot_captured_at: lastSnapshotCapturedAt,
         last_snapshot_age_seconds: lastSnapshotAgeSeconds,
+        // Bridge self-reported diagnostics (optional, may be null).
+        last_bridge_status: device.last_bridge_status || null,
       },
       summary: summarizePackages(safePackages),
       packages: safePackages,
@@ -855,4 +951,6 @@ module.exports.__test__ = {
   MAX_SNAPSHOT_BYTES,
   BRIDGE_TOKEN_TTL_SEC,
   ALLOWED_SNAPSHOT_INTERVALS,
+  computeConnectionState,
+  DEVICE_CONNECTION_TTL_SECONDS,
 };

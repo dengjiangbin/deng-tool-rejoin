@@ -117,8 +117,12 @@ def test_state_vocabulary_clamps_to_allowed_set():
 
 
 def test_state_vocabulary_includes_required_public_states():
-    # The user-facing app expects these specific labels.
-    for required in {"Online", "Dead", "Relaunching", "No Heartbeat", "Launching", "Unknown"}:
+    # The user-facing app expects these specific labels — including the
+    # v1.0.4 additions Launching + Joining + No Heartbeat.
+    for required in {
+        "Online", "Dead", "Launching", "Joining", "No Heartbeat",
+        "Relaunching", "Unknown",
+    }:
         assert required in ALLOWED_STATES
 
 
@@ -386,3 +390,104 @@ def test_safe_http_post_raw_uses_curl_backend_on_termux(monkeypatch):
     args = captured["args"]
     assert any("Authorization: Bearer abc" in str(a) for a in args)
     assert any("Content-Type: application/json" in str(a) for a in args)
+
+
+# ── v1.0.4 — bridge_status push payload + snapshot diagnostics ────────────────
+
+
+def test_push_payload_embeds_bridge_status_block(monkeypatch):
+    """v1.0.4: every /push payload now carries a `bridge_status` object
+    so the backend can persist real snapshot pipeline diagnostics on the
+    device row. Without this, the APK Snapshot tab can't tell the user
+    WHY a snapshot is missing — that was the v1.0.3 silent-failure bug.
+    """
+    cfg = BridgeConfig(
+        enabled=True, token="abc", bridge_url="https://example.com",
+        snapshot_interval_seconds=0,
+    )
+    bridge = MonitorBridge(config=cfg, status_provider=lambda: {"packages": []})
+    bridge.state.snapshot_last_result = "capture_failed"
+    bridge.state.snapshot_last_error = "screencap_unavailable"
+    bridge.state.snapshot_provider_called_count = 3
+    bridge.state.screencap_available = False
+
+    captured = {}
+    def _spy(url, body_bytes, *, content_type, headers, timeout):
+        captured["body"] = body_bytes
+        return 200, b'{"ok":true,"accepted":0,"settings":null}'
+
+    monkeypatch.setattr("agent.safe_http.post_raw", _spy)
+    bridge._tick()
+
+    import json as _json
+    pushed = _json.loads(captured["body"].decode("utf-8"))
+    assert "bridge_status" in pushed
+    bs = pushed["bridge_status"]
+    assert bs["snapshot_last_result"] == "capture_failed"
+    assert bs["snapshot_last_error"] == "screencap_unavailable"
+    assert bs["snapshot_provider_called_count"] == 3
+    assert bs["screencap_available"] is False
+
+
+def test_snapshot_provider_none_records_screencap_unavailable(monkeypatch):
+    """If the snapshot provider returns None (screencap missing / perm
+    denied), the bridge must record a precise reason — that's what the
+    APK shows in the Snapshot tab instead of "Waiting forever".
+    """
+    cfg = BridgeConfig(
+        enabled=True, token="t", bridge_url="https://example.com",
+        snapshot_interval_seconds=15,
+    )
+    bridge = MonitorBridge(
+        config=cfg, status_provider=lambda: {"packages": []},
+        snapshot_provider=lambda: None,
+    )
+    monkeypatch.setattr("agent.safe_http.post_raw", lambda *a, **kw: (200, b'{"ok":true}'))
+    bridge._tick()
+    assert bridge.state.snapshot_last_result == "capture_failed"
+    assert bridge.state.snapshot_last_error == "screencap_unavailable"
+    assert bridge.state.screencap_available is False
+    assert bridge.state.snapshot_provider_called_count == 1
+
+
+def test_snapshot_capture_success_records_bytes_and_upload_ok(monkeypatch):
+    """Happy path: provider returns PNG bytes, upload succeeds. The
+    bridge must record byte count + upload status so the APK can show
+    them in the diagnostics line.
+    """
+    cfg = BridgeConfig(
+        enabled=True, token="t", bridge_url="https://example.com",
+        snapshot_interval_seconds=1,
+    )
+    png = b"\x89PNG\r\n\x1a\n" + b"x" * 1024
+    bridge = MonitorBridge(
+        config=cfg, status_provider=lambda: {"packages": []},
+        snapshot_provider=lambda: (png, "image/png"),
+    )
+    monkeypatch.setattr("agent.safe_http.post_raw", lambda *a, **kw: (200, b'{"ok":true}'))
+    # Tick once for the push, then again to trigger the snapshot.
+    bridge._tick()
+    time.sleep(1.1)
+    bridge._tick()
+    assert bridge.state.snapshot_last_result == "success"
+    assert bridge.state.snapshot_last_bytes == len(png)
+    assert bridge.state.snapshot_last_upload_status == "ok"
+    assert bridge.state.screencap_available is True
+
+
+def test_to_push_status_redacts_no_secrets():
+    """BridgeState.to_push_status must never include tokens, URLs, or
+    license keys — only the small snapshot/push diagnostic block.
+    """
+    from agent.monitor_bridge import BridgeState
+    s = BridgeState()
+    out = s.to_push_status()
+    assert set(out.keys()) == {
+        "snapshot_last_result",
+        "snapshot_last_bytes",
+        "snapshot_last_error",
+        "snapshot_last_upload_status",
+        "snapshot_provider_called_count",
+        "screencap_available",
+        "last_push_result",
+    }

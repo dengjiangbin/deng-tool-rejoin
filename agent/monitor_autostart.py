@@ -315,6 +315,13 @@ def get_monitor_status_summary() -> dict[str, Any]:
         "snapshot_interval_seconds": snapshot_interval,
         "snapshot_last_sent_at": (state.snapshot_last_sent_at if state else 0.0),
         "snapshot_last_result": (state.snapshot_last_result if state else None),
+        # v1.0.4 diagnostics — what `deng-rejoin monitor status` prints
+        # so the user can debug the snapshot pipeline without secrets.
+        "snapshot_last_bytes": (state.snapshot_last_bytes if state else 0),
+        "snapshot_last_error": (state.snapshot_last_error if state else None),
+        "snapshot_last_upload_status": (state.snapshot_last_upload_status if state else None),
+        "snapshot_provider_called_count": (state.snapshot_provider_called_count if state else 0),
+        "screencap_available": (state.screencap_available if state else None),
         "configured_packages": configured_count,
         "reported_packages": reported_count,
         "supervisor_active": _active_supervisor is not None,
@@ -326,38 +333,80 @@ def get_monitor_status_summary() -> dict[str, Any]:
 # ── Status provider ─────────────────────────────────────────────────────────
 
 
-# Map the supervisor's status vocabulary to the public APK vocabulary
-# (the user explicitly restricts to: In-Lobby, Online, No Heartbeat, Dead).
+# v1.0.4: APK-visible state vocabulary is now exactly five values:
+#
+#   Dead          — process not running, or in lobby/not playing (so the
+#                   tool should relaunch / rejoin).
+#   Launching     — open-package command issued, process is starting.
+#                   This is BEFORE the private-server join intent.
+#   Joining       — private-server URL join intent has been issued; the
+#                   package is trying to enter that server.
+#   Online        — process confirmed in-game / healthy heartbeat.
+#   No Heartbeat  — process likely alive but no healthy heartbeat — will
+#                   trigger relaunch/rejoin after cooldown.
+#
+# `In-Lobby` is intentionally NOT in this set anymore. Per user feedback,
+# treating "Lobby" as a distinct state was blocking relaunch/rejoin —
+# it now collapses to `Dead` so the supervisor's recovery loop kicks in.
 _SUPERVISOR_TO_PUBLIC_STATE: dict[str, str] = {
+    # Healthy / in-game.
     "Online": "Online",
     "In Server": "Online",
-    "In-Lobby": "In-Lobby",
-    "Lobby": "In-Lobby",
+    # Process started but not yet in-game and not yet joining the
+    # private server. `Preparing` and the deprecated `Launched` collapse
+    # here too — they're all "process is coming up".
+    "Launching": "Launching",
+    "Launched": "Launching",
+    "Preparing": "Launching",
+    "Relaunching": "Launching",
+    # Process is in the join-private-URL phase. `Join Unconfirmed`
+    # collapses here because the supervisor uses it for "deep link
+    # opened but no in-game proof yet" — same user-visible meaning.
+    "Joining": "Joining",
+    "Join Unconfirmed": "Joining",
+    # Heartbeat lost on a known-good process. Reconnecting / Background
+    # collapse here because they all describe "process alive, gameplay
+    # uncertain" and the supervisor's relaunch cooldown handles them.
     "No Heartbeat": "No Heartbeat",
+    "Reconnecting": "No Heartbeat",
+    "Background": "No Heartbeat",
+    # Genuinely not running, OR returned to lobby / not-playing. The
+    # user explicitly does NOT want `In-Lobby` as a separate state —
+    # lobby must map to Dead so the watchdog re-issues a launch/rejoin.
     "Dead": "Dead",
+    "In-Lobby": "Dead",
+    "Lobby": "Dead",
     "Closed": "Dead",
     "Disconnected": "Dead",
     "Failed": "Dead",
     "Stopped": "Dead",
-    "Launching": "Dead",
-    "Launched": "Dead",
-    "Preparing": "Dead",
-    "Reconnecting": "No Heartbeat",
-    "Background": "No Heartbeat",
     "Unknown": "Dead",
     "Offline": "Dead",
     "Warning": "Dead",
-    "Relaunching": "Dead",
+    "Join Failed": "Dead",
+    "Wrong Game / Wrong Server": "Dead",
 }
+
+# Public allow-list for cross-checking: exactly five values.
+APK_VISIBLE_STATES: frozenset[str] = frozenset(
+    {"Dead", "Launching", "Joining", "Online", "No Heartbeat"}
+)
 
 
 def _coerce_public_state(raw: Any) -> str:
+    """Collapse any supervisor state string to the 5 APK-visible states.
+
+    Anything outside the canonical 5 — including blank/None — is mapped
+    to ``Dead`` so the watchdog's recovery loop owns the recovery
+    decision rather than the APK silently rendering an unfamiliar label.
+    """
     if not isinstance(raw, str) or not raw:
         return "Dead"
     if raw in _SUPERVISOR_TO_PUBLIC_STATE:
         return _SUPERVISOR_TO_PUBLIC_STATE[raw]
-    if raw in ALLOWED_STATES:
-        return raw
+    # If the supervisor introduces a brand-new state name later and we
+    # haven't wired it into the map, default to "Dead" — never silently
+    # leak the unknown vocabulary to the APK.
     return "Dead"
 
 
@@ -686,6 +735,7 @@ def _announce_status(*, connected: bool) -> None:
 
 
 __all__ = [
+    "APK_VISIBLE_STATES",
     "BRIDGE_CACHE_PATH",
     "clear_cached_token",
     "ensure_monitor_bridge_started",
