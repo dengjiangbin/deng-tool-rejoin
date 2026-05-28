@@ -144,18 +144,53 @@ function publicStatsLicenseAllowed(row, userByDiscord = new Map(), userBySiteId 
   return true;
 }
 
+// Only columns that ACTUALLY exist in the live Supabase schema (verified
+// against supabase/migrations/001–009). Listing a non-existent column makes
+// PostgREST reject the whole SELECT, which previously caused
+// `/api/public-stats` to 503 in production.
+//
+// The classifier functions further down (`publicStatsUserAllowed`,
+// `publicStatsLicenseAllowed`, etc.) intentionally also probe defensive
+// flag names like `is_test`, `is_admin`, `is_fake`, `is_internal`. Those
+// are only read from the row object — if the live row does not carry
+// such a column, the check is simply skipped, which is exactly what we
+// want for the real schema.
 const PUBLIC_STATS_COLUMNS = Object.freeze({
   device_bindings: 'key_id, install_id_hash, is_active',
-  license_keys: 'id, status, owner_discord_id, site_user_id, created_by, redeemed_at, expires_at, is_deleted, deleted, disabled, is_disabled, is_hidden, hidden, archived, is_archived, is_test, test, is_dev, is_admin, is_fake, fake, is_internal',
-  license_users: 'discord_user_id, is_owner, is_blocked, is_test, test, is_dev, is_admin, is_fake, fake, is_internal',
-  site_users: 'id, discord_user_id, is_test, test, is_dev, is_admin, is_fake, fake, is_internal',
+  license_keys: 'id, status, owner_discord_id, site_user_id, created_by, redeemed_at, expires_at',
+  license_users: 'discord_user_id, is_owner, is_blocked',
+  site_users: 'id, discord_user_id, is_active',
 });
+
+// Fallback projection used when the curated SELECT fails for any reason
+// (column drift, new optional flag column, etc.). `*` always succeeds for
+// service-role queries and the response payload still aggregates to plain
+// counts, so private fields can never leak to the public response.
+const PUBLIC_STATS_FALLBACK_COLUMNS = '*';
 
 async function selectPublicStatsRows(table) {
   const columns = PUBLIC_STATS_COLUMNS[table];
-  const { data, error } = await supabase.from(table).select(columns || '*');
-  if (error) throw serviceError('public_stats_unavailable', 'Public stats are unavailable.', 503);
-  return Array.isArray(data) ? data : [];
+  const first = await supabase.from(table).select(columns || '*');
+  if (!first.error) {
+    return Array.isArray(first.data) ? first.data : [];
+  }
+
+  console.warn(
+    '[public-stats] curated SELECT failed for table=%s message=%s; retrying with *',
+    table,
+    first.error?.message || first.error || 'unknown',
+  );
+
+  const fallback = await supabase.from(table).select(PUBLIC_STATS_FALLBACK_COLUMNS);
+  if (fallback.error) {
+    console.error(
+      '[public-stats] fallback SELECT also failed for table=%s message=%s',
+      table,
+      fallback.error?.message || fallback.error || 'unknown',
+    );
+    throw serviceError('public_stats_unavailable', 'Public stats are unavailable.', 503);
+  }
+  return Array.isArray(fallback.data) ? fallback.data : [];
 }
 
 function buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers }) {

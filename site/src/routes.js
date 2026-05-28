@@ -1118,8 +1118,19 @@ async function handlePublicStats(_req, res) {
     res.set('Cache-Control', 'public, max-age=10, stale-while-revalidate=10');
     return res.json(payload);
   } catch (err) {
-    console.error('[api/public-stats]', err?.message || err);
-    return res.status(503).json({ error: 'public_stats_unavailable', message: 'Public stats are unavailable.' });
+    // Log enough detail for ops to diagnose schema/connectivity issues,
+    // but never echo the underlying error (which may contain SQL,
+    // table names, or supabase URLs) back to the browser.
+    console.error(
+      '[api/public-stats] failed: code=%s status=%s message=%s',
+      err?.code || 'unknown',
+      err?.status || 503,
+      err?.message || String(err),
+    );
+    return res.status(503).json({
+      error: 'public_stats_unavailable',
+      message: 'Public stats are unavailable.',
+    });
   }
 }
 

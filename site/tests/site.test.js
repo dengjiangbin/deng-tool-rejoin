@@ -930,6 +930,103 @@ describe('auth and protected pages', () => {
     assert.equal(res.body.service, undefined);
     assert.equal(res.body.cooldown_seconds, undefined);
   });
+
+  test('public stats works against real production schema (no defensive flag columns)', async () => {
+    // Mimic the actual Supabase schema (migrations 001/005): no
+    // `is_test` / `is_admin` / `is_fake` etc. on license_users or
+    // site_users. Before the fix, requesting those non-existent
+    // columns made PostgREST reject the SELECT and the endpoint 503'd.
+    licenseService._clearPublicStatsCache();
+    memoryDb.site_users.push(
+      { id: 'site-real-1', discord_user_id: 'discord-real-1', username: 'Real1' },
+      { id: 'site-real-2', discord_user_id: 'discord-real-2', username: 'Real2' },
+    );
+    memoryDb.license_users.push(
+      { discord_user_id: 'discord-real-1', discord_username: 'Real1', is_owner: false, is_blocked: false },
+      { discord_user_id: 'discord-real-2', discord_username: 'Real2', is_owner: false, is_blocked: false },
+    );
+    insertLicenseFixture('DENG-AAAA-BBBB-CCCC-DDDD', {
+      id: 'key-real-1',
+      owner_discord_id: 'discord-real-1',
+      site_user_id: 'site-real-1',
+      redeemed_at: '2026-05-02T00:00:00Z',
+    });
+    insertLicenseFixture('DENG-BBBB-CCCC-DDDD-EEEE', {
+      id: 'key-real-2',
+      owner_discord_id: 'discord-real-2',
+      site_user_id: 'site-real-2',
+      redeemed_at: null,
+    });
+
+    const res = await request(app).get('/api/public-stats');
+    assert.equal(res.status, 200, 'must not 503 against the real schema column set');
+    assert.equal(typeof res.body.generatedKeys, 'number');
+    assert.equal(typeof res.body.uniqueUsers, 'number');
+    assert.equal(typeof res.body.redeemedKeys, 'number');
+    assert.equal(typeof res.body.activeDevices, 'number');
+    assert.ok(res.body.generatedKeys >= 2);
+    assert.ok(res.body.uniqueUsers >= 2);
+    assert.ok(res.body.redeemedKeys >= 1);
+  });
+
+  test('public stats returns clean zeros (not nulls/strings) when DB is empty', async () => {
+    licenseService._clearPublicStatsCache();
+    // memoryDb is already cleared by the beforeEach hook for this suite;
+    // this assertion guards the contract that zero is a real numeric 0
+    // so the frontend never falls into the `value || "—"` trap.
+    const res = await request(app).get('/api/public-stats');
+    assert.equal(res.status, 200);
+    assert.strictEqual(res.body.generatedKeys, 0);
+    assert.strictEqual(res.body.uniqueUsers, 0);
+    assert.strictEqual(res.body.redeemedKeys, 0);
+    assert.strictEqual(res.body.activeDevices, 0);
+    // 0 must be a Number, not a string and not null/undefined.
+    for (const k of ['generatedKeys', 'uniqueUsers', 'redeemedKeys', 'activeDevices']) {
+      assert.equal(typeof res.body[k], 'number', `${k} must be a number`);
+      assert.ok(Number.isFinite(res.body[k]), `${k} must be finite`);
+    }
+  });
+
+  test('public stats 503 response never leaks SQL / table names / supabase URLs', async () => {
+    // Temporarily replace the supabase client with one that throws an
+    // error mimicking a real PostgREST failure, then confirm the route
+    // returns a sanitized 503 (no error.message, no SQL hints).
+    licenseService._clearPublicStatsCache();
+    const realSupabase = require('../src/db');
+    const realFrom = realSupabase.from.bind(realSupabase);
+    realSupabase.from = () => ({
+      select: () => Promise.resolve({
+        data: null,
+        error: {
+          message: 'column "is_admin" does not exist',
+          details: 'select id, is_admin from license_keys',
+          hint: 'Perhaps you meant to reference the column "license_keys.is_active"',
+          code: '42703',
+        },
+      }),
+    });
+    try {
+      const res = await request(app).get('/api/public-stats');
+      assert.equal(res.status, 503);
+      assert.equal(res.body.error, 'public_stats_unavailable');
+      assert.equal(res.body.message, 'Public stats are unavailable.');
+      const blob = JSON.stringify(res.body);
+      for (const forbidden of [
+        'is_admin',
+        'license_keys',
+        'select id',
+        'PostgREST',
+        'supabase',
+        '42703',
+        'Perhaps you meant',
+      ]) {
+        assert.doesNotMatch(blob, new RegExp(forbidden, 'i'), `must not leak: ${forbidden}`);
+      }
+    } finally {
+      realSupabase.from = realFrom;
+      licenseService._clearPublicStatsCache();
+    }
+  });
 });
 
 describe('theme and dashboard UI', () => {
