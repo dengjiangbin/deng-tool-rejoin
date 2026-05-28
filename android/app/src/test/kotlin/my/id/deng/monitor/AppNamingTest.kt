@@ -21,19 +21,34 @@ class AppNamingTest {
     }
 
     @Test
-    fun `app_name string resource is the canonical product name`() {
+    fun `app_name string resource is the v1_0_3 App Info label`() {
         val xml = stringsXml()
+        // v1.0.3: dropped the trailing "APK" suffix per user feedback —
+        // the .apk extension was redundant noise inside the installed
+        // app's Android App Info screen.
         assertTrue(
-            "app_name must be exactly 'DENG Tool: Rejoin APK' — got: $xml",
+            "app_name must be exactly 'DENG Tool: Rejoin' — got: $xml",
+            xml.contains(Regex("""<string name="app_name">\s*DENG Tool: Rejoin\s*</string>""")),
+        )
+        // Old v1.0.2 wording must be gone from the installed-app label.
+        assertFalse(
+            "app_name must NOT still say 'DENG Tool: Rejoin APK'",
             xml.contains(Regex("""<string name="app_name">\s*DENG Tool: Rejoin APK\s*</string>""")),
         )
     }
 
     @Test
-    fun `app_launcher_label is the shorter launcher fallback`() {
+    fun `app_launcher_label is the v1_0_3 launcher label`() {
         val xml = stringsXml()
+        // v1.0.3: home-screen icon now reads "DENG Rejoin" — short
+        // enough not to wrap, and immediately recognisable as part of
+        // the DENG product family.
         assertTrue(
-            "app_launcher_label must be exactly 'Rejoin APK'",
+            "app_launcher_label must be exactly 'DENG Rejoin'",
+            xml.contains(Regex("""<string name="app_launcher_label">\s*DENG Rejoin\s*</string>""")),
+        )
+        assertFalse(
+            "app_launcher_label must NOT still say 'Rejoin APK'",
             xml.contains(Regex("""<string name="app_launcher_label">\s*Rejoin APK\s*</string>""")),
         )
     }
@@ -44,6 +59,10 @@ class AppNamingTest {
         assertFalse(
             "strings.xml still contains legacy 'DENG Monitor' wording",
             xml.contains("DENG Monitor"),
+        )
+        assertFalse(
+            "strings.xml still contains legacy 'Monitor App' wording",
+            xml.contains("Monitor App"),
         )
     }
 }

@@ -22,20 +22,20 @@ class AppVersionAndIconTest {
     }
 
     @Test
-    fun `versionName is bumped to 1_0_2`() {
+    fun `versionName is bumped to 1_0_3`() {
         val gradle = buildGradle()
         assertTrue(
-            "expected versionName = \"1.0.2\" in build.gradle.kts",
-            gradle.contains(Regex("""versionName\s*=\s*"1\.0\.2"""")),
+            "expected versionName = \"1.0.3\" in build.gradle.kts",
+            gradle.contains(Regex("""versionName\s*=\s*"1\.0\.3"""")),
         )
     }
 
     @Test
-    fun `versionCode is bumped to 3`() {
+    fun `versionCode is bumped to 4`() {
         val gradle = buildGradle()
         assertTrue(
-            "expected versionCode = 3 in build.gradle.kts",
-            gradle.contains(Regex("""versionCode\s*=\s*3\b""")),
+            "expected versionCode = 4 in build.gradle.kts",
+            gradle.contains(Regex("""versionCode\s*=\s*4\b""")),
         )
     }
 
@@ -69,16 +69,16 @@ class AppVersionAndIconTest {
     }
 
     @Test
-    fun `Android string resources still hold the canonical app name and launcher label`() {
+    fun `Android string resources hold the v1_0_3 app name and launcher label`() {
         val xml = File("src/main/res/values/strings.xml").readText(Charsets.UTF_8)
         assertNotNull(xml)
         assertTrue(
-            "app_name must remain 'DENG Tool: Rejoin APK'",
-            xml.contains(Regex("""<string name="app_name">\s*DENG Tool: Rejoin APK\s*</string>""")),
+            "app_name must be 'DENG Tool: Rejoin' (v1.0.3 dropped the APK suffix)",
+            xml.contains(Regex("""<string name="app_name">\s*DENG Tool: Rejoin\s*</string>""")),
         )
         assertTrue(
-            "app_launcher_label must remain 'Rejoin APK'",
-            xml.contains(Regex("""<string name="app_launcher_label">\s*Rejoin APK\s*</string>""")),
+            "app_launcher_label must be 'DENG Rejoin' (v1.0.3 family branding)",
+            xml.contains(Regex("""<string name="app_launcher_label">\s*DENG Rejoin\s*</string>""")),
         )
     }
 

@@ -30,8 +30,16 @@ fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
     var lastFetchedAt by remember { mutableStateOf<Long?>(null) }
     val scope = rememberCoroutineScope()
 
-    val deviceId = (state as? DeviceFetchState.Ready)?.status?.device?.id
-    val intervalSec = (state as? DeviceFetchState.Ready)?.status?.settings?.snapshotIntervalSeconds ?: 0
+    val ready = state as? DeviceFetchState.Ready
+    val deviceId = ready?.status?.device?.id
+    val intervalSec = ready?.status?.settings?.snapshotIntervalSeconds ?: 0
+    // v1.0.3: backend now reports when the bridge last uploaded a
+    // snapshot — we use this to differentiate "interval is on, but the
+    // bridge hasn't sent the first frame yet" from a genuine empty
+    // state. Without this, every user saw the misleading first-frame
+    // copy forever, even when the bridge was actively retrying.
+    val lastCapturedAtIso = ready?.status?.device?.lastSnapshotCapturedAt
+    val lastCapturedAgeSec = ready?.status?.device?.lastSnapshotAgeSeconds
 
     suspend fun fetch() {
         if (deviceId == null) return
@@ -40,6 +48,9 @@ fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
         try {
             val bytes = api.snapshotBytes(deviceId)
             if (bytes == null) {
+                // 204 No Content — backend has no snapshot for this device.
+                // Keep the previous bitmap if any; the placeholder text below
+                // explains what's going on based on intervalSec + lastCapturedAt.
                 bitmap = null
             } else {
                 val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
@@ -49,7 +60,10 @@ fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
                 }
             }
         } catch (t: Throwable) {
-            error = "Snapshot fetch failed."
+            // Never re-throw on the UI — keeps the screen responsive and
+            // gives the user an honest "Retrying…" hint rather than a
+            // silent empty placeholder.
+            error = "Snapshot fetch failed. Retrying…"
         } finally {
             loading = false
         }
@@ -112,20 +126,43 @@ fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
                 } else if (loading) {
                     CircularProgressIndicator(color = DengColors.Cyan, strokeWidth = 2.dp)
                 } else if (intervalSec == 0) {
-                    // Snapshot uploads are explicitly disabled — guide the
-                    // user instead of showing a silent empty placeholder.
+                    // Snapshot uploads are explicitly disabled.
                     Text(
                         "Snapshot is off. Enable it in Settings.",
                         color = DengColors.TextMuted,
                     )
+                } else if (lastCapturedAtIso == null) {
+                    // Interval is on, but the bridge has never uploaded a
+                    // snapshot for this device. This is the normal first-run
+                    // state — e.g. user just paired or just turned snapshot
+                    // back on, and we're inside the first interval window.
+                    Text(
+                        "Waiting for first snapshot…",
+                        color = DengColors.TextMuted,
+                    )
                 } else {
-                    Text("No snapshot yet.", color = DengColors.TextMuted)
+                    // We know one was uploaded (backend told us so) but
+                    // /snapshot/latest returned nothing on this attempt —
+                    // most likely a transient retention/race. Tell the user
+                    // honestly instead of pretending we have no idea.
+                    Text(
+                        "Snapshot temporarily unavailable. Retrying…",
+                        color = DengColors.TextMuted,
+                    )
                 }
             }
             Spacer(Modifier.height(8.dp))
+            // Bottom status line — always shows interval + the most useful
+            // timestamp we have. Priority: server-reported capture time >
+            // our local fetch time. Avoids the v1.0.2 confusion where
+            // "Last: —" rendered forever even though uploads were
+            // happening server-side.
+            val statusTimestamp = lastCapturedAtIso
+                ?.let { Format.timestamp(it) }
+                ?: Format.timestamp(lastFetchedAt)
             Text(
                 "Interval: " + (if (intervalSec == 0) "Off" else "${intervalSec}s") +
-                "  •  Last: " + Format.timestamp(lastFetchedAt),
+                "  •  Last: " + statusTimestamp,
                 style = MaterialTheme.typography.bodySmall,
                 color = DengColors.TextMuted,
             )

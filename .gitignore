@@ -14,6 +14,14 @@ htmlcov/
 config.json
 data/
 !data/rejoin_versions.json
+# The bare `data/` ignore above also (incorrectly) matched the Kotlin
+# `data` PACKAGE used by the Android app — Models.kt, MonitorApi.kt,
+# SessionStore.kt, etc. Re-include them so the APK's networking layer
+# is actually tracked in git instead of living only on the build box.
+!android/app/src/main/kotlin/my/id/deng/monitor/data/
+!android/app/src/main/kotlin/my/id/deng/monitor/data/**
+!android/app/src/test/kotlin/my/id/deng/monitor/data/
+!android/app/src/test/kotlin/my/id/deng/monitor/data/**
 logs/
 run/
 backups/

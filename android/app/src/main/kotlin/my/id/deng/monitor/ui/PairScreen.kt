@@ -35,7 +35,11 @@ fun PairScreen(api: MonitorApi, sessionStore: SessionStore) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            "DENG Tool: Rejoin APK",
+            // v1.0.3: in-app header drops the redundant "APK" suffix to
+            // match the new app_name. "DENG Tool: Rejoin APK" still
+            // appears in the website download footer (line below) because
+            // there it refers to the literal .apk artifact you install.
+            "DENG Tool: Rejoin",
             style = MaterialTheme.typography.headlineLarge,
             color = DengColors.Cyan,
             fontWeight = FontWeight.Bold,

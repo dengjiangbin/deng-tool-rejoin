@@ -40,7 +40,11 @@ const { requireLogin } = require('./auth');
 
 // ── Limits ──────────────────────────────────────────────────────────────────
 const MAX_JSON_BYTES        = 32 * 1024;            // 32 KB
-const MAX_SNAPSHOT_BYTES    = 1_500_000;            // 1.5 MB
+// v1.0.3: raised from 1.5 MB → 5 MB. Real Samsung cloud phones
+// (A51 1080×2400) produce 1.8–2.5 MB PNG screencaps. Termux bridge
+// caps its own uploads at 3 MB; this 5 MB server limit leaves
+// headroom for higher-DPI devices without changing rate limits.
+const MAX_SNAPSHOT_BYTES    = 5 * 1024 * 1024;      // 5 MB
 const BRIDGE_TOKEN_TTL_SEC  = 12 * 60 * 60;         // 12h bridge token
 const APP_SESSION_TTL_SEC   = 30 * 24 * 60 * 60;    // 30 day app session
 const PAIRING_CODE_TTL_SEC  = 5 * 60;               // 5 min pairing code
@@ -418,7 +422,7 @@ router.get('/api/monitor/devices/:id/status', requireAppAuth, async (req, res) =
   if (!device) return notFound(res);
 
   try {
-    const [{ data: pkgRows }, { data: settingsRow }] = await Promise.all([
+    const [{ data: pkgRows }, { data: settingsRow }, { data: snapRow }] = await Promise.all([
       supabase.from('monitor_package_states')
         .select('*')
         .eq('monitor_device_id', device.id)
@@ -427,8 +431,28 @@ router.get('/api/monitor/devices/:id/status', requireAppAuth, async (req, res) =
         .select('snapshot_interval_seconds, monitor_enabled, app_refresh_interval_seconds, app_display_name')
         .eq('monitor_device_id', device.id)
         .maybeSingle(),
+      // v1.0.3: surface the timestamp of the newest snapshot to the
+      // APK so SnapshotScreen can distinguish "interval is on but the
+      // bridge hasn't uploaded anything yet" (→ Waiting) from "interval
+      // is on and there genuinely is no image" (→ same Waiting copy,
+      // not the misleading "No snapshot yet"). Cheap query: indexed
+      // (monitor_device_id, captured_at DESC).
+      supabase.from('monitor_snapshots')
+        .select('captured_at')
+        .eq('monitor_device_id', device.id)
+        .order('captured_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
     const safePackages = (pkgRows || []).map(safePackageRowForApp);
+    const lastSnapshotCapturedAt = snapRow?.captured_at || null;
+    let lastSnapshotAgeSeconds = null;
+    if (lastSnapshotCapturedAt) {
+      const ageMs = Date.now() - new Date(lastSnapshotCapturedAt).getTime();
+      if (Number.isFinite(ageMs) && ageMs >= 0) {
+        lastSnapshotAgeSeconds = Math.floor(ageMs / 1000);
+      }
+    }
     res.set('Cache-Control', 'no-store');
     return res.json({
       device: {
@@ -438,6 +462,8 @@ router.get('/api/monitor/devices/:id/status', requireAppAuth, async (req, res) =
         channel: device.channel,
         status_connected: device.status_connected,
         last_seen_at: device.last_seen_at,
+        last_snapshot_captured_at: lastSnapshotCapturedAt,
+        last_snapshot_age_seconds: lastSnapshotAgeSeconds,
       },
       summary: summarizePackages(safePackages),
       packages: safePackages,

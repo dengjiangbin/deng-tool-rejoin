@@ -98,8 +98,40 @@ class ScreenLayoutContractTest {
             src.contains("SimpleDateFormat"),
         )
         assertTrue(
-            "SnapshotScreen must format timestamps via Format.timestamp",
+            "SnapshotScreen must format the local fetched timestamp via Format.timestamp",
             src.contains("Format.timestamp(lastFetchedAt)"),
+        )
+    }
+
+    @Test
+    fun `SnapshotScreen v1_0_3 shows Waiting and Retrying copies, never silent`() {
+        val src = ui("SnapshotScreen.kt")
+        // v1.0.3 — three explicit user-facing states besides "Off":
+        //   • first-frame:  "Waiting for first snapshot…"
+        //   • retention/race:  "Snapshot temporarily unavailable. Retrying…"
+        //   • fetch error:  "Snapshot fetch failed. Retrying…"
+        // The bare "No snapshot yet." copy from v1.0.2 must be gone, because
+        // it was the source of the user-reported silent-failure confusion.
+        assertTrue(
+            "SnapshotScreen must show 'Waiting for first snapshot…' when interval > 0 and no capture yet",
+            src.contains("Waiting for first snapshot"),
+        )
+        assertTrue(
+            "SnapshotScreen must show a Retrying… message when fetch fails",
+            src.contains("Retrying"),
+        )
+        assertFalse(
+            "SnapshotScreen must NOT use the misleading 'No snapshot yet.' copy from v1.0.2",
+            src.contains("No snapshot yet."),
+        )
+    }
+
+    @Test
+    fun `SnapshotScreen reads server-reported last_snapshot_captured_at from device summary`() {
+        val src = ui("SnapshotScreen.kt")
+        assertTrue(
+            "SnapshotScreen must consume lastSnapshotCapturedAt from DeviceSummary",
+            src.contains("lastSnapshotCapturedAt"),
         )
     }
 

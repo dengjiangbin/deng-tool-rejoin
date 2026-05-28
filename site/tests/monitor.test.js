@@ -288,10 +288,12 @@ describe('monitor bridge payload validation', () => {
     assert.equal(res.body.message, 'unsupported_schema');
   });
 
-  test('rejects oversized snapshot', async () => {
+  test('rejects oversized snapshot above v1.0.3 5MB limit', async () => {
+    // v1.0.3: server cap raised from 1.5MB → 5MB to accommodate full-DPI
+    // Samsung cloud-phone PNGs. Allocate 6MB to stay above the new cap.
     const deviceId = seedDevice();
     const token = seedBridgeToken(deviceId);
-    const big = Buffer.alloc(2_000_000, 0xff); // 2MB > 1.5MB limit
+    const big = Buffer.alloc(6 * 1024 * 1024, 0xff);
     const res = await request(app)
       .post('/api/monitor/bridge/snapshot')
       .set('Authorization', `Bearer ${token}`)
@@ -356,6 +358,48 @@ describe('app session auth + ownership isolation', () => {
       .get(`/api/monitor/devices/${othersDevice}/status`)
       .set('Authorization', `Bearer ${myToken}`);
     assert.equal(res.status, 404);
+  });
+
+  test('status response v1.0.3 reports last_snapshot_captured_at when a snapshot exists', async () => {
+    // v1.0.3: backend echoes the newest snapshot's captured_at to the
+    // APK so SnapshotScreen can render "Waiting…" vs "Captured: …"
+    // honestly instead of the v1.0.2 "No snapshot yet." silent default.
+    const owner = 'disc-me';
+    const deviceId = seedDevice(owner);
+    const myToken = seedAppSession(owner);
+    const capturedAt = new Date(Date.now() - 12_000).toISOString();
+    mem.monitor_snapshots.push({
+      id: crypto.randomUUID(),
+      monitor_device_id: deviceId,
+      mime_type: 'image/png',
+      image_data: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+      size_bytes: 4,
+      captured_at: capturedAt,
+    });
+    const res = await request(app)
+      .get(`/api/monitor/devices/${deviceId}/status`)
+      .set('Authorization', `Bearer ${myToken}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.device.last_snapshot_captured_at, capturedAt);
+    assert.ok(
+      typeof res.body.device.last_snapshot_age_seconds === 'number' &&
+        res.body.device.last_snapshot_age_seconds >= 0,
+      'last_snapshot_age_seconds should be a non-negative number',
+    );
+  });
+
+  test('status response v1.0.3 reports null snapshot fields when no snapshot exists', async () => {
+    const owner = 'disc-me';
+    const deviceId = seedDevice(owner);
+    const myToken = seedAppSession(owner);
+    const res = await request(app)
+      .get(`/api/monitor/devices/${deviceId}/status`)
+      .set('Authorization', `Bearer ${myToken}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.device.last_snapshot_captured_at, null);
+    assert.equal(res.body.device.last_snapshot_age_seconds, null);
+    // Default monitor_settings still echoes 30s interval per v1.0.2 contract.
+    assert.equal(res.body.settings.snapshot_interval_seconds, 30);
   });
 
   test('settings update rejects invalid snapshot interval', async () => {

@@ -143,7 +143,7 @@ fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore) {
         DengCard {
             Text("About", style = MaterialTheme.typography.titleMedium, color = DengColors.TextPrimary)
             Spacer(Modifier.height(6.dp))
-            Text("DENG Tool: Rejoin APK · App v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+            Text("DENG Tool: Rejoin · App v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
                 color = DengColors.TextMuted, style = MaterialTheme.typography.bodySmall)
             Text("Backend: ${BuildConfig.BRIDGE_URL}",
                 color = DengColors.TextDim, style = MaterialTheme.typography.bodySmall)

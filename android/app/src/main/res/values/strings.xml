@@ -5,14 +5,22 @@
         readers. Long-form intentionally — Android will not truncate inside
         the app itself.
     -->
-    <string name="app_name">DENG Tool: Rejoin APK</string>
+    <!--
+        v1.0.3: shortened to match the user-requested Android App Info
+        label. The website still describes the downloadable file as
+        "DENG Tool: Rejoin APK" because that phrase refers to the .apk
+        artifact, not the installed application.
+    -->
+    <string name="app_name">DENG Tool: Rejoin</string>
 
     <!--
         Shorter label used only by the launcher icon, which has limited
         horizontal space and would otherwise wrap awkwardly on most home
-        screens. The activity declares android:label="@string/app_launcher_label".
+        screens. v1.0.3: changed from "Rejoin APK" to "DENG Rejoin" so
+        the icon makes the product family obvious at a glance.
+        The activity declares android:label="@string/app_launcher_label".
     -->
-    <string name="app_launcher_label">Rejoin APK</string>
+    <string name="app_launcher_label">DENG Rejoin</string>
 
     <string name="app_tagline">Monitor your Rejoin packages from Android.</string>
     <string name="pair_title">Pair with DENG Tool</string>

@@ -1,21 +1,22 @@
 {
   "app_name": "DENG Tool: Rejoin APK",
-  "version_name": "1.0.2",
-  "version_code": 3,
-  "file_name": "deng-tool-rejoin-apk-v1.0.2.apk",
-  "sha256": "6ae57c65d8f41275b12421f2b580bb2187506bf25cd0d85f9517a1fcbab81c8a",
-  "size_bytes": 1846637,
+  "version_name": "1.0.3",
+  "version_code": 4,
+  "file_name": "deng-tool-rejoin-apk-v1.0.3.apk",
+  "sha256": "472de29ff183546d02ea2c192a338d66fb2be9cb48f7a712f238c9fac75eabe1",
+  "size_bytes": 1846633,
   "released_at": "2026-05-28",
   "min_sdk": 26,
   "purpose": "Monitoring companion app for DENG Tool: Rejoin",
   "changelog": [
-    "Package rows now appear immediately on the main menu (username title, package name subtitle, Dead badge when not playing).",
-    "Package rows update live after pressing Start in Termux; runtime is computed from the supervisor's online timestamp.",
-    "Snapshot capture is wired through the Termux screencap subprocess; APK Snapshot screen shows 'Snapshot is off. Enable it in Settings.' when interval is 0.",
-    "Settings screen is now vertically scrollable with navigation-bar / IME padding so the snapshot-interval rows are always reachable.",
-    "All user-facing timestamps now render as '28 Mei 2026, 4:35 PM' (Indonesian month names, 12h AM/PM).",
-    "All bridge HTTPS is now routed via curl subprocess on Termux to isolate the libssl3 EVP_PKEY_generate SIGSEGV captured in probe p-d1cb86fd89 (no more idle segfault while AFK in the top menu).",
-    "Backend /api/monitor/bridge/push now echoes monitor_settings so changing snapshot interval in the APK takes effect without relaunching Termux.",
-    "Stable v1.0.0 Termux package was rebuilt with the same monitoring fixes; /install/v1.0.0 and /install/latest both serve the fixed artifact."
+    "Android App Info label is now 'DENG Tool: Rejoin' (dropped the redundant 'APK' suffix that appeared in the installed-app name).",
+    "Home-screen / launcher icon now reads 'DENG Rejoin' so the product family is recognisable at a glance.",
+    "Fixed android.os.NetworkOnMainThreadException when tapping any option in the Settings screen — MonitorApi.execRaw now suspends on Dispatchers.IO so every network call is off the UI thread.",
+    "Snapshot screen no longer says 'No snapshot yet' forever: now distinguishes 'Snapshot is off…', 'Waiting for first snapshot…', 'Snapshot temporarily unavailable. Retrying…', and 'Snapshot fetch failed. Retrying…'.",
+    "Snapshot status line shows the server-reported capture time (Indonesian 12h format) instead of the local fetch time when available.",
+    "Termux bridge: bumped MAX_SNAPSHOT_BYTES from 1.5 MB to 3 MB so full-DPI PNG screencaps from cloud phones (e.g. Samsung A51 1080×2400 ≈ 2 MB) actually upload instead of being silently dropped.",
+    "Backend /api/monitor/devices/:id/status now returns last_snapshot_captured_at and last_snapshot_age_seconds so the APK can render honest snapshot status.",
+    "Backend snapshot upload cap raised to 5 MB (server) so the 3 MB Termux client has headroom on higher-DPI screens.",
+    "Stable v1.0.0 Termux package was rebuilt with the new MAX_SNAPSHOT_BYTES; /install/v1.0.0 and /install/latest both serve the fixed artifact."
   ]
 }

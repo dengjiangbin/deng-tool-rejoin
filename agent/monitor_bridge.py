@@ -49,7 +49,13 @@ DEFAULT_SNAPSHOT_INTERVAL_SECONDS = 30
 MIN_BACKOFF_SECONDS = 5.0
 MAX_BACKOFF_SECONDS = 120.0
 MAX_PAYLOAD_BYTES = 32 * 1024          # 32 KB lightweight status JSON
-MAX_SNAPSHOT_BYTES = 1_500_000          # 1.5 MB image limit
+# v1.0.3 hotfix: raised from 1.5 MB → 3 MB. Real Samsung cloud phones
+# (A51 1080×2400) routinely produce 1.8–2.5 MB PNG screencaps; the old
+# limit silently dropped every upload, which is why the APK Snapshot
+# tab kept showing "No snapshot yet" forever even though screencap was
+# succeeding. Backend `MAX_SNAPSHOT_BYTES` is 5 MB so 3 MB is well
+# under the server cap.
+MAX_SNAPSHOT_BYTES = 3_000_000          # 3 MB image limit
 MAX_PACKAGES_PER_PUSH = 64
 
 # Allowed states (mirrors agent.supervisor STATUS_* but kept local on purpose
