@@ -8,6 +8,7 @@ const path         = require('path');
 const fs           = require('fs');
 
 const routes = require('./routes');
+const monitorRoutes = require('./monitorRoutes');
 const { FileSessionStore } = require('./sessionStore');
 const packageJson = require('../package.json');
 
@@ -175,6 +176,13 @@ app.use((req, res, next) => {
   delete req.session.flash;
   next();
 });
+
+// ---------------------------------------------------------------
+// Mount monitor routes BEFORE main routes so their dedicated body
+// parsers (32KB JSON, 1.5MB raw image) take precedence over the
+// 16KB global parsers configured above.
+// ---------------------------------------------------------------
+app.use('/', monitorRoutes);
 
 // ---------------------------------------------------------------
 // Mount routes

@@ -984,7 +984,11 @@ describe('theme and dashboard UI', () => {
     });
     const dashboard = await agent.get('/dashboard');
     assert.match(dashboard.text, /Dashboard Overview/);
-    assert.match(dashboard.text, /Generate Key/);
+    // Dashboard primary CTA is now "Download APK" → /download (the legacy
+    // "Generate Key" CTA moved to the /license page only).
+    assert.match(dashboard.text, /href="\/download"[^>]*>\s*Download APK\s*</);
+    assert.match(dashboard.text, /DENG Tool: Rejoin APK/);
+    assert.doesNotMatch(dashboard.text, /DENG Monitor/);
     assert.match(dashboard.text, /News & Updates/);
     assert.match(dashboard.text, /Your Activity/);
     assert.match(dashboard.text, /stats-grid/);
@@ -1400,7 +1404,8 @@ describe('theme and dashboard UI', () => {
     const provider = await startChallenge(agent).then((result) => ({ status: 200, text: result.html }));
     assert.equal(dashboard.status, 200);
     assert.equal(license.status, 200);
-    assert.match(dashboard.text, /class="btn btn-primary"[^>]*>Generate Key/);
+    // Dashboard primary CTA is now "Download APK" (Generate Key lives on /license).
+    assert.match(dashboard.text, /class="btn btn-primary"[^>]*>Download APK</);
     assert.match(license.text, /data-download-keys/);
     assert.match(provider.text, /class="btn btn-primary btn-block btn-provider"[^>]*>Continue with LootLabs/);
     assert.match(provider.text, /class="btn btn-primary btn-block btn-provider"[^>]*>Continue with Linkvertise/);

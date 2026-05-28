@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Splash/system theme — Compose owns the actual UI theme, this is just
+        the launch theme used until the Activity attaches.
+    -->
+    <style name="Theme.DengMonitor" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/deng_bg_a</item>
+        <item name="android:navigationBarColor">@color/deng_bg_a</item>
+        <item name="android:windowBackground">@color/deng_bg_a</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

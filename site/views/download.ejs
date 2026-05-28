@@ -1,0 +1,170 @@
+<% locals.activePage = 'download' %>
+
+<div class="page-header">
+  <div>
+    <p class="eyebrow">DENG Tool Portal</p>
+    <h1 class="page-title">
+      <span class="gradient-brand-text">DENG Tool: Rejoin APK</span>
+    </h1>
+    <p class="page-subtitle">
+      Monitor your Rejoin packages from Android. View RAM usage, runtime,
+      package state, usernames, and snapshots securely from your phone.
+    </p>
+  </div>
+  <% if (manifest && manifest.file_name) { %>
+    <a href="/downloads/deng-tool-rejoin-apk-latest.apk" class="btn btn-primary" rel="nofollow">
+      Download APK
+    </a>
+  <% } else { %>
+    <span class="btn btn-outline" aria-disabled="true">APK not published yet</span>
+  <% } %>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-body">
+      <p class="stat-label">App Version</p>
+      <p class="stat-value"><%= manifest ? ('v' + manifest.version_name) : '—' %></p>
+      <p class="stat-note">Android APK release version only — not Rejoin package version.</p>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-body">
+      <p class="stat-label">Purpose</p>
+      <p class="stat-value" style="font-size: 1.05rem;">Monitoring companion app</p>
+      <p class="stat-note">Read-only. Rejoin packages still run in Termux.</p>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-body">
+      <p class="stat-label">Backend</p>
+      <p class="stat-value" style="font-size: 1.05rem;">tool.deng.my.id</p>
+      <p class="stat-note">
+        <% if (manifest && manifest.size_bytes) { %>
+          <%= (manifest.size_bytes / (1024 * 1024)).toFixed(1) %> MB · Min Android <%= manifest ? manifest.min_sdk : 26 %>+
+        <% } else { %>
+          Min Android <%= manifest ? manifest.min_sdk : 26 %>+
+        <% } %>
+      </p>
+    </div>
+  </div>
+</div>
+
+<section class="section-card">
+  <div class="section-header">
+    <div>
+      <h2 class="section-title">Install Instructions</h2>
+      <p class="section-desc">Sideload the APK on your Android device or cloud phone.</p>
+    </div>
+  </div>
+
+  <ol class="install-steps">
+    <li>Open this page on your Android device or cloud phone.</li>
+    <li>Tap <strong>Download APK</strong> above.</li>
+    <li>If asked, allow installs from this browser in Android Settings.</li>
+    <li>Open the downloaded <code>.apk</code> and tap <strong>Install</strong>.</li>
+    <li>Open <strong>DENG Tool: Rejoin APK</strong> and either log in with Discord or paste
+      a <strong>pairing code</strong> from your DENG Tool dashboard.</li>
+    <li>In Termux on your cloud phone, run <code>deng-rejoin</code>. The tool
+      will auto-start the monitor bridge after license verification.</li>
+  </ol>
+
+  <div class="alert alert-warning" role="note" style="margin-top: 1rem;">
+    Only download from <%= publicUrl %>/download. Do not install APK files
+    from unofficial sources — they may be tampered with.
+  </div>
+</section>
+
+<section class="section-card">
+  <div class="section-header">
+    <div>
+      <h2 class="section-title">Versioning</h2>
+      <p class="section-desc">How APK releases relate to Rejoin packages.</p>
+    </div>
+  </div>
+  <ul class="install-steps">
+    <li>This APK has its own Android release version (currently
+      <strong>v<%= manifest ? manifest.version_name : '1.0.0' %></strong>).</li>
+    <li>Rejoin package versions (stable / main-dev / test) are selected
+      separately on your dashboard or via the Discord <em>Select Version</em>
+      command — they are not tied to APK versions.</li>
+    <li>The APK is a monitoring companion only; it does not change which
+      Rejoin package version is installed in Termux.</li>
+  </ul>
+</section>
+
+<section class="section-card">
+  <div class="section-header">
+    <div>
+      <h2 class="section-title">Integrity / SHA-256</h2>
+      <p class="section-desc">Verify the APK matches the official build before installing.</p>
+    </div>
+  </div>
+  <% if (manifest && manifest.sha256) { %>
+    <pre class="code-block"><code><%= manifest.sha256 %>  <%= manifest.file_name %></code></pre>
+    <p class="section-desc">
+      On Termux: <code>sha256sum <%= manifest.file_name %></code>.<br>
+      On desktop PowerShell: <code>Get-FileHash <%= manifest.file_name %> -Algorithm SHA256</code>.
+    </p>
+  <% } else { %>
+    <p class="section-desc">Checksum will appear here once the first APK is published.</p>
+  <% } %>
+</section>
+
+<section class="section-card">
+  <div class="section-header">
+    <div>
+      <h2 class="section-title">Changelog</h2>
+      <p class="section-desc">What's new in app version
+        <strong>v<%= manifest ? manifest.version_name : '—' %></strong>.</p>
+    </div>
+  </div>
+  <% if (manifest && manifest.changelog && manifest.changelog.length) { %>
+    <ul class="install-steps">
+      <% manifest.changelog.forEach(function(line) { %>
+        <li><%= line %></li>
+      <% }) %>
+    </ul>
+  <% } else { %>
+    <p class="section-desc">No changelog available yet.</p>
+  <% } %>
+</section>
+
+<section class="section-card">
+  <div class="section-header">
+    <div>
+      <h2 class="section-title">What This App Shows</h2>
+      <p class="section-desc">Public, monitoring-only. No license keys or private URLs are sent to the app.</p>
+    </div>
+  </div>
+  <ul class="install-steps">
+    <li>RAM usage per package, with formatted MB/GB display.</li>
+    <li>Runtime per package (HH:MM:SS), restart count, last heartbeat.</li>
+    <li>Live state: Online, Dead, Relaunching, No Heartbeat, Launching, Unknown.</li>
+    <li>Latest cloud phone snapshot with configurable interval (Off / 15s / 30s / 60s / 5m).</li>
+    <li>Summary card: total / online / dead / total RAM / average RAM.</li>
+    <li>Device status: connected, last update, tool version, channel.</li>
+  </ul>
+</section>
+
+<style>
+  .install-steps {
+    margin: 0;
+    padding-left: 1.25rem;
+    line-height: 1.7;
+  }
+  .install-steps li {
+    margin-bottom: 0.35rem;
+  }
+  .code-block {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.85rem 1rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    color: var(--text);
+    word-break: break-all;
+    white-space: pre-wrap;
+  }
+</style>

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Full product name used in headers, system-level labels, and screen
+        readers. Long-form intentionally — Android will not truncate inside
+        the app itself.
+    -->
+    <string name="app_name">DENG Tool: Rejoin APK</string>
+
+    <!--
+        Shorter label used only by the launcher icon, which has limited
+        horizontal space and would otherwise wrap awkwardly on most home
+        screens. The activity declares android:label="@string/app_launcher_label".
+    -->
+    <string name="app_launcher_label">Rejoin APK</string>
+
+    <string name="app_tagline">Monitor your Rejoin packages from Android.</string>
+    <string name="pair_title">Pair with DENG Tool</string>
+    <string name="pair_help">Get an 8-character pairing code from your DENG Tool dashboard at tool.deng.my.id/license.</string>
+    <string name="pair_button">Pair</string>
+    <string name="pair_code_label">Pairing code</string>
+    <string name="logout">Log out</string>
+</resources>

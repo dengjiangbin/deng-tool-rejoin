@@ -1,0 +1,15 @@
+{
+  "version_name": "1.0.0",
+  "version_code": 1,
+  "file_name": "",
+  "sha256": "",
+  "size_bytes": 0,
+  "released_at": "",
+  "min_sdk": 26,
+  "changelog": [
+    "First public release of DENG Tool: Rejoin APK.",
+    "Read-only monitoring: RAM, runtime, state, snapshot, summary.",
+    "Pairing-code login (Discord OAuth in-app coming next).",
+    "Dark theme matching DENG Tool website."
+  ]
+}

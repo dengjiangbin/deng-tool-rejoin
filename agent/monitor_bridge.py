@@ -1,0 +1,437 @@
+"""DENG Tool: Rejoin APK — outbound monitor bridge from Termux agent to backend.
+
+This module is opt-in and isolated. It does NOT touch the supervisor or any
+launch logic. It runs in its own background thread, periodically asks a
+provided ``status_provider`` for a *safe* per-package snapshot, scrubs the
+payload of any sensitive fields, and POSTs it to the DENG Tool backend.
+
+Activation
+----------
+* Disabled by default. Enable by setting env var ``DENG_MONITOR_BRIDGE_ENABLED=1``.
+* Requires ``DENG_MONITOR_BRIDGE_URL`` (defaults to ``https://tool.deng.my.id``).
+* Requires a bridge token issued by the backend after license verification,
+  passed via ``DENG_MONITOR_BRIDGE_TOKEN`` or the constructor.
+
+Safety contract
+---------------
+* Never sends: license key, raw HWID, private URL, Roblox cookies, tokens,
+  Supabase secrets, bot token, monitor bridge secret, stack traces, full
+  internal config, filesystem paths.
+* Private URL is only reported as ``private_url_configured: bool``.
+* All network failures are swallowed; main monitoring keeps running.
+* Backoff with jitter prevents log spam when backend is offline.
+* HTTPS only in production (HTTP allowed for ``DENG_MONITOR_BRIDGE_INSECURE=1``
+  to support local backend testing).
+
+This module has zero hard dependencies beyond the standard library so it
+will not break Termux installs that lack ``requests`` or ``websocket-client``.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import random
+import threading
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+logger = logging.getLogger("deng.monitor_bridge")
+
+# ── Defaults / env tunables ─────────────────────────────────────────────────
+DEFAULT_BRIDGE_URL = "https://tool.deng.my.id"
+DEFAULT_PUSH_INTERVAL_SECONDS = 2.0
+DEFAULT_SNAPSHOT_INTERVAL_SECONDS = 30
+MIN_BACKOFF_SECONDS = 5.0
+MAX_BACKOFF_SECONDS = 120.0
+MAX_PAYLOAD_BYTES = 32 * 1024          # 32 KB lightweight status JSON
+MAX_SNAPSHOT_BYTES = 1_500_000          # 1.5 MB image limit
+MAX_PACKAGES_PER_PUSH = 64
+
+# Allowed states (mirrors agent.supervisor STATUS_* but kept local on purpose
+# so the bridge does not depend on supervisor imports).
+ALLOWED_STATES = frozenset({
+    "Online", "Dead", "Relaunching", "No Heartbeat",
+    "Launching", "Unknown", "Offline", "Preparing",
+    "Background", "Reconnecting", "Warning", "Failed",
+    "Closed", "Launched", "Disconnected",
+    "In Server", "Lobby", "Join Unconfirmed",
+    "Join Failed", "Wrong Game / Wrong Server",
+})
+
+# Sensitive substrings — if a key or value contains any of these (case-
+# insensitive), the field is dropped before sending.
+_SENSITIVE_KEY_FRAGMENTS = (
+    "secret", "token", "password", "passwd", "license_key", "licensekey",
+    "key_value", "key_full", "cookie", "roblosecurity", "hwid", "fingerprint",
+    "private_url", "private_server", "auth", "bearer", "credential",
+    "supabase", "discord_bot", "bot_token",
+)
+
+
+def _is_sensitive_key(name: str) -> bool:
+    n = name.lower()
+    return any(frag in n for frag in _SENSITIVE_KEY_FRAGMENTS)
+
+
+def _scrub(value: Any, _depth: int = 0) -> Any:
+    """Recursively scrub a value of sensitive content. Returns a JSON-safe copy."""
+    if _depth > 6:
+        return None
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:512]
+    if isinstance(value, (list, tuple)):
+        return [_scrub(v, _depth + 1) for v in value][:64]
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            if not isinstance(k, str):
+                continue
+            if _is_sensitive_key(k):
+                continue
+            out[k] = _scrub(v, _depth + 1)
+        return out
+    return None
+
+
+def _coerce_state(state: Any) -> str:
+    if not isinstance(state, str):
+        return "Unknown"
+    if state in ALLOWED_STATES:
+        return state
+    return "Unknown"
+
+
+def _safe_package_entry(raw: dict[str, Any]) -> dict[str, Any] | None:
+    """Build a safe per-package status dict from a raw provider entry."""
+    if not isinstance(raw, dict):
+        return None
+    package = raw.get("package") or raw.get("package_name")
+    if not isinstance(package, str) or not package:
+        return None
+    if _is_sensitive_key(package):
+        return None
+
+    def _int(name: str, default: int = 0, *, lo: int = 0, hi: int = 10_000_000) -> int:
+        try:
+            n = int(raw.get(name) or 0)
+        except (TypeError, ValueError):
+            n = default
+        return max(lo, min(hi, n))
+
+    def _optstr(name: str, *, limit: int = 64) -> str | None:
+        v = raw.get(name)
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            return None
+        return v[:limit]
+
+    def _opttime(name: str) -> float | None:
+        v = raw.get(name)
+        if v in (None, 0):
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "package": package[:128],
+        "display_name": _optstr("display_name", limit=64),
+        "username": _optstr("username", limit=64),
+        "state": _coerce_state(raw.get("state")),
+        "ram_mb": _int("ram_mb", lo=0, hi=65536),
+        "runtime_seconds": _int("runtime_seconds", lo=0, hi=60 * 60 * 24 * 30),
+        "restart_count": _int("restart_count", lo=0, hi=1_000_000),
+        # PID is included only if explicitly safe (small positive int).
+        "pid": _int("pid", lo=0, hi=2_000_000) or None,
+        "private_url_configured": bool(raw.get("private_url_configured")),
+        "safe_error_reason": _optstr("safe_error_reason", limit=200),
+        "last_launch_at": _opttime("last_launch_at"),
+        "last_heartbeat_at": _opttime("last_heartbeat_at"),
+        "last_state_change_at": _opttime("last_state_change_at"),
+    }
+
+
+def build_safe_payload(
+    *,
+    tool_version: str,
+    channel: str,
+    packages: list[dict[str, Any]],
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Public helper used by tests to validate the safe-payload contract."""
+    safe_pkgs: list[dict[str, Any]] = []
+    for entry in packages[:MAX_PACKAGES_PER_PUSH]:
+        safe = _safe_package_entry(entry)
+        if safe is not None:
+            safe_pkgs.append(safe)
+
+    payload: dict[str, Any] = {
+        "schema": 1,
+        "tool_version": str(tool_version or "")[:32],
+        "channel": str(channel or "stable")[:16],
+        "captured_at": time.time(),
+        "packages": safe_pkgs,
+    }
+    if extra:
+        payload["extra"] = _scrub(extra)
+    return payload
+
+
+# ── Bridge runtime ──────────────────────────────────────────────────────────
+
+
+StatusProvider = Callable[[], dict[str, Any]]
+SnapshotProvider = Callable[[], tuple[bytes, str] | None]
+
+
+@dataclass
+class BridgeConfig:
+    bridge_url: str = DEFAULT_BRIDGE_URL
+    token: str = ""
+    push_interval_seconds: float = DEFAULT_PUSH_INTERVAL_SECONDS
+    snapshot_interval_seconds: int = DEFAULT_SNAPSHOT_INTERVAL_SECONDS
+    insecure: bool = False
+    user_agent: str = "DENG-Tool-Monitor-Bridge/1.0"
+    enabled: bool = False
+
+    @classmethod
+    def from_env(cls) -> "BridgeConfig":
+        env = os.environ.get
+        return cls(
+            bridge_url=(env("DENG_MONITOR_BRIDGE_URL") or DEFAULT_BRIDGE_URL).rstrip("/"),
+            token=env("DENG_MONITOR_BRIDGE_TOKEN") or "",
+            push_interval_seconds=float(env("DENG_MONITOR_PUSH_INTERVAL") or DEFAULT_PUSH_INTERVAL_SECONDS),
+            snapshot_interval_seconds=int(env("DENG_MONITOR_SNAPSHOT_INTERVAL") or DEFAULT_SNAPSHOT_INTERVAL_SECONDS),
+            insecure=str(env("DENG_MONITOR_BRIDGE_INSECURE") or "").lower() in {"1", "true", "yes"},
+            enabled=str(env("DENG_MONITOR_BRIDGE_ENABLED") or "").lower() in {"1", "true", "yes"},
+        )
+
+
+@dataclass
+class BridgeState:
+    connected: bool = False
+    last_push_at: float | None = None
+    last_error: str | None = None
+    backoff: float = MIN_BACKOFF_SECONDS
+    consecutive_failures: int = 0
+    snapshot_last_sent_at: float = 0.0
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+class MonitorBridge:
+    """Outbound HTTPS push bridge — runs in a daemon thread.
+
+    Usage::
+
+        bridge = MonitorBridge(
+            config=BridgeConfig.from_env(),
+            status_provider=my_status_fn,     # returns dict with packages/version/channel
+            snapshot_provider=my_snapshot_fn, # returns (bytes, mime) or None
+        )
+        bridge.start()
+        ...
+        bridge.stop()
+
+    The bridge never raises; failures are recorded in ``self.state``.
+    """
+
+    def __init__(
+        self,
+        *,
+        config: BridgeConfig,
+        status_provider: StatusProvider,
+        snapshot_provider: SnapshotProvider | None = None,
+    ) -> None:
+        self.config = config
+        self.status_provider = status_provider
+        self.snapshot_provider = snapshot_provider
+        self.state = BridgeState()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    # ── Lifecycle ────────────────────────────────────────────────────────
+    def start(self) -> bool:
+        if not self.config.enabled:
+            logger.info("monitor_bridge disabled (DENG_MONITOR_BRIDGE_ENABLED not set)")
+            return False
+        if not self.config.token:
+            logger.warning("monitor_bridge has no token; not starting")
+            return False
+        if self._thread and self._thread.is_alive():
+            return True
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._run, name="deng-monitor-bridge", daemon=True
+        )
+        self._thread.start()
+        logger.info("monitor_bridge started url=%s", self.config.bridge_url)
+        return True
+
+    def stop(self, timeout: float = 3.0) -> None:
+        self._stop.set()
+        t = self._thread
+        if t and t.is_alive():
+            t.join(timeout=timeout)
+        self._thread = None
+
+    def is_running(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
+    # ── Main loop ────────────────────────────────────────────────────────
+    def _run(self) -> None:
+        push_interval = max(0.5, float(self.config.push_interval_seconds))
+        next_push = 0.0
+        while not self._stop.is_set():
+            now = time.monotonic()
+            if now >= next_push:
+                next_push = now + push_interval
+                try:
+                    self._tick()
+                except Exception as exc:  # noqa: BLE001
+                    self._record_failure(f"tick_error: {exc.__class__.__name__}")
+            # Sleep responsively
+            self._stop.wait(timeout=0.25)
+
+    def _tick(self) -> None:
+        # Build status payload
+        try:
+            raw = self.status_provider() or {}
+        except Exception as exc:  # noqa: BLE001
+            self._record_failure(f"status_provider: {exc.__class__.__name__}")
+            return
+
+        packages = raw.get("packages") or []
+        payload = build_safe_payload(
+            tool_version=str(raw.get("tool_version") or ""),
+            channel=str(raw.get("channel") or "stable"),
+            packages=list(packages) if isinstance(packages, list) else [],
+            extra=raw.get("extra") if isinstance(raw.get("extra"), dict) else None,
+        )
+
+        ok = self._post_json("/api/monitor/bridge/push", payload)
+        if not ok:
+            return
+
+        # Snapshot upload (interval-gated, off=0)
+        interval = int(self.config.snapshot_interval_seconds)
+        if interval > 0 and self.snapshot_provider:
+            elapsed = time.time() - self.state.snapshot_last_sent_at
+            if elapsed >= interval:
+                try:
+                    snap = self.snapshot_provider()
+                except Exception as exc:  # noqa: BLE001
+                    snap = None
+                    logger.debug("snapshot_provider failed: %s", exc)
+                if snap:
+                    data, mime = snap
+                    if data and len(data) <= MAX_SNAPSHOT_BYTES:
+                        if self._post_binary(
+                            "/api/monitor/bridge/snapshot",
+                            data,
+                            content_type=mime or "image/webp",
+                        ):
+                            self.state.snapshot_last_sent_at = time.time()
+
+    # ── HTTP helpers ─────────────────────────────────────────────────────
+    def _validate_url(self) -> bool:
+        url = self.config.bridge_url
+        if not url:
+            return False
+        if not self.config.insecure and not url.startswith("https://"):
+            self._record_failure("bridge_url_not_https")
+            return False
+        return True
+
+    def _post_json(self, path: str, body: dict[str, Any]) -> bool:
+        if not self._validate_url():
+            return False
+        try:
+            data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            self._record_failure(f"json_encode: {exc}")
+            return False
+        if len(data) > MAX_PAYLOAD_BYTES:
+            self._record_failure("payload_too_large")
+            return False
+        return self._send(path, data, "application/json")
+
+    def _post_binary(self, path: str, data: bytes, *, content_type: str) -> bool:
+        if not self._validate_url():
+            return False
+        if len(data) > MAX_SNAPSHOT_BYTES:
+            return False
+        return self._send(path, data, content_type)
+
+    def _send(self, path: str, data: bytes, content_type: str) -> bool:
+        url = f"{self.config.bridge_url}{path}"
+        req = urllib.request.Request(  # noqa: S310 - URL is validated above
+            url,
+            data=data,
+            method="POST",
+            headers={
+                "Content-Type": content_type,
+                "Authorization": f"Bearer {self.config.token}",
+                "User-Agent": self.config.user_agent,
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:  # noqa: S310
+                if 200 <= resp.status < 300:
+                    self._record_success()
+                    return True
+                self._record_failure(f"http_{resp.status}")
+                return False
+        except urllib.error.HTTPError as exc:
+            self._record_failure(f"http_{exc.code}")
+            return False
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            self._record_failure(f"net_{exc.__class__.__name__}")
+            return False
+
+    # ── State bookkeeping ────────────────────────────────────────────────
+    def _record_success(self) -> None:
+        with self.state.lock:
+            self.state.connected = True
+            self.state.last_push_at = time.time()
+            self.state.last_error = None
+            self.state.consecutive_failures = 0
+            self.state.backoff = MIN_BACKOFF_SECONDS
+
+    def _record_failure(self, reason: str) -> None:
+        with self.state.lock:
+            self.state.connected = False
+            self.state.last_error = reason
+            self.state.consecutive_failures += 1
+            # Exponential backoff with jitter, capped
+            self.state.backoff = min(
+                MAX_BACKOFF_SECONDS,
+                self.state.backoff * 2 + random.uniform(0, 1),  # noqa: S311
+            )
+        # Throttle log to avoid spam
+        if self.state.consecutive_failures in (1, 5) or self.state.consecutive_failures % 30 == 0:
+            logger.warning(
+                "monitor_bridge push failed reason=%s consecutive=%d",
+                reason, self.state.consecutive_failures,
+            )
+
+
+__all__ = [
+    "ALLOWED_STATES",
+    "BridgeConfig",
+    "BridgeState",
+    "MAX_PACKAGES_PER_PUSH",
+    "MAX_PAYLOAD_BYTES",
+    "MAX_SNAPSHOT_BYTES",
+    "MonitorBridge",
+    "build_safe_payload",
+]

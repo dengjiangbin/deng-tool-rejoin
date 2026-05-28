@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!--
+        Simple "D" monogram on a transparent foreground, intended to sit on
+        top of the dark @color/deng_bg_a adaptive background. The full DENG
+        logo can be dropped in later as PNG mipmaps.
+    -->
+    <path
+        android:fillColor="#00CFFF"
+        android:pathData="M36,30 L54,30 A24,24 0 0 1 78,54 A24,24 0 0 1 54,78 L36,78 Z M48,42 L48,66 L54,66 A12,12 0 0 0 66,54 A12,12 0 0 0 54,42 Z" />
+    <path
+        android:fillColor="#FF2FB3"
+        android:fillAlpha="0.6"
+        android:pathData="M36,30 L54,30 A24,24 0 0 1 78,54 L66,54 A12,12 0 0 0 54,42 L48,42 Z" />
+</vector>
