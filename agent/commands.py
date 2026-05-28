@@ -186,6 +186,70 @@ def _persist_license_status(cfg: dict[str, Any], status: str) -> dict[str, Any]:
     return save_config(cfg)
 
 
+def _try_autostart_monitor_bridge(cfg: dict[str, Any]) -> bool:
+    """Best-effort: start the Rejoin APK monitor bridge in the background.
+
+    Called after license verification succeeds (menu gate / cmd_start) so
+    the device appears in the Android app automatically without any
+    manual env-var setup. Never raises and never blocks more than a few
+    seconds on a single HTTP attempt. Returns ``True`` if the bridge is
+    running after the call, ``False`` otherwise.
+
+    Security: this function only ever reads ``cfg["license"]["key"]`` and
+    the locally-stored install_id, both of which the user has already
+    used to authenticate against ``rejoin.deng.my.id``. Nothing else
+    sensitive (private URLs, cookies, raw HWID) is ever sent or stored.
+    """
+    try:
+        from . import monitor_autostart
+        from .license import (
+            get_or_create_install_id,
+            hash_install_id,
+            normalize_license_key,
+        )
+    except Exception:  # noqa: BLE001
+        return False
+
+    try:
+        lic = cfg.get("license") if isinstance(cfg, dict) else None
+        lic = lic if isinstance(lic, dict) else {}
+        raw_key = (lic.get("key") or "").strip() or (cfg.get("license_key") or "").strip() if isinstance(cfg, dict) else ""
+        if not raw_key:
+            return False
+        try:
+            key = normalize_license_key(raw_key)
+        except Exception:  # noqa: BLE001
+            key = str(raw_key).strip().upper()
+        if not key:
+            return False
+        try:
+            install_id = get_or_create_install_id()
+        except Exception:  # noqa: BLE001
+            return False
+        if not install_id:
+            return False
+        install_id_hash = hash_install_id(install_id)
+
+        channel = "stable"
+        try:
+            ch_raw = str(cfg.get("channel") or "").strip().lower() if isinstance(cfg, dict) else ""
+            if ch_raw in {"stable", "beta", "dev", "latest", "test", "main-dev"}:
+                channel = ch_raw
+        except Exception:  # noqa: BLE001
+            pass
+
+        return monitor_autostart.ensure_monitor_bridge_started(
+            license_key=key,
+            install_id_hash=install_id_hash,
+            tool_version=VERSION,
+            channel=channel,
+            device_label="Termux on Android",
+        )
+    except Exception:  # noqa: BLE001
+        # Public users must never see a traceback from a bridge failure.
+        return False
+
+
 # ── License cache fast-path ───────────────────────────────────────────────────
 #
 # Real-device evidence (probe ``p-39924732cd``): on the cloud phone, the
@@ -5557,6 +5621,18 @@ def cmd_start(args: argparse.Namespace) -> int:
         # loop, process-check-first, 4 states only, never stops after Online.
         _supervisor = WatchdogSupervisor(runtime_entries, _live_cfg, initial_status=initial_status)
         _supervisor_ref = _supervisor
+        # Register the live supervisor with the monitor autostart so per-package
+        # state updates start flowing into the Rejoin APK as soon as Start
+        # begins. Idempotent + safe — set_active_supervisor never raises and
+        # the bridge thread already ran from cmd_menu when the license gated.
+        try:
+            from . import monitor_autostart as _mon_auto
+            _mon_auto.set_active_supervisor(_supervisor)
+            # Re-issue autostart in case the user ran ``deng-rejoin start``
+            # directly (skipping the menu autostart hook).
+            _try_autostart_monitor_bridge(cfg)
+        except Exception:  # noqa: BLE001
+            pass
         _live_map = _supervisor.status_map  # dict mutated in-place by watchdog loop
         _start_session.mark("supervisor_begin", package_count=len(runtime_entries))
 
@@ -5735,6 +5811,15 @@ def cmd_start(args: argparse.Namespace) -> int:
         # Best-effort clean exit: clear screen so terminal is not littered.
         try:
             _clear_terminal()
+        except Exception:  # noqa: BLE001
+            pass
+        # Drop the supervisor reference from the monitor autostart so the
+        # bridge stops pushing package state once Start ends. The bridge
+        # itself keeps running so the device still reports as connected
+        # (with an empty packages list) when the user returns to the menu.
+        try:
+            from . import monitor_autostart as _mon_auto
+            _mon_auto.set_active_supervisor(None)
         except Exception:  # noqa: BLE001
             pass
         _release_start_lock(_shutdown_reason)
@@ -6611,6 +6696,10 @@ def cmd_menu(args: argparse.Namespace) -> int:
     if _license_manual_verification_success:
         termux_ui.print_license_success(pause_seconds=0.8)
         _license_manual_verification_success = False
+    # License gate has passed → auto-start the Rejoin APK monitor bridge
+    # so the cloud phone appears in the Android app without any manual
+    # env-var setup. Never raises; backend offline is logged silently.
+    _try_autostart_monitor_bridge(cfg)
     safe_io.safe_clear_screen()
     return _run_top_menu_with_clean_exit(args)
 

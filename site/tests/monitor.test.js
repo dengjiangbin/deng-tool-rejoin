@@ -34,6 +34,9 @@ function makeMemoryDb() {
     monitor_bridge_tokens: [],
     monitor_pairing_codes: [],
     monitor_app_sessions: [],
+    // License-system tables used by /api/monitor/bridge/issue-from-license.
+    license_keys: [],
+    device_bindings: [],
   };
 }
 
@@ -538,5 +541,245 @@ describe('APK download page', () => {
       `expected 401/403/302, got ${res.status}`,
     );
     assert.notEqual(res.status, 200);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Termux-safe bridge token issuance (no website session required)
+// ───────────────────────────────────────────────────────────────────────────
+
+const VALID_LICENSE_KEY = 'DENG-1A2B-3C4D-5E6F-7890';
+const VALID_INSTALL_ID  = 'a'.repeat(32);
+function installIdHashFor(id) { return sha256(id); }
+function licenseKeyIdFor(key) { return sha256(String(key).toUpperCase()); }
+
+function seedActiveLicense({
+  owner = 'discord-owner-1',
+  key = VALID_LICENSE_KEY,
+  installId = VALID_INSTALL_ID,
+  status = 'active',
+  expiresAt = null,
+  bindingActive = true,
+} = {}) {
+  const keyId = licenseKeyIdFor(key);
+  mem.license_keys.push({
+    id: keyId,
+    prefix: 'DENG-1A2B',
+    suffix: '7890',
+    owner_discord_id: owner,
+    status,
+    plan: 'standard',
+    expires_at: expiresAt,
+    created_by: owner,
+  });
+  mem.device_bindings.push({
+    key_id: keyId,
+    install_id_hash: installIdHashFor(installId),
+    device_label: '',
+    device_model: '',
+    is_active: bindingActive,
+  });
+  return { key, installId, installIdHash: installIdHashFor(installId), keyId, owner };
+}
+
+describe('POST /api/monitor/bridge/issue-from-license', () => {
+  test('rejects bad license-key format', async () => {
+    const res = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: 'not-a-key', install_id_hash: 'a'.repeat(64) });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.message, 'invalid_license_key');
+  });
+
+  test('rejects bad install-id-hash format', async () => {
+    const res = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: VALID_LICENSE_KEY, install_id_hash: 'short' });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.message, 'invalid_install_id_hash');
+  });
+
+  test('rejects unknown license key (no row in license_keys)', async () => {
+    const res = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: VALID_LICENSE_KEY, install_id_hash: installIdHashFor('whatever-id-here-1234567890123456') });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, 'invalid_license');
+  });
+
+  test('rejects inactive license', async () => {
+    const seed = seedActiveLicense({ status: 'revoked' });
+    const res = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: seed.key, install_id_hash: seed.installIdHash });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, 'license_inactive');
+  });
+
+  test('rejects expired license', async () => {
+    const seed = seedActiveLicense({ expiresAt: new Date(Date.now() - 60_000).toISOString() });
+    const res = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: seed.key, install_id_hash: seed.installIdHash });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, 'license_expired');
+  });
+
+  test('rejects when no device_binding exists for that key', async () => {
+    const keyId = licenseKeyIdFor(VALID_LICENSE_KEY);
+    mem.license_keys.push({
+      id: keyId, prefix: 'DENG-1A2B', suffix: '7890',
+      owner_discord_id: 'disc-owner', status: 'active',
+    });
+    const res = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: VALID_LICENSE_KEY, install_id_hash: 'b'.repeat(64) });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, 'device_not_bound');
+  });
+
+  test('rejects when install_id_hash does not match the binding', async () => {
+    const seed = seedActiveLicense();
+    const res = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: seed.key, install_id_hash: installIdHashFor('different-install-id-1234567890ab') });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, 'install_id_mismatch');
+  });
+
+  test('rejects when device_binding is inactive', async () => {
+    const seed = seedActiveLicense({ bindingActive: false });
+    const res = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: seed.key, install_id_hash: seed.installIdHash });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, 'device_binding_inactive');
+  });
+
+  test('valid license + matching install_id_hash creates device and issues token', async () => {
+    const seed = seedActiveLicense({ owner: 'disc-success-1' });
+    const res = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({
+        license_key: seed.key,
+        install_id_hash: seed.installIdHash,
+        device_label: 'My Cloud Phone',
+        tool_version: '1.0.0',
+        channel: 'stable',
+      });
+    assert.equal(res.status, 200);
+    assert.ok(res.body.bridge_token, 'bridge_token returned');
+    assert.ok(res.body.device_id, 'device_id returned');
+    assert.ok(res.body.expires_at, 'expires_at returned');
+
+    // The plaintext token must NEVER be stored — only its sha256 hash.
+    assert.equal(mem.monitor_bridge_tokens.length, 1);
+    const stored = mem.monitor_bridge_tokens[0];
+    assert.equal(stored.token_hash, sha256(res.body.bridge_token));
+    assert.notEqual(stored.token_hash, res.body.bridge_token);
+
+    // The device row must be owned by the license owner (NOT some other
+    // user) and must use the install_id_hash as the fingerprint hash.
+    assert.equal(mem.monitor_devices.length, 1);
+    const dev = mem.monitor_devices[0];
+    assert.equal(dev.owner_discord_user_id, 'disc-success-1');
+    assert.equal(dev.device_fingerprint_hash, seed.installIdHash);
+    assert.equal(dev.device_label, 'My Cloud Phone');
+    assert.equal(dev.tool_version, '1.0.0');
+    assert.equal(dev.channel, 'stable');
+
+    // A default settings row is created so the APK does not 500 on
+    // first read.
+    assert.equal(mem.monitor_settings.length, 1);
+  });
+
+  test('repeated calls reuse the same device row instead of duplicating', async () => {
+    const seed = seedActiveLicense({ owner: 'disc-idempotent' });
+    await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: seed.key, install_id_hash: seed.installIdHash, device_label: 'A' });
+    await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: seed.key, install_id_hash: seed.installIdHash, device_label: 'B' });
+    assert.equal(mem.monitor_devices.length, 1, 'same device row reused across runs');
+    assert.equal(mem.monitor_devices[0].device_label, 'B', 'label refreshed on second call');
+    assert.equal(mem.monitor_bridge_tokens.length, 2, 'new bridge token issued each call');
+  });
+
+  test('different owner cannot mint a token for the same device (cross-user safety)', async () => {
+    // Owner-A is the real owner of the device.
+    const seedA = seedActiveLicense({ owner: 'disc-owner-A' });
+    // Owner-B owns a different license entirely, bound to a different install.
+    const seedB = seedActiveLicense({
+      owner: 'disc-owner-B',
+      key: 'DENG-AAAA-BBBB-CCCC-DDDD',
+      installId: 'b'.repeat(32),
+    });
+
+    // Owner-B tries to claim Owner-A's install_id_hash by passing it as their own.
+    const res = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: seedB.key, install_id_hash: seedA.installIdHash });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error, 'install_id_mismatch');
+
+    // No device row for owner-B was created.
+    const ownersB = mem.monitor_devices.filter((d) => d.owner_discord_user_id === 'disc-owner-B');
+    assert.equal(ownersB.length, 0);
+  });
+
+  test('the issued bridge_token is accepted by /api/monitor/bridge/push end-to-end', async () => {
+    const seed = seedActiveLicense({ owner: 'disc-e2e' });
+    const issue = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: seed.key, install_id_hash: seed.installIdHash });
+    assert.equal(issue.status, 200);
+    const token = issue.body.bridge_token;
+
+    // Empty packages push must still succeed and flip status_connected=true,
+    // so the APK shows the device even before Start.
+    const push = await request(app)
+      .post('/api/monitor/bridge/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ schema: 1, tool_version: '1.0.0', channel: 'stable', packages: [] });
+    assert.equal(push.status, 200);
+
+    const dev = mem.monitor_devices.find((d) => d.owner_discord_user_id === 'disc-e2e');
+    assert.ok(dev, 'device exists');
+    assert.equal(dev.status_connected, true, 'device flipped to connected after first push');
+  });
+
+  test('an APK app-session for the same owner can now see the device', async () => {
+    const seed = seedActiveLicense({ owner: 'disc-pair-flow' });
+    await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: seed.key, install_id_hash: seed.installIdHash });
+
+    const appToken = seedAppSession('disc-pair-flow');
+    const res = await request(app)
+      .get('/api/monitor/devices')
+      .set('Authorization', `Bearer ${appToken}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.devices.length, 1, 'APK sees the device registered by Termux');
+  });
+
+  test('payload never accepts banned fields back', async () => {
+    const seed = seedActiveLicense({ owner: 'disc-scrub' });
+    const res = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({
+        license_key: seed.key,
+        install_id_hash: seed.installIdHash,
+        // attempt to smuggle a malicious owner_discord_user_id:
+        owner_discord_user_id: 'disc-attacker',
+        // attempt to override the channel with a bogus value:
+        channel: 'pwn',
+      });
+    assert.equal(res.status, 200);
+    const dev = mem.monitor_devices[0];
+    // Owner must come from license_keys, never from the request body.
+    assert.equal(dev.owner_discord_user_id, 'disc-scrub');
+    // Unknown channel falls back to "stable".
+    assert.equal(dev.channel, 'stable');
   });
 });

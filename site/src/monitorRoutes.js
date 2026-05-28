@@ -587,6 +587,150 @@ router.post('/api/monitor/pairing/redeem',
     }
   });
 
+// ── License-key proof normalizers (mirror agent.license.normalize_license_key) ─
+const LICENSE_KEY_PATTERN = /^DENG-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/;
+function normalizeLicenseKey(raw) {
+  if (typeof raw !== 'string') return '';
+  return raw.trim().toUpperCase();
+}
+const INSTALL_ID_HASH_PATTERN = /^[a-f0-9]{64}$/;
+const ALLOWED_CHANNELS = ['stable', 'beta', 'dev', 'latest', 'test', 'main-dev'];
+
+/**
+ * POST /api/monitor/bridge/issue-from-license
+ *   Body: { license_key, install_id_hash, device_label?, tool_version?, channel? }
+ *   Returns: { bridge_token, device_id, expires_at }
+ *
+ *   Termux-safe device registration: validates an existing license-key +
+ *   install_id_hash binding against the license tables, then issues a
+ *   short-lived bridge token for the owner's device. NEVER requires a
+ *   website session, so `deng-rejoin` can auto-register after license
+ *   verification without any manual env-var setup by public users.
+ *
+ *   Security:
+ *     • Rejects unknown / expired / inactive license keys.
+ *     • Rejects calls where install_id_hash does not match the recorded
+ *       device_binding for that key (so a leaked key alone can't mint).
+ *     • Hashes the bridge token before storing (raw returned ONCE).
+ *     • Reuses the same monitor_devices row for (owner, fingerprint_hash)
+ *       so re-runs don't pile up phantom devices.
+ */
+router.post('/api/monitor/bridge/issue-from-license',
+  pairingLimiter,
+  monitorJsonParser,
+  async (req, res) => {
+    const body = req.body || {};
+    const rawKey = normalizeLicenseKey(body.license_key);
+    const installIdHash = typeof body.install_id_hash === 'string' ? body.install_id_hash.trim().toLowerCase() : '';
+    if (!LICENSE_KEY_PATTERN.test(rawKey)) return badRequest(res, 'invalid_license_key');
+    if (!INSTALL_ID_HASH_PATTERN.test(installIdHash)) return badRequest(res, 'invalid_install_id_hash');
+
+    const keyId = sha256(rawKey);
+    const deviceLabel = typeof body.device_label === 'string'
+      ? body.device_label.slice(0, 64).replace(/[^\x20-\x7E]/g, '').trim() || 'Termux'
+      : 'Termux';
+    const toolVersion = typeof body.tool_version === 'string' ? body.tool_version.slice(0, 32) : null;
+    const channel = typeof body.channel === 'string' && ALLOWED_CHANNELS.includes(body.channel)
+      ? body.channel : 'stable';
+
+    try {
+      // 1. Verify the license key is real, owned, and active.
+      const { data: keyRow, error: keyErr } = await supabase
+        .from('license_keys')
+        .select('id, owner_discord_id, status, expires_at')
+        .eq('id', keyId)
+        .maybeSingle();
+      if (keyErr) throw keyErr;
+      if (!keyRow) return res.status(403).json({ error: 'invalid_license' });
+      if (keyRow.status !== 'active') return res.status(403).json({ error: 'license_inactive' });
+      if (keyRow.expires_at && new Date(keyRow.expires_at).getTime() < Date.now()) {
+        return res.status(403).json({ error: 'license_expired' });
+      }
+      const owner = keyRow.owner_discord_id ? String(keyRow.owner_discord_id) : '';
+      if (!owner) return res.status(403).json({ error: 'license_unowned' });
+
+      // 2. Verify the install_id_hash matches the recorded binding.
+      //    This proves the caller is on the device that redeemed the key,
+      //    so a leaked license key alone cannot mint a bridge token.
+      const { data: binding, error: bindErr } = await supabase
+        .from('device_bindings')
+        .select('key_id, install_id_hash, is_active')
+        .eq('key_id', keyId)
+        .maybeSingle();
+      if (bindErr) throw bindErr;
+      if (!binding) return res.status(403).json({ error: 'device_not_bound' });
+      if (binding.is_active === false) return res.status(403).json({ error: 'device_binding_inactive' });
+      if (String(binding.install_id_hash).toLowerCase() !== installIdHash) {
+        return res.status(403).json({ error: 'install_id_mismatch' });
+      }
+
+      // 3. Upsert the monitor_devices row by (owner, fingerprint_hash).
+      //    The install_id_hash IS the fingerprint hash — it's already a
+      //    privacy-safe SHA-256 of a per-install random secret.
+      const fpHash = installIdHash;
+      let { data: existingDevice } = await supabase
+        .from('monitor_devices')
+        .select('id')
+        .eq('owner_discord_user_id', owner)
+        .eq('device_fingerprint_hash', fpHash)
+        .maybeSingle();
+
+      let deviceId;
+      if (existingDevice) {
+        deviceId = existingDevice.id;
+        try {
+          await supabase.from('monitor_devices').update({
+            device_label: deviceLabel,
+            tool_version: toolVersion,
+            channel,
+            updated_at: new Date().toISOString(),
+          }).eq('id', deviceId);
+        } catch (e) {
+          console.warn('[monitor] device label/version refresh failed', e?.message || e);
+        }
+      } else {
+        const ins = await supabase.from('monitor_devices').insert({
+          owner_discord_user_id: owner,
+          device_label: deviceLabel,
+          device_fingerprint_hash: fpHash,
+          tool_version: toolVersion,
+          channel,
+          status_connected: false, // becomes true on first /bridge/push
+        }).select('id').single();
+        if (ins.error) throw ins.error;
+        deviceId = ins.data.id;
+        try {
+          await supabase.from('monitor_settings').upsert({
+            monitor_device_id: deviceId,
+          }, { onConflict: 'monitor_device_id' });
+        } catch (e) {
+          console.warn('[monitor] default settings insert failed', e?.message || e);
+        }
+      }
+
+      // 4. Issue a fresh bridge token. Old tokens for this device are
+      //    left to expire naturally (12h TTL) — the agent caches one and
+      //    reissues on 401/expiry.
+      const token = randomToken(32);
+      const expiresAt = nowIso(BRIDGE_TOKEN_TTL_SEC);
+      const tokIns = await supabase.from('monitor_bridge_tokens').insert({
+        monitor_device_id: deviceId,
+        token_hash: sha256(token),
+        expires_at: expiresAt,
+      });
+      if (tokIns && tokIns.error) throw tokIns.error;
+
+      return res.json({
+        bridge_token: token,
+        device_id: deviceId,
+        expires_at: expiresAt,
+      });
+    } catch (err) {
+      console.error('[monitor] bridge issue-from-license failed', err?.message || err);
+      return serverError(res, 'bridge_issue_failed');
+    }
+  });
+
 /**
  * POST /api/monitor/bridge/issue
  *   Body: { device_label?, device_fingerprint, tool_version?, channel? }
@@ -657,7 +801,11 @@ module.exports.__test__ = {
   randomPairingCode,
   summarizePackages,
   safePackageRowForApp,
+  normalizeLicenseKey,
+  LICENSE_KEY_PATTERN,
+  INSTALL_ID_HASH_PATTERN,
   MAX_JSON_BYTES,
   MAX_SNAPSHOT_BYTES,
+  BRIDGE_TOKEN_TTL_SEC,
   ALLOWED_SNAPSHOT_INTERVALS,
 };
