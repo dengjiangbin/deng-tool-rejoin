@@ -328,7 +328,28 @@ router.post('/api/monitor/bridge/push',
       }
     }
 
-    return res.json({ ok: true, accepted: rows.length });
+    // Echo the device's current monitor settings so the bridge can react
+    // to APK setting changes (snapshot interval etc.) without requiring a
+    // Termux relaunch. Failure here must NOT fail the whole push.
+    let settingsEcho = null;
+    try {
+      const { data: srow } = await supabase
+        .from('monitor_settings')
+        .select('snapshot_interval_seconds, monitor_enabled, app_refresh_interval_seconds')
+        .eq('monitor_device_id', device.id)
+        .maybeSingle();
+      if (srow) {
+        settingsEcho = {
+          snapshot_interval_seconds: Math.max(0, Math.min(3600, parseInt(srow.snapshot_interval_seconds, 10) || 0)),
+          monitor_enabled: srow.monitor_enabled !== false,
+          app_refresh_interval_seconds: Math.max(1, Math.min(300, parseInt(srow.app_refresh_interval_seconds, 10) || 5)),
+        };
+      }
+    } catch (err) {
+      console.warn('[monitor] settings echo failed', err?.message || err);
+    }
+
+    return res.json({ ok: true, accepted: rows.length, settings: settingsEcho });
   });
 
 /**

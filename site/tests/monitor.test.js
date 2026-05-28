@@ -233,6 +233,47 @@ describe('monitor bridge auth', () => {
     assert.equal(stored.ram_mb, 642);
     assert.equal(stored.private_url_configured, true);
   });
+
+  // v1.0.2 — APK settings reach Termux via the /push echo so the user can
+  // change snapshot interval without relaunching Termux.
+  test('push response echoes current monitor_settings so bridge can react live', async () => {
+    const deviceId = seedDevice('disc-echo');
+    const token = seedBridgeToken(deviceId);
+    mem.monitor_settings.push({
+      monitor_device_id: deviceId,
+      snapshot_interval_seconds: 60,
+      monitor_enabled: true,
+      app_refresh_interval_seconds: 5,
+    });
+
+    const res = await request(app)
+      .post('/api/monitor/bridge/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        schema: 1,
+        tool_version: '1.0.0',
+        channel: 'stable',
+        packages: [],
+      });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.ok(res.body.settings, 'push response must echo settings');
+    assert.equal(res.body.settings.snapshot_interval_seconds, 60);
+    assert.equal(res.body.settings.monitor_enabled, true);
+    assert.equal(res.body.settings.app_refresh_interval_seconds, 5);
+  });
+
+  test('push response settings field is null when no settings row exists', async () => {
+    const deviceId = seedDevice('disc-no-settings');
+    const token = seedBridgeToken(deviceId);
+    const res = await request(app)
+      .post('/api/monitor/bridge/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ schema: 1, tool_version: '1.0.0', channel: 'stable', packages: [] });
+    assert.equal(res.status, 200);
+    // settings may be null (no row); the bridge tolerates either shape.
+    assert.ok(res.body.settings === null || res.body.settings === undefined);
+  });
 });
 
 describe('monitor bridge payload validation', () => {

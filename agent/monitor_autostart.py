@@ -11,9 +11,9 @@ Call :func:`ensure_monitor_bridge_started` from any post-license point
 raises**:
 
 * Loads a cached bridge token from ``~/.deng-tool/rejoin/.monitor-bridge.json``.
-* If the cache is missing/expired/wrong-URL, POSTs to
-  ``/api/monitor/bridge/issue-from-license`` using the active license key
-  and its install_id_hash. That endpoint validates the license proof,
+* If the cache is missing/expired/wrong-URL, calls
+  ``/api/monitor/bridge/issue-from-license`` via :mod:`agent.safe_http`
+  (curl subprocess on Termux). The endpoint validates the license proof,
   upserts the device row, and returns a short-lived bridge token.
 * Starts :class:`agent.monitor_bridge.MonitorBridge` in a daemon thread.
 * Re-entry: a second call detects the running bridge and does nothing.
@@ -23,16 +23,29 @@ Status provider
 :func:`set_active_supervisor` lets ``cmd_start`` register the live
 :class:`agent.supervisor.WatchdogSupervisor` so per-package state is
 included in pushes. When no supervisor is registered (user is sitting on
-the menu or hasn't pressed Start), the bridge still pushes an empty
-``packages`` array — the device row is upserted with ``status_connected =
-true`` so the APK shows "Connected, no packages reported yet" instead of
-"No cloud phone connected".
+the menu or hasn't pressed Start), the bridge instead reports each
+**configured/enabled package** with ``state="Dead"`` and ``runtime=0`` so
+the APK shows the rows immediately (username title, package_name
+subtitle, Dead badge) — see :func:`set_config`.
+
+Snapshot provider
+-----------------
+On Termux, the bridge captures screenshots via :func:`agent.snapshot.capture_snapshot`
+and uploads PNG bytes to ``/api/monitor/bridge/snapshot`` on the
+snapshot interval requested by the device's monitor settings. The
+interval is updated dynamically from the ``/push`` response so the user
+can change it in the APK without relaunching ``deng-rejoin``.
 
 Security
 --------
 * The bridge token is cached locally with mode ``0o600`` (when supported).
 * The token is the only secret persisted — license keys, install IDs, and
   owner identifiers are NEVER written to the cache file.
+* All HTTPS calls run via :mod:`agent.safe_http`, which uses curl as a
+  subprocess on Termux. This is essential: real-device probe
+  ``p-d1cb86fd89`` showed a SIGSEGV inside libssl3's
+  ``EVP_PKEY_generate`` when the previous (in-process) urllib path was
+  used. With curl-subprocess the crash only kills the curl child.
 * All network failures are swallowed: the agent's primary monitoring
   loop is never interrupted by bridge problems.
 """
@@ -44,14 +57,13 @@ import logging
 import os
 import threading
 import time
-import urllib.error
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from .constants import APP_HOME, VERSION
 from .monitor_bridge import (
+    ALLOWED_STATES,
     DEFAULT_BRIDGE_URL,
     BridgeConfig,
     MonitorBridge,
@@ -71,7 +83,9 @@ _TOKEN_REFRESH_SLACK_SECONDS = 10 * 60  # 10 min
 _lock = threading.Lock()
 _running_bridge: MonitorBridge | None = None
 _active_supervisor: Any = None
+_active_config: dict[str, Any] | None = None
 _status_announced: bool = False
+_last_issue_result: str | None = None
 
 
 # ── Public API ──────────────────────────────────────────────────────────────
@@ -90,6 +104,18 @@ def set_active_supervisor(supervisor: Any) -> None:
         pass
 
 
+def set_config(cfg: dict[str, Any] | None) -> None:
+    """Register the saved config so the bridge can report configured
+    packages even when no supervisor is active (Termux is sitting on the
+    main menu). Safe to call from any thread; never raises.
+    """
+    global _active_config
+    try:
+        _active_config = cfg if isinstance(cfg, dict) else None
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def ensure_monitor_bridge_started(
     *,
     license_key: str,
@@ -99,6 +125,7 @@ def ensure_monitor_bridge_started(
     device_label: str | None = None,
     bridge_url: str | None = None,
     announce: bool = True,
+    config: dict[str, Any] | None = None,
 ) -> bool:
     """Idempotent: ensure the monitor bridge is running.
 
@@ -109,7 +136,10 @@ def ensure_monitor_bridge_started(
     The first successful call prints a single non-noisy status line.
     Subsequent calls are silent.
     """
-    global _running_bridge, _status_announced
+    global _running_bridge, _status_announced, _last_issue_result
+
+    if config is not None:
+        set_config(config)
 
     if not (license_key and install_id_hash):
         return False
@@ -135,10 +165,12 @@ def ensure_monitor_bridge_started(
                 channel=ch,
             )
             if not issued:
+                _last_issue_result = "error"
                 if announce and not _status_announced:
                     _announce_status(connected=False)
                     _status_announced = True
                 return False
+            _last_issue_result = "success"
             token = issued.get("bridge_token") or ""
             if not token:
                 return False
@@ -150,13 +182,20 @@ def ensure_monitor_bridge_started(
                 "expires_at_epoch": _iso_to_epoch(issued.get("expires_at")),
                 "issued_at_epoch": time.time(),
             })
+        else:
+            _last_issue_result = "cached"
 
-        # Build provider closure that always reads the live supervisor.
+        # Closures that always read the live supervisor / config.
         def _status_provider() -> dict[str, Any]:
             return _build_status_payload(tool_version=tv, channel=ch)
 
+        def _on_unauthorized(_status: int) -> None:
+            # Token revoked → drop cache so next ensure() reissues.
+            clear_cached_token()
+            logger.info("monitor_bridge token rejected (HTTP %s); cleared cache", _status)
+
         try:
-            cfg = BridgeConfig(
+            cfg_obj = BridgeConfig(
                 bridge_url=url,
                 token=token,
                 enabled=True,
@@ -164,9 +203,10 @@ def ensure_monitor_bridge_started(
                     in {"1", "true", "yes"},
             )
             bridge = MonitorBridge(
-                config=cfg,
+                config=cfg_obj,
                 status_provider=_status_provider,
-                snapshot_provider=None,  # snapshots are out-of-scope for autostart
+                snapshot_provider=_default_snapshot_provider,
+                on_unauthorized=_on_unauthorized,
             )
             ok = bridge.start()
         except Exception:  # noqa: BLE001
@@ -203,53 +243,292 @@ def reset_for_tests() -> None:
     """Test-only helper: clear cache + module state. Safe in production
     (no behavior change beyond resetting the in-memory flags).
     """
-    global _running_bridge, _active_supervisor, _status_announced
+    global _running_bridge, _active_supervisor, _active_config
+    global _status_announced, _last_issue_result
     stop_monitor_bridge()
     _running_bridge = None
     _active_supervisor = None
+    _active_config = None
     _status_announced = False
+    _last_issue_result = None
+
+
+def get_monitor_status_summary() -> dict[str, Any]:
+    """Return a redacted dict describing current monitor state.
+
+    Used by ``deng-rejoin monitor status``. Contains **no** secrets:
+    license keys, bridge tokens, app session tokens, and raw install IDs
+    are never included.
+    """
+    bridge = _running_bridge
+    state = bridge.state if bridge is not None else None
+    cfg = _active_config
+    configured_count = 0
+    try:
+        if isinstance(cfg, dict):
+            pkgs = cfg.get("roblox_packages") or []
+            if isinstance(pkgs, list):
+                configured_count = sum(
+                    1 for p in pkgs
+                    if isinstance(p, dict) and p.get("enabled", True) and p.get("package")
+                )
+    except Exception:  # noqa: BLE001
+        configured_count = 0
+
+    reported_count = 0
+    try:
+        if bridge is not None:
+            raw = bridge.status_provider() or {}
+            pkgs = raw.get("packages") or []
+            reported_count = len(pkgs) if isinstance(pkgs, list) else 0
+    except Exception:  # noqa: BLE001
+        reported_count = 0
+
+    snapshot_interval = 0
+    if bridge is not None:
+        try:
+            snapshot_interval = int(bridge.config.snapshot_interval_seconds)
+        except Exception:  # noqa: BLE001
+            snapshot_interval = 0
+
+    cache_summary: dict[str, Any] = {"present": False}
+    try:
+        if BRIDGE_CACHE_PATH.exists():
+            data = json.loads(BRIDGE_CACHE_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                cache_summary = {
+                    "present": True,
+                    "expires_at": data.get("expires_at"),
+                    "issued_at_epoch": data.get("issued_at_epoch"),
+                }
+    except Exception:  # noqa: BLE001
+        cache_summary = {"present": False, "error": "read_failed"}
+
+    return {
+        "bridge_url": _resolve_bridge_url(None),
+        "autostart_enabled": True,
+        "bridge_running": bool(bridge and bridge.is_running()),
+        "connected": bool(state and state.connected),
+        "last_push_at": (state.last_push_at if state else None),
+        "last_push_result": (state.last_push_result if state else None),
+        "last_error": (state.last_error if state else None),
+        "snapshot_interval_seconds": snapshot_interval,
+        "snapshot_last_sent_at": (state.snapshot_last_sent_at if state else 0.0),
+        "snapshot_last_result": (state.snapshot_last_result if state else None),
+        "configured_packages": configured_count,
+        "reported_packages": reported_count,
+        "supervisor_active": _active_supervisor is not None,
+        "token_cache": cache_summary,
+        "last_issue_result": _last_issue_result,
+    }
 
 
 # ── Status provider ─────────────────────────────────────────────────────────
 
 
+# Map the supervisor's status vocabulary to the public APK vocabulary
+# (the user explicitly restricts to: In-Lobby, Online, No Heartbeat, Dead).
+_SUPERVISOR_TO_PUBLIC_STATE: dict[str, str] = {
+    "Online": "Online",
+    "In Server": "Online",
+    "In-Lobby": "In-Lobby",
+    "Lobby": "In-Lobby",
+    "No Heartbeat": "No Heartbeat",
+    "Dead": "Dead",
+    "Closed": "Dead",
+    "Disconnected": "Dead",
+    "Failed": "Dead",
+    "Stopped": "Dead",
+    "Launching": "Dead",
+    "Launched": "Dead",
+    "Preparing": "Dead",
+    "Reconnecting": "No Heartbeat",
+    "Background": "No Heartbeat",
+    "Unknown": "Dead",
+    "Offline": "Dead",
+    "Warning": "Dead",
+    "Relaunching": "Dead",
+}
+
+
+def _coerce_public_state(raw: Any) -> str:
+    if not isinstance(raw, str) or not raw:
+        return "Dead"
+    if raw in _SUPERVISOR_TO_PUBLIC_STATE:
+        return _SUPERVISOR_TO_PUBLIC_STATE[raw]
+    if raw in ALLOWED_STATES:
+        return raw
+    return "Dead"
+
+
 def _build_status_payload(*, tool_version: str, channel: str) -> dict[str, Any]:
-    """Convert the live supervisor snapshot into the bridge's safe payload
-    shape. Returns empty packages when no supervisor is active."""
-    packages: list[dict[str, Any]] = []
+    """Build the bridge payload.
+
+    Order of preference:
+      1. Live ``WatchdogSupervisor`` snapshot (post-Start).
+      2. Saved-config enabled packages (pre-Start / on menu).
+      3. Empty list (no config available).
+
+    All paths are exception-safe and never touch root / subprocesses.
+    """
     sup = _active_supervisor
     if sup is not None:
-        try:
-            snap = sup.get_status_snapshot()
-        except Exception:  # noqa: BLE001
-            snap = []
-        for row in (snap or [])[:64]:
-            if not isinstance(row, dict):
-                continue
-            pkg = row.get("package") or row.get("package_name")
-            if not isinstance(pkg, str) or not pkg:
-                continue
-            # Supervisor uses "status"; the bridge's safe-payload contract
-            # uses "state". Pass both so MonitorBridge picks whichever it
-            # supports today/tomorrow.
-            state = row.get("status") or row.get("state") or "Unknown"
-            packages.append({
-                "package": pkg,
-                "username": row.get("username") or "",
-                "state": state,
-                "ram_mb": int(row.get("ram_mb") or 0),
-                "runtime_seconds": int(row.get("runtime_seconds") or 0),
-                "restart_count": int(row.get("revive_count") or row.get("restart_count") or 0),
-                "private_url_configured": bool(row.get("private_url_configured")),
-            })
+        packages = _packages_from_supervisor(sup)
+        if packages is not None:
+            return {
+                "tool_version": tool_version,
+                "channel": channel,
+                "packages": packages,
+            }
+
+    cfg = _active_config
     return {
         "tool_version": tool_version,
         "channel": channel,
-        "packages": packages,
+        "packages": _packages_from_config(cfg) if cfg is not None else [],
     }
 
 
-# ── Token issuance ──────────────────────────────────────────────────────────
+def _packages_from_supervisor(sup: Any) -> list[dict[str, Any]] | None:
+    try:
+        snap = sup.get_status_snapshot()
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(snap, list):
+        return None
+
+    now = time.time()
+    out: list[dict[str, Any]] = []
+    for row in snap[:64]:
+        if not isinstance(row, dict):
+            continue
+        pkg = row.get("package") or row.get("package_name")
+        if not isinstance(pkg, str) or not pkg:
+            continue
+        raw_state = row.get("status") or row.get("state") or "Unknown"
+        public_state = _coerce_public_state(raw_state)
+        # Compute runtime from the optional epoch the supervisor tracks
+        # (``online_since`` / ``last_seen_at``). 0 means "not running yet".
+        runtime_seconds = 0
+        try:
+            online_since = row.get("online_since") or row.get("last_seen_at")
+            if online_since and public_state == "Online":
+                runtime_seconds = max(0, int(now - float(online_since)))
+        except (TypeError, ValueError):
+            runtime_seconds = 0
+        # RAM — supervisor may or may not include it. Never call dumpsys
+        # from this thread (idle-safety rule); use the cached value the
+        # supervisor publishes if present, else 0.
+        ram_mb = 0
+        try:
+            ram_mb = max(0, int(row.get("ram_mb") or 0))
+        except (TypeError, ValueError):
+            ram_mb = 0
+        out.append({
+            "package": pkg,
+            "username": row.get("username") or "",
+            "state": public_state,
+            "ram_mb": ram_mb,
+            "runtime_seconds": runtime_seconds,
+            "restart_count": int(row.get("revive_count") or row.get("restart_count") or 0),
+            "private_url_configured": bool(row.get("private_url_configured")),
+        })
+    return out
+
+
+def _packages_from_config(cfg: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Build per-package rows from the saved Termux config alone.
+
+    Never reads root, never scans installed apps, never queries dumpsys —
+    this is exactly the "idle-safe" data source required by the
+    no-segfault-while-AFK contract.
+    """
+    if not isinstance(cfg, dict):
+        return []
+    try:
+        raw_pkgs = cfg.get("roblox_packages") or []
+    except Exception:  # noqa: BLE001
+        return []
+    if not isinstance(raw_pkgs, list):
+        return []
+
+    # Optional read-only username cache (kept in cfg by package_username
+    # module). Falls back to ``account_username`` field on the entry.
+    username_cache = cfg.get("package_username_cache") if isinstance(cfg, dict) else None
+    if not isinstance(username_cache, dict):
+        username_cache = {}
+    account_cache = cfg.get("account_username_cache") if isinstance(cfg, dict) else None
+    if not isinstance(account_cache, dict):
+        account_cache = {}
+
+    out: list[dict[str, Any]] = []
+    for entry in raw_pkgs[:64]:
+        if not isinstance(entry, dict):
+            continue
+        if not entry.get("enabled", True):
+            continue
+        pkg = entry.get("package") or entry.get("package_name")
+        if not isinstance(pkg, str) or not pkg:
+            continue
+        username = (
+            entry.get("account_username")
+            or username_cache.get(pkg)
+            or account_cache.get(pkg)
+            or ""
+        )
+        if not isinstance(username, str):
+            username = ""
+        display_name = entry.get("app_name") if isinstance(entry.get("app_name"), str) else None
+        private_url = entry.get("private_server_url")
+        out.append({
+            "package": pkg,
+            "display_name": display_name or None,
+            "username": username,
+            "state": "Dead",
+            "ram_mb": 0,
+            "runtime_seconds": 0,
+            "restart_count": 0,
+            "private_url_configured": bool(private_url),
+        })
+    return out
+
+
+# ── Snapshot provider ───────────────────────────────────────────────────────
+
+
+def _default_snapshot_provider() -> tuple[bytes, str] | None:
+    """Capture a screenshot for the bridge to upload, or return ``None``.
+
+    Implementation rules:
+      * Never runs unless this function is actually called by the bridge
+        (which only happens when ``snapshot_interval_seconds > 0``).
+      * Uses ``agent.snapshot.capture_snapshot`` which already wraps
+        ``screencap -p`` in a subprocess with a strict 10-second timeout.
+      * On any failure returns ``None`` so the bridge logs
+        ``capture_failed`` and keeps running.
+      * Never raises.
+    """
+    try:
+        from . import snapshot as _snap  # local import keeps cold-start light
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        path, _msg = _snap.capture_snapshot()
+    except Exception:  # noqa: BLE001
+        return None
+    if path is None:
+        return None
+    try:
+        data = Path(path).read_bytes()
+    except Exception:  # noqa: BLE001
+        return None
+    if not data:
+        return None
+    # screencap -p produces PNG bytes.
+    return data, "image/png"
+
+
+# ── Token issuance (curl subprocess via safe_http) ──────────────────────────
 
 
 def _issue_token_from_license(
@@ -260,46 +539,45 @@ def _issue_token_from_license(
     device_label: str,
     tool_version: str,
     channel: str,
-    timeout: float = 8.0,
+    timeout: float = 12.0,
 ) -> dict[str, Any] | None:
-    """POST /api/monitor/bridge/issue-from-license. Returns the response
-    dict on success, ``None`` on any failure."""
+    """POST /api/monitor/bridge/issue-from-license via :mod:`agent.safe_http`.
+
+    Returns the parsed response dict on success or ``None`` on any
+    failure. **Always uses curl-subprocess on Termux** so OpenSSL
+    crashes inside libssl cannot kill the agent process.
+    """
+    try:
+        from . import safe_http  # local import — safe_http has no heavy deps
+    except Exception:  # noqa: BLE001
+        return None
+
     url = bridge_url.rstrip("/") + "/api/monitor/bridge/issue-from-license"
-    payload = json.dumps({
+    payload = {
         "license_key": license_key,
         "install_id_hash": install_id_hash,
         "device_label": device_label,
         "tool_version": tool_version,
         "channel": channel,
-    }, separators=(",", ":")).encode("utf-8")
-    req = urllib.request.Request(  # noqa: S310
-        url,
-        data=payload,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": "DENG-Tool-Monitor-Autostart/1.0",
-            "Accept": "application/json",
-        },
-    )
+    }
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            if not (200 <= resp.status < 300):
-                logger.debug("issue-from-license: http_%s", resp.status)
-                return None
-            body = resp.read()
-            data = json.loads(body.decode("utf-8"))
-            if not isinstance(data, dict) or not data.get("bridge_token"):
-                return None
-            return data
-    except urllib.error.HTTPError as exc:
-        logger.debug("issue-from-license: http_%d", exc.code)
+        data = safe_http.post_json(url, payload, timeout=int(max(5, timeout)))
+    except safe_http.SafeHttpStatusError as exc:
+        logger.debug("issue-from-license: http_%d", exc.status_code)
         return None
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+    except safe_http.SafeHttpNetworkError as exc:
+        logger.debug("issue-from-license: net error %s", exc)
+        return None
+    except safe_http.SafeHttpJsonError as exc:
+        logger.debug("issue-from-license: bad json %s", exc)
         return None
     except Exception:  # noqa: BLE001
         logger.debug("issue-from-license: unexpected", exc_info=True)
         return None
+
+    if not isinstance(data, dict) or not data.get("bridge_token"):
+        return None
+    return data
 
 
 # ── Cache helpers ───────────────────────────────────────────────────────────
@@ -342,7 +620,6 @@ def _save_cached_token(payload: dict[str, Any]) -> None:
         try:
             os.replace(tmp, BRIDGE_CACHE_PATH)
         except OSError:
-            # Fallback for filesystems without atomic replace.
             BRIDGE_CACHE_PATH.write_text(
                 json.dumps(payload, separators=(",", ":")),
                 encoding="utf-8",
@@ -412,7 +689,9 @@ __all__ = [
     "BRIDGE_CACHE_PATH",
     "clear_cached_token",
     "ensure_monitor_bridge_started",
+    "get_monitor_status_summary",
     "reset_for_tests",
     "set_active_supervisor",
+    "set_config",
     "stop_monitor_bridge",
 ]

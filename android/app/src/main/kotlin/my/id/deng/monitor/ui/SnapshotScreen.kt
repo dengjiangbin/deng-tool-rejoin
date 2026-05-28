@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.SessionStore
 import my.id.deng.monitor.ui.theme.DengColors
+import my.id.deng.monitor.util.Format
 
 @Composable
 fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
@@ -110,6 +111,13 @@ fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
                     )
                 } else if (loading) {
                     CircularProgressIndicator(color = DengColors.Cyan, strokeWidth = 2.dp)
+                } else if (intervalSec == 0) {
+                    // Snapshot uploads are explicitly disabled — guide the
+                    // user instead of showing a silent empty placeholder.
+                    Text(
+                        "Snapshot is off. Enable it in Settings.",
+                        color = DengColors.TextMuted,
+                    )
                 } else {
                     Text("No snapshot yet.", color = DengColors.TextMuted)
                 }
@@ -117,7 +125,7 @@ fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
             Spacer(Modifier.height(8.dp))
             Text(
                 "Interval: " + (if (intervalSec == 0) "Off" else "${intervalSec}s") +
-                "  •  Last: " + (lastFetchedAt?.let { java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date(it)) } ?: "—"),
+                "  •  Last: " + Format.timestamp(lastFetchedAt),
                 style = MaterialTheme.typography.bodySmall,
                 color = DengColors.TextMuted,
             )

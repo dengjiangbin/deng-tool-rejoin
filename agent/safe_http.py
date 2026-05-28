@@ -395,3 +395,59 @@ def get_json(
     if backend == "curl":
         return _curl_get_json(url, extra_headers=headers, timeout=timeout)
     return _python_get_json(url, extra_headers=headers, timeout=timeout)
+
+
+# ── Lightweight (status_code, body) helpers for the monitor bridge ───────────
+
+
+def post_raw(
+    url: str,
+    body_bytes: bytes,
+    *,
+    content_type: str = "application/json",
+    headers: dict[str, str] | None = None,
+    timeout: int = 10,
+) -> tuple[int, bytes]:
+    """POST raw bytes; return ``(http_status, response_body)``.
+
+    Unlike :func:`post_json`, this never raises on HTTP error status —
+    callers get the full ``(status, body)`` so they can act on
+    ``401/403`` (token revoked) etc.
+
+    Network failures and child-process crashes still raise
+    :class:`SafeHttpNetworkError` so the monitor bridge can apply
+    backoff. JSON-parse errors are NOT raised (body is returned raw).
+
+    On Termux this routes through curl-subprocess so an OpenSSL crash
+    inside libcrypto/libssl (real-device probe ``p-d1cb86fd89``: SIGSEGV
+    in ``EVP_PKEY_generate``) only kills the curl child, never the
+    parent Python interpreter.
+    """
+    backend = _http_backend()
+    merged_headers: dict[str, str] = {
+        "User-Agent": _SHARED_HEADERS["User-Agent"],
+        "Accept": "*/*",
+        "Content-Type": content_type,
+    }
+    if headers:
+        merged_headers.update(headers)
+
+    if backend == "curl":
+        header_args = _build_curl_header_args(merged_headers)
+        post_args = ["-X", "POST", "--data-binary", "@-"] + header_args + [url]
+        http_status, body = _run_curl(post_args, stdin_bytes=body_bytes, timeout=timeout)
+        return http_status, body
+
+    # Python urllib fallback (CI, dev box). On Termux this path is bypassed.
+    req = urllib.request.Request(url, data=body_bytes, headers=merged_headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            return int(resp.status), resp.read(_MAX_RESPONSE_BYTES)
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read(_MAX_RESPONSE_BYTES) or b""
+        except Exception:  # noqa: BLE001
+            body = b""
+        return int(exc.code), body
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise SafeHttpNetworkError(f"Network I/O error: {exc}") from exc

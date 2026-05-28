@@ -58,14 +58,18 @@ private fun PackageCard(pkg: PackageState) {
     DengCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
+                // Main line: username (the user identity the operator cares about).
+                // Falls back to "Unknown" rather than the package name so the
+                // layout never feels empty for newly-paired devices.
                 Text(
-                    Format.shortPackage(pkg.packageName),
+                    Format.safeUsername(pkg.username),
                     style = MaterialTheme.typography.titleMedium,
                     color = DengColors.TextPrimary,
                     fontWeight = FontWeight.SemiBold,
                 )
+                // Subtitle: package name, tiny and muted.
                 Text(
-                    "User: ${Format.safeUsername(pkg.username)}",
+                    pkg.packageName,
                     style = MaterialTheme.typography.bodySmall,
                     color = DengColors.TextMuted,
                 )

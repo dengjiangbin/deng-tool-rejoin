@@ -1,5 +1,12 @@
 package my.id.deng.monitor.util
 
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeParseException
+import java.util.Date
+import java.util.Locale
+
 /**
  * Pure formatting helpers — covered by `FormatTest` so the contract is locked
  * down (RAM and runtime are user-visible, must never crash on edge inputs).
@@ -11,7 +18,7 @@ object Format {
         if (mb <= 0) return "—"
         return if (mb >= 1024) {
             val gb = mb.toDouble() / 1024.0
-            String.format("%.1f GB", gb)
+            String.format(Locale.US, "%.1f GB", gb)
         } else {
             "$mb MB"
         }
@@ -24,9 +31,9 @@ object Format {
         val m = (seconds / 60) % 60
         val h = seconds / 3600
         return if (h > 0) {
-            String.format("%02d:%02d:%02d", h, m, s)
+            String.format(Locale.US, "%02d:%02d:%02d", h, m, s)
         } else {
-            String.format("%02d:%02d", m, s)
+            String.format(Locale.US, "%02d:%02d", m, s)
         }
     }
 
@@ -36,5 +43,86 @@ object Format {
         return if (parts.size >= 2) ".${parts[parts.size - 2]}" else pkg
     }
 
-    fun safeUsername(name: String?): String = name?.takeIf { it.isNotBlank() } ?: "—"
+    fun safeUsername(name: String?): String = name?.takeIf { it.isNotBlank() } ?: "Unknown"
+
+    // ── Date/time ───────────────────────────────────────────────────────────
+    //
+    // Single user-facing timestamp format for the whole APK:
+    //
+    //     28 Mei 2026, 4:35 PM
+    //
+    // • Indonesian month names (no need for system locale to be Indonesian)
+    // • Day number with no leading zero
+    // • 12-hour clock with AM/PM (English casing for technical readability)
+    // • Missing or unparseable timestamps render as "—".
+    //
+    // Implementation rules:
+    // • Accepts any ISO-8601 server timestamp (with/without milliseconds, Z
+    //   or ±HH:MM offset). Falls back gracefully on garbage input.
+    // • Renders in the device's local time zone so the user sees their own
+    //   "now" clock.
+    private val ID_MONTHS = arrayOf(
+        "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+        "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+    )
+
+    private fun parseInstant(iso: String): Instant? {
+        return try {
+            Instant.parse(iso)
+        } catch (e: DateTimeParseException) {
+            try {
+                ZonedDateTime.parse(iso).toInstant()
+            } catch (e2: DateTimeParseException) {
+                null
+            }
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    /**
+     * Format an ISO-8601 timestamp as `28 Mei 2026, 4:35 PM`.
+     * Returns `"—"` for null/blank/unparseable input.
+     */
+    fun timestamp(iso: String?, zone: ZoneId = ZoneId.systemDefault()): String {
+        val raw = iso?.trim().orEmpty()
+        if (raw.isEmpty()) return "—"
+        val instant = parseInstant(raw) ?: return "—"
+        return formatInstant(instant, zone)
+    }
+
+    /** Same contract as [timestamp] but accepts an epoch-millis number. */
+    fun timestamp(epochMillis: Long?, zone: ZoneId = ZoneId.systemDefault()): String {
+        if (epochMillis == null || epochMillis <= 0L) return "—"
+        return try {
+            formatInstant(Instant.ofEpochMilli(epochMillis), zone)
+        } catch (e: Throwable) {
+            "—"
+        }
+    }
+
+    private fun formatInstant(instant: Instant, zone: ZoneId): String {
+        return try {
+            val zdt = instant.atZone(zone)
+            val day = zdt.dayOfMonth
+            val monthName = ID_MONTHS[(zdt.monthValue - 1).coerceIn(0, 11)]
+            val year = zdt.year
+            var hour12 = zdt.hour % 12
+            if (hour12 == 0) hour12 = 12
+            val minute = zdt.minute
+            val ampm = if (zdt.hour < 12) "AM" else "PM"
+            String.format(
+                Locale.US,
+                "%d %s %d, %d:%02d %s",
+                day, monthName, year, hour12, minute, ampm,
+            )
+        } catch (e: Throwable) {
+            // Defensive: never crash a screen because of a date.
+            try {
+                Date.from(instant).toString()
+            } catch (e2: Throwable) {
+                "—"
+            }
+        }
+    }
 }

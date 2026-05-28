@@ -106,6 +106,7 @@ COMMANDS = {
     "version",
     "menu",
     "license",
+    "monitor",
     "new-user-help",
     "enable-boot",
     "update",
@@ -238,12 +239,20 @@ def _try_autostart_monitor_bridge(cfg: dict[str, Any]) -> bool:
         except Exception:  # noqa: BLE001
             pass
 
+        # Register the saved config so the bridge can report configured
+        # packages immediately (state=Dead) before the user presses Start.
+        try:
+            monitor_autostart.set_config(cfg)
+        except Exception:  # noqa: BLE001
+            pass
+
         return monitor_autostart.ensure_monitor_bridge_started(
             license_key=key,
             install_id_hash=install_id_hash,
             tool_version=VERSION,
             channel=channel,
             device_label="Termux on Android",
+            config=cfg,
         )
     except Exception:  # noqa: BLE001
         # Public users must never see a traceback from a bridge failure.
@@ -6632,6 +6641,77 @@ def cmd_new_user_help(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_monitor(args: argparse.Namespace) -> int:
+    """``deng-rejoin monitor [status]`` — show APK bridge status (no secrets).
+
+    Subcommands:
+      status   (default) print connection / push / snapshot summary
+    """
+    sub = (getattr(args, "monitor_subcommand", "") or "status").lower().strip()
+    if sub not in {"status", ""}:
+        print(f"Unknown monitor subcommand: {sub}")
+        print("Usage: deng-rejoin monitor status")
+        return 2
+
+    try:
+        cfg = load_config()
+    except ConfigError:
+        cfg = default_config()
+    # Register cfg so configured_packages count is accurate even when
+    # the bridge thread isn't running in this short-lived CLI invocation.
+    try:
+        from . import monitor_autostart
+        monitor_autostart.set_config(cfg)
+        summary = monitor_autostart.get_monitor_status_summary()
+    except Exception:  # noqa: BLE001
+        print("DENG Tool: Rejoin APK Monitor: (unavailable)")
+        return 1
+
+    sha = ""
+    try:
+        bi_path = Path(APP_HOME) / "BUILD-INFO.json"
+        if bi_path.exists():
+            sha = (json.loads(bi_path.read_text(encoding="utf-8")) or {}).get("artifact_sha256_short") or ""
+    except Exception:  # noqa: BLE001
+        sha = ""
+
+    def _fmt_time(epoch: float | None) -> str:
+        if not epoch:
+            return "never"
+        try:
+            dt = datetime.fromtimestamp(float(epoch), tz=timezone.utc).astimezone()
+            return dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+        except Exception:  # noqa: BLE001
+            return "never"
+
+    snap_iv = int(summary.get("snapshot_interval_seconds") or 0)
+    snap_iv_str = "Off" if snap_iv == 0 else f"{snap_iv}s"
+
+    print("DENG Tool: Rejoin APK Monitor")
+    print(f"  Installed version:      {VERSION}")
+    if sha:
+        print(f"  Installed artifact SHA: {sha}")
+    print(f"  Bridge URL:             {summary.get('bridge_url')}")
+    print(f"  Monitor autostart:      {'enabled' if summary.get('autostart_enabled') else 'disabled'}")
+    print(f"  Bridge thread running:  {'yes' if summary.get('bridge_running') else 'no'}")
+    print(f"  Device connected:       {'yes' if summary.get('connected') else 'no'}")
+    print(f"  Last push:              {_fmt_time(summary.get('last_push_at'))}")
+    print(f"  Last push result:       {summary.get('last_push_result') or '—'}")
+    print(f"  Configured packages:    {summary.get('configured_packages')}")
+    print(f"  Reported packages:      {summary.get('reported_packages')}")
+    print(f"  Snapshot interval:      {snap_iv_str}")
+    print(f"  Last snapshot:          {_fmt_time(summary.get('snapshot_last_sent_at'))}")
+    print(f"  Last snapshot result:   {summary.get('snapshot_last_result') or '—'}")
+    print(f"  Supervisor active:      {'yes' if summary.get('supervisor_active') else 'no'}")
+    cache = summary.get("token_cache") or {}
+    if cache.get("present"):
+        print(f"  Bridge token cache:     present (expires {cache.get('expires_at') or 'unknown'})")
+    else:
+        print("  Bridge token cache:     not present")
+    print(f"  Last issue attempt:     {summary.get('last_issue_result') or '—'}")
+    return 0
+
+
 def _run_top_menu_with_clean_exit(args: argparse.Namespace) -> int:
     """Run the top menu once; on clean exit use the single Termux teardown workaround."""
     try:
@@ -6773,6 +6853,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ns = parser.parse_args([])
         _unknown = list(argv)
 
+    # Capture sub-action for `monitor`: "monitor status".
+    ns.monitor_subcommand = ""
+    if ns.command == "monitor" and _unknown:
+        sub = (_unknown[0] or "").lower().replace("-", "_").strip()
+        if sub in {"status", ""}:
+            ns.monitor_subcommand = "status"
+        else:
+            ns.monitor_subcommand = sub
+
     # Map positional sub-subcommands for `doctor`: "doctor layout", "doctor root-state".
     ns.doctor_install = False
     if ns.command == "doctor" and _unknown:
@@ -6887,6 +6976,7 @@ def _handlers() -> dict[str, Any]:
         "menu": cmd_menu,
         "package-key": cmd_package_key,
         "license": cmd_license,
+        "monitor": cmd_monitor,
         "new-user-help": cmd_new_user_help,
         "enable-boot": cmd_enable_boot,
         "update": cmd_update,

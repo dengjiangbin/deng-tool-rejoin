@@ -7,8 +7,14 @@ These tests verify the public contract that the Rejoin APK fix depends on:
 * Expired / wrong-URL caches force re-issue.
 * Backend offline → returns False, no crash, no token written.
 * Active supervisor is mirrored into the status_provider payload.
+* When no supervisor is active but a saved config IS registered, the
+  bridge still reports each enabled package with state=Dead so the APK
+  has rows to render on the main menu (v1.0.2 fix).
 * Cache file is locked down (mode 0600 on POSIX).
 * No license keys / install IDs / owner identifiers leak into the cache file.
+* The issue-from-license request is routed via :mod:`agent.safe_http` so
+  the OpenSSL crash in ``EVP_PKEY_generate`` observed on probe
+  ``p-d1cb86fd89`` cannot kill the Termux Python process.
 """
 
 from __future__ import annotations
@@ -17,7 +23,6 @@ import json
 import os
 import sys
 import time
-import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -26,6 +31,7 @@ if str(PROJECT) not in sys.path:
     sys.path.insert(0, str(PROJECT))
 
 import pytest
+
 
 # Force APP_HOME into a per-test temp dir BEFORE importing monitor_autostart,
 # so the cache path is sandboxed.
@@ -46,6 +52,19 @@ def _fresh():
     from agent import monitor_autostart
     monitor_autostart.reset_for_tests()
     return monitor_autostart
+
+
+def _ok_payload(token: str = "bridge-tok-abc",
+                device_id: str = "dev-1",
+                ttl_sec: int = 12 * 3600) -> dict:
+    expires_at = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + ttl_sec)
+    )
+    return {
+        "bridge_token": token,
+        "device_id": device_id,
+        "expires_at": expires_at,
+    }
 
 
 # ── Cache path is inside the sandboxed APP_HOME ─────────────────────────────
@@ -82,14 +101,20 @@ def test_missing_install_id_returns_false_without_network():
     issue.assert_not_called()
 
 
-# ── Backend offline is non-fatal ────────────────────────────────────────────
+# ── Backend offline is non-fatal (segfault-fix invariant) ───────────────────
 
 
 def test_backend_offline_returns_false_and_never_raises():
+    """Probe p-d1cb86fd89: the *segfault* fix sends all bridge HTTPS via
+    safe_http (curl subprocess). A network error from safe_http must not
+    bubble up — autostart must catch it and return False."""
     autostart = _fresh()
-    def _fail(*_a, **_kw):
-        raise urllib.error.URLError("connection refused")
-    with mock.patch.object(autostart.urllib.request, "urlopen", side_effect=_fail):
+    import agent.safe_http as sh
+
+    def _net_fail(*_a, **_kw):
+        raise sh.SafeHttpNetworkError("simulated curl SIGSEGV")
+
+    with mock.patch("agent.safe_http.post_json", side_effect=_net_fail):
         result = autostart.ensure_monitor_bridge_started(
             license_key="DENG-1A2B-3C4D-5E6F-7890",
             install_id_hash="a" * 64,
@@ -103,14 +128,12 @@ def test_backend_offline_returns_false_and_never_raises():
 
 def test_backend_5xx_returns_false_and_caches_nothing():
     autostart = _fresh()
+    import agent.safe_http as sh
 
-    class _Resp:
-        status = 500
-        def read(self): return b""
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
+    def _http_500(*_a, **_kw):
+        raise sh.SafeHttpStatusError(500, "")
 
-    with mock.patch.object(autostart.urllib.request, "urlopen", return_value=_Resp()):
+    with mock.patch("agent.safe_http.post_json", side_effect=_http_500):
         result = autostart.ensure_monitor_bridge_started(
             license_key="DENG-1A2B-3C4D-5E6F-7890",
             install_id_hash="a" * 64,
@@ -123,26 +146,9 @@ def test_backend_5xx_returns_false_and_caches_nothing():
 # ── Successful issue path ───────────────────────────────────────────────────
 
 
-def _ok_response(token="bridge-tok-abc", device_id="dev-1", ttl_sec=12 * 3600):
-    expires_at = time.strftime(
-        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + ttl_sec)
-    )
-    body = json.dumps({
-        "bridge_token": token, "device_id": device_id, "expires_at": expires_at,
-    }).encode("utf-8")
-
-    class _Resp:
-        status = 200
-        def read(self): return body
-        def __enter__(self): return self
-        def __exit__(self, *a): return False
-    return _Resp(), expires_at
-
-
 def test_success_issues_token_and_starts_bridge():
     autostart = _fresh()
-    resp, _ = _ok_response()
-    with mock.patch.object(autostart.urllib.request, "urlopen", return_value=resp), \
+    with mock.patch("agent.safe_http.post_json", return_value=_ok_payload()), \
          mock.patch.object(autostart.MonitorBridge, "start", return_value=True):
         result = autostart.ensure_monitor_bridge_started(
             license_key="DENG-1A2B-3C4D-5E6F-7890",
@@ -168,8 +174,7 @@ def test_success_issues_token_and_starts_bridge():
 
 def test_cache_file_is_0600_on_posix():
     autostart = _fresh()
-    resp, _ = _ok_response()
-    with mock.patch.object(autostart.urllib.request, "urlopen", return_value=resp), \
+    with mock.patch("agent.safe_http.post_json", return_value=_ok_payload()), \
          mock.patch.object(autostart.MonitorBridge, "start", return_value=True):
         autostart.ensure_monitor_bridge_started(
             license_key="DENG-1A2B-3C4D-5E6F-7890",
@@ -183,7 +188,6 @@ def test_cache_file_is_0600_on_posix():
 
 def test_cached_token_is_reused_without_network():
     autostart = _fresh()
-    # Pre-seed a cache file with an unexpired token at the default URL.
     from agent.monitor_bridge import DEFAULT_BRIDGE_URL
     autostart.BRIDGE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     autostart.BRIDGE_CACHE_PATH.write_text(json.dumps({
@@ -215,8 +219,8 @@ def test_expired_cache_triggers_reissue():
         "bridge_token": "old-tok",
         "expires_at_epoch": time.time() - 60,  # already expired
     }), encoding="utf-8")
-    resp, _ = _ok_response(token="brand-new-tok")
-    with mock.patch.object(autostart.urllib.request, "urlopen", return_value=resp), \
+    with mock.patch("agent.safe_http.post_json",
+                    return_value=_ok_payload(token="brand-new-tok")), \
          mock.patch.object(autostart.MonitorBridge, "start", return_value=True):
         ok = autostart.ensure_monitor_bridge_started(
             license_key="DENG-1A2B-3C4D-5E6F-7890",
@@ -236,8 +240,8 @@ def test_wrong_url_cache_triggers_reissue():
         "bridge_token": "leftover-tok",
         "expires_at_epoch": time.time() + 6 * 3600,
     }), encoding="utf-8")
-    resp, _ = _ok_response(token="correct-host-tok")
-    with mock.patch.object(autostart.urllib.request, "urlopen", return_value=resp), \
+    with mock.patch("agent.safe_http.post_json",
+                    return_value=_ok_payload(token="correct-host-tok")), \
          mock.patch.object(autostart.MonitorBridge, "start", return_value=True):
         ok = autostart.ensure_monitor_bridge_started(
             license_key="DENG-1A2B-3C4D-5E6F-7890",
@@ -251,13 +255,13 @@ def test_wrong_url_cache_triggers_reissue():
 
 def test_idempotent_when_already_running():
     autostart = _fresh()
-    resp, _ = _ok_response()
     started = {"count": 0}
+
     def _fake_start(self):
         started["count"] += 1
         return True
-    # Once it starts, is_running() must return True for the second call to short-circuit.
-    with mock.patch.object(autostart.urllib.request, "urlopen", return_value=resp), \
+
+    with mock.patch("agent.safe_http.post_json", return_value=_ok_payload()), \
          mock.patch.object(autostart.MonitorBridge, "start", _fake_start), \
          mock.patch.object(autostart.MonitorBridge, "is_running", return_value=True):
         autostart.ensure_monitor_bridge_started(
@@ -277,43 +281,55 @@ def test_idempotent_when_already_running():
 class _FakeSupervisor:
     def __init__(self, snapshot):
         self._snap = snapshot
+
     def get_status_snapshot(self):
         return list(self._snap)
 
 
-def test_status_provider_returns_empty_packages_when_no_supervisor():
+def test_status_provider_returns_empty_packages_when_no_supervisor_and_no_config():
     autostart = _fresh()
     autostart.set_active_supervisor(None)
+    autostart.set_config(None)
     payload = autostart._build_status_payload(tool_version="1.0.0", channel="stable")
     assert payload["packages"] == []
     assert payload["tool_version"] == "1.0.0"
     assert payload["channel"] == "stable"
 
 
-def test_status_provider_maps_supervisor_status_to_state():
+def test_status_provider_maps_supervisor_status_to_public_state():
     autostart = _fresh()
     autostart.set_active_supervisor(_FakeSupervisor([
         {"package": "com.foo.bar", "username": "alice", "status": "Online",
-         "revive_count": 2},
+         "revive_count": 2, "online_since": time.time() - 120},
         {"package": "com.baz.qux", "username": "bob", "status": "Dead"},
+        # Unknown vocabulary must collapse to Dead (public allowed-state).
+        {"package": "com.x.y", "username": "carol", "status": "Launching"},
+        # "Reconnecting" → No Heartbeat.
+        {"package": "com.x.z", "username": "dan", "status": "Reconnecting"},
     ]))
     payload = autostart._build_status_payload(tool_version="1.0.0", channel="stable")
-    assert len(payload["packages"]) == 2
-    assert payload["packages"][0]["package"] == "com.foo.bar"
-    # Supervisor's "status" field must surface as "state" for the bridge.
-    assert payload["packages"][0]["state"] == "Online"
-    assert payload["packages"][0]["restart_count"] == 2
-    assert payload["packages"][1]["state"] == "Dead"
+    pkgs = payload["packages"]
+    assert len(pkgs) == 4
+    assert pkgs[0]["state"] == "Online"
+    assert pkgs[0]["restart_count"] == 2
+    # Online package picks up an approximate runtime from online_since.
+    assert pkgs[0]["runtime_seconds"] >= 100
+    assert pkgs[1]["state"] == "Dead"
+    assert pkgs[2]["state"] == "Dead", "non-public state must collapse to Dead"
+    assert pkgs[3]["state"] == "No Heartbeat"
 
 
 def test_status_provider_swallows_broken_supervisor():
     autostart = _fresh()
+
     class _Broken:
         def get_status_snapshot(self):
             raise RuntimeError("supervisor exploded")
+
     autostart.set_active_supervisor(_Broken())
+    autostart.set_config({"roblox_packages": []})
     payload = autostart._build_status_payload(tool_version="1.0.0", channel="stable")
-    # Empty packages, no exception bubbled.
+    # Broken supervisor → falls back to config (here empty).
     assert payload["packages"] == []
 
 
@@ -323,6 +339,78 @@ def test_status_provider_drops_oversized_snapshots():
     autostart.set_active_supervisor(_FakeSupervisor(huge))
     payload = autostart._build_status_payload(tool_version="1.0.0", channel="stable")
     assert len(payload["packages"]) <= 64, "must cap at 64 packages per push"
+
+
+# ── v1.0.2: config-only packages (pre-Start / main menu) ────────────────────
+
+
+def test_config_only_path_reports_enabled_packages_as_dead():
+    """User in main menu, never pressed Start: APK still gets rows."""
+    autostart = _fresh()
+    autostart.set_active_supervisor(None)
+    cfg = {
+        "roblox_packages": [
+            {"package": "com.litec.client", "app_name": "LiteC",
+             "account_username": "deng1629", "enabled": True,
+             "private_server_url": ""},
+            {"package": "com.moons.litesd", "app_name": "LiteD",
+             "account_username": "", "enabled": True,
+             "private_server_url": "https://example.com/share/abc"},
+            {"package": "com.disabled.x", "enabled": False,
+             "account_username": "ghost"},
+        ],
+    }
+    autostart.set_config(cfg)
+    payload = autostart._build_status_payload(tool_version="1.0.0", channel="stable")
+    pkgs = payload["packages"]
+    # Only the two enabled packages.
+    assert {p["package"] for p in pkgs} == {"com.litec.client", "com.moons.litesd"}
+    for p in pkgs:
+        assert p["state"] == "Dead"
+        assert p["runtime_seconds"] == 0
+        assert p["ram_mb"] == 0
+    by_pkg = {p["package"]: p for p in pkgs}
+    # Saved account_username surfaces as username.
+    assert by_pkg["com.litec.client"]["username"] == "deng1629"
+    # private_server_url is collapsed to a single bool — never leaked raw.
+    assert by_pkg["com.moons.litesd"]["private_url_configured"] is True
+    assert by_pkg["com.litec.client"]["private_url_configured"] is False
+    # Username falls back to "" (UI will show "Unknown") when not detected.
+    assert by_pkg["com.moons.litesd"]["username"] == ""
+
+
+def test_config_falls_through_to_username_cache():
+    autostart = _fresh()
+    autostart.set_active_supervisor(None)
+    cfg = {
+        "roblox_packages": [
+            {"package": "com.litec.client", "enabled": True,
+             "account_username": ""},
+        ],
+        "package_username_cache": {"com.litec.client": "deng_from_cache"},
+    }
+    autostart.set_config(cfg)
+    payload = autostart._build_status_payload(tool_version="1.0.0", channel="stable")
+    assert payload["packages"][0]["username"] == "deng_from_cache"
+
+
+def test_supervisor_active_overrides_config():
+    autostart = _fresh()
+    autostart.set_config({
+        "roblox_packages": [
+            {"package": "com.from.config", "enabled": True,
+             "account_username": "config_user"},
+        ],
+    })
+    autostart.set_active_supervisor(_FakeSupervisor([
+        {"package": "com.from.supervisor", "username": "sup_user",
+         "status": "Online"},
+    ]))
+    payload = autostart._build_status_payload(tool_version="1.0.0", channel="stable")
+    pkgs = payload["packages"]
+    assert len(pkgs) == 1
+    assert pkgs[0]["package"] == "com.from.supervisor"
+    assert pkgs[0]["state"] == "Online"
 
 
 # ── clear_cached_token forces reissue ────────────────────────────────────────
@@ -346,19 +434,12 @@ def test_issue_request_only_sends_whitelisted_fields():
     autostart = _fresh()
     captured = {}
 
-    def _spy(req, **kw):
-        # Capture the JSON body for inspection.
-        body = req.data
-        captured["body"] = json.loads(body.decode("utf-8"))
+    def _spy(url, payload, **kw):
+        captured["url"] = url
+        captured["payload"] = dict(payload)
+        return _ok_payload()
 
-        class _Resp:
-            status = 200
-            def read(self): return b'{"bridge_token":"t","device_id":"d","expires_at":"2099-01-01T00:00:00Z"}'
-            def __enter__(self): return self
-            def __exit__(self, *a): return False
-        return _Resp()
-
-    with mock.patch.object(autostart.urllib.request, "urlopen", side_effect=_spy), \
+    with mock.patch("agent.safe_http.post_json", side_effect=_spy), \
          mock.patch.object(autostart.MonitorBridge, "start", return_value=True):
         autostart.ensure_monitor_bridge_started(
             license_key="DENG-1A2B-3C4D-5E6F-7890",
@@ -368,13 +449,57 @@ def test_issue_request_only_sends_whitelisted_fields():
             announce=False,
         )
 
-    body = captured["body"]
-    # Exactly the documented contract — no extras.
+    # Endpoint is the documented one.
+    assert captured["url"].endswith("/api/monitor/bridge/issue-from-license")
+    body = captured["payload"]
     assert set(body.keys()) == {
         "license_key", "install_id_hash",
         "device_label", "tool_version", "channel",
     }
-    # No cookies / passwords / private URLs / Roblox tokens anywhere.
     raw = json.dumps(body).lower()
     for banned in ("cookie", "roblosecurity", "password", "private_url", "secret"):
         assert banned not in raw, f"banned key '{banned}' present in issue payload"
+
+
+# ── v1.0.2: monitor status summary is redacted ──────────────────────────────
+
+
+def test_monitor_status_summary_never_includes_secrets():
+    autostart = _fresh()
+    autostart.set_config({
+        "roblox_packages": [
+            {"package": "com.litec.client", "enabled": True,
+             "account_username": "deng1629",
+             "roblox_cookie": "_|WARNING:-DO-NOT-SHARE-THIS|_super_secret"},
+        ],
+        "license": {"key": "DENG-1A2B-3C4D-5E6F-7890"},
+    })
+    # Pre-seed a token cache so the summary has something to report.
+    from agent.monitor_bridge import DEFAULT_BRIDGE_URL
+    autostart.BRIDGE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    autostart.BRIDGE_CACHE_PATH.write_text(json.dumps({
+        "bridge_url": DEFAULT_BRIDGE_URL,
+        "bridge_token": "super-secret-token-xyz",
+        "device_id": "dev-redacted",
+        "expires_at": "2099-12-31T23:59:59Z",
+        "expires_at_epoch": time.time() + 6 * 3600,
+    }), encoding="utf-8")
+
+    summary = autostart.get_monitor_status_summary()
+    raw = json.dumps(summary).lower()
+
+    assert summary["configured_packages"] == 1
+    assert summary["autostart_enabled"] is True
+    # No raw secrets must appear.
+    for banned in (
+        "super-secret-token-xyz",
+        "deng-1a2b-3c4d-5e6f-7890",
+        "_|warning:-do-not-share-this|_",
+        "roblox_cookie",
+        "license_key",
+        "install_id",
+    ):
+        assert banned.lower() not in raw, f"banned token '{banned}' leaked into summary"
+    # Cache presence flag is fine; raw token must not be.
+    assert summary["token_cache"]["present"] is True
+    assert "bridge_token" not in summary["token_cache"]

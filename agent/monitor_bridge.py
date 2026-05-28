@@ -220,10 +220,13 @@ class BridgeConfig:
 class BridgeState:
     connected: bool = False
     last_push_at: float | None = None
+    last_push_result: str | None = None
     last_error: str | None = None
     backoff: float = MIN_BACKOFF_SECONDS
     consecutive_failures: int = 0
     snapshot_last_sent_at: float = 0.0
+    snapshot_last_result: str | None = None
+    monitor_enabled_remote: bool = True
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -250,6 +253,7 @@ class MonitorBridge:
         config: BridgeConfig,
         status_provider: StatusProvider,
         snapshot_provider: SnapshotProvider | None = None,
+        on_unauthorized: Callable[[int], None] | None = None,
     ) -> None:
         self.config = config
         self.status_provider = status_provider
@@ -257,6 +261,7 @@ class MonitorBridge:
         self.state = BridgeState()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._on_unauthorized = on_unauthorized
 
     # ── Lifecycle ────────────────────────────────────────────────────────
     def start(self) -> bool:
@@ -337,9 +342,17 @@ class MonitorBridge:
                         if self._post_binary(
                             "/api/monitor/bridge/snapshot",
                             data,
-                            content_type=mime or "image/webp",
+                            content_type=mime or "image/png",
                         ):
                             self.state.snapshot_last_sent_at = time.time()
+                            self.state.snapshot_last_result = "success"
+                        else:
+                            self.state.snapshot_last_result = "upload_failed"
+                else:
+                    # capture happened but returned None or empty bytes
+                    self.state.snapshot_last_result = "capture_failed"
+                    # Bump the cooldown so we don't spin on a broken capture
+                    self.state.snapshot_last_sent_at = time.time() - max(0, interval - 5)
 
     # ── HTTP helpers ─────────────────────────────────────────────────────
     def _validate_url(self) -> bool:
@@ -373,36 +386,83 @@ class MonitorBridge:
 
     def _send(self, path: str, data: bytes, content_type: str) -> bool:
         url = f"{self.config.bridge_url}{path}"
-        req = urllib.request.Request(  # noqa: S310 - URL is validated above
-            url,
-            data=data,
-            method="POST",
-            headers={
-                "Content-Type": content_type,
-                "Authorization": f"Bearer {self.config.token}",
-                "User-Agent": self.config.user_agent,
-                "Accept": "application/json",
-            },
-        )
+        # All HTTPS goes through safe_http.post_raw, which uses curl as a
+        # SUBPROCESS on Termux. Why: real-device probe ``p-d1cb86fd89``
+        # showed a SIGSEGV in ``EVP_PKEY_generate`` / ``EVP_PKEY_Q_keygen``
+        # inside ``libssl.so.3`` when the bridge's daemon thread called
+        # ``urllib.request.urlopen`` in-process. With curl-subprocess the
+        # OpenSSL crash kills only the curl child and the bridge thread
+        # records a controlled failure.
         try:
-            with urllib.request.urlopen(req, timeout=8) as resp:  # noqa: S310
-                if 200 <= resp.status < 300:
-                    self._record_success()
-                    return True
-                self._record_failure(f"http_{resp.status}")
-                return False
-        except urllib.error.HTTPError as exc:
-            self._record_failure(f"http_{exc.code}")
-            return False
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            from . import safe_http  # local import keeps tests light
+            status, body = safe_http.post_raw(
+                url,
+                data,
+                content_type=content_type,
+                headers={
+                    "Authorization": f"Bearer {self.config.token}",
+                    "User-Agent": self.config.user_agent,
+                },
+                timeout=8,
+            )
+        except safe_http.SafeHttpNetworkError as exc:
             self._record_failure(f"net_{exc.__class__.__name__}")
             return False
+        except Exception as exc:  # noqa: BLE001
+            self._record_failure(f"send_{exc.__class__.__name__}")
+            return False
+
+        if 200 <= status < 300:
+            self._record_success()
+            # The /push endpoint echoes the device's current settings
+            # (snapshot interval etc.) so the bridge can react without
+            # waiting for a Termux restart.
+            if path.endswith("/api/monitor/bridge/push") and body:
+                try:
+                    payload = json.loads(body.decode("utf-8"))
+                    settings = payload.get("settings") if isinstance(payload, dict) else None
+                    if isinstance(settings, dict):
+                        self._apply_remote_settings(settings)
+                except (ValueError, UnicodeDecodeError):
+                    pass
+            return True
+        if status in (401, 403):
+            # Token revoked / unauthorized: notify listeners so they can
+            # reissue and reconnect on the next tick.
+            try:
+                cb = self._on_unauthorized
+                if cb is not None:
+                    cb(status)
+            except Exception:  # noqa: BLE001
+                pass
+        self._record_failure(f"http_{status}")
+        return False
+
+    # ── Dynamic remote settings ──────────────────────────────────────────
+    def _apply_remote_settings(self, settings: dict[str, Any]) -> None:
+        """Update the bridge's local snapshot interval from a /push echo.
+
+        The backend stores per-device monitor settings; this lets the APK
+        change snapshot interval at runtime without requiring the Termux
+        user to relaunch ``deng-rejoin``.
+        """
+        interval = settings.get("snapshot_interval_seconds")
+        if isinstance(interval, (int, float)):
+            iv = max(0, min(3600, int(interval)))
+            if iv != self.config.snapshot_interval_seconds:
+                logger.info("monitor_bridge snapshot_interval updated %s -> %s",
+                            self.config.snapshot_interval_seconds, iv)
+                self.config.snapshot_interval_seconds = iv
+        enabled = settings.get("monitor_enabled")
+        if isinstance(enabled, bool):
+            self.state.monitor_enabled_remote = enabled
 
     # ── State bookkeeping ────────────────────────────────────────────────
     def _record_success(self) -> None:
         with self.state.lock:
             self.state.connected = True
             self.state.last_push_at = time.time()
+            self.state.last_push_result = "success"
             self.state.last_error = None
             self.state.consecutive_failures = 0
             self.state.backoff = MIN_BACKOFF_SECONDS
@@ -411,6 +471,7 @@ class MonitorBridge:
         with self.state.lock:
             self.state.connected = False
             self.state.last_error = reason
+            self.state.last_push_result = "error"
             self.state.consecutive_failures += 1
             # Exponential backoff with jitter, capped
             self.state.backoff = min(

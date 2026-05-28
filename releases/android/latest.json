@@ -1,17 +1,21 @@
 {
   "app_name": "DENG Tool: Rejoin APK",
-  "version_name": "1.0.1",
-  "version_code": 2,
-  "file_name": "deng-tool-rejoin-apk-v1.0.1.apk",
-  "sha256": "588961272beed464b366e5f4c19f30de1a9d5bf5f8c65bf9ed18a238a41d3b28",
-  "size_bytes": 1846633,
+  "version_name": "1.0.2",
+  "version_code": 3,
+  "file_name": "deng-tool-rejoin-apk-v1.0.2.apk",
+  "sha256": "6ae57c65d8f41275b12421f2b580bb2187506bf25cd0d85f9517a1fcbab81c8a",
+  "size_bytes": 1846637,
   "released_at": "2026-05-28",
   "min_sdk": 26,
   "purpose": "Monitoring companion app for DENG Tool: Rejoin",
   "changelog": [
-    "Replaced default Android launcher icon with the real DENG logo (adaptive icon + all densities).",
-    "Pair flow now points users to https://tool.deng.my.id/download instead of the License page.",
-    "App About screen reflects v1.0.1 (versionCode 2).",
-    "Independent APK app version; not tied to Rejoin Termux package versions."
+    "Package rows now appear immediately on the main menu (username title, package name subtitle, Dead badge when not playing).",
+    "Package rows update live after pressing Start in Termux; runtime is computed from the supervisor's online timestamp.",
+    "Snapshot capture is wired through the Termux screencap subprocess; APK Snapshot screen shows 'Snapshot is off. Enable it in Settings.' when interval is 0.",
+    "Settings screen is now vertically scrollable with navigation-bar / IME padding so the snapshot-interval rows are always reachable.",
+    "All user-facing timestamps now render as '28 Mei 2026, 4:35 PM' (Indonesian month names, 12h AM/PM).",
+    "All bridge HTTPS is now routed via curl subprocess on Termux to isolate the libssl3 EVP_PKEY_generate SIGSEGV captured in probe p-d1cb86fd89 (no more idle segfault while AFK in the top menu).",
+    "Backend /api/monitor/bridge/push now echoes monitor_settings so changing snapshot interval in the APK takes effect without relaunching Termux.",
+    "Stable v1.0.0 Termux package was rebuilt with the same monitoring fixes; /install/v1.0.0 and /install/latest both serve the fixed artifact."
   ]
 }

@@ -1,6 +1,8 @@
 package my.id.deng.monitor.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,8 +36,17 @@ fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore) {
     var error by remember { mutableStateOf<String?>(null) }
     var saveOk by remember { mutableStateOf(false) }
 
+    // Settings now contains many cards (snapshot interval x5, refresh x7,
+    // logout, about) — on small phones / cloud phones they don't fit on one
+    // screen. Wrap the whole content in a vertical scroll + nav-bar padding
+    // so the bottom cards (snapshot interval / Save) are always reachable.
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .imePadding()
+            .navigationBarsPadding()
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
@@ -139,6 +150,10 @@ fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore) {
             Text("Monitoring companion only. Rejoin package versions are selected via the website / Discord.",
                 color = DengColors.TextDim, style = MaterialTheme.typography.bodySmall)
         }
+
+        // Bottom breathing room so the last card never sits flush against
+        // the navigation-bar / gesture inset on edge-to-edge devices.
+        Spacer(Modifier.height(48.dp))
     }
 }
 

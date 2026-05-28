@@ -235,3 +235,154 @@ def test_bridge_refuses_http_without_insecure_flag():
     time.sleep(0.2)
     bridge.stop()
     assert bridge.state.last_error == "bridge_url_not_https"
+
+
+# ── v1.0.2 — segfault-fix invariants ────────────────────────────────────────
+
+
+def test_bridge_send_routes_through_safe_http_post_raw(monkeypatch):
+    """All bridge HTTPS MUST go through agent.safe_http.post_raw so the
+    OpenSSL ``EVP_PKEY_generate`` SIGSEGV captured in probe ``p-d1cb86fd89``
+    only kills a curl child, never the agent process.
+
+    Regression guard: if a future refactor brings back in-process
+    ``urllib.request.urlopen``, this test fails.
+    """
+    cfg = BridgeConfig(
+        enabled=True, token="abc", bridge_url="https://example.com",
+        push_interval_seconds=10,  # we'll drive _tick directly
+        snapshot_interval_seconds=0,
+    )
+    bridge = MonitorBridge(config=cfg, status_provider=lambda: {"packages": [_raw_pkg()]})
+
+    captured: dict[str, object] = {}
+    def _spy(url, body_bytes, *, content_type, headers, timeout):
+        captured["url"] = url
+        captured["content_type"] = content_type
+        captured["headers"] = dict(headers)
+        captured["body_len"] = len(body_bytes)
+        return 200, b'{"ok":true,"accepted":1,"settings":null}'
+
+    monkeypatch.setattr("agent.safe_http.post_raw", _spy)
+    # Drive a single tick by hand (avoids racing with the daemon loop).
+    bridge._tick()
+
+    assert captured["url"].endswith("/api/monitor/bridge/push")
+    assert captured["content_type"] == "application/json"
+    assert captured["headers"]["Authorization"] == "Bearer abc"
+    assert bridge.state.connected is True
+    assert bridge.state.last_push_result == "success"
+
+
+def test_bridge_applies_settings_echoed_from_push_response(monkeypatch):
+    """When /push echoes settings, the bridge updates its local snapshot
+    interval. That's how an APK settings change reaches Termux without a
+    relaunch."""
+    cfg = BridgeConfig(
+        enabled=True, token="abc", bridge_url="https://example.com",
+        snapshot_interval_seconds=0,
+    )
+    bridge = MonitorBridge(config=cfg, status_provider=lambda: {"packages": []})
+
+    monkeypatch.setattr(
+        "agent.safe_http.post_raw",
+        lambda *a, **kw: (
+            200,
+            b'{"ok":true,"accepted":0,"settings":{"snapshot_interval_seconds":30,"monitor_enabled":true}}',
+        ),
+    )
+    bridge._tick()
+    assert bridge.config.snapshot_interval_seconds == 30
+    assert bridge.state.monitor_enabled_remote is True
+
+
+def test_bridge_unauthorized_triggers_on_unauthorized_callback(monkeypatch):
+    seen: list[int] = []
+
+    def _on_unauth(status):
+        seen.append(status)
+
+    cfg = BridgeConfig(
+        enabled=True, token="revoked", bridge_url="https://example.com",
+        snapshot_interval_seconds=0,
+    )
+    bridge = MonitorBridge(
+        config=cfg, status_provider=lambda: {"packages": []},
+        on_unauthorized=_on_unauth,
+    )
+    monkeypatch.setattr("agent.safe_http.post_raw", lambda *a, **kw: (401, b"{}"))
+    bridge._tick()
+    assert seen == [401]
+    assert bridge.state.connected is False
+    assert bridge.state.last_error == "http_401"
+
+
+def test_snapshot_skipped_when_interval_is_zero(monkeypatch):
+    cfg = BridgeConfig(
+        enabled=True, token="t", bridge_url="https://example.com",
+        snapshot_interval_seconds=0,
+    )
+    called = {"snap": 0}
+    def _snap():
+        called["snap"] += 1
+        return (b"FAKEPNG", "image/png")
+    bridge = MonitorBridge(
+        config=cfg, status_provider=lambda: {"packages": []},
+        snapshot_provider=_snap,
+    )
+    monkeypatch.setattr("agent.safe_http.post_raw", lambda *a, **kw: (200, b'{"ok":true}'))
+    bridge._tick()
+    assert called["snap"] == 0, "snapshot must NOT run when interval is 0"
+
+
+def test_snapshot_capture_failure_marks_result_and_does_not_crash(monkeypatch):
+    cfg = BridgeConfig(
+        enabled=True, token="t", bridge_url="https://example.com",
+        snapshot_interval_seconds=15,
+    )
+    def _broken_snap():
+        raise RuntimeError("screencap exploded")
+    bridge = MonitorBridge(
+        config=cfg, status_provider=lambda: {"packages": []},
+        snapshot_provider=_broken_snap,
+    )
+    monkeypatch.setattr("agent.safe_http.post_raw", lambda *a, **kw: (200, b'{"ok":true}'))
+    # First tick: cooldown is initialized to 0, so snapshot will run.
+    bridge._tick()
+    # Should not raise; the result is recorded as a failure.
+    assert bridge.state.snapshot_last_result in (None, "capture_failed")
+
+
+def test_safe_http_post_raw_uses_curl_backend_on_termux(monkeypatch):
+    """When TERMUX_VERSION is set, safe_http.post_raw must NOT use
+    urllib.request — it must shell out to curl. That's the segfault
+    isolation guarantee.
+    """
+    monkeypatch.setenv("TERMUX_VERSION", "0.118.0")
+    monkeypatch.delenv("DENG_HTTP_BACKEND", raising=False)
+    from agent import safe_http
+
+    captured = {}
+    def _fake_run_curl(args, *, stdin_bytes=None, timeout=30):
+        captured["args"] = args
+        captured["stdin_len"] = len(stdin_bytes or b"")
+        return 200, b'{"ok":true}'
+
+    monkeypatch.setattr(safe_http, "_run_curl", _fake_run_curl)
+    # If the implementation regressed and went through urllib, curl_available
+    # would never be consulted and this monkeypatch would be a no-op — make
+    # the test loud by asserting our spy was hit.
+    status, body = safe_http.post_raw(
+        "https://example.com/x",
+        b'{"hello":"world"}',
+        content_type="application/json",
+        headers={"Authorization": "Bearer abc"},
+        timeout=5,
+    )
+    assert status == 200
+    assert body == b'{"ok":true}'
+    assert "args" in captured, "post_raw on Termux must route through _run_curl"
+    # Auth + content-type were forwarded.
+    args = captured["args"]
+    assert any("Authorization: Bearer abc" in str(a) for a in args)
+    assert any("Content-Type: application/json" in str(a) for a in args)

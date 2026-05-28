@@ -134,7 +134,7 @@ private fun DeviceHeaderCard(
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            "Last update: ${lastSeenAt ?: "—"}",
+            "Last update: ${my.id.deng.monitor.util.Format.timestamp(lastSeenAt)}",
             style = MaterialTheme.typography.bodySmall,
             color = DengColors.TextMuted,
         )
