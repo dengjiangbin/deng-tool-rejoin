@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    Adaptive launcher icon (API 26+). The foreground is a real DENG logo
+    bitmap generated from site/public/img/deng-logo.png at every density;
+    the background is a flat dark navy that matches the website theme.
+    The monochrome layer is a flat "D" silhouette used by Android 13+
+    themed icons (full-color logo can't be expressed as a single tone).
+-->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
     <monochrome android:drawable="@drawable/ic_launcher_foreground" />
 </adaptive-icon>

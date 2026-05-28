@@ -13,8 +13,12 @@ android {
         applicationId = "my.id.deng.monitor"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        // APK app versioning ONLY. Independent of any Rejoin
+        // Termux / package version. Bump versionCode whenever the
+        // APK is rebuilt and republished, even for branding-only
+        // changes, so Android sees it as a real upgrade.
+        versionCode = 2
+        versionName = "1.0.1"
 
         // Default backend URL. Can be overridden at build time:
         //   ./gradlew assembleRelease -PbridgeUrl=https://staging.example.com

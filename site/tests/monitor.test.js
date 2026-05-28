@@ -462,4 +462,81 @@ describe('APK download page', () => {
     const res = await request(app).get('/downloads/deng-monitor-..%2F..%2Fpackage.json');
     assert.equal(res.status, 404);
   });
+
+  test('/download shows the Pair Android App section', async () => {
+    const res = await request(app).get('/download');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /Pair Android App/);
+    assert.match(res.text, /id="pair-android-app"/);
+    assert.match(
+      res.text,
+      /After installing DENG Tool: Rejoin APK, open the app and enter this/,
+    );
+  });
+
+  test('/download logged-out shows the Discord login prompt for pairing (not a broken form)', async () => {
+    const res = await request(app).get('/download');
+    assert.equal(res.status, 200);
+    // Logged-out path: visible user-facing text + the Discord CTA.
+    assert.match(res.text, /Log in with Discord to generate a pairing code/);
+    // The Discord button appears inside the logged-out branch of the
+    // pair panel. (The href itself also exists in the global layout if
+    // logged out, so we anchor on the surrounding wrapper instead.)
+    assert.match(res.text, /data-pair-panel-loggedout/);
+    // The logged-in branch wrapper must NOT render when no session exists.
+    // We check for the wrapper attribute on the panel container, not for
+    // the inline JS selector string (which always appears in the always-
+    // rendered <script> block).
+    assert.doesNotMatch(res.text, /<div class="pair-panel"\s+data-pair-panel\b/);
+  });
+
+  test('/download does NOT instruct users to use the License page for pairing', async () => {
+    const res = await request(app).get('/download');
+    assert.equal(res.status, 200);
+    // The Pair Android App section must point at the Download page (this page),
+    // not at /license or "My License".
+    assert.doesNotMatch(res.text, /pair[^<]{0,40}(?:License page|My License)/i);
+  });
+
+  test('download.ejs template hosts the copy-friendly pair code UI in the logged-in branch', async () => {
+    // Source-level inspection: the EJS template must contain all the
+    // hooks the client JS depends on. This avoids needing a real session.
+    const fs = require('fs');
+    const path = require('path');
+    const tpl = fs.readFileSync(
+      path.resolve(__dirname, '..', 'views', 'download.ejs'),
+      'utf8',
+    );
+    // The logged-in branch must be present and gated on `user`.
+    assert.match(tpl, /<%\s*if\s*\(\s*user\s*\)\s*\{\s*%>/);
+    // It must include the Generate button, the read-only code field, and
+    // a Copy Code button.
+    assert.match(tpl, /data-pair-generate/);
+    assert.match(tpl, /data-pair-code/);
+    assert.match(tpl, /data-pair-copy/);
+    assert.match(tpl, /readonly/);
+    assert.match(tpl, />\s*Generate Pair Code\s*</);
+    assert.match(tpl, />\s*Copy Code\s*</);
+    assert.match(tpl, /Expires in 5 minutes/);
+    // Mobile-friendly: the code input must have user-select:all so long-press
+    // copies the whole code on touch devices.
+    assert.match(tpl, /user-select:\s*all/);
+    // The JS calls the existing pairing create endpoint.
+    assert.match(tpl, /\/api\/monitor\/pairing\/create/);
+  });
+
+  test('pair-code create endpoint rejects unauthenticated requests (401/403/302)', async () => {
+    const res = await request(app)
+      .post('/api/monitor/pairing/create')
+      .set('Content-Type', 'application/json')
+      .send('{}');
+    // requireLogin returns 401/403 for JSON clients and 302 for HTML
+    // clients. Either is a valid "you are not logged in" response —
+    // the only invalid outcome is success (200) without a session.
+    assert.ok(
+      [401, 403, 302].includes(res.status),
+      `expected 401/403/302, got ${res.status}`,
+    );
+    assert.notEqual(res.status, 200);
+  });
 });

@@ -50,6 +50,61 @@
   </div>
 </div>
 
+<section class="section-card" id="pair-android-app">
+  <div class="section-header">
+    <div>
+      <h2 class="section-title">Pair Android App</h2>
+      <p class="section-desc">
+        After installing DENG Tool: Rejoin APK, open the app and enter this
+        pairing code to connect it to your account.
+      </p>
+    </div>
+  </div>
+
+  <% if (user) { %>
+    <div class="pair-panel" data-pair-panel>
+      <div class="pair-actions" data-pair-actions>
+        <button type="button" class="btn btn-primary" data-pair-generate>
+          Generate Pair Code
+        </button>
+        <p class="section-desc pair-hint" data-pair-hint>
+          Click to generate a one-time 8-character code. It expires in 5 minutes.
+        </p>
+      </div>
+
+      <div class="pair-result" data-pair-result hidden>
+        <p class="pair-result-label">Pairing Code</p>
+        <div class="pair-code-row">
+          <input
+            type="text"
+            class="pair-code-field"
+            data-pair-code
+            readonly
+            autocomplete="off"
+            spellcheck="false"
+            aria-label="Pairing code">
+          <button type="button" class="btn btn-outline pair-copy-btn" data-pair-copy>
+            Copy Code
+          </button>
+        </div>
+        <p class="pair-meta">
+          <span data-pair-expiry>Expires in 5 minutes.</span><br>
+          Open <strong>DENG Tool: Rejoin APK</strong> → <em>Pair Device</em> →
+          paste this code.
+        </p>
+        <p class="pair-error" data-pair-error hidden role="alert"></p>
+      </div>
+    </div>
+  <% } else { %>
+    <div class="pair-panel pair-panel-loggedout" data-pair-panel-loggedout>
+      <p class="pair-loggedout-msg">
+        Log in with Discord to generate a pairing code.
+      </p>
+      <a href="/auth/discord" class="btn btn-discord">Log in with Discord</a>
+    </div>
+  <% } %>
+</section>
+
 <section class="section-card">
   <div class="section-header">
     <div>
@@ -63,8 +118,8 @@
     <li>Tap <strong>Download APK</strong> above.</li>
     <li>If asked, allow installs from this browser in Android Settings.</li>
     <li>Open the downloaded <code>.apk</code> and tap <strong>Install</strong>.</li>
-    <li>Open <strong>DENG Tool: Rejoin APK</strong> and either log in with Discord or paste
-      a <strong>pairing code</strong> from your DENG Tool dashboard.</li>
+    <li>Open <strong>DENG Tool: Rejoin APK</strong>, then enter the pairing
+      code generated above in <strong>Pair Android App</strong>.</li>
     <li>In Termux on your cloud phone, run <code>deng-rejoin</code>. The tool
       will auto-start the monitor bridge after license verification.</li>
   </ol>
@@ -167,4 +222,206 @@
     word-break: break-all;
     white-space: pre-wrap;
   }
+
+  /* ── Pair Android App ─────────────────────────────────────────── */
+  .pair-panel { display: flex; flex-direction: column; gap: 1rem; }
+  .pair-actions { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+  .pair-hint { margin: 0; }
+  .pair-result-label {
+    margin: 0 0 0.5rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+  }
+  .pair-code-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: stretch;
+  }
+  .pair-code-field {
+    flex: 1 1 220px;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-align: center;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--code-bg);
+    color: var(--text);
+    -webkit-user-select: all;
+    user-select: all;
+  }
+  .pair-code-field:focus { outline: 2px solid var(--cyan, #00cfff); outline-offset: 2px; }
+  .pair-copy-btn { white-space: nowrap; }
+  .pair-copy-btn.is-copied { background: var(--success, #1f8a4d); color: #fff; border-color: transparent; }
+  .pair-meta {
+    margin: 0.85rem 0 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+  .pair-error {
+    margin: 0.5rem 0 0;
+    color: var(--danger, #ff5277);
+    font-size: 0.9rem;
+  }
+  .pair-panel-loggedout {
+    align-items: flex-start;
+  }
+  .pair-loggedout-msg {
+    margin: 0 0 0.85rem;
+    color: var(--muted);
+  }
 </style>
+
+<script>
+(function initPairAndroidApp() {
+  var panel = document.querySelector('[data-pair-panel]');
+  if (!panel) return;
+  var btnGen   = panel.querySelector('[data-pair-generate]');
+  var hint     = panel.querySelector('[data-pair-hint]');
+  var result   = panel.querySelector('[data-pair-result]');
+  var codeEl   = panel.querySelector('[data-pair-code]');
+  var copyBtn  = panel.querySelector('[data-pair-copy]');
+  var expiryEl = panel.querySelector('[data-pair-expiry]');
+  var errEl    = panel.querySelector('[data-pair-error]');
+  var countdownTimer = null;
+
+  function setError(msg) {
+    if (!errEl) return;
+    if (msg) { errEl.textContent = msg; errEl.hidden = false; }
+    else     { errEl.textContent = '';  errEl.hidden = true;  }
+  }
+
+  function formatRemaining(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return 'Expired. Generate a new code.';
+    var totalSec = Math.max(1, Math.round(ms / 1000));
+    var m = Math.floor(totalSec / 60);
+    var s = totalSec % 60;
+    var pad = function (n) { return n < 10 ? '0' + n : String(n); };
+    return 'Expires in ' + m + ':' + pad(s) + '.';
+  }
+
+  function startCountdown(expiresAtIso) {
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    var expiresAt = Date.parse(expiresAtIso);
+    if (!Number.isFinite(expiresAt)) {
+      expiryEl.textContent = 'Expires in 5 minutes.';
+      return;
+    }
+    var tick = function () {
+      var remaining = expiresAt - Date.now();
+      expiryEl.textContent = formatRemaining(remaining);
+      if (remaining <= 0) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+    };
+    tick();
+    countdownTimer = setInterval(tick, 1000);
+  }
+
+  function fallbackCopy(text) {
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.left = '-1000px';
+      document.body.appendChild(ta);
+      try {
+        ta.focus(); ta.select();
+        var ok = document.execCommand && document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (ok) resolve(); else reject(new Error('copy_failed'));
+      } catch (e) {
+        try { document.body.removeChild(ta); } catch (_) {}
+        reject(e);
+      }
+    });
+  }
+
+  function copyCode() {
+    var text = codeEl ? codeEl.value : '';
+    if (!text) return;
+    var done = function () {
+      copyBtn.classList.add('is-copied');
+      copyBtn.textContent = 'Copied';
+      setTimeout(function () {
+        copyBtn.classList.remove('is-copied');
+        copyBtn.textContent = 'Copy Code';
+      }, 1800);
+    };
+    var fail = function () {
+      // Visible code stays selected so user can long-press / Ctrl+C manually.
+      if (codeEl && codeEl.setSelectionRange) {
+        codeEl.focus();
+        try { codeEl.setSelectionRange(0, text.length); } catch (_) {}
+      }
+      setError('Auto-copy failed. The code is selected — press Ctrl+C / long-press to copy.');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {
+        fallbackCopy(text).then(done).catch(fail);
+      });
+    } else {
+      fallbackCopy(text).then(done).catch(fail);
+    }
+  }
+
+  function generate() {
+    if (!btnGen) return;
+    btnGen.disabled = true;
+    var originalText = btnGen.textContent;
+    btnGen.textContent = 'Generating…';
+    setError('');
+    fetch('/api/monitor/pairing/create', {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: '{}'
+    })
+      .then(function (res) {
+        if (res.status === 401 || res.status === 403) {
+          throw new Error('You need to log in with Discord first.');
+        }
+        if (res.status === 429) {
+          throw new Error('Too many requests. Please wait a moment and try again.');
+        }
+        if (!res.ok) {
+          throw new Error('Pair code service is unavailable. Try again in a minute.');
+        }
+        return res.json();
+      })
+      .then(function (data) {
+        var code = data && typeof data.code === 'string' ? data.code : '';
+        if (!code) throw new Error('Server did not return a pairing code.');
+        codeEl.value = code;
+        result.hidden = false;
+        if (hint) hint.textContent = 'Code generated. Enter it in DENG Tool: Rejoin APK within 5 minutes.';
+        btnGen.textContent = 'Generate New Code';
+        startCountdown(data.expires_at);
+      })
+      .catch(function (err) {
+        setError(err && err.message ? err.message : 'Unable to generate pair code.');
+        btnGen.textContent = originalText;
+      })
+      .then(function () { btnGen.disabled = false; });
+  }
+
+  if (btnGen) btnGen.addEventListener('click', generate);
+  if (copyBtn) copyBtn.addEventListener('click', copyCode);
+  if (codeEl) codeEl.addEventListener('focus', function () {
+    if (codeEl.setSelectionRange && codeEl.value) {
+      try { codeEl.setSelectionRange(0, codeEl.value.length); } catch (_) {}
+    }
+  });
+}());
+</script>

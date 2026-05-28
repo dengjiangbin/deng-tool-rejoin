@@ -51,11 +51,11 @@ fun PairScreen(api: MonitorApi, sessionStore: SessionStore) {
         Spacer(Modifier.height(40.dp))
 
         DengCard {
-            Text("Pair with DENG Tool", style = MaterialTheme.typography.titleLarge, color = DengColors.TextPrimary)
+            Text("Pair Device", style = MaterialTheme.typography.titleLarge, color = DengColors.TextPrimary)
             Spacer(Modifier.height(8.dp))
             Text(
-                "On tool.deng.my.id → My License → click \"Pair Android App\". " +
-                "Enter the 8-character code below.",
+                "Log in at tool.deng.my.id, open the Download APK page, " +
+                "generate a pairing code, then enter it here.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = DengColors.TextMuted,
             )
