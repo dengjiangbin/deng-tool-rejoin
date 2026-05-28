@@ -35,8 +35,11 @@ android {
     //   DENG_KEY_ALIAS          key alias inside the keystore
     //   DENG_KEY_PASSWORD       key password
     //
-    // If any are missing, the release build falls back to debug signing
-    // so local development never breaks.
+    // SAFETY: A release build NEVER silently falls back to debug signing.
+    // If any credential is missing when a release-producing task is
+    // requested, the build fails loudly (see `gradle.taskGraph.whenReady`
+    // block below). Debug builds (`assembleDebug`, `test`) are unaffected
+    // and run without release credentials.
     val keystorePath = project.findProperty("DENG_KEYSTORE_PATH") as String?
     val keystorePassword = project.findProperty("DENG_KEYSTORE_PASSWORD") as String?
     val keyAlias = project.findProperty("DENG_KEY_ALIAS") as String?
@@ -66,10 +69,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = if (hasReleaseSigning) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            // Only wire the real release keystore when fully configured.
+            // When credentials are missing we deliberately leave
+            // signingConfig = null so debug keys can never sneak into a
+            // public APK. The whenReady guard below converts that into
+            // a clear, human-readable failure before AGP gets a chance
+            // to produce a misleading error.
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
             }
         }
         debug {
@@ -121,4 +128,87 @@ dependencies {
     implementation(libs.coil.compose)
 
     testImplementation(libs.junit)
+}
+
+// ---------------------------------------------------------------------------
+// Release signing guard
+// ---------------------------------------------------------------------------
+// Public release builds must NEVER silently fall back to debug signing.
+// Debug builds (`assembleDebug`, `test`) intentionally remain free of this
+// check so day-to-day development does not require a keystore.
+//
+// This guard fires after the task graph is built but before any task runs.
+// If the user requested a task that would produce a public release artifact
+// AND any of the required signing properties are missing, the build halts
+// with an actionable, human-readable error.
+val releaseProducingTaskNames = setOf(
+    "assembleRelease",
+    "bundleRelease",
+    "packageRelease",
+    "publishReleaseApk",
+    "uploadArchives",
+)
+
+gradle.taskGraph.whenReady {
+    val triggersReleaseSigning = allTasks.any { task ->
+        // Match both bare names (`assembleRelease`) and fully-qualified
+        // names (`:app:assembleRelease`) so the guard works from anywhere
+        // in a multi-project build.
+        releaseProducingTaskNames.contains(task.name) ||
+            task.path.endsWith(":assembleRelease") ||
+            task.path.endsWith(":bundleRelease") ||
+            task.path.endsWith(":packageRelease")
+    }
+    if (!triggersReleaseSigning) return@whenReady
+
+    val required = linkedMapOf(
+        "DENG_KEYSTORE_PATH" to (project.findProperty("DENG_KEYSTORE_PATH") as String?),
+        "DENG_KEYSTORE_PASSWORD" to (project.findProperty("DENG_KEYSTORE_PASSWORD") as String?),
+        "DENG_KEY_ALIAS" to (project.findProperty("DENG_KEY_ALIAS") as String?),
+        "DENG_KEY_PASSWORD" to (project.findProperty("DENG_KEY_PASSWORD") as String?),
+    )
+    val missing = required.filterValues { it.isNullOrBlank() }.keys.toList()
+
+    val keystorePathValue = required["DENG_KEYSTORE_PATH"]
+    val keystoreMissingOnDisk = missing.isEmpty() &&
+        !keystorePathValue.isNullOrBlank() &&
+        !file(keystorePathValue).exists()
+
+    if (missing.isNotEmpty() || keystoreMissingOnDisk) {
+        val bullets = buildString {
+            required.keys.forEach { name ->
+                val state = if (missing.contains(name)) "MISSING" else "ok"
+                append("  * ").append(name).append("  (").append(state).append(")\n")
+            }
+            if (keystoreMissingOnDisk) {
+                append("\nKeystore file does not exist at: ")
+                append(keystorePathValue)
+                append('\n')
+            }
+        }
+        throw GradleException(
+            """
+
+            Missing DENG Tool: Rejoin APK release signing config.
+
+            A release-producing task was requested (assembleRelease /
+            bundleRelease / packageRelease) but the release keystore
+            credentials are not available.
+
+            Required Gradle properties:
+            $bullets
+            Set them in one of the following places (in order of preference):
+
+              1. ~/.gradle/gradle.properties (recommended; machine-local)
+              2. Environment variables ORG_GRADLE_PROJECT_DENG_KEYSTORE_PATH
+                 (etc.), which Gradle maps to project properties.
+              3. -P CLI flags on the gradlew invocation.
+
+            Never commit keystore files, .jks, or signing passwords.
+            Release builds will NOT fall back to debug signing — debug
+            keys must never end up in a public APK.
+
+            """.trimIndent()
+        )
+    }
 }
