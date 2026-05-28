@@ -580,6 +580,45 @@ input {
   transform: translateY(-1px);
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+ * Global Stats — light-mode override.
+ *
+ * The default (dark) cards use a deep-glass surface that blends into
+ * the pastel light-mode background and washes out label text. In light
+ * mode we switch to bright semi-white glass with slate text so the four
+ * cards (Generated Keys / Unique Users / Redeemed Keys / Active Devices)
+ * remain readable and clearly separated from the body gradient.
+ * ──────────────────────────────────────────────────────────────────── */
+:root[data-theme="light"] .global-stats-kicker {
+  color: #334155;
+}
+
+:root[data-theme="light"] .global-stat-card {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.10);
+}
+
+:root[data-theme="light"] .global-stat-card::before {
+  /* Drop the neon cyan/pink wash that only reads on dark surfaces. */
+  background: none;
+  opacity: 0;
+}
+
+:root[data-theme="light"] .global-stat-label {
+  color: #475569;
+  font-weight: 600;
+}
+
+:root[data-theme="light"] .global-stat-value {
+  color: #0F172A;
+  font-weight: 800;
+  /* Cyan glow is invisible on white and adds halo artefacts. */
+  text-shadow: none;
+}
+
 .auth-card,
 .section-card,
 .provider-card,

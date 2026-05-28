@@ -1032,6 +1032,31 @@ describe('theme and dashboard UI', () => {
     assert.match(css, /\.global-stat-value\s*\{[\s\S]*min-height:/);
   });
 
+  test('light mode global stats cards use bright glass + slate text (no washed-out muted label)', () => {
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
+
+    // Bright glass surface + subtle slate border + soft drop shadow.
+    assert.match(css, /:root\[data-theme="light"\]\s+\.global-stat-card\s*\{[\s\S]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.78\)/);
+    assert.match(css, /:root\[data-theme="light"\]\s+\.global-stat-card\s*\{[\s\S]*border:\s*1px solid rgba\(148,\s*163,\s*184,\s*0\.28\)/);
+    assert.match(css, /:root\[data-theme="light"\]\s+\.global-stat-card\s*\{[\s\S]*backdrop-filter:\s*blur\(14px\)/);
+    assert.match(css, /:root\[data-theme="light"\]\s+\.global-stat-card\s*\{[\s\S]*box-shadow:\s*0 8px 24px rgba\(15,\s*23,\s*42,\s*0\.10\)/);
+
+    // Label is dark slate at weight 600 (NOT var(--muted) which was washed out).
+    assert.match(css, /:root\[data-theme="light"\]\s+\.global-stat-label\s*\{[\s\S]*color:\s*#475569[\s\S]*font-weight:\s*600/);
+
+    // Value is near-black at weight 800, no cyan halo.
+    assert.match(css, /:root\[data-theme="light"\]\s+\.global-stat-value\s*\{[\s\S]*color:\s*#0F172A[\s\S]*font-weight:\s*800/);
+    assert.match(css, /:root\[data-theme="light"\]\s+\.global-stat-value\s*\{[\s\S]*text-shadow:\s*none/);
+
+    // Heading is readable (not the faint --muted).
+    assert.match(css, /:root\[data-theme="light"\]\s+\.global-stats-kicker\s*\{[\s\S]*color:\s*#334155/);
+
+    // Sanity: dark-mode base rule is still present and untouched (no
+    // accidental regression to dark mode while fixing light mode).
+    assert.match(css, /\n\.global-stat-card\s*\{[\s\S]*backdrop-filter:\s*blur\(16px\)/);
+    assert.match(css, /\n\.global-stat-value\s*\{[\s\S]*text-shadow:\s*0 0 18px rgba\(5,\s*200,\s*255,\s*0\.18\)/);
+  });
+
   test('logo PNG has transparent near-black pixels instead of black backing', () => {
     const opaqueNearBlack = countOpaqueNearBlackPng(path.join(__dirname, '..', 'public', 'img', 'deng-logo.png'));
     assert.equal(opaqueNearBlack, 0);
