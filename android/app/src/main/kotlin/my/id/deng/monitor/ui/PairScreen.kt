@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 import my.id.deng.monitor.data.ApiException
 import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.SessionStore
+import my.id.deng.monitor.data.friendlyNetworkError
 import my.id.deng.monitor.ui.theme.DengColors
 
 @Composable
@@ -102,7 +103,7 @@ fun PairScreen(api: MonitorApi, sessionStore: SessionStore) {
                         } catch (e: ApiException) {
                             error = e.safeMessage
                         } catch (e: Throwable) {
-                            error = "Network error: ${e.javaClass.simpleName}"
+                            error = friendlyNetworkError(e, api.host)
                         } finally {
                             loading = false
                         }

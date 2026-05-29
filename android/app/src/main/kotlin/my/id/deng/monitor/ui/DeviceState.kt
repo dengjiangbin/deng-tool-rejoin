@@ -9,6 +9,7 @@ import my.id.deng.monitor.data.ApiException
 import my.id.deng.monitor.data.DeviceStatus
 import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.SessionStore
+import my.id.deng.monitor.data.friendlyNetworkError
 
 sealed interface DeviceFetchState {
     data object Loading : DeviceFetchState
@@ -83,7 +84,12 @@ fun rememberDeviceStatusHandle(
             } catch (ce: CancellationException) {
                 throw ce
             } catch (e: Throwable) {
-                state.value = DeviceFetchState.Error("Network error: ${e.javaClass.simpleName}")
+                // v1.0.5: render a safe, host-aware message (e.g.
+                // "Cannot reach tool.deng.my.id …") instead of the raw
+                // "Network error: UnknownHostException". The loop keeps
+                // ticking below (sleepOrRefresh), so this also auto-retries
+                // and never freezes on an infinite spinner.
+                state.value = DeviceFetchState.Error(friendlyNetworkError(e, api.host))
             }
             sleepOrRefresh(interval * 1_000L, refreshChannel)
         }

@@ -10,6 +10,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.PackageState
 import my.id.deng.monitor.data.SessionStore
@@ -18,7 +19,9 @@ import my.id.deng.monitor.util.Format
 
 @Composable
 fun PackagesScreen(api: MonitorApi, sessionStore: SessionStore) {
-    val state by rememberDeviceStatus(api, sessionStore)
+    val handle = rememberDeviceStatusHandle(api, sessionStore)
+    val state by handle.state
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -35,7 +38,10 @@ fun PackagesScreen(api: MonitorApi, sessionStore: SessionStore) {
 
         when (val s = state) {
             is DeviceFetchState.Loading -> Text("Loading…", color = DengColors.TextMuted)
-            is DeviceFetchState.Error   -> ErrorBanner(s.message)
+            is DeviceFetchState.Error   -> ErrorCard(
+                message = s.message,
+                onRetry = { scope.launch { handle.refreshNow() } },
+            )
             is DeviceFetchState.NoDevices -> Text(s.message, color = DengColors.TextMuted)
             is DeviceFetchState.Ready -> {
                 val pkgs = s.status.packages

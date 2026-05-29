@@ -165,3 +165,43 @@ fun ErrorBanner(message: String) {
         }
     }
 }
+
+/**
+ * v1.0.5: full error card with an explicit Retry action.
+ *
+ * The polling loop already auto-retries on its next tick, but a user staring
+ * at a network error has no idea that's happening — so before v1.0.5 it felt
+ * like the app was "stuck loading forever". This card gives them an immediate,
+ * obvious way to retry (and surfaces the safe, host-named reason) instead of
+ * an opaque spinner.
+ */
+@Composable
+fun ErrorCard(
+    message: String,
+    onRetry: () -> Unit,
+    title: String = "Can't reach the backend",
+) {
+    Surface(
+        color = DengColors.Danger.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, DengColors.Danger.copy(alpha = 0.4f)),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                title,
+                color = DengColors.Danger,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                message,
+                color = DengColors.TextMuted,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(14.dp))
+            DengGradientButton(text = "Retry", onClick = onRetry)
+        }
+    }
+}

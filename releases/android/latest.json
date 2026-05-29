@@ -1,22 +1,18 @@
 {
   "app_name": "DENG Tool: Rejoin APK",
-  "version_name": "1.0.4",
-  "version_code": 5,
-  "file_name": "deng-tool-rejoin-apk-v1.0.4.apk",
-  "sha256": "CDD1CFDD9B21D9A9BCABCC439E5AAFBEA53611853FD747B5AB0FE80318C88242",
+  "version_name": "1.0.5",
+  "version_code": 6,
+  "file_name": "deng-tool-rejoin-apk-v1.0.5.apk",
+  "sha256": "B4E43511AA9170BC8216C0F16E3BB3314862E400B7B0EBF4699758211FC93F46",
   "size_bytes": 1863017,
-  "released_at": "2026-05-28",
+  "released_at": "2026-05-29",
   "min_sdk": 26,
   "purpose": "Monitoring companion app for DENG Tool: Rejoin",
   "changelog": [
-    "Connection status is now computed from a 30-second last_seen_at TTL on the backend — the APK shows 'Disconnected' within ~30 seconds of the cloud phone rebooting or stopping `deng-rejoin`, instead of being stuck on 'Connected' forever.",
-    "Settings selection now updates instantly: optimistic local state is applied the moment a radio is tapped, and the status poller is kicked immediately after a successful save so you no longer have to leave and re-enter the Settings screen to see the saved value.",
-    "Snapshot tab no longer says 'Waiting for first snapshot…' forever — the Termux bridge now reports real capture/upload diagnostics (capture_failed, screencap_unavailable, upload_failed, byte counts) and the APK surfaces them as actionable status lines.",
-    "Snapshot capture is now whole-display: the Termux client tries `screencap -p`, then `/system/bin/screencap -p`, then (opt-in) `su -c \"screencap -p\"`, validates the PNG magic bytes, and never falls back to an app-only capture.",
-    "Package state model rewritten — the APK now shows exactly 5 states: Dead, Launching, Joining, Online, No Heartbeat. The old 'In-Lobby' state has been removed (lobby maps to Dead so the watchdog re-issues a relaunch/rejoin).",
-    "Launching vs Joining are now distinct: Launching = opening the Roblox package, Joining = opening the configured private-server URL.",
-    "Stable v1.0.0 Termux package was rebuilt with the new state vocabulary and whole-screen snapshot path; /install/v1.0.0 and /install/latest both serve the fixed artifact.",
-    "Backend /api/monitor/devices/:id/status now returns connected, connection_state, seconds_since_last_seen, and last_bridge_status alongside the existing last_snapshot_captured_at field.",
-    "Dashboard adds dedicated Launching and Joining tiles; the 'Connected/Disconnected' badge has been split into its own ConnectionBadge so it doesn't conflict with the package state vocabulary."
+    "Network errors are now clear and recoverable: a failed connection shows a host-named message such as 'Cannot reach tool.deng.my.id — check your internet/DNS connection and try again.' with a Retry button, instead of the previous cryptic 'Network error: UnknownHostException' that looked like the app was stuck loading forever.",
+    "Settings → About now shows the backend the app is built against ('API host: tool.deng.my.id') so connectivity issues can be diagnosed at a glance. No tokens or secrets are ever displayed.",
+    "Dashboard, Packages, Snapshot, and Settings all render a retry-capable error card on network failure and keep auto-retrying in the background — no more infinite spinner.",
+    "Backend now tolerates a not-yet-applied migration 010: the device heartbeat (last_seen_at) and the optional bridge diagnostics are written in separate updates, so a missing last_bridge_status column can never roll back the heartbeat and falsely mark devices Disconnected.",
+    "No functional change to the v1.0.4 connection-TTL, instant-settings-refresh, snapshot diagnostics, or 5-state package model — this release hardens connectivity and error handling on top of them."
   ]
 }

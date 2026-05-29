@@ -50,6 +50,33 @@ const APP_SESSION_TTL_SEC   = 30 * 24 * 60 * 60;    // 30 day app session
 const PAIRING_CODE_TTL_SEC  = 5 * 60;               // 5 min pairing code
 const ALLOWED_SNAPSHOT_INTERVALS = new Set([0, 15, 30, 60, 300]);
 
+// ── migration 010 resilience ─────────────────────────────────────────────────
+// monitor_devices.last_bridge_status (migration 010) may not be applied yet on
+// every deployment. If it is missing, naively SELECTing or UPDATEing it would
+// (a) 400 every /status read and (b) — far worse — roll back the *entire*
+// heartbeat UPDATE, so last_seen_at would never persist and every device would
+// look permanently Disconnected under the v1.0.4 TTL logic.
+//
+// We treat the column as optional: detect a "column does not exist" failure
+// once, latch a flag, and from then on skip the column entirely. When the
+// migration is applied the flag simply never trips. No restart required to go
+// from "missing" → "present": a fresh process re-probes; an already-running
+// process that latched off keeps degrading gracefully until next deploy, which
+// is the safe direction. Writes always split the core heartbeat from the
+// optional diagnostics so the heartbeat can never be poisoned by the column.
+let bridgeStatusColumnAvailable = true;
+
+function isMissingBridgeStatusColumn(err) {
+  if (!err) return false;
+  // Supabase/PostgREST: code 42703 (undefined_column) or a message referencing
+  // the column. Be liberal — false positives only cost us the diagnostics blob.
+  const code = err.code || err?.details || '';
+  const msg = `${err.message || ''} ${err.hint || ''} ${err.details || ''}`.toLowerCase();
+  if (code === '42703') return true;
+  return msg.includes('last_bridge_status') &&
+    (msg.includes('does not exist') || msg.includes('could not find') || msg.includes('column'));
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function sha256(input) {
   return crypto.createHash('sha256').update(String(input)).digest('hex');
@@ -345,7 +372,14 @@ router.post('/api/monitor/bridge/push',
       };
     }
 
-    // Update device heartbeat / version metadata
+    // Update device heartbeat / version metadata.
+    //
+    // CRITICAL: the heartbeat (last_seen_at) and the OPTIONAL bridge_status
+    // diagnostics are written in TWO separate UPDATEs. If they shared one
+    // UPDATE and last_bridge_status (migration 010) were missing, the whole
+    // statement would fail and last_seen_at would never persist — which the
+    // v1.0.4 TTL would render as a permanently Disconnected device. Splitting
+    // them guarantees the heartbeat always lands even when the column is gone.
     try {
       const update = {
         status_connected: true,
@@ -355,12 +389,37 @@ router.post('/api/monitor/bridge/push',
           ? body.channel : 'stable',
         last_disconnect_reason: null,
       };
-      if (bridgeStatusClean) update.last_bridge_status = bridgeStatusClean;
-      await supabase.from('monitor_devices')
+      const { error: hbErr } = await supabase.from('monitor_devices')
         .update(update)
         .eq('id', device.id);
+      if (hbErr) console.error('[monitor] device heartbeat update failed', hbErr.message || hbErr);
     } catch (err) {
-      console.error('[monitor] device update failed', err?.message || err);
+      console.error('[monitor] device heartbeat update failed', err?.message || err);
+    }
+
+    // Optional diagnostics write — only attempted when the bridge sent a
+    // status block AND migration 010's column has not been proven missing.
+    if (bridgeStatusClean && bridgeStatusColumnAvailable) {
+      try {
+        const { error: bsErr } = await supabase.from('monitor_devices')
+          .update({ last_bridge_status: bridgeStatusClean })
+          .eq('id', device.id);
+        if (bsErr) {
+          if (isMissingBridgeStatusColumn(bsErr)) {
+            bridgeStatusColumnAvailable = false;
+            console.warn('[monitor] last_bridge_status column missing — apply migration 010; diagnostics disabled until then');
+          } else {
+            console.error('[monitor] bridge_status update failed', bsErr.message || bsErr);
+          }
+        }
+      } catch (err) {
+        if (isMissingBridgeStatusColumn(err)) {
+          bridgeStatusColumnAvailable = false;
+          console.warn('[monitor] last_bridge_status column missing — apply migration 010; diagnostics disabled until then');
+        } else {
+          console.error('[monitor] bridge_status update failed', err?.message || err);
+        }
+      }
     }
 
     // Upsert each package state. We strip anything not in the schema.
@@ -483,20 +542,43 @@ router.get('/api/monitor/devices', requireAppAuth, async (req, res) => {
   }
 });
 
+// v1.0.4 included last_bridge_status (snapshot capture diagnostics pushed by
+// the Termux bridge) so /status can surface real reasons to the APK instead of
+// the v1.0.3 "Waiting for first snapshot…" silent state. If migration 010 has
+// not been applied, SELECTing that column makes the query error → maybeSingle()
+// returns data:null → loadOwnedDevice would 404 EVERY status read. So we
+// build the column list dynamically and, if the optional column trips a
+// "column does not exist" error, latch it off and retry with the safe columns.
+const DEVICE_CORE_COLS =
+  'id, owner_discord_user_id, device_label, tool_version, channel, status_connected, last_seen_at, created_at';
+
 async function loadOwnedDevice(req, deviceId) {
   if (!deviceId || typeof deviceId !== 'string') return null;
-  const { data } = await supabase
+
+  const cols = bridgeStatusColumnAvailable
+    ? `${DEVICE_CORE_COLS}, last_bridge_status`
+    : DEVICE_CORE_COLS;
+
+  let { data, error } = await supabase
     .from('monitor_devices')
-    .select(
-      // v1.0.4: include last_bridge_status (snapshot capture diagnostics
-      // pushed by the Termux bridge) so /status can surface real reasons
-      // to the APK instead of the v1.0.3 "Waiting for first snapshot…"
-      // silent state. Older deploys without migration 010 simply have
-      // null in that column and the APK falls back to its previous copy.
-      'id, owner_discord_user_id, device_label, tool_version, channel, status_connected, last_seen_at, created_at, last_bridge_status',
-    )
+    .select(cols)
     .eq('id', deviceId)
     .maybeSingle();
+
+  if (error && isMissingBridgeStatusColumn(error)) {
+    bridgeStatusColumnAvailable = false;
+    console.warn('[monitor] last_bridge_status column missing — apply migration 010; reading without diagnostics');
+    ({ data, error } = await supabase
+      .from('monitor_devices')
+      .select(DEVICE_CORE_COLS)
+      .eq('id', deviceId)
+      .maybeSingle());
+  }
+
+  if (error) {
+    console.error('[monitor] loadOwnedDevice failed', error.message || error);
+    return null;
+  }
   if (!data || data.owner_discord_user_id !== req.appOwner) return null;
   return data;
 }

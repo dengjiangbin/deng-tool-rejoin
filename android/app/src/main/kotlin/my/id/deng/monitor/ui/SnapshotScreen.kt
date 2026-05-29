@@ -30,7 +30,8 @@ import my.id.deng.monitor.util.Format
 
 @Composable
 fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
-    val state by rememberDeviceStatus(api, sessionStore)
+    val handle = rememberDeviceStatusHandle(api, sessionStore)
+    val state by handle.state
     var bitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -115,6 +116,17 @@ fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
             }
         }
 
+        // v1.0.5: surface a network/device-status error (e.g. cannot reach
+        // tool.deng.my.id) with a Retry action instead of silently rendering
+        // the "Waiting for cloud phone to reconnect…" placeholder, which made
+        // a DNS failure look like an idle-but-healthy screen.
+        (state as? DeviceFetchState.Error)?.let { errState ->
+            ErrorCard(
+                message = errState.message,
+                onRetry = { scope.launch { handle.refreshNow() } },
+            )
+            return@Column
+        }
         if (error != null) ErrorBanner(error!!)
         if (state is DeviceFetchState.NoDevices) {
             DengCard { Text("No cloud phone connected.", color = DengColors.TextMuted) }

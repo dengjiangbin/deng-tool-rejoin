@@ -68,7 +68,10 @@ fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore) {
 
         when (val s = state) {
             is DeviceFetchState.Loading -> Text("Loading…", color = DengColors.TextMuted)
-            is DeviceFetchState.Error -> ErrorBanner(s.message)
+            is DeviceFetchState.Error -> ErrorCard(
+                message = s.message,
+                onRetry = { scope.launch { handle.refreshNow() } },
+            )
             is DeviceFetchState.NoDevices -> {
                 DengCard { Text(s.message, color = DengColors.TextMuted) }
                 LogoutCard(sessionStore = sessionStore, scope = scope)
@@ -172,8 +175,16 @@ fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore) {
             Spacer(Modifier.height(6.dp))
             Text("DENG Tool: Rejoin · App v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
                 color = DengColors.TextMuted, style = MaterialTheme.typography.bodySmall)
+            // v1.0.5: show the API host prominently so anyone debugging a
+            // connectivity issue can confirm in one glance that the APK was
+            // built against the correct backend (tool.deng.my.id) — no token
+            // or secret is ever shown, just the public host + base URL.
+            Spacer(Modifier.height(4.dp))
+            Text("API host: ${api.host}",
+                color = DengColors.Cyan, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
             Text("Backend: ${BuildConfig.BRIDGE_URL}",
                 color = DengColors.TextDim, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(4.dp))
             Text("Monitoring companion only. Rejoin package versions are selected via the website / Discord.",
                 color = DengColors.TextDim, style = MaterialTheme.typography.bodySmall)
         }

@@ -9,7 +9,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
+import javax.net.ssl.SSLException
 
 /**
  * Thin OkHttp + kotlinx.serialization wrapper around the DENG Monitor
@@ -23,6 +26,15 @@ class MonitorApi(
     val baseUrl: String,
     private val tokenProvider: () -> String?,
 ) {
+    /**
+     * Bare host of [baseUrl] (e.g. "tool.deng.my.id") for display in the
+     * Settings/About card and in user-facing network-error messages. Falls
+     * back to the raw baseUrl if it can't be parsed — never throws.
+     */
+    val host: String = runCatching {
+        baseUrl.substringAfter("://").substringBefore('/').ifBlank { baseUrl }
+    }.getOrDefault(baseUrl)
+
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
@@ -133,3 +145,26 @@ class ApiException(
     val statusCode: Int,
     val safeMessage: String,
 ) : IOException("$statusCode: $safeMessage")
+
+/**
+ * Maps a low-level network/HTTP throwable to a short, safe, human-readable
+ * message that names the backend [host] — never a raw stack trace or an
+ * opaque class name like "UnknownHostException".
+ *
+ * This is what turns the v1.0.4 "Network error: UnknownHostException"
+ * (which left users with no idea what to do) into actionable copy such as
+ * "Cannot reach tool.deng.my.id — check your internet/DNS and try again."
+ */
+fun friendlyNetworkError(e: Throwable, host: String): String = when (e) {
+    is ApiException -> e.safeMessage
+    is UnknownHostException ->
+        "Cannot reach $host — check your internet/DNS connection and try again."
+    is SocketTimeoutException ->
+        "Connection to $host timed out — check your network and try again."
+    is SSLException ->
+        "Secure connection to $host failed — check your network and try again."
+    is IOException ->
+        "Network error reaching $host — check your connection and try again."
+    else ->
+        "Network error reaching $host — check your connection and try again."
+}
