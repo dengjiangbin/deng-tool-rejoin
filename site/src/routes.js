@@ -1279,9 +1279,11 @@ router.get('/api/license/download', requireLicenseDownloadLogin, repairSiteUser,
 // ───────────────────────────────────────────────────────────────────────────
 const path = require('path');
 const fs   = require('fs');
-const apkDownloadStats = require('./apkDownloadStats');
+const downloadStats = require('./downloadStats');
 
 const APK_RELEASES_DIR = path.join(__dirname, '..', '..', 'releases', 'android');
+const IOS_RELEASES_DIR = path.join(__dirname, '..', '..', 'releases', 'ios');
+const IOS_FILENAME_RE = /^deng-tool-monitor-ios-v?[A-Za-z0-9._-]+\.ipa$/;
 
 // New canonical filename pattern. Backward-compat: also accept legacy
 // `deng-monitor-*.apk` for any old assets that may already be hosted, so
@@ -1311,11 +1313,52 @@ function loadApkManifest() {
   }
 }
 
+function loadIosManifest() {
+  try {
+    const file = path.join(IOS_RELEASES_DIR, 'latest.json');
+    if (!fs.existsSync(file)) return null;
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return {
+      version_name: String(raw.version_name || '1.0.0'),
+      version_code: Number(raw.version_code || 1),
+      file_name: String(raw.file_name || ''),
+      sha256: String(raw.sha256 || ''),
+      size_bytes: Number(raw.size_bytes || 0),
+      released_at: String(raw.released_at || ''),
+      distribution: String(raw.distribution || 'coming_soon'),
+      testflight_url: String(raw.testflight_url || process.env.IOS_TESTFLIGHT_URL || ''),
+      app_store_url: String(raw.app_store_url || ''),
+    };
+  } catch (err) {
+    console.warn('[ios] manifest load failed:', err.message);
+    return null;
+  }
+}
+
+function resolveIosDownloadMode(iosManifest) {
+  const envMode = String(process.env.IOS_DOWNLOAD_MODE || '').toLowerCase().trim();
+  if (envMode === 'testflight' || envMode === 'ipa' || envMode === 'coming_soon') return envMode;
+  const dist = String(iosManifest?.distribution || 'coming_soon').toLowerCase();
+  if (dist === 'testflight' && (iosManifest?.testflight_url || process.env.IOS_TESTFLIGHT_URL)) {
+    return 'testflight';
+  }
+  if (dist === 'ipa' && iosManifest?.file_name) {
+    const target = path.resolve(IOS_RELEASES_DIR, iosManifest.file_name);
+    if (fs.existsSync(target)) return 'ipa';
+  }
+  return 'coming_soon';
+}
+
 router.get('/download', (_req, res) => {
   const manifest = loadApkManifest();
+  const iosManifest = loadIosManifest();
+  const iosMode = resolveIosDownloadMode(iosManifest);
   res.render('download', {
-    title: 'DENG Tool: Rejoin APK — DENG Tool',
+    title: 'DENG Tool Monitor — Download',
     manifest,
+    iosManifest,
+    iosMode,
+    testflightUrl: (iosManifest?.testflight_url || process.env.IOS_TESTFLIGHT_URL || '').trim(),
   });
 });
 
@@ -1323,12 +1366,34 @@ router.get('/app', (_req, res) => res.redirect('/download'));
 
 router.get('/api/downloads/apk/stats', (_req, res) => {
   try {
-    const stats = apkDownloadStats.getStats();
+    const stats = downloadStats.getApkStats();
     res.set('Cache-Control', 'no-store');
     return res.json(stats);
   } catch (err) {
     console.warn('[apk] stats failed:', err && err.message ? err.message : err);
     return res.json({ ok: false, latest: null });
+  }
+});
+
+router.get('/api/downloads/ios/stats', (_req, res) => {
+  try {
+    const stats = downloadStats.getPlatformStats('ios');
+    res.set('Cache-Control', 'no-store');
+    return res.json(stats);
+  } catch (err) {
+    console.warn('[ios] stats failed:', err && err.message ? err.message : err);
+    return res.json({ ok: false, platform: 'ios', latest: null });
+  }
+});
+
+router.get('/api/downloads/stats', (_req, res) => {
+  try {
+    const stats = downloadStats.getAllStats();
+    res.set('Cache-Control', 'no-store');
+    return res.json(stats);
+  } catch (err) {
+    console.warn('[downloads] stats failed:', err && err.message ? err.message : err);
+    return res.json({ ok: false, android: null, ios: null });
   }
 });
 
@@ -1349,14 +1414,40 @@ router.get('/downloads/deng-monitor-latest.apk', (_req, res) => {
   return res.redirect(301, '/downloads/deng-tool-rejoin-apk-latest.apk');
 });
 
+// ── iOS IPA (private test builds only — no public install without signing) ───
+router.get('/downloads/deng-tool-monitor-ios-latest.ipa', (_req, res) => {
+  const iosManifest = loadIosManifest();
+  if (!iosManifest || !iosManifest.file_name || resolveIosDownloadMode(iosManifest) !== 'ipa') {
+    return res.status(404).type('text/plain').send('iOS build not available for direct download.\n');
+  }
+  const safeName = path.basename(iosManifest.file_name);
+  return res.redirect(302, `/downloads/${encodeURIComponent(safeName)}`);
+});
+
 router.get('/downloads/:file', (req, res, next) => {
   const raw = String(req.params.file || '');
-  const isNew    = APK_FILENAME_NEW_RE.test(raw);
+
+  if (IOS_FILENAME_RE.test(raw)) {
+    const target = path.resolve(IOS_RELEASES_DIR, raw);
+    if (!target.startsWith(path.resolve(IOS_RELEASES_DIR) + path.sep)
+        && target !== path.resolve(IOS_RELEASES_DIR)) {
+      return next();
+    }
+    if (fs.existsSync(target)) {
+      if (req.method === 'GET') {
+        try { downloadStats.recordDownload('ios', raw); } catch (_) { /* non-fatal */ }
+      }
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${raw}"`);
+      return res.sendFile(target);
+    }
+    return res.status(404).type('text/plain').send('iOS build not found.\n');
+  }
+
+  const isNew = APK_FILENAME_NEW_RE.test(raw);
   const isLegacy = APK_FILENAME_LEGACY_RE.test(raw);
   if (!isNew && !isLegacy) return next();
 
-  // Resolve against the releases dir, then enforce that the resolved path
-  // is still inside it (defense in depth on top of the regex).
   const target = path.resolve(APK_RELEASES_DIR, raw);
   if (!target.startsWith(path.resolve(APK_RELEASES_DIR) + path.sep)
       && target !== path.resolve(APK_RELEASES_DIR)) {
@@ -1365,16 +1456,13 @@ router.get('/downloads/:file', (req, res, next) => {
 
   if (fs.existsSync(target)) {
     if (req.method === 'GET') {
-      try { apkDownloadStats.recordDownload(raw); } catch (_) { /* non-fatal */ }
+      try { downloadStats.recordDownload('android', raw); } catch (_) { /* non-fatal */ }
     }
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
     res.setHeader('Content-Disposition', `attachment; filename="${raw}"`);
     return res.sendFile(target);
   }
 
-  // Legacy filename requested but no legacy file on disk — redirect to the
-  // equivalent new-pattern filename (same version suffix) so older links
-  // continue to resolve once the publisher ships only new-named APKs.
   if (isLegacy) {
     const suffix = raw.replace(/^deng-monitor-/, '');
     return res.redirect(301, `/downloads/deng-tool-rejoin-apk-${suffix}`);

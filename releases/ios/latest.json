@@ -1,0 +1,18 @@
+{
+  "app_name": "DENG Tool Monitor",
+  "version_name": "1.0.0",
+  "version_code": 1,
+  "file_name": "",
+  "sha256": "",
+  "size_bytes": 0,
+  "released_at": "2026-05-29",
+  "distribution": "coming_soon",
+  "testflight_url": "",
+  "app_store_url": "",
+  "purpose": "Monitoring companion app for DENG Tool: Rejoin (iOS)",
+  "changelog": [
+    "First iOS release — same monitor dashboard, packages, snapshot, and Fish It as Android.",
+    "Pair with your Discord account using the website pairing code.",
+    "Light / Dark / System theme and Hide Username privacy toggle."
+  ]
+}

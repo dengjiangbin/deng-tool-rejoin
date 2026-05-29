@@ -4,26 +4,53 @@
   <div>
     <p class="eyebrow">DENG Tool Portal</p>
     <h1 class="page-title">
-      <span class="gradient-brand-text">DENG Tool: Rejoin APK</span>
+      <span class="gradient-brand-text">DENG Tool Monitor</span>
     </h1>
     <p class="page-subtitle">
-      Monitor your Rejoin packages from Android. View RAM usage, runtime,
-      package state, usernames, and snapshots securely from your phone.
+      Monitor your Rejoin packages from Android or iOS. View RAM, package state,
+      snapshots, and Fish It stats — same account, same backend.
     </p>
   </div>
-  <% if (manifest && manifest.file_name) { %>
+  <div class="download-platform-row">
     <div class="download-cta-col">
-      <a href="/downloads/deng-tool-rejoin-apk-latest.apk" class="btn btn-primary" data-apk-download rel="nofollow">
-        Download APK
-      </a>
-      <p class="apk-download-count" data-apk-download-count hidden aria-live="polite">
-        <span class="apk-download-count-skel" data-apk-count-skel></span>
-        <span class="apk-download-count-text" data-apk-count-text hidden></span>
-      </p>
+      <p class="download-platform-label">Android</p>
+      <% if (manifest && manifest.file_name) { %>
+        <a href="/downloads/deng-tool-rejoin-apk-latest.apk" class="btn btn-primary" data-apk-download rel="nofollow">
+          Download Android APK
+        </a>
+        <p class="apk-download-count" data-apk-download-count hidden aria-live="polite">
+          <span class="apk-download-count-skel" data-apk-count-skel></span>
+          <span class="apk-download-count-text" data-apk-count-text hidden></span>
+        </p>
+      <% } else { %>
+        <span class="btn btn-outline" aria-disabled="true">APK not published yet</span>
+      <% } %>
     </div>
-  <% } else { %>
-    <span class="btn btn-outline" aria-disabled="true">APK not published yet</span>
-  <% } %>
+    <div class="download-cta-col">
+      <p class="download-platform-label">iOS</p>
+      <% if (iosMode === 'testflight' && testflightUrl) { %>
+        <a href="<%= testflightUrl %>" class="btn btn-primary" data-ios-download target="_blank" rel="noopener noreferrer">
+          Join iOS TestFlight
+        </a>
+        <p class="apk-download-count" data-ios-download-count hidden aria-live="polite">
+          <span class="apk-download-count-skel" data-ios-count-skel></span>
+          <span class="apk-download-count-text" data-ios-count-text hidden></span>
+        </p>
+      <% } else if (iosMode === 'ipa' && iosManifest && iosManifest.file_name) { %>
+        <a href="/downloads/deng-tool-monitor-ios-latest.ipa" class="btn btn-primary" data-ios-download rel="nofollow">
+          Download iOS Test Build
+        </a>
+        <p class="apk-download-count" data-ios-download-count hidden aria-live="polite">
+          <span class="apk-download-count-skel" data-ios-count-skel></span>
+          <span class="apk-download-count-text" data-ios-count-text hidden></span>
+        </p>
+        <p class="stat-note">Private/ad-hoc build — requires registered device UDID.</p>
+      <% } else { %>
+        <span class="btn btn-outline" aria-disabled="true">iOS coming soon</span>
+        <p class="stat-note">TestFlight or App Store distribution is being set up.</p>
+      <% } %>
+    </div>
+  </div>
 </div>
 
 <div class="stats-grid">
@@ -485,6 +512,53 @@
           })
           .catch(function () {});
       }, 4000);
+    });
+  }
+}());
+</script>
+<script>
+(function () {
+  'use strict';
+  var wrap = document.querySelector('[data-ios-download-count]');
+  if (!wrap) return;
+  var skel = wrap.querySelector('[data-ios-count-skel]');
+  var textEl = wrap.querySelector('[data-ios-count-text]');
+  var btn = document.querySelector('[data-ios-download]');
+  wrap.hidden = false;
+  if (skel) skel.classList.add('is-loading');
+
+  function fmt(n) {
+    var v = Number(n);
+    if (!isFinite(v)) return '0';
+    return Math.round(v).toLocaleString('en-US');
+  }
+
+  function showCount(n) {
+    if (skel) skel.hidden = true;
+    if (textEl) {
+      textEl.hidden = false;
+      textEl.textContent = fmt(n) + ' downloads';
+      wrap.classList.add('is-ready');
+    }
+  }
+
+  fetch('/api/downloads/ios/stats', { headers: { Accept: 'application/json' } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (data) {
+      if (!data || !data.ok || !data.latest || !data.latest.downloads) {
+        wrap.hidden = true;
+        return;
+      }
+      showCount(data.latest.downloads);
+    })
+    .catch(function () { wrap.hidden = true; });
+
+  if (btn) {
+    btn.addEventListener('click', function () {
+      if (!textEl || textEl.hidden) return;
+      var m = textEl.textContent.match(/^([\d,]+)/);
+      if (!m) return;
+      showCount(parseInt(m[1].replace(/,/g, ''), 10) + 1);
     });
   }
 }());
