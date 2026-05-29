@@ -68,13 +68,16 @@ function discordFallbackId(discordId) {
 // Middleware
 // ---------------------------------------------------------------
 
+/** Public landing + sign-in page (Discord OAuth entry). */
+const LOGIN_HOME = '/';
+
 /**
- * Redirect unauthenticated users to /login.
+ * Redirect unauthenticated users to the public home page.
  */
 function requireLogin(req, res, next) {
   if (req.session && req.session.user) return next();
   req.session.flash = { error: 'Please login with Discord first.' };
-  res.redirect('/login');
+  res.redirect(LOGIN_HOME);
 }
 
 /**
@@ -298,6 +301,7 @@ async function ensureRealSiteUser(req) {
 }
 
 module.exports = {
+  LOGIN_HOME,
   requireLogin,
   verifyCsrf,
   buildDiscordAuthUrl,

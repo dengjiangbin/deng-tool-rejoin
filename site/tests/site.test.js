@@ -684,8 +684,32 @@ beforeEach(() => {
 });
 
 describe('auth and protected pages', () => {
-  test('login page shows Discord-only login with required text and no database login', async () => {
+  test('root / is the public landing and login page', async () => {
+    const res = await request(app).get('/');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /Sign in with Discord/);
+    assert.match(res.text, /data-fishit-global/);
+    assert.match(res.text, /fishit-home\.js/);
+    assert.match(res.text, /Global Stats/);
+    assert.doesNotMatch(res.text, /href="\/login"/);
+  });
+
+  test('legacy /login permanently redirects to /', async () => {
     const res = await request(app).get('/login');
+    assert.equal(res.status, 301);
+    assert.equal(res.headers.location, '/');
+  });
+
+  test('signed-in users visiting / are sent to dashboard', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/dashboard');
+  });
+
+  test('login page shows Discord-only login with required text and no database login', async () => {
+    const res = await request(app).get('/');
     assert.equal(res.status, 200);
     assert.match(res.text, /DENG Tool/);
     assert.match(res.text, /DENG Tool: Rejoin/);
@@ -755,7 +779,7 @@ describe('auth and protected pages', () => {
       const state = new URL(start.headers.location).searchParams.get('state');
       const res = await agent.get(`/auth/discord/callback?code=ok&state=${state}`);
       assert.equal(res.status, 302);
-      assert.equal(res.headers.location, '/login');
+      assert.equal(res.headers.location, '/');
       // Must not expose secrets in redirect URL or response body
       assert.doesNotMatch(res.headers.location, /secret|token|code/i);
     } finally {
@@ -768,7 +792,7 @@ describe('auth and protected pages', () => {
     await agent.get('/auth/discord'); // seeds oauthState in session
     const res = await agent.get('/auth/discord/callback?code=ok&state=WRONG_STATE');
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/login');
+    assert.equal(res.headers.location, '/');
     assert.equal(memoryDb.site_users.length, 0);
   });
 
@@ -776,7 +800,7 @@ describe('auth and protected pages', () => {
     // No prior /auth/discord call, so no oauthState in session
     const res = await request(app).get('/auth/discord/callback?code=ok&state=anything');
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/login');
+    assert.equal(res.headers.location, '/');
   });
 
   test('identify-only Discord user (no email field) logs in successfully', async () => {
@@ -807,10 +831,10 @@ describe('auth and protected pages', () => {
     const csrf = csrfFrom(page.text);
     const out = await agent.post('/auth/logout').type('form').send({ _csrf: csrf });
     assert.equal(out.status, 302);
-    assert.equal(out.headers.location, '/login');
+    assert.equal(out.headers.location, '/');
     const res = await agent.get('/dashboard');
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/login');
+    assert.equal(res.headers.location, '/');
   });
 
   test('protected pages and APIs redirect unauthenticated visitors', async () => {
@@ -819,7 +843,7 @@ describe('auth and protected pages', () => {
         ? await request(app).post(route)
         : await request(app).get(route);
       assert.equal(res.status, 302, route);
-      assert.equal(res.headers.location, '/login');
+      assert.equal(res.headers.location, '/');
     }
   });
 
@@ -1109,7 +1133,7 @@ describe('theme and dashboard UI', () => {
   });
 
   test('logo image replaces DT placeholders on login and dashboard', async () => {
-    const loginPage = await request(app).get('/login');
+    const loginPage = await request(app).get('/');
     assert.match(loginPage.text, /\/public\/img\/deng-logo\.png\?v=/);
     assert.doesNotMatch(loginPage.text, />DT</);
     assert.doesNotMatch(loginPage.text, /favicon\.svg/);
@@ -1458,7 +1482,7 @@ describe('theme and dashboard UI', () => {
   });
 
   test('layout includes cache-busted stylesheet URL', async () => {
-    const res = await request(app).get('/login');
+    const res = await request(app).get('/');
     assert.equal(res.status, 200);
     assert.match(res.text, /\/public\/css\/style\.css\?v=[A-Za-z0-9._-]+/);
   });
@@ -2573,11 +2597,11 @@ describe('security controls', () => {
     const res = await request(app)
       .get('/auth/discord/callback?error=access_denied&redirect=https://evil.example');
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/login');
+    assert.equal(res.headers.location, '/');
   });
 
   test('frontend responses do not expose server secrets or full keys outside authorized result', async () => {
-    const res = await request(app).get('/login');
+    const res = await request(app).get('/');
     assert.doesNotMatch(res.text, /test-service-role-key/);
     assert.doesNotMatch(res.text, /test-state-secret/);
     assert.doesNotMatch(res.text, /DENG-[0-9A-F]{4}/);
@@ -3101,11 +3125,11 @@ describe('provider UI and security gate', () => {
   test('unauthenticated users cannot reach key result or license history', async () => {
     const res1 = await request(app).get('/key/result');
     assert.equal(res1.status, 302);
-    assert.equal(res1.headers.location, '/login');
+    assert.equal(res1.headers.location, '/');
 
     const res2 = await request(app).get('/license');
     assert.equal(res2.status, 302);
-    assert.equal(res2.headers.location, '/login');
+    assert.equal(res2.headers.location, '/');
   });
 
   test('Linkvertise Anti-Bypass token is NEVER included in the redirect URL or in any rendered HTML', async () => {
@@ -3631,31 +3655,31 @@ describe('LootLabs provider helper (Redirect API / Anti-Bypass)', () => {
 });
 
 describe('Fish It website integration', () => {
-  test('login page shows a clean "Sign in with Discord" button with icon', async () => {
-    const res = await request(app).get('/login');
+  test('landing page shows a clean "Sign in with Discord" button with icon', async () => {
+    const res = await request(app).get('/');
     assert.equal(res.status, 200);
     assert.match(res.text, /Sign in with Discord/);
     assert.match(res.text, /class="discord-icon"/);
     assert.match(res.text, /href="\/auth\/discord"/);
   });
 
-  test('login page renders the Fish It global stats section', async () => {
-    const res = await request(app).get('/login');
+  test('landing page renders the Fish It global stats section', async () => {
+    const res = await request(app).get('/');
     assert.match(res.text, /data-fishit-global/);
     assert.match(res.text, /Fish It — Global Stats|Fish It/);
     assert.match(res.text, /fishit-home\.js/);
   });
 
-  test('login page has NO email/password login (Discord only)', async () => {
-    const res = await request(app).get('/login');
+  test('landing page has NO email/password login (Discord only)', async () => {
+    const res = await request(app).get('/');
     assert.doesNotMatch(res.text, /type="password"/);
     assert.doesNotMatch(res.text, /name="email"/);
   });
 
-  test('/fishit requires login (redirects to /login when signed out)', async () => {
+  test('/fishit requires login (redirects to / when signed out)', async () => {
     const res = await request(app).get('/fishit');
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/login');
+    assert.equal(res.headers.location, '/');
   });
 
   test('/fishit renders tabs + username masking hook when signed in', async () => {

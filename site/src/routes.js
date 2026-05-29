@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 
 const auth = require('./auth');
 const {
+  LOGIN_HOME,
   requireLogin,
   verifyCsrf,
   buildDiscordAuthUrl,
@@ -876,7 +877,13 @@ async function handleLootLabsComplete(req, res) {
 }
 
 router.get('/', (req, res) => {
-  res.redirect(req.session.user ? '/dashboard' : '/login');
+  if (req.session.user) return res.redirect('/dashboard');
+  return res.render('login', { title: 'Sign In - DENG Tool' });
+});
+
+/** Legacy URL — permanent redirect to the public landing page. */
+router.get('/login', (req, res) => {
+  return res.redirect(301, LOGIN_HOME);
 });
 
 router.get('/health', (_req, res) => {
@@ -888,20 +895,13 @@ router.get('/health', (_req, res) => {
   });
 });
 
-router.get('/login', (req, res) => {
-  if (req.session.user) return res.redirect('/dashboard');
-  return res.render('login', { title: 'Sign In - DENG Tool' });
-});
-
-
-
 router.get('/auth/discord', (req, res) => {
   try {
     res.redirect(buildDiscordAuthUrl(req));
   } catch (err) {
     console.error('[auth/discord]', err.message || err);
     safeFlash(req, 'error', 'Discord login is not configured.');
-    res.redirect('/login');
+    res.redirect(LOGIN_HOME);
   }
 });
 
@@ -911,7 +911,7 @@ router.get('/auth/discord/callback', authLimiter, async (req, res) => {
   if (oauthError) {
     console.warn('[auth/discord/callback] category=oauth_denied discord_error=%s', String(oauthError).slice(0, 64));
     safeFlash(req, 'error', `Discord denied access: ${oauthError}`);
-    return res.redirect('/login');
+    return res.redirect(LOGIN_HOME);
   }
 
   const storedState = req.session.oauthState;
@@ -920,17 +920,17 @@ router.get('/auth/discord/callback', authLimiter, async (req, res) => {
   if (!code) {
     console.warn('[auth/discord/callback] category=code_missing state_present=%s', !!storedState);
     safeFlash(req, 'error', 'Invalid OAuth response. Please try again.');
-    return res.redirect('/login');
+    return res.redirect(LOGIN_HOME);
   }
   if (!storedState) {
     console.warn('[auth/discord/callback] category=state_missing code_present=true');
     safeFlash(req, 'error', 'Session expired. Please try again.');
-    return res.redirect('/login');
+    return res.redirect(LOGIN_HOME);
   }
   if (String(state) !== storedState) {
     console.warn('[auth/discord/callback] category=state_mismatch code_present=true');
     safeFlash(req, 'error', 'Invalid OAuth state. Please try again.');
-    return res.redirect('/login');
+    return res.redirect(LOGIN_HOME);
   }
 
   // Step 1: Exchange code for access token
@@ -940,7 +940,7 @@ router.get('/auth/discord/callback', authLimiter, async (req, res) => {
   } catch (_err) {
     // Structured error details are already logged inside exchangeDiscordCode.
     safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
-    return res.redirect('/login');
+    return res.redirect(LOGIN_HOME);
   }
 
   // Step 2: Fetch Discord user identity
@@ -951,7 +951,7 @@ router.get('/auth/discord/callback', authLimiter, async (req, res) => {
     const status = (err.response && err.response.status) || 'unknown';
     console.error('[auth/discord/callback] category=user_fetch_failed http_status=%s', status);
     safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
-    return res.redirect('/login');
+    return res.redirect(LOGIN_HOME);
   }
 
   // Step 3: Create or update portal user
@@ -961,7 +961,7 @@ router.get('/auth/discord/callback', authLimiter, async (req, res) => {
   } catch (err) {
     console.error('[auth/discord/callback] category=site_user_upsert_failed error=%s', err.message);
     safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
-    return res.redirect('/login');
+    return res.redirect(LOGIN_HOME);
   }
 
   // Step 4: Regenerate session and redirect
@@ -970,7 +970,7 @@ router.get('/auth/discord/callback', authLimiter, async (req, res) => {
       if (regenErr) {
         console.error('[auth/discord/callback] category=session_regenerate_failed error=%s', regenErr.message);
         safeFlash(req, 'error', 'Session error. Please try again.');
-        res.redirect('/login');
+        res.redirect(LOGIN_HOME);
         return resolve();
       }
       req.session.user  = toSessionUser(siteUser);
@@ -990,7 +990,7 @@ router.post('/auth/logout', (req, res) => {
   if (!verifyCsrf(req)) return res.redirect('/');
   req.session.destroy(() => {
     res.clearCookie('deng_sid');
-    res.redirect('/login');
+    res.redirect(LOGIN_HOME);
   });
 });
 
