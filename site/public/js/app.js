@@ -47,6 +47,52 @@
   });
 }());
 
+(function initHideUsername() {
+  // UI-only privacy mask. Never changes the real identity sent to the server;
+  // it only obscures the displayed Discord username (e.g. dengjiangbin -> d*********n).
+  var STORAGE_KEY = 'deng_tool_hide_username';
+  var toggles = Array.prototype.slice.call(document.querySelectorAll('[data-hide-username-toggle]'));
+
+  function isHidden() {
+    try { return localStorage.getItem(STORAGE_KEY) === '1'; } catch (e) { return false; }
+  }
+  function mask(name) {
+    var s = String(name || '');
+    if (s.length <= 1) return s ? s[0] + '*' : '*';
+    if (s.length === 2) return s[0] + '*';
+    return s[0] + new Array(s.length - 1).join('*') + s[s.length - 1];
+  }
+  function apply() {
+    var hidden = isHidden();
+    Array.prototype.slice.call(document.querySelectorAll('[data-username]')).forEach(function (el) {
+      if (!el.hasAttribute('data-username-original')) {
+        el.setAttribute('data-username-original', el.textContent.trim());
+      }
+      var original = el.getAttribute('data-username-original') || '';
+      el.textContent = hidden ? mask(original) : original;
+    });
+    toggles.forEach(function (t) {
+      t.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+      t.classList.toggle('active', hidden);
+    });
+  }
+  function setHidden(next) {
+    try { localStorage.setItem(STORAGE_KEY, next ? '1' : '0'); } catch (e) { /* still applies this page */ }
+    apply();
+  }
+
+  // Expose for dynamically rendered content (e.g. Fish It pages).
+  window.DengPrivacy = { apply: apply, isHidden: isHidden, mask: mask };
+
+  toggles.forEach(function (t) {
+    t.addEventListener('click', function (e) {
+      e.preventDefault();
+      setHidden(!isHidden());
+    });
+  });
+  apply();
+}());
+
 (function initProgressMemory() {
   try {
     var stepEl = document.querySelector('[data-portal-step]');

@@ -61,10 +61,11 @@ class ScreenLayoutContractTest {
     @Test
     fun `PackagesScreen row uses username as title and package name as subtitle`() {
         val src = ui("PackagesScreen.kt")
-        // Title now reads username (safeUsername wraps null -> "Unknown").
+        // Title reads the username, now routed through the Hide Username
+        // privacy mask (displayUsername wraps safeUsername/maskUsername).
         assertTrue(
-            "PackagesScreen title must call Format.safeUsername(pkg.username)",
-            src.contains("Format.safeUsername(pkg.username)"),
+            "PackagesScreen title must render the username via Format.displayUsername(pkg.username, ...)",
+            src.contains("Format.displayUsername(pkg.username, LocalHideUsername.current)"),
         )
         // Subtitle is the raw package name (full path) at bodySmall / muted.
         assertTrue(

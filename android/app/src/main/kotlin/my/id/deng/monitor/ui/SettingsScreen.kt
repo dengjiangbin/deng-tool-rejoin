@@ -1,5 +1,6 @@
 package my.id.deng.monitor.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -12,9 +13,11 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import my.id.deng.monitor.BuildConfig
 import my.id.deng.monitor.data.ApiException
+import my.id.deng.monitor.data.AppPreferences
 import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.MonitorSettings
 import my.id.deng.monitor.data.SessionStore
+import my.id.deng.monitor.data.ThemeMode
 import my.id.deng.monitor.ui.theme.DengColors
 
 private val SNAPSHOT_OPTIONS = listOf(
@@ -28,7 +31,7 @@ private val SNAPSHOT_OPTIONS = listOf(
 private val REFRESH_OPTIONS = listOf(2, 3, 5, 10, 15, 30, 60)
 
 @Composable
-fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore) {
+fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore, appPreferences: AppPreferences) {
     // v1.0.4: we need the *handle* (not just the state) so we can ask
     // the poller to re-fetch immediately after a successful save.
     // Previously the radio button only flipped to its new position on
@@ -65,6 +68,8 @@ fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore) {
             color = DengColors.TextPrimary,
             fontWeight = FontWeight.SemiBold,
         )
+
+        AppearanceCard(appPreferences = appPreferences, scope = scope)
 
         when (val s = state) {
             is DeviceFetchState.Loading -> Text("Loading…", color = DengColors.TextMuted)
@@ -192,6 +197,62 @@ fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore) {
         // Bottom breathing room so the last card never sits flush against
         // the navigation-bar / gesture inset on edge-to-edge devices.
         Spacer(Modifier.height(48.dp))
+    }
+}
+
+@Composable
+private fun AppearanceCard(appPreferences: AppPreferences, scope: kotlinx.coroutines.CoroutineScope) {
+    val themeMode by appPreferences.themeModeFlow.collectAsState(initial = ThemeMode.SYSTEM)
+    val hideUsername by appPreferences.hideUsernameFlow.collectAsState(initial = false)
+
+    DengCard {
+        Text("Appearance", style = MaterialTheme.typography.titleMedium, color = DengColors.TextPrimary)
+        Spacer(Modifier.height(8.dp))
+        Text("Theme", color = DengColors.TextMuted, style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            listOf(
+                ThemeMode.SYSTEM to "System",
+                ThemeMode.LIGHT to "Light",
+                ThemeMode.DARK to "Dark",
+            ).forEach { (mode, label) ->
+                val selected = themeMode == mode
+                Surface(
+                    color = if (selected) DengColors.Cyan.copy(alpha = 0.18f) else DengColors.CardSoft,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) DengColors.Cyan else DengColors.BorderMuted),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f).clickable { scope.launch { appPreferences.setThemeMode(mode) } },
+                ) {
+                    Text(
+                        label,
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        color = if (selected) DengColors.TextPrimary else DengColors.TextMuted,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Hide Username", color = DengColors.TextPrimary, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    "Mask your Discord name in the app (e.g. d*****n). Does not change your account or stats.",
+                    color = DengColors.TextMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Switch(
+                checked = hideUsername,
+                onCheckedChange = { scope.launch { appPreferences.setHideUsername(it) } },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = DengColors.Cyan,
+                    checkedTrackColor = DengColors.Cyan.copy(alpha = 0.4f),
+                ),
+            )
+        }
     }
 }
 

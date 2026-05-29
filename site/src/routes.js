@@ -1022,6 +1022,13 @@ router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
   }
 });
 
+router.get('/fishit', requireLogin, repairSiteUser, (req, res) => {
+  res.render('fishit', {
+    title: 'Fish It Stats - DENG Tool',
+    activePage: 'fishit',
+  });
+});
+
 router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
   try {
     const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req), { activeOnly: false });

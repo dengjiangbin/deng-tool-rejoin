@@ -46,6 +46,18 @@
         </a>
       </li>
       <li>
+        <a href="/fishit" class="nav-link <%= locals.activePage === 'fishit' ? 'active' : '' %>">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M2 12c3-5 7-7 11-7 5 0 8 3 9 7-1 4-4 7-9 7-4 0-8-2-11-7Z"></path>
+              <circle cx="16" cy="11" r="1.2"></circle>
+              <path d="M2 12c-.5-1.5-.5-3 0-4M2 12c-.5 1.5-.5 3 0 4"></path>
+            </svg>
+          </span>
+          <span>Fish It</span>
+        </a>
+      </li>
+      <li>
         <a href="/license" class="nav-link <%= locals.activePage === 'license' ? 'active' : '' %>">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" focusable="false">
@@ -80,9 +92,18 @@
         <% } else { %>
           <div class="user-avatar-placeholder"><%= (user.username||'?')[0].toUpperCase() %></div>
         <% } %>
-        <span class="user-name text-truncate"><%= user.username %></span>
+        <span class="user-name text-truncate" data-username><%= user.username %></span>
       </div>
       <div class="sidebar-actions">
+        <button type="button" class="privacy-toggle" data-hide-username-toggle aria-label="Hide username" title="Hide username" aria-pressed="false">
+          <span class="privacy-toggle-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </span>
+          <span class="privacy-toggle-label">Hide Username</span>
+        </button>
         <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch theme" title="Switch theme">
           <span class="theme-toggle-track" aria-hidden="true">
             <span class="theme-toggle-knob">

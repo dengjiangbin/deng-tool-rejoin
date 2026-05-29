@@ -7,6 +7,7 @@ import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Waves
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -22,6 +23,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import my.id.deng.monitor.data.AppPreferences
 import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.SessionStore
 
@@ -33,6 +35,7 @@ private data class NavItem(
 
 private val NAV_ITEMS = listOf(
     NavItem("dashboard", "Dashboard") { Icon(Icons.Outlined.Dashboard, contentDescription = null) },
+    NavItem("fishit",    "Fish It")   { Icon(Icons.Outlined.Waves, contentDescription = null) },
     NavItem("packages",  "Packages")  { Icon(Icons.Outlined.Apps, contentDescription = null) },
     NavItem("snapshot",  "Snapshot")  { Icon(Icons.Outlined.Image, contentDescription = null) },
     NavItem("settings",  "Settings")  { Icon(Icons.Outlined.Settings, contentDescription = null) },
@@ -42,6 +45,7 @@ private val NAV_ITEMS = listOf(
 fun AppRoot(
     api: MonitorApi,
     sessionStore: SessionStore,
+    appPreferences: AppPreferences,
     isPaired: Boolean,
 ) {
     if (!isPaired) {
@@ -57,7 +61,7 @@ fun AppRoot(
         containerColor = Color.Transparent,
         bottomBar = {
             NavigationBar(
-                containerColor = Color(0xCC0F172A),
+                containerColor = my.id.deng.monitor.ui.theme.DengColors.NavBar,
                 tonalElevation = 0.dp,
             ) {
                 NAV_ITEMS.forEach { item ->
@@ -85,9 +89,10 @@ fun AppRoot(
             modifier = Modifier.fillMaxSize().padding(inner),
         ) {
             composable("dashboard") { DashboardScreen(api = api, sessionStore = sessionStore) }
+            composable("fishit")    { FishItScreen(api = api) }
             composable("packages")  { PackagesScreen(api = api, sessionStore = sessionStore) }
             composable("snapshot")  { SnapshotScreen(api = api, sessionStore = sessionStore) }
-            composable("settings")  { SettingsScreen(api = api, sessionStore = sessionStore) }
+            composable("settings")  { SettingsScreen(api = api, sessionStore = sessionStore, appPreferences = appPreferences) }
         }
     }
 }

@@ -68,6 +68,33 @@ class MonitorApi(
         }
     }
 
+    // ── Fish It (authenticated by the same app session token) ───────────────
+    suspend fun fishProfile(): FishProfile =
+        execJson("/api/fishit/me", auth = true)
+
+    suspend fun fishDaily(period: String): FishDaily =
+        execJson("/api/fishit/me/daily?period=${period}", auth = true)
+
+    suspend fun fishStats(): FishStats =
+        execJson("/api/fishit/me/stats", auth = true)
+
+    suspend fun fishGrid(
+        search: String? = null,
+        rarity: String? = null,
+        sort: String = "amount",
+        page: Int = 1,
+        limit: Int = 24,
+    ): FishGrid {
+        val sb = StringBuilder("/api/fishit/me/fish?sort=").append(sort)
+            .append("&page=").append(page).append("&limit=").append(limit)
+        if (!search.isNullOrBlank()) sb.append("&search=").append(urlEncode(search))
+        if (!rarity.isNullOrBlank()) sb.append("&rarity=").append(rarity)
+        return execJson(sb.toString(), auth = true)
+    }
+
+    private fun urlEncode(s: String): String =
+        runCatching { java.net.URLEncoder.encode(s, "UTF-8") }.getOrDefault(s)
+
     // ── Settings update ────────────────────────────────────────────────────
     suspend fun updateSettings(deviceId: String, settings: MonitorSettings) {
         val body = json.encodeToString(settings)

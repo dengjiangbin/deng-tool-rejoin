@@ -1494,3 +1494,313 @@ input {
 :root[data-theme="light"] .theme-toggle-knob {
   transform: translateX(0);
 }
+
+/* ============================================================
+   FISH IT INTEGRATION + LANDING + PRIVACY
+   ============================================================ */
+
+/* Grid background for landing + fish pages */
+.landing,
+.fishit-page {
+  position: relative;
+}
+.landing::before,
+.fishit-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image:
+    linear-gradient(rgba(5, 200, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 43, 174, 0.05) 1px, transparent 1px);
+  background-size: 42px 42px;
+  pointer-events: none;
+}
+
+/* Landing / hero */
+.landing {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 40px 20px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.hero {
+  text-align: center;
+  padding: 28px 18px 8px;
+}
+.hero-logo img {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  box-shadow: 0 0 30px rgba(5, 200, 255, 0.35);
+}
+.hero-kicker {
+  margin: 14px 0 4px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: var(--muted);
+}
+.hero-title {
+  font-size: clamp(28px, 5vw, 46px);
+  font-weight: 900;
+  margin: 0 0 12px;
+  line-height: 1.08;
+}
+.hero-sub {
+  max-width: 620px;
+  margin: 0 auto 22px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.6;
+}
+.hero-note {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.btn-discord-hero {
+  max-width: 360px;
+  margin: 0 auto;
+  font-size: 16px;
+  min-height: 50px;
+}
+.discord-icon {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
+/* Fish It global mini cards (rods) */
+.fishit-global .fishit-rod-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+.mini-stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 10px;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+.mini-stat-icon { font-size: 20px; }
+.mini-stat-label { font-size: 12px; color: var(--muted); }
+.mini-stat-value { font-size: 20px; font-weight: 900; color: var(--text); }
+.fishit-preview-note { margin-top: 14px; color: var(--muted); font-size: 13px; }
+
+/* Fish It page */
+.fishit-page {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.page-sub { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+
+.fishit-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 14px;
+  background: var(--card-2);
+  border: 1px solid var(--border-2);
+  margin-bottom: 20px;
+}
+.fishit-tab {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+  padding: 9px 20px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.fishit-tab.active {
+  color: white;
+  background: var(--button-gradient);
+}
+
+.fishit-filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.filter-chip {
+  border: 1px solid var(--border-2);
+  background: var(--card);
+  color: var(--muted);
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.filter-chip.active { color: var(--text); border-color: var(--cyan); box-shadow: 0 0 14px rgba(0, 207, 255, 0.2); }
+
+/* Generic stat cards (daily, totals) */
+.stat-card-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.stat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.stat-card.highlight { border-color: var(--cyan); box-shadow: 0 0 22px rgba(0, 207, 255, 0.16); }
+.stat-card-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.stat-card-value { font-size: 28px; font-weight: 900; color: var(--text); }
+.stat-card-sub { font-size: 12px; color: var(--muted); }
+
+.best-catch-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--card);
+  border: 1px solid var(--pink-border);
+  border-radius: 16px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.best-catch-img img { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; background: var(--card-2); }
+.best-catch-meta { display: flex; flex-direction: column; gap: 2px; }
+.best-catch-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--pink); }
+.best-catch-meta strong { font-size: 18px; }
+.best-catch-sub { color: var(--muted); font-size: 13px; }
+.fishit-updated { color: var(--muted); font-size: 12px; }
+
+.fishit-section-title { font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin: 22px 0 12px; }
+
+/* Stat/rarity/rod cards grid */
+.fishit-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.fishit-stat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+.fishit-stat-img img { width: 72px; height: 72px; border-radius: 14px; object-fit: cover; background: var(--card-2); }
+.fishit-stat-label { font-size: 13px; color: var(--muted); }
+.fishit-stat-amount { font-size: 24px; font-weight: 900; color: var(--text); }
+
+/* Fish grid */
+.fishit-controls { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+.fishit-search, .fishit-select {
+  background: var(--card);
+  border: 1px solid var(--border-2);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 14px;
+}
+.fishit-search { flex: 1; min-width: 180px; }
+.fish-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+.fish-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+  cursor: pointer;
+}
+.fish-card:hover, .fish-card:focus-visible {
+  transform: translateY(-3px);
+  border-color: var(--cyan);
+  box-shadow: 0 8px 26px rgba(0, 207, 255, 0.18);
+  outline: none;
+}
+.fish-card-img { position: relative; aspect-ratio: 1 / 1; background: var(--card-2); }
+.fish-card-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fish-card-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; }
+.fish-card-name { font-weight: 800; font-size: 14px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fish-card-stats { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+.fish-card-amount { font-weight: 900; color: var(--cyan); }
+.fish-card-meta { font-size: 11px; color: var(--muted); }
+.fish-grid-more { text-align: center; margin-top: 20px; }
+
+/* Rarity badge */
+.rarity-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: white;
+  backdrop-filter: blur(4px);
+}
+.rarity-secret { background: rgba(255, 47, 179, 0.85); }
+.rarity-forgotten { background: rgba(245, 166, 35, 0.9); }
+
+/* Empty / error / skeleton */
+.fishit-empty, .fishit-error {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px dashed var(--border-2);
+  border-radius: 16px;
+}
+.fishit-error p { margin: 0 0 14px; }
+.btn-ghost {
+  background: var(--card-2);
+  border: 1px solid var(--border-2);
+  color: var(--text);
+}
+.btn-ghost:hover { border-color: var(--cyan); }
+
+.fishit-skeleton-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.fishit-skeleton-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; width: 100%; }
+.skeleton-card { height: 92px; border-radius: 16px; }
+.skeleton-fish { height: 190px; border-radius: 16px; }
+.skeleton-card, .skeleton-fish {
+  background: linear-gradient(100deg, var(--card) 30%, var(--card-2) 50%, var(--card) 70%);
+  background-size: 200% 100%;
+  animation: dengShimmer 1.3s ease-in-out infinite;
+}
+@keyframes dengShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* Theme toggle floating (login/landing) */
+.theme-toggle-floating { position: absolute; top: 18px; right: 18px; z-index: 5; }
+
+/* Hide Username privacy toggle */
+.privacy-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card-2);
+  border: 1px solid var(--border-2);
+  color: var(--muted);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+.privacy-toggle .privacy-toggle-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.privacy-toggle.active { color: var(--text); border-color: var(--cyan); box-shadow: 0 0 14px rgba(0, 207, 255, 0.18); }
+
+@media (max-width: 640px) {
+  .page-head { flex-direction: column; }
+  .fishit-global .fishit-rod-cards { grid-template-columns: repeat(3, 1fr); }
+}

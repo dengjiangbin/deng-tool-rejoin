@@ -688,8 +688,8 @@ describe('auth and protected pages', () => {
     const res = await request(app).get('/login');
     assert.equal(res.status, 200);
     assert.match(res.text, /DENG Tool/);
-    assert.match(res.text, /Secure portal for DENG Tool: Rejoin/);
-    assert.match(res.text, /Continue With Discord/);
+    assert.match(res.text, /DENG Tool: Rejoin/);
+    assert.match(res.text, /Sign in with Discord/);
     assert.match(res.text, /Global Stats/);
     assert.match(res.text, /Generated Keys/);
     assert.match(res.text, /Unique Users/);
@@ -3627,5 +3627,56 @@ describe('LootLabs provider helper (Redirect API / Anti-Bypass)', () => {
     const bodyStr = JSON.stringify(lootlabsApi.lastCall.body || {});
     assert.ok(!bodyStr.includes(tok), 'API token must not be in the POST body');
     assert.equal(lootlabsApi.lastCall.destination_url, dest);
+  });
+});
+
+describe('Fish It website integration', () => {
+  test('login page shows a clean "Sign in with Discord" button with icon', async () => {
+    const res = await request(app).get('/login');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /Sign in with Discord/);
+    assert.match(res.text, /class="discord-icon"/);
+    assert.match(res.text, /href="\/auth\/discord"/);
+  });
+
+  test('login page renders the Fish It global stats section', async () => {
+    const res = await request(app).get('/login');
+    assert.match(res.text, /data-fishit-global/);
+    assert.match(res.text, /Fish It — Global Stats|Fish It/);
+    assert.match(res.text, /fishit-home\.js/);
+  });
+
+  test('login page has NO email/password login (Discord only)', async () => {
+    const res = await request(app).get('/login');
+    assert.doesNotMatch(res.text, /type="password"/);
+    assert.doesNotMatch(res.text, /name="email"/);
+  });
+
+  test('/fishit requires login (redirects to /login when signed out)', async () => {
+    const res = await request(app).get('/fishit');
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/login');
+  });
+
+  test('/fishit renders tabs + username masking hook when signed in', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/fishit');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /data-fishit-tab="daily"/);
+    assert.match(res.text, /data-fishit-tab="stats"/);
+    assert.match(res.text, /data-fishit-tab="fish"/);
+    assert.match(res.text, /data-username/);
+    assert.match(res.text, /fishit\.js/);
+  });
+
+  test('sidebar exposes Fish It nav link + Hide Username toggle when signed in', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/dashboard');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /href="\/fishit"/);
+    assert.match(res.text, /data-hide-username-toggle/);
+    assert.match(res.text, /data-theme-toggle/);
   });
 });

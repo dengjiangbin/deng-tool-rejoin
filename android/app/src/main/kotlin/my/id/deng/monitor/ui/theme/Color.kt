@@ -4,41 +4,108 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
 /**
- * Mirrors the DENG Tool website CSS variables so the app looks visually
- * identical:
- *   --bg-a   #050816
- *   --bg-b   #111827
- *   --bg-c   #250a26
- *   --cyan   #00cfff
- *   --pink   #ff2fb3
- *   --purple #6143b2  (mid-gradient)
- *   --button-gradient: cyan → purple → pink
+ * DENG palette, mirroring the website CSS variables for dark, plus a
+ * proper-contrast light variant (matches the website's
+ * `:root[data-theme="light"]` overrides).
+ *
+ * v1.0.7: light/dark theme. To avoid touching ~110 `DengColors.X` call
+ * sites across every screen, `DengColors` stays the single source of
+ * color names but its properties now read from a swappable [current]
+ * palette. [DengMonitorTheme] sets [DengColors.current] before composing
+ * its content, so when the theme toggles the whole tree recomposes and
+ * every screen recolors automatically — no per-screen edits needed.
  */
+data class DengPalette(
+    val bgA: Color,
+    val bgB: Color,
+    val bgC: Color,
+    val cyan: Color,
+    val pink: Color,
+    val purple: Color,
+    val magenta: Color,
+    val cardBg: Color,
+    val cardSoft: Color,
+    val borderCyan: Color,
+    val borderPink: Color,
+    val borderMuted: Color,
+    val textPrimary: Color,
+    val textMuted: Color,
+    val textDim: Color,
+    val success: Color,
+    val warning: Color,
+    val danger: Color,
+    val navBar: Color,
+)
+
+val DarkPalette = DengPalette(
+    bgA = Color(0xFF050816),
+    bgB = Color(0xFF111827),
+    bgC = Color(0xFF250A26),
+    cyan = Color(0xFF00CFFF),
+    pink = Color(0xFFFF2FB3),
+    purple = Color(0xFF7B5CFF),
+    magenta = Color(0xFFC0187A),
+    cardBg = Color(0xCC0F172A),
+    cardSoft = Color(0x991E293B),
+    borderCyan = Color(0x3D05C8FF),
+    borderPink = Color(0x38FF2BAE),
+    borderMuted = Color(0x4294A3B8),
+    textPrimary = Color(0xFFF8FBFF),
+    textMuted = Color(0xFF9FB0C9),
+    textDim = Color(0xFF64748B),
+    success = Color(0xFF16A34A),
+    warning = Color(0xFFD97706),
+    danger = Color(0xFFEF4444),
+    navBar = Color(0xCC0F172A),
+)
+
+val LightPalette = DengPalette(
+    bgA = Color(0xFFDFF6FF),
+    bgB = Color(0xFFEEF2FF),
+    bgC = Color(0xFFFFE4F6),
+    cyan = Color(0xFF0E8FBF),
+    pink = Color(0xFFC0187A),
+    purple = Color(0xFF6143B2),
+    magenta = Color(0xFFA31466),
+    cardBg = Color(0xF2FFFFFF),
+    cardSoft = Color(0xCCEEF2FF),
+    borderCyan = Color(0x4D0E8FBF),
+    borderPink = Color(0x40C0187A),
+    borderMuted = Color(0x4094A3B8),
+    textPrimary = Color(0xFF0F172A),
+    textMuted = Color(0xFF475569),
+    textDim = Color(0xFF64748B),
+    success = Color(0xFF15803D),
+    warning = Color(0xFFB45309),
+    danger = Color(0xFFDC2626),
+    navBar = Color(0xF2FFFFFF),
+)
+
 object DengColors {
-    val BgA = Color(0xFF050816)
-    val BgB = Color(0xFF111827)
-    val BgC = Color(0xFF250A26)
+    /** Active palette — swapped by [DengMonitorTheme]. */
+    @Volatile
+    var current: DengPalette = DarkPalette
 
-    val Cyan = Color(0xFF00CFFF)
-    val Pink = Color(0xFFFF2FB3)
-    val Purple = Color(0xFF7B5CFF)
-    val Magenta = Color(0xFFC0187A)
+    val BgA get() = current.bgA
+    val BgB get() = current.bgB
+    val BgC get() = current.bgC
+    val Cyan get() = current.cyan
+    val Pink get() = current.pink
+    val Purple get() = current.purple
+    val Magenta get() = current.magenta
+    val CardBg get() = current.cardBg
+    val CardSoft get() = current.cardSoft
+    val BorderCyan get() = current.borderCyan
+    val BorderPink get() = current.borderPink
+    val BorderMuted get() = current.borderMuted
+    val TextPrimary get() = current.textPrimary
+    val TextMuted get() = current.textMuted
+    val TextDim get() = current.textDim
+    val Success get() = current.success
+    val Warning get() = current.warning
+    val Danger get() = current.danger
+    val NavBar get() = current.navBar
 
-    val CardBg = Color(0xCC0F172A)
-    val CardSoft = Color(0x991E293B)
-    val BorderCyan = Color(0x3D05C8FF)
-    val BorderPink = Color(0x38FF2BAE)
-    val BorderMuted = Color(0x4294A3B8)
-
-    val TextPrimary = Color(0xFFF8FBFF)
-    val TextMuted = Color(0xFF9FB0C9)
-    val TextDim = Color(0xFF64748B)
-
-    val Success = Color(0xFF16A34A)
-    val Warning = Color(0xFFD97706)
-    val Danger = Color(0xFFEF4444)
-
-    val GradientButton = Brush.horizontalGradient(
-        colors = listOf(Cyan, Purple, Pink),
-    )
+    val GradientButton: Brush
+        get() = Brush.horizontalGradient(colors = listOf(current.cyan, current.purple, current.pink))
 }

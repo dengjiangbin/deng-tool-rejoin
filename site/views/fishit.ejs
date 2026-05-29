@@ -1,0 +1,71 @@
+<section class="fishit-page" data-fishit-page data-hide-username-scope>
+  <header class="page-head">
+    <div>
+      <h1 class="page-title gradient-brand-text">Fish It Stats</h1>
+      <p class="page-sub">Linked to <span class="fishit-owner" data-username><%= user.username %></span> via Discord.</p>
+    </div>
+    <button type="button" class="btn btn-ghost" data-fishit-refresh title="Refresh">Refresh</button>
+  </header>
+
+  <nav class="fishit-tabs" role="tablist" aria-label="Fish It sections">
+    <button type="button" class="fishit-tab active" data-fishit-tab="daily" role="tab" aria-selected="true">Daily</button>
+    <button type="button" class="fishit-tab" data-fishit-tab="stats" role="tab" aria-selected="false">Stats</button>
+    <button type="button" class="fishit-tab" data-fishit-tab="fish" role="tab" aria-selected="false">Fish</button>
+  </nav>
+
+  <!-- DAILY -->
+  <div class="fishit-panel" data-fishit-panel="daily">
+    <div class="fishit-filter-row" role="group" aria-label="Daily period">
+      <button type="button" class="filter-chip active" data-period="today">Today</button>
+      <button type="button" class="filter-chip" data-period="yesterday">Yesterday</button>
+      <button type="button" class="filter-chip" data-period="7d">7 Days</button>
+      <button type="button" class="filter-chip" data-period="30d">30 Days</button>
+      <button type="button" class="filter-chip" data-period="all">All Time</button>
+    </div>
+    <div data-daily-body>
+      <div class="fishit-skeleton-row">
+        <div class="skeleton-card"></div><div class="skeleton-card"></div>
+        <div class="skeleton-card"></div><div class="skeleton-card"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="fishit-panel" data-fishit-panel="stats" hidden>
+    <div data-stats-body>
+      <div class="fishit-skeleton-row">
+        <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FISH -->
+  <div class="fishit-panel" data-fishit-panel="fish" hidden>
+    <div class="fishit-controls">
+      <input type="search" class="fishit-search" data-fish-search placeholder="Search fish by name…" aria-label="Search fish">
+      <select class="fishit-select" data-fish-rarity aria-label="Filter by rarity">
+        <option value="">All rarities</option>
+        <option value="secret">Secret</option>
+        <option value="forgotten">Forgotten</option>
+      </select>
+      <select class="fishit-select" data-fish-sort aria-label="Sort fish">
+        <option value="amount">Most caught</option>
+        <option value="value">Highest value</option>
+        <option value="name">Name (A–Z)</option>
+        <option value="rarity">Rarity</option>
+        <option value="recent">Recently caught</option>
+      </select>
+    </div>
+    <div class="fish-grid" data-fish-grid>
+      <div class="fishit-skeleton-grid">
+        <div class="skeleton-fish"></div><div class="skeleton-fish"></div><div class="skeleton-fish"></div>
+        <div class="skeleton-fish"></div><div class="skeleton-fish"></div><div class="skeleton-fish"></div>
+      </div>
+    </div>
+    <div class="fish-grid-more" data-fish-more hidden>
+      <button type="button" class="btn btn-ghost" data-fish-loadmore>Load more</button>
+    </div>
+  </div>
+</section>
+
+<script src="/public/js/fishit.js?v=<%= assetVersion %>" defer></script>

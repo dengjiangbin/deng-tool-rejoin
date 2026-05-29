@@ -46,6 +46,25 @@ object Format {
     fun safeUsername(name: String?): String = name?.takeIf { it.isNotBlank() } ?: "Unknown"
 
     /**
+     * Mask a username for the Hide Username privacy toggle, keeping the
+     * first and last character: dengjiangbin -> d**********n, deng -> d**g.
+     * UI-only — never used for identity/matching.
+     */
+    fun maskUsername(name: String?): String {
+        val s = name?.trim().orEmpty()
+        if (s.isEmpty()) return "Unknown"
+        return when (s.length) {
+            1 -> "${s}*"
+            2 -> "${s[0]}*"
+            else -> "${s[0]}${"*".repeat(s.length - 2)}${s[s.length - 1]}"
+        }
+    }
+
+    /** Apply masking when [hide] is true, else the safe (non-empty) name. */
+    fun displayUsername(name: String?, hide: Boolean): String =
+        if (hide) maskUsername(name) else safeUsername(name)
+
+    /**
      * Human-readable "time since" for the dashboard Last Update line:
      * "just now", "12s ago", "3m ago", "2h ago". Negative/None → "—".
      */

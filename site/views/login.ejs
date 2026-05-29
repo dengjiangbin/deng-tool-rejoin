@@ -1,6 +1,56 @@
-<div class="auth-center">
-  <section class="global-stats" data-public-stats aria-label="Global Stats">
-    <p class="global-stats-kicker">Global Stats</p>
+<div class="landing" data-hide-username-scope>
+  <button type="button" class="theme-toggle theme-toggle-floating" data-theme-toggle aria-label="Switch theme" title="Switch theme">
+    <span class="theme-toggle-track" aria-hidden="true">
+      <span class="theme-toggle-knob">
+        <span class="theme-toggle-icon theme-icon-sun">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <circle cx="12" cy="12" r="4"></circle>
+            <path d="M12 2v2"></path><path d="M12 20v2"></path>
+            <path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path>
+            <path d="M2 12h2"></path><path d="M20 12h2"></path>
+            <path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>
+          </svg>
+        </span>
+        <span class="theme-toggle-icon theme-icon-moon">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 7 7 0 1 0 20.5 14.5Z"></path>
+          </svg>
+        </span>
+      </span>
+    </span>
+  </button>
+
+  <section class="hero">
+    <div class="hero-inner">
+      <div class="hero-logo" aria-hidden="true">
+        <img src="/public/img/deng-logo.png?v=<%= assetVersion %>" alt="">
+      </div>
+      <p class="hero-kicker">DENG Tool</p>
+      <h1 class="hero-title gradient-brand-text">Monitor, License &amp; Fish It Stats</h1>
+      <p class="hero-sub">
+        Cloud-phone monitoring, license management for DENG Tool: Rejoin, and live
+        Fish It statistics linked to your Discord account — all in one premium dashboard.
+      </p>
+
+      <% if (flash && flash.error) { %>
+        <div class="alert alert-error" role="alert"><%= flash.error %></div>
+      <% } %>
+      <% if (flash && flash.success) { %>
+        <div class="alert alert-success" role="alert"><%= flash.success %></div>
+      <% } %>
+
+      <a href="/auth/discord" class="btn btn-discord btn-discord-hero">
+        <svg class="discord-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M20.317 4.369A19.8 19.8 0 0 0 15.885 3a13.6 13.6 0 0 0-.617 1.27 18.3 18.3 0 0 0-5.535 0A13 13 0 0 0 9.11 3 19.7 19.7 0 0 0 4.677 4.37C1.86 8.57 1.096 12.66 1.478 16.693a19.9 19.9 0 0 0 6.073 3.078c.49-.668.927-1.377 1.304-2.122a13 13 0 0 1-2.053-.99c.172-.126.34-.257.503-.392a14.2 14.2 0 0 0 12.087 0c.165.14.333.27.503.392-.655.39-1.345.722-2.056.99.377.745.814 1.454 1.304 2.122a19.8 19.8 0 0 0 6.075-3.078c.448-4.67-.766-8.72-3.204-12.324M8.79 14.222c-1.183 0-2.157-1.085-2.157-2.42 0-1.334.955-2.42 2.157-2.42 1.21 0 2.176 1.095 2.157 2.42 0 1.335-.955 2.42-2.157 2.42m7.42 0c-1.183 0-2.157-1.085-2.157-2.42 0-1.334.955-2.42 2.157-2.42 1.21 0 2.176 1.095 2.157 2.42 0 1.335-.946 2.42-2.157 2.42"></path>
+        </svg>
+        <span>Sign in with Discord</span>
+      </a>
+      <p class="hero-note">Discord login only — no email and no extra account needed.</p>
+    </div>
+  </section>
+
+  <section class="global-stats" data-public-stats aria-label="Network Stats">
+    <p class="global-stats-kicker">Network Stats</p>
     <div class="global-stats-grid">
       <article class="global-stat-card">
         <span class="global-stat-label">Generated Keys</span>
@@ -21,22 +71,28 @@
     </div>
   </section>
 
-  <section class="auth-card">
-    <div class="auth-brand">
-      <div class="auth-brand-icon login-logo" aria-hidden="true">
-        <img src="/public/img/deng-logo.png?v=<%= assetVersion %>" alt="">
-      </div>
-      <h1 class="auth-brand-name gradient-brand-text">DENG Tool</h1>
-      <p class="auth-tagline">Secure portal for DENG Tool: Rejoin</p>
+  <section class="global-stats fishit-global" data-fishit-global aria-label="Fish It Global Stats" hidden>
+    <p class="global-stats-kicker">Fish It — Global Stats</p>
+    <div class="global-stats-grid">
+      <article class="global-stat-card">
+        <span class="global-stat-label">Tracked Players</span>
+        <strong class="global-stat-value" data-fishit-stat="total_players">—</strong>
+      </article>
+      <article class="global-stat-card">
+        <span class="global-stat-label">Total Fish Caught</span>
+        <strong class="global-stat-value" data-fishit-stat="total_fish">—</strong>
+      </article>
+      <article class="global-stat-card">
+        <span class="global-stat-label">Secret Fish</span>
+        <strong class="global-stat-value" data-fishit-stat="secret_fish">—</strong>
+      </article>
+      <article class="global-stat-card">
+        <span class="global-stat-label">Forgotten Fish</span>
+        <strong class="global-stat-value" data-fishit-stat="forgotten_fish">—</strong>
+      </article>
     </div>
-
-    <% if (flash && flash.error) { %>
-      <div class="alert alert-error" role="alert"><%= flash.error %></div>
-    <% } %>
-    <% if (flash && flash.success) { %>
-      <div class="alert alert-success" role="alert"><%= flash.success %></div>
-    <% } %>
-
-    <a href="/auth/discord" class="btn btn-discord">Continue With Discord</a>
+    <div class="fishit-rod-cards" data-fishit-rods></div>
+    <p class="fishit-preview-note">Sign in with Discord to view your personal Fish It stats and fish cards.</p>
   </section>
 </div>
+<script src="/public/js/fishit-home.js?v=<%= assetVersion %>" defer></script>

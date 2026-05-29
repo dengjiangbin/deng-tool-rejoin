@@ -1,0 +1,182 @@
+'use strict';
+/**
+ * Fish It stats API.
+ *
+ * Identity model (security-critical):
+ *   - The trusted Discord user ID comes ONLY from the server side:
+ *       1. the website cookie session (req.session.user.discord_user_id), or
+ *       2. the Android app bearer token -> monitor_app_sessions.owner_discord_user_id.
+ *   - A discord_id supplied by the client (query/body) is NEVER trusted for
+ *     private data. Stats always match by the authenticated ID.
+ *
+ * All data is read from the Fish It bot's SQLite DB via ./fishitDb (read-only).
+ * No bot tokens or DB secrets are ever exposed. Global stats are public; every
+ * /me route requires a valid session/token.
+ */
+
+const express = require('express');
+const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
+const supabase = require('./db');
+const fishit = require('./fishitDb');
+
+const router = express.Router();
+const jsonParser = express.json({ limit: '16kb' });
+
+const DAILY_PERIODS = new Set(['today', 'yesterday', '7d', '30d', 'all']);
+const FISH_SORTS = new Set(['amount', 'name', 'rarity', 'value', 'recent']);
+const RARITIES = new Set(['secret', 'forgotten']);
+
+// Fallback image identifiers the client maps to bundled icons.
+const FALLBACKS = {
+  fish: '/public/img/fishit/fallback-fish.svg',
+  rod: '/public/img/fishit/fallback-rod.svg',
+  secret: '/public/img/fishit/fallback-secret.svg',
+  forgotten: '/public/img/fishit/fallback-forgotten.svg',
+};
+
+const fishitLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  skip: () => process.env.NODE_ENV === 'test',
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'too_many_requests', message: 'Too many requests, please slow down.' },
+});
+
+function sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
+
+function extractBearer(req) {
+  const h = req.headers.authorization || '';
+  const m = /^Bearer\s+(.+)$/i.exec(h);
+  return m ? m[1].trim() : null;
+}
+
+/** Resolve the trusted Discord ID from session or app token. Null if neither. */
+async function resolveIdentity(req) {
+  if (req.session && req.session.user && req.session.user.discord_user_id) {
+    return String(req.session.user.discord_user_id);
+  }
+  const token = extractBearer(req);
+  if (token) {
+    try {
+      const { data: row } = await supabase
+        .from('monitor_app_sessions')
+        .select('owner_discord_user_id, expires_at, revoked_at')
+        .eq('token_hash', sha256(token))
+        .maybeSingle();
+      if (row && !row.revoked_at && row.owner_discord_user_id &&
+          new Date(row.expires_at).getTime() > Date.now()) {
+        return String(row.owner_discord_user_id);
+      }
+    } catch (_) { /* fall through to 401 */ }
+  }
+  return null;
+}
+
+async function requireFishUser(req, res, next) {
+  try {
+    const id = await resolveIdentity(req);
+    if (!id) return res.status(401).json({ error: 'auth_required', message: 'Sign in with Discord to view your Fish It stats.' });
+    req.fishOwner = id;
+    return next();
+  } catch (err) {
+    return res.status(500).json({ error: 'auth_error' });
+  }
+}
+
+function ok(res, payload) { return res.json(payload); }
+
+// ── Public: global stats (cached at the DB layer; short browser cache) ───────
+router.get('/api/fishit/global', fishitLimiter, (req, res) => {
+  try {
+    const g = fishit.getGlobal();
+    res.set('Cache-Control', 'public, max-age=15');
+    return ok(res, g && g.available ? g : { available: false });
+  } catch (err) {
+    return res.status(200).json({ available: false });
+  }
+});
+
+// ── Public: safe asset/fallback URLs + forgotten species images ──────────────
+router.get('/api/fishit/assets', fishitLimiter, (req, res) => {
+  try {
+    const species = fishit.getForgottenSpecies().map((f) => ({
+      name: f.name,
+      image: f.imageUrl || null, // only real stored URLs; never invented
+    }));
+    res.set('Cache-Control', 'public, max-age=60');
+    return ok(res, { fallbacks: FALLBACKS, forgotten_species: species });
+  } catch (err) {
+    return ok(res, { fallbacks: FALLBACKS, forgotten_species: [] });
+  }
+});
+
+// ── Private: profile summary ─────────────────────────────────────────────────
+router.get('/api/fishit/me', fishitLimiter, requireFishUser, (req, res) => {
+  const profile = fishit.getUserProfile(req.fishOwner);
+  return ok(res, profile);
+});
+
+// ── Private: card-friendly stats ─────────────────────────────────────────────
+router.get('/api/fishit/me/stats', fishitLimiter, requireFishUser, (req, res) => {
+  const stats = fishit.getUserStats(req.fishOwner);
+  // Attach fallbacks so the client doesn't have to hardcode paths.
+  if (stats && stats.rarity_cards) {
+    stats.rarity_cards.forEach((c) => { c.fallback_url = FALLBACKS[c.fallback] || FALLBACKS.fish; });
+    stats.rod_cards.forEach((c) => { c.fallback_url = FALLBACKS[c.fallback] || FALLBACKS.rod; });
+  }
+  return ok(res, stats);
+});
+
+// ── Private: daily stats with period filter ──────────────────────────────────
+router.get('/api/fishit/me/daily', fishitLimiter, requireFishUser, (req, res) => {
+  let period = String(req.query.period || 'today').toLowerCase();
+  if (!DAILY_PERIODS.has(period)) period = 'today';
+  const daily = fishit.getUserDaily(req.fishOwner, period);
+  return ok(res, daily);
+});
+
+// ── Private: fish card grid (server-side search / filter / sort / paginate) ──
+router.get('/api/fishit/me/fish', fishitLimiter, requireFishUser, (req, res) => {
+  const result = fishit.getUserFish(req.fishOwner);
+  let fish = Array.isArray(result.fish) ? result.fish : [];
+
+  const search = String(req.query.search || '').trim().toLowerCase();
+  if (search) fish = fish.filter((f) => f.name.toLowerCase().includes(search));
+
+  const rarity = String(req.query.rarity || '').trim().toLowerCase();
+  if (RARITIES.has(rarity)) fish = fish.filter((f) => f.rarity === rarity);
+
+  const sort = FISH_SORTS.has(String(req.query.sort)) ? String(req.query.sort) : 'amount';
+  const cmp = {
+    amount: (a, b) => b.amount - a.amount,
+    name: (a, b) => a.name.localeCompare(b.name),
+    rarity: (a, b) => String(a.rarity).localeCompare(String(b.rarity)) || b.amount - a.amount,
+    value: (a, b) => (b.max_weight || 0) - (a.max_weight || 0),
+    recent: (a, b) => String(b.last_caught || '').localeCompare(String(a.last_caught || '')),
+  }[sort];
+  fish = fish.slice().sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name));
+
+  const total = fish.length;
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 60, 1), 200);
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const start = (page - 1) * limit;
+  const pageFish = fish.slice(start, start + limit);
+
+  // Attach fallback URLs for missing images.
+  pageFish.forEach((f) => { f.fallback_url = FALLBACKS[f.fallback] || FALLBACKS.fish; });
+
+  return ok(res, {
+    has_data: total > 0,
+    total,
+    total_species: result.total_species || total,
+    page,
+    limit,
+    pages: Math.max(Math.ceil(total / limit), 1),
+    fish: pageFish,
+  });
+});
+
+module.exports = router;
+module.exports.resolveIdentity = resolveIdentity; // exported for tests

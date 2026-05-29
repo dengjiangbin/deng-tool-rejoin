@@ -9,6 +9,7 @@ const fs           = require('fs');
 
 const routes = require('./routes');
 const monitorRoutes = require('./monitorRoutes');
+const fishitRoutes = require('./fishitRoutes');
 const { FileSessionStore } = require('./sessionStore');
 const packageJson = require('../package.json');
 
@@ -183,6 +184,9 @@ app.use((req, res, next) => {
 // 16KB global parsers configured above.
 // ---------------------------------------------------------------
 app.use('/', monitorRoutes);
+
+// Fish It stats API (public global + authenticated /me/* routes).
+app.use('/', fishitRoutes);
 
 // ---------------------------------------------------------------
 // Mount routes

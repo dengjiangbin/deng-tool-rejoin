@@ -150,3 +150,86 @@ data class ErrorResponse(
     val error: String? = null,
     val message: String? = null,
 )
+
+// ── Fish It ──────────────────────────────────────────────────────────────────
+
+@Serializable
+data class FishRank(val rank: Int = 0, val of: Int = 0)
+
+@Serializable
+data class FishProfile(
+    @SerialName("has_data") val hasData: Boolean = false,
+    @SerialName("discord_user_id") val discordUserId: String? = null,
+    val username: String? = null,
+    @SerialName("total_fish") val totalFish: Int = 0,
+    @SerialName("secret_fish") val secretFish: Int = 0,
+    @SerialName("forgotten_fish") val forgottenFish: Int = 0,
+    val rank: FishRank? = null,
+)
+
+@Serializable
+data class FishStatCard(
+    val key: String = "",
+    val label: String = "",
+    val amount: Int = 0,
+    val image: String? = null,
+    @SerialName("fallback_url") val fallbackUrl: String? = null,
+)
+
+@Serializable
+data class FishStats(
+    @SerialName("has_data") val hasData: Boolean = false,
+    val username: String? = null,
+    @SerialName("total_fish") val totalFish: Int = 0,
+    val rank: FishRank? = null,
+    @SerialName("rarity_cards") val rarityCards: List<FishStatCard> = emptyList(),
+    @SerialName("rod_cards") val rodCards: List<FishStatCard> = emptyList(),
+)
+
+@Serializable
+data class FishBestCatch(
+    val name: String = "",
+    val weight: Long = 0,
+    val mutation: String? = null,
+    val thumbnail: String? = null,
+)
+
+@Serializable
+data class FishBreakdownEntry(val name: String = "", val count: Int = 0)
+
+@Serializable
+data class FishDaily(
+    @SerialName("has_data") val hasData: Boolean = false,
+    val period: String = "today",
+    @SerialName("period_label") val periodLabel: String = "Today",
+    val total: Int = 0,
+    val secret: Int = 0,
+    val forgotten: Int = 0,
+    @SerialName("best_catch") val bestCatch: FishBestCatch? = null,
+    @SerialName("secret_breakdown") val secretBreakdown: List<FishBreakdownEntry> = emptyList(),
+    @SerialName("forgotten_breakdown") val forgottenBreakdown: List<FishBreakdownEntry> = emptyList(),
+    @SerialName("last_updated") val lastUpdated: String? = null,
+)
+
+@Serializable
+data class FishCard(
+    val name: String = "",
+    val rarity: String = "secret",
+    val amount: Int = 0,
+    val image: String? = null,
+    @SerialName("max_weight") val maxWeight: Long? = null,
+    val mutation: String? = null,
+    @SerialName("last_caught") val lastCaught: String? = null,
+    @SerialName("fallback_url") val fallbackUrl: String? = null,
+)
+
+@Serializable
+data class FishGrid(
+    @SerialName("has_data") val hasData: Boolean = false,
+    val total: Int = 0,
+    @SerialName("total_species") val totalSpecies: Int = 0,
+    val page: Int = 1,
+    val limit: Int = 24,
+    val pages: Int = 1,
+    val fish: List<FishCard> = emptyList(),
+)

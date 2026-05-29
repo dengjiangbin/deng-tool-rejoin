@@ -149,4 +149,24 @@ class FormatTest {
         assertTrue("must not contain 'Z': $out", !out.contains("Z"))
         assertTrue("must not contain 'pukul': $out", !out.contains("pukul"))
     }
+
+    // ── Hide Username masking ────────────────────────────────────────────────
+    @Test fun `maskUsername keeps first and last char`() {
+        assertEquals("d**********n", Format.maskUsername("dengjiangbin"))
+        assertEquals("d**g", Format.maskUsername("deng"))
+    }
+
+    @Test fun `maskUsername handles short names safely`() {
+        assertEquals("a*", Format.maskUsername("ab"))
+        assertEquals("a*", Format.maskUsername("a"))
+        assertEquals("Unknown", Format.maskUsername(null))
+        assertEquals("Unknown", Format.maskUsername("   "))
+    }
+
+    @Test fun `displayUsername masks only when hide is true`() {
+        assertEquals("deng", Format.displayUsername("deng", hide = false))
+        assertEquals("d**g", Format.displayUsername("deng", hide = true))
+        // Masking must never reveal the full name when enabled.
+        assertTrue(!Format.displayUsername("dengjiangbin", hide = true).contains("engjiangbi"))
+    }
 }

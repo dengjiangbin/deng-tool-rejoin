@@ -1,0 +1,210 @@
+(function () {
+  'use strict';
+  var root = document.querySelector('[data-fishit-page]');
+  if (!root) return;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function fmt(n) {
+    n = Number(n) || 0;
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1) + 'M';
+    if (n >= 1_000) return (n / 1_000).toFixed(n % 1_000 === 0 ? 0 : 1) + 'K';
+    return String(n);
+  }
+  function relTime(iso) {
+    if (!iso) return '';
+    var t = Date.parse(iso);
+    if (!isFinite(t)) return '';
+    var s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+  }
+  function api(path) {
+    return fetch(path, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+      .then(function (r) {
+        if (r.status === 401) { var e = new Error('auth'); e.code = 401; throw e; }
+        if (!r.ok) throw new Error('http_' + r.status);
+        return r.json();
+      });
+  }
+  function emptyHtml(msg) { return '<div class="fishit-empty">' + esc(msg) + '</div>'; }
+  function errorHtml(target) {
+    return '<div class="fishit-error"><p>Could not load Fish It stats.</p>' +
+      '<button type="button" class="btn btn-ghost" data-retry="' + target + '">Retry</button></div>';
+  }
+  function badge(rarity) {
+    var r = (rarity || 'secret').toLowerCase();
+    var label = r.charAt(0).toUpperCase() + r.slice(1);
+    return '<span class="rarity-badge rarity-' + esc(r) + '">' + esc(label) + '</span>';
+  }
+  // Re-apply username masking after dynamic render (app.js owns the state).
+  function remask() { if (window.DengPrivacy && window.DengPrivacy.apply) window.DengPrivacy.apply(); }
+
+  // ── Tabs ──────────────────────────────────────────────────────────────────
+  var loaded = { daily: false, stats: false, fish: false };
+  root.querySelectorAll('[data-fishit-tab]').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      var name = tab.getAttribute('data-fishit-tab');
+      root.querySelectorAll('[data-fishit-tab]').forEach(function (t) {
+        var on = t === tab;
+        t.classList.toggle('active', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      root.querySelectorAll('[data-fishit-panel]').forEach(function (p) {
+        p.hidden = p.getAttribute('data-fishit-panel') !== name;
+      });
+      ensureLoaded(name);
+    });
+  });
+
+  function ensureLoaded(name) {
+    if (name === 'daily') loadDaily(currentPeriod);
+    else if (name === 'stats') { if (!loaded.stats) loadStats(); }
+    else if (name === 'fish') { if (!loaded.fish) loadFish(true); }
+  }
+
+  // ── Daily ───────────────────────────────────────────────────────────────────
+  var currentPeriod = 'today';
+  var dailyBody = root.querySelector('[data-daily-body]');
+  root.querySelectorAll('[data-period]').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      currentPeriod = chip.getAttribute('data-period');
+      root.querySelectorAll('[data-period]').forEach(function (c) { c.classList.toggle('active', c === chip); });
+      loadDaily(currentPeriod);
+    });
+  });
+
+  function loadDaily(period) {
+    api('/api/fishit/me/daily?period=' + encodeURIComponent(period))
+      .then(function (d) {
+        if (!d.has_data) {
+          dailyBody.innerHTML = emptyHtml('No catches found for this period.');
+          return;
+        }
+        var cards = [
+          { label: 'Total Caught', value: d.total },
+          { label: 'Secret', value: d.secret },
+          { label: 'Forgotten', value: d.forgotten },
+        ];
+        var html = '<div class="stat-card-row">' + cards.map(function (c) {
+          return '<article class="stat-card"><span class="stat-card-label">' + esc(c.label) +
+            '</span><strong class="stat-card-value">' + fmt(c.value) + '</strong></article>';
+        }).join('') + '</div>';
+        if (d.best_catch) {
+          html += '<article class="best-catch-card">' +
+            '<div class="best-catch-img">' + imgTag(d.best_catch.thumbnail, '/public/img/fishit/fallback-secret.svg', d.best_catch.name) + '</div>' +
+            '<div class="best-catch-meta"><span class="best-catch-kicker">Best Catch</span>' +
+            '<strong>' + esc(d.best_catch.name) + '</strong>' +
+            '<span class="best-catch-sub">' + fmt(d.best_catch.weight) + (d.best_catch.mutation ? ' · ' + esc(d.best_catch.mutation) : '') + '</span></div></article>';
+        }
+        if (d.last_updated) html += '<p class="fishit-updated">Updated ' + esc(relTime(d.last_updated)) + '</p>';
+        dailyBody.innerHTML = html;
+      })
+      .catch(function (e) { dailyBody.innerHTML = e.code === 401 ? emptyHtml('Sign in with Discord to view your Fish It stats.') : errorHtml('daily'); });
+  }
+
+  // ── Stats ─────────────────────────────────────────────────────────────────
+  var statsBody = root.querySelector('[data-stats-body]');
+  function statCard(card) {
+    var img = imgTag(card.image, card.fallback_url, card.label);
+    return '<article class="fishit-stat-card">' +
+      '<div class="fishit-stat-img">' + img + '</div>' +
+      '<span class="fishit-stat-label">' + esc(card.label) + '</span>' +
+      '<strong class="fishit-stat-amount">' + fmt(card.amount) + '</strong></article>';
+  }
+  function loadStats() {
+    api('/api/fishit/me/stats')
+      .then(function (s) {
+        loaded.stats = true;
+        if (!s.has_data) { statsBody.innerHTML = emptyHtml('You do not have Fish It stats yet.'); return; }
+        var html = '<div class="stat-card-row"><article class="stat-card highlight"><span class="stat-card-label">Total Fish Caught</span>' +
+          '<strong class="stat-card-value">' + fmt(s.total_fish) + '</strong>' +
+          (s.rank ? '<span class="stat-card-sub">Rank #' + s.rank.rank + ' of ' + s.rank.of + '</span>' : '') + '</article></div>';
+        html += '<h2 class="fishit-section-title">Rarity</h2><div class="fishit-card-grid">' + s.rarity_cards.map(statCard).join('') + '</div>';
+        html += '<h2 class="fishit-section-title">Rods</h2><div class="fishit-card-grid">' + s.rod_cards.map(statCard).join('') + '</div>';
+        statsBody.innerHTML = html;
+        remask();
+      })
+      .catch(function (e) { statsBody.innerHTML = e.code === 401 ? emptyHtml('Sign in with Discord to view your Fish It stats.') : errorHtml('stats'); });
+  }
+
+  // ── Fish grid ───────────────────────────────────────────────────────────────
+  var grid = root.querySelector('[data-fish-grid]');
+  var moreWrap = root.querySelector('[data-fish-more]');
+  var loadMoreBtn = root.querySelector('[data-fish-loadmore]');
+  var searchEl = root.querySelector('[data-fish-search]');
+  var rarityEl = root.querySelector('[data-fish-rarity]');
+  var sortEl = root.querySelector('[data-fish-sort]');
+  var fishPage = 1, fishPages = 1, searchTimer = null;
+
+  function imgTag(src, fallback, alt) {
+    var fb = esc(fallback || '/public/img/fishit/fallback-fish.svg');
+    if (!src) return '<img class="lazy-img" loading="lazy" src="' + fb + '" alt="' + esc(alt) + '">';
+    return '<img class="lazy-img" loading="lazy" src="' + esc(src) + '" alt="' + esc(alt) +
+      '" onerror="this.onerror=null;this.src=\'' + fb + '\'">';
+  }
+  function fishCard(f) {
+    var meta = [];
+    if (f.max_weight) meta.push('Wt ' + fmt(f.max_weight));
+    if (f.mutation) meta.push(esc(f.mutation));
+    return '<article class="fish-card" tabindex="0">' +
+      '<div class="fish-card-img">' + imgTag(f.image, f.fallback_url, f.name) + badge(f.rarity) + '</div>' +
+      '<div class="fish-card-body"><span class="fish-card-name">' + esc(f.name) + '</span>' +
+      '<div class="fish-card-stats"><span class="fish-card-amount">x' + fmt(f.amount) + '</span>' +
+      (meta.length ? '<span class="fish-card-meta">' + meta.join(' · ') + '</span>' : '') + '</div></div></article>';
+  }
+  function fishQuery() {
+    var p = new URLSearchParams();
+    if (searchEl.value.trim()) p.set('search', searchEl.value.trim());
+    if (rarityEl.value) p.set('rarity', rarityEl.value);
+    p.set('sort', sortEl.value);
+    p.set('page', String(fishPage));
+    p.set('limit', '24');
+    return '/api/fishit/me/fish?' + p.toString();
+  }
+  function loadFish(reset) {
+    if (reset) { fishPage = 1; grid.innerHTML = '<div class="fishit-skeleton-grid"><div class="skeleton-fish"></div><div class="skeleton-fish"></div><div class="skeleton-fish"></div></div>'; }
+    api(fishQuery())
+      .then(function (res) {
+        loaded.fish = true;
+        fishPages = res.pages || 1;
+        if (reset) grid.innerHTML = '';
+        if (!res.fish || !res.fish.length) {
+          if (reset) grid.innerHTML = emptyHtml(searchEl.value || rarityEl.value ? 'No fish match your filters.' : 'You do not have any tracked fish yet.');
+        } else {
+          grid.insertAdjacentHTML('beforeend', res.fish.map(fishCard).join(''));
+        }
+        moreWrap.hidden = fishPage >= fishPages;
+      })
+      .catch(function (e) { if (reset) grid.innerHTML = e.code === 401 ? emptyHtml('Sign in with Discord to view your Fish It stats.') : errorHtml('fish'); });
+  }
+  if (searchEl) searchEl.addEventListener('input', function () { clearTimeout(searchTimer); searchTimer = setTimeout(function () { loadFish(true); }, 300); });
+  if (rarityEl) rarityEl.addEventListener('change', function () { loadFish(true); });
+  if (sortEl) sortEl.addEventListener('change', function () { loadFish(true); });
+  if (loadMoreBtn) loadMoreBtn.addEventListener('click', function () { if (fishPage < fishPages) { fishPage++; loadFish(false); } });
+
+  // Retry delegation
+  root.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-retry]');
+    if (!btn) return;
+    var t = btn.getAttribute('data-retry');
+    if (t === 'daily') loadDaily(currentPeriod);
+    else if (t === 'stats') loadStats();
+    else if (t === 'fish') loadFish(true);
+  });
+
+  var refreshBtn = root.querySelector('[data-fishit-refresh]');
+  if (refreshBtn) refreshBtn.addEventListener('click', function () {
+    loaded.stats = false; loaded.fish = false;
+    var active = root.querySelector('[data-fishit-tab].active');
+    ensureLoaded(active ? active.getAttribute('data-fishit-tab') : 'daily');
+  });
+
+  // Initial load (Daily tab)
+  loadDaily('today');
+}());

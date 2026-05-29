@@ -68,7 +68,7 @@ private fun PackageCard(pkg: PackageState) {
                 // Falls back to "Unknown" rather than the package name so the
                 // layout never feels empty for newly-paired devices.
                 Text(
-                    Format.safeUsername(pkg.username),
+                    Format.displayUsername(pkg.username, LocalHideUsername.current),
                     style = MaterialTheme.typography.titleMedium,
                     color = DengColors.TextPrimary,
                     fontWeight = FontWeight.SemiBold,

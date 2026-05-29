@@ -1,19 +1,20 @@
 {
   "app_name": "DENG Tool: Rejoin APK",
-  "version_name": "1.0.6",
-  "version_code": 7,
-  "file_name": "deng-tool-rejoin-apk-v1.0.6.apk",
-  "sha256": "16d0244811e8be4f731667d0e131ca0c69e83f4e5eb84098487f39337aef596c",
-  "size_bytes": 1863017,
+  "version_name": "1.0.7",
+  "version_code": 8,
+  "file_name": "deng-tool-rejoin-apk-v1.0.7.apk",
+  "sha256": "55fd46b1bc51a6e33bf4da2f5a557096c75a1283938fa22b40f29179014ad7d0",
+  "size_bytes": 2077157,
   "released_at": "2026-05-29",
   "min_sdk": 26,
   "purpose": "Monitoring companion app for DENG Tool: Rejoin",
   "changelog": [
-    "Snapshot finally works on rooted cloud phones: the Termux bridge now walks a real capture ladder — normal screencap, /system/bin/screencap, root screencap to stdout, and (the reliable one) root 'screencap -p /sdcard/…' read back from file — automatically escalating to root when the unprivileged path is blocked. Root is on by default; set DENG_REJOIN_SNAPSHOT_USE_SU=0 to disable.",
-    "Every capture attempt is now validated as a real PNG (89 50 4E 47 …) before upload. Empty output, shell-error text, and non-PNG bytes are rejected and the next provider is tried, so a 0-byte 'image' is never uploaded.",
-    "Honest snapshot diagnostics: the bridge records which provider was attempted/selected, su availability, root grant, byte length, PNG validity, and a precise result (success / failed_no_screencap / failed_root_denied / failed_invalid_png / failed_timeout / failed_upload_http). The Snapshot screen shows a clean reason + Retry instead of an infinite spinner, and the probe gains a SNAPSHOT PROOF section.",
-    "Snapshot upload is isolated from the heartbeat: an upload failure (HTTP error, oversized image) never breaks the device's online status. Heartbeat controls connection; snapshot only controls snapshot status.",
-    "Redesigned, device-centric Dashboard: a compact header with Last Update + Interval + sync indicator, a TOTAL / ONLINE / DEAD / RAM stats row, and a per-device RAM list ('2048MB/4096MB 50% - Cloud Phone 1', tap to expand). Device counts are TTL-based and never affected by snapshot failures. RAM is read from /proc/meminfo (root-free) and never invented.",
-    "Backend returns dashboard-friendly fields on /api/monitor/devices (computed connection_state, per-device device_ram, snapshot_last_result) while staying backward compatible with older app versions."
+    "Fish It stats are now in the app: a new Fish It tab with Daily, Stats, and Fish cards — all linked to your Discord identity (the same pairing session already authenticates you, no extra login). Stats are read live from the Fish It bot database; nothing is faked.",
+    "Daily tab: filter by Today / Yesterday / 7 Days / 30 Days / All Time with total, secret, forgotten counts, best catch, and a per-species breakdown. Shows a clean empty state when there are no catches for a period.",
+    "Stats tab: total fish caught + rank, rarity cards (Secret / Forgotten with real caught-fish images) and rod cards (Ghostfinn / Element / Diamond). Rod images aren't stored by the bot, so those cards use a themed fallback icon rather than inventing one.",
+    "Fish tab: responsive fish card grid using real fish images from the database (Coil, lazy-loaded with a fallback box on missing/error), with server-side search, rarity filter, sort (most caught / value / name / rarity / recent), and Load more pagination.",
+    "Light / Dark theme: new Appearance settings with System / Light / Dark, persisted locally and following the system theme by default. The whole app recolors instantly (dashboard, snapshot, packages, settings, Fish It).",
+    "Hide Username privacy toggle in Settings: masks your Discord name everywhere in the UI (e.g. dengjiangbin -> d**********n). It's display-only and never changes your account, identity, or stats matching.",
+    "API errors across Fish It show a clear reason + Retry instead of an endless spinner. All private stats are fetched with your authenticated session — a client can never request another user's stats."
   ]
 }
