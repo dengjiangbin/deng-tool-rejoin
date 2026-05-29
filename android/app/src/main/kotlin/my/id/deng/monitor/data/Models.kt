@@ -43,6 +43,9 @@ data class DeviceSummary(
     @SerialName("snapshot_last_result") val snapshotLastResult: String? = null,
     // v1.0.8: per-device package summary (configured package counts).
     @SerialName("package_summary") val packageSummary: DashboardPackageSummary? = null,
+    // v1.0.9: configured monitor refresh interval from monitor_settings (seconds).
+    @SerialName("monitor_interval_seconds") val monitorIntervalSeconds: Int? = null,
+    @SerialName("connection_ttl_seconds") val connectionTtlSeconds: Int? = null,
 ) {
     /** Best-effort connection boolean: prefer the computed value. */
     val isConnected: Boolean

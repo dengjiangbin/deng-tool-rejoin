@@ -1279,6 +1279,7 @@ router.get('/api/license/download', requireLicenseDownloadLogin, repairSiteUser,
 // ───────────────────────────────────────────────────────────────────────────
 const path = require('path');
 const fs   = require('fs');
+const apkDownloadStats = require('./apkDownloadStats');
 
 const APK_RELEASES_DIR = path.join(__dirname, '..', '..', 'releases', 'android');
 
@@ -1320,6 +1321,17 @@ router.get('/download', (_req, res) => {
 
 router.get('/app', (_req, res) => res.redirect('/download'));
 
+router.get('/api/downloads/apk/stats', (_req, res) => {
+  try {
+    const stats = apkDownloadStats.getStats();
+    res.set('Cache-Control', 'no-store');
+    return res.json(stats);
+  } catch (err) {
+    console.warn('[apk] stats failed:', err && err.message ? err.message : err);
+    return res.json({ ok: false, latest: null });
+  }
+});
+
 // Canonical "latest" alias — reads manifest and redirects to the versioned
 // file. Returns a friendly 404 if no APK has been published yet.
 router.get('/downloads/deng-tool-rejoin-apk-latest.apk', (_req, res) => {
@@ -1352,6 +1364,9 @@ router.get('/downloads/:file', (req, res, next) => {
   }
 
   if (fs.existsSync(target)) {
+    if (req.method === 'GET') {
+      try { apkDownloadStats.recordDownload(raw); } catch (_) { /* non-fatal */ }
+    }
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
     res.setHeader('Content-Disposition', `attachment; filename="${raw}"`);
     return res.sendFile(target);

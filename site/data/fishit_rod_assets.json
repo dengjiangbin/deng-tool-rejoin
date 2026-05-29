@@ -7,17 +7,17 @@
     "ghostfinn": {
       "label": "Ghostfinn Rod",
       "emoji_id": "1488070188061556848",
-      "imageUrl": "https://cdn.discordapp.com/emojis/1488070188061556848.png"
+      "imageUrl": "https://cdn.discordapp.com/emojis/1488070188061556848.webp?size=96&quality=lossless"
     },
     "element": {
       "label": "Element Rod",
       "emoji_id": "1488070247482130532",
-      "imageUrl": "https://cdn.discordapp.com/emojis/1488070247482130532.png"
+      "imageUrl": "https://cdn.discordapp.com/emojis/1488070247482130532.webp?size=96&quality=lossless"
     },
     "diamond": {
       "label": "Diamond Rod",
       "emoji_id": "1488070280990687252",
-      "imageUrl": "https://cdn.discordapp.com/emojis/1488070280990687252.png"
+      "imageUrl": "https://cdn.discordapp.com/emojis/1488070280990687252.webp?size=96&quality=lossless"
     }
   }
 }

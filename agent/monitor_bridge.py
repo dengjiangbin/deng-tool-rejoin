@@ -604,6 +604,14 @@ class MonitorBridge:
                 logger.info("monitor_bridge snapshot_interval updated %s -> %s",
                             self.config.snapshot_interval_seconds, iv)
                 self.config.snapshot_interval_seconds = iv
+        refresh = settings.get("app_refresh_interval_seconds")
+        if isinstance(refresh, (int, float)):
+            rv = max(1, min(300, int(refresh)))
+            new_push = float(rv)
+            if new_push != self.config.push_interval_seconds:
+                logger.info("monitor_bridge push_interval updated %s -> %s",
+                            self.config.push_interval_seconds, new_push)
+                self.config.push_interval_seconds = new_push
         enabled = settings.get("monitor_enabled")
         if isinstance(enabled, bool):
             self.state.monitor_enabled_remote = enabled

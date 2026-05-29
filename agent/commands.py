@@ -3801,6 +3801,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(_LAYOUT_RESET_INSTRUCTIONS)
         return 0
 
+    if getattr(args, "doctor_versions", False):
+        return _cmd_doctor_versions()
+
     # Default doctor: show standard health check
     print_banner(use_color=use_color)
     cfg = None
@@ -6649,6 +6652,75 @@ def cmd_new_user_help(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_doctor_versions() -> int:
+    """``deng-rejoin doctor versions`` — installed vs wrapper paths (no secrets)."""
+    from . import build_info as _bi
+    from .constants import APP_HOME, VERSION
+
+    wrapper = _bi.find_wrapper_path()
+    installed = _bi.load_installed_build()
+    embedded = _bi.load_build_info()
+
+    print("DENG Tool: Rejoin — version diagnostics")
+    print(f"  Wrapper path:           {wrapper or '— not on PATH —'}")
+    print(f"  Agent home:             {APP_HOME}")
+    print(f"  Agent VERSION:          {VERSION}")
+    if installed:
+        print(f"  Installed build:        {installed.get('version') or installed.get('version_name') or '—'}")
+        print(f"  Installed at:           {installed.get('installed_at') or '—'}")
+        print(f"  Install path:           {installed.get('install_path') or '—'}")
+    else:
+        print("  Installed build:        (no .installed-build.json)")
+    if embedded:
+        print(f"  Embedded BUILD-INFO:    {embedded.get('version') or '—'}")
+        sha = embedded.get("artifact_sha256_short") or embedded.get("artifact_sha256")
+        if sha:
+            print(f"  Artifact SHA (short):   {sha}")
+
+    try:
+        from . import monitor_autostart
+
+        summary = monitor_autostart.get_monitor_status_summary()
+        print(f"  Bridge URL:             {summary.get('bridge_url')}")
+        print(f"  Bridge running:         {'yes' if summary.get('bridge_running') else 'no'}")
+        print(f"  Push interval:          {summary.get('push_interval_seconds') or '—'}s")
+        print(f"  Snapshot interval:      {summary.get('snapshot_interval_seconds') or 0}s")
+        print(f"  Last push:              {summary.get('last_push_result') or '—'}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  Monitor bridge:         unavailable ({exc.__class__.__name__})")
+
+    try:
+        from .safe_http import safe_get
+
+        api = _bi._read_install_api() if hasattr(_bi, "_read_install_api") else ""
+        if api:
+            print(f"  Install API:            {api}")
+    except Exception:  # noqa: BLE001
+        pass
+    print("  Latest server version:  (run `deng-rejoin update` to check)")
+    return 0
+
+
+def _cmd_monitor_restart(args: argparse.Namespace) -> int:
+    """``deng-rejoin monitor restart`` — restart only the APK monitor bridge."""
+    from . import monitor_autostart
+
+    print("DENG Tool: Rejoin — monitor bridge restart")
+    try:
+        monitor_autostart.stop_monitor_bridge()
+        print("  Stopped bridge thread.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  Stop warning: {exc.__class__.__name__}")
+    cfg = None
+    try:
+        cfg = load_config()
+    except ConfigError:
+        cfg = default_config()
+    ok = _try_autostart_monitor_bridge(cfg if isinstance(cfg, dict) else {})
+    print(f"  Restart result:         {'running' if ok else 'failed — check license / network'}")
+    return 0 if ok else 1
+
+
 def _cmd_monitor_snapshot_test(*, upload_probe: bool = False) -> int:
     """``deng-rejoin monitor snapshot-test [--upload-probe]``.
 
@@ -6656,10 +6728,19 @@ def _cmd_monitor_snapshot_test(*, upload_probe: bool = False) -> int:
     exact reason a capture succeeds/fails is visible. With ``--upload-probe`` it
     also uploads a dev-probe that carries a clear ``SNAPSHOT LIVE TEST`` section.
     """
+    from pathlib import Path
+
+    from . import build_info as _bi
     from . import snapshot as _snap
 
+    installed = _bi.load_installed_build()
+    inst_ver = (installed.get("version") or installed.get("version_name") or "") if installed else ""
+
     print("DENG Tool: Rejoin — SNAPSHOT LIVE TEST")
-    print(f"  Installed version:      {VERSION}")
+    print(f"  Agent VERSION:          {VERSION}")
+    if inst_ver:
+        print(f"  Installed build:        {inst_ver}")
+    print("  Snapshot ladder:        v1.0.6+ multi-provider (normal / system / root)")
     report = _snap.snapshot_test_report()
     print(f"  su available:           {'yes' if report.get('su_available') else 'no'}")
     print(f"  root escalation:        {'disabled' if report.get('root_disabled') else 'enabled'}")
@@ -6683,8 +6764,23 @@ def _cmd_monitor_snapshot_test(*, upload_probe: bool = False) -> int:
     print(f"  Selected provider:      {sel or '— none succeeded —'}")
     if sel:
         print(f"  Captured bytes:         {report.get('selected_bytes')}")
+        try:
+            from .snapshot import SNAPSHOT_DIR
+
+            test_path = SNAPSHOT_DIR / f"snapshot-test-{int(time.time())}.png"
+            cap = _snap.capture_snapshot_detailed()
+            if cap.ok and cap.data:
+                test_path.write_bytes(cap.data)
+                print(f"  Test PNG saved:         {test_path}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  Test PNG saved:         (failed: {exc.__class__.__name__})")
 
     if not upload_probe:
+        print("")
+        if sel:
+            print("  Next step: snapshot capture works — if APK still empty, check bridge upload / device pairing.")
+        else:
+            print("  Next step: fix the failing provider above, then re-run with --upload-probe.")
         return 0 if sel else 1
 
     # --upload-probe: attach the live-test evidence to a dev-probe and upload it.
@@ -6696,7 +6792,12 @@ def _cmd_monitor_snapshot_test(*, upload_probe: bool = False) -> int:
         probe_doc["snapshot_live_test"] = report
         ok, msg = _probe.upload_probe(probe_doc)
         if ok:
-            print(f"  Upload status:          OK ({msg})")
+            print(f"  Upload status:          OK")
+            if "probe_id=" in msg or msg.startswith("p-"):
+                print(f"  Probe ID:               {msg.split('probe_id=')[-1].strip() if 'probe_id=' in msg else msg}")
+            else:
+                print(f"  Probe detail:           {msg}")
+            print("  Next step: open the probe in admin tools or share the Probe ID with support.")
             return 0 if sel else 1
         print(f"  Upload status:          FAILED ({msg})")
         return 1
@@ -6718,6 +6819,8 @@ def cmd_monitor(args: argparse.Namespace) -> int:
         return _cmd_monitor_snapshot_test(
             upload_probe=bool(getattr(args, "snapshot_upload_probe", False))
         )
+    if sub in {"restart"}:
+        return _cmd_monitor_restart(args)
     if sub not in {"status", ""}:
         print(f"Unknown monitor subcommand: {sub}")
         print("Usage: deng-rejoin monitor status | deng-rejoin monitor snapshot-test [--upload-probe]")
@@ -6756,6 +6859,10 @@ def cmd_monitor(args: argparse.Namespace) -> int:
 
     snap_iv = int(summary.get("snapshot_interval_seconds") or 0)
     snap_iv_str = "Off" if snap_iv == 0 else f"{snap_iv}s"
+    push_iv = float(summary.get("push_interval_seconds") or 0)
+    push_iv_str = f"{push_iv:g}s" if push_iv > 0 else "—"
+    stale_ttl = max(int(push_iv or 5) * 2, 60) if push_iv > 0 else 60
+    disc_ttl = max(int(push_iv or 5) * 3, 90) if push_iv > 0 else 90
 
     print("DENG Tool: Rejoin APK Monitor")
     print(f"  Installed version:      {VERSION}")
@@ -6764,9 +6871,16 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     print(f"  Bridge URL:             {summary.get('bridge_url')}")
     print(f"  Monitor autostart:      {'enabled' if summary.get('autostart_enabled') else 'disabled'}")
     print(f"  Bridge thread running:  {'yes' if summary.get('bridge_running') else 'no'}")
+    print(f"  Push interval:          {push_iv_str}")
+    print(f"  Stale threshold:       ~{stale_ttl}s (2× interval, min 60)")
+    print(f"  Disconnect threshold:   ~{disc_ttl}s (3× interval, min 90)")
     print(f"  Device connected:       {'yes' if summary.get('connected') else 'no'}")
-    print(f"  Last push:              {_fmt_time(summary.get('last_push_at'))}")
+    print(f"  Last heartbeat (push):    {_fmt_time(summary.get('last_push_at'))}")
     print(f"  Last push result:       {summary.get('last_push_result') or '—'}")
+    if summary.get("last_error"):
+        print(f"  Last push error:        {summary.get('last_error')}")
+    if summary.get("consecutive_failures"):
+        print(f"  Consecutive failures:   {summary.get('consecutive_failures')}")
     print(f"  Configured packages:    {summary.get('configured_packages')}")
     print(f"  Reported packages:      {summary.get('reported_packages')}")
     print(f"  Snapshot interval:      {snap_iv_str}")
@@ -6952,6 +7066,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             ns.support_bundle = True
         elif sub in ("install", "installation", "build"):
             ns.doctor_install = True
+        elif sub in ("versions", "version_info"):
+            ns.doctor_versions = True
         # Any other doctor sub is just dropped silently — no traceback.
 
     flag_to_command = {

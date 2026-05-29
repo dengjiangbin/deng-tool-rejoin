@@ -23,6 +23,7 @@ describe('Rod asset resolver (channel 1483265484215287909)', () => {
       assert.ok(!/fallback/i.test(url), `${key} url is not a fallback`);
       // Sourced from the bot's rod custom emoji on the Discord CDN.
       assert.ok(url.includes('cdn.discordapp.com/emojis/'), `${key} url is the channel emoji`);
+      assert.ok(url.includes('.webp'), `${key} uses webp CDN format`);
     }
   });
 

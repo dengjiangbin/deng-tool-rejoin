@@ -6,6 +6,12 @@ import org.junit.Test
 import java.time.ZoneId
 
 class FormatTest {
+    @Test fun `formatExact uses thousands separators not K or M`() {
+        assertEquals("2,095", Format.formatExact(2095))
+        assertEquals("54,203", Format.formatExact(54203))
+        assertEquals("0", Format.formatExact(0))
+    }
+
     @Test fun `ram below 1024 MB formats as integer MB`() {
         assertEquals("642 MB", Format.ram(642))
         assertEquals("1023 MB", Format.ram(1023))

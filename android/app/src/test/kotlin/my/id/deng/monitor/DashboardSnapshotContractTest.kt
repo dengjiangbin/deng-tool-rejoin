@@ -119,6 +119,17 @@ class DashboardSnapshotContractTest {
     }
 
     @Test
+    fun `dashboard interval uses backend monitor_interval_seconds not hardcoded poll`() {
+        val src = dashboard()
+        assertTrue("interval from device settings", src.contains("dashboardIntervalLabel"))
+        assertTrue("device model exposes monitor interval", src.contains("monitorIntervalSeconds"))
+        assertFalse(
+            "must not hardcode poll constant in Interval label",
+            src.contains("Interval\", \"\${") && src.contains("DASHBOARD_POLL_SECONDS"),
+        )
+    }
+
+    @Test
     fun `dashboard offers refresh and never an infinite-only spinner`() {
         val src = dashboard()
         assertTrue("dashboard must have a refresh affordance", src.contains("RefreshPill"))

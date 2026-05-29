@@ -74,6 +74,16 @@ fun DashboardScreen(api: MonitorApi, sessionStore: SessionStore) {
     }
 }
 
+/** Interval label from backend monitor_interval_seconds (not UI poll cadence). */
+private fun dashboardIntervalLabel(devices: List<DeviceSummary>): String {
+    val secs = devices.mapNotNull { it.monitorIntervalSeconds }.distinct()
+    return when {
+        secs.isEmpty() -> "—"
+        secs.size == 1 -> "${secs.first()}s"
+        else -> "Mixed"
+    }
+}
+
 @Composable
 private fun DashboardContent(
     devices: List<DeviceSummary>,
@@ -94,7 +104,7 @@ private fun DashboardContent(
     val freshest = devices.minByOrNull { it.secondsSinceLastSeen ?: Long.MAX_VALUE }
     val lastSeenIso = freshest?.lastSeenAt
     val secsSince = freshest?.secondsSinceLastSeen
-    val stale = deviceOnline == 0 && deviceTotal > 0
+    val stale = deviceTotal > 0 && devices.all { !it.isConnected }
 
     // Overall RAM: sum(used)/sum(total) when totals are known; otherwise the
     // mean of reported percents. Null when no device reported RAM.
@@ -152,7 +162,7 @@ private fun DashboardContent(
             if (rel != "—") append("  •  $rel")
         })
         Spacer(Modifier.height(4.dp))
-        LabeledValue("Interval", "${DASHBOARD_POLL_SECONDS}s")
+        LabeledValue("Interval", dashboardIntervalLabel(devices))
         Spacer(Modifier.height(4.dp))
         // Device connectivity is secondary to package stats.
         LabeledValue("Devices", "$deviceOnline / $deviceTotal online")

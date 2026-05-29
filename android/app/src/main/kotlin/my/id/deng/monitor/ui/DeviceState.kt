@@ -150,11 +150,15 @@ fun rememberDeviceListHandle(
     val refreshChannel = remember { MutableSharedFlow<Unit>(extraBufferCapacity = 4) }
 
     LaunchedEffect(Unit) {
-        val interval = pollSeconds.coerceIn(2, 60)
+        var interval = pollSeconds.coerceIn(2, 60)
         while (true) {
             try {
                 val resp = api.listDevices()
                 state.value = DeviceListFetchState.Ready(resp.devices, resp.packageSummary, System.currentTimeMillis())
+                val deviceIntervals = resp.devices.mapNotNull { it.monitorIntervalSeconds }
+                if (deviceIntervals.isNotEmpty()) {
+                    interval = deviceIntervals.max().coerceIn(2, 60)
+                }
             } catch (ce: CancellationException) {
                 throw ce
             } catch (e: Throwable) {

@@ -12,9 +12,15 @@
     </p>
   </div>
   <% if (manifest && manifest.file_name) { %>
-    <a href="/downloads/deng-tool-rejoin-apk-latest.apk" class="btn btn-primary" rel="nofollow">
-      Download APK
-    </a>
+    <div class="download-cta-col">
+      <a href="/downloads/deng-tool-rejoin-apk-latest.apk" class="btn btn-primary" data-apk-download rel="nofollow">
+        Download APK
+      </a>
+      <p class="apk-download-count" data-apk-download-count hidden aria-live="polite">
+        <span class="apk-download-count-skel" data-apk-count-skel></span>
+        <span class="apk-download-count-text" data-apk-count-text hidden></span>
+      </p>
+    </div>
   <% } else { %>
     <span class="btn btn-outline" aria-disabled="true">APK not published yet</span>
   <% } %>
@@ -423,5 +429,63 @@
       try { codeEl.setSelectionRange(0, codeEl.value.length); } catch (_) {}
     }
   });
+}());
+</script>
+<script>
+(function () {
+  'use strict';
+  var wrap = document.querySelector('[data-apk-download-count]');
+  if (!wrap) return;
+  var skel = wrap.querySelector('[data-apk-count-skel]');
+  var textEl = wrap.querySelector('[data-apk-count-text]');
+  var btn = document.querySelector('[data-apk-download]');
+  wrap.hidden = false;
+  if (skel) skel.classList.add('is-loading');
+
+  function fmt(n) {
+    var v = Number(n);
+    if (!isFinite(v)) return '0';
+    return Math.round(v).toLocaleString('en-US');
+  }
+
+  function showCount(n) {
+    if (skel) skel.hidden = true;
+    if (textEl) {
+      textEl.hidden = false;
+      textEl.textContent = fmt(n) + ' downloads';
+      wrap.classList.add('is-ready');
+    }
+  }
+
+  function showUnavailable() {
+    wrap.hidden = true;
+  }
+
+  fetch('/api/downloads/apk/stats', { headers: { Accept: 'application/json' } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (data) {
+      if (!data || !data.ok || !data.latest) { showUnavailable(); return; }
+      showCount(data.latest.downloads);
+    })
+    .catch(showUnavailable);
+
+  if (btn) {
+    btn.addEventListener('click', function () {
+      if (!textEl || textEl.hidden) return;
+      var m = textEl.textContent.match(/^([\d,]+)/);
+      if (!m) return;
+      var n = parseInt(m[1].replace(/,/g, ''), 10);
+      if (!isFinite(n)) return;
+      showCount(n + 1);
+      setTimeout(function () {
+        fetch('/api/downloads/apk/stats', { headers: { Accept: 'application/json' } })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (data) {
+            if (data && data.ok && data.latest) showCount(data.latest.downloads);
+          })
+          .catch(function () {});
+      }, 4000);
+    });
+  }
 }());
 </script>

@@ -53,7 +53,14 @@ app.use(helmet({
         'https://publisher.linkvertise.com', // Linkvertise Full Script provider
       ],
       styleSrc:  ["'self'", "'unsafe-inline'"],
-      imgSrc:    ["'self'", 'data:', 'https://cdn.discordapp.com'],
+      imgSrc:    [
+        "'self'",
+        'data:',
+        'https://cdn.discordapp.com',
+        'https://media.discordapp.net',
+        'https://tr.rbxcdn.com',
+        'https://*.rbxcdn.com',
+      ],
       connectSrc:["'self'"],
       frameSrc:  ["'none'"],
       objectSrc: ["'none'"],

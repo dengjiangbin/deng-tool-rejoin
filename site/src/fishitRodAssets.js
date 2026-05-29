@@ -53,11 +53,19 @@ function loadRodAssets() {
   return rods;
 }
 
+/** Build Discord emoji CDN URL (webp preferred — works in browsers + CSP). */
+function emojiCdnUrl(emojiId) {
+  const id = String(emojiId || '').trim();
+  if (!/^\d{15,22}$/.test(id)) return null;
+  return `https://cdn.discordapp.com/emojis/${id}.webp?size=96&quality=lossless`;
+}
+
 /** Real rod image URL for a rod key (ghostfinn|element|diamond), or null. */
 function rodImageUrl(key) {
   const k = String(key || '').toLowerCase().trim();
   const entry = loadRodAssets()[k];
-  const u = entry && entry.imageUrl;
+  let u = entry && entry.imageUrl;
+  if (!_isHttpUrl(u) && entry && entry.emoji_id) u = emojiCdnUrl(entry.emoji_id);
   return _isHttpUrl(u) ? String(u).trim() : null;
 }
 
@@ -71,4 +79,4 @@ function rodLabel(key) {
 /** Test seam. */
 function _resetCache() { _cache = null; _at = 0; }
 
-module.exports = { ASSET_PATH, loadRodAssets, rodImageUrl, rodLabel, _resetCache };
+module.exports = { ASSET_PATH, loadRodAssets, rodImageUrl, rodLabel, emojiCdnUrl, _resetCache };

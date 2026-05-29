@@ -51,13 +51,9 @@ private val FISH_SORTS = listOf(
     "recent" to "Recently caught",
 )
 
-private fun compact(n: Long): String = when {
-    n >= 1_000_000 -> String.format("%.1fM", n / 1_000_000.0)
-    n >= 1_000 -> String.format("%.1fK", n / 1_000.0)
-    else -> n.toString()
-}
+private fun exactCount(n: Long): String = Format.formatExact(n)
 
-private fun compact(n: Int): String = compact(n.toLong())
+private fun exactCount(n: Int): String = Format.formatExact(n)
 
 @Composable
 fun FishItScreen(api: MonitorApi) {
@@ -171,9 +167,9 @@ private fun DailySection(api: MonitorApi) {
                 val d = daily!!
                 // Summary row — Total / Secret / Forgotten for the period.
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    StatTile("Total", compact(d.summary.totalFish), modifier = Modifier.weight(1f))
-                    StatTile("Secret", compact(d.summary.secretFish), accent = DengColors.Pink, modifier = Modifier.weight(1f))
-                    StatTile("Forgotten", compact(d.summary.forgottenFish), accent = DengColors.Warning, modifier = Modifier.weight(1f))
+                    StatTile("Total", exactCount(d.summary.totalFish), modifier = Modifier.weight(1f))
+                    StatTile("Secret", exactCount(d.summary.secretFish), accent = DengColors.Pink, modifier = Modifier.weight(1f))
+                    StatTile("Forgotten", exactCount(d.summary.forgottenFish), accent = DengColors.Warning, modifier = Modifier.weight(1f))
                 }
                 // One card per fish species caught in the period.
                 if (d.cards.isEmpty()) {
@@ -214,7 +210,7 @@ private fun DailyFishCard(card: my.id.deng.monitor.data.FishDailyCard) {
         Spacer(Modifier.height(8.dp))
         Text(card.name, color = DengColors.TextPrimary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-            Text("x${compact(card.count)}", color = DengColors.Cyan, fontWeight = FontWeight.Bold)
+            Text("x${exactCount(card.count)}", color = DengColors.Cyan, fontWeight = FontWeight.Bold)
             card.maxWeight?.let { Text("Wt $it", color = DengColors.TextDim, style = MaterialTheme.typography.bodySmall) }
         }
     }
@@ -258,7 +254,7 @@ private fun StatsSection(api: MonitorApi) {
                     Spacer(Modifier.height(8.dp))
                     Text("TOTAL FISH CAUGHT", style = MaterialTheme.typography.labelMedium, color = DengColors.TextMuted)
                     Spacer(Modifier.height(6.dp))
-                    Text(compact(s.totalFish), style = MaterialTheme.typography.headlineLarge, color = DengColors.Cyan, fontWeight = FontWeight.Bold)
+                    Text(exactCount(s.totalFish), style = MaterialTheme.typography.headlineLarge, color = DengColors.Cyan, fontWeight = FontWeight.Bold)
                     s.rank?.let {
                         Text("Rank #${it.rank} of ${it.of}", color = DengColors.TextMuted, style = MaterialTheme.typography.bodySmall)
                     }
@@ -289,7 +285,7 @@ private fun StatCardGrid(cards: List<my.id.deng.monitor.data.FishStatCard>) {
                             FishImage(card.imageUrl, card.key, Modifier.size(64.dp).clip(RoundedCornerShape(14.dp)))
                             Spacer(Modifier.height(8.dp))
                             Text(card.label, color = DengColors.TextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(compact(card.displayAmount), color = DengColors.TextPrimary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                            Text(exactCount(card.displayAmount), color = DengColors.TextPrimary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                         }
                     }
                 }
@@ -430,7 +426,7 @@ private fun FishGridCard(card: FishCard) {
         Spacer(Modifier.height(8.dp))
         Text(card.name, color = DengColors.TextPrimary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-            Text("x${compact(card.count)}", color = DengColors.Cyan, fontWeight = FontWeight.Bold)
+            Text("x${exactCount(card.count)}", color = DengColors.Cyan, fontWeight = FontWeight.Bold)
             card.maxWeight?.let { Text("Wt $it", color = DengColors.TextDim, style = MaterialTheme.typography.bodySmall) }
         }
     }

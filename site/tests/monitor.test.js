@@ -906,34 +906,41 @@ describe('POST /api/monitor/bridge/issue-from-license', () => {
 
 // ── v1.0.4 — connection TTL, bridge_status, new state vocabulary ─────────────
 
-describe('v1.0.4 connection_state TTL', () => {
-  const { computeConnectionState, DEVICE_CONNECTION_TTL_SECONDS } =
+describe('v1.0.9 connection_state TTL (interval-scaled)', () => {
+  const { computeConnectionState, connectionTtlSeconds, DEVICE_CONNECTION_TTL_SECONDS } =
     require('../src/monitorRoutes.js').__test__;
 
   test('fresh last_seen_at → Connected', () => {
-    const r = computeConnectionState(new Date().toISOString());
+    const r = computeConnectionState(new Date().toISOString(), 5);
     assert.equal(r.connected, true);
     assert.equal(r.connection_state, 'Connected');
     assert.ok(typeof r.seconds_since_last_seen === 'number');
     assert.ok(r.seconds_since_last_seen >= 0 && r.seconds_since_last_seen < 5);
   });
 
-  test('stale last_seen_at → Disconnected even if status_connected was true', () => {
-    const stale = new Date(Date.now() - (DEVICE_CONNECTION_TTL_SECONDS + 60) * 1000).toISOString();
-    const r = computeConnectionState(stale);
+  test('30s interval: still Connected before 90s TTL', () => {
+    const seen = new Date(Date.now() - 45 * 1000).toISOString();
+    const r = computeConnectionState(seen, 30);
+    assert.equal(r.connected, true);
+    assert.equal(connectionTtlSeconds(30), 90);
+  });
+
+  test('30s interval: Disconnected after TTL (90s)', () => {
+    const stale = new Date(Date.now() - 95 * 1000).toISOString();
+    const r = computeConnectionState(stale, 30);
     assert.equal(r.connected, false);
     assert.equal(r.connection_state, 'Disconnected');
-    assert.ok(r.seconds_since_last_seen > DEVICE_CONNECTION_TTL_SECONDS);
+    assert.ok(r.seconds_since_last_seen > connectionTtlSeconds(30));
   });
 
   test('null last_seen_at → Disconnected', () => {
-    const r = computeConnectionState(null);
+    const r = computeConnectionState(null, 30);
     assert.equal(r.connected, false);
     assert.equal(r.connection_state, 'Disconnected');
     assert.equal(r.seconds_since_last_seen, null);
   });
 
-  test('TTL boundary is exactly 30 seconds (default)', () => {
+  test('legacy DEVICE_CONNECTION_TTL_SECONDS constant kept for compat', () => {
     assert.equal(DEVICE_CONNECTION_TTL_SECONDS, 30);
   });
 });
@@ -970,7 +977,7 @@ describe('v1.0.4 summarizePackages — new state vocabulary', () => {
 });
 
 describe('v1.0.4 /status endpoint exposes connection_state and last_bridge_status', () => {
-  const { DEVICE_CONNECTION_TTL_SECONDS } = require('../src/monitorRoutes.js').__test__;
+  const { connectionTtlSeconds } = require('../src/monitorRoutes.js').__test__;
   beforeEach(() => { mem = makeMemoryDb(); });
 
   test('/status returns Disconnected after TTL even though status_connected was sticky-true', async () => {
@@ -988,8 +995,10 @@ describe('v1.0.4 /status endpoint exposes connection_state and last_bridge_statu
 
     const dev = mem.monitor_devices[0];
     assert.equal(dev.status_connected, true, 'sticky boolean was set');
-    // Now backdate last_seen_at well past the TTL.
-    dev.last_seen_at = new Date(Date.now() - (DEVICE_CONNECTION_TTL_SECONDS + 60) * 1000).toISOString();
+    const intervalSec = 5;
+    const ttl = connectionTtlSeconds(intervalSec);
+    // Backdate well past the interval-scaled TTL (default refresh interval is 5s).
+    dev.last_seen_at = new Date(Date.now() - (ttl + 10) * 1000).toISOString();
 
     const appToken = seedAppSession('disc-ttl');
     const status = await request(app)
@@ -1001,7 +1010,7 @@ describe('v1.0.4 /status endpoint exposes connection_state and last_bridge_statu
       'computed connected boolean overrides sticky status_connected',
     );
     assert.equal(status.body.device.connection_state, 'Disconnected');
-    assert.ok(status.body.device.seconds_since_last_seen >= DEVICE_CONNECTION_TTL_SECONDS);
+    assert.ok(status.body.device.seconds_since_last_seen > ttl);
     // Legacy sticky field is still surfaced unmodified for back-compat.
     assert.equal(status.body.device.status_connected, true);
   });

@@ -13,6 +13,12 @@ import java.util.Locale
  */
 object Format {
 
+    /** Exact integer with thousands separators — no K/M/B compact notation. */
+    fun formatExact(n: Long): String =
+        String.format(Locale.US, "%,d", n.coerceAtLeast(0))
+
+    fun formatExact(n: Int): String = formatExact(n.toLong())
+
     /** "642 MB", "1.4 GB", "—". Never negative, never throws. */
     fun ram(mb: Int): String {
         if (mb <= 0) return "—"

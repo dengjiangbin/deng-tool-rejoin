@@ -304,14 +304,23 @@ def get_monitor_status_summary() -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         cache_summary = {"present": False, "error": "read_failed"}
 
+    push_interval = 0.0
+    if bridge is not None:
+        try:
+            push_interval = float(bridge.config.push_interval_seconds)
+        except Exception:  # noqa: BLE001
+            push_interval = 0.0
+
     return {
         "bridge_url": _resolve_bridge_url(None),
         "autostart_enabled": True,
         "bridge_running": bool(bridge and bridge.is_running()),
         "connected": bool(state and state.connected),
+        "push_interval_seconds": push_interval,
         "last_push_at": (state.last_push_at if state else None),
         "last_push_result": (state.last_push_result if state else None),
         "last_error": (state.last_error if state else None),
+        "consecutive_failures": (state.consecutive_failures if state else 0),
         "snapshot_interval_seconds": snapshot_interval,
         "snapshot_last_sent_at": (state.snapshot_last_sent_at if state else 0.0),
         "snapshot_last_result": (state.snapshot_last_result if state else None),

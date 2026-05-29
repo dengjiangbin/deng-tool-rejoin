@@ -145,6 +145,21 @@ function normKey(name) {
   return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+/** Aggressive fold for lookup: strip ellipsis, punctuation, collapse spaces. */
+function foldKey(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/\u2026/g, '')
+    .replace(/\.{2,}/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** Common UI typos / truncations → canonical fold keys in DB. */
+const FISH_NAME_ALIASES = {
+  'elshark grand maja': 'elshark gran maja',
+};
+
 /** URL-safe species slug, e.g. "Strawberry Shenanigans" → "strawberry-shenanigans". */
 function speciesKey(name) {
   return String(name || '')
@@ -178,10 +193,13 @@ function buildImageIndex() {
   const now = Date.now();
   if (_imgIndex && now - _imgIndexAt < CACHE_TTL_MS) return _imgIndex;
   const idx = new Map();
-  const put = (name, url) => {
+  const put = (name, url, source) => {
     if (!isValidImg(url)) return;
-    const k = normKey(name);
-    if (k && !idx.has(k)) idx.set(k, String(url).trim());
+    const u = String(url).trim();
+    const nk = normKey(name);
+    const fk = foldKey(name);
+    if (nk && !idx.has(nk)) idx.set(nk, { url: u, source: source || 'index' });
+    if (fk && fk !== nk && !idx.has(fk)) idx.set(fk, { url: u, source: source || 'index' });
   };
 
   // 1. fish_catalog_seen table (PokéMeow/kolam catalog — same as bot).
@@ -189,9 +207,12 @@ function buildImageIndex() {
     const db = openDb();
     if (db) {
       const rows = db.prepare(
-        'SELECT canonical_name, image_url FROM fish_catalog_seen WHERE image_url IS NOT NULL',
+        'SELECT normalized_key, canonical_name, image_url FROM fish_catalog_seen WHERE image_url IS NOT NULL',
       ).all();
-      for (const r of rows) put(r.canonical_name, r.image_url);
+      for (const r of rows) {
+        put(r.canonical_name, r.image_url, 'fish_catalog_seen');
+        if (r.normalized_key) put(r.normalized_key, r.image_url, 'fish_catalog_seen');
+      }
     }
   } catch (_) { /* table may not exist on old bots */ }
 
@@ -201,12 +222,12 @@ function buildImageIndex() {
     for (const u of Object.values(fish.byUser)) {
       const ft = u.fishThumbnails;
       if (ft && typeof ft === 'object') {
-        for (const [n, url] of Object.entries(ft)) put(n, url);
+        for (const [n, url] of Object.entries(ft)) put(n, url, 'fishThumbnails');
       }
       const det = (u.details && typeof u.details === 'object') ? u.details : {};
       for (const arr of [det.secret, det.forgotten, det.thunder, det.sea]) {
         for (const c of (Array.isArray(arr) ? arr : [])) {
-          if (c) put(c.name || c.fishType, c.thumbnail);
+          if (c) put(c.name || c.fishType, c.thumbnail, 'catch_detail');
         }
       }
     }
@@ -216,14 +237,29 @@ function buildImageIndex() {
   const forg = readBlob(KEY_FORGOTTEN);
   if (forg && Array.isArray(forg.fish)) {
     for (const f of forg.fish) {
-      if (f.imageUrl) put(f.name, f.imageUrl);
-      put(f.name, emojiCdnUrl(f.emoji));
+      if (f.imageUrl) put(f.name, f.imageUrl, 'forgotten_catalog');
+      put(f.name, emojiCdnUrl(f.emoji), 'forgotten_emoji');
     }
   }
 
   _imgIndex = idx;
   _imgIndexAt = now;
   return idx;
+}
+
+function _lookupIndexed(name) {
+  const idx = buildImageIndex();
+  const tries = [];
+  const folded = foldKey(name);
+  const alias = FISH_NAME_ALIASES[folded];
+  tries.push(normKey(name), folded);
+  if (alias) tries.push(alias, foldKey(alias));
+  for (const k of tries) {
+    if (!k) continue;
+    const hit = idx.get(k);
+    if (hit && hit.url) return hit;
+  }
+  return null;
 }
 
 /**
@@ -234,8 +270,44 @@ function buildImageIndex() {
  */
 function resolveSpeciesImage(name, perCatchThumb) {
   if (isValidImg(perCatchThumb)) return String(perCatchThumb).trim();
-  const hit = buildImageIndex().get(normKey(name));
-  return hit || null;
+  const hit = _lookupIndexed(name);
+  return hit ? hit.url : null;
+}
+
+/** Same as resolveSpeciesImage but returns { url, source } for audits. */
+function resolveSpeciesImageSource(name, perCatchThumb) {
+  if (isValidImg(perCatchThumb)) {
+    return { url: String(perCatchThumb).trim(), source: 'catch_thumbnail' };
+  }
+  const hit = _lookupIndexed(name);
+  return hit || { url: null, source: 'none' };
+}
+
+/** Audit all species keys in the fish cache. */
+function auditSpeciesImages() {
+  const fish = readBlob(KEY_FISH);
+  const names = new Set();
+  if (fish && fish.byUser) {
+    for (const u of Object.values(fish.byUser)) {
+      if (!isRealUserId(String(u.userId))) continue;
+      for (const n of Object.keys(u.secretFish || {})) names.add(n);
+      for (const n of Object.keys(u.forgottenFish || {})) names.add(n);
+    }
+  }
+  const rows = [];
+  let withImg = 0;
+  for (const name of names) {
+    const r = resolveSpeciesImageSource(name, null);
+    if (r.url) withImg += 1;
+    rows.push({ name, imageUrl: r.url, source: r.source });
+  }
+  return {
+    total: rows.length,
+    with_image: withImg,
+    missing: rows.length - withImg,
+    missing_names: rows.filter((r) => !r.imageUrl).map((r) => r.name).sort(),
+    rows: rows.sort((a, b) => a.name.localeCompare(b.name)),
+  };
 }
 
 /** First real image across a list of species names, or null. */
@@ -585,6 +657,10 @@ module.exports = {
   speciesKey,
   formatWeight,
   resolveSpeciesImage,
+  resolveSpeciesImageSource,
+  auditSpeciesImages,
+  foldKey,
+  normKey,
   buildImageIndex,
   forgottenTotal,
   _resetCache,

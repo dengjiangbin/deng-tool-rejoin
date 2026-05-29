@@ -221,30 +221,68 @@ function aggregatePackageSummary(rows) {
   };
 }
 
-// v1.0.4: how stale `last_seen_at` may get before we tell the APK the
-// device is Disconnected. Termux pushes every ~2s, so 30s = 15 missed
-// pushes — long enough to ride out a flaky cell connection, short
-// enough that a cloud-phone reboot or `deng-rejoin` exit is visible.
+// v1.0.9: connection TTL scales with the device's configured refresh interval
+// so a 30s app interval does not show Disconnected after ~30s of silence.
+/** Legacy default TTL (5s interval); prefer connectionTtlSeconds(interval). */
 const DEVICE_CONNECTION_TTL_SECONDS = 30;
 
-function computeConnectionState(lastSeenAt) {
-  // Returns { connected, connection_state, seconds_since_last_seen }.
-  // Anchored to the server clock — clients can never spoof "I'm fresh"
-  // by lying about their wall-clock.
+function connectionTtlSeconds(intervalSec) {
+  const interval = Math.max(2, Math.min(300, Number(intervalSec) || 5));
+  return Math.max(interval * 3, 90);
+}
+
+function computeConnectionState(lastSeenAt, intervalSec = 5) {
+  const ttl = connectionTtlSeconds(intervalSec);
   if (!lastSeenAt) {
-    return { connected: false, connection_state: 'Disconnected', seconds_since_last_seen: null };
+    return {
+      connected: false,
+      connection_state: 'Disconnected',
+      seconds_since_last_seen: null,
+      connection_ttl_seconds: ttl,
+      monitor_interval_seconds: intervalSec,
+    };
   }
   const t = new Date(lastSeenAt).getTime();
   if (!Number.isFinite(t)) {
-    return { connected: false, connection_state: 'Disconnected', seconds_since_last_seen: null };
+    return {
+      connected: false,
+      connection_state: 'Disconnected',
+      seconds_since_last_seen: null,
+      connection_ttl_seconds: ttl,
+      monitor_interval_seconds: intervalSec,
+    };
   }
   const age = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  const fresh = age <= DEVICE_CONNECTION_TTL_SECONDS;
+  const fresh = age <= ttl;
   return {
     connected: fresh,
     connection_state: fresh ? 'Connected' : 'Disconnected',
     seconds_since_last_seen: age,
+    connection_ttl_seconds: ttl,
+    monitor_interval_seconds: intervalSec,
   };
+}
+
+async function loadSettingsByDeviceIds(deviceIds) {
+  const map = new Map();
+  if (!deviceIds.length) return map;
+  try {
+    const { data, error } = await supabase
+      .from('monitor_settings')
+      .select('monitor_device_id, app_refresh_interval_seconds, snapshot_interval_seconds, monitor_enabled')
+      .in('monitor_device_id', deviceIds);
+    if (error) throw error;
+    for (const row of (data || [])) {
+      map.set(row.monitor_device_id, {
+        app_refresh_interval_seconds: Math.max(1, Math.min(300, parseInt(row.app_refresh_interval_seconds, 10) || 5)),
+        snapshot_interval_seconds: Math.max(0, Math.min(3600, parseInt(row.snapshot_interval_seconds, 10) || 0)),
+        monitor_enabled: row.monitor_enabled !== false,
+      });
+    }
+  } catch (err) {
+    console.warn('[monitor] settings batch load failed', err?.message || err);
+  }
+  return map;
 }
 
 // ── Auth middlewares ────────────────────────────────────────────────────────
@@ -612,6 +650,8 @@ router.get('/api/monitor/devices', requireAppAuth, async (req, res) => {
     // compact, dashboard-ready device_ram block extracted from the scrubbed
     // bridge status. Never invents numbers: ram is null when the bridge
     // didn't report it.
+    const deviceIds = (data || []).map((d) => d.id);
+    const settingsMap = await loadSettingsByDeviceIds(deviceIds);
     const enriched = (data || []).map((d) => {
       const bs = d.last_bridge_status || null;
       const ram = bs && bs.device_ram && typeof bs.device_ram === 'object'
@@ -621,10 +661,14 @@ router.get('/api/monitor/devices', requireAppAuth, async (req, res) => {
             percent: Number.isFinite(Number(bs.device_ram.percent)) ? Number(bs.device_ram.percent) : null,
           }
         : null;
+      const settings = settingsMap.get(d.id) || {};
+      const intervalSec = settings.app_refresh_interval_seconds || 5;
       const { last_bridge_status, ...rest } = d;
       return {
         ...rest,
-        ...computeConnectionState(d.last_seen_at),
+        ...computeConnectionState(d.last_seen_at, intervalSec),
+        monitor_interval_seconds: intervalSec,
+        snapshot_interval_seconds: settings.snapshot_interval_seconds ?? 30,
         device_ram: ram,
         snapshot_last_result: bs ? (bs.snapshot_last_result || null) : null,
       };
@@ -633,14 +677,14 @@ router.get('/api/monitor/devices', requireAppAuth, async (req, res) => {
     // v1.0.8: aggregate PACKAGE stats across all owned devices so the
     // dashboard's TOTAL / ONLINE / DEAD cards reflect configured packages,
     // not the number of devices. Per-device package_summary is also attached.
-    const deviceIds = enriched.map((d) => d.id);
+    const enrichedIds = enriched.map((d) => d.id);
     let pkgRows = [];
-    if (deviceIds.length) {
+    if (enrichedIds.length) {
       try {
         const { data: prows, error: perr } = await supabase
           .from('monitor_package_states')
           .select('monitor_device_id, package_name, state, ram_mb')
-          .in('monitor_device_id', deviceIds);
+          .in('monitor_device_id', enrichedIds);
         if (perr) throw perr;
         pkgRows = prows || [];
       } catch (perr) {
@@ -745,7 +789,9 @@ router.get('/api/monitor/devices/:id/status', requireAppAuth, async (req, res) =
     // boolean used to be sticky-true forever after the first push, which
     // is why the APK still said Connected after the cloud phone was
     // rebooted. Now we anchor on last_seen_at + DEVICE_CONNECTION_TTL_SECONDS.
-    const conn = computeConnectionState(device.last_seen_at);
+    const intervalSec = Math.max(1, Math.min(300,
+      parseInt(settingsRow?.app_refresh_interval_seconds, 10) || 5));
+    const conn = computeConnectionState(device.last_seen_at, intervalSec);
     res.set('Cache-Control', 'no-store');
     return res.json({
       device: {
@@ -764,6 +810,8 @@ router.get('/api/monitor/devices/:id/status', requireAppAuth, async (req, res) =
         last_snapshot_age_seconds: lastSnapshotAgeSeconds,
         // Bridge self-reported diagnostics (optional, may be null).
         last_bridge_status: device.last_bridge_status || null,
+        monitor_interval_seconds: intervalSec,
+        connection_ttl_seconds: connectionTtlSeconds(intervalSec),
       },
       summary: summarizePackages(safePackages),
       packages: safePackages,
@@ -1148,6 +1196,8 @@ module.exports.__test__ = {
   randomPairingCode,
   summarizePackages,
   aggregatePackageSummary,
+  connectionTtlSeconds,
+  computeConnectionState,
   safePackageRowForApp,
   normalizeLicenseKey,
   LICENSE_KEY_PATTERN,
@@ -1156,6 +1206,5 @@ module.exports.__test__ = {
   MAX_SNAPSHOT_BYTES,
   BRIDGE_TOKEN_TTL_SEC,
   ALLOWED_SNAPSHOT_INTERVALS,
-  computeConnectionState,
   DEVICE_CONNECTION_TTL_SECONDS,
 };
