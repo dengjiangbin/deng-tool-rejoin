@@ -31,7 +31,7 @@ import my.id.deng.monitor.data.FishDaily
 import my.id.deng.monitor.data.FishGrid
 import my.id.deng.monitor.data.FishStats
 import my.id.deng.monitor.data.MonitorApi
-import my.id.deng.monitor.data.friendlyNetworkError
+import my.id.deng.monitor.data.fishFriendlyError
 import my.id.deng.monitor.ui.theme.DengColors
 import my.id.deng.monitor.util.Format
 
@@ -152,7 +152,7 @@ private fun DailySection(api: MonitorApi) {
         scope.launch {
             runCatching { api.fishDaily(period) }
                 .onSuccess { daily = it; loading = false }
-                .onFailure { error = friendlyNetworkError(it, api.host); loading = false }
+                .onFailure { error = fishFriendlyError(it, api.host); loading = false }
         }
     }
     LaunchedEffect(period) { load() }
@@ -165,39 +165,21 @@ private fun DailySection(api: MonitorApi) {
         when {
             loading -> LoadingCard()
             error != null -> ErrorCard(message = error!!, onRetry = { load() })
-            daily == null || !daily!!.hasData -> EmptyCard("No catches found for this period.")
+            daily == null || (!daily!!.hasData && daily!!.cards.isEmpty()) ->
+                EmptyCard(daily?.emptyMessage ?: "No catches found for this period.")
             else -> {
                 val d = daily!!
+                // Summary row — Total / Secret / Forgotten for the period.
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    StatTile("Total", compact(d.total), modifier = Modifier.weight(1f))
-                    StatTile("Secret", compact(d.secret), accent = DengColors.Pink, modifier = Modifier.weight(1f))
-                    StatTile("Forgotten", compact(d.forgotten), accent = DengColors.Warning, modifier = Modifier.weight(1f))
+                    StatTile("Total", compact(d.summary.totalFish), modifier = Modifier.weight(1f))
+                    StatTile("Secret", compact(d.summary.secretFish), accent = DengColors.Pink, modifier = Modifier.weight(1f))
+                    StatTile("Forgotten", compact(d.summary.forgottenFish), accent = DengColors.Warning, modifier = Modifier.weight(1f))
                 }
-                d.bestCatch?.let { best ->
-                    DengCard {
-                        Text("BEST CATCH", style = MaterialTheme.typography.labelMedium, color = DengColors.Pink)
-                        Spacer(Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            FishImage(best.thumbnail, "secret", Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)))
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text(best.name, color = DengColors.TextPrimary, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    compact(best.weight) + (best.mutation?.let { " · $it" } ?: ""),
-                                    color = DengColors.TextMuted, style = MaterialTheme.typography.bodySmall,
-                                )
-                            }
-                        }
-                    }
-                }
-                if (d.secretBreakdown.isNotEmpty()) {
-                    DengCard {
-                        Text("Secret catches", color = DengColors.TextPrimary, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(8.dp))
-                        d.secretBreakdown.take(12).forEach {
-                            BreakdownRow(it.name, it.count)
-                        }
-                    }
+                // One card per fish species caught in the period.
+                if (d.cards.isEmpty()) {
+                    EmptyCard(d.emptyMessage ?: "No catches found for this period.")
+                } else {
+                    DailyCardGrid(d.cards)
                 }
                 d.lastUpdated?.let {
                     Text("Updated ${Format.timestamp(it)}", color = DengColors.TextDim, style = MaterialTheme.typography.bodySmall)
@@ -209,10 +191,32 @@ private fun DailySection(api: MonitorApi) {
 }
 
 @Composable
-private fun BreakdownRow(name: String, count: Int) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(name, color = DengColors.TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        Text("x$count", color = DengColors.Cyan, fontWeight = FontWeight.SemiBold)
+private fun DailyCardGrid(cards: List<my.id.deng.monitor.data.FishDailyCard>) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        cards.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                row.forEach { card ->
+                    Box(modifier = Modifier.weight(1f)) { DailyFishCard(card) }
+                }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DailyFishCard(card: my.id.deng.monitor.data.FishDailyCard) {
+    DengCard {
+        Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp))) {
+            FishImage(card.imageUrl, card.rarity, Modifier.fillMaxSize())
+            RarityBadge(card.rarity, modifier = Modifier.align(Alignment.TopStart).padding(6.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(card.name, color = DengColors.TextPrimary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+            Text("x${compact(card.count)}", color = DengColors.Cyan, fontWeight = FontWeight.Bold)
+            card.maxWeight?.let { Text("Wt $it", color = DengColors.TextDim, style = MaterialTheme.typography.bodySmall) }
+        }
     }
 }
 
@@ -229,7 +233,7 @@ private fun StatsSection(api: MonitorApi) {
         scope.launch {
             runCatching { api.fishStats() }
                 .onSuccess { stats = it; loading = false }
-                .onFailure { error = friendlyNetworkError(it, api.host); loading = false }
+                .onFailure { error = fishFriendlyError(it, api.host); loading = false }
         }
     }
     LaunchedEffect(Unit) { load() }
@@ -267,6 +271,7 @@ private fun StatsSection(api: MonitorApi) {
                     Text("RODS", style = MaterialTheme.typography.labelMedium, color = DengColors.TextMuted)
                     StatCardGrid(s.rodCards)
                 }
+                Spacer(Modifier.height(4.dp))
             }
         }
         Spacer(Modifier.height(48.dp))
@@ -281,10 +286,10 @@ private fun StatCardGrid(cards: List<my.id.deng.monitor.data.FishStatCard>) {
                 row.forEach { card ->
                     DengCard(modifier = Modifier.weight(1f)) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                            FishImage(card.image, card.key, Modifier.size(64.dp).clip(RoundedCornerShape(14.dp)))
+                            FishImage(card.imageUrl, card.key, Modifier.size(64.dp).clip(RoundedCornerShape(14.dp)))
                             Spacer(Modifier.height(8.dp))
                             Text(card.label, color = DengColors.TextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(compact(card.amount), color = DengColors.TextPrimary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                            Text(compact(card.displayAmount), color = DengColors.TextPrimary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                         }
                     }
                 }
@@ -315,10 +320,10 @@ private fun FishSection(api: MonitorApi) {
                 .onSuccess { g ->
                     grid = g
                     if (reset) cards.clear()
-                    cards.addAll(g.fish)
+                    cards.addAll(g.items)
                     loading = false
                 }
-                .onFailure { error = friendlyNetworkError(it, api.host); loading = false }
+                .onFailure { error = fishFriendlyError(it, api.host); loading = false }
         }
     }
     // Reload when filters change (debounced for search).
@@ -419,14 +424,14 @@ private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
 private fun FishGridCard(card: FishCard) {
     DengCard {
         Box(modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(12.dp))) {
-            FishImage(card.image, card.rarity, Modifier.fillMaxSize())
+            FishImage(card.imageUrl, card.rarity, Modifier.fillMaxSize())
             RarityBadge(card.rarity, modifier = Modifier.align(Alignment.TopStart).padding(6.dp))
         }
         Spacer(Modifier.height(8.dp))
         Text(card.name, color = DengColors.TextPrimary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-            Text("x${compact(card.amount)}", color = DengColors.Cyan, fontWeight = FontWeight.Bold)
-            card.maxWeight?.let { Text("Wt ${compact(it)}", color = DengColors.TextDim, style = MaterialTheme.typography.bodySmall) }
+            Text("x${compact(card.count)}", color = DengColors.Cyan, fontWeight = FontWeight.Bold)
+            card.maxWeight?.let { Text("Wt $it", color = DengColors.TextDim, style = MaterialTheme.typography.bodySmall) }
         }
     }
 }

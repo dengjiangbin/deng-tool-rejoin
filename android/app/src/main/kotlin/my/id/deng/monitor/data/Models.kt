@@ -41,6 +41,8 @@ data class DeviceSummary(
     @SerialName("device_ram") val deviceRam: DeviceRam? = null,
     // v1.0.6: compact snapshot result on the device list row.
     @SerialName("snapshot_last_result") val snapshotLastResult: String? = null,
+    // v1.0.8: per-device package summary (configured package counts).
+    @SerialName("package_summary") val packageSummary: DashboardPackageSummary? = null,
 ) {
     /** Best-effort connection boolean: prefer the computed value. */
     val isConnected: Boolean
@@ -74,9 +76,28 @@ data class DeviceRam(
         }
 }
 
+/**
+ * v1.0.8: package-level summary for the dashboard headline cards. TOTAL is the
+ * number of CONFIGURED packages across the owner's device(s); ONLINE is those
+ * running/healthy; DEAD is everything else (dead/launching/joining/no-heartbeat
+ * /stale). This is what the dashboard's TOTAL/ONLINE/DEAD cards show — NOT the
+ * device count.
+ */
+@Serializable
+data class DashboardPackageSummary(
+    val total: Int = 0,
+    val online: Int = 0,
+    val dead: Int = 0,
+    val launching: Int = 0,
+    val joining: Int = 0,
+    @SerialName("no_heartbeat") val noHeartbeat: Int = 0,
+    @SerialName("total_ram_mb") val totalRamMb: Int = 0,
+)
+
 @Serializable
 data class DeviceListResponse(
     val devices: List<DeviceSummary> = emptyList(),
+    @SerialName("package_summary") val packageSummary: DashboardPackageSummary = DashboardPackageSummary(),
 )
 
 @Serializable
@@ -167,69 +188,88 @@ data class FishProfile(
     val rank: FishRank? = null,
 )
 
+// Standardized Fish It JSON (v1.0.8 — Part 11). All keys are camelCase and
+// every field has a default so a partial/extended payload never throws a
+// SerializationException (which the UI used to mis-report as
+// "can't reach backend"). `image`/weight are nullable strings — never numeric.
 @Serializable
 data class FishStatCard(
     val key: String = "",
     val label: String = "",
     val amount: Int = 0,
-    val image: String? = null,
-    @SerialName("fallback_url") val fallbackUrl: String? = null,
-)
+    val count: Int = 0,
+    val imageUrl: String? = null,
+    val fallbackUrl: String? = null,
+) {
+    /** Stats use `amount`; rod cards may use `count`. */
+    val displayAmount: Int get() = if (amount != 0) amount else count
+}
 
 @Serializable
 data class FishStats(
-    @SerialName("has_data") val hasData: Boolean = false,
+    val ok: Boolean = true,
+    val hasData: Boolean = false,
     val username: String? = null,
-    @SerialName("total_fish") val totalFish: Int = 0,
+    val totalFish: Int = 0,
     val rank: FishRank? = null,
-    @SerialName("rarity_cards") val rarityCards: List<FishStatCard> = emptyList(),
-    @SerialName("rod_cards") val rodCards: List<FishStatCard> = emptyList(),
+    val summaryCards: List<FishStatCard> = emptyList(),
+    val rarityCards: List<FishStatCard> = emptyList(),
+    val rodCards: List<FishStatCard> = emptyList(),
 )
 
 @Serializable
-data class FishBestCatch(
+data class FishDailySummary(
+    val totalFish: Int = 0,
+    val secretFish: Int = 0,
+    val forgottenFish: Int = 0,
+)
+
+@Serializable
+data class FishDailyCard(
+    val speciesKey: String = "",
     val name: String = "",
-    val weight: Long = 0,
-    val mutation: String? = null,
-    val thumbnail: String? = null,
+    val rarity: String = "Secret",
+    val count: Int = 0,
+    val imageUrl: String? = null,
+    val maxWeight: String? = null,
+    val latestCaughtAt: String? = null,
+    val fallbackUrl: String? = null,
 )
-
-@Serializable
-data class FishBreakdownEntry(val name: String = "", val count: Int = 0)
 
 @Serializable
 data class FishDaily(
-    @SerialName("has_data") val hasData: Boolean = false,
+    val ok: Boolean = true,
+    val hasData: Boolean = false,
     val period: String = "today",
-    @SerialName("period_label") val periodLabel: String = "Today",
-    val total: Int = 0,
-    val secret: Int = 0,
-    val forgotten: Int = 0,
-    @SerialName("best_catch") val bestCatch: FishBestCatch? = null,
-    @SerialName("secret_breakdown") val secretBreakdown: List<FishBreakdownEntry> = emptyList(),
-    @SerialName("forgotten_breakdown") val forgottenBreakdown: List<FishBreakdownEntry> = emptyList(),
-    @SerialName("last_updated") val lastUpdated: String? = null,
+    val periodLabel: String = "Today",
+    val timezone: String = "Asia/Jakarta",
+    val summary: FishDailySummary = FishDailySummary(),
+    val cards: List<FishDailyCard> = emptyList(),
+    val emptyMessage: String? = null,
+    val lastUpdated: String? = null,
 )
 
 @Serializable
 data class FishCard(
+    val speciesKey: String = "",
     val name: String = "",
-    val rarity: String = "secret",
-    val amount: Int = 0,
-    val image: String? = null,
-    @SerialName("max_weight") val maxWeight: Long? = null,
+    val rarity: String = "Secret",
+    val count: Int = 0,
+    val imageUrl: String? = null,
+    val maxWeight: String? = null,
     val mutation: String? = null,
-    @SerialName("last_caught") val lastCaught: String? = null,
-    @SerialName("fallback_url") val fallbackUrl: String? = null,
+    val latestCaughtAt: String? = null,
+    val fallbackUrl: String? = null,
 )
 
 @Serializable
 data class FishGrid(
-    @SerialName("has_data") val hasData: Boolean = false,
+    val ok: Boolean = true,
+    val hasData: Boolean = false,
+    val items: List<FishCard> = emptyList(),
     val total: Int = 0,
-    @SerialName("total_species") val totalSpecies: Int = 0,
+    val totalSpecies: Int = 0,
     val page: Int = 1,
     val limit: Int = 24,
     val pages: Int = 1,
-    val fish: List<FishCard> = emptyList(),
 )

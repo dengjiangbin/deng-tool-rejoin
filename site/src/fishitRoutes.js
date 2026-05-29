@@ -118,63 +118,66 @@ router.get('/api/fishit/me', fishitLimiter, requireFishUser, (req, res) => {
   return ok(res, profile);
 });
 
-// ── Private: card-friendly stats ─────────────────────────────────────────────
+// ── Private: card-friendly stats (standardized — Part 11) ────────────────────
 router.get('/api/fishit/me/stats', fishitLimiter, requireFishUser, (req, res) => {
   const stats = fishit.getUserStats(req.fishOwner);
-  // Attach fallbacks so the client doesn't have to hardcode paths.
-  if (stats && stats.rarity_cards) {
-    stats.rarity_cards.forEach((c) => { c.fallback_url = FALLBACKS[c.fallback] || FALLBACKS.fish; });
-    stats.rod_cards.forEach((c) => { c.fallback_url = FALLBACKS[c.fallback] || FALLBACKS.rod; });
+  if (!stats || !stats.hasData) {
+    return ok(res, { ok: true, hasData: false, summaryCards: [], rarityCards: [], rodCards: [] });
   }
-  return ok(res, stats);
+  const attach = (c) => { c.fallbackUrl = FALLBACKS[c.fallback] || FALLBACKS.fish; };
+  (stats.summaryCards || []).forEach(attach);
+  (stats.rarityCards || []).forEach(attach);
+  (stats.rodCards || []).forEach((c) => { c.fallbackUrl = FALLBACKS[c.fallback] || FALLBACKS.rod; });
+  return ok(res, { ok: true, ...stats });
 });
 
-// ── Private: daily stats with period filter ──────────────────────────────────
+// ── Private: daily per-species cards with period filter (standardized) ───────
 router.get('/api/fishit/me/daily', fishitLimiter, requireFishUser, (req, res) => {
   let period = String(req.query.period || 'today').toLowerCase();
   if (!DAILY_PERIODS.has(period)) period = 'today';
   const daily = fishit.getUserDaily(req.fishOwner, period);
-  return ok(res, daily);
+  (daily.cards || []).forEach((c) => { c.fallbackUrl = FALLBACKS[c.fallback] || FALLBACKS.fish; });
+  const emptyMessage = daily.hasData ? null : 'No catches found for this period.';
+  return ok(res, { ok: true, emptyMessage, ...daily });
 });
 
 // ── Private: fish card grid (server-side search / filter / sort / paginate) ──
 router.get('/api/fishit/me/fish', fishitLimiter, requireFishUser, (req, res) => {
   const result = fishit.getUserFish(req.fishOwner);
-  let fish = Array.isArray(result.fish) ? result.fish : [];
+  let items = Array.isArray(result.items) ? result.items : [];
 
   const search = String(req.query.search || '').trim().toLowerCase();
-  if (search) fish = fish.filter((f) => f.name.toLowerCase().includes(search));
+  if (search) items = items.filter((f) => f.name.toLowerCase().includes(search));
 
   const rarity = String(req.query.rarity || '').trim().toLowerCase();
-  if (RARITIES.has(rarity)) fish = fish.filter((f) => f.rarity === rarity);
+  if (RARITIES.has(rarity)) items = items.filter((f) => f.rarity.toLowerCase() === rarity);
 
   const sort = FISH_SORTS.has(String(req.query.sort)) ? String(req.query.sort) : 'amount';
   const cmp = {
-    amount: (a, b) => b.amount - a.amount,
+    amount: (a, b) => b.count - a.count,
     name: (a, b) => a.name.localeCompare(b.name),
-    rarity: (a, b) => String(a.rarity).localeCompare(String(b.rarity)) || b.amount - a.amount,
-    value: (a, b) => (b.max_weight || 0) - (a.max_weight || 0),
-    recent: (a, b) => String(b.last_caught || '').localeCompare(String(a.last_caught || '')),
+    rarity: (a, b) => String(a.rarity).localeCompare(String(b.rarity)) || b.count - a.count,
+    value: (a, b) => (b.maxWeightGrams || 0) - (a.maxWeightGrams || 0),
+    recent: (a, b) => String(b.latestCaughtAt || '').localeCompare(String(a.latestCaughtAt || '')),
   }[sort];
-  fish = fish.slice().sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name));
+  items = items.slice().sort((a, b) => cmp(a, b) || a.name.localeCompare(b.name));
 
-  const total = fish.length;
+  const total = items.length;
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 60, 1), 200);
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const start = (page - 1) * limit;
-  const pageFish = fish.slice(start, start + limit);
-
-  // Attach fallback URLs for missing images.
-  pageFish.forEach((f) => { f.fallback_url = FALLBACKS[f.fallback] || FALLBACKS.fish; });
+  const pageItems = items.slice(start, start + limit);
+  pageItems.forEach((f) => { f.fallbackUrl = FALLBACKS[f.fallback] || FALLBACKS.fish; });
 
   return ok(res, {
-    has_data: total > 0,
+    ok: true,
+    hasData: total > 0,
+    items: pageItems,
     total,
-    total_species: result.total_species || total,
+    totalSpecies: result.totalSpecies || total,
     page,
     limit,
     pages: Math.max(Math.ceil(total / limit), 1),
-    fish: pageFish,
   });
 });
 

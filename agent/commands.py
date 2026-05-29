@@ -6649,16 +6649,78 @@ def cmd_new_user_help(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_monitor_snapshot_test(*, upload_probe: bool = False) -> int:
+    """``deng-rejoin monitor snapshot-test [--upload-probe]``.
+
+    Runs every snapshot provider rung and prints a per-provider report so the
+    exact reason a capture succeeds/fails is visible. With ``--upload-probe`` it
+    also uploads a dev-probe that carries a clear ``SNAPSHOT LIVE TEST`` section.
+    """
+    from . import snapshot as _snap
+
+    print("DENG Tool: Rejoin — SNAPSHOT LIVE TEST")
+    print(f"  Installed version:      {VERSION}")
+    report = _snap.snapshot_test_report()
+    print(f"  su available:           {'yes' if report.get('su_available') else 'no'}")
+    print(f"  root escalation:        {'disabled' if report.get('root_disabled') else 'enabled'}")
+    print("  Providers (full ladder, every rung attempted):")
+    for row in report.get("providers", []):
+        print(f"    • provider:           {row.get('provider')}")
+        print(f"      command:            {row.get('command')}")
+        print(f"      exit code:          {row.get('exit_code')}")
+        print(f"      timeout:            {row.get('timeout_seconds')}s"
+              f"{' (TIMED OUT)' if row.get('timed_out') else ''}")
+        print(f"      binary found:       {'yes' if row.get('found') else 'no'}")
+        print(f"      output bytes:       {row.get('byte_length')}")
+        print(f"      PNG valid:          {'yes' if row.get('png_valid') else 'no'}")
+        print(f"      suspicious small:   {'yes' if row.get('suspicious_small') else 'no'}")
+        if row.get("stderr"):
+            print(f"      stderr:             {row.get('stderr')}")
+        if row.get("note"):
+            print(f"      note:               {row.get('note')}")
+    sel = report.get("selected_provider")
+    print(f"  Final result:           {report.get('final_result')}")
+    print(f"  Selected provider:      {sel or '— none succeeded —'}")
+    if sel:
+        print(f"  Captured bytes:         {report.get('selected_bytes')}")
+
+    if not upload_probe:
+        return 0 if sel else 1
+
+    # --upload-probe: attach the live-test evidence to a dev-probe and upload it.
+    print("")
+    print("  Uploading probe with SNAPSHOT LIVE TEST section…")
+    try:
+        from . import probe as _probe
+        probe_doc = _probe.collect_probe()
+        probe_doc["snapshot_live_test"] = report
+        ok, msg = _probe.upload_probe(probe_doc)
+        if ok:
+            print(f"  Upload status:          OK ({msg})")
+            return 0 if sel else 1
+        print(f"  Upload status:          FAILED ({msg})")
+        return 1
+    except Exception as exc:  # noqa: BLE001
+        print(f"  Upload status:          ERROR ({str(exc)[:160]})")
+        return 1
+
+
 def cmd_monitor(args: argparse.Namespace) -> int:
-    """``deng-rejoin monitor [status]`` — show APK bridge status (no secrets).
+    """``deng-rejoin monitor [status|snapshot-test]`` — APK bridge tooling (no secrets).
 
     Subcommands:
-      status   (default) print connection / push / snapshot summary
+      status         (default) print connection / push / snapshot summary
+      snapshot-test  run every snapshot provider rung and print the report
+                     (``--upload-probe`` also uploads a SNAPSHOT LIVE TEST probe)
     """
     sub = (getattr(args, "monitor_subcommand", "") or "status").lower().strip()
+    if sub in {"snapshot_test", "snapshot-test", "snapshottest"}:
+        return _cmd_monitor_snapshot_test(
+            upload_probe=bool(getattr(args, "snapshot_upload_probe", False))
+        )
     if sub not in {"status", ""}:
         print(f"Unknown monitor subcommand: {sub}")
-        print("Usage: deng-rejoin monitor status")
+        print("Usage: deng-rejoin monitor status | deng-rejoin monitor snapshot-test [--upload-probe]")
         return 2
 
     try:
@@ -6861,14 +6923,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ns = parser.parse_args([])
         _unknown = list(argv)
 
-    # Capture sub-action for `monitor`: "monitor status".
+    # Capture sub-action for `monitor`: "monitor status" / "monitor snapshot-test".
     ns.monitor_subcommand = ""
+    ns.snapshot_upload_probe = False
     if ns.command == "monitor" and _unknown:
-        sub = (_unknown[0] or "").lower().replace("-", "_").strip()
+        # First non-flag token is the subcommand; flags like --upload-probe are
+        # collected separately so `monitor snapshot-test --upload-probe` works.
+        positional = [t for t in _unknown if not str(t).startswith("-")]
+        flags = {str(t).lower().replace("-", "_") for t in _unknown if str(t).startswith("-")}
+        sub = (positional[0] if positional else "").lower().replace("-", "_").strip()
         if sub in {"status", ""}:
             ns.monitor_subcommand = "status"
         else:
             ns.monitor_subcommand = sub
+        ns.snapshot_upload_probe = ("__upload_probe" in flags) or ("upload_probe" in flags)
 
     # Map positional sub-subcommands for `doctor`: "doctor layout", "doctor root-state".
     ns.doctor_install = False

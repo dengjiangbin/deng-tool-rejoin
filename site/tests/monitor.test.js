@@ -54,14 +54,20 @@ class Q {
     this.selectColumns = '*';
   }
   _rows() { return mem[this.table] || (mem[this.table] = []); }
-  _matches(row) { return this.filters.every((f) => row[f.field] === f.value); }
+  _matches(row) {
+    return this.filters.every((f) => {
+      if (f.op === 'in') return Array.isArray(f.value) && f.value.includes(row[f.field]);
+      return row[f.field] === f.value;
+    });
+  }
 
   select(cols) { if (cols) this.selectColumns = cols; return this; }
   insert(payload) { this.action = 'insert'; this.payload = Array.isArray(payload) ? payload : [payload]; return this; }
   update(payload) { this.action = 'update'; this.payload = payload; return this; }
   upsert(payload, opts = {}) { this.action = 'upsert'; this.payload = Array.isArray(payload) ? payload : [payload]; this.upsertOnConflict = opts.onConflict || null; return this; }
   delete() { this.action = 'delete'; return this; }
-  eq(field, value) { this.filters.push({ field, value }); return this; }
+  eq(field, value) { this.filters.push({ field, value, op: 'eq' }); return this; }
+  in(field, values) { this.filters.push({ field, value: values, op: 'in' }); return this; }
   order(field, spec = {}) { this.orderSpec = { field, ascending: spec.ascending !== false }; return this; }
   limit(n) { this.limitCount = n; return this; }
 
@@ -349,6 +355,34 @@ describe('app session auth + ownership isolation', () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.devices.length, 1);
     assert.equal(res.body.devices[0].id, myDevice);
+  });
+
+  test('listDevices package_summary: 1 device + 8 dead packages → TOTAL 8 / ONLINE 0 / DEAD 8', async () => {
+    const owner = 'disc-pkg';
+    const deviceId = seedDevice(owner);
+    const token = seedBridgeToken(deviceId);
+    const deadPkgs = Array.from({ length: 8 }, (_, i) => ({
+      package: `com.moons.lite${String.fromCharCode(99 + i)}`,
+      state: 'Dead',
+      ram_mb: 0,
+    }));
+    await request(app)
+      .post('/api/monitor/bridge/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ schema: 1, tool_version: '1.0.8', channel: 'stable', packages: deadPkgs });
+    const appToken = seedAppSession(owner);
+    const res = await request(app)
+      .get('/api/monitor/devices')
+      .set('Authorization', `Bearer ${appToken}`);
+    assert.equal(res.status, 200);
+    const ps = res.body.package_summary;
+    assert.equal(ps.total, 8);
+    assert.equal(ps.online, 0);
+    assert.equal(ps.dead, 8);
+    // Device count must not replace package count on the headline cards.
+    assert.equal(res.body.devices.length, 1);
+    assert.equal(res.body.devices[0].package_summary.total, 8);
+    assert.equal(res.body.devices[0].package_summary.dead, 8);
   });
 
   test('cannot read another user device status', async () => {

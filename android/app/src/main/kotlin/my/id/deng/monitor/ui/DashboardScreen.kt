@@ -67,7 +67,7 @@ fun DashboardScreen(api: MonitorApi, sessionStore: SessionStore) {
                 if (s.devices.isEmpty()) {
                     EmptyDevicesCard()
                 } else {
-                    DashboardContent(s.devices)
+                    DashboardContent(s.devices, s.packageSummary)
                 }
             }
         }
@@ -75,16 +75,26 @@ fun DashboardScreen(api: MonitorApi, sessionStore: SessionStore) {
 }
 
 @Composable
-private fun DashboardContent(devices: List<DeviceSummary>) {
-    val total = devices.size
-    val online = devices.count { it.isConnected }
-    val dead = total - online
+private fun DashboardContent(
+    devices: List<DeviceSummary>,
+    packageSummary: my.id.deng.monitor.data.DashboardPackageSummary,
+) {
+    // v1.0.8: headline cards are PACKAGE counts (configured Roblox packages),
+    // not device counts. 8 configured packages all dead → TOTAL 8 / ONLINE 0 /
+    // DEAD 8. Device connectivity is shown secondarily below.
+    val pkgTotal = packageSummary.total
+    val pkgOnline = packageSummary.online
+    val pkgDead = packageSummary.dead
+
+    val deviceTotal = devices.size
+    val deviceOnline = devices.count { it.isConnected }
+    val online = deviceOnline // drives the sync/offline indicator
 
     // Most recent heartbeat across all devices → "Last Update".
     val freshest = devices.minByOrNull { it.secondsSinceLastSeen ?: Long.MAX_VALUE }
     val lastSeenIso = freshest?.lastSeenAt
     val secsSince = freshest?.secondsSinceLastSeen
-    val stale = online == 0 && total > 0
+    val stale = deviceOnline == 0 && deviceTotal > 0
 
     // Overall RAM: sum(used)/sum(total) when totals are known; otherwise the
     // mean of reported percents. Null when no device reported RAM.
@@ -143,16 +153,19 @@ private fun DashboardContent(devices: List<DeviceSummary>) {
         })
         Spacer(Modifier.height(4.dp))
         LabeledValue("Interval", "${DASHBOARD_POLL_SECONDS}s")
+        Spacer(Modifier.height(4.dp))
+        // Device connectivity is secondary to package stats.
+        LabeledValue("Devices", "$deviceOnline / $deviceTotal online")
     }
 
-    // Main stats row — TOTAL / ONLINE / DEAD / RAM.
+    // Main stats row — PACKAGE TOTAL / ONLINE / DEAD + overall RAM.
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        CompactStat("TOTAL", total.toString(), DengColors.Cyan, Modifier.weight(1f))
-        CompactStat("ONLINE", online.toString(), DengColors.Success, Modifier.weight(1f))
-        CompactStat("DEAD", dead.toString(), DengColors.Danger, Modifier.weight(1f))
+        CompactStat("TOTAL", pkgTotal.toString(), DengColors.Cyan, Modifier.weight(1f))
+        CompactStat("ONLINE", pkgOnline.toString(), DengColors.Success, Modifier.weight(1f))
+        CompactStat("DEAD", pkgDead.toString(), DengColors.Danger, Modifier.weight(1f))
         CompactStat(
             "RAM",
             overallPercent?.let { "$it%" } ?: "—",
@@ -171,7 +184,7 @@ private fun DashboardContent(devices: List<DeviceSummary>) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            overallPercent?.let { "Overall: $it% across $total device${if (total == 1) "" else "s"}" }
+            overallPercent?.let { "Overall: $it% across $deviceTotal device${if (deviceTotal == 1) "" else "s"}" }
                 ?: "Overall: RAM not reported yet",
             style = MaterialTheme.typography.bodySmall,
             color = DengColors.TextMuted,

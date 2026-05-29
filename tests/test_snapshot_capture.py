@@ -207,6 +207,28 @@ def test_backward_compatible_wrapper(monkeypatch, tmp_path):
     assert msg == "snapshot captured"
 
 
+def test_snapshot_test_report_runs_all_providers(monkeypatch, tmp_path):
+    """``deng-rejoin monitor snapshot-test`` must exercise every rung."""
+    monkeypatch.setattr(snap, "SNAPSHOT_DIR", tmp_path)
+    monkeypatch.setattr(snap, "_su_available", lambda: True)
+    _disable_system_binary(monkeypatch)
+
+    def handler(cmd):
+        if cmd[:2] == ["screencap", "-p"]:
+            return 0, VALID_PNG, b"", None
+        return None, b"", b"", "not_found"
+
+    _install_run(monkeypatch, handler)
+    report = snap.snapshot_test_report()
+    assert report["final_result"] == snap.RESULT_SUCCESS
+    assert report["selected_provider"] == "normal_screencap"
+    providers = [r["provider"] for r in report["providers"]]
+    assert "normal_screencap" in providers
+    assert "root_screencap_stdout" in providers
+    assert "root_screencap_file" in providers
+    assert all("command" in r and "png_valid" in r for r in report["providers"])
+
+
 def test_root_disabled_env_skips_root(monkeypatch, tmp_path):
     monkeypatch.setattr(snap, "SNAPSHOT_DIR", tmp_path)
     monkeypatch.setenv("DENG_REJOIN_SNAPSHOT_USE_SU", "0")

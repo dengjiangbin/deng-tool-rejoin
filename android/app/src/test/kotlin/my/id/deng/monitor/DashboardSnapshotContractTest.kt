@@ -102,14 +102,19 @@ class DashboardSnapshotContractTest {
     }
 
     @Test
-    fun `dashboard counts dead as total minus online (TTL-based, snapshot-independent)`() {
+    fun `dashboard headline cards show PACKAGE counts, not device counts (v1_0_8)`() {
         val src = dashboard()
-        assertTrue(src.contains("val online = devices.count { it.isConnected }"))
-        assertTrue(src.contains("val dead = total - online"))
-        // Snapshot result must NOT be used to compute dead/online counts.
+        // Headline TOTAL/ONLINE/DEAD come from the backend package summary.
+        assertTrue("TOTAL card uses package total", src.contains("CompactStat(\"TOTAL\", pkgTotal.toString()"))
+        assertTrue("ONLINE card uses package online", src.contains("CompactStat(\"ONLINE\", pkgOnline.toString()"))
+        assertTrue("DEAD card uses package dead", src.contains("CompactStat(\"DEAD\", pkgDead.toString()"))
+        assertTrue("package counts read from summary", src.contains("packageSummary.total"))
+        // Device count is still shown, but only as a secondary line.
+        assertTrue("device count is secondary", src.contains("\"Devices\""))
+        // Snapshot result must NOT be used to compute package counts.
         assertFalse(
-            "snapshot failure must never affect device counts",
-            src.contains("snapshotLastResult ==") && src.contains("dead ="),
+            "snapshot failure must never affect package counts",
+            src.contains("snapshotLastResult ==") && src.contains("pkgDead ="),
         )
     }
 

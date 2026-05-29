@@ -119,7 +119,14 @@ class MonitorApi(
         auth: Boolean,
     ): T {
         val raw = execRaw(path, method, body, auth)
-        return json.decodeFromString<T>(raw)
+        return try {
+            json.decodeFromString<T>(raw)
+        } catch (e: kotlinx.serialization.SerializationException) {
+            // The HTTP call succeeded but the body didn't match our model.
+            // Surface a specific, non-"can't reach backend" error so the user
+            // sees Retry + an honest reason instead of a fake network failure.
+            throw ApiException(0, "Unexpected response from server. Please update the app or try again.")
+        }
     }
 
     private suspend fun execRaw(
@@ -182,6 +189,15 @@ class ApiException(
  * (which left users with no idea what to do) into actionable copy such as
  * "Cannot reach tool.deng.my.id — check your internet/DNS and try again."
  */
+/** Fish It + monitor API errors with auth-specific copy (not generic network). */
+fun fishFriendlyError(e: Throwable, host: String): String = when (e) {
+    is ApiException -> when (e.statusCode) {
+        401 -> "Sign in with Discord to view your Fish It stats."
+        else -> e.safeMessage
+    }
+    else -> friendlyNetworkError(e, host)
+}
+
 fun friendlyNetworkError(e: Throwable, host: String): String = when (e) {
     is ApiException -> e.safeMessage
     is UnknownHostException ->

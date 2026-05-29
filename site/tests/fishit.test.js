@@ -42,12 +42,12 @@ class Q {
 }
 const mockSupabase = { from(table) { return new Q(table); } };
 
-// ── Fake Fish It DB ──────────────────────────────────────────────────────────
+// ── Fake Fish It DB (standardized v1.0.8 shapes) ─────────────────────────────
 const OWNER = '915851106280681492';
-const fishCards = [
-  { name: 'King Crab', rarity: 'secret', amount: 1314, image: 'https://cdn/king.png', max_weight: 192306, mutation: 'Albino', last_caught: '2026-05-29T03:46:12Z', fallback: 'secret' },
-  { name: 'Iridesca', rarity: 'forgotten', amount: 12, image: null, max_weight: 50000, mutation: null, last_caught: '2026-05-20T01:00:00Z', fallback: 'forgotten' },
-  { name: 'Frostbite Leviathan', rarity: 'forgotten', amount: 357, image: 'https://cdn/frost.png', max_weight: 900000, mutation: 'Corrupt', last_caught: '2026-05-28T10:00:00Z', fallback: 'forgotten' },
+const fishItems = [
+  { speciesKey: 'king-crab', name: 'King Crab', rarity: 'Secret', count: 1314, imageUrl: 'https://cdn/king.png', maxWeight: '192.3K', maxWeightGrams: 192306, mutation: 'Albino', latestCaughtAt: '2026-05-29T03:46:12Z', fallback: 'secret' },
+  { speciesKey: 'iridesca', name: 'Iridesca', rarity: 'Forgotten', count: 12, imageUrl: null, maxWeight: '50K', maxWeightGrams: 50000, mutation: null, latestCaughtAt: '2026-05-20T01:00:00Z', fallback: 'forgotten' },
+  { speciesKey: 'frostbite-leviathan', name: 'Frostbite Leviathan', rarity: 'Forgotten', count: 357, imageUrl: 'https://cdn/frost.png', maxWeight: '900K', maxWeightGrams: 900000, mutation: 'Corrupt', latestCaughtAt: '2026-05-28T10:00:00Z', fallback: 'forgotten' },
 ];
 
 const fakeState = { available: true };
@@ -61,6 +61,11 @@ const fakeFishit = {
     thunderzilla: 88, sea_eater: 43, maxton: 82,
     top_forgotten: [{ name: 'Frostbite Leviathan', count: 357 }],
     rods: { ghostfinn: 79, element: 96, diamond: 91, total: 266, participants: 22 },
+    rod_cards: [
+      { key: 'ghostfinn', label: 'Ghostfinn Rod', count: 79, amount: 79, imageUrl: 'https://cdn.discordapp.com/emojis/1.png', fallback: 'rod' },
+      { key: 'element', label: 'Element Rod', count: 96, amount: 96, imageUrl: 'https://cdn.discordapp.com/emojis/2.png', fallback: 'rod' },
+      { key: 'diamond', label: 'Diamond Rod', count: 91, amount: 91, imageUrl: 'https://cdn.discordapp.com/emojis/3.png', fallback: 'rod' },
+    ],
   } : { available: false },
   getForgottenSpecies: () => [{ name: 'Thunderzilla', emoji: '<:t:1>', imageUrl: null, maxtonWeight: 1100000 }],
   getUserProfile: (id) => id === OWNER ? {
@@ -69,26 +74,36 @@ const fakeFishit = {
     rank: { rank: 6, of: 87 }, rods: { ghostfinn: 0, element: 1, diamond: 0, total: 1 },
   } : { has_data: false },
   getUserStats: (id) => id === OWNER ? {
-    has_data: true, discord_user_id: OWNER, username: 'neptune_75', total_fish: 3061,
+    hasData: true, discordUserId: OWNER, username: 'neptune_75', totalFish: 3061,
     rank: { rank: 6, of: 87 },
-    rarity_cards: [
-      { key: 'secret', label: 'Secret', amount: 3061, image: 'https://cdn/king.png', fallback: 'secret' },
-      { key: 'forgotten', label: 'Forgotten', amount: 0, image: null, fallback: 'forgotten' },
+    summaryCards: [
+      { key: 'total', label: 'Total Fish', amount: 3061, imageUrl: null, fallback: 'fish' },
+      { key: 'secret', label: 'Secret', amount: 3061, imageUrl: 'https://cdn/king.png', fallback: 'secret' },
+      { key: 'forgotten', label: 'Forgotten', amount: 12, imageUrl: 'https://cdn/frost.png', fallback: 'forgotten' },
     ],
-    rod_cards: [
-      { key: 'ghostfinn', label: 'Ghostfinn Rod', amount: 0, image: null, fallback: 'rod' },
-      { key: 'element', label: 'Element Rod', amount: 1, image: null, fallback: 'rod' },
-      { key: 'diamond', label: 'Diamond Rod', amount: 0, image: null, fallback: 'rod' },
+    rarityCards: [
+      { key: 'secret', label: 'Secret', amount: 3061, imageUrl: 'https://cdn/king.png', fallback: 'secret' },
+      { key: 'forgotten', label: 'Forgotten', amount: 12, imageUrl: 'https://cdn/frost.png', fallback: 'forgotten' },
     ],
-  } : { has_data: false },
+    rodCards: [
+      { key: 'ghostfinn', label: 'Ghostfinn Rod', count: 0, amount: 0, imageUrl: 'https://cdn.discordapp.com/emojis/1.png', fallback: 'rod' },
+      { key: 'element', label: 'Element Rod', count: 1, amount: 1, imageUrl: 'https://cdn.discordapp.com/emojis/2.png', fallback: 'rod' },
+      { key: 'diamond', label: 'Diamond Rod', count: 0, amount: 0, imageUrl: 'https://cdn.discordapp.com/emojis/3.png', fallback: 'rod' },
+    ],
+  } : { hasData: false },
   getUserFish: (id) => id === OWNER
-    ? { has_data: true, total_species: fishCards.length, fish: fishCards.map((c) => ({ ...c })) }
-    : { has_data: false, fish: [] },
+    ? { hasData: true, totalSpecies: fishItems.length, items: fishItems.map((c) => ({ ...c })) }
+    : { hasData: false, items: [] },
   getUserDaily: (id, period) => id === OWNER ? {
-    has_data: period === 'all', period, period_label: period, total: period === 'all' ? 3061 : 0,
-    secret: period === 'all' ? 3061 : 0, forgotten: 0, best_catch: null,
-    secret_breakdown: [], forgotten_breakdown: [], last_updated: '2026-05-29T05:00:23.098Z',
-  } : { has_data: false, period, total: 0, secret: 0, forgotten: 0, last_updated: null },
+    hasData: period === 'all', period, periodLabel: period, timezone: 'Asia/Jakarta',
+    summary: { totalFish: period === 'all' ? 3061 : 0, secretFish: period === 'all' ? 2 : 0, forgottenFish: period === 'all' ? 1 : 0 },
+    cards: period === 'all' ? [
+      { speciesKey: 'frostborn-shark', name: 'Frostborn Shark', rarity: 'Secret', count: 9, imageUrl: 'https://cdn/frostborn.png', maxWeight: '165.9K', latestCaughtAt: '2026-05-29T01:00:00Z', fallback: 'secret' },
+      { speciesKey: 'king-crab', name: 'King Crab', rarity: 'Secret', count: 4, imageUrl: 'https://cdn/king.png', maxWeight: '192.3K', latestCaughtAt: '2026-05-29T02:00:00Z', fallback: 'secret' },
+      { speciesKey: 'thunderzilla', name: 'Thunderzilla', rarity: 'Forgotten', count: 3, imageUrl: 'https://cdn/thunder.png', maxWeight: '1.1M', latestCaughtAt: '2026-05-29T03:00:00Z', fallback: 'forgotten' },
+    ] : [],
+    lastUpdated: '2026-05-29T05:00:23.098Z',
+  } : { hasData: false, period, periodLabel: period, timezone: 'Asia/Jakarta', summary: { totalFish: 0, secretFish: 0, forgottenFish: 0 }, cards: [], lastUpdated: null },
   _resetCache: () => {},
 };
 
@@ -194,12 +209,32 @@ describe('Fish It daily filter', () => {
     assert.equal(res.body.period, 'today');
   });
 
-  test('all-time period returns data', async () => {
+  test('all-time period returns per-species cards (Secret + Forgotten), no bestCatch', async () => {
     const token = seedAppSession(OWNER);
     const res = await request(app).get('/api/fishit/me/daily?period=all').set('Authorization', `Bearer ${token}`);
     assert.equal(res.body.period, 'all');
-    assert.equal(res.body.has_data, true);
-    assert.equal(res.body.total, 3061);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.hasData, true);
+    assert.equal(res.body.summary.totalFish, 3061);
+    // Per-species cards present.
+    assert.ok(Array.isArray(res.body.cards) && res.body.cards.length === 3);
+    const secretCard = res.body.cards.find((c) => c.rarity === 'Secret');
+    const forgottenCard = res.body.cards.find((c) => c.rarity === 'Forgotten');
+    assert.ok(secretCard && secretCard.imageUrl && secretCard.name && secretCard.count > 0, 'secret card has image/name/count');
+    assert.ok(forgottenCard && forgottenCard.imageUrl && forgottenCard.name && forgottenCard.count > 0, 'forgotten card has image/name/count');
+    // Best Catch must be gone.
+    assert.equal(res.body.best_catch, undefined);
+    assert.equal(res.body.bestCatch, undefined);
+    // Each card carries a fallback URL for clients.
+    assert.ok(res.body.cards.every((c) => typeof c.fallbackUrl === 'string'));
+  });
+
+  test('empty period returns emptyMessage and no cards', async () => {
+    const token = seedAppSession(OWNER);
+    const res = await request(app).get('/api/fishit/me/daily?period=today').set('Authorization', `Bearer ${token}`);
+    assert.equal(res.body.hasData, false);
+    assert.deepEqual(res.body.cards, []);
+    assert.equal(typeof res.body.emptyMessage, 'string');
   });
 
   test('invalid period falls back to today', async () => {
@@ -210,55 +245,59 @@ describe('Fish It daily filter', () => {
 });
 
 describe('Fish It stats cards', () => {
-  test('returns rarity + rod cards with fallback URLs', async () => {
+  test('returns rarity + rod cards with real images + fallback URLs', async () => {
     const token = seedAppSession(OWNER);
     const res = await request(app).get('/api/fishit/me/stats').set('Authorization', `Bearer ${token}`);
     assert.equal(res.status, 200);
-    assert.equal(res.body.rarity_cards.length, 2);
-    assert.equal(res.body.rod_cards.length, 3);
-    // Rod cards have no DB image -> must carry a fallback URL.
-    assert.ok(res.body.rod_cards.every((c) => typeof c.fallback_url === 'string'));
-    assert.ok(res.body.rarity_cards.every((c) => typeof c.fallback_url === 'string'));
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.rarityCards.length, 2);
+    assert.equal(res.body.rodCards.length, 3);
+    // Rod cards must carry a REAL image URL (from the channel-derived config).
+    assert.ok(res.body.rodCards.every((c) => typeof c.imageUrl === 'string' && c.imageUrl.startsWith('http')));
+    assert.ok(res.body.rodCards.every((c) => typeof c.fallbackUrl === 'string'));
+    assert.ok(res.body.rarityCards.every((c) => typeof c.fallbackUrl === 'string'));
   });
 });
 
 describe('Fish It fish grid (server-side filter/sort/paginate)', () => {
-  test('returns all cards by default sorted by amount', async () => {
+  test('returns all items by default sorted by count', async () => {
     const token = seedAppSession(OWNER);
     const res = await request(app).get('/api/fishit/me/fish').set('Authorization', `Bearer ${token}`);
     assert.equal(res.status, 200);
     assert.equal(res.body.total, 3);
-    assert.equal(res.body.fish[0].name, 'King Crab'); // highest amount
+    assert.equal(res.body.items[0].name, 'King Crab'); // highest count
+    // maxWeight is a string (never a raw float — that's what crashed the app).
+    assert.equal(typeof res.body.items[0].maxWeight, 'string');
     // Missing image must still carry a fallback URL (no crash).
-    const iridesca = res.body.fish.find((f) => f.name === 'Iridesca');
-    assert.equal(iridesca.image, null);
-    assert.ok(typeof iridesca.fallback_url === 'string');
+    const iridesca = res.body.items.find((f) => f.name === 'Iridesca');
+    assert.equal(iridesca.imageUrl, null);
+    assert.ok(typeof iridesca.fallbackUrl === 'string');
   });
 
   test('search filters by name', async () => {
     const token = seedAppSession(OWNER);
     const res = await request(app).get('/api/fishit/me/fish?search=frost').set('Authorization', `Bearer ${token}`);
     assert.equal(res.body.total, 1);
-    assert.equal(res.body.fish[0].name, 'Frostbite Leviathan');
+    assert.equal(res.body.items[0].name, 'Frostbite Leviathan');
   });
 
   test('rarity filter works', async () => {
     const token = seedAppSession(OWNER);
     const res = await request(app).get('/api/fishit/me/fish?rarity=forgotten').set('Authorization', `Bearer ${token}`);
     assert.equal(res.body.total, 2);
-    assert.ok(res.body.fish.every((f) => f.rarity === 'forgotten'));
+    assert.ok(res.body.items.every((f) => f.rarity.toLowerCase() === 'forgotten'));
   });
 
   test('sort by name works', async () => {
     const token = seedAppSession(OWNER);
     const res = await request(app).get('/api/fishit/me/fish?sort=name').set('Authorization', `Bearer ${token}`);
-    assert.equal(res.body.fish[0].name, 'Frostbite Leviathan');
+    assert.equal(res.body.items[0].name, 'Frostbite Leviathan');
   });
 
   test('pagination limits results', async () => {
     const token = seedAppSession(OWNER);
     const res = await request(app).get('/api/fishit/me/fish?limit=1&page=2').set('Authorization', `Bearer ${token}`);
-    assert.equal(res.body.fish.length, 1);
+    assert.equal(res.body.items.length, 1);
     assert.equal(res.body.page, 2);
     assert.equal(res.body.pages, 3);
   });

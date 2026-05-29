@@ -395,6 +395,56 @@ def capture_snapshot_detailed() -> SnapshotCapture:
     return cap
 
 
+def _provider_command_str(kind: str, stdout_cmd: list[str] | None, root_cmd: str | None) -> str:
+    if kind == "stdout":
+        return " ".join(stdout_cmd or [])
+    return f"su -c '{root_cmd}'  (then read back {ROOT_TMP_PATH})"
+
+
+def snapshot_test_report() -> dict[str, Any]:
+    """Run EVERY provider rung (not just until first success) and return a
+    full per-provider diagnostic report.
+
+    Used by ``deng-rejoin monitor snapshot-test``. Never raises.
+    """
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    su_avail = _su_available()
+    rows: list[dict[str, Any]] = []
+    chosen: str | None = None
+    chosen_bytes = 0
+    for kind, provider, stdout_cmd, root_cmd in _build_providers():
+        cmd_str = _provider_command_str(kind, stdout_cmd, root_cmd)
+        if kind == "stdout":
+            png, attempt = _capture_via_stdout(provider, stdout_cmd or [])
+        else:
+            png, attempt = _capture_via_root_file(provider, root_cmd or "")
+        suspicious = bool(png is not None and len(png) < SUSPICIOUS_MIN_BYTES)
+        rows.append({
+            "provider": provider,
+            "command": cmd_str,
+            "exit_code": attempt.exit_code,
+            "timeout_seconds": ATTEMPT_TIMEOUT,
+            "timed_out": bool(attempt.timeout),
+            "found": bool(attempt.found),
+            "stderr": attempt.stderr,
+            "byte_length": int(attempt.byte_length or 0),
+            "png_valid": bool(attempt.png_valid),
+            "suspicious_small": suspicious,
+            "note": attempt.note,
+        })
+        if png is not None and chosen is None:
+            chosen = provider
+            chosen_bytes = len(png)
+    return {
+        "su_available": bool(su_avail),
+        "root_disabled": bool(_root_disabled()),
+        "providers": rows,
+        "selected_provider": chosen,
+        "selected_bytes": int(chosen_bytes),
+        "final_result": RESULT_SUCCESS if chosen else RESULT_UNKNOWN,
+    }
+
+
 def capture_snapshot() -> tuple[Path | None, str]:
     """Backward-compatible wrapper used by the webhook path and tests.
 
@@ -432,5 +482,6 @@ __all__ = [
     "RESULT_UNKNOWN",
     "capture_snapshot",
     "capture_snapshot_detailed",
+    "snapshot_test_report",
     "cleanup_old_snapshots",
 ]

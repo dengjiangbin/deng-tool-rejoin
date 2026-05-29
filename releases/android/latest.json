@@ -1,20 +1,19 @@
 {
   "app_name": "DENG Tool: Rejoin APK",
-  "version_name": "1.0.7",
-  "version_code": 8,
-  "file_name": "deng-tool-rejoin-apk-v1.0.7.apk",
-  "sha256": "55fd46b1bc51a6e33bf4da2f5a557096c75a1283938fa22b40f29179014ad7d0",
+  "version_name": "1.0.8",
+  "version_code": 9,
+  "file_name": "deng-tool-rejoin-apk-v1.0.8.apk",
+  "sha256": "6609c985addbd7dd7a9f51c78e660dd3bda15a302e5766a5cd20de0df43cf728",
   "size_bytes": 2077157,
   "released_at": "2026-05-29",
   "min_sdk": 26,
   "purpose": "Monitoring companion app for DENG Tool: Rejoin",
   "changelog": [
-    "Fish It stats are now in the app: a new Fish It tab with Daily, Stats, and Fish cards — all linked to your Discord identity (the same pairing session already authenticates you, no extra login). Stats are read live from the Fish It bot database; nothing is faked.",
-    "Daily tab: filter by Today / Yesterday / 7 Days / 30 Days / All Time with total, secret, forgotten counts, best catch, and a per-species breakdown. Shows a clean empty state when there are no catches for a period.",
-    "Stats tab: total fish caught + rank, rarity cards (Secret / Forgotten with real caught-fish images) and rod cards (Ghostfinn / Element / Diamond). Rod images aren't stored by the bot, so those cards use a themed fallback icon rather than inventing one.",
-    "Fish tab: responsive fish card grid using real fish images from the database (Coil, lazy-loaded with a fallback box on missing/error), with server-side search, rarity filter, sort (most caught / value / name / rarity / recent), and Load more pagination.",
-    "Light / Dark theme: new Appearance settings with System / Light / Dark, persisted locally and following the system theme by default. The whole app recolors instantly (dashboard, snapshot, packages, settings, Fish It).",
-    "Hide Username privacy toggle in Settings: masks your Discord name everywhere in the UI (e.g. dengjiangbin -> d**********n). It's display-only and never changes your account, identity, or stats matching.",
-    "API errors across Fish It show a clear reason + Retry instead of an endless spinner. All private stats are fetched with your authenticated session — a client can never request another user's stats."
+    "Dashboard headline cards now show PACKAGE stats (TOTAL / ONLINE / DEAD) across configured Roblox packages — not device count. Example: 1 cloud phone with 8 dead packages shows TOTAL 8 / ONLINE 0 / DEAD 8.",
+    "Snapshot: full screencap provider ladder with auto root escalation, richer bridge diagnostics, and deng-rejoin monitor snapshot-test [--upload-probe] for live capture proof.",
+    "Fish It Daily: one card per fish species caught in the selected period (image + name + rarity + count). Best Catch removed.",
+    "Fish It Stats: Secret/Forgotten cards use real fish images from the bot DB/leaderboard resolver; rod cards use real Ghostfinn/Element/Diamond images from channel 1483265484215287909.",
+    "Fish It Fish tab: fixed API model mismatch and clearer auth errors (Sign in with Discord) instead of generic cannot-reach-backend.",
+    "Light/Dark theme and Hide Username unchanged."
   ]
 }

@@ -1,0 +1,23 @@
+{
+  "source": {
+    "channel_id": "1483265484215287909",
+    "note": "Rod custom emoji from DENG Fish It bot BRANDING_EMOJI_IDS (same artwork used in kaitun/rod announcements on channel 1483265484215287909)."
+  },
+  "rods": {
+    "ghostfinn": {
+      "label": "Ghostfinn Rod",
+      "emoji_id": "1488070188061556848",
+      "imageUrl": "https://cdn.discordapp.com/emojis/1488070188061556848.png"
+    },
+    "element": {
+      "label": "Element Rod",
+      "emoji_id": "1488070247482130532",
+      "imageUrl": "https://cdn.discordapp.com/emojis/1488070247482130532.png"
+    },
+    "diamond": {
+      "label": "Diamond Rod",
+      "emoji_id": "1488070280990687252",
+      "imageUrl": "https://cdn.discordapp.com/emojis/1488070280990687252.png"
+    }
+  }
+}

@@ -79,30 +79,35 @@
     });
   });
 
+  function dailyCardHtml(c) {
+    var meta = [];
+    if (c.maxWeight) meta.push('Wt ' + esc(c.maxWeight));
+    return '<article class="fish-card" tabindex="0">' +
+      '<div class="fish-card-img">' + imgTag(c.imageUrl, c.fallbackUrl, c.name) + badge(c.rarity) + '</div>' +
+      '<div class="fish-card-body"><span class="fish-card-name">' + esc(c.name) + '</span>' +
+      '<div class="fish-card-stats"><span class="fish-card-amount">x' + fmt(c.count) + '</span>' +
+      (meta.length ? '<span class="fish-card-meta">' + meta.join(' · ') + '</span>' : '') + '</div></div></article>';
+  }
   function loadDaily(period) {
+    dailyBody.innerHTML = '<div class="fishit-skeleton-grid"><div class="skeleton-fish"></div><div class="skeleton-fish"></div><div class="skeleton-fish"></div></div>';
     api('/api/fishit/me/daily?period=' + encodeURIComponent(period))
       .then(function (d) {
-        if (!d.has_data) {
-          dailyBody.innerHTML = emptyHtml('No catches found for this period.');
-          return;
-        }
+        var summary = d.summary || { totalFish: 0, secretFish: 0, forgottenFish: 0 };
         var cards = [
-          { label: 'Total Caught', value: d.total },
-          { label: 'Secret', value: d.secret },
-          { label: 'Forgotten', value: d.forgotten },
+          { label: 'Total Fish', value: summary.totalFish },
+          { label: 'Secret', value: summary.secretFish },
+          { label: 'Forgotten', value: summary.forgottenFish },
         ];
         var html = '<div class="stat-card-row">' + cards.map(function (c) {
           return '<article class="stat-card"><span class="stat-card-label">' + esc(c.label) +
             '</span><strong class="stat-card-value">' + fmt(c.value) + '</strong></article>';
         }).join('') + '</div>';
-        if (d.best_catch) {
-          html += '<article class="best-catch-card">' +
-            '<div class="best-catch-img">' + imgTag(d.best_catch.thumbnail, '/public/img/fishit/fallback-secret.svg', d.best_catch.name) + '</div>' +
-            '<div class="best-catch-meta"><span class="best-catch-kicker">Best Catch</span>' +
-            '<strong>' + esc(d.best_catch.name) + '</strong>' +
-            '<span class="best-catch-sub">' + fmt(d.best_catch.weight) + (d.best_catch.mutation ? ' · ' + esc(d.best_catch.mutation) : '') + '</span></div></article>';
+        if (!d.cards || !d.cards.length) {
+          html += emptyHtml(d.emptyMessage || 'No catches found for this period.');
+        } else {
+          html += '<div class="fishit-card-grid">' + d.cards.map(dailyCardHtml).join('') + '</div>';
         }
-        if (d.last_updated) html += '<p class="fishit-updated">Updated ' + esc(relTime(d.last_updated)) + '</p>';
+        if (d.lastUpdated) html += '<p class="fishit-updated">Updated ' + esc(relTime(d.lastUpdated)) + '</p>';
         dailyBody.innerHTML = html;
       })
       .catch(function (e) { dailyBody.innerHTML = e.code === 401 ? emptyHtml('Sign in with Discord to view your Fish It stats.') : errorHtml('daily'); });
@@ -111,22 +116,23 @@
   // ── Stats ─────────────────────────────────────────────────────────────────
   var statsBody = root.querySelector('[data-stats-body]');
   function statCard(card) {
-    var img = imgTag(card.image, card.fallback_url, card.label);
+    var img = imgTag(card.imageUrl, card.fallbackUrl, card.label);
     return '<article class="fishit-stat-card">' +
       '<div class="fishit-stat-img">' + img + '</div>' +
       '<span class="fishit-stat-label">' + esc(card.label) + '</span>' +
-      '<strong class="fishit-stat-amount">' + fmt(card.amount) + '</strong></article>';
+      '<strong class="fishit-stat-amount">' + fmt(card.amount != null ? card.amount : card.count) + '</strong></article>';
   }
   function loadStats() {
+    statsBody.innerHTML = '<div class="fishit-skeleton-grid"><div class="skeleton-fish"></div><div class="skeleton-fish"></div></div>';
     api('/api/fishit/me/stats')
       .then(function (s) {
         loaded.stats = true;
-        if (!s.has_data) { statsBody.innerHTML = emptyHtml('You do not have Fish It stats yet.'); return; }
+        if (!s.hasData) { statsBody.innerHTML = emptyHtml('You do not have Fish It stats yet.'); return; }
         var html = '<div class="stat-card-row"><article class="stat-card highlight"><span class="stat-card-label">Total Fish Caught</span>' +
-          '<strong class="stat-card-value">' + fmt(s.total_fish) + '</strong>' +
+          '<strong class="stat-card-value">' + fmt(s.totalFish) + '</strong>' +
           (s.rank ? '<span class="stat-card-sub">Rank #' + s.rank.rank + ' of ' + s.rank.of + '</span>' : '') + '</article></div>';
-        html += '<h2 class="fishit-section-title">Rarity</h2><div class="fishit-card-grid">' + s.rarity_cards.map(statCard).join('') + '</div>';
-        html += '<h2 class="fishit-section-title">Rods</h2><div class="fishit-card-grid">' + s.rod_cards.map(statCard).join('') + '</div>';
+        html += '<h2 class="fishit-section-title">Rarity</h2><div class="fishit-card-grid">' + (s.rarityCards || []).map(statCard).join('') + '</div>';
+        html += '<h2 class="fishit-section-title">Rods</h2><div class="fishit-card-grid">' + (s.rodCards || []).map(statCard).join('') + '</div>';
         statsBody.innerHTML = html;
         remask();
       })
@@ -150,12 +156,12 @@
   }
   function fishCard(f) {
     var meta = [];
-    if (f.max_weight) meta.push('Wt ' + fmt(f.max_weight));
+    if (f.maxWeight) meta.push('Wt ' + esc(f.maxWeight));
     if (f.mutation) meta.push(esc(f.mutation));
     return '<article class="fish-card" tabindex="0">' +
-      '<div class="fish-card-img">' + imgTag(f.image, f.fallback_url, f.name) + badge(f.rarity) + '</div>' +
+      '<div class="fish-card-img">' + imgTag(f.imageUrl, f.fallbackUrl, f.name) + badge(f.rarity) + '</div>' +
       '<div class="fish-card-body"><span class="fish-card-name">' + esc(f.name) + '</span>' +
-      '<div class="fish-card-stats"><span class="fish-card-amount">x' + fmt(f.amount) + '</span>' +
+      '<div class="fish-card-stats"><span class="fish-card-amount">x' + fmt(f.count) + '</span>' +
       (meta.length ? '<span class="fish-card-meta">' + meta.join(' · ') + '</span>' : '') + '</div></div></article>';
   }
   function fishQuery() {
@@ -174,10 +180,12 @@
         loaded.fish = true;
         fishPages = res.pages || 1;
         if (reset) grid.innerHTML = '';
-        if (!res.fish || !res.fish.length) {
+        var items = res.items || res.fish || [];
+        if (!items.length) {
           if (reset) grid.innerHTML = emptyHtml(searchEl.value || rarityEl.value ? 'No fish match your filters.' : 'You do not have any tracked fish yet.');
         } else {
-          grid.insertAdjacentHTML('beforeend', res.fish.map(fishCard).join(''));
+          grid.insertAdjacentHTML('beforeend', items.map(fishCard).join(''));
+          remask();
         }
         moreWrap.hidden = fishPage >= fishPages;
       })

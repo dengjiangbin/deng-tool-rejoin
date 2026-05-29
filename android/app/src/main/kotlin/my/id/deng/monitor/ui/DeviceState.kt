@@ -118,7 +118,11 @@ const val DASHBOARD_POLL_SECONDS = 5
 
 sealed interface DeviceListFetchState {
     data object Loading : DeviceListFetchState
-    data class Ready(val devices: List<DeviceSummary>, val fetchedAtMillis: Long) : DeviceListFetchState
+    data class Ready(
+        val devices: List<DeviceSummary>,
+        val packageSummary: my.id.deng.monitor.data.DashboardPackageSummary,
+        val fetchedAtMillis: Long,
+    ) : DeviceListFetchState
     data class Error(val message: String) : DeviceListFetchState
 }
 
@@ -149,8 +153,8 @@ fun rememberDeviceListHandle(
         val interval = pollSeconds.coerceIn(2, 60)
         while (true) {
             try {
-                val devices = api.listDevices().devices
-                state.value = DeviceListFetchState.Ready(devices, System.currentTimeMillis())
+                val resp = api.listDevices()
+                state.value = DeviceListFetchState.Ready(resp.devices, resp.packageSummary, System.currentTimeMillis())
             } catch (ce: CancellationException) {
                 throw ce
             } catch (e: Throwable) {

@@ -1,5 +1,6 @@
 package my.id.deng.monitor
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -54,6 +55,19 @@ class FishItContractTest {
     }
 
     // ── API ──────────────────────────────────────────────────────────────────
+    @Test fun `FishItScreen uses fishFriendlyError for auth-aware API errors`() {
+        val s = read("$src/ui/FishItScreen.kt")
+        assertTrue("must use fishFriendlyError", s.contains("fishFriendlyError"))
+        val api = read("$src/data/MonitorApi.kt")
+        assertTrue("401 maps to Discord sign-in copy", api.contains("Sign in with Discord to view your Fish It stats."))
+    }
+
+    @Test fun `FishGrid model parses items not legacy fish array`() {
+        val models = read("$src/data/Models.kt")
+        assertTrue(models.contains("val items: List<FishCard>"))
+        assertFalse("legacy fish field must be gone", models.contains("val fish: List<FishCard>"))
+    }
+
     @Test fun `MonitorApi exposes authenticated Fish It endpoints`() {
         val api = read("$src/data/MonitorApi.kt")
         listOf(

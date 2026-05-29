@@ -185,6 +185,42 @@ function summarizePackages(rows) {
   return out;
 }
 
+// v1.0.8: dashboard package summary. The dashboard's headline cards are
+// PACKAGE counts (not device counts) — TOTAL configured packages, ONLINE
+// (running/healthy) and DEAD (everything else: dead/launching/joining/no
+// heartbeat/stale). Matches the user's spec exactly: 8 configured + all dead
+// → TOTAL 8 / ONLINE 0 / DEAD 8; 8 with 3 online → TOTAL 8 / ONLINE 3 / DEAD 5.
+// A snapshot failure never affects these counts (packages are tracked
+// independently of the snapshot pipeline).
+function aggregatePackageSummary(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  let online = 0;
+  let totalRam = 0;
+  let launching = 0;
+  let joining = 0;
+  let noHeartbeat = 0;
+  for (const r of list) {
+    totalRam += Number(r.ram_mb) || 0;
+    switch (r.state) {
+      case 'Online': online += 1; break;
+      case 'Launching': case 'Relaunching': launching += 1; break;
+      case 'Joining': joining += 1; break;
+      case 'No Heartbeat': noHeartbeat += 1; break;
+      default: break; // Dead / Unknown / stale all roll into "dead" below
+    }
+  }
+  const total = list.length;
+  return {
+    total,
+    online,
+    dead: total - online, // everything not actively Online counts as dead
+    launching,
+    joining,
+    no_heartbeat: noHeartbeat,
+    total_ram_mb: totalRam,
+  };
+}
+
 // v1.0.4: how stale `last_seen_at` may get before we tell the APK the
 // device is Disconnected. Termux pushes every ~2s, so 30s = 15 missed
 // pushes — long enough to ride out a flaky cell connection, short
@@ -593,7 +629,35 @@ router.get('/api/monitor/devices', requireAppAuth, async (req, res) => {
         snapshot_last_result: bs ? (bs.snapshot_last_result || null) : null,
       };
     });
-    return res.json({ devices: enriched });
+
+    // v1.0.8: aggregate PACKAGE stats across all owned devices so the
+    // dashboard's TOTAL / ONLINE / DEAD cards reflect configured packages,
+    // not the number of devices. Per-device package_summary is also attached.
+    const deviceIds = enriched.map((d) => d.id);
+    let pkgRows = [];
+    if (deviceIds.length) {
+      try {
+        const { data: prows, error: perr } = await supabase
+          .from('monitor_package_states')
+          .select('monitor_device_id, package_name, state, ram_mb')
+          .in('monitor_device_id', deviceIds);
+        if (perr) throw perr;
+        pkgRows = prows || [];
+      } catch (perr) {
+        console.warn('[monitor] package states query failed', perr?.message || perr);
+        pkgRows = [];
+      }
+    }
+    const byDevice = new Map();
+    for (const r of pkgRows) {
+      const arr = byDevice.get(r.monitor_device_id) || [];
+      arr.push(r);
+      byDevice.set(r.monitor_device_id, arr);
+    }
+    enriched.forEach((d) => { d.package_summary = aggregatePackageSummary(byDevice.get(d.id) || []); });
+    const packageSummary = aggregatePackageSummary(pkgRows);
+
+    return res.json({ devices: enriched, package_summary: packageSummary });
   } catch (err) {
     console.error('[monitor] list devices failed', err?.message || err);
     return serverError(res, 'list_devices_failed');
@@ -1083,6 +1147,7 @@ module.exports.__test__ = {
   sha256,
   randomPairingCode,
   summarizePackages,
+  aggregatePackageSummary,
   safePackageRowForApp,
   normalizeLicenseKey,
   LICENSE_KEY_PATTERN,

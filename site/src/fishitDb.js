@@ -22,6 +22,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const rodAssets = require('./fishitRodAssets');
 
 // Default path resolves to the sibling "DENG Fish It" project on this host.
 // site/src/fishitDb.js -> ../../.. = Desktop -> DENG Fish It\data\...
@@ -91,6 +92,8 @@ function _resetCache() {
   _blobCache.clear();
   _db = null;
   _dbTriedAt = 0;
+  _imgIndex = null;
+  _imgIndexAt = 0;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -122,7 +125,151 @@ function inWindow(iso, win) {
 
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
 
-function rodImageless(name, count) { return { name, count: num(count) }; }
+// ── Image resolution (mirrors the bot's !lb / !leaderboard resolver) ─────────
+// Bot order: local PNG → fish_catalog_seen → forgotten_fish.imageUrl → every
+// user's fishThumbnails. We can't read the bot's local PNG cache, but we read
+// the same DB-backed sources (catalog table + all-user thumbnails + forgotten
+// emoji) so Secret/Forgotten cards get real images, never a generic icon when
+// a real one exists.
+
+const DENG_LOGO_HINTS = [/deng[-_]hub/i, /qZ1thB4/i];
+
+function isValidImg(url) {
+  const u = String(url || '').trim();
+  if (!/^https?:\/\//i.test(u)) return false;
+  if (DENG_LOGO_HINTS.some((re) => re.test(u))) return false;
+  return true;
+}
+
+function normKey(name) {
+  return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/** URL-safe species slug, e.g. "Strawberry Shenanigans" → "strawberry-shenanigans". */
+function speciesKey(name) {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'unknown';
+}
+
+/** Compact weight string, e.g. 1_100_000 → "1.1M". Null for non-positive. */
+function formatWeight(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v <= 0) return null;
+  const trim = (s) => s.replace(/\.0$/, '');
+  if (v >= 1e9) return trim((v / 1e9).toFixed(1)) + 'B';
+  if (v >= 1e6) return trim((v / 1e6).toFixed(1)) + 'M';
+  if (v >= 1e3) return trim((v / 1e3).toFixed(1)) + 'K';
+  return String(Math.round(v));
+}
+
+/** Discord custom emoji `<:name:id>` / `<a:name:id>` → CDN PNG URL, else null. */
+function emojiCdnUrl(emoji) {
+  const m = String(emoji || '').match(/^<a?:[^:>]+:(\d+)>$/);
+  return m ? `https://cdn.discordapp.com/emojis/${m[1]}.png` : null;
+}
+
+let _imgIndex = null;
+let _imgIndexAt = 0;
+
+/** Build (and cache) a normalizedName → imageUrl map from all DB-backed sources. */
+function buildImageIndex() {
+  const now = Date.now();
+  if (_imgIndex && now - _imgIndexAt < CACHE_TTL_MS) return _imgIndex;
+  const idx = new Map();
+  const put = (name, url) => {
+    if (!isValidImg(url)) return;
+    const k = normKey(name);
+    if (k && !idx.has(k)) idx.set(k, String(url).trim());
+  };
+
+  // 1. fish_catalog_seen table (PokéMeow/kolam catalog — same as bot).
+  try {
+    const db = openDb();
+    if (db) {
+      const rows = db.prepare(
+        'SELECT canonical_name, image_url FROM fish_catalog_seen WHERE image_url IS NOT NULL',
+      ).all();
+      for (const r of rows) put(r.canonical_name, r.image_url);
+    }
+  } catch (_) { /* table may not exist on old bots */ }
+
+  // 2. every user's fishThumbnails + per-catch detail thumbnails.
+  const fish = readBlob(KEY_FISH);
+  if (fish && fish.byUser) {
+    for (const u of Object.values(fish.byUser)) {
+      const ft = u.fishThumbnails;
+      if (ft && typeof ft === 'object') {
+        for (const [n, url] of Object.entries(ft)) put(n, url);
+      }
+      const det = (u.details && typeof u.details === 'object') ? u.details : {};
+      for (const arr of [det.secret, det.forgotten, det.thunder, det.sea]) {
+        for (const c of (Array.isArray(arr) ? arr : [])) {
+          if (c) put(c.name || c.fishType, c.thumbnail);
+        }
+      }
+    }
+  }
+
+  // 3. forgotten_fish catalog (explicit imageUrl, then emoji artwork).
+  const forg = readBlob(KEY_FORGOTTEN);
+  if (forg && Array.isArray(forg.fish)) {
+    for (const f of forg.fish) {
+      if (f.imageUrl) put(f.name, f.imageUrl);
+      put(f.name, emojiCdnUrl(f.emoji));
+    }
+  }
+
+  _imgIndex = idx;
+  _imgIndexAt = now;
+  return idx;
+}
+
+/**
+ * Resolve a real image URL for a species. Priority:
+ *   1. the species' own catch thumbnail (most specific), then
+ *   2. the global DB image index (catalog + all-user thumbnails + forgotten).
+ * Returns null when nothing real exists (client shows its fallback icon).
+ */
+function resolveSpeciesImage(name, perCatchThumb) {
+  if (isValidImg(perCatchThumb)) return String(perCatchThumb).trim();
+  const hit = buildImageIndex().get(normKey(name));
+  return hit || null;
+}
+
+/** First real image across a list of species names, or null. */
+function firstSpeciesImage(names) {
+  for (const n of (names || [])) {
+    const u = resolveSpeciesImage(n, null);
+    if (u) return u;
+  }
+  return null;
+}
+
+/**
+ * Forgotten total that avoids double-counting Thunderzilla / Sea Eater.
+ * forgottenFish{} is canonical; the dedicated thunderzilla/seaEater counters
+ * are only added when that species is NOT already a key in the map.
+ */
+function forgottenTotal(u) {
+  const map = (u && u.forgottenFish && typeof u.forgottenFish === 'object') ? u.forgottenFish : {};
+  let sum = Object.values(map).reduce((a, c) => a + num(c), 0);
+  if (!('Thunderzilla' in map)) sum += num(u && u.thunderzilla);
+  if (!('Sea Eater' in map)) sum += num(u && u.seaEater);
+  return sum;
+}
+
+/** Sum byDate.total for day buckets whose WIB midnight falls in the window. */
+function sumByDateTotal(byDate, win) {
+  if (!byDate || typeof byDate !== 'object') return 0;
+  let sum = 0;
+  for (const [date, agg] of Object.entries(byDate)) {
+    const t = Date.parse(`${date}T00:00:00+07:00`);
+    if (Number.isFinite(t) && t >= win.from && t < win.to) sum += num(agg && agg.total);
+  }
+  return sum;
+}
 
 // ── Public accessors ─────────────────────────────────────────────────────────
 
@@ -173,6 +320,12 @@ function getGlobal() {
       total: num(rod.totalRod),
       participants: num(rod.totalParticipants),
     } : null,
+    // Global rod cards reuse the same real-image resolver as the user stats.
+    rod_cards: rod ? [
+      buildRodCard('ghostfinn', rod.totalGhostfinn),
+      buildRodCard('element', rod.totalElement),
+      buildRodCard('diamond', rod.totalDiamond),
+    ] : [],
   };
 }
 
@@ -209,8 +362,7 @@ function getUserProfile(discordId) {
   if (!u && !rodU) return { has_data: false };
 
   const secretCount = u ? Object.values(u.secretFish || {}).reduce((a, c) => a + num(c), 0) : 0;
-  const forgottenCount = u ? Object.values(u.forgottenFish || {}).reduce((a, c) => a + num(c), 0)
-    + num(u.thunderzilla) + num(u.seaEater) : 0;
+  const forgottenCount = u ? forgottenTotal(u) : 0;
 
   return {
     has_data: true,
@@ -232,132 +384,191 @@ function getUserProfile(discordId) {
   };
 }
 
-/**
- * /api/fishit/me/stats — card-friendly groupings: rarity cards, rod cards,
- * total fish. Reuses the profile + adds a representative image per rarity.
- */
-function getUserStats(discordId) {
-  const profile = getUserProfile(discordId);
-  if (!profile.has_data) return profile;
-  const u = rawUser(discordId) || {};
-  const thumbs = (u.fishThumbnails && typeof u.fishThumbnails === 'object') ? u.fishThumbnails : {};
+function rarityRank(r) {
+  const s = String(r || '').toLowerCase();
+  if (s === 'forgotten') return 0;
+  if (s === 'secret') return 1;
+  return 2;
+}
 
-  // A representative image for each rarity card: the bot has no dedicated
-  // rarity icons, so we surface a real caught-fish thumbnail of that rarity
-  // (per the user's "use a Secret/Forgotten fish image" instruction).
-  const secretSample = Object.keys(u.secretFish || {}).map((n) => thumbs[n]).find(Boolean) || null;
-  const forgottenSample = (() => {
-    const det = (u.details && u.details.forgotten) || [];
-    const withThumb = det.find((d) => d && d.thumbnail);
-    return (withThumb && withThumb.thumbnail) || thumbs['Thunderzilla'] || null;
-  })();
-
+/** A standardized rod card with a real channel-derived image (Part 8). */
+function buildRodCard(key, count) {
   return {
-    has_data: true,
-    discord_user_id: profile.discord_user_id,
-    username: profile.username,
-    total_fish: profile.total_fish,
-    rank: profile.rank,
-    rarity_cards: [
-      { key: 'secret', label: 'Secret', amount: profile.secret_fish, image: secretSample, fallback: 'secret' },
-      { key: 'forgotten', label: 'Forgotten', amount: profile.forgotten_fish, image: forgottenSample, fallback: 'forgotten' },
-    ],
-    // Rod images are NOT stored by the bot (only counts + emoji); cards use a
-    // category fallback icon. Never invents an image URL.
-    rod_cards: [
-      { key: 'ghostfinn', label: 'Ghostfinn Rod', amount: profile.rods.ghostfinn, image: null, fallback: 'rod' },
-      { key: 'element', label: 'Element Rod', amount: profile.rods.element, image: null, fallback: 'rod' },
-      { key: 'diamond', label: 'Diamond Rod', amount: profile.rods.diamond, image: null, fallback: 'rod' },
-    ],
+    key,
+    label: rodAssets.rodLabel(key),
+    count: num(count),
+    amount: num(count), // alias for clients that read `amount`
+    imageUrl: rodAssets.rodImageUrl(key),
+    fallback: 'rod',
   };
 }
 
 /**
- * /api/fishit/me/fish — the fish card grid. One card per tracked species the
- * user has caught, with the real thumbnail, rarity, the user's count, and a
- * sample value (heaviest catch weight) when available.
+ * /api/fishit/me/stats — standardized (Part 11).
+ * summaryCards (Total/Secret/Forgotten) + rarityCards + rodCards. Rarity cards
+ * carry a real representative species image; rod cards carry the real rod image.
  */
-function getUserFish(discordId) {
-  const u = rawUser(discordId);
-  if (!u) return { has_data: false, fish: [] };
-  const thumbs = (u.fishThumbnails && typeof u.fishThumbnails === 'object') ? u.fishThumbnails : {};
+function getUserStats(discordId) {
+  const profile = getUserProfile(discordId);
+  if (!profile.has_data) return { hasData: false };
+  const u = rawUser(discordId) || {};
 
-  // Heaviest weight + latest time per species, derived from the catch details.
+  const secretImg = firstSpeciesImage(Object.keys(u.secretFish || {}));
+  const forgottenImg = firstSpeciesImage([
+    ...Object.keys(u.forgottenFish || {}),
+    'Thunderzilla',
+    'Sea Eater',
+  ]);
+
+  return {
+    hasData: true,
+    discordUserId: profile.discord_user_id,
+    username: profile.username,
+    totalFish: profile.total_fish,
+    rank: profile.rank,
+    summaryCards: [
+      { key: 'total', label: 'Total Fish', amount: profile.total_fish, imageUrl: null, fallback: 'fish' },
+      { key: 'secret', label: 'Secret', amount: profile.secret_fish, imageUrl: secretImg, fallback: 'secret' },
+      { key: 'forgotten', label: 'Forgotten', amount: profile.forgotten_fish, imageUrl: forgottenImg, fallback: 'forgotten' },
+    ],
+    rarityCards: [
+      { key: 'secret', label: 'Secret', amount: profile.secret_fish, imageUrl: secretImg, fallback: 'secret' },
+      { key: 'forgotten', label: 'Forgotten', amount: profile.forgotten_fish, imageUrl: forgottenImg, fallback: 'forgotten' },
+    ],
+    rodCards: [
+      buildRodCard('ghostfinn', profile.rods.ghostfinn),
+      buildRodCard('element', profile.rods.element),
+      buildRodCard('diamond', profile.rods.diamond),
+    ],
+  };
+}
+
+/** Per-species detail (max weight / latest time / mutation / thumb) from catch arrays. */
+function buildSpeciesDetail(u) {
   const detail = {};
-  const ingest = (arr, rarity) => {
-    for (const c of (arr || [])) {
+  const ingest = (arr) => {
+    for (const c of (Array.isArray(arr) ? arr : [])) {
       const name = c && (c.name || c.fishType);
       if (!name) continue;
-      const d = detail[name] || (detail[name] = { rarity, maxWeight: 0, lastTime: null, mutation: null });
+      const d = detail[name] || (detail[name] = { maxWeight: 0, lastTime: null, mutation: null, thumb: null });
       const w = num(c.weight);
       if (w > d.maxWeight) { d.maxWeight = w; d.mutation = c.mutation || d.mutation; }
       if (c.time && (!d.lastTime || c.time > d.lastTime)) d.lastTime = c.time;
+      if (!d.thumb && isValidImg(c.thumbnail)) d.thumb = c.thumbnail;
     }
   };
-  ingest(u.details && u.details.secret, 'secret');
-  ingest(u.details && u.details.forgotten, 'forgotten');
+  ingest(u.details && u.details.secret);
+  ingest(u.details && u.details.forgotten);
+  ingest(u.details && u.details.thunder);
+  ingest(u.details && u.details.sea);
+  return detail;
+}
 
-  const cards = [];
+/**
+ * /api/fishit/me/fish — standardized card list (Part 11). One card per tracked
+ * species (Secret + Forgotten), each with a real image, rarity, count and a
+ * compact max-weight string. Sorting/paging happens in the route.
+ */
+function getUserFish(discordId) {
+  const u = rawUser(discordId);
+  if (!u) return { hasData: false, items: [] };
+  const detail = buildSpeciesDetail(u);
+
+  const items = [];
+  const seen = new Set();
   const addCard = (name, count, rarity) => {
     if (!name) return;
+    const key = normKey(name);
+    if (seen.has(key)) return; // avoid Thunderzilla appearing twice
+    seen.add(key);
     const d = detail[name] || {};
-    cards.push({
+    items.push({
+      speciesKey: speciesKey(name),
       name,
-      rarity: d.rarity || rarity,
-      amount: num(count),
-      image: thumbs[name] || (d && d.thumbnail) || null,
-      max_weight: d.maxWeight || null,
+      rarity: rarity === 'forgotten' ? 'Forgotten' : 'Secret',
+      count: num(count),
+      imageUrl: resolveSpeciesImage(name, d.thumb),
+      maxWeight: formatWeight(d.maxWeight),
+      maxWeightGrams: d.maxWeight || 0, // numeric, for server-side value sort
       mutation: d.mutation || null,
-      last_caught: d.lastTime || null,
-      fallback: (d.rarity || rarity) === 'forgotten' ? 'forgotten' : 'secret',
+      latestCaughtAt: d.lastTime || null,
+      fallback: rarity === 'forgotten' ? 'forgotten' : 'secret',
     });
   };
   for (const [name, count] of Object.entries(u.secretFish || {})) addCard(name, count, 'secret');
   for (const [name, count] of Object.entries(u.forgottenFish || {})) addCard(name, count, 'forgotten');
+  // Thunderzilla / Sea Eater only if not already represented in forgottenFish.
+  if (!('Thunderzilla' in (u.forgottenFish || {})) && num(u.thunderzilla) > 0) addCard('Thunderzilla', u.thunderzilla, 'forgotten');
+  if (!('Sea Eater' in (u.forgottenFish || {})) && num(u.seaEater) > 0) addCard('Sea Eater', u.seaEater, 'forgotten');
 
-  cards.sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
-  return { has_data: cards.length > 0, total_species: cards.length, fish: cards };
+  items.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  return { hasData: items.length > 0, totalSpecies: items.length, items };
 }
 
 /**
- * /api/fishit/me/daily — fish caught in a period (WIB day boundaries).
+ * /api/fishit/me/daily — standardized per-species cards (Part 11). For the
+ * selected period, returns one card per Secret/Forgotten species caught (image
+ * + name + rarity + count), plus summary counts. No "best catch".
  * `period` ∈ today | yesterday | 7d | 30d | all.
  */
 function getUserDaily(discordId, period = 'today') {
   const u = rawUser(discordId);
   const fish = readBlob(KEY_FISH);
   const win = periodWindow(period);
+  const lastUpdated = (fish && fish.lastUpdated) || null;
   if (!u) {
-    return { has_data: false, period, period_label: win.label, total: 0, secret: 0, forgotten: 0, last_updated: (fish && fish.lastUpdated) || null };
+    return {
+      hasData: false, period, periodLabel: win.label, timezone: 'Asia/Jakarta',
+      summary: { totalFish: 0, secretFish: 0, forgottenFish: 0 }, cards: [], lastUpdated,
+    };
   }
   const secret = (u.details && u.details.secret || []).filter((c) => inWindow(c.time, win));
+  // details.forgotten already contains Thunderzilla / Sea Eater catches, so we
+  // don't merge details.thunder/sea (that would double-count).
   const forgotten = (u.details && u.details.forgotten || []).filter((c) => inWindow(c.time, win));
 
-  const bySecret = {};
-  for (const c of secret) { const n = c.name || 'Unknown'; bySecret[n] = (bySecret[n] || 0) + 1; }
-  const byForgotten = {};
-  for (const c of forgotten) { const n = c.name || c.fishType || 'Unknown'; byForgotten[n] = (byForgotten[n] || 0) + 1; }
-
-  // Best catch in the window (heaviest), across both rarities.
-  let best = null;
-  for (const c of [...secret, ...forgotten]) {
+  const groups = new Map();
+  const add = (c, rarity) => {
+    const name = c.name || c.fishType;
+    if (!name) return;
+    const g = groups.get(name) || { name, rarity, count: 0, maxWeight: 0, latest: null, thumb: null };
+    g.count += 1;
     const w = num(c.weight);
-    if (w > 0 && (!best || w > best.weight)) {
-      best = { name: c.name || c.fishType || 'Unknown', weight: w, mutation: c.mutation || null, thumbnail: c.thumbnail || null };
-    }
-  }
+    if (w > g.maxWeight) g.maxWeight = w;
+    if (c.time && (!g.latest || c.time > g.latest)) g.latest = c.time;
+    if (!g.thumb && isValidImg(c.thumbnail)) g.thumb = c.thumbnail;
+    groups.set(name, g);
+  };
+  secret.forEach((c) => add(c, 'Secret'));
+  forgotten.forEach((c) => add(c, 'Forgotten'));
 
+  const cards = [...groups.values()].map((g) => ({
+    speciesKey: speciesKey(g.name),
+    name: g.name,
+    rarity: g.rarity,
+    count: g.count,
+    imageUrl: resolveSpeciesImage(g.name, g.thumb),
+    maxWeight: formatWeight(g.maxWeight),
+    latestCaughtAt: g.latest,
+    fallback: g.rarity === 'Forgotten' ? 'forgotten' : 'secret',
+  })).sort((a, b) =>
+    b.count - a.count
+    || rarityRank(a.rarity) - rarityRank(b.rarity)
+    || a.name.localeCompare(b.name));
+
+  const totalFish = sumByDateTotal(u.byDate, win) || (secret.length + forgotten.length);
   return {
-    has_data: secret.length + forgotten.length > 0,
+    hasData: cards.length > 0,
     period,
-    period_label: win.label,
-    total: secret.length + forgotten.length,
-    secret: secret.length,
-    forgotten: forgotten.length,
-    best_catch: best,
-    secret_breakdown: Object.entries(bySecret).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
-    forgotten_breakdown: Object.entries(byForgotten).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
-    last_updated: (fish && fish.lastUpdated) || null,
+    periodLabel: win.label,
+    timezone: 'Asia/Jakarta',
+    summary: {
+      totalFish,
+      secretFish: secret.length,
+      forgottenFish: forgotten.length,
+    },
+    cards,
+    lastUpdated,
   };
 }
 
@@ -370,5 +581,11 @@ module.exports = {
   getUserStats,
   getUserFish,
   getUserDaily,
+  // helpers exported for tests / reuse
+  speciesKey,
+  formatWeight,
+  resolveSpeciesImage,
+  buildImageIndex,
+  forgottenTotal,
   _resetCache,
 };
