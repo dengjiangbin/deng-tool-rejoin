@@ -45,6 +45,21 @@ object Format {
 
     fun safeUsername(name: String?): String = name?.takeIf { it.isNotBlank() } ?: "Unknown"
 
+    /**
+     * Human-readable "time since" for the dashboard Last Update line:
+     * "just now", "12s ago", "3m ago", "2h ago". Negative/None → "—".
+     */
+    fun relativeAgo(seconds: Long?): String {
+        if (seconds == null || seconds < 0) return "—"
+        return when {
+            seconds < 3 -> "just now"
+            seconds < 60 -> "${seconds}s ago"
+            seconds < 3600 -> "${seconds / 60}m ago"
+            seconds < 86_400 -> "${seconds / 3600}h ago"
+            else -> "${seconds / 86_400}d ago"
+        }
+    }
+
     // ── Date/time ───────────────────────────────────────────────────────────
     //
     // Single user-facing timestamp format for the whole APK:

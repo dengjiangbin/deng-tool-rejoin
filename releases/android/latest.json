@@ -1,18 +1,19 @@
 {
   "app_name": "DENG Tool: Rejoin APK",
-  "version_name": "1.0.5",
-  "version_code": 6,
-  "file_name": "deng-tool-rejoin-apk-v1.0.5.apk",
-  "sha256": "B4E43511AA9170BC8216C0F16E3BB3314862E400B7B0EBF4699758211FC93F46",
+  "version_name": "1.0.6",
+  "version_code": 7,
+  "file_name": "deng-tool-rejoin-apk-v1.0.6.apk",
+  "sha256": "16d0244811e8be4f731667d0e131ca0c69e83f4e5eb84098487f39337aef596c",
   "size_bytes": 1863017,
   "released_at": "2026-05-29",
   "min_sdk": 26,
   "purpose": "Monitoring companion app for DENG Tool: Rejoin",
   "changelog": [
-    "Network errors are now clear and recoverable: a failed connection shows a host-named message such as 'Cannot reach tool.deng.my.id — check your internet/DNS connection and try again.' with a Retry button, instead of the previous cryptic 'Network error: UnknownHostException' that looked like the app was stuck loading forever.",
-    "Settings → About now shows the backend the app is built against ('API host: tool.deng.my.id') so connectivity issues can be diagnosed at a glance. No tokens or secrets are ever displayed.",
-    "Dashboard, Packages, Snapshot, and Settings all render a retry-capable error card on network failure and keep auto-retrying in the background — no more infinite spinner.",
-    "Backend now tolerates a not-yet-applied migration 010: the device heartbeat (last_seen_at) and the optional bridge diagnostics are written in separate updates, so a missing last_bridge_status column can never roll back the heartbeat and falsely mark devices Disconnected.",
-    "No functional change to the v1.0.4 connection-TTL, instant-settings-refresh, snapshot diagnostics, or 5-state package model — this release hardens connectivity and error handling on top of them."
+    "Snapshot finally works on rooted cloud phones: the Termux bridge now walks a real capture ladder — normal screencap, /system/bin/screencap, root screencap to stdout, and (the reliable one) root 'screencap -p /sdcard/…' read back from file — automatically escalating to root when the unprivileged path is blocked. Root is on by default; set DENG_REJOIN_SNAPSHOT_USE_SU=0 to disable.",
+    "Every capture attempt is now validated as a real PNG (89 50 4E 47 …) before upload. Empty output, shell-error text, and non-PNG bytes are rejected and the next provider is tried, so a 0-byte 'image' is never uploaded.",
+    "Honest snapshot diagnostics: the bridge records which provider was attempted/selected, su availability, root grant, byte length, PNG validity, and a precise result (success / failed_no_screencap / failed_root_denied / failed_invalid_png / failed_timeout / failed_upload_http). The Snapshot screen shows a clean reason + Retry instead of an infinite spinner, and the probe gains a SNAPSHOT PROOF section.",
+    "Snapshot upload is isolated from the heartbeat: an upload failure (HTTP error, oversized image) never breaks the device's online status. Heartbeat controls connection; snapshot only controls snapshot status.",
+    "Redesigned, device-centric Dashboard: a compact header with Last Update + Interval + sync indicator, a TOTAL / ONLINE / DEAD / RAM stats row, and a per-device RAM list ('2048MB/4096MB 50% - Cloud Phone 1', tap to expand). Device counts are TTL-based and never affected by snapshot failures. RAM is read from /proc/meminfo (root-free) and never invented.",
+    "Backend returns dashboard-friendly fields on /api/monitor/devices (computed connection_state, per-device device_ram, snapshot_last_result) while staying backward compatible with older app versions."
   ]
 }

@@ -475,6 +475,130 @@ def test_snapshot_capture_success_records_bytes_and_upload_ok(monkeypatch):
     assert bridge.state.screencap_available is True
 
 
+class _FakeAttempt:
+    def __init__(self, provider, png_valid=False):
+        self.provider = provider
+        self.png_valid = png_valid
+    def to_safe_dict(self):
+        return {"provider": self.provider, "png_valid": self.png_valid}
+
+
+class _FakeCapture:
+    """Duck-typed stand-in for agent.snapshot.SnapshotCapture."""
+    def __init__(self, *, data=None, result="failed_unknown", provider=None,
+                 png_valid=False, error=None, byte_length=0,
+                 screencap_found=False, su_available=False, root_granted=None,
+                 attempts=None, mime="image/png"):
+        self.data = data
+        self.result = result
+        self.provider = provider
+        self.png_valid = png_valid
+        self.error = error
+        self.byte_length = byte_length or (len(data) if data else 0)
+        self.screencap_found = screencap_found
+        self.su_available = su_available
+        self.root_granted = root_granted
+        self.attempts = attempts or []
+        self.mime = mime
+
+
+def test_rich_capture_success_ingests_provider_diagnostics(monkeypatch):
+    """v1.0.6: a SnapshotCapture with valid PNG uploads and records WHICH
+    provider worked (e.g. root_screencap_file) + png validity + root grant.
+    """
+    cfg = BridgeConfig(
+        enabled=True, token="t", bridge_url="https://example.com",
+        snapshot_interval_seconds=1,
+    )
+    png = b"\x89PNG\r\n\x1a\n" + b"x" * 20_000
+    cap = _FakeCapture(
+        data=png, result="success", provider="root_screencap_file",
+        png_valid=True, screencap_found=True, su_available=True, root_granted=True,
+        attempts=[_FakeAttempt("normal_screencap"), _FakeAttempt("root_screencap_file", True)],
+    )
+    bridge = MonitorBridge(
+        config=cfg, status_provider=lambda: {"packages": []},
+        snapshot_provider=lambda: cap,
+    )
+    monkeypatch.setattr("agent.safe_http.post_raw", lambda *a, **kw: (200, b'{"ok":true}'))
+    bridge._tick()
+    time.sleep(1.1)
+    bridge._tick()
+    assert bridge.state.snapshot_last_result == "success"
+    assert bridge.state.snapshot_provider == "root_screencap_file"
+    assert bridge.state.snapshot_png_valid is True
+    assert bridge.state.snapshot_root_granted is True
+    assert bridge.state.snapshot_su_available is True
+    assert bridge.state.snapshot_last_bytes == len(png)
+
+
+def test_rich_capture_failure_records_result_without_crash(monkeypatch):
+    cfg = BridgeConfig(
+        enabled=True, token="t", bridge_url="https://example.com",
+        snapshot_interval_seconds=15,
+    )
+    cap = _FakeCapture(
+        data=None, result="failed_root_denied", error="root screencap denied",
+        screencap_found=True, su_available=True, root_granted=False,
+        attempts=[_FakeAttempt("root_screencap_stdout")],
+    )
+    bridge = MonitorBridge(
+        config=cfg, status_provider=lambda: {"packages": []},
+        snapshot_provider=lambda: cap,
+    )
+    monkeypatch.setattr("agent.safe_http.post_raw", lambda *a, **kw: (200, b'{"ok":true}'))
+    bridge._tick()
+    assert bridge.state.snapshot_last_result == "failed_root_denied"
+    assert bridge.state.snapshot_last_error == "root screencap denied"
+    assert bridge.state.snapshot_root_granted is False
+
+
+def test_upload_http_failure_marks_failed_upload_http(monkeypatch):
+    cfg = BridgeConfig(
+        enabled=True, token="t", bridge_url="https://example.com",
+        snapshot_interval_seconds=1,
+    )
+    png = b"\x89PNG\r\n\x1a\n" + b"x" * 1024
+    # push succeeds (200) but snapshot upload returns 503.
+    def _post(url, *a, **kw):
+        if url.endswith("/api/monitor/bridge/snapshot"):
+            return 503, b'{"error":"busy"}'
+        return 200, b'{"ok":true}'
+    bridge = MonitorBridge(
+        config=cfg, status_provider=lambda: {"packages": []},
+        snapshot_provider=lambda: (png, "image/png"),
+    )
+    monkeypatch.setattr("agent.safe_http.post_raw", _post)
+    bridge._tick()
+    time.sleep(1.1)
+    bridge._tick()
+    assert bridge.state.snapshot_last_result == "failed_upload_http"
+
+
+def test_device_ram_embedded_in_push_bridge_status(monkeypatch):
+    """v1.0.6: device_ram from the status provider must ride along in the
+    bridge_status block so the dashboard can render per-device RAM."""
+    cfg = BridgeConfig(
+        enabled=True, token="t", bridge_url="https://example.com",
+        snapshot_interval_seconds=0,
+    )
+    def _status():
+        return {
+            "packages": [],
+            "device_ram": {"used_mb": 2048, "total_mb": 4096, "percent": 50},
+        }
+    bridge = MonitorBridge(config=cfg, status_provider=_status)
+    captured = {}
+    def _spy(url, body_bytes, *, content_type, headers, timeout):
+        captured["body"] = body_bytes
+        return 200, b'{"ok":true,"settings":null}'
+    monkeypatch.setattr("agent.safe_http.post_raw", _spy)
+    bridge._tick()
+    import json as _json
+    pushed = _json.loads(captured["body"].decode("utf-8"))
+    assert pushed["bridge_status"]["device_ram"] == {"used_mb": 2048, "total_mb": 4096, "percent": 50}
+
+
 def test_to_push_status_redacts_no_secrets():
     """BridgeState.to_push_status must never include tokens, URLs, or
     license keys — only the small snapshot/push diagnostic block.
@@ -489,5 +613,13 @@ def test_to_push_status_redacts_no_secrets():
         "snapshot_last_upload_status",
         "snapshot_provider_called_count",
         "screencap_available",
+        # v1.0.6 capture-provider diagnostics.
+        "snapshot_provider",
+        "snapshot_png_valid",
+        "snapshot_root_granted",
+        "snapshot_su_available",
         "last_push_result",
     }
+    # None of these may carry a secret: assert only diagnostic primitives.
+    for v in out.values():
+        assert v is None or isinstance(v, (str, int, bool)), f"unexpected type: {v!r}"

@@ -1020,3 +1020,139 @@ describe('v1.0.4 /status endpoint exposes connection_state and last_bridge_statu
     assert.equal(status.body.device.last_bridge_status.snapshot_last_result, 'capture_failed');
   });
 });
+
+// ── v1.0.6 — snapshot robustness + device-centric dashboard fields ───────────
+
+describe('v1.0.6 snapshot upload + heartbeat independence', () => {
+  beforeEach(() => { mem = makeMemoryDb(); });
+
+  const PNG = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(12_000, 0x42),
+  ]);
+
+  test('valid PNG snapshot upload is stored and returns success JSON', async () => {
+    const deviceId = seedDevice('disc-snap');
+    const token = seedBridgeToken(deviceId);
+    const res = await request(app)
+      .post('/api/monitor/bridge/snapshot')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Content-Type', 'image/png')
+      .send(PNG);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.size, PNG.length);
+    assert.equal(mem.monitor_snapshots.length, 1);
+    assert.equal(mem.monitor_snapshots[0].mime_type, 'image/png');
+  });
+
+  test('heartbeat succeeds when bridge_status (snapshot fields) is missing', async () => {
+    const deviceId = seedDevice('disc-noss');
+    const token = seedBridgeToken(deviceId);
+    const res = await request(app)
+      .post('/api/monitor/bridge/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ schema: 1, tool_version: '1.0.6', channel: 'stable', packages: [] });
+    assert.equal(res.status, 200);
+    assert.equal(mem.monitor_devices[0].status_connected, true);
+  });
+
+  test('heartbeat persists v1.0.6 capture-provider diagnostics + device_ram', async () => {
+    const seed = seedActiveLicense({ owner: 'disc-ram' });
+    const issue = await request(app)
+      .post('/api/monitor/bridge/issue-from-license')
+      .send({ license_key: seed.key, install_id_hash: seed.installIdHash });
+    const token = issue.body.bridge_token;
+
+    const push = await request(app).post('/api/monitor/bridge/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        schema: 1, tool_version: '1.0.6', channel: 'stable', packages: [],
+        bridge_status: {
+          snapshot_last_result: 'success',
+          snapshot_provider: 'root_screencap_file',
+          snapshot_png_valid: true,
+          snapshot_root_granted: true,
+          snapshot_su_available: true,
+          device_ram: { used_mb: 2048, total_mb: 4096, percent: 50 },
+          last_push_result: 'success',
+        },
+      });
+    assert.equal(push.status, 200);
+    const bs = mem.monitor_devices[0].last_bridge_status;
+    assert.equal(bs.snapshot_provider, 'root_screencap_file');
+    assert.equal(bs.snapshot_png_valid, true);
+    assert.equal(bs.snapshot_root_granted, true);
+    assert.deepEqual(bs.device_ram, { used_mb: 2048, total_mb: 4096, percent: 50 });
+  });
+
+  test('snapshot upload failure (oversized) does not break the heartbeat', async () => {
+    const deviceId = seedDevice('disc-indep');
+    const token = seedBridgeToken(deviceId);
+    // Heartbeat 1 — connected.
+    await request(app).post('/api/monitor/bridge/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ schema: 1, tool_version: '1.0.6', channel: 'stable', packages: [] });
+    // Oversized snapshot — rejected.
+    const big = Buffer.alloc(6 * 1024 * 1024, 0xff);
+    const snap = await request(app).post('/api/monitor/bridge/snapshot')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Content-Type', 'image/png')
+      .send(big);
+    assert.ok(snap.status === 413 || snap.status === 400);
+    // Heartbeat 2 — still works, device still connected.
+    const push2 = await request(app).post('/api/monitor/bridge/push')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ schema: 1, tool_version: '1.0.6', channel: 'stable', packages: [] });
+    assert.equal(push2.status, 200);
+    assert.equal(mem.monitor_devices[0].status_connected, true);
+  });
+
+  test('snapshot latest returns 204 when no snapshot exists', async () => {
+    const owner = 'disc-empty-snap';
+    const deviceId = seedDevice(owner);
+    const appToken = seedAppSession(owner);
+    const res = await request(app)
+      .get(`/api/monitor/devices/${deviceId}/snapshot/latest`)
+      .set('Authorization', `Bearer ${appToken}`);
+    assert.equal(res.status, 204);
+  });
+});
+
+describe('v1.0.6 device-centric dashboard list fields', () => {
+  beforeEach(() => { mem = makeMemoryDb(); });
+
+  test('list returns connection state + device_ram + snapshot result per device', async () => {
+    const owner = 'disc-dash';
+    const deviceId = seedDevice(owner);
+    mem.monitor_devices[0].last_bridge_status = {
+      device_ram: { used_mb: 1500, total_mb: 3000, percent: 50 },
+      snapshot_last_result: 'success',
+    };
+    const appToken = seedAppSession(owner);
+    const res = await request(app)
+      .get('/api/monitor/devices')
+      .set('Authorization', `Bearer ${appToken}`);
+    assert.equal(res.status, 200);
+    const d = res.body.devices[0];
+    // Connection fields drive TOTAL/ONLINE/DEAD on the client.
+    assert.ok('connected' in d);
+    assert.ok('connection_state' in d);
+    assert.equal(d.device_ram.total_mb, 3000);
+    assert.equal(d.device_ram.percent, 50);
+    assert.equal(d.snapshot_last_result, 'success');
+    // last_bridge_status (the heavy blob) is not leaked into the list row.
+    assert.equal(d.last_bridge_status, undefined);
+  });
+
+  test('list tolerates devices that never reported RAM (no invented numbers)', async () => {
+    const owner = 'disc-noram';
+    seedDevice(owner);
+    const appToken = seedAppSession(owner);
+    const res = await request(app)
+      .get('/api/monitor/devices')
+      .set('Authorization', `Bearer ${appToken}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.devices[0].device_ram, null);
+  });
+});

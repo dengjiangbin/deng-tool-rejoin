@@ -36,6 +36,11 @@ data class DeviceSummary(
     // snapshot…" forever. JsonElement so we can extend the bridge
     // payload without bumping the APK every time.
     @SerialName("last_bridge_status") val lastBridgeStatus: JsonElement? = null,
+    // v1.0.6: device-level RAM for the redesigned dashboard's per-device
+    // RAM list. Null when the bridge didn't report it (never invented).
+    @SerialName("device_ram") val deviceRam: DeviceRam? = null,
+    // v1.0.6: compact snapshot result on the device list row.
+    @SerialName("snapshot_last_result") val snapshotLastResult: String? = null,
 ) {
     /** Best-effort connection boolean: prefer the computed value. */
     val isConnected: Boolean
@@ -44,6 +49,29 @@ data class DeviceSummary(
     /** Best-effort display label for the connection. */
     val connectionLabel: String
         get() = connectionState ?: if (isConnected) "Connected" else "Disconnected"
+
+    /** Display name for the dashboard list. */
+    val displayName: String
+        get() = deviceLabel?.takeIf { it.isNotBlank() } ?: "Cloud Phone"
+}
+
+@Serializable
+data class DeviceRam(
+    @SerialName("used_mb") val usedMb: Int = 0,
+    @SerialName("total_mb") val totalMb: Int = 0,
+    val percent: Int? = null,
+) {
+    /** Effective percent: explicit value, else computed from used/total. */
+    val effectivePercent: Int?
+        get() = percent ?: if (totalMb > 0) ((usedMb.toLong() * 100) / totalMb).toInt() else null
+
+    /** Dashboard row text: "2048MB/4096MB 50%" or "50%" when only % known. */
+    val displayText: String
+        get() = if (totalMb > 0) {
+            "${usedMb}MB/${totalMb}MB ${effectivePercent ?: 0}%"
+        } else {
+            effectivePercent?.let { "$it%" } ?: "—"
+        }
 }
 
 @Serializable

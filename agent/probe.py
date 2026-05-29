@@ -1131,7 +1131,59 @@ def collect_probe(*, include_diag_startup: bool | None = None) -> dict[str, Any]
     else:
         out["diag_startup"] = {"skipped": True,
                                "reason": "default off; use --diag to enable"}
+
+    # v1.0.6 — SNAPSHOT PROOF: actually run the fullscreen capture ladder so
+    # the operator can see which provider works on THIS device (and the exact
+    # reason if none do). This is the evidence required to declare snapshot
+    # fixed. Plus the bridge's own backend-visible view via monitor status.
+    out["snapshot_proof"] = _capture_snapshot_proof(errors)
     return out
+
+
+def _capture_snapshot_proof(errors: list[dict[str, str]]) -> dict[str, Any]:
+    """Run the snapshot capture ladder and summarize the evidence.
+
+    Includes: providers attempted, the selected provider, su availability,
+    root result, PNG byte length + signature validity, and the bridge's
+    backend-visible snapshot status. Never raises.
+    """
+    proof: dict[str, Any] = {}
+    try:
+        from . import snapshot as _snap
+        cap = _snap.capture_snapshot_detailed()
+        proof["capture"] = cap.to_safe_dict()
+        proof["summary"] = {
+            "provider": cap.provider,
+            "bytes": int(cap.byte_length or 0),
+            "png_valid": bool(cap.png_valid),
+            "su_available": bool(cap.su_available),
+            "root_granted": cap.root_granted,
+            "final_result": cap.result,
+            "providers_attempted": [a.provider for a in cap.attempts],
+        }
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "snapshot_proof.capture", "error": str(exc)[:200]})
+        proof["capture"] = {"error": "capture_failed"}
+
+    # Bridge / backend visibility (best-effort; safe if bridge not running).
+    try:
+        from . import monitor_autostart as _ma
+        status = _ma.get_monitor_status_summary()
+        proof["bridge_status"] = {
+            k: status.get(k)
+            for k in (
+                "bridge_running", "connected", "snapshot_last_result",
+                "snapshot_last_bytes", "snapshot_last_upload_status",
+                "snapshot_provider", "snapshot_png_valid", "snapshot_root_granted",
+                "snapshot_su_available", "snapshot_provider_called_count",
+                "screencap_available",
+            )
+        }
+    except Exception as exc:  # noqa: BLE001
+        errors.append({"step": "snapshot_proof.bridge_status", "error": str(exc)[:200]})
+        proof["bridge_status"] = {"error": "unavailable"}
+
+    return proof
 
 
 # ── Payload trimming for upload ─────────────────────────────────────────────

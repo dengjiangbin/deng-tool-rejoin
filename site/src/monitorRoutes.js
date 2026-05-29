@@ -352,6 +352,20 @@ router.post('/api/monitor/bridge/push',
     if (incomingStatus && typeof incomingStatus === 'object' && !Array.isArray(incomingStatus)) {
       const pick = (v, max = 64) =>
         typeof v === 'string' ? v.slice(0, max) : (typeof v === 'number' && Number.isFinite(v) ? v : null);
+      const pickBool = (v) => (typeof v === 'boolean' ? v : null);
+      // v1.0.6: device-level RAM block (used/total/percent) for the
+      // redesigned dashboard's per-device RAM list. Scrubbed + clamped.
+      let deviceRamClean = null;
+      const dr = incomingStatus.device_ram;
+      if (dr && typeof dr === 'object' && !Array.isArray(dr)) {
+        const usedMb = Math.max(0, Math.min(4_194_304, parseInt(dr.used_mb, 10) || 0));
+        const totalMb = Math.max(0, Math.min(4_194_304, parseInt(dr.total_mb, 10) || 0));
+        let percent = Math.max(0, Math.min(100, parseInt(dr.percent, 10)));
+        if (!Number.isFinite(percent)) percent = totalMb > 0 ? Math.round((usedMb / totalMb) * 100) : 0;
+        if (totalMb > 0 || percent > 0) {
+          deviceRamClean = { used_mb: usedMb, total_mb: totalMb, percent };
+        }
+      }
       bridgeStatusClean = {
         // Snapshot pipeline diagnostics (most important for the user's bug).
         snapshot_last_result: pick(incomingStatus.snapshot_last_result, 64),
@@ -359,8 +373,15 @@ router.post('/api/monitor/bridge/push',
         snapshot_last_error: pick(incomingStatus.snapshot_last_error, 200),
         snapshot_provider_called_count: Math.max(0, Math.min(1_000_000, parseInt(incomingStatus.snapshot_provider_called_count, 10) || 0)) || 0,
         snapshot_last_upload_status: pick(incomingStatus.snapshot_last_upload_status, 16),
-        screencap_available: typeof incomingStatus.screencap_available === 'boolean'
-          ? incomingStatus.screencap_available : null,
+        screencap_available: pickBool(incomingStatus.screencap_available),
+        // v1.0.6 capture-provider diagnostics — proves which screencap rung
+        // worked (normal/system/root stdout/root file) or why all failed.
+        snapshot_provider: pick(incomingStatus.snapshot_provider, 40),
+        snapshot_png_valid: pickBool(incomingStatus.snapshot_png_valid),
+        snapshot_root_granted: pickBool(incomingStatus.snapshot_root_granted),
+        snapshot_su_available: pickBool(incomingStatus.snapshot_su_available),
+        // v1.0.6 device RAM for the dashboard.
+        device_ram: deviceRamClean,
         // Push pipeline diagnostics (we already track this via timestamps,
         // but the bridge's own view is useful for debugging time skew).
         last_push_result: pick(incomingStatus.last_push_result, 32),
@@ -519,22 +540,59 @@ router.post('/api/monitor/bridge/snapshot',
 // 2. ANDROID APP
 // ───────────────────────────────────────────────────────────────────────────
 
+const DEVICE_LIST_CORE_COLS =
+  'id, device_label, tool_version, channel, status_connected, last_seen_at, created_at';
+
 router.get('/api/monitor/devices', requireAppAuth, async (req, res) => {
   try {
-    const { data, error } = await supabase
+    // v1.0.6: the redesigned dashboard is device-centric (TOTAL / ONLINE /
+    // DEAD + per-device RAM), so the list now also returns last_bridge_status
+    // (device RAM + snapshot diagnostics). Guarded the same way as
+    // loadOwnedDevice: if migration 010 isn't applied, fall back to the core
+    // columns so the dashboard still renders (just without RAM rows).
+    const cols = bridgeStatusColumnAvailable
+      ? `${DEVICE_LIST_CORE_COLS}, last_bridge_status`
+      : DEVICE_LIST_CORE_COLS;
+
+    let { data, error } = await supabase
       .from('monitor_devices')
-      .select('id, device_label, tool_version, channel, status_connected, last_seen_at, created_at')
+      .select(cols)
       .eq('owner_discord_user_id', req.appOwner)
       .order('last_seen_at', { ascending: false });
+
+    if (error && isMissingBridgeStatusColumn(error)) {
+      bridgeStatusColumnAvailable = false;
+      console.warn('[monitor] last_bridge_status column missing — apply migration 010; listing without RAM');
+      ({ data, error } = await supabase
+        .from('monitor_devices')
+        .select(DEVICE_LIST_CORE_COLS)
+        .eq('owner_discord_user_id', req.appOwner)
+        .order('last_seen_at', { ascending: false }));
+    }
     if (error) throw error;
+
     res.set('Cache-Control', 'no-store');
-    // v1.0.4: enrich each row with computed connection_state so the APK's
-    // device-picker (when it lands) can show Disconnected for stale rows
-    // without an extra round-trip.
-    const enriched = (data || []).map((d) => ({
-      ...d,
-      ...computeConnectionState(d.last_seen_at),
-    }));
+    // Enrich each row with the computed connection_state (TTL-based) and a
+    // compact, dashboard-ready device_ram block extracted from the scrubbed
+    // bridge status. Never invents numbers: ram is null when the bridge
+    // didn't report it.
+    const enriched = (data || []).map((d) => {
+      const bs = d.last_bridge_status || null;
+      const ram = bs && bs.device_ram && typeof bs.device_ram === 'object'
+        ? {
+            used_mb: Number(bs.device_ram.used_mb) || 0,
+            total_mb: Number(bs.device_ram.total_mb) || 0,
+            percent: Number.isFinite(Number(bs.device_ram.percent)) ? Number(bs.device_ram.percent) : null,
+          }
+        : null;
+      const { last_bridge_status, ...rest } = d;
+      return {
+        ...rest,
+        ...computeConnectionState(d.last_seen_at),
+        device_ram: ram,
+        snapshot_last_result: bs ? (bs.snapshot_last_result || null) : null,
+      };
+    });
     return res.json({ devices: enriched });
   } catch (err) {
     console.error('[monitor] list devices failed', err?.message || err);

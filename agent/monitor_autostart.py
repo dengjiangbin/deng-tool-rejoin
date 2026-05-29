@@ -322,6 +322,12 @@ def get_monitor_status_summary() -> dict[str, Any]:
         "snapshot_last_upload_status": (state.snapshot_last_upload_status if state else None),
         "snapshot_provider_called_count": (state.snapshot_provider_called_count if state else 0),
         "screencap_available": (state.screencap_available if state else None),
+        # v1.0.6 capture-provider diagnostics.
+        "snapshot_provider": (state.snapshot_provider if state else None),
+        "snapshot_png_valid": (state.snapshot_png_valid if state else None),
+        "snapshot_root_granted": (state.snapshot_root_granted if state else None),
+        "snapshot_su_available": (state.snapshot_su_available if state else None),
+        "snapshot_attempts": (list(state.snapshot_attempts) if state else []),
         "configured_packages": configured_count,
         "reported_packages": reported_count,
         "supervisor_active": _active_supervisor is not None,
@@ -420,22 +426,32 @@ def _build_status_payload(*, tool_version: str, channel: str) -> dict[str, Any]:
 
     All paths are exception-safe and never touch root / subprocesses.
     """
+    # Device-level RAM (used/total/percent) for the redesigned dashboard.
+    # Read from /proc/meminfo — root-free and idle-safe. None on dev hosts.
+    device_ram = read_device_ram()
+
     sup = _active_supervisor
     if sup is not None:
         packages = _packages_from_supervisor(sup)
         if packages is not None:
-            return {
+            payload: dict[str, Any] = {
                 "tool_version": tool_version,
                 "channel": channel,
                 "packages": packages,
             }
+            if device_ram is not None:
+                payload["device_ram"] = device_ram
+            return payload
 
     cfg = _active_config
-    return {
+    payload = {
         "tool_version": tool_version,
         "channel": channel,
         "packages": _packages_from_config(cfg) if cfg is not None else [],
     }
+    if device_ram is not None:
+        payload["device_ram"] = device_ram
+    return payload
 
 
 def _packages_from_supervisor(sup: Any) -> list[dict[str, Any]] | None:
@@ -545,16 +561,21 @@ def _packages_from_config(cfg: dict[str, Any] | None) -> list[dict[str, Any]]:
 # ── Snapshot provider ───────────────────────────────────────────────────────
 
 
-def _default_snapshot_provider() -> tuple[bytes, str] | None:
-    """Capture a screenshot for the bridge to upload, or return ``None``.
+def _default_snapshot_provider() -> Any:
+    """Capture a fullscreen screenshot for the bridge to upload.
+
+    v1.0.6: returns a rich :class:`agent.snapshot.SnapshotCapture` so the
+    bridge can surface real per-provider diagnostics (which rung worked,
+    PNG validity, root grant) to the APK and probe. The bridge duck-types
+    the return value, so returning the object — or ``None`` — is safe.
 
     Implementation rules:
-      * Never runs unless this function is actually called by the bridge
-        (which only happens when ``snapshot_interval_seconds > 0``).
-      * Uses ``agent.snapshot.capture_snapshot`` which already wraps
-        ``screencap -p`` in a subprocess with a strict 10-second timeout.
-      * On any failure returns ``None`` so the bridge logs
-        ``capture_failed`` and keeps running.
+      * Never runs unless the bridge calls it (snapshot_interval > 0).
+      * Uses ``agent.snapshot.capture_snapshot_detailed`` which walks the
+        full provider ladder (normal/system/root stdout + root file) with
+        a strict per-attempt timeout and PNG validation.
+      * On any failure returns the capture object with ``data=None`` and a
+        precise ``result``/``error`` so the bridge keeps running.
       * Never raises.
     """
     try:
@@ -562,19 +583,61 @@ def _default_snapshot_provider() -> tuple[bytes, str] | None:
     except Exception:  # noqa: BLE001
         return None
     try:
-        path, _msg = _snap.capture_snapshot()
+        return _snap.capture_snapshot_detailed()
     except Exception:  # noqa: BLE001
         return None
-    if path is None:
+
+
+def _parse_meminfo(text: str) -> dict[str, Any] | None:
+    """Pure parser for ``/proc/meminfo`` text. Returns RAM dict or None.
+
+    "used" = total - available (the number a user perceives as "in use"),
+    matching what the redesigned dashboard renders as ``used/total %``.
+    """
+    total_kb = 0
+    avail_kb = -1
+    free_kb = 0
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        key = parts[0].rstrip(":")
+        try:
+            val = int(parts[1])  # kB
+        except (TypeError, ValueError):
+            continue
+        if key == "MemTotal":
+            total_kb = val
+        elif key == "MemAvailable":
+            avail_kb = val
+        elif key == "MemFree":
+            free_kb = val
+    if total_kb <= 0:
+        return None
+    if avail_kb < 0:
+        avail_kb = free_kb
+    used_kb = max(0, total_kb - avail_kb)
+    total_mb = total_kb // 1024
+    used_mb = used_kb // 1024
+    percent = int(round((used_kb / total_kb) * 100)) if total_kb else 0
+    percent = max(0, min(100, percent))
+    return {"used_mb": int(used_mb), "total_mb": int(total_mb), "percent": percent}
+
+
+def read_device_ram() -> dict[str, Any] | None:
+    """Read device-level RAM from ``/proc/meminfo`` (root-free, idle-safe).
+
+    Returns ``{"used_mb", "total_mb", "percent"}`` or ``None`` when the
+    file is unavailable (e.g. non-Linux dev machine). Never raises.
+    """
+    try:
+        text = Path("/proc/meminfo").read_text(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
         return None
     try:
-        data = Path(path).read_bytes()
+        return _parse_meminfo(text)
     except Exception:  # noqa: BLE001
         return None
-    if not data:
-        return None
-    # screencap -p produces PNG bytes.
-    return data, "image/png"
 
 
 # ── Token issuance (curl subprocess via safe_http) ──────────────────────────

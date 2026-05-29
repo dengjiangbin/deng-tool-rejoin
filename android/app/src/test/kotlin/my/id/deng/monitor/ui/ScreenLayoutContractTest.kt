@@ -136,11 +136,18 @@ class ScreenLayoutContractTest {
     }
 
     @Test
-    fun `DashboardScreen renders lastSeenAt via Format timestamp`() {
+    fun `DashboardScreen renders timestamps via Format timestamp`() {
+        // v1.0.6 redesign: the dashboard is device-centric. It must still
+        // route every timestamp through the central Format helper (never a
+        // raw ISO string) and label it "Last Update".
         val src = ui("DashboardScreen.kt")
         assertTrue(
-            "DashboardScreen must call Format.timestamp(lastSeenAt)",
-            src.contains("Format.timestamp(lastSeenAt)"),
+            "DashboardScreen must format last-seen via Format.timestamp(...)",
+            src.contains("Format.timestamp("),
+        )
+        assertTrue(
+            "DashboardScreen must label the freshest heartbeat as Last Update",
+            src.contains("Last Update"),
         )
         assertFalse(
             "DashboardScreen must not still print raw lastSeenAt ?: \"—\"",

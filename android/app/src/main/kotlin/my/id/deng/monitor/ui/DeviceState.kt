@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import my.id.deng.monitor.data.ApiException
 import my.id.deng.monitor.data.DeviceStatus
+import my.id.deng.monitor.data.DeviceSummary
 import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.SessionStore
 import my.id.deng.monitor.data.friendlyNetworkError
@@ -109,6 +110,57 @@ fun rememberDeviceStatus(
     sessionStore: SessionStore,
     pollSeconds: Int = 5,
 ): State<DeviceFetchState> = rememberDeviceStatusHandle(api, sessionStore, pollSeconds).state
+
+// ── v1.0.6: device-LIST state for the redesigned (multi-device) dashboard ────
+
+/** Fixed dashboard auto-refresh cadence (seconds). Shown as "Interval". */
+const val DASHBOARD_POLL_SECONDS = 5
+
+sealed interface DeviceListFetchState {
+    data object Loading : DeviceListFetchState
+    data class Ready(val devices: List<DeviceSummary>, val fetchedAtMillis: Long) : DeviceListFetchState
+    data class Error(val message: String) : DeviceListFetchState
+}
+
+class DeviceListHandle internal constructor(
+    val state: State<DeviceListFetchState>,
+    private val refreshChannel: MutableSharedFlow<Unit>,
+) {
+    suspend fun refreshNow() {
+        refreshChannel.emit(Unit)
+    }
+}
+
+/**
+ * Polls the full device list (`/api/monitor/devices`) so the dashboard can
+ * show TOTAL / ONLINE / DEAD device counts + a per-device RAM list. Counts
+ * are device-centric and TTL-based (the backend computes connection_state);
+ * snapshot failures never affect them.
+ */
+@Composable
+fun rememberDeviceListHandle(
+    api: MonitorApi,
+    pollSeconds: Int = DASHBOARD_POLL_SECONDS,
+): DeviceListHandle {
+    val state = remember { mutableStateOf<DeviceListFetchState>(DeviceListFetchState.Loading) }
+    val refreshChannel = remember { MutableSharedFlow<Unit>(extraBufferCapacity = 4) }
+
+    LaunchedEffect(Unit) {
+        val interval = pollSeconds.coerceIn(2, 60)
+        while (true) {
+            try {
+                val devices = api.listDevices().devices
+                state.value = DeviceListFetchState.Ready(devices, System.currentTimeMillis())
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Throwable) {
+                state.value = DeviceListFetchState.Error(friendlyNetworkError(e, api.host))
+            }
+            sleepOrRefresh(interval * 1_000L, refreshChannel)
+        }
+    }
+    return remember(state, refreshChannel) { DeviceListHandle(state, refreshChannel) }
+}
 
 /**
  * Suspend until [millis] elapses OR the refresh channel emits — whichever

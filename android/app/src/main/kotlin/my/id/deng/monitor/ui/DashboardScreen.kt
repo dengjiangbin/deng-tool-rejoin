@@ -1,22 +1,39 @@
 package my.id.deng.monitor.ui
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import my.id.deng.monitor.data.DeviceSummary
 import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.SessionStore
 import my.id.deng.monitor.ui.theme.DengColors
 import my.id.deng.monitor.util.Format
 
+/**
+ * v1.0.6 redesign — a compact, device-centric dashboard.
+ *
+ * Shows ONLY the metrics the user asked for: Last Update, Interval, TOTAL,
+ * ONLINE, DEAD, overall RAM, and a per-device RAM list. Counts are device
+ * counts (TTL-based connection from the backend); a snapshot failure never
+ * marks a device dead. No debug fields here — diagnostics live in the
+ * Snapshot tab + probe.
+ */
 @Composable
 fun DashboardScreen(api: MonitorApi, sessionStore: SessionStore) {
-    val handle = rememberDeviceStatusHandle(api, sessionStore)
+    val handle = rememberDeviceListHandle(api)
     val state by handle.state
     val scope = rememberCoroutineScope()
 
@@ -27,175 +44,334 @@ fun DashboardScreen(api: MonitorApi, sessionStore: SessionStore) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Dashboard",
+                style = MaterialTheme.typography.headlineMedium,
+                color = DengColors.TextPrimary,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.weight(1f))
+            RefreshPill(onClick = { scope.launch { handle.refreshNow() } })
+        }
+
+        when (val s = state) {
+            is DeviceListFetchState.Loading -> DashboardSkeleton()
+
+            is DeviceListFetchState.Error -> ErrorCard(
+                message = s.message,
+                onRetry = { scope.launch { handle.refreshNow() } },
+            )
+
+            is DeviceListFetchState.Ready -> {
+                if (s.devices.isEmpty()) {
+                    EmptyDevicesCard()
+                } else {
+                    DashboardContent(s.devices)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DashboardContent(devices: List<DeviceSummary>) {
+    val total = devices.size
+    val online = devices.count { it.isConnected }
+    val dead = total - online
+
+    // Most recent heartbeat across all devices → "Last Update".
+    val freshest = devices.minByOrNull { it.secondsSinceLastSeen ?: Long.MAX_VALUE }
+    val lastSeenIso = freshest?.lastSeenAt
+    val secsSince = freshest?.secondsSinceLastSeen
+    val stale = online == 0 && total > 0
+
+    // Overall RAM: sum(used)/sum(total) when totals are known; otherwise the
+    // mean of reported percents. Null when no device reported RAM.
+    val ramDevices = devices.mapNotNull { it.deviceRam }
+    val totalUsed = ramDevices.sumOf { it.usedMb }
+    val totalTotal = ramDevices.sumOf { it.totalMb }
+    val overallPercent: Int? = when {
+        totalTotal > 0 -> ((totalUsed.toLong() * 100) / totalTotal).toInt()
+        ramDevices.any { it.effectivePercent != null } ->
+            ramDevices.mapNotNull { it.effectivePercent }.average().toInt()
+        else -> null
+    }
+
+    // Top section — header / sync indicator / Last Update / Interval.
+    DengCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .then(Modifier),
+                contentAlignment = Alignment.Center,
+            ) {
+                Surface(
+                    color = if (online > 0) DengColors.Success else DengColors.Danger,
+                    shape = RoundedCornerShape(999.dp),
+                    modifier = Modifier.size(10.dp),
+                ) {}
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (online > 0) "Syncing" else "Offline",
+                style = MaterialTheme.typography.labelLarge,
+                color = if (online > 0) DengColors.Success else DengColors.Danger,
+            )
+            Spacer(Modifier.weight(1f))
+            if (stale) {
+                Surface(
+                    color = DengColors.Warning.copy(alpha = 0.18f),
+                    shape = RoundedCornerShape(999.dp),
+                ) {
+                    Text(
+                        "STALE",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        color = DengColors.Warning,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        LabeledValue("Last Update", buildString {
+            append(Format.timestamp(lastSeenIso))
+            val rel = Format.relativeAgo(secsSince)
+            if (rel != "—") append("  •  $rel")
+        })
+        Spacer(Modifier.height(4.dp))
+        LabeledValue("Interval", "${DASHBOARD_POLL_SECONDS}s")
+    }
+
+    // Main stats row — TOTAL / ONLINE / DEAD / RAM.
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        CompactStat("TOTAL", total.toString(), DengColors.Cyan, Modifier.weight(1f))
+        CompactStat("ONLINE", online.toString(), DengColors.Success, Modifier.weight(1f))
+        CompactStat("DEAD", dead.toString(), DengColors.Danger, Modifier.weight(1f))
+        CompactStat(
+            "RAM",
+            overallPercent?.let { "$it%" } ?: "—",
+            DengColors.Purple,
+            Modifier.weight(1f),
+        )
+    }
+
+    // RAM section — overall summary + per-device list (tap to expand).
+    DengCard {
         Text(
-            "Dashboard",
-            style = MaterialTheme.typography.headlineMedium,
+            "RAM Details",
+            style = MaterialTheme.typography.titleMedium,
             color = DengColors.TextPrimary,
             fontWeight = FontWeight.SemiBold,
         )
-
-        when (val s = state) {
-            is DeviceFetchState.Loading -> {
-                LoadingCard()
-            }
-
-            is DeviceFetchState.Error -> {
-                ErrorCard(
-                    message = s.message,
-                    onRetry = { scope.launch { handle.refreshNow() } },
-                )
-            }
-
-            is DeviceFetchState.NoDevices -> {
-                DengCard {
-                    Text("No cloud phone connected", style = MaterialTheme.typography.titleLarge, color = DengColors.TextPrimary)
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Run `deng-rejoin` on your cloud phone in Termux. It will connect " +
-                        "automatically after license verification.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = DengColors.TextMuted,
-                    )
-                }
-            }
-
-            is DeviceFetchState.Ready -> {
-                val st = s.status
-                // v1.0.4: prefer the server-computed connection state.
-                // If the backend doesn't provide it (older deploy), fall
-                // back to the legacy sticky boolean.
-                DeviceHeaderCard(
-                    label = st.device.deviceLabel ?: "Cloud Phone",
-                    connectionLabel = st.device.connectionLabel,
-                    isConnected = st.device.isConnected,
-                    lastSeenAt = st.device.lastSeenAt,
-                    secondsSinceLastSeen = st.device.secondsSinceLastSeen,
-                    version = st.device.toolVersion,
-                    channel = st.device.channel,
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    StatTile(
-                        label = "Total",
-                        value = st.summary.total.toString(),
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatTile(
-                        label = "Online",
-                        value = st.summary.online.toString(),
-                        accent = DengColors.Success,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    StatTile(
-                        label = "Dead",
-                        value = st.summary.dead.toString(),
-                        accent = DengColors.Danger,
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatTile(
-                        // v1.0.4: replaces "Relaunching" — the public
-                        // 5-state model uses Launching.
-                        label = "Launching",
-                        value = (st.summary.launching + st.summary.relaunching).toString(),
-                        accent = DengColors.Cyan,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    StatTile(
-                        label = "Joining",
-                        value = st.summary.joining.toString(),
-                        accent = DengColors.Purple,
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatTile(
-                        label = "No Heartbeat",
-                        value = st.summary.noHeartbeat.toString(),
-                        accent = DengColors.Warning,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    StatTile(
-                        label = "Total RAM",
-                        value = Format.ram(st.summary.totalRamMb),
-                        accent = DengColors.Pink,
-                        modifier = Modifier.weight(1f),
-                    )
-                    StatTile(
-                        label = "Average RAM",
-                        value = Format.ram(st.summary.averageRamMb),
-                        accent = DengColors.Purple,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            overallPercent?.let { "Overall: $it% across $total device${if (total == 1) "" else "s"}" }
+                ?: "Overall: RAM not reported yet",
+            style = MaterialTheme.typography.bodySmall,
+            color = DengColors.TextMuted,
+        )
+        Spacer(Modifier.height(12.dp))
+        devices.forEach { device ->
+            DeviceRamRow(device)
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
 
 @Composable
-private fun DeviceHeaderCard(
-    label: String,
-    connectionLabel: String,
-    isConnected: Boolean,
-    lastSeenAt: String?,
-    secondsSinceLastSeen: Long?,
-    version: String?,
-    channel: String?,
-) {
-    DengCard {
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Text(label, style = MaterialTheme.typography.titleLarge, color = DengColors.TextPrimary)
-            Spacer(Modifier.weight(1f))
-            // v1.0.4: badge uses the literal Connected / Disconnected
-            // label so users can tell the difference instantly. The
-            // old code reused the package badge (Online/Dead), which
-            // overloaded two unrelated state vocabularies.
-            ConnectionBadge(connectionLabel, isConnected)
+private fun DeviceRamRow(device: DeviceSummary) {
+    var expanded by remember(device.id) { mutableStateOf(false) }
+    val accent = if (device.isConnected) DengColors.Success else DengColors.Danger
+    val ramText = device.deviceRam?.displayText ?: "—"
+
+    Surface(
+        color = DengColors.CardBg.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.30f)),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { expanded = !expanded }
+            .animateContentSize(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = accent,
+                    shape = RoundedCornerShape(999.dp),
+                    modifier = Modifier.size(8.dp),
+                ) {}
+                Spacer(Modifier.width(10.dp))
+                // "62/100% - Cloud Phone 1" style line.
+                Text(
+                    "$ramText - ${device.displayName}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = DengColors.TextPrimary,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+                ConnectionBadge(device.connectionLabel, device.isConnected)
+            }
+            if (expanded) {
+                Spacer(Modifier.height(10.dp))
+                DetailLine("Last seen", buildString {
+                    append(Format.timestamp(device.lastSeenAt))
+                    val rel = Format.relativeAgo(device.secondsSinceLastSeen)
+                    if (rel != "—") append("  •  $rel")
+                })
+                DetailLine("RAM", device.deviceRam?.displayText ?: "not reported")
+                DetailLine("Version", "${device.toolVersion ?: "—"}  •  ${device.channel ?: "stable"}")
+                DetailLine("Snapshot", snapshotResultLabel(device.snapshotLastResult))
+            }
         }
+    }
+}
+
+private fun snapshotResultLabel(result: String?): String = when (result) {
+    null -> "—"
+    "success" -> "OK"
+    "failed_no_screencap" -> "screencap unavailable"
+    "failed_root_denied" -> "root denied"
+    "failed_empty_output" -> "empty output"
+    "failed_invalid_png" -> "invalid PNG"
+    "failed_upload_http" -> "upload failed"
+    "failed_timeout" -> "timed out"
+    "capture_failed" -> "capture failed"
+    else -> result
+}
+
+@Composable
+private fun DetailLine(label: String, value: String) {
+    Row(modifier = Modifier.padding(vertical = 2.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = DengColors.TextMuted,
+            modifier = Modifier.width(86.dp),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodySmall,
+            color = DengColors.TextPrimary,
+        )
+    }
+}
+
+@Composable
+private fun LabeledValue(label: String, value: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label.uppercase(),
+            style = MaterialTheme.typography.labelMedium,
+            color = DengColors.TextMuted,
+            modifier = Modifier.width(110.dp),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = DengColors.TextPrimary,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
+@Composable
+private fun CompactStat(label: String, value: String, accent: Color, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.clip(RoundedCornerShape(16.dp)),
+        color = DengColors.CardBg,
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.35f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(vertical = 14.dp, horizontal = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(value, style = MaterialTheme.typography.titleLarge, color = accent, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text(label, style = MaterialTheme.typography.labelSmall, color = DengColors.TextMuted)
+        }
+    }
+}
+
+@Composable
+private fun RefreshPill(onClick: () -> Unit) {
+    Surface(
+        color = DengColors.Cyan.copy(alpha = 0.14f),
+        border = BorderStroke(1.dp, DengColors.Cyan.copy(alpha = 0.4f)),
+        shape = RoundedCornerShape(999.dp),
+        modifier = Modifier.clip(RoundedCornerShape(999.dp)).clickable { onClick() },
+    ) {
+        Text(
+            "Refresh",
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+            color = DengColors.Cyan,
+            style = MaterialTheme.typography.labelLarge,
+        )
+    }
+}
+
+@Composable
+private fun EmptyDevicesCard() {
+    DengCard {
+        Text("No cloud phone connected", style = MaterialTheme.typography.titleLarge, color = DengColors.TextPrimary)
         Spacer(Modifier.height(8.dp))
-        val staleSuffix = if (!isConnected && secondsSinceLastSeen != null) {
-            " (no push for ${secondsSinceLastSeen}s)"
-        } else ""
         Text(
-            "Last update: ${my.id.deng.monitor.util.Format.timestamp(lastSeenAt)}$staleSuffix",
-            style = MaterialTheme.typography.bodySmall,
-            color = DengColors.TextMuted,
-        )
-        Text(
-            "Version: ${version ?: "—"}  •  Channel: ${channel ?: "stable"}",
-            style = MaterialTheme.typography.bodySmall,
+            "Run `deng-rejoin` on your cloud phone in Termux. It will connect " +
+                "automatically after license verification.",
+            style = MaterialTheme.typography.bodyMedium,
             color = DengColors.TextMuted,
         )
     }
 }
 
+/** Modern skeleton — shimmer-free but clearly a placeholder, never forever. */
 @Composable
-private fun LoadingCard() {
+private fun DashboardSkeleton() {
     DengCard {
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        SkeletonBar(0.4f)
+        Spacer(Modifier.height(12.dp))
+        SkeletonBar(0.7f)
+        Spacer(Modifier.height(8.dp))
+        SkeletonBar(0.55f)
+    }
+    Spacer(Modifier.height(12.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        repeat(4) {
+            Surface(
+                modifier = Modifier.weight(1f).height(72.dp).clip(RoundedCornerShape(16.dp)),
+                color = DengColors.CardBg,
+                border = BorderStroke(1.dp, DengColors.BorderCyan),
+            ) {}
+        }
+    }
+    Spacer(Modifier.height(12.dp))
+    DengCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(
                 color = DengColors.Cyan,
                 strokeWidth = 2.dp,
                 modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.width(12.dp))
-            Text("Loading…", color = DengColors.TextMuted)
+            Text("Loading devices…", color = DengColors.TextMuted)
         }
     }
+}
+
+@Composable
+private fun SkeletonBar(widthFraction: Float) {
+    Surface(
+        color = DengColors.TextMuted.copy(alpha = 0.12f),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.fillMaxWidth(widthFraction).height(14.dp),
+    ) {}
 }

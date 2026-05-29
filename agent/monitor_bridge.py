@@ -251,6 +251,15 @@ class BridgeState:
     snapshot_last_upload_status: str | None = None  # "ok" | "http_NNN" | "network_error"
     snapshot_provider_called_count: int = 0
     screencap_available: bool | None = None  # None until first attempt
+    # v1.0.6 — richer capture diagnostics so the APK Snapshot tab + probe
+    # can prove EXACTLY which provider worked (or why all failed):
+    #   normal_screencap / system_screencap / root_screencap_stdout /
+    #   root_screencap_file / root_system_screencap.
+    snapshot_provider: str | None = None        # provider that produced bytes
+    snapshot_png_valid: bool | None = None       # last capture had valid PNG
+    snapshot_root_granted: bool | None = None     # root path succeeded/denied
+    snapshot_su_available: bool | None = None      # su binary present
+    snapshot_attempts: list[dict[str, Any]] = field(default_factory=list)
     monitor_enabled_remote: bool = True
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -263,6 +272,11 @@ class BridgeState:
             "snapshot_last_upload_status": (self.snapshot_last_upload_status or None),
             "snapshot_provider_called_count": int(self.snapshot_provider_called_count or 0),
             "screencap_available": self.screencap_available,
+            # v1.0.6 capture-provider diagnostics.
+            "snapshot_provider": (self.snapshot_provider or None),
+            "snapshot_png_valid": self.snapshot_png_valid,
+            "snapshot_root_granted": self.snapshot_root_granted,
+            "snapshot_su_available": self.snapshot_su_available,
             "last_push_result": (self.last_push_result or None),
         }
 
@@ -361,10 +375,17 @@ class MonitorBridge:
         # v1.0.4 — attach the bridge's self-view so the APK Snapshot tab
         # can show a real reason ("capture_failed: screencap unavailable")
         # instead of "Waiting for first snapshot…" forever. The block is
-        # tiny (~7 string/int fields) so it stays well under
+        # tiny (a dozen string/int fields) so it stays well under
         # MAX_PAYLOAD_BYTES even with the package list.
         try:
-            payload["bridge_status"] = self.state.to_push_status()
+            bridge_status = self.state.to_push_status()
+            # v1.0.6 — device-level RAM (used/total/percent) so the
+            # redesigned dashboard can render a per-device RAM list. Comes
+            # straight from the status provider (/proc/meminfo, root-free).
+            device_ram = raw.get("device_ram")
+            if isinstance(device_ram, dict):
+                bridge_status["device_ram"] = device_ram
+            payload["bridge_status"] = bridge_status
         except Exception:  # noqa: BLE001
             pass
 
@@ -378,55 +399,111 @@ class MonitorBridge:
             elapsed = time.time() - self.state.snapshot_last_sent_at
             if elapsed >= interval:
                 self.state.snapshot_provider_called_count += 1
-                snap: tuple[bytes, str] | None = None
+                capture: Any = None
                 capture_error: str | None = None
                 try:
-                    snap = self.snapshot_provider()
+                    capture = self.snapshot_provider()
                 except Exception as exc:  # noqa: BLE001
                     capture_error = f"{exc.__class__.__name__}"
                     logger.debug("snapshot_provider failed: %s", exc)
-                if snap:
-                    data, mime = snap
-                    # We at least got bytes from the provider — screencap works.
-                    self.state.screencap_available = True
-                    self.state.snapshot_last_bytes = len(data) if data else 0
-                    if not data:
-                        self.state.snapshot_last_result = "capture_failed"
-                        self.state.snapshot_last_error = "empty_bytes"
-                        self.state.snapshot_last_sent_at = time.time() - max(0, interval - 5)
-                    elif len(data) > MAX_SNAPSHOT_BYTES:
-                        self.state.snapshot_last_result = "capture_failed"
-                        self.state.snapshot_last_error = (
-                            f"image_too_large_{len(data)}_max_{MAX_SNAPSHOT_BYTES}"
-                        )
-                        self.state.snapshot_last_sent_at = time.time() - max(0, interval - 5)
-                    else:
-                        upload_ok = self._post_binary(
-                            "/api/monitor/bridge/snapshot",
-                            data,
-                            content_type=mime or "image/png",
-                        )
-                        if upload_ok:
-                            self.state.snapshot_last_sent_at = time.time()
-                            self.state.snapshot_last_result = "success"
-                            self.state.snapshot_last_error = None
-                            self.state.snapshot_last_upload_status = "ok"
-                        else:
-                            self.state.snapshot_last_result = "upload_failed"
-                            self.state.snapshot_last_upload_status = (
-                                self.state.last_error or "network_error"
-                            )
-                else:
-                    # Provider returned None — screencap missing / permission
-                    # denied / crashed. Surface the reason in bridge_status
-                    # so the APK shows it instead of a silent placeholder.
-                    self.state.screencap_available = False
-                    self.state.snapshot_last_result = "capture_failed"
-                    self.state.snapshot_last_error = (
-                        capture_error or "screencap_unavailable"
-                    )
-                    # Don't spin on a broken capture; back off slightly.
-                    self.state.snapshot_last_sent_at = time.time() - max(0, interval - 5)
+                self._handle_snapshot_capture(capture, capture_error, interval)
+
+    # ── Snapshot result handling ─────────────────────────────────────────
+    def _handle_snapshot_capture(self, capture: Any, capture_error: str | None, interval: int) -> None:
+        """Normalize the snapshot provider's return value and act on it.
+
+        Accepts three shapes for backward compatibility:
+          * ``None``                       — capture failed / not available.
+          * ``(bytes, mime)`` tuple        — legacy provider (v1.0.4/5).
+          * ``SnapshotCapture``-like object — v1.0.6 rich diagnostics
+            (duck-typed via the ``data`` + ``result`` attributes so the
+            bridge keeps zero hard dependency on agent.snapshot).
+        """
+        backoff_sent_at = time.time() - max(0, interval - 5)
+
+        # Rich capture object (v1.0.6).
+        if capture is not None and hasattr(capture, "data") and hasattr(capture, "result"):
+            self._ingest_capture_diagnostics(capture)
+            data = capture.data
+            mime = getattr(capture, "mime", "image/png") or "image/png"
+            if not data:
+                self.state.snapshot_last_result = getattr(capture, "result", "capture_failed")
+                self.state.snapshot_last_error = (
+                    getattr(capture, "error", None) or capture_error or "screencap_unavailable"
+                )
+                self.state.snapshot_last_bytes = int(getattr(capture, "byte_length", 0) or 0)
+                self.state.snapshot_last_sent_at = backoff_sent_at
+                return
+            self._upload_snapshot_bytes(data, mime, interval)
+            return
+
+        # Legacy tuple (bytes, mime).
+        if capture:
+            try:
+                data, mime = capture
+            except (TypeError, ValueError):
+                data, mime = None, "image/png"
+            self.state.screencap_available = True
+            self.state.snapshot_last_bytes = len(data) if data else 0
+            if not data:
+                self.state.snapshot_last_result = "capture_failed"
+                self.state.snapshot_last_error = "empty_bytes"
+                self.state.snapshot_last_sent_at = backoff_sent_at
+                return
+            self._upload_snapshot_bytes(data, mime or "image/png", interval)
+            return
+
+        # Provider returned None — screencap missing / permission denied /
+        # crashed. Surface the reason so the APK shows it.
+        self.state.screencap_available = False
+        self.state.snapshot_last_result = "capture_failed"
+        self.state.snapshot_last_error = capture_error or "screencap_unavailable"
+        self.state.snapshot_last_sent_at = backoff_sent_at
+
+    def _ingest_capture_diagnostics(self, capture: Any) -> None:
+        """Copy safe capture diagnostics from a SnapshotCapture into state."""
+        try:
+            self.state.screencap_available = bool(getattr(capture, "screencap_found", False))
+            self.state.snapshot_provider = getattr(capture, "provider", None)
+            self.state.snapshot_png_valid = bool(getattr(capture, "png_valid", False))
+            self.state.snapshot_root_granted = getattr(capture, "root_granted", None)
+            self.state.snapshot_su_available = bool(getattr(capture, "su_available", False))
+            attempts = getattr(capture, "attempts", None) or []
+            safe: list[dict[str, Any]] = []
+            for a in attempts[:8]:
+                if hasattr(a, "to_safe_dict"):
+                    safe.append(a.to_safe_dict())
+                elif isinstance(a, dict):
+                    safe.append(a)
+            self.state.snapshot_attempts = safe
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _upload_snapshot_bytes(self, data: bytes, mime: str, interval: int) -> None:
+        """Validate size and upload PNG bytes; records success/failure."""
+        self.state.snapshot_last_bytes = len(data) if data else 0
+        if len(data) > MAX_SNAPSHOT_BYTES:
+            self.state.snapshot_last_result = "capture_failed"
+            self.state.snapshot_last_error = (
+                f"image_too_large_{len(data)}_max_{MAX_SNAPSHOT_BYTES}"
+            )
+            self.state.snapshot_last_sent_at = time.time() - max(0, interval - 5)
+            return
+        upload_ok = self._post_binary(
+            "/api/monitor/bridge/snapshot",
+            data,
+            content_type=mime or "image/png",
+        )
+        if upload_ok:
+            self.state.snapshot_last_sent_at = time.time()
+            self.state.snapshot_last_result = "success"
+            self.state.snapshot_last_error = None
+            self.state.snapshot_last_upload_status = "ok"
+        else:
+            self.state.snapshot_last_result = "failed_upload_http"
+            self.state.snapshot_last_upload_status = (
+                self.state.last_error or "network_error"
+            )
 
     # ── HTTP helpers ─────────────────────────────────────────────────────
     def _validate_url(self) -> bool:

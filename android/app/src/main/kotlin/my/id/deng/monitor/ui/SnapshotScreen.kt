@@ -216,6 +216,7 @@ fun SnapshotScreen(api: MonitorApi, sessionStore: SessionStore) {
                 Text(
                     "Captures attempted: ${bridgeStatus.calledCount} • " +
                     "Last result: ${bridgeStatus.lastResult ?: "—"}" +
+                    (bridgeStatus.provider?.let { " • via $it" } ?: "") +
                     (bridgeStatus.lastBytes?.let { " • ${it / 1024} KB" } ?: ""),
                     style = MaterialTheme.typography.bodySmall,
                     color = DengColors.TextDim,
@@ -237,7 +238,24 @@ private data class BridgeStatusSnapshot(
     val calledCount: Int,
     val lastResult: String?,
     val lastBytes: Int?,
+    val provider: String?,
 )
+
+// v1.0.6: clean, user-facing reason for each capture result enum. No raw
+// stack traces — those live in the probe. The provider (which screencap
+// rung was tried) is appended when known.
+private fun humanCaptureReason(result: String?, error: String?, provider: String?): String {
+    val base = when (result) {
+        "failed_no_screencap" -> "screencap not available on this device"
+        "failed_root_denied" -> "root screencap was denied"
+        "failed_empty_output" -> "screencap returned no image"
+        "failed_invalid_png" -> "screencap did not return a valid PNG"
+        "failed_timeout" -> "screencap timed out"
+        "capture_failed", "failed_unknown" -> error ?: "screencap unavailable"
+        else -> error ?: result ?: "screencap unavailable"
+    }
+    return if (!provider.isNullOrBlank()) "$base ($provider)" else base
+}
 
 private fun parseBridgeStatus(raw: JsonElement?): BridgeStatusSnapshot? {
     val obj = (raw as? JsonObject) ?: return null
@@ -246,20 +264,24 @@ private fun parseBridgeStatus(raw: JsonElement?): BridgeStatusSnapshot? {
     val lastResult = s("snapshot_last_result")
     val lastError = s("snapshot_last_error")
     val uploadStatus = s("snapshot_last_upload_status")
+    val provider = s("snapshot_provider")
 
-    val captureFailedReason = when {
-        lastResult == "capture_failed" -> lastError ?: "screencap unavailable"
-        else -> null
-    }
-    val uploadFailedReason = when {
-        lastResult == "upload_failed" -> uploadStatus ?: "upload failed"
-        else -> null
-    }
+    // Any "failed_*" / "capture_failed" that is NOT an upload failure is a
+    // capture failure; failed_upload_http (+ legacy upload_failed) is upload.
+    val isUploadFailure = lastResult == "failed_upload_http" || lastResult == "upload_failed"
+    val isCaptureFailure = lastResult != null &&
+        lastResult != "success" &&
+        !isUploadFailure
+
+    val captureFailedReason = if (isCaptureFailure) humanCaptureReason(lastResult, lastError, provider) else null
+    val uploadFailedReason = if (isUploadFailure) (uploadStatus ?: "upload failed") else null
+
     return BridgeStatusSnapshot(
         captureFailedReason = captureFailedReason,
         uploadFailedReason = uploadFailedReason,
         calledCount = i("snapshot_provider_called_count") ?: 0,
         lastResult = lastResult,
         lastBytes = i("snapshot_last_bytes"),
+        provider = provider,
     )
 }

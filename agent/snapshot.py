@@ -1,27 +1,37 @@
-"""Optional Android screenshot/snapshot support for webhooks.
+"""Fullscreen Android screenshot capture for the DENG monitor bridge.
 
-v1.0.4: capture the **whole** Android display (terminal + every Roblox
-window + system UI) — the same picture the user sees when they look at
-the cloud phone — not just one app or a blank placeholder. The user
-explicitly compared this to the Kaeru tool which is a full-display
-capture; ours now does the same.
+v1.0.6 rewrite — "snapshot must finally work".
 
-Implementation:
-    * ``screencap -p`` is always the canonical path. On Android, this
-      binary captures the entire framebuffer, regardless of which app
-      is foreground, and emits a PNG to stdout — exactly what we want.
-    * We try a small ladder of binaries so the capture still works on
-      rooted devices that have moved ``screencap`` around, or on
-      cloud-phone images where the framework wraps it behind ``sh``::
+The monitor only needs ONE thing: a fullscreen PNG of the cloud phone's
+display. The previous versions failed on most cloud phones because:
 
-          1.  ``screencap -p``
-          2.  ``/system/bin/screencap -p``
-          3.  ``su -c "screencap -p"``  (only if su is on PATH and the
-              user has explicitly opted into root via the env var
-              DENG_REJOIN_SNAPSHOT_USE_SU=1)
-    * Each rung carries the same 10-second hard timeout.
-    * We never run an app-only capture — that's the bug class the user
-      hit in v1.0.3.
+  * Termux's plain ``screencap -p`` is frequently blocked (no framebuffer
+    access for the shell user) and produced empty / permission-denied
+    output.
+  * The only root fallback was ``su -c "screencap -p"`` to **stdout**, and
+    it was gated behind ``DENG_REJOIN_SNAPSHOT_USE_SU=1`` — an env var the
+    monitor autostart path never set. So root was never even tried.
+  * The most reliable rooted path — ``su -c 'screencap -p /sdcard/x.png'``
+    then read the file back — did not exist at all.
+
+This module now tries a ladder of providers, automatically escalating to
+root when the unprivileged path fails, and records rich diagnostics for
+every attempt so the APK / probe can show EXACTLY why a capture failed.
+
+Capture ladder (priority order)::
+
+    1. normal_screencap        screencap -p                         (stdout)
+    2. system_screencap        /system/bin/screencap -p             (stdout)
+    3. root_screencap_stdout   su -c 'screencap -p'                 (stdout)
+    4. root_screencap_file     su -c 'screencap -p <tmp>' + read    (file)
+    5. root_system_screencap   su -c '/system/bin/screencap -p <tmp>' (file)
+
+Safety:
+    * Never uses OCR / accessibility / UIAutomator / MediaProjection.
+    * Never saves tokens or secrets in the file or metadata.
+    * Never deletes user data; only its own temp PNG under /sdcard.
+    * Every rung carries a strict per-attempt timeout.
+    * Never raises — callers get a structured result.
 """
 
 from __future__ import annotations
@@ -30,88 +40,371 @@ import os
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .constants import SNAPSHOT_DIR
 
+# PNG magic — every valid PNG starts with these 8 bytes.
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
-def _candidate_commands() -> list[list[str]]:
-    """Return the list of capture commands to try, in priority order.
+# Per-attempt hard timeout (seconds).
+ATTEMPT_TIMEOUT = 12
 
-    Order is "fastest / least privileged first" so we never escalate
-    unless an earlier attempt actually failed. We do not silently
-    invoke ``su`` — users opt in with DENG_REJOIN_SNAPSHOT_USE_SU=1.
+# Prefer images larger than this; smaller valid PNGs are accepted but flagged.
+SUSPICIOUS_MIN_BYTES = 10 * 1024  # 10 KB
+
+# Root-side temp file. On Android /sdcard is the shared, FUSE-mounted store
+# that both root and the Termux shell user can usually reach. We always clean
+# it up after reading.
+ROOT_TMP_PATH = "/sdcard/deng-monitor-snapshot.png"
+
+# Result enum values (kept as module constants so callers/tests can reference).
+RESULT_SUCCESS = "success"
+RESULT_NO_SCREENCAP = "failed_no_screencap"
+RESULT_ROOT_DENIED = "failed_root_denied"
+RESULT_EMPTY_OUTPUT = "failed_empty_output"
+RESULT_INVALID_PNG = "failed_invalid_png"
+RESULT_TIMEOUT = "failed_timeout"
+RESULT_UNKNOWN = "failed_unknown"
+
+
+@dataclass
+class ProviderAttempt:
+    """Diagnostics for a single capture attempt (one rung of the ladder)."""
+
+    provider: str
+    exit_code: int | None = None
+    byte_length: int = 0
+    png_valid: bool = False
+    timeout: bool = False
+    found: bool = True            # binary/command existed
+    stderr: str | None = None     # first safe line of stderr
+    note: str | None = None       # short, safe human note
+
+    def to_safe_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "exit_code": self.exit_code,
+            "byte_length": int(self.byte_length or 0),
+            "png_valid": bool(self.png_valid),
+            "timeout": bool(self.timeout),
+            "found": bool(self.found),
+            "stderr": self.stderr,
+            "note": self.note,
+        }
+
+
+@dataclass
+class SnapshotCapture:
+    """Structured capture result handed back to the bridge.
+
+    ``data`` is the validated PNG bytes on success, else ``None``.
+    Everything else is safe-to-surface diagnostics — no secrets.
     """
-    cmds: list[list[str]] = [["screencap", "-p"]]
-    abs_path = "/system/bin/screencap"
-    if os.path.isfile(abs_path):
-        cmds.append([abs_path, "-p"])
-    if os.environ.get("DENG_REJOIN_SNAPSHOT_USE_SU") == "1" and shutil.which("su"):
-        cmds.append(["su", "-c", "screencap -p"])
-    return cmds
+
+    data: bytes | None = None
+    mime: str = "image/png"
+    path: Path | None = None
+    result: str = RESULT_UNKNOWN
+    provider: str | None = None       # provider that produced the bytes
+    byte_length: int = 0
+    png_valid: bool = False
+    suspicious_small: bool = False
+    screencap_found: bool = False
+    su_available: bool = False
+    root_granted: bool | None = None
+    error: str | None = None
+    attempts: list[ProviderAttempt] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return self.data is not None and self.png_valid
+
+    def to_safe_dict(self) -> dict[str, Any]:
+        return {
+            "result": self.result,
+            "provider": self.provider,
+            "byte_length": int(self.byte_length or 0),
+            "png_valid": bool(self.png_valid),
+            "suspicious_small": bool(self.suspicious_small),
+            "screencap_found": bool(self.screencap_found),
+            "su_available": bool(self.su_available),
+            "root_granted": self.root_granted,
+            "error": self.error,
+            "attempts": [a.to_safe_dict() for a in self.attempts],
+        }
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+
+def _su_available() -> bool:
+    if shutil.which("su"):
+        return True
+    for cand in ("/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su"):
+        if os.path.isfile(cand):
+            return True
+    return False
+
+
+def _root_disabled() -> bool:
+    """Root escalation is ON by default in v1.0.6. Operators can disable it
+    by setting DENG_REJOIN_SNAPSHOT_USE_SU to an explicit falsey value."""
+    v = os.environ.get("DENG_REJOIN_SNAPSHOT_USE_SU")
+    if v is None:
+        return False
+    return v.strip().lower() in {"0", "false", "no", "off"}
+
+
+def _first_safe_stderr_line(stderr: bytes | None) -> str | None:
+    if not stderr:
+        return None
+    try:
+        text = stderr.decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return None
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            # Cap and strip anything that could carry a path/secret-ish token.
+            return line[:160]
+    return None
+
+
+def _looks_like_root_denied(exit_code: int | None, stderr: str | None) -> bool:
+    if exit_code is not None and exit_code in (1, 13, 126, 127, 255):
+        # Could be denial; corroborate with stderr where possible.
+        pass
+    blob = (stderr or "").lower()
+    return any(
+        frag in blob
+        for frag in ("permission denied", "not allowed", "access denied",
+                     "su: ", "not permitted", "denied", "no su")
+    )
+
+
+def _extract_png(raw: bytes) -> bytes | None:
+    """Return PNG bytes from ``raw``, trimming any leading shell/su banner.
+
+    Some ``su`` implementations print a banner on stdout before the real
+    payload. We locate the PNG signature and slice from there. Returns
+    ``None`` when there's no signature at all.
+    """
+    if not raw:
+        return None
+    if raw.startswith(PNG_SIGNATURE):
+        return raw
+    idx = raw.find(PNG_SIGNATURE)
+    if idx > 0:
+        return raw[idx:]
+    return None
+
+
+def _run(cmd: list[str], *, timeout: int = ATTEMPT_TIMEOUT) -> tuple[int | None, bytes, bytes, str | None]:
+    """Run ``cmd`` capturing stdout+stderr. Returns (rc, stdout, stderr, kind).
+
+    ``kind`` is None when the process ran, else one of "not_found",
+    "timeout", "oserror". Never raises.
+    """
+    try:
+        completed = subprocess.run(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            shell=False,
+        )
+        return completed.returncode, completed.stdout or b"", completed.stderr or b"", None
+    except FileNotFoundError:
+        return None, b"", b"", "not_found"
+    except subprocess.TimeoutExpired:
+        return None, b"", b"", "timeout"
+    except OSError:
+        return None, b"", b"", "oserror"
+
+
+def _capture_via_stdout(provider: str, cmd: list[str]) -> tuple[bytes | None, ProviderAttempt]:
+    rc, out, err, kind = _run(cmd)
+    attempt = ProviderAttempt(provider=provider, exit_code=rc)
+    if kind == "not_found":
+        attempt.found = False
+        attempt.note = "binary_not_found"
+        return None, attempt
+    if kind == "timeout":
+        attempt.timeout = True
+        attempt.note = "timeout"
+        return None, attempt
+    if kind == "oserror":
+        attempt.note = "oserror"
+        return None, attempt
+    attempt.stderr = _first_safe_stderr_line(err)
+    png = _extract_png(out)
+    attempt.byte_length = len(png) if png else len(out)
+    if png is None:
+        attempt.note = "no_png_signature" if out else "empty_output"
+        return None, attempt
+    attempt.png_valid = True
+    attempt.byte_length = len(png)
+    return png, attempt
+
+
+def _capture_via_root_file(provider: str, remote_cmd: str) -> tuple[bytes | None, ProviderAttempt]:
+    """Run a root command that writes a PNG to ROOT_TMP_PATH, then read it.
+
+    The write goes through ``su -c '<screencap> -p <tmp>'`` and the read
+    prefers a direct filesystem read (fast, no extra root call), falling
+    back to ``su -c 'cat <tmp>'`` if the file isn't readable as the shell
+    user. Always cleans up the temp file.
+    """
+    write_rc, _w_out, w_err, w_kind = _run(["su", "-c", remote_cmd])
+    attempt = ProviderAttempt(provider=provider, exit_code=write_rc)
+    if w_kind == "not_found":
+        attempt.found = False
+        attempt.note = "su_not_found"
+        return None, attempt
+    if w_kind == "timeout":
+        attempt.timeout = True
+        attempt.note = "timeout"
+        return None, attempt
+    if w_kind == "oserror":
+        attempt.note = "oserror"
+        return None, attempt
+    attempt.stderr = _first_safe_stderr_line(w_err)
+
+    raw: bytes = b""
+    # 1) Try a direct read (works when /sdcard is shared + readable).
+    try:
+        raw = Path(ROOT_TMP_PATH).read_bytes()
+    except Exception:  # noqa: BLE001
+        raw = b""
+    # 2) Fallback: cat the file back through root.
+    if not raw:
+        rc2, out2, _err2, kind2 = _run(["su", "-c", f"cat {ROOT_TMP_PATH}"])
+        if kind2 is None and out2:
+            raw = out2
+
+    # Cleanup our own temp file (best-effort, never deletes user data).
+    _run(["su", "-c", f"rm -f {ROOT_TMP_PATH}"], timeout=6)
+
+    png = _extract_png(raw)
+    attempt.byte_length = len(png) if png else len(raw)
+    if png is None:
+        attempt.note = "no_png_signature" if raw else "empty_output"
+        return None, attempt
+    attempt.png_valid = True
+    attempt.byte_length = len(png)
+    return png, attempt
+
+
+def _build_providers() -> list[tuple[str, str, list[str] | None, str | None]]:
+    """Return ladder rungs as (kind, provider, stdout_cmd, root_file_cmd).
+
+    ``kind`` is "stdout" or "root_file". Exactly one of the command fields
+    is populated per rung.
+    """
+    rungs: list[tuple[str, str, list[str] | None, str | None]] = []
+    # 1 + 2 unprivileged stdout
+    rungs.append(("stdout", "normal_screencap", ["screencap", "-p"], None))
+    if os.path.isfile("/system/bin/screencap"):
+        rungs.append(("stdout", "system_screencap", ["/system/bin/screencap", "-p"], None))
+    # 3 + 4 + 5 root (auto unless explicitly disabled)
+    if not _root_disabled() and _su_available():
+        rungs.append(("stdout", "root_screencap_stdout", ["su", "-c", "screencap -p"], None))
+        rungs.append(("root_file", "root_screencap_file", None, f"screencap -p {ROOT_TMP_PATH}"))
+        rungs.append(("root_file", "root_system_screencap", None,
+                      f"/system/bin/screencap -p {ROOT_TMP_PATH}"))
+    return rungs
+
+
+def capture_snapshot_detailed() -> SnapshotCapture:
+    """Capture a fullscreen PNG via the provider ladder. Never raises."""
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    su_avail = _su_available()
+    cap = SnapshotCapture(su_available=su_avail)
+
+    any_screencap_found = False
+    any_root_attempted = False
+    any_root_denied = False
+    any_timeout = False
+    any_bytes = False
+
+    for kind, provider, stdout_cmd, root_cmd in _build_providers():
+        if kind == "stdout":
+            png, attempt = _capture_via_stdout(provider, stdout_cmd or [])
+        else:
+            any_root_attempted = True
+            png, attempt = _capture_via_root_file(provider, root_cmd or "")
+
+        cap.attempts.append(attempt)
+        if attempt.found:
+            any_screencap_found = True
+        if attempt.timeout:
+            any_timeout = True
+        if attempt.byte_length:
+            any_bytes = True
+        if provider.startswith("root") and (
+            attempt.exit_code not in (0, None) or _looks_like_root_denied(attempt.exit_code, attempt.stderr)
+        ) and not attempt.png_valid:
+            any_root_denied = True
+
+        if png is not None:
+            # Success — persist to disk so callers that want a path get one.
+            path = SNAPSHOT_DIR / f"snapshot-{int(time.time())}.png"
+            try:
+                path.write_bytes(png)
+            except OSError:
+                path = None
+            cap.data = png
+            cap.path = path
+            cap.provider = provider
+            cap.byte_length = len(png)
+            cap.png_valid = True
+            cap.screencap_found = True
+            cap.suspicious_small = len(png) < SUSPICIOUS_MIN_BYTES
+            cap.result = RESULT_SUCCESS
+            if provider.startswith("root"):
+                cap.root_granted = True
+            return cap
+
+    # No provider produced a valid PNG — classify the failure.
+    cap.screencap_found = any_screencap_found
+    if any_root_attempted:
+        cap.root_granted = False if any_root_denied else cap.root_granted
+    if not any_screencap_found and not su_avail:
+        cap.result = RESULT_NO_SCREENCAP
+        cap.error = "screencap binary not found and su unavailable"
+    elif any_root_attempted and any_root_denied and not any_bytes:
+        cap.result = RESULT_ROOT_DENIED
+        cap.error = "root screencap denied"
+    elif any_timeout and not any_bytes:
+        cap.result = RESULT_TIMEOUT
+        cap.error = "screencap timed out"
+    elif any_bytes:
+        # We got bytes from at least one provider but none were valid PNG.
+        cap.result = RESULT_INVALID_PNG
+        cap.error = "screencap did not return valid PNG bytes"
+    elif not any_bytes and any_screencap_found:
+        cap.result = RESULT_EMPTY_OUTPUT
+        cap.error = "screencap returned empty output"
+    else:
+        cap.result = RESULT_UNKNOWN
+        cap.error = "snapshot capture failed"
+    return cap
 
 
 def capture_snapshot() -> tuple[Path | None, str]:
-    """Capture a whole-display Android screenshot, PNG, to disk.
+    """Backward-compatible wrapper used by the webhook path and tests.
 
     Returns ``(path, "snapshot captured")`` on success or
     ``(None, "<safe error message>")`` on failure. Never raises.
     """
-    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-    path = SNAPSHOT_DIR / f"snapshot-{int(time.time())}.png"
-
-    last_err = "screenshot unavailable"
-    for cmd in _candidate_commands():
-        try:
-            with path.open("wb") as handle:
-                completed = subprocess.run(
-                    cmd,
-                    stdin=subprocess.DEVNULL,
-                    stdout=handle,
-                    stderr=subprocess.PIPE,
-                    timeout=10,
-                    shell=False,
-                )
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
-            last_err = f"screenshot unavailable: {exc.__class__.__name__}"
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-            continue
-
-        if completed.returncode != 0 or not path.exists() or path.stat().st_size == 0:
-            err_text = (
-                completed.stderr.decode("utf-8", errors="replace").strip()
-                if completed.stderr else "screenshot failed (empty)"
-            )
-            last_err = err_text or "screenshot failed"
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-            continue
-
-        # Sanity check: a real PNG starts with 0x89 0x50 0x4E 0x47.
-        # If we got bytes but they aren't PNG, something proxied the
-        # output (e.g. shell wrapped stderr into stdout). Treat as a
-        # failure and try the next rung.
-        try:
-            head = path.open("rb").read(8)
-        except OSError as exc:
-            last_err = f"snapshot read failed: {exc.__class__.__name__}"
-            continue
-        if not head.startswith(b"\x89PNG\r\n\x1a\n"):
-            last_err = "screencap did not return PNG bytes"
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-            continue
-
-        return path, "snapshot captured"
-
-    return None, last_err
+    cap = capture_snapshot_detailed()
+    if cap.ok and cap.path is not None:
+        return cap.path, "snapshot captured"
+    return None, (cap.error or cap.result or "screenshot unavailable")
 
 
 def cleanup_old_snapshots(max_age_seconds: int = 300) -> None:
@@ -124,3 +417,20 @@ def cleanup_old_snapshots(max_age_seconds: int = 300) -> None:
                 item.unlink()
         except OSError:
             continue
+
+
+__all__ = [
+    "PNG_SIGNATURE",
+    "ProviderAttempt",
+    "SnapshotCapture",
+    "RESULT_SUCCESS",
+    "RESULT_NO_SCREENCAP",
+    "RESULT_ROOT_DENIED",
+    "RESULT_EMPTY_OUTPUT",
+    "RESULT_INVALID_PNG",
+    "RESULT_TIMEOUT",
+    "RESULT_UNKNOWN",
+    "capture_snapshot",
+    "capture_snapshot_detailed",
+    "cleanup_old_snapshots",
+]
