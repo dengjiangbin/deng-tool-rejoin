@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -46,6 +47,7 @@ from .config import (
     validate_username_source,
 )
 from .constants import (
+    APP_HOME,
     CONFIG_PATH,
     CRASH_LOG_PATH,
     DB_PATH,
@@ -55,9 +57,14 @@ from .constants import (
     GITHUB_REMOTE,
     LOCK_PATH,
     LOG_PATH,
+    MONITOR_LOCK_PATH,
+    MONITOR_LOG_PATH,
+    MONITOR_PID_PATH,
+    MONITOR_STATUS_PATH,
     PID_PATH,
     PRODUCT_NAME,
     RAW_INSTALL_URL,
+    RUN_DIR,
     START_CRASH_STATE_PATH,
     LOG_DIR,
     TERMUX_BOOT_SCRIPT,
@@ -66,7 +73,7 @@ from .constants import (
 from .doctor import print_doctor, run_doctor
 from .launcher import RejoinResult, perform_rejoin
 from .launcher_file import create_market_launchers
-from .lockfile import LockError, LockManager, stop_running_agent
+from .lockfile import LockError, LockManager, is_process_alive, stop_running_agent
 from .menu import run_menu
 from .onboarding import (
     NEW_USER_HELP_TEXT,
@@ -82,6 +89,10 @@ from .license import (
     bind_remote_license_key,
     check_remote_license_status,
     get_device_summary,
+    get_or_create_install_id,
+    get_public_device_model,
+    hash_install_id,
+    normalize_license_key,
     sync_install_id_with_config,
 )
 
@@ -187,75 +198,221 @@ def _persist_license_status(cfg: dict[str, Any], status: str) -> dict[str, Any]:
     return save_config(cfg)
 
 
-def _try_autostart_monitor_bridge(cfg: dict[str, Any]) -> bool:
-    """Best-effort: start the Rejoin APK monitor bridge in the background.
+_MONITOR_WORKER_ENV = "DENG_MONITOR_BRIDGE_WORKER"
+_MONITOR_WORKER_BOOTSTRAP_SECONDS = 8.0
 
-    Called after license verification succeeds (menu gate / cmd_start) so
-    the device appears in the Android app automatically without any
-    manual env-var setup. Never raises and never blocks more than a few
-    seconds on a single HTTP attempt. Returns ``True`` if the bridge is
-    running after the call, ``False`` otherwise.
 
-    Security: this function only ever reads ``cfg["license"]["key"]`` and
-    the locally-stored install_id, both of which the user has already
-    used to authenticate against ``rejoin.deng.my.id``. Nothing else
-    sensitive (private URLs, cookies, raw HWID) is ever sent or stored.
-    """
+def _monitor_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _read_json_file(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _monitor_worker_pid() -> int | None:
+    try:
+        raw = MONITOR_PID_PATH.read_text(encoding="utf-8").strip()
+        pid = int(raw)
+    except Exception:  # noqa: BLE001
+        return None
+    return pid if pid > 0 else None
+
+
+def _monitor_worker_running() -> bool:
+    pid = _monitor_worker_pid()
+    return bool(pid and is_process_alive(pid))
+
+
+def _cleanup_monitor_worker_files(*, keep_status: bool = False) -> None:
+    for path in (MONITOR_PID_PATH, MONITOR_LOCK_PATH):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:  # noqa: BLE001
+            pass
+    if not keep_status:
+        try:
+            MONITOR_STATUS_PATH.unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _monitor_bridge_launch_material(cfg: dict[str, Any] | None) -> dict[str, str] | None:
+    if not isinstance(cfg, dict):
+        return None
+    lic = cfg.get("license") if isinstance(cfg.get("license"), dict) else {}
+    raw_key = (lic.get("key") or "").strip() or str(cfg.get("license_key") or "").strip()
+    if not raw_key:
+        return None
+    try:
+        key = normalize_license_key(raw_key)
+    except Exception:  # noqa: BLE001
+        key = str(raw_key).strip().upper()
+    if not key:
+        return None
+    try:
+        install_id = get_or_create_install_id()
+    except Exception:  # noqa: BLE001
+        return None
+    if not install_id:
+        return None
+    label = str(lic.get("device_label") or "").strip()
+    if not label or label.lower() in {"termux on android", "localhost", "unknown"}:
+        label = (get_public_device_model() or "").strip()
+    if not label or label.lower() == "unknown":
+        label = "Android device"
+    channel = "stable"
+    try:
+        ch_raw = str(cfg.get("channel") or "").strip().lower()
+        if ch_raw in {"stable", "beta", "dev", "latest", "test", "main-dev"}:
+            channel = ch_raw
+    except Exception:  # noqa: BLE001
+        pass
+    return {
+        "license_key": key,
+        "install_id_hash": hash_install_id(install_id),
+        "channel": channel,
+        "device_label": label[:64],
+    }
+
+
+def _ensure_monitor_bridge_for_config(cfg: dict[str, Any]) -> bool:
     try:
         from . import monitor_autostart
-        from .license import (
-            get_or_create_install_id,
-            hash_install_id,
-            normalize_license_key,
+    except Exception:  # noqa: BLE001
+        return False
+    material = _monitor_bridge_launch_material(cfg)
+    if not material:
+        return False
+    try:
+        monitor_autostart.set_config(cfg)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return monitor_autostart.ensure_monitor_bridge_started(
+            license_key=material["license_key"],
+            install_id_hash=material["install_id_hash"],
+            tool_version=VERSION,
+            channel=material["channel"],
+            device_label=material["device_label"],
+            config=cfg,
+            announce=False,
         )
     except Exception:  # noqa: BLE001
         return False
 
-    try:
-        lic = cfg.get("license") if isinstance(cfg, dict) else None
-        lic = lic if isinstance(lic, dict) else {}
-        raw_key = (lic.get("key") or "").strip() or (cfg.get("license_key") or "").strip() if isinstance(cfg, dict) else ""
-        if not raw_key:
-            return False
-        try:
-            key = normalize_license_key(raw_key)
-        except Exception:  # noqa: BLE001
-            key = str(raw_key).strip().upper()
-        if not key:
-            return False
-        try:
-            install_id = get_or_create_install_id()
-        except Exception:  # noqa: BLE001
-            return False
-        if not install_id:
-            return False
-        install_id_hash = hash_install_id(install_id)
 
-        channel = "stable"
-        try:
-            ch_raw = str(cfg.get("channel") or "").strip().lower() if isinstance(cfg, dict) else ""
-            if ch_raw in {"stable", "beta", "dev", "latest", "test", "main-dev"}:
-                channel = ch_raw
-        except Exception:  # noqa: BLE001
-            pass
+def _monitor_status_from_disk() -> dict[str, Any]:
+    status = _read_json_file(MONITOR_STATUS_PATH)
+    pid = _monitor_worker_pid()
+    alive = bool(pid and is_process_alive(pid))
+    if pid:
+        status["worker_pid"] = pid
+    status["worker_running"] = alive
+    if not alive:
+        status["bridge_running"] = False
+        status["connected"] = False
+    return status
 
-        # Register the saved config so the bridge can report configured
-        # packages immediately (state=Dead) before the user presses Start.
-        try:
-            monitor_autostart.set_config(cfg)
-        except Exception:  # noqa: BLE001
-            pass
 
-        return monitor_autostart.ensure_monitor_bridge_started(
-            license_key=key,
-            install_id_hash=install_id_hash,
-            tool_version=VERSION,
-            channel=channel,
-            device_label="Termux on Android",
-            config=cfg,
+def _spawn_monitor_worker(cfg: dict[str, Any]) -> bool:
+    if _monitor_worker_running():
+        return True
+    if not _monitor_bridge_launch_material(cfg):
+        return False
+    _cleanup_monitor_worker_files(keep_status=True)
+    MONITOR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    script_path = Path(__file__).with_name("deng_tool_rejoin.py")
+    env = os.environ.copy()
+    env[_MONITOR_WORKER_ENV] = "1"
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    with MONITOR_LOG_PATH.open("ab") as log_file:
+        proc = subprocess.Popen(
+            [sys.executable, str(script_path), "monitor", "run-worker"],
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            cwd=str(APP_HOME),
+            env=env,
+            start_new_session=(os.name != "nt"),
+            creationflags=creationflags,
+            shell=False,
         )
+    deadline = time.time() + _MONITOR_WORKER_BOOTSTRAP_SECONDS
+    while time.time() < deadline:
+        if _monitor_worker_running():
+            return True
+        if proc.poll() is not None:
+            break
+        time.sleep(0.2)
+    return _monitor_worker_running()
+
+
+def _stop_monitor_worker(*, timeout: float = 10.0) -> tuple[bool, str]:
+    pid = _monitor_worker_pid()
+    if not pid:
+        _cleanup_monitor_worker_files(keep_status=True)
+        return False, "monitor bridge is not running"
+    if not is_process_alive(pid):
+        _cleanup_monitor_worker_files(keep_status=True)
+        return False, f"stale monitor bridge PID {pid} cleaned"
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=max(3, int(timeout)),
+                check=False,
+                shell=False,
+            )
+        else:
+            os.kill(pid, signal.SIGTERM)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"failed to signal monitor bridge PID {pid}: {exc.__class__.__name__}"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not is_process_alive(pid):
+            _cleanup_monitor_worker_files(keep_status=True)
+            return True, f"stopped monitor bridge PID {pid}"
+        time.sleep(0.2)
+    if os.name != "nt":
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(0.2)
+    if not is_process_alive(pid):
+        _cleanup_monitor_worker_files(keep_status=True)
+        return True, f"stopped monitor bridge PID {pid}"
+    return False, f"monitor bridge PID {pid} did not exit in time"
+
+
+def _try_autostart_monitor_bridge(cfg: dict[str, Any]) -> bool:
+    """Best-effort: ensure the persistent APK monitor bridge worker exists."""
+    try:
+        if os.environ.get(_MONITOR_WORKER_ENV) == "1":
+            return _ensure_monitor_bridge_for_config(cfg)
+        return _spawn_monitor_worker(cfg)
     except Exception:  # noqa: BLE001
-        # Public users must never see a traceback from a bridge failure.
         return False
 
 
@@ -6681,8 +6838,13 @@ def _cmd_doctor_versions() -> int:
         from . import monitor_autostart
 
         summary = monitor_autostart.get_monitor_status_summary()
+        summary.update(_monitor_status_from_disk())
         print(f"  Bridge URL:             {summary.get('bridge_url')}")
+        print(f"  Bridge process:         {'yes' if summary.get('worker_running') else 'no'}")
+        print(f"  Bridge PID:             {summary.get('worker_pid') or '—'}")
         print(f"  Bridge running:         {'yes' if summary.get('bridge_running') else 'no'}")
+        print(f"  Bridge log:             {MONITOR_LOG_PATH}")
+        print(f"  Bridge status file:     {MONITOR_STATUS_PATH}")
         print(f"  Push interval:          {summary.get('push_interval_seconds') or '—'}s")
         print(f"  Snapshot interval:      {summary.get('snapshot_interval_seconds') or 0}s")
         print(f"  Last push:              {summary.get('last_push_result') or '—'}")
@@ -6701,24 +6863,173 @@ def _cmd_doctor_versions() -> int:
     return 0
 
 
-def _cmd_monitor_restart(args: argparse.Namespace) -> int:
-    """``deng-rejoin monitor restart`` — restart only the APK monitor bridge."""
+def _cmd_monitor_run_worker(args: argparse.Namespace) -> int:
     from . import monitor_autostart
 
-    print("DENG Tool: Rejoin — monitor bridge restart")
+    RUN_DIR.mkdir(parents=True, exist_ok=True)
+    pid = _monitor_worker_pid()
+    if pid and is_process_alive(pid) and pid != os.getpid():
+        return 0
+
+    started_at = _monitor_now_iso()
+    stop_requested = False
+
+    def _persist(summary: dict[str, Any]) -> None:
+        payload = dict(summary)
+        payload["worker_pid"] = os.getpid()
+        payload["worker_running"] = True
+        payload["worker_started_at"] = started_at
+        payload["updated_at"] = _monitor_now_iso()
+        _write_json_atomic(MONITOR_STATUS_PATH, payload)
+
+    def _handle_signal(_signum: int, _frame: Any) -> None:
+        nonlocal stop_requested
+        stop_requested = True
+
+    for sig_name in ("SIGTERM", "SIGINT"):
+        sig = getattr(signal, sig_name, None)
+        if sig is not None:
+            try:
+                signal.signal(sig, _handle_signal)
+            except Exception:  # noqa: BLE001
+                pass
+
+    _write_json_atomic(
+        MONITOR_LOCK_PATH,
+        {
+            "pid": os.getpid(),
+            "product": PRODUCT_NAME,
+            "command": "monitor-run-worker",
+            "started_at": started_at,
+        },
+    )
+    MONITOR_PID_PATH.write_text(f"{os.getpid()}\n", encoding="utf-8")
+
     try:
-        monitor_autostart.stop_monitor_bridge()
-        print("  Stopped bridge thread.")
-    except Exception as exc:  # noqa: BLE001
-        print(f"  Stop warning: {exc.__class__.__name__}")
-    cfg = None
+        while not stop_requested:
+            try:
+                cfg = load_config()
+            except ConfigError:
+                cfg = default_config()
+            ok = _ensure_monitor_bridge_for_config(cfg if isinstance(cfg, dict) else {})
+            summary = monitor_autostart.get_monitor_status_summary()
+            _persist(summary)
+            time.sleep(2.0 if ok else 5.0)
+    finally:
+        try:
+            monitor_autostart.stop_monitor_bridge()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            summary = monitor_autostart.get_monitor_status_summary()
+        except Exception:  # noqa: BLE001
+            summary = {}
+        summary["bridge_running"] = False
+        summary["connected"] = False
+        summary["worker_pid"] = os.getpid()
+        summary["worker_running"] = False
+        summary["worker_started_at"] = started_at
+        summary["updated_at"] = _monitor_now_iso()
+        _write_json_atomic(MONITOR_STATUS_PATH, summary)
+        _cleanup_monitor_worker_files(keep_status=True)
+    return 0
+
+
+def _cmd_monitor_start(args: argparse.Namespace) -> int:
+    del args
     try:
         cfg = load_config()
     except ConfigError:
         cfg = default_config()
-    ok = _try_autostart_monitor_bridge(cfg if isinstance(cfg, dict) else {})
-    print(f"  Restart result:         {'running' if ok else 'failed — check license / network'}")
+    print("DENG Tool: Rejoin — monitor bridge start")
+    if _monitor_worker_running():
+        print(f"  Bridge process:         already running (PID {_monitor_worker_pid()})")
+        return 0
+    if not _monitor_bridge_launch_material(cfg if isinstance(cfg, dict) else {}):
+        print("  Start result:           failed — no valid license/device binding available")
+        return 1
+    ok = _spawn_monitor_worker(cfg if isinstance(cfg, dict) else {})
+    status = _monitor_status_from_disk()
+    print(f"  Bridge process:         {'running' if ok else 'failed'}")
+    print(f"  Bridge PID:             {status.get('worker_pid') or '—'}")
+    print(f"  Bridge log:             {MONITOR_LOG_PATH}")
     return 0 if ok else 1
+
+
+def _cmd_monitor_stop(args: argparse.Namespace) -> int:
+    del args
+    print("DENG Tool: Rejoin — monitor bridge stop")
+    stopped, message = _stop_monitor_worker()
+    print(f"  Stop result:            {message}")
+    return 0 if stopped else 1
+
+
+def _cmd_monitor_restart(args: argparse.Namespace) -> int:
+    """``deng-rejoin monitor restart`` — restart the persistent APK monitor bridge."""
+    print("DENG Tool: Rejoin — monitor bridge restart")
+    try:
+        cfg = load_config()
+    except ConfigError:
+        cfg = default_config()
+    stopped, message = _stop_monitor_worker()
+    print(f"  Stop result:            {message}")
+    if not _monitor_bridge_launch_material(cfg if isinstance(cfg, dict) else {}):
+        print("  Restart result:         failed — no valid license/device binding available")
+        return 1
+    ok = _spawn_monitor_worker(cfg if isinstance(cfg, dict) else {})
+    status = _monitor_status_from_disk()
+    print(f"  Restart result:         {'running' if ok else 'failed — check license / network'}")
+    print(f"  Bridge PID:             {status.get('worker_pid') or '—'}")
+    return 0 if ok else 1
+
+
+def _upload_snapshot_test_image(cfg: dict[str, Any], data: bytes, mime: str = "image/png") -> tuple[bool, str]:
+    from . import monitor_autostart
+    from . import safe_http
+
+    material = _monitor_bridge_launch_material(cfg)
+    if not material:
+        return False, "missing_license"
+    bridge_url = monitor_autostart._resolve_bridge_url(None)
+    token = monitor_autostart._load_cached_token_for_url(bridge_url)
+    if not token:
+        issued = monitor_autostart._issue_token_from_license(
+            bridge_url=bridge_url,
+            license_key=material["license_key"],
+            install_id_hash=material["install_id_hash"],
+            device_label=material["device_label"],
+            tool_version=VERSION,
+            channel=material["channel"],
+        )
+        if not issued or not issued.get("bridge_token"):
+            return False, "issue_failed"
+        token = str(issued.get("bridge_token") or "")
+        monitor_autostart._save_cached_token({
+            "bridge_url": bridge_url,
+            "bridge_token": token,
+            "device_id": issued.get("device_id"),
+            "expires_at": issued.get("expires_at"),
+            "expires_at_epoch": monitor_autostart._iso_to_epoch(issued.get("expires_at")),
+            "issued_at_epoch": time.time(),
+        })
+    try:
+        status, _body = safe_http.post_raw(
+            bridge_url.rstrip("/") + "/api/monitor/bridge/snapshot",
+            data,
+            content_type=mime,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "User-Agent": "DENG-Tool-Monitor-Bridge/1.0",
+            },
+            timeout=12,
+        )
+    except safe_http.SafeHttpNetworkError as exc:
+        return False, f"network_{exc.__class__.__name__}"
+    except Exception as exc:  # noqa: BLE001
+        return False, exc.__class__.__name__
+    if 200 <= int(status) < 300:
+        return True, "ok"
+    return False, f"http_{status}"
 
 
 def _cmd_monitor_snapshot_test(*, upload_probe: bool = False) -> int:
@@ -6762,6 +7073,7 @@ def _cmd_monitor_snapshot_test(*, upload_probe: bool = False) -> int:
     sel = report.get("selected_provider")
     print(f"  Final result:           {report.get('final_result')}")
     print(f"  Selected provider:      {sel or '— none succeeded —'}")
+    cap = None
     if sel:
         print(f"  Captured bytes:         {report.get('selected_bytes')}")
         try:
@@ -6785,6 +7097,15 @@ def _cmd_monitor_snapshot_test(*, upload_probe: bool = False) -> int:
 
     # --upload-probe: attach the live-test evidence to a dev-probe and upload it.
     print("")
+    if cap is not None and getattr(cap, "ok", False) and getattr(cap, "data", None):
+        try:
+            cfg = load_config()
+        except ConfigError:
+            cfg = default_config()
+        uploaded, detail = _upload_snapshot_test_image(cfg if isinstance(cfg, dict) else {}, cap.data, getattr(cap, "mime", "image/png") or "image/png")
+        print(f"  Latest snapshot upload: {'OK' if uploaded else f'FAILED ({detail})'}")
+    else:
+        print("  Latest snapshot upload: skipped (no valid PNG to upload)")
     print("  Uploading probe with SNAPSHOT LIVE TEST section…")
     try:
         from . import probe as _probe
@@ -6807,23 +7128,32 @@ def _cmd_monitor_snapshot_test(*, upload_probe: bool = False) -> int:
 
 
 def cmd_monitor(args: argparse.Namespace) -> int:
-    """``deng-rejoin monitor [status|snapshot-test]`` — APK bridge tooling (no secrets).
+    """``deng-rejoin monitor [status|start|stop|restart|snapshot-test]``.
 
     Subcommands:
       status         (default) print connection / push / snapshot summary
+      start          start the persistent bridge worker process
+      stop           stop the persistent bridge worker process
+      restart        restart the persistent bridge worker process
       snapshot-test  run every snapshot provider rung and print the report
                      (``--upload-probe`` also uploads a SNAPSHOT LIVE TEST probe)
     """
     sub = (getattr(args, "monitor_subcommand", "") or "status").lower().strip()
+    if sub in {"run_worker", "run-worker", "worker"}:
+        return _cmd_monitor_run_worker(args)
     if sub in {"snapshot_test", "snapshot-test", "snapshottest"}:
         return _cmd_monitor_snapshot_test(
             upload_probe=bool(getattr(args, "snapshot_upload_probe", False))
         )
+    if sub in {"start"}:
+        return _cmd_monitor_start(args)
+    if sub in {"stop"}:
+        return _cmd_monitor_stop(args)
     if sub in {"restart"}:
         return _cmd_monitor_restart(args)
     if sub not in {"status", ""}:
         print(f"Unknown monitor subcommand: {sub}")
-        print("Usage: deng-rejoin monitor status | deng-rejoin monitor snapshot-test [--upload-probe]")
+        print("Usage: deng-rejoin monitor [status|start|stop|restart|snapshot-test [--upload-probe]]")
         return 2
 
     try:
@@ -6836,6 +7166,7 @@ def cmd_monitor(args: argparse.Namespace) -> int:
         from . import monitor_autostart
         monitor_autostart.set_config(cfg)
         summary = monitor_autostart.get_monitor_status_summary()
+        summary.update(_monitor_status_from_disk())
     except Exception:  # noqa: BLE001
         print("DENG Tool: Rejoin APK Monitor: (unavailable)")
         return 1
@@ -6869,6 +7200,8 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     if sha:
         print(f"  Installed artifact SHA: {sha}")
     print(f"  Bridge URL:             {summary.get('bridge_url')}")
+    print(f"  Bridge process running: {'yes' if summary.get('worker_running') else 'no'}")
+    print(f"  Bridge PID:             {summary.get('worker_pid') or '—'}")
     print(f"  Monitor autostart:      {'enabled' if summary.get('autostart_enabled') else 'disabled'}")
     print(f"  Bridge thread running:  {'yes' if summary.get('bridge_running') else 'no'}")
     print(f"  Push interval:          {push_iv_str}")
@@ -6886,6 +7219,8 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     print(f"  Snapshot interval:      {snap_iv_str}")
     print(f"  Last snapshot:          {_fmt_time(summary.get('snapshot_last_sent_at'))}")
     print(f"  Last snapshot result:   {summary.get('snapshot_last_result') or '—'}")
+    print(f"  Status file updated:    {summary.get('updated_at') or 'never'}")
+    print(f"  Bridge log path:        {MONITOR_LOG_PATH}")
     print(f"  Supervisor active:      {'yes' if summary.get('supervisor_active') else 'no'}")
     cache = summary.get("token_cache") or {}
     if cache.get("present"):

@@ -106,13 +106,13 @@ private fun DashboardContent(
     val secsSince = freshest?.secondsSinceLastSeen
     val stale = deviceTotal > 0 && devices.all { !it.isConnected }
 
-    // Overall RAM: sum(used)/sum(total) when totals are known; otherwise the
+    // Overall RAM: sum(available)/sum(total) when totals are known; otherwise the
     // mean of reported percents. Null when no device reported RAM.
     val ramDevices = devices.mapNotNull { it.deviceRam }
-    val totalUsed = ramDevices.sumOf { it.usedMb }
+    val totalAvailable = ramDevices.sumOf { it.availableMb }
     val totalTotal = ramDevices.sumOf { it.totalMb }
     val overallPercent: Int? = when {
-        totalTotal > 0 -> ((totalUsed.toLong() * 100) / totalTotal).toInt()
+        totalTotal > 0 -> ((totalAvailable.toLong() * 100) / totalTotal).toInt()
         ramDevices.any { it.effectivePercent != null } ->
             ramDevices.mapNotNull { it.effectivePercent }.average().toInt()
         else -> null
@@ -231,7 +231,7 @@ private fun DeviceRamRow(device: DeviceSummary) {
                     modifier = Modifier.size(8.dp),
                 ) {}
                 Spacer(Modifier.width(10.dp))
-                // "62/100% - Cloud Phone 1" style line.
+                // "1,111 MB / 15,000 MB 8% - SM-A515F" style line.
                 Text(
                     "$ramText - ${device.displayName}",
                     style = MaterialTheme.typography.bodyMedium,

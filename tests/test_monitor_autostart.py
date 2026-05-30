@@ -299,15 +299,14 @@ def test_status_provider_returns_empty_packages_when_no_supervisor_and_no_config
 # ── v1.0.6 device RAM (for the redesigned dashboard) ────────────────────────
 
 
-def test_parse_meminfo_computes_used_total_percent():
+def test_parse_meminfo_computes_available_total_percent():
     import agent.monitor_autostart as ma
     text = "MemTotal:        4096000 kB\nMemFree:         512000 kB\nMemAvailable:    1024000 kB\n"
     ram = ma._parse_meminfo(text)
     assert ram is not None
     assert ram["total_mb"] == 4096000 // 1024
-    # used = total - available = 3072000 kB → percent 75
-    assert ram["percent"] == 75
-    assert ram["used_mb"] == (4096000 - 1024000) // 1024
+    assert ram["percent"] == 25
+    assert ram["available_mb"] == 1024000 // 1024
 
 
 def test_parse_meminfo_falls_back_to_memfree_without_available():
@@ -315,7 +314,7 @@ def test_parse_meminfo_falls_back_to_memfree_without_available():
     text = "MemTotal: 1000000 kB\nMemFree: 400000 kB\n"
     ram = ma._parse_meminfo(text)
     assert ram is not None
-    assert ram["percent"] == 60  # used = 600000/1000000
+    assert ram["percent"] == 40
 
 
 def test_parse_meminfo_returns_none_on_garbage():
@@ -329,9 +328,9 @@ def test_status_payload_includes_device_ram_when_available(monkeypatch):
     autostart.set_active_supervisor(None)
     autostart.set_config(None)
     monkeypatch.setattr(ma, "read_device_ram",
-                        lambda: {"used_mb": 2048, "total_mb": 4096, "percent": 50})
+                        lambda: {"available_mb": 2048, "total_mb": 4096, "percent": 50})
     payload = autostart._build_status_payload(tool_version="1.0.0", channel="stable")
-    assert payload["device_ram"] == {"used_mb": 2048, "total_mb": 4096, "percent": 50}
+    assert payload["device_ram"] == {"available_mb": 2048, "total_mb": 4096, "percent": 50}
 
 
 def test_status_payload_omits_device_ram_on_non_linux(monkeypatch):

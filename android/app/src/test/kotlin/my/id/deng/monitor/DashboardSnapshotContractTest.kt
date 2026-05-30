@@ -29,26 +29,26 @@ class DashboardSnapshotContractTest {
 
     @Test
     fun `DeviceRam renders MB over MB with percent when totals known`() {
-        val ram = DeviceRam(usedMb = 2048, totalMb = 4096, percent = 50)
-        assertEquals("2048MB/4096MB 50%", ram.displayText)
-        assertEquals(50, ram.effectivePercent)
+        val ram = DeviceRam(availableMb = 1111, totalMb = 15000, percent = 8)
+        assertEquals("1,111 MB / 15,000 MB 8%", ram.displayText)
+        assertEquals(8, ram.effectivePercent)
     }
 
     @Test
-    fun `DeviceRam computes percent from used over total when percent missing`() {
-        val ram = DeviceRam(usedMb = 750, totalMb = 1000, percent = null)
+    fun `DeviceRam computes percent from available over total when percent missing`() {
+        val ram = DeviceRam(availableMb = 750, totalMb = 1000, percent = null)
         assertEquals(75, ram.effectivePercent)
     }
 
     @Test
     fun `DeviceRam shows percent only when total unknown`() {
-        val ram = DeviceRam(usedMb = 0, totalMb = 0, percent = 42)
+        val ram = DeviceRam(availableMb = 0, totalMb = 0, percent = 42)
         assertEquals("42%", ram.displayText)
     }
 
     @Test
     fun `DeviceRam never invents numbers when nothing reported`() {
-        val ram = DeviceRam(usedMb = 0, totalMb = 0, percent = null)
+        val ram = DeviceRam(availableMb = 0, totalMb = 0, percent = null)
         assertEquals("—", ram.displayText)
         assertNull(ram.effectivePercent)
     }
@@ -64,8 +64,8 @@ class DashboardSnapshotContractTest {
     }
 
     @Test
-    fun `device display name falls back to Cloud Phone`() {
-        assertEquals("Cloud Phone", DeviceSummary(id = "a").displayName)
+    fun `device display name falls back to Android device`() {
+        assertEquals("Android device", DeviceSummary(id = "a").displayName)
         assertEquals("Phone 1", DeviceSummary(id = "a", deviceLabel = "Phone 1").displayName)
     }
 

@@ -3,6 +3,7 @@ package my.id.deng.monitor.data
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import my.id.deng.monitor.util.Format
 
 @Serializable
 data class DeviceSummary(
@@ -57,23 +58,23 @@ data class DeviceSummary(
 
     /** Display name for the dashboard list. */
     val displayName: String
-        get() = deviceLabel?.takeIf { it.isNotBlank() } ?: "Cloud Phone"
+        get() = deviceLabel?.takeIf { it.isNotBlank() } ?: "Android device"
 }
 
 @Serializable
 data class DeviceRam(
-    @SerialName("used_mb") val usedMb: Int = 0,
+    @SerialName("available_mb") val availableMb: Int = 0,
     @SerialName("total_mb") val totalMb: Int = 0,
     val percent: Int? = null,
 ) {
-    /** Effective percent: explicit value, else computed from used/total. */
+    /** Effective percent: explicit value, else computed from available/total. */
     val effectivePercent: Int?
-        get() = percent ?: if (totalMb > 0) ((usedMb.toLong() * 100) / totalMb).toInt() else null
+        get() = percent ?: if (totalMb > 0) ((availableMb.toLong() * 100) / totalMb).toInt() else null
 
-    /** Dashboard row text: "2048MB/4096MB 50%" or "50%" when only % known. */
+    /** Dashboard row text: "1,111 MB / 15,000 MB 8%" or "8%" when only % known. */
     val displayText: String
         get() = if (totalMb > 0) {
-            "${usedMb}MB/${totalMb}MB ${effectivePercent ?: 0}%"
+            "${Format.formatExact(availableMb)} MB / ${Format.formatExact(totalMb)} MB ${effectivePercent ?: 0}%"
         } else {
             effectivePercent?.let { "$it%" } ?: "—"
         }

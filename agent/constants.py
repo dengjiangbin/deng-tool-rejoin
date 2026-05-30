@@ -34,9 +34,13 @@ FAULT_HANDLER_LOG_PATH = FAULT_LOG_DIR / "crash_faulthandler.log"
 RUN_DIR = APP_HOME / "run"
 LOCK_PATH = RUN_DIR / "agent.lock"
 PID_PATH = RUN_DIR / "agent.pid"
+MONITOR_PID_PATH = RUN_DIR / "monitor-bridge.pid"
+MONITOR_LOCK_PATH = RUN_DIR / "monitor-bridge.lock"
+MONITOR_STATUS_PATH = RUN_DIR / "monitor-bridge.status.json"
 LAUNCHER_DIR = APP_HOME / "launcher"
 CACHE_DIR = APP_HOME / "cache"
 SNAPSHOT_DIR = CACHE_DIR / "snapshots"
+MONITOR_LOG_PATH = LOG_DIR / "monitor-bridge.log"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AGENT_DIR = PROJECT_ROOT / "agent"

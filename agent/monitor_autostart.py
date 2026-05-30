@@ -62,6 +62,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .constants import APP_HOME, VERSION
+from .license import get_public_device_model
 from .monitor_bridge import (
     ALLOWED_STATES,
     DEFAULT_BRIDGE_URL,
@@ -435,9 +436,10 @@ def _build_status_payload(*, tool_version: str, channel: str) -> dict[str, Any]:
 
     All paths are exception-safe and never touch root / subprocesses.
     """
-    # Device-level RAM (used/total/percent) for the redesigned dashboard.
-    # Read from /proc/meminfo — root-free and idle-safe. None on dev hosts.
-    device_ram = read_device_ram()
+    try:
+        device_ram = read_device_ram()
+    except Exception:  # noqa: BLE001
+        device_ram = None
 
     sup = _active_supervisor
     if sup is not None:
@@ -600,8 +602,8 @@ def _default_snapshot_provider() -> Any:
 def _parse_meminfo(text: str) -> dict[str, Any] | None:
     """Pure parser for ``/proc/meminfo`` text. Returns RAM dict or None.
 
-    "used" = total - available (the number a user perceives as "in use"),
-    matching what the redesigned dashboard renders as ``used/total %``.
+    Returns the dashboard contract requested by the user:
+    ``available_mb / total_mb / available_percent``.
     """
     total_kb = 0
     avail_kb = -1
@@ -625,19 +627,22 @@ def _parse_meminfo(text: str) -> dict[str, Any] | None:
         return None
     if avail_kb < 0:
         avail_kb = free_kb
-    used_kb = max(0, total_kb - avail_kb)
     total_mb = total_kb // 1024
-    used_mb = used_kb // 1024
-    percent = int(round((used_kb / total_kb) * 100)) if total_kb else 0
+    available_mb = max(0, avail_kb) // 1024
+    percent = int(round((avail_kb / total_kb) * 100)) if total_kb else 0
     percent = max(0, min(100, percent))
-    return {"used_mb": int(used_mb), "total_mb": int(total_mb), "percent": percent}
+    return {
+        "available_mb": int(available_mb),
+        "total_mb": int(total_mb),
+        "percent": percent,
+    }
 
 
 def read_device_ram() -> dict[str, Any] | None:
     """Read device-level RAM from ``/proc/meminfo`` (root-free, idle-safe).
 
-    Returns ``{"used_mb", "total_mb", "percent"}`` or ``None`` when the
-    file is unavailable (e.g. non-Linux dev machine). Never raises.
+    Returns ``{"available_mb", "total_mb", "percent"}`` or ``None`` when
+    the file is unavailable (e.g. non-Linux dev machine). Never raises.
     """
     try:
         text = Path("/proc/meminfo").read_text(encoding="utf-8", errors="replace")
@@ -778,8 +783,10 @@ def _resolve_bridge_url(explicit: str | None) -> str:
 
 
 def _default_device_label() -> str:
-    # Privacy-safe default: never leak hostnames or user names.
-    return "Termux on Android"
+    label = (get_public_device_model() or "").strip()
+    if label and label.lower() != "unknown":
+        return label[:64]
+    return "Android device"
 
 
 def _iso_to_epoch(iso: Any) -> float:

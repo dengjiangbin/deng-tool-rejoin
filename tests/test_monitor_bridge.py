@@ -619,7 +619,7 @@ def test_device_ram_embedded_in_push_bridge_status(monkeypatch):
     def _status():
         return {
             "packages": [],
-            "device_ram": {"used_mb": 2048, "total_mb": 4096, "percent": 50},
+            "device_ram": {"available_mb": 2048, "total_mb": 4096, "percent": 50},
         }
     bridge = MonitorBridge(config=cfg, status_provider=_status)
     captured = {}
@@ -630,7 +630,7 @@ def test_device_ram_embedded_in_push_bridge_status(monkeypatch):
     bridge._tick()
     import json as _json
     pushed = _json.loads(captured["body"].decode("utf-8"))
-    assert pushed["bridge_status"]["device_ram"] == {"used_mb": 2048, "total_mb": 4096, "percent": 50}
+    assert pushed["bridge_status"]["device_ram"] == {"available_mb": 2048, "total_mb": 4096, "percent": 50}
 
 
 def test_to_push_status_redacts_no_secrets():

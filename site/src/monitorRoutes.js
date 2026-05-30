@@ -239,12 +239,14 @@ function connectionTtlSeconds(intervalSec) {
 }
 
 function normalizeMonitorSettings(row = {}) {
+  const snapshotRaw = parseInt(row.snapshot_interval_seconds, 10);
+  const refreshRaw = parseInt(row.app_refresh_interval_seconds, 10);
   return {
     snapshot_interval_seconds: Math.max(0, Math.min(3600,
-      parseInt(row.snapshot_interval_seconds, 10) || 30)),
+      Number.isFinite(snapshotRaw) ? snapshotRaw : 30)),
     monitor_enabled: row.monitor_enabled !== false,
     app_refresh_interval_seconds: Math.max(2, Math.min(60,
-      parseInt(row.app_refresh_interval_seconds, 10) || 30)),
+      Number.isFinite(refreshRaw) ? refreshRaw : 30)),
     app_display_name: typeof row.app_display_name === 'string' ? row.app_display_name : null,
   };
 }
@@ -469,17 +471,17 @@ router.post('/api/monitor/bridge/push',
       const pick = (v, max = 64) =>
         typeof v === 'string' ? v.slice(0, max) : (typeof v === 'number' && Number.isFinite(v) ? v : null);
       const pickBool = (v) => (typeof v === 'boolean' ? v : null);
-      // v1.0.6: device-level RAM block (used/total/percent) for the
+      // v1.0.6+: device-level RAM block (available/total/percent) for the
       // redesigned dashboard's per-device RAM list. Scrubbed + clamped.
       let deviceRamClean = null;
       const dr = incomingStatus.device_ram;
       if (dr && typeof dr === 'object' && !Array.isArray(dr)) {
-        const usedMb = Math.max(0, Math.min(4_194_304, parseInt(dr.used_mb, 10) || 0));
+        const availableMb = Math.max(0, Math.min(4_194_304, parseInt(dr.available_mb, 10) || 0));
         const totalMb = Math.max(0, Math.min(4_194_304, parseInt(dr.total_mb, 10) || 0));
         let percent = Math.max(0, Math.min(100, parseInt(dr.percent, 10)));
-        if (!Number.isFinite(percent)) percent = totalMb > 0 ? Math.round((usedMb / totalMb) * 100) : 0;
+        if (!Number.isFinite(percent)) percent = totalMb > 0 ? Math.round((availableMb / totalMb) * 100) : 0;
         if (totalMb > 0 || percent > 0) {
-          deviceRamClean = { used_mb: usedMb, total_mb: totalMb, percent };
+          deviceRamClean = { available_mb: availableMb, total_mb: totalMb, percent };
         }
       }
       bridgeStatusClean = {
@@ -701,7 +703,7 @@ router.get('/api/monitor/devices', requireAppAuth, async (req, res) => {
       const bs = d.last_bridge_status || null;
       const ram = bs && bs.device_ram && typeof bs.device_ram === 'object'
         ? {
-            used_mb: Number(bs.device_ram.used_mb) || 0,
+            available_mb: Number(bs.device_ram.available_mb) || 0,
             total_mb: Number(bs.device_ram.total_mb) || 0,
             percent: Number.isFinite(Number(bs.device_ram.percent)) ? Number(bs.device_ram.percent) : null,
           }

@@ -462,6 +462,24 @@ describe('app session auth + ownership isolation', () => {
     assert.equal(row.snapshot_interval_seconds, 60);
   });
 
+  test('settings update preserves snapshot interval Off as 0', async () => {
+    const myDevice = seedDevice('disc-off');
+    mem.monitor_settings.push({ monitor_device_id: myDevice, snapshot_interval_seconds: 30 });
+    const myToken = seedAppSession('disc-off');
+    const save = await request(app)
+      .patch(`/api/monitor/devices/${myDevice}/settings`)
+      .set('Authorization', `Bearer ${myToken}`)
+      .send({ snapshot_interval_seconds: 0 });
+    assert.equal(save.status, 200);
+    assert.equal(save.body.settings.snapshot_interval_seconds, 0);
+
+    const status = await request(app)
+      .get(`/api/monitor/devices/${myDevice}/status`)
+      .set('Authorization', `Bearer ${myToken}`);
+    assert.equal(status.status, 200);
+    assert.equal(status.body.settings.snapshot_interval_seconds, 0);
+  });
+
   test('settings update persists non-30 refresh interval and echoes saved settings', async () => {
     const myDevice = seedDevice('disc-me');
     mem.monitor_settings.push({
@@ -1207,7 +1225,7 @@ describe('v1.0.6 snapshot upload + heartbeat independence', () => {
           snapshot_png_valid: true,
           snapshot_root_granted: true,
           snapshot_su_available: true,
-          device_ram: { used_mb: 2048, total_mb: 4096, percent: 50 },
+          device_ram: { available_mb: 2048, total_mb: 4096, percent: 50 },
           last_push_result: 'success',
         },
       });
@@ -1216,7 +1234,7 @@ describe('v1.0.6 snapshot upload + heartbeat independence', () => {
     assert.equal(bs.snapshot_provider, 'root_screencap_file');
     assert.equal(bs.snapshot_png_valid, true);
     assert.equal(bs.snapshot_root_granted, true);
-    assert.deepEqual(bs.device_ram, { used_mb: 2048, total_mb: 4096, percent: 50 });
+    assert.deepEqual(bs.device_ram, { available_mb: 2048, total_mb: 4096, percent: 50 });
   });
 
   test('snapshot upload failure (oversized) does not break the heartbeat', async () => {
@@ -1259,7 +1277,7 @@ describe('v1.0.6 device-centric dashboard list fields', () => {
     const owner = 'disc-dash';
     const deviceId = seedDevice(owner);
     mem.monitor_devices[0].last_bridge_status = {
-      device_ram: { used_mb: 1500, total_mb: 3000, percent: 50 },
+      device_ram: { available_mb: 1500, total_mb: 3000, percent: 50 },
       snapshot_last_result: 'success',
     };
     const appToken = seedAppSession(owner);
@@ -1272,6 +1290,7 @@ describe('v1.0.6 device-centric dashboard list fields', () => {
     assert.ok('connected' in d);
     assert.ok('connection_state' in d);
     assert.equal(d.device_ram.total_mb, 3000);
+    assert.equal(d.device_ram.available_mb, 1500);
     assert.equal(d.device_ram.percent, 50);
     assert.equal(d.snapshot_last_result, 'success');
     // last_bridge_status (the heavy blob) is not leaked into the list row.
