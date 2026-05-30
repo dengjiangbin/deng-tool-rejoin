@@ -35,7 +35,7 @@
     "release_stage": "stable",
     "frozen": true,
     "artifact_path": "releases/v1.0.1/deng-tool-rejoin-v1.0.1.tar.gz",
-    "artifact_sha256": "a3248b13490c8cea6beac84dd1ee2095f4e8e93f482329f505e21de86a4f5b23",
+    "artifact_sha256": "867bee7a1956bd7cda8f49d028d5e65ac593447c2e370a17c9de648d02fdadb3",
     "installer_endpoint": "/install/v1.0.1",
     "notes": "Frozen public stable release for the monitor worker and snapshot latest hotfix.",
     "enabled": true
@@ -53,6 +53,6 @@
     "notes": "Owner/admin/tester testing \u2014 fixed bootstrap URL (license + allowlist gate). Legacy signed /install/dev/main still supported.",
     "visibility": "admin",
     "enabled": true,
-    "artifact_sha256": "c5b17b79f5f8543e00749ec55e4a82f47d79ef9e4762562b7b02901bd1c02fcf"
+    "artifact_sha256": "e5088937216c29c7ad52698f271e0b48946eca3a4d069da72648f2964c2cf4a5"
   }
 ]

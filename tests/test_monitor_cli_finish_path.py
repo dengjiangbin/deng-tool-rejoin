@@ -69,6 +69,31 @@ def test_doctor_versions_missing_metadata_and_latest_check_does_not_crash(monkey
     assert "Latest server version:  unavailable" in out
 
 
+def test_doctor_versions_reports_persistent_worker_detector(monkeypatch, capsys):
+    from agent import commands
+    from agent import build_info, install_registry
+
+    monkeypatch.setattr(build_info, "collect_version_info", lambda: {
+        "monitor_worker_present": True,
+        "monitor_command_implementation": "persistent_worker",
+        "persistent_worker_command_available": True,
+        "legacy_shell_path_reachable": False,
+        "monitor_detector_detail": "persistent worker symbols present",
+    })
+    monkeypatch.setattr(build_info, "find_wrapper_path", lambda: "")
+    monkeypatch.setattr(build_info, "load_installed_build", lambda: {})
+    monkeypatch.setattr(build_info, "load_build_info", lambda: {})
+    monkeypatch.setattr(install_registry, "resolve_requested_public_version", lambda _r: ({}, "offline"))
+    rc = commands._cmd_doctor_versions()
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Monitor worker present: yes" in out
+    assert "Monitor implementation: persistent_worker" in out
+    assert "Persistent worker command available: yes" in out
+    assert "Legacy shell path reachable: no" in out
+    assert "legacy_shell" not in out
+
+
 def test_monitor_status_summary_does_not_probe_android_when_no_live_bridge(monkeypatch):
     from agent import monitor_autostart
 
@@ -148,6 +173,27 @@ def test_monitor_status_after_status_json_uses_disk_state(monkeypatch, tmp_path,
     assert "RAM:                    13,863 MB / 15,120 MB 92%" in out
     assert "Device name:            SM-A515F" in out
     assert "Last snapshot result:   success" in out
+
+
+def test_snapshot_latest_upload_uses_monitor_autostart_cache_path(monkeypatch, tmp_path):
+    from agent import commands, monitor_autostart
+    from agent import safe_http
+
+    cache_path = tmp_path / ".monitor-bridge.json"
+    cache_path.write_text(json.dumps({"device_id": "dev_1"}), encoding="utf-8")
+    monkeypatch.setattr(monitor_autostart, "BRIDGE_CACHE_PATH", cache_path)
+    monkeypatch.setattr(commands, "_monitor_bridge_launch_material", lambda _cfg: {
+        "license_key": "DENG-TEST",
+        "install_id_hash": "hash",
+        "channel": "stable",
+        "device_label": "SM-A515F",
+    })
+    monkeypatch.setattr(monitor_autostart, "_resolve_bridge_url", lambda _url: "https://tool.deng.my.id")
+    monkeypatch.setattr(monitor_autostart, "_load_cached_token_for_url", lambda _url: "bridge-token")
+    monkeypatch.setattr(safe_http, "post_raw", lambda *_a, **_k: (200, b'{"ok":true}'))
+    ok, detail = commands._upload_snapshot_test_image({}, VALID_PNG, "image/png")
+    assert ok is True
+    assert detail == "http_200"
 
 
 def test_snapshot_test_success_uploads_latest_and_probe(monkeypatch, capsys):

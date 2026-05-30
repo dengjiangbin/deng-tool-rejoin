@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import marshal
 import os
 import sys
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +17,11 @@ if str(PROJECT) not in sys.path:
     sys.path.insert(0, str(PROJECT))
 
 from agent import build_info
+
+
+def _write_runtime(path: Path, source: str) -> None:
+    code = compile(source, "<test-runtime>/agent/commands.py", "exec")
+    path.write_bytes(zlib.compress(marshal.dumps({"agent.commands": code})))
 
 
 class CollectVersionInfoTests(unittest.TestCase):
@@ -98,6 +105,59 @@ class CollectVersionInfoTests(unittest.TestCase):
                     path.write_bytes(backup)
                 else:
                     path.unlink(missing_ok=True)
+
+
+class ProtectedRuntimeDetectorTests(unittest.TestCase):
+    def test_detects_persistent_worker_from_command_symbols(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runtime = Path(td) / ".deng_runtime.bin"
+            _write_runtime(
+                runtime,
+                """
+_MONITOR_WORKER_ENV = "DENG_MONITOR_BRIDGE_WORKER"
+def _cmd_monitor_run_worker(): pass
+def _spawn_monitor_worker(): pass
+def _monitor_worker_running(): pass
+def _monitor_status_from_disk(): pass
+def _stop_monitor_worker(): pass
+def cmd_monitor():
+    return "run-worker monitor-run-worker"
+""",
+            )
+            with patch("agent.build_info.PROTECTED_RUNTIME_PATH", runtime):
+                info = build_info.inspect_protected_runtime()
+        self.assertTrue(info["monitor_worker_present"])
+        self.assertTrue(info["persistent_worker_command_available"])
+        self.assertEqual(info["monitor_command_implementation"], "persistent_worker")
+
+    def test_detector_fails_when_worker_symbols_are_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runtime = Path(td) / ".deng_runtime.bin"
+            _write_runtime(runtime, "def cmd_monitor(): return 'status'\n")
+            with patch("agent.build_info.PROTECTED_RUNTIME_PATH", runtime):
+                info = build_info.inspect_protected_runtime()
+        self.assertFalse(info["monitor_worker_present"])
+        self.assertEqual(info["monitor_command_implementation"], "legacy_shell")
+
+    def test_legacy_words_in_help_do_not_override_persistent_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            runtime = Path(td) / ".deng_runtime.bin"
+            _write_runtime(
+                runtime,
+                """
+_MONITOR_WORKER_ENV = "DENG_MONITOR_BRIDGE_WORKER"
+def _cmd_monitor_run_worker(): pass
+def _spawn_monitor_worker(): pass
+def _monitor_worker_running(): pass
+def _monitor_status_from_disk(): pass
+def _stop_monitor_worker(): pass
+def cmd_monitor():
+    return "run-worker monitor-run-worker legacy_shell"
+""",
+            )
+            with patch("agent.build_info.PROTECTED_RUNTIME_PATH", runtime):
+                info = build_info.inspect_protected_runtime()
+        self.assertEqual(info["monitor_command_implementation"], "persistent_worker")
 
 
 class WrapperPathParsingTests(unittest.TestCase):

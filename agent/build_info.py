@@ -150,6 +150,21 @@ def _iter_code_objects(root: Any):
                 stack.append(const)
 
 
+def _code_object_facts(root: Any) -> dict[str, set[str]]:
+    names: set[str] = set()
+    strings: set[str] = set()
+    for code in _iter_code_objects(root):
+        co_name = getattr(code, "co_name", "")
+        if co_name:
+            names.add(str(co_name))
+        for name in getattr(code, "co_names", ()):
+            names.add(str(name))
+        for const in getattr(code, "co_consts", ()):
+            if isinstance(const, str):
+                strings.add(const)
+    return {"names": names, "strings": strings}
+
+
 def inspect_protected_runtime() -> dict[str, Any]:
     info: dict[str, Any] = {
         "present": PROTECTED_RUNTIME_PATH.is_file(),
@@ -158,6 +173,9 @@ def inspect_protected_runtime() -> dict[str, Any]:
         "module_count": 0,
         "monitor_worker_present": False,
         "monitor_command_implementation": "missing",
+        "persistent_worker_command_available": False,
+        "legacy_shell_path_reachable": False,
+        "monitor_detector_detail": "protected runtime missing",
         "bridge_launcher_path": str(INSTALL_ROOT / "agent" / "deng_tool_rejoin.py"),
     }
     if not PROTECTED_RUNTIME_PATH.is_file():
@@ -176,21 +194,36 @@ def inspect_protected_runtime() -> dict[str, Any]:
     commands_code = modules.get("agent.commands")
     if commands_code is None:
         info["monitor_command_implementation"] = "missing_commands"
+        info["monitor_detector_detail"] = "agent.commands missing from protected runtime"
         return info
-    needles = {
-        "run-worker",
-        "monitor-bridge.pid",
-        "monitor-bridge.status.json",
-        "monitor-bridge.log",
+    facts = _code_object_facts(commands_code)
+    names = facts["names"]
+    strings = facts["strings"]
+    required_names = {
+        "_cmd_monitor_run_worker",
+        "_spawn_monitor_worker",
+        "_monitor_worker_running",
+        "_monitor_status_from_disk",
+        "_stop_monitor_worker",
+        "_MONITOR_WORKER_ENV",
     }
-    found: set[str] = set()
-    for code in _iter_code_objects(commands_code):
-        for const in getattr(code, "co_consts", ()):
-            if isinstance(const, str):
-                for needle in needles:
-                    if needle in const:
-                        found.add(needle)
-    info["monitor_worker_present"] = needles.issubset(found)
+    required_strings = {"run-worker", "monitor-run-worker"}
+    missing_names = sorted(required_names - names)
+    missing_strings = sorted(s for s in required_strings if not any(s in item for item in strings))
+    info["persistent_worker_command_available"] = not missing_names and not missing_strings
+    info["monitor_worker_present"] = bool(info["persistent_worker_command_available"])
+    # Old builds launched a shell status/start shim. Keeping historical strings
+    # in help text must not make the current persistent worker look legacy.
+    info["legacy_shell_path_reachable"] = any(
+        marker in item
+        for item in strings
+        for marker in ("monitor-autostart.sh", "monitor-status.sh")
+    )
+    info["monitor_detector_detail"] = (
+        "persistent worker symbols present"
+        if info["persistent_worker_command_available"]
+        else f"missing names={missing_names or '-'} strings={missing_strings or '-'}"
+    )
     info["monitor_command_implementation"] = (
         "persistent_worker" if info["monitor_worker_present"] else "legacy_shell"
     )
@@ -274,6 +307,9 @@ def collect_version_info() -> dict[str, Any]:
         "protected_runtime_module_count": runtime.get("module_count") or 0,
         "monitor_worker_present": runtime.get("monitor_worker_present", False),
         "monitor_command_implementation": runtime.get("monitor_command_implementation") or "missing",
+        "persistent_worker_command_available": runtime.get("persistent_worker_command_available", False),
+        "legacy_shell_path_reachable": runtime.get("legacy_shell_path_reachable", False),
+        "monitor_detector_detail": runtime.get("monitor_detector_detail") or "",
         "bridge_launcher_path": runtime.get("bridge_launcher_path") or "",
         "release_manifest_version": str(manifest.get("version") or ""),
         "modules": {},

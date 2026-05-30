@@ -366,8 +366,9 @@ def _resolve_monitor_bridge_auth(cfg: dict[str, Any], *, refresh: bool = False) 
     bridge_url = monitor_autostart._resolve_bridge_url(None).rstrip("/")
     token = "" if refresh else monitor_autostart._load_cached_token_for_url(bridge_url)
     device_id = ""
-    if BRIDGE_CACHE_PATH.exists() and not refresh:
-        cached = _read_json_file(BRIDGE_CACHE_PATH)
+    bridge_cache_path = getattr(monitor_autostart, "BRIDGE_CACHE_PATH", None)
+    if bridge_cache_path is not None and bridge_cache_path.exists() and not refresh:
+        cached = _read_json_file(bridge_cache_path)
         device_id = str(cached.get("device_id") or "")
     if not token:
         issued = monitor_autostart._issue_token_from_license(
@@ -6918,6 +6919,11 @@ def _cmd_doctor_versions() -> int:
         from .install_registry import resolve_requested_public_version
 
         latest_row, latest_err = resolve_requested_public_version("latest")
+    except ModuleNotFoundError as exc:
+        # Protected client artifacts intentionally omit server-only registry
+        # code; doctor should report that as unavailable, not as a crash-log
+        # event.
+        latest_err = exc.__class__.__name__
     except Exception as exc:  # noqa: BLE001
         _write_cli_crash_log(exc, context="doctor versions latest check")
         latest_err = exc.__class__.__name__
@@ -6952,11 +6958,17 @@ def _cmd_doctor_versions() -> int:
     print(f"  Installed build path:   {version_info.get('installed_build_path') or '—'}")
     print(f"  Monitor worker present: {'yes' if version_info.get('monitor_worker_present') else 'no'}")
     print(f"  Monitor implementation: {version_info.get('monitor_command_implementation') or '—'}")
+    print(f"  Persistent worker command available: {'yes' if version_info.get('persistent_worker_command_available') else 'no'}")
+    print(f"  Legacy shell path reachable: {'yes' if version_info.get('legacy_shell_path_reachable') else 'no'}")
+    if version_info.get("monitor_detector_detail"):
+        print(f"  Monitor detector:       {version_info.get('monitor_detector_detail')}")
     print(f"  Bridge launcher path:   {version_info.get('bridge_launcher_path') or '—'}")
     print(f"  PID path:               {MONITOR_PID_PATH}")
+    print(f"  Lock path:              {MONITOR_LOCK_PATH}")
     print(f"  Status JSON path:       {MONITOR_STATUS_PATH}")
     print(f"  Log path:               {MONITOR_LOG_PATH}")
     print("  Snapshot-test available: yes")
+    print("  Snapshot-test latest upload available: yes")
 
     try:
         from . import monitor_autostart
