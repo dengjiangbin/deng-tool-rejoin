@@ -1364,10 +1364,19 @@ router.get('/download', (_req, res) => {
 
 router.get('/app', (_req, res) => res.redirect('/download'));
 
+function setDownloadStatsNoStore(res) {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.set('Surrogate-Control', 'no-store');
+  res.set('CDN-Cache-Control', 'no-store');
+  res.set('Cloudflare-CDN-Cache-Control', 'no-store');
+}
+
 router.get('/api/downloads/apk/stats', (_req, res) => {
+  setDownloadStatsNoStore(res);
   try {
     const stats = downloadStats.getApkStats();
-    res.set('Cache-Control', 'no-store');
     return res.json(stats);
   } catch (err) {
     console.warn('[apk] stats failed:', err && err.message ? err.message : err);
@@ -1376,9 +1385,9 @@ router.get('/api/downloads/apk/stats', (_req, res) => {
 });
 
 router.get('/api/downloads/ios/stats', (_req, res) => {
+  setDownloadStatsNoStore(res);
   try {
     const stats = downloadStats.getPlatformStats('ios');
-    res.set('Cache-Control', 'no-store');
     return res.json(stats);
   } catch (err) {
     console.warn('[ios] stats failed:', err && err.message ? err.message : err);
@@ -1387,9 +1396,9 @@ router.get('/api/downloads/ios/stats', (_req, res) => {
 });
 
 router.get('/api/downloads/stats', (_req, res) => {
+  setDownloadStatsNoStore(res);
   try {
     const stats = downloadStats.getAllStats();
-    res.set('Cache-Control', 'no-store');
     return res.json(stats);
   } catch (err) {
     console.warn('[downloads] stats failed:', err && err.message ? err.message : err);

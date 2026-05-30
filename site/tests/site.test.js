@@ -3726,6 +3726,18 @@ describe('Fish It website integration', () => {
     assert.match(res.text, /data-fishit-global/);
   });
 
+  test('download stats API is explicitly uncached by browsers and CDN', async () => {
+    const res = await request(app).get('/api/downloads/apk/stats');
+    assert.equal(res.status, 200);
+    assert.match(String(res.headers['cache-control'] || ''), /no-store/);
+    assert.match(String(res.headers['cache-control'] || ''), /s-maxage=0/);
+    assert.equal(res.headers.pragma, 'no-cache');
+    assert.equal(res.headers.expires, '0');
+    assert.equal(res.headers['surrogate-control'], 'no-store');
+    assert.equal(res.headers['cdn-cache-control'], 'no-store');
+    assert.equal(res.headers['cloudflare-cdn-cache-control'], 'no-store');
+  });
+
   test('monitor bridge routes are exempt from public IP limiter and use device-keyed limiter', () => {
     const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
     const monitorSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'monitorRoutes.js'), 'utf8');
