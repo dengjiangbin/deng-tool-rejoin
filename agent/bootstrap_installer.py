@@ -421,6 +421,11 @@ def render_direct_install_bootstrap(
         "fi\n"
         'ok "Manifest signature verified"\n'
         'ok "Runtime verified"\n'
+        '_MONITOR_IMPL="$(cd "$h" && PYTHONPATH="$h" python3 -c "from agent import build_info; print(build_info.collect_version_info().get(\'monitor_command_implementation\') or \'\')" 2>/dev/null)" || _MONITOR_IMPL=""\n'
+        'if [ "$_MONITOR_IMPL" != "persistent_worker" ]; then\n'
+        '  fail "Install verification failed: monitor runtime is not the persistent worker build."\n'
+        "fi\n"
+        'ok "Monitor runtime verified"\n'
         '_VERSION_OUT="$("$BIN/deng-rejoin" version 2>/dev/null)" || _VERSION_OUT=""\n'
         'if ! echo "$_VERSION_OUT" | grep -q "^artifact_sha256: " ; then\n'
         '  fail "Install verification failed: deng-rejoin version did not return artifact SHA."\n'

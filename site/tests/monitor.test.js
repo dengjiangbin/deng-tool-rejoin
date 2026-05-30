@@ -1268,6 +1268,24 @@ describe('v1.0.6 snapshot upload + heartbeat independence', () => {
       .set('Authorization', `Bearer ${appToken}`);
     assert.equal(res.status, 204);
   });
+
+  test('bridge latest snapshot returns uploaded bytes for the same device', async () => {
+    const deviceId = seedDevice('disc-bridge-snap');
+    const token = seedBridgeToken(deviceId);
+    const upload = await request(app)
+      .post('/api/monitor/bridge/snapshot')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Content-Type', 'image/png')
+      .send(PNG);
+    assert.equal(upload.status, 200);
+
+    const latest = await request(app)
+      .get('/api/monitor/bridge/snapshot/latest')
+      .set('Authorization', `Bearer ${token}`);
+    assert.equal(latest.status, 200);
+    assert.equal(latest.headers['content-type'], 'image/png');
+    assert.equal(Buffer.compare(Buffer.from(latest.body), PNG), 0);
+  });
 });
 
 describe('v1.0.6 device-centric dashboard list fields', () => {

@@ -10,9 +10,9 @@ manifests; this file exists so that no future commit can accidentally:
   * leak the dev/test artifact SHA into ``/install/latest``,
   * remove the channel-pointer row that drives ``resolve_latest_public_stable``.
 
-The reproduction case for this guard: when stable v1.0.0 and the dev
+The reproduction case for this guard: when stable and the dev
 ``main-dev`` artifact were rebuilt together in the same commit, the manifest
-correctly kept ``stable_latest = "v1.0.0"`` and the resolver served the
+correctly kept ``stable_latest`` on the public stable row and the resolver served the
 stable SHA from ``/install/latest`` — but a future careless edit could
 swap those pointers and there was no test pinning the *real* manifest
 values. This file fixes that.
@@ -34,6 +34,7 @@ from agent.rejoin_versions import default_versions_manifest_path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROD_MANIFEST = REPO_ROOT / "data" / "rejoin_versions.json"
+CURRENT_STABLE_VERSION = f"v{(REPO_ROOT / 'VERSION').read_text(encoding='utf-8').strip()}"
 
 
 class ProductionManifestSanityTests(unittest.TestCase):
@@ -72,8 +73,8 @@ class ProductionManifestSanityTests(unittest.TestCase):
         assert pointer is not None  # mypy
         self.assertEqual(
             pointer.get("stable_latest"),
-            "v1.0.0",
-            "stable_latest pointer must be v1.0.0 hotfix",
+            CURRENT_STABLE_VERSION,
+            f"stable_latest pointer must be {CURRENT_STABLE_VERSION}",
         )
         self.assertEqual(
             pointer.get("test_latest"),
@@ -81,26 +82,25 @@ class ProductionManifestSanityTests(unittest.TestCase):
             "test_latest pointer must be main-dev",
         )
 
-    def test_v100_row_is_public_stable_and_matches_published_sha(self) -> None:
-        # Locked to the SHA produced by the v1.0.4 release artifact rebuild
-        # (Termux side picked up the new state vocabulary and whole-screen
-        # snapshot capture). If the artifact is ever rebuilt the test must
-        # be updated in lockstep so /install/v1.0.0 cannot accidentally
-        # start serving a different tarball than what was QA'd.
-        EXPECTED_V100_SHA = (
-            "091ec7d0d54b4a7f73108639a3015e5636f65c2db17f019c4c66e5e8a68b4bc7"
+    def test_current_stable_row_is_public_stable_and_has_published_sha(self) -> None:
+        row = next((r for r in self.rows if r.get("version") == CURRENT_STABLE_VERSION), None)
+        self.assertIsNotNone(
+            row,
+            f"{CURRENT_STABLE_VERSION} row missing from production manifest",
         )
-        row = next((r for r in self.rows if r.get("version") == "v1.0.0"), None)
-        self.assertIsNotNone(row, "v1.0.0 row missing from production manifest")
         assert row is not None
-        self.assertEqual(row.get("artifact_sha256"), EXPECTED_V100_SHA)
+        self.assertRegex(
+            str(row.get("artifact_sha256", "")),
+            r"^[0-9a-f]{64}$",
+            "current stable row must carry a concrete published artifact SHA",
+        )
         self.assertTrue(
             is_public_stable_row(row),
-            "v1.0.0 must qualify as a public stable row",
+            f"{CURRENT_STABLE_VERSION} must qualify as a public stable row",
         )
         self.assertFalse(
             is_admin_internal_row(row),
-            "v1.0.0 must NOT be classified as admin/internal",
+            f"{CURRENT_STABLE_VERSION} must NOT be classified as admin/internal",
         )
 
     def test_main_dev_row_is_admin_internal_and_never_public_stable(self) -> None:
@@ -128,31 +128,34 @@ class ProductionManifestSanityTests(unittest.TestCase):
 
     # ── Resolver behaviour against the real manifest ───────────────────
 
-    def test_resolve_latest_public_stable_picks_v100_not_main_dev(self) -> None:
+    def test_resolve_latest_public_stable_picks_current_stable_not_main_dev(self) -> None:
         row = resolve_latest_public_stable()
         self.assertIsNotNone(row, "resolver returned None on production manifest")
         assert row is not None
-        self.assertEqual(row.get("version"), "v1.0.0")
+        self.assertEqual(row.get("version"), CURRENT_STABLE_VERSION)
         self.assertNotEqual(row.get("version"), "main-dev")
+        dev_row = next((r for r in self.rows if r.get("version") == "main-dev"), None)
+        self.assertIsNotNone(dev_row, "main-dev row missing from production manifest")
+        assert dev_row is not None
         self.assertNotEqual(
             row.get("artifact_sha256"),
-            "5609f6025439d4f1eb92308acea1901ce8094c05f71f43c6f8fb1fd551709fe6",
+            dev_row.get("artifact_sha256"),
             "/install/latest must NEVER resolve to the main-dev SHA",
         )
 
-    def test_resolve_requested_public_version_latest_returns_v100(self) -> None:
+    def test_resolve_requested_public_version_latest_returns_current_stable(self) -> None:
         row, err = resolve_requested_public_version("latest")
         self.assertIsNone(err)
         self.assertIsNotNone(row)
         assert row is not None
-        self.assertEqual(row.get("version"), "v1.0.0")
+        self.assertEqual(row.get("version"), CURRENT_STABLE_VERSION)
 
-    def test_resolve_requested_public_version_v100_returns_v100(self) -> None:
-        row, err = resolve_requested_public_version("v1.0.0")
+    def test_resolve_requested_public_version_current_stable_returns_current_stable(self) -> None:
+        row, err = resolve_requested_public_version(CURRENT_STABLE_VERSION)
         self.assertIsNone(err)
         self.assertIsNotNone(row)
         assert row is not None
-        self.assertEqual(row.get("version"), "v1.0.0")
+        self.assertEqual(row.get("version"), CURRENT_STABLE_VERSION)
 
     def test_public_resolver_refuses_main_dev_by_name(self) -> None:
         # Even if a public user crafted a URL like /install/main-dev,

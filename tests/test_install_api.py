@@ -26,6 +26,7 @@ from agent.license_store import LocalJsonLicenseStore
 _TEST_LATEST_BANNER_MARKERS = ("DENG Tool: Rejoin Installer", "install/test/package-token")
 _TEST_PACKAGE_ROUTE_AVAILABLE: bool | None = None
 _TEST_LATEST_BANNER_DEPLOYED: bool | None = None
+CURRENT_STABLE_VERSION = f"v{(PROJECT / 'VERSION').read_text(encoding='utf-8').strip()}"
 
 
 def _wsgi_call(method: str, path: str, body=None, environ_extra: dict | None = None):
@@ -137,12 +138,12 @@ class InstallBootstrapGetTests(unittest.TestCase):
         self.assertIn("text/", headers.get("Content-Type", ""))
         text = body.decode("utf-8")
         self.assertIn("DENG Tool: Rejoin Installer", text)
-        self.assertIn("Version: v1.0.0", text)
+        self.assertIn(f"Version: {CURRENT_STABLE_VERSION}", text)
         self.assertIn("Channel: latest", text)
         self.assertIn("/install/latest/package-token", text)
         self.assertIn('"installer_url": "$u/install/latest"', text)
         self.assertIn('"requested_channel": "latest"', text)
-        self.assertIn('"resolved_version": "v1.0.0"', text)
+        self.assertIn(f'"resolved_version": "{CURRENT_STABLE_VERSION}"', text)
         self.assertIn('"channel": "stable"', text)
         self.assertIn(".install_version", text)
         self.assertNotIn(".install_requested", text)

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -321,6 +322,7 @@ def _monitor_status_from_disk() -> dict[str, Any]:
     status = _read_json_file(MONITOR_STATUS_PATH)
     pid = _monitor_worker_pid()
     alive = bool(pid and is_process_alive(pid))
+    status["status_file_present"] = MONITOR_STATUS_PATH.is_file()
     if pid:
         status["worker_pid"] = pid
     status["worker_running"] = alive
@@ -328,6 +330,81 @@ def _monitor_status_from_disk() -> dict[str, Any]:
         status["bridge_running"] = False
         status["connected"] = False
     return status
+
+
+def _format_monitor_ram(device_ram: dict[str, Any] | None) -> str:
+    if not isinstance(device_ram, dict):
+        return "—"
+    try:
+        available = int(device_ram.get("available_mb") or 0)
+        total = int(device_ram.get("total_mb") or 0)
+        percent = int(device_ram.get("percent") or 0)
+    except Exception:  # noqa: BLE001
+        return "—"
+    if total <= 0:
+        return "—"
+    return f"{available:,} MB / {total:,} MB {percent}%"
+
+
+def _wait_for_monitor_status(*, timeout: float = 10.0) -> dict[str, Any]:
+    deadline = time.time() + timeout
+    latest = _monitor_status_from_disk()
+    while time.time() < deadline:
+        latest = _monitor_status_from_disk()
+        if latest.get("last_push_result") or latest.get("last_error"):
+            return latest
+        time.sleep(0.25)
+    return latest
+
+
+def _resolve_monitor_bridge_auth(cfg: dict[str, Any], *, refresh: bool = False) -> dict[str, str] | None:
+    from . import monitor_autostart
+
+    material = _monitor_bridge_launch_material(cfg)
+    if not material:
+        return None
+    bridge_url = monitor_autostart._resolve_bridge_url(None).rstrip("/")
+    token = "" if refresh else monitor_autostart._load_cached_token_for_url(bridge_url)
+    device_id = ""
+    if BRIDGE_CACHE_PATH.exists() and not refresh:
+        cached = _read_json_file(BRIDGE_CACHE_PATH)
+        device_id = str(cached.get("device_id") or "")
+    if not token:
+        issued = monitor_autostart._issue_token_from_license(
+            bridge_url=bridge_url,
+            license_key=material["license_key"],
+            install_id_hash=material["install_id_hash"],
+            device_label=material["device_label"],
+            tool_version=VERSION,
+            channel=material["channel"],
+        )
+        if not issued or not issued.get("bridge_token"):
+            return None
+        token = str(issued.get("bridge_token") or "")
+        device_id = str(issued.get("device_id") or "")
+        monitor_autostart._save_cached_token({
+            "bridge_url": bridge_url,
+            "bridge_token": token,
+            "device_id": device_id,
+            "expires_at": issued.get("expires_at"),
+            "expires_at_epoch": monitor_autostart._iso_to_epoch(issued.get("expires_at")),
+            "issued_at_epoch": time.time(),
+        })
+    return {
+        "bridge_url": bridge_url,
+        "bridge_token": token,
+        "device_id": device_id,
+    }
+
+
+def _write_cli_crash_log(exc: BaseException, *, context: str = "cli") -> None:
+    try:
+        CRASH_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with CRASH_LOG_PATH.open("a", encoding="utf-8", errors="replace") as fh:
+            fh.write(f"\n[{_monitor_now_iso()}] {context}: {exc.__class__.__name__}: {exc}\n")
+            traceback.print_exc(file=fh)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _spawn_monitor_worker(cfg: dict[str, Any]) -> bool:
@@ -6814,25 +6891,72 @@ def _cmd_doctor_versions() -> int:
     from . import build_info as _bi
     from .constants import APP_HOME, VERSION
 
-    wrapper = _bi.find_wrapper_path()
-    installed = _bi.load_installed_build()
-    embedded = _bi.load_build_info()
+    def _safe_dict(fn: Any) -> dict[str, Any]:
+        try:
+            data = fn()
+            return data if isinstance(data, dict) else {}
+        except Exception as exc:  # noqa: BLE001
+            _write_cli_crash_log(exc, context="doctor versions metadata")
+            return {}
+
+    def _safe_text(value: Any, default: str = "—") -> str:
+        text = str(value or "").strip()
+        return text if text else default
+
+    version_info = _safe_dict(_bi.collect_version_info)
+    try:
+        wrapper = version_info.get("wrapper_path") or _bi.find_wrapper_path() or ""
+    except Exception as exc:  # noqa: BLE001
+        _write_cli_crash_log(exc, context="doctor versions wrapper")
+        wrapper = ""
+    installed = _safe_dict(_bi.load_installed_build)
+    embedded = _safe_dict(_bi.load_build_info)
+
+    latest_row: dict[str, Any] | None = None
+    latest_err = ""
+    try:
+        from .install_registry import resolve_requested_public_version
+
+        latest_row, latest_err = resolve_requested_public_version("latest")
+    except Exception as exc:  # noqa: BLE001
+        _write_cli_crash_log(exc, context="doctor versions latest check")
+        latest_err = exc.__class__.__name__
+    latest_sha = str((latest_row or {}).get("artifact_sha256") or "").strip()
+    latest_version = str((latest_row or {}).get("version") or "").strip()
 
     print("DENG Tool: Rejoin — version diagnostics")
+    print(f"  Product version:        {VERSION}")
+    print(f"  Agent VERSION:          {VERSION}")
     print(f"  Wrapper path:           {wrapper or '— not on PATH —'}")
     print(f"  Agent home:             {APP_HOME}")
-    print(f"  Agent VERSION:          {VERSION}")
+    print(f"  Build commit:           {_safe_text(version_info.get('git_commit_short') or version_info.get('git_commit'))}")
+    print(f"  Artifact SHA:           {_safe_text(version_info.get('artifact_sha256_short'))}")
+    print(f"  Installed artifact SHA: {_safe_text(version_info.get('artifact_sha256'))}")
+    print(f"  Protected runtime SHA:  {_safe_text(version_info.get('protected_runtime_sha256'))}")
+    print(f"  Runtime build date:     {_safe_text(version_info.get('runtime_build_date'))}")
+    print(f"  Install channel:        {_safe_text(version_info.get('channel'))}")
+    if latest_version or latest_sha:
+        print(f"  Latest public stable:   {latest_version or '—'}")
+        print(f"  Latest channel SHA:     {latest_sha or '—'}")
+    else:
+        print(f"  Latest server version:  unavailable ({latest_err or 'not configured'})")
     if installed:
         print(f"  Installed build:        {installed.get('version') or installed.get('version_name') or '—'}")
-        print(f"  Installed at:           {installed.get('installed_at') or '—'}")
-        print(f"  Install path:           {installed.get('install_path') or '—'}")
+        print(f"  Install time:           {installed.get('install_time_iso') or installed.get('installed_at') or '—'}")
     else:
         print("  Installed build:        (no .installed-build.json)")
     if embedded:
         print(f"  Embedded BUILD-INFO:    {embedded.get('version') or '—'}")
-        sha = embedded.get("artifact_sha256_short") or embedded.get("artifact_sha256")
-        if sha:
-            print(f"  Artifact SHA (short):   {sha}")
+    print(f"  Release manifest:       {version_info.get('release_manifest_path') or '—'}")
+    print(f"  Build info path:        {version_info.get('build_info_path') or '—'}")
+    print(f"  Installed build path:   {version_info.get('installed_build_path') or '—'}")
+    print(f"  Monitor worker present: {'yes' if version_info.get('monitor_worker_present') else 'no'}")
+    print(f"  Monitor implementation: {version_info.get('monitor_command_implementation') or '—'}")
+    print(f"  Bridge launcher path:   {version_info.get('bridge_launcher_path') or '—'}")
+    print(f"  PID path:               {MONITOR_PID_PATH}")
+    print(f"  Status JSON path:       {MONITOR_STATUS_PATH}")
+    print(f"  Log path:               {MONITOR_LOG_PATH}")
+    print("  Snapshot-test available: yes")
 
     try:
         from . import monitor_autostart
@@ -6845,10 +6969,12 @@ def _cmd_doctor_versions() -> int:
         print(f"  Bridge running:         {'yes' if summary.get('bridge_running') else 'no'}")
         print(f"  Bridge log:             {MONITOR_LOG_PATH}")
         print(f"  Bridge status file:     {MONITOR_STATUS_PATH}")
-        print(f"  Push interval:          {summary.get('push_interval_seconds') or '—'}s")
+        push_interval = summary.get("push_interval_seconds")
+        print(f"  Push interval:          {f'{push_interval:g}s' if isinstance(push_interval, (int, float)) and push_interval > 0 else '—'}")
         print(f"  Snapshot interval:      {summary.get('snapshot_interval_seconds') or 0}s")
         print(f"  Last push:              {summary.get('last_push_result') or '—'}")
     except Exception as exc:  # noqa: BLE001
+        _write_cli_crash_log(exc, context="doctor versions monitor summary")
         print(f"  Monitor bridge:         unavailable ({exc.__class__.__name__})")
 
     try:
@@ -6859,7 +6985,8 @@ def _cmd_doctor_versions() -> int:
             print(f"  Install API:            {api}")
     except Exception:  # noqa: BLE001
         pass
-    print("  Latest server version:  (run `deng-rejoin update` to check)")
+    if latest_version or latest_sha:
+        print("  Latest server version:  checked")
     return 0
 
 
@@ -6943,16 +7070,24 @@ def _cmd_monitor_start(args: argparse.Namespace) -> int:
         cfg = default_config()
     print("DENG Tool: Rejoin — monitor bridge start")
     if _monitor_worker_running():
-        print(f"  Bridge process:         already running (PID {_monitor_worker_pid()})")
+        status = _monitor_status_from_disk()
+        print("  Starting monitor bridge: already running")
+        print(f"  Worker PID:             {status.get('worker_pid') or _monitor_worker_pid() or '—'}")
+        print(f"  Status file:            {MONITOR_STATUS_PATH}")
+        print(f"  Log file:               {MONITOR_LOG_PATH}")
         return 0
     if not _monitor_bridge_launch_material(cfg if isinstance(cfg, dict) else {}):
         print("  Start result:           failed — no valid license/device binding available")
         return 1
+    print("  Starting monitor bridge...")
     ok = _spawn_monitor_worker(cfg if isinstance(cfg, dict) else {})
-    status = _monitor_status_from_disk()
-    print(f"  Bridge process:         {'running' if ok else 'failed'}")
-    print(f"  Bridge PID:             {status.get('worker_pid') or '—'}")
-    print(f"  Bridge log:             {MONITOR_LOG_PATH}")
+    status = _wait_for_monitor_status(timeout=10.0) if ok else _monitor_status_from_disk()
+    first_heartbeat = "success" if status.get("last_push_result") == "success" else (status.get("last_error") or "pending")
+    print(f"  Worker PID:             {status.get('worker_pid') or '—'}")
+    print(f"  Status file:            {MONITOR_STATUS_PATH}")
+    print(f"  Log file:               {MONITOR_LOG_PATH}")
+    print(f"  First heartbeat:        {first_heartbeat}")
+    print(f"  Device connected:       {'yes' if status.get('connected') else 'no'}")
     return 0 if ok else 1
 
 
@@ -6976,60 +7111,76 @@ def _cmd_monitor_restart(args: argparse.Namespace) -> int:
     if not _monitor_bridge_launch_material(cfg if isinstance(cfg, dict) else {}):
         print("  Restart result:         failed — no valid license/device binding available")
         return 1
+    print("  Starting monitor bridge...")
     ok = _spawn_monitor_worker(cfg if isinstance(cfg, dict) else {})
-    status = _monitor_status_from_disk()
+    status = _wait_for_monitor_status(timeout=10.0) if ok else _monitor_status_from_disk()
     print(f"  Restart result:         {'running' if ok else 'failed — check license / network'}")
-    print(f"  Bridge PID:             {status.get('worker_pid') or '—'}")
+    print(f"  Worker PID:             {status.get('worker_pid') or '—'}")
+    print(f"  Status file:            {MONITOR_STATUS_PATH}")
+    print(f"  Log file:               {MONITOR_LOG_PATH}")
+    print(f"  First heartbeat:        {'success' if status.get('last_push_result') == 'success' else (status.get('last_error') or 'pending')}")
+    print(f"  Device connected:       {'yes' if status.get('connected') else 'no'}")
     return 0 if ok else 1
 
 
 def _upload_snapshot_test_image(cfg: dict[str, Any], data: bytes, mime: str = "image/png") -> tuple[bool, str]:
-    from . import monitor_autostart
     from . import safe_http
 
-    material = _monitor_bridge_launch_material(cfg)
-    if not material:
+    auth = _resolve_monitor_bridge_auth(cfg)
+    if not auth:
         return False, "missing_license"
-    bridge_url = monitor_autostart._resolve_bridge_url(None)
-    token = monitor_autostart._load_cached_token_for_url(bridge_url)
-    if not token:
-        issued = monitor_autostart._issue_token_from_license(
-            bridge_url=bridge_url,
-            license_key=material["license_key"],
-            install_id_hash=material["install_id_hash"],
-            device_label=material["device_label"],
-            tool_version=VERSION,
-            channel=material["channel"],
-        )
-        if not issued or not issued.get("bridge_token"):
-            return False, "issue_failed"
-        token = str(issued.get("bridge_token") or "")
-        monitor_autostart._save_cached_token({
-            "bridge_url": bridge_url,
-            "bridge_token": token,
-            "device_id": issued.get("device_id"),
-            "expires_at": issued.get("expires_at"),
-            "expires_at_epoch": monitor_autostart._iso_to_epoch(issued.get("expires_at")),
-            "issued_at_epoch": time.time(),
-        })
+    last_status = "not_sent"
+    for attempt in range(2):
+        try:
+            status, _body = safe_http.post_raw(
+                auth["bridge_url"] + "/api/monitor/bridge/snapshot",
+                data,
+                content_type=mime,
+                headers={
+                    "Authorization": f"Bearer {auth['bridge_token']}",
+                    "User-Agent": "DENG-Tool-Monitor-Bridge/1.0",
+                },
+                timeout=12,
+            )
+        except safe_http.SafeHttpNetworkError as exc:
+            return False, f"network_{exc.__class__.__name__}"
+        except Exception as exc:  # noqa: BLE001
+            _write_cli_crash_log(exc, context="snapshot-test latest upload")
+            return False, exc.__class__.__name__
+        last_status = f"http_{status}"
+        if 200 <= int(status) < 300:
+            return True, last_status
+        if int(status) in {401, 403} and attempt == 0:
+            refreshed = _resolve_monitor_bridge_auth(cfg, refresh=True)
+            if refreshed:
+                auth = refreshed
+                continue
+    return False, last_status
+
+
+def _verify_latest_snapshot_fetch(cfg: dict[str, Any]) -> tuple[bool, str, str]:
+    from . import safe_http
+
+    auth = _resolve_monitor_bridge_auth(cfg)
+    if not auth:
+        return False, "missing_license", ""
+    url = auth["bridge_url"] + "/api/monitor/bridge/snapshot/latest"
     try:
-        status, _body = safe_http.post_raw(
-            bridge_url.rstrip("/") + "/api/monitor/bridge/snapshot",
-            data,
-            content_type=mime,
+        status, body = safe_http.get_raw(
+            url,
             headers={
-                "Authorization": f"Bearer {token}",
+                "Authorization": f"Bearer {auth['bridge_token']}",
                 "User-Agent": "DENG-Tool-Monitor-Bridge/1.0",
             },
             timeout=12,
         )
     except safe_http.SafeHttpNetworkError as exc:
-        return False, f"network_{exc.__class__.__name__}"
+        return False, f"network_{exc.__class__.__name__}", url
     except Exception as exc:  # noqa: BLE001
-        return False, exc.__class__.__name__
-    if 200 <= int(status) < 300:
-        return True, "ok"
-    return False, f"http_{status}"
+        return False, exc.__class__.__name__, url
+    if int(status) == 200 and body:
+        return True, f"http_{status}", url
+    return False, f"http_{status}", url
 
 
 def _cmd_monitor_snapshot_test(*, upload_probe: bool = False) -> int:
@@ -7097,33 +7248,93 @@ def _cmd_monitor_snapshot_test(*, upload_probe: bool = False) -> int:
 
     # --upload-probe: attach the live-test evidence to a dev-probe and upload it.
     print("")
+    uploaded = False
+    detail = "skipped"
+    visible = False
+    fetch_status = "skipped"
+    fetch_url = ""
     if cap is not None and getattr(cap, "ok", False) and getattr(cap, "data", None):
         try:
             cfg = load_config()
         except ConfigError:
             cfg = default_config()
-        uploaded, detail = _upload_snapshot_test_image(cfg if isinstance(cfg, dict) else {}, cap.data, getattr(cap, "mime", "image/png") or "image/png")
-        print(f"  Latest snapshot upload: {'OK' if uploaded else f'FAILED ({detail})'}")
+        try:
+            uploaded, detail = _upload_snapshot_test_image(
+                cfg if isinstance(cfg, dict) else {},
+                cap.data,
+                getattr(cap, "mime", "image/png") or "image/png",
+            )
+        except Exception as exc:  # noqa: BLE001
+            _write_cli_crash_log(exc, context="snapshot-test upload step")
+            uploaded, detail = False, exc.__class__.__name__
+        if uploaded:
+            try:
+                visible, fetch_status, fetch_url = _verify_latest_snapshot_fetch(cfg if isinstance(cfg, dict) else {})
+            except Exception as exc:  # noqa: BLE001
+                _write_cli_crash_log(exc, context="snapshot-test latest verify")
+                visible, fetch_status, fetch_url = False, exc.__class__.__name__, ""
+            print(f"  Snapshot latest upload: HTTP {detail.removeprefix('http_') if detail.startswith('http_') else '200'}")
+            print(f"  Backend latest visible: {'yes' if visible else 'no'}")
+            print(f"  Snapshot fetch URL:     {fetch_url or '—'}")
+            print(f"  Snapshot fetch status:  {fetch_status}")
+        else:
+            print(f"  Snapshot latest upload: FAILED ({detail})")
     else:
-        print("  Latest snapshot upload: skipped (no valid PNG to upload)")
+        print("  Snapshot latest upload: skipped (no valid PNG to upload)")
     print("  Uploading probe with SNAPSHOT LIVE TEST section…")
+    probe_doc: dict[str, Any] = {}
+    probe_module: Any | None = None
     try:
         from . import probe as _probe
+        probe_module = _probe
         probe_doc = _probe.collect_probe()
+    except Exception as exc:  # noqa: BLE001
+        _write_cli_crash_log(exc, context="snapshot-test collect probe")
+        probe_doc = {
+            "probe_version": 1,
+            "errors": [{"step": "collect_probe", "error": exc.__class__.__name__}],
+        }
+    try:
         probe_doc["snapshot_live_test"] = report
-        ok, msg = _probe.upload_probe(probe_doc)
+        probe_doc["snapshot_latest_verify"] = {
+            "upload_ok": uploaded,
+            "upload_result": detail,
+            "backend_visible": visible,
+            "fetch_status": fetch_status,
+            "fetch_url": fetch_url,
+        }
+    except Exception as exc:  # noqa: BLE001
+        _write_cli_crash_log(exc, context="snapshot-test probe section")
+        probe_doc = {
+            "probe_version": 1,
+            "snapshot_live_test": report,
+            "snapshot_latest_verify": {
+                "upload_ok": uploaded,
+                "upload_result": detail,
+                "backend_visible": visible,
+                "fetch_status": fetch_status,
+                "fetch_url": fetch_url,
+            },
+            "errors": [{"step": "probe_section", "error": exc.__class__.__name__}],
+        }
+    try:
+        if probe_module is None:
+            from . import probe as _probe
+            probe_module = _probe
+        ok, msg = probe_module.upload_probe(probe_doc)
         if ok:
-            print(f"  Upload status:          OK")
+            print("  Probe upload:           OK")
             if "probe_id=" in msg or msg.startswith("p-"):
                 print(f"  Probe ID:               {msg.split('probe_id=')[-1].strip() if 'probe_id=' in msg else msg}")
             else:
                 print(f"  Probe detail:           {msg}")
             print("  Next step: open the probe in admin tools or share the Probe ID with support.")
             return 0 if sel else 1
-        print(f"  Upload status:          FAILED ({msg})")
+        print(f"  Probe upload:           FAILED ({msg})")
         return 1
     except Exception as exc:  # noqa: BLE001
-        print(f"  Upload status:          ERROR ({str(exc)[:160]})")
+        _write_cli_crash_log(exc, context="snapshot-test upload probe")
+        print(f"  Probe upload:           ERROR ({str(exc)[:160]})")
         return 1
 
 
@@ -7162,14 +7373,22 @@ def cmd_monitor(args: argparse.Namespace) -> int:
         cfg = default_config()
     # Register cfg so configured_packages count is accurate even when
     # the bridge thread isn't running in this short-lived CLI invocation.
+    from . import monitor_autostart
     try:
-        from . import monitor_autostart
         monitor_autostart.set_config(cfg)
+    except Exception as exc:  # noqa: BLE001
+        _write_cli_crash_log(exc, context="monitor status set_config")
+    summary: dict[str, Any] = {}
+    try:
         summary = monitor_autostart.get_monitor_status_summary()
-        summary.update(_monitor_status_from_disk())
-    except Exception:  # noqa: BLE001
-        print("DENG Tool: Rejoin APK Monitor: (unavailable)")
-        return 1
+    except Exception as exc:  # noqa: BLE001
+        _write_cli_crash_log(exc, context="monitor status live summary")
+        summary = {
+            "bridge_url": "—",
+            "autostart_enabled": True,
+            "token_cache": {"present": False},
+        }
+    summary.update(_monitor_status_from_disk())
 
     sha = ""
     try:
@@ -7200,15 +7419,19 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     if sha:
         print(f"  Installed artifact SHA: {sha}")
     print(f"  Bridge URL:             {summary.get('bridge_url')}")
-    print(f"  Bridge process running: {'yes' if summary.get('worker_running') else 'no'}")
-    print(f"  Bridge PID:             {summary.get('worker_pid') or '—'}")
+    worker_state = "yes" if summary.get("worker_running") else "no"
+    if summary.get("worker_running") and not summary.get("status_file_present"):
+        worker_state = "starting"
+    print(f"  Bridge worker running:  {worker_state}")
+    print(f"  Worker PID:             {summary.get('worker_pid') or '—'}")
     print(f"  Monitor autostart:      {'enabled' if summary.get('autostart_enabled') else 'disabled'}")
-    print(f"  Bridge thread running:  {'yes' if summary.get('bridge_running') else 'no'}")
+    print(f"  Bridge session active:  {'yes' if summary.get('bridge_running') else 'no'}")
     print(f"  Push interval:          {push_iv_str}")
     print(f"  Stale threshold:       ~{stale_ttl}s (2× interval, min 60)")
     print(f"  Disconnect threshold:   ~{disc_ttl}s (3× interval, min 90)")
     print(f"  Device connected:       {'yes' if summary.get('connected') else 'no'}")
-    print(f"  Last heartbeat (push):    {_fmt_time(summary.get('last_push_at'))}")
+    print(f"  Last heartbeat:         {summary.get('last_push_result') or 'never'}")
+    print(f"  Last heartbeat at:      {_fmt_time(summary.get('last_push_at'))}")
     print(f"  Last push result:       {summary.get('last_push_result') or '—'}")
     if summary.get("last_error"):
         print(f"  Last push error:        {summary.get('last_error')}")
@@ -7216,9 +7439,15 @@ def cmd_monitor(args: argparse.Namespace) -> int:
         print(f"  Consecutive failures:   {summary.get('consecutive_failures')}")
     print(f"  Configured packages:    {summary.get('configured_packages')}")
     print(f"  Reported packages:      {summary.get('reported_packages')}")
+    print(f"  RAM:                    {_format_monitor_ram(summary.get('device_ram'))}")
+    print(f"  Device name:            {summary.get('device_label') or '—'}")
     print(f"  Snapshot interval:      {snap_iv_str}")
     print(f"  Last snapshot:          {_fmt_time(summary.get('snapshot_last_sent_at'))}")
     print(f"  Last snapshot result:   {summary.get('snapshot_last_result') or '—'}")
+    if not summary.get("status_file_present"):
+        print(f"  Status file:            missing ({MONITOR_STATUS_PATH})")
+        if summary.get("worker_running"):
+            print("  Last heartbeat:         not yet (worker is starting)")
     print(f"  Status file updated:    {summary.get('updated_at') or 'never'}")
     print(f"  Bridge log path:        {MONITOR_LOG_PATH}")
     print(f"  Supervisor active:      {'yes' if summary.get('supervisor_active') else 'no'}")
@@ -7476,9 +7705,10 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as _exc:
         _code = _exc.code
         return _code if isinstance(_code, int) else (0 if _code is None else 1)
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         import logging as _logging
         _logging.getLogger("deng.rejoin.cli").debug("Unhandled CLI error", exc_info=True)
+        _write_cli_crash_log(exc, context="main")
         print(
             "\nThe tool hit an internal error. "
             "Please send support the latest crash log.",

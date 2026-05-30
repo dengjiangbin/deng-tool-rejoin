@@ -312,6 +312,27 @@ def get_monitor_status_summary() -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             push_interval = 0.0
 
+    device_ram = None
+    if bridge is not None or _active_supervisor is not None:
+        try:
+            raw = _build_status_payload(tool_version="", channel="")
+            if isinstance(raw, dict):
+                ram = raw.get("device_ram")
+                if isinstance(ram, dict):
+                    device_ram = ram
+        except Exception:  # noqa: BLE001
+            device_ram = None
+
+    device_label = ""
+    try:
+        if isinstance(cfg, dict):
+            lic = cfg.get("license") if isinstance(cfg.get("license"), dict) else {}
+            device_label = str(lic.get("device_label") or cfg.get("device_name") or "").strip()
+        if not device_label or device_label.lower() in {"termux on android", "localhost", "unknown"}:
+            device_label = _default_device_label()
+    except Exception:  # noqa: BLE001
+        device_label = ""
+
     return {
         "bridge_url": _resolve_bridge_url(None),
         "autostart_enabled": True,
@@ -340,6 +361,8 @@ def get_monitor_status_summary() -> dict[str, Any]:
         "snapshot_attempts": (list(state.snapshot_attempts) if state else []),
         "configured_packages": configured_count,
         "reported_packages": reported_count,
+        "device_ram": device_ram,
+        "device_label": device_label or None,
         "supervisor_active": _active_supervisor is not None,
         "token_cache": cache_summary,
         "last_issue_result": _last_issue_result,

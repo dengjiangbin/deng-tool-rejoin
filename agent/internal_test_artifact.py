@@ -40,7 +40,7 @@ _SIGNING_KEY_ENV = "DENG_REJOIN_MANIFEST_SIGNING_KEY_PEM"
 _SIGNING_KEY_REL = Path("data") / "rejoin_manifest_signing_key.pem"
 
 _RAW_RUNTIME_FILES = {
-    "agent/__init__.py": '''from . import _protected_runtime as _dpr\n_dpr.install()\n__all__ = ["__version__"]\n__version__ = "1.0.0"\n''',
+    "agent/__init__.py": '''from . import _protected_runtime as _dpr\n_dpr.install()\n__all__ = ["__version__"]\n__version__ = {package_version!r}\n''',
     "agent/deng_tool_rejoin.py": '''#!/usr/bin/env python3\nfrom __future__ import annotations\nimport sys\nfrom pathlib import Path\nif __package__ in {None, ""}:\n    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))\nimport agent._protected_runtime  # noqa: F401\nfrom agent.commands import main\nif __name__ == "__main__":\n    raise SystemExit(main())\n''',
     "agent/_protected_runtime.py": r'''from __future__ import annotations
 import base64, hashlib, importlib.abc, importlib.machinery, json, marshal, sys, zlib
@@ -467,9 +467,17 @@ def _public_numbers(signing_key) -> tuple[int, int]:
     return int(nums.n), int(nums.e)
 
 
-def _render_raw_runtime_files(signing_key, *, fallback_install_endpoint: str = "/install/test/latest") -> dict[str, str]:
+def _render_raw_runtime_files(
+    signing_key,
+    *,
+    fallback_install_endpoint: str = "/install/test/latest",
+    package_version: str = "1.0.0",
+) -> dict[str, str]:
     public_n, public_e = _public_numbers(signing_key)
     rendered = dict(_RAW_RUNTIME_FILES)
+    rendered["agent/__init__.py"] = rendered["agent/__init__.py"].format(
+        package_version=package_version.lstrip("v"),
+    )
     rendered["agent/_protected_runtime.py"] = rendered["agent/_protected_runtime.py"].format(
         public_n=public_n,
         public_e=public_e,
@@ -563,7 +571,11 @@ def build_internal_test_tarball(
     build_info = json.loads(build_info_bytes.decode("utf-8"))
     bundle_bytes = _compile_client_bundle(pairs)
     fallback_install_endpoint = f"/install/{version}" if version != "main-dev" else "/install/test/latest"
-    entries = _render_raw_runtime_files(signing_key, fallback_install_endpoint=fallback_install_endpoint)
+    entries = _render_raw_runtime_files(
+        signing_key,
+        fallback_install_endpoint=fallback_install_endpoint,
+        package_version=version,
+    )
     entries[_PROTECTED_BUNDLE] = bundle_bytes
     entries["BUILD-INFO.json"] = build_info_bytes
     manifest_bytes = _make_release_manifest_bytes(entries, build_info=build_info, version=version)

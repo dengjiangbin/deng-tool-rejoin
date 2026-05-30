@@ -173,12 +173,13 @@ class RegistryStableGateTests(unittest.TestCase):
         self.assertNotIn("refs/heads", json.dumps(stable))
         self.assertNotIn("test/latest", json.dumps(stable))
 
-    def test_stable_latest_pointer_targets_v100(self) -> None:
+    def test_stable_latest_pointer_targets_current_version(self) -> None:
         """The public latest channel moves only by changing this pointer."""
         root = Path(__file__).resolve().parents[1]
         rows = json.loads((root / "data" / "rejoin_versions.json").read_text(encoding="utf-8"))
+        current_stable = f"v{(root / 'VERSION').read_text(encoding='utf-8').strip()}"
         pointers = next(r for r in rows if r.get("kind") == "channel_pointers")
-        self.assertEqual(pointers.get("stable_latest"), "v1.0.0")
+        self.assertEqual(pointers.get("stable_latest"), current_stable)
         self.assertEqual(pointers.get("test_latest"), "main-dev")
         stable = next(r for r in rows if r.get("version") == pointers.get("stable_latest"))
         self.assertEqual(stable.get("channel"), "stable")

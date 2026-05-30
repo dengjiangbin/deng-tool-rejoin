@@ -18,6 +18,7 @@ Backend selection (in order):
 Public API:
     post_json(url, data, *, headers=None, timeout=30) -> dict
     get_json(url, *, headers=None, timeout=30)        -> dict
+    get_raw(url, *, headers=None, timeout=30)         -> (status, bytes)
 
 Both raise SafeHttpError subclasses on failure.
 """
@@ -57,6 +58,8 @@ _MAX_RESPONSE_BYTES = 256 * 1024
 def _http_backend() -> str:
     """Return the active HTTP backend identifier: ``'curl'`` or ``'python'``."""
     override = os.environ.get("DENG_HTTP_BACKEND", "auto").lower().strip()
+
+
     if override == "curl":
         return "curl"
     if override == "python":
@@ -107,6 +110,8 @@ def _build_curl_header_args(headers: dict[str, str]) -> list[str]:
     args: list[str] = []
     for k, v in headers.items():
         args.extend(["-H", f"{k}: {v}"])
+
+
     return args
 
 
@@ -451,3 +456,21 @@ def post_raw(
         return int(exc.code), body
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise SafeHttpNetworkError(f"Network I/O error: {exc}") from exc
+
+
+def get_raw(
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    timeout: int = 30,
+) -> tuple[int, bytes]:
+    """GET a raw response body without JSON decoding.
+
+    Returns ``(status_code, body_bytes)`` for both success and HTTP error
+    responses. Network failures still raise :class:`SafeHttpNetworkError`.
+    """
+    backend = _http_backend()
+    _log.debug("safe_http GET(raw) %s (backend=%s)", url, backend)
+    if backend == "curl":
+        return _curl_get_raw(url, extra_headers=headers, timeout=timeout)
+    return _python_get_raw(url, extra_headers=headers, timeout=timeout)

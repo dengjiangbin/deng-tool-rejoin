@@ -907,6 +907,32 @@ router.get('/api/monitor/devices/:id/snapshot/latest', requireAppAuth, async (re
   }
 });
 
+router.get('/api/monitor/bridge/snapshot/latest', requireBridgeAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('monitor_snapshots')
+      .select('mime_type, image_data, size_bytes, captured_at')
+      .eq('monitor_device_id', req.bridgeDevice.id)
+      .order('captured_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(204).end();
+    }
+    res.set('Cache-Control', 'no-store');
+    res.set('Content-Type', data.mime_type || 'image/webp');
+    res.set('X-Captured-At', data.captured_at);
+    const bytes = Buffer.isBuffer(data.image_data)
+      ? data.image_data
+      : Buffer.from(data.image_data, 'base64');
+    return res.send(bytes);
+  } catch (err) {
+    console.error('[monitor] bridge snapshot fetch failed', err?.message || err);
+    return serverError(res, 'snapshot_fetch_failed');
+  }
+});
+
 router.patch('/api/monitor/devices/:id/settings',
   requireAppAuth,
   monitorJsonParser,

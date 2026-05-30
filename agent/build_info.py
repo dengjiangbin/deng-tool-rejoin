@@ -26,6 +26,8 @@ import json
 import os
 import shutil
 import sys
+import marshal
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +37,8 @@ INSTALL_ROOT = Path(__file__).resolve().parent.parent
 BUILD_INFO_PATH = INSTALL_ROOT / "BUILD-INFO.json"
 INSTALLED_BUILD_PATH = INSTALL_ROOT / ".installed-build.json"
 INSTALL_API_PATH = INSTALL_ROOT / ".install_api"
+RELEASE_MANIFEST_PATH = INSTALL_ROOT / "RELEASE-MANIFEST.json"
+PROTECTED_RUNTIME_PATH = INSTALL_ROOT / "agent" / ".deng_runtime.bin"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -132,6 +136,67 @@ def _short(sha: str, n: int = 12) -> str:
     return sha[:n] if sha else ""
 
 
+def _load_release_manifest() -> dict[str, Any]:
+    return _read_json(RELEASE_MANIFEST_PATH)
+
+
+def _iter_code_objects(root: Any):
+    stack = [root]
+    while stack:
+        item = stack.pop()
+        yield item
+        for const in getattr(item, "co_consts", ()):
+            if hasattr(const, "co_consts"):
+                stack.append(const)
+
+
+def inspect_protected_runtime() -> dict[str, Any]:
+    info: dict[str, Any] = {
+        "present": PROTECTED_RUNTIME_PATH.is_file(),
+        "sha256": "",
+        "sha256_short": "",
+        "module_count": 0,
+        "monitor_worker_present": False,
+        "monitor_command_implementation": "missing",
+        "bridge_launcher_path": str(INSTALL_ROOT / "agent" / "deng_tool_rejoin.py"),
+    }
+    if not PROTECTED_RUNTIME_PATH.is_file():
+        return info
+    info["sha256"] = _hash_file(PROTECTED_RUNTIME_PATH)
+    info["sha256_short"] = _short(info["sha256"])
+    try:
+        modules = marshal.loads(zlib.decompress(PROTECTED_RUNTIME_PATH.read_bytes()))
+    except Exception:  # noqa: BLE001
+        info["monitor_command_implementation"] = "unreadable"
+        return info
+    if not isinstance(modules, dict):
+        info["monitor_command_implementation"] = "unreadable"
+        return info
+    info["module_count"] = len(modules)
+    commands_code = modules.get("agent.commands")
+    if commands_code is None:
+        info["monitor_command_implementation"] = "missing_commands"
+        return info
+    needles = {
+        "run-worker",
+        "monitor-bridge.pid",
+        "monitor-bridge.status.json",
+        "monitor-bridge.log",
+    }
+    found: set[str] = set()
+    for code in _iter_code_objects(commands_code):
+        for const in getattr(code, "co_consts", ()):
+            if isinstance(const, str):
+                for needle in needles:
+                    if needle in const:
+                        found.add(needle)
+    info["monitor_worker_present"] = needles.issubset(found)
+    info["monitor_command_implementation"] = (
+        "persistent_worker" if info["monitor_worker_present"] else "legacy_shell"
+    )
+    return info
+
+
 def _wrapper_target_install_root() -> str | None:
     """Inspect the wrapper script and try to extract its install-root path.
 
@@ -173,6 +238,8 @@ def collect_version_info() -> dict[str, Any]:
 
     bi = load_build_info()
     ib = load_installed_build()
+    manifest = _load_release_manifest()
+    runtime = inspect_protected_runtime()
     info: dict[str, Any] = {
         "product": PRODUCT_NAME,
         "product_version": str(VERSION),
@@ -197,6 +264,18 @@ def collect_version_info() -> dict[str, Any]:
         "installed_build_path": str(INSTALLED_BUILD_PATH)
         if INSTALLED_BUILD_PATH.is_file()
         else "",
+        "release_manifest_path": str(RELEASE_MANIFEST_PATH) if RELEASE_MANIFEST_PATH.is_file() else "",
+        "release_manifest_sha256": _hash_file(RELEASE_MANIFEST_PATH) if RELEASE_MANIFEST_PATH.is_file() else "",
+        "release_manifest_sha256_short": _short(_hash_file(RELEASE_MANIFEST_PATH)) if RELEASE_MANIFEST_PATH.is_file() else "",
+        "runtime_build_date": str(bi.get("built_at_iso") or ""),
+        "protected_runtime_present": runtime.get("present", False),
+        "protected_runtime_sha256": runtime.get("sha256") or "",
+        "protected_runtime_sha256_short": runtime.get("sha256_short") or "",
+        "protected_runtime_module_count": runtime.get("module_count") or 0,
+        "monitor_worker_present": runtime.get("monitor_worker_present", False),
+        "monitor_command_implementation": runtime.get("monitor_command_implementation") or "missing",
+        "bridge_launcher_path": runtime.get("bridge_launcher_path") or "",
+        "release_manifest_version": str(manifest.get("version") or ""),
         "modules": {},
     }
     for mod in REQUIRED_MODULES:
