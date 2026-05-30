@@ -1408,6 +1408,16 @@ router.get('/api/downloads/stats', (_req, res) => {
 
 // Canonical "latest" alias — reads manifest and redirects to the versioned
 // file. Returns a friendly 404 if no APK has been published yet.
+router.head('/downloads/deng-tool-rejoin-apk-latest.apk', (_req, res) => {
+  setDownloadStatsNoStore(res);
+  const manifest = loadApkManifest();
+  if (!manifest || !manifest.file_name) {
+    return res.status(404).type('text/plain').end();
+  }
+  const safeName = path.basename(manifest.file_name);
+  return res.redirect(302, `/downloads/${encodeURIComponent(safeName)}`);
+});
+
 router.get('/downloads/deng-tool-rejoin-apk-latest.apk', (_req, res) => {
   setDownloadStatsNoStore(res);
   const manifest = loadApkManifest();
@@ -1420,6 +1430,11 @@ router.get('/downloads/deng-tool-rejoin-apk-latest.apk', (_req, res) => {
 
 // Legacy alias — permanent redirect to the new canonical "latest" URL so
 // existing bookmarks keep working.
+router.head('/downloads/deng-monitor-latest.apk', (_req, res) => {
+  setDownloadStatsNoStore(res);
+  return res.redirect(301, '/downloads/deng-tool-rejoin-apk-latest.apk');
+});
+
 router.get('/downloads/deng-monitor-latest.apk', (_req, res) => {
   setDownloadStatsNoStore(res);
   return res.redirect(301, '/downloads/deng-tool-rejoin-apk-latest.apk');
@@ -1433,6 +1448,51 @@ router.get('/downloads/deng-tool-monitor-ios-latest.ipa', (_req, res) => {
   }
   const safeName = path.basename(iosManifest.file_name);
   return res.redirect(302, `/downloads/${encodeURIComponent(safeName)}`);
+});
+
+router.head('/downloads/:file', (req, res, next) => {
+  const raw = String(req.params.file || '');
+
+  if (IOS_FILENAME_RE.test(raw)) {
+    const target = path.resolve(IOS_RELEASES_DIR, raw);
+    if (!target.startsWith(path.resolve(IOS_RELEASES_DIR) + path.sep)
+        && target !== path.resolve(IOS_RELEASES_DIR)) {
+      return next();
+    }
+    if (fs.existsSync(target)) {
+      setDownloadStatsNoStore(res);
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${raw}"`);
+      res.setHeader('Content-Length', String(fs.statSync(target).size));
+      return res.status(200).end();
+    }
+    return res.status(404).type('text/plain').end();
+  }
+
+  const isNew = APK_FILENAME_NEW_RE.test(raw);
+  const isLegacy = APK_FILENAME_LEGACY_RE.test(raw);
+  if (!isNew && !isLegacy) return next();
+
+  const target = path.resolve(APK_RELEASES_DIR, raw);
+  if (!target.startsWith(path.resolve(APK_RELEASES_DIR) + path.sep)
+      && target !== path.resolve(APK_RELEASES_DIR)) {
+    return next();
+  }
+
+  if (fs.existsSync(target)) {
+    setDownloadStatsNoStore(res);
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Disposition', `attachment; filename="${raw}"`);
+    res.setHeader('Content-Length', String(fs.statSync(target).size));
+    return res.status(200).end();
+  }
+
+  if (isLegacy) {
+    const suffix = raw.replace(/^deng-monitor-/, '');
+    return res.redirect(301, `/downloads/deng-tool-rejoin-apk-${suffix}`);
+  }
+
+  return res.status(404).type('text/plain').end();
 });
 
 router.get('/downloads/:file', (req, res, next) => {

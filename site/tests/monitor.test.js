@@ -12,6 +12,8 @@ const { describe, test, before, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const Module = require('node:module');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 // ── Env required by app.js ──────────────────────────────────────────────────
@@ -575,6 +577,40 @@ describe('APK download page', () => {
     } else {
       assert.equal(res.status, 404);
       assert.match(res.text, /APK not available yet/);
+    }
+  });
+
+  test('HEAD latest APK follows to the file without incrementing download count', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dl-head-'));
+    const oldDownloadStatsPath = process.env.DOWNLOAD_STATS_PATH;
+    const oldApkStatsPath = process.env.APK_DOWNLOAD_STATS_PATH;
+    const oldAndroidStatsPath = process.env.ANDROID_DOWNLOAD_STATS_PATH;
+    process.env.DOWNLOAD_STATS_PATH = path.join(tmpDir, 'stats.json');
+    delete process.env.APK_DOWNLOAD_STATS_PATH;
+    delete process.env.ANDROID_DOWNLOAD_STATS_PATH;
+    try {
+      const ds = require('../src/downloadStats');
+      const beforeCount = ds.getApkStats().latest?.downloads || 0;
+      const res = await request(app)
+        .head('/downloads/deng-tool-rejoin-apk-latest.apk')
+        .redirects(1);
+      if (res.status === 200) {
+        assert.match(
+          String(res.headers['content-type'] || ''),
+          /application\/(vnd\.android\.package-archive|octet-stream)/,
+        );
+      } else {
+        assert.equal(res.status, 404);
+      }
+      assert.equal(ds.getApkStats().latest?.downloads || 0, beforeCount);
+    } finally {
+      if (oldDownloadStatsPath === undefined) delete process.env.DOWNLOAD_STATS_PATH;
+      else process.env.DOWNLOAD_STATS_PATH = oldDownloadStatsPath;
+      if (oldApkStatsPath === undefined) delete process.env.APK_DOWNLOAD_STATS_PATH;
+      else process.env.APK_DOWNLOAD_STATS_PATH = oldApkStatsPath;
+      if (oldAndroidStatsPath === undefined) delete process.env.ANDROID_DOWNLOAD_STATS_PATH;
+      else process.env.ANDROID_DOWNLOAD_STATS_PATH = oldAndroidStatsPath;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
