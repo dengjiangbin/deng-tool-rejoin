@@ -55,12 +55,33 @@ describe('downloadStats platform support', () => {
     }
   });
 
+  test('older versioned APK downloads do not replace published latest stats', () => {
+    const ds = require('../src/downloadStats');
+    ds.recordDownload('android', 'deng-tool-rejoin-apk-v1.0.9.apk');
+    ds.recordDownload('android', 'deng-tool-rejoin-apk-v1.0.0.apk');
+    ds.recordDownload('android', 'deng-tool-rejoin-apk-v1.0.0.apk');
+    const latest = ds.getApkStats().latest;
+    assert.equal(latest.version, '1.0.9');
+    assert.equal(latest.file_name, 'deng-tool-rejoin-apk-v1.0.9.apk');
+    assert.equal(latest.downloads, 1);
+  });
+
+  test('published latest stats fallback to exact zero when stats file is corrupt', () => {
+    const file = process.env.APK_DOWNLOAD_STATS_PATH;
+    fs.writeFileSync(file, '{not-json', 'utf8');
+    const ds = require('../src/downloadStats');
+    const latest = ds.getApkStats().latest;
+    assert.equal(ds.getApkStats().ok, true);
+    assert.equal(latest.version, '1.0.9');
+    assert.equal(latest.downloads, 0);
+  });
+
   test('corrupt stats JSON returns clean empty stats without random count', () => {
     const file = process.env.APK_DOWNLOAD_STATS_PATH;
     fs.writeFileSync(file, '{not-json', 'utf8');
     const ds = require('../src/downloadStats');
     assert.equal(ds.getApkStats().ok, true);
-    assert.equal(ds.getApkStats().latest, null);
+    assert.equal(ds.getApkStats().latest.downloads, 0);
   });
 });
 

@@ -1409,6 +1409,7 @@ router.get('/api/downloads/stats', (_req, res) => {
 // Canonical "latest" alias — reads manifest and redirects to the versioned
 // file. Returns a friendly 404 if no APK has been published yet.
 router.get('/downloads/deng-tool-rejoin-apk-latest.apk', (_req, res) => {
+  setDownloadStatsNoStore(res);
   const manifest = loadApkManifest();
   if (!manifest || !manifest.file_name) {
     return res.status(404).type('text/plain').send('APK not available yet.\n');
@@ -1420,6 +1421,7 @@ router.get('/downloads/deng-tool-rejoin-apk-latest.apk', (_req, res) => {
 // Legacy alias — permanent redirect to the new canonical "latest" URL so
 // existing bookmarks keep working.
 router.get('/downloads/deng-monitor-latest.apk', (_req, res) => {
+  setDownloadStatsNoStore(res);
   return res.redirect(301, '/downloads/deng-tool-rejoin-apk-latest.apk');
 });
 
@@ -1446,6 +1448,7 @@ router.get('/downloads/:file', (req, res, next) => {
       if (req.method === 'GET') {
         try { downloadStats.recordDownload('ios', raw); } catch (_) { /* non-fatal */ }
       }
+      setDownloadStatsNoStore(res);
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${raw}"`);
       return res.sendFile(target);
@@ -1467,6 +1470,7 @@ router.get('/downloads/:file', (req, res, next) => {
     if (req.method === 'GET') {
       try { downloadStats.recordDownload('android', raw); } catch (_) { /* non-fatal */ }
     }
+    setDownloadStatsNoStore(res);
     res.setHeader('Content-Type', 'application/vnd.android.package-archive');
     res.setHeader('Content-Disposition', `attachment; filename="${raw}"`);
     return res.sendFile(target);

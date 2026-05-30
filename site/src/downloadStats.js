@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const DEFAULT_PATH = path.join(__dirname, '..', 'data', 'download_stats.json');
+const RELEASES_ROOT = path.join(__dirname, '..', '..', 'releases');
 
 const PLATFORM_CONFIG = {
   android: {
@@ -93,6 +94,22 @@ function _versionFromFilename(fileName) {
   return m ? m[1] : null;
 }
 
+function _publishedLatest(platform) {
+  const rel = platform === 'ios'
+    ? path.join(RELEASES_ROOT, 'ios', 'latest.json')
+    : path.join(RELEASES_ROOT, 'android', 'latest.json');
+  try {
+    if (!fs.existsSync(rel)) return null;
+    const raw = JSON.parse(fs.readFileSync(rel, 'utf8'));
+    const fileName = String(raw.file_name || '');
+    const version = String(raw.version_name || _versionFromFilename(fileName) || '');
+    if (!fileName || !version) return null;
+    return { file_name: fileName, version };
+  } catch (_) {
+    return null;
+  }
+}
+
 /** Record a download for a platform binary. */
 function recordDownload(platform, fileName) {
   const p = platform === 'ios' ? 'ios' : 'android';
@@ -111,11 +128,18 @@ function recordDownload(platform, fileName) {
   versions[key].downloads = Number(versions[key].downloads || 0) + 1;
   versions[key].file_name = base;
   versions[key].updated_at = new Date().toISOString();
+  const published = _publishedLatest(p);
+  const latestKey = published ? published.version : key;
+  const latestRow = versions[latestKey] || {
+    file_name: published?.file_name || base,
+    version: published?.version || version || key,
+    downloads: 0,
+  };
   const latest = {
-    file_name: base,
-    version: version || key,
-    downloads: versions[key].downloads,
-    updated_at: versions[key].updated_at,
+    file_name: published?.file_name || latestRow.file_name || base,
+    version: published?.version || latestRow.version || latestKey,
+    downloads: Number(latestRow.downloads || 0),
+    updated_at: latestRow.updated_at || null,
   };
   _write(p, { versions, latest });
 }
@@ -123,7 +147,16 @@ function recordDownload(platform, fileName) {
 function _latestFor(platform) {
   const all = _read();
   const bucket = all.platforms[platform];
-  const latest = bucket?.latest || (platform === 'android' ? all.android : all.ios);
+  const published = _publishedLatest(platform);
+  let latest = bucket?.latest || (platform === 'android' ? all.android : all.ios);
+  if (published) {
+    const row = bucket?.versions?.[published.version];
+    latest = {
+      file_name: published.file_name,
+      version: published.version,
+      downloads: Number(row?.downloads || 0),
+    };
+  }
   if (!latest) return null;
   return {
     version: latest.version,
