@@ -55,10 +55,14 @@ ATTEMPT_TIMEOUT = 12
 # Prefer images larger than this; smaller valid PNGs are accepted but flagged.
 SUSPICIOUS_MIN_BYTES = 10 * 1024  # 10 KB
 
-# Root-side temp file. On Android /sdcard is the shared, FUSE-mounted store
-# that both root and the Termux shell user can usually reach. We always clean
-# it up after reading.
+# Root-side temp files. On some cloud phones /sdcard itself refuses writes,
+# while Download remains shared and readable by Termux.
 ROOT_TMP_PATH = "/sdcard/deng-monitor-snapshot.png"
+ROOT_TMP_PATHS = (
+    ROOT_TMP_PATH,
+    "/sdcard/Download/deng-monitor-snapshot.png",
+    "/storage/emulated/0/Download/deng-monitor-snapshot.png",
+)
 
 # Result enum values (kept as module constants so callers/tests can reference).
 RESULT_SUCCESS = "success"
@@ -251,7 +255,7 @@ def _capture_via_stdout(provider: str, cmd: list[str]) -> tuple[bytes | None, Pr
     return png, attempt
 
 
-def _capture_via_root_file(provider: str, remote_cmd: str) -> tuple[bytes | None, ProviderAttempt]:
+def _capture_via_root_file(provider: str, remote_cmd_template: str) -> tuple[bytes | None, ProviderAttempt]:
     """Run a root command that writes a PNG to ROOT_TMP_PATH, then read it.
 
     The write goes through ``su -c '<screencap> -p <tmp>'`` and the read
@@ -259,44 +263,48 @@ def _capture_via_root_file(provider: str, remote_cmd: str) -> tuple[bytes | None
     back to ``su -c 'cat <tmp>'`` if the file isn't readable as the shell
     user. Always cleans up the temp file.
     """
-    write_rc, _w_out, w_err, w_kind = _run(["su", "-c", remote_cmd])
-    attempt = ProviderAttempt(provider=provider, exit_code=write_rc)
-    if w_kind == "not_found":
-        attempt.found = False
-        attempt.note = "su_not_found"
-        return None, attempt
-    if w_kind == "timeout":
-        attempt.timeout = True
-        attempt.note = "timeout"
-        return None, attempt
-    if w_kind == "oserror":
-        attempt.note = "oserror"
-        return None, attempt
-    attempt.stderr = _first_safe_stderr_line(w_err)
+    last_attempt: ProviderAttempt | None = None
+    for tmp_path in ROOT_TMP_PATHS:
+        remote_cmd = remote_cmd_template.format(path=tmp_path)
+        write_rc, _w_out, w_err, w_kind = _run(["su", "-c", remote_cmd])
+        attempt = ProviderAttempt(provider=provider, exit_code=write_rc)
+        last_attempt = attempt
+        attempt.note = f"path={tmp_path}"
+        if w_kind == "not_found":
+            attempt.found = False
+            attempt.note = "su_not_found"
+            return None, attempt
+        if w_kind == "timeout":
+            attempt.timeout = True
+            attempt.note = f"timeout path={tmp_path}"
+            return None, attempt
+        if w_kind == "oserror":
+            attempt.note = f"oserror path={tmp_path}"
+            continue
+        attempt.stderr = _first_safe_stderr_line(w_err)
 
-    raw: bytes = b""
-    # 1) Try a direct read (works when /sdcard is shared + readable).
-    try:
-        raw = Path(ROOT_TMP_PATH).read_bytes()
-    except Exception:  # noqa: BLE001
-        raw = b""
-    # 2) Fallback: cat the file back through root.
-    if not raw:
-        rc2, out2, _err2, kind2 = _run(["su", "-c", f"cat {ROOT_TMP_PATH}"])
-        if kind2 is None and out2:
-            raw = out2
+        raw: bytes = b""
+        try:
+            raw = Path(tmp_path).read_bytes()
+        except Exception:  # noqa: BLE001
+            raw = b""
+        if not raw:
+            rc2, out2, _err2, kind2 = _run(["su", "-c", f"cat {tmp_path}"])
+            if kind2 is None and out2:
+                raw = out2
 
-    # Cleanup our own temp file (best-effort, never deletes user data).
-    _run(["su", "-c", f"rm -f {ROOT_TMP_PATH}"], timeout=6)
+        _run(["su", "-c", f"rm -f {tmp_path}"], timeout=6)
 
-    png = _extract_png(raw)
-    attempt.byte_length = len(png) if png else len(raw)
-    if png is None:
-        attempt.note = "no_png_signature" if raw else "empty_output"
-        return None, attempt
-    attempt.png_valid = True
-    attempt.byte_length = len(png)
-    return png, attempt
+        png = _extract_png(raw)
+        attempt.byte_length = len(png) if png else len(raw)
+        if png is None:
+            attempt.note = f"{'no_png_signature' if raw else 'empty_output'} path={tmp_path}"
+            continue
+        attempt.png_valid = True
+        attempt.byte_length = len(png)
+        return png, attempt
+
+    return None, last_attempt or ProviderAttempt(provider=provider, note="no_paths_tried")
 
 
 def _build_providers() -> list[tuple[str, str, list[str] | None, str | None]]:
@@ -313,9 +321,9 @@ def _build_providers() -> list[tuple[str, str, list[str] | None, str | None]]:
     # 3 + 4 + 5 root (auto unless explicitly disabled)
     if not _root_disabled() and _su_available():
         rungs.append(("stdout", "root_screencap_stdout", ["su", "-c", "screencap -p"], None))
-        rungs.append(("root_file", "root_screencap_file", None, f"screencap -p {ROOT_TMP_PATH}"))
+        rungs.append(("root_file", "root_screencap_file", None, "screencap -p {path}"))
         rungs.append(("root_file", "root_system_screencap", None,
-                      f"/system/bin/screencap -p {ROOT_TMP_PATH}"))
+                      "/system/bin/screencap -p {path}"))
     return rungs
 
 
@@ -398,7 +406,7 @@ def capture_snapshot_detailed() -> SnapshotCapture:
 def _provider_command_str(kind: str, stdout_cmd: list[str] | None, root_cmd: str | None) -> str:
     if kind == "stdout":
         return " ".join(stdout_cmd or [])
-    return f"su -c '{root_cmd}'  (then read back {ROOT_TMP_PATH})"
+    return f"su -c '{root_cmd}'  (then read back first writable shared path)"
 
 
 def snapshot_test_report() -> dict[str, Any]:
@@ -471,6 +479,7 @@ def cleanup_old_snapshots(max_age_seconds: int = 300) -> None:
 
 __all__ = [
     "PNG_SIGNATURE",
+    "ROOT_TMP_PATHS",
     "ProviderAttempt",
     "SnapshotCapture",
     "RESULT_SUCCESS",

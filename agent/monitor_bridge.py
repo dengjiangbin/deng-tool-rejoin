@@ -236,6 +236,7 @@ class BridgeState:
     last_push_at: float | None = None
     last_push_result: str | None = None
     last_error: str | None = None
+    next_retry_at: float | None = None
     backoff: float = MIN_BACKOFF_SECONDS
     consecutive_failures: int = 0
     snapshot_last_sent_at: float = 0.0
@@ -278,6 +279,8 @@ class BridgeState:
             "snapshot_root_granted": self.snapshot_root_granted,
             "snapshot_su_available": self.snapshot_su_available,
             "last_push_result": (self.last_push_result or None),
+            "last_push_error": (self.last_error or None),
+            "next_retry_at": self.next_retry_at,
         }
 
 
@@ -349,11 +352,13 @@ class MonitorBridge:
             now = time.monotonic()
             push_interval = max(0.5, float(self.config.push_interval_seconds))
             if now >= next_push:
-                next_push = now + push_interval
                 try:
                     self._tick()
                 except Exception as exc:  # noqa: BLE001
                     self._record_failure(f"tick_error: {exc.__class__.__name__}")
+                with self.state.lock:
+                    delay = self.state.backoff if self.state.last_push_result == "error" else push_interval
+                next_push = time.monotonic() + max(push_interval, delay)
             # Sleep responsively
             self._stop.wait(timeout=0.25)
 
@@ -577,6 +582,13 @@ class MonitorBridge:
                 except (ValueError, UnicodeDecodeError):
                     pass
             return True
+        if status == 429:
+            retry_after = self._retry_after_seconds(body)
+            self._record_failure(f"http_429_retry_after_{retry_after}")
+            with self.state.lock:
+                self.state.backoff = float(retry_after)
+                self.state.next_retry_at = time.time() + retry_after
+            return False
         if status in (401, 403):
             # Token revoked / unauthorized: notify listeners so they can
             # reissue and reconnect on the next tick.
@@ -588,6 +600,18 @@ class MonitorBridge:
                 pass
         self._record_failure(f"http_{status}")
         return False
+
+    def _retry_after_seconds(self, body: bytes | None) -> int:
+        retry_after = 60
+        if body:
+            try:
+                payload = json.loads(body.decode("utf-8"))
+                raw = payload.get("retry_after_seconds") if isinstance(payload, dict) else None
+                retry_after = int(raw)
+            except (ValueError, TypeError, UnicodeDecodeError):
+                retry_after = 60
+        retry_after = max(5, min(300, retry_after))
+        return retry_after
 
     # ── Dynamic remote settings ──────────────────────────────────────────
     def _apply_remote_settings(self, settings: dict[str, Any]) -> None:
@@ -623,6 +647,7 @@ class MonitorBridge:
             self.state.last_push_at = time.time()
             self.state.last_push_result = "success"
             self.state.last_error = None
+            self.state.next_retry_at = None
             self.state.consecutive_failures = 0
             self.state.backoff = MIN_BACKOFF_SECONDS
 
@@ -637,6 +662,7 @@ class MonitorBridge:
                 MAX_BACKOFF_SECONDS,
                 self.state.backoff * 2 + random.uniform(0, 1),  # noqa: S311
             )
+            self.state.next_retry_at = time.time() + self.state.backoff
         # Throttle log to avoid spam
         if self.state.consecutive_failures in (1, 5) or self.state.consecutive_failures % 30 == 0:
             logger.warning(

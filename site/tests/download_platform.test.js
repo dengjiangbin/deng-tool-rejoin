@@ -44,6 +44,24 @@ describe('downloadStats platform support', () => {
     // no record on HEAD — count unchanged
     assert.equal(ds.getPlatformStats('ios').latest?.downloads || 0, before);
   });
+
+  test('stats reads are deterministic and do not increment counts', () => {
+    const ds = require('../src/downloadStats');
+    ds.recordDownload('android', 'deng-tool-rejoin-apk-v1.0.9.apk');
+    const before = ds.getPlatformStats('android').latest.downloads;
+    for (let i = 0; i < 5; i++) {
+      assert.equal(ds.getPlatformStats('android').latest.downloads, before);
+      assert.equal(ds.getApkStats().latest.downloads, before);
+    }
+  });
+
+  test('corrupt stats JSON returns clean empty stats without random count', () => {
+    const file = process.env.APK_DOWNLOAD_STATS_PATH;
+    fs.writeFileSync(file, '{not-json', 'utf8');
+    const ds = require('../src/downloadStats');
+    assert.equal(ds.getApkStats().ok, true);
+    assert.equal(ds.getApkStats().latest, null);
+  });
 });
 
 describe('iOS download page contract', () => {

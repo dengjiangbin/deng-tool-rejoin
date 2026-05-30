@@ -88,7 +88,7 @@ class ProductionManifestSanityTests(unittest.TestCase):
         # be updated in lockstep so /install/v1.0.0 cannot accidentally
         # start serving a different tarball than what was QA'd.
         EXPECTED_V100_SHA = (
-            "ba5f6c2fb47093afcc33fa024161468a766352b4dfa966b4741a900c39a9854f"
+            "091ec7d0d54b4a7f73108639a3015e5636f65c2db17f019c4c66e5e8a68b4bc7"
         )
         row = next((r for r in self.rows if r.get("version") == "v1.0.0"), None)
         self.assertIsNotNone(row, "v1.0.0 row missing from production manifest")

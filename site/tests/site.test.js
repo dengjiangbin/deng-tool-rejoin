@@ -3717,11 +3717,22 @@ describe('Fish It website integration', () => {
     assert.equal(res.headers.location, '/');
   });
 
-  test('landing page includes download area and survives missing download stats', async () => {
+  test('landing page hides APK download CTA/count and survives missing download stats', async () => {
     const res = await request(app).get('/');
     assert.equal(res.status, 200);
-    assert.match(res.text, /href="\/download"/);
+    assert.doesNotMatch(res.text, /href="\/download"/);
+    assert.doesNotMatch(res.text, /Download Rejoin APK|Download APK/);
+    assert.doesNotMatch(res.text, /download count|data-apk-download-count/i);
     assert.match(res.text, /data-fishit-global/);
+  });
+
+  test('monitor bridge routes are exempt from public IP limiter and use device-keyed limiter', () => {
+    const appSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+    const monitorSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'monitorRoutes.js'), 'utf8');
+    assert.match(appSrc, /api\\\/monitor\\\/bridge\\\/\(\?:push\|snapshot\)/);
+    assert.match(monitorSrc, /keyGenerator:\s*\(req\)\s*=>\s*`bridge:\$\{req\.bridgeDevice\?\.id/);
+    assert.match(monitorSrc, /retry_after_seconds/);
+    assert.match(monitorSrc, /requireBridgeAuth,\s*bridgePushLimiter/s);
   });
 
   test('Fish It frontend supports real imageUrl fields before falling back', () => {

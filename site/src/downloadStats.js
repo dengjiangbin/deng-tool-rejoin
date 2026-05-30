@@ -83,7 +83,7 @@ function _write(platform, data) {
   bucket.versions = data.versions;
   platforms[platform] = bucket;
   const payload = { platforms, updated_at: new Date().toISOString() };
-  const tmp = `${file}.tmp`;
+  const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
   fs.renameSync(tmp, file);
 }

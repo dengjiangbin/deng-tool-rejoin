@@ -317,6 +317,23 @@ def test_bridge_applies_app_refresh_interval_echoed_from_push_response(monkeypat
     assert bridge.config.push_interval_seconds == 10.0
 
 
+def test_bridge_respects_retry_after_on_http_429(monkeypatch):
+    cfg = BridgeConfig(
+        enabled=True, token="abc", bridge_url="https://example.com",
+        push_interval_seconds=5, snapshot_interval_seconds=0,
+    )
+    bridge = MonitorBridge(config=cfg, status_provider=lambda: {"packages": [_raw_pkg()]})
+    monkeypatch.setattr(
+        "agent.safe_http.post_raw",
+        lambda *a, **kw: (429, b'{"ok":false,"error":"rate_limited","retry_after_seconds":42}'),
+    )
+    bridge._tick()
+    assert bridge.state.connected is False
+    assert bridge.state.last_error == "http_429_retry_after_42"
+    assert bridge.state.backoff == 42.0
+    assert bridge.state.next_retry_at is not None
+
+
 def test_bridge_unauthorized_triggers_on_unauthorized_callback(monkeypatch):
     seen: list[int] = []
 
@@ -636,6 +653,8 @@ def test_to_push_status_redacts_no_secrets():
         "snapshot_root_granted",
         "snapshot_su_available",
         "last_push_result",
+        "last_push_error",
+        "next_retry_at",
     }
     # None of these may carry a secret: assert only diagnostic primitives.
     for v in out.values():

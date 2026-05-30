@@ -938,7 +938,7 @@ describe('POST /api/monitor/bridge/issue-from-license', () => {
 // ── v1.0.4 — connection TTL, bridge_status, new state vocabulary ─────────────
 
 describe('v1.0.9 connection_state TTL (interval-scaled)', () => {
-  const { computeConnectionState, connectionTtlSeconds, DEVICE_CONNECTION_TTL_SECONDS } =
+  const { computeConnectionState, connectionThresholds, connectionTtlSeconds, DEVICE_CONNECTION_TTL_SECONDS } =
     require('../src/monitorRoutes.js').__test__;
 
   test('fresh last_seen_at → Connected', () => {
@@ -949,11 +949,25 @@ describe('v1.0.9 connection_state TTL (interval-scaled)', () => {
     assert.ok(r.seconds_since_last_seen >= 0 && r.seconds_since_last_seen < 5);
   });
 
-  test('30s interval: still Connected before 90s TTL', () => {
+  test('30s interval: still Connected before stale threshold', () => {
     const seen = new Date(Date.now() - 45 * 1000).toISOString();
     const r = computeConnectionState(seen, 30);
     assert.equal(r.connected, true);
+    assert.equal(r.connection_state, 'Connected');
     assert.equal(connectionTtlSeconds(30), 90);
+    assert.deepEqual(connectionThresholds(30), {
+      stale_after_seconds: 60,
+      disconnected_after_seconds: 90,
+    });
+  });
+
+  test('30s interval: Stale after two missed pushes but not Disconnected', () => {
+    const seen = new Date(Date.now() - 75 * 1000).toISOString();
+    const r = computeConnectionState(seen, 30);
+    assert.equal(r.connected, true);
+    assert.equal(r.connection_state, 'Stale');
+    assert.equal(r.stale_after_seconds, 60);
+    assert.equal(r.disconnected_after_seconds, 90);
   });
 
   test('30s interval: Disconnected after TTL (90s)', () => {
@@ -1042,6 +1056,8 @@ describe('v1.0.4 /status endpoint exposes connection_state and last_bridge_statu
     );
     assert.equal(status.body.device.connection_state, 'Disconnected');
     assert.ok(status.body.device.seconds_since_last_seen > ttl);
+    assert.equal(status.body.device.stale_after_seconds, 60);
+    assert.equal(status.body.device.disconnected_after_seconds, 90);
     // Legacy sticky field is still surfaced unmodified for back-compat.
     assert.equal(status.body.device.status_connected, true);
   });
@@ -1066,6 +1082,8 @@ describe('v1.0.4 /status endpoint exposes connection_state and last_bridge_statu
           snapshot_last_upload_status: null,
           screencap_available: false,
           last_push_result: 'success',
+          last_push_error: 'http_429_retry_after_60',
+          next_retry_at: '2026-05-30T03:00:00Z',
           // Banned field — must be stripped server-side.
           bridge_token: 'leaking-token',
           license_key: 'DENG-XXXX',
@@ -1081,6 +1099,8 @@ describe('v1.0.4 /status endpoint exposes connection_state and last_bridge_statu
     assert.equal(bs.snapshot_provider_called_count, 7);
     assert.equal(bs.screencap_available, false);
     assert.equal(bs.last_push_result, 'success');
+    assert.equal(bs.last_push_error, 'http_429_retry_after_60');
+    assert.equal(bs.next_retry_at, '2026-05-30T03:00:00Z');
     // Allow-list is enforced — secrets dropped.
     assert.equal(bs.bridge_token, undefined);
     assert.equal(bs.license_key, undefined);
@@ -1092,6 +1112,9 @@ describe('v1.0.4 /status endpoint exposes connection_state and last_bridge_statu
       .set('Authorization', `Bearer ${appToken}`);
     assert.equal(status.status, 200);
     assert.equal(status.body.device.last_bridge_status.snapshot_last_result, 'capture_failed');
+    assert.equal(status.body.device.last_push_status, 'success');
+    assert.equal(status.body.device.last_push_error, 'http_429_retry_after_60');
+    assert.equal(status.body.device.next_retry_at, '2026-05-30T03:00:00Z');
   });
 });
 

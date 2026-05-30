@@ -226,9 +226,16 @@ function aggregatePackageSummary(rows) {
 /** Legacy default TTL (5s interval); prefer connectionTtlSeconds(interval). */
 const DEVICE_CONNECTION_TTL_SECONDS = 30;
 
-function connectionTtlSeconds(intervalSec) {
+function connectionThresholds(intervalSec) {
   const interval = Math.max(2, Math.min(300, Number(intervalSec) || 5));
-  return Math.max(interval * 3, 90);
+  return {
+    stale_after_seconds: Math.max(interval * 2, 60),
+    disconnected_after_seconds: Math.max(interval * 3, 90),
+  };
+}
+
+function connectionTtlSeconds(intervalSec) {
+  return connectionThresholds(intervalSec).disconnected_after_seconds;
 }
 
 function normalizeMonitorSettings(row = {}) {
@@ -243,13 +250,16 @@ function normalizeMonitorSettings(row = {}) {
 }
 
 function computeConnectionState(lastSeenAt, intervalSec = 5) {
-  const ttl = connectionTtlSeconds(intervalSec);
+  const thresholds = connectionThresholds(intervalSec);
+  const ttl = thresholds.disconnected_after_seconds;
   if (!lastSeenAt) {
     return {
       connected: false,
       connection_state: 'Disconnected',
       seconds_since_last_seen: null,
       connection_ttl_seconds: ttl,
+      stale_after_seconds: thresholds.stale_after_seconds,
+      disconnected_after_seconds: thresholds.disconnected_after_seconds,
       monitor_interval_seconds: intervalSec,
     };
   }
@@ -260,16 +270,23 @@ function computeConnectionState(lastSeenAt, intervalSec = 5) {
       connection_state: 'Disconnected',
       seconds_since_last_seen: null,
       connection_ttl_seconds: ttl,
+      stale_after_seconds: thresholds.stale_after_seconds,
+      disconnected_after_seconds: thresholds.disconnected_after_seconds,
       monitor_interval_seconds: intervalSec,
     };
   }
   const age = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  const fresh = age <= ttl;
+  const connected = age <= ttl;
+  const state = age <= thresholds.stale_after_seconds
+    ? 'Connected'
+    : (age <= thresholds.disconnected_after_seconds ? 'Stale' : 'Disconnected');
   return {
-    connected: fresh,
-    connection_state: fresh ? 'Connected' : 'Disconnected',
+    connected,
+    connection_state: state,
     seconds_since_last_seen: age,
     connection_ttl_seconds: ttl,
+    stale_after_seconds: thresholds.stale_after_seconds,
+    disconnected_after_seconds: thresholds.disconnected_after_seconds,
     monitor_interval_seconds: intervalSec,
   };
 }
@@ -376,20 +393,38 @@ const snapshotParser = express.raw({
 
 const bridgePushLimiter = rateLimit({
   windowMs: 60_000,
-  max: 90,                      // ~1.5/sec sustained per IP
+  max: 240,                     // supports 5s interval + retries per device
   skip: isTest,
+  keyGenerator: (req) => `bridge:${req.bridgeDevice?.id || req.bridgeTokenId || 'unknown'}`,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'rate_limited' },
+  handler: (req, res, _next, options) => {
+    const retryAfter = Math.max(1, Math.ceil(options.windowMs / 1000));
+    return res.status(429).json({
+      ok: false,
+      error: 'rate_limited',
+      retry_after_seconds: retryAfter,
+      endpoint: req.originalUrl || req.path,
+    });
+  },
 });
 
 const bridgeSnapshotLimiter = rateLimit({
   windowMs: 60_000,
-  max: 12,                      // 1 snapshot / 5s ceiling
+  max: 60,                      // snapshot uploads are separate from heartbeat
   skip: isTest,
+  keyGenerator: (req) => `bridge-snapshot:${req.bridgeDevice?.id || req.bridgeTokenId || 'unknown'}`,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'rate_limited' },
+  handler: (req, res, _next, options) => {
+    const retryAfter = Math.max(1, Math.ceil(options.windowMs / 1000));
+    return res.status(429).json({
+      ok: false,
+      error: 'rate_limited',
+      retry_after_seconds: retryAfter,
+      endpoint: req.originalUrl || req.path,
+    });
+  },
 });
 
 const pairingLimiter = rateLimit({
@@ -410,9 +445,9 @@ const pairingLimiter = rateLimit({
  * Body: { schema, tool_version, channel, captured_at, packages: [...] }
  */
 router.post('/api/monitor/bridge/push',
-  bridgePushLimiter,
   monitorJsonParser,
   requireBridgeAuth,
+  bridgePushLimiter,
   async (req, res) => {
     const body = req.body || {};
     if (body.schema !== 1) return badRequest(res, 'unsupported_schema');
@@ -466,6 +501,8 @@ router.post('/api/monitor/bridge/push',
         // Push pipeline diagnostics (we already track this via timestamps,
         // but the bridge's own view is useful for debugging time skew).
         last_push_result: pick(incomingStatus.last_push_result, 32),
+        last_push_error: pick(incomingStatus.last_push_error, 120),
+        next_retry_at: pick(incomingStatus.next_retry_at, 64),
         // Schema marker so callers can detect old / new payloads.
         schema: 1,
         // Server-side trust timestamp — clients can't lie about when we
@@ -593,9 +630,9 @@ router.post('/api/monitor/bridge/push',
  * Body: raw image bytes (image/webp|png|jpeg)
  */
 router.post('/api/monitor/bridge/snapshot',
-  bridgeSnapshotLimiter,
   snapshotParser,
   requireBridgeAuth,
+  bridgeSnapshotLimiter,
   async (req, res) => {
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
       return badRequest(res, 'image_required');
@@ -671,14 +708,18 @@ router.get('/api/monitor/devices', requireAppAuth, async (req, res) => {
         : null;
       const settings = settingsMap.get(d.id) || {};
       const intervalSec = settings.app_refresh_interval_seconds || 30;
+      const conn = computeConnectionState(d.last_seen_at, intervalSec);
       const { last_bridge_status, ...rest } = d;
       return {
         ...rest,
-        ...computeConnectionState(d.last_seen_at, intervalSec),
+        ...conn,
         monitor_interval_seconds: intervalSec,
         snapshot_interval_seconds: settings.snapshot_interval_seconds ?? 30,
         device_ram: ram,
         snapshot_last_result: bs ? (bs.snapshot_last_result || null) : null,
+        last_push_status: bs ? (bs.last_push_result || null) : null,
+        last_push_error: bs ? (bs.last_push_error || null) : null,
+        next_retry_at: bs ? (bs.next_retry_at || null) : null,
       };
     });
 
@@ -813,11 +854,16 @@ router.get('/api/monitor/devices/:id/status', requireAppAuth, async (req, res) =
         connected: conn.connected,
         connection_state: conn.connection_state,
         seconds_since_last_seen: conn.seconds_since_last_seen,
+        stale_after_seconds: conn.stale_after_seconds,
+        disconnected_after_seconds: conn.disconnected_after_seconds,
         last_seen_at: device.last_seen_at,
         last_snapshot_captured_at: lastSnapshotCapturedAt,
         last_snapshot_age_seconds: lastSnapshotAgeSeconds,
         // Bridge self-reported diagnostics (optional, may be null).
         last_bridge_status: device.last_bridge_status || null,
+        last_push_status: device.last_bridge_status?.last_push_result || null,
+        last_push_error: device.last_bridge_status?.last_push_error || null,
+        next_retry_at: device.last_bridge_status?.next_retry_at || null,
         monitor_interval_seconds: intervalSec,
         connection_ttl_seconds: connectionTtlSeconds(intervalSec),
       },
@@ -1205,6 +1251,7 @@ module.exports.__test__ = {
   randomPairingCode,
   summarizePackages,
   aggregatePackageSummary,
+  connectionThresholds,
   connectionTtlSeconds,
   normalizeMonitorSettings,
   computeConnectionState,

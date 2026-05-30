@@ -108,6 +108,35 @@ def test_root_screencap_file_success(monkeypatch, tmp_path):
     assert cap.png_valid is True
 
 
+def test_root_screencap_file_download_path_fallback(monkeypatch, tmp_path):
+    monkeypatch.setattr(snap, "SNAPSHOT_DIR", tmp_path)
+    monkeypatch.setattr(snap, "_su_available", lambda: True)
+    _disable_system_binary(monkeypatch)
+
+    download_path = "/sdcard/Download/deng-monitor-snapshot.png"
+
+    def handler(cmd):
+        if cmd[:2] == ["screencap", "-p"]:
+            return 0, b"", b"", None
+        if cmd[:3] == ["su", "-c", "screencap -p"]:
+            return 0, b"", b"", None
+        if cmd[:3] == ["su", "-c", f"screencap -p {snap.ROOT_TMP_PATH}"]:
+            return 1, b"", b"Permission denied", None
+        if cmd[:3] == ["su", "-c", f"screencap -p {download_path}"]:
+            return 0, b"", b"", None
+        if cmd[:3] == ["su", "-c", f"cat {download_path}"]:
+            return 0, VALID_PNG, b"", None
+        if cmd[:2] == ["su", "-c"] and cmd[2].startswith("rm -f"):
+            return 0, b"", b"", None
+        return 0, b"", b"", None
+
+    _install_run(monkeypatch, handler)
+    cap = snap.capture_snapshot_detailed()
+    assert cap.ok
+    assert cap.provider == "root_screencap_file"
+    assert "Download" in cap.attempts[-1].note
+
+
 def test_invalid_png_is_rejected(monkeypatch, tmp_path):
     monkeypatch.setattr(snap, "SNAPSHOT_DIR", tmp_path)
     monkeypatch.setattr(snap, "_su_available", lambda: False)

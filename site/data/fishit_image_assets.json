@@ -1,0 +1,28 @@
+{
+  "source": "leaderboard_db_source",
+  "channel_id": "1481530183545520159",
+  "leaderboard_resolver": "C:\\Users\\Administrator\\Desktop\\DENG Fish It\\utils\\fishImageResolver.js",
+  "generated_at": "2026-05-30T02:56:45.884Z",
+  "images": {
+    "Elshark Gran Maja": {
+      "canonical_name": "Elshark Gran Maja",
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-800c7ad9501897afb5ac2b8ee732937c/420/420/Image/Png/noFilter",
+      "source": "fish_catalog_seen"
+    },
+    "Elshark Grand Maja": {
+      "canonical_name": "Elshark Gran Maja",
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-800c7ad9501897afb5ac2b8ee732937c/420/420/Image/Png/noFilter",
+      "source": "fish_catalog_seen"
+    },
+    "King Jelly": {
+      "canonical_name": "King Jelly",
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-686ea124937e28c6466829ac8d993edf/420/420/Image/Png/noFilter",
+      "source": "fish_catalog_seen"
+    },
+    "Skeleton Narwhal": {
+      "canonical_name": "Skeleton Narwhal",
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-ac004bd7c6670241b705afafcb7c35e1/420/420/Image/Png/noFilter",
+      "source": "fish_catalog_seen"
+    }
+  }
+}

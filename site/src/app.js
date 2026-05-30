@@ -106,7 +106,8 @@ app.set('trust proxy', 1);
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
-  skip: () => process.env.NODE_ENV === 'test',
+  skip: (req) => process.env.NODE_ENV === 'test'
+    || /^\/api\/monitor\/bridge\/(?:push|snapshot)\b/.test(req.path || ''),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
