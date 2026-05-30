@@ -459,6 +459,37 @@ describe('app session auth + ownership isolation', () => {
     const row = mem.monitor_settings.find((r) => r.monitor_device_id === myDevice);
     assert.equal(row.snapshot_interval_seconds, 60);
   });
+
+  test('settings update persists non-30 refresh interval and echoes saved settings', async () => {
+    const myDevice = seedDevice('disc-me');
+    mem.monitor_settings.push({
+      monitor_device_id: myDevice,
+      snapshot_interval_seconds: 30,
+      monitor_enabled: true,
+      app_refresh_interval_seconds: 30,
+    });
+    const myToken = seedAppSession('disc-me');
+    const save = await request(app)
+      .patch(`/api/monitor/devices/${myDevice}/settings`)
+      .set('Authorization', `Bearer ${myToken}`)
+      .send({ app_refresh_interval_seconds: 10, snapshot_interval_seconds: 60 });
+    assert.equal(save.status, 200);
+    assert.equal(save.body.settings.app_refresh_interval_seconds, 10);
+    assert.equal(save.body.settings.snapshot_interval_seconds, 60);
+
+    const status = await request(app)
+      .get(`/api/monitor/devices/${myDevice}/status`)
+      .set('Authorization', `Bearer ${myToken}`);
+    assert.equal(status.status, 200);
+    assert.equal(status.body.settings.app_refresh_interval_seconds, 10);
+    assert.equal(status.body.device.monitor_interval_seconds, 10);
+
+    const list = await request(app)
+      .get('/api/monitor/devices')
+      .set('Authorization', `Bearer ${myToken}`);
+    assert.equal(list.status, 200);
+    assert.equal(list.body.devices[0].monitor_interval_seconds, 10);
+  });
 });
 
 describe('pairing flow', () => {

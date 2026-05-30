@@ -41,6 +41,9 @@
     var label = r.charAt(0).toUpperCase() + r.slice(1);
     return '<span class="rarity-badge rarity-' + esc(r) + '">' + esc(label) + '</span>';
   }
+  function imageUrl(item) {
+    return item && (item.imageUrl || item.image_url || item.thumbnailUrl || item.thumbnail || item.image || null);
+  }
   // Re-apply username masking after dynamic render (app.js owns the state).
   function remask() { if (window.DengPrivacy && window.DengPrivacy.apply) window.DengPrivacy.apply(); }
 
@@ -82,7 +85,7 @@
     var meta = [];
     if (c.maxWeight) meta.push('Wt ' + esc(c.maxWeight));
     return '<article class="fish-card" tabindex="0">' +
-      '<div class="fish-card-img">' + imgTag(c.imageUrl, c.fallbackUrl, c.name) + badge(c.rarity) + '</div>' +
+      '<div class="fish-card-img">' + imgTag(imageUrl(c), c.fallbackUrl, c.name) + badge(c.rarity) + '</div>' +
       '<div class="fish-card-body"><span class="fish-card-name">' + esc(c.name) + '</span>' +
       '<div class="fish-card-stats"><span class="fish-card-amount">x' + fmt(c.count) + '</span>' +
       (meta.length ? '<span class="fish-card-meta">' + meta.join(' · ') + '</span>' : '') + '</div></div></article>';
@@ -115,7 +118,7 @@
   // ── Stats ─────────────────────────────────────────────────────────────────
   var statsBody = root.querySelector('[data-stats-body]');
   function statCard(card) {
-    var img = imgTag(card.imageUrl, card.fallbackUrl, card.label);
+    var img = imgTag(imageUrl(card), card.fallbackUrl, card.label);
     return '<article class="fishit-stat-card">' +
       '<div class="fishit-stat-img">' + img + '</div>' +
       '<span class="fishit-stat-label">' + esc(card.label) + '</span>' +
@@ -158,7 +161,7 @@
     if (f.maxWeight) meta.push('Wt ' + esc(f.maxWeight));
     if (f.mutation) meta.push(esc(f.mutation));
     return '<article class="fish-card" tabindex="0">' +
-      '<div class="fish-card-img">' + imgTag(f.imageUrl, f.fallbackUrl, f.name) + badge(f.rarity) + '</div>' +
+      '<div class="fish-card-img">' + imgTag(imageUrl(f), f.fallbackUrl, f.name) + badge(f.rarity) + '</div>' +
       '<div class="fish-card-body"><span class="fish-card-name">' + esc(f.name) + '</span>' +
       '<div class="fish-card-stats"><span class="fish-card-amount">x' + fmt(f.count) + '</span>' +
       (meta.length ? '<span class="fish-card-meta">' + meta.join(' · ') + '</span>' : '') + '</div></div></article>';

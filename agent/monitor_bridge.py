@@ -344,10 +344,10 @@ class MonitorBridge:
 
     # ── Main loop ────────────────────────────────────────────────────────
     def _run(self) -> None:
-        push_interval = max(0.5, float(self.config.push_interval_seconds))
         next_push = 0.0
         while not self._stop.is_set():
             now = time.monotonic()
+            push_interval = max(0.5, float(self.config.push_interval_seconds))
             if now >= next_push:
                 next_push = now + push_interval
                 try:

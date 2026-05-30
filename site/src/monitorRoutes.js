@@ -231,6 +231,17 @@ function connectionTtlSeconds(intervalSec) {
   return Math.max(interval * 3, 90);
 }
 
+function normalizeMonitorSettings(row = {}) {
+  return {
+    snapshot_interval_seconds: Math.max(0, Math.min(3600,
+      parseInt(row.snapshot_interval_seconds, 10) || 30)),
+    monitor_enabled: row.monitor_enabled !== false,
+    app_refresh_interval_seconds: Math.max(2, Math.min(60,
+      parseInt(row.app_refresh_interval_seconds, 10) || 30)),
+    app_display_name: typeof row.app_display_name === 'string' ? row.app_display_name : null,
+  };
+}
+
 function computeConnectionState(lastSeenAt, intervalSec = 5) {
   const ttl = connectionTtlSeconds(intervalSec);
   if (!lastSeenAt) {
@@ -273,11 +284,7 @@ async function loadSettingsByDeviceIds(deviceIds) {
       .in('monitor_device_id', deviceIds);
     if (error) throw error;
     for (const row of (data || [])) {
-      map.set(row.monitor_device_id, {
-        app_refresh_interval_seconds: Math.max(1, Math.min(300, parseInt(row.app_refresh_interval_seconds, 10) || 5)),
-        snapshot_interval_seconds: Math.max(0, Math.min(3600, parseInt(row.snapshot_interval_seconds, 10) || 0)),
-        monitor_enabled: row.monitor_enabled !== false,
-      });
+      map.set(row.monitor_device_id, normalizeMonitorSettings(row));
     }
   } catch (err) {
     console.warn('[monitor] settings batch load failed', err?.message || err);
@@ -567,10 +574,11 @@ router.post('/api/monitor/bridge/push',
         .eq('monitor_device_id', device.id)
         .maybeSingle();
       if (srow) {
+        const normalized = normalizeMonitorSettings(srow);
         settingsEcho = {
-          snapshot_interval_seconds: Math.max(0, Math.min(3600, parseInt(srow.snapshot_interval_seconds, 10) || 0)),
-          monitor_enabled: srow.monitor_enabled !== false,
-          app_refresh_interval_seconds: Math.max(1, Math.min(300, parseInt(srow.app_refresh_interval_seconds, 10) || 5)),
+          snapshot_interval_seconds: normalized.snapshot_interval_seconds,
+          monitor_enabled: normalized.monitor_enabled,
+          app_refresh_interval_seconds: normalized.app_refresh_interval_seconds,
         };
       }
     } catch (err) {
@@ -662,7 +670,7 @@ router.get('/api/monitor/devices', requireAppAuth, async (req, res) => {
           }
         : null;
       const settings = settingsMap.get(d.id) || {};
-      const intervalSec = settings.app_refresh_interval_seconds || 5;
+      const intervalSec = settings.app_refresh_interval_seconds || 30;
       const { last_bridge_status, ...rest } = d;
       return {
         ...rest,
@@ -789,8 +797,8 @@ router.get('/api/monitor/devices/:id/status', requireAppAuth, async (req, res) =
     // boolean used to be sticky-true forever after the first push, which
     // is why the APK still said Connected after the cloud phone was
     // rebooted. Now we anchor on last_seen_at + DEVICE_CONNECTION_TTL_SECONDS.
-    const intervalSec = Math.max(1, Math.min(300,
-      parseInt(settingsRow?.app_refresh_interval_seconds, 10) || 5));
+    const normalizedSettings = normalizeMonitorSettings(settingsRow || {});
+    const intervalSec = normalizedSettings.app_refresh_interval_seconds;
     const conn = computeConnectionState(device.last_seen_at, intervalSec);
     res.set('Cache-Control', 'no-store');
     return res.json({
@@ -815,12 +823,7 @@ router.get('/api/monitor/devices/:id/status', requireAppAuth, async (req, res) =
       },
       summary: summarizePackages(safePackages),
       packages: safePackages,
-      settings: settingsRow || {
-        snapshot_interval_seconds: 30,
-        monitor_enabled: true,
-        app_refresh_interval_seconds: 5,
-        app_display_name: null,
-      },
+      settings: settingsRow ? normalizeMonitorSettings(settingsRow) : normalizeMonitorSettings(),
     });
   } catch (err) {
     console.error('[monitor] device status failed', err?.message || err);
@@ -884,9 +887,15 @@ router.patch('/api/monitor/devices/:id/settings',
     }
 
     try {
-      await supabase.from('monitor_settings')
+      const saved = await supabase.from('monitor_settings')
         .upsert(patch, { onConflict: 'monitor_device_id' });
-      return res.json({ ok: true });
+      if (saved && saved.error) throw saved.error;
+      const { data: settingsRow, error: readError } = await supabase.from('monitor_settings')
+        .select('snapshot_interval_seconds, monitor_enabled, app_refresh_interval_seconds, app_display_name')
+        .eq('monitor_device_id', device.id)
+        .maybeSingle();
+      if (readError) throw readError;
+      return res.json({ ok: true, settings: normalizeMonitorSettings(settingsRow || patch) });
     } catch (err) {
       console.error('[monitor] settings update failed', err?.message || err);
       return serverError(res, 'settings_update_failed');
@@ -1197,6 +1206,7 @@ module.exports.__test__ = {
   summarizePackages,
   aggregatePackageSummary,
   connectionTtlSeconds,
+  normalizeMonitorSettings,
   computeConnectionState,
   safePackageRowForApp,
   normalizeLicenseKey,

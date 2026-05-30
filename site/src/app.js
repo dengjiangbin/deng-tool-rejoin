@@ -40,6 +40,12 @@ const assetVersion = [
   latestAssetStamp(),
 ].filter(Boolean).join('-').replace(/[^A-Za-z0-9._-]/g, '');
 
+app.locals.assetVersion = assetVersion;
+app.locals.flash = {};
+app.locals.csrfToken = '';
+app.locals.user = null;
+app.locals.publicUrl = process.env.TOOL_SITE_PUBLIC_URL || 'https://tool.deng.my.id';
+
 // ---------------------------------------------------------------
 // Security headers (helmet)
 // ---------------------------------------------------------------
@@ -58,8 +64,11 @@ app.use(helmet({
         'data:',
         'https://cdn.discordapp.com',
         'https://media.discordapp.net',
+        'https://rbxcdn.com',
         'https://tr.rbxcdn.com',
         'https://*.rbxcdn.com',
+        'https://thumbnails.roblox.com',
+        'https://*.roblox.com',
       ],
       connectSrc:["'self'"],
       frameSrc:  ["'none'"],

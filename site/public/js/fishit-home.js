@@ -6,10 +6,18 @@
     if (!isFinite(v)) return '0';
     return Math.round(v).toLocaleString('en-US');
   }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function imageUrl(item) {
+    return item && (item.imageUrl || item.image_url || item.thumbnailUrl || item.thumbnail || item.image || null);
+  }
   function rodImg(url, label) {
     if (!url) return '<span class="mini-stat-icon" aria-hidden="true">\u{1F3A3}</span>';
     var fb = '/public/img/fishit/fallback-rod.svg';
-    return '<img class="mini-stat-img" loading="lazy" src="' + url + '" alt="' + label +
+    return '<img class="mini-stat-img" loading="lazy" src="' + esc(url) + '" alt="' + esc(label) +
       '" onerror="this.onerror=null;this.src=\'' + fb + '\'">';
   }
 
@@ -27,18 +35,19 @@
       });
       var rodWrap = section.querySelector('[data-fishit-rods]');
       if (rodWrap) {
-        var cards = (data.rod_cards && data.rod_cards.length)
-          ? data.rod_cards
+        var apiCards = (data.rod_cards && data.rod_cards.length) ? data.rod_cards : data.rodCards;
+        var cards = (apiCards && apiCards.length)
+          ? apiCards
           : (data.rods ? [
             { label: 'Ghostfinn Rod', amount: data.rods.ghostfinn, imageUrl: null, cls: 'rod-ghostfinn' },
             { label: 'Element Rod', amount: data.rods.element, imageUrl: null, cls: 'rod-element' },
             { label: 'Diamond Rod', amount: data.rods.diamond, imageUrl: null, cls: 'rod-diamond' },
           ] : []);
         rodWrap.innerHTML = cards.map(function (rod) {
-          var cls = rod.cls || ('rod-' + String(rod.key || rod.label || '').toLowerCase().replace(/\s+/g, '-'));
-          return '<article class="mini-stat-card ' + cls + '">' +
-            rodImg(rod.imageUrl, rod.label) +
-            '<span class="mini-stat-label">' + rod.label + '</span>' +
+          var cls = rod.cls || ('rod-' + String(rod.key || rod.label || '').toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+          return '<article class="mini-stat-card ' + esc(cls) + '">' +
+            rodImg(imageUrl(rod), rod.label) +
+            '<span class="mini-stat-label">' + esc(rod.label) + '</span>' +
             '<strong class="mini-stat-value">' + fmt(rod.amount != null ? rod.amount : rod.value) + '</strong>' +
             '</article>';
         }).join('');

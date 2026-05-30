@@ -34,6 +34,13 @@ describe('Fish image resolution (DB-backed)', { skip: !hasDb }, () => {
     });
   }
 
+  test('Elshark Grand Maja alias resolves to the canonical Gran image', () => {
+    const gran = fishit.resolveSpeciesImageSource('Elshark Gran Maja', null);
+    const grand = fishit.resolveSpeciesImageSource('Elshark Grand Maja', null);
+    assert.equal(grand.url, gran.url);
+    assert.equal(grand.source, gran.source);
+  });
+
   test('audit reports species with images', () => {
     const audit = fishit.auditSpeciesImages();
     assert.ok(audit.total > 0);

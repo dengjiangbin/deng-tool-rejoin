@@ -3703,4 +3703,45 @@ describe('Fish It website integration', () => {
     assert.match(res.text, /data-hide-username-toggle/);
     assert.match(res.text, /data-theme-toggle/);
   });
+
+  test('layout has an app-level assetVersion fallback so error pages cannot 500', async () => {
+    assert.ok(app.locals.assetVersion);
+    const res = await request(app).get('/definitely-missing-page');
+    assert.equal(res.status, 404);
+    assert.match(res.text, /\/public\/css\/style\.css\?v=/);
+  });
+
+  test('/login redirects to the public landing page', async () => {
+    const res = await request(app).get('/login');
+    assert.equal(res.status, 301);
+    assert.equal(res.headers.location, '/');
+  });
+
+  test('landing page includes download area and survives missing download stats', async () => {
+    const res = await request(app).get('/');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /href="\/download"/);
+    assert.match(res.text, /data-fishit-global/);
+  });
+
+  test('Fish It frontend supports real imageUrl fields before falling back', () => {
+    const home = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'fishit-home.js'), 'utf8');
+    const fish = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'fishit.js'), 'utf8');
+    assert.match(home, /imageUrl\(rod\)/);
+    assert.match(home, /rod_cards/);
+    assert.match(home, /rodCards/);
+    assert.match(fish, /imageUrl\(c\)/);
+    assert.match(fish, /imageUrl\(f\)/);
+    assert.match(fish, /image_url/);
+  });
+
+  test('CSP allows Discord rod images and Roblox fish image CDN domains', async () => {
+    const res = await request(app).get('/');
+    const csp = res.headers['content-security-policy'];
+    assert.match(csp, /cdn\.discordapp\.com/);
+    assert.match(csp, /media\.discordapp\.net/);
+    assert.match(csp, /tr\.rbxcdn\.com/);
+    assert.match(csp, /rbxcdn\.com/);
+    assert.match(csp, /thumbnails\.roblox\.com/);
+  });
 });

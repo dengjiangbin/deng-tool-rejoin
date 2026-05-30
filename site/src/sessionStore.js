@@ -27,7 +27,8 @@ class FileSessionStore extends session.Store {
   }
 
   get(sid, callback) {
-    fs.readFile(this._file(sid), 'utf8', (err, text) => {
+    const file = this._file(sid);
+    fs.readFile(file, 'utf8', (err, text) => {
       if (err) {
         if (err.code === 'ENOENT') return callback(null, null);
         return callback(err);
@@ -39,21 +40,30 @@ class FileSessionStore extends session.Store {
         }
         return callback(null, wrapped.session || null);
       } catch (parseErr) {
-        return callback(parseErr);
+        fs.unlink(file, () => callback(null, null));
       }
     });
   }
 
   set(sid, sess, callback = () => {}) {
     const file = this._file(sid);
-    const tmp = `${file}.${process.pid}.tmp`;
+    const tmp = `${file}.${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}.tmp`;
     const wrapped = JSON.stringify({
       expires_at: this._expiry(sess),
       session: sess,
     });
     fs.writeFile(tmp, wrapped, { encoding: 'utf8', mode: 0o600 }, (writeErr) => {
       if (writeErr) return callback(writeErr);
-      fs.rename(tmp, file, callback);
+      fs.rename(tmp, file, (renameErr) => {
+        if (!renameErr) return callback(null);
+        if (!['EPERM', 'EACCES', 'ENOENT'].includes(renameErr.code)) {
+          fs.unlink(tmp, () => callback(renameErr));
+          return;
+        }
+        fs.copyFile(tmp, file, (copyErr) => {
+          fs.unlink(tmp, () => callback(copyErr || null));
+        });
+      });
     });
   }
 

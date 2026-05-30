@@ -300,6 +300,23 @@ def test_bridge_applies_settings_echoed_from_push_response(monkeypatch):
     assert bridge.state.monitor_enabled_remote is True
 
 
+def test_bridge_applies_app_refresh_interval_echoed_from_push_response(monkeypatch):
+    cfg = BridgeConfig(
+        enabled=True, token="abc", bridge_url="https://example.com",
+        push_interval_seconds=30, snapshot_interval_seconds=0,
+    )
+    bridge = MonitorBridge(config=cfg, status_provider=lambda: {"packages": []})
+    monkeypatch.setattr(
+        "agent.safe_http.post_raw",
+        lambda *a, **kw: (
+            200,
+            b'{"ok":true,"accepted":0,"settings":{"app_refresh_interval_seconds":10,"snapshot_interval_seconds":0,"monitor_enabled":true}}',
+        ),
+    )
+    bridge._tick()
+    assert bridge.config.push_interval_seconds == 10.0
+
+
 def test_bridge_unauthorized_triggers_on_unauthorized_callback(monkeypatch):
     seen: list[int] = []
 
