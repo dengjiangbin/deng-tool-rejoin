@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>?? Fish It Live Inventory Tracker</title>
+  <title>&#x1F3A3; Fish It Live Inventory Tracker</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -148,8 +148,8 @@
     </a>
 
     <header class="header">
-      <h1>?? Fish It Live Inventory Tracker</h1>
-      <p>Track unlimited players simultaneously — sessions are saved and restored on page reload.</p>
+      <h1>&#x1F3A3; Fish It Live Inventory Tracker</h1>
+      <p>Track unlimited players simultaneously ï¿½ sessions are saved and restored on page reload.</p>
     </header>
 
     <div class="add-row">
@@ -164,12 +164,12 @@
     <div id="trackerList"></div>
 
     <div class="no-trackers" id="noTrackersMsg">
-      <div class="icon">??</div>
+      <div class="icon">&#x1F3A3;</div>
       <p>Add a Roblox username above to start live tracking.<br>Sessions are saved automatically and restored on page reload.</p>
     </div>
 
     <div class="loadstring-box">
-      <h3>Executor Script — copy &amp; run in-game</h3>
+      <h3>Executor Script ï¿½ copy &amp; run in-game</h3>
       <div class="code-row">
         <div class="code-block" id="loadstringCode">loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua"))()</div>
         <button class="btn-copy" id="copyBtn" type="button">Copy</button>
@@ -208,7 +208,7 @@
   }
 
   function buildItemsHtml(items) {
-    if (!items || items.length === 0) return '<div class="card-empty">?? Backpack is empty.</div>';
+    if (!items || items.length === 0) return '<div class="card-empty">&#x1F9F3; Backpack is empty.</div>';
     return `<div class="items-grid">${items.map(item => {
       const isShiny = item.shiny === true;
       const hasW    = item.weight !== null && item.weight !== undefined;
@@ -216,7 +216,7 @@
       const rc      = rarityClass(rarity);
       return `<div class="item-card${isShiny?' shiny':''}">
   <div class="ic-head"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${isShiny?'<span class="badge-shiny">? Shiny</span>':''}</div>
-  <div class="ic-meta">${hasW?`<span class="badge badge-weight">?? ${escHtml(String(item.weight))} kg</span>`:''}${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
+  <div class="ic-meta">${hasW?`<span class="badge badge-weight">&#x2696;&#xFE0F; ${escHtml(String(item.weight))} kg</span>`:''}${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
 </div>`;
     }).join('')}</div>`;
   }
@@ -230,14 +230,14 @@
   <span class="dot" aria-hidden="true"></span>
   <span class="card-username">${escHtml(username)}</span>
   <div class="card-meta-row">
-    <span class="pill" data-items-count>Items: <strong>—</strong></span>
+    <span class="pill" data-items-count>Items: <strong>-</strong></span>
     <span class="pill" data-sync-time></span>
   </div>
-  <button class="btn-remove" data-remove-btn aria-label="Remove">? Remove</button>
+  <button class="btn-remove" data-remove-btn aria-label="Remove">x Remove</button>
   <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>
 </div>
-<div class="card-status-line" data-status-line>? Waiting for <strong>${escHtml(username)}</strong> to execute the script in-game…</div>
-<div class="card-body" data-card-body><div class="card-empty">? Awaiting first data…</div></div>`;
+<div class="card-status-line" data-status-line>&#x23F3; Waiting for <strong>${escHtml(username)}</strong> to execute the script in-game...</div>
+<div class="card-body" data-card-body><div class="card-empty">&#x23F3; Awaiting first data...</div></div>`
 
     el.querySelector('.card-head').addEventListener('click', e => { if (!e.target.closest('[data-remove-btn]')) el.classList.toggle('expanded'); });
     el.querySelector('[data-remove-btn]').addEventListener('click', e => { e.stopPropagation(); removeTracker(username.toLowerCase()); });
@@ -253,7 +253,7 @@
     const b = card.querySelector('[data-card-body]');
     if (c) c.innerHTML = `Items: <strong>${data.items.length}</strong>`;
     if (s) s.textContent = `Sync: ${fmtTime(data.updatedAt)}`;
-    if (l) l.innerHTML = `?? Live &mdash; User ID: <strong>${data.userId||'—'}</strong>`;
+    if (l) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;
     if (b) b.innerHTML = buildItemsHtml(data.items);
   }
 
@@ -262,7 +262,7 @@
     card.classList.add('state-waiting');
     const l = card.querySelector('[data-status-line]');
     const s = card.querySelector('[data-sync-time]');
-    if (l) l.innerHTML = `? Waiting for <strong>${escHtml(name)}</strong> to execute the script in-game…`;
+    if (l) l.innerHTML = `&#x23F3; Waiting for <strong>${escHtml(name)}</strong> to execute the script in-game...`;
     if (s) s.textContent = '';
   }
 
@@ -270,7 +270,7 @@
     card.classList.remove('state-live','state-waiting');
     card.classList.add('state-error');
     const l = card.querySelector('[data-status-line]');
-    if (l) l.textContent = '? Network error — retrying…';
+    if (l) l.textContent = 'Network error - retrying...';
   }
 
   async function pollUser(key) {
