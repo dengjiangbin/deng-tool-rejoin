@@ -220,8 +220,9 @@
       const tabBadge = item.tab
                         ? `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.tab)}</span>`
                         : '';
+      const imgSrc = `/images/${encodeURIComponent(item.name||'unknown')}.png`;
       return `<div class="item-card${isShiny?' shiny':''}">
-  <div class="ic-head"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${qty}${tabBadge}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div>
+  <div class="ic-head"><img src="${imgSrc}" style="width:22px;height:22px;margin-right:6px;vertical-align:middle;border-radius:3px;" onerror="this.style.display='none'"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${qty}${tabBadge}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div>
   <div class="ic-meta">${hasW?`<span class="badge badge-weight">&#x2696;&#xFE0F; ${escHtml(Number(item.weight).toFixed(2))} kg</span>`:''}${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
 </div>`;
     }).join('')}</div>`;
