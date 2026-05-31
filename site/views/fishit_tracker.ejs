@@ -209,20 +209,22 @@
 
   function buildItemsHtml(items) {
     if (!items || items.length === 0) return '<div class="card-empty">&#x1F9F3; Inventory is empty.</div>';
+    // Default SVG fish icon shown when no image file exists for this item
+    const FALLBACK_IMG = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%90%9F%3C/text%3E%3C/svg%3E`;
     return `<div class="items-grid">${items.map(item => {
       const isShiny = item.shiny === true;
       const hasW    = item.weight !== null && item.weight !== undefined;
       const rarity  = item.rarity && item.rarity !== 'Unknown' ? item.rarity : null;
       const rc      = rarityClass(rarity);
       const qty     = (item.amount && item.amount > 1)
-                        ? `<span style="margin-left:7px;color:#a0aec0;font-size:.83em;font-weight:600;">x${item.amount}</span>`
+                        ? `<span style="margin-left:7px;color:#a0aec0;font-size:.83em;font-weight:600;">${item.amount}x</span>`
                         : '';
-      const tabBadge = item.tab
-                        ? `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.tab)}</span>`
-                        : '';
-      const imgSrc = `/images/${encodeURIComponent(item.name||'unknown')}.png`;
+      const cat     = item.category
+                        ? `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.category)}</span>`
+                        : (item.tab ? `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.tab)}</span>` : '');
+      const imgSrc  = `/images/${encodeURIComponent(item.name||'unknown')}.png`;
       return `<div class="item-card${isShiny?' shiny':''}">
-  <div class="ic-head"><img src="${imgSrc}" style="width:22px;height:22px;margin-right:6px;vertical-align:middle;border-radius:3px;" onerror="this.style.display='none'"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${qty}${tabBadge}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div>
+  <div class="ic-head"><img src="${imgSrc}" style="width:22px;height:22px;margin-right:6px;vertical-align:middle;border-radius:3px;" onerror="this.onerror=null;this.src='${FALLBACK_IMG}';"><span class="item-name">${qty}${escHtml(item.name||'Unknown')}</span>${cat}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div>
   <div class="ic-meta">${hasW?`<span class="badge badge-weight">&#x2696;&#xFE0F; ${escHtml(Number(item.weight).toFixed(2))} kg</span>`:''}${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
 </div>`;
     }).join('')}</div>`;
