@@ -10,6 +10,7 @@ const fs           = require('fs');
 const routes = require('./routes');
 const monitorRoutes = require('./monitorRoutes');
 const fishitRoutes = require('./fishitRoutes');
+const fishitTrackerRoutes = require('./fishitTrackerRoutes');
 const { FileSessionStore } = require('./sessionStore');
 const packageJson = require('../package.json');
 
@@ -107,7 +108,8 @@ const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
   skip: (req) => process.env.NODE_ENV === 'test'
-    || /^\/api\/monitor\/bridge\/(?:push|snapshot)\b/.test(req.path || ''),
+    || /^\/api\/monitor\/bridge\/(?:push|snapshot)\b/.test(req.path || '')
+    || /^\/api\/tracker\//.test(req.path || ''),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
@@ -204,6 +206,9 @@ app.use('/', monitorRoutes);
 
 // Fish It stats API (public global + authenticated /me/* routes).
 app.use('/', fishitRoutes);
+
+// Fish It Live Backpack Tracker (public, no auth required).
+app.use('/', fishitTrackerRoutes);
 
 // ---------------------------------------------------------------
 // Mount routes
