@@ -25,6 +25,12 @@ if ($content -match 'xpcall' -and $content -match 'debug\.traceback') { Write-Ho
 $ra = ([regex]::Matches($codeOnly, 'RequestAsync')).Count
 if ($ra -gt 0) { $errors += "FAIL  HttpService:RequestAsync found in code (must not be in LocalScript)" } else { Write-Host "PASS  No HttpService:RequestAsync in code" }
 
+if ($content -match 'scanCatalog') { Write-Host "PASS  scanCatalog found" } else { $errors += "FAIL  scanCatalog missing" }
+if ($content -match 'scanOwnedInventory') { Write-Host "PASS  scanOwnedInventory found" } else { $errors += "FAIL  scanOwnedInventory missing" }
+if ($content -match 'mergeItem') { Write-Host "PASS  mergeItem found" } else { $errors += "FAIL  mergeItem missing" }
+if ($content -match 'walkInventoryTable') { Write-Host "PASS  walkInventoryTable found" } else { $errors += "FAIL  walkInventoryTable missing" }
+if ($content -match 'DEBUG_VERBOSE_INVENTORY') { Write-Host "PASS  DEBUG_VERBOSE_INVENTORY config found" } else { $errors += "FAIL  DEBUG_VERBOSE_INVENTORY missing" }
+
 Write-Host ""
 if ($errors.Count -eq 0) {
     Write-Host "ALL CHECKS PASSED" -ForegroundColor Green; exit 0
