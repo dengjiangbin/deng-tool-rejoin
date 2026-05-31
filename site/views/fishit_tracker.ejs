@@ -214,9 +214,10 @@
       const hasW    = item.weight !== null && item.weight !== undefined;
       const rarity  = item.rarity || null;
       const rc      = rarityClass(rarity);
+      const qty = (item.amount && item.amount > 1) ? `<span style="margin-left:8px;color:#a0aec0;font-size:.85em;">x${item.amount}</span>` : '';
       return `<div class="item-card${isShiny?' shiny':''}">
-  <div class="ic-head"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${isShiny?'<span class="badge-shiny">? Shiny</span>':''}</div>
-  <div class="ic-meta">${hasW?`<span class="badge badge-weight">&#x2696;&#xFE0F; ${escHtml(String(item.weight))} kg</span>`:''}${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
+  <div class="ic-head"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${qty}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div>
+  <div class="ic-meta">${hasW?`<span class="badge badge-weight">&#x2696;&#xFE0F; ${escHtml(Number(item.weight).toFixed(2))} kg</span>`:''}${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
 </div>`;
     }).join('')}</div>`;
   }
