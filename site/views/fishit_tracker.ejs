@@ -201,6 +201,27 @@
   function fmtTime(iso) { const d = new Date(iso); return [d.getHours(),d.getMinutes(),d.getSeconds()].map(n=>String(n).padStart(2,'0')).join(':'); }
   function rarityClass(r) { return r ? (RARITY_MAP[r.toLowerCase()] || 'badge') : ''; }
 
+  const ITEM_IMAGES = {
+    // Add real hosted/local URLs here as they become available, e.g.
+    // 'Cactus Pufferfish': '/assets/img/fishit/cactus-pufferfish.png',
+    fish: '/assets/img/fishit/fallback-fish.svg',
+    rod: '/assets/img/fishit/fallback-rod.svg',
+    rods: '/assets/img/fishit/fallback-rod.svg',
+    bait: '/assets/img/fishit/fallback-fish.svg',
+    baits: '/assets/img/fishit/fallback-fish.svg',
+    items: '/assets/img/fishit/fallback-secret.svg',
+    item: '/assets/img/fishit/fallback-secret.svg',
+    secret: '/assets/img/fishit/fallback-secret.svg',
+    forgotten: '/assets/img/fishit/fallback-forgotten.svg',
+    Default: '/assets/img/fishit/fallback-fish.svg'
+  };
+
+  function itemImageSrc(item) {
+    const name = String(item.name || '');
+    const category = String(item.category || item.tab || '').toLowerCase();
+    return ITEM_IMAGES[name] || ITEM_IMAGES[category] || ITEM_IMAGES.Default;
+  }
+
   function updateSummary() {
     const n = trackers.size;
     if (n === 0) { summaryTextEl.textContent = 'No active trackers'; noTrackersMsg.style.display = 'block'; }
@@ -209,22 +230,19 @@
 
   function buildItemsHtml(items) {
     if (!items || items.length === 0) return '<div class="card-empty">&#x1F9F3; Inventory is empty.</div>';
-    // Default SVG fish icon shown when no image file exists for this item
-    const FALLBACK_IMG = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%90%9F%3C/text%3E%3C/svg%3E`;
     return `<div class="items-grid">${items.map(item => {
       const isShiny = item.shiny === true;
       const hasW    = item.weight !== null && item.weight !== undefined;
       const rarity  = item.rarity && item.rarity !== 'Unknown' ? item.rarity : null;
       const rc      = rarityClass(rarity);
-      const qty     = (item.amount && item.amount > 1)
-                        ? `<span style="margin-left:7px;color:#a0aec0;font-size:.83em;font-weight:600;">${item.amount}x</span>`
-                        : '';
+      const amount  = Number(item.amount || 1);
+      const qty     = `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#0a0c10;color:#e2e8f0;border:1px solid #2a3040;">x${Number.isFinite(amount) ? amount : 1}</span>`;
       const cat     = item.category
                         ? `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.category)}</span>`
                         : (item.tab ? `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.tab)}</span>` : '');
-      const imgSrc  = `/images/${encodeURIComponent(item.name||'unknown')}.png`;
+      const imgSrc  = itemImageSrc(item);
       return `<div class="item-card${isShiny?' shiny':''}">
-  <div class="ic-head"><img src="${imgSrc}" style="width:22px;height:22px;margin-right:6px;vertical-align:middle;border-radius:3px;" onerror="this.onerror=null;this.src='${FALLBACK_IMG}';"><span class="item-name">${qty}${escHtml(item.name||'Unknown')}</span>${cat}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div>
+  <div class="ic-head"><img src="${imgSrc}" style="width:28px;height:28px;margin-right:8px;vertical-align:middle;border-radius:6px;object-fit:cover;background:#2a3040;" onerror="this.onerror=null;this.src='${ITEM_IMAGES.Default}';"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${qty}${cat}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div>
   <div class="ic-meta">${hasW?`<span class="badge badge-weight">&#x2696;&#xFE0F; ${escHtml(Number(item.weight).toFixed(2))} kg</span>`:''}${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
 </div>`;
     }).join('')}</div>`;
@@ -260,7 +278,8 @@
     const s = card.querySelector('[data-sync-time]');
     const l = card.querySelector('[data-status-line]');
     const b = card.querySelector('[data-card-body]');
-    if (c) c.innerHTML = `Items: <strong>${data.items.length}</strong>`;
+    const totalAmount = (data.items || []).reduce((sum, item) => sum + (Number(item.amount) || 1), 0);
+    if (c) c.innerHTML = `Items: <strong>${totalAmount}</strong> <span style="color:#8a94a6;">(${data.items.length} types)</span>`;
     if (s) s.textContent = `Sync: ${fmtTime(data.updatedAt)}`;
     if (l) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;
     if (b) b.innerHTML = buildItemsHtml(data.items);

@@ -60,12 +60,25 @@ function sanitiseUsername(raw) {
 
 function sanitiseItems(raw) {
   if (!Array.isArray(raw)) return [];
-  return raw.slice(0, 300).map((item) => ({
-    name:   typeof item.name   === 'string'  ? item.name.slice(0, 100)  : '',
-    weight: typeof item.weight === 'number'  ? item.weight              : null,
-    rarity: typeof item.rarity === 'string'  ? item.rarity.slice(0, 50) : null,
-    shiny:  item.shiny === true              ? true                     : false,
-  }));
+  return raw.slice(0, 300).map((item) => {
+    const name = typeof item.name === 'string'
+      ? item.name
+      : (typeof item.Name === 'string' ? item.Name : '');
+    const rawWeight = item.weight ?? item.totalWeight ?? item.Weight;
+    const rawAmount = item.amount ?? item.Amount ?? 1;
+    const weight = Number(rawWeight);
+    const amount = Number(rawAmount);
+
+    return {
+      name:     name.slice(0, 100),
+      weight:   Number.isFinite(weight) ? weight : null,
+      amount:   Number.isFinite(amount) && amount > 0 ? Math.floor(amount) : 1,
+      category: typeof item.category === 'string' ? item.category.slice(0, 50) : null,
+      tab:      typeof item.tab === 'string'      ? item.tab.slice(0, 50)      : null,
+      rarity:   typeof item.rarity === 'string'   ? item.rarity.slice(0, 50)   : null,
+      shiny:    item.shiny === true               ? true                      : false,
+    };
+  });
 }
 
 // ── GET /tracker – serve the dashboard page ───────────────────────
