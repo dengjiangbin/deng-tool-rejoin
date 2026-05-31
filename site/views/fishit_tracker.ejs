@@ -3,27 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>🎣 Fish It Live Inventory Tracker</title>
+  <title>?? Fish It Live Inventory Tracker</title>
   <style>
-    /* ── Reset & tokens ─────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:         #0d0f14;
-      --surface:    #161a22;
-      --surface2:   #1e2430;
-      --border:     #2a3040;
-      --accent:     #3b82f6;
-      --accent2:    #60a5fa;
-      --text:       #e2e8f0;
-      --muted:      #8a94a6;
-      --danger:     #ef4444;
-      --success:    #22c55e;
-      --warn:       #f59e0b;
-      --shine:      #fbbf24;
-      --radius:     10px;
-      --radius-lg:  16px;
-      --font:       'Segoe UI', system-ui, -apple-system, sans-serif;
+      --bg:        #0d0f14;
+      --surface:   #161a22;
+      --surface2:  #1e2430;
+      --border:    #2a3040;
+      --accent:    #3b82f6;
+      --accent2:   #60a5fa;
+      --text:      #e2e8f0;
+      --muted:     #8a94a6;
+      --danger:    #ef4444;
+      --success:   #22c55e;
+      --warn:      #f59e0b;
+      --shine:     #fbbf24;
+      --radius:    10px;
+      --radius-lg: 16px;
+      --font:      'Segoe UI', system-ui, -apple-system, sans-serif;
     }
 
     html, body {
@@ -35,328 +34,105 @@
       line-height: 1.5;
     }
 
-    /* ── Page shell ─────────────────────────────────────────────── */
-    .page {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 32px 16px 64px;
-    }
+    .page { min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:32px 16px 64px; }
+    .inner { width:100%; max-width:1040px; }
 
-    .inner {
-      width: 100%;
-      max-width: 1000px;
-    }
+    .back-link { display:inline-flex; align-items:center; gap:6px; color:var(--muted); text-decoration:none; font-size:.85rem; margin-bottom:24px; transition:color .15s; }
+    .back-link:hover { color:var(--accent2); }
 
-    /* ── Header ─────────────────────────────────────────────────── */
-    .header {
-      text-align: center;
-      margin-bottom: 32px;
-    }
+    .header { text-align:center; margin-bottom:28px; }
+    .header h1 { font-size:clamp(1.5rem,4vw,2.2rem); font-weight:700; background:linear-gradient(135deg,#3b82f6,#60a5fa,#93c5fd); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; letter-spacing:-.5px; margin-bottom:6px; }
+    .header p { color:var(--muted); font-size:.9rem; }
 
-    .header h1 {
-      font-size: clamp(1.5rem, 4vw, 2.2rem);
-      font-weight: 700;
-      background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 50%, #93c5fd 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      letter-spacing: -0.5px;
-      margin-bottom: 6px;
-    }
+    .add-row { display:flex; gap:10px; margin-bottom:20px; }
+    .add-row input { flex:1; padding:12px 16px; background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius); color:var(--text); font-size:.95rem; font-family:var(--font); outline:none; transition:border-color .15s; }
+    .add-row input:focus { border-color:var(--accent); }
+    .add-row input::placeholder { color:var(--muted); }
 
-    .header p {
-      color: var(--muted);
-      font-size: 0.9rem;
-    }
+    .btn { padding:12px 22px; border-radius:var(--radius); border:none; cursor:pointer; font-size:.9rem; font-weight:600; font-family:var(--font); transition:opacity .15s,transform .1s; white-space:nowrap; }
+    .btn:active { transform:scale(.97); }
+    .btn-primary { background:linear-gradient(135deg,#3b82f6,#2563eb); color:#fff; }
+    .btn-primary:hover { opacity:.9; }
 
-    /* ── Search bar ─────────────────────────────────────────────── */
-    .search-row {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 16px;
-    }
+    .summary-bar { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; font-size:.85rem; color:var(--muted); }
+    .summary-bar strong { color:var(--text); }
 
-    .search-row input {
-      flex: 1;
-      padding: 12px 16px;
-      background: var(--surface);
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius);
-      color: var(--text);
-      font-size: 0.95rem;
-      font-family: var(--font);
-      outline: none;
-      transition: border-color 0.15s;
-    }
+    .no-trackers { text-align:center; padding:60px 20px; color:var(--muted); border:1.5px dashed var(--border); border-radius:var(--radius-lg); margin-bottom:24px; }
+    .no-trackers .icon { font-size:2.5rem; margin-bottom:10px; }
+    .no-trackers p { font-size:.9rem; }
 
-    .search-row input:focus {
-      border-color: var(--accent);
-    }
+    .tracker-card { background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius-lg); margin-bottom:14px; overflow:hidden; animation:slideIn .2s ease; transition:border-color .25s; }
+    .tracker-card.state-live    { border-color:var(--success); }
+    .tracker-card.state-waiting { border-color:var(--warn); }
+    .tracker-card.state-error   { border-color:var(--danger); }
 
-    .search-row input::placeholder { color: var(--muted); }
+    @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 
-    .btn {
-      padding: 12px 24px;
-      border-radius: var(--radius);
-      border: none;
-      cursor: pointer;
-      font-size: 0.95rem;
-      font-weight: 600;
-      font-family: var(--font);
-      transition: opacity 0.15s, transform 0.1s;
-      white-space: nowrap;
-    }
+    .card-head { display:flex; align-items:center; gap:12px; padding:14px 16px; cursor:pointer; user-select:none; }
+    .card-head:hover { background:var(--surface2); }
 
-    .btn:active { transform: scale(0.97); }
+    .dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; background:var(--muted); transition:background .2s; }
+    .state-live    .dot { background:var(--success); animation:pulse 1.4s ease-in-out infinite; }
+    .state-waiting .dot { background:var(--warn);    animation:pulse 1.4s ease-in-out infinite; }
+    .state-error   .dot { background:var(--danger); }
 
-    .btn-primary {
-      background: linear-gradient(135deg, #3b82f6, #2563eb);
-      color: #fff;
-    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 
-    .btn-primary:hover { opacity: 0.9; }
+    .card-username { font-weight:700; font-size:1rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .card-meta-row { display:flex; align-items:center; gap:10px; font-size:.8rem; color:var(--muted); flex-shrink:0; }
 
-    .btn-stop {
-      background: var(--surface2);
-      color: var(--danger);
-      border: 1.5px solid var(--border);
-    }
+    .pill { padding:3px 10px; border-radius:99px; background:var(--surface2); border:1px solid var(--border); font-size:.78rem; color:var(--muted); white-space:nowrap; }
+    .pill strong { color:var(--text); }
 
-    .btn-stop:hover { background: #2a1a1a; border-color: var(--danger); }
+    .chevron { width:16px; height:16px; color:var(--muted); transition:transform .2s; flex-shrink:0; }
+    .tracker-card.expanded .chevron { transform:rotate(180deg); }
 
-    /* ── Status banner ──────────────────────────────────────────── */
-    .status-bar {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 11px 16px;
-      border-radius: var(--radius);
-      border: 1.5px solid var(--border);
-      background: var(--surface);
-      margin-bottom: 24px;
-      font-size: 0.875rem;
-      transition: border-color 0.25s, background 0.25s;
-    }
+    .btn-remove { background:none; border:1px solid var(--border); border-radius:var(--radius); color:var(--muted); cursor:pointer; padding:4px 10px; font-size:.78rem; font-family:var(--font); transition:color .15s,border-color .15s,background .15s; flex-shrink:0; }
+    .btn-remove:hover { color:var(--danger); border-color:var(--danger); background:#1a0808; }
 
-    .status-bar.offline  { border-color: var(--border); }
-    .status-bar.waiting  { border-color: var(--warn);   background: #1a1500; }
-    .status-bar.live     { border-color: var(--success); background: #0a1a0f; }
-    .status-bar.error    { border-color: var(--danger);  background: #1a0808; }
+    .card-status-line { padding:0 16px 10px; font-size:.8rem; color:var(--muted); }
 
-    .status-dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      flex-shrink: 0;
-      background: var(--muted);
-    }
+    .card-body { padding:0 16px 16px; display:none; }
+    .tracker-card.expanded .card-body { display:block; }
 
-    .status-bar.offline  .status-dot { background: var(--muted); }
-    .status-bar.waiting  .status-dot { background: var(--warn); animation: pulse 1.4s ease-in-out infinite; }
-    .status-bar.live     .status-dot { background: var(--success); animation: pulse 1.4s ease-in-out infinite; }
-    .status-bar.error    .status-dot { background: var(--danger); }
+    .items-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; margin-top:4px; }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.35; }
-    }
+    .item-card { background:var(--surface2); border:1.5px solid var(--border); border-radius:var(--radius); padding:14px; display:flex; flex-direction:column; gap:8px; transition:border-color .2s,transform .15s; animation:fadeIn .2s ease; }
+    .item-card:hover { border-color:var(--accent); transform:translateY(-2px); }
+    .item-card.shiny { border-color:var(--shine); background:linear-gradient(135deg,#1a1500 0%,var(--surface2) 60%); }
 
-    .status-text { flex: 1; color: var(--text); }
-    .status-sync  { color: var(--muted); font-size: 0.8rem; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
 
-    /* ── Stats strip ─────────────────────────────────────────────── */
-    .stats-strip {
-      display: flex;
-      gap: 12px;
-      margin-bottom: 20px;
-      flex-wrap: wrap;
-    }
+    .ic-head { display:flex; align-items:flex-start; justify-content:space-between; gap:6px; }
+    .item-name { font-weight:600; font-size:.9rem; line-height:1.3; word-break:break-word; }
+    .badge-shiny { font-size:.7rem; padding:2px 7px; border-radius:99px; background:#3d2c00; color:var(--shine); border:1px solid #7a5a00; white-space:nowrap; flex-shrink:0; }
+    .ic-meta { display:flex; flex-wrap:wrap; gap:5px; }
+    .badge { font-size:.72rem; padding:2px 9px; border-radius:99px; border:1px solid var(--border); background:var(--surface); color:var(--muted); }
+    .badge-weight  { color:var(--accent2); border-color:#1d3a5c; background:#0d1f30; }
+    .rarity-common    { color:var(--muted); }
+    .rarity-uncommon  { color:#4ade80;  border-color:#143d20; background:#091a0f; }
+    .rarity-rare      { color:#60a5fa;  border-color:#1d3a5c; background:#0d1f30; }
+    .rarity-epic      { color:#c084fc;  border-color:#3d1f5e; background:#1a0f2e; }
+    .rarity-legendary { color:var(--shine); border-color:#7a5a00; background:#3d2c00; }
+    .rarity-secret    { color:#f87171;  border-color:#4a1010; background:#1a0808; }
+    .rarity-forgotten { color:#818cf8;  border-color:#1e1e5c; background:#0d0d30; }
 
-    .stat-pill {
-      padding: 6px 14px;
-      border-radius: 99px;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      font-size: 0.8rem;
-      color: var(--muted);
-    }
+    .card-empty { text-align:center; padding:24px; color:var(--muted); font-size:.85rem; }
 
-    .stat-pill strong { color: var(--text); }
+    .loadstring-box { margin-top:36px; background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius-lg); padding:20px; }
+    .loadstring-box h3 { font-size:.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:12px; }
+    .code-row { display:flex; gap:8px; align-items:stretch; }
+    .code-block { flex:1; font-family:'Consolas','Fira Code',monospace; font-size:.82rem; background:#0a0c10; border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; color:#93c5fd; overflow-x:auto; white-space:nowrap; }
+    .btn-copy { padding:0 16px; background:var(--surface2); border:1.5px solid var(--border); border-radius:var(--radius); color:var(--text); cursor:pointer; font-size:.85rem; font-family:var(--font); font-weight:600; white-space:nowrap; transition:background .15s,border-color .15s,color .15s; }
+    .btn-copy:hover  { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .btn-copy.copied { background:var(--success); border-color:var(--success); color:#fff; }
 
-    /* ── Empty / loading state ──────────────────────────────────── */
-    .empty-state {
-      text-align: center;
-      padding: 60px 20px;
-      color: var(--muted);
-    }
-
-    .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
-    .empty-state p { font-size: 0.9rem; }
-
-    /* ── Item grid ───────────────────────────────────────────────── */
-    .items-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 14px;
-    }
-
-    /* ── Item card ───────────────────────────────────────────────── */
-    .item-card {
-      background: var(--surface);
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      transition: border-color 0.2s, transform 0.15s;
-      animation: fadeIn 0.2s ease;
-    }
-
-    .item-card:hover {
-      border-color: var(--accent);
-      transform: translateY(-2px);
-    }
-
-    .item-card.shiny {
-      border-color: var(--shine);
-      background: linear-gradient(135deg, #1a1500 0%, var(--surface) 60%);
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(6px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-
-    .card-header {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 6px;
-    }
-
-    .item-name {
-      font-weight: 600;
-      font-size: 0.95rem;
-      color: var(--text);
-      line-height: 1.3;
-      word-break: break-word;
-    }
-
-    .badge-shiny {
-      font-size: 0.75rem;
-      padding: 2px 8px;
-      border-radius: 99px;
-      background: #3d2c00;
-      color: var(--shine);
-      border: 1px solid #7a5a00;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-
-    .card-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .badge {
-      font-size: 0.75rem;
-      padding: 3px 10px;
-      border-radius: 99px;
-      border: 1px solid var(--border);
-      background: var(--surface2);
-      color: var(--muted);
-    }
-
-    .badge-weight { color: var(--accent2); border-color: #1d3a5c; background: #0d1f30; }
-    .badge-rarity { color: #c084fc;        border-color: #3d1f5e; background: #1a0f2e; }
-
-    /* Rarity-specific colours */
-    .rarity-common    { color: var(--muted); }
-    .rarity-uncommon  { color: #4ade80;  border-color: #143d20; background: #091a0f; }
-    .rarity-rare      { color: #60a5fa;  border-color: #1d3a5c; background: #0d1f30; }
-    .rarity-epic      { color: #c084fc;  border-color: #3d1f5e; background: #1a0f2e; }
-    .rarity-legendary { color: var(--shine); border-color: #7a5a00; background: #3d2c00; }
-    .rarity-secret    { color: #f87171;  border-color: #4a1010; background: #1a0808; }
-    .rarity-forgotten { color: #818cf8;  border-color: #1e1e5c; background: #0d0d30; }
-
-    /* ── Loadstring box ──────────────────────────────────────────── */
-    .loadstring-box {
-      margin-top: 40px;
-      background: var(--surface);
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 20px;
-    }
-
-    .loadstring-box h3 {
-      font-size: 0.9rem;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 12px;
-    }
-
-    .code-row {
-      display: flex;
-      gap: 8px;
-      align-items: stretch;
-    }
-
-    .code-block {
-      flex: 1;
-      font-family: 'Consolas', 'Fira Code', monospace;
-      font-size: 0.82rem;
-      background: #0a0c10;
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 12px 14px;
-      color: #93c5fd;
-      overflow-x: auto;
-      white-space: nowrap;
-      word-break: keep-all;
-    }
-
-    .btn-copy {
-      padding: 0 16px;
-      background: var(--surface2);
-      border: 1.5px solid var(--border);
-      border-radius: var(--radius);
-      color: var(--text);
-      cursor: pointer;
-      font-size: 0.85rem;
-      font-family: var(--font);
-      font-weight: 600;
-      white-space: nowrap;
-      transition: background 0.15s, border-color 0.15s;
-    }
-
-    .btn-copy:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
-    .btn-copy.copied { background: var(--success); border-color: var(--success); color: #fff; }
-
-    /* ── Back link ───────────────────────────────────────────────── */
-    .back-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      color: var(--muted);
-      text-decoration: none;
-      font-size: 0.85rem;
-      margin-bottom: 24px;
-      transition: color 0.15s;
-    }
-
-    .back-link:hover { color: var(--accent2); }
-
-    /* ── Responsive ──────────────────────────────────────────────── */
-    @media (max-width: 560px) {
-      .search-row { flex-wrap: wrap; }
-      .btn { width: 100%; justify-content: center; }
-      .code-row { flex-direction: column; }
-      .btn-copy { padding: 10px; }
+    @media (max-width:560px) {
+      .add-row { flex-wrap:wrap; }
+      .btn { width:100%; }
+      .code-row { flex-direction:column; }
+      .btn-copy { padding:10px; }
+      .card-meta-row { gap:6px; }
     }
   </style>
 </head>
@@ -364,7 +140,6 @@
 <div class="page">
   <div class="inner">
 
-    <!-- Back to main site -->
     <a href="/" class="back-link">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
         <polyline points="15 18 9 12 15 6"></polyline>
@@ -372,52 +147,29 @@
       Back to DENG Tool
     </a>
 
-    <!-- Header -->
     <header class="header">
-      <h1>🎣 Fish It Live Inventory Tracker</h1>
-      <p>Real-time backpack viewer — execute the script in-game, then search below.</p>
+      <h1>?? Fish It Live Inventory Tracker</h1>
+      <p>Track unlimited players simultaneously � sessions are saved and restored on page reload.</p>
     </header>
 
-    <!-- Search -->
-    <div class="search-row">
-      <input
-        type="text"
-        id="usernameInput"
-        placeholder="Enter Roblox Username..."
-        maxlength="20"
-        autocomplete="off"
-        spellcheck="false"
-        aria-label="Roblox username"
-      >
-      <button class="btn btn-primary" id="trackBtn" type="button">Track Live</button>
-      <button class="btn btn-stop" id="stopBtn" type="button" style="display:none">Stop</button>
+    <div class="add-row">
+      <input type="text" id="usernameInput" placeholder="Enter Roblox Username..." maxlength="20" autocomplete="off" spellcheck="false" aria-label="Roblox username">
+      <button class="btn btn-primary" id="addBtn" type="button">+ Add Tracker</button>
     </div>
 
-    <!-- Status bar -->
-    <div class="status-bar offline" id="statusBar" role="status" aria-live="polite">
-      <span class="status-dot" aria-hidden="true"></span>
-      <span class="status-text" id="statusText">Offline — enter a username and click Track Live.</span>
-      <span class="status-sync" id="statusSync"></span>
+    <div class="summary-bar">
+      <span id="summaryText">No active trackers</span>
     </div>
 
-    <!-- Stats strip (hidden until live) -->
-    <div class="stats-strip" id="statsStrip" style="display:none">
-      <div class="stat-pill">Items: <strong id="statCount">0</strong></div>
-      <div class="stat-pill">User ID: <strong id="statUserId">—</strong></div>
+    <div id="trackerList"></div>
+
+    <div class="no-trackers" id="noTrackersMsg">
+      <div class="icon">??</div>
+      <p>Add a Roblox username above to start live tracking.<br>Sessions are saved automatically and restored on page reload.</p>
     </div>
 
-    <!-- Item grid -->
-    <div id="itemsContainer">
-      <div class="empty-state" id="emptyState">
-        <div class="icon">🎣</div>
-        <p>No data yet. Enter a username and start tracking.</p>
-      </div>
-      <div class="items-grid" id="itemsGrid" style="display:none"></div>
-    </div>
-
-    <!-- Loadstring box -->
     <div class="loadstring-box">
-      <h3>Executor Script — copy &amp; run in-game</h3>
+      <h3>Executor Script � copy &amp; run in-game</h3>
       <div class="code-row">
         <div class="code-block" id="loadstringCode">loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua"))()</div>
         <button class="btn-copy" id="copyBtn" type="button">Copy</button>
@@ -426,190 +178,156 @@
 
   </div>
 </div>
-
 <script>
 (function () {
   'use strict';
 
-  // ── DOM refs ──────────────────────────────────────────────────
-  const usernameInput = document.getElementById('usernameInput');
-  const trackBtn      = document.getElementById('trackBtn');
-  const stopBtn       = document.getElementById('stopBtn');
-  const statusBar     = document.getElementById('statusBar');
-  const statusText    = document.getElementById('statusText');
-  const statusSync    = document.getElementById('statusSync');
-  const statsStrip    = document.getElementById('statsStrip');
-  const statCount     = document.getElementById('statCount');
-  const statUserId    = document.getElementById('statUserId');
-  const emptyState    = document.getElementById('emptyState');
-  const itemsGrid     = document.getElementById('itemsGrid');
-  const copyBtn       = document.getElementById('copyBtn');
+  const LS_KEY     = 'fishit_tracked_users';
+  const POLL_MS    = 2500;
+  const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', secret:'rarity-secret', forgotten:'rarity-forgotten' };
 
-  // ── State ─────────────────────────────────────────────────────
-  let pollTimer   = null;
-  let activeUser  = '';
+  const trackers       = new Map();
+  const inputEl        = document.getElementById('usernameInput');
+  const addBtn         = document.getElementById('addBtn');
+  const trackerListEl  = document.getElementById('trackerList');
+  const noTrackersMsg  = document.getElementById('noTrackersMsg');
+  const summaryTextEl  = document.getElementById('summaryText');
+  const copyBtn        = document.getElementById('copyBtn');
 
-  // ── Status helpers ────────────────────────────────────────────
-  const STATUS = {
-    offline: (msg) => setStatus('offline', msg || 'Offline — enter a username and click Track Live.', ''),
-    waiting: (u)   => setStatus('waiting', `Waiting for ${u} to execute the script in-game…`, ''),
-    live:    (u, ts) => setStatus('live', `Live: ${u}`, `Last Sync: ${ts}`),
-    error:   (msg) => setStatus('error', msg, ''),
-  };
+  function loadSaved() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; } }
+  function saveCurrent() { try { localStorage.setItem(LS_KEY, JSON.stringify([...trackers.keys()])); } catch {} }
 
-  function setStatus(cls, text, sync) {
-    statusBar.className = `status-bar ${cls}`;
-    statusText.textContent = text;
-    statusSync.textContent = sync;
+  function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function fmtTime(iso) { const d = new Date(iso); return [d.getHours(),d.getMinutes(),d.getSeconds()].map(n=>String(n).padStart(2,'0')).join(':'); }
+  function rarityClass(r) { return r ? (RARITY_MAP[r.toLowerCase()] || 'badge') : ''; }
+
+  function updateSummary() {
+    const n = trackers.size;
+    if (n === 0) { summaryTextEl.textContent = 'No active trackers'; noTrackersMsg.style.display = 'block'; }
+    else { summaryTextEl.innerHTML = `Tracking <strong>${n}</strong> player${n>1?'s':''} &mdash; sessions saved automatically`; noTrackersMsg.style.display = 'none'; }
   }
 
-  // ── Rarity badge class ────────────────────────────────────────
-  const RARITY_MAP = {
-    common: 'rarity-common',
-    uncommon: 'rarity-uncommon',
-    rare: 'rarity-rare',
-    epic: 'rarity-epic',
-    legendary: 'rarity-legendary',
-    secret: 'rarity-secret',
-    forgotten: 'rarity-forgotten',
-  };
-
-  function rarityClass(r) {
-    if (!r) return '';
-    return RARITY_MAP[r.toLowerCase()] || 'badge-rarity';
-  }
-
-  // ── Render items ──────────────────────────────────────────────
-  function renderItems(data) {
-    const { items, userId, username, updatedAt } = data;
-
-    // Stats strip
-    statsStrip.style.display = 'flex';
-    statCount.textContent    = items.length;
-    statUserId.textContent   = userId || '—';
-
-    // Last sync timestamp
-    const ts = new Date(updatedAt);
-    const hms = [ts.getHours(), ts.getMinutes(), ts.getSeconds()]
-      .map((n) => String(n).padStart(2, '0')).join(':');
-    STATUS.live(username, hms);
-
-    // Grid
-    if (items.length === 0) {
-      emptyState.style.display = 'block';
-      emptyState.innerHTML     = '<div class="icon">🎒</div><p>Backpack is empty.</p>';
-      itemsGrid.style.display  = 'none';
-      return;
-    }
-
-    emptyState.style.display = 'none';
-    itemsGrid.style.display  = 'grid';
-
-    itemsGrid.innerHTML = items.map((item) => {
+  function buildItemsHtml(items) {
+    if (!items || items.length === 0) return '<div class="card-empty">?? Backpack is empty.</div>';
+    return `<div class="items-grid">${items.map(item => {
       const isShiny = item.shiny === true;
-      const weight  = item.weight !== null && item.weight !== undefined
-        ? `${item.weight} kg` : null;
+      const hasW    = item.weight !== null && item.weight !== undefined;
       const rarity  = item.rarity || null;
       const rc      = rarityClass(rarity);
-
-      return `<div class="item-card${isShiny ? ' shiny' : ''}">
-  <div class="card-header">
-    <span class="item-name">${escHtml(item.name || 'Unknown')}</span>
-    ${isShiny ? '<span class="badge-shiny">✨ Shiny</span>' : ''}
-  </div>
-  <div class="card-meta">
-    ${weight ? `<span class="badge badge-weight">⚖️ ${escHtml(weight)}</span>` : ''}
-    ${rarity ? `<span class="badge ${rc}">${escHtml(rarity)}</span>` : ''}
-  </div>
+      return `<div class="item-card${isShiny?' shiny':''}">
+  <div class="ic-head"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${isShiny?'<span class="badge-shiny">? Shiny</span>':''}</div>
+  <div class="ic-meta">${hasW?`<span class="badge badge-weight">?? ${escHtml(String(item.weight))} kg</span>`:''}${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
 </div>`;
-    }).join('');
+    }).join('')}</div>`;
   }
 
-  // ── XSS guard ─────────────────────────────────────────────────
-  function escHtml(s) {
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+  function createCard(username) {
+    const el = document.createElement('div');
+    el.className = 'tracker-card expanded';
+    el.dataset.user = username.toLowerCase();
+    el.innerHTML = `
+<div class="card-head">
+  <span class="dot" aria-hidden="true"></span>
+  <span class="card-username">${escHtml(username)}</span>
+  <div class="card-meta-row">
+    <span class="pill" data-items-count>Items: <strong>�</strong></span>
+    <span class="pill" data-sync-time></span>
+  </div>
+  <button class="btn-remove" data-remove-btn aria-label="Remove">? Remove</button>
+  <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>
+</div>
+<div class="card-status-line" data-status-line>? Waiting for <strong>${escHtml(username)}</strong> to execute the script in-game�</div>
+<div class="card-body" data-card-body><div class="card-empty">? Awaiting first data�</div></div>`;
+
+    el.querySelector('.card-head').addEventListener('click', e => { if (!e.target.closest('[data-remove-btn]')) el.classList.toggle('expanded'); });
+    el.querySelector('[data-remove-btn]').addEventListener('click', e => { e.stopPropagation(); removeTracker(username.toLowerCase()); });
+    return el;
   }
 
-  // ── Fetch once ────────────────────────────────────────────────
-  async function fetchOnce(username) {
-    const res = await fetch(`/api/tracker/get-backpack/${encodeURIComponent(username)}`);
-    if (res.status === 404) {
-      STATUS.waiting(username);
-      statsStrip.style.display = 'none';
-      emptyState.style.display = 'block';
-      emptyState.innerHTML     = '<div class="icon">⏳</div><p>Waiting for user to execute script in-game…</p>';
-      itemsGrid.style.display  = 'none';
+  function updateCard(card, data) {
+    card.classList.remove('state-waiting','state-error');
+    card.classList.add('state-live');
+    const c = card.querySelector('[data-items-count]');
+    const s = card.querySelector('[data-sync-time]');
+    const l = card.querySelector('[data-status-line]');
+    const b = card.querySelector('[data-card-body]');
+    if (c) c.innerHTML = `Items: <strong>${data.items.length}</strong>`;
+    if (s) s.textContent = `Sync: ${fmtTime(data.updatedAt)}`;
+    if (l) l.innerHTML = `?? Live &mdash; User ID: <strong>${data.userId||'�'}</strong>`;
+    if (b) b.innerHTML = buildItemsHtml(data.items);
+  }
+
+  function setCardWaiting(card, name) {
+    card.classList.remove('state-live','state-error');
+    card.classList.add('state-waiting');
+    const l = card.querySelector('[data-status-line]');
+    const s = card.querySelector('[data-sync-time]');
+    if (l) l.innerHTML = `? Waiting for <strong>${escHtml(name)}</strong> to execute the script in-game�`;
+    if (s) s.textContent = '';
+  }
+
+  function setCardError(card) {
+    card.classList.remove('state-live','state-waiting');
+    card.classList.add('state-error');
+    const l = card.querySelector('[data-status-line]');
+    if (l) l.textContent = '? Network error � retrying�';
+  }
+
+  async function pollUser(key) {
+    const entry = trackers.get(key);
+    if (!entry) return;
+    try {
+      const res = await fetch(`/api/tracker/get-backpack/${encodeURIComponent(key)}`);
+      if (!trackers.has(key)) return;
+      if (res.status === 404) { setCardWaiting(entry.el, entry.displayName); return; }
+      if (!res.ok) { setCardError(entry.el); return; }
+      updateCard(entry.el, await res.json());
+    } catch { if (trackers.has(key)) setCardError(entry.el); }
+  }
+
+  function addTracker(username) {
+    const raw = username.trim();
+    const key = raw.toLowerCase();
+    if (!key || !/^[a-z0-9_]{3,20}$/.test(key)) return;
+    if (trackers.has(key)) {
+      const e = trackers.get(key);
+      e.el.scrollIntoView({ behavior:'smooth', block:'center' });
       return;
     }
-    if (!res.ok) {
-      // Non-404 error — don't throw, just show warning so the poll continues
-      STATUS.error(`Server error (${res.status}) — retrying…`);
-      return;
-    }
-    const data = await res.json();
-    renderItems(data);
+    const card  = createCard(raw);
+    trackerListEl.appendChild(card);
+    const timer = setInterval(() => pollUser(key), POLL_MS);
+    trackers.set(key, { timer, el: card, displayName: raw });
+    pollUser(key);
+    updateSummary();
+    saveCurrent();
   }
 
-  // ── Start polling ─────────────────────────────────────────────
-  function startTracking() {
-    const raw = usernameInput.value.trim();
-    if (!raw) {
-      usernameInput.focus();
-      return;
-    }
-
-    stopTracking();
-    activeUser = raw;
-
-    trackBtn.style.display = 'none';
-    stopBtn.style.display  = '';
-
-    STATUS.waiting(activeUser);
-
-    // Immediate fetch, then loop
-    fetchOnce(activeUser).catch(() => STATUS.error('Network error — retrying…'));
-
-    pollTimer = setInterval(() => {
-      fetchOnce(activeUser).catch(() => STATUS.error('Network error — retrying…'));
-    }, 2500);
+  function removeTracker(key) {
+    const entry = trackers.get(key);
+    if (!entry) return;
+    clearInterval(entry.timer);
+    entry.el.remove();
+    trackers.delete(key);
+    updateSummary();
+    saveCurrent();
   }
 
-  // ── Stop polling ──────────────────────────────────────────────
-  function stopTracking() {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-    trackBtn.style.display = '';
-    stopBtn.style.display  = 'none';
-    statsStrip.style.display = 'none';
-    STATUS.offline();
-    emptyState.style.display = 'block';
-    emptyState.innerHTML     = '<div class="icon">🎣</div><p>No data yet. Enter a username and start tracking.</p>';
-    itemsGrid.style.display  = 'none';
-    activeUser = '';
-  }
-
-  // ── Copy loadstring ───────────────────────────────────────────
   copyBtn.addEventListener('click', () => {
     const code = document.getElementById('loadstringCode').textContent;
     navigator.clipboard.writeText(code).then(() => {
-      copyBtn.textContent = '✓ Copied';
+      copyBtn.textContent = '? Copied!';
       copyBtn.classList.add('copied');
-      setTimeout(() => {
-        copyBtn.textContent = 'Copy';
-        copyBtn.classList.remove('copied');
-      }, 2000);
+      setTimeout(() => { copyBtn.textContent = 'Copy'; copyBtn.classList.remove('copied'); }, 2000);
     });
   });
 
-  // ── Event bindings ────────────────────────────────────────────
-  trackBtn.addEventListener('click', startTracking);
-  stopBtn.addEventListener('click', stopTracking);
-  usernameInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') startTracking();
-  });
+  addBtn.addEventListener('click', () => { const v=inputEl.value.trim(); if(v){addTracker(v);inputEl.value='';} inputEl.focus(); });
+  inputEl.addEventListener('keydown', e => { if(e.key==='Enter'){const v=inputEl.value.trim();if(v){addTracker(v);inputEl.value='';}} });
+
+  // Restore saved sessions
+  loadSaved().forEach(u => addTracker(u));
+  updateSummary();
 }());
 </script>
 </body>
