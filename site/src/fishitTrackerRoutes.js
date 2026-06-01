@@ -6,6 +6,7 @@
  *   GET  /tracker                        – serve the live dashboard UI
  *   POST /api/tracker/update-backpack    – receive payload from the Lua client
  *   GET  /api/tracker/get-backpack/:user – query live data for a username
+ *   GET  /api/fishit-tracker/debug/:user – lightweight diagnostic (counts only)
  *
  * Security notes:
  *   - All data lives only in process memory (liveTrackDB). Nothing is
@@ -15,12 +16,21 @@
  *     global site limiter is not exhausted by the 2500 ms frontend polling.
  *   - Username keys are always lowercased; original casing is preserved
  *     inside the stored payload for display purposes only.
+ *
+ * Deployment note:
+ *   This router is mounted in app.js BEFORE the global express.json()  
+ *   middleware so that the route-level 512 KB JSON parsers take effect.  
+ *   Moving it after the global 16 KB parser would cause catalog and        
+ *   inventory POSTs to receive a 413 before the route is matched.          
  */
 
 const express   = require('express');
 const rateLimit = require('express-rate-limit');
 
 const catalogStore = require('./fishitCatalogStore');
+const packageJson = require('../package.json');
+// Commit hash injected by CI/deploy or fallback to package version.
+const SERVER_COMMIT = process.env.GIT_COMMIT || packageJson.version || 'unknown';
 
 // Optional Fish It DB image resolver (real fish artwork). Loaded lazily and
 // defensively so the tracker keeps working even if the DB module is absent.
@@ -338,17 +348,36 @@ router.post(
 );
 
 // ── POST /api/tracker/update-catalog ─────────────────────────────
-// Receives the recursive ReplicatedStorage fish_catalog_snapshot from the Lua
-// tracker and merges it into the persistent catalog store (real name + tier +
-// image for every scanned fish/rod/item).
+// Accepts both:
+//   • catalog_summary  (preferred, small payload) — Lua v8+ sends only counts
+//     and up to 3 sample entries; imageUrls are NOT included, so the payload
+//     stays well under 5 KB regardless of catalog size.
+//   • fish_catalog_snapshot  (legacy, full catalog) — accepted for backward
+//     compatibility but the Lua client should never send this any more since
+//     it caused HTTP 413 (body exceeded the global 16 KB JSON limit in older
+//     deployments).
 router.post(
   '/api/tracker/update-catalog',
   postLimiter,
   express.json({ limit: '512kb' }),
   (req, res) => {
     const body = req.body || {};
-    if (body.type !== 'fish_catalog_snapshot' || !body.catalog || typeof body.catalog !== 'object') {
-      return res.status(400).json({ error: 'Invalid catalog snapshot.' });
+    const { type } = body;
+
+    // ── catalog_summary (preferred small payload) ─────────────────
+    if (type === 'catalog_summary') {
+      const stats = body.catalogStats || {};
+      console.log(
+        `[fishit-tracker] recv catalog_summary user=${body.playerName || '?'}` +
+        ` fish=${stats.fish || 0} rods=${stats.rods || 0} items=${stats.items || 0}` +
+        ` images=${stats.images || 0} metadataByIdKeys=${stats.metadataByIdKeys || 0}`
+      );
+      return res.status(200).json({ status: 'success', type: 'catalog_summary', stats });
+    }
+
+    // ── fish_catalog_snapshot (legacy full catalog) ───────────────
+    if (type !== 'fish_catalog_snapshot' || !body.catalog || typeof body.catalog !== 'object') {
+      return res.status(400).json({ error: 'Invalid catalog payload. Expected type=catalog_summary or fish_catalog_snapshot.' });
     }
     const summary = catalogStore.ingestSnapshot(body);
     return res.status(200).json({ status: 'success', ...summary });
@@ -417,26 +446,35 @@ router.get(
 // Admin-safe diagnostic: returns only counts and first 5 items, never
 // the full inventory dump. Helps distinguish backend-has-data vs
 // frontend-render bugs without leaking sensitive inventory contents.
+// Also returns serverCommit so the caller can verify which build is live.
 router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
   const cleanUser = sanitiseUsername(req.params.username);
-  if (!cleanUser) return res.status(400).json({ error: 'Invalid username.' });
+  if (!cleanUser) return res.status(400).json({ ok: false, error: 'Invalid username.' });
 
   const key   = cleanUser.toLowerCase();
   const data  = liveTrackDB[key];
-  if (!data) return res.status(404).json({ found: false, key });
+
+  if (!data) {
+    // Enumerate known keys (usernames only, strip uid: aliases and limit count).
+    const knownKeys = Object.keys(liveTrackDB)
+      .filter((k) => !k.startsWith('uid:'))
+      .slice(0, 100);
+    return res.status(404).json({ ok: false, error: 'not_found', key, knownKeys, serverCommit: SERVER_COMMIT });
+  }
 
   const inv   = data.inventory || buildInventoryGroups(data.items || []);
-  const first5 = (inv.all || data.items || []).slice(0, 5).map((i) => ({
-    name:     i.name,
-    amount:   i.amount,
-    rarity:   i.rarity,
-    hasImage: !!i.imageUrl,
-    category: i.category,
-    itemId:   i.itemId,
+  const firstItems = (inv.all || data.items || []).slice(0, 5).map((i) => ({
+    name:         i.name,
+    amount:       i.amount,
+    category:     i.category,
+    tier:         i.rarity || null,
+    imageUrlPresent: !!i.imageUrl,
+    itemId:       i.itemId || null,
   }));
 
   return res.status(200).json({
-    found:           true,
+    ok:              true,
+    serverCommit:    SERVER_COMMIT,
     sessionKey:      key,
     username:        data.username,
     userId:          data.userId,
@@ -445,14 +483,15 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
     parseStats:      data.parseStats || null,
     lastSeenAt:      data.lastSeenAt || null,
     lastInventoryAt: data.updatedAt  || null,
+    lastPayloadType: data.lastPayloadType || null,
     counts: {
-      flatItems:      (data.items || []).length,
-      inventoryAll:   inv.all.length,
-      inventoryFish:  inv.fish.length,
-      inventoryRods:  inv.rods.length,
-      inventoryItems: inv.items.length,
+      items:        (data.items || []).length,
+      all:          (inv.all   || []).length,
+      fish:         (inv.fish  || []).length,
+      rods:         (inv.rods  || []).length,
+      itemsOnly:    (inv.items || []).length,
     },
-    first5Items: first5,
+    firstItems,
   });
 });
 

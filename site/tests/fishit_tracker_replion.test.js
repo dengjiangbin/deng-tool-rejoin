@@ -1031,15 +1031,268 @@ describe('Fish It tracker — BLOCKER 4 backend rendering pipeline', () => {
       .get('/api/fishit-tracker/debug/B4Angler10')
       .expect(200);
 
-    assert.equal(res.body.found, true);
+    assert.equal(res.body.ok, true);
     assert.equal(res.body.sessionKey, 'b4angler10');
-    assert.equal(res.body.counts.flatItems, 2);
-    assert.equal(res.body.counts.inventoryAll, 2);
-    assert.equal(res.body.counts.inventoryFish, 2, 'both are fish category');
-    assert.equal(res.body.counts.inventoryRods, 0);
-    assert.ok(Array.isArray(res.body.first5Items), 'first5Items present');
-    assert.ok(res.body.first5Items.length <= 5, 'at most 5 items in debug');
-    // Must NOT contain the full items array (only first5Items summary).
+    assert.equal(res.body.counts.items, 2);
+    assert.equal(res.body.counts.all, 2);
+    assert.equal(res.body.counts.fish, 2, 'both are fish category');
+    assert.equal(res.body.counts.rods, 0);
+    assert.ok(Array.isArray(res.body.firstItems), 'firstItems present');
+    assert.ok(res.body.firstItems.length <= 5, 'at most 5 items in debug');
+    // Must NOT contain the full items array (only firstItems summary).
     assert.equal(res.body.items, undefined, 'full items array must not be exposed in debug response');
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// BLOCKER 5: catalog_summary payload, debug route shape, 413 prevention.
+// These tests lock the fixes introduced in the BLOCKER 5 PR:
+//   - catalog_summary (small) accepted with 200.
+//   - fish_catalog_snapshot (legacy full) still accepted with 200.
+//   - catalog_summary POST after inventory_snapshot does not clear inventory.
+//   - inventory_snapshot after catalog_summary still stores items.
+//   - debug route returns JSON (not HTML) for known user.
+//   - debug route returns JSON 404 (not HTML) for unknown user.
+//   - debug route includes serverCommit field.
+//   - debug route firstItems shape matches spec.
+//   - debug route knownKeys listed when user not found.
+//   - inventory stored without full catalog (items carry their own metadata).
+// ════════════════════════════════════════════════════════════════════════════
+describe('Fish It tracker — BLOCKER 5 catalog_summary + debug route', () => {
+  beforeEach(() => { cleanup(); });
+
+  // B5-1: catalog_summary small payload accepted 200.
+  test('B5-1: catalog_summary POST accepted with 200', async () => {
+    const app = makeApp();
+    const res = await request(app)
+      .post('/api/tracker/update-catalog')
+      .send({
+        type: 'catalog_summary',
+        playerName: 'B5Angler1',
+        userId: 5001,
+        scannedAt: Math.floor(Date.now() / 1000),
+        catalogStats: { fish: 242, rods: 46, items: 7, bait: 0, images: 200, tiers: 180, metadataByIdKeys: 292, numericIdKeys: 292, stringIdKeys: 0 },
+        sampleEntries: [{ key: 'clownfish', name: 'Clownfish', tier: 'common' }],
+      })
+      .expect(200);
+
+    assert.equal(res.body.status, 'success');
+    assert.equal(res.body.type, 'catalog_summary');
+  });
+
+  // B5-2: fish_catalog_snapshot (legacy) still accepted for backward compat.
+  test('B5-2: fish_catalog_snapshot (legacy full) accepted with 200', async () => {
+    const app = makeApp();
+    const res = await request(app)
+      .post('/api/tracker/update-catalog')
+      .send({
+        type: 'fish_catalog_snapshot',
+        playerName: 'B5Angler2',
+        catalog: { fish: [{ key: 'clownfish', name: 'Clownfish', tier: 'common', imageUrl: 'https://rbxcdn.com/img.png' }], rods: [], items: [] },
+      })
+      .expect(200);
+
+    assert.equal(res.body.status, 'success');
+  });
+
+  // B5-3: unknown type returns 400.
+  test('B5-3: unknown catalog payload type returns 400', async () => {
+    const app = makeApp();
+    const res = await request(app)
+      .post('/api/tracker/update-catalog')
+      .send({ type: 'full_dump', data: {} })
+      .expect(400);
+
+    assert.ok(res.body.error, 'error field present');
+  });
+
+  // B5-4: catalog_summary after inventory_snapshot does NOT clear inventory.
+  test('B5-4: catalog_summary POST after inventory_snapshot does not clear inventory', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B5Angler4',
+        userId: 5004,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Salmon', count: 3, category: 'fish' }],
+      })
+      .expect(200);
+
+    // Send catalog_summary (different endpoint, no per-user state change).
+    await request(app)
+      .post('/api/tracker/update-catalog')
+      .send({
+        type: 'catalog_summary',
+        playerName: 'B5Angler4',
+        userId: 5004,
+        scannedAt: Math.floor(Date.now() / 1000),
+        catalogStats: { fish: 10, rods: 2, items: 0 },
+        sampleEntries: [],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B5Angler4')
+      .expect(200);
+
+    assert.ok(res.body.items.length > 0, 'inventory not cleared by catalog_summary');
+    assert.equal(res.body.items[0].name, 'Salmon');
+  });
+
+  // B5-5: inventory_snapshot after catalog_summary stores items correctly.
+  test('B5-5: inventory_snapshot after catalog_summary stores items', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-catalog')
+      .send({ type: 'catalog_summary', playerName: 'B5Angler5', userId: 5005, scannedAt: 0, catalogStats: { fish: 5 }, sampleEntries: [] })
+      .expect(200);
+
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B5Angler5',
+        userId: 5005,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'Tuna', count: 1, category: 'fish', tier: 'rare', imageUrl: 'https://rbxcdn.com/tuna.png' },
+        ],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B5Angler5')
+      .expect(200);
+
+    assert.equal(res.body.items.length, 1);
+    assert.equal(res.body.items[0].name, 'Tuna');
+    assert.equal(res.body.items[0].imageUrl, 'https://rbxcdn.com/tuna.png');
+  });
+
+  // B5-6: debug route returns JSON for known user.
+  test('B5-6: debug route returns JSON (not HTML) for known user', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B5Angler6',
+        userId: 5006,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Carp', count: 1, category: 'fish' }],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B5Angler6')
+      .expect(200);
+
+    assert.equal(res.headers['content-type'].includes('application/json'), true, 'Content-Type is JSON');
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.sessionKey, 'b5angler6');
+    assert.ok(res.body.serverCommit, 'serverCommit field present');
+  });
+
+  // B5-7: debug route returns JSON 404 (not HTML) for unknown user.
+  test('B5-7: debug route returns JSON 404 for unknown user', async () => {
+    const app = makeApp();
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/NoSuchUser99')
+      .expect(404);
+
+    assert.equal(res.headers['content-type'].includes('application/json'), true, 'Content-Type is JSON not HTML');
+    assert.equal(res.body.ok, false);
+    assert.equal(res.body.error, 'not_found');
+    assert.ok(Array.isArray(res.body.knownKeys), 'knownKeys is array');
+  });
+
+  // B5-8: debug route firstItems shape matches spec (no raw imageUrl exposure).
+  test('B5-8: debug route firstItems has correct shape', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B5Angler8',
+        userId: 5008,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Bass', count: 5, category: 'fish', tier: 'common', imageUrl: 'https://rbxcdn.com/bass.png', itemId: 'bass_id_1' }],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B5Angler8')
+      .expect(200);
+
+    const item = res.body.firstItems[0];
+    assert.equal(item.name, 'Bass');
+    assert.equal(item.amount, 5);
+    assert.equal(item.category, 'fish');
+    assert.equal(item.imageUrlPresent, true, 'imageUrlPresent not raw imageUrl');
+    assert.equal(item.imageUrl, undefined, 'raw imageUrl must not be in firstItems');
+    assert.equal(item.itemId, 'bass_id_1');
+  });
+
+  // B5-9: debug route knownKeys listed when multiple sessions exist.
+  test('B5-9: debug route knownKeys lists other active sessions', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({ type: 'tracker_status', username: 'B5Angler9a', userId: 5091, isOnline: true, source: 'replion' })
+      .expect(200);
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({ type: 'tracker_status', username: 'B5Angler9b', userId: 5092, isOnline: true, source: 'replion' })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/NoSuchUser99')
+      .expect(404);
+
+    assert.equal(res.body.ok, false);
+    assert.ok(Array.isArray(res.body.knownKeys), 'knownKeys is an array');
+    // Both sessions were stored in this test run — they must appear in knownKeys.
+    // (liveTrackDB accumulates across tests; knownKeys allows up to 100 entries.)
+    assert.ok(res.body.knownKeys.includes('b5angler9a'), 'knownKeys includes b5angler9a');
+    assert.ok(res.body.knownKeys.includes('b5angler9b'), 'knownKeys includes b5angler9b');
+  });
+
+  // B5-10: inventory stored without full catalog — items carry their own metadata.
+  test('B5-10: backend stores and returns inventory when no catalog_snapshot was sent', async () => {
+    const app = makeApp();
+    // No catalog POST at all — items carry metadata from Replion resolution.
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B5Angler10',
+        userId: 5010,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'Swordfish',  count: 1, category: 'fish', tier: 'legendary', imageUrl: 'https://rbxcdn.com/sword.png' },
+          { name: 'Carbon Rod', count: 1, category: 'rod',  tier: 'epic',      imageUrl: 'https://rbxcdn.com/rod.png'   },
+        ],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B5Angler10')
+      .expect(200);
+
+    assert.equal(res.body.items.length, 2, 'both items stored');
+    assert.ok(res.body.inventory, 'inventory object present');
+    assert.ok(res.body.inventory.all.length > 0, 'inventory.all populated');
+    // Fish and rod partitions
+    const hasRod  = res.body.inventory.rods.some((i) => i.name === 'Carbon Rod');
+    const hasFish = res.body.inventory.fish.some((i) => i.name === 'Swordfish');
+    assert.ok(hasRod,  'rod in inventory.rods');
+    assert.ok(hasFish, 'fish in inventory.fish');
   });
 });

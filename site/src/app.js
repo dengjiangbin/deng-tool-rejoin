@@ -117,6 +117,15 @@ const globalLimiter = rateLimit({
 app.use(globalLimiter);
 
 // ---------------------------------------------------------------
+// Fish It Live Backpack Tracker (mounted BEFORE the global body
+// parsers so that the route-level express.json({ limit: '512kb' })
+// handlers inside fishitTrackerRoutes take precedence.  The global
+// 16 KB parser would otherwise reject large tracker payloads with a
+// 413 before the route is even matched.)
+// ---------------------------------------------------------------
+app.use('/', fishitTrackerRoutes);
+
+// ---------------------------------------------------------------
 // Body parsers
 // ---------------------------------------------------------------
 app.use(express.urlencoded({ extended: false, limit: '16kb' }));
@@ -207,8 +216,7 @@ app.use('/', monitorRoutes);
 // Fish It stats API (public global + authenticated /me/* routes).
 app.use('/', fishitRoutes);
 
-// Fish It Live Backpack Tracker (public, no auth required).
-app.use('/', fishitTrackerRoutes);
+// (fishitTrackerRoutes already mounted before body parsers above)
 
 // ---------------------------------------------------------------
 // Mount routes
@@ -226,8 +234,18 @@ app.use((_req, res) => {
 // Global error handler
 // ---------------------------------------------------------------
 // eslint-disable-next-line no-unused-vars
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, _next) => {
   console.error('[deng-tool-site] Unhandled error:', err);
+  // Return JSON for API routes (e.g. PayloadTooLargeError from body parsers)
+  // so Lua clients receive a parseable error body, not an HTML page.
+  if (err.type === 'entity.too.large' && req.path.startsWith('/api/')) {
+    return res.status(413).json({
+      ok: false,
+      error: 'payload_too_large',
+      limit: err.limit || '16kb',
+      message: 'Request body exceeds the allowed size limit.',
+    });
+  }
   const code = err.status || 500;
   res.status(code).render('error', { code, message: 'An unexpected error occurred.' });
 });
