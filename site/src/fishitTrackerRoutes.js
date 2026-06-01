@@ -164,6 +164,8 @@ const ALLOWED_PHASES = new Set([
   'player_data_selected',
   'player_data_not_found',
   'inventory_path_missing',
+  'inventory_empty',
+  'inventory_parse_failed',
   'replion_missing',
   'live',
 ]);

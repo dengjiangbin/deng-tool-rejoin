@@ -73,6 +73,23 @@ foreach ($ph in @('startup','replion_client_found','player_data_selected','playe
     if ($content -match [regex]::Escape($ph)) { Write-Host "PASS  phase '$ph' present" } else { $errors += "FAIL  phase '$ph' missing" }
 }
 
+# ── BLOCKER 2: Replion inventory parser + id/name metadata mapping ──
+if ($content -match 'DEBUG_REPLION_INVENTORY_DUMP') { Write-Host "PASS  DEBUG_REPLION_INVENTORY_DUMP config flag found" } else { $errors += "FAIL  DEBUG_REPLION_INVENTORY_DUMP missing" }
+if ($content -match 'debugDumpReplionInventoryShape') { Write-Host "PASS  debugDumpReplionInventoryShape (safe shape dumper) found" } else { $errors += "FAIL  debugDumpReplionInventoryShape missing" }
+if ($content -match 'metadataById') { Write-Host "PASS  metadataById (id->meta index) found" } else { $errors += "FAIL  metadataById missing" }
+if ($content -match 'metadataByName') { Write-Host "PASS  metadataByName (name->meta index) found" } else { $errors += "FAIL  metadataByName missing" }
+if ($content -match 'resolveMetaById') { Write-Host "PASS  resolveMetaById (id resolver) found" } else { $errors += "FAIL  resolveMetaById missing" }
+if ($content -match 'scoreInventoryTable') { Write-Host "PASS  scoreInventoryTable (path scorer) found" } else { $errors += "FAIL  scoreInventoryTable missing" }
+if ($content -match 'sourcePath') { Write-Host "PASS  sourcePath tracking found" } else { $errors += "FAIL  sourcePath missing" }
+if ($content -match 'REPLION_PARSE_RESULT') { Write-Host "PASS  REPLION_PARSE_RESULT summary log found" } else { $errors += "FAIL  REPLION_PARSE_RESULT missing" }
+foreach ($ph in @('inventory_empty','inventory_parse_failed')) {
+    if ($content -match [regex]::Escape($ph)) { Write-Host "PASS  phase '$ph' present" } else { $errors += "FAIL  phase '$ph' missing" }
+}
+
+# Read-only guarantee: never scrape Backpack or PlayerGui as the PRODUCTION
+# inventory source. They may only appear inside DEBUG_DIAGNOSTIC-gated code.
+if ($codeOnly -match 'Selected owned inventory path') { Write-Host "PASS  'Selected owned inventory path' log present" } else { $errors += "FAIL  selected-path log missing" }
+
 # Replion must be read-only: no mutation methods actually invoked on a replion object
 $mut = ([regex]::Matches($codeOnly, ':\s*(Set|Update|Increase|Decrease|Fire|Save|Equip|Buy|Sell|Remove|Insert)\s*\(')).Count
 if ($mut -gt 0) { $errors += "FAIL  $mut Replion mutation call(s) found in code (must be read-only)" } else { Write-Host "PASS  No Replion mutation calls in code (read-only)" }

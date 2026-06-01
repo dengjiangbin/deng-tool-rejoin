@@ -430,3 +430,174 @@ describe('Fish It tracker — tracker_status phases (running before inventory)',
     assert.equal(res.body.isOnline, true);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────
+// BLOCKER 2: parser selects the right path, resolves item metadata by
+// id/name, and the backend never drops valid id-only / unknown-tier items.
+// The Lua parser itself runs in Roblox; here we lock the backend contract
+// that the parser depends on (PARTs 5-10).
+// ───────────────────────────────────────────────────────────────────
+describe('Fish It tracker — Replion inventory parser contract (BLOCKER 2)', () => {
+  beforeEach(() => { cleanup(); });
+
+  test('inventory_empty phase is accepted and surfaced', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'EmptyAngler',
+        userId: 2001,
+        source: 'replion',
+        isOnline: true,
+        phase: 'inventory_empty',
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/EmptyAngler')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'inventory_empty', 'inventory_empty phase must be stored');
+    assert.equal(res.body.isOnline, true);
+  });
+
+  test('inventory_parse_failed phase is accepted and surfaced', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'ParseFailAngler',
+        userId: 2002,
+        source: 'replion',
+        isOnline: true,
+        phase: 'inventory_parse_failed',
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/ParseFailAngler')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'inventory_parse_failed', 'parse_failed phase must be stored');
+  });
+
+  test('item with itemId + sourcePath but unknown tier is NOT dropped', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'IdAngler',
+        userId: 2003,
+        source: 'replion',
+        isOnline: true,
+        items: [{
+          name: 'Yellow Damselfish',
+          count: 2,
+          itemId: 'yellow_damselfish',
+          source: 'Replion.Inventory.Items.yellow_damselfish',
+          // No tier/rarity on purpose — must still be kept.
+        }],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/IdAngler')
+      .expect(200);
+
+    const fish = res.body.items.find((i) => i.name === 'Yellow Damselfish');
+    assert.ok(fish, 'id-only / unknown-tier item must be displayed');
+    assert.equal(fish.amount, 2);
+    assert.equal(fish.itemId, 'yellow_damselfish', 'itemId preserved');
+    assert.ok((fish.source || '').includes('Replion.Inventory.Items'), 'sourcePath preserved');
+  });
+
+  test('item imageUrl from the snapshot survives backend enrichment', async () => {
+    const app = makeApp();
+    const img = 'https://www.roblox.com/asset-thumbnail/image?assetId=12345&width=150&height=150&format=png';
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'ImgAngler',
+        userId: 2004,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Glow Tetra', count: 1, imageUrl: img }],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/ImgAngler')
+      .expect(200);
+
+    const fish = res.body.items.find((i) => i.name === 'Glow Tetra');
+    assert.ok(fish, 'item present');
+    assert.ok(fish.imageUrl && fish.imageUrl.length > 0, 'imageUrl must be carried through');
+  });
+
+  test('a non-empty snapshot replaces a previous non-zero inventory', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'ReplaceAngler',
+        userId: 2005,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'King Crab', count: 4 }],
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'ReplaceAngler',
+        userId: 2005,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Clownfish', count: 9 }],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/ReplaceAngler')
+      .expect(200);
+
+    const names = res.body.items.map((i) => i.name);
+    assert.ok(names.includes('Clownfish'), 'new inventory applied');
+    assert.ok(!names.includes('King Crab'), 'previous non-zero inventory replaced');
+  });
+
+  test('stat labels (Caught / Rarest Fish) are still dropped on ingest', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'StatAngler',
+        userId: 2006,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'Caught', count: 100 },
+          { name: 'Rarest Fish', count: 1 },
+          { name: 'King Crab', count: 3 },
+        ],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/StatAngler')
+      .expect(200);
+
+    const names = res.body.items.map((i) => i.name);
+    assert.ok(names.includes('King Crab'), 'real fish kept');
+    assert.ok(!names.includes('Caught'), 'Caught stat label dropped');
+    assert.ok(!names.includes('Rarest Fish'), 'Rarest Fish stat label dropped');
+  });
+});
