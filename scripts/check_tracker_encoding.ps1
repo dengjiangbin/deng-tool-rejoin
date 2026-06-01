@@ -98,6 +98,7 @@ if ($content -match 'idVariants') { Write-Host "PASS  idVariants (numeric id loo
 # UUID instance shape: the live Fish It shape { Id=70, UUID="...", Metadata={Weight} }
 if ($content -match 'value\.UUID or value\.Uuid or value\.uuid') { Write-Host "PASS  UUID instance record shape handled" } else { $errors += "FAIL  UUID instance record shape missing" }
 if ($content -match 'numericId keys') { Write-Host "PASS  numericId keys diagnostic found" } else { $errors += "FAIL  numericId keys diagnostic missing" }
+if ($content -match 'buildNumericIdIndexFromRSFolders') { Write-Host "PASS  buildNumericIdIndexFromRSFolders present" } else { $errors += "FAIL  buildNumericIdIndexFromRSFolders missing (BLOCKER 3 RS folder fallback)" }
 
 # Replion must be read-only: no mutation methods actually invoked on a replion object
 $mut = ([regex]::Matches($codeOnly, ':\s*(Set|Update|Increase|Decrease|Fire|Save|Equip|Buy|Sell|Remove|Insert)\s*\(')).Count
