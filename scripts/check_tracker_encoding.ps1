@@ -35,6 +35,18 @@ if ($content -match 'mergeItem') { Write-Host "PASS  mergeItem found" } else { $
 if ($content -match 'walkInventoryTable') { Write-Host "PASS  walkInventoryTable found" } else { $errors += "FAIL  walkInventoryTable missing" }
 if ($content -match 'DEBUG_VERBOSE_INVENTORY') { Write-Host "PASS  DEBUG_VERBOSE_INVENTORY config found" } else { $errors += "FAIL  DEBUG_VERBOSE_INVENTORY missing" }
 
+# ── v7-rs-catalog checks ──────────────────────────────────────────
+if ($content -match 'v7-rs-catalog') { Write-Host "PASS  v7-rs-catalog build marker found" } else { $errors += "FAIL  v7-rs-catalog build marker missing" }
+if ($content -match 'scanReplicatedStorageFishCatalog') { Write-Host "PASS  scanReplicatedStorageFishCatalog (recursive scanner) found" } else { $errors += "FAIL  scanReplicatedStorageFishCatalog missing" }
+if ($content -match 'fish_catalog_snapshot') { Write-Host "PASS  fish_catalog_snapshot payload type found" } else { $errors += "FAIL  fish_catalog_snapshot missing" }
+if ($content -match 'syncCatalogToBackend') { Write-Host "PASS  syncCatalogToBackend found" } else { $errors += "FAIL  syncCatalogToBackend missing" }
+if ($content -match 'CATALOG_URL') { Write-Host "PASS  CATALOG_URL constant found" } else { $errors += "FAIL  CATALOG_URL missing" }
+if ($content -match 'resolveImageUrl') { Write-Host "PASS  resolveImageUrl (rbxassetid converter) found" } else { $errors += "FAIL  resolveImageUrl missing" }
+if ($content -match 'asset-thumbnail') { Write-Host "PASS  asset-thumbnail URL conversion found" } else { $errors += "FAIL  asset-thumbnail conversion missing" }
+if ($content -match 'extractInstanceMeta') { Write-Host "PASS  extractInstanceMeta (rich metadata) found" } else { $errors += "FAIL  extractInstanceMeta missing" }
+if ($content -match 'walkCatalogTable') { Write-Host "PASS  walkCatalogTable (module require scan) found" } else { $errors += "FAIL  walkCatalogTable missing" }
+if ($content -match 'GetAttributes') { Write-Host "PASS  GetAttributes() metadata read found" } else { $errors += "FAIL  GetAttributes missing" }
+
 Write-Host ""
 if ($errors.Count -eq 0) {
     Write-Host "ALL CHECKS PASSED" -ForegroundColor Green; exit 0

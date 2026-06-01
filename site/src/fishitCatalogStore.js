@@ -1,0 +1,200 @@
+'use strict';
+/**
+ * Fish It catalog store.
+ *
+ * The Lua tracker recursively scans ReplicatedStorage and POSTs a
+ * `fish_catalog_snapshot` to /api/tracker/update-catalog. This module keeps
+ * that catalog (normalized fish/rod/item metadata: real name, tier/rarity and
+ * image URL) in memory AND persists it to site/data/fishit_catalog.json so the
+ * website can render real images + tiers even across restarts and while a
+ * player is offline.
+ *
+ * Nothing is invented: entries only ever come from the scanned game data
+ * (or, as a fallback, the existing Fish It DB image resolver). Stat/UI labels
+ * such as "Caught" or "Rarest Fish" are never stored as catalog entries.
+ */
+
+const path = require('path');
+const fs = require('fs');
+
+const STORE_PATH = process.env.FISHIT_CATALOG_PATH
+  || path.join(__dirname, '..', 'data', 'fishit_catalog.json');
+
+// Stat/UI labels that must never be treated as a real fish/item.
+const STAT_LABEL_DENYLIST = new Set([
+  'caught', 'rarest fish', 'total', 'total fish', 'fish', 'weight',
+  'search', 'inventory', 'owned', 'best catch', 'rarity', 'tier',
+  'amount', 'count', 'value', 'oldest', 'newest', 'all', 'sort',
+  'filter', 'equip', 'equipped', 'use', 'sell', 'buy', 'lock', 'unlock',
+  'backpack', 'collection', 'bag', 'myfish', 'myitems', 'none',
+  'weight (kg)', 'max weight', 'total weight', 'close', 'back', 'next',
+  'prev', 'previous', 'page', 'tab', 'menu', 'stats', 'info', 'profile',
+  'shop', 'store', 'trade', 'donate', 'rank', 'level', 'exp', 'coins',
+  'cash', 'gold', 'gems', 'ok', 'yes', 'no', 'cancel', 'confirm', 'submit',
+  'reset', 'settings', 'options', 'help', 'credits', 'about', 'exit', 'quit',
+  'leave', 'loading', 'please wait', 'equipped rod', 'current rod',
+  'best', 'item', 'items',
+]);
+
+const TIER_NORMALIZE = {
+  common: 'common', uncommon: 'uncommon', rare: 'rare', epic: 'epic',
+  legendary: 'legend', legend: 'legend', mythic: 'epic', mythical: 'epic',
+  secret: 'secret', forgotten: 'forgotten', special: 'rare', ultra: 'epic',
+};
+
+function normalizeName(raw) {
+  return String(raw || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function normalizeTier(raw) {
+  if (!raw) return null;
+  const t = String(raw).trim().toLowerCase();
+  return TIER_NORMALIZE[t] || t || null;
+}
+
+function isStatLabel(name) {
+  const n = normalizeName(name);
+  if (n.length <= 2) return true;
+  return STAT_LABEL_DENYLIST.has(n);
+}
+
+function isHttpUrl(u) {
+  return typeof u === 'string' && /^https?:\/\//i.test(u.trim());
+}
+
+// ── In-memory catalog: normalizedKey -> { name, key, tier, imageUrl, source }
+let _catalog = null;
+
+function _emptyCatalog() {
+  return { entries: {}, updatedAt: null, counts: { fish: 0, rods: 0, items: 0 } };
+}
+
+function _load() {
+  if (_catalog) return _catalog;
+  _catalog = _emptyCatalog();
+  try {
+    if (fs.existsSync(STORE_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
+      if (parsed && parsed.entries && typeof parsed.entries === 'object') {
+        _catalog = {
+          entries: parsed.entries,
+          updatedAt: parsed.updatedAt || null,
+          counts: parsed.counts || _emptyCatalog().counts,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[fishit-catalog] load failed:', err && err.message ? err.message : err);
+    _catalog = _emptyCatalog();
+  }
+  return _catalog;
+}
+
+function _persist() {
+  try {
+    const dir = path.dirname(STORE_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const tmp = `${STORE_PATH}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(_catalog), 'utf8');
+    fs.renameSync(tmp, STORE_PATH); // atomic replace
+  } catch (err) {
+    console.warn('[fishit-catalog] persist failed:', err && err.message ? err.message : err);
+  }
+}
+
+/**
+ * Merge a scanned catalog snapshot into the persistent store.
+ * @param {object} snapshot { catalog: { fish:[], rods:[], items:[] } }
+ * @returns {object} summary counts
+ */
+function ingestSnapshot(snapshot) {
+  _load();
+  const cat = (snapshot && snapshot.catalog) || {};
+  const groups = [
+    ['fish', cat.fish],
+    ['rods', cat.rods],
+    ['items', cat.items],
+  ];
+
+  let added = 0;
+  let enriched = 0;
+
+  for (const [category, list] of groups) {
+    if (!Array.isArray(list)) continue;
+    for (const raw of list.slice(0, 5000)) {
+      const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+      if (!name || isStatLabel(name)) continue;
+      const key = (typeof raw.key === 'string' && raw.key) ? normalizeName(raw.key) : normalizeName(name);
+      if (!key || isStatLabel(key)) continue;
+
+      const tier = normalizeTier(raw.tier);
+      const imageUrl = isHttpUrl(raw.imageUrl) ? raw.imageUrl.trim().slice(0, 300) : null;
+
+      const existing = _catalog.entries[key];
+      if (!existing) {
+        _catalog.entries[key] = {
+          name: name.slice(0, 100),
+          key,
+          tier: tier && tier !== 'unknown' ? tier : null,
+          imageUrl,
+          category,
+          source: typeof raw.source === 'string' ? raw.source.slice(0, 120) : null,
+        };
+        added += 1;
+      } else {
+        // Enrich: never overwrite good data with empty data.
+        let changed = false;
+        if ((!existing.tier || existing.tier === 'unknown') && tier && tier !== 'unknown') {
+          existing.tier = tier; changed = true;
+        }
+        if (!existing.imageUrl && imageUrl) { existing.imageUrl = imageUrl; changed = true; }
+        if (changed) enriched += 1;
+      }
+    }
+  }
+
+  // Recount by category.
+  const counts = { fish: 0, rods: 0, items: 0 };
+  for (const e of Object.values(_catalog.entries)) {
+    if (e.category === 'rods' || e.category === 'rod') counts.rods += 1;
+    else if (e.category === 'items') counts.items += 1;
+    else counts.fish += 1;
+  }
+  _catalog.counts = counts;
+  _catalog.updatedAt = new Date().toISOString();
+  _persist();
+
+  return { added, enriched, total: Object.keys(_catalog.entries).length, counts };
+}
+
+/** Look up catalog metadata for a name, or null. */
+function lookup(name) {
+  _load();
+  const key = normalizeName(name);
+  return _catalog.entries[key] || null;
+}
+
+/** Return the full catalog (for /api/fishit-tracker/catalog and tests). */
+function getCatalog() {
+  _load();
+  return {
+    updatedAt: _catalog.updatedAt,
+    counts: _catalog.counts,
+    entries: _catalog.entries,
+  };
+}
+
+/** Test seam. */
+function _reset() { _catalog = null; }
+
+module.exports = {
+  STORE_PATH,
+  STAT_LABEL_DENYLIST,
+  ingestSnapshot,
+  lookup,
+  getCatalog,
+  normalizeName,
+  normalizeTier,
+  isStatLabel,
+  _reset,
+};

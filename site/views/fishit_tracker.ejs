@@ -218,10 +218,13 @@
 
   function itemImageSrc(item) {
     if (item.imageUrl && typeof item.imageUrl === 'string' && item.imageUrl !== '') {
+      // Already-resolved HTTPS image (catalog / Fish It DB) — use directly.
+      if (item.imageUrl.startsWith('http')) return item.imageUrl;
       // Roblox asset IDs arrive as "rbxassetid://..." — convert to thumbnail URL
       const m = item.imageUrl.match(/rbxassetid:\/\/(\d+)/i);
-      if (m) return `https://assetgame.roblox.com/asset/?id=${m[1]}`;
-      if (item.imageUrl.startsWith('http')) return item.imageUrl;
+      if (m) return `https://www.roblox.com/asset-thumbnail/image?assetId=${m[1]}&width=150&height=150&format=png`;
+      const num = item.imageUrl.match(/^(\d+)$/);
+      if (num) return `https://www.roblox.com/asset-thumbnail/image?assetId=${num[1]}&width=150&height=150&format=png`;
     }
     const name = String(item.name || '');
     const category = String(item.category || item.tab || '').toLowerCase();
@@ -340,7 +343,12 @@
       if (!res.ok) { setCardError(entry.el); return; }
       const data = await res.json();
       entry.lastData = data;
-      updateCard(entry.el, data);
+      // Offline: keep the last known inventory visible with a red dot.
+      if (data.isOnline === false) {
+        setCardOffline(entry.el, entry.displayName, data);
+      } else {
+        updateCard(entry.el, data);
+      }
     } catch { if (trackers.has(key)) setCardError(entry.el); }
   }
 

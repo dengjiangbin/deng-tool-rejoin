@@ -20,6 +20,21 @@
 const express   = require('express');
 const rateLimit = require('express-rate-limit');
 
+const catalogStore = require('./fishitCatalogStore');
+
+// Optional Fish It DB image resolver (real fish artwork). Loaded lazily and
+// defensively so the tracker keeps working even if the DB module is absent.
+let fishitDb = null;
+try { fishitDb = require('./fishitDb'); } catch (_) { fishitDb = null; }
+
+function dbImageFor(name) {
+  if (!fishitDb || typeof fishitDb.resolveSpeciesImage !== 'function') return null;
+  try {
+    const url = fishitDb.resolveSpeciesImage(name);
+    return (typeof url === 'string' && /^https?:\/\//i.test(url)) ? url : null;
+  } catch (_) { return null; }
+}
+
 const router = express.Router();
 
 // ── In-memory live-data store ─────────────────────────────────────
@@ -60,16 +75,20 @@ function sanitiseUsername(raw) {
 
 function sanitiseItems(raw) {
   if (!Array.isArray(raw)) return [];
-  return raw.slice(0, 300).map((item) => {
+  const out = [];
+  for (const item of raw.slice(0, 300)) {
     const name = typeof item.name === 'string'
       ? item.name
       : (typeof item.Name === 'string' ? item.Name : '');
+    // Drop stat/UI labels (e.g. "Caught", "Rarest Fish") on the way in.
+    if (!name || catalogStore.isStatLabel(name)) continue;
+
     const rawWeight = item.weight ?? item.totalWeight ?? item.Weight;
     const rawAmount = item.amount ?? item.Amount ?? 1;
     const weight = Number(rawWeight);
     const amount = Number(rawAmount);
 
-    return {
+    out.push({
       name:     name.slice(0, 100),
       weight:   Number.isFinite(weight) ? weight : null,
       amount:   Number.isFinite(amount) && amount > 0 ? Math.floor(amount) : 1,
@@ -78,8 +97,39 @@ function sanitiseItems(raw) {
       rarity:   typeof item.rarity === 'string'   ? item.rarity.slice(0, 50)    : null,
       imageUrl: typeof item.imageUrl === 'string' ? item.imageUrl.slice(0, 200) : null,
       shiny:    item.shiny === true               ? true                        : false,
-    };
-  });
+    });
+  }
+  return out;
+}
+
+/**
+ * Merge stored items with the persistent catalog so each card carries a real
+ * name, tier/rarity and image — even for old snapshots. Also filters out any
+ * stat labels that may have been stored before this filtering existed.
+ */
+function enrichItemsFromCatalog(items) {
+  if (!Array.isArray(items)) return [];
+  const out = [];
+  for (const it of items) {
+    if (!it || !it.name || catalogStore.isStatLabel(it.name)) continue;
+    const meta = catalogStore.lookup(it.name);
+
+    const name = (meta && meta.name) || it.name;
+    let rarity = it.rarity || (meta && meta.tier) || null;
+    if (rarity) rarity = catalogStore.normalizeTier(rarity);
+
+    // Image priority: explicit item image → catalog image → Fish It DB resolver.
+    let imageUrl = it.imageUrl || (meta && meta.imageUrl) || dbImageFor(name) || null;
+
+    out.push({
+      ...it,
+      name,
+      rarity,
+      category: it.category || (meta && meta.category) || null,
+      imageUrl,
+    });
+  }
+  return out;
 }
 
 // ── GET /tracker – serve the dashboard page ───────────────────────
@@ -104,18 +154,57 @@ router.post(
     }
 
     const key = cleanUser.toLowerCase();
+    const now = new Date().toISOString();
+    const online = isOnline === true;
+    const existing = liveTrackDB[key];
+    const cleanItems = sanitiseItems(items);
+
+    // Offline / status-only update: keep the last known inventory visible.
+    // Never clear inventory just because the player went offline or sent an
+    // empty payload — only flip the online flag and refresh timestamps.
+    if (!online && existing && (!cleanItems.length)) {
+      existing.isOnline = false;
+      existing.updatedAt = now;
+      return res.status(200).json({ status: 'success', note: 'status_only' });
+    }
+
     liveTrackDB[key] = {
       username:    cleanUser,
       userId:      Number.isFinite(Number(userId)) ? Number(userId) : 0,
-      items:       sanitiseItems(items),
-      isOnline:    isOnline === true,
-      lastSeenAt:  new Date().toISOString(),
-      updatedAt:   new Date().toISOString(),
+      // Keep last known inventory if a live payload arrives empty.
+      items:       cleanItems.length ? cleanItems : (existing ? existing.items : []),
+      isOnline:    online,
+      lastSeenAt:  online ? now : (existing ? existing.lastSeenAt : now),
+      updatedAt:   now,
     };
 
     return res.status(200).json({ status: 'success' });
   },
 );
+
+// ── POST /api/tracker/update-catalog ─────────────────────────────
+// Receives the recursive ReplicatedStorage fish_catalog_snapshot from the Lua
+// tracker and merges it into the persistent catalog store (real name + tier +
+// image for every scanned fish/rod/item).
+router.post(
+  '/api/tracker/update-catalog',
+  postLimiter,
+  express.json({ limit: '512kb' }),
+  (req, res) => {
+    const body = req.body || {};
+    if (body.type !== 'fish_catalog_snapshot' || !body.catalog || typeof body.catalog !== 'object') {
+      return res.status(400).json({ error: 'Invalid catalog snapshot.' });
+    }
+    const summary = catalogStore.ingestSnapshot(body);
+    return res.status(200).json({ status: 'success', ...summary });
+  },
+);
+
+// ── GET /api/fishit-tracker/catalog ──────────────────────────────
+// Expose the stored catalog (debugging / verification).
+router.get('/api/fishit-tracker/catalog', getLimiter, (_req, res) => {
+  return res.status(200).json(catalogStore.getCatalog());
+});
 
 // ── GET /api/tracker/get-backpack/:username ───────────────────────
 router.get(
@@ -134,7 +223,14 @@ router.get(
       return res.status(404).json({ error: 'No tracking session active for this user.' });
     }
 
-    return res.status(200).json(data);
+    // Merge each item with the persistent catalog (real name + tier + image)
+    // and strip any stat labels stored before read-time filtering existed.
+    const enriched = {
+      ...data,
+      items: enrichItemsFromCatalog(data.items),
+    };
+
+    return res.status(200).json(enriched);
   },
 );
 
