@@ -25,7 +25,11 @@ if ($content -match 'xpcall' -and $content -match 'debug\.traceback') { Write-Ho
 $ra = ([regex]::Matches($codeOnly, 'RequestAsync')).Count
 if ($ra -gt 0) { $errors += "FAIL  HttpService:RequestAsync found in code (must not be in LocalScript)" } else { Write-Host "PASS  No HttpService:RequestAsync in code" }
 
-if ($content -match 'scanCatalog') { Write-Host "PASS  scanCatalog found" } else { $errors += "FAIL  scanCatalog missing" }
+if ($content -match 'buildCatalogFromRS') { Write-Host "PASS  buildCatalogFromRS found" } else { $errors += "FAIL  buildCatalogFromRS missing" }
+if ($content -match 'STAT_LABEL_DENYLIST') { Write-Host "PASS  STAT_LABEL_DENYLIST found" } else { $errors += "FAIL  STAT_LABEL_DENYLIST missing" }
+if ($content -match 'normalizeName')       { Write-Host "PASS  normalizeName found" }       else { $errors += "FAIL  normalizeName missing" }
+if ($content -match 'resolveFishMeta')     { Write-Host "PASS  resolveFishMeta found" }     else { $errors += "FAIL  resolveFishMeta missing" }
+if ($content -match 'rejectInventoryLabel') { Write-Host "PASS  rejectInventoryLabel found" } else { $errors += "FAIL  rejectInventoryLabel missing" }
 if ($content -match 'scanOwnedInventory') { Write-Host "PASS  scanOwnedInventory found" } else { $errors += "FAIL  scanOwnedInventory missing" }
 if ($content -match 'mergeItem') { Write-Host "PASS  mergeItem found" } else { $errors += "FAIL  mergeItem missing" }
 if ($content -match 'walkInventoryTable') { Write-Host "PASS  walkInventoryTable found" } else { $errors += "FAIL  walkInventoryTable missing" }

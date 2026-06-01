@@ -73,10 +73,11 @@ function sanitiseItems(raw) {
       name:     name.slice(0, 100),
       weight:   Number.isFinite(weight) ? weight : null,
       amount:   Number.isFinite(amount) && amount > 0 ? Math.floor(amount) : 1,
-      category: typeof item.category === 'string' ? item.category.slice(0, 50) : null,
-      tab:      typeof item.tab === 'string'      ? item.tab.slice(0, 50)      : null,
-      rarity:   typeof item.rarity === 'string'   ? item.rarity.slice(0, 50)   : null,
-      shiny:    item.shiny === true               ? true                      : false,
+      category: typeof item.category === 'string' ? item.category.slice(0, 50)  : null,
+      tab:      typeof item.tab === 'string'      ? item.tab.slice(0, 50)       : null,
+      rarity:   typeof item.rarity === 'string'   ? item.rarity.slice(0, 50)    : null,
+      imageUrl: typeof item.imageUrl === 'string' ? item.imageUrl.slice(0, 200) : null,
+      shiny:    item.shiny === true               ? true                        : false,
     };
   });
 }
@@ -95,7 +96,7 @@ router.post(
   postLimiter,
   express.json({ limit: '64kb' }),
   (req, res) => {
-    const { username, userId, items } = req.body || {};
+    const { username, userId, items, isOnline } = req.body || {};
 
     const cleanUser = sanitiseUsername(username);
     if (!cleanUser) {
@@ -104,10 +105,12 @@ router.post(
 
     const key = cleanUser.toLowerCase();
     liveTrackDB[key] = {
-      username:  cleanUser,
-      userId:    Number.isFinite(Number(userId)) ? Number(userId) : 0,
-      items:     sanitiseItems(items),
-      updatedAt: new Date().toISOString(),
+      username:    cleanUser,
+      userId:      Number.isFinite(Number(userId)) ? Number(userId) : 0,
+      items:       sanitiseItems(items),
+      isOnline:    isOnline === true,
+      lastSeenAt:  new Date().toISOString(),
+      updatedAt:   new Date().toISOString(),
     };
 
     return res.status(200).json({ status: 'success' });

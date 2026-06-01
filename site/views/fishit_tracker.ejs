@@ -171,7 +171,7 @@
     <div class="loadstring-box">
       <h3>Executor Script � copy &amp; run in-game</h3>
       <div class="code-row">
-        <div class="code-block" id="loadstringCode">loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua"))()</div>
+        <div class="code-block" id="loadstringCode">loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/scripts/loader.lua"))()</div>
         <button class="btn-copy" id="copyBtn" type="button">Copy</button>
       </div>
     </div>
@@ -184,7 +184,7 @@
 
   const LS_KEY     = 'fishit_tracked_users';
   const POLL_MS    = 2500;
-  const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', secret:'rarity-secret', forgotten:'rarity-forgotten' };
+  const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', secret:'rarity-secret', forgotten:'rarity-forgotten' };
 
   const trackers       = new Map();
   const inputEl        = document.getElementById('usernameInput');
@@ -217,6 +217,12 @@
   };
 
   function itemImageSrc(item) {
+    if (item.imageUrl && typeof item.imageUrl === 'string' && item.imageUrl !== '') {
+      // Roblox asset IDs arrive as "rbxassetid://..." — convert to thumbnail URL
+      const m = item.imageUrl.match(/rbxassetid:\/\/(\d+)/i);
+      if (m) return `https://assetgame.roblox.com/asset/?id=${m[1]}`;
+      if (item.imageUrl.startsWith('http')) return item.imageUrl;
+    }
     const name = String(item.name || '');
     const category = String(item.category || item.tab || '').toLowerCase();
     return ITEM_IMAGES[name] || ITEM_IMAGES[category] || ITEM_IMAGES.Default;
@@ -294,6 +300,22 @@
     if (s) s.textContent = '';
   }
 
+  function setCardOffline(card, name, lastData) {
+    card.classList.remove('state-live','state-waiting');
+    card.classList.add('state-error');
+    const l = card.querySelector('[data-status-line]');
+    const s = card.querySelector('[data-sync-time]');
+    const c = card.querySelector('[data-items-count]');
+    const b = card.querySelector('[data-card-body]');
+    if (l) l.innerHTML = `&#x1F534; Offline &mdash; <strong>${escHtml(name)}</strong> is not running the tracker`;
+    if (s && lastData) s.textContent = `Last sync: ${fmtTime(lastData.updatedAt)}`;
+    if (c && lastData) {
+      const total = (lastData.items || []).reduce((sum, i) => sum + (Number(i.amount) || 1), 0);
+      c.innerHTML = `Items: <strong>${total}</strong> <span style="color:#8a94a6;">(${(lastData.items||[]).length} types) &mdash; Offline</span>`;
+    }
+    if (b && lastData) b.innerHTML = buildItemsHtml(lastData.items);
+  }
+
   function setCardError(card) {
     card.classList.remove('state-live','state-waiting');
     card.classList.add('state-error');
@@ -307,9 +329,18 @@
     try {
       const res = await fetch(`/api/tracker/get-backpack/${encodeURIComponent(key)}`);
       if (!trackers.has(key)) return;
-      if (res.status === 404) { setCardWaiting(entry.el, entry.displayName); return; }
+      if (res.status === 404) {
+        if (entry.lastData) {
+          setCardOffline(entry.el, entry.displayName, entry.lastData);
+        } else {
+          setCardWaiting(entry.el, entry.displayName);
+        }
+        return;
+      }
       if (!res.ok) { setCardError(entry.el); return; }
-      updateCard(entry.el, await res.json());
+      const data = await res.json();
+      entry.lastData = data;
+      updateCard(entry.el, data);
     } catch { if (trackers.has(key)) setCardError(entry.el); }
   }
 
@@ -325,7 +356,7 @@
     const card  = createCard(raw);
     trackerListEl.appendChild(card);
     const timer = setInterval(() => pollUser(key), POLL_MS);
-    trackers.set(key, { timer, el: card, displayName: raw });
+    trackers.set(key, { timer, el: card, displayName: raw, lastData: null });
     pollUser(key);
     updateSummary();
     saveCurrent();
