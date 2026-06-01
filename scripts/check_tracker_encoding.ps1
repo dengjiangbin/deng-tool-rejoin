@@ -90,6 +90,15 @@ foreach ($ph in @('inventory_empty','inventory_parse_failed')) {
 # inventory source. They may only appear inside DEBUG_DIAGNOSTIC-gated code.
 if ($codeOnly -match 'Selected owned inventory path') { Write-Host "PASS  'Selected owned inventory path' log present" } else { $errors += "FAIL  selected-path log missing" }
 
+# ── BLOCKER 3: numeric Id resolution (Replion instance records) ──
+if ($content -match 'debugCatalogLookupForOwnedIds') { Write-Host "PASS  debugCatalogLookupForOwnedIds found" } else { $errors += "FAIL  debugCatalogLookupForOwnedIds missing" }
+if ($content -match 'unresolved_numeric_id') { Write-Host "PASS  unresolved_numeric_id rejection reason found" } else { $errors += "FAIL  unresolved_numeric_id missing" }
+if ($content -match 'parseStats') { Write-Host "PASS  parseStats payload found" } else { $errors += "FAIL  parseStats missing" }
+if ($content -match 'idVariants') { Write-Host "PASS  idVariants (numeric id lookup variants) found" } else { $errors += "FAIL  idVariants missing" }
+# UUID instance shape: the live Fish It shape { Id=70, UUID="...", Metadata={Weight} }
+if ($content -match 'value\.UUID or value\.Uuid or value\.uuid') { Write-Host "PASS  UUID instance record shape handled" } else { $errors += "FAIL  UUID instance record shape missing" }
+if ($content -match 'numericId keys') { Write-Host "PASS  numericId keys diagnostic found" } else { $errors += "FAIL  numericId keys diagnostic missing" }
+
 # Replion must be read-only: no mutation methods actually invoked on a replion object
 $mut = ([regex]::Matches($codeOnly, ':\s*(Set|Update|Increase|Decrease|Fire|Save|Equip|Buy|Sell|Remove|Insert)\s*\(')).Count
 if ($mut -gt 0) { $errors += "FAIL  $mut Replion mutation call(s) found in code (must be read-only)" } else { Write-Host "PASS  No Replion mutation calls in code (read-only)" }

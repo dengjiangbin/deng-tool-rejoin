@@ -601,3 +601,153 @@ describe('Fish It tracker — Replion inventory parser contract (BLOCKER 2)', ()
     assert.ok(!names.includes('Rarest Fish'), 'Rarest Fish stat label dropped');
   });
 });
+
+// ───────────────────────────────────────────────────────────────────
+// BLOCKER 3: Replion Inventory.Items is an array of UUID-keyed instance
+// records {Id=70, UUID="...", Metadata={Weight=N}}. The backend must
+// preserve parseStats from inventory_parse_failed pings and inventory
+// snapshots, and must not wipe a good inventory on a failed re-parse.
+// ───────────────────────────────────────────────────────────────────
+describe('Fish It tracker — numeric-Id instance inventory (BLOCKER 3)', () => {
+  beforeEach(() => { cleanup(); });
+
+  test('parseStats from inventory_parse_failed tracker_status is stored and returned', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'IdAngler3',
+        userId: 3001,
+        source: 'replion',
+        isOnline: true,
+        phase: 'inventory_parse_failed',
+        parseStats: { raw: 2145, accepted: 0, rejected: 2145, images: 0, tiers: 0, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/IdAngler3')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'inventory_parse_failed');
+    assert.ok(res.body.parseStats, 'parseStats must be present');
+    assert.equal(res.body.parseStats.raw, 2145, 'raw count preserved');
+    assert.equal(res.body.parseStats.accepted, 0, 'accepted=0 preserved');
+    assert.equal(res.body.parseStats.rejected, 2145, 'rejected count preserved');
+    assert.equal(res.body.parseStats.selectedPath, 'Inventory.Items', 'selectedPath preserved');
+  });
+
+  test('parseStats from inventory_snapshot is stored', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'IdAngler4',
+        userId: 3002,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Yellow Damselfish', count: 10, itemId: '70' }],
+        parseStats: { raw: 10, accepted: 10, rejected: 0, images: 10, tiers: 0, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/IdAngler4')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'live');
+    assert.ok(res.body.parseStats, 'parseStats present in live snapshot');
+    assert.equal(res.body.parseStats.raw, 10);
+    assert.equal(res.body.parseStats.accepted, 10);
+    assert.equal(res.body.parseStats.selectedPath, 'Inventory.Items');
+  });
+
+  test('good inventory is preserved when a later parse sends inventory_parse_failed', async () => {
+    const app = makeApp();
+    // First: good inventory snapshot.
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'IdAngler5',
+        userId: 3003,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'King Crab', count: 5 }],
+        parseStats: { raw: 5, accepted: 5, rejected: 0, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    // Second: parse fails (e.g. after a game update breaks the catalog).
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'IdAngler5',
+        userId: 3003,
+        source: 'replion',
+        isOnline: true,
+        phase: 'inventory_parse_failed',
+        parseStats: { raw: 5, accepted: 0, rejected: 5, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/IdAngler5')
+      .expect(200);
+
+    // Old inventory should still be visible.
+    assert.ok(res.body.items.some((i) => i.name === 'King Crab'), 'prior inventory preserved');
+    assert.equal(res.body.parseStats.accepted, 0, 'updated parseStats reflects parse failure');
+  });
+
+  test('invalid parseStats body is silently ignored — does not crash', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'IdAngler6',
+        userId: 3004,
+        source: 'replion',
+        isOnline: true,
+        phase: 'startup',
+        parseStats: 'not an object',   // garbage
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/IdAngler6')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'startup');
+    assert.ok(res.body.parseStats === null || res.body.parseStats === undefined,
+      'invalid parseStats must be dropped');
+  });
+
+  test('inventory_empty phase is stored with parseStats', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'IdAngler7',
+        userId: 3005,
+        source: 'replion',
+        isOnline: true,
+        phase: 'inventory_empty',
+        parseStats: { raw: 0, accepted: 0, rejected: 0, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/IdAngler7')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'inventory_empty');
+    assert.ok(res.body.parseStats, 'parseStats present');
+    assert.equal(res.body.parseStats.raw, 0);
+  });
+});

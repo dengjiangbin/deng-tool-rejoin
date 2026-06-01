@@ -155,6 +155,20 @@ function sanitiseSource(raw) {
   return ALLOWED_SOURCES.has(s) ? s : 'unknown';
 }
 
+// Validate and sanitise the numeric parse-stats block sent by the Lua tracker.
+function sanitiseParseStats(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const num = (v) => (Number.isFinite(Number(v)) ? Math.floor(Number(v)) : 0);
+  return {
+    raw:          num(raw.raw),
+    accepted:     num(raw.accepted),
+    rejected:     num(raw.rejected),
+    images:       num(raw.images),
+    tiers:        num(raw.tiers),
+    selectedPath: typeof raw.selectedPath === 'string' ? raw.selectedPath.slice(0, 80) : null,
+  };
+}
+
 // Discovery phases reported by tracker_status. They drive the website's
 // "script is running — locating Replion data..." messaging so the card never
 // stays on "waiting to execute" once the script has started.
@@ -223,6 +237,7 @@ router.post(
         items:      base.items || [],
         isOnline:   online,
         phase:      phase || base.phase || 'startup',
+        parseStats: sanitiseParseStats(body.parseStats) || base.parseStats || null,
         lastSeenAt: online ? now : (base.lastSeenAt || now),
         updatedAt:  now,
       };
@@ -248,6 +263,9 @@ router.post(
       isOnline:    online,
       // A real inventory snapshot means we're fully live.
       phase:       cleanItems.length ? 'live' : (phase || (existing && existing.phase) || 'live'),
+      // Keep parseStats from the snapshot; preserve prior stats if empty snapshot.
+      parseStats:  sanitiseParseStats(body.parseStats)
+                   || (existing && existing.parseStats) || null,
       lastSeenAt:  online ? now : (existing ? existing.lastSeenAt : now),
       updatedAt:   now,
     };

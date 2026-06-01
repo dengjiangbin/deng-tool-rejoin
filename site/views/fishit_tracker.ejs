@@ -339,7 +339,16 @@
     if (l) l.innerHTML = `&#x1F7E2; ${escHtml(phaseMessage(data.phase))}`;
     if (s) s.textContent = data.updatedAt ? `Sync: ${fmtTime(data.updatedAt)}` : '';
     if (c) c.innerHTML = `Items: <strong>-</strong>`;
-    if (b) b.innerHTML = `<div class="card-empty">&#x1F7E2; ${escHtml(phaseMessage(data.phase))}</div>`;
+    let bodyHtml = `<div class="card-empty">&#x1F7E2; ${escHtml(phaseMessage(data.phase))}</div>`;
+    // BLOCKER 3: Show parse stats when parser fails so the user can debug.
+    if (data.parseStats && (data.phase === 'inventory_parse_failed' || data.phase === 'inventory_empty')) {
+      const ps = data.parseStats;
+      bodyHtml += `<div class="card-empty" style="font-size:0.8em;color:#8a94a6;margin-top:4px">`
+        + `Raw: ${ps.raw ?? '?'} &middot; Accepted: ${ps.accepted ?? 0} &middot; Rejected: ${ps.rejected ?? '?'}`
+        + (ps.selectedPath ? ` &middot; Path: ${escHtml(ps.selectedPath)}` : '')
+        + `</div>`;
+    }
+    if (b) b.innerHTML = bodyHtml;
   }
 
   function setCardOffline(card, name, lastData) {
