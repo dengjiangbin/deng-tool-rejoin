@@ -303,6 +303,41 @@
     if (s) s.textContent = '';
   }
 
+  // Map a tracker_status discovery phase to a human-readable message.
+  function phaseMessage(phase) {
+    switch (phase) {
+      case 'replion_client_found':
+        return 'Replion client found, locating player data...';
+      case 'player_data_not_found':
+        return 'Replion client found, player data not found yet.';
+      case 'inventory_path_missing':
+        return 'Replion data found, inventory path not matched. Send logs.';
+      case 'replion_missing':
+        return 'Replion library not found in this game.';
+      case 'player_data_selected':
+        return 'Player data found — reading inventory...';
+      case 'startup':
+      case 'live':
+      default:
+        return 'Script running — locating Replion data...';
+    }
+  }
+
+  // Script is executing (tracker_status online) but no inventory snapshot yet.
+  // Green dot + phase message instead of "Awaiting first data".
+  function setCardRunning(card, name, data) {
+    card.classList.remove('state-waiting','state-error');
+    card.classList.add('state-live');
+    const l = card.querySelector('[data-status-line]');
+    const s = card.querySelector('[data-sync-time]');
+    const c = card.querySelector('[data-items-count]');
+    const b = card.querySelector('[data-card-body]');
+    if (l) l.innerHTML = `&#x1F7E2; ${escHtml(phaseMessage(data.phase))}`;
+    if (s) s.textContent = data.updatedAt ? `Sync: ${fmtTime(data.updatedAt)}` : '';
+    if (c) c.innerHTML = `Items: <strong>-</strong>`;
+    if (b) b.innerHTML = `<div class="card-empty">&#x1F7E2; ${escHtml(phaseMessage(data.phase))}</div>`;
+  }
+
   function setCardOffline(card, name, lastData) {
     card.classList.remove('state-live','state-waiting');
     card.classList.add('state-error');
@@ -343,11 +378,17 @@
       if (!res.ok) { setCardError(entry.el); return; }
       const data = await res.json();
       entry.lastData = data;
-      // Offline: keep the last known inventory visible with a red dot.
+      const hasItems = Array.isArray(data.items) && data.items.length > 0;
       if (data.isOnline === false) {
+        // Offline: keep the last known inventory visible with a red dot.
         setCardOffline(entry.el, entry.displayName, data);
-      } else {
+      } else if (hasItems) {
+        // Online with a real inventory snapshot.
         updateCard(entry.el, data);
+      } else {
+        // Online (tracker_status heartbeat) but no inventory yet: show the
+        // running phase with a green dot, never "Awaiting first data".
+        setCardRunning(entry.el, entry.displayName, data);
       }
     } catch { if (trackers.has(key)) setCardError(entry.el); }
   }

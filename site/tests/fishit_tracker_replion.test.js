@@ -277,3 +277,156 @@ describe('Fish It tracker — Replion payloads (v7-replion)', () => {
     assert.equal(res.body.source, 'unknown');
   });
 });
+
+describe('Fish It tracker — tracker_status phases (running before inventory)', () => {
+  beforeEach(() => { cleanup(); });
+
+  test('tracker_status with NO existing session creates an online session', async () => {
+    const app = makeApp();
+
+    const ping = await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'FreshAngler',
+        userId: 777,
+        source: 'replion',
+        isOnline: true,
+        phase: 'startup',
+      })
+      .expect(200);
+
+    assert.equal(ping.body.note, 'status_only');
+    assert.equal(ping.body.phase, 'startup');
+
+    // The website must no longer 404 / "await first data" — the session exists.
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/FreshAngler')
+      .expect(200);
+
+    assert.equal(res.body.isOnline, true, 'status ping must mark the session online');
+    assert.equal(res.body.phase, 'startup');
+    assert.deepEqual(res.body.items, [], 'no inventory yet, but session is live');
+    assert.equal(res.body.source, 'replion');
+  });
+
+  test('phase is stored and returned and advances across status pings', async () => {
+    const app = makeApp();
+
+    for (const phase of ['startup', 'replion_client_found', 'player_data_not_found']) {
+      await request(app)
+        .post('/api/tracker/update-backpack')
+        .send({
+          type: 'tracker_status',
+          username: 'PhaseAngler',
+          userId: 888,
+          source: 'replion',
+          isOnline: true,
+          phase,
+        })
+        .expect(200);
+    }
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/PhaseAngler')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'player_data_not_found', 'latest phase must win');
+    assert.equal(res.body.isOnline, true);
+  });
+
+  test('an unknown phase is ignored (falls back, never crashes)', async () => {
+    const app = makeApp();
+
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'BadPhaseAngler',
+        userId: 999,
+        source: 'replion',
+        isOnline: true,
+        phase: 'totally-made-up-phase',
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/BadPhaseAngler')
+      .expect(200);
+
+    assert.equal(res.body.isOnline, true);
+    assert.equal(res.body.phase, 'startup', 'invalid phase falls back to startup default');
+  });
+
+  test('a status ping promotes phase, then inventory_snapshot goes to "live"', async () => {
+    const app = makeApp();
+
+    // Running phase first (no items yet).
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'LiveAngler',
+        userId: 1010,
+        source: 'replion',
+        isOnline: true,
+        phase: 'player_data_selected',
+      })
+      .expect(200);
+
+    // Then a real inventory snapshot arrives.
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'LiveAngler',
+        userId: 1010,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'King Crab', count: 2 }],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/LiveAngler')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'live', 'inventory snapshot flips phase to live');
+    assert.ok(res.body.items.some((i) => i.name === 'King Crab'), 'inventory present');
+  });
+
+  test('status ping keeps inventory and stays live after a snapshot', async () => {
+    const app = makeApp();
+
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'KeepAngler',
+        userId: 1111,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Clownfish', count: 5 }],
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'KeepAngler',
+        userId: 1111,
+        source: 'replion',
+        isOnline: true,
+        phase: 'player_data_selected',
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/KeepAngler')
+      .expect(200);
+
+    assert.ok(res.body.items.some((i) => i.name === 'Clownfish'), 'status ping must keep inventory');
+    assert.equal(res.body.isOnline, true);
+  });
+});

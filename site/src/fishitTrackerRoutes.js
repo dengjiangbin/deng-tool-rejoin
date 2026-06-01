@@ -155,6 +155,25 @@ function sanitiseSource(raw) {
   return ALLOWED_SOURCES.has(s) ? s : 'unknown';
 }
 
+// Discovery phases reported by tracker_status. They drive the website's
+// "script is running — locating Replion data..." messaging so the card never
+// stays on "waiting to execute" once the script has started.
+const ALLOWED_PHASES = new Set([
+  'startup',
+  'replion_client_found',
+  'player_data_selected',
+  'player_data_not_found',
+  'inventory_path_missing',
+  'replion_missing',
+  'live',
+]);
+
+function sanitisePhase(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim().toLowerCase().slice(0, 40);
+  return ALLOWED_PHASES.has(s) ? s : null;
+}
+
 // ── POST /api/tracker/update-backpack ────────────────────────────
 // Accepts both:
 //   • inventory_snapshot  – the Replion source-of-truth inventory. The items
@@ -169,6 +188,7 @@ router.post(
     const body = req.body || {};
     const { username, userId, items, isOnline, type } = body;
     const source = sanitiseSource(body.source);
+    const phase = sanitisePhase(body.phase);
 
     const cleanUser = sanitiseUsername(username);
     if (!cleanUser) {
@@ -181,26 +201,51 @@ router.post(
     const existing = liveTrackDB[key];
     const isStatusOnly = type === 'tracker_status';
     const cleanItems = isStatusOnly ? [] : sanitiseItems(items);
+    const cleanUserId = Number.isFinite(Number(userId)) ? Number(userId) : 0;
 
-    // Status-only ping, OR an offline/empty update: keep the last known
-    // inventory visible and only flip the online flag + source. Never clear
-    // inventory just because the player went offline or sent no items.
-    if ((isStatusOnly || (!online && !cleanItems.length)) && existing) {
+    // tracker_status is a heartbeat that proves the script is RUNNING. It must
+    // create or update the session (online=true) even before any inventory
+    // exists — this is what flips the website card off "waiting to execute".
+    // It never clears a previously captured inventory.
+    if (isStatusOnly) {
+      const base = existing || {
+        username: cleanUser,
+        userId: cleanUserId,
+        items: [],
+      };
+      liveTrackDB[key] = {
+        ...base,
+        username:   cleanUser,
+        userId:     cleanUserId || base.userId || 0,
+        source:     source !== 'unknown' ? source : (base.source || source),
+        items:      base.items || [],
+        isOnline:   online,
+        phase:      phase || base.phase || 'startup',
+        lastSeenAt: online ? now : (base.lastSeenAt || now),
+        updatedAt:  now,
+      };
+      return res.status(200).json({ status: 'success', note: 'status_only', phase: liveTrackDB[key].phase });
+    }
+
+    // An offline/empty inventory update: keep the last known inventory visible
+    // and only flip the online flag + source.
+    if (!online && !cleanItems.length && existing) {
       existing.isOnline = online;
       existing.source = source !== 'unknown' ? source : existing.source;
-      if (online) existing.lastSeenAt = now;
       existing.updatedAt = now;
-      return res.status(200).json({ status: 'success', note: 'status_only' });
+      return res.status(200).json({ status: 'success', note: 'offline_keep' });
     }
 
     // Inventory snapshot REPLACES the stored items (Replion source of truth).
     liveTrackDB[key] = {
       username:    cleanUser,
-      userId:      Number.isFinite(Number(userId)) ? Number(userId) : 0,
+      userId:      cleanUserId,
       source,
       // Keep last known inventory if a live snapshot arrives empty.
       items:       cleanItems.length ? cleanItems : (existing ? existing.items : []),
       isOnline:    online,
+      // A real inventory snapshot means we're fully live.
+      phase:       cleanItems.length ? 'live' : (phase || (existing && existing.phase) || 'live'),
       lastSeenAt:  online ? now : (existing ? existing.lastSeenAt : now),
       updatedAt:   now,
     };

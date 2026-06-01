@@ -59,6 +59,20 @@ if ($content -match 'tracker_status') { Write-Host "PASS  tracker_status payload
 if ($content -match 'polling every 5s') { Write-Host "PASS  polling fallback present" } else { $errors += "FAIL  polling fallback missing" }
 if ($content -match 'DEBUG_DIAGNOSTIC') { Write-Host "PASS  DEBUG_DIAGNOSTIC quarantine flag found" } else { $errors += "FAIL  DEBUG_DIAGNOSTIC missing" }
 
+# ── v7-replion player-data discovery hardening (this fix) ──
+if ($content -match 'DEBUG_REPLION_DISCOVERY') { Write-Host "PASS  DEBUG_REPLION_DISCOVERY config flag found" } else { $errors += "FAIL  DEBUG_REPLION_DISCOVERY missing" }
+if ($content -match 'REPLION_WAIT_SECONDS') { Write-Host "PASS  REPLION_WAIT_SECONDS deadline found" } else { $errors += "FAIL  REPLION_WAIT_SECONDS missing" }
+if ($content -match 'describeReplionObject') { Write-Host "PASS  describeReplionObject (safe shape printer) found" } else { $errors += "FAIL  describeReplionObject missing" }
+if ($content -match 'inventoryPaths') { Write-Host "PASS  inventoryPaths (inventory path detector) found" } else { $errors += "FAIL  inventoryPaths missing" }
+if ($content -match 'GetReplion') { Write-Host "PASS  GetReplion attempt found" } else { $errors += "FAIL  GetReplion missing" }
+if ($content -match 'WaitReplion') { Write-Host "PASS  WaitReplion attempt found" } else { $errors += "FAIL  WaitReplion missing" }
+if ($content -match 'OnReplionAdded') { Write-Host "PASS  OnReplionAdded subscription found" } else { $errors += "FAIL  OnReplionAdded missing" }
+
+# tracker_status discovery phases must be emitted so the website shows "running"
+foreach ($ph in @('startup','replion_client_found','player_data_selected','player_data_not_found','inventory_path_missing','replion_missing')) {
+    if ($content -match [regex]::Escape($ph)) { Write-Host "PASS  phase '$ph' present" } else { $errors += "FAIL  phase '$ph' missing" }
+}
+
 # Replion must be read-only: no mutation methods actually invoked on a replion object
 $mut = ([regex]::Matches($codeOnly, ':\s*(Set|Update|Increase|Decrease|Fire|Save|Equip|Buy|Sell|Remove|Insert)\s*\(')).Count
 if ($mut -gt 0) { $errors += "FAIL  $mut Replion mutation call(s) found in code (must be read-only)" } else { Write-Host "PASS  No Replion mutation calls in code (read-only)" }
