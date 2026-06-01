@@ -1296,3 +1296,168 @@ describe('Fish It tracker — BLOCKER 5 catalog_summary + debug route', () => {
     assert.ok(hasFish, 'fish in inventory.fish');
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// BLOCKER 6: Replion parser finalization — parseStats + phase must always
+// advance past player_data_selected after inventory_parse_failed,
+// inventory_empty, or inventory_snapshot.
+// ════════════════════════════════════════════════════════════════════════════
+describe('Fish It tracker — BLOCKER 6 Replion parse finalization', () => {
+  beforeEach(() => { cleanup(); });
+
+  test('player_data_selected then inventory_parse_failed updates phase and parseStats', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B6Angler1',
+        userId: 6001,
+        source: 'replion',
+        isOnline: true,
+        phase: 'player_data_selected',
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B6Angler1',
+        userId: 6001,
+        source: 'replion',
+        isOnline: true,
+        phase: 'inventory_parse_failed',
+        parseStats: {
+          raw: 3116, accepted: 0, rejected: 3116,
+          selectedPath: 'Inventory.Items',
+          firstRejected: [{ rawKey: '70', reason: 'unresolved_numeric_id' }],
+        },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B6Angler1')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'inventory_parse_failed');
+    assert.notEqual(res.body.parseStats, null);
+    assert.equal(res.body.parseStats.raw, 3116);
+    assert.equal(res.body.parseStats.accepted, 0);
+    assert.equal(res.body.lastPayloadType, 'tracker_status');
+  });
+
+  test('inventory_snapshot with parseStats stores items and parseStats', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B6Angler2',
+        userId: 6002,
+        source: 'replion',
+        isOnline: true,
+        phase: 'live',
+        items: [
+          { name: 'Ballina Angelfish', count: 3, category: 'fish', itemId: '119' },
+          { name: 'Flame Angelfish', count: 2, category: 'fish', itemId: '68' },
+        ],
+        parseStats: {
+          raw: 3116, accepted: 2, rejected: 3114,
+          selectedPath: 'Inventory.Items', fish: 2, rods: 0, items: 0,
+        },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B6Angler2')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'live');
+    assert.equal(res.body.lastPayloadType, 'inventory_snapshot');
+    assert.ok(res.body.parseStats);
+    assert.equal(res.body.parseStats.accepted, 2);
+    assert.equal(res.body.counts.items, 2);
+  });
+
+  test('partial accepted + rejected stores only accepted items', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B6Angler3',
+        userId: 6003,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Darwin Clownfish', count: 1, category: 'fish', itemId: '71' }],
+        parseStats: {
+          raw: 3116, accepted: 1, rejected: 3115,
+          selectedPath: 'Inventory.Items',
+          firstRejected: [{ rawKey: '70', reason: 'unresolved_numeric_id' }],
+        },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B6Angler3')
+      .expect(200);
+
+    assert.equal(res.body.items.length, 1);
+    assert.equal(res.body.items[0].name, 'Darwin Clownfish');
+    assert.equal(res.body.parseStats.rejected, 3115);
+    assert.ok(Array.isArray(res.body.parseStats.firstRejected));
+    assert.equal(res.body.parseStats.firstRejected[0].rawKey, '70');
+  });
+
+  test('inventory_empty tracker_status stores parseStats and lastPayloadType', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B6Angler4',
+        userId: 6004,
+        source: 'replion',
+        isOnline: true,
+        phase: 'inventory_empty',
+        parseStats: { raw: 0, accepted: 0, rejected: 0, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B6Angler4')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'inventory_empty');
+    assert.ok(res.body.parseStats);
+    assert.equal(res.body.parseStats.raw, 0);
+    assert.equal(res.body.lastPayloadType, 'tracker_status');
+  });
+
+  test('parseStats error field is preserved from inventory_parse_failed', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B6Angler5',
+        userId: 6005,
+        source: 'replion',
+        isOnline: true,
+        phase: 'inventory_parse_failed',
+        parseStats: {
+          raw: 100, accepted: 0, rejected: 100,
+          selectedPath: 'Inventory.Items',
+          error: 'test parser traceback line',
+        },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B6Angler5')
+      .expect(200);
+
+    assert.equal(res.body.parseStats.error, 'test parser traceback line');
+  });
+});

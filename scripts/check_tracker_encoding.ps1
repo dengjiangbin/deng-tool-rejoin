@@ -82,6 +82,14 @@ if ($content -match 'resolveMetaById') { Write-Host "PASS  resolveMetaById (id r
 if ($content -match 'scoreInventoryTable') { Write-Host "PASS  scoreInventoryTable (path scorer) found" } else { $errors += "FAIL  scoreInventoryTable missing" }
 if ($content -match 'sourcePath') { Write-Host "PASS  sourcePath tracking found" } else { $errors += "FAIL  sourcePath missing" }
 if ($content -match 'REPLION_PARSE_RESULT') { Write-Host "PASS  REPLION_PARSE_RESULT summary log found" } else { $errors += "FAIL  REPLION_PARSE_RESULT missing" }
+if ($content -match 'REPLION_PARSE_ERROR') { Write-Host "PASS  REPLION_PARSE_ERROR log found" } else { $errors += "FAIL  REPLION_PARSE_ERROR missing" }
+if ($content -match 'parseInventoryFromReplionData\(data\)' -and $content -match 'xpcall\(function\(\)' ) { Write-Host "PASS  xpcall wraps parseInventoryFromReplionData in refreshFromReplion" } else { $errors += "FAIL  xpcall around parseInventoryFromReplionData missing" }
+if ($content -match 'DEBUG_SAMPLE_LIMIT') { Write-Host "PASS  DEBUG_SAMPLE_LIMIT cap found" } else { $errors += "FAIL  DEBUG_SAMPLE_LIMIT missing" }
+if ($content -match 'DEBUG_LOOKUP_LIMIT') { Write-Host "PASS  DEBUG_LOOKUP_LIMIT cap found" } else { $errors += "FAIL  DEBUG_LOOKUP_LIMIT missing" }
+if ($content -match 'DEBUG_REJECT_LIMIT') { Write-Host "PASS  DEBUG_REJECT_LIMIT cap found" } else { $errors += "FAIL  DEBUG_REJECT_LIMIT missing" }
+if ($content -match 'DEBUG_RAW_ENTRY_LIMIT') { Write-Host "PASS  DEBUG_RAW_ENTRY_LIMIT cap found" } else { $errors += "FAIL  DEBUG_RAW_ENTRY_LIMIT missing" }
+if ($content -match 'DASHBOARD_SEND tracker_status phase=inventory_parse_failed') { Write-Host "PASS  inventory_parse_failed sync log found" } else { $errors += "FAIL  inventory_parse_failed sync log missing" }
+if ($content -match 'DASHBOARD_SEND tracker_status phase=inventory_empty') { Write-Host "PASS  inventory_empty sync log found" } else { $errors += "FAIL  inventory_empty sync log missing" }
 foreach ($ph in @('inventory_empty','inventory_parse_failed')) {
     if ($content -match [regex]::Escape($ph)) { Write-Host "PASS  phase '$ph' present" } else { $errors += "FAIL  phase '$ph' missing" }
 }

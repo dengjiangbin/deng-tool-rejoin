@@ -203,7 +203,7 @@ function sanitiseSource(raw) {
 function sanitiseParseStats(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const num = (v) => (Number.isFinite(Number(v)) ? Math.floor(Number(v)) : 0);
-  return {
+  const out = {
     raw:          num(raw.raw),
     accepted:     num(raw.accepted),
     rejected:     num(raw.rejected),
@@ -211,6 +211,17 @@ function sanitiseParseStats(raw) {
     tiers:        num(raw.tiers),
     selectedPath: typeof raw.selectedPath === 'string' ? raw.selectedPath.slice(0, 80) : null,
   };
+  if (typeof raw.error === 'string' && raw.error.length > 0) {
+    out.error = raw.error.slice(0, 500);
+  }
+  if (Array.isArray(raw.firstRejected)) {
+    out.firstRejected = raw.firstRejected.slice(0, 10).map((r) => ({
+      rawKey:     typeof r.rawKey === 'string'     ? r.rawKey.slice(0, 80)     : null,
+      sourcePath: typeof r.sourcePath === 'string' ? r.sourcePath.slice(0, 120) : null,
+      reason:     typeof r.reason === 'string'     ? r.reason.slice(0, 80)     : null,
+    }));
+  }
+  return out;
 }
 
 // Discovery phases reported by tracker_status. They drive the website's
@@ -269,16 +280,17 @@ router.post(
       const base = existing || { username: cleanUser, userId: cleanUserId, items: [], inventory: null };
       liveTrackDB[key] = {
         ...base,
-        username:   cleanUser,
-        userId:     cleanUserId || base.userId || 0,
-        source:     source !== 'unknown' ? source : (base.source || source),
-        items:      base.items     || [],   // NEVER clear on status-only
-        inventory:  base.inventory || null, // NEVER clear on status-only
-        isOnline:   online,
-        phase:      phase || base.phase || 'startup',
-        parseStats: sanitiseParseStats(body.parseStats) || base.parseStats || null,
-        lastSeenAt: online ? now : (base.lastSeenAt || now),
-        updatedAt:  now,
+        username:        cleanUser,
+        userId:          cleanUserId || base.userId || 0,
+        source:          source !== 'unknown' ? source : (base.source || source),
+        items:           base.items     || [],   // NEVER clear on status-only
+        inventory:       base.inventory || null, // NEVER clear on status-only
+        isOnline:        online,
+        phase:           phase || base.phase || 'startup',
+        parseStats:      sanitiseParseStats(body.parseStats) || base.parseStats || null,
+        lastPayloadType: 'tracker_status',
+        lastSeenAt:      online ? now : (base.lastSeenAt || now),
+        updatedAt:       now,
       };
       // Store userId→key alias so GET can resolve by userId if needed.
       if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
@@ -330,16 +342,17 @@ router.post(
 
     // Store under username key + userId alias.
     liveTrackDB[key] = {
-      username:    cleanUser,
-      userId:      cleanUserId,
+      username:        cleanUser,
+      userId:          cleanUserId,
       source,
-      items:       cleanItems.length ? cleanItems : (existing ? existing.items     : []),
-      inventory:   cleanItems.length ? inventory  : (existing ? existing.inventory : null),
-      isOnline:    online,
-      phase:       cleanItems.length ? 'live' : (phase || (existing && existing.phase) || 'live'),
-      parseStats:  ps || (existing && existing.parseStats) || null,
-      lastSeenAt:  online ? now : (existing ? existing.lastSeenAt : now),
-      updatedAt:   now,
+      items:           cleanItems.length ? cleanItems : (existing ? existing.items     : []),
+      inventory:       cleanItems.length ? inventory  : (existing ? existing.inventory : null),
+      isOnline:        online,
+      phase:           cleanItems.length ? 'live' : (phase || (existing && existing.phase) || 'live'),
+      parseStats:      ps || (existing && existing.parseStats) || null,
+      lastPayloadType: cleanItems.length ? 'inventory_snapshot' : (type || 'inventory_snapshot'),
+      lastSeenAt:      online ? now : (existing ? existing.lastSeenAt : now),
+      updatedAt:       now,
     };
     if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
 
