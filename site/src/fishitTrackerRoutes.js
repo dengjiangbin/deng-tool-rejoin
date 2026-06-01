@@ -83,10 +83,14 @@ function sanitiseItems(raw) {
     // Drop stat/UI labels (e.g. "Caught", "Rarest Fish") on the way in.
     if (!name || catalogStore.isStatLabel(name)) continue;
 
-    const rawWeight = item.weight ?? item.totalWeight ?? item.Weight;
-    const rawAmount = item.amount ?? item.Amount ?? 1;
+    const rawWeight = item.weight ?? item.maxWeight ?? item.totalWeight ?? item.Weight;
+    const rawAmount = item.amount ?? item.count ?? item.Amount ?? item.Count ?? 1;
     const weight = Number(rawWeight);
     const amount = Number(rawAmount);
+
+    const rarity = typeof item.rarity === 'string'
+      ? item.rarity
+      : (typeof item.tier === 'string' ? item.tier : null);
 
     out.push({
       name:     name.slice(0, 100),
@@ -94,8 +98,10 @@ function sanitiseItems(raw) {
       amount:   Number.isFinite(amount) && amount > 0 ? Math.floor(amount) : 1,
       category: typeof item.category === 'string' ? item.category.slice(0, 50)  : null,
       tab:      typeof item.tab === 'string'      ? item.tab.slice(0, 50)       : null,
-      rarity:   typeof item.rarity === 'string'   ? item.rarity.slice(0, 50)    : null,
+      rarity:   rarity ? rarity.slice(0, 50) : null,
       imageUrl: typeof item.imageUrl === 'string' ? item.imageUrl.slice(0, 200) : null,
+      itemId:   typeof item.itemId === 'string'   ? item.itemId.slice(0, 80)    : null,
+      source:   typeof item.source === 'string'   ? item.source.slice(0, 120)   : null,
       shiny:    item.shiny === true               ? true                        : false,
     });
   }
@@ -140,13 +146,29 @@ router.get('/tracker', (_req, res) => {
   });
 });
 
+// Allowed inventory sources. "replion" is the source of truth.
+const ALLOWED_SOURCES = new Set(['replion', 'replion_missing', 'event', 'legacy', 'unknown']);
+
+function sanitiseSource(raw) {
+  if (typeof raw !== 'string') return 'unknown';
+  const s = raw.trim().toLowerCase().slice(0, 30);
+  return ALLOWED_SOURCES.has(s) ? s : 'unknown';
+}
+
 // ── POST /api/tracker/update-backpack ────────────────────────────
+// Accepts both:
+//   • inventory_snapshot  – the Replion source-of-truth inventory. The items
+//     array REPLACES the previous snapshot (counts never accumulate).
+//   • tracker_status      – a lightweight online/offline + source ping with no
+//     items; keeps the last known inventory and only flips flags.
 router.post(
   '/api/tracker/update-backpack',
   postLimiter,
-  express.json({ limit: '64kb' }),
+  express.json({ limit: '128kb' }),
   (req, res) => {
-    const { username, userId, items, isOnline } = req.body || {};
+    const body = req.body || {};
+    const { username, userId, items, isOnline, type } = body;
+    const source = sanitiseSource(body.source);
 
     const cleanUser = sanitiseUsername(username);
     if (!cleanUser) {
@@ -157,21 +179,26 @@ router.post(
     const now = new Date().toISOString();
     const online = isOnline === true;
     const existing = liveTrackDB[key];
-    const cleanItems = sanitiseItems(items);
+    const isStatusOnly = type === 'tracker_status';
+    const cleanItems = isStatusOnly ? [] : sanitiseItems(items);
 
-    // Offline / status-only update: keep the last known inventory visible.
-    // Never clear inventory just because the player went offline or sent an
-    // empty payload — only flip the online flag and refresh timestamps.
-    if (!online && existing && (!cleanItems.length)) {
-      existing.isOnline = false;
+    // Status-only ping, OR an offline/empty update: keep the last known
+    // inventory visible and only flip the online flag + source. Never clear
+    // inventory just because the player went offline or sent no items.
+    if ((isStatusOnly || (!online && !cleanItems.length)) && existing) {
+      existing.isOnline = online;
+      existing.source = source !== 'unknown' ? source : existing.source;
+      if (online) existing.lastSeenAt = now;
       existing.updatedAt = now;
       return res.status(200).json({ status: 'success', note: 'status_only' });
     }
 
+    // Inventory snapshot REPLACES the stored items (Replion source of truth).
     liveTrackDB[key] = {
       username:    cleanUser,
       userId:      Number.isFinite(Number(userId)) ? Number(userId) : 0,
-      // Keep last known inventory if a live payload arrives empty.
+      source,
+      // Keep last known inventory if a live snapshot arrives empty.
       items:       cleanItems.length ? cleanItems : (existing ? existing.items : []),
       isOnline:    online,
       lastSeenAt:  online ? now : (existing ? existing.lastSeenAt : now),

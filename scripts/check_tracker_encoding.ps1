@@ -35,8 +35,7 @@ if ($content -match 'mergeItem') { Write-Host "PASS  mergeItem found" } else { $
 if ($content -match 'walkInventoryTable') { Write-Host "PASS  walkInventoryTable found" } else { $errors += "FAIL  walkInventoryTable missing" }
 if ($content -match 'DEBUG_VERBOSE_INVENTORY') { Write-Host "PASS  DEBUG_VERBOSE_INVENTORY config found" } else { $errors += "FAIL  DEBUG_VERBOSE_INVENTORY missing" }
 
-# ── v7-rs-catalog checks ──────────────────────────────────────────
-if ($content -match 'v7-rs-catalog') { Write-Host "PASS  v7-rs-catalog build marker found" } else { $errors += "FAIL  v7-rs-catalog build marker missing" }
+# ── RS metadata-catalog checks (retained, demoted to metadata under v7-replion) ──
 if ($content -match 'scanReplicatedStorageFishCatalog') { Write-Host "PASS  scanReplicatedStorageFishCatalog (recursive scanner) found" } else { $errors += "FAIL  scanReplicatedStorageFishCatalog missing" }
 if ($content -match 'fish_catalog_snapshot') { Write-Host "PASS  fish_catalog_snapshot payload type found" } else { $errors += "FAIL  fish_catalog_snapshot missing" }
 if ($content -match 'syncCatalogToBackend') { Write-Host "PASS  syncCatalogToBackend found" } else { $errors += "FAIL  syncCatalogToBackend missing" }
@@ -46,6 +45,23 @@ if ($content -match 'asset-thumbnail') { Write-Host "PASS  asset-thumbnail URL c
 if ($content -match 'extractInstanceMeta') { Write-Host "PASS  extractInstanceMeta (rich metadata) found" } else { $errors += "FAIL  extractInstanceMeta missing" }
 if ($content -match 'walkCatalogTable') { Write-Host "PASS  walkCatalogTable (module require scan) found" } else { $errors += "FAIL  walkCatalogTable missing" }
 if ($content -match 'GetAttributes') { Write-Host "PASS  GetAttributes() metadata read found" } else { $errors += "FAIL  GetAttributes missing" }
+
+# ── v7-replion checks (Replion player data = inventory source of truth) ──
+if ($content -match 'v7-replion') { Write-Host "PASS  v7-replion build marker found" } else { $errors += "FAIL  v7-replion build marker missing" }
+if ($content -match 'findReplionClient') { Write-Host "PASS  findReplionClient (Replion module discovery) found" } else { $errors += "FAIL  findReplionClient missing" }
+if ($content -match 'findPlayerDataReplion') { Write-Host "PASS  findPlayerDataReplion (player data selection) found" } else { $errors += "FAIL  findPlayerDataReplion missing" }
+if ($content -match 'readReplionData') { Write-Host "PASS  readReplionData (read-only data accessor) found" } else { $errors += "FAIL  readReplionData missing" }
+if ($content -match 'parseInventoryFromReplionData') { Write-Host "PASS  parseInventoryFromReplionData (inventory parser) found" } else { $errors += "FAIL  parseInventoryFromReplionData missing" }
+if ($content -match 'buildMetadataCatalog') { Write-Host "PASS  buildMetadataCatalog (RS metadata catalog) found" } else { $errors += "FAIL  buildMetadataCatalog missing" }
+if ($content -match 'attachReplionListeners') { Write-Host "PASS  attachReplionListeners (realtime) found" } else { $errors += "FAIL  attachReplionListeners missing" }
+if ($content -match 'inventory_snapshot') { Write-Host "PASS  inventory_snapshot payload type found" } else { $errors += "FAIL  inventory_snapshot missing" }
+if ($content -match 'tracker_status') { Write-Host "PASS  tracker_status payload type found" } else { $errors += "FAIL  tracker_status missing" }
+if ($content -match 'polling every 5s') { Write-Host "PASS  polling fallback present" } else { $errors += "FAIL  polling fallback missing" }
+if ($content -match 'DEBUG_DIAGNOSTIC') { Write-Host "PASS  DEBUG_DIAGNOSTIC quarantine flag found" } else { $errors += "FAIL  DEBUG_DIAGNOSTIC missing" }
+
+# Replion must be read-only: no mutation methods actually invoked on a replion object
+$mut = ([regex]::Matches($codeOnly, ':\s*(Set|Update|Increase|Decrease|Fire|Save|Equip|Buy|Sell|Remove|Insert)\s*\(')).Count
+if ($mut -gt 0) { $errors += "FAIL  $mut Replion mutation call(s) found in code (must be read-only)" } else { Write-Host "PASS  No Replion mutation calls in code (read-only)" }
 
 Write-Host ""
 if ($errors.Count -eq 0) {
