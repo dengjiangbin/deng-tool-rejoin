@@ -109,6 +109,40 @@ function sanitiseItems(raw) {
 }
 
 /**
+ * Normalise inventory from any shape the Lua tracker may send:
+ *   - flat `items` array (primary — preferred)
+ *   - grouped `owned.{fish,rods,items}` (fallback when flat is absent/empty)
+ * This handles the case where `items` was accidentally omitted or empty.
+ */
+function normaliseInventoryItems(body) {
+  const flat = Array.isArray(body.items) ? body.items : [];
+  if (flat.length > 0) return sanitiseItems(flat);
+  // Fallback: combine owned groups when flat is not present.
+  const owned = (body.owned && typeof body.owned === 'object') ? body.owned : {};
+  const combined = [
+    ...(Array.isArray(owned.fish)  ? owned.fish  : []),
+    ...(Array.isArray(owned.rods)  ? owned.rods  : []),
+    ...(Array.isArray(owned.items) ? owned.items : []),
+  ];
+  return sanitiseItems(combined);
+}
+
+/**
+ * Partition a flat sanitised-items array into { all, fish, rods, items } groups.
+ * Mirrors the Lua buildOwnedGroups() output for frontend consumption.
+ */
+function buildInventoryGroups(items) {
+  const fish = [], rods = [], inv = [];
+  for (const it of items) {
+    const cat = String(it.category || '').toLowerCase();
+    if (cat === 'rod' || cat === 'bait') rods.push(it);
+    else if (cat === 'items')            inv.push(it);
+    else                                 fish.push(it);
+  }
+  return { all: items, fish, rods, items: inv };
+}
+
+/**
  * Merge stored items with the persistent catalog so each card carries a real
  * name, tier/rarity and image — even for old snapshots. Also filters out any
  * stat labels that may have been stored before this filtering existed.
@@ -199,76 +233,105 @@ function sanitisePhase(raw) {
 router.post(
   '/api/tracker/update-backpack',
   postLimiter,
-  express.json({ limit: '128kb' }),
+  express.json({ limit: '512kb' }),
   (req, res) => {
     const body = req.body || {};
-    const { username, userId, items, isOnline, type } = body;
+    const { username, userId, isOnline, type } = body;
     const source = sanitiseSource(body.source);
-    const phase = sanitisePhase(body.phase);
+    const phase  = sanitisePhase(body.phase);
 
     const cleanUser = sanitiseUsername(username);
     if (!cleanUser) {
       return res.status(400).json({ error: 'Invalid or missing username.' });
     }
 
-    const key = cleanUser.toLowerCase();
-    const now = new Date().toISOString();
-    const online = isOnline === true;
-    const existing = liveTrackDB[key];
+    const key         = cleanUser.toLowerCase();
+    const now         = new Date().toISOString();
+    const online      = isOnline === true;
+    const existing    = liveTrackDB[key];
     const isStatusOnly = type === 'tracker_status';
-    const cleanItems = isStatusOnly ? [] : sanitiseItems(items);
     const cleanUserId = Number.isFinite(Number(userId)) ? Number(userId) : 0;
 
-    // tracker_status is a heartbeat that proves the script is RUNNING. It must
-    // create or update the session (online=true) even before any inventory
-    // exists — this is what flips the website card off "waiting to execute".
-    // It never clears a previously captured inventory.
+    // ── tracker_status heartbeat ──────────────────────────────────
+    // Proves the script is running. Creates the session when it does not yet
+    // exist, and flips online/phase. NEVER clears inventory or parseStats.
     if (isStatusOnly) {
-      const base = existing || {
-        username: cleanUser,
-        userId: cleanUserId,
-        items: [],
-      };
+      const base = existing || { username: cleanUser, userId: cleanUserId, items: [], inventory: null };
       liveTrackDB[key] = {
         ...base,
         username:   cleanUser,
         userId:     cleanUserId || base.userId || 0,
         source:     source !== 'unknown' ? source : (base.source || source),
-        items:      base.items || [],
+        items:      base.items     || [],   // NEVER clear on status-only
+        inventory:  base.inventory || null, // NEVER clear on status-only
         isOnline:   online,
         phase:      phase || base.phase || 'startup',
         parseStats: sanitiseParseStats(body.parseStats) || base.parseStats || null,
         lastSeenAt: online ? now : (base.lastSeenAt || now),
         updatedAt:  now,
       };
+      // Store userId→key alias so GET can resolve by userId if needed.
+      if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
+      // Server-side log.
+      console.log(`[fishit-tracker] recv tracker_status user=${cleanUser} userId=${cleanUserId} phase=${liveTrackDB[key].phase} online=${online}`);
       return res.status(200).json({ status: 'success', note: 'status_only', phase: liveTrackDB[key].phase });
     }
 
-    // An offline/empty inventory update: keep the last known inventory visible
-    // and only flip the online flag + source.
-    if (!online && !cleanItems.length && existing) {
+    // ── Offline snapshot with no items ────────────────────────────
+    // Keep the last known inventory; only flip the online flag.
+    const rawFlatLen  = Array.isArray(body.items) ? body.items.length : 0;
+    const rawOwnedLen = (body.owned && typeof body.owned === 'object')
+      ? ['fish','rods','items'].reduce((s,k2)=> s + (Array.isArray(body.owned[k2]) ? body.owned[k2].length : 0), 0)
+      : 0;
+
+    if (!online && rawFlatLen === 0 && rawOwnedLen === 0 && existing) {
       existing.isOnline = online;
-      existing.source = source !== 'unknown' ? source : existing.source;
+      existing.source   = source !== 'unknown' ? source : existing.source;
       existing.updatedAt = now;
       return res.status(200).json({ status: 'success', note: 'offline_keep' });
     }
 
-    // Inventory snapshot REPLACES the stored items (Replion source of truth).
+    // ── Inventory snapshot ────────────────────────────────────────
+    // Accepts both flat `items` array and grouped `owned.{fish,rods,items}`.
+    const cleanItems = normaliseInventoryItems(body);
+    const inventory  = buildInventoryGroups(cleanItems);
+    const ps         = sanitiseParseStats(body.parseStats);
+
+    // Server-side log — counts and first 3 samples (never full dump).
+    const ownedFishLen  = Array.isArray(body.owned && body.owned.fish)  ? body.owned.fish.length  : 0;
+    const ownedRodsLen  = Array.isArray(body.owned && body.owned.rods)  ? body.owned.rods.length  : 0;
+    const ownedItemsLen = Array.isArray(body.owned && body.owned.items) ? body.owned.items.length : 0;
+    console.log(
+      `[fishit-tracker] recv ${type || 'snapshot'} user=${cleanUser} userId=${cleanUserId}` +
+      ` flatItems=${rawFlatLen} ownedFish=${ownedFishLen} ownedRods=${ownedRodsLen} ownedItems=${ownedItemsLen}`
+    );
+    console.log(
+      `[fishit-tracker] stored key=${key}` +
+      ` items=${cleanItems.length} fish=${inventory.fish.length} rods=${inventory.rods.length}` +
+      ` phase=${cleanItems.length ? 'live' : (phase || 'live')}` +
+      (ps ? ` parseStats.raw=${ps.raw} accepted=${ps.accepted}` : '')
+    );
+    if (cleanItems.length > 0) {
+      const samples = cleanItems.slice(0, 3).map(
+        (it) => `${it.name}(x${it.amount},tier=${it.rarity || '-'},img=${!!it.imageUrl},cat=${it.category || '-'})`
+      ).join(' | ');
+      console.log(`[fishit-tracker] first 3 items: ${samples}`);
+    }
+
+    // Store under username key + userId alias.
     liveTrackDB[key] = {
       username:    cleanUser,
       userId:      cleanUserId,
       source,
-      // Keep last known inventory if a live snapshot arrives empty.
-      items:       cleanItems.length ? cleanItems : (existing ? existing.items : []),
+      items:       cleanItems.length ? cleanItems : (existing ? existing.items     : []),
+      inventory:   cleanItems.length ? inventory  : (existing ? existing.inventory : null),
       isOnline:    online,
-      // A real inventory snapshot means we're fully live.
       phase:       cleanItems.length ? 'live' : (phase || (existing && existing.phase) || 'live'),
-      // Keep parseStats from the snapshot; preserve prior stats if empty snapshot.
-      parseStats:  sanitiseParseStats(body.parseStats)
-                   || (existing && existing.parseStats) || null,
+      parseStats:  ps || (existing && existing.parseStats) || null,
       lastSeenAt:  online ? now : (existing ? existing.lastSeenAt : now),
       updatedAt:   now,
     };
+    if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
 
     return res.status(200).json({ status: 'success' });
   },
@@ -299,6 +362,7 @@ router.get('/api/fishit-tracker/catalog', getLimiter, (_req, res) => {
 });
 
 // ── GET /api/tracker/get-backpack/:username ───────────────────────
+// Also resolves userId aliases (uid:<number> keys created on POST).
 router.get(
   '/api/tracker/get-backpack/:username',
   getLimiter,
@@ -308,22 +372,88 @@ router.get(
       return res.status(400).json({ error: 'Invalid username.' });
     }
 
-    const key   = cleanUser.toLowerCase();
-    const data  = liveTrackDB[key];
+    const key  = cleanUser.toLowerCase();
+    let data    = liveTrackDB[key];
+
+    // Fallback: if the param looks like a userId, resolve through the alias.
+    if (!data && /^\d+$/.test(key)) {
+      const uidTarget = liveTrackDB['uid:' + key];
+      if (typeof uidTarget === 'string') data = liveTrackDB[uidTarget];
+    }
 
     if (!data) {
       return res.status(404).json({ error: 'No tracking session active for this user.' });
     }
 
-    // Merge each item with the persistent catalog (real name + tier + image)
-    // and strip any stat labels stored before read-time filtering existed.
+    // Enrich flat items array (catalog merge + stat-label strip).
+    const enrichedFlat = enrichItemsFromCatalog(data.items);
+
+    // Build enriched grouped inventory from the stored inventory object.
+    // Fall back to partitioning the flat array when no grouped data exists.
+    let enrichedInventory;
+    if (data.inventory && Array.isArray(data.inventory.all)) {
+      enrichedInventory = {
+        all:   enrichItemsFromCatalog(data.inventory.all),
+        fish:  enrichItemsFromCatalog(data.inventory.fish  || []),
+        rods:  enrichItemsFromCatalog(data.inventory.rods  || []),
+        items: enrichItemsFromCatalog(data.inventory.items || []),
+      };
+    } else {
+      // Legacy sessions that pre-date the inventory grouping field.
+      enrichedInventory = buildInventoryGroups(enrichedFlat);
+    }
+
     const enriched = {
       ...data,
-      items: enrichItemsFromCatalog(data.items),
+      items:     enrichedFlat,        // legacy flat array (backward compat)
+      inventory: enrichedInventory,   // grouped: { all, fish, rods, items }
     };
 
     return res.status(200).json(enriched);
   },
 );
+
+// ── GET /api/fishit-tracker/debug/:username ───────────────────────
+// Admin-safe diagnostic: returns only counts and first 5 items, never
+// the full inventory dump. Helps distinguish backend-has-data vs
+// frontend-render bugs without leaking sensitive inventory contents.
+router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
+  const cleanUser = sanitiseUsername(req.params.username);
+  if (!cleanUser) return res.status(400).json({ error: 'Invalid username.' });
+
+  const key   = cleanUser.toLowerCase();
+  const data  = liveTrackDB[key];
+  if (!data) return res.status(404).json({ found: false, key });
+
+  const inv   = data.inventory || buildInventoryGroups(data.items || []);
+  const first5 = (inv.all || data.items || []).slice(0, 5).map((i) => ({
+    name:     i.name,
+    amount:   i.amount,
+    rarity:   i.rarity,
+    hasImage: !!i.imageUrl,
+    category: i.category,
+    itemId:   i.itemId,
+  }));
+
+  return res.status(200).json({
+    found:           true,
+    sessionKey:      key,
+    username:        data.username,
+    userId:          data.userId,
+    online:          data.isOnline,
+    phase:           data.phase,
+    parseStats:      data.parseStats || null,
+    lastSeenAt:      data.lastSeenAt || null,
+    lastInventoryAt: data.updatedAt  || null,
+    counts: {
+      flatItems:      (data.items || []).length,
+      inventoryAll:   inv.all.length,
+      inventoryFish:  inv.fish.length,
+      inventoryRods:  inv.rods.length,
+      inventoryItems: inv.items.length,
+    },
+    first5Items: first5,
+  });
+});
 
 module.exports = router;

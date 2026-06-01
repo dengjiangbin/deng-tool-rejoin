@@ -287,11 +287,15 @@
     const s = card.querySelector('[data-sync-time]');
     const l = card.querySelector('[data-status-line]');
     const b = card.querySelector('[data-card-body]');
-    const totalAmount = (data.items || []).reduce((sum, item) => sum + (Number(item.amount) || 1), 0);
-    if (c) c.innerHTML = `Items: <strong>${totalAmount}</strong> <span style="color:#8a94a6;">(${data.items.length} types)</span>`;
+    // Support both grouped (inventory.all) and legacy flat (items) shapes.
+    const allItems = (data.inventory && Array.isArray(data.inventory.all) && data.inventory.all.length > 0)
+      ? data.inventory.all
+      : (data.items || []);
+    const totalAmount = allItems.reduce((sum, item) => sum + (Number(item.amount || item.count) || 1), 0);
+    if (c) c.innerHTML = `Items: <strong>${totalAmount}</strong> <span style="color:#8a94a6;">(${allItems.length} types)</span>`;
     if (s) s.textContent = `Sync: ${fmtTime(data.updatedAt)}`;
     if (l) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;
-    if (b) b.innerHTML = buildItemsHtml(data.items);
+    if (b) b.innerHTML = buildItemsHtml(allItems);
   }
 
   function setCardWaiting(card, name) {
@@ -340,9 +344,11 @@
     if (s) s.textContent = data.updatedAt ? `Sync: ${fmtTime(data.updatedAt)}` : '';
     if (c) c.innerHTML = `Items: <strong>-</strong>`;
     let bodyHtml = `<div class="card-empty">&#x1F7E2; ${escHtml(phaseMessage(data.phase))}</div>`;
-    // BLOCKER 3: Show parse stats when parser fails so the user can debug.
-    if (data.parseStats && (data.phase === 'inventory_parse_failed' || data.phase === 'inventory_empty')) {
-      const ps = data.parseStats;
+    // Show parse stats whenever raw>0 accepted=0, regardless of phase label.
+    const ps = data.parseStats;
+    const showParseDebug = ps && ps.raw > 0 && (ps.accepted === 0 ||
+      data.phase === 'inventory_parse_failed' || data.phase === 'inventory_empty');
+    if (showParseDebug) {
       bodyHtml += `<div class="card-empty" style="font-size:0.8em;color:#8a94a6;margin-top:4px">`
         + `Raw: ${ps.raw ?? '?'} &middot; Accepted: ${ps.accepted ?? 0} &middot; Rejected: ${ps.rejected ?? '?'}`
         + (ps.selectedPath ? ` &middot; Path: ${escHtml(ps.selectedPath)}` : '')
@@ -360,11 +366,14 @@
     const b = card.querySelector('[data-card-body]');
     if (l) l.innerHTML = `&#x1F534; Offline &mdash; <strong>${escHtml(name)}</strong> is not running the tracker`;
     if (s && lastData) s.textContent = `Last sync: ${fmtTime(lastData.updatedAt)}`;
-    if (c && lastData) {
-      const total = (lastData.items || []).reduce((sum, i) => sum + (Number(i.amount) || 1), 0);
-      c.innerHTML = `Items: <strong>${total}</strong> <span style="color:#8a94a6;">(${(lastData.items||[]).length} types) &mdash; Offline</span>`;
+    if (lastData) {
+      const allItems = (lastData.inventory && Array.isArray(lastData.inventory.all) && lastData.inventory.all.length > 0)
+        ? lastData.inventory.all
+        : (lastData.items || []);
+      const total = allItems.reduce((sum, i) => sum + (Number(i.amount || i.count) || 1), 0);
+      if (c) c.innerHTML = `Items: <strong>${total}</strong> <span style="color:#8a94a6;">(${allItems.length} types) &mdash; Offline</span>`;
+      if (b) b.innerHTML = buildItemsHtml(allItems);
     }
-    if (b && lastData) b.innerHTML = buildItemsHtml(lastData.items);
   }
 
   function setCardError(card) {
@@ -391,7 +400,11 @@
       if (!res.ok) { setCardError(entry.el); return; }
       const data = await res.json();
       entry.lastData = data;
-      const hasItems = Array.isArray(data.items) && data.items.length > 0;
+      // Support grouped (inventory.all) and legacy flat (items) response shapes.
+      const allItems = (data.inventory && Array.isArray(data.inventory.all))
+        ? data.inventory.all
+        : (data.items || []);
+      const hasItems = allItems.length > 0;
       if (data.isOnline === false) {
         // Offline: keep the last known inventory visible with a red dot.
         setCardOffline(entry.el, entry.displayName, data);

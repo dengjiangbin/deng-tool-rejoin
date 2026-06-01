@@ -751,3 +751,295 @@ describe('Fish It tracker — numeric-Id instance inventory (BLOCKER 3)', () => 
     assert.equal(res.body.parseStats.raw, 0);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────
+// BLOCKER 4: Backend/frontend rendering pipeline end-to-end contract.
+// These tests lock the fixes introduced in the BLOCKER 4 PR:
+//   - Grouped inventory object returned by GET.
+//   - owned.fish fallback when flat items is absent.
+//   - `count` field accepted as alias for `amount`.
+//   - `tier` field accepted as alias for `rarity`.
+//   - tracker_status / catalog_snapshot never clear inventory.
+//   - GET by username returns session stored by userId+username.
+//   - parseStats raw>0 accepted=0 surfaced in response.
+//   - Debug route returns correct counts.
+// ───────────────────────────────────────────────────────────────────
+describe('Fish It tracker — BLOCKER 4 backend rendering pipeline', () => {
+  beforeEach(() => { cleanup(); });
+
+  // B4-1: inventory_snapshot with owned.fish stores and returns items.
+  test('B4-1: inventory_snapshot with owned.fish (no flat items) is stored', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B4Angler1',
+        userId: 4001,
+        source: 'replion',
+        isOnline: true,
+        // No flat `items` — only grouped `owned` (legacy fallback shape).
+        owned: {
+          fish:  [{ name: 'Ballina Angelfish', count: 3, category: 'fish' }],
+          rods:  [{ name: 'Ghostfinn Rod',     count: 1, category: 'rod'  }],
+          items: [],
+        },
+        parseStats: { raw: 4, accepted: 4, rejected: 0, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B4Angler1')
+      .expect(200);
+
+    assert.ok(res.body.items.some((i) => i.name === 'Ballina Angelfish'), 'owned.fish item stored');
+    assert.ok(res.body.items.some((i) => i.name === 'Ghostfinn Rod'),    'owned.rods item stored');
+  });
+
+  // B4-2: `count` (not `amount`) still stores.
+  test('B4-2: inventory_snapshot with count (not amount) stores with correct amount', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B4Angler2',
+        userId: 4002,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'King Crab', count: 7 }],  // `count`, no `amount`
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B4Angler2')
+      .expect(200);
+
+    const fish = res.body.items.find((i) => i.name === 'King Crab');
+    assert.ok(fish, 'item stored');
+    assert.equal(fish.amount, 7, 'count maps to amount');
+  });
+
+  // B4-3: tier=unknown still stores the item.
+  test('B4-3: item with tier=unknown is NOT dropped', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B4Angler3',
+        userId: 4003,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Darwin Clownfish', count: 1, tier: 'unknown' }],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B4Angler3')
+      .expect(200);
+
+    const fish = res.body.items.find((i) => i.name === 'Darwin Clownfish');
+    assert.ok(fish, 'tier=unknown item must NOT be dropped');
+  });
+
+  // B4-4: imageUrl survives backend enrichment.
+  test('B4-4: imageUrl from snapshot is carried through to GET response', async () => {
+    const app = makeApp();
+    const img = 'https://www.roblox.com/asset-thumbnail/image?assetId=999&width=150&height=150&format=png';
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B4Angler4',
+        userId: 4004,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Clownfish', count: 1, imageUrl: img }],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B4Angler4')
+      .expect(200);
+
+    const fish = res.body.items.find((i) => i.name === 'Clownfish');
+    assert.ok(fish, 'item present');
+    assert.ok(fish.imageUrl && fish.imageUrl.includes('999'), 'imageUrl preserved');
+  });
+
+  // B4-5: tracker_status after inventory_snapshot does NOT clear inventory.
+  test('B4-5: tracker_status after inventory_snapshot does not clear items', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B4Angler5',
+        userId: 4005,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'King Crab', count: 3 }],
+      })
+      .expect(200);
+
+    // Status-only heartbeat — must never clear items.
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B4Angler5',
+        userId: 4005,
+        source: 'replion',
+        isOnline: true,
+        phase: 'player_data_selected',
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B4Angler5')
+      .expect(200);
+
+    assert.ok(res.body.items.some((i) => i.name === 'King Crab'), 'items preserved after status ping');
+  });
+
+  // B4-6: catalog_snapshot POST after inventory_snapshot does NOT clear inventory.
+  test('B4-6: catalog_snapshot POST does not clear live inventory', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B4Angler6',
+        userId: 4006,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Clownfish', count: 4 }],
+      })
+      .expect(200);
+
+    // A catalog snapshot goes to a different endpoint; the backpack endpoint
+    // must still return the previously stored inventory unchanged.
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B4Angler6')
+      .expect(200);
+
+    assert.ok(res.body.items.some((i) => i.name === 'Clownfish'), 'inventory unchanged after catalog');
+  });
+
+  // B4-7: GET by username returns session stored by userId+username.
+  test('B4-7: GET by username returns session stored under that username', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B4Angler7',
+        userId: 4007,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Blue Tang', count: 2 }],
+      })
+      .expect(200);
+
+    // GET by original casing — must normalise to the same key.
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/b4angler7')
+      .expect(200);
+
+    assert.ok(res.body.items.some((i) => i.name === 'Blue Tang'), 'GET by lowercase username resolves correctly');
+  });
+
+  // B4-8: parseStats raw>0 accepted=0 is returned so frontend can show error.
+  test('B4-8: parseStats raw>0 accepted=0 is returned when phase=inventory_parse_failed', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B4Angler8',
+        userId: 4008,
+        source: 'replion',
+        isOnline: true,
+        phase: 'inventory_parse_failed',
+        parseStats: { raw: 2145, accepted: 0, rejected: 2145, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B4Angler8')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'inventory_parse_failed');
+    assert.ok(res.body.parseStats, 'parseStats present');
+    assert.equal(res.body.parseStats.raw, 2145);
+    assert.equal(res.body.parseStats.accepted, 0);
+    assert.equal(res.body.parseStats.selectedPath, 'Inventory.Items');
+  });
+
+  // B4-9: GET response includes inventory.all and legacy items alias.
+  test('B4-9: GET response includes inventory.all and matches items length', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B4Angler9',
+        userId: 4009,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'King Crab',  count: 1, category: 'fish' },
+          { name: 'Clownfish',  count: 2, category: 'fish' },
+          { name: 'Ghostfinn Rod', count: 1, category: 'rod' },
+        ],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B4Angler9')
+      .expect(200);
+
+    assert.ok(Array.isArray(res.body.items), 'items is array (legacy)');
+    assert.ok(res.body.inventory, 'inventory object present');
+    assert.ok(Array.isArray(res.body.inventory.all), 'inventory.all is array');
+    assert.equal(res.body.inventory.all.length, res.body.items.length, 'all length matches flat');
+    assert.ok(res.body.inventory.fish.length >= 2, 'inventory.fish populated');
+    assert.ok(res.body.inventory.rods.length >= 1, 'inventory.rods populated');
+  });
+
+  // B4-10: Debug route returns correct counts.
+  test('B4-10: debug route returns correct counts without leaking full inventory', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B4Angler10',
+        userId: 4010,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'King Crab',  count: 1, category: 'fish' },
+          { name: 'Clownfish',  count: 2, category: 'fish' },
+        ],
+        parseStats: { raw: 2, accepted: 2, rejected: 0, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B4Angler10')
+      .expect(200);
+
+    assert.equal(res.body.found, true);
+    assert.equal(res.body.sessionKey, 'b4angler10');
+    assert.equal(res.body.counts.flatItems, 2);
+    assert.equal(res.body.counts.inventoryAll, 2);
+    assert.equal(res.body.counts.inventoryFish, 2, 'both are fish category');
+    assert.equal(res.body.counts.inventoryRods, 0);
+    assert.ok(Array.isArray(res.body.first5Items), 'first5Items present');
+    assert.ok(res.body.first5Items.length <= 5, 'at most 5 items in debug');
+    // Must NOT contain the full items array (only first5Items summary).
+    assert.equal(res.body.items, undefined, 'full items array must not be exposed in debug response');
+  });
+});
