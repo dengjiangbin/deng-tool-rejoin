@@ -20,11 +20,11 @@ if (src.charCodeAt(0) === 0xfeff) {
 if (/^\s*loadstring\s*\(/.test(src)) {
   errors.push('tracker.lua must not begin with loadstring() wrapper');
 }
-if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10F')) {
-  errors.push('TRACKER_BOOT_BEGIN BLOCKER10F marker missing');
+if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10G')) {
+  errors.push('TRACKER_BOOT_BEGIN BLOCKER10G marker missing');
 }
-if (!src.includes('BLOCKER10F_SAFE_MINIMAL_NO_FREEZE_COMPILE_GATE_2026_06_03')) {
-  errors.push('BLOCKER10F build marker missing');
+if (!src.includes('BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03')) {
+  errors.push('BLOCKER10G build marker missing');
 }
 if (!/TRACKER_BUILD\s*=/.test(src)) {
   errors.push('TRACKER_BUILD assignment missing');
@@ -44,8 +44,8 @@ if (!src.includes('enablePhaseBItemUpgrade = false')) {
 if (!src.includes('debugRemoteHooks = false')) {
   errors.push('debugRemoteHooks must default false');
 }
-if (!src.includes('enableModuleRequire = false')) {
-  errors.push('enableModuleRequire must default false');
+if (!src.includes('enableTargetedItemDiagnostics = true')) {
+  errors.push('enableTargetedItemDiagnostics must default true');
 }
 if (/^<<<<<<<|^>>>>>>>|^=======\s*$/.test(src)) {
   errors.push('merge conflict markers detected');

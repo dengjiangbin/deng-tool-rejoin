@@ -2172,7 +2172,7 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
     assert.equal(res.body.items.find((i) => i.itemId === '388').name, 'Carbon Rod');
   });
 
-  test('trackerBuild BLOCKER10F stored on debug endpoint', async () => {
+  test('trackerBuild BLOCKER10G stored on debug endpoint', async () => {
     const app = makeApp();
     await request(app)
       .post('/api/tracker/update-backpack')
@@ -2183,7 +2183,7 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
         source: 'replion',
         isOnline: true,
         phase: 'live',
-        trackerBuild: 'BLOCKER10F_SAFE_MINIMAL_NO_FREEZE_COMPILE_GATE_2026_06_03',
+        trackerBuild: 'BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03',
       })
       .expect(200);
 
@@ -2191,18 +2191,218 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
       .get('/api/fishit-tracker/debug/B10CAngler4')
       .expect(200);
 
-    assert.equal(res.body.trackerBuild, 'BLOCKER10F_SAFE_MINIMAL_NO_FREEZE_COMPILE_GATE_2026_06_03');
+    assert.equal(res.body.trackerBuild, 'BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03');
   });
 });
 
-describe('BLOCKER10F safe minimal no-freeze compile gate', () => {
+describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
   const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
 
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10F_SAFE_MINIMAL_NO_FREEZE_COMPILE_GATE_2026_06_03/);
+    assert.match(out, /BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03/);
+  });
+
+  test('targeted diagnostics enabled; heavy flags remain disabled', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('enableTargetedItemDiagnostics = true'));
+    assert.ok(src.includes('enableHeavyCatalog = false'));
+    assert.ok(src.includes('enablePhaseBItemUpgrade = false'));
+    assert.ok(src.includes('debugRemoteHooks = false'));
+    assert.ok(src.includes('enableModuleRequire = false'));
+    assert.ok(src.includes('TARGETED_ITEM_DIAGNOSTICS enabled='));
+  });
+
+  test('targeted diagnostics only processes target item ids', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('targetItemIds = {'));
+    assert.ok(src.includes('"990"'));
+    assert.ok(src.includes('runTargetedItemDiagnosticsAsync'));
+    assert.ok(src.match(/for _, idStr in ipairs\(LiveSafe\.targetItemIds\)/));
+    assert.ok(src.includes('isPlaceholderName(e.name, idStr)'));
+  });
+
+  test('shallow targeted scan does not call GetDescendants', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    const shallowStart = src.indexOf('local function shallowLookupIdInRs(idStr, checkedPaths)');
+    const shallowEnd = src.indexOf('local function traceTargetItemId(idStr)', shallowStart);
+    assert.ok(shallowStart >= 0 && shallowEnd > shallowStart);
+    const shallowBlock = src.slice(shallowStart, shallowEnd);
+    assert.ok(shallowBlock.includes(':GetChildren()'));
+    assert.ok(!shallowBlock.includes('GetDescendants'));
+    assert.ok(src.includes('function runTargetedItemDiagnosticsAsync'));
+  });
+
+  test('module require remains disabled by default', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.match(/enableModuleRequire = false/));
+    assert.ok(src.match(/function scanTargetedDefinitionModules[\s\S]{0,80}if LiveSafe\.catalogAborted or not LiveSafe\.enableModuleRequire/));
+  });
+
+  test('remote hooks remain disabled by default', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('debugRemoteHooks = false'));
+    assert.ok(src.match(/if not LiveSafe\.debugRemoteHooks then[\s\S]*hookRemotesDeferred/));
+  });
+
+  test('heavy catalog remains disabled by default', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('enableHeavyCatalog = false'));
+    assert.ok(src.match(/if LiveSafe\.enableHeavyCatalog then/));
+  });
+
+  test('freeze monitor remains active', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('RunService.Heartbeat'));
+    assert.ok(src.includes('FREEZE_SUSPECT'));
+    assert.ok(src.includes('Freeze monitor summary'));
+    assert.ok(src.includes('startFreezeMonitor'));
+  });
+
+  test('target diagnostics abort/pause on stall', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.match(/function runTargetedItemDiagnosticsAsync[\s\S]{0,600}catalogPausedUntil/));
+    assert.ok(src.includes('TARGET_ITEM_DIAG paused reason=frame_stall'));
+    assert.ok(src.includes('TARGET_ITEM_DIAG aborted reason=catalog_aborted'));
+  });
+
+  test('boot marker is BLOCKER10G targeted diagnostics build', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10G'));
+    assert.ok(src.includes('BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03'));
+  });
+
+  test('Item #990 upgrades only with exact catalog metadata', async () => {
+    catalogStore._reset();
+    catalogStore.upsertByItemId({ itemId: '990', name: 'Common Crate', category: 'items', source: 'test' });
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10GUser990',
+        userId: 13001,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Item #990', count: 2, category: 'items', itemId: '990', resolved: false }],
+      })
+      .expect(200);
+    const res = await request(app).get('/api/tracker/get-backpack/B10GUser990').expect(200);
+    assert.equal(res.body.items.find((i) => i.itemId === '990').name, 'Common Crate');
+    const reject = catalogStore.upsertByItemId({ itemId: '990', name: 'Item #990', category: 'items', source: 'bad' });
+    assert.equal(reject.updated, false);
+    assert.equal(reject.reason, 'placeholder_or_empty');
+  });
+
+  test('Item #388 upgrades only with exact catalog metadata', async () => {
+    catalogStore._reset();
+    catalogStore.upsertByItemId({ itemId: '388', name: 'Carbon Rod', category: 'rod', source: 'test' });
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10GUser388',
+        userId: 13002,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Item #388', count: 1, category: 'items', itemId: '388', resolved: false }],
+      })
+      .expect(200);
+    const res = await request(app).get('/api/tracker/get-backpack/B10GUser388').expect(200);
+    assert.equal(res.body.items.find((i) => i.itemId === '388').name, 'Carbon Rod');
+  });
+
+  test('fish names cannot downgrade via catalog cache', async () => {
+    catalogStore._reset();
+    catalogStore.upsertByItemId({ itemId: '117', name: 'Item #117', category: 'items', source: 'bad' });
+    assert.equal(catalogStore.lookupById('117'), null);
+    catalogStore.upsertByItemId({ itemId: '117', name: 'Bandit Angelfish', category: 'fish', source: 'test' });
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10GFish117',
+        userId: 13003,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Bandit Angelfish', count: 3, category: 'fish', itemId: '117', resolved: true }],
+      })
+      .expect(200);
+    const res = await request(app).get('/api/tracker/get-backpack/B10GFish117').expect(200);
+    assert.equal(res.body.items.find((i) => i.itemId === '117').name, 'Bandit Angelfish');
+  });
+
+  test('backend catalog cache enriches placeholder from stored real metadata', async () => {
+    catalogStore._reset();
+    catalogStore.upsertByItemId({ itemId: '10', name: 'Topwater Bait', category: 'bait', source: 'diag' });
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10GUser10',
+        userId: 13004,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Item #10', count: 1, category: 'items', itemId: '10', resolved: false }],
+      })
+      .expect(200);
+    const res = await request(app).get('/api/tracker/get-backpack/B10GUser10').expect(200);
+    const item = res.body.items.find((i) => i.itemId === '10');
+    assert.equal(item.name, 'Topwater Bait');
+    assert.ok(item.catalogEnrichmentSource || item.catalogReason);
+  });
+
+  test('placeholder cannot overwrite cached real name', () => {
+    catalogStore._reset();
+    catalogStore.upsertByItemId({ itemId: '990', name: 'Common Crate', category: 'items', source: 'first' });
+    const r = catalogStore.upsertByItemId({ itemId: '990', name: 'Item #990', category: 'items', source: 'bad' });
+    assert.equal(r.updated, false);
+    assert.equal(catalogStore.lookupById('990').name, 'Common Crate');
+  });
+
+  test('debug endpoint exposes unresolvedDiagnostics fields', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B10GDebug',
+        userId: 13005,
+        source: 'replion',
+        isOnline: true,
+        phase: 'targeted_diagnostics',
+        trackerBuild: 'BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03',
+        unresolvedDiagnostics: [
+          {
+            id: 990,
+            count: 5,
+            currentName: 'Item #990',
+            checkedPaths: ['Replion.Items', 'ReplicatedStorage.Shared'],
+            found: false,
+            candidatePath: null,
+            candidateKeys: [],
+            elapsedMs: 12,
+          },
+        ],
+        discoveredCatalog: [{ itemId: '10', name: 'Topwater Bait', category: 'bait', source: 'targeted_diag' }],
+      })
+      .expect(200);
+    const res = await request(app).get('/api/fishit-tracker/debug/B10GDebug').expect(200);
+    assert.ok(Array.isArray(res.body.unresolvedDiagnostics));
+    assert.deepEqual(res.body.stillUnresolvedIds, [990]);
+    assert.equal(catalogStore.lookupById('10').name, 'Topwater Bait');
+  });
+});
+
+describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER10G)', () => {
+  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+  const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
+
+  test('validate_tracker_compile.js passes on tracker.lua', () => {
+    const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
+    assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
+    assert.match(out, /BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03/);
   });
 
   test('safe minimal flags default off for heavy work', () => {
@@ -2221,10 +2421,10 @@ describe('BLOCKER10F safe minimal no-freeze compile gate', () => {
     assert.ok(src.match(/if not LiveSafe\.enableHeavyCatalog then[\s\S]{0,80}HEAVY_CATALOG disabled=true/));
   });
 
-  test('boot marker is BLOCKER10F safe minimal build', () => {
+  test('boot marker is BLOCKER10G build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10F'));
-    assert.ok(src.includes('BLOCKER10F_SAFE_MINIMAL_NO_FREEZE_COMPILE_GATE_2026_06_03'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10G'));
+    assert.ok(src.includes('BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03'));
   });
 
   test('inventory upload and fish downgrade guards remain', () => {
@@ -2297,7 +2497,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
 
   test('TRACKER_BOOT_BEGIN appears before catalog scan code', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10F');
+    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10G');
     const catalog = src.indexOf('scanReplicatedStorageFishCatalog');
     assert.ok(boot >= 0, 'TRACKER_BOOT_BEGIN missing');
     assert.ok(catalog >= 0, 'catalog scan missing');

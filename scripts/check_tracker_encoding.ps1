@@ -15,19 +15,23 @@ if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
 
 if ($content -notmatch '^--') { $errors += "FAIL  Does not start with '--'" } else { Write-Host "PASS  Starts with '--' (Lua comment)" }
 
-# ── BLOCKER10F: safe minimal + compile gate ──
+# ── BLOCKER10G: targeted item diagnostics + compile gate ──
 if ($content -match '^\s*loadstring\s*\(') { $errors += "FAIL  tracker.lua must not begin with loadstring() wrapper" } else { Write-Host "PASS  No unsafe top-level loadstring wrapper" }
-if ($content -match 'TRACKER_BOOT_BEGIN BLOCKER10F') { Write-Host "PASS  TRACKER_BOOT_BEGIN BLOCKER10F marker found" } else { $errors += "FAIL  TRACKER_BOOT_BEGIN BLOCKER10F missing" }
-if ($content -match 'BLOCKER10F_SAFE_MINIMAL_NO_FREEZE_COMPILE_GATE_2026_06_03') { Write-Host "PASS  BLOCKER10F build id found" } else { $errors += "FAIL  BLOCKER10F build id missing" }
+if ($content -match 'TRACKER_BOOT_BEGIN BLOCKER10G') { Write-Host "PASS  TRACKER_BOOT_BEGIN BLOCKER10G marker found" } else { $errors += "FAIL  TRACKER_BOOT_BEGIN BLOCKER10G missing" }
+if ($content -match 'BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03') { Write-Host "PASS  BLOCKER10G build id found" } else { $errors += "FAIL  BLOCKER10G build id missing" }
 if ($content -match 'safeMinimalMode = true') { Write-Host "PASS  SAFE_MINIMAL_MODE default true" } else { $errors += "FAIL  safeMinimalMode missing" }
 if ($content -match 'enableHeavyCatalog = false') { Write-Host "PASS  enableHeavyCatalog default false" } else { $errors += "FAIL  enableHeavyCatalog must be false" }
 if ($content -match 'enablePhaseBItemUpgrade = false') { Write-Host "PASS  enablePhaseBItemUpgrade default false" } else { $errors += "FAIL  enablePhaseBItemUpgrade must be false" }
+if ($content -match 'enableTargetedItemDiagnostics = true') { Write-Host "PASS  enableTargetedItemDiagnostics default true" } else { $errors += "FAIL  enableTargetedItemDiagnostics must be true" }
 if ($content -match 'LiveSafe\.debugRemoteHooks = false|debugRemoteHooks = false') { Write-Host "PASS  debugRemoteHooks default false" } else { $errors += "FAIL  debugRemoteHooks must be false" }
 if ($content -match 'enableModuleRequire = false') { Write-Host "PASS  enableModuleRequire default false" } else { $errors += "FAIL  enableModuleRequire must be false" }
 if ($content -match 'SAFE_MINIMAL_MODE enabled=') { Write-Host "PASS  SAFE_MINIMAL_MODE log found" } else { $errors += "FAIL  SAFE_MINIMAL_MODE log missing" }
 if ($content -match 'HEAVY_CATALOG disabled=') { Write-Host "PASS  HEAVY_CATALOG disabled log found" } else { $errors += "FAIL  HEAVY_CATALOG disabled log missing" }
+if ($content -match 'TARGETED_ITEM_DIAGNOSTICS enabled=') { Write-Host "PASS  TARGETED_ITEM_DIAGNOSTICS log found" } else { $errors += "FAIL  TARGETED_ITEM_DIAGNOSTICS log missing" }
 if ($content -match 'PHASE_B_ITEM_UPGRADE disabled_by_default') { Write-Host "PASS  PHASE_B_ITEM_UPGRADE disabled log found" } else { $errors += "FAIL  PHASE_B_ITEM_UPGRADE disabled log missing" }
 if ($content -match 'INVENTORY_UPLOAD ok=') { Write-Host "PASS  INVENTORY_UPLOAD log found" } else { $errors += "FAIL  INVENTORY_UPLOAD log missing" }
+if ($content -match 'TARGET_ITEM_TRACE id=') { Write-Host "PASS  TARGET_ITEM_TRACE log found" } else { $errors += "FAIL  TARGET_ITEM_TRACE log missing" }
+if ($content -match 'TARGET_ITEM_HIT id=') { Write-Host "PASS  TARGET_ITEM_HIT log found" } else { $errors += "FAIL  TARGET_ITEM_HIT log missing" }
 if ($content -match 'local LiveSafe = \{') { Write-Host "PASS  LiveSafe register-pack table found" } else { $errors += "FAIL  LiveSafe register-pack table missing" }
 if ($content -match 'Freeze monitor summary') { Write-Host "PASS  Freeze monitor summary found" } else { $errors += "FAIL  Freeze monitor summary missing" }
 if ($content -match 'function hookRemotesDeferred[\s\S]{0,200}if not LiveSafe\.debugRemoteHooks') { Write-Host "PASS  hookRemotesDeferred gated by LiveSafe.debugRemoteHooks" } else { $errors += "FAIL  hookRemotesDeferred not gated" }
@@ -124,7 +128,7 @@ if ($content -match 'MISSING_HELPER name=') { Write-Host "PASS  MISSING_HELPER d
 if ($content -match 'NUMERIC_ID_FALLBACK_ACCEPTED') { Write-Host "PASS  NUMERIC_ID_FALLBACK_ACCEPTED log found" } else { $errors += "FAIL  NUMERIC_ID_FALLBACK_ACCEPTED missing" }
 if ($content -match 'addOwnedNumericFallback') { Write-Host "PASS  addOwnedNumericFallback found" } else { $errors += "FAIL  addOwnedNumericFallback missing" }
 if ($content -match 'local mergeOwnedItem') { Write-Host "PASS  mergeOwnedItem forward declaration found" } else { $errors += "FAIL  mergeOwnedItem forward declaration missing" }
-if ($content -match 'TRACKER_BUILD BLOCKER10F') { Write-Host "PASS  TRACKER_BUILD BLOCKER10F marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10F marker missing" }
+if ($content -match 'TRACKER_BUILD BLOCKER10G') { Write-Host "PASS  TRACKER_BUILD BLOCKER10G marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10G marker missing" }
 if ($content -match 'STARTUP_NON_BLOCKING') { Write-Host "PASS  STARTUP_NON_BLOCKING log found" } else { $errors += "FAIL  STARTUP_NON_BLOCKING missing" }
 if ($content -match 'scanBudgetYield') { Write-Host "PASS  scanBudgetYield scheduler found" } else { $errors += "FAIL  scanBudgetYield missing" }
 if ($content -match 'INVENTORY_PHASE_A') { Write-Host "PASS  INVENTORY_PHASE_A log found" } else { $errors += "FAIL  INVENTORY_PHASE_A missing" }
@@ -178,7 +182,7 @@ if ($content -match 'buildNumericIdIndexFromRSFolders') { Write-Host "PASS  buil
 $mut = ([regex]::Matches($codeOnly, ':\s*(Set|Update|Increase|Decrease|Fire|Save|Equip|Buy|Sell|Remove|Insert)\s*\(')).Count
 if ($mut -gt 0) { $errors += "FAIL  $mut Replion mutation call(s) found in code (must be read-only)" } else { Write-Host "PASS  No Replion mutation calls in code (read-only)" }
 
-# BLOCKER10F: Luau compile validation (register limit + syntax)
+# BLOCKER10G: Luau compile validation (register limit + syntax)
 $luauCompile = Join-Path (Join-Path $PSScriptRoot "..") "_luau\luau-compile.exe"
 if (-not (Test-Path $luauCompile)) {
     $setup = Join-Path $PSScriptRoot "setup_luau_compile.ps1"

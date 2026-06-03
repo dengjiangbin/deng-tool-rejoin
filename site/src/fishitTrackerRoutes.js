@@ -216,6 +216,9 @@ function enrichItemsFromCatalog(items) {
       : (it.resolved != null ? it.resolved : !!meta);
     const catalogReason = it.catalogReason || (meta && !trackerHasRealName ? 'catalog_hit' : null);
     const catalogSource = it.catalogSource || (meta && meta.source) || null;
+    const catalogEnrichmentSource = (!trackerHasRealName && meta)
+      ? (meta.source || 'catalog_cache')
+      : (it.catalogEnrichmentSource || null);
 
     // Never downgrade fish category or real tracker names via catalog enrichment.
     let category = it.category || (meta && meta.category) || null;
@@ -234,6 +237,7 @@ function enrichItemsFromCatalog(items) {
       resolved,
       catalogReason,
       catalogSource,
+      catalogEnrichmentSource,
     });
   }
   return out;
@@ -295,6 +299,7 @@ const ALLOWED_PHASES = new Set([
   'inventory_parse_failed',
   'replion_missing',
   'live',
+  'targeted_diagnostics',
 ]);
 
 function sanitiseTrackerBuild(raw) {
@@ -314,6 +319,16 @@ function sanitisePhase(raw) {
   if (typeof raw !== 'string') return null;
   const s = raw.trim().toLowerCase().slice(0, 40);
   return ALLOWED_PHASES.has(s) ? s : null;
+}
+
+function ingestDiscoveredCatalog(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return [];
+  const results = [];
+  for (const raw of entries.slice(0, 50)) {
+    if (!raw || raw.itemId == null) continue;
+    results.push(catalogStore.upsertByItemId(raw));
+  }
+  return results;
 }
 
 // ── POST /api/tracker/update-backpack ────────────────────────────
@@ -366,6 +381,12 @@ router.post(
         lastSeenAt:      online ? now : (base.lastSeenAt || now),
         updatedAt:       now,
       };
+      if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
+        liveTrackDB[key].unresolvedDiagnostics = body.unresolvedDiagnostics.slice(0, 30);
+      }
+      if (Array.isArray(body.discoveredCatalog) && body.discoveredCatalog.length) {
+        liveTrackDB[key].discoveredCatalogIngest = ingestDiscoveredCatalog(body.discoveredCatalog);
+      }
       // Store userId→key alias so GET can resolve by userId if needed.
       if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
       // Server-side log.
@@ -434,6 +455,9 @@ router.post(
     };
     if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
       liveTrackDB[key].unresolvedDiagnostics = body.unresolvedDiagnostics.slice(0, 20);
+    }
+    if (Array.isArray(body.discoveredCatalog) && body.discoveredCatalog.length) {
+      liveTrackDB[key].discoveredCatalogIngest = ingestDiscoveredCatalog(body.discoveredCatalog);
     }
     if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
 
@@ -567,6 +591,15 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
     resolved:     i.resolved != null ? i.resolved : null,
     catalogSource: i.catalogSource || null,
     catalogReason: i.catalogReason || null,
+    catalogEnrichmentSource: i.catalogEnrichmentSource || null,
+  }));
+
+  const diags = Array.isArray(data.unresolvedDiagnostics) ? data.unresolvedDiagnostics : [];
+  const unresolvedIds = diags.filter((d) => d && !d.found).map((d) => d.id);
+  const resolvedFromDiag = diags.filter((d) => d && d.found).map((d) => ({
+    id: d.id,
+    name: (d.candidateKeys && d.candidateKeys[0]) || null,
+    path: d.candidatePath || null,
   }));
 
   return res.status(200).json({
@@ -592,7 +625,11 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
       itemsOnly:    (inv.items || []).length,
     },
     firstItems,
-    unresolvedDiagnostics: data.unresolvedDiagnostics || null,
+    unresolvedDiagnostics: diags.length ? diags : null,
+    unresolvedIds,
+    stillUnresolvedIds: unresolvedIds,
+    resolvedFromDiagnostics: resolvedFromDiag.length ? resolvedFromDiag : null,
+    discoveredCatalogIngest: data.discoveredCatalogIngest || null,
   });
 });
 

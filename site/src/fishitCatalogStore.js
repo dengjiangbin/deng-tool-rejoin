@@ -58,6 +58,14 @@ function isStatLabel(name) {
   return STAT_LABEL_DENYLIST.has(n);
 }
 
+function isPlaceholderItemName(name, itemId) {
+  if (!name) return true;
+  const s = String(name).trim();
+  if (/^Item #\d+$/.test(s)) return true;
+  if (itemId != null && s === `Item #${itemId}`) return true;
+  return false;
+}
+
 function isHttpUrl(u) {
   return typeof u === 'string' && /^https?:\/\//i.test(u.trim());
 }
@@ -203,6 +211,68 @@ function lookupById(itemId) {
   return key ? (_catalog.entries[key] || null) : null;
 }
 
+/**
+ * Upsert catalog metadata by item id (BLOCKER10G).
+ * Real name beats placeholder; fish category is never overwritten by item category.
+ */
+function upsertByItemId(raw) {
+  _load();
+  if (!raw || raw.itemId == null) return { updated: false, reason: 'missing_id' };
+  const itemId = String(raw.itemId).trim();
+  if (!itemId.match(/^\d+$/)) return { updated: false, reason: 'invalid_id' };
+  const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+  if (!name || isStatLabel(name) || isPlaceholderItemName(name, itemId)) {
+    return { updated: false, reason: 'placeholder_or_empty' };
+  }
+  const category = typeof raw.category === 'string' ? raw.category.trim().slice(0, 40) : 'items';
+  const tier = normalizeTier(raw.tier);
+  const source = typeof raw.source === 'string' ? raw.source.slice(0, 120) : 'catalog_cache';
+  const key = normalizeName(name);
+  if (!key || isStatLabel(key)) return { updated: false, reason: 'invalid_key' };
+
+  const existingKey = _idIndex[itemId];
+  const existing = existingKey ? _catalog.entries[existingKey] : null;
+  if (existing) {
+    if (isPlaceholderItemName(existing.name, itemId)) {
+      existing.name = name.slice(0, 100);
+      existing.key = key;
+      existing.category = category;
+      if (tier && tier !== 'unknown') existing.tier = tier;
+      existing.source = source;
+      existing.itemId = itemId;
+      _catalog.updatedAt = new Date().toISOString();
+      _persist();
+      return { updated: true, reason: 'replaced_placeholder' };
+    }
+    if (String(existing.category || '').toLowerCase() === 'fish' && category !== 'fish') {
+      return { updated: false, reason: 'fish_category_protected' };
+    }
+    if (existing.name === name) return { updated: false, reason: 'unchanged' };
+    return { updated: false, reason: 'real_name_exists' };
+  }
+
+  _catalog.entries[key] = {
+    name: name.slice(0, 100),
+    key,
+    tier: tier && tier !== 'unknown' ? tier : null,
+    imageUrl: null,
+    category,
+    itemId,
+    source,
+  };
+  _idIndex[itemId] = key;
+  const counts = { fish: 0, rods: 0, items: 0 };
+  for (const e of Object.values(_catalog.entries)) {
+    if (e.category === 'rods' || e.category === 'rod') counts.rods += 1;
+    else if (e.category === 'items') counts.items += 1;
+    else counts.fish += 1;
+  }
+  _catalog.counts = counts;
+  _catalog.updatedAt = new Date().toISOString();
+  _persist();
+  return { updated: true, reason: 'inserted' };
+}
+
 /** Return the full catalog (for /api/fishit-tracker/catalog and tests). */
 function getCatalog() {
   _load();
@@ -222,9 +292,11 @@ module.exports = {
   ingestSnapshot,
   lookup,
   lookupById,
+  upsertByItemId,
   getCatalog,
   normalizeName,
   normalizeTier,
   isStatLabel,
+  isPlaceholderItemName,
   _reset,
 };
