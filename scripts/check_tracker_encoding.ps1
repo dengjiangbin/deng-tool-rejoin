@@ -15,24 +15,25 @@ if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
 
 if ($content -notmatch '^--') { $errors += "FAIL  Does not start with '--'" } else { Write-Host "PASS  Starts with '--' (Lua comment)" }
 
-# ── BLOCKER10E: live freeze proof + targeted item resolution ──
+# ── BLOCKER10F: compile guard + live boot restore ──
 if ($content -match '^\s*loadstring\s*\(') { $errors += "FAIL  tracker.lua must not begin with loadstring() wrapper" } else { Write-Host "PASS  No unsafe top-level loadstring wrapper" }
-if ($content -match 'TRACKER_BOOT_BEGIN BLOCKER10E') { Write-Host "PASS  TRACKER_BOOT_BEGIN BLOCKER10E marker found" } else { $errors += "FAIL  TRACKER_BOOT_BEGIN BLOCKER10E missing" }
-if ($content -match 'BLOCKER10E_LIVE_FREEZE_PROOF_AND_TARGETED_ITEM_RESOLUTION_2026_06_03') { Write-Host "PASS  BLOCKER10E build id found" } else { $errors += "FAIL  BLOCKER10E build id missing" }
+if ($content -match 'TRACKER_BOOT_BEGIN BLOCKER10F') { Write-Host "PASS  TRACKER_BOOT_BEGIN BLOCKER10F marker found" } else { $errors += "FAIL  TRACKER_BOOT_BEGIN BLOCKER10F missing" }
+if ($content -match 'BLOCKER10F_COMPILE_GUARD_AND_LIVE_BOOT_RESTORE_2026_06_03') { Write-Host "PASS  BLOCKER10F build id found" } else { $errors += "FAIL  BLOCKER10F build id missing" }
+if ($content -match 'local LiveSafe = \{') { Write-Host "PASS  LiveSafe register-pack table found" } else { $errors += "FAIL  LiveSafe register-pack table missing" }
 if ($content -match 'LIVE_SAFE_MODE') { Write-Host "PASS  LIVE_SAFE_MODE found" } else { $errors += "FAIL  LIVE_SAFE_MODE missing" }
 if ($content -match 'FREEZE_SUSPECT') { Write-Host "PASS  FREEZE_SUSPECT stall detector found" } else { $errors += "FAIL  FREEZE_SUSPECT missing" }
 if ($content -match 'Freeze monitor summary') { Write-Host "PASS  Freeze monitor summary found" } else { $errors += "FAIL  Freeze monitor summary missing" }
-if ($content -match 'DEBUG_REMOTE_HOOKS') { Write-Host "PASS  DEBUG_REMOTE_HOOKS flag found" } else { $errors += "FAIL  DEBUG_REMOTE_HOOKS missing" }
+if ($content -match 'LiveSafe\.debugRemoteHooks') { Write-Host "PASS  LiveSafe.debugRemoteHooks flag found" } else { $errors += "FAIL  LiveSafe.debugRemoteHooks missing" }
 if ($content -match 'REMOTE_HOOKS disabled_by_default') { Write-Host "PASS  REMOTE_HOOKS disabled log found" } else { $errors += "FAIL  REMOTE_HOOKS disabled log missing" }
 if ($content -match 'HEAVY_CATALOG_DELAY') { Write-Host "PASS  HEAVY_CATALOG_DELAY found" } else { $errors += "FAIL  HEAVY_CATALOG_DELAY missing" }
 if ($content -match 'CATALOG_THROTTLE') { Write-Host "PASS  CATALOG_THROTTLE found" } else { $errors += "FAIL  CATALOG_THROTTLE missing" }
 if ($content -match 'CATALOG_ABORTED') { Write-Host "PASS  CATALOG_ABORTED found" } else { $errors += "FAIL  CATALOG_ABORTED missing" }
 if ($content -match 'UNRESOLVED_ID_TRACE') { Write-Host "PASS  UNRESOLVED_ID_TRACE found" } else { $errors += "FAIL  UNRESOLVED_ID_TRACE missing" }
-if ($content -match 'UNRESOLVED_TARGET_IDS') { Write-Host "PASS  UNRESOLVED_TARGET_IDS list found" } else { $errors += "FAIL  UNRESOLVED_TARGET_IDS missing" }
+if ($content -match 'unresolvedTargetIds') { Write-Host "PASS  unresolvedTargetIds list found" } else { $errors += "FAIL  unresolvedTargetIds missing" }
 if ($content -match 'scanTargetedItemCatalogRoots') { Write-Host "PASS  scanTargetedItemCatalogRoots found" } else { $errors += "FAIL  scanTargetedItemCatalogRoots missing" }
 if ($content -match 'tryFinalizeCatalogAndUpgrade') { Write-Host "PASS  tryFinalizeCatalogAndUpgrade coordinator found" } else { $errors += "FAIL  tryFinalizeCatalogAndUpgrade missing" }
-if ($content -match 'TRACKER_BUILD BLOCKER10E') { Write-Host "PASS  TRACKER_BUILD BLOCKER10E marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10E marker missing" }
-if ($content -match 'function hookRemotesDeferred[\s\S]{0,200}if not DEBUG_REMOTE_HOOKS') { Write-Host "PASS  hookRemotesDeferred gated by DEBUG_REMOTE_HOOKS" } else { $errors += "FAIL  hookRemotesDeferred not gated" }
+if ($content -match 'TRACKER_BUILD BLOCKER10F') { Write-Host "PASS  TRACKER_BUILD BLOCKER10F marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10F marker missing" }
+if ($content -match 'function hookRemotesDeferred[\s\S]{0,200}if not LiveSafe\.debugRemoteHooks') { Write-Host "PASS  hookRemotesDeferred gated by LiveSafe.debugRemoteHooks" } else { $errors += "FAIL  hookRemotesDeferred not gated" }
 if ($content -match '(?m)return true\s*\r?\nend\s*\r?\n\r?\n\s+return true\s*\r?\nend\s*\r?\n\r?\n-- BLOCKER10C') { $errors += "FAIL  orphaned duplicate return/end syntax corruption detected" } else { Write-Host "PASS  No orphaned duplicate return/end syntax corruption" }
 $bootPos = $content.IndexOf('TRACKER_BOOT_BEGIN')
 $catalogPos = $content.IndexOf('scanReplicatedStorageFishCatalog')
@@ -125,7 +126,7 @@ if ($content -match 'MISSING_HELPER name=') { Write-Host "PASS  MISSING_HELPER d
 if ($content -match 'NUMERIC_ID_FALLBACK_ACCEPTED') { Write-Host "PASS  NUMERIC_ID_FALLBACK_ACCEPTED log found" } else { $errors += "FAIL  NUMERIC_ID_FALLBACK_ACCEPTED missing" }
 if ($content -match 'addOwnedNumericFallback') { Write-Host "PASS  addOwnedNumericFallback found" } else { $errors += "FAIL  addOwnedNumericFallback missing" }
 if ($content -match 'local mergeOwnedItem') { Write-Host "PASS  mergeOwnedItem forward declaration found" } else { $errors += "FAIL  mergeOwnedItem forward declaration missing" }
-if ($content -match 'TRACKER_BUILD BLOCKER10E') { Write-Host "PASS  TRACKER_BUILD BLOCKER10E marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10E marker missing" }
+if ($content -match 'TRACKER_BUILD BLOCKER10F') { Write-Host "PASS  TRACKER_BUILD BLOCKER10F marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10F marker missing" }
 if ($content -match 'STARTUP_NON_BLOCKING') { Write-Host "PASS  STARTUP_NON_BLOCKING log found" } else { $errors += "FAIL  STARTUP_NON_BLOCKING missing" }
 if ($content -match 'scanBudgetYield') { Write-Host "PASS  scanBudgetYield scheduler found" } else { $errors += "FAIL  scanBudgetYield missing" }
 if ($content -match 'INVENTORY_PHASE_A') { Write-Host "PASS  INVENTORY_PHASE_A log found" } else { $errors += "FAIL  INVENTORY_PHASE_A missing" }
@@ -178,6 +179,24 @@ if ($content -match 'buildNumericIdIndexFromRSFolders') { Write-Host "PASS  buil
 # Replion must be read-only: no mutation methods actually invoked on a replion object
 $mut = ([regex]::Matches($codeOnly, ':\s*(Set|Update|Increase|Decrease|Fire|Save|Equip|Buy|Sell|Remove|Insert)\s*\(')).Count
 if ($mut -gt 0) { $errors += "FAIL  $mut Replion mutation call(s) found in code (must be read-only)" } else { Write-Host "PASS  No Replion mutation calls in code (read-only)" }
+
+# BLOCKER10F: Luau compile validation (register limit + syntax)
+$luauCompile = Join-Path (Join-Path $PSScriptRoot "..") "_luau\luau-compile.exe"
+if (-not (Test-Path $luauCompile)) {
+    $setup = Join-Path $PSScriptRoot "setup_luau_compile.ps1"
+    if (Test-Path $setup) {
+        Write-Host "Luau compiler missing - running setup ..."
+        & $setup
+    }
+}
+$compileScript = Join-Path $PSScriptRoot "validate_tracker_compile.js"
+if (Test-Path $compileScript) {
+    node $compileScript (Resolve-Path $TrackerPath)
+    if ($LASTEXITCODE -ne 0) { $errors += "FAIL  tracker.lua compile validation failed (see output above)" }
+    else { Write-Host "PASS  tracker.lua Luau compile validation" }
+} else {
+    $errors += "FAIL  validate_tracker_compile.js missing"
+}
 
 Write-Host ""
 if ($errors.Count -eq 0) {

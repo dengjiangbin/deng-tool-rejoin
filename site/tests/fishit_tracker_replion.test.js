@@ -17,6 +17,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 
 process.env.NODE_ENV = 'test';
 const TMP_CATALOG = path.join(os.tmpdir(), `fishit_replion_test_${process.pid}.json`);
@@ -2171,7 +2172,7 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
     assert.equal(res.body.items.find((i) => i.itemId === '388').name, 'Carbon Rod');
   });
 
-  test('trackerBuild BLOCKER10E stored on debug endpoint', async () => {
+  test('trackerBuild BLOCKER10F stored on debug endpoint', async () => {
     const app = makeApp();
     await request(app)
       .post('/api/tracker/update-backpack')
@@ -2182,7 +2183,7 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
         source: 'replion',
         isOnline: true,
         phase: 'live',
-        trackerBuild: 'BLOCKER10E_LIVE_FREEZE_PROOF_AND_TARGETED_ITEM_RESOLUTION_2026_06_03',
+        trackerBuild: 'BLOCKER10F_COMPILE_GUARD_AND_LIVE_BOOT_RESTORE_2026_06_03',
       })
       .expect(200);
 
@@ -2190,7 +2191,33 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
       .get('/api/fishit-tracker/debug/B10CAngler4')
       .expect(200);
 
-    assert.equal(res.body.trackerBuild, 'BLOCKER10E_LIVE_FREEZE_PROOF_AND_TARGETED_ITEM_RESOLUTION_2026_06_03');
+    assert.equal(res.body.trackerBuild, 'BLOCKER10F_COMPILE_GUARD_AND_LIVE_BOOT_RESTORE_2026_06_03');
+  });
+});
+
+describe('BLOCKER10F compile guard and live boot restore', () => {
+  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+  const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
+
+  test('validate_tracker_compile.js passes on tracker.lua', () => {
+    const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
+    assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
+    assert.match(out, /BLOCKER10F_COMPILE_GUARD_AND_LIVE_BOOT_RESTORE_2026_06_03/);
+  });
+
+  test('LiveSafe table packs state for Luau register limit', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('local LiveSafe = {'));
+    assert.ok(src.includes('debugRemoteHooks = false'));
+    assert.ok(src.includes('enableModuleRequire = false'));
+    assert.ok(src.includes('budgetMs = 2'));
+    assert.ok(src.includes('scanOpsPerYield = 4'));
+  });
+
+  test('boot marker is BLOCKER10F', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10F'));
+    assert.ok(src.includes('BLOCKER10F_COMPILE_GUARD_AND_LIVE_BOOT_RESTORE_2026_06_03'));
   });
 });
 
@@ -2202,25 +2229,25 @@ describe('BLOCKER10E live freeze proof and targeted item resolution', () => {
     assert.ok(src.includes('RunService.Heartbeat'));
     assert.ok(src.includes('FREEZE_SUSPECT'));
     assert.ok(src.includes('LIVE_SAFE_MODE'));
-    assert.ok(src.includes('HEAVY_CATALOG_DELAY_SEC'));
+    assert.ok(src.includes('heavyCatalogDelaySec = 5'));
     assert.ok(src.includes('CATALOG_THROTTLE'));
     assert.ok(src.includes('CATALOG_ABORTED'));
   });
 
   test('remote hooks disabled by default', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('DEBUG_REMOTE_HOOKS = false'));
+    assert.ok(src.includes('debugRemoteHooks = false'));
     assert.ok(src.includes('REMOTE_HOOKS disabled_by_default=true'));
-    assert.ok(src.match(/if DEBUG_REMOTE_HOOKS then[\s\S]*hookRemotesDeferred/));
+    assert.ok(src.match(/if not LiveSafe\.debugRemoteHooks then[\s\S]*hookRemotesDeferred/));
   });
 
   test('heavy catalog delayed and targeted roots only', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('scanTargetedItemCatalogRoots'));
-    assert.ok(src.includes('task.wait(HEAVY_CATALOG_DELAY_SEC)'));
+    assert.ok(src.includes('task.wait(LiveSafe.heavyCatalogDelaySec)'));
     assert.ok(!src.includes('task.wait(0.05)'));
     const heavyIdx = src.indexOf('buildMetadataCatalogAsync');
-    const delayIdx = src.indexOf('HEAVY_CATALOG_DELAY_SEC');
+    const delayIdx = src.indexOf('heavyCatalogDelaySec');
     assert.ok(heavyIdx > 0 && delayIdx > 0 && delayIdx < heavyIdx + 800);
   });
 
@@ -2241,13 +2268,13 @@ describe('BLOCKER10E live freeze proof and targeted item resolution', () => {
 
   test('strict live budget defaults', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('STARTUP_BUDGET_MS = 2'));
-    assert.ok(src.includes('SCAN_OPS_PER_YIELD = 4'));
+    assert.ok(src.includes('budgetMs = 2'));
+    assert.ok(src.includes('scanOpsPerYield = 4'));
   });
 
   test('module require disabled by default in live safe mode', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('ENABLE_MODULE_REQUIRE = false'));
+    assert.ok(src.includes('enableModuleRequire = false'));
     assert.ok(src.includes('MODULE_REQUIRE_SUMMARY'));
   });
 });
@@ -2269,7 +2296,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
 
   test('TRACKER_BOOT_BEGIN appears before catalog scan code', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10E');
+    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10F');
     const catalog = src.indexOf('scanReplicatedStorageFishCatalog');
     assert.ok(boot >= 0, 'TRACKER_BOOT_BEGIN missing');
     assert.ok(catalog >= 0, 'catalog scan missing');
@@ -2283,7 +2310,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
 
   test('BLOCKER10C non-blocking helpers remain after BLOCKER10D fix', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('STARTUP_NON_BLOCKING'));
+    assert.ok(src.includes('LiveSafe.nonBlocking') || src.includes('nonBlocking = true'));
     assert.ok(src.includes('scanBudgetYield'));
     assert.ok(src.includes('buildMetadataCatalogAsync'));
     assert.ok(src.includes('INVENTORY_PHASE_A'));
