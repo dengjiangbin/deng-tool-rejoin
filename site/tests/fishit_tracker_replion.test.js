@@ -2183,7 +2183,7 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
         source: 'replion',
         isOnline: true,
         phase: 'live',
-        trackerBuild: 'BLOCKER10F_COMPILE_GUARD_AND_LIVE_BOOT_RESTORE_2026_06_03',
+        trackerBuild: 'BLOCKER10F_SAFE_MINIMAL_NO_FREEZE_COMPILE_GATE_2026_06_03',
       })
       .expect(200);
 
@@ -2191,47 +2191,60 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
       .get('/api/fishit-tracker/debug/B10CAngler4')
       .expect(200);
 
-    assert.equal(res.body.trackerBuild, 'BLOCKER10F_COMPILE_GUARD_AND_LIVE_BOOT_RESTORE_2026_06_03');
+    assert.equal(res.body.trackerBuild, 'BLOCKER10F_SAFE_MINIMAL_NO_FREEZE_COMPILE_GATE_2026_06_03');
   });
 });
 
-describe('BLOCKER10F compile guard and live boot restore', () => {
+describe('BLOCKER10F safe minimal no-freeze compile gate', () => {
   const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
   const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
 
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10F_COMPILE_GUARD_AND_LIVE_BOOT_RESTORE_2026_06_03/);
+    assert.match(out, /BLOCKER10F_SAFE_MINIMAL_NO_FREEZE_COMPILE_GATE_2026_06_03/);
   });
 
-  test('LiveSafe table packs state for Luau register limit', () => {
+  test('safe minimal flags default off for heavy work', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('local LiveSafe = {'));
+    assert.ok(src.includes('safeMinimalMode = true'));
+    assert.ok(src.includes('enableHeavyCatalog = false'));
+    assert.ok(src.includes('enablePhaseBItemUpgrade = false'));
     assert.ok(src.includes('debugRemoteHooks = false'));
     assert.ok(src.includes('enableModuleRequire = false'));
-    assert.ok(src.includes('budgetMs = 2'));
-    assert.ok(src.includes('scanOpsPerYield = 4'));
   });
 
-  test('boot marker is BLOCKER10F', () => {
+  test('heavy catalog spawn gated when disabled', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('if LiveSafe.enableHeavyCatalog then'));
+    assert.ok(src.includes('function buildMetadataCatalogAsync'));
+    assert.ok(src.match(/if not LiveSafe\.enableHeavyCatalog then[\s\S]{0,80}HEAVY_CATALOG disabled=true/));
+  });
+
+  test('boot marker is BLOCKER10F safe minimal build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10F'));
-    assert.ok(src.includes('BLOCKER10F_COMPILE_GUARD_AND_LIVE_BOOT_RESTORE_2026_06_03'));
+    assert.ok(src.includes('BLOCKER10F_SAFE_MINIMAL_NO_FREEZE_COMPILE_GATE_2026_06_03'));
+  });
+
+  test('inventory upload and fish downgrade guards remain', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('INVENTORY_UPLOAD ok='));
+    assert.ok(src.includes('CATALOG_DOWNGRADE_BLOCKED'));
+    assert.ok(src.includes('shouldReplaceName'));
   });
 });
 
 describe('BLOCKER10E live freeze proof and targeted item resolution', () => {
   const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
 
-  test('freeze monitor and live safe mode present', () => {
+  test('freeze monitor and safe minimal mode present', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('RunService.Heartbeat'));
     assert.ok(src.includes('FREEZE_SUSPECT'));
-    assert.ok(src.includes('LIVE_SAFE_MODE'));
-    assert.ok(src.includes('heavyCatalogDelaySec = 5'));
+    assert.ok(src.includes('SAFE_MINIMAL_MODE'));
+    assert.ok(src.includes('enableHeavyCatalog = false'));
     assert.ok(src.includes('CATALOG_THROTTLE'));
-    assert.ok(src.includes('CATALOG_ABORTED'));
   });
 
   test('remote hooks disabled by default', () => {
@@ -2241,29 +2254,17 @@ describe('BLOCKER10E live freeze proof and targeted item resolution', () => {
     assert.ok(src.match(/if not LiveSafe\.debugRemoteHooks then[\s\S]*hookRemotesDeferred/));
   });
 
-  test('heavy catalog delayed and targeted roots only', () => {
+  test('heavy catalog disabled by default', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('scanTargetedItemCatalogRoots'));
-    assert.ok(src.includes('task.wait(LiveSafe.heavyCatalogDelaySec)'));
-    assert.ok(!src.includes('task.wait(0.05)'));
-    const heavyIdx = src.indexOf('buildMetadataCatalogAsync');
-    const delayIdx = src.indexOf('heavyCatalogDelaySec');
-    assert.ok(heavyIdx > 0 && delayIdx > 0 && delayIdx < heavyIdx + 800);
+    assert.ok(src.includes('enableHeavyCatalog = false'));
+    assert.ok(src.includes('HEAVY_CATALOG disabled='));
+    assert.ok(!src.includes('task.wait(LiveSafe.heavyCatalogDelaySec)'));
   });
 
-  test('unresolved target id list includes live screenshot ids', () => {
+  test('Phase B item upgrade disabled by default', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    for (const id of ['10', '990', '388', '196', '74', '70', '112', '234', '115', '67', '65', '232', '237']) {
-      assert.ok(src.includes(`"${id}"`), `missing target id ${id}`);
-    }
-    assert.ok(src.includes('UNRESOLVED_ID_TRACE'));
-    assert.ok(src.includes('unresolvedDiagnostics'));
-  });
-
-  test('Phase B batched with pass logging', () => {
-    const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('INVENTORY_PHASE_B pass='));
-    assert.ok(src.includes('INVENTORY_PHASE_B complete upgradedTotal='));
+    assert.ok(src.includes('enablePhaseBItemUpgrade = false'));
+    assert.ok(src.match(/function runInventoryPhaseB[\s\S]{0,80}if not LiveSafe\.enablePhaseBItemUpgrade/));
   });
 
   test('strict live budget defaults', () => {

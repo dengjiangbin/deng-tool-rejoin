@@ -23,7 +23,7 @@ if (/^\s*loadstring\s*\(/.test(src)) {
 if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10F')) {
   errors.push('TRACKER_BOOT_BEGIN BLOCKER10F marker missing');
 }
-if (!src.includes('BLOCKER10F_COMPILE_GUARD_AND_LIVE_BOOT_RESTORE_2026_06_03')) {
+if (!src.includes('BLOCKER10F_SAFE_MINIMAL_NO_FREEZE_COMPILE_GATE_2026_06_03')) {
   errors.push('BLOCKER10F build marker missing');
 }
 if (!/TRACKER_BUILD\s*=/.test(src)) {
@@ -31,6 +31,24 @@ if (!/TRACKER_BUILD\s*=/.test(src)) {
 }
 if (!src.includes('local LiveSafe = {')) {
   errors.push('LiveSafe register-pack table missing (Luau 200-register guard)');
+}
+if (!src.includes('safeMinimalMode = true')) {
+  errors.push('safeMinimalMode must default true');
+}
+if (!src.includes('enableHeavyCatalog = false')) {
+  errors.push('enableHeavyCatalog must default false');
+}
+if (!src.includes('enablePhaseBItemUpgrade = false')) {
+  errors.push('enablePhaseBItemUpgrade must default false');
+}
+if (!src.includes('debugRemoteHooks = false')) {
+  errors.push('debugRemoteHooks must default false');
+}
+if (!src.includes('enableModuleRequire = false')) {
+  errors.push('enableModuleRequire must default false');
+}
+if (/^<<<<<<<|^>>>>>>>|^=======\s*$/.test(src)) {
+  errors.push('merge conflict markers detected');
 }
 if (/return true\nend\n\n\s+return true\nend/.test(src)) {
   errors.push('orphan duplicate return/end block detected');

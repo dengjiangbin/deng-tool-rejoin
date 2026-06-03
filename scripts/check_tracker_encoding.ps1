@@ -15,25 +15,23 @@ if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
 
 if ($content -notmatch '^--') { $errors += "FAIL  Does not start with '--'" } else { Write-Host "PASS  Starts with '--' (Lua comment)" }
 
-# ── BLOCKER10F: compile guard + live boot restore ──
+# ── BLOCKER10F: safe minimal + compile gate ──
 if ($content -match '^\s*loadstring\s*\(') { $errors += "FAIL  tracker.lua must not begin with loadstring() wrapper" } else { Write-Host "PASS  No unsafe top-level loadstring wrapper" }
 if ($content -match 'TRACKER_BOOT_BEGIN BLOCKER10F') { Write-Host "PASS  TRACKER_BOOT_BEGIN BLOCKER10F marker found" } else { $errors += "FAIL  TRACKER_BOOT_BEGIN BLOCKER10F missing" }
-if ($content -match 'BLOCKER10F_COMPILE_GUARD_AND_LIVE_BOOT_RESTORE_2026_06_03') { Write-Host "PASS  BLOCKER10F build id found" } else { $errors += "FAIL  BLOCKER10F build id missing" }
+if ($content -match 'BLOCKER10F_SAFE_MINIMAL_NO_FREEZE_COMPILE_GATE_2026_06_03') { Write-Host "PASS  BLOCKER10F build id found" } else { $errors += "FAIL  BLOCKER10F build id missing" }
+if ($content -match 'safeMinimalMode = true') { Write-Host "PASS  SAFE_MINIMAL_MODE default true" } else { $errors += "FAIL  safeMinimalMode missing" }
+if ($content -match 'enableHeavyCatalog = false') { Write-Host "PASS  enableHeavyCatalog default false" } else { $errors += "FAIL  enableHeavyCatalog must be false" }
+if ($content -match 'enablePhaseBItemUpgrade = false') { Write-Host "PASS  enablePhaseBItemUpgrade default false" } else { $errors += "FAIL  enablePhaseBItemUpgrade must be false" }
+if ($content -match 'LiveSafe\.debugRemoteHooks = false|debugRemoteHooks = false') { Write-Host "PASS  debugRemoteHooks default false" } else { $errors += "FAIL  debugRemoteHooks must be false" }
+if ($content -match 'enableModuleRequire = false') { Write-Host "PASS  enableModuleRequire default false" } else { $errors += "FAIL  enableModuleRequire must be false" }
+if ($content -match 'SAFE_MINIMAL_MODE enabled=') { Write-Host "PASS  SAFE_MINIMAL_MODE log found" } else { $errors += "FAIL  SAFE_MINIMAL_MODE log missing" }
+if ($content -match 'HEAVY_CATALOG disabled=') { Write-Host "PASS  HEAVY_CATALOG disabled log found" } else { $errors += "FAIL  HEAVY_CATALOG disabled log missing" }
+if ($content -match 'PHASE_B_ITEM_UPGRADE disabled_by_default') { Write-Host "PASS  PHASE_B_ITEM_UPGRADE disabled log found" } else { $errors += "FAIL  PHASE_B_ITEM_UPGRADE disabled log missing" }
+if ($content -match 'INVENTORY_UPLOAD ok=') { Write-Host "PASS  INVENTORY_UPLOAD log found" } else { $errors += "FAIL  INVENTORY_UPLOAD log missing" }
 if ($content -match 'local LiveSafe = \{') { Write-Host "PASS  LiveSafe register-pack table found" } else { $errors += "FAIL  LiveSafe register-pack table missing" }
-if ($content -match 'LIVE_SAFE_MODE') { Write-Host "PASS  LIVE_SAFE_MODE found" } else { $errors += "FAIL  LIVE_SAFE_MODE missing" }
-if ($content -match 'FREEZE_SUSPECT') { Write-Host "PASS  FREEZE_SUSPECT stall detector found" } else { $errors += "FAIL  FREEZE_SUSPECT missing" }
 if ($content -match 'Freeze monitor summary') { Write-Host "PASS  Freeze monitor summary found" } else { $errors += "FAIL  Freeze monitor summary missing" }
-if ($content -match 'LiveSafe\.debugRemoteHooks') { Write-Host "PASS  LiveSafe.debugRemoteHooks flag found" } else { $errors += "FAIL  LiveSafe.debugRemoteHooks missing" }
-if ($content -match 'REMOTE_HOOKS disabled_by_default') { Write-Host "PASS  REMOTE_HOOKS disabled log found" } else { $errors += "FAIL  REMOTE_HOOKS disabled log missing" }
-if ($content -match 'HEAVY_CATALOG_DELAY') { Write-Host "PASS  HEAVY_CATALOG_DELAY found" } else { $errors += "FAIL  HEAVY_CATALOG_DELAY missing" }
-if ($content -match 'CATALOG_THROTTLE') { Write-Host "PASS  CATALOG_THROTTLE found" } else { $errors += "FAIL  CATALOG_THROTTLE missing" }
-if ($content -match 'CATALOG_ABORTED') { Write-Host "PASS  CATALOG_ABORTED found" } else { $errors += "FAIL  CATALOG_ABORTED missing" }
-if ($content -match 'UNRESOLVED_ID_TRACE') { Write-Host "PASS  UNRESOLVED_ID_TRACE found" } else { $errors += "FAIL  UNRESOLVED_ID_TRACE missing" }
-if ($content -match 'unresolvedTargetIds') { Write-Host "PASS  unresolvedTargetIds list found" } else { $errors += "FAIL  unresolvedTargetIds missing" }
-if ($content -match 'scanTargetedItemCatalogRoots') { Write-Host "PASS  scanTargetedItemCatalogRoots found" } else { $errors += "FAIL  scanTargetedItemCatalogRoots missing" }
-if ($content -match 'tryFinalizeCatalogAndUpgrade') { Write-Host "PASS  tryFinalizeCatalogAndUpgrade coordinator found" } else { $errors += "FAIL  tryFinalizeCatalogAndUpgrade missing" }
-if ($content -match 'TRACKER_BUILD BLOCKER10F') { Write-Host "PASS  TRACKER_BUILD BLOCKER10F marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10F marker missing" }
 if ($content -match 'function hookRemotesDeferred[\s\S]{0,200}if not LiveSafe\.debugRemoteHooks') { Write-Host "PASS  hookRemotesDeferred gated by LiveSafe.debugRemoteHooks" } else { $errors += "FAIL  hookRemotesDeferred not gated" }
+if ($content -match 'function buildMetadataCatalogAsync[\s\S]{0,120}if not LiveSafe\.enableHeavyCatalog') { Write-Host "PASS  buildMetadataCatalogAsync gated by enableHeavyCatalog" } else { $errors += "FAIL  buildMetadataCatalogAsync not gated" }
 if ($content -match '(?m)return true\s*\r?\nend\s*\r?\n\r?\n\s+return true\s*\r?\nend\s*\r?\n\r?\n-- BLOCKER10C') { $errors += "FAIL  orphaned duplicate return/end syntax corruption detected" } else { Write-Host "PASS  No orphaned duplicate return/end syntax corruption" }
 $bootPos = $content.IndexOf('TRACKER_BOOT_BEGIN')
 $catalogPos = $content.IndexOf('scanReplicatedStorageFishCatalog')
