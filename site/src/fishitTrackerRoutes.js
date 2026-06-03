@@ -123,6 +123,34 @@ function sanitiseItems(raw) {
   return out;
 }
 
+/** BLOCKER10C: incoming placeholder must not downgrade a stored real name/category. */
+function mergeItemsNoDowngrade(incoming, existing) {
+  if (!Array.isArray(incoming) || incoming.length === 0) return incoming;
+  if (!Array.isArray(existing) || existing.length === 0) return incoming;
+  const byId = new Map();
+  for (const it of existing) {
+    if (it && it.itemId) byId.set(String(it.itemId), it);
+  }
+  return incoming.map((it) => {
+    if (!it || !it.itemId) return it;
+    const prev = byId.get(String(it.itemId));
+    if (!prev || !prev.name) return it;
+    const prevReal = !/^Item #\d+$/.test(String(prev.name));
+    const incPlaceholder = /^Item #\d+$/.test(String(it.name || ''));
+    if (prevReal && incPlaceholder) {
+      return {
+        ...it,
+        name: prev.name,
+        category: String(prev.category || '').toLowerCase() === 'fish' ? 'fish' : (prev.category || it.category),
+        resolved: prev.resolved !== false ? true : prev.resolved,
+        catalogReason: prev.catalogReason || it.catalogReason,
+        catalogSource: prev.catalogSource || it.catalogSource,
+      };
+    }
+    return it;
+  });
+}
+
 /**
  * Normalise inventory from any shape the Lua tracker may send:
  *   - flat `items` array (primary — preferred)
@@ -174,7 +202,8 @@ function enrichItemsFromCatalog(items) {
       meta = catalogStore.lookupById(idFromName);
     }
 
-    const trackerHasRealName = it.resolved === true && !/^Item #\d+$/.test(it.name);
+    const isPlaceholder = /^Item #\d+$/.test(String(it.name || ''));
+    const trackerHasRealName = !isPlaceholder && !!it.name;
     const name = trackerHasRealName ? it.name : ((meta && meta.name) || it.name);
     let rarity = it.rarity || (meta && meta.tier) || null;
     if (rarity) rarity = catalogStore.normalizeTier(rarity);
@@ -188,11 +217,17 @@ function enrichItemsFromCatalog(items) {
     const catalogReason = it.catalogReason || (meta && !trackerHasRealName ? 'catalog_hit' : null);
     const catalogSource = it.catalogSource || (meta && meta.source) || null;
 
+    // Never downgrade fish category or real tracker names via catalog enrichment.
+    let category = it.category || (meta && meta.category) || null;
+    if (trackerHasRealName && String(it.category || '').toLowerCase() === 'fish') {
+      category = 'fish';
+    }
+
     out.push({
       ...it,
       name,
       rarity,
-      category: it.category || (meta && meta.category) || null,
+      category,
       imageUrl,
       resolved,
       catalogReason,
@@ -352,7 +387,10 @@ router.post(
 
     // ── Inventory snapshot ────────────────────────────────────────
     // Accepts both flat `items` array and grouped `owned.{fish,rods,items}`.
-    const cleanItems = normaliseInventoryItems(body);
+    let cleanItems = normaliseInventoryItems(body);
+    if (existing && existing.items && cleanItems.length) {
+      cleanItems = mergeItemsNoDowngrade(cleanItems, existing.items);
+    }
     const inventory  = buildInventoryGroups(cleanItems);
     const ps         = sanitiseParseStats(body.parseStats);
 

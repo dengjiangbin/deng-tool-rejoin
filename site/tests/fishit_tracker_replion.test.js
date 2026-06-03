@@ -1864,7 +1864,7 @@ describe('Fish It tracker — BLOCKER 10 item name resolution', () => {
         source: 'replion',
         isOnline: true,
         phase: 'live',
-        trackerBuild: 'BLOCKER10B_RESTORE_FISH_AND_SAFE_ITEM_UPGRADE_2026_06_03',
+        trackerBuild: 'BLOCKER10C_NONBLOCKING_ITEM_CATALOG_UPGRADE_2026_06_03',
       })
       .expect(200);
 
@@ -1872,7 +1872,7 @@ describe('Fish It tracker — BLOCKER 10 item name resolution', () => {
       .get('/api/fishit-tracker/debug/B10Angler1')
       .expect(200);
 
-    assert.equal(res.body.trackerBuild, 'BLOCKER10B_RESTORE_FISH_AND_SAFE_ITEM_UPGRADE_2026_06_03');
+    assert.equal(res.body.trackerBuild, 'BLOCKER10C_NONBLOCKING_ITEM_CATALOG_UPGRADE_2026_06_03');
   });
 
   test('resolved rod/item names from tracker are preserved on GET', async () => {
@@ -1970,7 +1970,7 @@ describe('Fish It tracker — BLOCKER 10 item name resolution', () => {
 describe('Fish It tracker — BLOCKER 10B fish name regression guard', () => {
   beforeEach(() => { cleanup(); });
 
-  test('trackerBuild BLOCKER10B stored in payload', async () => {
+  test('trackerBuild BLOCKER10C stored in payload', async () => {
     const app = makeApp();
     await request(app)
       .post('/api/tracker/update-backpack')
@@ -1980,7 +1980,7 @@ describe('Fish It tracker — BLOCKER 10B fish name regression guard', () => {
         userId: 11001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10B_RESTORE_FISH_AND_SAFE_ITEM_UPGRADE_2026_06_03',
+        trackerBuild: 'BLOCKER10C_NONBLOCKING_ITEM_CATALOG_UPGRADE_2026_06_03',
       })
       .expect(200);
 
@@ -1988,7 +1988,7 @@ describe('Fish It tracker — BLOCKER 10B fish name regression guard', () => {
       .get('/api/fishit-tracker/debug/B10BAngler1')
       .expect(200);
 
-    assert.equal(res.body.trackerBuild, 'BLOCKER10B_RESTORE_FISH_AND_SAFE_ITEM_UPGRADE_2026_06_03');
+    assert.equal(res.body.trackerBuild, 'BLOCKER10C_NONBLOCKING_ITEM_CATALOG_UPGRADE_2026_06_03');
   });
 
   test('resolved fish names from tracker are never overwritten by backend catalog', async () => {
@@ -2065,5 +2065,131 @@ describe('Fish It tracker — BLOCKER 10B fish name regression guard', () => {
 
     assert.equal(res.body.items.find((i) => i.itemId === '68').name, 'Flame Angelfish');
     assert.equal(res.body.items.find((i) => i.itemId === '10').name, 'Carbon Rod');
+  });
+});
+
+describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
+  test('tracker real fish name is never overwritten by later placeholder payload', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B10CAngler1',
+        userId: 12001,
+        source: 'replion',
+        isOnline: true,
+        trackerBuild: 'BLOCKER10C_NONBLOCKING_ITEM_CATALOG_UPGRADE_2026_06_03',
+        items: [
+          { name: 'Bandit Angelfish', count: 1, category: 'fish', itemId: '117', resolved: true },
+        ],
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B10CAngler1',
+        userId: 12001,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'Item #117', count: 1, category: 'items', itemId: '117', resolved: false },
+        ],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B10CAngler1')
+      .expect(200);
+
+    const fish = res.body.items.find((i) => i.itemId === '117');
+    assert.equal(fish.name, 'Bandit Angelfish', 'real fish name must not downgrade to Item #id');
+    assert.equal(fish.category, 'fish', 'fish category must not become items');
+  });
+
+  test('placeholder Item #990 upgrades when catalog has id 990', async () => {
+    catalogStore.ingestSnapshot({
+      catalog: {
+        fish: [],
+        rods: [],
+        items: [{ name: 'Common Crate', key: 'common crate', itemId: '990', category: 'items', source: 'test' }],
+      },
+    });
+
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B10CAngler2',
+        userId: 12002,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'Item #990', count: 2, category: 'items', itemId: '990', resolved: false },
+        ],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B10CAngler2')
+      .expect(200);
+
+    assert.equal(res.body.items.find((i) => i.itemId === '990').name, 'Common Crate');
+  });
+
+  test('placeholder Item #388 upgrades when catalog has id 388', async () => {
+    catalogStore.ingestSnapshot({
+      catalog: {
+        fish: [],
+        rods: [{ name: 'Carbon Rod', key: 'carbon rod', itemId: '388', category: 'rod', source: 'test' }],
+        items: [],
+      },
+    });
+
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B10CAngler3',
+        userId: 12003,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'Item #388', count: 1, category: 'items', itemId: '388', resolved: false },
+        ],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B10CAngler3')
+      .expect(200);
+
+    assert.equal(res.body.items.find((i) => i.itemId === '388').name, 'Carbon Rod');
+  });
+
+  test('trackerBuild BLOCKER10C stored on debug endpoint', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B10CAngler4',
+        userId: 12004,
+        source: 'replion',
+        isOnline: true,
+        phase: 'live',
+        trackerBuild: 'BLOCKER10C_NONBLOCKING_ITEM_CATALOG_UPGRADE_2026_06_03',
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B10CAngler4')
+      .expect(200);
+
+    assert.equal(res.body.trackerBuild, 'BLOCKER10C_NONBLOCKING_ITEM_CATALOG_UPGRADE_2026_06_03');
   });
 });
