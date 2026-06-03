@@ -174,15 +174,18 @@ function enrichItemsFromCatalog(items) {
       meta = catalogStore.lookupById(idFromName);
     }
 
-    const name = (meta && meta.name) || it.name;
+    const trackerHasRealName = it.resolved === true && !/^Item #\d+$/.test(it.name);
+    const name = trackerHasRealName ? it.name : ((meta && meta.name) || it.name);
     let rarity = it.rarity || (meta && meta.tier) || null;
     if (rarity) rarity = catalogStore.normalizeTier(rarity);
 
     // Image priority: explicit item image → catalog image → Fish It DB resolver.
     let imageUrl = it.imageUrl || (meta && meta.imageUrl) || dbImageFor(name) || null;
 
-    const resolved = it.resolved === true || (meta != null && !/^Item #\d+$/.test(it.name));
-    const catalogReason = it.catalogReason || (meta ? 'catalog_hit' : null);
+    const resolved = trackerHasRealName
+      ? true
+      : (it.resolved != null ? it.resolved : !!meta);
+    const catalogReason = it.catalogReason || (meta && !trackerHasRealName ? 'catalog_hit' : null);
     const catalogSource = it.catalogSource || (meta && meta.source) || null;
 
     out.push({
@@ -191,7 +194,7 @@ function enrichItemsFromCatalog(items) {
       rarity,
       category: it.category || (meta && meta.category) || null,
       imageUrl,
-      resolved: it.resolved != null ? it.resolved : !!meta,
+      resolved,
       catalogReason,
       catalogSource,
     });

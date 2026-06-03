@@ -1846,3 +1846,120 @@ describe('Fish It tracker — BLOCKER 9 catalog resolve + nil-safe fields', () =
     assert.equal(res.body.parseStats.acceptedInstances, 100);
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// BLOCKER 10: item name resolution (rods/crates/items by numeric id)
+// ════════════════════════════════════════════════════════════════════════════
+describe('Fish It tracker — BLOCKER 10 item name resolution', () => {
+  beforeEach(() => { cleanup(); });
+
+  test('trackerBuild BLOCKER10 stored in payload', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B10Angler1',
+        userId: 10001,
+        source: 'replion',
+        isOnline: true,
+        phase: 'live',
+        trackerBuild: 'BLOCKER10_ITEM_NAME_RESOLUTION_2026_06_03',
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B10Angler1')
+      .expect(200);
+
+    assert.equal(res.body.trackerBuild, 'BLOCKER10_ITEM_NAME_RESOLUTION_2026_06_03');
+  });
+
+  test('resolved rod/item names from tracker are preserved on GET', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B10Angler2',
+        userId: 10002,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'Carbon Rod', count: 1, category: 'rod', itemId: '10', resolved: true, catalogReason: 'catalog_hit' },
+          { name: 'Common Crate', count: 2, category: 'items', itemId: '990', resolved: true, catalogReason: 'catalog_hit' },
+          { name: 'Bandit Angelfish', count: 5, category: 'fish', itemId: '119', resolved: true, catalogReason: 'catalog_hit' },
+        ],
+        parseStats: { raw: 8, accepted: 3, acceptedInstances: 8, rejected: 0, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B10Angler2')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'live');
+    assert.ok(res.body.items.some((i) => i.name === 'Carbon Rod' && i.itemId === '10'));
+    assert.ok(res.body.items.some((i) => i.name === 'Common Crate' && i.itemId === '990'));
+    assert.ok(res.body.items.some((i) => i.name === 'Bandit Angelfish'));
+  });
+
+  test('backend enriches Item #10 via lookupById but keeps tracker-resolved real name', async () => {
+    catalogStore.ingestSnapshot({
+      catalog: {
+        fish: [],
+        rods: [{ name: 'Wrong Rod Name', key: 'wrong rod', itemId: '10', source: 'test' }],
+        items: [{ name: 'Common Crate', key: 'common crate', itemId: '990', source: 'test' }],
+      },
+    });
+
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B10Angler3',
+        userId: 10003,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'Carbon Rod', count: 1, itemId: '10', resolved: true, catalogReason: 'catalog_hit' },
+          { name: 'Item #990', count: 1, itemId: '990', resolved: false, catalogReason: 'catalog_missing_numeric_id' },
+        ],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B10Angler3')
+      .expect(200);
+
+    const rod = res.body.items.find((i) => i.itemId === '10');
+    const crate = res.body.items.find((i) => i.itemId === '990');
+    assert.equal(rod.name, 'Carbon Rod', 'tracker real name must not be overwritten');
+    assert.equal(crate.name, 'Common Crate', 'placeholder enriched from catalog by id');
+  });
+
+  test('unresolved placeholder Item #65 stays unresolved', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B10Angler4',
+        userId: 10004,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Item #65', count: 1, itemId: '65', resolved: false, catalogReason: 'catalog_missing_numeric_id' }],
+        parseStats: { raw: 1, accepted: 1, acceptedInstances: 1, rejected: 0, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B10Angler4')
+      .expect(200);
+
+    assert.equal(res.body.items[0].name, 'Item #65');
+    assert.equal(res.body.items[0].resolved, false);
+    assert.equal(res.body.parseStats.acceptedInstances, 1);
+  });
+});
