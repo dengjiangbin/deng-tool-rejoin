@@ -2171,7 +2171,7 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
     assert.equal(res.body.items.find((i) => i.itemId === '388').name, 'Carbon Rod');
   });
 
-  test('trackerBuild BLOCKER10D stored on debug endpoint', async () => {
+  test('trackerBuild BLOCKER10E stored on debug endpoint', async () => {
     const app = makeApp();
     await request(app)
       .post('/api/tracker/update-backpack')
@@ -2182,7 +2182,7 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
         source: 'replion',
         isOnline: true,
         phase: 'live',
-        trackerBuild: 'BLOCKER10D_LOADSTRING_STARTUP_FIX_2026_06_03',
+        trackerBuild: 'BLOCKER10E_LIVE_FREEZE_PROOF_AND_TARGETED_ITEM_RESOLUTION_2026_06_03',
       })
       .expect(200);
 
@@ -2190,7 +2190,65 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
       .get('/api/fishit-tracker/debug/B10CAngler4')
       .expect(200);
 
-    assert.equal(res.body.trackerBuild, 'BLOCKER10D_LOADSTRING_STARTUP_FIX_2026_06_03');
+    assert.equal(res.body.trackerBuild, 'BLOCKER10E_LIVE_FREEZE_PROOF_AND_TARGETED_ITEM_RESOLUTION_2026_06_03');
+  });
+});
+
+describe('BLOCKER10E live freeze proof and targeted item resolution', () => {
+  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+
+  test('freeze monitor and live safe mode present', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('RunService.Heartbeat'));
+    assert.ok(src.includes('FREEZE_SUSPECT'));
+    assert.ok(src.includes('LIVE_SAFE_MODE'));
+    assert.ok(src.includes('HEAVY_CATALOG_DELAY_SEC'));
+    assert.ok(src.includes('CATALOG_THROTTLE'));
+    assert.ok(src.includes('CATALOG_ABORTED'));
+  });
+
+  test('remote hooks disabled by default', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('DEBUG_REMOTE_HOOKS = false'));
+    assert.ok(src.includes('REMOTE_HOOKS disabled_by_default=true'));
+    assert.ok(src.match(/if DEBUG_REMOTE_HOOKS then[\s\S]*hookRemotesDeferred/));
+  });
+
+  test('heavy catalog delayed and targeted roots only', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('scanTargetedItemCatalogRoots'));
+    assert.ok(src.includes('task.wait(HEAVY_CATALOG_DELAY_SEC)'));
+    assert.ok(!src.includes('task.wait(0.05)'));
+    const heavyIdx = src.indexOf('buildMetadataCatalogAsync');
+    const delayIdx = src.indexOf('HEAVY_CATALOG_DELAY_SEC');
+    assert.ok(heavyIdx > 0 && delayIdx > 0 && delayIdx < heavyIdx + 800);
+  });
+
+  test('unresolved target id list includes live screenshot ids', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    for (const id of ['10', '990', '388', '196', '74', '70', '112', '234', '115', '67', '65', '232', '237']) {
+      assert.ok(src.includes(`"${id}"`), `missing target id ${id}`);
+    }
+    assert.ok(src.includes('UNRESOLVED_ID_TRACE'));
+    assert.ok(src.includes('unresolvedDiagnostics'));
+  });
+
+  test('Phase B batched with pass logging', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('INVENTORY_PHASE_B pass='));
+    assert.ok(src.includes('INVENTORY_PHASE_B complete upgradedTotal='));
+  });
+
+  test('strict live budget defaults', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('STARTUP_BUDGET_MS = 2'));
+    assert.ok(src.includes('SCAN_OPS_PER_YIELD = 4'));
+  });
+
+  test('module require disabled by default in live safe mode', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('ENABLE_MODULE_REQUIRE = false'));
+    assert.ok(src.includes('MODULE_REQUIRE_SUMMARY'));
   });
 });
 
@@ -2211,7 +2269,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
 
   test('TRACKER_BOOT_BEGIN appears before catalog scan code', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10D');
+    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10E');
     const catalog = src.indexOf('scanReplicatedStorageFishCatalog');
     assert.ok(boot >= 0, 'TRACKER_BOOT_BEGIN missing');
     assert.ok(catalog >= 0, 'catalog scan missing');

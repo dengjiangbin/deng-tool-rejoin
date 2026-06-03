@@ -221,6 +221,8 @@ function enrichItemsFromCatalog(items) {
     let category = it.category || (meta && meta.category) || null;
     if (trackerHasRealName && String(it.category || '').toLowerCase() === 'fish') {
       category = 'fish';
+    } else if (isPlaceholder && meta && meta.category && !trackerHasRealName) {
+      category = meta.category;
     }
 
     out.push({
@@ -430,6 +432,9 @@ router.post(
       lastSeenAt:      online ? now : (existing ? existing.lastSeenAt : now),
       updatedAt:       now,
     };
+    if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
+      liveTrackDB[key].unresolvedDiagnostics = body.unresolvedDiagnostics.slice(0, 20);
+    }
     if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
 
     return res.status(200).json({ status: 'success' });
@@ -587,6 +592,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
       itemsOnly:    (inv.items || []).length,
     },
     firstItems,
+    unresolvedDiagnostics: data.unresolvedDiagnostics || null,
   });
 });
 
