@@ -2171,7 +2171,7 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
     assert.equal(res.body.items.find((i) => i.itemId === '388').name, 'Carbon Rod');
   });
 
-  test('trackerBuild BLOCKER10C stored on debug endpoint', async () => {
+  test('trackerBuild BLOCKER10D stored on debug endpoint', async () => {
     const app = makeApp();
     await request(app)
       .post('/api/tracker/update-backpack')
@@ -2182,7 +2182,7 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
         source: 'replion',
         isOnline: true,
         phase: 'live',
-        trackerBuild: 'BLOCKER10C_NONBLOCKING_ITEM_CATALOG_UPGRADE_2026_06_03',
+        trackerBuild: 'BLOCKER10D_LOADSTRING_STARTUP_FIX_2026_06_03',
       })
       .expect(200);
 
@@ -2190,6 +2190,51 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
       .get('/api/fishit-tracker/debug/B10CAngler4')
       .expect(200);
 
-    assert.equal(res.body.trackerBuild, 'BLOCKER10C_NONBLOCKING_ITEM_CATALOG_UPGRADE_2026_06_03');
+    assert.equal(res.body.trackerBuild, 'BLOCKER10D_LOADSTRING_STARTUP_FIX_2026_06_03');
+  });
+});
+
+describe('BLOCKER10D loadstring startup safety', () => {
+  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+
+  test('tracker.lua starts with comment header, not loadstring wrapper', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.startsWith('--'), 'must be plain Lua source');
+    const firstCodeLine = src.split('\n').find((l) => {
+      const t = l.trim();
+      return t.length > 0 && !t.startsWith('--');
+    });
+    assert.ok(firstCodeLine, 'expected executable line');
+    assert.ok(!firstCodeLine.includes('loadstring('), 'first executable line must not be loadstring wrapper');
+    assert.ok(firstCodeLine.includes('TRACKER_BOOT_BEGIN'), 'first executable line must be TRACKER_BOOT_BEGIN');
+  });
+
+  test('TRACKER_BOOT_BEGIN appears before catalog scan code', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10D');
+    const catalog = src.indexOf('scanReplicatedStorageFishCatalog');
+    assert.ok(boot >= 0, 'TRACKER_BOOT_BEGIN missing');
+    assert.ok(catalog >= 0, 'catalog scan missing');
+    assert.ok(boot < catalog, 'boot marker must precede catalog work');
+  });
+
+  test('no orphaned duplicate return/end syntax corruption', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(!/return true\nend\n\n\s+return true\nend\n\n-- BLOCKER10C/m.test(src), 'duplicate orphaned return/end block must not exist');
+  });
+
+  test('BLOCKER10C non-blocking helpers remain after BLOCKER10D fix', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('STARTUP_NON_BLOCKING'));
+    assert.ok(src.includes('scanBudgetYield'));
+    assert.ok(src.includes('buildMetadataCatalogAsync'));
+    assert.ok(src.includes('INVENTORY_PHASE_A'));
+    assert.ok(src.includes('INVENTORY_PHASE_B'));
+    assert.ok(src.includes('isPlaceholderName'));
+  });
+
+  test('exact loader command shape is documented in tracker header', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua"))()'));
   });
 });

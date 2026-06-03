@@ -14,6 +14,20 @@ if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
 }
 
 if ($content -notmatch '^--') { $errors += "FAIL  Does not start with '--'" } else { Write-Host "PASS  Starts with '--' (Lua comment)" }
+
+# ── BLOCKER10D: loadstring startup safety ──
+if ($content -match '^\s*loadstring\s*\(') { $errors += "FAIL  tracker.lua must not begin with loadstring() wrapper" } else { Write-Host "PASS  No unsafe top-level loadstring wrapper" }
+if ($content -match 'TRACKER_BOOT_BEGIN BLOCKER10D') { Write-Host "PASS  TRACKER_BOOT_BEGIN BLOCKER10D marker found" } else { $errors += "FAIL  TRACKER_BOOT_BEGIN BLOCKER10D missing" }
+if ($content -match 'BLOCKER10D_LOADSTRING_STARTUP_FIX_2026_06_03') { Write-Host "PASS  BLOCKER10D build id found" } else { $errors += "FAIL  BLOCKER10D build id missing" }
+if ($content -match '(?m)return true\s*\r?\nend\s*\r?\n\r?\n\s+return true\s*\r?\nend\s*\r?\n\r?\n-- BLOCKER10C') { $errors += "FAIL  orphaned duplicate return/end syntax corruption detected" } else { Write-Host "PASS  No orphaned duplicate return/end syntax corruption" }
+$bootPos = $content.IndexOf('TRACKER_BOOT_BEGIN')
+$catalogPos = $content.IndexOf('scanReplicatedStorageFishCatalog')
+if ($bootPos -lt 0 -or $catalogPos -lt 0 -or $bootPos -ge $catalogPos) { $errors += "FAIL  TRACKER_BOOT_BEGIN must appear before catalog scan code" } else { Write-Host "PASS  TRACKER_BOOT_BEGIN precedes catalog startup" }
+$buildPos = $content.IndexOf('TRACKER_BUILD')
+$asyncPos = $content.IndexOf('buildMetadataCatalogAsync')
+if ($buildPos -lt 0 -or $asyncPos -lt 0 -or $buildPos -ge $asyncPos) { $errors += "FAIL  TRACKER_BUILD must appear before async catalog work" } else { Write-Host "PASS  TRACKER_BUILD precedes async catalog work" }
+if ($content -match 'typeof\(task\)') { Write-Host "PASS  task nil-safe shim found" } else { $errors += "FAIL  task nil-safe shim missing" }
+
 if ($content -match '\[DENG TRACKER\] tracker\.lua loaded') { Write-Host "PASS  Version marker found" } else { $errors += "FAIL  Version marker missing" }
 
 $dc = ([regex]::Matches($codeOnly, '_G\.httpRequest\s*\(')).Count
@@ -97,8 +111,7 @@ if ($content -match 'MISSING_HELPER name=') { Write-Host "PASS  MISSING_HELPER d
 if ($content -match 'NUMERIC_ID_FALLBACK_ACCEPTED') { Write-Host "PASS  NUMERIC_ID_FALLBACK_ACCEPTED log found" } else { $errors += "FAIL  NUMERIC_ID_FALLBACK_ACCEPTED missing" }
 if ($content -match 'addOwnedNumericFallback') { Write-Host "PASS  addOwnedNumericFallback found" } else { $errors += "FAIL  addOwnedNumericFallback missing" }
 if ($content -match 'local mergeOwnedItem') { Write-Host "PASS  mergeOwnedItem forward declaration found" } else { $errors += "FAIL  mergeOwnedItem forward declaration missing" }
-if ($content -match 'TRACKER_BUILD BLOCKER10C') { Write-Host "PASS  TRACKER_BUILD BLOCKER10C marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10C marker missing" }
-if ($content -match 'BLOCKER10C_NONBLOCKING_ITEM_CATALOG_UPGRADE_2026_06_03') { Write-Host "PASS  BLOCKER10C build id found" } else { $errors += "FAIL  BLOCKER10C build id missing" }
+if ($content -match 'TRACKER_BUILD BLOCKER10D') { Write-Host "PASS  TRACKER_BUILD BLOCKER10D marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10D marker missing" }
 if ($content -match 'STARTUP_NON_BLOCKING') { Write-Host "PASS  STARTUP_NON_BLOCKING log found" } else { $errors += "FAIL  STARTUP_NON_BLOCKING missing" }
 if ($content -match 'scanBudgetYield') { Write-Host "PASS  scanBudgetYield scheduler found" } else { $errors += "FAIL  scanBudgetYield missing" }
 if ($content -match 'INVENTORY_PHASE_A') { Write-Host "PASS  INVENTORY_PHASE_A log found" } else { $errors += "FAIL  INVENTORY_PHASE_A missing" }
