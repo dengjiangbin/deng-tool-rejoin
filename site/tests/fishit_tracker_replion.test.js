@@ -1864,7 +1864,7 @@ describe('Fish It tracker — BLOCKER 10 item name resolution', () => {
         source: 'replion',
         isOnline: true,
         phase: 'live',
-        trackerBuild: 'BLOCKER10_ITEM_NAME_RESOLUTION_2026_06_03',
+        trackerBuild: 'BLOCKER10B_RESTORE_FISH_AND_SAFE_ITEM_UPGRADE_2026_06_03',
       })
       .expect(200);
 
@@ -1872,7 +1872,7 @@ describe('Fish It tracker — BLOCKER 10 item name resolution', () => {
       .get('/api/fishit-tracker/debug/B10Angler1')
       .expect(200);
 
-    assert.equal(res.body.trackerBuild, 'BLOCKER10_ITEM_NAME_RESOLUTION_2026_06_03');
+    assert.equal(res.body.trackerBuild, 'BLOCKER10B_RESTORE_FISH_AND_SAFE_ITEM_UPGRADE_2026_06_03');
   });
 
   test('resolved rod/item names from tracker are preserved on GET', async () => {
@@ -1961,5 +1961,109 @@ describe('Fish It tracker — BLOCKER 10 item name resolution', () => {
     assert.equal(res.body.items[0].name, 'Item #65');
     assert.equal(res.body.items[0].resolved, false);
     assert.equal(res.body.parseStats.acceptedInstances, 1);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// BLOCKER 10B: fish names must not regress to Item #id after generic item pass
+// ════════════════════════════════════════════════════════════════════════════
+describe('Fish It tracker — BLOCKER 10B fish name regression guard', () => {
+  beforeEach(() => { cleanup(); });
+
+  test('trackerBuild BLOCKER10B stored in payload', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B10BAngler1',
+        userId: 11001,
+        source: 'replion',
+        isOnline: true,
+        trackerBuild: 'BLOCKER10B_RESTORE_FISH_AND_SAFE_ITEM_UPGRADE_2026_06_03',
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B10BAngler1')
+      .expect(200);
+
+    assert.equal(res.body.trackerBuild, 'BLOCKER10B_RESTORE_FISH_AND_SAFE_ITEM_UPGRADE_2026_06_03');
+  });
+
+  test('resolved fish names from tracker are never overwritten by backend catalog', async () => {
+    catalogStore.ingestSnapshot({
+      catalog: {
+        fish: [{ name: 'Item #117', key: 'item #117', itemId: '117', source: 'bad' }],
+        rods: [],
+        items: [{ name: 'Item #10', key: 'item #10', itemId: '10', source: 'bad' }],
+      },
+    });
+
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B10BAngler2',
+        userId: 11002,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'Bandit Angelfish', count: 3, category: 'fish', itemId: '117', resolved: true, catalogReason: 'catalog_hit' },
+          { name: 'Ballina Angelfish', count: 2, category: 'fish', itemId: '119', resolved: true, catalogReason: 'catalog_hit' },
+          { name: 'Item #10', count: 1, category: 'items', itemId: '10', resolved: false, catalogReason: 'catalog_missing_numeric_id' },
+        ],
+        parseStats: { raw: 6, accepted: 3, acceptedInstances: 6, rejected: 0, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B10BAngler2')
+      .expect(200);
+
+    const fish117 = res.body.items.find((i) => i.itemId === '117');
+    const fish119 = res.body.items.find((i) => i.itemId === '119');
+    const item10 = res.body.items.find((i) => i.itemId === '10');
+    assert.equal(fish117.name, 'Bandit Angelfish');
+    assert.equal(fish117.category, 'fish');
+    assert.equal(fish117.resolved, true);
+    assert.equal(fish119.name, 'Ballina Angelfish');
+    assert.equal(item10.name, 'Item #10');
+    assert.equal(res.body.phase, 'live');
+    assert.equal(res.body.parseStats.acceptedInstances, 6);
+  });
+
+  test('backend enriches placeholder Item #10 but preserves resolved fish', async () => {
+    catalogStore.ingestSnapshot({
+      catalog: {
+        fish: [],
+        rods: [{ name: 'Carbon Rod', key: 'carbon rod', itemId: '10', source: 'test' }],
+        items: [],
+      },
+    });
+
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B10BAngler3',
+        userId: 11003,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'Flame Angelfish', count: 1, category: 'fish', itemId: '68', resolved: true, catalogReason: 'catalog_hit' },
+          { name: 'Item #10', count: 1, category: 'items', itemId: '10', resolved: false, catalogReason: 'catalog_missing_numeric_id' },
+        ],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B10BAngler3')
+      .expect(200);
+
+    assert.equal(res.body.items.find((i) => i.itemId === '68').name, 'Flame Angelfish');
+    assert.equal(res.body.items.find((i) => i.itemId === '10').name, 'Carbon Rod');
   });
 });
