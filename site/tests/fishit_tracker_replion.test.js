@@ -1699,3 +1699,150 @@ describe('Fish It tracker — BLOCKER 8 accept-zero fix + rate limit', () => {
     }
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// BLOCKER 9: catalog/name resolution + nil-safe arithmetic + debug fields
+// ════════════════════════════════════════════════════════════════════════════
+describe('Fish It tracker — BLOCKER 9 catalog resolve + nil-safe fields', () => {
+  beforeEach(() => { cleanup(); });
+
+  test('resolved catalog item fields are stored from inventory_snapshot', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B9Angler1',
+        userId: 9001,
+        source: 'replion',
+        isOnline: true,
+        trackerBuild: 'BLOCKER9_CATALOG_RESOLVE_AND_NIL_FIX_2026_06_03',
+        items: [{
+          name: 'Carbon Rod',
+          count: 1,
+          category: 'rod',
+          itemId: '10',
+          resolved: true,
+          catalogSource: 'ReplicatedStorage.Rods.10',
+          catalogReason: 'catalog_hit',
+        }],
+        parseStats: {
+          raw: 1, accepted: 1, acceptedInstances: 1, rejected: 0,
+          selectedPath: 'Inventory.Items',
+        },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B9Angler1')
+      .expect(200);
+
+    assert.equal(res.body.trackerBuild, 'BLOCKER9_CATALOG_RESOLVE_AND_NIL_FIX_2026_06_03');
+    assert.equal(res.body.firstItems[0].name, 'Carbon Rod');
+    assert.equal(res.body.firstItems[0].itemId, '10');
+    assert.equal(res.body.firstItems[0].resolved, true);
+    assert.equal(res.body.firstItems[0].catalogReason, 'catalog_hit');
+    assert.match(res.body.firstItems[0].catalogSource, /ReplicatedStorage/);
+  });
+
+  test('fallback Item #990 keeps resolved=false and catalogReason', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B9Angler2',
+        userId: 9002,
+        source: 'replion',
+        isOnline: true,
+        items: [{
+          name: 'Item #990',
+          count: 5,
+          category: 'items',
+          itemId: '990',
+          resolved: false,
+          catalogReason: 'catalog_missing_numeric_id',
+        }],
+        parseStats: {
+          raw: 5, accepted: 1, acceptedInstances: 5, rejected: 0,
+          selectedPath: 'Inventory.Items',
+        },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B9Angler2')
+      .expect(200);
+
+    const item = res.body.items.find((i) => i.itemId === '990');
+    assert.ok(item);
+    assert.equal(item.name, 'Item #990');
+    assert.equal(item.resolved, false);
+    assert.equal(item.catalogReason, 'catalog_missing_numeric_id');
+  });
+
+  test('catalog store lookupById enriches placeholder names when catalog has id', async () => {
+    catalogStore.ingestSnapshot({
+      catalog: {
+        fish: [],
+        rods: [{ name: 'Carbon Rod', key: 'carbon rod', tier: 'rare', itemId: '10', source: 'test' }],
+        items: [],
+      },
+    });
+
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B9Angler3',
+        userId: 9003,
+        source: 'replion',
+        isOnline: true,
+        items: [{
+          name: 'Item #10',
+          count: 2,
+          category: 'items',
+          itemId: '10',
+          resolved: false,
+          catalogReason: 'catalog_missing_numeric_id',
+        }],
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B9Angler3')
+      .expect(200);
+
+    const item = res.body.items.find((i) => i.itemId === '10');
+    assert.ok(item);
+    assert.equal(item.name, 'Carbon Rod');
+    assert.equal(item.rarity, 'rare');
+  });
+
+  test('acceptedInstances > 0 still promotes phase=live (BLOCKER8 preserved)', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B9Angler4',
+        userId: 9004,
+        source: 'replion',
+        isOnline: true,
+        phase: 'inventory_parse_failed',
+        parseStats: {
+          raw: 100, accepted: 20, acceptedInstances: 100, rejected: 0,
+          selectedPath: 'Inventory.Items',
+        },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B9Angler4')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'live');
+    assert.equal(res.body.parseStats.acceptedInstances, 100);
+  });
+});

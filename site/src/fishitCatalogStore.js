@@ -63,15 +63,28 @@ function isHttpUrl(u) {
 }
 
 // ── In-memory catalog: normalizedKey -> { name, key, tier, imageUrl, source }
+// idIndex: numeric/string item id -> normalizedKey (BLOCKER9)
 let _catalog = null;
+let _idIndex = null;
 
 function _emptyCatalog() {
   return { entries: {}, updatedAt: null, counts: { fish: 0, rods: 0, items: 0 } };
 }
 
+function _rebuildIdIndex() {
+  _idIndex = {};
+  if (!_catalog || !_catalog.entries) return;
+  for (const [key, e] of Object.entries(_catalog.entries)) {
+    if (e && e.itemId && String(e.itemId).match(/^\d+$/)) {
+      _idIndex[String(e.itemId)] = key;
+    }
+  }
+}
+
 function _load() {
   if (_catalog) return _catalog;
   _catalog = _emptyCatalog();
+  _idIndex = {};
   try {
     if (fs.existsSync(STORE_PATH)) {
       const parsed = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
@@ -87,6 +100,7 @@ function _load() {
     console.warn('[fishit-catalog] load failed:', err && err.message ? err.message : err);
     _catalog = _emptyCatalog();
   }
+  _rebuildIdIndex();
   return _catalog;
 }
 
@@ -129,6 +143,8 @@ function ingestSnapshot(snapshot) {
 
       const tier = normalizeTier(raw.tier);
       const imageUrl = isHttpUrl(raw.imageUrl) ? raw.imageUrl.trim().slice(0, 300) : null;
+      const itemId = (typeof raw.itemId === 'string' || typeof raw.itemId === 'number')
+        ? String(raw.itemId).trim().slice(0, 40) : null;
 
       const existing = _catalog.entries[key];
       if (!existing) {
@@ -138,6 +154,7 @@ function ingestSnapshot(snapshot) {
           tier: tier && tier !== 'unknown' ? tier : null,
           imageUrl,
           category,
+          itemId: itemId && itemId.match(/^\d+$/) ? itemId : null,
           source: typeof raw.source === 'string' ? raw.source.slice(0, 120) : null,
         };
         added += 1;
@@ -148,8 +165,10 @@ function ingestSnapshot(snapshot) {
           existing.tier = tier; changed = true;
         }
         if (!existing.imageUrl && imageUrl) { existing.imageUrl = imageUrl; changed = true; }
+        if (!existing.itemId && itemId && itemId.match(/^\d+$/)) { existing.itemId = itemId; changed = true; }
         if (changed) enriched += 1;
       }
+      if (itemId && itemId.match(/^\d+$/)) _idIndex[itemId] = key;
     }
   }
 
@@ -174,6 +193,16 @@ function lookup(name) {
   return _catalog.entries[key] || null;
 }
 
+/** Look up catalog metadata by numeric item id (BLOCKER9). */
+function lookupById(itemId) {
+  _load();
+  if (itemId == null) return null;
+  const id = String(itemId).trim();
+  if (!id.match(/^\d+$/)) return null;
+  const key = _idIndex[id];
+  return key ? (_catalog.entries[key] || null) : null;
+}
+
 /** Return the full catalog (for /api/fishit-tracker/catalog and tests). */
 function getCatalog() {
   _load();
@@ -185,13 +214,14 @@ function getCatalog() {
 }
 
 /** Test seam. */
-function _reset() { _catalog = null; }
+function _reset() { _catalog = null; _idIndex = null; }
 
 module.exports = {
   STORE_PATH,
   STAT_LABEL_DENYLIST,
   ingestSnapshot,
   lookup,
+  lookupById,
   getCatalog,
   normalizeName,
   normalizeTier,

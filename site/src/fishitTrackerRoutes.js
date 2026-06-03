@@ -115,6 +115,9 @@ function sanitiseItems(raw) {
       itemId:   typeof item.itemId === 'string'   ? item.itemId.slice(0, 80)    : null,
       source:   typeof item.source === 'string'   ? item.source.slice(0, 120)   : null,
       shiny:    item.shiny === true               ? true                        : false,
+      resolved: item.resolved === true             ? true                        : (item.resolved === false ? false : null),
+      catalogSource: typeof item.catalogSource === 'string' ? item.catalogSource.slice(0, 120) : null,
+      catalogReason: typeof item.catalogReason === 'string' ? item.catalogReason.slice(0, 80)  : null,
     });
   }
   return out;
@@ -164,7 +167,12 @@ function enrichItemsFromCatalog(items) {
   const out = [];
   for (const it of items) {
     if (!it || !it.name || catalogStore.isStatLabel(it.name)) continue;
-    const meta = catalogStore.lookup(it.name);
+    let meta = catalogStore.lookup(it.name);
+    if (!meta && it.itemId) meta = catalogStore.lookupById(it.itemId);
+    if (!meta && /^Item #\d+$/.test(it.name)) {
+      const idFromName = it.name.replace(/^Item #/, '');
+      meta = catalogStore.lookupById(idFromName);
+    }
 
     const name = (meta && meta.name) || it.name;
     let rarity = it.rarity || (meta && meta.tier) || null;
@@ -173,12 +181,19 @@ function enrichItemsFromCatalog(items) {
     // Image priority: explicit item image → catalog image → Fish It DB resolver.
     let imageUrl = it.imageUrl || (meta && meta.imageUrl) || dbImageFor(name) || null;
 
+    const resolved = it.resolved === true || (meta != null && !/^Item #\d+$/.test(it.name));
+    const catalogReason = it.catalogReason || (meta ? 'catalog_hit' : null);
+    const catalogSource = it.catalogSource || (meta && meta.source) || null;
+
     out.push({
       ...it,
       name,
       rarity,
       category: it.category || (meta && meta.category) || null,
       imageUrl,
+      resolved: it.resolved != null ? it.resolved : !!meta,
+      catalogReason,
+      catalogSource,
     });
   }
   return out;
@@ -503,6 +518,9 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
     tier:         i.rarity || null,
     imageUrlPresent: !!i.imageUrl,
     itemId:       i.itemId || null,
+    resolved:     i.resolved != null ? i.resolved : null,
+    catalogSource: i.catalogSource || null,
+    catalogReason: i.catalogReason || null,
   }));
 
   return res.status(200).json({
