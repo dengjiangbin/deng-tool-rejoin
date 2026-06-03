@@ -1461,3 +1461,241 @@ describe('Fish It tracker — BLOCKER 6 Replion parse finalization', () => {
     assert.equal(res.body.parseStats.error, 'test parser traceback line');
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// BLOCKER 7: numeric Id + UUID placeholder acceptance (catalog missing OK)
+// ════════════════════════════════════════════════════════════════════════════
+describe('Fish It tracker — BLOCKER 7 numeric Id fallback inventory', () => {
+  beforeEach(() => { cleanup(); });
+
+  test('inventory_snapshot with Item #10 placeholder is stored and counted', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B7Angler1',
+        userId: 7001,
+        source: 'replion',
+        isOnline: true,
+        phase: 'live',
+        items: [{ name: 'Item #10', count: 5, category: 'items', itemId: '10' }],
+        parseStats: {
+          raw: 2517, accepted: 1, acceptedInstances: 2517, rejected: 0,
+          selectedPath: 'Inventory.Items', items: 1,
+        },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B7Angler1')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'live');
+    assert.equal(res.body.counts.items, 1);
+    assert.equal(res.body.firstItems[0].name, 'Item #10');
+    assert.equal(res.body.firstItems[0].itemId, '10');
+    assert.equal(res.body.parseStats.accepted, 1);
+    assert.equal(res.body.parseStats.rejected, 0);
+  });
+
+  test('partial placeholder inventory with consistent parseStats counters', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B7Angler2',
+        userId: 7002,
+        source: 'replion',
+        isOnline: true,
+        items: [
+          { name: 'Item #10', count: 100, category: 'items', itemId: '10' },
+          { name: 'Item #70', count: 50, category: 'items', itemId: '70' },
+          { name: 'Ballina Angelfish', count: 3, category: 'fish', itemId: '119' },
+        ],
+        parseStats: {
+          raw: 2517, accepted: 3, acceptedInstances: 2517, rejected: 0,
+          selectedPath: 'Inventory.Items', fish: 1, items: 2,
+        },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B7Angler2')
+      .expect(200);
+
+    assert.equal(res.body.items.length, 3);
+    assert.ok(res.body.items.some((i) => i.name === 'Item #10'));
+    assert.ok(res.body.items.some((i) => i.name === 'Item #70'));
+    assert.equal(res.body.parseStats.raw, 2517);
+    assert.equal(res.body.parseStats.rejected, 0);
+    assert.equal(res.body.parseStats.accepted, 3);
+  });
+
+  test('inventory_parse_failed only when raw>0 and acceptedInstances=0', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B7Angler3',
+        userId: 7003,
+        source: 'replion',
+        isOnline: true,
+        phase: 'inventory_parse_failed',
+        parseStats: {
+          raw: 100, accepted: 0, acceptedInstances: 0, rejected: 100,
+          selectedPath: 'Inventory.Items',
+          firstRejected: [{ rawKey: 'bad', reason: 'parse_error' }],
+        },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B7Angler3')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'inventory_parse_failed');
+    assert.equal(res.body.parseStats.rejected, 100);
+    assert.equal(res.body.parseStats.accepted, 0);
+  });
+
+  test('live snapshot after player_data_selected with placeholder items', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B7Angler4',
+        userId: 7004,
+        source: 'replion',
+        isOnline: true,
+        phase: 'player_data_selected',
+      })
+      .expect(200);
+
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B7Angler4',
+        userId: 7004,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Item #10', count: 1, category: 'items', itemId: '10' }],
+        parseStats: { raw: 1, accepted: 1, acceptedInstances: 1, rejected: 0, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B7Angler4')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'live');
+    assert.equal(res.body.lastPayloadType, 'inventory_snapshot');
+    assert.ok(res.body.parseStats);
+    assert.ok(res.body.firstItems.length > 0);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// BLOCKER 8: build marker, acceptedInstances phase promotion, rate limit headroom
+// ════════════════════════════════════════════════════════════════════════════
+describe('Fish It tracker — BLOCKER 8 accept-zero fix + rate limit', () => {
+  beforeEach(() => { cleanup(); });
+
+  test('trackerBuild is stored from tracker_status payload', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B8Angler1',
+        userId: 8001,
+        source: 'replion',
+        isOnline: true,
+        phase: 'startup',
+        trackerBuild: 'BLOCKER8_ACCEPT_ZERO_AND_429_FIX_2026_06_03',
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B8Angler1')
+      .expect(200);
+
+    assert.equal(res.body.trackerBuild, 'BLOCKER8_ACCEPT_ZERO_AND_429_FIX_2026_06_03');
+  });
+
+  test('acceptedInstances > 0 promotes phase to live even on tracker_status', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'tracker_status',
+        username: 'B8Angler2',
+        userId: 8002,
+        source: 'replion',
+        isOnline: true,
+        phase: 'inventory_parse_failed',
+        parseStats: {
+          raw: 3282, accepted: 42, acceptedInstances: 3282, rejected: 0,
+          selectedPath: 'Inventory.Items',
+        },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/tracker/get-backpack/B8Angler2')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'live');
+    assert.equal(res.body.parseStats.acceptedInstances, 3282);
+  });
+
+  test('placeholder Item #10 snapshot stores items and consistent parseStats', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        type: 'inventory_snapshot',
+        username: 'B8Angler3',
+        userId: 8003,
+        source: 'replion',
+        isOnline: true,
+        trackerBuild: 'BLOCKER8_ACCEPT_ZERO_AND_429_FIX_2026_06_03',
+        items: [{ name: 'Item #10', count: 3282, category: 'items', itemId: '10' }],
+        parseStats: {
+          raw: 3282, accepted: 1, acceptedInstances: 3282, rejected: 0,
+          selectedPath: 'Inventory.Items', items: 1,
+        },
+      })
+      .expect(200);
+
+    const res = await request(app)
+      .get('/api/fishit-tracker/debug/B8Angler3')
+      .expect(200);
+
+    assert.equal(res.body.phase, 'live');
+    assert.equal(res.body.counts.items, 1);
+    assert.equal(res.body.parseStats.rejected, 0);
+    assert.equal(res.body.acceptedInstances, 3282);
+  });
+
+  test('POST rate limit allows startup burst (>5 requests/min)', async () => {
+    const app = makeApp();
+    for (let i = 0; i < 8; i += 1) {
+      await request(app)
+        .post('/api/tracker/update-backpack')
+        .send({
+          type: 'tracker_status',
+          username: 'B8Burst',
+          userId: 8004,
+          source: 'replion',
+          isOnline: true,
+          phase: 'startup',
+        })
+        .expect(200);
+    }
+  });
+});

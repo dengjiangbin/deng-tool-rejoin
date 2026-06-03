@@ -52,15 +52,17 @@ const router = express.Router();
 const liveTrackDB = {};
 
 // ── Rate limiters ─────────────────────────────────────────────────
-// POST: Lua scripts fire every 3 s but only when data changes, so 5/10 s
-// gives generous headroom while preventing abuse.
+// POST: one live Roblox tracker per user — allow startup burst + periodic sync.
 const postLimiter = rateLimit({
-  windowMs: 10 * 1000,   // 10 seconds
-  max: 5,
+  windowMs: 60 * 1000,
+  max: 30,
   skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'too_many_requests', message: 'Slow down.' },
+  handler: (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    return res.status(429).json({ error: 'too_many_requests', message: 'Slow down.' });
+  },
 });
 
 // GET: frontend polls every 2500 ms = ~24 req/min, so 60/min is comfortable.
@@ -204,12 +206,13 @@ function sanitiseParseStats(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const num = (v) => (Number.isFinite(Number(v)) ? Math.floor(Number(v)) : 0);
   const out = {
-    raw:          num(raw.raw),
-    accepted:     num(raw.accepted),
-    rejected:     num(raw.rejected),
-    images:       num(raw.images),
-    tiers:        num(raw.tiers),
-    selectedPath: typeof raw.selectedPath === 'string' ? raw.selectedPath.slice(0, 80) : null,
+    raw:               num(raw.raw),
+    accepted:          num(raw.accepted),
+    acceptedInstances: num(raw.acceptedInstances),
+    rejected:          num(raw.rejected),
+    images:            num(raw.images),
+    tiers:             num(raw.tiers),
+    selectedPath:      typeof raw.selectedPath === 'string' ? raw.selectedPath.slice(0, 80) : null,
   };
   if (typeof raw.error === 'string' && raw.error.length > 0) {
     out.error = raw.error.slice(0, 500);
@@ -238,6 +241,19 @@ const ALLOWED_PHASES = new Set([
   'replion_missing',
   'live',
 ]);
+
+function sanitiseTrackerBuild(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim().slice(0, 80);
+  return s.length > 0 ? s : null;
+}
+
+function effectivePhase(requestedPhase, parseStats, hasItems) {
+  if (hasItems) return 'live';
+  if (parseStats && parseStats.acceptedInstances > 0) return 'live';
+  if (parseStats && parseStats.accepted > 0) return 'live';
+  return sanitisePhase(requestedPhase) || 'startup';
+}
 
 function sanitisePhase(raw) {
   if (typeof raw !== 'string') return null;
@@ -278,16 +294,19 @@ router.post(
     // exist, and flips online/phase. NEVER clears inventory or parseStats.
     if (isStatusOnly) {
       const base = existing || { username: cleanUser, userId: cleanUserId, items: [], inventory: null };
+      const ps = sanitiseParseStats(body.parseStats) || base.parseStats || null;
+      const phaseOut = effectivePhase(phase || base.phase, ps, (base.items || []).length > 0);
       liveTrackDB[key] = {
         ...base,
         username:        cleanUser,
         userId:          cleanUserId || base.userId || 0,
         source:          source !== 'unknown' ? source : (base.source || source),
-        items:           base.items     || [],   // NEVER clear on status-only
-        inventory:       base.inventory || null, // NEVER clear on status-only
+        items:           base.items     || [],
+        inventory:       base.inventory || null,
         isOnline:        online,
-        phase:           phase || base.phase || 'startup',
-        parseStats:      sanitiseParseStats(body.parseStats) || base.parseStats || null,
+        phase:           phaseOut,
+        parseStats:      ps,
+        trackerBuild:    sanitiseTrackerBuild(body.trackerBuild) || base.trackerBuild || null,
         lastPayloadType: 'tracker_status',
         lastSeenAt:      online ? now : (base.lastSeenAt || now),
         updatedAt:       now,
@@ -348,8 +367,9 @@ router.post(
       items:           cleanItems.length ? cleanItems : (existing ? existing.items     : []),
       inventory:       cleanItems.length ? inventory  : (existing ? existing.inventory : null),
       isOnline:        online,
-      phase:           cleanItems.length ? 'live' : (phase || (existing && existing.phase) || 'live'),
+      phase:           effectivePhase(phase, ps, cleanItems.length > 0),
       parseStats:      ps || (existing && existing.parseStats) || null,
+      trackerBuild:    sanitiseTrackerBuild(body.trackerBuild) || (existing && existing.trackerBuild) || null,
       lastPayloadType: cleanItems.length ? 'inventory_snapshot' : (type || 'inventory_snapshot'),
       lastSeenAt:      online ? now : (existing ? existing.lastSeenAt : now),
       updatedAt:       now,
@@ -488,12 +508,15 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
   return res.status(200).json({
     ok:              true,
     serverCommit:    SERVER_COMMIT,
+    trackerBuild:    data.trackerBuild || null,
     sessionKey:      key,
     username:        data.username,
     userId:          data.userId,
     online:          data.isOnline,
     phase:           data.phase,
     parseStats:      data.parseStats || null,
+    acceptedInstances: data.parseStats ? data.parseStats.acceptedInstances : null,
+    uniqueAccepted:  data.parseStats ? data.parseStats.accepted : null,
     lastSeenAt:      data.lastSeenAt || null,
     lastInventoryAt: data.updatedAt  || null,
     lastPayloadType: data.lastPayloadType || null,

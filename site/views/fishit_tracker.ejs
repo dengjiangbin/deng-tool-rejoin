@@ -346,12 +346,20 @@
     let bodyHtml = `<div class="card-empty">&#x1F7E2; ${escHtml(phaseMessage(data.phase))}</div>`;
     // Show parse stats whenever raw>0 accepted=0, regardless of phase label.
     const ps = data.parseStats;
-    const showParseDebug = ps && ps.raw > 0 && (ps.accepted === 0 ||
-      data.phase === 'inventory_parse_failed' || data.phase === 'inventory_empty');
+    const showParseDebug = ps && ps.raw > 0
+      && (ps.acceptedInstances === 0 || ps.acceptedInstances === undefined)
+      && (ps.accepted === 0 || ps.accepted === undefined)
+      && (data.phase === 'inventory_parse_failed' || data.phase === 'inventory_empty');
     if (showParseDebug) {
       bodyHtml += `<div class="card-empty" style="font-size:0.8em;color:#8a94a6;margin-top:4px">`
-        + `Raw: ${ps.raw ?? '?'} &middot; Accepted: ${ps.accepted ?? 0} &middot; Rejected: ${ps.rejected ?? '?'}`
+        + `Raw: ${ps.raw ?? '?'} &middot; Accepted: ${ps.accepted ?? 0} &middot; Instances: ${ps.acceptedInstances ?? 0} &middot; Rejected: ${ps.rejected ?? '?'}`
         + (ps.selectedPath ? ` &middot; Path: ${escHtml(ps.selectedPath)}` : '')
+        + (data.trackerBuild ? ` &middot; Build: ${escHtml(data.trackerBuild)}` : '')
+        + `</div>`;
+    } else if (data.trackerBuild || (ps && ps.acceptedInstances > 0)) {
+      bodyHtml += `<div class="card-empty" style="font-size:0.75em;color:#6b7280;margin-top:4px">`
+        + (data.trackerBuild ? `Build: ${escHtml(data.trackerBuild)}` : '')
+        + (ps && ps.acceptedInstances > 0 ? ` &middot; Instances: ${ps.acceptedInstances} &middot; Unique: ${ps.accepted ?? 0}` : '')
         + `</div>`;
     }
     if (b) b.innerHTML = bodyHtml;

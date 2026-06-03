@@ -89,7 +89,23 @@ if ($content -match 'DEBUG_LOOKUP_LIMIT') { Write-Host "PASS  DEBUG_LOOKUP_LIMIT
 if ($content -match 'DEBUG_REJECT_LIMIT') { Write-Host "PASS  DEBUG_REJECT_LIMIT cap found" } else { $errors += "FAIL  DEBUG_REJECT_LIMIT missing" }
 if ($content -match 'DEBUG_RAW_ENTRY_LIMIT') { Write-Host "PASS  DEBUG_RAW_ENTRY_LIMIT cap found" } else { $errors += "FAIL  DEBUG_RAW_ENTRY_LIMIT missing" }
 if ($content -match 'DASHBOARD_SEND tracker_status phase=inventory_parse_failed') { Write-Host "PASS  inventory_parse_failed sync log found" } else { $errors += "FAIL  inventory_parse_failed sync log missing" }
-if ($content -match 'DASHBOARD_SEND tracker_status phase=inventory_empty') { Write-Host "PASS  inventory_empty sync log found" } else { $errors += "FAIL  inventory_empty sync log missing" }
+if ($content -match 'CONSUME_ENTRY_ERROR') { Write-Host "PASS  CONSUME_ENTRY_ERROR diagnostic found" } else { $errors += "FAIL  CONSUME_ENTRY_ERROR missing" }
+if ($content -match 'RawItemSample') { Write-Host "PASS  RawItemSample inventory logging found" } else { $errors += "FAIL  RawItemSample logging missing" }
+if ($content -match 'finalizeReplionParseStats') { Write-Host "PASS  finalizeReplionParseStats (unified counters) found" } else { $errors += "FAIL  finalizeReplionParseStats missing" }
+if ($content -match 'safeCallNamed') { Write-Host "PASS  safeCallNamed nil-safe helper found" } else { $errors += "FAIL  safeCallNamed missing" }
+if ($content -match 'MISSING_HELPER name=') { Write-Host "PASS  MISSING_HELPER diagnostic found" } else { $errors += "FAIL  MISSING_HELPER diagnostic missing" }
+if ($content -match 'NUMERIC_ID_FALLBACK_ACCEPTED') { Write-Host "PASS  NUMERIC_ID_FALLBACK_ACCEPTED log found" } else { $errors += "FAIL  NUMERIC_ID_FALLBACK_ACCEPTED missing" }
+if ($content -match 'addOwnedNumericFallback') { Write-Host "PASS  addOwnedNumericFallback found" } else { $errors += "FAIL  addOwnedNumericFallback missing" }
+if ($content -match 'local mergeOwnedItem') { Write-Host "PASS  mergeOwnedItem forward declaration found" } else { $errors += "FAIL  mergeOwnedItem forward declaration missing" }
+if ($content -match 'TRACKER_BUILD BLOCKER8') { Write-Host "PASS  TRACKER_BUILD BLOCKER8 marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER8 marker missing" }
+if ($content -match 'BLOCKER8_ACCEPT_ZERO_AND_429_FIX_2026_06_03') { Write-Host "PASS  BLOCKER8 build id found" } else { $errors += "FAIL  BLOCKER8 build id missing" }
+if ($content -match 'CONSUME_ENTRY_ACTIVE BLOCKER8') { Write-Host "PASS  CONSUME_ENTRY_ACTIVE BLOCKER8 log found" } else { $errors += "FAIL  CONSUME_ENTRY_ACTIVE BLOCKER8 missing" }
+if ($content -match 'RAW_INVENTORY_ENTRY') { Write-Host "PASS  RAW_INVENTORY_ENTRY diagnostic found" } else { $errors += "FAIL  RAW_INVENTORY_ENTRY missing" }
+if ($content -match 'sendDashboardRequest') { Write-Host "PASS  sendDashboardRequest throttle found" } else { $errors += "FAIL  sendDashboardRequest missing" }
+if ($content -match 'RATE_LIMIT_BACKOFF') { Write-Host "PASS  RATE_LIMIT_BACKOFF log found" } else { $errors += "FAIL  RATE_LIMIT_BACKOFF missing" }
+if ($content -match 'FishTrackerRunId') { Write-Host "PASS  FishTrackerRunId reload guard found" } else { $errors += "FAIL  FishTrackerRunId missing" }
+if ($content -match 'PARSER_IMPL active') { Write-Host "PASS  PARSER_IMPL startup audit found" } else { $errors += "FAIL  PARSER_IMPL audit missing" }
+if ($content -match 'xpcall\(function\(\)\s*\n\s*return consumeReplionEntry' -or $content -match 'xpcall\(function\(\)[\s\S]{0,80}consumeReplionEntry') { Write-Host "PASS  xpcall wraps consumeReplionEntry" } else { $errors += "FAIL  xpcall around consumeReplionEntry missing" }
 foreach ($ph in @('inventory_empty','inventory_parse_failed')) {
     if ($content -match [regex]::Escape($ph)) { Write-Host "PASS  phase '$ph' present" } else { $errors += "FAIL  phase '$ph' missing" }
 }
@@ -100,7 +116,7 @@ if ($codeOnly -match 'Selected owned inventory path') { Write-Host "PASS  'Selec
 
 # ── BLOCKER 3: numeric Id resolution (Replion instance records) ──
 if ($content -match 'debugCatalogLookupForOwnedIds') { Write-Host "PASS  debugCatalogLookupForOwnedIds found" } else { $errors += "FAIL  debugCatalogLookupForOwnedIds missing" }
-if ($content -match 'unresolved_numeric_id') { Write-Host "PASS  unresolved_numeric_id rejection reason found" } else { $errors += "FAIL  unresolved_numeric_id missing" }
+if ($content -match 'catalog_missing_numeric_id') { Write-Host "PASS  catalog_missing_numeric_id fallback reason found" } else { $errors += "FAIL  catalog_missing_numeric_id missing" }
 if ($content -match 'parseStats') { Write-Host "PASS  parseStats payload found" } else { $errors += "FAIL  parseStats missing" }
 if ($content -match 'idVariants') { Write-Host "PASS  idVariants (numeric id lookup variants) found" } else { $errors += "FAIL  idVariants missing" }
 # UUID instance shape: the live Fish It shape { Id=70, UUID="...", Metadata={Weight} }
