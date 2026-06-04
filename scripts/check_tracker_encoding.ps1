@@ -15,10 +15,15 @@ if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
 
 if ($content -notmatch '^--') { $errors += "FAIL  Does not start with '--'" } else { Write-Host "PASS  Starts with '--' (Lua comment)" }
 
-# ── BLOCKER10H: ultra-light player-data-only + compile gate ──
+# ── BLOCKER10I: zero-freeze one-shot exporter + compile gate ──
 if ($content -match '^\s*loadstring\s*\(') { $errors += "FAIL  tracker.lua must not begin with loadstring() wrapper" } else { Write-Host "PASS  No unsafe top-level loadstring wrapper" }
-if ($content -match 'TRACKER_BOOT_BEGIN BLOCKER10H') { Write-Host "PASS  TRACKER_BOOT_BEGIN BLOCKER10H marker found" } else { $errors += "FAIL  TRACKER_BOOT_BEGIN BLOCKER10H missing" }
-if ($content -match 'BLOCKER10H_ULTRA_LIGHT_PLAYER_DATA_ONLY_2026_06_04') { Write-Host "PASS  BLOCKER10H build id found" } else { $errors += "FAIL  BLOCKER10H build id missing" }
+if ($content -match 'TRACKER_BOOT_BEGIN BLOCKER10I') { Write-Host "PASS  TRACKER_BOOT_BEGIN BLOCKER10I marker found" } else { $errors += "FAIL  TRACKER_BOOT_BEGIN BLOCKER10I missing" }
+if ($content -match 'BLOCKER10I_ZERO_FREEZE_ONE_SHOT_EXPORTER_2026_06_04') { Write-Host "PASS  BLOCKER10I build id found" } else { $errors += "FAIL  BLOCKER10I build id missing" }
+if ($content -match 'oneShot = true') { Write-Host "PASS  oneShot default true" } else { $errors += "FAIL  oneShot must be true" }
+if ($content -match 'repeatUpload = false') { Write-Host "PASS  repeatUpload default false" } else { $errors += "FAIL  repeatUpload must be false" }
+if ($content -match 'ONE_SHOT_EXPORT enabled=') { Write-Host "PASS  ONE_SHOT_EXPORT log found" } else { $errors += "FAIL  ONE_SHOT_EXPORT log missing" }
+if ($content -match 'TRACKER_DONE one_shot=true') { Write-Host "PASS  TRACKER_DONE one_shot log found" } else { $errors += "FAIL  TRACKER_DONE one_shot log missing" }
+if ($content -match 'STEP_BEGIN') { Write-Host "PASS  STEP_BEGIN timing logs found" } else { $errors += "FAIL  STEP_BEGIN timing logs missing" }
 if ($content -match 'safeMinimalMode = true') { Write-Host "PASS  SAFE_MINIMAL_MODE default true" } else { $errors += "FAIL  safeMinimalMode missing" }
 if ($content -match 'playerDataOnly = true') { Write-Host "PASS  playerDataOnly default true" } else { $errors += "FAIL  playerDataOnly must be true" }
 if ($content -match 'clientCatalogResolution = false') { Write-Host "PASS  clientCatalogResolution default false" } else { $errors += "FAIL  clientCatalogResolution must be false" }
@@ -32,7 +37,7 @@ if ($content -match 'PLAYER_DATA_ONLY enabled=') { Write-Host "PASS  PLAYER_DATA
 if ($content -match 'CATALOG_RESOLUTION client=') { Write-Host "PASS  CATALOG_RESOLUTION log found" } else { $errors += "FAIL  CATALOG_RESOLUTION log missing" }
 if ($content -match 'TARGETED_ITEM_DIAGNOSTICS disabled_by_default=') { Write-Host "PASS  TARGETED_ITEM_DIAGNOSTICS disabled log found" } else { $errors += "FAIL  TARGETED_ITEM_DIAGNOSTICS disabled log missing" }
 if ($content -match 'HEAVY_CATALOG disabled=') { Write-Host "PASS  HEAVY_CATALOG disabled log found" } else { $errors += "FAIL  HEAVY_CATALOG disabled log missing" }
-if ($content -match 'INVENTORY_UPLOAD ok=') { Write-Host "PASS  INVENTORY_UPLOAD log found" } else { $errors += "FAIL  INVENTORY_UPLOAD log missing" }
+if ($content -match 'INVENTORY_UPLOAD ok=true') { Write-Host "PASS  INVENTORY_UPLOAD log found" } else { $errors += "FAIL  INVENTORY_UPLOAD log missing" }
 if ($content -match 'local LiveSafe = \{') { Write-Host "PASS  LiveSafe register-pack table found" } else { $errors += "FAIL  LiveSafe register-pack table missing" }
 if ($content -match 'Freeze monitor summary') { Write-Host "PASS  Freeze monitor summary found" } else { $errors += "FAIL  Freeze monitor summary missing" }
 if ($content -match 'function hookRemotesDeferred[\s\S]{0,200}if not LiveSafe\.debugRemoteHooks') { Write-Host "PASS  hookRemotesDeferred gated by LiveSafe.debugRemoteHooks" } else { $errors += "FAIL  hookRemotesDeferred not gated" }
@@ -129,10 +134,11 @@ if ($content -match 'MISSING_HELPER name=') { Write-Host "PASS  MISSING_HELPER d
 if ($content -match 'NUMERIC_ID_FALLBACK_ACCEPTED') { Write-Host "PASS  NUMERIC_ID_FALLBACK_ACCEPTED log found" } else { $errors += "FAIL  NUMERIC_ID_FALLBACK_ACCEPTED missing" }
 if ($content -match 'addOwnedNumericFallback') { Write-Host "PASS  addOwnedNumericFallback found" } else { $errors += "FAIL  addOwnedNumericFallback missing" }
 if ($content -match 'local mergeOwnedItem') { Write-Host "PASS  mergeOwnedItem forward declaration found" } else { $errors += "FAIL  mergeOwnedItem forward declaration missing" }
-if ($content -match 'TRACKER_BUILD = "BLOCKER10H') { Write-Host "PASS  TRACKER_BUILD BLOCKER10H marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10H marker missing" }
-if ($content -match 'STARTUP_NON_BLOCKING') { Write-Host "PASS  STARTUP_NON_BLOCKING log found" } else { $errors += "FAIL  STARTUP_NON_BLOCKING missing" }
+if ($content -match 'TRACKER_BUILD = "BLOCKER10I') { Write-Host "PASS  TRACKER_BUILD BLOCKER10I marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10I marker missing" }
+if ($content -match 'LiveSafe\.nonBlocking|nonBlocking = true') { Write-Host "PASS  nonBlocking config found" } else { $errors += "FAIL  nonBlocking config missing" }
+if ($content -match 'CONSUME_ENTRY_ACTIVE') { Write-Host "PASS  CONSUME_ENTRY_ACTIVE diagnostic found" } else { $errors += "FAIL  CONSUME_ENTRY_ACTIVE missing" }
 if ($content -match 'scanBudgetYield') { Write-Host "PASS  scanBudgetYield scheduler found" } else { $errors += "FAIL  scanBudgetYield missing" }
-if ($content -match 'INVENTORY_UPLOAD ok=true raw=') { Write-Host "PASS  INVENTORY_UPLOAD raw log found" } else { $errors += "FAIL  INVENTORY_UPLOAD raw log missing" }
+if ($content -match 'INVENTORY_UPLOAD ok=true') { Write-Host "PASS  INVENTORY_UPLOAD accepted log found" } else { $errors += "FAIL  INVENTORY_UPLOAD accepted log missing" }
 if ($content -match 'INVENTORY_PHASE_B') { Write-Host "PASS  INVENTORY_PHASE_B log found" } else { $errors += "FAIL  INVENTORY_PHASE_B missing" }
 if ($content -match 'looksLikeOwnedInventoryTable') { Write-Host "PASS  looksLikeOwnedInventoryTable guard found" } else { $errors += "FAIL  looksLikeOwnedInventoryTable missing" }
 if ($content -match 'buildQuickPriorityCatalog') { Write-Host "PASS  buildQuickPriorityCatalog found" } else { $errors += "FAIL  buildQuickPriorityCatalog missing" }
@@ -143,7 +149,6 @@ if ($content -match 'shouldReplaceName') { Write-Host "PASS  shouldReplaceName h
 if ($content -match 'CATALOG_DOWNGRADE_BLOCKED') { Write-Host "PASS  CATALOG_DOWNGRADE_BLOCKED log found" } else { $errors += "FAIL  CATALOG_DOWNGRADE_BLOCKED missing" }
 if ($content -match 'CATALOG_PLACEHOLDER_UPGRADED') { Write-Host "PASS  CATALOG_PLACEHOLDER_UPGRADED log found" } else { $errors += "FAIL  CATALOG_PLACEHOLDER_UPGRADED missing" }
 if ($content -match 'safeWriteMetadataById') { Write-Host "PASS  safeWriteMetadataById found" } else { $errors += "FAIL  safeWriteMetadataById missing" }
-if ($content -match 'CONSUME_ENTRY_ACTIVE BLOCKER8') { Write-Host "PASS  CONSUME_ENTRY_ACTIVE BLOCKER8 log found" } else { $errors += "FAIL  CONSUME_ENTRY_ACTIVE BLOCKER8 missing" }
 if ($content -match 'toNumberOr') { Write-Host "PASS  toNumberOr nil-safe helper found" } else { $errors += "FAIL  toNumberOr missing" }
 if ($content -match 'safeAdd') { Write-Host "PASS  safeAdd nil-safe helper found" } else { $errors += "FAIL  safeAdd missing" }
 if ($content -match 'buildCatalogFromReplionData') { Write-Host "PASS  buildCatalogFromReplionData found" } else { $errors += "FAIL  buildCatalogFromReplionData missing" }
@@ -159,7 +164,7 @@ if ($content -match 'RAW_INVENTORY_ENTRY') { Write-Host "PASS  RAW_INVENTORY_ENT
 if ($content -match 'sendDashboardRequest') { Write-Host "PASS  sendDashboardRequest throttle found" } else { $errors += "FAIL  sendDashboardRequest missing" }
 if ($content -match 'RATE_LIMIT_BACKOFF') { Write-Host "PASS  RATE_LIMIT_BACKOFF log found" } else { $errors += "FAIL  RATE_LIMIT_BACKOFF missing" }
 if ($content -match 'FishTrackerRunId') { Write-Host "PASS  FishTrackerRunId reload guard found" } else { $errors += "FAIL  FishTrackerRunId missing" }
-if ($content -match 'PARSER_IMPL active') { Write-Host "PASS  PARSER_IMPL startup audit found" } else { $errors += "FAIL  PARSER_IMPL audit missing" }
+if ($content -match 'STEP_BEGIN|stepBegin') { Write-Host "PASS  step timing audit found" } else { $errors += "FAIL  step timing audit missing" }
 if ($content -match 'xpcall\(function\(\)\s*\n\s*return consumeReplionEntry' -or $content -match 'xpcall\(function\(\)[\s\S]{0,80}consumeReplionEntry') { Write-Host "PASS  xpcall wraps consumeReplionEntry" } else { $errors += "FAIL  xpcall around consumeReplionEntry missing" }
 foreach ($ph in @('inventory_empty','inventory_parse_failed')) {
     if ($content -match [regex]::Escape($ph)) { Write-Host "PASS  phase '$ph' present" } else { $errors += "FAIL  phase '$ph' missing" }
@@ -183,7 +188,7 @@ if ($content -match 'buildNumericIdIndexFromRSFolders') { Write-Host "PASS  buil
 $mut = ([regex]::Matches($codeOnly, ':\s*(Set|Update|Increase|Decrease|Fire|Save|Equip|Buy|Sell|Remove|Insert)\s*\(')).Count
 if ($mut -gt 0) { $errors += "FAIL  $mut Replion mutation call(s) found in code (must be read-only)" } else { Write-Host "PASS  No Replion mutation calls in code (read-only)" }
 
-# BLOCKER10H: Luau compile validation (register limit + syntax)
+# BLOCKER10I: Luau compile validation (register limit + syntax)
 $luauCompile = Join-Path (Join-Path $PSScriptRoot "..") "_luau\luau-compile.exe"
 if (-not (Test-Path $luauCompile)) {
     $setup = Join-Path $PSScriptRoot "setup_luau_compile.ps1"

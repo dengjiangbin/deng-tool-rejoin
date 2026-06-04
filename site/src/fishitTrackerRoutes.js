@@ -293,6 +293,33 @@ function debugItemSlice(items, limit = 5) {
   }));
 }
 
+function inventoryCountsFromGroups(inv) {
+  const g = inv || { all: [], fish: [], rods: [], items: [] };
+  return {
+    all:       (g.all   || []).length,
+    fish:      (g.fish  || []).length,
+    rods:      (g.rods  || []).length,
+    itemsOnly: (g.items || []).length,
+    items:     (g.all   || []).length,
+  };
+}
+
+function catalogMapForItems(items) {
+  const out = {};
+  if (!Array.isArray(items)) return out;
+  for (const i of items) {
+    if (!i || !i.itemId) continue;
+    const meta = catalogStore.catalogMetaForItemId(i.itemId);
+    if (!meta) continue;
+    out[String(i.itemId)] = {
+      name: meta.name,
+      category: meta.category || null,
+      source: meta.source || null,
+    };
+  }
+  return out;
+}
+
 // ── GET /tracker – serve the dashboard page ───────────────────────
 router.get('/tracker', (_req, res) => {
   res.render('fishit_tracker', {
@@ -584,29 +611,20 @@ router.get(
       return res.status(404).json({ error: 'No tracking session active for this user.' });
     }
 
-    // Enrich from raw tracker payload when available (BLOCKER10H).
+    // Enrich from raw tracker payload when available (BLOCKER10I).
     const sourceItems = (data.rawItems && data.rawItems.length) ? data.rawItems : data.items;
     const enrichedFlat = enrichItemsFromCatalog(sourceItems);
-
-    // Build enriched grouped inventory from the stored inventory object.
-    // Fall back to partitioning the flat array when no grouped data exists.
-    let enrichedInventory;
-    if (data.inventory && Array.isArray(data.inventory.all)) {
-      enrichedInventory = {
-        all:   enrichItemsFromCatalog(data.inventory.all),
-        fish:  enrichItemsFromCatalog(data.inventory.fish  || []),
-        rods:  enrichItemsFromCatalog(data.inventory.rods  || []),
-        items: enrichItemsFromCatalog(data.inventory.items || []),
-      };
-    } else {
-      // Legacy sessions that pre-date the inventory grouping field.
-      enrichedInventory = buildInventoryGroups(enrichedFlat);
-    }
+    const enrichedInventory = buildInventoryGroups(enrichedFlat);
+    const rawInventory = buildInventoryGroups(sourceItems);
+    const countsRaw = inventoryCountsFromGroups(rawInventory);
+    const countsEnriched = inventoryCountsFromGroups(enrichedInventory);
 
     const enriched = {
       ...data,
-      items:     enrichedFlat,        // legacy flat array (backward compat)
-      inventory: enrichedInventory,   // grouped: { all, fish, rods, items }
+      items:           enrichedFlat,
+      inventory:       enrichedInventory,
+      countsRaw,
+      countsEnriched,
     };
 
     return res.status(200).json(enriched);
@@ -633,16 +651,17 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
     return res.status(404).json({ ok: false, error: 'not_found', key, knownKeys, serverCommit: SERVER_COMMIT });
   }
 
-  const inv   = data.inventory || buildInventoryGroups(data.items || []);
-  const rawSlice = debugItemSlice(data.rawItems || data.items || []);
-  const enrichedAll = enrichItemsFromCatalog(data.rawItems || data.items || []);
+  const rawItemsArr = data.rawItems || data.items || [];
+  const rawInv = buildInventoryGroups(rawItemsArr);
+  const enrichedAll = enrichItemsFromCatalog(rawItemsArr);
+  const enrichedInv = buildInventoryGroups(enrichedAll);
+  const rawSlice = debugItemSlice(rawItemsArr);
   const enrichedSlice = debugItemSlice(enrichedAll);
-  const catalogSlice = enrichedSlice.map((i) => ({
-    itemId: i.itemId,
-    catalog: i.itemId ? catalogStore.catalogMetaForItemId(i.itemId) : null,
-  }));
+  const countsRaw = inventoryCountsFromGroups(rawInv);
+  const countsEnriched = inventoryCountsFromGroups(enrichedInv);
+  const catalogForItems = catalogMapForItems(enrichedAll);
 
-  const firstItems = enrichedAll.slice(0, 5).map((i) => ({
+  const mapDebugItem = (i) => ({
     name:         i.name,
     amount:       i.amount,
     category:     i.category,
@@ -653,7 +672,10 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
     catalogSource: i.catalogSource || null,
     catalogReason: i.catalogReason || null,
     catalogEnrichmentSource: i.catalogEnrichmentSource || null,
-  }));
+  });
+
+  const firstItems = enrichedAll.slice(0, 5).map(mapDebugItem);
+  const rawFirstItems = rawItemsArr.slice(0, 5).map(mapDebugItem);
 
   const diags = Array.isArray(data.unresolvedDiagnostics) ? data.unresolvedDiagnostics : [];
   const unresolvedIds = diags.filter((d) => d && !d.found).map((d) => d.id);
@@ -678,17 +700,14 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
     lastSeenAt:      data.lastSeenAt || null,
     lastInventoryAt: data.updatedAt  || null,
     lastPayloadType: data.lastPayloadType || null,
-    counts: {
-      items:        (data.items || []).length,
-      all:          (inv.all   || []).length,
-      fish:         (inv.fish  || []).length,
-      rods:         (inv.rods  || []).length,
-      itemsOnly:    (inv.items || []).length,
-    },
+    counts: countsEnriched,
+    countsRaw,
+    countsEnriched,
     firstItems,
+    rawFirstItems,
     rawItems: rawSlice,
     enrichedItems: enrichedSlice,
-    catalogForItems: catalogSlice,
+    catalogForItems,
     unresolvedDiagnostics: diags.length ? diags : null,
     unresolvedIds,
     stillUnresolvedIds: unresolvedIds,
@@ -700,4 +719,5 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
 module.exports = router;
 module.exports.mergeItemsNoDowngradeFromCatalog = mergeItemsNoDowngradeFromCatalog;
 module.exports.enrichItemsFromCatalog = enrichItemsFromCatalog;
-module.exports.debugItemSlice = debugItemSlice;
+module.exports.inventoryCountsFromGroups = inventoryCountsFromGroups;
+module.exports.catalogMapForItems = catalogMapForItems;

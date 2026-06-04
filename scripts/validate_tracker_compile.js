@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * BLOCKER10H: static compile guard for tracker.lua
+ * BLOCKER10I: static compile guard for tracker.lua
  * - luaparse catches Lua syntax errors (continue stripped for parse-only)
  * - luau-compile (when present) catches Luau register-limit failures
  */
@@ -20,11 +20,11 @@ if (src.charCodeAt(0) === 0xfeff) {
 if (/^\s*loadstring\s*\(/.test(src)) {
   errors.push('tracker.lua must not begin with loadstring() wrapper');
 }
-if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10H')) {
-  errors.push('TRACKER_BOOT_BEGIN BLOCKER10H marker missing');
+if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10I')) {
+  errors.push('TRACKER_BOOT_BEGIN BLOCKER10I marker missing');
 }
-if (!src.includes('BLOCKER10H_ULTRA_LIGHT_PLAYER_DATA_ONLY_2026_06_04')) {
-  errors.push('BLOCKER10H build marker missing');
+if (!src.includes('BLOCKER10I_ZERO_FREEZE_ONE_SHOT_EXPORTER_2026_06_04')) {
+  errors.push('BLOCKER10I build marker missing');
 }
 if (!/TRACKER_BUILD\s*=/.test(src)) {
   errors.push('TRACKER_BUILD assignment missing');
@@ -34,6 +34,12 @@ if (!src.includes('local LiveSafe = {')) {
 }
 if (!src.includes('safeMinimalMode = true')) {
   errors.push('safeMinimalMode must default true');
+}
+if (!src.includes('oneShot = true')) {
+  errors.push('oneShot must default true');
+}
+if (!src.includes('repeatUpload = false')) {
+  errors.push('repeatUpload must default false');
 }
 if (!src.includes('enableHeavyCatalog = false')) {
   errors.push('enableHeavyCatalog must default false');
@@ -52,6 +58,12 @@ if (!src.includes('clientCatalogResolution = false')) {
 }
 if (!src.includes('enableTargetedItemDiagnostics = false')) {
   errors.push('enableTargetedItemDiagnostics must default false');
+}
+if (!src.includes('TRACKER_DONE one_shot=true')) {
+  errors.push('TRACKER_DONE one_shot log missing');
+}
+if (!src.includes('STEP_BEGIN')) {
+  errors.push('STEP_BEGIN timing logs missing');
 }
 if (/^<<<<<<<|^>>>>>>>|^=======\s*$/.test(src)) {
   errors.push('merge conflict markers detected');
