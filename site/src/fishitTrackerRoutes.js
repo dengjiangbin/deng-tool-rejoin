@@ -472,7 +472,8 @@ router.post(
         parseStats:      ps,
         trackerBuild:    sanitiseTrackerBuild(body.trackerBuild) || base.trackerBuild || null,
         lastPayloadType: 'tracker_status',
-        lastSeenAt:      online ? now : (base.lastSeenAt || now),
+        lastSeenAt:      now,
+        lastInventoryAt: base.lastInventoryAt || base.updatedAt || null,
         updatedAt:       now,
       };
       if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
@@ -505,7 +506,7 @@ router.post(
     // ── Inventory snapshot ────────────────────────────────────────
     const rawItems = normaliseInventoryItems(body);
     catalogStore.learnFromTrackerItems(rawItems);
-    let cleanItems = rawItems;
+    let cleanItems = mergeItemsNoDowngradeFromCatalog(rawItems);
     if (existing && existing.items && cleanItems.length) {
       cleanItems = mergeItemsNoDowngrade(cleanItems, existing.items);
     }
@@ -533,6 +534,8 @@ router.post(
       console.log(`[fishit-tracker] first 3 items: ${samples}`);
     }
 
+    const acceptedCount = cleanItems.length || (ps && ps.accepted) || 0;
+
     // Store under username key + userId alias.
     liveTrackDB[key] = {
       username:        cleanUser,
@@ -546,7 +549,8 @@ router.post(
       parseStats:      ps || (existing && existing.parseStats) || null,
       trackerBuild:    sanitiseTrackerBuild(body.trackerBuild) || (existing && existing.trackerBuild) || null,
       lastPayloadType: cleanItems.length ? 'inventory_snapshot' : (type || 'inventory_snapshot'),
-      lastSeenAt:      online ? now : (existing ? existing.lastSeenAt : now),
+      lastSeenAt:      now,
+      lastInventoryAt: now,
       updatedAt:       now,
     };
     if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
@@ -557,9 +561,25 @@ router.post(
     }
     if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
 
-    return res.status(200).json({ status: 'success' });
+    return res.status(200).json({
+      ok: true,
+      status: 'success',
+      accepted: acceptedCount,
+      lastInventoryAt: now,
+      lastSeenAt: now,
+      online: true,
+    });
   },
 );
+
+/** Session is live when a heartbeat arrived within the threshold (inventory or status). */
+function isSessionLive(data, maxAgeMs = 45000) {
+  if (!data) return false;
+  const ts = data.lastSeenAt || data.lastInventoryAt || data.updatedAt;
+  if (!ts) return data.isOnline === true;
+  const age = Date.now() - new Date(ts).getTime();
+  return data.isOnline !== false && Number.isFinite(age) && age >= 0 && age < maxAgeMs;
+}
 
 // ── POST /api/tracker/update-catalog ─────────────────────────────
 // Accepts both:
@@ -642,6 +662,8 @@ router.get(
       inventory:       enrichedInventory,
       countsRaw,
       countsEnriched,
+      lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
+      isOnline:        isSessionLive(data),
     };
 
     return res.status(200).json(enriched);
@@ -709,7 +731,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
     sessionKey:      key,
     username:        data.username,
     userId:          data.userId,
-    online:          data.isOnline,
+    online:          isSessionLive(data),
     phase:           data.phase,
     parseStats:      data.parseStats || null,
     acceptedInstances: data.parseStats ? data.parseStats.acceptedInstances : null,
@@ -740,3 +762,4 @@ module.exports.inventoryCountsFromGroups = inventoryCountsFromGroups;
 module.exports.catalogMapForItems = catalogMapForItems;
 module.exports.debugItemSlice = debugItemSlice;
 module.exports.resolveServerCommit = resolveServerCommit;
+module.exports.isSessionLive = isSessionLive;

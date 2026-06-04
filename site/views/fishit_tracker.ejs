@@ -198,7 +198,17 @@
   function saveCurrent() { try { localStorage.setItem(LS_KEY, JSON.stringify([...trackers.keys()])); } catch {} }
 
   function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-  function fmtTime(iso) { const d = new Date(iso); return [d.getHours(),d.getMinutes(),d.getSeconds()].map(n=>String(n).padStart(2,'0')).join(':'); }
+  function fmtTime(iso) {
+    if (!iso) return '-';
+    try {
+      return new Date(iso).toLocaleTimeString('en-GB', {
+        timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      }) + ' WIB';
+    } catch { return '-'; }
+  }
+  function syncTimestamp(data) {
+    return data && (data.lastInventoryAt || data.lastSeenAt || data.updatedAt) || null;
+  }
   function rarityClass(r) { return r ? (RARITY_MAP[r.toLowerCase()] || 'badge') : ''; }
 
   const ITEM_IMAGES = {
@@ -293,7 +303,7 @@
       : (data.items || []);
     const totalAmount = allItems.reduce((sum, item) => sum + (Number(item.amount || item.count) || 1), 0);
     if (c) c.innerHTML = `Items: <strong>${totalAmount}</strong> <span style="color:#8a94a6;">(${allItems.length} types)</span>`;
-    if (s) s.textContent = `Sync: ${fmtTime(data.updatedAt)}`;
+    if (s) s.textContent = `Last sync: ${fmtTime(syncTimestamp(data))}`;
     if (l) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;
     if (b) b.innerHTML = buildItemsHtml(allItems);
   }
@@ -373,7 +383,7 @@
     const c = card.querySelector('[data-items-count]');
     const b = card.querySelector('[data-card-body]');
     if (l) l.innerHTML = `&#x1F534; Offline &mdash; <strong>${escHtml(name)}</strong> is not running the tracker`;
-    if (s && lastData) s.textContent = `Last sync: ${fmtTime(lastData.updatedAt)}`;
+    if (s && lastData) s.textContent = `Last sync: ${fmtTime(syncTimestamp(lastData))}`;
     if (lastData) {
       const allItems = (lastData.inventory && Array.isArray(lastData.inventory.all) && lastData.inventory.all.length > 0)
         ? lastData.inventory.all

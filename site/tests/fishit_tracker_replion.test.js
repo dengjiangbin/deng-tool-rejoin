@@ -2852,6 +2852,49 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
     }
   });
 
+  test('inventory POST returns ok accepted lastSeenAt and updates on repeat sync', async () => {
+    const app = makeApp();
+    const post1 = await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10JSync',
+        userId: 16002,
+        source: 'replion',
+        isOnline: true,
+        type: 'inventory_snapshot',
+        items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
+        parseStats: { raw: 23, accepted: 23, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    assert.equal(post1.body.ok, true);
+    assert.equal(post1.body.accepted, 1);
+    assert.ok(post1.body.lastSeenAt);
+    assert.ok(post1.body.lastInventoryAt);
+    assert.equal(post1.body.online, true);
+
+    await new Promise((r) => setTimeout(r, 15));
+
+    const post2 = await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10JSync',
+        userId: 16002,
+        source: 'replion',
+        isOnline: true,
+        type: 'inventory_snapshot',
+        items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
+        parseStats: { raw: 23, accepted: 23, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    assert.equal(post2.body.ok, true);
+    const get = await request(app).get('/api/tracker/get-backpack/B10JSync').expect(200);
+    assert.equal(get.body.isOnline, true);
+    assert.ok(get.body.lastInventoryAt);
+    assert.equal(get.body.items.find((i) => i.itemId === '117').name, 'Bandit Angelfish');
+  });
+
   test('debug endpoint exposes enriched fields and non-version serverCommit', async () => {
     const app = makeApp();
     await request(app)
