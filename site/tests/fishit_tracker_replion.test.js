@@ -2206,7 +2206,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01/);
+    assert.match(out, /BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04/);
   });
 
   test('targeted diagnostics disabled by default; heavy flags remain disabled', () => {
@@ -2273,7 +2273,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('boot marker is BLOCKER10J light sync build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01'));
+    assert.ok(src.includes('BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04'));
   });
 
   test('Item #990 upgrades only with exact catalog metadata', async () => {
@@ -2391,7 +2391,7 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01/);
+    assert.match(out, /BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04/);
   });
 
   test('safe minimal flags default off for heavy work', () => {
@@ -2412,7 +2412,7 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
   test('boot marker is BLOCKER10J build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01'));
+    assert.ok(src.includes('BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04'));
   });
 
   test('inventory upload and fish downgrade guards remain', () => {
@@ -2518,7 +2518,7 @@ describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01/);
+    assert.match(out, /BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04/);
   });
 
   test('player-data-only flags default correctly', () => {
@@ -2653,7 +2653,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01/);
+    assert.match(out, /BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04/);
   });
 
   test('light sync defaults: 10s loop, no attachReplionListeners by default', () => {
@@ -2669,7 +2669,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
   test('boot marker is BLOCKER10J light sync build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01'));
+    assert.ok(src.includes('BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04'));
   });
 
   test('itemId 117 raw enriches to Bandit Angelfish / fish on debug firstItems', async () => {
@@ -2681,7 +2681,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
         userId: 15001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01',
+        trackerBuild: 'BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04',
         items: [{ name: 'Item #117', count: 3, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -2820,7 +2820,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01/);
+    assert.match(out, /BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04/);
   });
 
   test('light sync defaults and no attachReplionListeners on default path', () => {
@@ -2955,7 +2955,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
         userId: 16001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01',
+        trackerBuild: 'BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04',
         items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -2967,5 +2967,164 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
     assert.ok(res.body.countsEnriched);
     assert.ok(res.body.catalogForItems['117']);
     assert.notEqual(res.body.serverCommit, '1.0.0');
+  });
+});
+
+describe('BLOCKER10K fish-only public + raw proof', () => {
+  const routes = require('../src/fishitTrackerRoutes');
+  const {
+    buildPublicFishFields,
+    buildRawInspector,
+    deriveResolution,
+    isPublicFishItem,
+  } = routes;
+
+  const mixedPayload = [
+    { name: 'Topwater Bait', amount: 1, category: 'bait', itemId: '10' },
+    { name: 'Carbon Rod', amount: 138, category: 'rod', itemId: '388' },
+    { name: 'Common Crate', amount: 5, category: 'items', itemId: '990' },
+    { name: 'Flame Angelfish', amount: 136, category: 'fish', itemId: '68' },
+    { name: 'Yello Damselfish', amount: 14, category: 'fish', itemId: '70' },
+  ];
+
+  test('public fish-only filtering on get-backpack', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10KFish',
+        userId: 17001,
+        isOnline: true,
+        type: 'inventory_snapshot',
+        items: mixedPayload,
+      })
+      .expect(200);
+
+    const get = await request(app).get('/api/fishit-tracker/get-backpack/B10KFish').expect(200);
+    assert.equal(get.body.items.length, 5);
+    assert.equal(get.body.fishItems.length, 2);
+    assert.equal(get.body.publicItems.length, 2);
+    const fishNames = get.body.fishItems.map((i) => i.name);
+    assert.ok(fishNames.includes('Flame Angelfish'));
+    assert.ok(fishNames.some((n) => /damselfish/i.test(n)));
+    assert.equal(get.body.fishCounts.fishTypes, 2);
+    assert.equal(get.body.fishCounts.fishInstances, 150);
+    assert.equal(get.body.fishCounts.hiddenNonFishTypes, 3);
+    assert.equal(get.body.fishCounts.hiddenNonFishInstances, 144);
+    assert.ok(!get.body.fishItems.some((i) => i.name === 'Topwater Bait'));
+    assert.ok(!get.body.fishInventory.fish.some((i) => i.name === 'Carbon Rod'));
+  });
+
+  test('buildPublicFishFields unit', () => {
+    const pub = buildPublicFishFields(mixedPayload);
+    assert.equal(pub.fishItems.length, 2);
+    assert.equal(pub.fishCounts.hiddenNonFishTypes, 3);
+  });
+
+  test('raw numeric-only proof and catalog enrichment', async () => {
+    const app = makeApp();
+    const raw196 = {
+      name: 'Item #196',
+      amount: 34,
+      category: 'items',
+      itemId: '196',
+      rawProof: {
+        rawKey: '196',
+        sourcePath: 'Inventory.Items',
+        rawType: 'table',
+        rawValuePreview: null,
+        rawNameFields: {},
+        extractedIdFields: { Id: '196' },
+      },
+    };
+    const raw68 = {
+      name: 'Item #68',
+      amount: 2,
+      category: 'items',
+      itemId: '68',
+      rawProof: {
+        rawKey: '68',
+        sourcePath: 'Inventory.Items',
+        rawType: 'table',
+        rawNameFields: {},
+      },
+    };
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10KRaw',
+        userId: 17002,
+        isOnline: true,
+        items: [raw196, raw68],
+        parseStats: { raw: 2, accepted: 2, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const dbg = await request(app).get('/api/fishit-tracker/debug/B10KRaw').expect(200);
+    assert.ok(dbg.body.rawInspector);
+    assert.ok(Array.isArray(dbg.body.unresolvedRawProof));
+    const proof196 = dbg.body.unresolvedRawProof.find((p) => p.itemId === '196');
+    assert.ok(proof196);
+    assert.equal(proof196.rawHadName, false);
+    assert.equal(proof196.reason, 'raw_numeric_only_no_catalog_match');
+
+    const res68 = deriveResolution(raw68, { name: 'Flame Angelfish', category: 'fish', itemId: '68' });
+    assert.equal(res68.finalName, 'Flame Angelfish');
+    assert.equal(res68.rawHadName, false);
+    assert.equal(res68.catalogMatched, true);
+    assert.equal(res68.resolutionReason, 'raw_numeric_only_catalog_seed_confirmed');
+
+    const entry68 = dbg.body.firstItems.find((i) => i.itemId === '68');
+    assert.ok(entry68);
+    assert.equal(entry68.resolutionReason, 'raw_numeric_only_catalog_seed_confirmed');
+  });
+
+  test('parser dropped-name detection', () => {
+    const raw = {
+      name: 'Item #999',
+      itemId: '999',
+      rawProof: { rawNameFields: { Name: 'Example Fish' } },
+    };
+    const res = deriveResolution(raw, { name: 'Item #999', category: 'items', itemId: '999' });
+    assert.equal(res.rawHadName, true);
+    assert.equal(res.resolutionReason, 'raw_name_present_but_not_used_parser_bug');
+  });
+
+  test('website template uses fish-only helpers', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(tpl.includes('getPublicFishItems'));
+    assert.ok(tpl.includes('fishCountLabel'));
+    assert.ok(!tpl.includes('inventory.all'));
+    assert.ok(tpl.includes('Fish: <strong>-</strong>'));
+  });
+
+  test('debug regression fields preserved', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10KDbg',
+        userId: 17003,
+        isOnline: true,
+        items: [{ name: 'Item #117', count: 1, itemId: '117' }],
+      })
+      .expect(200);
+    const dbg = await request(app).get('/api/fishit-tracker/debug/B10KDbg').expect(200);
+    assert.ok(dbg.body.rawItems);
+    assert.ok(dbg.body.enrichedItems);
+    assert.ok(dbg.body.catalogForItems['117']);
+    assert.ok(dbg.body.countsRaw);
+    assert.ok(dbg.body.countsEnriched);
+    assert.ok(dbg.body.rawInspector);
+    assert.ok(dbg.body.unresolvedRawProof);
+  });
+
+  test('isPublicFishItem only accepts fish category', () => {
+    assert.equal(isPublicFishItem({ category: 'fish' }), true);
+    assert.equal(isPublicFishItem({ category: 'bait' }), false);
+    assert.equal(isPublicFishItem({ category: 'rod' }), false);
+    assert.equal(isPublicFishItem({ category: 'items' }), false);
   });
 });

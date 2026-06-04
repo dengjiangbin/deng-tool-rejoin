@@ -6,7 +6,7 @@ const https = require('https');
 const { execFileSync } = require('child_process');
 const path = require('path');
 
-const BUILD_MARKER = process.argv[2] || 'BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01';
+const BUILD_MARKER = process.argv[2] || 'BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04';
 const url = `https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua?t=${Date.now()}`;
 
 function fetch(url) {

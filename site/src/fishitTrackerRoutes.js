@@ -137,6 +137,7 @@ function sanitiseItems(raw) {
       resolved: item.resolved === true             ? true                        : (item.resolved === false ? false : null),
       catalogSource: typeof item.catalogSource === 'string' ? item.catalogSource.slice(0, 120) : null,
       catalogReason: typeof item.catalogReason === 'string' ? item.catalogReason.slice(0, 80)  : null,
+      rawProof:      sanitiseRawProof(item.rawProof),
     });
   }
   return out;
@@ -337,6 +338,195 @@ function catalogMapForItems(items) {
     };
   }
   return out;
+}
+
+const RAW_INSPECTOR_MAX = 40;
+const RAW_PROOF_MAX_STR = 80;
+
+function sanitiseRawProof(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const trimStr = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : null);
+  const nameFields = {};
+  if (raw.rawNameFields && typeof raw.rawNameFields === 'object') {
+    for (const [k, v] of Object.entries(raw.rawNameFields).slice(0, 8)) {
+      if (typeof v === 'string' && v.length) nameFields[k.slice(0, 32)] = v.slice(0, RAW_PROOF_MAX_STR);
+    }
+  }
+  const idFields = {};
+  if (raw.extractedIdFields && typeof raw.extractedIdFields === 'object') {
+    for (const [k, v] of Object.entries(raw.extractedIdFields).slice(0, 12)) {
+      if (v != null && typeof v !== 'object') idFields[k.slice(0, 32)] = String(v).slice(0, RAW_PROOF_MAX_STR);
+    }
+  }
+  let objPreview = null;
+  if (raw.rawObjectPreview && typeof raw.rawObjectPreview === 'object') {
+    objPreview = {};
+    for (const [k, v] of Object.entries(raw.rawObjectPreview).slice(0, 12)) {
+      objPreview[k.slice(0, 40)] = typeof v === 'string' ? v.slice(0, RAW_PROOF_MAX_STR) : String(v).slice(0, 40);
+    }
+  }
+  return {
+    rawKey: trimStr(raw.rawKey, 80),
+    sourcePath: trimStr(raw.sourcePath, 120),
+    rawType: trimStr(raw.rawType, 24),
+    rawValuePreview: trimStr(raw.rawValuePreview, RAW_PROOF_MAX_STR),
+    rawObjectPreview: objPreview,
+    rawNameFields: Object.keys(nameFields).length ? nameFields : null,
+    extractedIdFields: Object.keys(idFields).length ? idFields : null,
+  };
+}
+
+function sumItemAmounts(items) {
+  if (!Array.isArray(items)) return 0;
+  return items.reduce((s, it) => s + (Number(it.amount) > 0 ? Math.floor(Number(it.amount)) : 1), 0);
+}
+
+function isPublicFishItem(item) {
+  return item && catalogStore.isFishCategory(item.category);
+}
+
+/** Fish-only view for public website/API (storage keeps full inventory). */
+function buildPublicFishFields(enrichedFlat) {
+  const fishItems = (enrichedFlat || []).filter(isPublicFishItem);
+  const hidden = (enrichedFlat || []).filter((it) => !isPublicFishItem(it));
+  const fishCounts = {
+    fishTypes: fishItems.length,
+    fishInstances: sumItemAmounts(fishItems),
+    hiddenNonFishTypes: hidden.length,
+    hiddenNonFishInstances: sumItemAmounts(hidden),
+  };
+  return {
+    fishItems,
+    publicItems: fishItems,
+    fishInventory: buildInventoryGroups(fishItems),
+    fishCounts,
+    publicCounts: fishCounts,
+  };
+}
+
+function rawHadNameFromItem(rawItem, proof) {
+  const itemId = rawItem?.itemId;
+  if (rawItem?.name && !catalogStore.isPlaceholderItemName(rawItem.name, itemId) && /[a-zA-Z]/.test(rawItem.name)) {
+    return true;
+  }
+  const fields = proof?.rawNameFields;
+  if (!fields || typeof fields !== 'object') return false;
+  return Object.values(fields).some((v) => typeof v === 'string' && v.trim().length > 0);
+}
+
+function deriveResolution(rawItem, enrichedItem) {
+  const itemId = String(enrichedItem?.itemId || rawItem?.itemId || '');
+  const rawName = rawItem?.name || '';
+  const finalName = enrichedItem?.name || rawName;
+  const finalCategory = enrichedItem?.category || rawItem?.category || null;
+  const proof = rawItem?.rawProof || null;
+  const meta = itemId ? catalogStore.lookupById(itemId) : null;
+  const rawHadName = rawHadNameFromItem(rawItem, proof);
+  const catalogMatched = !!meta && !catalogStore.isPlaceholderItemName(meta.name, itemId);
+  const catalogSource = catalogMatched ? (meta.source || enrichedItem?.catalogSource || null) : null;
+  const isPlaceholderFinal = catalogStore.isPlaceholderItemName(finalName, itemId);
+
+  let resolutionReason = 'raw_numeric_only_no_catalog_match';
+  if (rawHadName && isPlaceholderFinal) {
+    resolutionReason = 'raw_name_present_but_not_used_parser_bug';
+  } else if (catalogMatched && catalogSource === 'seed_confirmed') {
+    resolutionReason = 'raw_numeric_only_catalog_seed_confirmed';
+  } else if (catalogMatched) {
+    resolutionReason = 'raw_numeric_only_catalog_match';
+  }
+
+  return {
+    rawName,
+    finalName,
+    category: finalCategory,
+    rawHadName,
+    catalogMatched,
+    catalogSource,
+    resolutionReason,
+  };
+}
+
+function buildRawInspector(rawItems, enrichedItems, selectedPath) {
+  const enrichedById = new Map();
+  for (const it of enrichedItems || []) {
+    if (it?.itemId) enrichedById.set(String(it.itemId), it);
+  }
+  const entries = [];
+  let unresolvedInspectedCount = 0;
+  for (const raw of (rawItems || []).slice(0, 300)) {
+    if (!raw?.itemId) continue;
+    const enriched = enrichedById.get(String(raw.itemId)) || raw;
+    const resolution = deriveResolution(raw, enriched);
+    const meta = catalogStore.lookupById(raw.itemId);
+    const isUnresolved = catalogStore.isPlaceholderItemName(enriched.name, raw.itemId)
+      && !catalogStore.isFishCategory(enriched.category);
+    if (isUnresolved) unresolvedInspectedCount += 1;
+    entries.push({
+      itemId: String(raw.itemId),
+      amount: Number(raw.amount) > 0 ? Math.floor(Number(raw.amount)) : 1,
+      rawKey: raw.rawProof?.rawKey || null,
+      sourcePath: raw.rawProof?.sourcePath || raw.source || selectedPath || null,
+      rawType: raw.rawProof?.rawType || null,
+      rawValuePreview: raw.rawProof?.rawValuePreview || null,
+      rawObjectPreview: raw.rawProof?.rawObjectPreview || null,
+      rawNameFields: raw.rawProof?.rawNameFields || null,
+      extractedIdFields: raw.rawProof?.extractedIdFields || null,
+      resolution: {
+        rawHadName: resolution.rawHadName,
+        catalogMatched: resolution.catalogMatched,
+        catalogName: meta?.name || null,
+        finalName: resolution.finalName,
+        finalCategory: resolution.category,
+        reason: resolution.resolutionReason,
+      },
+    });
+    if (entries.length >= RAW_INSPECTOR_MAX) break;
+  }
+  return {
+    selectedPath: selectedPath || null,
+    inspectedCount: entries.length,
+    unresolvedInspectedCount,
+    entries,
+  };
+}
+
+function buildUnresolvedRawProof(rawItems, enrichedItems, selectedPath) {
+  const inspector = buildRawInspector(rawItems, enrichedItems, selectedPath);
+  return inspector.entries
+    .filter((e) => e.resolution && !e.resolution.catalogMatched
+      && catalogStore.isPlaceholderItemName(e.resolution.finalName, e.itemId))
+    .slice(0, 25)
+    .map((e) => ({
+      itemId: e.itemId,
+      amount: e.amount,
+      sourcePath: e.sourcePath,
+      rawHadName: e.resolution.rawHadName,
+      rawNameFields: e.rawNameFields,
+      rawType: e.rawType,
+      rawValuePreview: e.rawValuePreview,
+      reason: e.resolution.reason,
+    }));
+}
+
+function mapDebugItemWithResolution(raw, enriched) {
+  const res = deriveResolution(raw, enriched);
+  return {
+    name: enriched.name,
+    amount: enriched.amount,
+    category: enriched.category,
+    tier: enriched.rarity || null,
+    imageUrlPresent: !!enriched.imageUrl,
+    itemId: enriched.itemId || null,
+    resolved: enriched.resolved != null ? enriched.resolved : null,
+    catalogSource: enriched.catalogSource || null,
+    catalogReason: enriched.catalogReason || null,
+    catalogEnrichmentSource: enriched.catalogEnrichmentSource || null,
+    rawName: res.rawName,
+    finalName: res.finalName,
+    rawHadName: res.rawHadName,
+    catalogMatched: res.catalogMatched,
+    resolutionReason: res.resolutionReason,
+  };
 }
 
 // ── GET /tracker – serve the dashboard page ───────────────────────
@@ -678,11 +868,17 @@ function handleGetBackpack(req, res) {
   const rawInventory = buildInventoryGroups(sourceItems);
   const countsRaw = inventoryCountsFromGroups(rawInventory);
   const countsEnriched = inventoryCountsFromGroups(enrichedInventory);
+  const publicFish = buildPublicFishFields(enrichedFlat);
 
   const enriched = {
     ...data,
     items:           enrichedFlat,
     inventory:       enrichedInventory,
+    fishItems:       publicFish.fishItems,
+    publicItems:     publicFish.publicItems,
+    fishInventory:   publicFish.fishInventory,
+    fishCounts:      publicFish.fishCounts,
+    publicCounts:    publicFish.publicCounts,
     countsRaw,
     countsEnriched,
     lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
@@ -725,21 +921,32 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
   const countsEnriched = inventoryCountsFromGroups(enrichedInv);
   const catalogForItems = catalogMapForItems(enrichedAll);
 
-  const mapDebugItem = (i) => ({
-    name:         i.name,
-    amount:       i.amount,
-    category:     i.category,
-    tier:         i.rarity || null,
-    imageUrlPresent: !!i.imageUrl,
-    itemId:       i.itemId || null,
-    resolved:     i.resolved != null ? i.resolved : null,
-    catalogSource: i.catalogSource || null,
-    catalogReason: i.catalogReason || null,
-    catalogEnrichmentSource: i.catalogEnrichmentSource || null,
-  });
+  const enrichedById = new Map();
+  for (const it of enrichedAll) {
+    if (it?.itemId) enrichedById.set(String(it.itemId), it);
+  }
+  const mapDebugItem = (i, useResolution) => {
+    const raw = rawItemsArr.find((r) => r.itemId && String(r.itemId) === String(i.itemId)) || i;
+    if (useResolution) return mapDebugItemWithResolution(raw, i);
+    return {
+      name: i.name,
+      amount: i.amount,
+      category: i.category,
+      tier: i.rarity || null,
+      imageUrlPresent: !!i.imageUrl,
+      itemId: i.itemId || null,
+      resolved: i.resolved != null ? i.resolved : null,
+      catalogSource: i.catalogSource || null,
+      catalogReason: i.catalogReason || null,
+      catalogEnrichmentSource: i.catalogEnrichmentSource || null,
+    };
+  };
 
-  const firstItems = enrichedAll.slice(0, 5).map(mapDebugItem);
-  const rawFirstItems = rawItemsArr.slice(0, 5).map(mapDebugItem);
+  const firstItems = enrichedAll.slice(0, 5).map((i) => mapDebugItem(i, true));
+  const rawFirstItems = rawItemsArr.slice(0, 5).map((i) => mapDebugItem(i, false));
+  const selectedPath = data.parseStats?.selectedPath || null;
+  const rawInspector = buildRawInspector(rawItemsArr, enrichedAll, selectedPath);
+  const unresolvedRawProof = buildUnresolvedRawProof(rawItemsArr, enrichedAll, selectedPath);
 
   const diags = Array.isArray(data.unresolvedDiagnostics) ? data.unresolvedDiagnostics : [];
   const unresolvedIds = diags.filter((d) => d && !d.found).map((d) => d.id);
@@ -772,6 +979,8 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
     rawItems: rawSlice,
     enrichedItems: enrichedSlice,
     catalogForItems,
+    rawInspector,
+    unresolvedRawProof,
     unresolvedDiagnostics: diags.length ? diags : null,
     unresolvedIds,
     stillUnresolvedIds: unresolvedIds,
@@ -788,3 +997,8 @@ module.exports.catalogMapForItems = catalogMapForItems;
 module.exports.debugItemSlice = debugItemSlice;
 module.exports.resolveServerCommit = resolveServerCommit;
 module.exports.isSessionLive = isSessionLive;
+module.exports.buildPublicFishFields = buildPublicFishFields;
+module.exports.buildRawInspector = buildRawInspector;
+module.exports.deriveResolution = deriveResolution;
+module.exports.sanitiseRawProof = sanitiseRawProof;
+module.exports.isPublicFishItem = isPublicFishItem;

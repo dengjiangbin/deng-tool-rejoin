@@ -23,8 +23,11 @@ if (/^\s*loadstring\s*\(/.test(src)) {
 if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J')) {
   errors.push('TRACKER_BOOT_BEGIN BLOCKER10J marker missing');
 }
-if (!src.includes('BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01')) {
-  errors.push('BLOCKER10J2 build marker missing');
+if (!src.includes('BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04')) {
+  errors.push('BLOCKER10K build marker missing');
+}
+if (!src.includes('buildRawProof')) {
+  errors.push('buildRawProof helper missing');
 }
 if (!src.includes('/api/fishit-tracker/update-backpack')) {
   errors.push('canonical fishit-tracker POST URL missing');

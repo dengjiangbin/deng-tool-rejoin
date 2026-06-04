@@ -209,6 +209,22 @@
   function syncTimestamp(data) {
     return data && (data.lastInventoryAt || data.lastSeenAt || data.updatedAt) || null;
   }
+  /** Public fish-only list (BLOCKER10K). */
+  function getPublicFishItems(data) {
+    if (!data) return [];
+    if (Array.isArray(data.fishItems) && data.fishItems.length) return data.fishItems;
+    if (Array.isArray(data.publicItems) && data.publicItems.length) return data.publicItems;
+    if (data.fishInventory && Array.isArray(data.fishInventory.fish)) return data.fishInventory.fish;
+    return (data.items || []).filter((it) => String(it.category || '').toLowerCase() === 'fish');
+  }
+  function fishCountLabel(data, fishList) {
+    const fc = data && data.fishCounts;
+    if (fc && Number.isFinite(fc.fishInstances)) {
+      return `Fish: <strong>${fc.fishInstances}</strong> <span style="color:#8a94a6;">(${fc.fishTypes || fishList.length} types)</span>`;
+    }
+    const total = fishList.reduce((sum, item) => sum + (Number(item.amount || item.count) || 1), 0);
+    return `Fish: <strong>${total}</strong> <span style="color:#8a94a6;">(${fishList.length} types)</span>`;
+  }
   function rarityClass(r) { return r ? (RARITY_MAP[r.toLowerCase()] || 'badge') : ''; }
 
   const ITEM_IMAGES = {
@@ -276,7 +292,7 @@
   <span class="dot" aria-hidden="true"></span>
   <span class="card-username">${escHtml(username)}</span>
   <div class="card-meta-row">
-    <span class="pill" data-items-count>Items: <strong>-</strong></span>
+    <span class="pill" data-items-count>Fish: <strong>-</strong></span>
     <span class="pill" data-sync-time></span>
   </div>
   <button class="btn-remove" data-remove-btn aria-label="Remove">x Remove</button>
@@ -297,15 +313,11 @@
     const s = card.querySelector('[data-sync-time]');
     const l = card.querySelector('[data-status-line]');
     const b = card.querySelector('[data-card-body]');
-    // Support both grouped (inventory.all) and legacy flat (items) shapes.
-    const allItems = (data.inventory && Array.isArray(data.inventory.all) && data.inventory.all.length > 0)
-      ? data.inventory.all
-      : (data.items || []);
-    const totalAmount = allItems.reduce((sum, item) => sum + (Number(item.amount || item.count) || 1), 0);
-    if (c) c.innerHTML = `Items: <strong>${totalAmount}</strong> <span style="color:#8a94a6;">(${allItems.length} types)</span>`;
+    const fishList = getPublicFishItems(data);
+    if (c) c.innerHTML = fishCountLabel(data, fishList);
     if (s) s.textContent = `Last sync: ${fmtTime(syncTimestamp(data))}`;
     if (l) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;
-    if (b) b.innerHTML = buildItemsHtml(allItems);
+    if (b) b.innerHTML = buildItemsHtml(fishList);
   }
 
   function setCardWaiting(card, name) {
@@ -352,7 +364,7 @@
     const b = card.querySelector('[data-card-body]');
     if (l) l.innerHTML = `&#x1F7E2; ${escHtml(phaseMessage(data.phase))}`;
     if (s) s.textContent = syncTimestamp(data) ? `Sync: ${fmtTime(syncTimestamp(data))}` : '';
-    if (c) c.innerHTML = `Items: <strong>-</strong>`;
+    if (c) c.innerHTML = `Fish: <strong>-</strong>`;
     let bodyHtml = `<div class="card-empty">&#x1F7E2; ${escHtml(phaseMessage(data.phase))}</div>`;
     // Show parse stats whenever raw>0 accepted=0, regardless of phase label.
     const ps = data.parseStats;
@@ -385,12 +397,9 @@
     if (l) l.innerHTML = `&#x1F534; Offline &mdash; <strong>${escHtml(name)}</strong> is not running the tracker`;
     if (s && lastData) s.textContent = `Last sync: ${fmtTime(syncTimestamp(lastData))}`;
     if (lastData) {
-      const allItems = (lastData.inventory && Array.isArray(lastData.inventory.all) && lastData.inventory.all.length > 0)
-        ? lastData.inventory.all
-        : (lastData.items || []);
-      const total = allItems.reduce((sum, i) => sum + (Number(i.amount || i.count) || 1), 0);
-      if (c) c.innerHTML = `Items: <strong>${total}</strong> <span style="color:#8a94a6;">(${allItems.length} types) &mdash; Offline</span>`;
-      if (b) b.innerHTML = buildItemsHtml(allItems);
+      const fishList = getPublicFishItems(lastData);
+      if (c) c.innerHTML = fishCountLabel(lastData, fishList).replace('</span>', ' &mdash; Offline</span>');
+      if (b) b.innerHTML = buildItemsHtml(fishList);
     }
   }
 
@@ -418,15 +427,12 @@
       if (!res.ok) { setCardError(entry.el); return; }
       const data = await res.json();
       entry.lastData = data;
-      // Support grouped (inventory.all) and legacy flat (items) response shapes.
-      const allItems = (data.inventory && Array.isArray(data.inventory.all))
-        ? data.inventory.all
-        : (data.items || []);
-      const hasItems = allItems.length > 0;
+      const fishList = getPublicFishItems(data);
+      const hasFish = fishList.length > 0;
       if (data.isOnline === false) {
         // Offline: keep the last known inventory visible with a red dot.
         setCardOffline(entry.el, entry.displayName, data);
-      } else if (hasItems) {
+      } else if (hasFish) {
         // Online with a real inventory snapshot.
         updateCard(entry.el, data);
       } else {
