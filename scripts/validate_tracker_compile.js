@@ -23,8 +23,14 @@ if (/^\s*loadstring\s*\(/.test(src)) {
 if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J')) {
   errors.push('TRACKER_BOOT_BEGIN BLOCKER10J marker missing');
 }
-if (!src.includes('BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04')) {
-  errors.push('BLOCKER10K build marker missing');
+if (!src.includes('BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04')) {
+  errors.push('BLOCKER10M build marker missing');
+}
+if (!src.includes('normalizeCatchFishName')) {
+  errors.push('BLOCKER10M normalizeCatchFishName missing');
+}
+if (!src.includes('pendingCatchName')) {
+  errors.push('BLOCKER10M pendingCatchName payload field missing');
 }
 if (!src.includes('buildRawProof')) {
   errors.push('buildRawProof helper missing');

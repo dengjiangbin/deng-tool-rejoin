@@ -2213,7 +2213,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04/);
+    assert.match(out, /BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04/);
   });
 
   test('targeted diagnostics disabled by default; heavy flags remain disabled', () => {
@@ -2280,7 +2280,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('boot marker is BLOCKER10J light sync build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04'));
+    assert.ok(src.includes('BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04'));
   });
 
   test('Item #990 upgrades only with exact catalog metadata', async () => {
@@ -2399,7 +2399,7 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04/);
+    assert.match(out, /BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04/);
   });
 
   test('safe minimal flags default off for heavy work', () => {
@@ -2420,7 +2420,7 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
   test('boot marker is BLOCKER10J build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04'));
+    assert.ok(src.includes('BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04'));
   });
 
   test('inventory upload and fish downgrade guards remain', () => {
@@ -2526,7 +2526,7 @@ describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04/);
+    assert.match(out, /BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04/);
   });
 
   test('player-data-only flags default correctly', () => {
@@ -2662,7 +2662,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04/);
+    assert.match(out, /BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04/);
   });
 
   test('light sync defaults: 10s loop, no attachReplionListeners by default', () => {
@@ -2678,7 +2678,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
   test('boot marker is BLOCKER10J light sync build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04'));
+    assert.ok(src.includes('BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04'));
   });
 
   test('itemId 117 raw enriches to Bandit Angelfish / fish on debug firstItems', async () => {
@@ -2690,7 +2690,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
         userId: 15001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04',
+        trackerBuild: 'BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04',
         items: [{ name: 'Item #117', count: 3, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -2829,7 +2829,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04/);
+    assert.match(out, /BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04/);
   });
 
   test('light sync defaults and no attachReplionListeners on default path', () => {
@@ -2964,7 +2964,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
         userId: 16001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04',
+        trackerBuild: 'BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04',
         items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -3355,5 +3355,195 @@ describe('BLOCKER10L fish image asset catalog', () => {
   test('isPublicFishItem unchanged for fish-only gate', () => {
     assert.equal(isPublicFishItem({ category: 'fish', name: 'Flame Angelfish' }), true);
     assert.equal(isPublicFishItem({ category: 'bait', name: 'Topwater Bait' }), false);
+  });
+});
+
+describe('BLOCKER10M catch-delta name catalog discovery', () => {
+  const TMP_LEARNED = path.join(os.tmpdir(), `fishit_learned_${process.pid}.json`);
+  process.env.FISHIT_LEARNED_FISH_CATALOG_PATH = TMP_LEARNED;
+
+  const learnedFishCatalog = require('../src/fishitLearnedFishCatalog');
+  const catchDelta = require('../src/fishitCatalogCatchDelta');
+  const {
+    buildPublicFishFields,
+    isPublicFishItem,
+    runCatchDeltaOnUpload,
+    ingestLearnedFishEntry,
+    PUBLIC_CATCH_DELTA_BUILD,
+  } = require('../src/fishitTrackerRoutes');
+
+  function cleanupLearned() {
+    try { if (fs.existsSync(TMP_LEARNED)) fs.unlinkSync(TMP_LEARNED); } catch (_) {}
+    learnedFishCatalog._reset();
+  }
+
+  beforeEach(() => {
+    cleanup();
+    cleanupLearned();
+    catalogStore.seedKnownMappings();
+  });
+
+  test('1: catch delta learns single increased item (196 -> Forgotten)', () => {
+    const discovery = catchDelta.processCatchDelta({
+      pendingCatch: { fishName: 'Forgotten', source: 'catch_notification' },
+      previousItemCounts: { 196: 34 },
+      currentItems: [{ name: 'Item #196', itemId: '196', amount: 35, category: 'items' }],
+      ingestLearned: ingestLearnedFishEntry,
+      mainCatalogLookup: (id) => catalogStore.lookupById(id),
+    });
+    assert.equal(discovery.learnedMappings.length, 1);
+    assert.equal(discovery.learnedMappings[0].itemId, '196');
+    assert.equal(discovery.learnedMappings[0].learnedName, 'Forgotten');
+    assert.equal(discovery.learnedMappings[0].source, 'catch_delta_high_confidence');
+    assert.equal(discovery.learnedMappings[0].publicEligible, true);
+    const learned = learnedFishCatalog.lookupById('196');
+    assert.equal(learned.name, 'Forgotten');
+    assert.equal(learned.category, 'fish');
+    assert.equal(learned.source, 'catch_delta_high_confidence');
+  });
+
+  test('2: multiple deltas stay low confidence only', () => {
+    const discovery = catchDelta.processCatchDelta({
+      pendingCatch: { fishName: 'Forgotten', source: 'catch_notification' },
+      previousItemCounts: { 196: 34, 72: 57 },
+      currentItems: [
+        { name: 'Item #196', itemId: '196', amount: 35, category: 'items' },
+        { name: 'Item #72', itemId: '72', amount: 58, category: 'items' },
+      ],
+      ingestLearned: ingestLearnedFishEntry,
+      mainCatalogLookup: (id) => catalogStore.lookupById(id),
+    });
+    assert.equal(discovery.learnedMappings.length, 0);
+    assert.equal(discovery.pendingLowConfidenceMappings.length, 2);
+    assert.equal(learnedFishCatalog.lookupById('196'), null);
+    const pub = buildPublicFishFields([
+      { name: 'Item #196', itemId: '196', amount: 35, category: 'items' },
+      { name: 'Item #72', itemId: '72', amount: 58, category: 'items' },
+    ]);
+    assert.equal(pub.publicItems.length, 0);
+  });
+
+  test('3: no delta produces no mapping', () => {
+    const discovery = catchDelta.processCatchDelta({
+      pendingCatch: { fishName: 'Forgotten', source: 'catch_notification' },
+      previousItemCounts: { 196: 34 },
+      currentItems: [{ name: 'Item #196', itemId: '196', amount: 34, category: 'items' }],
+      ingestLearned: ingestLearnedFishEntry,
+      mainCatalogLookup: (id) => catalogStore.lookupById(id),
+    });
+    assert.equal(discovery.learnedMappings.length, 0);
+    assert.ok(discovery.rejectedEvents.some((e) => e.reason === 'no_inventory_delta'));
+  });
+
+  test('4: existing non-fish (Carbon Rod 388) protected from fish overwrite', () => {
+    const discovery = catchDelta.processCatchDelta({
+      pendingCatch: { fishName: 'Forgotten', source: 'catch_notification' },
+      previousItemCounts: { 388: 137 },
+      currentItems: [{ name: 'Carbon Rod', itemId: '388', amount: 138, category: 'rod' }],
+      ingestLearned: ingestLearnedFishEntry,
+      mainCatalogLookup: (id) => catalogStore.lookupById(id),
+    });
+    assert.equal(discovery.learnedMappings.length, 0);
+    assert.ok(discovery.rejectedEvents.some((e) => e.reason === 'existing_non_fish_protected'));
+    assert.equal(isPublicFishItem({ name: 'Carbon Rod', category: 'rod', itemId: '388' }), false);
+  });
+
+  test('5: public UI remains fish-only after catch-delta learn', async () => {
+    const app = makeApp();
+    const mixed = [
+      { name: 'Topwater Bait', amount: 1, category: 'bait', itemId: '10' },
+      { name: 'Carbon Rod', amount: 138, category: 'rod', itemId: '388' },
+      { name: 'Common Crate', amount: 5, category: 'items', itemId: '990' },
+      { name: 'Flame Angelfish', amount: 136, category: 'fish', itemId: '68' },
+      { name: 'Item #196', amount: 35, category: 'items', itemId: '196' },
+    ];
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10MCatch',
+        userId: 20001,
+        isOnline: true,
+        items: mixed,
+        pendingCatchName: { fishName: 'Forgotten', source: 'catch_notification' },
+        previousItemCounts: { 196: 34 },
+      })
+      .expect(200);
+
+    const get = await request(app).get('/api/fishit-tracker/get-backpack/B10MCatch').expect(200);
+    const names = get.body.publicItems.map((i) => i.name);
+    assert.ok(names.includes('Forgotten'));
+    assert.ok(names.includes('Flame Angelfish'));
+    assert.ok(!names.some((n) => /Item #/i.test(n)));
+    assert.ok(!names.includes('Topwater Bait'));
+    assert.ok(!names.includes('Carbon Rod'));
+    assert.ok(!names.includes('Common Crate'));
+  });
+
+  test('6: image attached after name known (Flame Angelfish via learn)', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10MImg',
+        userId: 20002,
+        isOnline: true,
+        items: [{ name: 'Item #68', itemId: '68', amount: 2, category: 'items' }],
+        pendingCatchName: { fishName: 'Flame Angelfish', source: 'catch_notification' },
+        previousItemCounts: { 68: 1 },
+      })
+      .expect(200);
+
+    const get = await request(app).get('/api/fishit-tracker/get-backpack/B10MImg').expect(200);
+    const flame = get.body.publicItems.find((i) => i.name === 'Flame Angelfish');
+    assert.ok(flame);
+    assert.equal(flame.imageAssetId, '128385926161840');
+    assert.ok(flame.imageUrl.includes('128385926161840'));
+    assert.equal(flame.imageSource, 'fish_image_asset_catalog');
+  });
+
+  test('7: debug proof contains nameCatalogDiscovery', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10MDebug',
+        userId: 20003,
+        isOnline: true,
+        items: [{ name: 'Item #196', itemId: '196', amount: 35, category: 'items' }],
+        pendingCatchName: { fishName: 'Forgotten', source: 'catch_notification' },
+        previousItemCounts: { 196: 34 },
+      })
+      .expect(200);
+
+    const dbg = await request(app).get('/api/fishit-tracker/debug/B10MDebug').expect(200);
+    assert.ok(dbg.body.nameCatalogDiscovery);
+    assert.equal(dbg.body.catchDeltaBuild, PUBLIC_CATCH_DELTA_BUILD);
+    const learned = dbg.body.nameCatalogDiscovery.learnedMappings;
+    assert.ok(Array.isArray(learned) && learned.length >= 1);
+    assert.equal(learned[0].itemId, '196');
+    assert.equal(learned[0].learnedName, 'Forgotten');
+    assert.equal(learned[0].publicEligible, true);
+  });
+
+  test('runCatchDeltaOnUpload integrates on POST', () => {
+    const raw = [{ name: 'Item #196', itemId: '196', amount: 35, category: 'items' }];
+    const disc = runCatchDeltaOnUpload(
+      { pendingCatchName: { fishName: 'Forgotten' }, previousItemCounts: { 196: 34 } },
+      raw,
+      null,
+    );
+    assert.ok(disc);
+    assert.equal(disc.learnedMappings.length, 1);
+  });
+
+  test('tracker.lua includes BLOCKER10M catch delta markers', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    assert.ok(src.includes('BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04'));
+    assert.ok(src.includes('normalizeCatchFishName'));
+    assert.ok(src.includes('pendingCatchName'));
+    assert.ok(src.includes('previousItemCounts'));
+    assert.ok(src.includes('CATCH_NAME_PENDING'));
+    assert.ok(!src.toLowerCase().includes('anticheat'));
+    assert.ok(!src.toLowerCase().includes('coregui'));
   });
 });

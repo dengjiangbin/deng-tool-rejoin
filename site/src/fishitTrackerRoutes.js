@@ -33,6 +33,8 @@ const { execFileSync } = require('child_process');
 
 const catalogStore = require('./fishitCatalogStore');
 const fishImageAssets = require('./fishitFishImageAssets');
+const learnedFishCatalog = require('./fishitLearnedFishCatalog');
+const catchDelta = require('./fishitCatalogCatchDelta');
 const packageJson = require('../package.json');
 
 function resolveServerCommit() {
@@ -74,6 +76,7 @@ const NO_STORE_HEADERS = {
 };
 const PUBLIC_RENDER_BUILD = 'BLOCKER10K1_FISH_ONLY_UI';
 const PUBLIC_IMAGE_BUILD = 'BLOCKER10L_IMAGE';
+const PUBLIC_CATCH_DELTA_BUILD = 'BLOCKER10M_CATCH_DELTA';
 
 router.use((req, res, next) => {
   const p = req.path || '';
@@ -191,11 +194,41 @@ function mergeItemsNoDowngrade(incoming, existing) {
 }
 
 /** BLOCKER10H: enrich incoming placeholders from persistent catalog before store. */
+function catalogMetaForItemId(itemId) {
+  const main = catalogStore.lookupById(itemId);
+  if (main && !catalogStore.isPlaceholderItemName(main.name, itemId)) return main;
+  const learned = learnedFishCatalog.lookupById(itemId);
+  if (learned && learned.publicEligible) {
+    return {
+      name: learned.name,
+      category: learned.category || 'fish',
+      source: learned.source,
+      tier: null,
+      confidence: String(learned.confidence),
+    };
+  }
+  return main;
+}
+
+function ingestLearnedFishEntry(raw) {
+  const r = learnedFishCatalog.ingestEntry(raw, (id) => catalogStore.lookupById(id));
+  if (r.updated && r.entry && r.entry.publicEligible) {
+    catalogStore.upsertByItemId({
+      itemId: r.entry.itemId,
+      name: r.entry.name,
+      category: 'fish',
+      source: r.entry.source,
+      confidence: 'catch_delta',
+    });
+  }
+  return r;
+}
+
 function mergeItemsNoDowngradeFromCatalog(incoming) {
   if (!Array.isArray(incoming) || incoming.length === 0) return incoming;
   return incoming.map((it) => {
     if (!it || !it.itemId) return it;
-    const meta = catalogStore.lookupById(it.itemId);
+    const meta = catalogMetaForItemId(it.itemId);
     if (!meta || catalogStore.isPlaceholderItemName(meta.name, it.itemId)) return it;
     const incPlaceholder = catalogStore.isPlaceholderItemName(it.name, it.itemId);
     if (!incPlaceholder) return it;
@@ -265,7 +298,7 @@ function enrichItemsFromCatalog(items) {
     const isPlaceholder = catalogStore.isPlaceholderItemName(it.name, it.itemId);
     const trackerHasRealName = !isPlaceholder && !!it.name;
 
-    let meta = it.itemId ? catalogStore.lookupById(it.itemId) : null;
+    let meta = it.itemId ? catalogMetaForItemId(it.itemId) : null;
     if (!meta) meta = catalogStore.lookup(it.name);
     if (!meta && isPlaceholder) {
       const idFromName = String(it.name).replace(/^Item #/, '');
@@ -403,14 +436,19 @@ function sumItemAmounts(items) {
 function isPublicFishItem(item) {
   if (!item) return false;
   const cat = String(item.category || '').toLowerCase();
-  if (cat === 'rod' || cat === 'bait' || cat === 'items') return false;
-  if (catalogStore.isPlaceholderItemName(item.name, item.itemId)) return false;
+  if (cat === 'rod' || cat === 'bait') return false;
   if (item.itemId) {
+    const learned = learnedFishCatalog.lookupById(item.itemId);
+    if (learned && learned.publicEligible && learned.category === 'fish') {
+      return true;
+    }
     const meta = catalogStore.lookupById(item.itemId);
     if (meta && !catalogStore.isFishCategory(meta.category)) return false;
   }
+  if (cat === 'items') return false;
+  if (catalogStore.isPlaceholderItemName(item.name, item.itemId)) return false;
   if (catalogStore.isFishCategory(cat)) return true;
-  return true;
+  return cat !== 'rod' && cat !== 'bait' && cat !== 'items';
 }
 
 /** Fish-only view for public website/API (storage keeps full inventory). */
@@ -666,6 +704,28 @@ function ingestDiscoveredCatalog(entries) {
   return results;
 }
 
+function ingestLearnedFishCatalogFromBody(body) {
+  if (!Array.isArray(body.learnedFishCatalog) || body.learnedFishCatalog.length === 0) return [];
+  const results = [];
+  for (const raw of body.learnedFishCatalog.slice(0, 30)) {
+    results.push(ingestLearnedFishEntry(raw));
+  }
+  return results;
+}
+
+function runCatchDeltaOnUpload(body, rawItems, existing) {
+  const pending = body.pendingCatchName || body.pendingCatch;
+  const prev = body.previousItemCounts || (existing && existing.lastItemCounts) || null;
+  if (!pending && !prev) return null;
+  return catchDelta.processCatchDelta({
+    pendingCatch: pending,
+    previousItemCounts: prev,
+    currentItems: rawItems,
+    ingestLearned: ingestLearnedFishEntry,
+    mainCatalogLookup: (id) => catalogStore.lookupById(id),
+  });
+}
+
 // ── POST update-backpack (canonical + legacy alias) ───────────────
 // Accepts both:
 //   • inventory_snapshot  – the Replion source-of-truth inventory. The items
@@ -755,6 +815,8 @@ function handleUpdateBackpack(req, res) {
 
     // ── Inventory snapshot ────────────────────────────────────────
     const rawItems = normaliseInventoryItems(body);
+    const learnedIngest = ingestLearnedFishCatalogFromBody(body);
+    const nameCatalogDiscovery = runCatchDeltaOnUpload(body, rawItems, existing);
     catalogStore.learnFromTrackerItems(rawItems);
     let cleanItems = mergeItemsNoDowngradeFromCatalog(rawItems);
     if (existing && existing.items && cleanItems.length) {
@@ -811,11 +873,20 @@ function handleUpdateBackpack(req, res) {
     if (Array.isArray(body.discoveredCatalog) && body.discoveredCatalog.length) {
       liveTrackDB[key].discoveredCatalogIngest = ingestDiscoveredCatalog(body.discoveredCatalog);
     }
+    if (learnedIngest.length) {
+      liveTrackDB[key].learnedFishCatalogIngest = learnedIngest;
+    }
+    if (nameCatalogDiscovery) {
+      liveTrackDB[key].nameCatalogDiscovery = nameCatalogDiscovery;
+    }
+    liveTrackDB[key].lastItemCounts = catchDelta.buildItemCountsFromItems(rawItems);
     if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
 
     console.log(
       `[fishit-tracker] POST ok=true user=${cleanUser} sessionKey=${key}` +
-      ` accepted=${acceptedCount} lastSeenAt=${now} lastInventoryAt=${now} online=true`
+      ` accepted=${acceptedCount} lastSeenAt=${now} lastInventoryAt=${now} online=true` +
+      (nameCatalogDiscovery && nameCatalogDiscovery.learnedMappings.length
+        ? ` catchDeltaLearned=${nameCatalogDiscovery.learnedMappings.length}` : '')
     );
 
     return res.status(200).json({
@@ -825,6 +896,7 @@ function handleUpdateBackpack(req, res) {
       lastInventoryAt: now,
       lastSeenAt: now,
       online: true,
+      nameCatalogDiscovery: nameCatalogDiscovery || undefined,
     });
 }
 
@@ -1051,6 +1123,28 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
     stillUnresolvedIds: unresolvedIds,
     resolvedFromDiagnostics: resolvedFromDiag.length ? resolvedFromDiag : null,
     discoveredCatalogIngest: data.discoveredCatalogIngest || null,
+    nameCatalogDiscovery: catchDelta.buildNameCatalogDiscoveryForDebug(
+      data.nameCatalogDiscovery,
+      learnedFishCatalog,
+    ),
+    catchDeltaBuild: PUBLIC_CATCH_DELTA_BUILD,
+    learnedFishCatalogCount: learnedFishCatalog.getAllMappings().length,
+  });
+});
+
+// Optional manual catalog probe request (BLOCKER10M-G) — off by default on client.
+router.post('/api/fishit-tracker/request-catalog-scan/:username', postLimiter, (req, res) => {
+  const cleanUser = sanitiseUsername(req.params.username);
+  if (!cleanUser) return res.status(400).json({ ok: false, error: 'Invalid username.' });
+  const key = cleanUser.toLowerCase();
+  if (!liveTrackDB[key]) return res.status(404).json({ ok: false, error: 'not_found' });
+  liveTrackDB[key].catalogScanRequested = true;
+  liveTrackDB[key].catalogScanRequestedAt = new Date().toISOString();
+  return res.status(200).json({
+    ok: true,
+    note: 'catalog_scan_requested',
+    enableOnClient: 'LiveSafe.enableManualCatalogProbe',
+    defaultEnabled: false,
   });
 });
 
@@ -1070,3 +1164,7 @@ module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
 module.exports.PUBLIC_IMAGE_BUILD = PUBLIC_IMAGE_BUILD;
+module.exports.PUBLIC_CATCH_DELTA_BUILD = PUBLIC_CATCH_DELTA_BUILD;
+module.exports.ingestLearnedFishEntry = ingestLearnedFishEntry;
+module.exports.runCatchDeltaOnUpload = runCatchDeltaOnUpload;
+module.exports.catalogMetaForItemId = catalogMetaForItemId;
