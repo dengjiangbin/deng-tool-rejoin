@@ -2206,7 +2206,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04/);
+    assert.match(out, /BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01/);
   });
 
   test('targeted diagnostics disabled by default; heavy flags remain disabled', () => {
@@ -2273,7 +2273,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('boot marker is BLOCKER10J light sync build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04'));
+    assert.ok(src.includes('BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01'));
   });
 
   test('Item #990 upgrades only with exact catalog metadata', async () => {
@@ -2391,7 +2391,7 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04/);
+    assert.match(out, /BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01/);
   });
 
   test('safe minimal flags default off for heavy work', () => {
@@ -2412,7 +2412,7 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
   test('boot marker is BLOCKER10J build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04'));
+    assert.ok(src.includes('BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01'));
   });
 
   test('inventory upload and fish downgrade guards remain', () => {
@@ -2518,7 +2518,7 @@ describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04/);
+    assert.match(out, /BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01/);
   });
 
   test('player-data-only flags default correctly', () => {
@@ -2653,7 +2653,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04/);
+    assert.match(out, /BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01/);
   });
 
   test('light sync defaults: 10s loop, no attachReplionListeners by default', () => {
@@ -2669,7 +2669,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
   test('boot marker is BLOCKER10J light sync build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04'));
+    assert.ok(src.includes('BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01'));
   });
 
   test('itemId 117 raw enriches to Bandit Angelfish / fish on debug firstItems', async () => {
@@ -2681,7 +2681,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
         userId: 15001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04',
+        trackerBuild: 'BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01',
         items: [{ name: 'Item #117', count: 3, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -2820,7 +2820,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04/);
+    assert.match(out, /BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01/);
   });
 
   test('light sync defaults and no attachReplionListeners on default path', () => {
@@ -2895,6 +2895,57 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
     assert.equal(get.body.items.find((i) => i.itemId === '117').name, 'Bandit Angelfish');
   });
 
+  test('canonical fishit-tracker POST/GET routes accept inventory upload', async () => {
+    const app = makeApp();
+    const post = await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10J2Canon',
+        userId: 16003,
+        source: 'replion',
+        isOnline: true,
+        type: 'inventory_snapshot',
+        items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
+        parseStats: { raw: 11, accepted: 11, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    assert.equal(post.body.ok, true);
+    assert.equal(post.body.status, 'success');
+    assert.equal(post.body.accepted, 1);
+    assert.ok(post.body.lastSeenAt);
+    assert.ok(post.body.lastInventoryAt);
+
+    const get = await request(app)
+      .get('/api/fishit-tracker/get-backpack/B10J2Canon')
+      .expect(200);
+    assert.equal(get.body.isOnline, true);
+    assert.equal(get.body.items.find((i) => i.itemId === '117').name, 'Bandit Angelfish');
+
+    const dbg = await request(app).get('/api/fishit-tracker/debug/B10J2Canon').expect(200);
+    assert.equal(dbg.body.ok, true);
+    assert.equal(dbg.body.sessionKey, 'b10j2canon');
+    const miss = await request(app).get('/api/fishit-tracker/debug/NotB10J2Canon').expect(404);
+    assert.ok(miss.body.knownKeys.includes('b10j2canon'));
+  });
+
+  test('legacy POST alias still works after canonical route added', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10J2Alias',
+        userId: 16004,
+        isOnline: true,
+        items: [{ name: 'Item #117', count: 1, itemId: '117' }],
+      })
+      .expect(200);
+    const dbg = await request(app).get('/api/fishit-tracker/debug/B10J2Alias').expect(200);
+    assert.equal(dbg.body.ok, true);
+    const miss = await request(app).get('/api/fishit-tracker/debug/wrongkeyzzz').expect(404);
+    assert.ok(miss.body.knownKeys.includes('b10j2alias'));
+  });
+
   test('debug endpoint exposes enriched fields and non-version serverCommit', async () => {
     const app = makeApp();
     await request(app)
@@ -2904,7 +2955,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
         userId: 16001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04',
+        trackerBuild: 'BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01',
         items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
       })
       .expect(200);

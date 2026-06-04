@@ -4,9 +4,11 @@
  *
  * Public routes (no authentication required):
  *   GET  /tracker                        – serve the live dashboard UI
- *   POST /api/tracker/update-backpack    – receive payload from the Lua client
- *   GET  /api/tracker/get-backpack/:user – query live data for a username
- *   GET  /api/fishit-tracker/debug/:user – lightweight diagnostic (counts only)
+ *   POST /api/fishit-tracker/update-backpack – canonical inventory POST (Lua v10J2+)
+ *   POST /api/tracker/update-backpack          – backward-compatible alias
+ *   GET  /api/fishit-tracker/get-backpack/:user – canonical live query
+ *   GET  /api/tracker/get-backpack/:user        – backward-compatible alias
+ *   GET  /api/fishit-tracker/debug/:user        – lightweight diagnostic (counts only)
  *
  * Security notes:
  *   - All data lives only in process memory (liveTrackDB). Nothing is
@@ -425,21 +427,18 @@ function ingestDiscoveredCatalog(entries) {
   return results;
 }
 
-// ── POST /api/tracker/update-backpack ────────────────────────────
+// ── POST update-backpack (canonical + legacy alias) ───────────────
 // Accepts both:
 //   • inventory_snapshot  – the Replion source-of-truth inventory. The items
 //     array REPLACES the previous snapshot (counts never accumulate).
 //   • tracker_status      – a lightweight online/offline + source ping with no
 //     items; keeps the last known inventory and only flips flags.
-router.post(
-  '/api/tracker/update-backpack',
-  postLimiter,
-  express.json({ limit: '512kb' }),
-  (req, res) => {
+function handleUpdateBackpack(req, res) {
     const body = req.body || {};
     const { username, userId, isOnline, type } = body;
     const source = sanitiseSource(body.source);
     const phase  = sanitisePhase(body.phase);
+    const payloadType = type || 'inventory_snapshot';
 
     const cleanUser = sanitiseUsername(username);
     if (!cleanUser) {
@@ -485,8 +484,20 @@ router.post(
       // Store userId→key alias so GET can resolve by userId if needed.
       if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
       // Server-side log.
-      console.log(`[fishit-tracker] recv tracker_status user=${cleanUser} userId=${cleanUserId} phase=${liveTrackDB[key].phase} online=${online}`);
-      return res.status(200).json({ status: 'success', note: 'status_only', phase: liveTrackDB[key].phase });
+      console.log(
+        `[fishit-tracker] POST hit route=${req.path} user=${cleanUser} sessionKey=${key}` +
+        ` userId=${cleanUserId} payloadType=tracker_status accepted=0 ok=true` +
+        ` lastSeenAt=${now} lastInventoryAt=${liveTrackDB[key].lastInventoryAt || 'n/a'} online=${online}`
+      );
+      return res.status(200).json({
+        ok: true,
+        status: 'success',
+        note: 'status_only',
+        phase: liveTrackDB[key].phase,
+        lastSeenAt: now,
+        lastInventoryAt: liveTrackDB[key].lastInventoryAt || null,
+        online: isSessionLive(liveTrackDB[key]),
+      });
     }
 
     // ── Offline snapshot with no items ────────────────────────────
@@ -518,8 +529,10 @@ router.post(
     const ownedRodsLen  = Array.isArray(body.owned && body.owned.rods)  ? body.owned.rods.length  : 0;
     const ownedItemsLen = Array.isArray(body.owned && body.owned.items) ? body.owned.items.length : 0;
     console.log(
-      `[fishit-tracker] recv ${type || 'snapshot'} user=${cleanUser} userId=${cleanUserId}` +
-      ` flatItems=${rawFlatLen} ownedFish=${ownedFishLen} ownedRods=${ownedRodsLen} ownedItems=${ownedItemsLen}`
+      `[fishit-tracker] POST hit route=${req.path} user=${cleanUser} sessionKey=${key}` +
+      ` userId=${cleanUserId} payloadType=${payloadType} flatItems=${rawFlatLen}` +
+      ` ownedFish=${ownedFishLen} ownedRods=${ownedRodsLen} ownedItems=${ownedItemsLen}` +
+      (ps ? ` parseStats.accepted=${ps.accepted}` : '')
     );
     console.log(
       `[fishit-tracker] stored key=${key}` +
@@ -561,6 +574,11 @@ router.post(
     }
     if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
 
+    console.log(
+      `[fishit-tracker] POST ok=true user=${cleanUser} sessionKey=${key}` +
+      ` accepted=${acceptedCount} lastSeenAt=${now} lastInventoryAt=${now} online=true`
+    );
+
     return res.status(200).json({
       ok: true,
       status: 'success',
@@ -569,8 +587,16 @@ router.post(
       lastSeenAt: now,
       online: true,
     });
-  },
-);
+}
+
+const updateBackpackMiddleware = [
+  postLimiter,
+  express.json({ limit: '512kb' }),
+  handleUpdateBackpack,
+];
+
+router.post('/api/fishit-tracker/update-backpack', updateBackpackMiddleware);
+router.post('/api/tracker/update-backpack', updateBackpackMiddleware);
 
 /** Session is live when a heartbeat arrived within the threshold (inventory or status). */
 function isSessionLive(data, maxAgeMs = 45000) {
@@ -624,51 +650,50 @@ router.get('/api/fishit-tracker/catalog', getLimiter, (_req, res) => {
   return res.status(200).json(catalogStore.getCatalog());
 });
 
-// ── GET /api/tracker/get-backpack/:username ───────────────────────
+// ── GET get-backpack (canonical + legacy alias) ───────────────────
 // Also resolves userId aliases (uid:<number> keys created on POST).
-router.get(
-  '/api/tracker/get-backpack/:username',
-  getLimiter,
-  (req, res) => {
-    const cleanUser = sanitiseUsername(req.params.username);
-    if (!cleanUser) {
-      return res.status(400).json({ error: 'Invalid username.' });
-    }
+function handleGetBackpack(req, res) {
+  const cleanUser = sanitiseUsername(req.params.username);
+  if (!cleanUser) {
+    return res.status(400).json({ error: 'Invalid username.' });
+  }
 
-    const key  = cleanUser.toLowerCase();
-    let data    = liveTrackDB[key];
+  const key  = cleanUser.toLowerCase();
+  let data    = liveTrackDB[key];
 
-    // Fallback: if the param looks like a userId, resolve through the alias.
-    if (!data && /^\d+$/.test(key)) {
-      const uidTarget = liveTrackDB['uid:' + key];
-      if (typeof uidTarget === 'string') data = liveTrackDB[uidTarget];
-    }
+  // Fallback: if the param looks like a userId, resolve through the alias.
+  if (!data && /^\d+$/.test(key)) {
+    const uidTarget = liveTrackDB['uid:' + key];
+    if (typeof uidTarget === 'string') data = liveTrackDB[uidTarget];
+  }
 
-    if (!data) {
-      return res.status(404).json({ error: 'No tracking session active for this user.' });
-    }
+  if (!data) {
+    return res.status(404).json({ error: 'No tracking session active for this user.' });
+  }
 
-    // Enrich from raw tracker payload when available (BLOCKER10I).
-    const sourceItems = (data.rawItems && data.rawItems.length) ? data.rawItems : data.items;
-    const enrichedFlat = enrichItemsFromCatalog(sourceItems);
-    const enrichedInventory = buildInventoryGroups(enrichedFlat);
-    const rawInventory = buildInventoryGroups(sourceItems);
-    const countsRaw = inventoryCountsFromGroups(rawInventory);
-    const countsEnriched = inventoryCountsFromGroups(enrichedInventory);
+  // Enrich from raw tracker payload when available (BLOCKER10I).
+  const sourceItems = (data.rawItems && data.rawItems.length) ? data.rawItems : data.items;
+  const enrichedFlat = enrichItemsFromCatalog(sourceItems);
+  const enrichedInventory = buildInventoryGroups(enrichedFlat);
+  const rawInventory = buildInventoryGroups(sourceItems);
+  const countsRaw = inventoryCountsFromGroups(rawInventory);
+  const countsEnriched = inventoryCountsFromGroups(enrichedInventory);
 
-    const enriched = {
-      ...data,
-      items:           enrichedFlat,
-      inventory:       enrichedInventory,
-      countsRaw,
-      countsEnriched,
-      lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
-      isOnline:        isSessionLive(data),
-    };
+  const enriched = {
+    ...data,
+    items:           enrichedFlat,
+    inventory:       enrichedInventory,
+    countsRaw,
+    countsEnriched,
+    lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
+    isOnline:        isSessionLive(data),
+  };
 
-    return res.status(200).json(enriched);
-  },
-);
+  return res.status(200).json(enriched);
+}
+
+router.get('/api/fishit-tracker/get-backpack/:username', getLimiter, handleGetBackpack);
+router.get('/api/tracker/get-backpack/:username', getLimiter, handleGetBackpack);
 
 // ── GET /api/fishit-tracker/debug/:username ───────────────────────
 // Admin-safe diagnostic: returns only counts and first 5 items, never
@@ -737,7 +762,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
     acceptedInstances: data.parseStats ? data.parseStats.acceptedInstances : null,
     uniqueAccepted:  data.parseStats ? data.parseStats.accepted : null,
     lastSeenAt:      data.lastSeenAt || null,
-    lastInventoryAt: data.updatedAt  || null,
+    lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
     lastPayloadType: data.lastPayloadType || null,
     counts: countsEnriched,
     countsRaw,

@@ -351,7 +351,7 @@
     const c = card.querySelector('[data-items-count]');
     const b = card.querySelector('[data-card-body]');
     if (l) l.innerHTML = `&#x1F7E2; ${escHtml(phaseMessage(data.phase))}`;
-    if (s) s.textContent = data.updatedAt ? `Sync: ${fmtTime(data.updatedAt)}` : '';
+    if (s) s.textContent = syncTimestamp(data) ? `Sync: ${fmtTime(syncTimestamp(data))}` : '';
     if (c) c.innerHTML = `Items: <strong>-</strong>`;
     let bodyHtml = `<div class="card-empty">&#x1F7E2; ${escHtml(phaseMessage(data.phase))}</div>`;
     // Show parse stats whenever raw>0 accepted=0, regardless of phase label.
@@ -405,7 +405,7 @@
     const entry = trackers.get(key);
     if (!entry) return;
     try {
-      const res = await fetch(`/api/tracker/get-backpack/${encodeURIComponent(key)}`);
+      const res = await fetch(`/api/fishit-tracker/get-backpack/${encodeURIComponent(key)}`);
       if (!trackers.has(key)) return;
       if (res.status === 404) {
         if (entry.lastData) {

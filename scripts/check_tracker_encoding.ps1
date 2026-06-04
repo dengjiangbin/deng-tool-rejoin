@@ -18,7 +18,7 @@ if ($content -notmatch '^--') { $errors += "FAIL  Does not start with '--'" } el
 # ── BLOCKER10J: safe light 10s sync + compile gate ──
 if ($content -match '^\s*loadstring\s*\(') { $errors += "FAIL  tracker.lua must not begin with loadstring() wrapper" } else { Write-Host "PASS  No unsafe top-level loadstring wrapper" }
 if ($content -match 'TRACKER_BOOT_BEGIN BLOCKER10J') { Write-Host "PASS  TRACKER_BOOT_BEGIN BLOCKER10J marker found" } else { $errors += "FAIL  TRACKER_BOOT_BEGIN BLOCKER10J missing" }
-if ($content -match 'BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04') { Write-Host "PASS  BLOCKER10J build id found" } else { $errors += "FAIL  BLOCKER10J build id missing" }
+if ($content -match 'BLOCKER10J2_CANONICAL_UPLOAD_2026_06_01') { Write-Host "PASS  BLOCKER10J2 build id found" } else { $errors += "FAIL  BLOCKER10J2 build id missing" }
 if ($content -match 'lightSyncEnabled = true') { Write-Host "PASS  lightSyncEnabled default true" } else { $errors += "FAIL  lightSyncEnabled must be true" }
 if ($content -match 'lightSyncIntervalSeconds = 10') { Write-Host "PASS  lightSyncIntervalSeconds default 10" } else { $errors += "FAIL  lightSyncIntervalSeconds must be 10" }
 if ($content -match 'repeatUpload = true') { Write-Host "PASS  repeatUpload default true" } else { $errors += "FAIL  repeatUpload must be true" }
