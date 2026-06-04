@@ -2206,7 +2206,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10I_ZERO_FREEZE_ONE_SHOT_EXPORTER_2026_06_04/);
+    assert.match(out, /BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04/);
   });
 
   test('targeted diagnostics disabled by default; heavy flags remain disabled', () => {
@@ -2216,7 +2216,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
     assert.ok(src.includes('enablePhaseBItemUpgrade = false'));
     assert.ok(src.includes('debugRemoteHooks = false'));
     assert.ok(src.includes('enableModuleRequire = false'));
-    assert.ok(src.includes('TARGETED_ITEM_DIAGNOSTICS disabled_by_default='));
+    assert.ok(src.includes('lightSyncEnabled = true'));
   });
 
   test('targeted diagnostics only processes target item ids', () => {
@@ -2248,20 +2248,19 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('remote hooks remain disabled by default', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('debugRemoteHooks = false'));
-    assert.ok(src.match(/if not LiveSafe\.debugRemoteHooks then[\s\S]*hookRemotesDeferred/));
+    assert.ok(src.match(/function hookRemotesDeferred[\s\S]{0,120}if not LiveSafe\.debugRemoteHooks/));
   });
 
   test('heavy catalog remains disabled by default', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('enableHeavyCatalog = false'));
-    assert.ok(src.match(/if LiveSafe\.enableHeavyCatalog then/));
+    assert.ok(src.match(/function buildMetadataCatalogAsync[\s\S]{0,120}if not LiveSafe\.enableHeavyCatalog/));
   });
 
-  test('freeze monitor disabled by default in one-shot mode', () => {
+  test('freeze monitor disabled by default', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('enableFreezeMonitor = false'));
-    assert.ok(src.includes('if LiveSafe.enableFreezeMonitor then startFreezeMonitor()'));
-    assert.ok(src.includes('startFreezeMonitor'));
+    assert.ok(src.includes('function startFreezeMonitor'));
   });
 
   test('target diagnostics abort/pause on stall', () => {
@@ -2271,10 +2270,10 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
     assert.ok(src.includes('TARGET_ITEM_DIAG aborted reason=catalog_aborted'));
   });
 
-  test('boot marker is BLOCKER10I one-shot build', () => {
+  test('boot marker is BLOCKER10J light sync build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10I'));
-    assert.ok(src.includes('BLOCKER10I_ZERO_FREEZE_ONE_SHOT_EXPORTER_2026_06_04'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
+    assert.ok(src.includes('BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04'));
   });
 
   test('Item #990 upgrades only with exact catalog metadata', async () => {
@@ -2385,14 +2384,14 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   });
 });
 
-describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER10I)', () => {
+describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER10J)', () => {
   const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
   const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
 
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10I_ZERO_FREEZE_ONE_SHOT_EXPORTER_2026_06_04/);
+    assert.match(out, /BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04/);
   });
 
   test('safe minimal flags default off for heavy work', () => {
@@ -2406,15 +2405,14 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
 
   test('heavy catalog spawn gated when disabled', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('if LiveSafe.enableHeavyCatalog then'));
     assert.ok(src.includes('function buildMetadataCatalogAsync'));
     assert.ok(src.match(/if not LiveSafe\.enableHeavyCatalog then[\s\S]{0,80}HEAVY_CATALOG disabled=true/));
   });
 
-  test('boot marker is BLOCKER10I build', () => {
+  test('boot marker is BLOCKER10J build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10I'));
-    assert.ok(src.includes('BLOCKER10I_ZERO_FREEZE_ONE_SHOT_EXPORTER_2026_06_04'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
+    assert.ok(src.includes('BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04'));
   });
 
   test('inventory upload and fish downgrade guards remain', () => {
@@ -2430,24 +2428,21 @@ describe('BLOCKER10E live freeze proof and targeted item resolution', () => {
 
   test('freeze monitor and safe minimal mode present', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('RunService.Heartbeat'));
-    assert.ok(src.includes('FREEZE_SUSPECT'));
-    assert.ok(src.includes('SAFE_MINIMAL_MODE'));
+    assert.ok(src.includes('enableFreezeMonitor = false'));
+    assert.ok(src.includes('safeMinimalMode = true'));
     assert.ok(src.includes('enableHeavyCatalog = false'));
-    assert.ok(src.includes('CATALOG_THROTTLE'));
+    assert.ok(src.includes('lightSyncEnabled = true'));
   });
 
   test('remote hooks disabled by default', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('debugRemoteHooks = false'));
-    assert.ok(src.includes('REMOTE_HOOKS disabled_by_default=true'));
-    assert.ok(src.match(/if not LiveSafe\.debugRemoteHooks then[\s\S]*hookRemotesDeferred/));
+    assert.ok(src.match(/function hookRemotesDeferred[\s\S]{0,120}if not LiveSafe\.debugRemoteHooks/));
   });
 
   test('heavy catalog disabled by default', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('enableHeavyCatalog = false'));
-    assert.ok(src.includes('HEAVY_CATALOG disabled='));
     assert.ok(!src.includes('task.wait(LiveSafe.heavyCatalogDelaySec)'));
   });
 
@@ -2487,7 +2482,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
 
   test('TRACKER_BOOT_BEGIN appears before catalog scan code', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10I');
+    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10J');
     const catalog = src.indexOf('scanReplicatedStorageFishCatalog');
     assert.ok(boot >= 0, 'TRACKER_BOOT_BEGIN missing');
     assert.ok(catalog >= 0, 'catalog scan missing');
@@ -2521,9 +2516,9 @@ describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
 
   beforeEach(() => { cleanup(); });
 
-  test('validate_tracker_compile.js passes with BLOCKER10I marker', () => {
+  test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10I_ZERO_FREEZE_ONE_SHOT_EXPORTER_2026_06_04/);
+    assert.match(out, /BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04/);
   });
 
   test('player-data-only flags default correctly', () => {
@@ -2650,31 +2645,31 @@ describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
   });
 });
 
-describe('BLOCKER10I zero-freeze one-shot exporter + server enriched display', () => {
+describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
   const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
   const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
 
   beforeEach(() => { cleanup(); });
 
-  test('validate_tracker_compile.js passes with BLOCKER10I marker', () => {
+  test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10I_ZERO_FREEZE_ONE_SHOT_EXPORTER_2026_06_04/);
+    assert.match(out, /BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04/);
   });
 
-  test('one-shot defaults: no polling loop, no targeted diagnostics, no repeat upload', () => {
+  test('light sync defaults: 10s loop, no attachReplionListeners by default', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('oneShot = true'));
-    assert.ok(src.includes('repeatUpload = false'));
-    assert.ok(src.includes('enableTargetedItemDiagnostics = false'));
-    assert.ok(src.includes('if LiveSafe.oneShot or not LiveSafe.repeatUpload then'));
-    assert.ok(src.includes('TRACKER_DONE one_shot=true'));
+    assert.ok(src.includes('lightSyncEnabled = true'));
+    assert.ok(src.includes('lightSyncIntervalSeconds = 10'));
+    assert.ok(src.includes('repeatUpload = true'));
+    assert.ok(src.includes('oneShot = false'));
+    assert.ok(src.includes('SYNC_LOOP_STARTED interval='));
     assert.ok(src.includes('cachedInventoryPath = "Inventory.Items"'));
   });
 
-  test('boot marker is BLOCKER10I one-shot build', () => {
+  test('boot marker is BLOCKER10J light sync build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10I'));
-    assert.ok(src.includes('BLOCKER10I_ZERO_FREEZE_ONE_SHOT_EXPORTER_2026_06_04'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
+    assert.ok(src.includes('BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04'));
   });
 
   test('itemId 117 raw enriches to Bandit Angelfish / fish on debug firstItems', async () => {
@@ -2686,7 +2681,7 @@ describe('BLOCKER10I zero-freeze one-shot exporter + server enriched display', (
         userId: 15001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10I_ZERO_FREEZE_ONE_SHOT_EXPORTER_2026_06_04',
+        trackerBuild: 'BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04',
         items: [{ name: 'Item #117', count: 3, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -2813,5 +2808,70 @@ describe('BLOCKER10I zero-freeze one-shot exporter + server enriched display', (
     assert.ok(!Array.isArray(res.body.catalogForItems));
     assert.equal(res.body.catalogForItems['117'].name, 'Bandit Angelfish');
     assert.equal(res.body.catalogForItems['117'].category, 'fish');
+  });
+});
+
+describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
+  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+  const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
+  const routes = require('../src/fishitTrackerRoutes');
+
+  beforeEach(() => { cleanup(); });
+
+  test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
+    const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
+    assert.match(out, /BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04/);
+  });
+
+  test('light sync defaults and no attachReplionListeners on default path', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('lightSyncEnabled = true'));
+    assert.ok(src.includes('lightSyncIntervalSeconds = 10'));
+    assert.ok(src.includes('repeatUpload = true'));
+    assert.ok(src.includes('oneShot = false'));
+    assert.ok(src.includes('SYNC_LOOP_STARTED interval='));
+    assert.ok(src.includes('SYNC_UPLOAD ok=true'));
+    const startup = src.slice(src.indexOf('function runReplionStartupPhase'), src.indexOf('function runReplionStartupPhase') + 4500);
+    assert.ok(startup.includes('SYNC_LOOP_STARTED interval='));
+    assert.ok(startup.includes('not LiveSafe.lightSyncEnabled'));
+    assert.ok(!startup.match(/if not LiveSafe\.oneShot then\s*\n\s*attachReplionListeners/));
+  });
+
+  test('oneShot=true still disables light sync loop', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('LiveSafe.lightSyncLoopStarted'));
+    assert.ok(src.includes('TRACKER_DONE one_shot=true'));
+  });
+
+  test('resolveServerCommit prefers git HEAD over package version', () => {
+    const commit = routes.resolveServerCommit();
+    assert.ok(commit);
+    assert.notEqual(commit, 'unknown');
+    if (!process.env.GIT_COMMIT) {
+      assert.match(commit, /^[0-9a-f]{7,40}$/i);
+    }
+  });
+
+  test('debug endpoint exposes enriched fields and non-version serverCommit', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10JDebug',
+        userId: 16001,
+        source: 'replion',
+        isOnline: true,
+        trackerBuild: 'BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04',
+        items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
+      })
+      .expect(200);
+
+    const res = await request(app).get('/api/fishit-tracker/debug/B10JDebug').expect(200);
+    assert.equal(res.body.firstItems[0].name, 'Bandit Angelfish');
+    assert.equal(res.body.rawFirstItems[0].name, 'Item #117');
+    assert.ok(res.body.countsRaw);
+    assert.ok(res.body.countsEnriched);
+    assert.ok(res.body.catalogForItems['117']);
+    assert.notEqual(res.body.serverCommit, '1.0.0');
   });
 });

@@ -26,11 +26,28 @@
 
 const express   = require('express');
 const rateLimit = require('express-rate-limit');
+const path      = require('path');
+const { execFileSync } = require('child_process');
 
 const catalogStore = require('./fishitCatalogStore');
 const packageJson = require('../package.json');
-// Commit hash injected by CI/deploy or fallback to package version.
-const SERVER_COMMIT = process.env.GIT_COMMIT || packageJson.version || 'unknown';
+
+function resolveServerCommit() {
+  if (process.env.GIT_COMMIT) return String(process.env.GIT_COMMIT).trim();
+  try {
+    const root = path.join(__dirname, '..', '..');
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch (_) {
+    return packageJson.version || 'unknown';
+  }
+}
+
+// Commit hash injected by CI/deploy, git HEAD, or fallback to package version.
+const SERVER_COMMIT = resolveServerCommit();
 
 // Optional Fish It DB image resolver (real fish artwork). Loaded lazily and
 // defensively so the tracker keeps working even if the DB module is absent.
@@ -721,3 +738,5 @@ module.exports.mergeItemsNoDowngradeFromCatalog = mergeItemsNoDowngradeFromCatal
 module.exports.enrichItemsFromCatalog = enrichItemsFromCatalog;
 module.exports.inventoryCountsFromGroups = inventoryCountsFromGroups;
 module.exports.catalogMapForItems = catalogMapForItems;
+module.exports.debugItemSlice = debugItemSlice;
+module.exports.resolveServerCommit = resolveServerCommit;

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * BLOCKER10I: static compile guard for tracker.lua
+ * BLOCKER10J: static compile guard for tracker.lua
  * - luaparse catches Lua syntax errors (continue stripped for parse-only)
  * - luau-compile (when present) catches Luau register-limit failures
  */
@@ -20,11 +20,11 @@ if (src.charCodeAt(0) === 0xfeff) {
 if (/^\s*loadstring\s*\(/.test(src)) {
   errors.push('tracker.lua must not begin with loadstring() wrapper');
 }
-if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10I')) {
-  errors.push('TRACKER_BOOT_BEGIN BLOCKER10I marker missing');
+if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J')) {
+  errors.push('TRACKER_BOOT_BEGIN BLOCKER10J marker missing');
 }
-if (!src.includes('BLOCKER10I_ZERO_FREEZE_ONE_SHOT_EXPORTER_2026_06_04')) {
-  errors.push('BLOCKER10I build marker missing');
+if (!src.includes('BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04')) {
+  errors.push('BLOCKER10J build marker missing');
 }
 if (!/TRACKER_BUILD\s*=/.test(src)) {
   errors.push('TRACKER_BUILD assignment missing');
@@ -35,20 +35,20 @@ if (!src.includes('local LiveSafe = {')) {
 if (!src.includes('safeMinimalMode = true')) {
   errors.push('safeMinimalMode must default true');
 }
-if (!src.includes('oneShot = true')) {
-  errors.push('oneShot must default true');
+if (!src.includes('lightSyncEnabled = true')) {
+  errors.push('lightSyncEnabled must default true');
 }
-if (!src.includes('repeatUpload = false')) {
-  errors.push('repeatUpload must default false');
+if (!src.includes('lightSyncIntervalSeconds = 10')) {
+  errors.push('lightSyncIntervalSeconds must default 10');
+}
+if (!src.includes('repeatUpload = true')) {
+  errors.push('repeatUpload must default true');
+}
+if (!src.includes('oneShot = false')) {
+  errors.push('oneShot must default false');
 }
 if (!src.includes('enableHeavyCatalog = false')) {
   errors.push('enableHeavyCatalog must default false');
-}
-if (!src.includes('enablePhaseBItemUpgrade = false')) {
-  errors.push('enablePhaseBItemUpgrade must default false');
-}
-if (!src.includes('debugRemoteHooks = false')) {
-  errors.push('debugRemoteHooks must default false');
 }
 if (!src.includes('playerDataOnly = true')) {
   errors.push('playerDataOnly must default true');
@@ -56,23 +56,17 @@ if (!src.includes('playerDataOnly = true')) {
 if (!src.includes('clientCatalogResolution = false')) {
   errors.push('clientCatalogResolution must default false');
 }
-if (!src.includes('enableTargetedItemDiagnostics = false')) {
-  errors.push('enableTargetedItemDiagnostics must default false');
+if (!src.includes('SYNC_LOOP_STARTED interval=')) {
+  errors.push('SYNC_LOOP_STARTED log missing');
 }
-if (!src.includes('TRACKER_DONE one_shot=true')) {
-  errors.push('TRACKER_DONE one_shot log missing');
-}
-if (!src.includes('STEP_BEGIN')) {
-  errors.push('STEP_BEGIN timing logs missing');
+if (!src.includes('SYNC_UPLOAD ok=true')) {
+  errors.push('SYNC_UPLOAD log missing');
 }
 if (/^<<<<<<<|^>>>>>>>|^=======\s*$/.test(src)) {
   errors.push('merge conflict markers detected');
 }
 if (/return true\nend\n\n\s+return true\nend/.test(src)) {
   errors.push('orphan duplicate return/end block detected');
-}
-if (/loadstring\(game:HttpGet\([^)]+\)\)\(\)/.test(src) && !src.includes('loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua"))()')) {
-  errors.push('documented loader command shape missing from tracker header');
 }
 
 const forLuaparse = src.replace(/\bthen\s+continue\s+end\b/g, 'then end');

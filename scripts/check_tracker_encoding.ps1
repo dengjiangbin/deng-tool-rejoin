@@ -15,15 +15,17 @@ if ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
 
 if ($content -notmatch '^--') { $errors += "FAIL  Does not start with '--'" } else { Write-Host "PASS  Starts with '--' (Lua comment)" }
 
-# ── BLOCKER10I: zero-freeze one-shot exporter + compile gate ──
+# ── BLOCKER10J: safe light 10s sync + compile gate ──
 if ($content -match '^\s*loadstring\s*\(') { $errors += "FAIL  tracker.lua must not begin with loadstring() wrapper" } else { Write-Host "PASS  No unsafe top-level loadstring wrapper" }
-if ($content -match 'TRACKER_BOOT_BEGIN BLOCKER10I') { Write-Host "PASS  TRACKER_BOOT_BEGIN BLOCKER10I marker found" } else { $errors += "FAIL  TRACKER_BOOT_BEGIN BLOCKER10I missing" }
-if ($content -match 'BLOCKER10I_ZERO_FREEZE_ONE_SHOT_EXPORTER_2026_06_04') { Write-Host "PASS  BLOCKER10I build id found" } else { $errors += "FAIL  BLOCKER10I build id missing" }
-if ($content -match 'oneShot = true') { Write-Host "PASS  oneShot default true" } else { $errors += "FAIL  oneShot must be true" }
-if ($content -match 'repeatUpload = false') { Write-Host "PASS  repeatUpload default false" } else { $errors += "FAIL  repeatUpload must be false" }
-if ($content -match 'ONE_SHOT_EXPORT enabled=') { Write-Host "PASS  ONE_SHOT_EXPORT log found" } else { $errors += "FAIL  ONE_SHOT_EXPORT log missing" }
-if ($content -match 'TRACKER_DONE one_shot=true') { Write-Host "PASS  TRACKER_DONE one_shot log found" } else { $errors += "FAIL  TRACKER_DONE one_shot log missing" }
-if ($content -match 'STEP_BEGIN') { Write-Host "PASS  STEP_BEGIN timing logs found" } else { $errors += "FAIL  STEP_BEGIN timing logs missing" }
+if ($content -match 'TRACKER_BOOT_BEGIN BLOCKER10J') { Write-Host "PASS  TRACKER_BOOT_BEGIN BLOCKER10J marker found" } else { $errors += "FAIL  TRACKER_BOOT_BEGIN BLOCKER10J missing" }
+if ($content -match 'BLOCKER10J_SAFE_LIGHT_SYNC_10S_2026_06_04') { Write-Host "PASS  BLOCKER10J build id found" } else { $errors += "FAIL  BLOCKER10J build id missing" }
+if ($content -match 'lightSyncEnabled = true') { Write-Host "PASS  lightSyncEnabled default true" } else { $errors += "FAIL  lightSyncEnabled must be true" }
+if ($content -match 'lightSyncIntervalSeconds = 10') { Write-Host "PASS  lightSyncIntervalSeconds default 10" } else { $errors += "FAIL  lightSyncIntervalSeconds must be 10" }
+if ($content -match 'repeatUpload = true') { Write-Host "PASS  repeatUpload default true" } else { $errors += "FAIL  repeatUpload must be true" }
+if ($content -match 'oneShot = false') { Write-Host "PASS  oneShot default false" } else { $errors += "FAIL  oneShot must be false" }
+if ($content -match 'LIGHT_SYNC enabled=') { Write-Host "PASS  LIGHT_SYNC log found" } else { $errors += "FAIL  LIGHT_SYNC log missing" }
+if ($content -match 'SYNC_LOOP_STARTED interval=') { Write-Host "PASS  SYNC_LOOP_STARTED log found" } else { $errors += "FAIL  SYNC_LOOP_STARTED log missing" }
+if ($content -match 'SYNC_UPLOAD ok=true') { Write-Host "PASS  SYNC_UPLOAD log found" } else { $errors += "FAIL  SYNC_UPLOAD log missing" }
 if ($content -match 'safeMinimalMode = true') { Write-Host "PASS  SAFE_MINIMAL_MODE default true" } else { $errors += "FAIL  safeMinimalMode missing" }
 if ($content -match 'playerDataOnly = true') { Write-Host "PASS  playerDataOnly default true" } else { $errors += "FAIL  playerDataOnly must be true" }
 if ($content -match 'clientCatalogResolution = false') { Write-Host "PASS  clientCatalogResolution default false" } else { $errors += "FAIL  clientCatalogResolution must be false" }
@@ -134,7 +136,7 @@ if ($content -match 'MISSING_HELPER name=') { Write-Host "PASS  MISSING_HELPER d
 if ($content -match 'NUMERIC_ID_FALLBACK_ACCEPTED') { Write-Host "PASS  NUMERIC_ID_FALLBACK_ACCEPTED log found" } else { $errors += "FAIL  NUMERIC_ID_FALLBACK_ACCEPTED missing" }
 if ($content -match 'addOwnedNumericFallback') { Write-Host "PASS  addOwnedNumericFallback found" } else { $errors += "FAIL  addOwnedNumericFallback missing" }
 if ($content -match 'local mergeOwnedItem') { Write-Host "PASS  mergeOwnedItem forward declaration found" } else { $errors += "FAIL  mergeOwnedItem forward declaration missing" }
-if ($content -match 'TRACKER_BUILD = "BLOCKER10I') { Write-Host "PASS  TRACKER_BUILD BLOCKER10I marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10I marker missing" }
+if ($content -match 'TRACKER_BUILD = "BLOCKER10J') { Write-Host "PASS  TRACKER_BUILD BLOCKER10J marker found" } else { $errors += "FAIL  TRACKER_BUILD BLOCKER10J marker missing" }
 if ($content -match 'LiveSafe\.nonBlocking|nonBlocking = true') { Write-Host "PASS  nonBlocking config found" } else { $errors += "FAIL  nonBlocking config missing" }
 if ($content -match 'CONSUME_ENTRY_ACTIVE') { Write-Host "PASS  CONSUME_ENTRY_ACTIVE diagnostic found" } else { $errors += "FAIL  CONSUME_ENTRY_ACTIVE missing" }
 if ($content -match 'scanBudgetYield') { Write-Host "PASS  scanBudgetYield scheduler found" } else { $errors += "FAIL  scanBudgetYield missing" }
@@ -188,7 +190,7 @@ if ($content -match 'buildNumericIdIndexFromRSFolders') { Write-Host "PASS  buil
 $mut = ([regex]::Matches($codeOnly, ':\s*(Set|Update|Increase|Decrease|Fire|Save|Equip|Buy|Sell|Remove|Insert)\s*\(')).Count
 if ($mut -gt 0) { $errors += "FAIL  $mut Replion mutation call(s) found in code (must be read-only)" } else { Write-Host "PASS  No Replion mutation calls in code (read-only)" }
 
-# BLOCKER10I: Luau compile validation (register limit + syntax)
+# BLOCKER10J: Luau compile validation (register limit + syntax)
 $luauCompile = Join-Path (Join-Path $PSScriptRoot "..") "_luau\luau-compile.exe"
 if (-not (Test-Path $luauCompile)) {
     $setup = Join-Path $PSScriptRoot "setup_luau_compile.ps1"
