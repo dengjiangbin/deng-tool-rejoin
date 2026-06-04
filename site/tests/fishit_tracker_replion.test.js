@@ -1173,7 +1173,9 @@ describe('Fish It tracker — BLOCKER 5 catalog_summary + debug route', () => {
 
     assert.equal(res.body.items.length, 1);
     assert.equal(res.body.items[0].name, 'Tuna');
-    assert.equal(res.body.items[0].imageUrl, 'https://rbxcdn.com/tuna.png');
+    assert.equal(res.body.items[0].imageSource, 'missing_image_asset');
+    assert.equal(res.body.items[0].imageUrl, null);
+    assert.ok(res.body.allItems[0].imageUrl === 'https://rbxcdn.com/tuna.png', 'tracker image kept on internal allItems');
   });
 
   // B5-6: debug route returns JSON for known user.
@@ -3243,5 +3245,115 @@ describe('BLOCKER10K1 public fish-only UI regression', () => {
     assert.equal(counts.all, 216);
     assert.equal(counts.items, 5);
     assert.equal(counts.rods, 0);
+  });
+});
+
+describe('BLOCKER10L fish image asset catalog', () => {
+  const fishImageAssets = require('../src/fishitFishImageAssets');
+  const {
+    buildPublicFishFields,
+    isPublicFishItem,
+  } = require('../src/fishitTrackerRoutes');
+
+  const mixedPayload = [
+    { name: 'Topwater Bait', amount: 1, category: 'bait', itemId: '10' },
+    { name: 'Carbon Rod', amount: 138, category: 'rod', itemId: '388' },
+    { name: 'Common Crate', amount: 5, category: 'items', itemId: '990' },
+    { name: 'Flame Angelfish', amount: 136, category: 'fish', itemId: '68' },
+    { name: 'Yello Damselfish', amount: 14, category: 'fish', itemId: '70' },
+    { name: 'Item #196', amount: 34, category: 'items', itemId: '196' },
+  ];
+
+  test('known fish gets image from asset catalog by name', () => {
+    const pub = buildPublicFishFields([
+      { name: 'Flame Angelfish', amount: 1, category: 'fish', itemId: '68' },
+    ]);
+    assert.equal(pub.publicItems.length, 1);
+    assert.equal(pub.publicItems[0].imageAssetId, '128385926161840');
+    assert.ok(pub.publicItems[0].imageUrl.includes('/128385926161840/'));
+    assert.equal(pub.publicItems[0].imageSource, 'fish_image_asset_catalog');
+  });
+
+  test('lookupByItemId is forbidden and returns null', () => {
+    const warn = console.warn;
+    let warned = '';
+    console.warn = (msg) => { warned = String(msg); };
+    try {
+      assert.equal(fishImageAssets.lookupByItemId('196'), null);
+      assert.ok(warned.includes('asset_catalog_index_mapping_forbidden'));
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  test('Item #196 does not use asset list index or appear publicly', () => {
+    const pub = buildPublicFishFields(mixedPayload);
+    assert.ok(!pub.publicItems.some((i) => /Item #196/i.test(i.name)));
+    const img = fishImageAssets.lookupByItemId('196');
+    assert.equal(img, null);
+    assert.equal(fishImageAssets.lookupByFishName('Item #196'), null);
+  });
+
+  test('confirmed fish without image asset stays visible with missing_image_asset', () => {
+    const pub = buildPublicFishFields([
+      { name: 'Mystery Testfish', amount: 2, category: 'fish', itemId: '99999' },
+    ]);
+    assert.equal(pub.publicItems.length, 1);
+    assert.equal(pub.publicItems[0].name, 'Mystery Testfish');
+    assert.equal(pub.publicItems[0].imageUrl, null);
+    assert.equal(pub.publicItems[0].imageSource, 'missing_image_asset');
+  });
+
+  test('non-fish hidden from publicItems', () => {
+    const pub = buildPublicFishFields(mixedPayload);
+    const names = pub.publicItems.map((i) => i.name);
+    assert.ok(names.includes('Flame Angelfish'));
+    assert.ok(!names.includes('Topwater Bait'));
+    assert.ok(!names.includes('Carbon Rod'));
+    assert.ok(!names.includes('Common Crate'));
+  });
+
+  test('get-backpack exposes image fields and debug imageResolutionProof', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10LImage',
+        userId: 19001,
+        isOnline: true,
+        items: mixedPayload,
+      })
+      .expect(200);
+
+    const get = await request(app).get('/api/fishit-tracker/get-backpack/B10LImage').expect(200);
+    const flame = get.body.publicItems.find((i) => i.name === 'Flame Angelfish');
+    assert.ok(flame);
+    assert.equal(flame.imageAssetId, '128385926161840');
+    assert.ok(flame.imageUrl.includes('128385926161840'));
+
+    const dbg = await request(app).get('/api/fishit-tracker/debug/B10LImage').expect(200);
+    assert.ok(Array.isArray(dbg.body.imageResolutionProof));
+    const proof68 = dbg.body.imageResolutionProof.find((p) => p.itemId === '68');
+    assert.ok(proof68);
+    assert.equal(proof68.finalName, 'Flame Angelfish');
+    assert.equal(proof68.imageAssetMatched, true);
+    assert.equal(proof68.imageAssetId, '128385926161840');
+    assert.ok(dbg.body.rawInspector);
+    assert.ok(dbg.body.unresolvedRawProof);
+  });
+
+  test('tracker page template includes BLOCKER10L_IMAGE marker', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(tpl.includes('BLOCKER10L_IMAGE'));
+    assert.ok(tpl.includes('imageAssetId'));
+    assert.ok(tpl.includes('loading="lazy"'));
+    assert.ok(tpl.includes('robloxThumbFromAssetId'));
+  });
+
+  test('isPublicFishItem unchanged for fish-only gate', () => {
+    assert.equal(isPublicFishItem({ category: 'fish', name: 'Flame Angelfish' }), true);
+    assert.equal(isPublicFishItem({ category: 'bait', name: 'Topwater Bait' }), false);
   });
 });

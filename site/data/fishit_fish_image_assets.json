@@ -1,0 +1,11 @@
+{
+  "source": "uploaded_fish_image_asset_list",
+  "note": "Maps confirmed fish display names to Roblox asset IDs. Not an inventory itemId catalog — never index by itemId or array position.",
+  "fish": [
+    { "name": "Flame Angelfish", "assetId": "128385926161840" },
+    { "name": "Yello Damselfish", "assetId": "125066072333378" },
+    { "name": "Darwin Clownfish", "assetId": "109996187340520" },
+    { "name": "Bandit Angelfish", "assetId": "86776001616210" },
+    { "name": "Ballina Angelfish", "assetId": "99236757363784" }
+  ]
+}

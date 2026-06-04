@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10K1_FISH_ONLY_UI' %>">
+<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10K1_FISH_ONLY_UI' %>" data-image-build="<%= typeof imageBuild !== 'undefined' ? imageBuild : 'BLOCKER10L_IMAGE' %>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -185,6 +185,7 @@
   const LS_KEY        = 'fishit_tracked_users';
   const POLL_MS       = 2500;
   const RENDER_BUILD  = 'BLOCKER10K1_FISH_ONLY_UI';
+  const IMAGE_BUILD   = 'BLOCKER10L_IMAGE';
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', secret:'rarity-secret', forgotten:'rarity-forgotten' };
 
   const trackers       = new Map();
@@ -257,15 +258,28 @@
     Default: '/assets/img/fishit/fallback-fish.svg'
   };
 
+  function robloxThumbFromAssetId(assetId) {
+    const id = String(assetId || '').trim();
+    if (!/^\d{10,22}$/.test(id)) return null;
+    return `https://www.roblox.com/asset-thumbnail/image?assetId=${id}&width=150&height=150&format=png`;
+  }
+  function assetIdFromImageUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+    const store = url.match(/\/store\/asset\/(\d{10,22})\//i);
+    if (store) return store[1];
+    const m = url.match(/rbxassetid:\/\/(\d+)/i);
+    if (m) return m[1];
+    const num = url.match(/^(\d{10,22})$/);
+    return num ? num[1] : null;
+  }
   function itemImageSrc(item) {
+    const thumb = robloxThumbFromAssetId(item.imageAssetId)
+      || robloxThumbFromAssetId(assetIdFromImageUrl(item.imageUrl));
+    if (thumb) return thumb;
     if (item.imageUrl && typeof item.imageUrl === 'string' && item.imageUrl !== '') {
-      // Already-resolved HTTPS image (catalog / Fish It DB) — use directly.
-      if (item.imageUrl.startsWith('http')) return item.imageUrl;
-      // Roblox asset IDs arrive as "rbxassetid://..." — convert to thumbnail URL
-      const m = item.imageUrl.match(/rbxassetid:\/\/(\d+)/i);
-      if (m) return `https://www.roblox.com/asset-thumbnail/image?assetId=${m[1]}&width=150&height=150&format=png`;
-      const num = item.imageUrl.match(/^(\d+)$/);
-      if (num) return `https://www.roblox.com/asset-thumbnail/image?assetId=${num[1]}&width=150&height=150&format=png`;
+      if (item.imageUrl.startsWith('http') && !/create\.roblox\.com\/store\/asset\//i.test(item.imageUrl)) {
+        return item.imageUrl;
+      }
     }
     const name = String(item.name || '');
     const category = String(item.category || item.tab || '').toLowerCase();
@@ -292,7 +306,7 @@
                         : (item.tab ? `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.tab)}</span>` : '');
       const imgSrc  = itemImageSrc(item);
       return `<div class="item-card${isShiny?' shiny':''}">
-  <div class="ic-head"><img src="${imgSrc}" style="width:28px;height:28px;margin-right:8px;vertical-align:middle;border-radius:6px;object-fit:cover;background:#2a3040;" onerror="this.onerror=null;this.src='${ITEM_IMAGES.Default}';"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${qty}${cat}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div>
+  <div class="ic-head"><img src="${imgSrc}" alt="" loading="lazy" decoding="async" style="width:28px;height:28px;margin-right:8px;vertical-align:middle;border-radius:6px;object-fit:cover;background:#2a3040;" onerror="this.onerror=null;this.src='${ITEM_IMAGES.Default}';"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${qty}${cat}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div>
   <div class="ic-meta">${hasW?`<span class="badge badge-weight">&#x2696;&#xFE0F; ${escHtml(Number(item.weight).toFixed(2))} kg</span>`:''}${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
 </div>`;
     }).join('')}</div>`;

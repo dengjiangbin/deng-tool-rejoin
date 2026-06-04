@@ -32,6 +32,7 @@ const path      = require('path');
 const { execFileSync } = require('child_process');
 
 const catalogStore = require('./fishitCatalogStore');
+const fishImageAssets = require('./fishitFishImageAssets');
 const packageJson = require('../package.json');
 
 function resolveServerCommit() {
@@ -72,6 +73,7 @@ const NO_STORE_HEADERS = {
   Expires: '0',
 };
 const PUBLIC_RENDER_BUILD = 'BLOCKER10K1_FISH_ONLY_UI';
+const PUBLIC_IMAGE_BUILD = 'BLOCKER10L_IMAGE';
 
 router.use((req, res, next) => {
   const p = req.path || '';
@@ -413,7 +415,9 @@ function isPublicFishItem(item) {
 
 /** Fish-only view for public website/API (storage keeps full inventory). */
 function buildPublicFishFields(enrichedFlat) {
-  const fishItems = (enrichedFlat || []).filter(isPublicFishItem);
+  const fishItems = fishImageAssets.attachFishImagesToItems(
+    (enrichedFlat || []).filter(isPublicFishItem),
+  );
   const hidden = (enrichedFlat || []).filter((it) => !isPublicFishItem(it));
   const fishCounts = {
     fishTypes: fishItems.length,
@@ -575,6 +579,7 @@ function renderTrackerPage(_req, res) {
     layout: false,
     title: '🎣 Fish It Live Inventory Tracker',
     renderBuild: PUBLIC_RENDER_BUILD,
+    imageBuild: PUBLIC_IMAGE_BUILD,
   });
 }
 
@@ -913,10 +918,12 @@ function handleGetBackpack(req, res) {
   const countsRaw = inventoryCountsFromGroups(rawInventory);
   const countsEnriched = inventoryCountsFromGroups(enrichedInventory);
   const publicFish = buildPublicFishFields(enrichedFlat);
+  const imageResolutionProof = fishImageAssets.buildImageResolutionProof(publicFish.fishItems);
 
   const enriched = {
     ...data,
     renderBuild:     PUBLIC_RENDER_BUILD,
+    imageBuild:      PUBLIC_IMAGE_BUILD,
     items:           publicFish.fishItems,
     inventory:       publicFish.fishInventory,
     counts:          buildPublicLegacyCounts(publicFish.fishCounts),
@@ -925,6 +932,7 @@ function handleGetBackpack(req, res) {
     fishInventory:   publicFish.fishInventory,
     fishCounts:      publicFish.fishCounts,
     publicCounts:    publicFish.publicCounts,
+    imageResolutionProof,
     allItems:        enrichedFlat,
     fullItems:       enrichedFlat,
     enrichedItems:   enrichedFlat,
@@ -1000,6 +1008,8 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
   const selectedPath = data.parseStats?.selectedPath || null;
   const rawInspector = buildRawInspector(rawItemsArr, enrichedAll, selectedPath);
   const unresolvedRawProof = buildUnresolvedRawProof(rawItemsArr, enrichedAll, selectedPath);
+  const publicFishDbg = buildPublicFishFields(enrichedAll);
+  const imageResolutionProof = fishImageAssets.buildImageResolutionProof(publicFishDbg.fishItems);
 
   const diags = Array.isArray(data.unresolvedDiagnostics) ? data.unresolvedDiagnostics : [];
   const unresolvedIds = diags.filter((d) => d && !d.found).map((d) => d.id);
@@ -1034,6 +1044,8 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
     catalogForItems,
     rawInspector,
     unresolvedRawProof,
+    imageResolutionProof,
+    fishImageAssetCatalogCount: fishImageAssets.getCatalogEntryCount(),
     unresolvedDiagnostics: diags.length ? diags : null,
     unresolvedIds,
     stillUnresolvedIds: unresolvedIds,
@@ -1057,3 +1069,4 @@ module.exports.buildRawInspector = buildRawInspector;
 module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
+module.exports.PUBLIC_IMAGE_BUILD = PUBLIC_IMAGE_BUILD;
