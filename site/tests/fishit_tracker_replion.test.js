@@ -1494,7 +1494,8 @@ describe('Fish It tracker — BLOCKER 7 numeric Id fallback inventory', () => {
 
     assert.equal(res.body.phase, 'live');
     assert.equal(res.body.counts.items, 1);
-    assert.equal(res.body.firstItems[0].name, 'Item #10');
+    assert.equal(res.body.rawItems[0].name, 'Item #10');
+    assert.equal(res.body.firstItems[0].name, 'Topwater Bait');
     assert.equal(res.body.firstItems[0].itemId, '10');
     assert.equal(res.body.parseStats.accepted, 1);
     assert.equal(res.body.parseStats.rejected, 0);
@@ -1527,8 +1528,9 @@ describe('Fish It tracker — BLOCKER 7 numeric Id fallback inventory', () => {
       .expect(200);
 
     assert.equal(res.body.items.length, 3);
-    assert.ok(res.body.items.some((i) => i.name === 'Item #10'));
-    assert.ok(res.body.items.some((i) => i.name === 'Item #70'));
+    assert.ok(res.body.items.some((i) => i.itemId === '10' && i.name === 'Topwater Bait'));
+    assert.ok(res.body.items.some((i) => i.itemId === '70' && i.name === 'Yello Damselfish'));
+    assert.ok(res.body.items.some((i) => i.itemId === '119' && i.name === 'Ballina Angelfish'));
     assert.equal(res.body.parseStats.raw, 2517);
     assert.equal(res.body.parseStats.rejected, 0);
     assert.equal(res.body.parseStats.accepted, 3);
@@ -1757,10 +1759,10 @@ describe('Fish It tracker — BLOCKER 9 catalog resolve + nil-safe fields', () =
         source: 'replion',
         isOnline: true,
         items: [{
-          name: 'Item #990',
+          name: 'Item #65',
           count: 5,
           category: 'items',
-          itemId: '990',
+          itemId: '65',
           resolved: false,
           catalogReason: 'catalog_missing_numeric_id',
         }],
@@ -1775,9 +1777,9 @@ describe('Fish It tracker — BLOCKER 9 catalog resolve + nil-safe fields', () =
       .get('/api/tracker/get-backpack/B9Angler2')
       .expect(200);
 
-    const item = res.body.items.find((i) => i.itemId === '990');
+    const item = res.body.items.find((i) => i.itemId === '65');
     assert.ok(item);
-    assert.equal(item.name, 'Item #990');
+    assert.equal(item.name, 'Item #65');
     assert.equal(item.resolved, false);
     assert.equal(item.catalogReason, 'catalog_missing_numeric_id');
   });
@@ -2030,7 +2032,7 @@ describe('Fish It tracker — BLOCKER 10B fish name regression guard', () => {
     assert.equal(fish117.category, 'fish');
     assert.equal(fish117.resolved, true);
     assert.equal(fish119.name, 'Ballina Angelfish');
-    assert.equal(item10.name, 'Item #10');
+    assert.equal(item10.name, 'Topwater Bait');
     assert.equal(res.body.phase, 'live');
     assert.equal(res.body.parseStats.acceptedInstances, 6);
   });
@@ -2172,7 +2174,7 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
     assert.equal(res.body.items.find((i) => i.itemId === '388').name, 'Carbon Rod');
   });
 
-  test('trackerBuild BLOCKER10G stored on debug endpoint', async () => {
+  test('trackerBuild BLOCKER10H stored on debug endpoint', async () => {
     const app = makeApp();
     await request(app)
       .post('/api/tracker/update-backpack')
@@ -2183,7 +2185,7 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
         source: 'replion',
         isOnline: true,
         phase: 'live',
-        trackerBuild: 'BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03',
+        trackerBuild: 'BLOCKER10H_ULTRA_LIGHT_PLAYER_DATA_ONLY_2026_06_04',
       })
       .expect(200);
 
@@ -2191,7 +2193,7 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
       .get('/api/fishit-tracker/debug/B10CAngler4')
       .expect(200);
 
-    assert.equal(res.body.trackerBuild, 'BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03');
+    assert.equal(res.body.trackerBuild, 'BLOCKER10H_ULTRA_LIGHT_PLAYER_DATA_ONLY_2026_06_04');
   });
 });
 
@@ -2199,20 +2201,22 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
   const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
 
+  beforeEach(() => { cleanup(); });
+
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03/);
+    assert.match(out, /BLOCKER10H_ULTRA_LIGHT_PLAYER_DATA_ONLY_2026_06_04/);
   });
 
-  test('targeted diagnostics enabled; heavy flags remain disabled', () => {
+  test('targeted diagnostics disabled by default; heavy flags remain disabled', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('enableTargetedItemDiagnostics = true'));
+    assert.ok(src.includes('enableTargetedItemDiagnostics = false'));
     assert.ok(src.includes('enableHeavyCatalog = false'));
     assert.ok(src.includes('enablePhaseBItemUpgrade = false'));
     assert.ok(src.includes('debugRemoteHooks = false'));
     assert.ok(src.includes('enableModuleRequire = false'));
-    assert.ok(src.includes('TARGETED_ITEM_DIAGNOSTICS enabled='));
+    assert.ok(src.includes('TARGETED_ITEM_DIAGNOSTICS disabled_by_default='));
   });
 
   test('targeted diagnostics only processes target item ids', () => {
@@ -2268,10 +2272,10 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
     assert.ok(src.includes('TARGET_ITEM_DIAG aborted reason=catalog_aborted'));
   });
 
-  test('boot marker is BLOCKER10G targeted diagnostics build', () => {
+  test('boot marker is BLOCKER10H ultra-light build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10G'));
-    assert.ok(src.includes('BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10H'));
+    assert.ok(src.includes('BLOCKER10H_ULTRA_LIGHT_PLAYER_DATA_ONLY_2026_06_04'));
   });
 
   test('Item #990 upgrades only with exact catalog metadata', async () => {
@@ -2313,24 +2317,11 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
     assert.equal(res.body.items.find((i) => i.itemId === '388').name, 'Carbon Rod');
   });
 
-  test('fish names cannot downgrade via catalog cache', async () => {
-    catalogStore._reset();
-    catalogStore.upsertByItemId({ itemId: '117', name: 'Item #117', category: 'items', source: 'bad' });
-    assert.equal(catalogStore.lookupById('117'), null);
-    catalogStore.upsertByItemId({ itemId: '117', name: 'Bandit Angelfish', category: 'fish', source: 'test' });
-    const app = makeApp();
-    await request(app)
-      .post('/api/tracker/update-backpack')
-      .send({
-        username: 'B10GFish117',
-        userId: 13003,
-        source: 'replion',
-        isOnline: true,
-        items: [{ name: 'Bandit Angelfish', count: 3, category: 'fish', itemId: '117', resolved: true }],
-      })
-      .expect(200);
-    const res = await request(app).get('/api/tracker/get-backpack/B10GFish117').expect(200);
-    assert.equal(res.body.items.find((i) => i.itemId === '117').name, 'Bandit Angelfish');
+  test('fish names cannot downgrade via catalog cache', () => {
+    cleanup();
+    const reject = catalogStore.upsertByItemId({ itemId: '117', name: 'Item #117', category: 'items', source: 'bad' });
+    assert.equal(reject.updated, false);
+    assert.equal(catalogStore.lookupById('117').name, 'Bandit Angelfish');
   });
 
   test('backend catalog cache enriches placeholder from stored real metadata', async () => {
@@ -2395,14 +2386,14 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   });
 });
 
-describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER10G)', () => {
+describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER10H)', () => {
   const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
   const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
 
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03/);
+    assert.match(out, /BLOCKER10H_ULTRA_LIGHT_PLAYER_DATA_ONLY_2026_06_04/);
   });
 
   test('safe minimal flags default off for heavy work', () => {
@@ -2421,10 +2412,10 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
     assert.ok(src.match(/if not LiveSafe\.enableHeavyCatalog then[\s\S]{0,80}HEAVY_CATALOG disabled=true/));
   });
 
-  test('boot marker is BLOCKER10G build', () => {
+  test('boot marker is BLOCKER10H build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10G'));
-    assert.ok(src.includes('BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10H'));
+    assert.ok(src.includes('BLOCKER10H_ULTRA_LIGHT_PLAYER_DATA_ONLY_2026_06_04'));
   });
 
   test('inventory upload and fish downgrade guards remain', () => {
@@ -2497,7 +2488,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
 
   test('TRACKER_BOOT_BEGIN appears before catalog scan code', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10G');
+    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10H');
     const catalog = src.indexOf('scanReplicatedStorageFishCatalog');
     assert.ok(boot >= 0, 'TRACKER_BOOT_BEGIN missing');
     assert.ok(catalog >= 0, 'catalog scan missing');
@@ -2514,7 +2505,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
     assert.ok(src.includes('LiveSafe.nonBlocking') || src.includes('nonBlocking = true'));
     assert.ok(src.includes('scanBudgetYield'));
     assert.ok(src.includes('buildMetadataCatalogAsync'));
-    assert.ok(src.includes('INVENTORY_PHASE_A'));
+    assert.ok(src.includes('INVENTORY_UPLOAD ok=true raw='));
     assert.ok(src.includes('INVENTORY_PHASE_B'));
     assert.ok(src.includes('isPlaceholderName'));
   });
@@ -2522,5 +2513,140 @@ describe('BLOCKER10D loadstring startup safety', () => {
   test('exact loader command shape is documented in tracker header', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
     assert.ok(src.includes('loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua"))()'));
+  });
+});
+
+describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
+  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+  const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
+
+  beforeEach(() => { cleanup(); });
+
+  test('validate_tracker_compile.js passes with BLOCKER10H marker', () => {
+    const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
+    assert.match(out, /BLOCKER10H_ULTRA_LIGHT_PLAYER_DATA_ONLY_2026_06_04/);
+  });
+
+  test('player-data-only flags default correctly', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    assert.ok(src.includes('playerDataOnly = true'));
+    assert.ok(src.includes('clientCatalogResolution = false'));
+    assert.ok(src.includes('enableTargetedItemDiagnostics = false'));
+    assert.ok(!src.match(/pcall\(buildQuickPriorityCatalog\)/));
+  });
+
+  test('startup does not scan ReplicatedStorage for catalog by default', () => {
+    const src = fs.readFileSync(trackerPath, 'utf8');
+    const startup = src.indexOf('function runReplionStartupPhase');
+    const block = src.slice(startup, startup + 2500);
+    assert.ok(!block.includes('pcall(buildQuickPriorityCatalog)'));
+    assert.ok(block.includes('refreshFromReplion'));
+  });
+
+  test('raw Item #117 enriched to Bandit Angelfish from seeded catalog', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10HUser117',
+        userId: 14001,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Item #117', count: 3, category: 'items', itemId: '117', resolved: false }],
+        parseStats: { raw: 3318, accepted: 23, selectedPath: 'Inventory.Items' },
+      })
+      .expect(200);
+
+    const res = await request(app).get('/api/tracker/get-backpack/B10HUser117').expect(200);
+    const fish = res.body.items.find((i) => i.itemId === '117');
+    assert.equal(fish.name, 'Bandit Angelfish');
+    assert.equal(fish.category, 'fish');
+  });
+
+  test('raw category items does not overwrite catalog category fish on display', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10HUser117b',
+        userId: 14002,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
+      })
+      .expect(200);
+
+    const stored = (await request(app).get('/api/fishit-tracker/debug/B10HUser117b').expect(200)).body;
+    assert.equal(stored.rawItems[0].name, 'Item #117');
+    assert.equal(stored.rawItems[0].category, 'items');
+    assert.equal(stored.enrichedItems[0].name, 'Bandit Angelfish');
+    assert.equal(stored.enrichedItems[0].category, 'fish');
+  });
+
+  test('Topwater Bait cache survives raw Item #10', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10HUser10',
+        userId: 14003,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Item #10', count: 5, category: 'items', itemId: '10' }],
+      })
+      .expect(200);
+
+    const res = await request(app).get('/api/tracker/get-backpack/B10HUser10').expect(200);
+    assert.equal(res.body.items.find((i) => i.itemId === '10').name, 'Topwater Bait');
+  });
+
+  test('placeholder cannot overwrite seeded real catalog name', () => {
+    cleanup();
+    const r = catalogStore.upsertByItemId({ itemId: '117', name: 'Item #117', category: 'items', source: 'bad' });
+    assert.equal(r.updated, false);
+    assert.equal(catalogStore.lookupById('117').name, 'Bandit Angelfish');
+  });
+
+  test('debug endpoint shows rawItems enrichedItems and catalogForItems', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10HDebug',
+        userId: 14004,
+        source: 'replion',
+        isOnline: true,
+        trackerBuild: 'BLOCKER10H_ULTRA_LIGHT_PLAYER_DATA_ONLY_2026_06_04',
+        items: [
+          { name: 'Item #117', count: 2, category: 'items', itemId: '117' },
+          { name: 'Item #10', count: 1, category: 'items', itemId: '10' },
+        ],
+      })
+      .expect(200);
+
+    const res = await request(app).get('/api/fishit-tracker/debug/B10HDebug').expect(200);
+    assert.equal(res.body.rawItems[0].name, 'Item #117');
+    assert.equal(res.body.enrichedItems[0].name, 'Bandit Angelfish');
+    assert.equal(res.body.enrichedItems[0].category, 'fish');
+    assert.ok(res.body.catalogForItems[0].catalog);
+    assert.equal(res.body.catalogForItems[0].catalog.name, 'Bandit Angelfish');
+  });
+
+  test('fish names from tracker are never downgraded by catalog', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/tracker/update-backpack')
+      .send({
+        username: 'B10HFish',
+        userId: 14005,
+        source: 'replion',
+        isOnline: true,
+        items: [{ name: 'Bandit Angelfish', count: 1, category: 'fish', itemId: '117', resolved: true }],
+      })
+      .expect(200);
+
+    const res = await request(app).get('/api/tracker/get-backpack/B10HFish').expect(200);
+    assert.equal(res.body.items[0].name, 'Bandit Angelfish');
+    assert.equal(res.body.items[0].category, 'fish');
   });
 });

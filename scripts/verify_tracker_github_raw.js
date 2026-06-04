@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * BLOCKER10G: post-push guard — raw GitHub tracker.lua must be valid Lua source.
+ * BLOCKER10H: post-push guard — raw GitHub tracker.lua must be valid Lua source.
  */
 const https = require('https');
 const { execFileSync } = require('child_process');
 const path = require('path');
 
-const BUILD_MARKER = process.argv[2] || 'BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03';
+const BUILD_MARKER = process.argv[2] || 'BLOCKER10H_ULTRA_LIGHT_PLAYER_DATA_ONLY_2026_06_04';
 const url = `https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua?t=${Date.now()}`;
 
 function fetch(url) {
@@ -29,7 +29,7 @@ function fetch(url) {
   const errors = [];
   if (!src.startsWith('--')) errors.push('raw content does not start with Lua comment');
   if (src.includes('<!DOCTYPE') || src.includes('<html')) errors.push('raw content looks like HTML error page');
-  if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10G')) errors.push('TRACKER_BOOT_BEGIN BLOCKER10G missing on raw GitHub');
+  if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10H')) errors.push('TRACKER_BOOT_BEGIN BLOCKER10H missing on raw GitHub');
   if (!src.includes(BUILD_MARKER)) errors.push(`build marker ${BUILD_MARKER} missing on raw GitHub`);
   if (errors.length) {
     console.error('GITHUB_RAW_VALIDATION FAILED');

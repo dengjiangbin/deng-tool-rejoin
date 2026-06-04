@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * BLOCKER10F: static compile guard for tracker.lua
+ * BLOCKER10H: static compile guard for tracker.lua
  * - luaparse catches Lua syntax errors (continue stripped for parse-only)
  * - luau-compile (when present) catches Luau register-limit failures
  */
@@ -20,11 +20,11 @@ if (src.charCodeAt(0) === 0xfeff) {
 if (/^\s*loadstring\s*\(/.test(src)) {
   errors.push('tracker.lua must not begin with loadstring() wrapper');
 }
-if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10G')) {
-  errors.push('TRACKER_BOOT_BEGIN BLOCKER10G marker missing');
+if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10H')) {
+  errors.push('TRACKER_BOOT_BEGIN BLOCKER10H marker missing');
 }
-if (!src.includes('BLOCKER10G_TARGETED_ITEM_DIAGNOSTICS_NO_FREEZE_2026_06_03')) {
-  errors.push('BLOCKER10G build marker missing');
+if (!src.includes('BLOCKER10H_ULTRA_LIGHT_PLAYER_DATA_ONLY_2026_06_04')) {
+  errors.push('BLOCKER10H build marker missing');
 }
 if (!/TRACKER_BUILD\s*=/.test(src)) {
   errors.push('TRACKER_BUILD assignment missing');
@@ -44,8 +44,14 @@ if (!src.includes('enablePhaseBItemUpgrade = false')) {
 if (!src.includes('debugRemoteHooks = false')) {
   errors.push('debugRemoteHooks must default false');
 }
-if (!src.includes('enableTargetedItemDiagnostics = true')) {
-  errors.push('enableTargetedItemDiagnostics must default true');
+if (!src.includes('playerDataOnly = true')) {
+  errors.push('playerDataOnly must default true');
+}
+if (!src.includes('clientCatalogResolution = false')) {
+  errors.push('clientCatalogResolution must default false');
+}
+if (!src.includes('enableTargetedItemDiagnostics = false')) {
+  errors.push('enableTargetedItemDiagnostics must default false');
 }
 if (/^<<<<<<<|^>>>>>>>|^=======\s*$/.test(src)) {
   errors.push('merge conflict markers detected');

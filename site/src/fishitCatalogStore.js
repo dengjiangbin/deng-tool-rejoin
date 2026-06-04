@@ -66,6 +66,22 @@ function isPlaceholderItemName(name, itemId) {
   return false;
 }
 
+function isFishCategory(category) {
+  return String(category || '').toLowerCase() === 'fish';
+}
+
+/** Confirmed itemId mappings from prior successful tracker/site output (BLOCKER10H). */
+const KNOWN_ID_SEEDS = [
+  { itemId: '117', name: 'Bandit Angelfish', category: 'fish', source: 'seed_confirmed', confidence: 'confirmed' },
+  { itemId: '119', name: 'Ballina Angelfish', category: 'fish', source: 'seed_confirmed', confidence: 'confirmed' },
+  { itemId: '68', name: 'Flame Angelfish', category: 'fish', source: 'seed_confirmed', confidence: 'confirmed' },
+  { itemId: '71', name: 'Darwin Clownfish', category: 'fish', source: 'seed_confirmed', confidence: 'confirmed' },
+  { itemId: '70', name: 'Yello Damselfish', category: 'fish', source: 'seed_confirmed', confidence: 'confirmed' },
+  { itemId: '10', name: 'Topwater Bait', category: 'bait', source: 'seed_confirmed', confidence: 'confirmed' },
+  { itemId: '990', name: 'Common Crate', category: 'items', source: 'seed_confirmed', confidence: 'confirmed' },
+  { itemId: '388', name: 'Carbon Rod', category: 'rod', source: 'seed_confirmed', confidence: 'confirmed' },
+];
+
 function isHttpUrl(u) {
   return typeof u === 'string' && /^https?:\/\//i.test(u.trim());
 }
@@ -76,7 +92,7 @@ let _catalog = null;
 let _idIndex = null;
 
 function _emptyCatalog() {
-  return { entries: {}, updatedAt: null, counts: { fish: 0, rods: 0, items: 0 } };
+  return { entries: {}, updatedAt: null, counts: { fish: 0, rods: 0, items: 0 }, seeded: false };
 }
 
 function _rebuildIdIndex() {
@@ -101,6 +117,7 @@ function _load() {
           entries: parsed.entries,
           updatedAt: parsed.updatedAt || null,
           counts: parsed.counts || _emptyCatalog().counts,
+          seeded: parsed.seeded === true,
         };
       }
     }
@@ -109,7 +126,22 @@ function _load() {
     _catalog = _emptyCatalog();
   }
   _rebuildIdIndex();
+  if (!_catalog.seeded) {
+    let seeded = 0;
+    for (const raw of KNOWN_ID_SEEDS) {
+      const r = upsertByItemIdCore(raw);
+      if (r.updated) seeded += 1;
+    }
+    _catalog.seeded = true;
+    if (seeded > 0) _persist();
+  }
   return _catalog;
+}
+
+/** Seed confirmed itemId→name mappings once (test seam). */
+function seedKnownMappings() {
+  _load();
+  return { seeded: _catalog.seeded };
 }
 
 function _persist() {
@@ -146,13 +178,14 @@ function ingestSnapshot(snapshot) {
     for (const raw of list.slice(0, 5000)) {
       const name = typeof raw.name === 'string' ? raw.name.trim() : '';
       if (!name || isStatLabel(name)) continue;
+      const itemId = (typeof raw.itemId === 'string' || typeof raw.itemId === 'number')
+        ? String(raw.itemId).trim().slice(0, 40) : null;
+      if (isPlaceholderItemName(name, itemId)) continue;
       const key = (typeof raw.key === 'string' && raw.key) ? normalizeName(raw.key) : normalizeName(name);
       if (!key || isStatLabel(key)) continue;
 
       const tier = normalizeTier(raw.tier);
       const imageUrl = isHttpUrl(raw.imageUrl) ? raw.imageUrl.trim().slice(0, 300) : null;
-      const itemId = (typeof raw.itemId === 'string' || typeof raw.itemId === 'number')
-        ? String(raw.itemId).trim().slice(0, 40) : null;
 
       const existing = _catalog.entries[key];
       if (!existing) {
@@ -164,6 +197,8 @@ function ingestSnapshot(snapshot) {
           category,
           itemId: itemId && itemId.match(/^\d+$/) ? itemId : null,
           source: typeof raw.source === 'string' ? raw.source.slice(0, 120) : null,
+          confidence: typeof raw.confidence === 'string' ? raw.confidence.slice(0, 40) : null,
+          updatedAt: new Date().toISOString(),
         };
         added += 1;
       } else {
@@ -212,11 +247,10 @@ function lookupById(itemId) {
 }
 
 /**
- * Upsert catalog metadata by item id (BLOCKER10G).
+ * Upsert catalog metadata by item id (BLOCKER10G/10H).
  * Real name beats placeholder; fish category is never overwritten by item category.
  */
-function upsertByItemId(raw) {
-  _load();
+function upsertByItemIdCore(raw) {
   if (!raw || raw.itemId == null) return { updated: false, reason: 'missing_id' };
   const itemId = String(raw.itemId).trim();
   if (!itemId.match(/^\d+$/)) return { updated: false, reason: 'invalid_id' };
@@ -227,6 +261,8 @@ function upsertByItemId(raw) {
   const category = typeof raw.category === 'string' ? raw.category.trim().slice(0, 40) : 'items';
   const tier = normalizeTier(raw.tier);
   const source = typeof raw.source === 'string' ? raw.source.slice(0, 120) : 'catalog_cache';
+  const confidence = typeof raw.confidence === 'string' ? raw.confidence.slice(0, 40) : 'tracker';
+  const now = new Date().toISOString();
   const key = normalizeName(name);
   if (!key || isStatLabel(key)) return { updated: false, reason: 'invalid_key' };
 
@@ -239,12 +275,14 @@ function upsertByItemId(raw) {
       existing.category = category;
       if (tier && tier !== 'unknown') existing.tier = tier;
       existing.source = source;
+      existing.confidence = confidence;
       existing.itemId = itemId;
-      _catalog.updatedAt = new Date().toISOString();
+      existing.updatedAt = now;
+      _catalog.updatedAt = now;
       _persist();
       return { updated: true, reason: 'replaced_placeholder' };
     }
-    if (String(existing.category || '').toLowerCase() === 'fish' && category !== 'fish') {
+    if (isFishCategory(existing.category) && !isFishCategory(category)) {
       return { updated: false, reason: 'fish_category_protected' };
     }
     if (existing.name === name) return { updated: false, reason: 'unchanged' };
@@ -259,6 +297,8 @@ function upsertByItemId(raw) {
     category,
     itemId,
     source,
+    confidence,
+    updatedAt: now,
   };
   _idIndex[itemId] = key;
   const counts = { fish: 0, rods: 0, items: 0 };
@@ -268,9 +308,49 @@ function upsertByItemId(raw) {
     else counts.fish += 1;
   }
   _catalog.counts = counts;
-  _catalog.updatedAt = new Date().toISOString();
+  _catalog.updatedAt = now;
   _persist();
   return { updated: true, reason: 'inserted' };
+}
+
+function upsertByItemId(raw) {
+  _load();
+  return upsertByItemIdCore(raw);
+}
+
+/** Learn real names from tracker uploads; placeholders never enter catalog. */
+function learnFromTrackerItems(items) {
+  if (!Array.isArray(items) || items.length === 0) return { learned: 0 };
+  let learned = 0;
+  for (const it of items.slice(0, 300)) {
+    if (!it || it.itemId == null) continue;
+    const name = typeof it.name === 'string' ? it.name.trim() : '';
+    if (!name || isPlaceholderItemName(name, it.itemId) || isStatLabel(name)) continue;
+    const r = upsertByItemId({
+      itemId: it.itemId,
+      name,
+      category: it.category || 'items',
+      tier: it.rarity || it.tier,
+      source: 'tracker_upload',
+      confidence: 'tracker',
+    });
+    if (r.updated) learned += 1;
+  }
+  return { learned };
+}
+
+/** Catalog metadata for an itemId (debug/display). */
+function catalogMetaForItemId(itemId) {
+  const meta = lookupById(itemId);
+  if (!meta) return null;
+  return {
+    itemId: String(itemId),
+    name: meta.name,
+    category: meta.category || null,
+    source: meta.source || null,
+    confidence: meta.confidence || null,
+    updatedAt: meta.updatedAt || null,
+  };
 }
 
 /** Return the full catalog (for /api/fishit-tracker/catalog and tests). */
@@ -289,14 +369,19 @@ function _reset() { _catalog = null; _idIndex = null; }
 module.exports = {
   STORE_PATH,
   STAT_LABEL_DENYLIST,
+  KNOWN_ID_SEEDS,
   ingestSnapshot,
   lookup,
   lookupById,
   upsertByItemId,
+  seedKnownMappings,
+  learnFromTrackerItems,
+  catalogMetaForItemId,
   getCatalog,
   normalizeName,
   normalizeTier,
   isStatLabel,
   isPlaceholderItemName,
+  isFishCategory,
   _reset,
 };

@@ -135,19 +135,47 @@ function mergeItemsNoDowngrade(incoming, existing) {
     if (!it || !it.itemId) return it;
     const prev = byId.get(String(it.itemId));
     if (!prev || !prev.name) return it;
-    const prevReal = !/^Item #\d+$/.test(String(prev.name));
-    const incPlaceholder = /^Item #\d+$/.test(String(it.name || ''));
+    const prevReal = !catalogStore.isPlaceholderItemName(prev.name, it.itemId);
+    const incPlaceholder = catalogStore.isPlaceholderItemName(it.name, it.itemId);
     if (prevReal && incPlaceholder) {
       return {
         ...it,
         name: prev.name,
-        category: String(prev.category || '').toLowerCase() === 'fish' ? 'fish' : (prev.category || it.category),
+        category: catalogStore.isFishCategory(prev.category) ? 'fish' : (prev.category || it.category),
         resolved: prev.resolved !== false ? true : prev.resolved,
         catalogReason: prev.catalogReason || it.catalogReason,
         catalogSource: prev.catalogSource || it.catalogSource,
       };
     }
     return it;
+  });
+}
+
+/** BLOCKER10H: enrich incoming placeholders from persistent catalog before store. */
+function mergeItemsNoDowngradeFromCatalog(incoming) {
+  if (!Array.isArray(incoming) || incoming.length === 0) return incoming;
+  return incoming.map((it) => {
+    if (!it || !it.itemId) return it;
+    const meta = catalogStore.lookupById(it.itemId);
+    if (!meta || catalogStore.isPlaceholderItemName(meta.name, it.itemId)) return it;
+    const incPlaceholder = catalogStore.isPlaceholderItemName(it.name, it.itemId);
+    if (!incPlaceholder) return it;
+    if (catalogStore.isFishCategory(meta.category)
+      && String(it.category || '').toLowerCase() === 'items') {
+      console.log(
+        `[FishTrackerAPI] CATALOG_DOWNGRADE_BLOCKED itemId=${it.itemId}` +
+        ` existing=${meta.name} attempted=${it.name}`
+      );
+    }
+    return {
+      ...it,
+      name: meta.name,
+      category: catalogStore.isFishCategory(meta.category) ? 'fish' : (meta.category || it.category),
+      resolved: true,
+      catalogReason: 'catalog_hit',
+      catalogSource: meta.source || 'catalog_cache',
+      catalogEnrichmentSource: meta.source || 'catalog_cache',
+    };
   });
 }
 
@@ -195,20 +223,20 @@ function enrichItemsFromCatalog(items) {
   const out = [];
   for (const it of items) {
     if (!it || !it.name || catalogStore.isStatLabel(it.name)) continue;
-    let meta = catalogStore.lookup(it.name);
-    if (!meta && it.itemId) meta = catalogStore.lookupById(it.itemId);
-    if (!meta && /^Item #\d+$/.test(it.name)) {
-      const idFromName = it.name.replace(/^Item #/, '');
+    const isPlaceholder = catalogStore.isPlaceholderItemName(it.name, it.itemId);
+    const trackerHasRealName = !isPlaceholder && !!it.name;
+
+    let meta = it.itemId ? catalogStore.lookupById(it.itemId) : null;
+    if (!meta) meta = catalogStore.lookup(it.name);
+    if (!meta && isPlaceholder) {
+      const idFromName = String(it.name).replace(/^Item #/, '');
       meta = catalogStore.lookupById(idFromName);
     }
 
-    const isPlaceholder = /^Item #\d+$/.test(String(it.name || ''));
-    const trackerHasRealName = !isPlaceholder && !!it.name;
     const name = trackerHasRealName ? it.name : ((meta && meta.name) || it.name);
     let rarity = it.rarity || (meta && meta.tier) || null;
     if (rarity) rarity = catalogStore.normalizeTier(rarity);
 
-    // Image priority: explicit item image → catalog image → Fish It DB resolver.
     let imageUrl = it.imageUrl || (meta && meta.imageUrl) || dbImageFor(name) || null;
 
     const resolved = trackerHasRealName
@@ -220,12 +248,23 @@ function enrichItemsFromCatalog(items) {
       ? (meta.source || 'catalog_cache')
       : (it.catalogEnrichmentSource || null);
 
-    // Never downgrade fish category or real tracker names via catalog enrichment.
-    let category = it.category || (meta && meta.category) || null;
-    if (trackerHasRealName && String(it.category || '').toLowerCase() === 'fish') {
+    let category = it.category || null;
+    if (trackerHasRealName && catalogStore.isFishCategory(it.category)) {
       category = 'fish';
-    } else if (isPlaceholder && meta && meta.category && !trackerHasRealName) {
-      category = meta.category;
+    } else if (meta && meta.category) {
+      if (isPlaceholder || catalogStore.isFishCategory(meta.category)) {
+        category = meta.category;
+      } else if (!category) {
+        category = meta.category;
+      }
+    }
+
+    if (isPlaceholder && meta && catalogStore.isFishCategory(meta.category)
+      && String(it.category || '').toLowerCase() === 'items') {
+      console.log(
+        `[FishTrackerAPI] CATALOG_DOWNGRADE_BLOCKED itemId=${it.itemId}` +
+        ` existing=${meta.name} attempted=${it.name}`
+      );
     }
 
     out.push({
@@ -241,6 +280,17 @@ function enrichItemsFromCatalog(items) {
     });
   }
   return out;
+}
+
+function debugItemSlice(items, limit = 5) {
+  if (!Array.isArray(items)) return [];
+  return items.slice(0, limit).map((i) => ({
+    name: i.name,
+    amount: i.amount,
+    category: i.category,
+    itemId: i.itemId || null,
+    resolved: i.resolved != null ? i.resolved : null,
+  }));
 }
 
 // ── GET /tracker – serve the dashboard page ───────────────────────
@@ -409,8 +459,9 @@ router.post(
     }
 
     // ── Inventory snapshot ────────────────────────────────────────
-    // Accepts both flat `items` array and grouped `owned.{fish,rods,items}`.
-    let cleanItems = normaliseInventoryItems(body);
+    const rawItems = normaliseInventoryItems(body);
+    catalogStore.learnFromTrackerItems(rawItems);
+    let cleanItems = rawItems;
     if (existing && existing.items && cleanItems.length) {
       cleanItems = mergeItemsNoDowngrade(cleanItems, existing.items);
     }
@@ -443,6 +494,7 @@ router.post(
       username:        cleanUser,
       userId:          cleanUserId,
       source,
+      rawItems:        rawItems.length ? rawItems : (existing ? existing.rawItems : []),
       items:           cleanItems.length ? cleanItems : (existing ? existing.items     : []),
       inventory:       cleanItems.length ? inventory  : (existing ? existing.inventory : null),
       isOnline:        online,
@@ -532,8 +584,9 @@ router.get(
       return res.status(404).json({ error: 'No tracking session active for this user.' });
     }
 
-    // Enrich flat items array (catalog merge + stat-label strip).
-    const enrichedFlat = enrichItemsFromCatalog(data.items);
+    // Enrich from raw tracker payload when available (BLOCKER10H).
+    const sourceItems = (data.rawItems && data.rawItems.length) ? data.rawItems : data.items;
+    const enrichedFlat = enrichItemsFromCatalog(sourceItems);
 
     // Build enriched grouped inventory from the stored inventory object.
     // Fall back to partitioning the flat array when no grouped data exists.
@@ -581,7 +634,15 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
   }
 
   const inv   = data.inventory || buildInventoryGroups(data.items || []);
-  const firstItems = (inv.all || data.items || []).slice(0, 5).map((i) => ({
+  const rawSlice = debugItemSlice(data.rawItems || data.items || []);
+  const enrichedAll = enrichItemsFromCatalog(data.rawItems || data.items || []);
+  const enrichedSlice = debugItemSlice(enrichedAll);
+  const catalogSlice = enrichedSlice.map((i) => ({
+    itemId: i.itemId,
+    catalog: i.itemId ? catalogStore.catalogMetaForItemId(i.itemId) : null,
+  }));
+
+  const firstItems = enrichedAll.slice(0, 5).map((i) => ({
     name:         i.name,
     amount:       i.amount,
     category:     i.category,
@@ -625,6 +686,9 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
       itemsOnly:    (inv.items || []).length,
     },
     firstItems,
+    rawItems: rawSlice,
+    enrichedItems: enrichedSlice,
+    catalogForItems: catalogSlice,
     unresolvedDiagnostics: diags.length ? diags : null,
     unresolvedIds,
     stillUnresolvedIds: unresolvedIds,
@@ -634,3 +698,6 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
 });
 
 module.exports = router;
+module.exports.mergeItemsNoDowngradeFromCatalog = mergeItemsNoDowngradeFromCatalog;
+module.exports.enrichItemsFromCatalog = enrichItemsFromCatalog;
+module.exports.debugItemSlice = debugItemSlice;
