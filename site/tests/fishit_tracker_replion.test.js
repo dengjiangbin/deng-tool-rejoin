@@ -793,8 +793,8 @@ describe('Fish It tracker — BLOCKER 4 backend rendering pipeline', () => {
       .get('/api/tracker/get-backpack/B4Angler1')
       .expect(200);
 
-    assert.ok(res.body.items.some((i) => i.name === 'Ballina Angelfish'), 'owned.fish item stored');
-    assert.ok(res.body.items.some((i) => i.name === 'Ghostfinn Rod'),    'owned.rods item stored');
+    assert.ok(res.body.items.some((i) => i.name === 'Ballina Angelfish'), 'owned.fish on public GET');
+    assert.ok(res.body.allItems.some((i) => i.name === 'Ghostfinn Rod'), 'owned.rods in allItems');
   });
 
   // B4-2: `count` (not `amount`) still stores.
@@ -978,8 +978,8 @@ describe('Fish It tracker — BLOCKER 4 backend rendering pipeline', () => {
     assert.equal(res.body.parseStats.selectedPath, 'Inventory.Items');
   });
 
-  // B4-9: GET response includes inventory.all and legacy items alias.
-  test('B4-9: GET response includes inventory.all and matches items length', async () => {
+  // B4-9: GET public fields are fish-only; full mix lives under internalInventory.
+  test('B4-9: GET response fish-only items with internalInventory for mixed', async () => {
     const app = makeApp();
     await request(app)
       .post('/api/tracker/update-backpack')
@@ -1001,12 +1001,14 @@ describe('Fish It tracker — BLOCKER 4 backend rendering pipeline', () => {
       .get('/api/tracker/get-backpack/B4Angler9')
       .expect(200);
 
-    assert.ok(Array.isArray(res.body.items), 'items is array (legacy)');
+    assert.ok(Array.isArray(res.body.items), 'items is array (legacy, fish-only)');
+    assert.equal(res.body.items.length, 2, 'public items are fish-only');
     assert.ok(res.body.inventory, 'inventory object present');
-    assert.ok(Array.isArray(res.body.inventory.all), 'inventory.all is array');
-    assert.equal(res.body.inventory.all.length, res.body.items.length, 'all length matches flat');
     assert.ok(res.body.inventory.fish.length >= 2, 'inventory.fish populated');
-    assert.ok(res.body.inventory.rods.length >= 1, 'inventory.rods populated');
+    assert.equal(res.body.inventory.rods.length, 0, 'rods not exposed on public inventory');
+    assert.ok(res.body.internalInventory, 'internalInventory present');
+    assert.ok(res.body.internalInventory.rods.length >= 1, 'rod kept in internalInventory');
+    assert.equal(res.body.allItems.length, 3, 'allItems has full mixed flat list');
   });
 
   // B4-10: Debug route returns correct counts.
@@ -1287,14 +1289,11 @@ describe('Fish It tracker — BLOCKER 5 catalog_summary + debug route', () => {
       .get('/api/tracker/get-backpack/B5Angler10')
       .expect(200);
 
-    assert.equal(res.body.items.length, 2, 'both items stored');
+    assert.equal(res.body.items.length, 1, 'public items are fish-only');
     assert.ok(res.body.inventory, 'inventory object present');
-    assert.ok(res.body.inventory.all.length > 0, 'inventory.all populated');
-    // Fish and rod partitions
-    const hasRod  = res.body.inventory.rods.some((i) => i.name === 'Carbon Rod');
-    const hasFish = res.body.inventory.fish.some((i) => i.name === 'Swordfish');
-    assert.ok(hasRod,  'rod in inventory.rods');
-    assert.ok(hasFish, 'fish in inventory.fish');
+    assert.ok(res.body.inventory.fish.some((i) => i.name === 'Swordfish'), 'fish in public inventory');
+    assert.ok(!res.body.items.some((i) => i.name === 'Carbon Rod'), 'rod not in public items');
+    assert.ok(res.body.internalInventory.rods.some((i) => i.name === 'Carbon Rod'), 'rod in internalInventory');
   });
 });
 
@@ -1527,8 +1526,8 @@ describe('Fish It tracker — BLOCKER 7 numeric Id fallback inventory', () => {
       .get('/api/tracker/get-backpack/B7Angler2')
       .expect(200);
 
-    assert.equal(res.body.items.length, 3);
-    assert.ok(res.body.items.some((i) => i.itemId === '10' && i.name === 'Topwater Bait'));
+    assert.equal(res.body.items.length, 2, 'public GET is fish-only');
+    assert.ok(res.body.allItems.some((i) => i.itemId === '10' && i.name === 'Topwater Bait'));
     assert.ok(res.body.items.some((i) => i.itemId === '70' && i.name === 'Yello Damselfish'));
     assert.ok(res.body.items.some((i) => i.itemId === '119' && i.name === 'Ballina Angelfish'));
     assert.equal(res.body.parseStats.raw, 2517);
@@ -1777,11 +1776,12 @@ describe('Fish It tracker — BLOCKER 9 catalog resolve + nil-safe fields', () =
       .get('/api/tracker/get-backpack/B9Angler2')
       .expect(200);
 
-    const item = res.body.items.find((i) => i.itemId === '65');
+    const item = res.body.allItems.find((i) => i.itemId === '65');
     assert.ok(item);
     assert.equal(item.name, 'Item #65');
     assert.equal(item.resolved, false);
     assert.equal(item.catalogReason, 'catalog_missing_numeric_id');
+    assert.equal(res.body.items.length, 0);
   });
 
   test('catalog store lookupById enriches placeholder names when catalog has id', async () => {
@@ -1817,7 +1817,7 @@ describe('Fish It tracker — BLOCKER 9 catalog resolve + nil-safe fields', () =
       .get('/api/tracker/get-backpack/B9Angler3')
       .expect(200);
 
-    const item = res.body.items.find((i) => i.itemId === '10');
+    const item = res.body.allItems.find((i) => i.itemId === '10');
     assert.ok(item);
     assert.equal(item.name, 'Carbon Rod');
     assert.equal(item.rarity, 'rare');
@@ -1902,8 +1902,8 @@ describe('Fish It tracker — BLOCKER 10 item name resolution', () => {
       .expect(200);
 
     assert.equal(res.body.phase, 'live');
-    assert.ok(res.body.items.some((i) => i.name === 'Carbon Rod' && i.itemId === '10'));
-    assert.ok(res.body.items.some((i) => i.name === 'Common Crate' && i.itemId === '990'));
+    assert.ok(res.body.allItems.some((i) => i.name === 'Carbon Rod' && i.itemId === '10'));
+    assert.ok(res.body.allItems.some((i) => i.name === 'Common Crate' && i.itemId === '990'));
     assert.ok(res.body.items.some((i) => i.name === 'Bandit Angelfish'));
   });
 
@@ -1936,10 +1936,11 @@ describe('Fish It tracker — BLOCKER 10 item name resolution', () => {
       .get('/api/tracker/get-backpack/B10Angler3')
       .expect(200);
 
-    const rod = res.body.items.find((i) => i.itemId === '10');
-    const crate = res.body.items.find((i) => i.itemId === '990');
+    const rod = res.body.allItems.find((i) => i.itemId === '10');
+    const crate = res.body.allItems.find((i) => i.itemId === '990');
     assert.equal(rod.name, 'Carbon Rod', 'tracker real name must not be overwritten');
     assert.equal(crate.name, 'Common Crate', 'placeholder enriched from catalog by id');
+    assert.equal(res.body.items.length, 0, 'non-fish not on public GET');
   });
 
   test('unresolved placeholder Item #65 stays unresolved', async () => {
@@ -1961,8 +1962,10 @@ describe('Fish It tracker — BLOCKER 10 item name resolution', () => {
       .get('/api/tracker/get-backpack/B10Angler4')
       .expect(200);
 
-    assert.equal(res.body.items[0].name, 'Item #65');
-    assert.equal(res.body.items[0].resolved, false);
+    const unresolved = res.body.allItems.find((i) => i.itemId === '65');
+    assert.equal(unresolved.name, 'Item #65');
+    assert.equal(unresolved.resolved, false);
+    assert.equal(res.body.items.length, 0, 'unresolved non-fish not on public GET');
     assert.equal(res.body.parseStats.acceptedInstances, 1);
   });
 });
@@ -2027,7 +2030,7 @@ describe('Fish It tracker — BLOCKER 10B fish name regression guard', () => {
 
     const fish117 = res.body.items.find((i) => i.itemId === '117');
     const fish119 = res.body.items.find((i) => i.itemId === '119');
-    const item10 = res.body.items.find((i) => i.itemId === '10');
+    const item10 = res.body.allItems.find((i) => i.itemId === '10');
     assert.equal(fish117.name, 'Bandit Angelfish');
     assert.equal(fish117.category, 'fish');
     assert.equal(fish117.resolved, true);
@@ -2067,7 +2070,7 @@ describe('Fish It tracker — BLOCKER 10B fish name regression guard', () => {
       .expect(200);
 
     assert.equal(res.body.items.find((i) => i.itemId === '68').name, 'Flame Angelfish');
-    assert.equal(res.body.items.find((i) => i.itemId === '10').name, 'Carbon Rod');
+    assert.equal(res.body.allItems.find((i) => i.itemId === '10').name, 'Carbon Rod');
   });
 });
 
@@ -2140,7 +2143,8 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
       .get('/api/tracker/get-backpack/B10CAngler2')
       .expect(200);
 
-    assert.equal(res.body.items.find((i) => i.itemId === '990').name, 'Common Crate');
+    assert.equal(res.body.allItems.find((i) => i.itemId === '990').name, 'Common Crate');
+    assert.equal(res.body.items.length, 0, 'crate not on public GET');
   });
 
   test('placeholder Item #388 upgrades when catalog has id 388', async () => {
@@ -2171,7 +2175,8 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
       .get('/api/tracker/get-backpack/B10CAngler3')
       .expect(200);
 
-    assert.equal(res.body.items.find((i) => i.itemId === '388').name, 'Carbon Rod');
+    assert.equal(res.body.allItems.find((i) => i.itemId === '388').name, 'Carbon Rod');
+    assert.equal(res.body.items.length, 0, 'rod not on public GET');
   });
 
   test('trackerBuild BLOCKER10H stored on debug endpoint', async () => {
@@ -2291,7 +2296,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
       })
       .expect(200);
     const res = await request(app).get('/api/tracker/get-backpack/B10GUser990').expect(200);
-    assert.equal(res.body.items.find((i) => i.itemId === '990').name, 'Common Crate');
+    assert.equal(res.body.allItems.find((i) => i.itemId === '990').name, 'Common Crate');
     const reject = catalogStore.upsertByItemId({ itemId: '990', name: 'Item #990', category: 'items', source: 'bad' });
     assert.equal(reject.updated, false);
     assert.equal(reject.reason, 'placeholder_or_empty');
@@ -2312,7 +2317,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
       })
       .expect(200);
     const res = await request(app).get('/api/tracker/get-backpack/B10GUser388').expect(200);
-    assert.equal(res.body.items.find((i) => i.itemId === '388').name, 'Carbon Rod');
+    assert.equal(res.body.allItems.find((i) => i.itemId === '388').name, 'Carbon Rod');
   });
 
   test('fish names cannot downgrade via catalog cache', () => {
@@ -2337,9 +2342,10 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
       })
       .expect(200);
     const res = await request(app).get('/api/tracker/get-backpack/B10GUser10').expect(200);
-    const item = res.body.items.find((i) => i.itemId === '10');
+    const item = res.body.allItems.find((i) => i.itemId === '10');
     assert.equal(item.name, 'Topwater Bait');
     assert.ok(item.catalogEnrichmentSource || item.catalogReason);
+    assert.equal(res.body.items.length, 0);
   });
 
   test('placeholder cannot overwrite cached real name', () => {
@@ -2591,7 +2597,8 @@ describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
       .expect(200);
 
     const res = await request(app).get('/api/tracker/get-backpack/B10HUser10').expect(200);
-    assert.equal(res.body.items.find((i) => i.itemId === '10').name, 'Topwater Bait');
+    assert.equal(res.body.allItems.find((i) => i.itemId === '10').name, 'Topwater Bait');
+    assert.equal(res.body.items.length, 0);
   });
 
   test('placeholder cannot overwrite seeded real catalog name', () => {
@@ -3001,7 +3008,7 @@ describe('BLOCKER10K fish-only public + raw proof', () => {
       .expect(200);
 
     const get = await request(app).get('/api/fishit-tracker/get-backpack/B10KFish').expect(200);
-    assert.equal(get.body.items.length, 5);
+    assert.equal(get.body.items.length, 2, 'legacy items field is fish-only');
     assert.equal(get.body.fishItems.length, 2);
     assert.equal(get.body.publicItems.length, 2);
     const fishNames = get.body.fishItems.map((i) => i.name);
@@ -3096,7 +3103,10 @@ describe('BLOCKER10K fish-only public + raw proof', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
     assert.ok(tpl.includes('getPublicFishItems'));
     assert.ok(tpl.includes('fishCountLabel'));
-    assert.ok(!tpl.includes('inventory.all'));
+    assert.ok(tpl.includes('BLOCKER10K1_FISH_ONLY_UI'));
+    assert.ok(tpl.includes('RENDER_BUILD'));
+    assert.ok(!tpl.match(/inventory\.all/));
+    assert.ok(!tpl.match(/Items:\s*<strong>/));
     assert.ok(tpl.includes('Fish: <strong>-</strong>'));
   });
 
@@ -3121,10 +3131,117 @@ describe('BLOCKER10K fish-only public + raw proof', () => {
     assert.ok(dbg.body.unresolvedRawProof);
   });
 
-  test('isPublicFishItem only accepts fish category', () => {
-    assert.equal(isPublicFishItem({ category: 'fish' }), true);
-    assert.equal(isPublicFishItem({ category: 'bait' }), false);
-    assert.equal(isPublicFishItem({ category: 'rod' }), false);
-    assert.equal(isPublicFishItem({ category: 'items' }), false);
+  test('isPublicFishItem excludes bait rod crate placeholders', () => {
+    assert.equal(isPublicFishItem({ category: 'fish', name: 'Flame Angelfish' }), true);
+    assert.equal(isPublicFishItem({ name: 'King Crab' }), true);
+    assert.equal(isPublicFishItem({ category: 'bait', name: 'Topwater Bait' }), false);
+    assert.equal(isPublicFishItem({ category: 'rod', name: 'Carbon Rod' }), false);
+    assert.equal(isPublicFishItem({ category: 'items', name: 'Common Crate' }), false);
+    assert.equal(isPublicFishItem({ category: 'items', name: 'Item #196', itemId: '196' }), false);
+  });
+});
+
+describe('BLOCKER10K1 public fish-only UI regression', () => {
+  const { buildPublicLegacyCounts, PUBLIC_RENDER_BUILD } = require('../src/fishitTrackerRoutes');
+
+  beforeEach(() => { cleanup(); });
+
+  const mixedPayload = [
+    { name: 'Topwater Bait', amount: 1, category: 'bait', itemId: '10' },
+    { name: 'Common Crate', amount: 5, category: 'items', itemId: '990' },
+    { name: 'Carbon Rod', amount: 138, category: 'rod', itemId: '388' },
+    { name: 'Flame Angelfish', amount: 136, category: 'fish', itemId: '68' },
+    { name: 'Yello Damselfish', amount: 14, category: 'fish', itemId: '70' },
+    { name: 'Item #196', amount: 34, category: 'items', itemId: '196' },
+  ];
+
+  test('get-backpack public API is fish-only with legacy counts safe for UI', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10K1Fish',
+        userId: 18001,
+        isOnline: true,
+        type: 'inventory_snapshot',
+        items: mixedPayload,
+      })
+      .expect(200);
+
+    const get = await request(app).get('/api/fishit-tracker/get-backpack/B10K1Fish').expect(200);
+    assert.equal(get.headers['cache-control'], 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    assert.equal(get.body.renderBuild, PUBLIC_RENDER_BUILD);
+
+    const pubNames = get.body.publicItems.map((i) => i.name);
+    assert.ok(pubNames.includes('Flame Angelfish'));
+    assert.ok(pubNames.some((n) => /damselfish/i.test(n)));
+    assert.ok(!pubNames.includes('Topwater Bait'));
+    assert.ok(!pubNames.includes('Carbon Rod'));
+    assert.ok(!pubNames.includes('Common Crate'));
+    assert.ok(!pubNames.some((n) => /^Item #/i.test(n)));
+
+    assert.equal(get.body.items.length, 2);
+    assert.equal(get.body.fishCounts.fishTypes, 2);
+    assert.equal(get.body.fishCounts.fishInstances, 150);
+    assert.equal(get.body.counts.all, 150, 'counts.all is fish instances not mixed types');
+    assert.equal(get.body.counts.items, 2, 'counts.items is fish types not mixed');
+    assert.equal(get.body.allItems.length, 6);
+    assert.ok(get.body.internalInventory.rods.some((i) => i.name === 'Carbon Rod'));
+  });
+
+  test('tracker page template is fish-only marked', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(html.includes('BLOCKER10K1_FISH_ONLY_UI'));
+    assert.ok(html.includes('data-render-build'));
+    assert.ok(html.includes('getPublicFishItems'));
+    assert.ok(!html.match(/Items:\s*<strong>/));
+  });
+
+  test('debug rawInspector preserved for Item #196', async () => {
+    const app = makeApp();
+    const raw196 = {
+      name: 'Item #196',
+      amount: 34,
+      category: 'items',
+      itemId: '196',
+      rawProof: {
+        rawKey: '196',
+        sourcePath: 'Inventory.Items',
+        rawType: 'table',
+        rawNameFields: {},
+        extractedIdFields: { Id: '196' },
+      },
+    };
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10K1Raw',
+        userId: 18002,
+        isOnline: true,
+        items: [...mixedPayload.filter((i) => i.itemId !== '196'), raw196],
+      })
+      .expect(200);
+
+    const dbg = await request(app).get('/api/fishit-tracker/debug/B10K1Raw').expect(200);
+    assert.ok(dbg.body.rawInspector);
+    assert.ok(Array.isArray(dbg.body.unresolvedRawProof));
+    const proof196 = dbg.body.unresolvedRawProof.find((p) => p.itemId === '196');
+    assert.ok(proof196);
+    assert.equal(proof196.rawHadName, false);
+    assert.equal(proof196.reason, 'raw_numeric_only_no_catalog_match');
+  });
+
+  test('buildPublicLegacyCounts never exposes mixed type count as all', () => {
+    const counts = buildPublicLegacyCounts({
+      fishTypes: 5,
+      fishInstances: 216,
+      hiddenNonFishTypes: 19,
+      hiddenNonFishInstances: 275,
+    });
+    assert.equal(counts.all, 216);
+    assert.equal(counts.items, 5);
+    assert.equal(counts.rods, 0);
   });
 });

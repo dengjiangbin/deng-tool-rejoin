@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10K1_FISH_ONLY_UI' %>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -182,8 +182,9 @@
 (function () {
   'use strict';
 
-  const LS_KEY     = 'fishit_tracked_users';
-  const POLL_MS    = 2500;
+  const LS_KEY        = 'fishit_tracked_users';
+  const POLL_MS       = 2500;
+  const RENDER_BUILD  = 'BLOCKER10K1_FISH_ONLY_UI';
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', secret:'rarity-secret', forgotten:'rarity-forgotten' };
 
   const trackers       = new Map();
@@ -209,13 +210,27 @@
   function syncTimestamp(data) {
     return data && (data.lastInventoryAt || data.lastSeenAt || data.updatedAt) || null;
   }
-  /** Public fish-only list (BLOCKER10K). */
+  /** Public fish-only list (BLOCKER10K1). Never reads mixed enrichedItems or full inventory groups. */
   function getPublicFishItems(data) {
     if (!data) return [];
-    if (Array.isArray(data.fishItems) && data.fishItems.length) return data.fishItems;
-    if (Array.isArray(data.publicItems) && data.publicItems.length) return data.publicItems;
+    if (Array.isArray(data.fishItems)) return data.fishItems;
+    if (Array.isArray(data.publicItems)) return data.publicItems;
     if (data.fishInventory && Array.isArray(data.fishInventory.fish)) return data.fishInventory.fish;
-    return (data.items || []).filter((it) => String(it.category || '').toLowerCase() === 'fish');
+    if (data.renderBuild === RENDER_BUILD && Array.isArray(data.items)) {
+      return data.items.filter((it) => String(it.category || '').toLowerCase() === 'fish');
+    }
+    return [];
+  }
+  function logFishOnlyRender(key, data, fishList) {
+    if (!data || data.renderBuild !== RENDER_BUILD) return;
+    const entry = trackers.get(key);
+    if (!entry || entry._loggedK1) return;
+    entry._loggedK1 = true;
+    const fc = data.fishCounts;
+    console.log(
+      `[fishit-tracker-ui] renderBuild=${RENDER_BUILD} fishItems=${fishList.length}` +
+      ` hiddenNonFishTypes=${fc && fc.hiddenNonFishTypes != null ? fc.hiddenNonFishTypes : '?'}`
+    );
   }
   function fishCountLabel(data, fishList) {
     const fc = data && data.fishCounts;
@@ -314,6 +329,7 @@
     const l = card.querySelector('[data-status-line]');
     const b = card.querySelector('[data-card-body]');
     const fishList = getPublicFishItems(data);
+    logFishOnlyRender(card.dataset.user, data, fishList);
     if (c) c.innerHTML = fishCountLabel(data, fishList);
     if (s) s.textContent = `Last sync: ${fmtTime(syncTimestamp(data))}`;
     if (l) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;

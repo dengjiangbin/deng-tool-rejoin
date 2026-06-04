@@ -66,6 +66,23 @@ function dbImageFor(name) {
 
 const router = express.Router();
 
+const NO_STORE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+  Pragma: 'no-cache',
+  Expires: '0',
+};
+const PUBLIC_RENDER_BUILD = 'BLOCKER10K1_FISH_ONLY_UI';
+
+router.use((req, res, next) => {
+  const p = req.path || '';
+  if (p === '/tracker' || p === '/fishit-tracker'
+      || p.startsWith('/api/fishit-tracker/')
+      || p.startsWith('/api/tracker/')) {
+    res.set(NO_STORE_HEADERS);
+  }
+  next();
+});
+
 // ── In-memory live-data store ─────────────────────────────────────
 // Key: lowercased Roblox username  |  Value: last received payload + server ts
 const liveTrackDB = {};
@@ -382,7 +399,16 @@ function sumItemAmounts(items) {
 }
 
 function isPublicFishItem(item) {
-  return item && catalogStore.isFishCategory(item.category);
+  if (!item) return false;
+  const cat = String(item.category || '').toLowerCase();
+  if (cat === 'rod' || cat === 'bait' || cat === 'items') return false;
+  if (catalogStore.isPlaceholderItemName(item.name, item.itemId)) return false;
+  if (item.itemId) {
+    const meta = catalogStore.lookupById(item.itemId);
+    if (meta && !catalogStore.isFishCategory(meta.category)) return false;
+  }
+  if (catalogStore.isFishCategory(cat)) return true;
+  return true;
 }
 
 /** Fish-only view for public website/API (storage keeps full inventory). */
@@ -401,6 +427,20 @@ function buildPublicFishFields(enrichedFlat) {
     fishInventory: buildInventoryGroups(fishItems),
     fishCounts,
     publicCounts: fishCounts,
+  };
+}
+
+/** Legacy `counts` shape for public UI — fish metrics only (never mixed type totals). */
+function buildPublicLegacyCounts(fishCounts) {
+  const types = fishCounts.fishTypes;
+  const instances = fishCounts.fishInstances;
+  return {
+    fish: types,
+    fishInstances: instances,
+    all: instances,
+    items: types,
+    itemsOnly: 0,
+    rods: 0,
   };
 }
 
@@ -530,12 +570,16 @@ function mapDebugItemWithResolution(raw, enriched) {
 }
 
 // ── GET /tracker – serve the dashboard page ───────────────────────
-router.get('/tracker', (_req, res) => {
+function renderTrackerPage(_req, res) {
   res.render('fishit_tracker', {
     layout: false,
     title: '🎣 Fish It Live Inventory Tracker',
+    renderBuild: PUBLIC_RENDER_BUILD,
   });
-});
+}
+
+router.get('/tracker', renderTrackerPage);
+router.get('/fishit-tracker', renderTrackerPage);
 
 // Allowed inventory sources. "replion" is the source of truth.
 const ALLOWED_SOURCES = new Set(['replion', 'replion_missing', 'event', 'legacy', 'unknown']);
@@ -872,15 +916,24 @@ function handleGetBackpack(req, res) {
 
   const enriched = {
     ...data,
-    items:           enrichedFlat,
-    inventory:       enrichedInventory,
+    renderBuild:     PUBLIC_RENDER_BUILD,
+    items:           publicFish.fishItems,
+    inventory:       publicFish.fishInventory,
+    counts:          buildPublicLegacyCounts(publicFish.fishCounts),
     fishItems:       publicFish.fishItems,
     publicItems:     publicFish.publicItems,
     fishInventory:   publicFish.fishInventory,
     fishCounts:      publicFish.fishCounts,
     publicCounts:    publicFish.publicCounts,
+    allItems:        enrichedFlat,
+    fullItems:       enrichedFlat,
+    enrichedItems:   enrichedFlat,
+    debugItems:      enrichedFlat.slice(0, 50),
+    rawItems:        data.rawItems || sourceItems,
+    internalInventory: enrichedInventory,
     countsRaw,
     countsEnriched,
+    countsInternal:  countsEnriched,
     lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
     isOnline:        isSessionLive(data),
   };
@@ -998,6 +1051,8 @@ module.exports.debugItemSlice = debugItemSlice;
 module.exports.resolveServerCommit = resolveServerCommit;
 module.exports.isSessionLive = isSessionLive;
 module.exports.buildPublicFishFields = buildPublicFishFields;
+module.exports.buildPublicLegacyCounts = buildPublicLegacyCounts;
+module.exports.PUBLIC_RENDER_BUILD = PUBLIC_RENDER_BUILD;
 module.exports.buildRawInspector = buildRawInspector;
 module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
