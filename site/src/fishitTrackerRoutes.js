@@ -41,7 +41,8 @@ const staticCatalogAudit = require('./fishitStaticCatalogAudit');
 const nameOnlyCatalog = require('./fishitNameOnlyCatalog');
 const rarityLabels = require('./fishitRarityLabels');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
-const { BLOCKER10Q_BUILD, BLOCKER10Q_UI_MARKER } = require('./fishitTrackerBuild');
+const liveCatchProof = require('./fishitLiveCatchProof');
+const { BLOCKER10R_BUILD, BLOCKER10R_UI_MARKER } = require('./fishitTrackerBuild');
 
 learnedFishCatalog.purgePoisonedMappings();
 for (const row of learnedFishCatalog.getBlockedMappings()) {
@@ -87,8 +88,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10Q_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10Q_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10R_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10R_BUILD;
 
 const CONFIRMED_FISH_IMAGE_ASSET_IDS = [
   '128385926161840',
@@ -674,7 +675,8 @@ function renderTrackerPage(_req, res) {
     title: '🎣 Fish It Live Inventory Tracker',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
-    blocker10qBuild: BLOCKER10Q_BUILD,
+    blocker10rBuild: BLOCKER10R_BUILD,
+    blocker10qBuild: BLOCKER10R_BUILD,
   });
 }
 
@@ -809,10 +811,11 @@ function ingestLearnedFishCatalogFromBody(body) {
   return results;
 }
 
-function runCatchDeltaOnUpload(body, rawItems, existing) {
+function runCatchDeltaOnUpload(body, rawItems, existing, sessionKey) {
   const pending = body.pendingCatchName || body.pendingCatch;
   const prev = body.previousItemCounts || (existing && existing.lastItemCounts) || null;
   if (!pending && !prev) return null;
+  const evidenceSourceMode = liveCatchProof.resolveEvidenceSourceMode(body);
   return catchDelta.processCatchDelta({
     pendingCatch: pending,
     previousItemCounts: prev,
@@ -826,6 +829,8 @@ function runCatchDeltaOnUpload(body, rawItems, existing) {
       gameId: body.gameId || body.game_id || null,
       placeId: body.placeId || body.place_id || null,
       gameVersion: body.gameVersion || body.game_version || null,
+      evidenceSourceMode,
+      sessionKey: sessionKey || null,
     },
   });
 }
@@ -920,7 +925,7 @@ function handleUpdateBackpack(req, res) {
     // ── Inventory snapshot ────────────────────────────────────────
     const rawItems = normaliseInventoryItems(body);
     const learnedIngest = ingestLearnedFishCatalogFromBody(body);
-    const nameCatalogDiscovery = runCatchDeltaOnUpload(body, rawItems, existing);
+    const nameCatalogDiscovery = runCatchDeltaOnUpload(body, rawItems, existing, key);
     catalogStore.learnFromTrackerItems(rawItems);
     let cleanItems = mergeItemsNoDowngradeFromCatalog(rawItems);
     if (existing && existing.items && cleanItems.length) {
@@ -1257,6 +1262,15 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
       enrichedAll.map((i) => i && i.itemId).filter(Boolean).slice(0, 30),
     ),
     liveCatchBinding: globalFishCatalog.buildLiveCatchBinding(data.nameCatalogDiscovery),
+    evidenceSourceDebug: liveCatchProof.buildEvidenceSourceDebug(
+      globalFishCatalog.getStoreMeta(),
+      data.nameCatalogDiscovery,
+    ),
+    newUnresolvedBindingProof: liveCatchProof.buildNewUnresolvedBindingProof(
+      data.nameCatalogDiscovery,
+      key,
+      (id) => globalFishCatalog.lookupById(id),
+    ),
     staticCatalogAudit: staticCatalogAudit.auditStaticCatalogSources(),
   });
 });
@@ -1293,11 +1307,12 @@ module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
 module.exports.PUBLIC_API_BUILD = PUBLIC_API_BUILD;
-module.exports.BLOCKER10Q_BUILD = BLOCKER10Q_BUILD;
-module.exports.BLOCKER10P_BUILD = BLOCKER10Q_BUILD;
-module.exports.BLOCKER10O_BUILD = BLOCKER10Q_BUILD;
-module.exports.BLOCKER10N2_BUILD = BLOCKER10Q_BUILD;
-module.exports.BLOCKER10N_BUILD = BLOCKER10Q_BUILD;
+module.exports.BLOCKER10R_BUILD = BLOCKER10R_BUILD;
+module.exports.BLOCKER10Q_BUILD = BLOCKER10R_BUILD;
+module.exports.BLOCKER10P_BUILD = BLOCKER10R_BUILD;
+module.exports.BLOCKER10O_BUILD = BLOCKER10R_BUILD;
+module.exports.BLOCKER10N2_BUILD = BLOCKER10R_BUILD;
+module.exports.BLOCKER10N_BUILD = BLOCKER10R_BUILD;
 module.exports.ingestLearnedFishEntry = ingestLearnedFishEntry;
 module.exports.runCatchDeltaOnUpload = runCatchDeltaOnUpload;
 module.exports.catalogMetaForItemId = catalogMetaForItemId;

@@ -133,11 +133,24 @@ function _submitGlobalEvidence(ctx, payload) {
       gameId: ctx.gameId || null,
       placeId: ctx.placeId || null,
       gameVersion: ctx.gameVersion || null,
+      evidenceSourceMode: ctx.evidenceSourceMode || 'api_simulation',
+      sessionKey: ctx.sessionKey || null,
       ...payload,
     });
   } catch (_) {
     return null;
   }
+}
+
+function _recordPipeline(ctx, evt) {
+  if (!ctx || ctx.enabled === false) return;
+  try {
+    globalFishCatalog.recordPipelineEvent({
+      evidenceSourceMode: ctx.evidenceSourceMode || 'api_simulation',
+      sessionKey: ctx.sessionKey || null,
+      ...evt,
+    });
+  } catch (_) { /* optional */ }
 }
 
 function processCatchDelta({
@@ -168,7 +181,25 @@ function processCatchDelta({
     pendingLowConfidenceMappings: [],
     rejectedEvents: [],
     globalEvidence: null,
+    evidenceSourceMode: globalContext?.evidenceSourceMode || 'api_simulation',
+    sessionKey: globalContext?.sessionKey || null,
   };
+
+  if (parsed.rawText) {
+    _recordPipeline(globalContext, {
+      eventType: 'live_catch_text_seen',
+      rawText: parsed.rawText,
+      fishName: parsed.fishNameCandidate,
+      rarity: parsed.rarityCandidate,
+    });
+    _recordPipeline(globalContext, {
+      eventType: 'live_catch_parse_result',
+      decision: parsed.parserDecision,
+      reason: parsed.fishNameCandidate ? 'parsed_ok' : (parsed.parserDecision || 'parse_failed'),
+      fishName: parsed.fishNameCandidate,
+      rarity: parsed.rarityCandidate,
+    });
+  }
 
   if (uploadFailed) {
     discovery.rejectedEvents.push({ reason: 'upload_failed' });
@@ -217,6 +248,14 @@ function processCatchDelta({
   const increased = computeIncreasedIds(prev, cur);
   discovery.lastInventoryDelta = { increased, previousCounts: prev, currentCounts: cur };
   discovery.deltaCandidates = increased;
+  if (increased.length > 0) {
+    _recordPipeline(globalContext, {
+      eventType: 'live_delta_detected',
+      itemId: increased.length === 1 ? increased[0].itemId : null,
+      reason: increased.length === 1 ? 'single_delta' : 'multiple_delta',
+      fishName: pending && pending.fishName,
+    });
+  }
 
   if (increased.length === 0) {
     discovery.rejectedEvents.push({

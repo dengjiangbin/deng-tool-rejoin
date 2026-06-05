@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Global collective fish item catalog (BLOCKER10Q).
+ * Global collective fish item catalog (BLOCKER10Q/10R).
  * Shared itemId -> fishName mappings from safe catch-delta evidence across all users.
  * JSON-backed; no full inventory storage.
  */
@@ -13,6 +13,7 @@ const nameOnlyCatalog = require('./fishitNameOnlyCatalog');
 const fishImageAssets = require('./fishitFishImageAssets');
 const catalogStore = require('./fishitCatalogStore');
 const learnedFishCatalog = require('./fishitLearnedFishCatalog');
+const liveCatchProof = require('./fishitLiveCatchProof');
 
 const RARITY_ALIASES = {
   common: 'Common', uncommon: 'Uncommon', rare: 'Rare', epic: 'Epic',
@@ -42,7 +43,18 @@ let _store = null;
 let _lastIngestResult = null;
 
 function _defaultStore() {
-  return { updatedAt: null, storage: 'json', byItemId: {}, recentEvents: [] };
+  return {
+    updatedAt: null,
+    storage: 'json',
+    byItemId: {},
+    recentEvents: [],
+    liveRobloxEvidenceCount: 0,
+    simulationEvidenceCount: 0,
+    testFixtureEvidenceCount: 0,
+    lastLiveCatchAt: null,
+    lastLiveCatchSessionKey: null,
+    lastEvidenceSourceMode: null,
+  };
 }
 
 function _maybePersist() {
@@ -67,6 +79,12 @@ function _load() {
         storage: raw.storage || 'json',
         byItemId: (raw.byItemId && typeof raw.byItemId === 'object') ? raw.byItemId : {},
         recentEvents: Array.isArray(raw.recentEvents) ? raw.recentEvents.slice(-MAX_RECENT_EVENTS) : [],
+        liveRobloxEvidenceCount: raw.liveRobloxEvidenceCount || 0,
+        simulationEvidenceCount: raw.simulationEvidenceCount || 0,
+        testFixtureEvidenceCount: raw.testFixtureEvidenceCount || 0,
+        lastLiveCatchAt: raw.lastLiveCatchAt || null,
+        lastLiveCatchSessionKey: raw.lastLiveCatchSessionKey || null,
+        lastEvidenceSourceMode: raw.lastEvidenceSourceMode || null,
       };
       _purgeForceBlocked();
       return _store;
@@ -117,15 +135,38 @@ function publicEligible(entry) {
 function _pushRecentEvent(evt) {
   _store.recentEvents.push({
     timestamp: evt.timestamp || new Date().toISOString(),
+    eventType: evt.eventType || evt.decision || null,
     itemId: evt.itemId || null,
     decision: evt.decision || null,
     reason: evt.reason || null,
     fishName: evt.fishName || null,
     rarity: evt.rarity || null,
+    evidenceSourceMode: evt.evidenceSourceMode || null,
+    sessionKey: evt.sessionKey || null,
+    rawText: evt.rawText || null,
   });
   if (_store.recentEvents.length > MAX_RECENT_EVENTS) {
     _store.recentEvents = _store.recentEvents.slice(-MAX_RECENT_EVENTS);
   }
+}
+
+function recordPipelineEvent(evt) {
+  _load();
+  _pushRecentEvent(evt);
+  _maybePersist();
+}
+
+function _bumpEvidenceSourceMode(mode, sessionKey) {
+  if (mode === 'live_roblox') {
+    _store.liveRobloxEvidenceCount = (_store.liveRobloxEvidenceCount || 0) + 1;
+    _store.lastLiveCatchAt = new Date().toISOString();
+    if (sessionKey) _store.lastLiveCatchSessionKey = sessionKey;
+  } else if (mode === 'api_simulation') {
+    _store.simulationEvidenceCount = (_store.simulationEvidenceCount || 0) + 1;
+  } else if (mode === 'test_fixture') {
+    _store.testFixtureEvidenceCount = (_store.testFixtureEvidenceCount || 0) + 1;
+  }
+  _store.lastEvidenceSourceMode = mode;
 }
 
 function _makeEntry(itemId, fishName, extra) {
@@ -179,12 +220,20 @@ function _evaluateConfirmation(entry, nameValidation, evidence) {
   const verifiedSource = VERIFIED_CATCH_SOURCES.has(evidence.source);
   const nameKnown = !!(nameValidation && nameValidation.nameKnown);
   const hasImage = !!(nameValidation && (nameValidation.imageAssetId || nameValidation.imageUrl));
+  const isLiveRoblox = evidence.evidenceSourceMode === 'live_roblox';
+  const isSeed = liveCatchProof.isKnownSeedItemId(entry.itemId);
+  const wasUnresolved = evidence.wasPreviouslyUnresolved === true;
 
   if (entry.evidenceCount >= 2 || entry.uniqueUserCount >= 2) {
     if (!nameKnown) {
       entry.confidence = 'pending';
       entry.publicEligible = false;
       return { decision: 'pending', reason: 'name_not_validated' };
+    }
+    if (wasUnresolved && !isSeed && (entry.liveRobloxEvidenceCount || 0) < 1) {
+      entry.confidence = 'pending';
+      entry.publicEligible = false;
+      return { decision: 'pending', reason: 'awaiting_live_roblox_evidence' };
     }
     entry.confidence = 'confirmed';
     entry.publicEligible = true;
@@ -196,10 +245,17 @@ function _evaluateConfirmation(entry, nameValidation, evidence) {
 
   if (entry.evidenceCount === 1 && verifiedSource && nameKnown && hasImage
       && evidence.cleanSingleDelta && !entry.conflictNames) {
+    if (wasUnresolved && !isSeed && !isLiveRoblox) {
+      entry.confidence = 'pending';
+      entry.publicEligible = false;
+      return { decision: 'pending', reason: 'awaiting_live_roblox_evidence' };
+    }
     entry.confidence = 'confirmed';
     entry.publicEligible = true;
     entry.lastConfirmedAt = new Date().toISOString();
-    entry.confirmationReason = 'high_confidence_single_clean_delta';
+    entry.confirmationReason = isLiveRoblox && wasUnresolved && !isSeed
+      ? 'live_roblox_single_clean_delta'
+      : 'high_confidence_single_clean_delta';
     return { decision: 'confirmed', reason: entry.confirmationReason };
   }
 
@@ -268,14 +324,24 @@ function submitEvidence(raw) {
   const fishName = typeof raw.fishNameCandidate === 'string' ? raw.fishNameCandidate.trim() : '';
   const rarityCandidate = raw.rarityCandidate || null;
   const source = typeof raw.source === 'string' ? raw.source.slice(0, 40) : 'catch_notification';
+  const evidenceSourceMode = raw.evidenceSourceMode || 'api_simulation';
+  const sessionKey = raw.sessionKey || null;
   const now = new Date().toISOString();
   const userHash = raw.userIdHash || hashContributorId(raw.userId);
+  const wasPreviouslyUnresolved = itemId
+    ? liveCatchProof.getPreviousItemIdStatus(itemId, lookupById) === 'unresolved'
+    : false;
 
   const reject = (reason, extra) => {
-    const result = { accepted: false, rejected: true, reason, ...(extra || {}) };
+    const result = {
+      accepted: false, rejected: true, reason, evidenceSourceMode, ...(extra || {}),
+    };
+    _bumpEvidenceSourceMode(evidenceSourceMode, sessionKey);
     _pushRecentEvent({
+      eventType: 'global_evidence_rejected',
       itemId, decision: 'rejected', reason,
       fishName: fishName || rarityCandidate, rarity: rarityCandidate,
+      evidenceSourceMode, sessionKey,
     });
     _lastIngestResult = result;
     _maybePersist();
@@ -332,6 +398,10 @@ function submitEvidence(raw) {
 
   entry.evidenceCount = (entry.evidenceCount || 0) + 1;
   entry.lastSeenAt = now;
+  if (evidenceSourceMode === 'live_roblox') {
+    entry.liveRobloxEvidenceCount = (entry.liveRobloxEvidenceCount || 0) + 1;
+  }
+  entry.lastEvidenceSourceMode = evidenceSourceMode;
   if (userHash && !entry.contributorHashes.includes(userHash)) {
     entry.contributorHashes.push(userHash);
     entry.uniqueUserCount = entry.contributorHashes.length;
@@ -342,7 +412,9 @@ function submitEvidence(raw) {
     lastValidation: nameValidation.reason || null,
     lastDelta: raw.deltaAmount || 1,
     lastAt: now,
+    lastEvidenceSourceMode: evidenceSourceMode,
   };
+  _bumpEvidenceSourceMode(evidenceSourceMode, sessionKey);
   if (nameValidation.imageAssetId) entry.imageAssetId = nameValidation.imageAssetId;
   if (nameValidation.imageUrl) entry.imageUrl = nameValidation.imageUrl;
 
@@ -351,17 +423,23 @@ function submitEvidence(raw) {
   const evalResult = _evaluateConfirmation(entry, nameValidation, {
     source,
     cleanSingleDelta: raw.cleanSingleDelta !== false,
+    evidenceSourceMode,
+    wasPreviouslyUnresolved,
   });
   entry.publicEligible = publicEligible(entry);
   if (entry.publicEligible) entry.lastConfirmedAt = now;
 
   _store.updatedAt = now;
   _pushRecentEvent({
+    eventType: evalResult.decision === 'confirmed' || evalResult.decision === 'pending'
+      ? 'global_evidence_accepted' : 'global_evidence_rejected',
     itemId,
     decision: evalResult.decision,
     reason: evalResult.reason,
     fishName,
     rarity: entry.rarity,
+    evidenceSourceMode,
+    sessionKey,
   });
 
   const result = {
@@ -374,6 +452,9 @@ function submitEvidence(raw) {
     rarity: entry.rarity,
     rarityCandidate,
     nameValidation,
+    evidenceSourceMode,
+    wasPreviouslyUnresolved,
+    wasExistingSeed: liveCatchProof.isKnownSeedItemId(itemId),
     entry: { ...entry, contributorHashes: undefined },
     publicEligible: entry.publicEligible,
     evidenceCount: entry.evidenceCount,
@@ -457,11 +538,27 @@ function getLastIngestResult() {
 }
 
 function getGlobalEvidenceStats() {
+  _load();
   const recent = getRecentEvents(20);
   return {
-    globalEvidenceAccepted: recent.filter((e) => e.decision === 'confirmed' || e.decision === 'pending').length,
-    globalEvidenceRejected: recent.filter((e) => e.decision === 'rejected' || e.decision === 'blocked').length,
+    globalEvidenceAccepted: recent.filter((e) => e.eventType === 'global_evidence_accepted'
+      || e.decision === 'confirmed' || e.decision === 'pending').length,
+    globalEvidenceRejected: recent.filter((e) => e.eventType === 'global_evidence_rejected'
+      || e.decision === 'rejected' || e.decision === 'blocked').length,
     recentEvents: recent,
+    ...liveCatchProof.buildEvidenceSourceDebug(_store, null),
+  };
+}
+
+function getStoreMeta() {
+  _load();
+  return {
+    liveRobloxEvidenceCount: _store.liveRobloxEvidenceCount || 0,
+    simulationEvidenceCount: _store.simulationEvidenceCount || 0,
+    testFixtureEvidenceCount: _store.testFixtureEvidenceCount || 0,
+    lastLiveCatchAt: _store.lastLiveCatchAt || null,
+    lastLiveCatchSessionKey: _store.lastLiveCatchSessionKey || null,
+    lastEvidenceSourceMode: _store.lastEvidenceSourceMode || null,
   };
 }
 
@@ -478,6 +575,7 @@ function buildLiveCatchBinding(sessionDiscovery) {
     lastDecision = globalResult.decision || lastDecision;
     if (globalResult.rejected) lastRejectReason = globalResult.reason;
   }
+  const evidenceDebug = liveCatchProof.buildEvidenceSourceDebug(_store, sessionDiscovery);
   return {
     lastCatchTextRaw: sessionDiscovery?.lastParserRawText || null,
     lastFishNameCandidate: sessionDiscovery?.lastFishNameCandidate ?? null,
@@ -490,6 +588,8 @@ function buildLiveCatchBinding(sessionDiscovery) {
     lastRejectReason,
     recentEvents: getRecentEvents(10),
     globalEvidence: globalResult || null,
+    evidenceSourceMode: sessionDiscovery?.evidenceSourceMode || evidenceDebug.evidenceSourceMode,
+    ...evidenceDebug,
   };
 }
 
@@ -552,6 +652,8 @@ module.exports = {
   getRecentEvents,
   getLastIngestResult,
   getGlobalEvidenceStats,
+  getStoreMeta,
+  recordPipelineEvent,
   buildLiveCatchBinding,
   reloadFromDisk,
   _reset,
