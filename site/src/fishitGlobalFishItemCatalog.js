@@ -69,6 +69,66 @@ function _persist() {
   fs.writeFileSync(sp, JSON.stringify(_store, null, 2), 'utf8');
 }
 
+function _normalizeStoredEntry(entry) {
+  if (!entry || !entry.fishName) return false;
+  const parsed = catchNameParser.parseCatchInput({
+    fishName: entry.fishName,
+    rawText: entry.fishName,
+  });
+  const base = parsed.baseFishName || catchNameParser.baseFishNameForConflict(entry.fishName) || entry.fishName;
+  let changed = false;
+  if (entry.baseFishName !== base || entry.fishName !== base) {
+    entry.baseFishName = base;
+    entry.fishName = base;
+    entry.normalizedFishName = normalizeFishName(base);
+    changed = true;
+  }
+  if (!entry.displayName || entry.displayName.includes('(')) {
+    entry.displayName = parsed.displayName || entry.displayName || base;
+    changed = true;
+  }
+  if (parsed.mutation && !entry.mutation) {
+    entry.mutation = parsed.mutation;
+    changed = true;
+  }
+  if (parsed.weightKg != null && entry.weightKg == null) {
+    entry.weightKg = parsed.weightKg;
+    changed = true;
+  }
+  if (Array.isArray(entry.conflictNames) && entry.conflictNames.length) {
+    const bases = new Set(entry.conflictNames.map((n) => catchNameParser.baseFishNameForConflict(n) || n));
+    if (bases.size <= 1) {
+      entry.conflictNames = null;
+      if (entry.confidence === 'conflict' && entry.blockedReason == null) {
+        entry.confidence = 'confirmed';
+        entry.publicEligible = true;
+        entry.confirmationReason = entry.confirmationReason || 'normalized_base_name_repair';
+      }
+      changed = true;
+    } else {
+      const next = [...bases];
+      if (next.length !== entry.conflictNames.length) {
+        entry.conflictNames = next;
+        changed = true;
+      }
+    }
+  }
+  entry.publicEligible = publicEligible(entry);
+  return changed;
+}
+
+function _normalizeStoredEntries() {
+  let changed = false;
+  for (const entry of Object.values(_store.byItemId || {})) {
+    if (_normalizeStoredEntry(entry)) changed = true;
+  }
+  if (changed) {
+    _store.updatedAt = new Date().toISOString();
+    _maybePersist();
+    _resetMergedFishCatalog();
+  }
+}
+
 function _load() {
   if (_store) return _store;
   try {
@@ -88,6 +148,7 @@ function _load() {
         lastEvidenceSourceMode: raw.lastEvidenceSourceMode || null,
       };
       _purgeForceBlocked();
+      _normalizeStoredEntries();
       return _store;
     }
   } catch (_) { /* fall through */ }

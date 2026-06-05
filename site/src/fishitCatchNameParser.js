@@ -27,7 +27,8 @@ const SUFFIX_RE = /\s*(?:!|\.|kg|lbs|lb)\s*$/i;
 /** Mutation/prefix labels — separate from rarity (BLOCKER10T). */
 const MUTATION_LABELS = new Set([
   'shiny', 'big', 'baby', 'giant', 'mutated', 'albino', 'darkened', 'glossy',
-  'mosaic', 'silver', 'golden', 'mythical', 'frozen', 'electric',
+  'mosaic', 'silver', 'golden', 'mythical', 'frozen', 'electric', 'sandy',
+  'corrupt', 'ghost', 'midnight',
 ]);
 
 function cleanToken(raw) {
