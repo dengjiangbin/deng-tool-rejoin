@@ -20,11 +20,14 @@ if (src.charCodeAt(0) === 0xfeff) {
 if (/^\s*loadstring\s*\(/.test(src)) {
   errors.push('tracker.lua must not begin with loadstring() wrapper');
 }
-if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05')) {
-  errors.push('TRACKER_BOOT_BEGIN BLOCKER10S marker missing');
+if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10T_LIVE_CATCH_NORMALIZE_AND_PUBLIC_PROMOTE_2026_06_05')) {
+  errors.push('TRACKER_BOOT_BEGIN BLOCKER10T marker missing');
 }
-if (!src.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05')) {
-  errors.push('BLOCKER10S build marker missing');
+if (!src.includes('BLOCKER10T_LIVE_CATCH_NORMALIZE_AND_PUBLIC_PROMOTE_2026_06_05')) {
+  errors.push('BLOCKER10T build marker missing');
+}
+if (!src.includes('parseCatchNameFull')) {
+  errors.push('parseCatchNameFull catch normalizer missing');
 }
 if (src.includes('TRACKER_BOOT_BEGIN BLOCKER10J')) {
   errors.push('stale TRACKER_BOOT_BEGIN BLOCKER10J must be removed');

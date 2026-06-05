@@ -7,6 +7,7 @@
 const path = require('path');
 const fs = require('fs');
 const rarityLabels = require('./fishitRarityLabels');
+const catchNameParser = require('./fishitCatchNameParser');
 
 function storePath() {
   return process.env.FISHIT_LEARNED_FISH_CATALOG_PATH
@@ -15,6 +16,7 @@ function storePath() {
 
 const HIGH_CONFIDENCE_SOURCES = new Set([
   'catch_delta_high_confidence',
+  'live_roblox_catch_delta',
   'manual_confirmed',
   'seed_confirmed',
 ]);
@@ -80,6 +82,11 @@ function publicEligible(entry) {
   if (!entry || entry.category !== 'fish' || !entry.name) return false;
   if (/^Item #\d+$/i.test(entry.name)) return false;
   if (rarityLabels.isBlockedLearnName(entry.name)) return false;
+  if (entry.source === 'live_roblox_catch_delta'
+      && entry.proof?.evidenceSourceMode === 'live_roblox'
+      && entry.proof?.promotionDecision === 'confirmed') {
+    return true;
+  }
   if (!isHighConfidence(entry)) return false;
   const obs = entry.proof && entry.proof.observationCount;
   const nameValidated = entry.proof && entry.proof.nameValidated === true;
@@ -206,12 +213,16 @@ function ingestEntry(raw, mainCatalogLookup, nameValidation) {
     }
   }
 
-  if (existing && existing.name && existing.name !== name) {
-    blockEntry(itemId, existing.name, 'name_conflict_quarantine', { conflictName: name });
-    return { updated: false, reason: 'name_conflict', itemId, conflictNames: [existing.name, name] };
+  const existingBase = existing
+    ? (catchNameParser.baseFishNameForConflict(existing.name) || existing.name)
+    : null;
+  const incomingBase = catchNameParser.baseFishNameForConflict(name) || name;
+  if (existing && existingBase && incomingBase && existingBase !== incomingBase) {
+    blockEntry(itemId, existingBase, 'name_conflict_quarantine', { conflictName: incomingBase });
+    return { updated: false, reason: 'live_catch_conflict_base_name', itemId, conflictNames: [existingBase, incomingBase] };
   }
 
-  if (existing && publicEligible(existing) && existing.name === name) {
+  if (existing && publicEligible(existing) && existingBase === incomingBase) {
     return {
       updated: false,
       reason: 'already_confirmed',
@@ -222,19 +233,26 @@ function ingestEntry(raw, mainCatalogLookup, nameValidation) {
   }
 
   const observationCount = (existing && existing.proof && existing.proof.observationCount) || 0;
-  const nextObs = (existing && existing.name === name) ? observationCount + 1 : 1;
+  const nextObs = (existing && existingBase === incomingBase) ? observationCount + 1 : 1;
 
   let finalSource = source;
   let finalConfidence = confidence != null ? confidence : 0.5;
   let promotionDecision = 'pending';
   let promotionReason = 'first_observation_pending';
 
+  const isLiveRobloxCatch = source === 'live_roblox_catch_delta'
+    && proof?.evidenceSourceMode === 'live_roblox';
   const canPromoteImmediate = nameValidated
     && nextObs >= 1
     && HIGH_CONFIDENCE_SOURCES.has('catch_delta_high_confidence')
     && source === 'catch_delta_high_confidence';
 
-  if (nameValidated && nextObs >= 2) {
+  if (isLiveRobloxCatch && nextObs >= 1) {
+    finalSource = 'live_roblox_catch_delta';
+    finalConfidence = 0.85;
+    promotionDecision = 'confirmed';
+    promotionReason = 'live_roblox_single_delta_public';
+  } else if (nameValidated && nextObs >= 2) {
     finalSource = 'catch_delta_high_confidence';
     finalConfidence = 1;
     promotionDecision = 'confirmed';
@@ -270,7 +288,10 @@ function ingestEntry(raw, mainCatalogLookup, nameValidation) {
 
   const entry = {
     itemId,
-    name,
+    name: incomingBase,
+    displayName: typeof raw.displayName === 'string' ? raw.displayName.trim() : name,
+    mutation: raw.mutation || null,
+    weightKg: raw.weightKg != null ? raw.weightKg : null,
     category: category === 'fish' ? 'fish' : category,
     source: finalSource,
     confidence: finalConfidence,

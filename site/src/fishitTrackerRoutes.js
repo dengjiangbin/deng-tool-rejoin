@@ -43,7 +43,7 @@ const rarityLabels = require('./fishitRarityLabels');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10S_BUILD, BLOCKER10S_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10T_BUILD, BLOCKER10T_UI_MARKER } = require('./fishitTrackerBuild');
 
 learnedFishCatalog.purgePoisonedMappings();
 for (const row of learnedFishCatalog.getBlockedMappings()) {
@@ -89,8 +89,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10S_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10S_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10T_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10T_BUILD;
 
 const CONFIRMED_FISH_IMAGE_ASSET_IDS = [
   '128385926161840',
@@ -223,10 +223,29 @@ function mergeItemsNoDowngrade(incoming, existing) {
 
 /** BLOCKER10H: enrich incoming placeholders from persistent catalog before store. */
 function catalogMetaForItemId(itemId) {
+  const global = globalFishCatalog.lookupById(itemId);
+  if (global && (global.publicEligible || global.confidence === 'confirmed')
+      && !rarityLabels.isBlockedLearnName(global.baseFishName || global.fishName)) {
+    return {
+      name: global.displayName || global.fishName,
+      displayName: global.displayName || global.fishName,
+      baseFishName: global.baseFishName || global.fishName,
+      mutation: global.mutation || null,
+      category: 'fish',
+      source: global.source || 'live_roblox_catch_delta',
+      tier: global.rarity || null,
+      imageUrl: global.imageUrl || null,
+      imageAssetId: global.imageAssetId || null,
+      confidence: global.confidence || null,
+      publicEligible: global.publicEligible,
+    };
+  }
   const fish = fishCatalog.lookupByItemId(itemId);
   if (fish) {
     return {
       name: fish.name,
+      displayName: fish.name,
+      baseFishName: fish.name,
       category: fish.category || 'fish',
       source: fish.source,
       tier: fish.rarity || fish.tier || null,
@@ -241,11 +260,15 @@ function catalogMetaForItemId(itemId) {
   const learned = learnedFishCatalog.lookupById(itemId);
   if (learned && learned.publicEligible) {
     return {
-      name: learned.name,
+      name: learned.displayName || learned.name,
+      displayName: learned.displayName || learned.name,
+      baseFishName: learned.name,
+      mutation: learned.mutation || null,
       category: learned.category || 'fish',
       source: learned.source,
       tier: null,
       confidence: String(learned.confidence),
+      publicEligible: true,
     };
   }
   return main;
@@ -290,7 +313,10 @@ function mergeItemsNoDowngradeFromCatalog(incoming) {
     }
     return {
       ...it,
-      name: meta.name,
+      name: meta.displayName || meta.name,
+      displayName: meta.displayName || meta.name,
+      baseFishName: meta.baseFishName || meta.name,
+      mutation: meta.mutation || null,
       category: catalogStore.isFishCategory(meta.category) ? 'fish' : (meta.category || it.category),
       resolved: true,
       catalogReason: 'catalog_hit',
@@ -354,7 +380,8 @@ function enrichItemsFromCatalog(items) {
       meta = catalogStore.lookupById(idFromName);
     }
 
-    const name = trackerHasRealName ? it.name : ((meta && meta.name) || it.name);
+    const displayFromMeta = meta && (meta.displayName || meta.name);
+    const name = trackerHasRealName ? it.name : (displayFromMeta || it.name);
     let rarity = it.rarity || (meta && meta.tier) || null;
     if (rarity) rarity = catalogStore.normalizeTier(rarity);
 
@@ -397,6 +424,9 @@ function enrichItemsFromCatalog(items) {
     out.push({
       ...it,
       name,
+      displayName: meta?.displayName || it.displayName || name,
+      baseFishName: meta?.baseFishName || it.baseFishName || null,
+      mutation: meta?.mutation || it.mutation || null,
       rarity,
       category,
       imageUrl,
@@ -489,7 +519,11 @@ function isPublicFishItem(item) {
       if (!rarityLabels.isBlockedLearnName(confirmed.name)) return true;
     }
     const global = globalFishCatalog.lookupById(item.itemId);
-    if (global && global.publicEligible && !rarityLabels.isBlockedLearnName(global.fishName)) return true;
+    const globalBase = global && (global.baseFishName || global.fishName);
+    if (global && globalBase && !rarityLabels.isBlockedLearnName(globalBase)) {
+      if (global.publicEligible) return true;
+      if (global.confidence === 'confirmed' && (global.liveRobloxEvidenceCount || 0) > 0) return true;
+    }
     const learned = learnedFishCatalog.lookupById(item.itemId);
     if (learned && learned.publicEligible && learned.category === 'fish'
         && !rarityLabels.isBlockedLearnName(learned.name)) {
@@ -544,14 +578,38 @@ function buildPublicLegacyCounts(fishCounts) {
   };
 }
 
+const RAW_NAME_FIELD_KEYS = new Set([
+  'name', 'displayname', 'fishname', 'species', 'itemname', 'title', 'label',
+]);
+
+function proofHasRealNameField(fields) {
+  if (!fields || typeof fields !== 'object') return false;
+  for (const [k, v] of Object.entries(fields)) {
+    const key = String(k).replace(/^meta\./i, '').toLowerCase();
+    if (key === 'weight' || key === 'kg' || key === 'rarity' || key === 'mutation') continue;
+    if (RAW_NAME_FIELD_KEYS.has(key) && typeof v === 'string' && v.trim().length > 0) return true;
+  }
+  return false;
+}
+
+function proofHasWeightOnly(fields) {
+  if (!fields || typeof fields !== 'object') return false;
+  let hasWeight = false;
+  let hasName = false;
+  for (const [k, v] of Object.entries(fields)) {
+    const key = String(k).replace(/^meta\./i, '').toLowerCase();
+    if (key === 'weight' || key === 'kg') hasWeight = true;
+    if (RAW_NAME_FIELD_KEYS.has(key) && typeof v === 'string' && v.trim()) hasName = true;
+  }
+  return hasWeight && !hasName;
+}
+
 function rawHadNameFromItem(rawItem, proof) {
   const itemId = rawItem?.itemId;
   if (rawItem?.name && !catalogStore.isPlaceholderItemName(rawItem.name, itemId) && /[a-zA-Z]/.test(rawItem.name)) {
     return true;
   }
-  const fields = proof?.rawNameFields;
-  if (!fields || typeof fields !== 'object') return false;
-  return Object.values(fields).some((v) => typeof v === 'string' && v.trim().length > 0);
+  return proofHasRealNameField(proof?.rawNameFields);
 }
 
 function deriveResolution(rawItem, enrichedItem) {
@@ -567,8 +625,11 @@ function deriveResolution(rawItem, enrichedItem) {
   const isPlaceholderFinal = catalogStore.isPlaceholderItemName(finalName, itemId);
 
   let resolutionReason = 'raw_numeric_only_no_catalog_match';
-  if (rawHadName && isPlaceholderFinal) {
-    resolutionReason = 'raw_name_present_but_not_used_parser_bug';
+  if ((proofHasWeightOnly(proof?.rawWeightFields) || proofHasWeightOnly(proof?.rawNameFields))
+      && isPlaceholderFinal && !rawHadName) {
+    resolutionReason = 'raw_weight_present_no_name';
+  } else if (rawHadName && isPlaceholderFinal) {
+    resolutionReason = 'live_catch_name_pending';
   } else if (catalogMatched && catalogSource === 'seed_confirmed') {
     resolutionReason = 'raw_numeric_only_catalog_seed_confirmed';
   } else if (catalogMatched) {
@@ -676,9 +737,10 @@ function renderTrackerPage(_req, res) {
     title: '🎣 Fish It Live Inventory Tracker',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
-    blocker10sBuild: BLOCKER10S_BUILD,
-    blocker10rBuild: BLOCKER10S_BUILD,
-    blocker10qBuild: BLOCKER10S_BUILD,
+    blocker10tBuild: BLOCKER10T_BUILD,
+    blocker10sBuild: BLOCKER10T_BUILD,
+    blocker10rBuild: BLOCKER10T_BUILD,
+    blocker10qBuild: BLOCKER10T_BUILD,
   });
 }
 
@@ -1351,6 +1413,8 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
       : null,
     catchWatcherStatus: data.catchWatcherStatus || null,
     lastGoodPublicFishCount: data.lastGoodPublicFishCount || 0,
+    lastCatchParsed: data.nameCatalogDiscovery?.lastCatchParsed
+      || data.lastCatchParsed || null,
   });
 });
 
@@ -1386,13 +1450,14 @@ module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
 module.exports.PUBLIC_API_BUILD = PUBLIC_API_BUILD;
-module.exports.BLOCKER10S_BUILD = BLOCKER10S_BUILD;
-module.exports.BLOCKER10R_BUILD = BLOCKER10S_BUILD;
-module.exports.BLOCKER10Q_BUILD = BLOCKER10S_BUILD;
-module.exports.BLOCKER10P_BUILD = BLOCKER10S_BUILD;
-module.exports.BLOCKER10O_BUILD = BLOCKER10S_BUILD;
-module.exports.BLOCKER10N2_BUILD = BLOCKER10S_BUILD;
-module.exports.BLOCKER10N_BUILD = BLOCKER10S_BUILD;
+module.exports.BLOCKER10T_BUILD = BLOCKER10T_BUILD;
+module.exports.BLOCKER10S_BUILD = BLOCKER10T_BUILD;
+module.exports.BLOCKER10R_BUILD = BLOCKER10T_BUILD;
+module.exports.BLOCKER10Q_BUILD = BLOCKER10T_BUILD;
+module.exports.BLOCKER10P_BUILD = BLOCKER10T_BUILD;
+module.exports.BLOCKER10O_BUILD = BLOCKER10T_BUILD;
+module.exports.BLOCKER10N2_BUILD = BLOCKER10T_BUILD;
+module.exports.BLOCKER10N_BUILD = BLOCKER10T_BUILD;
 module.exports.ingestLearnedFishEntry = ingestLearnedFishEntry;
 module.exports.runCatchDeltaOnUpload = runCatchDeltaOnUpload;
 module.exports.catalogMetaForItemId = catalogMetaForItemId;

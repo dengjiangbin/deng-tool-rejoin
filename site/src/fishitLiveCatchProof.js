@@ -39,7 +39,8 @@ function resolveEvidenceSourceMode(body) {
   }
   if (b.clientOrigin === 'roblox_tracker') return 'live_roblox';
   if (b.trackerBuild && (
-    String(b.trackerBuild).includes('BLOCKER10S')
+    String(b.trackerBuild).includes('BLOCKER10T')
+    || String(b.trackerBuild).includes('BLOCKER10S')
     || String(b.trackerBuild).includes('BLOCKER10R')
   )) return 'live_roblox';
   if (b.adminSeed || b.source === 'admin_seed') return 'admin_seed';
@@ -111,11 +112,20 @@ function buildNewUnresolvedBindingProof(discovery, sessionKey, globalLookup) {
     && evidenceSourceMode === 'live_roblox'
   );
 
+  const lastParsed = discovery?.lastCatchParsed || null;
   return {
     attempted,
     itemId,
     previousStatus,
     fishNameCandidate: discovery?.lastFishNameCandidate ?? null,
+    fishNameCandidateRaw: discovery?.lastParserRawText ?? null,
+    baseFishNameCandidate: discovery?.lastBaseFishNameCandidate
+      ?? lastParsed?.baseFishName ?? discovery?.lastFishNameCandidate ?? null,
+    displayNameCandidate: discovery?.lastDisplayNameCandidate
+      ?? lastParsed?.displayName ?? null,
+    mutationCandidate: discovery?.lastMutationCandidate
+      ?? lastParsed?.mutation ?? null,
+    weightKg: discovery?.lastWeightKg ?? lastParsed?.weightKg ?? null,
     rarityCandidate: discovery?.lastRarityCandidate ?? null,
     deltaCandidates: deltas,
     decision,

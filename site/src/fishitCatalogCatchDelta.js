@@ -13,10 +13,23 @@ const CATCH_STALE_SECONDS = Number(process.env.FISHIT_CATCH_STALE_SECONDS || 180
 const VERIFIED_CATCH_SOURCES = new Set(['catch_notification', 'catch_event']);
 
 function sanitisePendingCatch(raw) {
-  const parsed = catchNameParser.parseCatchInput(raw);
-  if (!parsed.fishNameCandidate) return null;
+  const parsed = catchNameParser.parseCatchInput({
+    fishName: raw?.rawText || raw?.fishName || raw?.name,
+    rawText: raw?.rawText,
+    source: raw?.source,
+    detectedAt: raw?.detectedAt,
+  });
+  if (!parsed.baseFishName && !parsed.fishNameCandidate && !raw?.baseFishName && !raw?.fishName) return null;
+  const baseFishName = raw?.baseFishName || parsed.baseFishName || parsed.fishNameCandidate || raw?.fishName;
+  const displayName = raw?.displayName || parsed.displayName || baseFishName;
+  const mutation = raw?.mutation != null ? raw.mutation : (parsed.mutation || null);
+  const weightKg = raw?.weightKg != null ? raw.weightKg : parsed.weightKg;
   return {
-    fishName: parsed.fishNameCandidate,
+    fishName: baseFishName,
+    baseFishName,
+    displayName,
+    mutation,
+    weightKg: weightKg != null ? weightKg : null,
     rarityCandidate: parsed.rarityCandidate,
     detectedAt: parsed.detectedAt,
     source: parsed.source,
@@ -94,9 +107,20 @@ function isKnownNonFishItemId(itemId, mainCatalogLookup, currentItems) {
   return cat === 'rod' || cat === 'rods' || cat === 'bait' || cat === 'items';
 }
 
-function resolveLearnSource(pending, increasedCount, nameValidation) {
+function resolveLearnSource(pending, increasedCount, nameValidation, globalContext) {
   const verifiedCatch = VERIFIED_CATCH_SOURCES.has(pending.source);
   const nameKnown = !!(nameValidation && nameValidation.nameKnown);
+  const isLiveRoblox = globalContext?.evidenceSourceMode === 'live_roblox';
+  if (increasedCount === 1 && verifiedCatch && isLiveRoblox) {
+    return {
+      source: nameKnown ? 'catch_delta_high_confidence' : 'live_roblox_catch_delta',
+      confidence: nameKnown ? 1.0 : 0.85,
+      promotionDecision: 'confirmed',
+      promotionReason: nameKnown
+        ? 'verified_name_single_delta'
+        : 'live_roblox_single_delta_public',
+    };
+  }
   if (increasedCount === 1 && verifiedCatch && nameKnown) {
     return {
       source: 'catch_delta_high_confidence',
@@ -110,7 +134,7 @@ function resolveLearnSource(pending, increasedCount, nameValidation) {
       source: 'catch_delta_pending',
       confidence: 0.5,
       promotionDecision: 'pending',
-      promotionReason: nameKnown ? 'awaiting_second_observation' : 'name_not_validated',
+      promotionReason: nameKnown ? 'awaiting_second_observation' : 'name_not_in_catalog',
     };
   }
   return {
@@ -162,15 +186,33 @@ function processCatchDelta({
   uploadFailed,
   globalContext,
 }) {
-  const parsed = catchNameParser.parseCatchInput(pendingCatch);
+  const parsed = catchNameParser.parseCatchInput({
+    rawText: pendingCatch?.rawText,
+    fishName: pendingCatch?.rawText || pendingCatch?.fishName || pendingCatch?.name,
+    source: pendingCatch?.source,
+    detectedAt: pendingCatch?.detectedAt,
+  });
   const discovery = {
     lastPendingCatchName: null,
     lastCatchAt: null,
-    lastFishNameCandidate: parsed.fishNameCandidate,
+    lastFishNameCandidate: parsed.baseFishName || parsed.fishNameCandidate,
+    lastBaseFishNameCandidate: parsed.baseFishName || parsed.fishNameCandidate,
+    lastDisplayNameCandidate: parsed.displayName,
+    lastMutationCandidate: parsed.mutation,
+    lastWeightKg: parsed.weightKg,
     lastRarityCandidate: parsed.rarityCandidate,
     lastParserSource: parsed.source,
     lastParserDecision: parsed.parserDecision,
     lastParserRawText: parsed.rawText,
+    lastCatchParsed: {
+      rawText: parsed.rawText,
+      baseFishName: parsed.baseFishName || parsed.fishNameCandidate,
+      displayName: parsed.displayName,
+      mutation: parsed.mutation,
+      rarity: parsed.rarityCandidate,
+      weightKg: parsed.weightKg,
+      parserDecision: parsed.parserDecision,
+    },
     promotionDecision: null,
     promotionReason: null,
     previousInventoryCounts: null,
@@ -357,14 +399,17 @@ function processCatchDelta({
     return discovery;
   }
 
-  const nameValidation = nameOnlyCatalog.validateFishName(pending.fishName);
-  const learnMeta = resolveLearnSource(pending, 1, nameValidation);
+  const nameValidation = nameOnlyCatalog.validateFishName(pending.baseFishName || pending.fishName);
+  const learnMeta = resolveLearnSource(pending, 1, nameValidation, globalContext);
   discovery.promotionDecision = learnMeta.promotionDecision;
   discovery.promotionReason = learnMeta.promotionReason;
 
   const mapping = {
     itemId: inc.itemId,
-    name: pending.fishName,
+    name: pending.baseFishName || pending.fishName,
+    displayName: pending.displayName || pending.fishName,
+    mutation: pending.mutation || null,
+    weightKg: pending.weightKg != null ? pending.weightKg : null,
     category: 'fish',
     source: learnMeta.source,
     confidence: learnMeta.confidence,
@@ -372,7 +417,10 @@ function processCatchDelta({
       beforeAmount: inc.beforeAmount,
       afterAmount: inc.afterAmount,
       delta: inc.delta,
-      catchName: pending.fishName,
+      catchName: pending.baseFishName || pending.fishName,
+      displayName: pending.displayName,
+      mutation: pending.mutation,
+      weightKg: pending.weightKg,
       catchSource: pending.source,
       catchAt: pending.detectedAt,
       rarityCandidate: pending.rarityCandidate,
@@ -381,14 +429,18 @@ function processCatchDelta({
       validationReason: nameValidation.reason,
       promotionDecision: learnMeta.promotionDecision,
       promotionReason: learnMeta.promotionReason,
+      evidenceSourceMode: globalContext?.evidenceSourceMode || 'api_simulation',
       evidenceSources: nameValidation.reason ? [nameValidation.reason] : [],
     },
   };
   const ingestResult = ingestLearned(mapping);
   discovery.globalEvidence = _submitGlobalEvidence(globalContext, {
     itemId: inc.itemId,
-    fishNameCandidate: pending.fishName,
+    fishNameCandidate: pending.rawText || pending.displayName || pending.fishName,
+    displayName: pending.displayName,
     rarityCandidate: pending.rarityCandidate,
+    mutation: pending.mutation,
+    weightKg: pending.weightKg,
     source: pending.source,
     sourceText: parsed.rawText,
     deltaAmount: inc.delta,
@@ -399,7 +451,9 @@ function processCatchDelta({
   });
   const learnedItem = {
     itemId: inc.itemId,
-    learnedName: pending.fishName,
+    learnedName: pending.baseFishName || pending.fishName,
+    displayName: pending.displayName,
+    mutation: pending.mutation,
     source: ingestResult.entry ? ingestResult.entry.source : learnMeta.source,
     beforeAmount: inc.beforeAmount,
     afterAmount: inc.afterAmount,

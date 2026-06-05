@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const rarityLabels = require('./fishitRarityLabels');
+const catchNameParser = require('./fishitCatchNameParser');
 const nameOnlyCatalog = require('./fishitNameOnlyCatalog');
 const fishImageAssets = require('./fishitFishImageAssets');
 const catalogStore = require('./fishitCatalogStore');
@@ -122,13 +123,19 @@ function hashContributorId(userId) {
   return crypto.createHash('sha256').update(`${salt}:${userId}`).digest('hex').slice(0, 16);
 }
 
+function catalogIdentityName(entry) {
+  if (!entry) return null;
+  return entry.baseFishName || entry.fishName || null;
+}
+
 function publicEligible(entry) {
   if (!entry) return false;
   if (entry.confidence !== 'confirmed') return false;
   if (entry.publicEligible !== true) return false;
   if (entry.blockedReason) return false;
-  if (!entry.fishName || /^Item #\d+$/i.test(entry.fishName)) return false;
-  if (rarityLabels.isBlockedLearnName(entry.fishName)) return false;
+  const idName = catalogIdentityName(entry);
+  if (!idName || /^Item #\d+$/i.test(idName)) return false;
+  if (rarityLabels.isBlockedLearnName(idName)) return false;
   return true;
 }
 
@@ -171,13 +178,20 @@ function _bumpEvidenceSourceMode(mode, sessionKey) {
 
 function _makeEntry(itemId, fishName, extra) {
   const now = new Date().toISOString();
-  const nv = nameOnlyCatalog.validateFishName(fishName);
-  const img = nv.imageAssetId ? { imageAssetId: nv.imageAssetId } : fishImageAssets.lookupByFishName(fishName);
+  const parsed = catchNameParser.parseCatchInput({ fishName });
+  const baseFishName = extra.baseFishName || parsed.baseFishName || fishName;
+  const displayName = extra.displayName || parsed.displayName || fishName;
+  const nv = nameOnlyCatalog.validateFishName(baseFishName);
+  const img = nv.imageAssetId ? { imageAssetId: nv.imageAssetId } : fishImageAssets.lookupByFishName(baseFishName);
   return {
     itemId,
     normalizedItemId: itemId,
-    fishName,
-    normalizedFishName: normalizeFishName(fishName),
+    fishName: baseFishName,
+    baseFishName,
+    displayName,
+    mutation: extra.mutation != null ? extra.mutation : (parsed.mutation || null),
+    weightKg: extra.weightKg != null ? extra.weightKg : (parsed.weightKg || null),
+    normalizedFishName: normalizeFishName(baseFishName),
     rarity: extra.rarity != null ? extra.rarity : null,
     normalizedRarity: extra.rarity != null ? normalizeRarity(extra.rarity) : null,
     imageUrl: nv.imageUrl || null,
@@ -243,25 +257,41 @@ function _evaluateConfirmation(entry, nameValidation, evidence) {
     return { decision: 'confirmed', reason: entry.confirmationReason };
   }
 
-  if (entry.evidenceCount === 1 && verifiedSource && nameKnown && hasImage
-      && evidence.cleanSingleDelta && !entry.conflictNames) {
-    if (wasUnresolved && !isSeed && !isLiveRoblox) {
+  if (entry.evidenceCount === 1 && verifiedSource && evidence.cleanSingleDelta && !entry.conflictNames) {
+    if (isLiveRoblox && entry.baseFishName) {
+      entry.confidence = 'confirmed';
+      entry.publicEligible = true;
+      entry.lastConfirmedAt = new Date().toISOString();
+      entry.confirmationReason = 'live_roblox_single_clean_delta';
+      if (!entry.sources.includes('live_roblox_catch_delta')) {
+        entry.sources.push('live_roblox_catch_delta');
+      }
+      return { decision: 'confirmed', reason: entry.confirmationReason };
+    }
+    if (nameKnown && hasImage) {
+      if (wasUnresolved && !isSeed && !isLiveRoblox) {
+        entry.confidence = 'pending';
+        entry.publicEligible = false;
+        return { decision: 'pending', reason: 'awaiting_live_roblox_evidence' };
+      }
+      entry.confidence = 'confirmed';
+      entry.publicEligible = true;
+      entry.lastConfirmedAt = new Date().toISOString();
+      entry.confirmationReason = isLiveRoblox && wasUnresolved && !isSeed
+        ? 'live_roblox_single_clean_delta'
+        : 'high_confidence_single_clean_delta';
+      return { decision: 'confirmed', reason: entry.confirmationReason };
+    }
+    if (isLiveRoblox) {
       entry.confidence = 'pending';
       entry.publicEligible = false;
-      return { decision: 'pending', reason: 'awaiting_live_roblox_evidence' };
+      return { decision: 'pending', reason: 'pending_live' };
     }
-    entry.confidence = 'confirmed';
-    entry.publicEligible = true;
-    entry.lastConfirmedAt = new Date().toISOString();
-    entry.confirmationReason = isLiveRoblox && wasUnresolved && !isSeed
-      ? 'live_roblox_single_clean_delta'
-      : 'high_confidence_single_clean_delta';
-    return { decision: 'confirmed', reason: entry.confirmationReason };
   }
 
   entry.confidence = 'pending';
   entry.publicEligible = false;
-  const reason = nameKnown ? 'awaiting_second_observation' : 'name_not_validated';
+  const reason = nameKnown ? 'awaiting_second_observation' : 'name_not_in_catalog';
   return { decision: 'pending', reason };
 }
 
@@ -321,8 +351,17 @@ function _purgeForceBlocked() {
 function submitEvidence(raw) {
   _load();
   const itemId = sanitiseItemId(raw && raw.itemId);
-  const fishName = typeof raw.fishNameCandidate === 'string' ? raw.fishNameCandidate.trim() : '';
-  const rarityCandidate = raw.rarityCandidate || null;
+  const rawCandidate = typeof raw.fishNameCandidate === 'string' ? raw.fishNameCandidate.trim() : '';
+  const parsedCatch = catchNameParser.parseCatchInput({
+    fishName: raw.sourceText || rawCandidate,
+    rawText: raw.sourceText || rawCandidate,
+    rarityCandidate: raw.rarityCandidate,
+  });
+  const fishName = parsedCatch.baseFishName || parsedCatch.fishNameCandidate || rawCandidate;
+  const displayName = raw.displayName || parsedCatch.displayName || fishName;
+  const mutation = raw.mutation != null ? raw.mutation : (parsedCatch.mutation || null);
+  const weightKg = parsedCatch.weightKg != null ? parsedCatch.weightKg : (raw.weightKg || null);
+  const rarityCandidate = parsedCatch.rarityCandidate || raw.rarityCandidate || null;
   const source = typeof raw.source === 'string' ? raw.source.slice(0, 40) : 'catch_notification';
   const evidenceSourceMode = raw.evidenceSourceMode || 'api_simulation';
   const sessionKey = raw.sessionKey || null;
@@ -363,7 +402,8 @@ function submitEvidence(raw) {
   }
 
   const nameValidation = nameOnlyCatalog.validateFishName(fishName);
-  if (!nameValidation.nameKnown && !VERIFIED_CATCH_SOURCES.has(source)) {
+  if (!nameValidation.nameKnown && !VERIFIED_CATCH_SOURCES.has(source)
+      && evidenceSourceMode !== 'live_roblox') {
     return reject('name_not_validated_weak_source', { itemId, fishName, nameValidation });
   }
 
@@ -372,14 +412,19 @@ function submitEvidence(raw) {
     return reject(entry.blockedReason || 'blocked_history', { itemId });
   }
 
-  if (entry && entry.fishName && normalizeFishName(entry.fishName) !== normalizeFishName(fishName)) {
-    const conflicts = new Set([entry.fishName, fishName, ...(entry.conflictNames || [])]);
+  const incomingBase = catchNameParser.baseFishNameForConflict(fishName) || fishName;
+  const existingBase = entry
+    ? (catchNameParser.baseFishNameForConflict(entry.baseFishName || entry.fishName) || entry.fishName)
+    : null;
+  if (entry && existingBase && incomingBase
+      && normalizeFishName(existingBase) !== normalizeFishName(incomingBase)) {
+    const conflicts = new Set([existingBase, incomingBase, ...(entry.conflictNames || [])]);
     entry.conflictNames = [...conflicts];
     entry.confidence = 'conflict';
     entry.publicEligible = false;
     entry.lastSeenAt = now;
     _store.updatedAt = now;
-    _pushRecentEvent({ itemId, decision: 'conflict', reason: 'name_conflict', fishName });
+    _pushRecentEvent({ itemId, decision: 'conflict', reason: 'live_catch_conflict_base_name', fishName: incomingBase });
     _lastIngestResult = { accepted: true, rejected: false, decision: 'conflict', itemId, entry };
     _maybePersist();
     _resetMergedFishCatalog();
@@ -388,13 +433,24 @@ function submitEvidence(raw) {
 
   if (!entry) {
     entry = _makeEntry(itemId, fishName, {
-      source: 'catch_delta',
+      source: evidenceSourceMode === 'live_roblox' ? 'live_roblox_catch_delta' : 'catch_delta',
+      baseFishName: incomingBase,
+      displayName,
+      mutation,
+      weightKg,
       gameId: raw.gameId || null,
       placeId: raw.placeId || null,
       gameVersion: raw.gameVersion || null,
     });
     _store.byItemId[itemId] = entry;
   }
+
+  entry.baseFishName = incomingBase;
+  entry.displayName = displayName || entry.displayName || incomingBase;
+  entry.mutation = mutation || entry.mutation || null;
+  if (weightKg != null) entry.weightKg = weightKg;
+  entry.fishName = incomingBase;
+  entry.normalizedFishName = normalizeFishName(incomingBase);
 
   entry.evidenceCount = (entry.evidenceCount || 0) + 1;
   entry.lastSeenAt = now;
@@ -448,7 +504,11 @@ function submitEvidence(raw) {
     decision: evalResult.decision,
     reason: evalResult.reason,
     itemId,
-    fishName,
+    fishName: incomingBase,
+    baseFishName: incomingBase,
+    displayName: entry.displayName,
+    mutation: entry.mutation,
+    weightKg: entry.weightKg,
     rarity: entry.rarity,
     rarityCandidate,
     nameValidation,
@@ -513,11 +573,16 @@ function catalogMapForItemIds(itemIds) {
     out[String(rawId)] = {
       itemId: meta.itemId,
       fishName: meta.fishName,
+      baseFishName: meta.baseFishName || meta.fishName,
+      displayName: meta.displayName || meta.fishName,
+      mutation: meta.mutation || null,
+      weightKg: meta.weightKg != null ? meta.weightKg : null,
       rarity: meta.rarity || null,
       confidence: meta.confidence,
       publicEligible: meta.publicEligible,
       evidenceCount: meta.evidenceCount,
       uniqueUserCount: meta.uniqueUserCount,
+      evidenceSourceMode: meta.lastEvidenceSourceMode || null,
       imageUrlPresent: !!(meta.imageUrl || meta.imageAssetId),
       imageAssetId: meta.imageAssetId || null,
       source: meta.source,
