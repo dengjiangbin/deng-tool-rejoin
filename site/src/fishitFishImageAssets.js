@@ -137,18 +137,24 @@ function attachFishImagesToItems(items) {
 
 function buildImageResolutionProof(fishItems) {
   if (!Array.isArray(fishItems)) return [];
-  return fishItems.map((it) => ({
-    itemId: it.itemId || null,
-    finalName: it.name || null,
-    category: it.category || null,
-    imageAssetMatched: !!it.imageAssetId,
-    imageAssetId: it.imageAssetId || null,
-    imageUrl: it.imageUrl || null,
-    imageUrlPresent: it.imageUrlPresent === true || !!it.imageUrl,
-    imageResolved: it.imageResolved === true,
-    imageStatus: it.imageStatus || null,
-    imageSource: it.imageSource || IMAGE_SOURCE_MISSING,
-  }));
+  return fishItems.map((it) => {
+    const resolved = it.imageResolved === true;
+    const verifiedProxy = it.verifiedProxy === true;
+    const usable = resolved || verifiedProxy;
+    return {
+      itemId: it.itemId || null,
+      finalName: it.name || null,
+      category: it.category || null,
+      imageAssetMatched: !!it.imageAssetId,
+      imageAssetId: it.imageAssetId || null,
+      imageUrl: it.imageUrl || null,
+      imageUrlPresent: usable,
+      imageResolved: resolved,
+      verifiedProxy,
+      imageStatus: it.imageStatus || null,
+      imageSource: it.imageSource || IMAGE_SOURCE_MISSING,
+    };
+  });
 }
 
 function getCatalogEntryCount() {

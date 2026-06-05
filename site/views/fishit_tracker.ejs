@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_UI' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05' %>">
+<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10N2_IMAGE_PROXY_LABEL_FIX_2026_06_05' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10N2_IMAGE_PROXY_LABEL_FIX_2026_06_05' %>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -136,8 +136,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_UI">
-<!-- BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_UI -->
+<body data-ui-marker="BLOCKER10N2_IMAGE_PROXY_LABEL_FIX_2026_06_05">
+<!-- BLOCKER10N2_IMAGE_PROXY_LABEL_FIX_2026_06_05 -->
 <div class="page">
   <div class="inner">
 
@@ -185,8 +185,8 @@
 
   const LS_KEY        = 'fishit_tracked_users';
   const POLL_MS       = 2500;
-  const RENDER_BUILD  = 'BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_UI';
-  const PUBLIC_API_BUILD = 'BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05';
+  const RENDER_BUILD  = 'BLOCKER10N2_IMAGE_PROXY_LABEL_FIX_2026_06_05';
+  const PUBLIC_API_BUILD = 'BLOCKER10N2_IMAGE_PROXY_LABEL_FIX_2026_06_05';
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', secret:'rarity-secret', forgotten:'rarity-forgotten' };
 
   const trackers       = new Map();
@@ -236,6 +236,10 @@
   }
   function fishCountLabel(data, fishList) {
     const fc = data && data.fishCounts;
+    const label = (fc && fc.label) || (data && data.counts && data.counts.label) || 'Fish';
+    if (label !== 'Fish') {
+      console.warn('[fishit-tracker-ui] non-fish count label blocked:', label);
+    }
     if (fc && Number.isFinite(fc.fishInstances)) {
       return `Fish: <strong>${fc.fishInstances}</strong> <span style="color:#8a94a6;">(${fc.fishTypes || fishList.length} types)</span>`;
     }
@@ -272,13 +276,27 @@
     return false;
   }
   function itemImageSrc(item) {
+    if (item.imageUrlPresent === true && isUsableImageUrl(item.imageUrl)) return item.imageUrl;
+    if (item.imageResolved === true && isUsableImageUrl(item.imageUrl)) return item.imageUrl;
+    if (item.verifiedProxy === true && isUsableImageUrl(item.imageUrl)) return item.imageUrl;
     if (isUsableImageUrl(item.imageUrl)) return item.imageUrl;
     if (item.imageAssetId && /^\d{10,22}$/.test(String(item.imageAssetId))) {
       return `/api/fishit-tracker/image/${item.imageAssetId}`;
     }
-    const name = String(item.name || '');
-    const category = String(item.category || item.tab || '').toLowerCase();
-    return ITEM_IMAGES[name] || ITEM_IMAGES[category] || ITEM_IMAGES.Default;
+    return null;
+  }
+  function onFishImageError(img, item) {
+    console.warn('[fishit-tracker-ui] image load failed', {
+      name: item && item.name,
+      itemId: item && item.itemId,
+      imageAssetId: item && item.imageAssetId,
+      imageUrl: item && item.imageUrl,
+      imageResolved: item && item.imageResolved,
+      imageStatus: item && item.imageStatus,
+      attempted: img && img.src,
+    });
+    img.onerror = null;
+    img.src = ITEM_IMAGES.Default;
   }
 
   function updateSummary() {
@@ -307,6 +325,15 @@
 </div>`;
     }).join('')}</div>`;
   }
+  function wireFishImageErrors(root) {
+    if (!root) return;
+    root.querySelectorAll('.item-card img[data-item-id]:not([data-placeholder])').forEach((img) => {
+      const card = img.closest('.item-card');
+      const itemId = img.getAttribute('data-item-id');
+      const item = { itemId, imageAssetId: img.getAttribute('data-asset-id'), name: card && card.querySelector('.item-name') && card.querySelector('.item-name').textContent };
+      img.onerror = () => onFishImageError(img, item);
+    });
+  }
 
   function createCard(username) {
     const el = document.createElement('div');
@@ -317,7 +344,7 @@
   <span class="dot" aria-hidden="true"></span>
   <span class="card-username">${escHtml(username)}</span>
   <div class="card-meta-row">
-    <span class="pill" data-items-count>Fish: <strong>-</strong></span>
+    <span class="pill" data-fish-count>Fish: <strong>-</strong></span>
     <span class="pill" data-sync-time></span>
   </div>
   <button class="btn-remove" data-remove-btn aria-label="Remove">x Remove</button>
@@ -334,7 +361,7 @@
   function updateCard(card, data) {
     card.classList.remove('state-waiting','state-error');
     card.classList.add('state-live');
-    const c = card.querySelector('[data-items-count]');
+    const c = card.querySelector('[data-fish-count]');
     const s = card.querySelector('[data-sync-time]');
     const l = card.querySelector('[data-status-line]');
     const b = card.querySelector('[data-card-body]');
@@ -386,7 +413,7 @@
     card.classList.add('state-live');
     const l = card.querySelector('[data-status-line]');
     const s = card.querySelector('[data-sync-time]');
-    const c = card.querySelector('[data-items-count]');
+    const c = card.querySelector('[data-fish-count]');
     const b = card.querySelector('[data-card-body]');
     if (l) l.innerHTML = `&#x1F7E2; ${escHtml(phaseMessage(data.phase))}`;
     if (s) s.textContent = syncTimestamp(data) ? `Sync: ${fmtTime(syncTimestamp(data))}` : '';
@@ -418,14 +445,14 @@
     card.classList.add('state-error');
     const l = card.querySelector('[data-status-line]');
     const s = card.querySelector('[data-sync-time]');
-    const c = card.querySelector('[data-items-count]');
+    const c = card.querySelector('[data-fish-count]');
     const b = card.querySelector('[data-card-body]');
     if (l) l.innerHTML = `&#x1F534; Offline &mdash; <strong>${escHtml(name)}</strong> is not running the tracker`;
     if (s && lastData) s.textContent = `Last sync: ${fmtTime(syncTimestamp(lastData))}`;
     if (lastData) {
       const fishList = getPublicFishItems(lastData);
       if (c) c.innerHTML = fishCountLabel(lastData, fishList).replace('</span>', ' &mdash; Offline</span>');
-      if (b) b.innerHTML = buildItemsHtml(fishList);
+      if (b) { b.innerHTML = buildItemsHtml(fishList); wireFishImageErrors(b); }
     }
   }
 

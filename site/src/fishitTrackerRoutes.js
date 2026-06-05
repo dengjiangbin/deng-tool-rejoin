@@ -37,7 +37,7 @@ const learnedFishCatalog = require('./fishitLearnedFishCatalog');
 const catchDelta = require('./fishitCatalogCatchDelta');
 const fishCatalog = require('./fishitFishCatalog');
 const robloxThumbnails = require('./fishitRobloxThumbnails');
-const { BLOCKER10N_BUILD, BLOCKER10N_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10N2_BUILD, BLOCKER10N2_UI_MARKER } = require('./fishitTrackerBuild');
 const packageJson = require('../package.json');
 
 function resolveServerCommit() {
@@ -77,8 +77,22 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10N_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10N_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10N2_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10N2_BUILD;
+
+const CONFIRMED_FISH_IMAGE_ASSET_IDS = [
+  '128385926161840',
+  '125066072333378',
+  '109996187340520',
+  '86776001616210',
+  '99236757363784',
+];
+
+if (process.env.NODE_ENV !== 'test') {
+  robloxThumbnails.warmCacheForAssetIds(CONFIRMED_FISH_IMAGE_ASSET_IDS).catch((err) => {
+    console.warn('[fishit] thumbnail warm-cache failed:', err && err.message ? err.message : err);
+  });
+}
 
 router.use((req, res, next) => {
   const p = req.path || '';
@@ -462,14 +476,16 @@ function isPublicFishItem(item) {
 }
 
 /** Fish-only view for public website/API (storage keeps full inventory). */
-function buildPublicFishFields(enrichedFlat) {
-  const fishItems = robloxThumbnails.attachImageFieldsToItems(
-    fishImageAssets.attachFishImagesToItems(
-      (enrichedFlat || []).filter(isPublicFishItem),
-    ),
+async function buildPublicFishFields(enrichedFlat, baseUrl) {
+  const rawFish = fishImageAssets.attachFishImagesToItems(
+    (enrichedFlat || []).filter(isPublicFishItem),
   );
+  const assetIds = rawFish.map((it) => it.imageAssetId).filter(Boolean);
+  await robloxThumbnails.resolveFishImageAssets(assetIds);
+  const fishItems = await robloxThumbnails.attachResolvedImageFieldsToItems(rawFish, baseUrl);
   const hidden = (enrichedFlat || []).filter((it) => !isPublicFishItem(it));
   const fishCounts = {
+    label: 'Fish',
     fishTypes: fishItems.length,
     fishInstances: sumItemAmounts(fishItems),
     hiddenNonFishTypes: hidden.length,
@@ -489,6 +505,7 @@ function buildPublicLegacyCounts(fishCounts) {
   const types = fishCounts.fishTypes;
   const instances = fishCounts.fishInstances;
   return {
+    label: 'Fish',
     fish: types,
     fishInstances: instances,
     all: instances,
@@ -630,20 +647,21 @@ function renderTrackerPage(_req, res) {
     title: '🎣 Fish It Live Inventory Tracker',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
-    blocker10nBuild: BLOCKER10N_BUILD,
+    blocker10n2Build: BLOCKER10N2_BUILD,
   });
 }
 
 router.get('/tracker', renderTrackerPage);
 router.get('/fishit-tracker', renderTrackerPage);
 
-// ── GET /api/fishit-tracker/image/:assetId — thumbnail proxy (BLOCKER10N) ──
-router.get('/api/fishit-tracker/image/:assetId', getLimiter, async (req, res) => {
+// ── GET /api/fishit-tracker/image/:assetId — thumbnail proxy (BLOCKER10N2) ──
+router.get('/api/fishit-tracker/image/:assetId', async (req, res) => {
   const assetId = robloxThumbnails.sanitiseAssetId(req.params.assetId);
   if (!assetId) {
-    return res.status(400).json({ error: 'invalid_asset_id' });
+    console.warn('[fishit] image proxy invalid_asset_id:', req.params.assetId);
+    return res.status(400).type('text/plain').send('invalid_asset_id');
   }
-  res.set('Cache-Control', 'public, max-age=3600');
+  res.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
   const cached = robloxThumbnails.getCached(assetId);
   if (cached && cached.imageUrl) {
     return res.redirect(302, cached.imageUrl);
@@ -653,8 +671,26 @@ router.get('/api/fishit-tracker/image/:assetId', getLimiter, async (req, res) =>
     if (resolved.imageUrl) {
       return res.redirect(302, resolved.imageUrl);
     }
-  } catch (_) { /* fall through */ }
+    console.warn('[fishit] image proxy unresolved assetId=%s status=%s reason=%s',
+      assetId, resolved.imageStatus, resolved.failureReason || 'none');
+  } catch (err) {
+    console.warn('[fishit] image proxy error assetId=%s:', assetId, err && err.message ? err.message : err);
+  }
   return res.redirect(302, '/assets/img/fishit/fallback-fish.svg');
+});
+
+// ── GET /api/fishit-tracker/image-debug/:assetId — image pipeline diagnostic ──
+router.get('/api/fishit-tracker/image-debug/:assetId', getLimiter, async (req, res) => {
+  const assetId = robloxThumbnails.sanitiseAssetId(req.params.assetId);
+  if (!assetId) {
+    return res.status(400).json({ ok: false, assetId: null, error: 'invalid_asset_id' });
+  }
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const dbg = await robloxThumbnails.debugImageAsset(assetId, baseUrl);
+  return res.status(200).json({
+    ...dbg,
+    publicApiBuild: PUBLIC_API_BUILD,
+  });
 });
 
 // Allowed inventory sources. "replion" is the source of truth.
@@ -996,7 +1032,7 @@ router.get('/api/fishit-tracker/catalog', getLimiter, (_req, res) => {
 
 // ── GET get-backpack (canonical + legacy alias) ───────────────────
 // Also resolves userId aliases (uid:<number> keys created on POST).
-function handleGetBackpack(req, res) {
+async function handleGetBackpack(req, res) {
   const cleanUser = sanitiseUsername(req.params.username);
   if (!cleanUser) {
     return res.status(400).json({ error: 'Invalid username.' });
@@ -1022,7 +1058,8 @@ function handleGetBackpack(req, res) {
   const rawInventory = buildInventoryGroups(sourceItems);
   const countsRaw = inventoryCountsFromGroups(rawInventory);
   const countsEnriched = inventoryCountsFromGroups(enrichedInventory);
-  const publicFish = buildPublicFishFields(enrichedFlat);
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const publicFish = await buildPublicFishFields(enrichedFlat, baseUrl);
   const imageResolutionProof = fishImageAssets.buildImageResolutionProof(publicFish.fishItems);
 
   const fishCatalogStats = fishCatalog.getStats();
@@ -1068,7 +1105,7 @@ router.get('/api/tracker/get-backpack/:username', getLimiter, handleGetBackpack)
 // the full inventory dump. Helps distinguish backend-has-data vs
 // frontend-render bugs without leaking sensitive inventory contents.
 // Also returns serverCommit so the caller can verify which build is live.
-router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
+router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) => {
   const cleanUser = sanitiseUsername(req.params.username);
   if (!cleanUser) return res.status(400).json({ ok: false, error: 'Invalid username.' });
 
@@ -1119,7 +1156,8 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
   const selectedPath = data.parseStats?.selectedPath || null;
   const rawInspector = buildRawInspector(rawItemsArr, enrichedAll, selectedPath);
   const unresolvedRawProof = buildUnresolvedRawProof(rawItemsArr, enrichedAll, selectedPath);
-  const publicFishDbg = buildPublicFishFields(enrichedAll);
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const publicFishDbg = await buildPublicFishFields(enrichedAll, baseUrl);
   const imageResolutionProof = fishImageAssets.buildImageResolutionProof(publicFishDbg.fishItems);
   const fishCatalogStats = fishCatalog.getStats();
 
@@ -1212,7 +1250,8 @@ module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
 module.exports.PUBLIC_API_BUILD = PUBLIC_API_BUILD;
-module.exports.BLOCKER10N_BUILD = BLOCKER10N_BUILD;
+module.exports.BLOCKER10N2_BUILD = BLOCKER10N2_BUILD;
+module.exports.BLOCKER10N_BUILD = BLOCKER10N2_BUILD;
 module.exports.ingestLearnedFishEntry = ingestLearnedFishEntry;
 module.exports.runCatchDeltaOnUpload = runCatchDeltaOnUpload;
 module.exports.catalogMetaForItemId = catalogMetaForItemId;
