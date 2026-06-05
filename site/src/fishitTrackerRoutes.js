@@ -37,7 +37,8 @@ const learnedFishCatalog = require('./fishitLearnedFishCatalog');
 const catchDelta = require('./fishitCatalogCatchDelta');
 const fishCatalog = require('./fishitFishCatalog');
 const robloxThumbnails = require('./fishitRobloxThumbnails');
-const { BLOCKER10N2_BUILD, BLOCKER10N2_UI_MARKER } = require('./fishitTrackerBuild');
+const staticCatalogAudit = require('./fishitStaticCatalogAudit');
+const { BLOCKER10O_BUILD, BLOCKER10O_UI_MARKER } = require('./fishitTrackerBuild');
 const packageJson = require('../package.json');
 
 function resolveServerCommit() {
@@ -77,8 +78,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10N2_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10N2_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10O_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10O_BUILD;
 
 const CONFIRMED_FISH_IMAGE_ASSET_IDS = [
   '128385926161840',
@@ -248,6 +249,7 @@ function ingestLearnedFishEntry(raw) {
       source: r.entry.source,
       confidence: 'catch_delta',
     });
+    fishCatalog._reset();
   }
   return r;
 }
@@ -462,6 +464,8 @@ function isPublicFishItem(item) {
   const cat = String(item.category || '').toLowerCase();
   if (cat === 'rod' || cat === 'bait') return false;
   if (item.itemId) {
+    const confirmed = fishCatalog.lookupByItemId(item.itemId);
+    if (confirmed && confirmed.category === 'fish') return true;
     const learned = learnedFishCatalog.lookupById(item.itemId);
     if (learned && learned.publicEligible && learned.category === 'fish') {
       return true;
@@ -647,7 +651,7 @@ function renderTrackerPage(_req, res) {
     title: '🎣 Fish It Live Inventory Tracker',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
-    blocker10n2Build: BLOCKER10N2_BUILD,
+    blocker10oBuild: BLOCKER10O_BUILD,
   });
 }
 
@@ -1213,8 +1217,10 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     nameCatalogDiscovery: catchDelta.buildNameCatalogDiscoveryForDebug(
       data.nameCatalogDiscovery,
       learnedFishCatalog,
+      data,
     ),
     learnedFishCatalogCount: learnedFishCatalog.getAllMappings().length,
+    staticCatalogAudit: staticCatalogAudit.auditStaticCatalogSources(),
   });
 });
 
@@ -1250,8 +1256,9 @@ module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
 module.exports.PUBLIC_API_BUILD = PUBLIC_API_BUILD;
-module.exports.BLOCKER10N2_BUILD = BLOCKER10N2_BUILD;
-module.exports.BLOCKER10N_BUILD = BLOCKER10N2_BUILD;
+module.exports.BLOCKER10O_BUILD = BLOCKER10O_BUILD;
+module.exports.BLOCKER10N2_BUILD = BLOCKER10O_BUILD;
+module.exports.BLOCKER10N_BUILD = BLOCKER10O_BUILD;
 module.exports.ingestLearnedFishEntry = ingestLearnedFishEntry;
 module.exports.runCatchDeltaOnUpload = runCatchDeltaOnUpload;
 module.exports.catalogMetaForItemId = catalogMetaForItemId;

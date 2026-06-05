@@ -8,14 +8,24 @@
 const path = require('path');
 const fs = require('fs');
 
-const STORE_PATH = process.env.FISHIT_LEARNED_FISH_CATALOG_PATH
-  || path.join(__dirname, '..', 'data', 'fishit_learned_fish_catalog.json');
+function storePath() {
+  return process.env.FISHIT_LEARNED_FISH_CATALOG_PATH
+    || path.join(__dirname, '..', 'data', 'fishit_learned_fish_catalog.json');
+}
 
 const HIGH_CONFIDENCE_SOURCES = new Set([
   'catch_delta_high_confidence',
   'manual_confirmed',
   'seed_confirmed',
 ]);
+
+const PENDING_SOURCES = new Set([
+  'catch_delta_pending',
+  'catch_delta_low_confidence',
+]);
+
+/** Known non-fish inventory seeds — never learn as fish. */
+const KNOWN_NON_FISH_IDS = new Set(['10', '388', '990']);
 
 let _store = null;
 
@@ -26,8 +36,9 @@ function _defaultStore() {
 function _load() {
   if (_store) return _store;
   try {
-    if (fs.existsSync(STORE_PATH)) {
-      const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
+    const sp = storePath();
+    if (fs.existsSync(sp)) {
+      const raw = JSON.parse(fs.readFileSync(sp, 'utf8'));
       _store = {
         updatedAt: raw.updatedAt || null,
         byItemId: (raw.byItemId && typeof raw.byItemId === 'object') ? raw.byItemId : {},
@@ -40,9 +51,10 @@ function _load() {
 }
 
 function _persist() {
-  const dir = path.dirname(STORE_PATH);
+  const sp = storePath();
+  const dir = path.dirname(sp);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(STORE_PATH, JSON.stringify(_store, null, 2), 'utf8');
+  fs.writeFileSync(sp, JSON.stringify(_store, null, 2), 'utf8');
 }
 
 function sanitiseItemId(raw) {
@@ -67,9 +79,14 @@ function publicEligible(entry) {
 /**
  * Ingest one learned mapping. Never overwrites a different confirmed name.
  */
+function isKnownNonFishId(itemId) {
+  return KNOWN_NON_FISH_IDS.has(String(itemId));
+}
+
 function ingestEntry(raw, mainCatalogLookup) {
   const itemId = sanitiseItemId(raw && raw.itemId);
   if (!itemId) return { updated: false, reason: 'invalid_id' };
+  if (isKnownNonFishId(itemId)) return { updated: false, reason: 'known_non_fish', itemId };
 
   const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 100) : '';
   if (!name) return { updated: false, reason: 'empty_name' };
@@ -102,13 +119,45 @@ function ingestEntry(raw, mainCatalogLookup) {
     if (exHigh && inHigh) return { updated: false, reason: 'name_conflict', itemId };
   }
 
+  if (existing && isHighConfidence(existing) && existing.name === name) {
+    return {
+      updated: false,
+      reason: 'already_confirmed',
+      itemId,
+      entry: existing,
+      publicEligible: publicEligible(existing),
+    };
+  }
+
+  let finalSource = source;
+  let finalConfidence = confidence != null ? confidence : (isHighConfidence({ source }) ? 1 : 0.3);
+  const observationCount = (existing && existing.proof && existing.proof.observationCount) || 0;
+
+  if (PENDING_SOURCES.has(source) || finalConfidence < 1) {
+    const nextObs = observationCount + 1;
+    if (existing && existing.name === name && nextObs >= 2) {
+      finalSource = 'catch_delta_high_confidence';
+      finalConfidence = 1;
+    } else if (!isHighConfidence({ source, confidence })) {
+      finalSource = 'catch_delta_pending';
+      finalConfidence = 0.5;
+    }
+  }
+
+  const mergedProof = {
+    ...(existing && existing.proof ? existing.proof : {}),
+    ...(proof || {}),
+    observationCount: (existing && existing.name === name ? observationCount + 1 : 1),
+    lastObservedAt: now,
+  };
+
   const entry = {
     itemId,
     name,
     category: category === 'fish' ? 'fish' : category,
-    source,
-    confidence: confidence != null ? confidence : (isHighConfidence({ source }) ? 1 : 0.3),
-    proof,
+    source: finalSource,
+    confidence: finalConfidence,
+    proof: mergedProof,
     updatedAt: now,
     publicEligible: false,
   };
@@ -117,7 +166,7 @@ function ingestEntry(raw, mainCatalogLookup) {
   const wasNew = !existing;
   _store.byItemId[itemId] = entry;
   _store.updatedAt = now;
-  if (process.env.NODE_ENV !== 'test') _persist();
+  if (process.env.NODE_ENV !== 'test' || process.env.FISHIT_LEARNED_PERSIST === '1') _persist();
 
   return {
     updated: true,
@@ -160,16 +209,26 @@ function getHighConfidenceFishIds() {
     .map((e) => e.itemId);
 }
 
+function reloadFromDisk() {
+  _store = null;
+  return _load();
+}
+
 function _reset() {
   _store = _defaultStore();
   try {
-    if (fs.existsSync(STORE_PATH)) fs.unlinkSync(STORE_PATH);
+    const sp = storePath();
+    if (fs.existsSync(sp)) fs.unlinkSync(sp);
   } catch (_) { /* ignore */ }
 }
 
 module.exports = {
-  STORE_PATH,
+  storePath,
+  get STORE_PATH() { return storePath(); },
   HIGH_CONFIDENCE_SOURCES,
+  PENDING_SOURCES,
+  KNOWN_NON_FISH_IDS,
+  isKnownNonFishId,
   ingestEntry,
   ingestBatch,
   lookupById,
@@ -177,5 +236,6 @@ module.exports = {
   getHighConfidenceFishIds,
   isHighConfidence,
   publicEligible,
+  reloadFromDisk,
   _reset,
 };

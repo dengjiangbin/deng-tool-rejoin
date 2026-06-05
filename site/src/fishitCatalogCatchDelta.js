@@ -1,7 +1,9 @@
 'use strict';
 /**
- * Catch notification + inventory delta name catalog discovery (BLOCKER10M).
+ * Catch notification + inventory delta name catalog discovery (BLOCKER10M/10O).
  */
+
+const learnedFishCatalog = require('./fishitLearnedFishCatalog');
 
 const NON_FISH_PHRASES = [
   'you caught',
@@ -19,6 +21,8 @@ const NON_FISH_PHRASES = [
 ];
 
 const NOTIFICATION_SUFFIX_RE = /\s*(?:!|\.|kg|lbs|lb)\s*$/i;
+const CATCH_STALE_SECONDS = Number(process.env.FISHIT_CATCH_STALE_SECONDS || 180);
+const HIGH_CONFIDENCE_CATCH_SOURCES = new Set(['catch_notification', 'catch_event']);
 
 function normalizeCatchFishName(raw) {
   if (raw == null) return null;
@@ -40,9 +44,20 @@ function sanitisePendingCatch(raw) {
   const fishName = normalizeCatchFishName(raw.fishName ?? raw.name);
   if (!fishName) return null;
   const source = typeof raw.source === 'string' ? raw.source.slice(0, 40) : 'catch_notification';
-  const detectedAt = typeof raw.detectedAt === 'number' ? raw.detectedAt
-    : (typeof raw.detectedAt === 'string' ? raw.detectedAt : new Date().toISOString());
+  let detectedAt = raw.detectedAt;
+  if (typeof detectedAt === 'number') {
+    detectedAt = new Date(detectedAt * 1000).toISOString();
+  } else if (typeof detectedAt !== 'string') {
+    detectedAt = new Date().toISOString();
+  }
   return { fishName, detectedAt, source };
+}
+
+function isCatchStale(pending) {
+  if (!pending || !pending.detectedAt) return false;
+  const t = Date.parse(pending.detectedAt);
+  if (!Number.isFinite(t)) return false;
+  return (Date.now() - t) > CATCH_STALE_SECONDS * 1000;
 }
 
 function buildItemCountsFromItems(items) {
@@ -74,7 +89,6 @@ function computeIncreasedIds(previousCounts, currentCounts) {
   const increased = [];
   const prev = previousCounts || {};
   const cur = currentCounts || {};
-  // Only compare ids present in the previous snapshot (avoid 0 -> N false positives).
   for (const id of Object.keys(prev)) {
     const before = prev[id] || 0;
     const after = cur[id] || 0;
@@ -90,6 +104,25 @@ function computeIncreasedIds(previousCounts, currentCounts) {
   return increased;
 }
 
+function isKnownNonFishItemId(itemId, mainCatalogLookup) {
+  if (learnedFishCatalog.isKnownNonFishId(itemId)) return true;
+  const main = mainCatalogLookup ? mainCatalogLookup(itemId) : null;
+  if (!main) return false;
+  const cat = String(main.category || '').toLowerCase();
+  return cat === 'rod' || cat === 'rods' || cat === 'bait' || cat === 'items';
+}
+
+function resolveLearnSource(pending, increasedCount) {
+  const highCatch = HIGH_CONFIDENCE_CATCH_SOURCES.has(pending.source);
+  if (increasedCount === 1 && highCatch) {
+    return { source: 'catch_delta_high_confidence', confidence: 1.0, immediate: true };
+  }
+  if (increasedCount === 1) {
+    return { source: 'catch_delta_pending', confidence: 0.5, immediate: false };
+  }
+  return { source: 'catch_delta_low_confidence', confidence: 0.3, immediate: false };
+}
+
 /**
  * Apply catch-delta learning from pending catch + count maps.
  */
@@ -99,113 +132,192 @@ function processCatchDelta({
   currentItems,
   ingestLearned,
   mainCatalogLookup,
+  uploadFailed,
 }) {
   const discovery = {
     lastPendingCatchName: null,
+    lastCatchAt: null,
+    previousInventoryCounts: null,
+    currentInventoryCounts: null,
     lastInventoryDelta: null,
+    deltaCandidates: [],
     learnedMappings: [],
     pendingLowConfidenceMappings: [],
     rejectedEvents: [],
   };
 
+  if (uploadFailed) {
+    discovery.rejectedEvents.push({ reason: 'upload_failed' });
+    return discovery;
+  }
+
   const pending = sanitisePendingCatch(pendingCatch);
   if (!pending) {
     if (pendingCatch) {
-      discovery.rejectedEvents.push({ reason: 'invalid_catch_name', raw: pendingCatch });
+      discovery.rejectedEvents.push({ reason: 'no_catch_name', raw: pendingCatch });
+    } else {
+      discovery.rejectedEvents.push({ reason: 'no_catch_name' });
     }
     return discovery;
   }
   discovery.lastPendingCatchName = pending;
+  discovery.lastCatchAt = pending.detectedAt;
+
+  if (isCatchStale(pending)) {
+    discovery.rejectedEvents.push({ reason: 'stale_catch', catchName: pending.fishName, detectedAt: pending.detectedAt });
+    return discovery;
+  }
 
   const prev = sanitiseCountMap(previousItemCounts);
   const cur = buildItemCountsFromItems(currentItems);
+  discovery.previousInventoryCounts = prev;
+  discovery.currentInventoryCounts = cur;
+
+  if (!prev || Object.keys(prev).length === 0) {
+    discovery.rejectedEvents.push({ reason: 'no_previous_inventory', catchName: pending.fishName });
+    return discovery;
+  }
+
   const increased = computeIncreasedIds(prev, cur);
   discovery.lastInventoryDelta = { increased, previousCounts: prev, currentCounts: cur };
+  discovery.deltaCandidates = increased;
 
   if (increased.length === 0) {
-    discovery.rejectedEvents.push({ reason: 'no_inventory_delta', catchName: pending.fishName });
+    discovery.rejectedEvents.push({ reason: 'no_delta', catchName: pending.fishName });
     return discovery;
   }
 
-  if (increased.length === 1) {
-    const inc = increased[0];
-    const main = mainCatalogLookup ? mainCatalogLookup(inc.itemId) : null;
-    if (main && main.category && main.category !== 'fish' && (main.category === 'rod' || main.category === 'rods' || main.category === 'bait')) {
-      discovery.rejectedEvents.push({
-        reason: 'existing_non_fish_protected',
+  if (increased.length > 1) {
+    for (const inc of increased) {
+      if (isKnownNonFishItemId(inc.itemId, mainCatalogLookup)) {
+        discovery.rejectedEvents.push({
+          reason: 'known_non_fish',
+          itemId: inc.itemId,
+          catchName: pending.fishName,
+        });
+        continue;
+      }
+      discovery.pendingLowConfidenceMappings.push({
         itemId: inc.itemId,
-        existingName: main.name,
-        catchName: pending.fishName,
+        candidateName: pending.fishName,
+        source: 'catch_delta_low_confidence',
+        confidence: 0.3,
+        proof: {
+          beforeAmount: inc.beforeAmount,
+          afterAmount: inc.afterAmount,
+          delta: inc.delta,
+          catchName: pending.fishName,
+          ambiguous: true,
+        },
+        publicEligible: false,
       });
-      return discovery;
     }
+    discovery.rejectedEvents.push({
+      reason: 'multiple_delta_candidates',
+      catchName: pending.fishName,
+      candidates: increased.map((i) => i.itemId),
+    });
+    return discovery;
+  }
 
-    const mapping = {
+  const inc = increased[0];
+  if (isKnownNonFishItemId(inc.itemId, mainCatalogLookup)) {
+    discovery.rejectedEvents.push({
+      reason: 'known_non_fish',
       itemId: inc.itemId,
-      name: pending.fishName,
-      category: 'fish',
-      source: 'catch_delta_high_confidence',
-      confidence: 1.0,
-      proof: {
-        beforeAmount: inc.beforeAmount,
-        afterAmount: inc.afterAmount,
-        delta: inc.delta,
-        catchName: pending.fishName,
-        catchSource: pending.source,
-      },
-    };
-    const ingestResult = ingestLearned(mapping);
-    const learnedItem = {
+      catchName: pending.fishName,
+    });
+    return discovery;
+  }
+
+  const main = mainCatalogLookup ? mainCatalogLookup(inc.itemId) : null;
+  if (main && main.category && main.category !== 'fish'
+      && (main.category === 'rod' || main.category === 'rods' || main.category === 'bait')) {
+    discovery.rejectedEvents.push({
+      reason: 'known_non_fish',
       itemId: inc.itemId,
-      learnedName: pending.fishName,
-      source: 'catch_delta_high_confidence',
+      existingName: main.name,
+      catchName: pending.fishName,
+    });
+    return discovery;
+  }
+
+  const learnMeta = resolveLearnSource(pending, 1);
+  const mapping = {
+    itemId: inc.itemId,
+    name: pending.fishName,
+    category: 'fish',
+    source: learnMeta.source,
+    confidence: learnMeta.confidence,
+    proof: {
       beforeAmount: inc.beforeAmount,
       afterAmount: inc.afterAmount,
-      publicEligible: !!(ingestResult.entry && ingestResult.entry.publicEligible),
-      ingest: ingestResult,
-    };
-    if (ingestResult.updated !== false) {
-      discovery.learnedMappings.push(learnedItem);
-    } else {
-      discovery.rejectedEvents.push({
-        reason: ingestResult.reason || 'ingest_failed',
-        itemId: inc.itemId,
-        catchName: pending.fishName,
-      });
-    }
+      delta: inc.delta,
+      catchName: pending.fishName,
+      catchSource: pending.source,
+      catchAt: pending.detectedAt,
+    },
+  };
+  const ingestResult = ingestLearned(mapping);
+  const learnedItem = {
+    itemId: inc.itemId,
+    learnedName: pending.fishName,
+    source: ingestResult.entry ? ingestResult.entry.source : learnMeta.source,
+    beforeAmount: inc.beforeAmount,
+    afterAmount: inc.afterAmount,
+    publicEligible: !!(ingestResult.entry && ingestResult.entry.publicEligible),
+    ingest: ingestResult,
+  };
+
+  if (ingestResult.reason === 'already_confirmed') {
+    discovery.rejectedEvents.push({
+      reason: 'already_confirmed',
+      itemId: inc.itemId,
+      catchName: pending.fishName,
+    });
     return discovery;
   }
 
-  for (const inc of increased) {
+  if (ingestResult.updated !== false && learnedItem.publicEligible) {
+    discovery.learnedMappings.push(learnedItem);
+  } else if (ingestResult.updated !== false && !learnedItem.publicEligible) {
     discovery.pendingLowConfidenceMappings.push({
       itemId: inc.itemId,
       candidateName: pending.fishName,
-      source: 'catch_delta_low_confidence',
-      confidence: 0.3,
-      proof: {
-        beforeAmount: inc.beforeAmount,
-        afterAmount: inc.afterAmount,
-        delta: inc.delta,
-        catchName: pending.fishName,
-        ambiguous: true,
-      },
+      source: ingestResult.entry ? ingestResult.entry.source : 'catch_delta_pending',
+      confidence: ingestResult.entry ? ingestResult.entry.confidence : 0.5,
+      proof: mapping.proof,
       publicEligible: false,
+    });
+  } else {
+    discovery.rejectedEvents.push({
+      reason: ingestResult.reason || 'low_confidence',
+      itemId: inc.itemId,
+      catchName: pending.fishName,
     });
   }
   return discovery;
 }
 
-function buildNameCatalogDiscoveryForDebug(sessionDiscovery, learnedCatalog) {
+function buildNameCatalogDiscoveryForDebug(sessionDiscovery, learnedCatalog, sessionData) {
   const learned = learnedCatalog.getAllMappings();
   const unresolved = [];
   for (const m of learned) {
     if (!m.publicEligible) {
-      unresolved.push({ itemId: m.itemId, reason: 'low_confidence_pending' });
+      unresolved.push({ itemId: m.itemId, name: m.name, reason: 'low_confidence_pending' });
     }
   }
+  const pendingCatch = sessionDiscovery?.lastPendingCatchName || sessionData?.lastPendingCatchName || null;
   return {
-    lastPendingCatchName: sessionDiscovery?.lastPendingCatchName || null,
+    lastPendingCatchName: pendingCatch,
+    lastCatchAt: sessionDiscovery?.lastCatchAt || (pendingCatch && pendingCatch.detectedAt) || null,
+    previousInventoryCounts: sessionDiscovery?.previousInventoryCounts
+      || sessionDiscovery?.lastInventoryDelta?.previousCounts || null,
+    currentInventoryCounts: sessionDiscovery?.currentInventoryCounts
+      || sessionDiscovery?.lastInventoryDelta?.currentCounts || null,
     lastInventoryDelta: sessionDiscovery?.lastInventoryDelta || null,
+    deltaCandidates: sessionDiscovery?.deltaCandidates
+      || (sessionDiscovery?.lastInventoryDelta && sessionDiscovery.lastInventoryDelta.increased) || [],
     learnedMappings: sessionDiscovery?.learnedMappings || [],
     pendingLowConfidenceMappings: sessionDiscovery?.pendingLowConfidenceMappings || [],
     rejectedEvents: sessionDiscovery?.rejectedEvents || [],
@@ -215,6 +327,7 @@ function buildNameCatalogDiscoveryForDebug(sessionDiscovery, learnedCatalog) {
       learnedName: e.name,
       source: e.source,
       publicEligible: true,
+      observationCount: e.proof && e.proof.observationCount,
     })),
     unresolvedSample: unresolved.slice(0, 10),
   };
@@ -237,4 +350,6 @@ module.exports = {
   processCatchDelta,
   buildNameCatalogDiscoveryForDebug,
   unresolvedReasonForItem,
+  CATCH_STALE_SECONDS,
+  KNOWN_NON_FISH_IDS: learnedFishCatalog.KNOWN_NON_FISH_IDS,
 };

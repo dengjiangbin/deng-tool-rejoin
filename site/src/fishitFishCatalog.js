@@ -21,8 +21,14 @@ const RARITY_ALIASES = {
   epic: 'Epic',
   legend: 'Legendary',
   legendary: 'Legendary',
+  mythic: 'Mythic',
   secret: 'Secret',
   forgotten: 'Forgotten',
+  limited: 'Limited',
+  event: 'Event',
+  grade: null,
+  rank: null,
+  quality: null,
 };
 
 let _byItemId = null;
@@ -32,8 +38,13 @@ function normalizeRarity(raw) {
   if (!raw) return null;
   const t = String(raw).trim().toLowerCase();
   if (!t || t === 'unknown' || t === '-') return null;
+  if (Object.prototype.hasOwnProperty.call(RARITY_ALIASES, t)) {
+    return RARITY_ALIASES[t];
+  }
   const norm = catalogStore.normalizeTier(t);
-  return RARITY_ALIASES[norm] || (norm ? norm.charAt(0).toUpperCase() + norm.slice(1) : null);
+  if (RARITY_ALIASES[norm] === null) return null;
+  if (RARITY_ALIASES[norm]) return RARITY_ALIASES[norm];
+  return norm ? norm.charAt(0).toUpperCase() + norm.slice(1) : null;
 }
 
 function normalizeName(raw) {
