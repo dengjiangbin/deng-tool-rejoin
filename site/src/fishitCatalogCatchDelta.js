@@ -1,56 +1,28 @@
 'use strict';
 /**
- * Catch notification + inventory delta name catalog discovery (BLOCKER10M/10O).
+ * Catch notification + inventory delta name catalog discovery (BLOCKER10M/10O/10P).
  */
 
 const learnedFishCatalog = require('./fishitLearnedFishCatalog');
+const catchNameParser = require('./fishitCatchNameParser');
+const nameOnlyCatalog = require('./fishitNameOnlyCatalog');
+const rarityLabels = require('./fishitRarityLabels');
 
-const NON_FISH_PHRASES = [
-  'you caught',
-  'new fish',
-  'inventory full',
-  'equipped',
-  'sold',
-  'purchased',
-  'quest',
-  'level up',
-  'achievement',
-  'warning',
-  'error',
-  'disconnect',
-];
-
-const NOTIFICATION_SUFFIX_RE = /\s*(?:!|\.|kg|lbs|lb)\s*$/i;
 const CATCH_STALE_SECONDS = Number(process.env.FISHIT_CATCH_STALE_SECONDS || 180);
-const HIGH_CONFIDENCE_CATCH_SOURCES = new Set(['catch_notification', 'catch_event']);
-
-function normalizeCatchFishName(raw) {
-  if (raw == null) return null;
-  let s = String(raw).trim();
-  if (!s) return null;
-  s = s.replace(NOTIFICATION_SUFFIX_RE, '').trim();
-  for (const phrase of NON_FISH_PHRASES) {
-    if (s.toLowerCase().includes(phrase)) return null;
-  }
-  if (s.length < 2 || s.length > 80) return null;
-  if (/^\d+$/.test(s)) return null;
-  if (/^item\s*#\s*\d+$/i.test(s)) return null;
-  if (/^[\d.,\s]+(?:kg|lb)?$/i.test(s)) return null;
-  return s;
-}
+const VERIFIED_CATCH_SOURCES = new Set(['catch_notification', 'catch_event']);
 
 function sanitisePendingCatch(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const fishName = normalizeCatchFishName(raw.fishName ?? raw.name);
-  if (!fishName) return null;
-  const source = typeof raw.source === 'string' ? raw.source.slice(0, 40) : 'catch_notification';
-  let detectedAt = raw.detectedAt;
-  if (typeof detectedAt === 'number') {
-    detectedAt = new Date(detectedAt * 1000).toISOString();
-  } else if (typeof detectedAt !== 'string') {
-    detectedAt = new Date().toISOString();
-  }
-  return { fishName, detectedAt, source };
+  const parsed = catchNameParser.parseCatchInput(raw);
+  if (!parsed.fishNameCandidate) return null;
+  return {
+    fishName: parsed.fishNameCandidate,
+    rarityCandidate: parsed.rarityCandidate,
+    detectedAt: parsed.detectedAt,
+    source: parsed.source,
+    rawText: parsed.rawText,
+    parserDecision: parsed.parserDecision,
+    confidence: parsed.confidence,
+  };
 }
 
 function isCatchStale(pending) {
@@ -104,23 +76,48 @@ function computeIncreasedIds(previousCounts, currentCounts) {
   return increased;
 }
 
-function isKnownNonFishItemId(itemId, mainCatalogLookup) {
+function itemCategoryFromCurrent(currentItems, itemId) {
+  if (!Array.isArray(currentItems)) return null;
+  const id = String(itemId);
+  const hit = currentItems.find((it) => it && String(it.itemId) === id);
+  return hit ? String(hit.category || '').toLowerCase() : null;
+}
+
+function isKnownNonFishItemId(itemId, mainCatalogLookup, currentItems) {
   if (learnedFishCatalog.isKnownNonFishId(itemId)) return true;
+  const curCat = itemCategoryFromCurrent(currentItems, itemId);
+  if (curCat === 'rod' || curCat === 'rods' || curCat === 'bait') return true;
   const main = mainCatalogLookup ? mainCatalogLookup(itemId) : null;
   if (!main) return false;
   const cat = String(main.category || '').toLowerCase();
   return cat === 'rod' || cat === 'rods' || cat === 'bait' || cat === 'items';
 }
 
-function resolveLearnSource(pending, increasedCount) {
-  const highCatch = HIGH_CONFIDENCE_CATCH_SOURCES.has(pending.source);
-  if (increasedCount === 1 && highCatch) {
-    return { source: 'catch_delta_high_confidence', confidence: 1.0, immediate: true };
+function resolveLearnSource(pending, increasedCount, nameValidation) {
+  const verifiedCatch = VERIFIED_CATCH_SOURCES.has(pending.source);
+  const nameKnown = !!(nameValidation && nameValidation.nameKnown);
+  if (increasedCount === 1 && verifiedCatch && nameKnown) {
+    return {
+      source: 'catch_delta_high_confidence',
+      confidence: 1.0,
+      promotionDecision: 'confirmed',
+      promotionReason: 'verified_name_single_delta',
+    };
   }
   if (increasedCount === 1) {
-    return { source: 'catch_delta_pending', confidence: 0.5, immediate: false };
+    return {
+      source: 'catch_delta_pending',
+      confidence: 0.5,
+      promotionDecision: 'pending',
+      promotionReason: nameKnown ? 'awaiting_second_observation' : 'name_not_validated',
+    };
   }
-  return { source: 'catch_delta_low_confidence', confidence: 0.3, immediate: false };
+  return {
+    source: 'catch_delta_low_confidence',
+    confidence: 0.3,
+    promotionDecision: 'pending',
+    promotionReason: 'ambiguous_delta',
+  };
 }
 
 /**
@@ -134,9 +131,17 @@ function processCatchDelta({
   mainCatalogLookup,
   uploadFailed,
 }) {
+  const parsed = catchNameParser.parseCatchInput(pendingCatch);
   const discovery = {
     lastPendingCatchName: null,
     lastCatchAt: null,
+    lastFishNameCandidate: parsed.fishNameCandidate,
+    lastRarityCandidate: parsed.rarityCandidate,
+    lastParserSource: parsed.source,
+    lastParserDecision: parsed.parserDecision,
+    lastParserRawText: parsed.rawText,
+    promotionDecision: null,
+    promotionReason: null,
     previousInventoryCounts: null,
     currentInventoryCounts: null,
     lastInventoryDelta: null,
@@ -151,20 +156,29 @@ function processCatchDelta({
     return discovery;
   }
 
-  const pending = sanitisePendingCatch(pendingCatch);
-  if (!pending) {
-    if (pendingCatch) {
-      discovery.rejectedEvents.push({ reason: 'no_catch_name', raw: pendingCatch });
-    } else {
-      discovery.rejectedEvents.push({ reason: 'no_catch_name' });
-    }
+  if (!pendingCatch) {
+    discovery.rejectedEvents.push({ reason: 'no_catch_name' });
     return discovery;
   }
-  discovery.lastPendingCatchName = pending;
-  discovery.lastCatchAt = pending.detectedAt;
 
-  if (isCatchStale(pending)) {
-    discovery.rejectedEvents.push({ reason: 'stale_catch', catchName: pending.fishName, detectedAt: pending.detectedAt });
+  const pending = sanitisePendingCatch(pendingCatch);
+  const invalidName = !pending || rarityLabels.isBlockedLearnName(parsed.fishNameCandidate);
+  const invalidReason = !parsed.fishNameCandidate
+    ? (parsed.rarityCandidate && rarityLabels.isRarityLabel(parsed.rarityCandidate)
+      ? 'name_is_rarity_label' : 'no_valid_fish_name_candidate')
+    : (rarityLabels.isRarityLabel(parsed.fishNameCandidate)
+      ? 'name_is_rarity_label' : 'name_is_status_label');
+  if (pending) {
+    discovery.lastPendingCatchName = pending;
+    discovery.lastCatchAt = pending.detectedAt;
+  }
+
+  if (pending && isCatchStale(pending)) {
+    discovery.rejectedEvents.push({
+      reason: 'stale_catch',
+      catchName: pending.fishName,
+      detectedAt: pending.detectedAt,
+    });
     return discovery;
   }
 
@@ -174,7 +188,10 @@ function processCatchDelta({
   discovery.currentInventoryCounts = cur;
 
   if (!prev || Object.keys(prev).length === 0) {
-    discovery.rejectedEvents.push({ reason: 'no_previous_inventory', catchName: pending.fishName });
+    discovery.rejectedEvents.push({
+      reason: 'no_previous_inventory',
+      catchName: pending && pending.fishName,
+    });
     return discovery;
   }
 
@@ -183,13 +200,44 @@ function processCatchDelta({
   discovery.deltaCandidates = increased;
 
   if (increased.length === 0) {
-    discovery.rejectedEvents.push({ reason: 'no_delta', catchName: pending.fishName });
+    discovery.rejectedEvents.push({
+      reason: 'no_delta',
+      catchName: pending && pending.fishName,
+    });
+    return discovery;
+  }
+
+  if (invalidName) {
+    if (increased.length === 1) {
+      const badName = parsed.rarityCandidate || parsed.rawText || parsed.fishNameCandidate;
+      learnedFishCatalog.blockEntry(increased[0].itemId, badName, invalidReason, {
+        sourceText: parsed.rawText,
+        parserDecision: parsed.parserDecision,
+      });
+    }
+    discovery.rejectedEvents.push({
+      reason: invalidReason,
+      raw: pendingCatch,
+      rejectedLearnedName: parsed.rarityCandidate || parsed.rawText,
+      rejectedReason: invalidReason,
+      sourceText: parsed.rawText,
+      rarityCandidate: parsed.rarityCandidate,
+      parserDecision: parsed.parserDecision,
+      itemId: increased.length === 1 ? increased[0].itemId : undefined,
+    });
+    if (increased.length > 1) {
+      discovery.rejectedEvents.push({
+        reason: 'multiple_delta_candidates',
+        catchName: pending && pending.fishName,
+        candidates: increased.map((i) => i.itemId),
+      });
+    }
     return discovery;
   }
 
   if (increased.length > 1) {
     for (const inc of increased) {
-      if (isKnownNonFishItemId(inc.itemId, mainCatalogLookup)) {
+      if (isKnownNonFishItemId(inc.itemId, mainCatalogLookup, currentItems)) {
         discovery.rejectedEvents.push({
           reason: 'known_non_fish',
           itemId: inc.itemId,
@@ -221,7 +269,7 @@ function processCatchDelta({
   }
 
   const inc = increased[0];
-  if (isKnownNonFishItemId(inc.itemId, mainCatalogLookup)) {
+  if (isKnownNonFishItemId(inc.itemId, mainCatalogLookup, currentItems)) {
     discovery.rejectedEvents.push({
       reason: 'known_non_fish',
       itemId: inc.itemId,
@@ -242,7 +290,11 @@ function processCatchDelta({
     return discovery;
   }
 
-  const learnMeta = resolveLearnSource(pending, 1);
+  const nameValidation = nameOnlyCatalog.validateFishName(pending.fishName);
+  const learnMeta = resolveLearnSource(pending, 1, nameValidation);
+  discovery.promotionDecision = learnMeta.promotionDecision;
+  discovery.promotionReason = learnMeta.promotionReason;
+
   const mapping = {
     itemId: inc.itemId,
     name: pending.fishName,
@@ -256,6 +308,13 @@ function processCatchDelta({
       catchName: pending.fishName,
       catchSource: pending.source,
       catchAt: pending.detectedAt,
+      rarityCandidate: pending.rarityCandidate,
+      parserDecision: pending.parserDecision,
+      nameValidated: nameValidation.nameKnown,
+      validationReason: nameValidation.reason,
+      promotionDecision: learnMeta.promotionDecision,
+      promotionReason: learnMeta.promotionReason,
+      evidenceSources: nameValidation.reason ? [nameValidation.reason] : [],
     },
   };
   const ingestResult = ingestLearned(mapping);
@@ -266,6 +325,10 @@ function processCatchDelta({
     beforeAmount: inc.beforeAmount,
     afterAmount: inc.afterAmount,
     publicEligible: !!(ingestResult.entry && ingestResult.entry.publicEligible),
+    promotionDecision: ingestResult.promotionDecision || learnMeta.promotionDecision,
+    promotionReason: ingestResult.promotionReason || learnMeta.promotionReason,
+    observationCount: ingestResult.observationCount,
+    nameValidated: nameValidation.nameKnown,
     ingest: ingestResult,
   };
 
@@ -274,6 +337,18 @@ function processCatchDelta({
       reason: 'already_confirmed',
       itemId: inc.itemId,
       catchName: pending.fishName,
+    });
+    return discovery;
+  }
+
+  if (ingestResult.reason === 'name_is_rarity_label' || ingestResult.reason === 'name_is_status_label'
+      || ingestResult.reason === 'blocked_history' || ingestResult.reason === 'name_conflict') {
+    discovery.rejectedEvents.push({
+      reason: ingestResult.reason,
+      itemId: inc.itemId,
+      catchName: pending.fishName,
+      rejectedLearnedName: ingestResult.rejectedLearnedName || pending.fishName,
+      conflictNames: ingestResult.conflictNames,
     });
     return discovery;
   }
@@ -288,6 +363,8 @@ function processCatchDelta({
       confidence: ingestResult.entry ? ingestResult.entry.confidence : 0.5,
       proof: mapping.proof,
       publicEligible: false,
+      promotionDecision: learnedItem.promotionDecision,
+      promotionReason: learnedItem.promotionReason,
     });
   } else {
     discovery.rejectedEvents.push({
@@ -304,13 +381,24 @@ function buildNameCatalogDiscoveryForDebug(sessionDiscovery, learnedCatalog, ses
   const unresolved = [];
   for (const m of learned) {
     if (!m.publicEligible) {
-      unresolved.push({ itemId: m.itemId, name: m.name, reason: 'low_confidence_pending' });
+      unresolved.push({
+        itemId: m.itemId,
+        name: m.name,
+        reason: 'low_confidence_pending',
+        observationCount: m.proof && m.proof.observationCount,
+      });
     }
   }
   const pendingCatch = sessionDiscovery?.lastPendingCatchName || sessionData?.lastPendingCatchName || null;
   return {
     lastPendingCatchName: pendingCatch,
     lastCatchAt: sessionDiscovery?.lastCatchAt || (pendingCatch && pendingCatch.detectedAt) || null,
+    lastFishNameCandidate: sessionDiscovery?.lastFishNameCandidate ?? null,
+    lastRarityCandidate: sessionDiscovery?.lastRarityCandidate ?? null,
+    lastParserSource: sessionDiscovery?.lastParserSource ?? null,
+    lastParserDecision: sessionDiscovery?.lastParserDecision ?? null,
+    promotionDecision: sessionDiscovery?.promotionDecision ?? null,
+    promotionReason: sessionDiscovery?.promotionReason ?? null,
     previousInventoryCounts: sessionDiscovery?.previousInventoryCounts
       || sessionDiscovery?.lastInventoryDelta?.previousCounts || null,
     currentInventoryCounts: sessionDiscovery?.currentInventoryCounts
@@ -342,7 +430,7 @@ function unresolvedReasonForItem(itemId, learnedLookup, mainLookup) {
 }
 
 module.exports = {
-  normalizeCatchFishName,
+  normalizeCatchFishName: catchNameParser.normalizeCatchFishName,
   sanitisePendingCatch,
   buildItemCountsFromItems,
   sanitiseCountMap,

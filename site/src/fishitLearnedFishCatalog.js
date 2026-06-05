@@ -1,12 +1,12 @@
 'use strict';
 /**
- * Persistent learned fish catalog (BLOCKER10M).
- * itemId -> fish name from catch-delta and other high-confidence sources.
- * Separate from image asset list and from manual/seed confirmed catalog.
+ * Persistent learned fish catalog (BLOCKER10M/10P).
+ * itemId -> fish name from catch-delta — never rarity labels.
  */
 
 const path = require('path');
 const fs = require('fs');
+const rarityLabels = require('./fishitRarityLabels');
 
 function storePath() {
   return process.env.FISHIT_LEARNED_FISH_CATALOG_PATH
@@ -24,13 +24,17 @@ const PENDING_SOURCES = new Set([
   'catch_delta_low_confidence',
 ]);
 
-/** Known non-fish inventory seeds — never learn as fish. */
 const KNOWN_NON_FISH_IDS = new Set(['10', '388', '990']);
+
+/** Poisoned mappings quarantined on load (BLOCKER10P). */
+const FORCE_BLOCKED = [
+  { itemId: '196', learnedName: 'Forgotten', reason: 'name_is_rarity_label' },
+];
 
 let _store = null;
 
 function _defaultStore() {
-  return { updatedAt: null, byItemId: {} };
+  return { updatedAt: null, byItemId: {}, blockedByItemId: {} };
 }
 
 function _load() {
@@ -42,11 +46,15 @@ function _load() {
       _store = {
         updatedAt: raw.updatedAt || null,
         byItemId: (raw.byItemId && typeof raw.byItemId === 'object') ? raw.byItemId : {},
+        blockedByItemId: (raw.blockedByItemId && typeof raw.blockedByItemId === 'object')
+          ? raw.blockedByItemId : {},
       };
+      purgePoisonedMappings();
       return _store;
     }
   } catch (_) { /* fall through */ }
   _store = _defaultStore();
+  purgePoisonedMappings();
   return _store;
 }
 
@@ -69,21 +77,80 @@ function isHighConfidence(entry) {
 }
 
 function publicEligible(entry) {
-  return !!(entry
-    && entry.category === 'fish'
-    && isHighConfidence(entry)
-    && entry.name
-    && !/^Item #\d+$/i.test(entry.name));
+  if (!entry || entry.category !== 'fish' || !entry.name) return false;
+  if (/^Item #\d+$/i.test(entry.name)) return false;
+  if (rarityLabels.isBlockedLearnName(entry.name)) return false;
+  if (!isHighConfidence(entry)) return false;
+  const obs = entry.proof && entry.proof.observationCount;
+  const nameValidated = entry.proof && entry.proof.nameValidated === true;
+  if (nameValidated && obs >= 1) return true;
+  if (obs >= 2) return true;
+  return false;
 }
 
-/**
- * Ingest one learned mapping. Never overwrites a different confirmed name.
- */
 function isKnownNonFishId(itemId) {
   return KNOWN_NON_FISH_IDS.has(String(itemId));
 }
 
-function ingestEntry(raw, mainCatalogLookup) {
+function blockEntry(itemId, name, reason, extra) {
+  _load();
+  const id = sanitiseItemId(itemId);
+  if (!id) return false;
+  if (_store.byItemId[id]) delete _store.byItemId[id];
+  _store.blockedByItemId[id] = {
+    itemId: id,
+    learnedName: name || null,
+    reason: reason || 'blocked',
+    blockedAt: new Date().toISOString(),
+    ...(extra || {}),
+  };
+  _store.updatedAt = new Date().toISOString();
+  _maybePersist();
+  return true;
+}
+
+function _maybePersist() {
+  if (process.env.NODE_ENV !== 'test' || process.env.FISHIT_LEARNED_PERSIST === '1') _persist();
+}
+
+function removeEntry(itemId) {
+  _load();
+  const id = sanitiseItemId(itemId);
+  if (!id || !_store.byItemId[id]) return false;
+  delete _store.byItemId[id];
+  _store.updatedAt = new Date().toISOString();
+  _maybePersist();
+  return true;
+}
+
+function purgePoisonedMappings() {
+  if (!_store) return { removed: 0, blocked: 0 };
+  let removed = 0;
+  let blocked = 0;
+  for (const [id, entry] of Object.entries(_store.byItemId || {})) {
+    if (!entry || rarityLabels.isBlockedLearnName(entry.name)) {
+      blockEntry(id, entry && entry.name, 'name_is_rarity_label', {
+        previousSource: entry && entry.source,
+        purged: true,
+      });
+      removed += 1;
+      blocked += 1;
+    }
+  }
+  for (const row of FORCE_BLOCKED) {
+    if (_store.byItemId[row.itemId]) {
+      blockEntry(row.itemId, row.learnedName, row.reason, { forceBlocked: true });
+      removed += 1;
+      blocked += 1;
+    } else if (!_store.blockedByItemId[row.itemId]) {
+      blockEntry(row.itemId, row.learnedName, row.reason, { forceBlocked: true });
+      blocked += 1;
+    }
+  }
+  return { removed, blocked };
+}
+
+function ingestEntry(raw, mainCatalogLookup, nameValidation) {
   const itemId = sanitiseItemId(raw && raw.itemId);
   if (!itemId) return { updated: false, reason: 'invalid_id' };
   if (isKnownNonFishId(itemId)) return { updated: false, reason: 'known_non_fish', itemId };
@@ -91,13 +158,40 @@ function ingestEntry(raw, mainCatalogLookup) {
   const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 100) : '';
   if (!name) return { updated: false, reason: 'empty_name' };
 
+  if (rarityLabels.isBlockedLearnName(name)) {
+    blockEntry(itemId, name, rarityLabels.isRarityLabel(name) ? 'name_is_rarity_label' : 'name_is_status_label', {
+      rejectedLearnedName: name,
+      sourceText: raw.proof && raw.proof.catchName,
+    });
+    return {
+      updated: false,
+      reason: rarityLabels.isRarityLabel(name) ? 'name_is_rarity_label' : 'name_is_status_label',
+      itemId,
+      rejectedLearnedName: name,
+    };
+  }
+
+  _load();
+  if (_store.blockedByItemId[itemId]) {
+    const prev = _store.blockedByItemId[itemId];
+    if (prev.learnedName === name || prev.reason === 'name_is_rarity_label') {
+      return {
+        updated: false,
+        reason: prev.reason || 'blocked_history',
+        itemId,
+        rejectedLearnedName: name,
+      };
+    }
+  }
+
   const category = typeof raw.category === 'string' ? raw.category.trim().toLowerCase() : 'fish';
   const source = typeof raw.source === 'string' ? raw.source.slice(0, 80) : 'unknown';
   const confidence = Number.isFinite(Number(raw.confidence)) ? Number(raw.confidence) : null;
   const proof = (raw.proof && typeof raw.proof === 'object') ? raw.proof : null;
   const now = new Date().toISOString();
+  const nameValidated = !!(nameValidation && nameValidation.nameKnown);
+  const validationReason = nameValidation && nameValidation.reason;
 
-  _load();
   const existing = _store.byItemId[itemId];
 
   if (mainCatalogLookup) {
@@ -113,42 +207,65 @@ function ingestEntry(raw, mainCatalogLookup) {
   }
 
   if (existing && existing.name && existing.name !== name) {
-    const exHigh = isHighConfidence(existing);
-    const inHigh = isHighConfidence({ source, confidence });
-    if (exHigh && !inHigh) return { updated: false, reason: 'existing_higher_confidence', itemId };
-    if (exHigh && inHigh) return { updated: false, reason: 'name_conflict', itemId };
+    blockEntry(itemId, existing.name, 'name_conflict_quarantine', { conflictName: name });
+    return { updated: false, reason: 'name_conflict', itemId, conflictNames: [existing.name, name] };
   }
 
-  if (existing && isHighConfidence(existing) && existing.name === name) {
+  if (existing && publicEligible(existing) && existing.name === name) {
     return {
       updated: false,
       reason: 'already_confirmed',
       itemId,
       entry: existing,
-      publicEligible: publicEligible(existing),
+      publicEligible: true,
     };
   }
 
-  let finalSource = source;
-  let finalConfidence = confidence != null ? confidence : (isHighConfidence({ source }) ? 1 : 0.3);
   const observationCount = (existing && existing.proof && existing.proof.observationCount) || 0;
+  const nextObs = (existing && existing.name === name) ? observationCount + 1 : 1;
 
-  if (PENDING_SOURCES.has(source) || finalConfidence < 1) {
-    const nextObs = observationCount + 1;
-    if (existing && existing.name === name && nextObs >= 2) {
-      finalSource = 'catch_delta_high_confidence';
-      finalConfidence = 1;
-    } else if (!isHighConfidence({ source, confidence })) {
-      finalSource = 'catch_delta_pending';
-      finalConfidence = 0.5;
-    }
+  let finalSource = source;
+  let finalConfidence = confidence != null ? confidence : 0.5;
+  let promotionDecision = 'pending';
+  let promotionReason = 'first_observation_pending';
+
+  const canPromoteImmediate = nameValidated
+    && nextObs >= 1
+    && HIGH_CONFIDENCE_SOURCES.has('catch_delta_high_confidence')
+    && source === 'catch_delta_high_confidence';
+
+  if (nameValidated && nextObs >= 2) {
+    finalSource = 'catch_delta_high_confidence';
+    finalConfidence = 1;
+    promotionDecision = 'confirmed';
+    promotionReason = 'repeated_observation_name_validated';
+  } else if (canPromoteImmediate && nameValidated) {
+    finalSource = 'catch_delta_high_confidence';
+    finalConfidence = 1;
+    promotionDecision = 'confirmed';
+    promotionReason = 'verified_name_single_delta';
+  } else if (nextObs >= 2 && existing && existing.name === name) {
+    finalSource = 'catch_delta_high_confidence';
+    finalConfidence = 1;
+    promotionDecision = 'confirmed';
+    promotionReason = 'repeated_observation';
+  } else {
+    finalSource = 'catch_delta_pending';
+    finalConfidence = 0.5;
+    promotionDecision = 'pending';
+    promotionReason = nameValidated ? 'awaiting_second_observation' : 'name_not_validated';
   }
 
   const mergedProof = {
     ...(existing && existing.proof ? existing.proof : {}),
     ...(proof || {}),
-    observationCount: (existing && existing.name === name ? observationCount + 1 : 1),
+    observationCount: nextObs,
     lastObservedAt: now,
+    nameValidated,
+    validationReason: validationReason || null,
+    promotionDecision,
+    promotionReason,
+    evidenceSources: nameValidation && nameValidation.reason ? [nameValidation.reason] : [],
   };
 
   const entry = {
@@ -166,7 +283,7 @@ function ingestEntry(raw, mainCatalogLookup) {
   const wasNew = !existing;
   _store.byItemId[itemId] = entry;
   _store.updatedAt = now;
-  if (process.env.NODE_ENV !== 'test' || process.env.FISHIT_LEARNED_PERSIST === '1') _persist();
+  _maybePersist();
 
   return {
     updated: true,
@@ -174,14 +291,18 @@ function ingestEntry(raw, mainCatalogLookup) {
     itemId,
     entry,
     publicEligible: entry.publicEligible,
+    promotionDecision,
+    promotionReason,
+    observationCount: nextObs,
   };
 }
 
-function ingestBatch(entries, mainCatalogLookup) {
+function ingestBatch(entries, mainCatalogLookup, validateName) {
   if (!Array.isArray(entries) || entries.length === 0) return [];
   const results = [];
   for (const raw of entries.slice(0, 30)) {
-    results.push(ingestEntry(raw, mainCatalogLookup));
+    const nv = validateName && raw.name ? validateName(raw.name) : null;
+    results.push(ingestEntry(raw, mainCatalogLookup, nv));
   }
   return results;
 }
@@ -201,6 +322,11 @@ function getAllMappings() {
     ...e,
     publicEligible: publicEligible(e),
   }));
+}
+
+function getBlockedMappings() {
+  _load();
+  return Object.values(_store.blockedByItemId || {});
 }
 
 function getHighConfidenceFishIds() {
@@ -228,11 +354,16 @@ module.exports = {
   HIGH_CONFIDENCE_SOURCES,
   PENDING_SOURCES,
   KNOWN_NON_FISH_IDS,
+  FORCE_BLOCKED,
   isKnownNonFishId,
+  blockEntry,
+  removeEntry,
+  purgePoisonedMappings,
   ingestEntry,
   ingestBatch,
   lookupById,
   getAllMappings,
+  getBlockedMappings,
   getHighConfidenceFishIds,
   isHighConfidence,
   publicEligible,

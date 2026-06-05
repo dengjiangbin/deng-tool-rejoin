@@ -318,6 +318,31 @@ function upsertByItemId(raw) {
   return upsertByItemIdCore(raw);
 }
 
+/** Remove catalog entry by itemId (BLOCKER10P — quarantine bad learned names). */
+function removeByItemId(itemId, onlyIfSource) {
+  _load();
+  const id = String(itemId || '').trim();
+  if (!id.match(/^\d+$/)) return { removed: false, reason: 'invalid_id' };
+  const existingKey = _idIndex[id];
+  if (!existingKey) return { removed: false, reason: 'not_found' };
+  const existing = _catalog.entries[existingKey];
+  if (onlyIfSource && existing && existing.source !== onlyIfSource) {
+    return { removed: false, reason: 'source_mismatch' };
+  }
+  delete _catalog.entries[existingKey];
+  delete _idIndex[id];
+  const counts = { fish: 0, rods: 0, items: 0 };
+  for (const e of Object.values(_catalog.entries)) {
+    if (e.category === 'rods' || e.category === 'rod') counts.rods += 1;
+    else if (e.category === 'items') counts.items += 1;
+    else counts.fish += 1;
+  }
+  _catalog.counts = counts;
+  _catalog.updatedAt = new Date().toISOString();
+  _persist();
+  return { removed: true, reason: 'deleted' };
+}
+
 /** Learn real names from tracker uploads; placeholders never enter catalog. */
 function learnFromTrackerItems(items) {
   if (!Array.isArray(items) || items.length === 0) return { learned: 0 };
@@ -374,6 +399,7 @@ module.exports = {
   lookup,
   lookupById,
   upsertByItemId,
+  removeByItemId,
   seedKnownMappings,
   learnFromTrackerItems,
   catalogMetaForItemId,

@@ -2213,7 +2213,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05/);
+    assert.match(out, /BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05/);
   });
 
   test('targeted diagnostics disabled by default; heavy flags remain disabled', () => {
@@ -2279,9 +2279,9 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
 
   test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
   });
 
   test('Item #990 upgrades only with exact catalog metadata', async () => {
@@ -2400,7 +2400,7 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05/);
+    assert.match(out, /BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05/);
   });
 
   test('safe minimal flags default off for heavy work', () => {
@@ -2420,9 +2420,9 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
 
   test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
   });
 
   test('inventory upload and fish downgrade guards remain', () => {
@@ -2492,7 +2492,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
 
   test('TRACKER_BOOT_BEGIN appears before catalog scan code', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05');
+    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05');
     const catalog = src.indexOf('scanReplicatedStorageFishCatalog');
     assert.ok(boot >= 0, 'TRACKER_BOOT_BEGIN missing');
     assert.ok(catalog >= 0, 'catalog scan missing');
@@ -2528,7 +2528,7 @@ describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05/);
+    assert.match(out, /BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05/);
   });
 
   test('player-data-only flags default correctly', () => {
@@ -2664,7 +2664,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05/);
+    assert.match(out, /BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05/);
   });
 
   test('light sync defaults: 10s loop, no attachReplionListeners by default', () => {
@@ -2679,9 +2679,9 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
 
   test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
   });
 
   test('itemId 117 raw enriches to Bandit Angelfish / fish on debug firstItems', async () => {
@@ -2693,7 +2693,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
         userId: 15001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05',
+        trackerBuild: 'BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05',
         items: [{ name: 'Item #117', count: 3, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -2832,7 +2832,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05/);
+    assert.match(out, /BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05/);
   });
 
   test('light sync defaults and no attachReplionListeners on default path', () => {
@@ -2967,7 +2967,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
         userId: 16001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05',
+        trackerBuild: 'BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05',
         items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -3109,7 +3109,7 @@ describe('BLOCKER10K fish-only public + raw proof', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
     assert.ok(tpl.includes('getPublicFishItems'));
     assert.ok(tpl.includes('fishCountLabel'));
-    assert.ok(tpl.includes('BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(tpl.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
     assert.ok(tpl.includes('RENDER_BUILD'));
     assert.ok(!tpl.match(/inventory\.all/));
     assert.ok(!tpl.match(/Items:\s*<strong>/));
@@ -3200,7 +3200,7 @@ describe('BLOCKER10K1 public fish-only UI regression', () => {
     const fs = require('fs');
     const path = require('path');
     const html = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(html.includes('BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(html.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
     assert.ok(html.includes('data-render-build'));
     assert.ok(html.includes('getPublicFishItems'));
     assert.ok(!html.match(/Items:\s*<strong>/));
@@ -3354,7 +3354,7 @@ describe('BLOCKER10L fish image asset catalog', () => {
     const fs = require('fs');
     const path = require('path');
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(tpl.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
     assert.ok(tpl.includes('imageAssetId'));
     assert.ok(tpl.includes('loading="lazy"'));
     assert.ok(tpl.includes('isUsableImageUrl'));
@@ -3369,9 +3369,9 @@ describe('BLOCKER10L fish image asset catalog', () => {
 });
 
 describe('BLOCKER10M catch-delta name catalog discovery', () => {
-  const TMP_LEARNED = path.join(os.tmpdir(), `fishit_learned_${process.pid}.json`);
-  process.env.FISHIT_LEARNED_FISH_CATALOG_PATH = TMP_LEARNED;
+  const TMP_LEARNED = path.join(os.tmpdir(), `fishit_learned_m_${process.pid}.json`);
 
+  const fishCatalog = require('../src/fishitFishCatalog');
   const learnedFishCatalog = require('../src/fishitLearnedFishCatalog');
   const catchDelta = require('../src/fishitCatalogCatchDelta');
   const {
@@ -3385,15 +3385,17 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
   function cleanupLearned() {
     try { if (fs.existsSync(TMP_LEARNED)) fs.unlinkSync(TMP_LEARNED); } catch (_) {}
     learnedFishCatalog._reset();
+    fishCatalog._reset();
   }
 
   beforeEach(() => {
+    process.env.FISHIT_LEARNED_FISH_CATALOG_PATH = TMP_LEARNED;
     cleanup();
     cleanupLearned();
     catalogStore.seedKnownMappings();
   });
 
-  test('1: catch delta learns single increased item (196 -> Forgotten)', () => {
+  test('1: rarity-only catch (Forgotten) is rejected — not learned as fish', () => {
     const discovery = catchDelta.processCatchDelta({
       pendingCatch: { fishName: 'Forgotten', source: 'catch_notification' },
       previousItemCounts: { 196: 34 },
@@ -3401,20 +3403,19 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
       ingestLearned: ingestLearnedFishEntry,
       mainCatalogLookup: (id) => catalogStore.lookupById(id),
     });
-    assert.equal(discovery.learnedMappings.length, 1);
-    assert.equal(discovery.learnedMappings[0].itemId, '196');
-    assert.equal(discovery.learnedMappings[0].learnedName, 'Forgotten');
-    assert.equal(discovery.learnedMappings[0].source, 'catch_delta_high_confidence');
-    assert.equal(discovery.learnedMappings[0].publicEligible, true);
-    const learned = learnedFishCatalog.lookupById('196');
-    assert.equal(learned.name, 'Forgotten');
-    assert.equal(learned.category, 'fish');
-    assert.equal(learned.source, 'catch_delta_high_confidence');
+    assert.equal(discovery.learnedMappings.length, 0);
+    assert.ok(discovery.rejectedEvents.some((e) => e.reason === 'name_is_rarity_label'));
+    assert.equal(discovery.lastRarityCandidate, 'Forgotten');
+    assert.equal(discovery.lastFishNameCandidate, null);
+    assert.equal(learnedFishCatalog.lookupById('196'), null);
+    const blocked = learnedFishCatalog.getBlockedMappings().find((b) => b.itemId === '196');
+    assert.ok(blocked);
+    assert.equal(blocked.reason, 'name_is_rarity_label');
   });
 
   test('2: multiple deltas stay low confidence only', async () => {
     const discovery = catchDelta.processCatchDelta({
-      pendingCatch: { fishName: 'Forgotten', source: 'catch_notification' },
+      pendingCatch: { fishName: 'King Crab', source: 'catch_notification' },
       previousItemCounts: { 196: 34, 72: 57 },
       currentItems: [
         { name: 'Item #196', itemId: '196', amount: 35, category: 'items' },
@@ -3435,7 +3436,7 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
 
   test('3: no delta produces no mapping', () => {
     const discovery = catchDelta.processCatchDelta({
-      pendingCatch: { fishName: 'Forgotten', source: 'catch_notification' },
+      pendingCatch: { fishName: 'King Crab', source: 'catch_notification' },
       previousItemCounts: { 196: 34 },
       currentItems: [{ name: 'Item #196', itemId: '196', amount: 34, category: 'items' }],
       ingestLearned: ingestLearnedFishEntry,
@@ -3447,14 +3448,18 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
 
   test('4: existing non-fish (Carbon Rod 388) protected from fish overwrite', () => {
     const discovery = catchDelta.processCatchDelta({
-      pendingCatch: { fishName: 'Forgotten', source: 'catch_notification' },
+      pendingCatch: { fishName: 'King Crab', source: 'catch_notification' },
       previousItemCounts: { 388: 137 },
       currentItems: [{ name: 'Carbon Rod', itemId: '388', amount: 138, category: 'rod' }],
       ingestLearned: ingestLearnedFishEntry,
       mainCatalogLookup: (id) => catalogStore.lookupById(id),
     });
     assert.equal(discovery.learnedMappings.length, 0);
-    assert.ok(discovery.rejectedEvents.some((e) => e.reason === 'known_non_fish'));
+    assert.ok(
+      discovery.rejectedEvents.some((e) => e.reason === 'known_non_fish'),
+      `expected known_non_fish rejection, got: ${JSON.stringify(discovery.rejectedEvents)}`,
+    );
+    assert.equal(learnedFishCatalog.lookupById('388'), null);
     assert.equal(isPublicFishItem({ name: 'Carbon Rod', category: 'rod', itemId: '388' }), false);
   });
 
@@ -3481,7 +3486,7 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
 
     const get = await request(app).get('/api/fishit-tracker/get-backpack/B10MCatch').expect(200);
     const names = get.body.publicItems.map((i) => i.name);
-    assert.ok(names.includes('Forgotten'));
+    assert.ok(!names.includes('Forgotten'));
     assert.ok(names.includes('Flame Angelfish'));
     assert.ok(!names.some((n) => /Item #/i.test(n)));
     assert.ok(!names.includes('Topwater Bait'));
@@ -3529,14 +3534,15 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
     const dbg = await request(app).get('/api/fishit-tracker/debug/B10MDebug').expect(200);
     assert.ok(dbg.body.nameCatalogDiscovery);
     assert.equal(dbg.body.publicApiBuild, PUBLIC_API_BUILD);
-    const learned = dbg.body.nameCatalogDiscovery.learnedMappings;
-    assert.ok(Array.isArray(learned) && learned.length >= 1);
-    assert.equal(learned[0].itemId, '196');
-    assert.equal(learned[0].learnedName, 'Forgotten');
-    assert.equal(learned[0].publicEligible, true);
+    assert.ok(dbg.body.learningValidation);
+    const blocked = dbg.body.learningValidation.blockedLearnedMappings.find((b) => b.itemId === '196');
+    assert.ok(blocked);
+    assert.equal(blocked.learnedName, 'Forgotten');
+    assert.equal(blocked.reason, 'name_is_rarity_label');
+    assert.ok(dbg.body.nameCatalogDiscovery.rejectedEvents.some((e) => e.reason === 'name_is_rarity_label'));
   });
 
-  test('runCatchDeltaOnUpload integrates on POST', () => {
+  test('runCatchDeltaOnUpload rejects rarity-only catch on POST', () => {
     const raw = [{ name: 'Item #196', itemId: '196', amount: 35, category: 'items' }];
     const disc = runCatchDeltaOnUpload(
       { pendingCatchName: { fishName: 'Forgotten' }, previousItemCounts: { 196: 34 } },
@@ -3544,12 +3550,13 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
       null,
     );
     assert.ok(disc);
-    assert.equal(disc.learnedMappings.length, 1);
+    assert.equal(disc.learnedMappings.length, 0);
+    assert.ok(disc.rejectedEvents.some((e) => e.reason === 'name_is_rarity_label'));
   });
 
   test('tracker.lua includes BLOCKER10M catch delta markers', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
     assert.ok(src.includes('normalizeCatchFishName'));
     assert.ok(src.includes('pendingCatchName'));
     assert.ok(src.includes('previousItemCounts'));
@@ -3621,7 +3628,7 @@ describe('BLOCKER10N2 image proxy label fix', () => {
 
   test('HTML contains N2 marker, Fish label, and image src for all 5 fish', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(tpl.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
     assert.ok(tpl.includes('fishCountLabel'));
     assert.ok(tpl.includes('data-fish-count'));
     assert.ok(tpl.includes('onFishImageError'));
@@ -3733,7 +3740,7 @@ describe('BLOCKER10N2 image proxy label fix', () => {
 
   test('tracker.lua has single BLOCKER10O boot marker', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
     assert.equal((src.match(/TRACKER_BOOT_BEGIN/g) || []).length, 1);
   });
@@ -3741,7 +3748,6 @@ describe('BLOCKER10N2 image proxy label fix', () => {
 
 describe('BLOCKER10O full catalog safe learning', () => {
   const TMP_LEARNED = path.join(os.tmpdir(), `fishit_learned_o_${process.pid}.json`);
-  process.env.FISHIT_LEARNED_FISH_CATALOG_PATH = TMP_LEARNED;
 
   const robloxThumbnails = require('../src/fishitRobloxThumbnails');
   const fishCatalog = require('../src/fishitFishCatalog');
@@ -3771,6 +3777,7 @@ describe('BLOCKER10O full catalog safe learning', () => {
   }
 
   beforeEach(() => {
+    process.env.FISHIT_LEARNED_FISH_CATALOG_PATH = TMP_LEARNED;
     robloxThumbnails._resetCache();
     cleanupLearned();
     catalogStore._reset();
@@ -3812,7 +3819,7 @@ describe('BLOCKER10O full catalog safe learning', () => {
     assert.ok(!names.includes('Common Crate'));
   });
 
-  test('clean catch delta from catch_notification confirms immediately', () => {
+  test('rarity-only catch from catch_notification is rejected not confirmed', () => {
     const disc = catchDelta.processCatchDelta({
       pendingCatch: { fishName: 'Forgotten', source: 'catch_notification', detectedAt: new Date().toISOString() },
       previousItemCounts: { 196: 34 },
@@ -3820,8 +3827,8 @@ describe('BLOCKER10O full catalog safe learning', () => {
       ingestLearned: ingestLearnedFishEntry,
       mainCatalogLookup: (id) => catalogStore.lookupById(id),
     });
-    assert.equal(disc.learnedMappings.length, 1);
-    assert.equal(disc.learnedMappings[0].publicEligible, true);
+    assert.equal(disc.learnedMappings.length, 0);
+    assert.ok(disc.rejectedEvents.some((e) => e.reason === 'name_is_rarity_label'));
   });
 
   test('weak catch source creates pending not public', () => {
@@ -3858,7 +3865,7 @@ describe('BLOCKER10O full catalog safe learning', () => {
 
   test('rejects ambiguous multi-delta', () => {
     const disc = catchDelta.processCatchDelta({
-      pendingCatch: { fishName: 'Forgotten', source: 'catch_notification', detectedAt: new Date().toISOString() },
+      pendingCatch: { fishName: 'King Crab', source: 'catch_notification', detectedAt: new Date().toISOString() },
       previousItemCounts: { 196: 34, 72: 57 },
       currentItems: [
         { name: 'Item #196', itemId: '196', amount: 35, category: 'items' },
@@ -3909,22 +3916,26 @@ describe('BLOCKER10O full catalog safe learning', () => {
     assert.ok(bait.rejectedEvents.some((e) => e.reason === 'known_non_fish'));
   });
 
-  test('confirmed learned fish persists and reloads', () => {
+  test('rarity label ingest is blocked and persisted as rejected mapping', () => {
     process.env.FISHIT_LEARNED_PERSIST = '1';
-    ingestLearnedFishEntry({
+    learnedFishCatalog._reset();
+    learnedFishCatalog.blockEntry('196', 'Forgotten', 'name_is_rarity_label', { testPersist: true });
+    assert.ok(fs.existsSync(TMP_LEARNED));
+    learnedFishCatalog.reloadFromDisk();
+    fishCatalog._reset();
+    assert.equal(learnedFishCatalog.lookupById('196'), null);
+    const blocked = learnedFishCatalog.getBlockedMappings().find((b) => b.itemId === '196');
+    assert.ok(blocked);
+    assert.equal(blocked.learnedName, 'Forgotten');
+    assert.equal(blocked.reason, 'name_is_rarity_label');
+    const r = ingestLearnedFishEntry({
       itemId: '196',
       name: 'Forgotten',
       category: 'fish',
       source: 'catch_delta_high_confidence',
       confidence: 1,
     });
-    assert.ok(fs.existsSync(TMP_LEARNED));
-    learnedFishCatalog.reloadFromDisk();
-    fishCatalog._reset();
-    const row = learnedFishCatalog.lookupById('196');
-    assert.ok(row);
-    assert.equal(row.name, 'Forgotten');
-    assert.equal(row.publicEligible, true);
+    assert.equal(r.reason, 'name_is_rarity_label');
     delete process.env.FISHIT_LEARNED_PERSIST;
   });
 
@@ -3958,15 +3969,15 @@ describe('BLOCKER10O full catalog safe learning', () => {
     assert.equal(dbg.body.renderBuild, PUBLIC_RENDER_BUILD);
     assert.ok(dbg.body.staticCatalogAudit);
     assert.ok(dbg.body.nameCatalogDiscovery);
-    assert.ok(dbg.body.nameCatalogDiscovery.lastPendingCatchName);
-    assert.ok(Array.isArray(dbg.body.nameCatalogDiscovery.rejectedEvents));
+    assert.ok(dbg.body.learningValidation);
+    assert.ok(dbg.body.nameCatalogDiscovery.rejectedEvents.some((e) => e.reason === 'name_is_rarity_label'));
     for (const f of knownFish) {
       const row = dbg.body.publicFishItems.find((i) => i.itemId === f.itemId);
       assert.equal(row.imageResolved, true);
     }
   });
 
-  test('public API and HTML keep Fish label and BLOCKER10O marker', async () => {
+  test('public API and HTML keep Fish label and BLOCKER10P marker', async () => {
     const app = makeApp();
     await request(app)
       .post('/api/fishit-tracker/update-backpack')
@@ -3980,10 +3991,207 @@ describe('BLOCKER10O full catalog safe learning', () => {
 
     const get = await request(app).get('/api/fishit-tracker/get-backpack/B10OLabel').expect(200);
     assert.equal(get.body.fishCounts.label, 'Fish');
-    assert.equal(get.body.publicApiBuild, 'BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05');
+    assert.equal(get.body.publicApiBuild, 'BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05');
 
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10O_FULL_CATALOG_SAFE_LEARNING_2026_06_05'));
+    assert.ok(tpl.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
     assert.ok(!tpl.match(/Items:\s*<strong>/));
+  });
+});
+
+describe('BLOCKER10P false rarity learn fix', () => {
+  const TMP_LEARNED = path.join(os.tmpdir(), `fishit_learned_p_${process.pid}.json`);
+
+  const rarityLabels = require('../src/fishitRarityLabels');
+  const catchNameParser = require('../src/fishitCatchNameParser');
+  const nameOnlyCatalog = require('../src/fishitNameOnlyCatalog');
+  const learnedFishCatalog = require('../src/fishitLearnedFishCatalog');
+  const catchDelta = require('../src/fishitCatalogCatchDelta');
+  const robloxThumbnails = require('../src/fishitRobloxThumbnails');
+  const fishCatalog = require('../src/fishitFishCatalog');
+  const {
+    buildPublicFishFields,
+    PUBLIC_API_BUILD,
+    PUBLIC_RENDER_BUILD,
+    ingestLearnedFishEntry,
+    isPublicFishItem,
+  } = require('../src/fishitTrackerRoutes');
+
+  const knownFish = [
+    { itemId: '68', name: 'Flame Angelfish', assetId: '128385926161840' },
+    { itemId: '70', name: 'Yello Damselfish', assetId: '125066072333378' },
+    { itemId: '71', name: 'Darwin Clownfish', assetId: '109996187340520' },
+    { itemId: '117', name: 'Bandit Angelfish', assetId: '86776001616210' },
+    { itemId: '119', name: 'Ballina Angelfish', assetId: '99236757363784' },
+  ];
+
+  function cleanupLearned() {
+    try { if (fs.existsSync(TMP_LEARNED)) fs.unlinkSync(TMP_LEARNED); } catch (_) {}
+    learnedFishCatalog._reset();
+    fishCatalog._reset();
+  }
+
+  beforeEach(() => {
+    process.env.FISHIT_LEARNED_FISH_CATALOG_PATH = TMP_LEARNED;
+    robloxThumbnails._resetCache();
+    cleanupLearned();
+    catalogStore._reset();
+    catalogStore.seedKnownMappings();
+  });
+
+  test('1: bad learned mapping cleanup — itemId 196 Forgotten rejected', () => {
+    const r = ingestLearnedFishEntry({
+      itemId: '196',
+      name: 'Forgotten',
+      category: 'fish',
+      source: 'catch_delta_high_confidence',
+      confidence: 1,
+    });
+    assert.equal(r.reason, 'name_is_rarity_label');
+    assert.equal(learnedFishCatalog.lookupById('196'), null);
+    const blocked = learnedFishCatalog.getBlockedMappings().find((b) => b.itemId === '196');
+    assert.ok(blocked);
+    assert.equal(blocked.learnedName, 'Forgotten');
+    assert.equal(blocked.reason, 'name_is_rarity_label');
+  });
+
+  test('2: rarity classifier blocks labels, allows real fish names', () => {
+    assert.equal(rarityLabels.isRarityLabel('Forgotten'), true);
+    assert.equal(rarityLabels.isRarityLabel('Common'), true);
+    assert.equal(rarityLabels.isRarityLabel('Legendary'), true);
+    assert.equal(rarityLabels.isRarityLabel('Flame Angelfish'), false);
+    assert.equal(rarityLabels.isBlockedLearnName('Rare'), true);
+    assert.equal(rarityLabels.isBlockedLearnName('Darwin Clownfish'), false);
+  });
+
+  test('3: parser separates rarity prefix from fish name', () => {
+    const split = catchNameParser.parseCatchInput({ fishName: 'Forgotten King Crab', source: 'catch_notification' });
+    assert.equal(split.fishNameCandidate, 'King Crab');
+    assert.equal(split.rarityCandidate, 'Forgotten');
+    assert.equal(split.parserDecision, 'rarity_prefix_stripped');
+
+    const onlyRarity = catchNameParser.parseCatchInput({ fishName: 'Forgotten', source: 'catch_notification' });
+    assert.equal(onlyRarity.fishNameCandidate, null);
+    assert.equal(onlyRarity.rarityCandidate, 'Forgotten');
+    assert.equal(onlyRarity.parserDecision, 'rarity_only');
+
+    const weight = catchNameParser.parseCatchInput({ fishName: '12.5 kg', source: 'catch_notification' });
+    assert.equal(weight.fishNameCandidate, null);
+  });
+
+  test('4: promotion rules — one weak observation stays pending', () => {
+    const disc = catchDelta.processCatchDelta({
+      pendingCatch: { fishName: 'Mystery Fish', source: 'chat_log', detectedAt: new Date().toISOString() },
+      previousItemCounts: { 72: 10 },
+      currentItems: [{ name: 'Item #72', itemId: '72', amount: 11, category: 'items' }],
+      ingestLearned: ingestLearnedFishEntry,
+      mainCatalogLookup: (id) => catalogStore.lookupById(id),
+    });
+    assert.equal(disc.learnedMappings.length, 0);
+    assert.equal(disc.pendingLowConfidenceMappings.length, 1);
+    assert.equal(disc.pendingLowConfidenceMappings[0].publicEligible, false);
+  });
+
+  test('4b: verified known fish name can promote on single clean delta', () => {
+    const disc = catchDelta.processCatchDelta({
+      pendingCatch: { fishName: 'Flame Angelfish', source: 'catch_notification', detectedAt: new Date().toISOString() },
+      previousItemCounts: { 68: 1 },
+      currentItems: [{ name: 'Item #68', itemId: '68', amount: 2, category: 'items' }],
+      ingestLearned: ingestLearnedFishEntry,
+      mainCatalogLookup: (id) => catalogStore.lookupById(id),
+    });
+    assert.equal(disc.learnedMappings.length, 1);
+    assert.equal(disc.learnedMappings[0].publicEligible, true);
+    assert.equal(disc.learnedMappings[0].nameValidated, true);
+  });
+
+  test('4c: two clean repeated observations promote unknown name', () => {
+    const args = {
+      pendingCatch: { fishName: 'King Crab', source: 'chat_log', detectedAt: new Date().toISOString() },
+      previousItemCounts: { 72: 10 },
+      currentItems: [{ name: 'Item #72', itemId: '72', amount: 11, category: 'items' }],
+      ingestLearned: ingestLearnedFishEntry,
+      mainCatalogLookup: (id) => catalogStore.lookupById(id),
+    };
+    catchDelta.processCatchDelta(args);
+    const second = catchDelta.processCatchDelta({
+      ...args,
+      previousItemCounts: { 72: 11 },
+      currentItems: [{ name: 'Item #72', itemId: '72', amount: 12, category: 'items' }],
+    });
+    assert.equal(second.learnedMappings.length, 1);
+    assert.equal(second.learnedMappings[0].publicEligible, true);
+  });
+
+  test('5: name-only DB validation — real fish passes, rarity fails', () => {
+    const flame = nameOnlyCatalog.validateFishName('Flame Angelfish');
+    assert.equal(flame.nameKnown, true);
+    assert.equal(flame.valid, true);
+    assert.ok(flame.imageAssetId);
+
+    const forg = nameOnlyCatalog.validateFishName('Forgotten');
+    assert.equal(forg.nameKnown, false);
+    assert.equal(forg.reason, 'name_is_rarity_label');
+  });
+
+  test('6: regression — 5 fish images, Fish label, Forgotten not public', async () => {
+    const pub = await buildPublicFishFields(knownFish.map((f) => ({
+      name: f.name, amount: 10, category: 'fish', itemId: f.itemId,
+    })));
+    assert.equal(pub.publicItems.length, 5);
+    assert.equal(pub.fishCounts.label, 'Fish');
+    for (const f of knownFish) {
+      const row = pub.publicItems.find((i) => i.itemId === f.itemId);
+      assert.equal(row.imageAssetId, f.assetId);
+    }
+    const withForgotten = await buildPublicFishFields([
+      ...knownFish.map((f) => ({ name: f.name, amount: 1, category: 'fish', itemId: f.itemId })),
+      { name: 'Forgotten', amount: 34, category: 'fish', itemId: '196' },
+    ]);
+    assert.ok(!withForgotten.publicItems.some((i) => i.name === 'Forgotten'));
+    assert.equal(isPublicFishItem({ name: 'Forgotten', category: 'fish', itemId: '196' }), false);
+    assert.ok(!withForgotten.publicItems.some((i) => /Item #/i.test(i.name)));
+  });
+
+  test('7: debug exposes learningValidation and parser fields', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10PDebug',
+        userId: 23001,
+        isOnline: true,
+        items: [
+          ...knownFish.map((f) => ({ name: f.name, amount: 5, category: 'fish', itemId: f.itemId })),
+          { name: 'Item #196', itemId: '196', amount: 35, category: 'items' },
+        ],
+        pendingCatchName: { fishName: 'Forgotten King Crab', source: 'catch_notification', detectedAt: new Date().toISOString() },
+        previousItemCounts: { 196: 34 },
+      })
+      .expect(200);
+
+    const dbg = await request(app).get('/api/fishit-tracker/debug/B10PDebug').expect(200);
+    assert.equal(dbg.body.publicApiBuild, PUBLIC_API_BUILD);
+    assert.equal(dbg.body.renderBuild, PUBLIC_RENDER_BUILD);
+    assert.ok(dbg.body.learningValidation);
+    assert.ok(dbg.body.learningValidation.knownFishNameCount >= 5);
+    assert.ok(dbg.body.learningValidation.knownFishImageCount >= 5);
+    assert.ok(dbg.body.nameCatalogDiscovery.lastFishNameCandidate);
+    assert.ok(dbg.body.nameCatalogDiscovery.lastRarityCandidate);
+    assert.ok(!dbg.body.publicFishItems.some((i) => i.name === 'Forgotten'));
+    for (const f of knownFish) {
+      const row = dbg.body.publicFishItems.find((i) => i.itemId === f.itemId);
+      assert.equal(row.imageResolved, true);
+    }
+  });
+
+  test('8: build markers BLOCKER10P in tracker.lua and template', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(src.includes('isRarityTok'));
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(tpl.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05');
   });
 });
