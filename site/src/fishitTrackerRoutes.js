@@ -35,6 +35,9 @@ const catalogStore = require('./fishitCatalogStore');
 const fishImageAssets = require('./fishitFishImageAssets');
 const learnedFishCatalog = require('./fishitLearnedFishCatalog');
 const catchDelta = require('./fishitCatalogCatchDelta');
+const fishCatalog = require('./fishitFishCatalog');
+const robloxThumbnails = require('./fishitRobloxThumbnails');
+const { BLOCKER10N_BUILD, BLOCKER10N_UI_MARKER } = require('./fishitTrackerBuild');
 const packageJson = require('../package.json');
 
 function resolveServerCommit() {
@@ -74,9 +77,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = 'BLOCKER10K1_FISH_ONLY_UI';
-const PUBLIC_IMAGE_BUILD = 'BLOCKER10L_IMAGE';
-const PUBLIC_CATCH_DELTA_BUILD = 'BLOCKER10M_CATCH_DELTA';
+const PUBLIC_RENDER_BUILD = BLOCKER10N_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10N_BUILD;
 
 router.use((req, res, next) => {
   const p = req.path || '';
@@ -195,6 +197,18 @@ function mergeItemsNoDowngrade(incoming, existing) {
 
 /** BLOCKER10H: enrich incoming placeholders from persistent catalog before store. */
 function catalogMetaForItemId(itemId) {
+  const fish = fishCatalog.lookupByItemId(itemId);
+  if (fish) {
+    return {
+      name: fish.name,
+      category: fish.category || 'fish',
+      source: fish.source,
+      tier: fish.rarity || fish.tier || null,
+      imageUrl: fish.imageUrl || null,
+      imageAssetId: fish.imageAssetId || null,
+      confidence: fish.confidence || null,
+    };
+  }
   const main = catalogStore.lookupById(itemId);
   if (main && !catalogStore.isPlaceholderItemName(main.name, itemId)) return main;
   const learned = learnedFishCatalog.lookupById(itemId);
@@ -310,6 +324,7 @@ function enrichItemsFromCatalog(items) {
     if (rarity) rarity = catalogStore.normalizeTier(rarity);
 
     let imageUrl = it.imageUrl || (meta && meta.imageUrl) || dbImageFor(name) || null;
+    let imageAssetId = it.imageAssetId || (meta && meta.imageAssetId) || null;
 
     const resolved = trackerHasRealName
       ? true
@@ -339,12 +354,18 @@ function enrichItemsFromCatalog(items) {
       );
     }
 
+    if (!imageAssetId && catalogStore.isFishCategory(category)) {
+      const img = fishImageAssets.lookupByFishName(name);
+      if (img) imageAssetId = img.assetId;
+    }
+
     out.push({
       ...it,
       name,
       rarity,
       category,
       imageUrl,
+      imageAssetId: imageAssetId || it.imageAssetId || null,
       resolved,
       catalogReason,
       catalogSource,
@@ -377,19 +398,8 @@ function inventoryCountsFromGroups(inv) {
 }
 
 function catalogMapForItems(items) {
-  const out = {};
-  if (!Array.isArray(items)) return out;
-  for (const i of items) {
-    if (!i || !i.itemId) continue;
-    const meta = catalogStore.catalogMetaForItemId(i.itemId);
-    if (!meta) continue;
-    out[String(i.itemId)] = {
-      name: meta.name,
-      category: meta.category || null,
-      source: meta.source || null,
-    };
-  }
-  return out;
+  const ids = (items || []).map((i) => i && i.itemId).filter(Boolean);
+  return fishCatalog.catalogMapForItemIds(ids);
 }
 
 const RAW_INSPECTOR_MAX = 40;
@@ -453,8 +463,10 @@ function isPublicFishItem(item) {
 
 /** Fish-only view for public website/API (storage keeps full inventory). */
 function buildPublicFishFields(enrichedFlat) {
-  const fishItems = fishImageAssets.attachFishImagesToItems(
-    (enrichedFlat || []).filter(isPublicFishItem),
+  const fishItems = robloxThumbnails.attachImageFieldsToItems(
+    fishImageAssets.attachFishImagesToItems(
+      (enrichedFlat || []).filter(isPublicFishItem),
+    ),
   );
   const hidden = (enrichedFlat || []).filter((it) => !isPublicFishItem(it));
   const fishCounts = {
@@ -617,12 +629,33 @@ function renderTrackerPage(_req, res) {
     layout: false,
     title: '🎣 Fish It Live Inventory Tracker',
     renderBuild: PUBLIC_RENDER_BUILD,
-    imageBuild: PUBLIC_IMAGE_BUILD,
+    publicApiBuild: PUBLIC_API_BUILD,
+    blocker10nBuild: BLOCKER10N_BUILD,
   });
 }
 
 router.get('/tracker', renderTrackerPage);
 router.get('/fishit-tracker', renderTrackerPage);
+
+// ── GET /api/fishit-tracker/image/:assetId — thumbnail proxy (BLOCKER10N) ──
+router.get('/api/fishit-tracker/image/:assetId', getLimiter, async (req, res) => {
+  const assetId = robloxThumbnails.sanitiseAssetId(req.params.assetId);
+  if (!assetId) {
+    return res.status(400).json({ error: 'invalid_asset_id' });
+  }
+  res.set('Cache-Control', 'public, max-age=3600');
+  const cached = robloxThumbnails.getCached(assetId);
+  if (cached && cached.imageUrl) {
+    return res.redirect(302, cached.imageUrl);
+  }
+  try {
+    const resolved = await robloxThumbnails.resolveThumbnailUrl(assetId);
+    if (resolved.imageUrl) {
+      return res.redirect(302, resolved.imageUrl);
+    }
+  } catch (_) { /* fall through */ }
+  return res.redirect(302, '/assets/img/fishit/fallback-fish.svg');
+});
 
 // Allowed inventory sources. "replion" is the source of truth.
 const ALLOWED_SOURCES = new Set(['replion', 'replion_missing', 'event', 'legacy', 'unknown']);
@@ -992,10 +1025,13 @@ function handleGetBackpack(req, res) {
   const publicFish = buildPublicFishFields(enrichedFlat);
   const imageResolutionProof = fishImageAssets.buildImageResolutionProof(publicFish.fishItems);
 
+  const fishCatalogStats = fishCatalog.getStats();
+
   const enriched = {
     ...data,
     renderBuild:     PUBLIC_RENDER_BUILD,
-    imageBuild:      PUBLIC_IMAGE_BUILD,
+    publicApiBuild:  PUBLIC_API_BUILD,
+    trackerBuild:    data.trackerBuild || null,
     items:           publicFish.fishItems,
     inventory:       publicFish.fishInventory,
     counts:          buildPublicLegacyCounts(publicFish.fishCounts),
@@ -1005,6 +1041,9 @@ function handleGetBackpack(req, res) {
     fishCounts:      publicFish.fishCounts,
     publicCounts:    publicFish.publicCounts,
     imageResolutionProof,
+    fishCatalogTotal: fishCatalogStats.fishCatalogTotal,
+    fishCatalogWithImages: fishCatalogStats.fishCatalogWithImages,
+    fishCatalogWithRarity: fishCatalogStats.fishCatalogWithRarity,
     allItems:        enrichedFlat,
     fullItems:       enrichedFlat,
     enrichedItems:   enrichedFlat,
@@ -1082,6 +1121,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
   const unresolvedRawProof = buildUnresolvedRawProof(rawItemsArr, enrichedAll, selectedPath);
   const publicFishDbg = buildPublicFishFields(enrichedAll);
   const imageResolutionProof = fishImageAssets.buildImageResolutionProof(publicFishDbg.fishItems);
+  const fishCatalogStats = fishCatalog.getStats();
 
   const diags = Array.isArray(data.unresolvedDiagnostics) ? data.unresolvedDiagnostics : [];
   const unresolvedIds = diags.filter((d) => d && !d.found).map((d) => d.id);
@@ -1094,6 +1134,8 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
   return res.status(200).json({
     ok:              true,
     serverCommit:    SERVER_COMMIT,
+    publicApiBuild:  PUBLIC_API_BUILD,
+    renderBuild:     PUBLIC_RENDER_BUILD,
     trackerBuild:    data.trackerBuild || null,
     sessionKey:      key,
     username:        data.username,
@@ -1117,7 +1159,14 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
     rawInspector,
     unresolvedRawProof,
     imageResolutionProof,
+    publicFishItems: publicFishDbg.fishItems.slice(0, 10),
     fishImageAssetCatalogCount: fishImageAssets.getCatalogEntryCount(),
+    fishCatalogTotal: fishCatalogStats.fishCatalogTotal,
+    fishCatalogWithImages: fishCatalogStats.fishCatalogWithImages,
+    fishCatalogWithRarity: fishCatalogStats.fishCatalogWithRarity,
+    fishCatalogSources: fishCatalogStats.fishCatalogSources,
+    missingImageFishIds: fishCatalogStats.missingImageFishIds,
+    missingRarityFishIds: fishCatalogStats.missingRarityFishIds,
     unresolvedDiagnostics: diags.length ? diags : null,
     unresolvedIds,
     stillUnresolvedIds: unresolvedIds,
@@ -1127,7 +1176,6 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, (req, res) => {
       data.nameCatalogDiscovery,
       learnedFishCatalog,
     ),
-    catchDeltaBuild: PUBLIC_CATCH_DELTA_BUILD,
     learnedFishCatalogCount: learnedFishCatalog.getAllMappings().length,
   });
 });
@@ -1163,8 +1211,8 @@ module.exports.buildRawInspector = buildRawInspector;
 module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
-module.exports.PUBLIC_IMAGE_BUILD = PUBLIC_IMAGE_BUILD;
-module.exports.PUBLIC_CATCH_DELTA_BUILD = PUBLIC_CATCH_DELTA_BUILD;
+module.exports.PUBLIC_API_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10N_BUILD = BLOCKER10N_BUILD;
 module.exports.ingestLearnedFishEntry = ingestLearnedFishEntry;
 module.exports.runCatchDeltaOnUpload = runCatchDeltaOnUpload;
 module.exports.catalogMetaForItemId = catalogMetaForItemId;

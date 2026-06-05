@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10K1_FISH_ONLY_UI' %>" data-image-build="<%= typeof imageBuild !== 'undefined' ? imageBuild : 'BLOCKER10L_IMAGE' %>">
+<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_UI' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05' %>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -136,7 +136,8 @@
     }
   </style>
 </head>
-<body>
+<body data-ui-marker="BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_UI">
+<!-- BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_UI -->
 <div class="page">
   <div class="inner">
 
@@ -184,8 +185,8 @@
 
   const LS_KEY        = 'fishit_tracked_users';
   const POLL_MS       = 2500;
-  const RENDER_BUILD  = 'BLOCKER10K1_FISH_ONLY_UI';
-  const IMAGE_BUILD   = 'BLOCKER10L_IMAGE';
+  const RENDER_BUILD  = 'BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_UI';
+  const PUBLIC_API_BUILD = 'BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05';
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', secret:'rarity-secret', forgotten:'rarity-forgotten' };
 
   const trackers       = new Map();
@@ -258,28 +259,22 @@
     Default: '/assets/img/fishit/fallback-fish.svg'
   };
 
-  function robloxThumbFromAssetId(assetId) {
-    const id = String(assetId || '').trim();
-    if (!/^\d{10,22}$/.test(id)) return null;
-    return `https://www.roblox.com/asset-thumbnail/image?assetId=${id}&width=150&height=150&format=png`;
-  }
-  function assetIdFromImageUrl(url) {
-    if (!url || typeof url !== 'string') return null;
-    const store = url.match(/\/store\/asset\/(\d{10,22})\//i);
-    if (store) return store[1];
-    const m = url.match(/rbxassetid:\/\/(\d+)/i);
-    if (m) return m[1];
-    const num = url.match(/^(\d{10,22})$/);
-    return num ? num[1] : null;
+  function isUsableImageUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    const u = url.trim();
+    if (!u) return false;
+    if (/^\d{10,22}$/.test(u)) return false;
+    if (/thumbnails\.roblox\.com/i.test(u)) return false;
+    if (/create\.roblox\.com\/store\/asset\//i.test(u)) return false;
+    if (u.startsWith('/api/fishit-tracker/image/')) return true;
+    if (u.startsWith('http')) return true;
+    if (u.startsWith('/assets/')) return true;
+    return false;
   }
   function itemImageSrc(item) {
-    const thumb = robloxThumbFromAssetId(item.imageAssetId)
-      || robloxThumbFromAssetId(assetIdFromImageUrl(item.imageUrl));
-    if (thumb) return thumb;
-    if (item.imageUrl && typeof item.imageUrl === 'string' && item.imageUrl !== '') {
-      if (item.imageUrl.startsWith('http') && !/create\.roblox\.com\/store\/asset\//i.test(item.imageUrl)) {
-        return item.imageUrl;
-      }
+    if (isUsableImageUrl(item.imageUrl)) return item.imageUrl;
+    if (item.imageAssetId && /^\d{10,22}$/.test(String(item.imageAssetId))) {
+      return `/api/fishit-tracker/image/${item.imageAssetId}`;
     }
     const name = String(item.name || '');
     const category = String(item.category || item.tab || '').toLowerCase();
@@ -305,8 +300,9 @@
                         ? `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.category)}</span>`
                         : (item.tab ? `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.tab)}</span>` : '');
       const imgSrc  = itemImageSrc(item);
+      const altText = escHtml(item.name || 'Fish');
       return `<div class="item-card${isShiny?' shiny':''}">
-  <div class="ic-head"><img src="${imgSrc}" alt="" loading="lazy" decoding="async" style="width:28px;height:28px;margin-right:8px;vertical-align:middle;border-radius:6px;object-fit:cover;background:#2a3040;" onerror="this.onerror=null;this.src='${ITEM_IMAGES.Default}';"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${qty}${cat}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div>
+  <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${altText}" loading="lazy" decoding="async" style="width:28px;height:28px;margin-right:8px;vertical-align:middle;border-radius:6px;object-fit:cover;background:#2a3040;" onerror="this.onerror=null;this.src='${ITEM_IMAGES.Default}';"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${qty}${cat}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div>
   <div class="ic-meta">${hasW?`<span class="badge badge-weight">&#x2696;&#xFE0F; ${escHtml(Number(item.weight).toFixed(2))} kg</span>`:''}${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
 </div>`;
     }).join('')}</div>`;

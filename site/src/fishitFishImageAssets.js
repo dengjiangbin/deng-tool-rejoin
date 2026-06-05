@@ -49,7 +49,7 @@ function registerEntry(maps, name, assetId) {
   if (!display) return;
   const lower = normalizeName(display);
   const punct = normalizeNamePunct(display);
-  const row = { name: display, assetId: id, imageUrl: buildStoreUrl(id), imageSource: IMAGE_SOURCE_MATCHED };
+  const row = { name: display, assetId: id, imageUrl: null, imageSource: IMAGE_SOURCE_MATCHED };
   maps.byLower.set(lower, row);
   if (punct && punct !== lower) maps.byNormalized.set(punct, row);
 }
@@ -143,6 +143,10 @@ function buildImageResolutionProof(fishItems) {
     category: it.category || null,
     imageAssetMatched: !!it.imageAssetId,
     imageAssetId: it.imageAssetId || null,
+    imageUrl: it.imageUrl || null,
+    imageUrlPresent: it.imageUrlPresent === true || !!it.imageUrl,
+    imageResolved: it.imageResolved === true,
+    imageStatus: it.imageStatus || null,
     imageSource: it.imageSource || IMAGE_SOURCE_MISSING,
   }));
 }

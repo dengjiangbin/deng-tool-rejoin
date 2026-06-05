@@ -1,0 +1,41 @@
+{
+  "source": "confirmed_seeds_and_image_assets",
+  "note": "Confirmed itemId -> fish mappings only. Image asset list supplies imageAssetId by fish name, not by itemId index.",
+  "fish": [
+    {
+      "itemId": "68",
+      "name": "Flame Angelfish",
+      "category": "fish",
+      "imageAssetId": "128385926161840",
+      "source": "confirmed_catalog"
+    },
+    {
+      "itemId": "70",
+      "name": "Yello Damelfish",
+      "category": "fish",
+      "imageAssetId": "125066072333378",
+      "source": "confirmed_catalog"
+    },
+    {
+      "itemId": "71",
+      "name": "Darwin Clownfish",
+      "category": "fish",
+      "imageAssetId": "109996187340520",
+      "source": "confirmed_catalog"
+    },
+    {
+      "itemId": "117",
+      "name": "Bandit Angelfish",
+      "category": "fish",
+      "imageAssetId": "86776001616210",
+      "source": "confirmed_catalog"
+    },
+    {
+      "itemId": "119",
+      "name": "Ballina Angelfish",
+      "category": "fish",
+      "imageAssetId": "99236757363784",
+      "source": "confirmed_catalog"
+    }
+  ]
+}

@@ -2213,7 +2213,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04/);
+    assert.match(out, /BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05/);
   });
 
   test('targeted diagnostics disabled by default; heavy flags remain disabled', () => {
@@ -2277,10 +2277,11 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
     assert.ok(src.includes('TARGET_ITEM_DIAG aborted reason=catalog_aborted'));
   });
 
-  test('boot marker is BLOCKER10J light sync build', () => {
+  test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05'));
+    assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
+    assert.ok(src.includes('BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05'));
   });
 
   test('Item #990 upgrades only with exact catalog metadata', async () => {
@@ -2399,7 +2400,7 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04/);
+    assert.match(out, /BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05/);
   });
 
   test('safe minimal flags default off for heavy work', () => {
@@ -2417,10 +2418,11 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
     assert.ok(src.match(/if not LiveSafe\.enableHeavyCatalog then[\s\S]{0,80}HEAVY_CATALOG disabled=true/));
   });
 
-  test('boot marker is BLOCKER10J build', () => {
+  test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05'));
+    assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
+    assert.ok(src.includes('BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05'));
   });
 
   test('inventory upload and fish downgrade guards remain', () => {
@@ -2490,7 +2492,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
 
   test('TRACKER_BOOT_BEGIN appears before catalog scan code', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10J');
+    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05');
     const catalog = src.indexOf('scanReplicatedStorageFishCatalog');
     assert.ok(boot >= 0, 'TRACKER_BOOT_BEGIN missing');
     assert.ok(catalog >= 0, 'catalog scan missing');
@@ -2526,7 +2528,7 @@ describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04/);
+    assert.match(out, /BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05/);
   });
 
   test('player-data-only flags default correctly', () => {
@@ -2662,7 +2664,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04/);
+    assert.match(out, /BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05/);
   });
 
   test('light sync defaults: 10s loop, no attachReplionListeners by default', () => {
@@ -2675,10 +2677,11 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
     assert.ok(src.includes('cachedInventoryPath = "Inventory.Items"'));
   });
 
-  test('boot marker is BLOCKER10J light sync build', () => {
+  test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05'));
+    assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
+    assert.ok(src.includes('BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05'));
   });
 
   test('itemId 117 raw enriches to Bandit Angelfish / fish on debug firstItems', async () => {
@@ -2690,7 +2693,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
         userId: 15001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04',
+        trackerBuild: 'BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05',
         items: [{ name: 'Item #117', count: 3, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -2829,7 +2832,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04/);
+    assert.match(out, /BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05/);
   });
 
   test('light sync defaults and no attachReplionListeners on default path', () => {
@@ -2964,7 +2967,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
         userId: 16001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04',
+        trackerBuild: 'BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05',
         items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -3105,7 +3108,7 @@ describe('BLOCKER10K fish-only public + raw proof', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
     assert.ok(tpl.includes('getPublicFishItems'));
     assert.ok(tpl.includes('fishCountLabel'));
-    assert.ok(tpl.includes('BLOCKER10K1_FISH_ONLY_UI'));
+    assert.ok(tpl.includes('BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_UI'));
     assert.ok(tpl.includes('RENDER_BUILD'));
     assert.ok(!tpl.match(/inventory\.all/));
     assert.ok(!tpl.match(/Items:\s*<strong>/));
@@ -3195,7 +3198,7 @@ describe('BLOCKER10K1 public fish-only UI regression', () => {
     const fs = require('fs');
     const path = require('path');
     const html = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(html.includes('BLOCKER10K1_FISH_ONLY_UI'));
+    assert.ok(html.includes('BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_UI'));
     assert.ok(html.includes('data-render-build'));
     assert.ok(html.includes('getPublicFishItems'));
     assert.ok(!html.match(/Items:\s*<strong>/));
@@ -3270,7 +3273,9 @@ describe('BLOCKER10L fish image asset catalog', () => {
     ]);
     assert.equal(pub.publicItems.length, 1);
     assert.equal(pub.publicItems[0].imageAssetId, '128385926161840');
-    assert.ok(pub.publicItems[0].imageUrl.includes('/128385926161840/'));
+    assert.ok(pub.publicItems[0].imageUrl.includes('/api/fishit-tracker/image/128385926161840')
+      || pub.publicItems[0].imageUrl.includes('tr.rbxcdn.com'));
+    assert.equal(pub.publicItems[0].imageUrlPresent, true);
     assert.equal(pub.publicItems[0].imageSource, 'fish_image_asset_catalog');
   });
 
@@ -3329,6 +3334,7 @@ describe('BLOCKER10L fish image asset catalog', () => {
     const flame = get.body.publicItems.find((i) => i.name === 'Flame Angelfish');
     assert.ok(flame);
     assert.equal(flame.imageAssetId, '128385926161840');
+    assert.equal(flame.imageUrlPresent, true);
     assert.ok(flame.imageUrl.includes('128385926161840'));
 
     const dbg = await request(app).get('/api/fishit-tracker/debug/B10LImage').expect(200);
@@ -3342,14 +3348,16 @@ describe('BLOCKER10L fish image asset catalog', () => {
     assert.ok(dbg.body.unresolvedRawProof);
   });
 
-  test('tracker page template includes BLOCKER10L_IMAGE marker', () => {
+  test('tracker page template includes BLOCKER10N image marker', () => {
     const fs = require('fs');
     const path = require('path');
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10L_IMAGE'));
+    assert.ok(tpl.includes('BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_UI'));
     assert.ok(tpl.includes('imageAssetId'));
     assert.ok(tpl.includes('loading="lazy"'));
-    assert.ok(tpl.includes('robloxThumbFromAssetId'));
+    assert.ok(tpl.includes('isUsableImageUrl'));
+    assert.ok(!tpl.includes('robloxThumbFromAssetId'));
+    assert.ok(!tpl.includes('thumbnails.roblox.com'));
   });
 
   test('isPublicFishItem unchanged for fish-only gate', () => {
@@ -3369,7 +3377,7 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
     isPublicFishItem,
     runCatchDeltaOnUpload,
     ingestLearnedFishEntry,
-    PUBLIC_CATCH_DELTA_BUILD,
+    PUBLIC_API_BUILD,
   } = require('../src/fishitTrackerRoutes');
 
   function cleanupLearned() {
@@ -3497,6 +3505,7 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
     const flame = get.body.publicItems.find((i) => i.name === 'Flame Angelfish');
     assert.ok(flame);
     assert.equal(flame.imageAssetId, '128385926161840');
+    assert.equal(flame.imageUrlPresent, true);
     assert.ok(flame.imageUrl.includes('128385926161840'));
     assert.equal(flame.imageSource, 'fish_image_asset_catalog');
   });
@@ -3517,7 +3526,7 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
 
     const dbg = await request(app).get('/api/fishit-tracker/debug/B10MDebug').expect(200);
     assert.ok(dbg.body.nameCatalogDiscovery);
-    assert.equal(dbg.body.catchDeltaBuild, PUBLIC_CATCH_DELTA_BUILD);
+    assert.equal(dbg.body.publicApiBuild, PUBLIC_API_BUILD);
     const learned = dbg.body.nameCatalogDiscovery.learnedMappings;
     assert.ok(Array.isArray(learned) && learned.length >= 1);
     assert.equal(learned[0].itemId, '196');
@@ -3538,12 +3547,120 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
 
   test('tracker.lua includes BLOCKER10M catch delta markers', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('BLOCKER10M_CATCH_DELTA_NAME_CATALOG_2026_06_04'));
+    assert.ok(src.includes('BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05'));
     assert.ok(src.includes('normalizeCatchFishName'));
     assert.ok(src.includes('pendingCatchName'));
     assert.ok(src.includes('previousItemCounts'));
     assert.ok(src.includes('CATCH_NAME_PENDING'));
     assert.ok(!src.toLowerCase().includes('anticheat'));
     assert.ok(!src.toLowerCase().includes('coregui'));
+  });
+});
+
+describe('BLOCKER10N image rarity full catalog', () => {
+  const robloxThumbnails = require('../src/fishitRobloxThumbnails');
+  const fishCatalog = require('../src/fishitFishCatalog');
+  const {
+    buildPublicFishFields,
+    PUBLIC_API_BUILD,
+    PUBLIC_RENDER_BUILD,
+  } = require('../src/fishitTrackerRoutes');
+
+  beforeEach(() => {
+    robloxThumbnails._resetCache();
+    fishCatalog._reset();
+    catalogStore._reset();
+    catalogStore.seedKnownMappings();
+  });
+
+  const knownFish = [
+    { itemId: '68', name: 'Flame Angelfish', assetId: '128385926161840' },
+    { itemId: '70', name: 'Yello Damselfish', assetId: '125066072333378' },
+    { itemId: '71', name: 'Darwin Clownfish', assetId: '109996187340520' },
+    { itemId: '117', name: 'Bandit Angelfish', assetId: '86776001616210' },
+    { itemId: '119', name: 'Ballina Angelfish', assetId: '99236757363784' },
+  ];
+
+  test('image resolver returns proxy imageUrl with imageUrlPresent for known fish', () => {
+    const pub = buildPublicFishFields(knownFish.map((f) => ({
+      name: f.name, amount: 1, category: 'fish', itemId: f.itemId,
+    })));
+    assert.equal(pub.publicItems.length, 5);
+    for (const f of knownFish) {
+      const row = pub.publicItems.find((i) => i.itemId === f.itemId);
+      assert.ok(row, `missing ${f.itemId}`);
+      assert.equal(row.imageAssetId, f.assetId);
+      assert.equal(row.imageUrlPresent, true);
+      assert.ok(row.imageUrl.includes(`/api/fishit-tracker/image/${f.assetId}`)
+        || row.imageUrl.includes('tr.rbxcdn.com'));
+      assert.ok(!/create\.roblox\.com\/store\/asset\//i.test(row.imageUrl || ''));
+    }
+  });
+
+  test('HTML never uses raw asset id or thumbnails JSON as img src', () => {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(!tpl.includes('robloxThumbFromAssetId'));
+    assert.ok(!tpl.includes('thumbnails.roblox.com'));
+    assert.ok(tpl.includes('isUsableImageUrl'));
+    assert.ok(tpl.includes('BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_UI'));
+    assert.ok(!tpl.match(/Items:\s*<strong>/));
+    assert.ok(tpl.includes('Fish: <strong>-</strong>'));
+  });
+
+  test('fish catalog has confirmed seeds and non-fish protected', () => {
+    const stats = fishCatalog.getStats();
+    assert.ok(stats.fishCatalogTotal >= 5);
+    assert.equal(stats.fishCatalogWithImages, 5);
+    assert.equal(fishCatalog.lookupByItemId('68').name, 'Flame Angelfish');
+    assert.equal(fishCatalog.lookupByItemId('10'), null);
+    assert.equal(catalogStore.lookupById('388').name, 'Carbon Rod');
+    assert.equal(catalogStore.lookupById('10').name, 'Topwater Bait');
+  });
+
+  test('public API and debug expose BLOCKER10N markers and catalog stats', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10NProof',
+        userId: 21001,
+        isOnline: true,
+        items: knownFish.map((f) => ({
+          name: f.name, amount: 10, category: 'fish', itemId: f.itemId,
+        })),
+      })
+      .expect(200);
+
+    const get = await request(app).get('/api/fishit-tracker/get-backpack/B10NProof').expect(200);
+    assert.equal(get.body.publicApiBuild, PUBLIC_API_BUILD);
+    assert.equal(get.body.renderBuild, PUBLIC_RENDER_BUILD);
+    assert.ok(get.body.fishCatalogTotal >= 5);
+    for (const f of knownFish) {
+      const row = get.body.publicItems.find((i) => i.itemId === f.itemId);
+      assert.equal(row.imageUrlPresent, true);
+    }
+
+    const dbg = await request(app).get('/api/fishit-tracker/debug/B10NProof').expect(200);
+    assert.equal(dbg.body.publicApiBuild, PUBLIC_API_BUILD);
+    assert.ok(dbg.body.fishCatalogTotal >= 5);
+    assert.ok(Array.isArray(dbg.body.publicFishItems));
+    assert.ok(dbg.body.imageResolutionProof.every((p) => p.imageUrlPresent === true));
+  });
+
+  test('image proxy route redirects or serves fallback', async () => {
+    const app = makeApp();
+    const res = await request(app)
+      .get('/api/fishit-tracker/image/128385926161840')
+      .expect(302);
+    assert.ok(res.headers.location);
+    assert.ok(res.headers.location.includes('tr.rbxcdn.com')
+      || res.headers.location.includes('fallback-fish.svg'));
+  });
+
+  test('tracker.lua has single BLOCKER10N boot marker', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10N_IMAGE_RARITY_FULL_CATALOG_2026_06_05'));
+    assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
+    assert.equal((src.match(/TRACKER_BOOT_BEGIN/g) || []).length, 1);
   });
 });
