@@ -42,7 +42,8 @@ const nameOnlyCatalog = require('./fishitNameOnlyCatalog');
 const rarityLabels = require('./fishitRarityLabels');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
-const { BLOCKER10R_BUILD, BLOCKER10R_UI_MARKER } = require('./fishitTrackerBuild');
+const partialSnapshot = require('./fishitPartialSnapshot');
+const { BLOCKER10S_BUILD, BLOCKER10S_UI_MARKER } = require('./fishitTrackerBuild');
 
 learnedFishCatalog.purgePoisonedMappings();
 for (const row of learnedFishCatalog.getBlockedMappings()) {
@@ -88,8 +89,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10R_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10R_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10S_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10S_BUILD;
 
 const CONFIRMED_FISH_IMAGE_ASSET_IDS = [
   '128385926161840',
@@ -675,8 +676,9 @@ function renderTrackerPage(_req, res) {
     title: '🎣 Fish It Live Inventory Tracker',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
-    blocker10rBuild: BLOCKER10R_BUILD,
-    blocker10qBuild: BLOCKER10R_BUILD,
+    blocker10sBuild: BLOCKER10S_BUILD,
+    blocker10rBuild: BLOCKER10S_BUILD,
+    blocker10qBuild: BLOCKER10S_BUILD,
   });
 }
 
@@ -743,6 +745,10 @@ function sanitiseParseStats(raw) {
     images:            num(raw.images),
     tiers:             num(raw.tiers),
     selectedPath:      typeof raw.selectedPath === 'string' ? raw.selectedPath.slice(0, 80) : null,
+    selectedGeneralPath: typeof raw.selectedGeneralPath === 'string' ? raw.selectedGeneralPath.slice(0, 80) : null,
+    selectedFishPath: typeof raw.selectedFishPath === 'string' ? raw.selectedFishPath.slice(0, 80) : null,
+    fishPathAccepted: Number.isFinite(Number(raw.fishPathAccepted)) ? Math.floor(Number(raw.fishPathAccepted)) : null,
+    fish: Number.isFinite(Number(raw.fish)) ? Math.floor(Number(raw.fish)) : null,
   };
   if (typeof raw.error === 'string' && raw.error.length > 0) {
     out.error = raw.error.slice(0, 500);
@@ -923,7 +929,7 @@ function handleUpdateBackpack(req, res) {
     }
 
     // ── Inventory snapshot ────────────────────────────────────────
-    const rawItems = normaliseInventoryItems(body);
+    let rawItems = normaliseInventoryItems(body);
     const learnedIngest = ingestLearnedFishCatalogFromBody(body);
     const nameCatalogDiscovery = runCatchDeltaOnUpload(body, rawItems, existing, key);
     catalogStore.learnFromTrackerItems(rawItems);
@@ -931,8 +937,35 @@ function handleUpdateBackpack(req, res) {
     if (existing && existing.items && cleanItems.length) {
       cleanItems = mergeItemsNoDowngrade(cleanItems, existing.items);
     }
-    const inventory  = buildInventoryGroups(cleanItems);
+    let inventory  = buildInventoryGroups(cleanItems);
     const ps         = sanitiseParseStats(body.parseStats);
+    const fishPathDiscovery = partialSnapshot.sanitiseFishPathDiscovery(body.fishPathDiscovery
+      || body.parseStats?.fishPathDiscovery);
+
+    const priorPublicFishCount = existing?.lastGoodPublicFishCount || 0;
+    let partialInfo = partialSnapshot.detectPartialZeroFishSnapshot({
+      ps,
+      cleanItems,
+      existing,
+      priorPublicFishCount,
+    });
+    if (partialInfo.isPartial) {
+      const preserved = partialSnapshot.applyPartialSnapshotPreservation({
+        cleanItems,
+        rawItems,
+        inventory,
+        existing,
+        partialInfo,
+      });
+      cleanItems = preserved.cleanItems;
+      rawItems = preserved.rawItems;
+      inventory = preserved.inventory;
+      partialInfo = preserved.partialInfo;
+      console.log(
+        `[fishit-tracker] PARTIAL_SNAPSHOT_PRESERVED user=${cleanUser} reason=${partialInfo.partialSnapshotReason}` +
+        ` prevGood=${partialInfo.previousGoodFishCount} accepted=${partialInfo.currentRawAccepted}`,
+      );
+    }
 
     // Server-side log — counts and first 3 samples (never full dump).
     const ownedFishLen  = Array.isArray(body.owned && body.owned.fish)  ? body.owned.fish.length  : 0;
@@ -959,6 +992,12 @@ function handleUpdateBackpack(req, res) {
 
     const acceptedCount = cleanItems.length || (ps && ps.accepted) || 0;
 
+    const hasDisplayItems = cleanItems.length > 0
+      || (partialInfo.lastGoodFishPreserved && existing && existing.items?.length);
+    const sessionPhase = partialInfo.lastGoodFishPreserved
+      ? 'live'
+      : effectivePhase(phase, ps, hasDisplayItems);
+
     // Store under username key + userId alias.
     liveTrackDB[key] = {
       username:        cleanUser,
@@ -968,14 +1007,38 @@ function handleUpdateBackpack(req, res) {
       items:           cleanItems.length ? cleanItems : (existing ? existing.items     : []),
       inventory:       cleanItems.length ? inventory  : (existing ? existing.inventory : null),
       isOnline:        online,
-      phase:           effectivePhase(phase, ps, cleanItems.length > 0),
+      phase:           sessionPhase,
       parseStats:      ps || (existing && existing.parseStats) || null,
+      fishPathDiscovery: fishPathDiscovery || (existing && existing.fishPathDiscovery) || null,
       trackerBuild:    sanitiseTrackerBuild(body.trackerBuild) || (existing && existing.trackerBuild) || null,
       lastPayloadType: cleanItems.length ? 'inventory_snapshot' : (type || 'inventory_snapshot'),
       lastSeenAt:      now,
       lastInventoryAt: now,
       updatedAt:       now,
+      partialSnapshotDetected: partialInfo.partialSnapshotDetected || false,
+      partialSnapshotReason: partialInfo.partialSnapshotReason || null,
+      lastGoodFishPreserved: partialInfo.lastGoodFishPreserved || false,
+      partialSnapshotMeta: partialInfo.isPartial ? {
+        currentRawAccepted: partialInfo.currentRawAccepted,
+        previousGoodFishCount: partialInfo.previousGoodFishCount,
+        selectedPath: partialInfo.selectedPath,
+        selectedFishPath: partialInfo.selectedFishPath,
+      } : (existing && existing.partialSnapshotMeta) || null,
+      lastGoodFishItems: existing?.lastGoodFishItems || null,
+      lastGoodRawItems: existing?.lastGoodRawItems || null,
+      lastGoodInventory: existing?.lastGoodInventory || null,
+      lastGoodPublicFishCount: existing?.lastGoodPublicFishCount || 0,
+      catchWatcherStatus: body.catchWatcherStatus || (existing && existing.catchWatcherStatus) || null,
     };
+
+    const enrichedForGood = enrichItemsFromCatalog(liveTrackDB[key].items);
+    const publicFishCount = enrichedForGood.filter(isPublicFishItem).length;
+    partialSnapshot.updateLastGoodFishOnSession(
+      liveTrackDB[key],
+      cleanItems,
+      publicFishCount,
+      partialInfo,
+    );
     if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
       liveTrackDB[key].unresolvedDiagnostics = body.unresolvedDiagnostics.slice(0, 20);
     }
@@ -1091,8 +1154,8 @@ async function handleGetBackpack(req, res) {
     return res.status(404).json({ error: 'No tracking session active for this user.' });
   }
 
-  // Enrich from raw tracker payload when available (BLOCKER10I).
-  const sourceItems = (data.rawItems && data.rawItems.length) ? data.rawItems : data.items;
+  // Enrich from raw tracker payload when available (BLOCKER10I/10S).
+  const sourceItems = partialSnapshot.itemsForSessionDisplay(data);
   const enrichedFlat = enrichItemsFromCatalog(sourceItems);
   const enrichedInventory = buildInventoryGroups(enrichedFlat);
   const rawInventory = buildInventoryGroups(sourceItems);
@@ -1160,7 +1223,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     return res.status(404).json({ ok: false, error: 'not_found', key, knownKeys, serverCommit: SERVER_COMMIT });
   }
 
-  const rawItemsArr = data.rawItems || data.items || [];
+  const rawItemsArr = partialSnapshot.itemsForSessionDisplay(data);
   const rawInv = buildInventoryGroups(rawItemsArr);
   const enrichedAll = enrichItemsFromCatalog(rawItemsArr);
   const enrichedInv = buildInventoryGroups(enrichedAll);
@@ -1272,6 +1335,22 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
       (id) => globalFishCatalog.lookupById(id),
     ),
     staticCatalogAudit: staticCatalogAudit.auditStaticCatalogSources(),
+    partialSnapshotDetected: !!data.partialSnapshotDetected,
+    lastGoodFishPreserved: !!data.lastGoodFishPreserved,
+    partialSnapshotReason: data.partialSnapshotReason || null,
+    partialSnapshotMeta: data.partialSnapshotMeta || null,
+    selectedGeneralInventoryPath: data.parseStats?.selectedGeneralPath
+      || data.parseStats?.selectedPath || null,
+    selectedFishInventoryPath: data.parseStats?.selectedFishPath
+      || data.fishPathDiscovery?.selectedFishPath || null,
+    fishPathDiscovery: data.fishPathDiscovery || data.parseStats?.fishPathDiscovery || null,
+    emptyPublicFishReason: publicFishDbg.publicItems.length === 0
+      ? (data.partialSnapshotDetected
+        ? data.partialSnapshotReason
+        : (data.parseStats?.fish === 0 ? 'parse_stats_fish_zero' : 'no_public_fish_items'))
+      : null,
+    catchWatcherStatus: data.catchWatcherStatus || null,
+    lastGoodPublicFishCount: data.lastGoodPublicFishCount || 0,
   });
 });
 
@@ -1307,12 +1386,13 @@ module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
 module.exports.PUBLIC_API_BUILD = PUBLIC_API_BUILD;
-module.exports.BLOCKER10R_BUILD = BLOCKER10R_BUILD;
-module.exports.BLOCKER10Q_BUILD = BLOCKER10R_BUILD;
-module.exports.BLOCKER10P_BUILD = BLOCKER10R_BUILD;
-module.exports.BLOCKER10O_BUILD = BLOCKER10R_BUILD;
-module.exports.BLOCKER10N2_BUILD = BLOCKER10R_BUILD;
-module.exports.BLOCKER10N_BUILD = BLOCKER10R_BUILD;
+module.exports.BLOCKER10S_BUILD = BLOCKER10S_BUILD;
+module.exports.BLOCKER10R_BUILD = BLOCKER10S_BUILD;
+module.exports.BLOCKER10Q_BUILD = BLOCKER10S_BUILD;
+module.exports.BLOCKER10P_BUILD = BLOCKER10S_BUILD;
+module.exports.BLOCKER10O_BUILD = BLOCKER10S_BUILD;
+module.exports.BLOCKER10N2_BUILD = BLOCKER10S_BUILD;
+module.exports.BLOCKER10N_BUILD = BLOCKER10S_BUILD;
 module.exports.ingestLearnedFishEntry = ingestLearnedFishEntry;
 module.exports.runCatchDeltaOnUpload = runCatchDeltaOnUpload;
 module.exports.catalogMetaForItemId = catalogMetaForItemId;

@@ -2213,7 +2213,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05/);
+    assert.match(out, /BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05/);
   });
 
   test('targeted diagnostics disabled by default; heavy flags remain disabled', () => {
@@ -2279,9 +2279,9 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
 
   test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
   });
 
   test('Item #990 upgrades only with exact catalog metadata', async () => {
@@ -2400,7 +2400,7 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05/);
+    assert.match(out, /BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05/);
   });
 
   test('safe minimal flags default off for heavy work', () => {
@@ -2420,9 +2420,9 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
 
   test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
   });
 
   test('inventory upload and fish downgrade guards remain', () => {
@@ -2492,7 +2492,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
 
   test('TRACKER_BOOT_BEGIN appears before catalog scan code', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05');
+    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05');
     const catalog = src.indexOf('scanReplicatedStorageFishCatalog');
     assert.ok(boot >= 0, 'TRACKER_BOOT_BEGIN missing');
     assert.ok(catalog >= 0, 'catalog scan missing');
@@ -2528,7 +2528,7 @@ describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05/);
+    assert.match(out, /BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05/);
   });
 
   test('player-data-only flags default correctly', () => {
@@ -2664,7 +2664,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05/);
+    assert.match(out, /BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05/);
   });
 
   test('light sync defaults: 10s loop, no attachReplionListeners by default', () => {
@@ -2679,9 +2679,9 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
 
   test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
   });
 
   test('itemId 117 raw enriches to Bandit Angelfish / fish on debug firstItems', async () => {
@@ -2693,7 +2693,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
         userId: 15001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05',
+        trackerBuild: 'BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05',
         items: [{ name: 'Item #117', count: 3, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -2832,7 +2832,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05/);
+    assert.match(out, /BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05/);
   });
 
   test('light sync defaults and no attachReplionListeners on default path', () => {
@@ -2843,7 +2843,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
     assert.ok(src.includes('oneShot = false'));
     assert.ok(src.includes('SYNC_LOOP_STARTED interval='));
     assert.ok(src.includes('SYNC_UPLOAD ok=true'));
-    const startup = src.slice(src.indexOf('function runReplionStartupPhase'), src.indexOf('function runReplionStartupPhase') + 4500);
+    const startup = src.slice(src.indexOf('function runReplionStartupPhase'), src.indexOf('function runReplionStartupPhase') + 5500);
     assert.ok(startup.includes('SYNC_LOOP_STARTED interval='));
     assert.ok(startup.includes('not LiveSafe.lightSyncEnabled'));
     assert.ok(!startup.match(/if not LiveSafe\.oneShot then\s*\n\s*attachReplionListeners/));
@@ -2967,7 +2967,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
         userId: 16001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05',
+        trackerBuild: 'BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05',
         items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -3109,7 +3109,7 @@ describe('BLOCKER10K fish-only public + raw proof', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
     assert.ok(tpl.includes('getPublicFishItems'));
     assert.ok(tpl.includes('fishCountLabel'));
-    assert.ok(tpl.includes('BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(tpl.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
     assert.ok(tpl.includes('RENDER_BUILD'));
     assert.ok(!tpl.match(/inventory\.all/));
     assert.ok(!tpl.match(/Items:\s*<strong>/));
@@ -3200,7 +3200,7 @@ describe('BLOCKER10K1 public fish-only UI regression', () => {
     const fs = require('fs');
     const path = require('path');
     const html = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(html.includes('BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(html.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
     assert.ok(html.includes('data-render-build'));
     assert.ok(html.includes('getPublicFishItems'));
     assert.ok(!html.match(/Items:\s*<strong>/));
@@ -3354,7 +3354,7 @@ describe('BLOCKER10L fish image asset catalog', () => {
     const fs = require('fs');
     const path = require('path');
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(tpl.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
     assert.ok(tpl.includes('imageAssetId'));
     assert.ok(tpl.includes('loading="lazy"'));
     assert.ok(tpl.includes('isUsableImageUrl'));
@@ -3556,7 +3556,7 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
 
   test('tracker.lua includes BLOCKER10M catch delta markers', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
     assert.ok(src.includes('normalizeCatchFishName'));
     assert.ok(src.includes('pendingCatchName'));
     assert.ok(src.includes('previousItemCounts'));
@@ -3628,7 +3628,7 @@ describe('BLOCKER10N2 image proxy label fix', () => {
 
   test('HTML contains N2 marker, Fish label, and image src for all 5 fish', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(tpl.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
     assert.ok(tpl.includes('fishCountLabel'));
     assert.ok(tpl.includes('data-fish-count'));
     assert.ok(tpl.includes('onFishImageError'));
@@ -3740,7 +3740,7 @@ describe('BLOCKER10N2 image proxy label fix', () => {
 
   test('tracker.lua has single BLOCKER10O boot marker', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
     assert.equal((src.match(/TRACKER_BOOT_BEGIN/g) || []).length, 1);
   });
@@ -3991,10 +3991,10 @@ describe('BLOCKER10O full catalog safe learning', () => {
 
     const get = await request(app).get('/api/fishit-tracker/get-backpack/B10OLabel').expect(200);
     assert.equal(get.body.fishCounts.label, 'Fish');
-    assert.equal(get.body.publicApiBuild, 'BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05');
+    assert.equal(get.body.publicApiBuild, 'BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05');
 
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(tpl.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
     assert.ok(!tpl.match(/Items:\s*<strong>/));
   });
 });
@@ -4187,12 +4187,12 @@ describe('BLOCKER10P false rarity learn fix (regression)', () => {
 
   test('8: build markers BLOCKER10Q in tracker.lua and template', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
-    assert.ok(src.includes('BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
     assert.ok(src.includes('isRarityTok'));
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
-    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05');
+    assert.ok(tpl.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05');
   });
 });
 
@@ -4483,12 +4483,12 @@ describe('BLOCKER10Q global collective catalog rarity', () => {
 
   test('14: build markers BLOCKER10R', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
     assert.ok(src.includes('payload.gameId'));
     assert.ok(src.includes('payload.placeId'));
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05'));
-    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05');
+    assert.ok(tpl.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05');
   });
 });
 
@@ -4542,7 +4542,7 @@ describe('BLOCKER10R real live new itemId proof', () => {
   test('1: evidence source mode distinguishes live_roblox from api_simulation', () => {
     assert.equal(liveCatchProof.resolveEvidenceSourceMode({
       clientOrigin: 'roblox_tracker',
-      trackerBuild: 'BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05',
+      trackerBuild: 'BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05',
     }), 'live_roblox');
     assert.equal(liveCatchProof.resolveEvidenceSourceMode({
       pendingCatchName: { fishName: 'Flame Angelfish', source: 'catch_notification' },
@@ -4675,7 +4675,7 @@ describe('BLOCKER10R real live new itemId proof', () => {
         userId: 25002,
         isOnline: true,
         clientOrigin: 'roblox_tracker',
-        trackerBuild: 'BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05',
+        trackerBuild: 'BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05',
         evidenceSourceMode: 'live_roblox',
         items: knownFish.map((f) => ({ name: f.name, amount: 3, category: 'fish', itemId: f.itemId })),
         pendingCatchName: {
@@ -4710,6 +4710,130 @@ describe('BLOCKER10R real live new itemId proof', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
     assert.ok(src.includes('LIVE_CATCH_TEXT'));
     assert.ok(src.includes('evidenceSourceMode'));
-    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10R_REAL_LIVE_NEW_ITEMID_PROOF_2026_06_05');
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05');
+  });
+});
+
+describe('BLOCKER10S fish path discovery and no empty wipe', () => {
+  const partialSnapshot = require('../src/fishitPartialSnapshot');
+  const catchNameParser = require('../src/fishitCatchNameParser');
+  const rarityLabels = require('../src/fishitRarityLabels');
+  const {
+    buildPublicFishFields,
+    isPublicFishItem,
+    PUBLIC_API_BUILD,
+  } = require('../src/fishitTrackerRoutes');
+
+  const knownFish = [
+    { itemId: '68', name: 'Flame Angelfish', assetId: '128385926161840' },
+    { itemId: '70', name: 'Yello Damselfish', assetId: '125066072333378' },
+    { itemId: '71', name: 'Darwin Clownfish', assetId: '109996187340520' },
+    { itemId: '117', name: 'Bandit Angelfish', assetId: '86776001616210' },
+    { itemId: '119', name: 'Ballina Angelfish', assetId: '99236757363784' },
+  ];
+
+  test('1: partial zero-fish snapshot preserves last good fish', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10SPreserve',
+        userId: 26001,
+        isOnline: true,
+        items: knownFish.map((f) => ({ name: f.name, amount: 5, category: 'fish', itemId: f.itemId })),
+        parseStats: { raw: 50, accepted: 5, fish: 5, selectedPath: 'Inventory.Fish' },
+      })
+      .expect(200);
+
+    const good = await request(app).get('/api/fishit-tracker/get-backpack/B10SPreserve').expect(200);
+    assert.equal(good.body.publicItems.length, 5);
+
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10SPreserve',
+        userId: 26001,
+        isOnline: true,
+        items: [
+          { name: 'Item #10', itemId: '10', amount: 1, category: 'items' },
+          { name: 'Item #990', itemId: '990', amount: 1, category: 'items' },
+        ],
+        parseStats: {
+          raw: 14, accepted: 2, acceptedInstances: 2, fish: 0,
+          selectedPath: 'Inventory.Items', selectedGeneralPath: 'Inventory.Items',
+        },
+      })
+      .expect(200);
+
+    const after = await request(app).get('/api/fishit-tracker/get-backpack/B10SPreserve').expect(200);
+    assert.equal(after.body.publicItems.length, 5, 'public fish must not wipe to empty');
+
+    const dbg = await request(app).get('/api/fishit-tracker/debug/B10SPreserve').expect(200);
+    assert.equal(dbg.body.partialSnapshotDetected, true);
+    assert.equal(dbg.body.lastGoodFishPreserved, true);
+    assert.ok(dbg.body.partialSnapshotReason.includes('zero_fish_partial_snapshot_preserved_last_good'));
+    assert.equal(dbg.body.publicFishItems.length, 5);
+  });
+
+  test('2: fishPathDiscovery sanitises candidate payload', () => {
+    const out = partialSnapshot.sanitiseFishPathDiscovery({
+      selectedFishPath: 'Inventory.Fish',
+      selectedFishPathReason: 'fish_like_entries',
+      selectedGeneralPath: 'Inventory.Items',
+      candidates: [{
+        path: 'Inventory.Fish',
+        rawCount: 12,
+        acceptedCount: 12,
+        fishLikeCount: 12,
+        nameFieldCount: 10,
+        weightFieldCount: 8,
+        score: 24,
+        selected: true,
+        sample: 'Salmon',
+      }, {
+        path: 'Inventory.Items',
+        rawCount: 14,
+        acceptedCount: 6,
+        fishLikeCount: 0,
+        score: 1,
+        selected: false,
+      }],
+    });
+    assert.equal(out.selectedFishPath, 'Inventory.Fish');
+    assert.equal(out.candidates.length, 2);
+    assert.equal(out.candidates[0].sample, 'Salmon');
+  });
+
+  test('3: rarity-only catch names blocked; Forgotten King Crab splits', () => {
+    const split = catchNameParser.parseCatchInput({
+      fishName: 'Forgotten King Crab',
+      source: 'catch_notification',
+    });
+    assert.equal(split.fishNameCandidate, 'King Crab');
+    assert.equal(split.rarityCandidate, 'Forgotten');
+    assert.equal(rarityLabels.isBlockedLearnName('Forgotten'), true);
+    assert.equal(rarityLabels.isBlockedLearnName('Salmon'), false);
+  });
+
+  test('4: regression — Fish label, no Forgotten, no Item # public cards', async () => {
+    const pub = await buildPublicFishFields([
+      ...knownFish.map((f) => ({ name: f.name, amount: 1, category: 'fish', itemId: f.itemId })),
+      { name: 'Forgotten', amount: 1, category: 'fish', itemId: '196' },
+      { name: 'Item #72', itemId: '72', amount: 1, category: 'items' },
+    ]);
+    assert.equal(pub.fishCounts.label, 'Fish');
+    assert.equal(pub.publicItems.length, 5);
+    assert.ok(!pub.publicItems.some((i) => i.name === 'Forgotten'));
+    assert.ok(!pub.publicItems.some((i) => /Item #/i.test(i.name)));
+    assert.equal(isPublicFishItem({ name: 'Forgotten', category: 'fish', itemId: '196' }), false);
+  });
+
+  test('5: tracker.lua has fish path discovery and catch watcher markers', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    assert.ok(src.includes('discoverFishInventoryPaths'));
+    assert.ok(src.includes('FISH_PATH_SELECTED'));
+    assert.ok(src.includes('scanPlayerGuiForCatchText'));
+    assert.ok(src.includes('BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05'));
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10S_FISH_PATH_DISCOVERY_AND_NO_EMPTY_WIPE_2026_06_05');
   });
 });

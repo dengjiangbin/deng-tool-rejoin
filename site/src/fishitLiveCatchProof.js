@@ -38,7 +38,10 @@ function resolveEvidenceSourceMode(body) {
     return 'test_fixture';
   }
   if (b.clientOrigin === 'roblox_tracker') return 'live_roblox';
-  if (b.trackerBuild && String(b.trackerBuild).includes('BLOCKER10R')) return 'live_roblox';
+  if (b.trackerBuild && (
+    String(b.trackerBuild).includes('BLOCKER10S')
+    || String(b.trackerBuild).includes('BLOCKER10R')
+  )) return 'live_roblox';
   if (b.adminSeed || b.source === 'admin_seed') return 'admin_seed';
   if (b.source === 'static_seed' || b.source === 'seed_confirmed') return 'static_seed';
   return 'api_simulation';
