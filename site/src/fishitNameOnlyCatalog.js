@@ -112,8 +112,10 @@ function getNameCatalogStats() {
   };
 }
 
-function buildLearningValidation(learnedCatalog) {
+function buildLearningValidation(learnedCatalog, globalCatalog) {
   const blocked = learnedCatalog.getBlockedMappings();
+  const globalStats = globalCatalog && typeof globalCatalog.getGlobalEvidenceStats === 'function'
+    ? globalCatalog.getGlobalEvidenceStats() : null;
   return {
     rarityLabelsBlocked: rarityLabels.getRarityLabelsBlocked(),
     blockedLearnedMappings: blocked,
@@ -121,6 +123,8 @@ function buildLearningValidation(learnedCatalog) {
     pendingMappings: learnedCatalog.getAllMappings().filter((m) => !m.publicEligible),
     confirmedMappings: learnedCatalog.getAllMappings().filter((m) => m.publicEligible),
     rejectedMappings: blocked,
+    globalEvidenceAccepted: globalStats ? globalStats.globalEvidenceAccepted : 0,
+    globalEvidenceRejected: globalStats ? globalStats.globalEvidenceRejected : 0,
   };
 }
 

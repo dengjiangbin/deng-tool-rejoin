@@ -120,6 +120,25 @@ function loadCatalogStore(map, sources) {
   }
 }
 
+function loadGlobalConfirmed(map, sources) {
+  const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
+  for (const e of globalFishCatalog.getConfirmedMappings()) {
+    if (!e.publicEligible || !e.fishName) continue;
+    registerEntry(map, sources, {
+      itemId: e.itemId,
+      name: e.fishName,
+      category: 'fish',
+      rarity: e.rarity,
+      tier: e.rarity,
+      imageAssetId: e.imageAssetId,
+      imageUrl: e.imageUrl,
+      source: 'global_catalog_confirmed',
+      confidence: e.confidence,
+      updatedAt: e.lastConfirmedAt || e.lastSeenAt,
+    }, 'global_catalog_confirmed');
+  }
+}
+
 function loadLearned(map, sources) {
   for (const e of learnedFishCatalog.getAllMappings()) {
     if (!e.publicEligible || e.category !== 'fish') continue;
@@ -146,6 +165,7 @@ function _load() {
   const sources = [];
   loadSeeds(map, sources);
   loadConfirmedFile(map, sources);
+  loadGlobalConfirmed(map, sources);
   loadCatalogStore(map, sources);
   loadLearned(map, sources);
   _byItemId = map;

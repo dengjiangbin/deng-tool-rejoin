@@ -2213,7 +2213,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05/);
+    assert.match(out, /BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05/);
   });
 
   test('targeted diagnostics disabled by default; heavy flags remain disabled', () => {
@@ -2279,9 +2279,9 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
 
   test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
   });
 
   test('Item #990 upgrades only with exact catalog metadata', async () => {
@@ -2400,7 +2400,7 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05/);
+    assert.match(out, /BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05/);
   });
 
   test('safe minimal flags default off for heavy work', () => {
@@ -2420,9 +2420,9 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
 
   test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
   });
 
   test('inventory upload and fish downgrade guards remain', () => {
@@ -2492,7 +2492,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
 
   test('TRACKER_BOOT_BEGIN appears before catalog scan code', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05');
+    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05');
     const catalog = src.indexOf('scanReplicatedStorageFishCatalog');
     assert.ok(boot >= 0, 'TRACKER_BOOT_BEGIN missing');
     assert.ok(catalog >= 0, 'catalog scan missing');
@@ -2528,7 +2528,7 @@ describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05/);
+    assert.match(out, /BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05/);
   });
 
   test('player-data-only flags default correctly', () => {
@@ -2664,7 +2664,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05/);
+    assert.match(out, /BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05/);
   });
 
   test('light sync defaults: 10s loop, no attachReplionListeners by default', () => {
@@ -2679,9 +2679,9 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
 
   test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
   });
 
   test('itemId 117 raw enriches to Bandit Angelfish / fish on debug firstItems', async () => {
@@ -2693,7 +2693,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
         userId: 15001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05',
+        trackerBuild: 'BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05',
         items: [{ name: 'Item #117', count: 3, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -2832,7 +2832,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05/);
+    assert.match(out, /BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05/);
   });
 
   test('light sync defaults and no attachReplionListeners on default path', () => {
@@ -2967,7 +2967,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
         userId: 16001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05',
+        trackerBuild: 'BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05',
         items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -3109,7 +3109,7 @@ describe('BLOCKER10K fish-only public + raw proof', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
     assert.ok(tpl.includes('getPublicFishItems'));
     assert.ok(tpl.includes('fishCountLabel'));
-    assert.ok(tpl.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(tpl.includes('BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
     assert.ok(tpl.includes('RENDER_BUILD'));
     assert.ok(!tpl.match(/inventory\.all/));
     assert.ok(!tpl.match(/Items:\s*<strong>/));
@@ -3200,7 +3200,7 @@ describe('BLOCKER10K1 public fish-only UI regression', () => {
     const fs = require('fs');
     const path = require('path');
     const html = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(html.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(html.includes('BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
     assert.ok(html.includes('data-render-build'));
     assert.ok(html.includes('getPublicFishItems'));
     assert.ok(!html.match(/Items:\s*<strong>/));
@@ -3354,7 +3354,7 @@ describe('BLOCKER10L fish image asset catalog', () => {
     const fs = require('fs');
     const path = require('path');
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(tpl.includes('BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
     assert.ok(tpl.includes('imageAssetId'));
     assert.ok(tpl.includes('loading="lazy"'));
     assert.ok(tpl.includes('isUsableImageUrl'));
@@ -3556,7 +3556,7 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
 
   test('tracker.lua includes BLOCKER10M catch delta markers', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
     assert.ok(src.includes('normalizeCatchFishName'));
     assert.ok(src.includes('pendingCatchName'));
     assert.ok(src.includes('previousItemCounts'));
@@ -3628,7 +3628,7 @@ describe('BLOCKER10N2 image proxy label fix', () => {
 
   test('HTML contains N2 marker, Fish label, and image src for all 5 fish', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(tpl.includes('BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
     assert.ok(tpl.includes('fishCountLabel'));
     assert.ok(tpl.includes('data-fish-count'));
     assert.ok(tpl.includes('onFishImageError'));
@@ -3740,7 +3740,7 @@ describe('BLOCKER10N2 image proxy label fix', () => {
 
   test('tracker.lua has single BLOCKER10O boot marker', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
     assert.equal((src.match(/TRACKER_BOOT_BEGIN/g) || []).length, 1);
   });
@@ -3977,7 +3977,7 @@ describe('BLOCKER10O full catalog safe learning', () => {
     }
   });
 
-  test('public API and HTML keep Fish label and BLOCKER10P marker', async () => {
+  test('public API and HTML keep Fish label and BLOCKER10Q marker', async () => {
     const app = makeApp();
     await request(app)
       .post('/api/fishit-tracker/update-backpack')
@@ -3991,15 +3991,15 @@ describe('BLOCKER10O full catalog safe learning', () => {
 
     const get = await request(app).get('/api/fishit-tracker/get-backpack/B10OLabel').expect(200);
     assert.equal(get.body.fishCounts.label, 'Fish');
-    assert.equal(get.body.publicApiBuild, 'BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05');
+    assert.equal(get.body.publicApiBuild, 'BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05');
 
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(tpl.includes('BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
     assert.ok(!tpl.match(/Items:\s*<strong>/));
   });
 });
 
-describe('BLOCKER10P false rarity learn fix', () => {
+describe('BLOCKER10P false rarity learn fix (regression)', () => {
   const TMP_LEARNED = path.join(os.tmpdir(), `fishit_learned_p_${process.pid}.json`);
 
   const rarityLabels = require('../src/fishitRarityLabels');
@@ -4185,13 +4185,309 @@ describe('BLOCKER10P false rarity learn fix', () => {
     }
   });
 
-  test('8: build markers BLOCKER10P in tracker.lua and template', () => {
+  test('8: build markers BLOCKER10Q in tracker.lua and template', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
-    assert.ok(src.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
+    assert.ok(src.includes('BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
     assert.ok(src.includes('isRarityTok'));
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05'));
-    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10P_FALSE_RARITY_LEARN_FIX_2026_06_05');
+    assert.ok(tpl.includes('BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05');
+  });
+});
+
+describe('BLOCKER10Q global collective catalog rarity', () => {
+  const TMP_GLOBAL = path.join(os.tmpdir(), `fishit_global_${process.pid}.json`);
+  const TMP_LEARNED = path.join(os.tmpdir(), `fishit_learned_q_${process.pid}.json`);
+
+  const globalFishCatalog = require('../src/fishitGlobalFishItemCatalog');
+  const catchNameParser = require('../src/fishitCatchNameParser');
+  const nameOnlyCatalog = require('../src/fishitNameOnlyCatalog');
+  const learnedFishCatalog = require('../src/fishitLearnedFishCatalog');
+  const catchDelta = require('../src/fishitCatalogCatchDelta');
+  const robloxThumbnails = require('../src/fishitRobloxThumbnails');
+  const fishCatalog = require('../src/fishitFishCatalog');
+  const {
+    buildPublicFishFields,
+    enrichItemsFromCatalog,
+    PUBLIC_API_BUILD,
+    ingestLearnedFishEntry,
+    isPublicFishItem,
+  } = require('../src/fishitTrackerRoutes');
+
+  const knownFish = [
+    { itemId: '68', name: 'Flame Angelfish', assetId: '128385926161840' },
+    { itemId: '70', name: 'Yello Damselfish', assetId: '125066072333378' },
+    { itemId: '71', name: 'Darwin Clownfish', assetId: '109996187340520' },
+    { itemId: '117', name: 'Bandit Angelfish', assetId: '86776001616210' },
+    { itemId: '119', name: 'Ballina Angelfish', assetId: '99236757363784' },
+  ];
+
+  function evidenceBase(overrides) {
+    return {
+      itemId: '68',
+      fishNameCandidate: 'Flame Angelfish',
+      source: 'catch_notification',
+      userId: 1001,
+      cleanSingleDelta: true,
+      deltaAmount: 1,
+      timestamp: new Date().toISOString(),
+      ...(overrides || {}),
+    };
+  }
+
+  function cleanup() {
+    try { if (fs.existsSync(TMP_GLOBAL)) fs.unlinkSync(TMP_GLOBAL); } catch (_) {}
+    try { if (fs.existsSync(TMP_LEARNED)) fs.unlinkSync(TMP_LEARNED); } catch (_) {}
+    globalFishCatalog._reset();
+    learnedFishCatalog._reset();
+    fishCatalog._reset();
+  }
+
+  beforeEach(() => {
+    process.env.FISHIT_GLOBAL_FISH_ITEM_CATALOG_PATH = TMP_GLOBAL;
+    process.env.FISHIT_LEARNED_FISH_CATALOG_PATH = TMP_LEARNED;
+    delete process.env.FISHIT_GLOBAL_PERSIST;
+    robloxThumbnails._resetCache();
+    cleanup();
+    catalogStore._reset();
+    catalogStore.seedKnownMappings();
+    fishCatalog._reset();
+  });
+
+  test('1: global storage — pending write, confirmed write, reload', () => {
+    process.env.FISHIT_GLOBAL_PERSIST = '1';
+    const pending = globalFishCatalog.submitEvidence({
+      ...evidenceBase({ itemId: '72', fishNameCandidate: 'Flame Angelfish', cleanSingleDelta: false }),
+    });
+    assert.equal(pending.decision, 'pending');
+    assert.equal(globalFishCatalog.lookupById('72').confidence, 'pending');
+
+    globalFishCatalog.submitEvidence(evidenceBase({ itemId: '72', userId: 1002, cleanSingleDelta: true }));
+    const confirmed = globalFishCatalog.lookupById('72');
+    assert.equal(confirmed.confidence, 'confirmed');
+    assert.equal(confirmed.publicEligible, true);
+
+    fishCatalog._reset();
+    const reloaded = globalFishCatalog.reloadFromDisk();
+    assert.equal(reloaded.byItemId['72'].confidence, 'confirmed');
+    assert.equal(globalFishCatalog.getStats().confirmedCount, 1);
+  });
+
+  test('2: one weak observation stays pending', () => {
+    const r = globalFishCatalog.submitEvidence({
+      ...evidenceBase({ cleanSingleDelta: false }),
+    });
+    assert.equal(r.decision, 'pending');
+    assert.equal(r.publicEligible, false);
+    assert.equal(globalFishCatalog.getStats().pendingCount, 1);
+  });
+
+  test('3: two clean observations confirm same itemId/name', () => {
+    globalFishCatalog.submitEvidence(evidenceBase({ userId: 2001, cleanSingleDelta: false }));
+    const second = globalFishCatalog.submitEvidence(evidenceBase({ userId: 2001, cleanSingleDelta: true }));
+    assert.equal(second.decision, 'confirmed');
+    assert.equal(second.evidenceCount, 2);
+    assert.equal(second.publicEligible, true);
+    assert.equal(second.reason, 'repeated_observation_confirmed');
+  });
+
+  test('4: two unique users confirm', () => {
+    globalFishCatalog.submitEvidence(evidenceBase({ userId: 3001, cleanSingleDelta: false }));
+    const second = globalFishCatalog.submitEvidence(evidenceBase({ userId: 3002, cleanSingleDelta: true }));
+    assert.equal(second.decision, 'confirmed');
+    assert.equal(second.uniqueUserCount, 2);
+    assert.equal(second.reason, 'multi_user_confirmed');
+  });
+
+  test('5: conflicting names mark conflict', () => {
+    globalFishCatalog.submitEvidence(evidenceBase({ itemId: '80', fishNameCandidate: 'Flame Angelfish' }));
+    const conflict = globalFishCatalog.submitEvidence({
+      ...evidenceBase({ itemId: '80', fishNameCandidate: 'Darwin Clownfish', userId: 4002 }),
+    });
+    assert.equal(conflict.decision, 'conflict');
+    const entry = globalFishCatalog.lookupById('80');
+    assert.equal(entry.confidence, 'conflict');
+    assert.equal(entry.publicEligible, false);
+    assert.ok(entry.conflictNames.length >= 2);
+  });
+
+  test('6: blocked rarity label marks blocked', () => {
+    const r = globalFishCatalog.submitEvidence({
+      itemId: '196',
+      fishNameCandidate: 'Forgotten',
+      source: 'catch_notification',
+      userId: 5001,
+    });
+    assert.equal(r.rejected, true);
+    assert.equal(r.reason, 'name_is_rarity_label');
+    const entry = globalFishCatalog.lookupById('196');
+    assert.equal(entry.confidence, 'blocked');
+    assert.equal(entry.blockedReason, 'name_is_rarity_label');
+  });
+
+  test('7: rarity — Forgotten King Crab splits; Forgotten alone rejected', () => {
+    const split = catchNameParser.parseCatchInput({
+      fishName: 'Forgotten King Crab',
+      source: 'catch_notification',
+    });
+    assert.equal(split.rarityCandidate, 'Forgotten');
+    assert.equal(split.fishNameCandidate, 'King Crab');
+
+    const rarityEv = globalFishCatalog.submitEvidence({
+      itemId: '88',
+      fishNameCandidate: 'Flame Angelfish',
+      rarityCandidate: 'Forgotten',
+      source: 'catch_notification',
+      userId: 6001,
+      cleanSingleDelta: true,
+    });
+    assert.equal(rarityEv.rarity, 'Forgotten');
+    assert.equal(rarityEv.fishName, 'Flame Angelfish');
+
+    const onlyRarity = catchNameParser.parseCatchInput({ fishName: 'Forgotten', source: 'catch_notification' });
+    assert.equal(onlyRarity.fishNameCandidate, null);
+    const rej = globalFishCatalog.submitEvidence({
+      itemId: '89',
+      fishNameCandidate: onlyRarity.fishNameCandidate,
+      rarityCandidate: onlyRarity.rarityCandidate,
+      source: 'catch_notification',
+      userId: 6002,
+    });
+    assert.equal(rej.rejected, true);
+  });
+
+  test('8: rarity conflicts do not silently overwrite', () => {
+    globalFishCatalog.seedAdminEntry({
+      itemId: '90',
+      fishName: 'Flame Angelfish',
+      rarity: 'Rare',
+      source: 'admin_seed',
+    });
+    globalFishCatalog.submitEvidence({
+      ...evidenceBase({ itemId: '90', rarityCandidate: 'Epic', userId: 7001 }),
+    });
+    const entry = globalFishCatalog.lookupById('90');
+    assert.equal(entry.rarityConfidence, 'conflict');
+    assert.ok(entry.rarityConflictValues.includes('Rare'));
+    assert.ok(entry.rarityConflictValues.includes('Epic'));
+  });
+
+  test('9: name validation — known fish passes, rarity fails, image enriched', () => {
+    const flame = nameOnlyCatalog.validateFishName('Flame Angelfish');
+    assert.equal(flame.nameKnown, true);
+    assert.ok(flame.imageAssetId);
+    const forg = nameOnlyCatalog.validateFishName('Forgotten');
+    assert.equal(forg.nameKnown, false);
+    assert.equal(forg.reason, 'name_is_rarity_label');
+
+    globalFishCatalog.submitEvidence(evidenceBase({ itemId: '91', userId: 8001, cleanSingleDelta: false }));
+    globalFishCatalog.submitEvidence(evidenceBase({ itemId: '91', userId: 8002, cleanSingleDelta: true }));
+    const entry = globalFishCatalog.lookupById('91');
+    assert.equal(entry.imageAssetId, flame.imageAssetId);
+  });
+
+  test('10: public merge — confirmed global appears; pending/blocked/conflict hidden', async () => {
+    globalFishCatalog.seedAdminEntry({
+      itemId: '92',
+      fishName: 'Bandit Angelfish',
+      source: 'admin_seed',
+    });
+    globalFishCatalog.submitEvidence({
+      ...evidenceBase({ itemId: '93', fishNameCandidate: 'Flame Angelfish', userId: 9001, cleanSingleDelta: false }),
+    });
+    globalFishCatalog.blockEntry('94', 'Forgotten', 'name_is_rarity_label');
+    globalFishCatalog.submitEvidence(evidenceBase({ itemId: '95', fishNameCandidate: 'Flame Angelfish', userId: 9003 }));
+    globalFishCatalog.submitEvidence({
+      ...evidenceBase({ itemId: '95', fishNameCandidate: 'Darwin Clownfish', userId: 9004 }),
+    });
+    fishCatalog._reset();
+
+    const rawItems = [
+      ...knownFish.map((f) => ({ name: f.name, amount: 1, category: 'fish', itemId: f.itemId })),
+      { name: 'Item #92', itemId: '92', amount: 2, category: 'items' },
+      { name: 'Item #93', itemId: '93', amount: 1, category: 'items' },
+      { name: 'Item #94', itemId: '94', amount: 1, category: 'items' },
+      { name: 'Item #95', itemId: '95', amount: 1, category: 'items' },
+    ];
+    const pub = await buildPublicFishFields(enrichItemsFromCatalog(rawItems));
+
+    assert.ok(pub.publicItems.some((i) => i.itemId === '92' && i.name === 'Bandit Angelfish'));
+    assert.ok(!pub.publicItems.some((i) => i.itemId === '93'));
+    assert.ok(!pub.publicItems.some((i) => i.itemId === '94'));
+    assert.ok(!pub.publicItems.some((i) => i.itemId === '95'));
+    assert.ok(!pub.publicItems.some((i) => /Item #/i.test(i.name)));
+  });
+
+  test('11: regression — 5 fish images, Fish label, Forgotten absent', async () => {
+    const pub = await buildPublicFishFields(knownFish.map((f) => ({
+      name: f.name, amount: 10, category: 'fish', itemId: f.itemId,
+    })));
+    assert.equal(pub.publicItems.length, 5);
+    assert.equal(pub.fishCounts.label, 'Fish');
+    for (const f of knownFish) {
+      const row = pub.publicItems.find((i) => i.itemId === f.itemId);
+      assert.equal(row.imageAssetId, f.assetId);
+    }
+    assert.equal(isPublicFishItem({ name: 'Forgotten', category: 'fish', itemId: '196' }), false);
+  });
+
+  test('12: debug exposes globalCatalog, liveCatchBinding, learningValidation', async () => {
+    const app = makeApp();
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'B10QDebug',
+        userId: 24001,
+        isOnline: true,
+        items: knownFish.map((f) => ({ name: f.name, amount: 3, category: 'fish', itemId: f.itemId })),
+        pendingCatchName: {
+          fishName: 'Forgotten King Crab',
+          source: 'catch_notification',
+          detectedAt: new Date().toISOString(),
+        },
+        previousItemCounts: { 68: 2 },
+        gameId: '12345',
+        placeId: '67890',
+      })
+      .expect(200);
+
+    const dbg = await request(app).get('/api/fishit-tracker/debug/B10QDebug').expect(200);
+    assert.equal(dbg.body.publicApiBuild, PUBLIC_API_BUILD);
+    assert.ok(dbg.body.globalCatalog);
+    assert.equal(dbg.body.globalCatalog.enabled, true);
+    assert.ok(dbg.body.liveCatchBinding);
+    assert.ok(dbg.body.liveCatchBinding.lastCatchTextRaw != null
+      || dbg.body.liveCatchBinding.lastFishNameCandidate != null);
+    assert.ok(dbg.body.learningValidation);
+    assert.ok('globalEvidenceAccepted' in dbg.body.learningValidation);
+    assert.ok('globalEvidenceRejected' in dbg.body.learningValidation);
+  });
+
+  test('13: catch delta submits global evidence with game context', () => {
+    const disc = catchDelta.processCatchDelta({
+      pendingCatch: {
+        fishName: 'Flame Angelfish',
+        source: 'catch_notification',
+        detectedAt: new Date().toISOString(),
+      },
+      previousItemCounts: { 68: 1 },
+      currentItems: [{ name: 'Item #68', itemId: '68', amount: 2, category: 'items' }],
+      ingestLearned: ingestLearnedFishEntry,
+      mainCatalogLookup: (id) => catalogStore.lookupById(id),
+      globalContext: { enabled: true, userId: 25001, gameId: 'g1', placeId: 'p1', gameVersion: 'v1' },
+    });
+    assert.ok(disc.globalEvidence);
+    assert.equal(disc.globalEvidence.accepted || disc.globalEvidence.rejected, true);
+  });
+
+  test('14: build markers BLOCKER10Q', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
+    assert.ok(src.includes('payload.gameId'));
+    assert.ok(src.includes('payload.placeId'));
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(tpl.includes('BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05'));
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10Q_GLOBAL_COLLECTIVE_CATALOG_RARITY_2026_06_05');
   });
 });

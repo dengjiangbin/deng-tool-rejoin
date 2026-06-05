@@ -4,6 +4,7 @@
  */
 
 const learnedFishCatalog = require('./fishitLearnedFishCatalog');
+const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const catchNameParser = require('./fishitCatchNameParser');
 const nameOnlyCatalog = require('./fishitNameOnlyCatalog');
 const rarityLabels = require('./fishitRarityLabels');
@@ -123,6 +124,22 @@ function resolveLearnSource(pending, increasedCount, nameValidation) {
 /**
  * Apply catch-delta learning from pending catch + count maps.
  */
+function _submitGlobalEvidence(ctx, payload) {
+  if (!ctx || ctx.enabled === false) return null;
+  try {
+    return globalFishCatalog.submitEvidence({
+      userId: ctx.userId,
+      userIdHash: ctx.userIdHash || globalFishCatalog.hashContributorId(ctx.userId),
+      gameId: ctx.gameId || null,
+      placeId: ctx.placeId || null,
+      gameVersion: ctx.gameVersion || null,
+      ...payload,
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
 function processCatchDelta({
   pendingCatch,
   previousItemCounts,
@@ -130,6 +147,7 @@ function processCatchDelta({
   ingestLearned,
   mainCatalogLookup,
   uploadFailed,
+  globalContext,
 }) {
   const parsed = catchNameParser.parseCatchInput(pendingCatch);
   const discovery = {
@@ -149,6 +167,7 @@ function processCatchDelta({
     learnedMappings: [],
     pendingLowConfidenceMappings: [],
     rejectedEvents: [],
+    globalEvidence: null,
   };
 
   if (uploadFailed) {
@@ -213,6 +232,15 @@ function processCatchDelta({
       learnedFishCatalog.blockEntry(increased[0].itemId, badName, invalidReason, {
         sourceText: parsed.rawText,
         parserDecision: parsed.parserDecision,
+      });
+      discovery.globalEvidence = _submitGlobalEvidence(globalContext, {
+        itemId: increased[0].itemId,
+        fishNameCandidate: badName,
+        rarityCandidate: parsed.rarityCandidate,
+        source: parsed.source,
+        sourceText: parsed.rawText,
+        deltaAmount: increased[0].delta,
+        cleanSingleDelta: true,
       });
     }
     discovery.rejectedEvents.push({
@@ -318,6 +346,18 @@ function processCatchDelta({
     },
   };
   const ingestResult = ingestLearned(mapping);
+  discovery.globalEvidence = _submitGlobalEvidence(globalContext, {
+    itemId: inc.itemId,
+    fishNameCandidate: pending.fishName,
+    rarityCandidate: pending.rarityCandidate,
+    source: pending.source,
+    sourceText: parsed.rawText,
+    deltaAmount: inc.delta,
+    cleanSingleDelta: true,
+    imageAssetIdCandidate: nameValidation.imageAssetId || null,
+    imageUrlCandidate: nameValidation.imageUrl || null,
+    confidenceSignal: learnMeta.promotionReason,
+  });
   const learnedItem = {
     itemId: inc.itemId,
     learnedName: pending.fishName,

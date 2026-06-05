@@ -40,7 +40,8 @@ const robloxThumbnails = require('./fishitRobloxThumbnails');
 const staticCatalogAudit = require('./fishitStaticCatalogAudit');
 const nameOnlyCatalog = require('./fishitNameOnlyCatalog');
 const rarityLabels = require('./fishitRarityLabels');
-const { BLOCKER10P_BUILD, BLOCKER10P_UI_MARKER } = require('./fishitTrackerBuild');
+const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
+const { BLOCKER10Q_BUILD, BLOCKER10Q_UI_MARKER } = require('./fishitTrackerBuild');
 
 learnedFishCatalog.purgePoisonedMappings();
 for (const row of learnedFishCatalog.getBlockedMappings()) {
@@ -86,8 +87,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10P_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10P_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10Q_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10Q_BUILD;
 
 const CONFIRMED_FISH_IMAGE_ASSET_IDS = [
   '128385926161840',
@@ -479,11 +480,17 @@ function isPublicFishItem(item) {
   if (!item) return false;
   const cat = String(item.category || '').toLowerCase();
   if (cat === 'rod' || cat === 'bait') return false;
+  if (rarityLabels.isBlockedLearnName(item.name)) return false;
   if (item.itemId) {
     const confirmed = fishCatalog.lookupByItemId(item.itemId);
-    if (confirmed && confirmed.category === 'fish') return true;
+    if (confirmed && confirmed.category === 'fish') {
+      if (!rarityLabels.isBlockedLearnName(confirmed.name)) return true;
+    }
+    const global = globalFishCatalog.lookupById(item.itemId);
+    if (global && global.publicEligible && !rarityLabels.isBlockedLearnName(global.fishName)) return true;
     const learned = learnedFishCatalog.lookupById(item.itemId);
-    if (learned && learned.publicEligible && learned.category === 'fish') {
+    if (learned && learned.publicEligible && learned.category === 'fish'
+        && !rarityLabels.isBlockedLearnName(learned.name)) {
       return true;
     }
     const meta = catalogStore.lookupById(item.itemId);
@@ -491,7 +498,6 @@ function isPublicFishItem(item) {
   }
   if (cat === 'items') return false;
   if (catalogStore.isPlaceholderItemName(item.name, item.itemId)) return false;
-  if (rarityLabels.isBlockedLearnName(item.name)) return false;
   if (catalogStore.isFishCategory(cat)) return true;
   return cat !== 'rod' && cat !== 'bait' && cat !== 'items';
 }
@@ -668,7 +674,7 @@ function renderTrackerPage(_req, res) {
     title: '🎣 Fish It Live Inventory Tracker',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
-    blocker10pBuild: BLOCKER10P_BUILD,
+    blocker10qBuild: BLOCKER10Q_BUILD,
   });
 }
 
@@ -813,6 +819,14 @@ function runCatchDeltaOnUpload(body, rawItems, existing) {
     currentItems: rawItems,
     ingestLearned: ingestLearnedFishEntry,
     mainCatalogLookup: (id) => catalogStore.lookupById(id),
+    globalContext: {
+      enabled: true,
+      userId: body.userId,
+      userIdHash: globalFishCatalog.hashContributorId(body.userId),
+      gameId: body.gameId || body.game_id || null,
+      placeId: body.placeId || body.place_id || null,
+      gameVersion: body.gameVersion || body.game_version || null,
+    },
   });
 }
 
@@ -1237,7 +1251,12 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
       data,
     ),
     learnedFishCatalogCount: learnedFishCatalog.getAllMappings().length,
-    learningValidation: nameOnlyCatalog.buildLearningValidation(learnedFishCatalog),
+    learningValidation: nameOnlyCatalog.buildLearningValidation(learnedFishCatalog, globalFishCatalog),
+    globalCatalog: globalFishCatalog.getStats(),
+    globalCatalogForItems: globalFishCatalog.catalogMapForItemIds(
+      enrichedAll.map((i) => i && i.itemId).filter(Boolean).slice(0, 30),
+    ),
+    liveCatchBinding: globalFishCatalog.buildLiveCatchBinding(data.nameCatalogDiscovery),
     staticCatalogAudit: staticCatalogAudit.auditStaticCatalogSources(),
   });
 });
@@ -1274,10 +1293,11 @@ module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
 module.exports.PUBLIC_API_BUILD = PUBLIC_API_BUILD;
-module.exports.BLOCKER10P_BUILD = BLOCKER10P_BUILD;
-module.exports.BLOCKER10O_BUILD = BLOCKER10P_BUILD;
-module.exports.BLOCKER10N2_BUILD = BLOCKER10P_BUILD;
-module.exports.BLOCKER10N_BUILD = BLOCKER10P_BUILD;
+module.exports.BLOCKER10Q_BUILD = BLOCKER10Q_BUILD;
+module.exports.BLOCKER10P_BUILD = BLOCKER10Q_BUILD;
+module.exports.BLOCKER10O_BUILD = BLOCKER10Q_BUILD;
+module.exports.BLOCKER10N2_BUILD = BLOCKER10Q_BUILD;
+module.exports.BLOCKER10N_BUILD = BLOCKER10Q_BUILD;
 module.exports.ingestLearnedFishEntry = ingestLearnedFishEntry;
 module.exports.runCatchDeltaOnUpload = runCatchDeltaOnUpload;
 module.exports.catalogMetaForItemId = catalogMetaForItemId;
