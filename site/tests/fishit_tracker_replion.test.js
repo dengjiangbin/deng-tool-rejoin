@@ -5532,7 +5532,7 @@ describe('BLOCKER10U5 critical public card and image fix', () => {
     assert.ok(!tpl.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
   });
 
-  test('fishit_db image source wired into resolveImageMetaForItem', () => {
+  test('quiz bot image source wired into resolveImageMetaForItem', () => {
     fishImageCache._reset();
     const meta = fishImageCache.resolveImageMetaForItem({
       itemId: '156',
@@ -5540,10 +5540,11 @@ describe('BLOCKER10U5 critical public card and image fix', () => {
       name: 'Giant Squid',
       category: 'fish',
     });
-    const hasDb = meta.searchedSources?.some((s) => String(s).startsWith('fishit_db:'));
-    const hasUrl = !!(meta.sourceUrl && /^https?:\/\//i.test(meta.sourceUrl));
-    assert.ok(hasDb || hasUrl || meta.imageSource === 'fishit_db' || process.env.NODE_ENV === 'test',
-      'Giant Squid should resolve fishit_db image when DB present');
+    const hasQuiz = meta.imageSource === 'quiz_bot_fishit_bank'
+      || meta.searchedSources?.includes('quiz_bot_fishit_bank');
+    const hasLocal = !!meta.localFilePath;
+    assert.ok(hasQuiz || hasLocal || process.env.NODE_ENV === 'test',
+      'Giant Squid should resolve quiz bot bank image when bank present');
   });
 
   test('buildImageSourceProof includes probe rows', () => {
@@ -5556,5 +5557,95 @@ describe('BLOCKER10U5 critical public card and image fix', () => {
   test('build marker is BLOCKER10U5', () => {
     assert.equal(PUBLIC_API_BUILD, U5_BUILD);
     assert.ok(tpl.includes(U5_BUILD));
+  });
+});
+
+describe('BLOCKER10U6 quiz bot fish image source', () => {
+  const quizBotCatalog = require('../src/fishitQuizBotImageCatalog');
+  const fishImageCache = require('../src/fishitFishImageCache');
+  const fs = require('fs');
+  const path = require('path');
+  const {
+    buildPublicFishFields,
+    PUBLIC_API_BUILD,
+  } = require('../src/fishitTrackerRoutes');
+
+  const U6_BUILD = 'BLOCKER10U6_QUIZ_BOT_FISH_IMAGE_SOURCE_FIX_2026_06_06';
+  const QUIZ_NAMES = [
+    'Mossy Fishlet', 'Parrot Fish', 'Parrot Blopfish', 'Viperangler Fish',
+    'Freshwater Piranha', 'Goliath Tiger', 'Spear Guardian', 'Giant Squid',
+  ];
+
+  test('quiz bot catalog meta points to fishit_bank.json not deng-quiz.sqlite', () => {
+    const meta = quizBotCatalog.getCatalogMeta();
+    assert.ok(meta.bankPath.includes('fishit_bank.json'));
+    assert.ok(meta.assetsDir.includes('FishItFish'));
+    assert.ok(meta.note.includes('deng-quiz.sqlite'));
+    assert.ok(meta.bankEntryCount >= 600, `expected 600+ bank entries, got ${meta.bankEntryCount}`);
+  });
+
+  for (const name of QUIZ_NAMES) {
+    test(`quiz bot bank resolves ${name} by name`, () => {
+      const hit = quizBotCatalog.lookupByFishName(name);
+      assert.ok(hit, `${name} must exist in quiz bot fishit_bank.json`);
+      assert.equal(hit.name, name);
+      assert.ok(hit.localFile, `${name} must have localFile in bank`);
+      if (fs.existsSync(quizBotCatalog.ASSETS_DIR)) {
+        assert.ok(hit.cachedInQuizBot, `${name} webp must exist in FishItFish assets`);
+      }
+    });
+  }
+
+  test('resolveImageMetaForItem prefers quiz bot local webp over fishit_db', () => {
+    fishImageCache._reset();
+    const meta = fishImageCache.resolveImageMetaForItem({
+      baseFishName: 'Mossy Fishlet',
+      name: 'Mossy Fishlet',
+      cardName: 'Mossy Fishlet',
+      itemId: '287',
+    });
+    assert.equal(meta.imageSource, 'quiz_bot_fishit_bank');
+    assert.ok(meta.localFilePath || meta.assetId);
+    assert.ok(meta.sourceDb?.includes('quiz_bot'));
+    assert.ok(meta.triedAliases?.includes('Mossy Fishlet'));
+  });
+
+  test('buildPublicFishFields caches Mossy Fishlet from quiz bot webp', async () => {
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    fishImageCache._reset();
+    const pub = await buildPublicFishFields([{
+      name: 'Mossy Fishlet',
+      baseFishName: 'Mossy Fishlet',
+      cardName: 'Mossy Fishlet',
+      amount: 1,
+      category: 'fish',
+      itemId: '287',
+    }]);
+    assert.equal(pub.publicItems.length, 1);
+    const item = pub.publicItems[0];
+    assert.equal(item.name, 'Mossy Fishlet');
+    if (fs.existsSync(path.join(quizBotCatalog.ASSETS_DIR, 'Mossy_Fishlet.webp'))) {
+      assert.equal(item.imageStatus, 'cached');
+      assert.ok(String(item.imageUrl).startsWith('/api/fishit-tracker/assets/fish/'));
+      assert.equal(item.imageSource, 'quiz_bot_fishit_bank');
+    }
+  });
+
+  test('buildImageSourceProof reports quiz bot match and aliases', () => {
+    const proof = fishImageCache.buildImageSourceProof([], QUIZ_NAMES, 8);
+    const mossy = proof.find((r) => r.baseFishName === 'Mossy Fishlet');
+    const parrot = proof.find((r) => r.baseFishName === 'Parrot Fish');
+    assert.ok(mossy);
+    assert.ok(parrot);
+    assert.equal(mossy.quizBotMatched, true);
+    assert.equal(parrot.quizBotMatched, true);
+    assert.ok(Array.isArray(mossy.aliasesTried));
+    assert.ok(mossy.sourceDb?.includes('quiz_bot'));
+  });
+
+  test('build marker is BLOCKER10U6', () => {
+    assert.equal(PUBLIC_API_BUILD, U6_BUILD);
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(tpl.includes(U6_BUILD));
   });
 });

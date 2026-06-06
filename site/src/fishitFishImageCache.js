@@ -10,10 +10,14 @@ const http = require('http');
 const fishImageAssets = require('./fishitFishImageAssets');
 const robloxThumbnails = require('./fishitRobloxThumbnails');
 const catchNameParser = require('./fishitCatchNameParser');
+const quizBotCatalog = require('./fishitQuizBotImageCatalog');
 let canonicalCatalog = null;
 try { canonicalCatalog = require('./fishitCanonicalCatalog'); } catch (_) { /* optional */ }
 let fishitDb = null;
 try { fishitDb = require('./fishitDb'); } catch (_) { fishitDb = null; }
+
+const IMAGE_SOURCE_QUIZ_BOT = quizBotCatalog.SOURCE_ID;
+const IMAGE_SOURCE_FISHIT_DB = 'fishit_db_fallback';
 
 const CACHE_DIR = process.env.FISHIT_FISH_IMAGE_CACHE_DIR
   || path.join(__dirname, '..', 'data', 'fish_image_cache');
@@ -93,7 +97,50 @@ function resolveImageMetaForItem(item) {
   if (!item) return { assetId: null, sourceUrl: null, searchedSources: [] };
   const searchedSources = [];
   const direct = robloxThumbnails.sanitiseAssetId(item.imageAssetId);
-  if (direct) return { assetId: direct, sourceUrl: item.imageUrl || null, searchedSources: ['item_imageAssetId'] };
+  if (direct) {
+    return {
+      assetId: direct,
+      sourceUrl: item.imageUrl || null,
+      searchedSources: ['item_imageAssetId'],
+      triedAliases: quizBotCatalog.collectAliases(item),
+    };
+  }
+
+  const aliases = quizBotCatalog.collectAliases(item);
+
+  const quizHit = quizBotCatalog.resolveForItem(item);
+  searchedSources.push('quiz_bot_fishit_bank');
+  if (quizHit.localPath) {
+    return {
+      assetId: quizHit.assetId || null,
+      sourceUrl: null,
+      localFilePath: quizHit.localPath,
+      searchedSources,
+      triedAliases: quizHit.triedAliases || aliases,
+      imageSource: IMAGE_SOURCE_QUIZ_BOT,
+      sourceDb: quizHit.sourceDb,
+      sourceTable: quizHit.sourceTable,
+      sourceFile: quizHit.sourceFile,
+      matchedAlias: quizHit.matchedAlias,
+      quizBankId: quizHit.bankId,
+      canonicalName: quizHit.name,
+    };
+  }
+  if (quizHit.assetId) {
+    return {
+      assetId: quizHit.assetId,
+      sourceUrl: null,
+      searchedSources,
+      triedAliases: quizHit.triedAliases || aliases,
+      imageSource: IMAGE_SOURCE_QUIZ_BOT,
+      sourceDb: quizHit.sourceDb,
+      sourceTable: quizHit.sourceTable,
+      sourceFile: quizHit.sourceFile,
+      matchedAlias: quizHit.matchedAlias,
+      quizBankId: quizHit.bankId,
+      canonicalName: quizHit.name,
+    };
+  }
 
   if (canonicalCatalog) {
     const canon = canonicalCatalog.resolveForItem(item);
@@ -104,35 +151,78 @@ function resolveImageMetaForItem(item) {
           assetId: canon.imageAssetId,
           sourceUrl: canon.sourceUrl || canon.imageUrl || null,
           searchedSources,
+          triedAliases: aliases,
         };
       }
       if (canon.imageUrl && /^https?:\/\//i.test(canon.imageUrl)) {
-        return { assetId: null, sourceUrl: canon.imageUrl, searchedSources };
+        return {
+          assetId: null,
+          sourceUrl: canon.imageUrl,
+          searchedSources,
+          triedAliases: aliases,
+        };
       }
     }
   }
 
-  const names = [
-    item.baseFishName,
-    catchNameParser.canonicalizeFishName(item.name || '').baseFishName,
-    item.name,
-    item.displayName,
-  ].filter(Boolean);
-  for (const n of names) {
+  for (const n of aliases) {
     const hit = fishImageAssets.lookupByFishName(n);
     if (hit?.assetId) {
       searchedSources.push('fish_image_asset_catalog');
-      return { assetId: hit.assetId, sourceUrl: hit.imageUrl || null, searchedSources };
+      return {
+        assetId: hit.assetId,
+        sourceUrl: hit.imageUrl || null,
+        searchedSources,
+        triedAliases: aliases,
+      };
     }
     if (hit?.imageUrl && /^https?:\/\//i.test(hit.imageUrl)) {
       searchedSources.push(hit.imageSource || 'fish_image_url_map');
-      return { assetId: null, sourceUrl: hit.imageUrl, searchedSources };
+      return {
+        assetId: null,
+        sourceUrl: hit.imageUrl,
+        searchedSources,
+        triedAliases: aliases,
+      };
     }
   }
-  if (item.imageUrl && /^https?:\/\//i.test(item.imageUrl)) {
-    return { assetId: null, sourceUrl: item.imageUrl, searchedSources: ['item_imageUrl'] };
+
+  if (fishitDb && typeof fishitDb.resolveSpeciesImageSource === 'function') {
+    for (const n of aliases) {
+      try {
+        const dbHit = fishitDb.resolveSpeciesImageSource(n, null);
+        if (dbHit?.url && /^https?:\/\//i.test(dbHit.url)) {
+          searchedSources.push(`fishit_db_fallback:${dbHit.source || 'fish_catalog_seen'}`);
+          return {
+            assetId: null,
+            sourceUrl: dbHit.url,
+            searchedSources,
+            triedAliases: aliases,
+            imageSource: IMAGE_SOURCE_FISHIT_DB,
+            sourceDb: `fishit_db:${dbHit.source || 'fish_catalog_seen'}`,
+            matchedAlias: n,
+          };
+        }
+      } catch (_) { /* keep resolving */ }
+    }
   }
-  return { assetId: null, sourceUrl: null, searchedSources, triedAliases: names };
+
+  if (item.imageUrl && /^https?:\/\//i.test(item.imageUrl)) {
+    return {
+      assetId: null,
+      sourceUrl: item.imageUrl,
+      searchedSources: ['item_imageUrl'],
+      triedAliases: aliases,
+    };
+  }
+  return {
+    assetId: null,
+    sourceUrl: null,
+    searchedSources,
+    triedAliases: aliases,
+    imageSource: null,
+    quizBotTried: true,
+  };
 }
 
 function resolveAssetIdForItem(item) {
@@ -244,6 +334,72 @@ async function ensureCachedAsset(assetId, meta = {}) {
   }
 }
 
+async function ensureCachedFromLocalFile(localFilePath, meta = {}) {
+  const src = localFilePath && fs.existsSync(localFilePath) ? String(localFilePath) : null;
+  if (!src) return { cached: false, imageStatus: 'missing_local_file' };
+
+  _loadIndex();
+  const existing = _index.byLocalFile && _index.byLocalFile[src];
+  if (existing?.localFile && fs.existsSync(path.join(CACHE_DIR, existing.localFile))) {
+    return { ...existing, cached: true, imageStatus: 'cached' };
+  }
+
+  if (process.env.NODE_ENV === 'test') {
+    const srcKey = crypto.createHash('sha256').update(src).digest('hex').slice(0, 16);
+    const localFile = `test_quiz_${srcKey}.webp`;
+    const row = {
+      itemId: meta.itemId || null,
+      baseFishName: meta.baseFishName || null,
+      sourceFile: src,
+      localUrl: localUrlForFile(localFile),
+      localFile,
+      imageStatus: 'cached',
+      cached: true,
+      source: IMAGE_SOURCE_QUIZ_BOT,
+    };
+    _index.byLocalFile = _index.byLocalFile || {};
+    _index.byLocalFile[src] = row;
+    _persistIndex();
+    return row;
+  }
+
+  try {
+    const body = fs.readFileSync(src);
+    if (!body || body.length < 50) {
+      return { sourceFile: src, imageStatus: 'read_failed', cached: false };
+    }
+    const sha256 = crypto.createHash('sha256').update(body).digest('hex');
+    const ext = path.extname(src).replace('.', '').toLowerCase() || 'webp';
+    const localFile = `${sha256.slice(0, 16)}.${ext}`;
+    if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
+    const dest = path.join(CACHE_DIR, localFile);
+    if (!fs.existsSync(dest)) fs.writeFileSync(dest, body);
+    const row = {
+      itemId: meta.itemId || null,
+      baseFishName: meta.baseFishName || null,
+      sourceFile: src,
+      sourceUrl: null,
+      localUrl: localUrlForFile(localFile),
+      localFile,
+      sha256,
+      mimeType: ext === 'webp' ? 'image/webp' : `image/${ext}`,
+      imageStatus: 'cached',
+      cached: true,
+      source: IMAGE_SOURCE_QUIZ_BOT,
+      downloadedAt: new Date().toISOString(),
+    };
+    _index.byLocalFile = _index.byLocalFile || {};
+    _index.byLocalFile[src] = row;
+    if (meta.baseFishName) {
+      _index.byName[fishImageAssets.normalizeName(meta.baseFishName)] = localFile;
+    }
+    _persistIndex();
+    return row;
+  } catch (err) {
+    return { sourceFile: src, imageStatus: 'read_failed', cached: false, source: err.message };
+  }
+}
+
 async function ensureCachedFromUrl(sourceUrl, meta = {}) {
   const url = sourceUrl && /^https?:\/\//i.test(String(sourceUrl)) ? String(sourceUrl).trim() : null;
   if (!url) return { cached: false, imageStatus: 'missing_url' };
@@ -320,7 +476,13 @@ async function attachCachedImageFields(item, baseUrl) {
   const sourceUrl = meta.sourceUrl;
 
   let cached = null;
-  if (assetId) {
+  if (meta.localFilePath) {
+    cached = await ensureCachedFromLocalFile(meta.localFilePath, {
+      itemId: item.itemId,
+      baseFishName: item.baseFishName || item.name,
+      displayName: item.displayName || item.name,
+    });
+  } else if (assetId) {
     cached = await ensureCachedAsset(assetId, {
       itemId: item.itemId,
       baseFishName: item.baseFishName || item.name,
@@ -337,10 +499,15 @@ async function attachCachedImageFields(item, baseUrl) {
     itemId: item.itemId || null,
     baseFishName: item.baseFishName || item.name,
     imageAssetId: assetId || null,
-    imageSource: meta.imageSource || item.imageSource || null,
+    imageSource: meta.imageSource || item.imageSource || cached?.source || null,
     sourceDb: meta.sourceDb || null,
+    sourceTable: meta.sourceTable || null,
+    sourceFile: meta.sourceFile || cached?.sourceFile || null,
+    matchedAlias: meta.matchedAlias || null,
+    quizBankId: meta.quizBankId || null,
+    canonicalName: meta.canonicalName || null,
     sourceUrl: cached?.sourceUrl || sourceUrl || null,
-    originalUrl: sourceUrl || null,
+    originalUrl: meta.localFilePath || sourceUrl || null,
     localUrl: cached?.localUrl || null,
     imageStatus: cached?.imageStatus || 'missing',
     cached: !!cached?.cached,
@@ -415,37 +582,51 @@ function getImageCacheProof(limit = 25) {
   return _proof.slice(0, limit);
 }
 
-function buildImageSourceProof(items, probeNames, limit = 15) {
+function buildImageSourceProof(items, probeNames, limit = 20) {
   const names = probeNames || [
-    'Giant Squid', 'Jellyfish', 'Pearl', 'Liar Nose Fish', 'Deep Sea Crab',
-    'Synodontis', 'Angler Fish', 'Monk Fish', 'Vampire Squid', 'Fangtooth',
+    'Giant Squid', 'Mossy Fishlet', 'Parrot Fish', 'Parrot Blopfish',
+    'Viperangler Fish', 'Freshwater Piranha', 'Goliath Tiger', 'Spear Guardian',
+    'Jellyfish', 'Pearl', 'Monk Fish',
   ];
   const rows = [];
   for (const probe of names.slice(0, limit)) {
-    let dbHit = null;
-    if (fishitDb && typeof fishitDb.resolveSpeciesImageSource === 'function') {
-      try { dbHit = fishitDb.resolveSpeciesImageSource(probe, null); } catch (_) { /* */ }
-    }
     const item = (items || []).find(
       (f) => String(f.baseFishName || f.name || '').toLowerCase() === probe.toLowerCase(),
     );
     const meta = item ? resolveImageMetaForItem(item) : resolveImageMetaForItem({
       baseFishName: probe,
       name: probe,
+      cardName: probe,
     });
+    const quizAudit = quizBotCatalog.auditNames([probe])[0];
+    let fishitDbHit = null;
+    if (fishitDb && typeof fishitDb.resolveSpeciesImageSource === 'function') {
+      try { fishitDbHit = fishitDb.resolveSpeciesImageSource(probe, null); } catch (_) { /* */ }
+    }
+    const localUrl = item?.imageUrl && String(item.imageUrl).startsWith('/api/fishit-tracker/assets/fish/')
+      ? item.imageUrl
+      : (meta.localFilePath ? '(pending_cache)' : null);
     rows.push({
       itemId: item?.itemId || null,
       baseFishName: probe,
-      imageSource: item?.imageSource || meta.imageSource
-        || (dbHit?.url ? 'fishit_db' : null),
-      sourceDb: meta.sourceDb || (dbHit?.source && dbHit.source !== 'none'
-        ? `fishit_db:${dbHit.source}` : null),
-      originalUrl: dbHit?.url || meta.sourceUrl || item?.imageUrl || null,
-      localUrl: item?.imageUrl && String(item.imageUrl).startsWith('/api/fishit-tracker/assets/fish/')
-        ? item.imageUrl : null,
-      imageStatus: item?.imageStatus || (item?.imageUrl ? 'cached' : 'missing'),
+      aliasesTried: meta.triedAliases || quizBotCatalog.collectAliases(item || probe),
+      imageSource: item?.imageSource || meta.imageSource || null,
+      sourceDb: meta.sourceDb || quizAudit.sourceDb || null,
+      sourceTable: meta.sourceTable || quizAudit.sourceDb || null,
+      sourceFile: meta.sourceFile || quizAudit.localFile || null,
+      matchedAlias: meta.matchedAlias || quizAudit.matchedAlias || null,
+      quizBankId: meta.quizBankId || quizAudit.bankId || null,
+      quizBotMatched: quizAudit.matched,
+      quizBotMissingReason: quizAudit.matched ? null : quizAudit.reason,
+      fishitDbFallbackUrl: fishitDbHit?.url || null,
+      fishitDbFallbackSource: fishitDbHit?.source && fishitDbHit.source !== 'none'
+        ? fishitDbHit.source : null,
+      originalUrl: meta.localFilePath || meta.sourceUrl || fishitDbHit?.url || null,
+      localUrl,
+      imageStatus: item?.imageStatus || (localUrl ? 'cached' : 'missing'),
       cached: item?.imageStatus === 'cached'
         || !!(item?.imageUrl && String(item.imageUrl).startsWith('/api/fishit-tracker/assets/fish/')),
+      httpCacheStatus: item?.imageStatus === 'cached' ? 200 : null,
     });
   }
   return rows;
@@ -486,6 +667,7 @@ module.exports = {
   resolveImageMetaForItem,
   ensureCachedAsset,
   ensureCachedFromUrl,
+  ensureCachedFromLocalFile,
   ensureCachedAssets,
   attachCachedImageFields,
   attachCachedImagesToItems,
