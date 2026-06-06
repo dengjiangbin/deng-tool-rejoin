@@ -4,6 +4,7 @@
  */
 
 const rarityLabels = require('./fishitRarityLabels');
+const protectedFishNames = require('./fishitProtectedFishNames');
 
 const NON_FISH_PHRASES = [
   'you caught', 'new fish', 'inventory full', 'equipped', 'sold', 'purchased',
@@ -207,6 +208,20 @@ function parseCatchInput(raw) {
 /** Full canonicalization for catalog repair (BLOCKER10U). */
 function canonicalizeFishName(rawName, extra) {
   const raw = String(rawName || '').trim();
+  if (protectedFishNames.isProtectedBaseName(raw)) {
+    const mutation = extra?.mutation || null;
+    return {
+      rawName: raw,
+      baseFishName: raw,
+      displayName: mutation ? `${mutation} ${raw}` : raw,
+      mutation,
+      rarity: extra?.rarity || extra?.rarityCandidate || null,
+      weightKg: extra?.weightKg ?? null,
+      changed: false,
+      reason: 'protected_base_name',
+      parserDecision: 'protected_base_name',
+    };
+  }
   const parsed = parseCatchInput({
     rawText: raw,
     fishName: raw,

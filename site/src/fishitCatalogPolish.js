@@ -5,6 +5,7 @@
 
 const catchNameParser = require('./fishitCatchNameParser');
 const rarityLabels = require('./fishitRarityLabels');
+const protectedFishNames = require('./fishitProtectedFishNames');
 
 const _stats = {
   enabled: true,
@@ -127,6 +128,24 @@ function repairAllEntries(byItemId) {
 function polishPublicItem(item) {
   if (!item || typeof item !== 'object') return item;
   const raw = item.name || item.displayName || '';
+  if (protectedFishNames.isProtectedBaseName(item.baseFishName)
+      || protectedFishNames.isProtectedBaseName(raw)) {
+    const base = protectedFishNames.normalizeProtected(item.baseFishName || raw);
+    const mutation = item.mutation || null;
+    const displayName = item.displayName
+      || (mutation ? `${mutation} ${base}` : base);
+    return {
+      ...item,
+      cardName: base,
+      name: base,
+      baseFishName: base,
+      displayName,
+      mutation,
+      weight: item.weightKg != null ? item.weightKg : item.weight,
+      weightKg: item.weightKg != null ? item.weightKg : item.weight,
+      shiny: item.shiny === true || String(mutation || '').toLowerCase().includes('shiny'),
+    };
+  }
   const catalogLocked = item.catalogSource === 'manual_verified_catalog'
     || item.catalogSource === 'canonical_catalog';
   const lockedBase = item.baseFishName
@@ -208,6 +227,7 @@ const MUTATION_PREFIXES = [
 function startsWithMutationPrefix(name) {
   const s = String(name || '').trim();
   if (!s) return false;
+  if (protectedFishNames.isProtectedBaseName(s)) return false;
   const low = s.toLowerCase();
   for (const prefix of MUTATION_PREFIXES) {
     if (low.startsWith(`${prefix.toLowerCase()} `)) return true;

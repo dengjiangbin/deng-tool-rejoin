@@ -12,6 +12,8 @@ const robloxThumbnails = require('./fishitRobloxThumbnails');
 const catchNameParser = require('./fishitCatchNameParser');
 let canonicalCatalog = null;
 try { canonicalCatalog = require('./fishitCanonicalCatalog'); } catch (_) { /* optional */ }
+let fishitDb = null;
+try { fishitDb = require('./fishitDb'); } catch (_) { fishitDb = null; }
 
 const CACHE_DIR = process.env.FISHIT_FISH_IMAGE_CACHE_DIR
   || path.join(__dirname, '..', 'data', 'fish_image_cache');
@@ -335,11 +337,14 @@ async function attachCachedImageFields(item, baseUrl) {
     itemId: item.itemId || null,
     baseFishName: item.baseFishName || item.name,
     imageAssetId: assetId || null,
+    imageSource: meta.imageSource || item.imageSource || null,
+    sourceDb: meta.sourceDb || null,
     sourceUrl: cached?.sourceUrl || sourceUrl || null,
+    originalUrl: sourceUrl || null,
     localUrl: cached?.localUrl || null,
     imageStatus: cached?.imageStatus || 'missing',
     cached: !!cached?.cached,
-    source: cached?.source || null,
+    source: cached?.source || meta.imageSource || null,
     triedAliases: meta.triedAliases || null,
     searchedSources: meta.searchedSources || null,
   });
@@ -352,7 +357,7 @@ async function attachCachedImageFields(item, baseUrl) {
       imageUrlPresent: true,
       imageResolved: true,
       imageStatus: 'cached',
-      imageSource: IMAGE_SOURCE_LOCAL,
+      imageSource: meta.imageSource || item.imageSource || IMAGE_SOURCE_LOCAL,
     };
   }
 
@@ -410,6 +415,42 @@ function getImageCacheProof(limit = 25) {
   return _proof.slice(0, limit);
 }
 
+function buildImageSourceProof(items, probeNames, limit = 15) {
+  const names = probeNames || [
+    'Giant Squid', 'Jellyfish', 'Pearl', 'Liar Nose Fish', 'Deep Sea Crab',
+    'Synodontis', 'Angler Fish', 'Monk Fish', 'Vampire Squid', 'Fangtooth',
+  ];
+  const rows = [];
+  for (const probe of names.slice(0, limit)) {
+    let dbHit = null;
+    if (fishitDb && typeof fishitDb.resolveSpeciesImageSource === 'function') {
+      try { dbHit = fishitDb.resolveSpeciesImageSource(probe, null); } catch (_) { /* */ }
+    }
+    const item = (items || []).find(
+      (f) => String(f.baseFishName || f.name || '').toLowerCase() === probe.toLowerCase(),
+    );
+    const meta = item ? resolveImageMetaForItem(item) : resolveImageMetaForItem({
+      baseFishName: probe,
+      name: probe,
+    });
+    rows.push({
+      itemId: item?.itemId || null,
+      baseFishName: probe,
+      imageSource: item?.imageSource || meta.imageSource
+        || (dbHit?.url ? 'fishit_db' : null),
+      sourceDb: meta.sourceDb || (dbHit?.source && dbHit.source !== 'none'
+        ? `fishit_db:${dbHit.source}` : null),
+      originalUrl: dbHit?.url || meta.sourceUrl || item?.imageUrl || null,
+      localUrl: item?.imageUrl && String(item.imageUrl).startsWith('/api/fishit-tracker/assets/fish/')
+        ? item.imageUrl : null,
+      imageStatus: item?.imageStatus || (item?.imageUrl ? 'cached' : 'missing'),
+      cached: item?.imageStatus === 'cached'
+        || !!(item?.imageUrl && String(item.imageUrl).startsWith('/api/fishit-tracker/assets/fish/')),
+    });
+  }
+  return rows;
+}
+
 function getImageCacheStats() {
   _loadIndex();
   const rows = Object.values(_index.byAssetId || {});
@@ -449,6 +490,7 @@ module.exports = {
   attachCachedImageFields,
   attachCachedImagesToItems,
   getImageCacheProof,
+  buildImageSourceProof,
   getImageCacheStats,
   getCachedEntry,
   getCacheDir,
