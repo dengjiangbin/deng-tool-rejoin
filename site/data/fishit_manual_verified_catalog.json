@@ -1,0 +1,15 @@
+[
+  {
+    "itemId": "156",
+    "baseFishName": "Giant Squid",
+    "category": "fish",
+    "rarity": "Secret",
+    "imageUrl": "https://tr.rbxcdn.com/180DAY-ad8d392c5e6afe4cf421b5d1071b9a5e/420/420/Image/Png/noFilter",
+    "sourceUrl": "https://tr.rbxcdn.com/180DAY-ad8d392c5e6afe4cf421b5d1071b9a5e/420/420/Image/Png/noFilter",
+    "verifiedBy": "owner",
+    "verifiedReason": "User owns Giant Squid and live debug shows unresolved itemId 156 amount 1; Fish It DB has exact Giant Squid Secret + image match",
+    "confidence": "user_verified",
+    "force": true,
+    "createdAt": "2026-06-06T12:00:00.000Z"
+  }
+]
