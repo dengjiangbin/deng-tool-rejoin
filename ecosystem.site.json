@@ -12,7 +12,8 @@
       "env": {
         "NODE_ENV": "production",
         "TOOL_SITE_HOST": "127.0.0.1",
-        "TOOL_SITE_PORT": "8791"
+        "TOOL_SITE_PORT": "8791",
+        "GIT_COMMIT": "5038f77"
       }
     }
   ]
