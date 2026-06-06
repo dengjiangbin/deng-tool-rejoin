@@ -39,7 +39,8 @@ function resolveEvidenceSourceMode(body) {
   }
   if (b.clientOrigin === 'roblox_tracker') return 'live_roblox';
   if (b.trackerBuild && (
-    String(b.trackerBuild).includes('BLOCKER10T')
+    String(b.trackerBuild).includes('BLOCKER10U')
+    || String(b.trackerBuild).includes('BLOCKER10T')
     || String(b.trackerBuild).includes('BLOCKER10S')
     || String(b.trackerBuild).includes('BLOCKER10R')
   )) return 'live_roblox';

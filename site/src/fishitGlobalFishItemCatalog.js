@@ -10,6 +10,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const rarityLabels = require('./fishitRarityLabels');
 const catchNameParser = require('./fishitCatchNameParser');
+const catalogPolish = require('./fishitCatalogPolish');
 const nameOnlyCatalog = require('./fishitNameOnlyCatalog');
 const fishImageAssets = require('./fishitFishImageAssets');
 const catalogStore = require('./fishitCatalogStore');
@@ -639,13 +640,17 @@ function catalogMapForItemIds(itemIds) {
       mutation: meta.mutation || null,
       weightKg: meta.weightKg != null ? meta.weightKg : null,
       rarity: meta.rarity || null,
+      raritySource: meta.raritySources?.[0] || null,
       confidence: meta.confidence,
       publicEligible: meta.publicEligible,
       evidenceCount: meta.evidenceCount,
       uniqueUserCount: meta.uniqueUserCount,
       evidenceSourceMode: meta.lastEvidenceSourceMode || null,
-      imageUrlPresent: !!(meta.imageUrl || meta.imageAssetId),
+      imageUrl: meta.imageUrl || null,
       imageAssetId: meta.imageAssetId || null,
+      imageStatus: meta.imageAssetId ? 'catalog_asset' : (meta.imageUrl ? 'url' : 'missing'),
+      imageSource: meta.imageSource || null,
+      imageUrlPresent: !!(meta.imageUrl || meta.imageAssetId),
       source: meta.source,
       blockedReason: meta.blockedReason || null,
       conflictNames: meta.conflictNames || null,

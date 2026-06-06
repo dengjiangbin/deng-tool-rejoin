@@ -52,12 +52,31 @@ function _load() {
           ? raw.blockedByItemId : {},
       };
       purgePoisonedMappings();
+      _repairStoredEntries();
       return _store;
     }
   } catch (_) { /* fall through */ }
   _store = _defaultStore();
   purgePoisonedMappings();
+  _repairStoredEntries();
   return _store;
+}
+
+function _repairStoredEntries() {
+  if (!_store || _store._blocker10uRepaired) return;
+  try {
+    const catalogPolish = require('./fishitCatalogPolish');
+    let any = false;
+    for (const entry of Object.values(_store.byItemId || {})) {
+      const { changed } = catalogPolish.repairCatalogEntry(entry, { idField: 'name' });
+      if (changed) any = true;
+    }
+    if (any) {
+      _store.updatedAt = new Date().toISOString();
+      _maybePersist();
+    }
+  } catch (_) { /* optional */ }
+  _store._blocker10uRepaired = true;
 }
 
 function _persist() {

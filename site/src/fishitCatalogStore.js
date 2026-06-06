@@ -126,6 +126,18 @@ function _load() {
     _catalog = _emptyCatalog();
   }
   _rebuildIdIndex();
+  if (!_catalog._blocker10uRepaired) {
+    try {
+      const catalogPolish = require('./fishitCatalogPolish');
+      if (catalogPolish.repairCatalogStoreEntries(_catalog, _idIndex)) {
+        _catalog.updatedAt = new Date().toISOString();
+        _persist();
+      }
+    } catch (err) {
+      console.warn('[fishit-catalog] BLOCKER10U repair failed:', err && err.message ? err.message : err);
+    }
+    _catalog._blocker10uRepaired = true;
+  }
   if (!_catalog.seeded) {
     let seeded = 0;
     for (const raw of KNOWN_ID_SEEDS) {

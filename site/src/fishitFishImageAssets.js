@@ -113,7 +113,12 @@ function attachFishImageFields(item) {
   const finalName = item.name;
   if (!finalName || /^Item #\d+$/i.test(String(finalName).trim())) return item;
 
-  const img = lookupByFishName(finalName);
+  const names = [finalName, item.baseFishName, item.displayName].filter(Boolean);
+  let img = null;
+  for (const n of names) {
+    img = lookupByFishName(n);
+    if (img) break;
+  }
   if (img) {
     return {
       ...item,
