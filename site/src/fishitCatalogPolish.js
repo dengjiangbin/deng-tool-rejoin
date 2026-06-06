@@ -123,11 +123,51 @@ function repairAllEntries(byItemId) {
   return any;
 }
 
-/** Clean public-facing item name — never show weight in name. */
+/** Clean public-facing item name — card title is baseFishName only (BLOCKER10U3-U4). */
 function polishPublicItem(item) {
   if (!item || typeof item !== 'object') return item;
   const raw = item.name || item.displayName || '';
-  if (!raw || /^Item #\d+$/i.test(raw)) return item;
+  const catalogLocked = item.catalogSource === 'manual_verified_catalog'
+    || item.catalogSource === 'canonical_catalog';
+  const lockedBase = item.baseFishName
+    && (catalogLocked || !startsWithMutationPrefix(item.baseFishName))
+    ? String(item.baseFishName).trim()
+    : null;
+
+  if (lockedBase && (catalogLocked || raw === lockedBase || /^Item #\d+$/i.test(raw))) {
+    const mutation = item.mutation || null;
+    const displayName = item.displayName
+      || (mutation ? `${mutation} ${lockedBase}` : raw || lockedBase);
+    return {
+      ...item,
+      cardName: lockedBase,
+      name: lockedBase,
+      baseFishName: lockedBase,
+      displayName,
+      mutation,
+      weight: item.weightKg != null ? item.weightKg : item.weight,
+      weightKg: item.weightKg != null ? item.weightKg : item.weight,
+      shiny: item.shiny === true || String(mutation || '').toLowerCase().includes('shiny'),
+    };
+  }
+
+  if (!raw || /^Item #\d+$/i.test(raw)) {
+    if (item.baseFishName) {
+      const base = String(item.baseFishName).trim();
+      const mut = item.mutation || null;
+      const fullDisplay = mut ? `${mut} ${base}` : base;
+      return {
+        ...item,
+        cardName: base,
+        name: base,
+        baseFishName: base,
+        displayName: item.displayName || fullDisplay,
+        mutation: mut,
+        shiny: item.shiny === true || String(mut || '').toLowerCase().includes('shiny'),
+      };
+    }
+    return item;
+  }
 
   const canon = catchNameParser.canonicalizeFishName(raw, {
     mutation: item.mutation,
@@ -135,30 +175,64 @@ function polishPublicItem(item) {
     weightKg: item.weightKg != null ? item.weightKg : item.weight,
   });
 
-  const displayName = item.mutation
-    ? (item.displayName || (canon.mutation ? `${canon.mutation} ${canon.baseFishName}` : canon.displayName))
-    : (canon.displayName || canon.baseFishName || raw);
-
-  const cardName = canon.baseFishName
-    ? (item.mutation || canon.mutation
-      ? `${item.mutation || canon.mutation} ${canon.baseFishName}`
-      : canon.baseFishName)
-    : displayName;
+  const baseFishName = canon.baseFishName || item.baseFishName || null;
+  const mutation = item.mutation || canon.mutation || null;
+  const displayName = mutation && baseFishName
+    ? `${mutation} ${baseFishName}`
+    : (item.displayName || canon.displayName || baseFishName || raw);
+  const cardName = baseFishName || raw;
 
   const weight = item.weightKg != null ? item.weightKg
     : (canon.weightKg != null ? canon.weightKg : item.weight);
 
   return {
     ...item,
+    cardName,
     name: cardName,
-    displayName: cardName,
-    baseFishName: canon.baseFishName || item.baseFishName || cardName,
-    mutation: item.mutation || canon.mutation || null,
+    baseFishName: baseFishName || cardName,
+    displayName,
+    mutation,
     weight: weight != null ? weight : item.weight,
     weightKg: weight != null ? weight : item.weightKg,
     shiny: item.shiny === true
-      || String(item.mutation || canon.mutation || '').toLowerCase().includes('shiny'),
+      || String(mutation || '').toLowerCase().includes('shiny'),
   };
+}
+
+const MUTATION_PREFIXES = [
+  'Fairy Dust', 'Radioactive Shiny', 'Shiny', 'Big', 'Ghost', 'Holographic', 'Sandy',
+  'Galaxy', 'Radioactive', 'Albino', 'Darkened', 'Electric', 'Frozen', 'Mythic', 'Glossy',
+  'Baby', 'Giant', 'Golden', 'Silver', 'Mosaic', 'Corrupt', 'Midnight',
+];
+
+function startsWithMutationPrefix(name) {
+  const s = String(name || '').trim();
+  if (!s) return false;
+  const low = s.toLowerCase();
+  for (const prefix of MUTATION_PREFIXES) {
+    if (low.startsWith(`${prefix.toLowerCase()} `)) return true;
+  }
+  return false;
+}
+
+function buildPublicNameContractProof(items, limit = 25) {
+  return (items || []).slice(0, limit).map((item) => {
+    const publicName = item.cardName || item.name;
+    const base = item.baseFishName || publicName;
+    const mut = item.mutation || null;
+    return {
+      itemId: item.itemId || null,
+      rawName: item.rawName || null,
+      finalName: item.name || null,
+      displayName: item.displayName || null,
+      baseFishName: base,
+      mutation: mut,
+      publicName,
+      cardName: item.cardName || base,
+      titleUsesBaseName: !startsWithMutationPrefix(publicName),
+      mutationSeparated: !mut || (publicName && !String(publicName).toLowerCase().startsWith(String(mut).toLowerCase())),
+    };
+  });
 }
 
 function polishPublicFishItems(items) {
@@ -259,5 +333,8 @@ module.exports = {
   polishPublicFishItems,
   getCatalogPolishStats,
   getNameNormalizationProof,
+  buildPublicNameContractProof,
+  startsWithMutationPrefix,
+  MUTATION_PREFIXES,
   resetStats,
 };

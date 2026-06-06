@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-06-06T04:55:14.440Z",
+  "updatedAt": "2026-06-06T06:31:35.409Z",
   "sourcesSearched": [
     {
       "id": "fishit_fish_image_assets",
@@ -30,7 +30,7 @@
       "path": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_catalog.json",
       "exists": true,
       "type": "catalog_store",
-      "rows": 38,
+      "rows": 39,
       "error": null
     },
     {
@@ -38,7 +38,7 @@
       "path": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_learned_fish_catalog.json",
       "exists": true,
       "type": "learned",
-      "rows": 25,
+      "rows": 29,
       "error": null
     },
     {
@@ -46,7 +46,7 @@
       "path": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_global_fish_item_catalog.json",
       "exists": true,
       "type": "global",
-      "rows": 43,
+      "rows": 44,
       "error": null
     },
     {
@@ -54,7 +54,15 @@
       "path": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fish_image_cache\\index.json",
       "exists": true,
       "type": "image_cache",
-      "rows": 2,
+      "rows": 11,
+      "error": null
+    },
+    {
+      "id": "fishit_manual_verified_catalog",
+      "path": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_manual_verified_catalog.json",
+      "exists": true,
+      "type": "manual_verified",
+      "rows": 1,
       "error": null
     },
     {
@@ -88,15 +96,15 @@
       "triedAliases": [
         "Jewel Tang",
         "jewel tang",
-        "Cow Clownfish",
-        "cow clownfish"
+        "Vintage Damsel",
+        "vintage damsel"
       ],
       "mutation": null
     },
     "58": {
       "itemId": "58",
       "baseFishName": "Cute Octopus",
-      "displayName": "Sandy Big Cute Octopus",
+      "displayName": "Cute Octopus",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -111,39 +119,14 @@
       ],
       "triedAliases": [
         "Cute Octopus",
-        "cute octopus",
-        "Vintage Damsel",
-        "vintage damsel"
+        "cute octopus"
       ],
-      "mutation": "Sandy Big"
+      "mutation": "Shiny"
     },
     "59": {
       "itemId": "59",
-      "baseFishName": "Vintage Damsel",
-      "displayName": "Candy Butterfly",
-      "rarity": null,
-      "raritySource": null,
-      "rarityConfidence": null,
-      "imageAssetId": null,
-      "imageUrl": null,
-      "imageSource": null,
-      "sourceUrl": null,
-      "sources": [
-        "fishit_learned_fish_catalog",
-        "fishit_global_fish_item_catalog"
-      ],
-      "triedAliases": [
-        "Vintage Damsel",
-        "vintage damsel",
-        "Candy Butterfly",
-        "candy butterfly"
-      ],
-      "mutation": "Albino"
-    },
-    "60": {
-      "itemId": "60",
-      "baseFishName": "Vintage Damsel",
-      "displayName": "Shiny Traffic Cone Fish",
+      "baseFishName": "Candy Butterfly",
+      "displayName": "Candy Butterfly (1.85kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -157,14 +140,33 @@
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
+        "Candy Butterfly",
+        "candy butterfly"
+      ],
+      "mutation": "Big"
+    },
+    "60": {
+      "itemId": "60",
+      "baseFishName": "Vintage Damsel",
+      "displayName": "Corrupt Traffic Cone Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
         "Vintage Damsel",
         "vintage damsel",
-        "Jewel Tang",
-        "jewel tang",
         "Traffic Cone Fish",
         "traffic cone fish"
       ],
-      "mutation": "Shiny"
+      "mutation": "Corrupt"
     },
     "68": {
       "itemId": "68",
@@ -199,11 +201,12 @@
       "rarityConfidence": null,
       "imageAssetId": "125066072333378",
       "imageUrl": null,
-      "imageSource": "fishit_fish_confirmed_catalog",
+      "imageSource": "local_asset_cache",
       "sourceUrl": null,
       "sources": [
         "fishit_fish_confirmed_catalog",
-        "fishit_catalog"
+        "fishit_catalog",
+        "fish_image_cache_index"
       ],
       "triedAliases": [
         "Yello Damelfish",
@@ -222,11 +225,12 @@
       "rarityConfidence": null,
       "imageAssetId": "109996187340520",
       "imageUrl": null,
-      "imageSource": "fishit_fish_confirmed_catalog",
+      "imageSource": "local_asset_cache",
       "sourceUrl": null,
       "sources": [
         "fishit_fish_confirmed_catalog",
-        "fishit_catalog"
+        "fishit_catalog",
+        "fish_image_cache_index"
       ],
       "triedAliases": [
         "Darwin Clownfish",
@@ -267,7 +271,6 @@
       "imageSource": null,
       "sourceUrl": null,
       "sources": [
-        "fishit_catalog",
         "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
@@ -288,11 +291,12 @@
       "rarityConfidence": null,
       "imageAssetId": "86776001616210",
       "imageUrl": null,
-      "imageSource": "fishit_fish_confirmed_catalog",
+      "imageSource": "local_asset_cache",
       "sourceUrl": null,
       "sources": [
         "fishit_fish_confirmed_catalog",
-        "fishit_catalog"
+        "fishit_catalog",
+        "fish_image_cache_index"
       ],
       "triedAliases": [
         "Bandit Angelfish",
@@ -309,11 +313,12 @@
       "rarityConfidence": null,
       "imageAssetId": "99236757363784",
       "imageUrl": null,
-      "imageSource": "fishit_fish_confirmed_catalog",
+      "imageSource": "local_asset_cache",
       "sourceUrl": null,
       "sources": [
         "fishit_fish_confirmed_catalog",
-        "fishit_catalog"
+        "fishit_catalog",
+        "fish_image_cache_index"
       ],
       "triedAliases": [
         "Ballina Angelfish",
@@ -324,7 +329,7 @@
     "149": {
       "itemId": "149",
       "baseFishName": "Angler Fish",
-      "displayName": "Angler Fish",
+      "displayName": "Angler Fish (68.1kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -367,7 +372,7 @@
     "152": {
       "itemId": "152",
       "baseFishName": "Deep Sea Crab",
-      "displayName": "Deep Sea Crab (1.04K kg)",
+      "displayName": "Deep Sea Crab (985.7kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -389,7 +394,7 @@
     "155": {
       "itemId": "155",
       "baseFishName": "Fangtooth",
-      "displayName": "Fangtooth",
+      "displayName": "Fangtooth (134.4kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -399,18 +404,39 @@
       "sourceUrl": null,
       "sources": [
         "fishit_catalog",
+        "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
         "Fangtooth",
         "fangtooth"
       ],
-      "mutation": "Ghost"
+      "mutation": "Big Shiny"
+    },
+    "156": {
+      "itemId": "156",
+      "baseFishName": "Giant Squid",
+      "displayName": "Giant Squid",
+      "rarity": "Secret",
+      "raritySource": "fishit_manual_verified_catalog",
+      "rarityConfidence": "user_verified",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-ad8d392c5e6afe4cf421b5d1071b9a5e/420/420/Image/Png/noFilter",
+      "imageSource": "fishit_manual_verified_catalog",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-ad8d392c5e6afe4cf421b5d1071b9a5e/420/420/Image/Png/noFilter",
+      "sources": [
+        "fishit_manual_verified_catalog"
+      ],
+      "triedAliases": [],
+      "mutation": null,
+      "category": "fish",
+      "verifiedBy": "owner",
+      "verifiedReason": "User owns Giant Squid and live debug shows unresolved itemId 156 amount 1; Fish It DB has exact Giant Squid Secret + image match"
     },
     "157": {
       "itemId": "157",
       "baseFishName": "Jellyfish",
-      "displayName": "Jellyfish",
+      "displayName": "Jellyfish (17.8kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -420,18 +446,19 @@
       "sourceUrl": null,
       "sources": [
         "fishit_catalog",
+        "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
         "Jellyfish",
         "jellyfish"
       ],
-      "mutation": "Holographic"
+      "mutation": "Shiny"
     },
     "160": {
       "itemId": "160",
       "baseFishName": "Monk Fish",
-      "displayName": "Monk Fish",
+      "displayName": "Monk Fish (190.9kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -441,6 +468,7 @@
       "sourceUrl": null,
       "sources": [
         "fishit_catalog",
+        "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
@@ -452,7 +480,7 @@
     "162": {
       "itemId": "162",
       "baseFishName": "Vampire Squid",
-      "displayName": "Vampire Squid",
+      "displayName": "Vampire Squid (1.03kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -462,6 +490,7 @@
       "sourceUrl": null,
       "sources": [
         "fishit_catalog",
+        "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
@@ -511,7 +540,7 @@
     "224": {
       "itemId": "224",
       "baseFishName": "Synodontis",
-      "displayName": "Synodontis",
+      "displayName": "Synodontis (140.9kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -553,7 +582,7 @@
     },
     "233": {
       "itemId": "233",
-      "baseFishName": "Expensive Chain",
+      "baseFishName": "Traffic Cone Fish",
       "displayName": "Expensive Chain",
       "rarity": null,
       "raritySource": null,
@@ -563,9 +592,13 @@
       "imageSource": null,
       "sourceUrl": null,
       "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
+        "Traffic Cone Fish",
+        "traffic cone fish",
         "Expensive Chain",
         "expensive chain"
       ],
@@ -574,7 +607,7 @@
     "235": {
       "itemId": "235",
       "baseFishName": "Pearl",
-      "displayName": "Sandy Pearl",
+      "displayName": "Pearl (0.26kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -591,7 +624,7 @@
         "Pearl",
         "pearl"
       ],
-      "mutation": "Sandy"
+      "mutation": "Big"
     },
     "238": {
       "itemId": "238",
@@ -637,6 +670,27 @@
       ],
       "mutation": "Big"
     },
+    "283": {
+      "itemId": "283",
+      "baseFishName": "Parrot Blopfish",
+      "displayName": "Shiny Parrot Blopfish (2.43kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Parrot Blopfish",
+        "parrot blopfish"
+      ],
+      "mutation": "Shiny"
+    },
     "339": {
       "itemId": "339",
       "baseFishName": "Vintage Damsel",
@@ -649,7 +703,6 @@
       "imageSource": null,
       "sourceUrl": null,
       "sources": [
-        "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
@@ -661,7 +714,7 @@
     "361": {
       "itemId": "361",
       "baseFishName": "Liar Nose Fish",
-      "displayName": "Liar Nose Fish",
+      "displayName": "Liar Nose Fish (17.8kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -683,7 +736,7 @@
     "377": {
       "itemId": "377",
       "baseFishName": "Traffic Cone Fish",
-      "displayName": "Traffic Cone Fish",
+      "displayName": "Traffic Cone Fish (2.59kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -713,18 +766,21 @@
       "sourceUrl": null,
       "sources": [
         "fishit_catalog",
+        "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
         "Expensive Chain",
-        "expensive chain"
+        "expensive chain",
+        "Cute Octopus",
+        "cute octopus"
       ],
       "mutation": "Galaxy"
     },
     "780": {
       "itemId": "780",
       "baseFishName": "Azure Reef Crab",
-      "displayName": "Azure Reef Crab (2.08kg)",
+      "displayName": "Azure Reef Crab",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -746,7 +802,7 @@
     "781": {
       "itemId": "781",
       "baseFishName": "Sea Urchin",
-      "displayName": "Sea Urchin (5.5kg)",
+      "displayName": "Sea Urchin",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -813,7 +869,7 @@
     "784": {
       "itemId": "784",
       "baseFishName": "Goldmask Tetra",
-      "displayName": "Crown (5.5kg)",
+      "displayName": "Crown",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -991,7 +1047,7 @@
     },
     "811": {
       "itemId": "811",
-      "baseFishName": "Traffic Cone Fish",
+      "baseFishName": "Blue Moonfish",
       "displayName": "Traffic Cone Fish",
       "rarity": null,
       "raritySource": null,
@@ -1001,15 +1057,14 @@
       "imageSource": null,
       "sourceUrl": null,
       "sources": [
-        "fishit_catalog",
         "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
-        "Traffic Cone Fish",
-        "traffic cone fish",
         "Blue Moonfish",
-        "blue moonfish"
+        "blue moonfish",
+        "Traffic Cone Fish",
+        "traffic cone fish"
       ],
       "mutation": null
     },
@@ -1078,7 +1133,7 @@
     "881": {
       "itemId": "881",
       "baseFishName": "Deepsea Dweller",
-      "displayName": "Deepsea Dweller (19.8kg)",
+      "displayName": "Deepsea Dweller",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1118,15 +1173,15 @@
       "triedAliases": [
         "Jewel Tang",
         "jewel tang",
-        "Cow Clownfish",
-        "cow clownfish"
+        "Vintage Damsel",
+        "vintage damsel"
       ],
       "mutation": null
     },
     "cute octopus": {
       "itemId": "58",
       "baseFishName": "Cute Octopus",
-      "displayName": "Sandy Big Cute Octopus",
+      "displayName": "Cute Octopus",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1141,86 +1196,14 @@
       ],
       "triedAliases": [
         "Cute Octopus",
-        "cute octopus",
-        "Vintage Damsel",
-        "vintage damsel"
+        "cute octopus"
       ],
-      "mutation": "Sandy Big"
-    },
-    "sandy big cute octopus": {
-      "itemId": "58",
-      "baseFishName": "Cute Octopus",
-      "displayName": "Sandy Big Cute Octopus",
-      "rarity": null,
-      "raritySource": null,
-      "rarityConfidence": null,
-      "imageAssetId": null,
-      "imageUrl": null,
-      "imageSource": null,
-      "sourceUrl": null,
-      "sources": [
-        "fishit_catalog",
-        "fishit_learned_fish_catalog",
-        "fishit_global_fish_item_catalog"
-      ],
-      "triedAliases": [
-        "Cute Octopus",
-        "cute octopus",
-        "Vintage Damsel",
-        "vintage damsel"
-      ],
-      "mutation": "Sandy Big"
-    },
-    "vintage damsel": {
-      "itemId": "59",
-      "baseFishName": "Vintage Damsel",
-      "displayName": "Candy Butterfly",
-      "rarity": null,
-      "raritySource": null,
-      "rarityConfidence": null,
-      "imageAssetId": null,
-      "imageUrl": null,
-      "imageSource": null,
-      "sourceUrl": null,
-      "sources": [
-        "fishit_learned_fish_catalog",
-        "fishit_global_fish_item_catalog"
-      ],
-      "triedAliases": [
-        "Vintage Damsel",
-        "vintage damsel",
-        "Candy Butterfly",
-        "candy butterfly"
-      ],
-      "mutation": "Albino"
+      "mutation": "Shiny"
     },
     "candy butterfly": {
       "itemId": "59",
-      "baseFishName": "Vintage Damsel",
-      "displayName": "Candy Butterfly",
-      "rarity": null,
-      "raritySource": null,
-      "rarityConfidence": null,
-      "imageAssetId": null,
-      "imageUrl": null,
-      "imageSource": null,
-      "sourceUrl": null,
-      "sources": [
-        "fishit_learned_fish_catalog",
-        "fishit_global_fish_item_catalog"
-      ],
-      "triedAliases": [
-        "Vintage Damsel",
-        "vintage damsel",
-        "Candy Butterfly",
-        "candy butterfly"
-      ],
-      "mutation": "Albino"
-    },
-    "shiny traffic cone fish": {
-      "itemId": "60",
-      "baseFishName": "Vintage Damsel",
-      "displayName": "Shiny Traffic Cone Fish",
+      "baseFishName": "Candy Butterfly",
+      "displayName": "Candy Butterfly (1.85kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1234,14 +1217,78 @@
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
+        "Candy Butterfly",
+        "candy butterfly"
+      ],
+      "mutation": "Big"
+    },
+    "candy butterfly (1.85kg)": {
+      "itemId": "59",
+      "baseFishName": "Candy Butterfly",
+      "displayName": "Candy Butterfly (1.85kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Candy Butterfly",
+        "candy butterfly"
+      ],
+      "mutation": "Big"
+    },
+    "vintage damsel": {
+      "itemId": "60",
+      "baseFishName": "Vintage Damsel",
+      "displayName": "Corrupt Traffic Cone Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
         "Vintage Damsel",
         "vintage damsel",
-        "Jewel Tang",
-        "jewel tang",
         "Traffic Cone Fish",
         "traffic cone fish"
       ],
-      "mutation": "Shiny"
+      "mutation": "Corrupt"
+    },
+    "corrupt traffic cone fish": {
+      "itemId": "60",
+      "baseFishName": "Vintage Damsel",
+      "displayName": "Corrupt Traffic Cone Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Vintage Damsel",
+        "vintage damsel",
+        "Traffic Cone Fish",
+        "traffic cone fish"
+      ],
+      "mutation": "Corrupt"
     },
     "flame angelfish": {
       "itemId": "68",
@@ -1276,11 +1323,12 @@
       "rarityConfidence": null,
       "imageAssetId": "125066072333378",
       "imageUrl": null,
-      "imageSource": "fishit_fish_confirmed_catalog",
+      "imageSource": "local_asset_cache",
       "sourceUrl": null,
       "sources": [
         "fishit_fish_confirmed_catalog",
-        "fishit_catalog"
+        "fishit_catalog",
+        "fish_image_cache_index"
       ],
       "triedAliases": [
         "Yello Damelfish",
@@ -1299,11 +1347,12 @@
       "rarityConfidence": null,
       "imageAssetId": "125066072333378",
       "imageUrl": null,
-      "imageSource": "fishit_fish_confirmed_catalog",
+      "imageSource": "local_asset_cache",
       "sourceUrl": null,
       "sources": [
         "fishit_fish_confirmed_catalog",
-        "fishit_catalog"
+        "fishit_catalog",
+        "fish_image_cache_index"
       ],
       "triedAliases": [
         "Yello Damelfish",
@@ -1322,11 +1371,12 @@
       "rarityConfidence": null,
       "imageAssetId": "109996187340520",
       "imageUrl": null,
-      "imageSource": "fishit_fish_confirmed_catalog",
+      "imageSource": "local_asset_cache",
       "sourceUrl": null,
       "sources": [
         "fishit_fish_confirmed_catalog",
-        "fishit_catalog"
+        "fishit_catalog",
+        "fish_image_cache_index"
       ],
       "triedAliases": [
         "Darwin Clownfish",
@@ -1367,7 +1417,6 @@
       "imageSource": null,
       "sourceUrl": null,
       "sources": [
-        "fishit_catalog",
         "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
@@ -1388,11 +1437,12 @@
       "rarityConfidence": null,
       "imageAssetId": "86776001616210",
       "imageUrl": null,
-      "imageSource": "fishit_fish_confirmed_catalog",
+      "imageSource": "local_asset_cache",
       "sourceUrl": null,
       "sources": [
         "fishit_fish_confirmed_catalog",
-        "fishit_catalog"
+        "fishit_catalog",
+        "fish_image_cache_index"
       ],
       "triedAliases": [
         "Bandit Angelfish",
@@ -1409,11 +1459,12 @@
       "rarityConfidence": null,
       "imageAssetId": "99236757363784",
       "imageUrl": null,
-      "imageSource": "fishit_fish_confirmed_catalog",
+      "imageSource": "local_asset_cache",
       "sourceUrl": null,
       "sources": [
         "fishit_fish_confirmed_catalog",
-        "fishit_catalog"
+        "fishit_catalog",
+        "fish_image_cache_index"
       ],
       "triedAliases": [
         "Ballina Angelfish",
@@ -1424,7 +1475,29 @@
     "angler fish": {
       "itemId": "149",
       "baseFishName": "Angler Fish",
-      "displayName": "Angler Fish",
+      "displayName": "Angler Fish (68.1kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Angler Fish",
+        "angler fish"
+      ],
+      "mutation": "Shiny"
+    },
+    "angler fish (68.1kg)": {
+      "itemId": "149",
+      "baseFishName": "Angler Fish",
+      "displayName": "Angler Fish (68.1kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1467,7 +1540,7 @@
     "deep sea crab": {
       "itemId": "152",
       "baseFishName": "Deep Sea Crab",
-      "displayName": "Deep Sea Crab (1.04K kg)",
+      "displayName": "Deep Sea Crab (985.7kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1486,10 +1559,10 @@
       ],
       "mutation": null
     },
-    "deep sea crab (1.04k kg)": {
+    "deep sea crab (985.7kg)": {
       "itemId": "152",
       "baseFishName": "Deep Sea Crab",
-      "displayName": "Deep Sea Crab (1.04K kg)",
+      "displayName": "Deep Sea Crab (985.7kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1511,7 +1584,7 @@
     "fangtooth": {
       "itemId": "155",
       "baseFishName": "Fangtooth",
-      "displayName": "Fangtooth",
+      "displayName": "Fangtooth (134.4kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1521,18 +1594,19 @@
       "sourceUrl": null,
       "sources": [
         "fishit_catalog",
+        "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
         "Fangtooth",
         "fangtooth"
       ],
-      "mutation": "Ghost"
+      "mutation": "Big Shiny"
     },
-    "jellyfish": {
-      "itemId": "157",
-      "baseFishName": "Jellyfish",
-      "displayName": "Jellyfish",
+    "fangtooth (134.4kg)": {
+      "itemId": "155",
+      "baseFishName": "Fangtooth",
+      "displayName": "Fangtooth (134.4kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1542,18 +1616,61 @@
       "sourceUrl": null,
       "sources": [
         "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Fangtooth",
+        "fangtooth"
+      ],
+      "mutation": "Big Shiny"
+    },
+    "giant squid": {
+      "itemId": "156",
+      "baseFishName": "Giant Squid",
+      "displayName": "Giant Squid",
+      "rarity": "Secret",
+      "raritySource": "fishit_manual_verified_catalog",
+      "rarityConfidence": "user_verified",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-ad8d392c5e6afe4cf421b5d1071b9a5e/420/420/Image/Png/noFilter",
+      "imageSource": "fishit_manual_verified_catalog",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-ad8d392c5e6afe4cf421b5d1071b9a5e/420/420/Image/Png/noFilter",
+      "sources": [
+        "fishit_manual_verified_catalog"
+      ],
+      "triedAliases": [],
+      "mutation": null,
+      "category": "fish",
+      "verifiedBy": "owner",
+      "verifiedReason": "User owns Giant Squid and live debug shows unresolved itemId 156 amount 1; Fish It DB has exact Giant Squid Secret + image match"
+    },
+    "jellyfish": {
+      "itemId": "157",
+      "baseFishName": "Jellyfish",
+      "displayName": "Jellyfish (17.8kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
         "Jellyfish",
         "jellyfish"
       ],
-      "mutation": "Holographic"
+      "mutation": "Shiny"
     },
-    "monk fish": {
-      "itemId": "160",
-      "baseFishName": "Monk Fish",
-      "displayName": "Monk Fish",
+    "jellyfish (17.8kg)": {
+      "itemId": "157",
+      "baseFishName": "Jellyfish",
+      "displayName": "Jellyfish (17.8kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1563,6 +1680,51 @@
       "sourceUrl": null,
       "sources": [
         "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Jellyfish",
+        "jellyfish"
+      ],
+      "mutation": "Shiny"
+    },
+    "monk fish": {
+      "itemId": "160",
+      "baseFishName": "Monk Fish",
+      "displayName": "Monk Fish (190.9kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Monk Fish",
+        "monk fish"
+      ],
+      "mutation": "Shiny"
+    },
+    "monk fish (190.9kg)": {
+      "itemId": "160",
+      "baseFishName": "Monk Fish",
+      "displayName": "Monk Fish (190.9kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
@@ -1574,7 +1736,7 @@
     "vampire squid": {
       "itemId": "162",
       "baseFishName": "Vampire Squid",
-      "displayName": "Vampire Squid",
+      "displayName": "Vampire Squid (1.03kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1584,6 +1746,29 @@
       "sourceUrl": null,
       "sources": [
         "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Vampire Squid",
+        "vampire squid"
+      ],
+      "mutation": "Shiny"
+    },
+    "vampire squid (1.03kg)": {
+      "itemId": "162",
+      "baseFishName": "Vampire Squid",
+      "displayName": "Vampire Squid (1.03kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
@@ -1633,7 +1818,29 @@
     "synodontis": {
       "itemId": "224",
       "baseFishName": "Synodontis",
-      "displayName": "Synodontis",
+      "displayName": "Synodontis (140.9kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Synodontis",
+        "synodontis"
+      ],
+      "mutation": "Shiny"
+    },
+    "synodontis (140.9kg)": {
+      "itemId": "224",
+      "baseFishName": "Synodontis",
+      "displayName": "Synodontis (140.9kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1696,7 +1903,7 @@
     },
     "expensive chain": {
       "itemId": "233",
-      "baseFishName": "Expensive Chain",
+      "baseFishName": "Traffic Cone Fish",
       "displayName": "Expensive Chain",
       "rarity": null,
       "raritySource": null,
@@ -1706,9 +1913,13 @@
       "imageSource": null,
       "sourceUrl": null,
       "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
+        "Traffic Cone Fish",
+        "traffic cone fish",
         "Expensive Chain",
         "expensive chain"
       ],
@@ -1717,7 +1928,7 @@
     "pearl": {
       "itemId": "235",
       "baseFishName": "Pearl",
-      "displayName": "Sandy Pearl",
+      "displayName": "Pearl (0.26kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1734,12 +1945,12 @@
         "Pearl",
         "pearl"
       ],
-      "mutation": "Sandy"
+      "mutation": "Big"
     },
-    "sandy pearl": {
+    "pearl (0.26kg)": {
       "itemId": "235",
       "baseFishName": "Pearl",
-      "displayName": "Sandy Pearl",
+      "displayName": "Pearl (0.26kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1756,7 +1967,7 @@
         "Pearl",
         "pearl"
       ],
-      "mutation": "Sandy"
+      "mutation": "Big"
     },
     "antique watch": {
       "itemId": "238",
@@ -1802,10 +2013,52 @@
       ],
       "mutation": "Big"
     },
+    "parrot blopfish": {
+      "itemId": "283",
+      "baseFishName": "Parrot Blopfish",
+      "displayName": "Shiny Parrot Blopfish (2.43kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Parrot Blopfish",
+        "parrot blopfish"
+      ],
+      "mutation": "Shiny"
+    },
+    "shiny parrot blopfish (2.43kg)": {
+      "itemId": "283",
+      "baseFishName": "Parrot Blopfish",
+      "displayName": "Shiny Parrot Blopfish (2.43kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Parrot Blopfish",
+        "parrot blopfish"
+      ],
+      "mutation": "Shiny"
+    },
     "liar nose fish": {
       "itemId": "361",
       "baseFishName": "Liar Nose Fish",
-      "displayName": "Liar Nose Fish",
+      "displayName": "Liar Nose Fish (17.8kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1824,10 +2077,10 @@
       ],
       "mutation": "Big"
     },
-    "azure reef crab": {
-      "itemId": "780",
-      "baseFishName": "Azure Reef Crab",
-      "displayName": "Azure Reef Crab (2.08kg)",
+    "liar nose fish (17.8kg)": {
+      "itemId": "361",
+      "baseFishName": "Liar Nose Fish",
+      "displayName": "Liar Nose Fish (17.8kg)",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1841,15 +2094,35 @@
         "fishit_global_fish_item_catalog"
       ],
       "triedAliases": [
-        "Azure Reef Crab",
-        "azure reef crab"
+        "Liar Nose Fish",
+        "liar nose fish"
       ],
-      "mutation": "Ghost"
+      "mutation": "Big"
     },
-    "azure reef crab (2.08kg)": {
+    "traffic cone fish (2.59kg)": {
+      "itemId": "377",
+      "baseFishName": "Traffic Cone Fish",
+      "displayName": "Traffic Cone Fish (2.59kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Traffic Cone Fish",
+        "traffic cone fish"
+      ],
+      "mutation": "Big"
+    },
+    "azure reef crab": {
       "itemId": "780",
       "baseFishName": "Azure Reef Crab",
-      "displayName": "Azure Reef Crab (2.08kg)",
+      "displayName": "Azure Reef Crab",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1871,29 +2144,7 @@
     "sea urchin": {
       "itemId": "781",
       "baseFishName": "Sea Urchin",
-      "displayName": "Sea Urchin (5.5kg)",
-      "rarity": null,
-      "raritySource": null,
-      "rarityConfidence": null,
-      "imageAssetId": null,
-      "imageUrl": null,
-      "imageSource": null,
-      "sourceUrl": null,
-      "sources": [
-        "fishit_catalog",
-        "fishit_learned_fish_catalog",
-        "fishit_global_fish_item_catalog"
-      ],
-      "triedAliases": [
-        "Sea Urchin",
-        "sea urchin"
-      ],
-      "mutation": "Shiny"
-    },
-    "sea urchin (5.5kg)": {
-      "itemId": "781",
-      "baseFishName": "Sea Urchin",
-      "displayName": "Sea Urchin (5.5kg)",
+      "displayName": "Sea Urchin",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -1960,31 +2211,7 @@
     "goldmask tetra": {
       "itemId": "784",
       "baseFishName": "Goldmask Tetra",
-      "displayName": "Crown (5.5kg)",
-      "rarity": null,
-      "raritySource": null,
-      "rarityConfidence": null,
-      "imageAssetId": null,
-      "imageUrl": null,
-      "imageSource": null,
-      "sourceUrl": null,
-      "sources": [
-        "fishit_catalog",
-        "fishit_learned_fish_catalog",
-        "fishit_global_fish_item_catalog"
-      ],
-      "triedAliases": [
-        "Goldmask Tetra",
-        "goldmask tetra",
-        "Crown",
-        "crown"
-      ],
-      "mutation": "Big"
-    },
-    "crown (5.5kg)": {
-      "itemId": "784",
-      "baseFishName": "Goldmask Tetra",
-      "displayName": "Crown (5.5kg)",
+      "displayName": "Crown",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -2230,29 +2457,7 @@
     "deepsea dweller": {
       "itemId": "881",
       "baseFishName": "Deepsea Dweller",
-      "displayName": "Deepsea Dweller (19.8kg)",
-      "rarity": null,
-      "raritySource": null,
-      "rarityConfidence": null,
-      "imageAssetId": null,
-      "imageUrl": null,
-      "imageSource": null,
-      "sourceUrl": null,
-      "sources": [
-        "fishit_catalog",
-        "fishit_learned_fish_catalog",
-        "fishit_global_fish_item_catalog"
-      ],
-      "triedAliases": [
-        "Deepsea Dweller",
-        "deepsea dweller"
-      ],
-      "mutation": null
-    },
-    "deepsea dweller (19.8kg)": {
-      "itemId": "881",
-      "baseFishName": "Deepsea Dweller",
-      "displayName": "Deepsea Dweller (19.8kg)",
+      "displayName": "Deepsea Dweller",
       "rarity": null,
       "raritySource": null,
       "rarityConfidence": null,
@@ -2334,6 +2539,25 @@
       "triedAliases": [
         "Skeleton Narwhal",
         "skeleton narwhal"
+      ],
+      "mutation": null
+    },
+    "yellow damselfish": {
+      "itemId": null,
+      "baseFishName": "yellow damselfish",
+      "displayName": "yellow damselfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": "125066072333378",
+      "imageUrl": null,
+      "imageSource": "fish_image_cache_index",
+      "sourceUrl": null,
+      "sources": [
+        "fish_image_cache_index"
+      ],
+      "triedAliases": [
+        "yellow damselfish"
       ],
       "mutation": null
     },
@@ -2548,27 +2772,6 @@
       "mutation": null
     },
     "squid": {
-      "itemId": null,
-      "baseFishName": "squid",
-      "displayName": "Giant Squid",
-      "rarity": "Secret",
-      "raritySource": "fishit_db_secret",
-      "rarityConfidence": "pending",
-      "imageAssetId": null,
-      "imageUrl": "https://tr.rbxcdn.com/180DAY-ad8d392c5e6afe4cf421b5d1071b9a5e/420/420/Image/Png/noFilter",
-      "imageSource": "fish_catalog_seen",
-      "sourceUrl": "https://tr.rbxcdn.com/180DAY-ad8d392c5e6afe4cf421b5d1071b9a5e/420/420/Image/Png/noFilter",
-      "sources": [
-        "fish_catalog_seen",
-        "fishit_db_secret"
-      ],
-      "triedAliases": [
-        "squid",
-        "Squid"
-      ],
-      "mutation": "Giant"
-    },
-    "giant squid": {
       "itemId": null,
       "baseFishName": "squid",
       "displayName": "Giant Squid",
@@ -3409,5 +3612,5 @@
       "mutation": null
     }
   },
-  "rowsScanned": 330
+  "rowsScanned": 346
 }

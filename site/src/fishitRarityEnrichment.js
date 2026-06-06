@@ -97,7 +97,15 @@ function lookupRarityForItem(item) {
 
 function attachRarityFields(item) {
   if (!item || typeof item !== 'object') return item;
-  if (item.rarity && item.raritySource) return item;
+  if (item.rarity && item.rarity !== 'Unknown') {
+    return {
+      ...item,
+      tier: item.tier || item.rarity,
+      raritySource: item.raritySource || null,
+      rarityConfidence: item.rarityConfidence || null,
+      rarityNeedsData: false,
+    };
+  }
 
   const hit = lookupRarityForItem(item);
   if (!hit || !hit.rarity) {
@@ -135,6 +143,7 @@ function attachRarityFields(item) {
     tier: hit.rarity,
     raritySource: hit.raritySource,
     rarityConfidence: hit.rarityConfidence,
+    rarityNeedsData: false,
     rarityUpdatedAt: new Date().toISOString(),
   };
 }

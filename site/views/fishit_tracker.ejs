@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06' %>">
+<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10U3_U4_PUBLIC_NAME_AND_SECRET_FISH_FIX_2026_06_06' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10U3_U4_PUBLIC_NAME_AND_SECRET_FISH_FIX_2026_06_06' %>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -103,8 +103,11 @@
 
     @keyframes fadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
 
-    .ic-head { display:flex; align-items:flex-start; justify-content:space-between; gap:6px; }
-    .item-name { font-weight:600; font-size:.9rem; line-height:1.3; word-break:break-word; }
+    .ic-head { display:flex; align-items:flex-start; gap:8px; flex-wrap:wrap; }
+    .ic-title-wrap { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+    .item-name { font-weight:600; font-size:.9rem; line-height:1.35; min-width:0; word-break:normal; overflow-wrap:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .ic-badges { display:flex; flex-wrap:wrap; gap:4px; align-items:center; flex-shrink:0; }
+    .badge-mutation { font-size:.7rem; padding:2px 7px; border-radius:99px; background:#1a2438; color:#93c5fd; border:1px solid #2d4a6e; white-space:nowrap; }
     .badge-shiny { font-size:.7rem; padding:2px 7px; border-radius:99px; background:#3d2c00; color:var(--shine); border:1px solid #7a5a00; white-space:nowrap; flex-shrink:0; }
     .ic-meta { display:flex; flex-wrap:wrap; gap:5px; }
     .badge { font-size:.72rem; padding:2px 9px; border-radius:99px; border:1px solid var(--border); background:var(--surface); color:var(--muted); }
@@ -136,8 +139,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06">
-<!-- BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06 -->
+<body data-ui-marker="BLOCKER10U3_U4_PUBLIC_NAME_AND_SECRET_FISH_FIX_2026_06_06">
+<!-- BLOCKER10U3_U4_PUBLIC_NAME_AND_SECRET_FISH_FIX_2026_06_06 -->
 <div class="page">
   <div class="inner">
 
@@ -306,6 +309,16 @@
     else { summaryTextEl.innerHTML = `Tracking <strong>${n}</strong> player${n>1?'s':''} &mdash; sessions saved automatically`; noTrackersMsg.style.display = 'none'; }
   }
 
+  function cardTitle(item) {
+    return item.cardName || item.baseFishName || item.name || 'Unknown';
+  }
+  function mutationBadge(item) {
+    const mut = item.mutation ? String(item.mutation).trim() : '';
+    if (!mut) return '';
+    const low = mut.toLowerCase();
+    if (low === 'shiny' && item.shiny === true) return '';
+    return `<span class="badge-mutation">${escHtml(mut)}</span>`;
+  }
   function buildItemsHtml(items) {
     if (!items || items.length === 0) return '<div class="card-empty">&#x1F9F3; Inventory is empty.</div>';
     return `<div class="items-grid">${items.map(item => {
@@ -314,14 +327,16 @@
       const rarity  = item.rarity && item.rarity !== 'Unknown' ? item.rarity : null;
       const rc      = rarityClass(rarity);
       const amount  = Number(item.amount || 1);
-      const qty     = `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#0a0c10;color:#e2e8f0;border:1px solid #2a3040;">x${Number.isFinite(amount) ? amount : 1}</span>`;
+      const title   = cardTitle(item);
+      const qty     = `<span style="padding:1px 6px;border-radius:4px;font-size:.75em;background:#0a0c10;color:#e2e8f0;border:1px solid #2a3040;">x${Number.isFinite(amount) ? amount : 1}</span>`;
       const cat     = item.category
-                        ? `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.category)}</span>`
-                        : (item.tab ? `<span style="margin-left:7px;padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.tab)}</span>` : '');
+                        ? `<span style="padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.category)}</span>`
+                        : (item.tab ? `<span style="padding:1px 6px;border-radius:4px;font-size:.75em;background:#2d3748;color:#90cdf4;">${escHtml(item.tab)}</span>` : '');
       const imgSrc  = itemImageSrc(item);
-      const altText = escHtml(item.name || 'Fish');
+      const altText = escHtml(title);
+      const mutBadge = mutationBadge(item);
       return `<div class="item-card${isShiny?' shiny':''}">
-  <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${altText}" loading="lazy" decoding="async" style="width:28px;height:28px;margin-right:8px;vertical-align:middle;border-radius:6px;object-fit:cover;background:#2a3040;" onerror="this.onerror=null;this.src='${ITEM_IMAGES.Default}';"><span class="item-name">${escHtml(item.name||'Unknown')}</span>${qty}${cat}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div>
+  <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${altText}" loading="lazy" decoding="async" style="width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;" onerror="this.onerror=null;this.src='${ITEM_IMAGES.Default}';"><div class="ic-title-wrap"><span class="item-name">${escHtml(title)}</span><div class="ic-badges">${qty}${cat}${mutBadge}${isShiny?'<span class="badge-shiny">&#x2728; Shiny</span>':''}</div></div></div>
   <div class="ic-meta">${hasW?`<span class="badge badge-weight">&#x2696;&#xFE0F; ${escHtml(Number(item.weight).toFixed(2))} kg</span>`:''}${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
 </div>`;
     }).join('')}</div>`;

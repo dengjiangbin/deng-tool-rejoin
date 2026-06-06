@@ -8,7 +8,6 @@ const fs = require('fs');
 const fishImageAssets = require('./fishitFishImageAssets');
 const catchNameParser = require('./fishitCatchNameParser');
 const catalogStore = require('./fishitCatalogStore');
-const fishCatalog = require('./fishitFishCatalog');
 
 const CANONICAL_PATH = process.env.FISHIT_CANONICAL_CATALOG_PATH
   || path.join(__dirname, '..', 'data', 'fishit_canonical_catalog.json');
@@ -23,6 +22,7 @@ const SOURCE_FILES = [
   { id: 'fishit_learned_fish_catalog', path: 'fishit_learned_fish_catalog.json', type: 'learned' },
   { id: 'fishit_global_fish_item_catalog', path: 'fishit_global_fish_item_catalog.json', type: 'global' },
   { id: 'fish_image_cache_index', path: path.join('fish_image_cache', 'index.json'), type: 'image_cache' },
+  { id: 'fishit_manual_verified_catalog', path: 'fishit_manual_verified_catalog.json', type: 'manual_verified' },
 ];
 
 let _store = null;
@@ -43,6 +43,21 @@ function sanitiseAssetId(raw) {
 
 function isHttpUrl(raw) {
   return typeof raw === 'string' && /^https?:\/\//i.test(raw.trim());
+}
+
+function _normalizeRarity(raw) {
+  if (!raw) return null;
+  const t = String(raw).trim().toLowerCase();
+  if (!t || t === 'unknown' || t === '-') return null;
+  const norm = catalogStore.normalizeTier(t);
+  if (!norm) return null;
+  return norm.charAt(0).toUpperCase() + norm.slice(1);
+}
+
+function _resetFishCatalog() {
+  try {
+    require('./fishitFishCatalog')._reset();
+  } catch (_) { /* circular load safe */ }
 }
 
 function emptyStore() {
@@ -148,7 +163,7 @@ function rebuildFromAllSources({ persist = true } = {}) {
     _touchSource(entry, sourceId);
     rowsScanned += 1;
 
-    const rarity = fishCatalog.normalizeRarity(row.rarity || row.tier || row.normalizedRarity);
+    const rarity = _normalizeRarity(row.rarity || row.tier || row.normalizedRarity);
     if (rarity) _mergeField(entry, 'rarity', rarity, sourceId, row.rarityConfidence || 'pending');
 
     const assetId = sanitiseAssetId(row.imageAssetId || row.assetId);
@@ -189,6 +204,46 @@ function rebuildFromAllSources({ persist = true } = {}) {
     } else if (def.type === 'item_list') {
       const list = Array.isArray(data.fish) ? data.fish : (Array.isArray(data.entries) ? data.entries : []);
       for (const row of list) upsert(row, def.id) && (src.rows += 1);
+    } else if (def.type === 'manual_verified') {
+      const list = Array.isArray(data) ? data : (Array.isArray(data.entries) ? data.entries : []);
+      for (const row of list) {
+        const itemId = row.itemId != null ? String(row.itemId).trim() : null;
+        const baseFishName = row.baseFishName ? String(row.baseFishName).trim() : null;
+        if (!itemId || !/^\d+$/.test(itemId) || !baseFishName) continue;
+        const existing = map[itemId];
+        const confirmedSources = new Set(['fishit_fish_confirmed_catalog', 'confirmed_catalog']);
+        const existingConfirmed = existing && (existing.sources || []).some((s) => confirmedSources.has(s));
+        if (existing && existing.baseFishName && existing.baseFishName !== baseFishName
+            && !row.force && existingConfirmed) {
+          continue;
+        }
+        const e = _ensureEntry(map, itemId, baseFishName);
+        if (!e) continue;
+        e.itemId = itemId;
+        e.baseFishName = baseFishName;
+        e.displayName = row.displayName || baseFishName;
+        e.mutation = row.mutation || null;
+        e.category = row.category || 'fish';
+        e.verifiedBy = row.verifiedBy || null;
+        e.verifiedReason = row.verifiedReason || null;
+        e.rarity = _normalizeRarity(row.rarity) || e.rarity;
+        e.raritySource = def.id;
+        e.rarityConfidence = row.confidence || 'user_verified';
+        const assetId = sanitiseAssetId(row.imageAssetId || row.assetId);
+        if (assetId) {
+          e.imageAssetId = assetId;
+          e.imageSource = def.id;
+        }
+        const url = isHttpUrl(row.imageUrl || row.sourceUrl) ? String(row.imageUrl || row.sourceUrl).trim() : null;
+        if (url) {
+          e.imageUrl = url;
+          e.sourceUrl = url;
+          e.imageSource = def.id;
+        }
+        _touchSource(e, def.id);
+        src.rows += 1;
+        rowsScanned += 1;
+      }
     } else if (def.type === 'catalog_store') {
       for (const row of Object.values(data.entries || {})) {
         if (!row?.itemId || !catalogStore.isFishCategory(row.category || 'fish')) continue;
@@ -311,7 +366,7 @@ function rebuildFromAllSources({ persist = true } = {}) {
   if (persist && (process.env.NODE_ENV !== 'test' || process.env.FISHIT_CANONICAL_PERSIST === '1')) {
     _persist();
   }
-  fishCatalog._reset();
+  _resetFishCatalog();
   return _store;
 }
 
@@ -427,7 +482,7 @@ function importRows(rows, { sourceTag = 'import_script', persist = true } = {}) 
   _store.updatedAt = new Date().toISOString();
   _audit = buildAudit(_store);
   if (persist) _persist();
-  fishCatalog._reset();
+  _resetFishCatalog();
   return results;
 }
 

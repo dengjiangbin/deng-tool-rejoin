@@ -44,12 +44,13 @@ const rarityLabels = require('./fishitRarityLabels');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10U2_BUILD, BLOCKER10U2_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10U3_U4_BUILD, BLOCKER10U3_U4_UI_MARKER } = require('./fishitTrackerBuild');
 const catalogPolish = require('./fishitCatalogPolish');
 const fishImageCache = require('./fishitFishImageCache');
 const rarityEnrichment = require('./fishitRarityEnrichment');
 const catchNameParser = require('./fishitCatchNameParser');
 const canonicalCatalog = require('./fishitCanonicalCatalog');
+const manualVerifiedCatalog = require('./fishitManualVerifiedCatalog');
 const sessionStore = require('./fishitSessionStore');
 
 learnedFishCatalog.purgePoisonedMappings();
@@ -96,8 +97,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10U2_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10U2_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10U3_U4_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10U3_U4_BUILD;
 
 const CONFIRMED_FISH_IMAGE_ASSET_IDS = [
   '128385926161840',
@@ -258,17 +259,34 @@ function mergeItemsNoDowngrade(incoming, existing) {
 function catalogMetaForItemId(itemId) {
   const canon = canonicalCatalog.lookupByItemId(itemId);
   if (canon && canon.baseFishName && !rarityLabels.isBlockedLearnName(canon.baseFishName)) {
+    const isManual = (canon.sources || []).includes('fishit_manual_verified_catalog');
     return {
-      name: canon.displayName || canon.baseFishName,
+      name: canon.baseFishName,
       displayName: canon.displayName || canon.baseFishName,
       baseFishName: canon.baseFishName,
       mutation: canon.mutation || null,
-      category: 'fish',
-      source: canon.raritySource || canon.imageSource || 'canonical_catalog',
+      category: canon.category || 'fish',
+      source: isManual ? 'manual_verified_catalog' : (canon.raritySource || canon.imageSource || 'canonical_catalog'),
       tier: canon.rarity || null,
       imageUrl: canon.imageUrl || canon.sourceUrl || null,
       imageAssetId: canon.imageAssetId || null,
-      confidence: canon.rarityConfidence || 'confirmed',
+      confidence: canon.rarityConfidence || (isManual ? 'user_verified' : 'confirmed'),
+      publicEligible: true,
+    };
+  }
+  const manual = manualVerifiedCatalog.lookupByItemId(itemId);
+  if (manual && manual.baseFishName && !rarityLabels.isBlockedLearnName(manual.baseFishName)) {
+    return {
+      name: manual.baseFishName,
+      displayName: manual.displayName || manual.baseFishName,
+      baseFishName: manual.baseFishName,
+      mutation: manual.mutation || null,
+      category: manual.category || 'fish',
+      source: 'manual_verified_catalog',
+      tier: manual.rarity || null,
+      imageUrl: manual.imageUrl || manual.sourceUrl || null,
+      imageAssetId: manual.imageAssetId || null,
+      confidence: manual.confidence || 'user_verified',
       publicEligible: true,
     };
   }
@@ -439,12 +457,20 @@ function enrichItemsFromCatalog(items) {
     let displayName = meta?.displayName || it.displayName || name;
     let weightVal = it.weightKg != null ? it.weightKg : it.weight;
 
+    const catalogBaseLocked = !trackerHasRealName && meta?.baseFishName
+      && (meta.source === 'manual_verified_catalog' || meta.source === 'canonical_catalog'
+        || meta.publicEligible === true);
     const canon = catchNameParser.canonicalizeFishName(name, {
       mutation,
       rarity,
       weightKg: weightVal,
     });
-    if (canon.baseFishName) {
+    if (catalogBaseLocked) {
+      baseFishName = meta.baseFishName;
+      mutation = meta.mutation || mutation || null;
+      displayName = mutation ? `${mutation} ${baseFishName}` : (meta.displayName || baseFishName);
+      name = displayName;
+    } else if (canon.baseFishName) {
       baseFishName = canon.baseFishName;
       mutation = mutation || canon.mutation;
       displayName = mutation ? `${mutation} ${baseFishName}` : baseFishName;
@@ -498,6 +524,9 @@ function enrichItemsFromCatalog(items) {
       weight: weightVal != null ? weightVal : it.weight,
       weightKg: weightVal != null ? weightVal : it.weightKg,
       rarity,
+      tier: rarity || it.tier || null,
+      raritySource: it.raritySource || (meta && meta.source && rarity ? meta.source : null),
+      rarityConfidence: it.rarityConfidence || (meta && meta.confidence) || null,
       category,
       imageUrl,
       imageAssetId: imageAssetId || it.imageAssetId || null,
@@ -582,6 +611,18 @@ function isPublicFishItem(item) {
   if (!item) return false;
   const cat = String(item.category || '').toLowerCase();
   if (cat === 'rod' || cat === 'bait') return false;
+  if (item.itemId) {
+    const canon = canonicalCatalog.lookupByItemId(item.itemId);
+    if (canon && canon.baseFishName && !rarityLabels.isBlockedLearnName(canon.baseFishName)
+        && catalogStore.isFishCategory(canon.category || 'fish')) {
+      return true;
+    }
+    const manual = manualVerifiedCatalog.lookupByItemId(item.itemId);
+    if (manual && manual.baseFishName && !rarityLabels.isBlockedLearnName(manual.baseFishName)
+        && catalogStore.isFishCategory(manual.category || 'fish')) {
+      return true;
+    }
+  }
   if (rarityLabels.isBlockedLearnName(item.name)) return false;
   if (item.itemId) {
     const confirmed = fishCatalog.lookupByItemId(item.itemId);
@@ -610,8 +651,13 @@ function isPublicFishItem(item) {
 
 /** Fish-only view for public website/API (storage keeps full inventory). */
 async function buildPublicFishFields(enrichedFlat, baseUrl) {
+  const items = enrichedFlat || [];
+  const needsCatalogEnrich = items.some(
+    (it) => it && catalogStore.isPlaceholderItemName(it.name, it.itemId),
+  );
+  const enriched = needsCatalogEnrich ? enrichItemsFromCatalog(items) : items;
   const polished = catalogPolish.polishPublicFishItems(
-    (enrichedFlat || []).filter(isPublicFishItem),
+    enriched.filter(isPublicFishItem),
   );
   const withAssets = fishImageAssets.attachFishImagesToItems(polished);
   const withRarity = rarityEnrichment.attachRarityToItems(withAssets);
@@ -779,6 +825,51 @@ function buildUnresolvedRawProof(rawItems, enrichedItems, selectedPath) {
     }));
 }
 
+function buildMissingFishRecoveryProof(rawItems, enrichedItems, publicFishItems) {
+  const proofs = [];
+  const watchIds = new Set(['156']);
+  for (const manual of manualVerifiedCatalog.getAll()) {
+    if (manual?.itemId) watchIds.add(String(manual.itemId));
+  }
+  for (const raw of rawItems || []) {
+    const itemId = raw?.itemId ? String(raw.itemId) : null;
+    if (!itemId || !watchIds.has(itemId)) continue;
+    const enriched = (enrichedItems || []).find((e) => String(e.itemId) === itemId);
+    const pub = (publicFishItems || []).find((p) => String(p.itemId) === itemId);
+    const canon = canonicalCatalog.lookupByItemId(itemId);
+    const manual = manualVerifiedCatalog.lookupByItemId(itemId);
+    const wasPlaceholder = catalogStore.isPlaceholderItemName(raw.name, itemId);
+    const catalogMatchedBefore = !wasPlaceholder && !!raw.catalogSource;
+    const catalogMatchedAfter = enriched
+      ? !catalogStore.isPlaceholderItemName(enriched.baseFishName || enriched.name, itemId)
+      : false;
+    proofs.push({
+      itemId,
+      amount: raw.amount,
+      rawPath: raw.rawProof?.sourcePath || null,
+      rawObjectPreview: raw.rawProof?.rawObjectPreview || null,
+      rawNameFields: raw.rawProof?.rawNameFields || null,
+      metadataKeys: raw.rawProof?.rawObjectPreview?.Metadata
+        ? Object.keys(raw.rawProof.rawObjectPreview.Metadata)
+        : null,
+      catalogMatchedBefore,
+      suspectedName: manual?.baseFishName || canon?.baseFishName || null,
+      suspectedRarity: manual?.rarity || canon?.rarity || null,
+      recoverySource: manual ? 'manual_verified_catalog' : (canon ? 'canonical_catalog' : null),
+      confidence: manual?.confidence || canon?.rarityConfidence || null,
+      shouldShowPublic: !!pub,
+      reason: pub ? 'manual_verified_public_eligible' : 'not_recovered',
+      catalogMatchedAfter,
+      finalNameBefore: raw.name,
+      finalNameAfter: enriched?.baseFishName || enriched?.name || null,
+      finalCategoryBefore: raw.category || null,
+      finalCategoryAfter: enriched?.category || null,
+      rarity: pub?.rarity || enriched?.rarity || manual?.rarity || canon?.rarity || null,
+    });
+  }
+  return proofs;
+}
+
 function mapDebugItemWithResolution(raw, enriched) {
   const res = deriveResolution(raw, enriched);
   return {
@@ -807,12 +898,13 @@ function renderTrackerPage(_req, res) {
     title: '🎣 Fish It Live Inventory Tracker',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
-    blocker10u2Build: BLOCKER10U2_BUILD,
-    blocker10uBuild: BLOCKER10U2_BUILD,
-    blocker10tBuild: BLOCKER10U2_BUILD,
-    blocker10sBuild: BLOCKER10U2_BUILD,
-    blocker10rBuild: BLOCKER10U2_BUILD,
-    blocker10qBuild: BLOCKER10U2_BUILD,
+    blocker10u3u4Build: BLOCKER10U3_U4_BUILD,
+    blocker10u2Build: BLOCKER10U3_U4_BUILD,
+    blocker10uBuild: BLOCKER10U3_U4_BUILD,
+    blocker10tBuild: BLOCKER10U3_U4_BUILD,
+    blocker10sBuild: BLOCKER10U3_U4_BUILD,
+    blocker10rBuild: BLOCKER10U3_U4_BUILD,
+    blocker10qBuild: BLOCKER10U3_U4_BUILD,
   });
 }
 
@@ -1512,6 +1604,17 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     lastGoodPublicFishCount: data.lastGoodPublicFishCount || 0,
     lastCatchParsed: data.nameCatalogDiscovery?.lastCatchParsed
       || data.lastCatchParsed || null,
+    publicNameContractProof: catalogPolish.buildPublicNameContractProof(publicFishDbg.fishItems, 25),
+    missingFishRecoveryProof: buildMissingFishRecoveryProof(
+      rawItemsArr,
+      enrichedAll,
+      publicFishDbg.fishItems,
+    ),
+    manualVerifiedCatalogCount: manualVerifiedCatalog.getCount(),
+    knownRarityCount: rarityStats.knownCount,
+    publicFishContainsGiantSquid: publicFishDbg.fishItems.some(
+      (f) => String(f.itemId) === '156' || String(f.baseFishName || f.name).toLowerCase() === 'giant squid',
+    ),
   });
 });
 
@@ -1547,16 +1650,17 @@ module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
 module.exports.PUBLIC_API_BUILD = PUBLIC_API_BUILD;
-module.exports.BLOCKER10U2_BUILD = BLOCKER10U2_BUILD;
-module.exports.BLOCKER10U_BUILD = BLOCKER10U2_BUILD;
-module.exports.BLOCKER10T_BUILD = BLOCKER10U2_BUILD;
-module.exports.BLOCKER10S_BUILD = BLOCKER10U2_BUILD;
-module.exports.BLOCKER10R_BUILD = BLOCKER10U2_BUILD;
-module.exports.BLOCKER10Q_BUILD = BLOCKER10U2_BUILD;
-module.exports.BLOCKER10P_BUILD = BLOCKER10U2_BUILD;
-module.exports.BLOCKER10O_BUILD = BLOCKER10U2_BUILD;
-module.exports.BLOCKER10N2_BUILD = BLOCKER10U2_BUILD;
-module.exports.BLOCKER10N_BUILD = BLOCKER10U2_BUILD;
+module.exports.BLOCKER10U3_U4_BUILD = BLOCKER10U3_U4_BUILD;
+module.exports.BLOCKER10U2_BUILD = BLOCKER10U3_U4_BUILD;
+module.exports.BLOCKER10U_BUILD = BLOCKER10U3_U4_BUILD;
+module.exports.BLOCKER10T_BUILD = BLOCKER10U3_U4_BUILD;
+module.exports.BLOCKER10S_BUILD = BLOCKER10U3_U4_BUILD;
+module.exports.BLOCKER10R_BUILD = BLOCKER10U3_U4_BUILD;
+module.exports.BLOCKER10Q_BUILD = BLOCKER10U3_U4_BUILD;
+module.exports.BLOCKER10P_BUILD = BLOCKER10U3_U4_BUILD;
+module.exports.BLOCKER10O_BUILD = BLOCKER10U3_U4_BUILD;
+module.exports.BLOCKER10N2_BUILD = BLOCKER10U3_U4_BUILD;
+module.exports.BLOCKER10N_BUILD = BLOCKER10U3_U4_BUILD;
 module.exports.persistSessionState = persistSessionState;
 module.exports.sessionStore = sessionStore;
 module.exports.canonicalCatalog = canonicalCatalog;
