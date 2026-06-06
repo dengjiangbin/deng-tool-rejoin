@@ -11,6 +11,8 @@ const fs = require('fs');
 
 const ASSET_PATH = process.env.FISHIT_FISH_IMAGE_ASSETS_PATH
   || path.join(__dirname, '..', 'data', 'fishit_fish_image_assets.json');
+const URL_MAP_PATH = process.env.FISHIT_IMAGE_ASSETS_PATH
+  || path.join(__dirname, '..', 'data', 'fishit_image_assets.json');
 
 const IMAGE_SOURCE_MATCHED = 'fish_image_asset_catalog';
 const IMAGE_SOURCE_MISSING = 'missing_image_asset';
@@ -42,14 +44,20 @@ function sanitiseAssetId(raw) {
   return /^\d{10,22}$/.test(id) ? id : null;
 }
 
-function registerEntry(maps, name, assetId) {
+function registerEntry(maps, name, assetId, imageUrl, imageSource) {
   const id = sanitiseAssetId(assetId);
-  if (!id) return;
+  const url = imageUrl && /^https?:\/\//i.test(String(imageUrl)) ? String(imageUrl).trim() : null;
+  if (!id && !url) return;
   const display = String(name || '').trim();
   if (!display) return;
   const lower = normalizeName(display);
   const punct = normalizeNamePunct(display);
-  const row = { name: display, assetId: id, imageUrl: null, imageSource: IMAGE_SOURCE_MATCHED };
+  const row = {
+    name: display,
+    assetId: id || null,
+    imageUrl: url,
+    imageSource: imageSource || IMAGE_SOURCE_MATCHED,
+  };
   maps.byLower.set(lower, row);
   if (punct && punct !== lower) maps.byNormalized.set(punct, row);
 }
@@ -71,7 +79,25 @@ function loadMaps() {
   }
   for (const row of rawList) {
     if (!row || typeof row !== 'object') continue;
-    registerEntry({ byLower, byNormalized }, row.name, row.assetId);
+    registerEntry({ byLower, byNormalized }, row.name, row.assetId, row.imageUrl, IMAGE_SOURCE_MATCHED);
+  }
+  try {
+    if (fs.existsSync(URL_MAP_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(URL_MAP_PATH, 'utf8'));
+      const images = parsed.images && typeof parsed.images === 'object' ? parsed.images : {};
+      for (const [name, row] of Object.entries(images)) {
+        if (!row || typeof row !== 'object') continue;
+        registerEntry(
+          { byLower, byNormalized },
+          row.canonical_name || name,
+          null,
+          row.imageUrl,
+          row.source || 'fishit_image_assets',
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('[fishit] fishit_image_assets load failed:', err && err.message ? err.message : err);
   }
   _entryCount = byLower.size;
   _maps = { byLower, byNormalized };

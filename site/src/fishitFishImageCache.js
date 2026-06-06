@@ -10,6 +10,8 @@ const http = require('http');
 const fishImageAssets = require('./fishitFishImageAssets');
 const robloxThumbnails = require('./fishitRobloxThumbnails');
 const catchNameParser = require('./fishitCatchNameParser');
+let canonicalCatalog = null;
+try { canonicalCatalog = require('./fishitCanonicalCatalog'); } catch (_) { /* optional */ }
 
 const CACHE_DIR = process.env.FISHIT_FISH_IMAGE_CACHE_DIR
   || path.join(__dirname, '..', 'data', 'fish_image_cache');
@@ -85,10 +87,29 @@ function localUrlForFile(filename) {
   return `/api/fishit-tracker/assets/fish/${filename}`;
 }
 
-function resolveAssetIdForItem(item) {
-  if (!item) return null;
+function resolveImageMetaForItem(item) {
+  if (!item) return { assetId: null, sourceUrl: null, searchedSources: [] };
+  const searchedSources = [];
   const direct = robloxThumbnails.sanitiseAssetId(item.imageAssetId);
-  if (direct) return direct;
+  if (direct) return { assetId: direct, sourceUrl: item.imageUrl || null, searchedSources: ['item_imageAssetId'] };
+
+  if (canonicalCatalog) {
+    const canon = canonicalCatalog.resolveForItem(item);
+    if (canon) {
+      searchedSources.push(...(canon.searchedSources || []));
+      if (canon.imageAssetId) {
+        return {
+          assetId: canon.imageAssetId,
+          sourceUrl: canon.sourceUrl || canon.imageUrl || null,
+          searchedSources,
+        };
+      }
+      if (canon.imageUrl && /^https?:\/\//i.test(canon.imageUrl)) {
+        return { assetId: null, sourceUrl: canon.imageUrl, searchedSources };
+      }
+    }
+  }
+
   const names = [
     item.baseFishName,
     catchNameParser.canonicalizeFishName(item.name || '').baseFishName,
@@ -97,9 +118,23 @@ function resolveAssetIdForItem(item) {
   ].filter(Boolean);
   for (const n of names) {
     const hit = fishImageAssets.lookupByFishName(n);
-    if (hit && hit.assetId) return hit.assetId;
+    if (hit?.assetId) {
+      searchedSources.push('fish_image_asset_catalog');
+      return { assetId: hit.assetId, sourceUrl: hit.imageUrl || null, searchedSources };
+    }
+    if (hit?.imageUrl && /^https?:\/\//i.test(hit.imageUrl)) {
+      searchedSources.push(hit.imageSource || 'fish_image_url_map');
+      return { assetId: null, sourceUrl: hit.imageUrl, searchedSources };
+    }
   }
-  return null;
+  if (item.imageUrl && /^https?:\/\//i.test(item.imageUrl)) {
+    return { assetId: null, sourceUrl: item.imageUrl, searchedSources: ['item_imageUrl'] };
+  }
+  return { assetId: null, sourceUrl: null, searchedSources, triedAliases: names };
+}
+
+function resolveAssetIdForItem(item) {
+  return resolveImageMetaForItem(item).assetId;
 }
 
 async function ensureCachedAsset(assetId, meta = {}) {
@@ -207,6 +242,66 @@ async function ensureCachedAsset(assetId, meta = {}) {
   }
 }
 
+async function ensureCachedFromUrl(sourceUrl, meta = {}) {
+  const url = sourceUrl && /^https?:\/\//i.test(String(sourceUrl)) ? String(sourceUrl).trim() : null;
+  if (!url) return { cached: false, imageStatus: 'missing_url' };
+
+  _loadIndex();
+  const urlKey = crypto.createHash('sha256').update(url).digest('hex').slice(0, 16);
+  const existing = _index.byUrl && _index.byUrl[url];
+  if (existing?.localFile && fs.existsSync(path.join(CACHE_DIR, existing.localFile))) {
+    return { ...existing, cached: true, imageStatus: 'cached' };
+  }
+
+  if (process.env.NODE_ENV === 'test') {
+    const localFile = `test_url_${urlKey}.png`;
+    const row = {
+      itemId: meta.itemId || null,
+      baseFishName: meta.baseFishName || null,
+      sourceUrl: url,
+      localUrl: localUrlForFile(localFile),
+      localFile,
+      imageStatus: 'cached',
+      cached: true,
+      source: IMAGE_SOURCE_LOCAL,
+    };
+    _index.byUrl = _index.byUrl || {};
+    _index.byUrl[url] = row;
+    _persistIndex();
+    return row;
+  }
+
+  try {
+    const fetched = await _fetchBuffer(url);
+    if (fetched.status < 200 || fetched.status >= 300 || !fetched.body || fetched.body.length < 50) {
+      return { sourceUrl: url, imageStatus: 'download_failed', cached: false };
+    }
+    const sha256 = crypto.createHash('sha256').update(fetched.body).digest('hex');
+    const ext = _extFromMime(fetched.contentType);
+    const localFile = `${sha256.slice(0, 16)}.${ext}`;
+    if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
+    fs.writeFileSync(path.join(CACHE_DIR, localFile), fetched.body);
+    const row = {
+      itemId: meta.itemId || null,
+      baseFishName: meta.baseFishName || null,
+      sourceUrl: url,
+      localUrl: localUrlForFile(localFile),
+      localFile,
+      sha256,
+      imageStatus: 'cached',
+      cached: true,
+      source: IMAGE_SOURCE_LOCAL,
+      downloadedAt: new Date().toISOString(),
+    };
+    _index.byUrl = _index.byUrl || {};
+    _index.byUrl[url] = row;
+    _persistIndex();
+    return row;
+  } catch (err) {
+    return { sourceUrl: url, imageStatus: 'download_failed', cached: false, source: err.message };
+  }
+}
+
 async function ensureCachedAssets(assetIds, metaByAssetId = {}) {
   const ids = [...new Set((assetIds || []).map(robloxThumbnails.sanitiseAssetId).filter(Boolean))].slice(0, 40);
   const results = [];
@@ -218,38 +313,42 @@ async function ensureCachedAssets(assetIds, metaByAssetId = {}) {
 
 async function attachCachedImageFields(item, baseUrl) {
   if (!item || typeof item !== 'object') return item;
-  const assetId = resolveAssetIdForItem(item);
-  if (!assetId) {
-    return {
-      ...item,
-      imageStatus: item.imageStatus || 'missing',
-      imageSource: item.imageSource || fishImageAssets.IMAGE_SOURCE_MISSING,
-    };
-  }
+  const meta = resolveImageMetaForItem(item);
+  const assetId = meta.assetId;
+  const sourceUrl = meta.sourceUrl;
 
-  const cached = await ensureCachedAsset(assetId, {
-    itemId: item.itemId,
-    baseFishName: item.baseFishName || item.name,
-    displayName: item.displayName || item.name,
-  });
+  let cached = null;
+  if (assetId) {
+    cached = await ensureCachedAsset(assetId, {
+      itemId: item.itemId,
+      baseFishName: item.baseFishName || item.name,
+      displayName: item.displayName || item.name,
+    });
+  } else if (sourceUrl) {
+    cached = await ensureCachedFromUrl(sourceUrl, {
+      itemId: item.itemId,
+      baseFishName: item.baseFishName || item.name,
+    });
+  }
 
   recordProof({
     itemId: item.itemId || null,
     baseFishName: item.baseFishName || item.name,
-    imageAssetId: assetId,
-    sourceUrl: cached.sourceUrl || null,
-    localUrl: cached.localUrl || null,
-    imageStatus: cached.imageStatus || 'missing',
-    cached: !!cached.cached,
-    source: cached.source || null,
+    imageAssetId: assetId || null,
+    sourceUrl: cached?.sourceUrl || sourceUrl || null,
+    localUrl: cached?.localUrl || null,
+    imageStatus: cached?.imageStatus || 'missing',
+    cached: !!cached?.cached,
+    source: cached?.source || null,
+    triedAliases: meta.triedAliases || null,
+    searchedSources: meta.searchedSources || null,
   });
 
-  if (cached.cached && cached.localUrl) {
-    const url = cached.localUrl;
+  if (cached?.cached && cached.localUrl) {
     return {
       ...item,
-      imageAssetId: assetId,
-      imageUrl: url,
+      imageAssetId: assetId || item.imageAssetId || null,
+      imageUrl: cached.localUrl,
       imageUrlPresent: true,
       imageResolved: true,
       imageStatus: 'cached',
@@ -257,15 +356,27 @@ async function attachCachedImageFields(item, baseUrl) {
     };
   }
 
-  const proxy = robloxThumbnails.proxyImageUrl(assetId);
+  if (assetId) {
+    const proxy = robloxThumbnails.proxyImageUrl(assetId);
+    return {
+      ...item,
+      imageAssetId: assetId,
+      imageUrl: proxy,
+      imageUrlPresent: !!proxy,
+      imageResolved: false,
+      imageStatus: cached?.imageStatus || 'missing',
+      imageSource: item.imageSource || fishImageAssets.IMAGE_SOURCE_MATCHED,
+    };
+  }
+
   return {
     ...item,
-    imageAssetId: assetId,
-    imageUrl: proxy,
-    imageUrlPresent: !!proxy,
-    imageResolved: false,
-    imageStatus: cached.imageStatus || 'missing',
-    imageSource: item.imageSource || fishImageAssets.IMAGE_SOURCE_MATCHED,
+    imageStatus: 'missing',
+    imageSource: item.imageSource || fishImageAssets.IMAGE_SOURCE_MISSING,
+    imageMissingProof: {
+      triedAliases: meta.triedAliases || [item.baseFishName, item.name].filter(Boolean),
+      searchedSources: meta.searchedSources || [],
+    },
   };
 }
 
@@ -331,7 +442,9 @@ module.exports = {
   IMAGE_SOURCE_LOCAL,
   localUrlForFile,
   resolveAssetIdForItem,
+  resolveImageMetaForItem,
   ensureCachedAsset,
+  ensureCachedFromUrl,
   ensureCachedAssets,
   attachCachedImageFields,
   attachCachedImagesToItems,

@@ -87,6 +87,48 @@ function readBlob(key) {
   return value;
 }
 
+/** Export all DB-backed species images for canonical catalog backfill. */
+function exportImageCatalog() {
+  const idx = buildImageIndex();
+  const seen = new Set();
+  const out = [];
+  for (const [key, hit] of idx.entries()) {
+    if (!hit?.url || seen.has(hit.url)) continue;
+    seen.add(hit.url);
+    out.push({
+      name: key,
+      imageUrl: hit.url,
+      source: hit.source || 'fishit_db',
+    });
+  }
+  return out;
+}
+
+/** Export species→rarity hints from Secret/Forgotten caches (reliable bot data). */
+function exportRarityHints() {
+  const out = [];
+  const seen = new Set();
+  const add = (name, rarity, source) => {
+    const k = normKey(name);
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    out.push({ name, normalizedKey: k, rarity, source });
+  };
+  const fish = readBlob(KEY_FISH);
+  if (fish && fish.byUser) {
+    for (const u of Object.values(fish.byUser)) {
+      if (!isRealUserId(String(u.userId))) continue;
+      for (const n of Object.keys(u.secretFish || {})) add(n, 'Secret', 'fishit_db_secret');
+      for (const n of Object.keys(u.forgottenFish || {})) add(n, 'Forgotten', 'fishit_db_forgotten');
+    }
+  }
+  const forg = readBlob(KEY_FORGOTTEN);
+  if (forg && Array.isArray(forg.fish)) {
+    for (const f of forg.fish) add(f.name, 'Forgotten', 'forgotten_fish_catalog');
+  }
+  return out;
+}
+
 /** Test seam: drop the in-process caches + handle. */
 function _resetCache() {
   _blobCache.clear();
@@ -662,6 +704,8 @@ module.exports = {
   foldKey,
   normKey,
   buildImageIndex,
+  exportImageCatalog,
+  exportRarityHints,
   forgottenTotal,
   _resetCache,
 };

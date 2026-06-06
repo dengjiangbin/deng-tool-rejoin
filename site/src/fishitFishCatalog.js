@@ -10,6 +10,7 @@ const fs = require('fs');
 const catalogStore = require('./fishitCatalogStore');
 const learnedFishCatalog = require('./fishitLearnedFishCatalog');
 const fishImageAssets = require('./fishitFishImageAssets');
+const canonicalCatalog = require('./fishitCanonicalCatalog');
 
 const CONFIRMED_PATH = process.env.FISHIT_FISH_CONFIRMED_CATALOG_PATH
   || path.join(__dirname, '..', 'data', 'fishit_fish_confirmed_catalog.json');
@@ -159,12 +160,31 @@ function loadSeeds(map, sources) {
   }
 }
 
+function loadCanonical(map, sources) {
+  const store = canonicalCatalog._load();
+  for (const row of Object.values(store.byItemId || {})) {
+    if (!row?.itemId || !row.baseFishName) continue;
+    registerEntry(map, sources, {
+      itemId: row.itemId,
+      name: row.baseFishName,
+      category: 'fish',
+      rarity: row.rarity,
+      tier: row.rarity,
+      imageAssetId: row.imageAssetId,
+      imageUrl: row.imageUrl || row.sourceUrl,
+      source: row.raritySource || row.imageSource || 'canonical_catalog',
+      confidence: row.rarityConfidence || 'confirmed',
+    }, 'canonical_catalog');
+  }
+}
+
 function _load() {
   if (_byItemId) return _byItemId;
   const map = new Map();
   const sources = [];
   loadSeeds(map, sources);
   loadConfirmedFile(map, sources);
+  loadCanonical(map, sources);
   loadGlobalConfirmed(map, sources);
   loadCatalogStore(map, sources);
   loadLearned(map, sources);

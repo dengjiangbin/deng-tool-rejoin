@@ -44,11 +44,13 @@ const rarityLabels = require('./fishitRarityLabels');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10U_BUILD, BLOCKER10U_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10U2_BUILD, BLOCKER10U2_UI_MARKER } = require('./fishitTrackerBuild');
 const catalogPolish = require('./fishitCatalogPolish');
 const fishImageCache = require('./fishitFishImageCache');
 const rarityEnrichment = require('./fishitRarityEnrichment');
 const catchNameParser = require('./fishitCatchNameParser');
+const canonicalCatalog = require('./fishitCanonicalCatalog');
+const sessionStore = require('./fishitSessionStore');
 
 learnedFishCatalog.purgePoisonedMappings();
 for (const row of learnedFishCatalog.getBlockedMappings()) {
@@ -94,8 +96,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10U_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10U_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10U2_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10U2_BUILD;
 
 const CONFIRMED_FISH_IMAGE_ASSET_IDS = [
   '128385926161840',
@@ -121,9 +123,35 @@ router.use((req, res, next) => {
   next();
 });
 
-// ── In-memory live-data store ─────────────────────────────────────
-// Key: lowercased Roblox username  |  Value: last received payload + server ts
+// ── Live-data store (hydrated from disk on boot — BLOCKER10U2) ─────
 const liveTrackDB = {};
+
+if (process.env.NODE_ENV !== 'test' || process.env.FISHIT_SESSION_PERSIST === '1') {
+  try {
+    canonicalCatalog.rebuildFromAllSources({ persist: true });
+    const loaded = sessionStore.loadIntoLiveTrackDB(liveTrackDB);
+    console.log('[fishit-tracker] canonical catalog rebuilt; sessions restored:', loaded.loaded || 0);
+  } catch (err) {
+    console.warn('[fishit-tracker] boot hydrate failed:', err && err.message ? err.message : err);
+  }
+}
+
+async function persistSessionState(key, baseUrl) {
+  const data = liveTrackDB[key];
+  if (!data || key.startsWith('uid:')) return;
+  try {
+    const sourceItems = partialSnapshot.itemsForSessionDisplay(data);
+    const enriched = enrichItemsFromCatalog(sourceItems);
+    const publicFish = await buildPublicFishFields(enriched, baseUrl || 'http://127.0.0.1:8791');
+    data.lastGoodPublicFishItems = publicFish.fishItems;
+    data.lastGoodPublicFishCount = publicFish.fishItems.length;
+    data.lastCatchParsed = data.nameCatalogDiscovery?.lastCatchParsed
+      || data.lastCatchParsed || null;
+    sessionStore.saveSession(key, data, liveTrackDB);
+  } catch (err) {
+    console.warn('[fishit-tracker] session persist failed:', key, err && err.message ? err.message : err);
+  }
+}
 
 // ── Rate limiters ─────────────────────────────────────────────────
 // POST: one live Roblox tracker per user — allow startup burst + periodic sync.
@@ -228,6 +256,22 @@ function mergeItemsNoDowngrade(incoming, existing) {
 
 /** BLOCKER10H: enrich incoming placeholders from persistent catalog before store. */
 function catalogMetaForItemId(itemId) {
+  const canon = canonicalCatalog.lookupByItemId(itemId);
+  if (canon && canon.baseFishName && !rarityLabels.isBlockedLearnName(canon.baseFishName)) {
+    return {
+      name: canon.displayName || canon.baseFishName,
+      displayName: canon.displayName || canon.baseFishName,
+      baseFishName: canon.baseFishName,
+      mutation: canon.mutation || null,
+      category: 'fish',
+      source: canon.raritySource || canon.imageSource || 'canonical_catalog',
+      tier: canon.rarity || null,
+      imageUrl: canon.imageUrl || canon.sourceUrl || null,
+      imageAssetId: canon.imageAssetId || null,
+      confidence: canon.rarityConfidence || 'confirmed',
+      publicEligible: true,
+    };
+  }
   const global = globalFishCatalog.lookupById(itemId);
   if (global && (global.publicEligible || global.confidence === 'confirmed')
       && !rarityLabels.isBlockedLearnName(global.baseFishName || global.fishName)) {
@@ -763,11 +807,12 @@ function renderTrackerPage(_req, res) {
     title: '🎣 Fish It Live Inventory Tracker',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
-    blocker10uBuild: BLOCKER10U_BUILD,
-    blocker10tBuild: BLOCKER10U_BUILD,
-    blocker10sBuild: BLOCKER10U_BUILD,
-    blocker10rBuild: BLOCKER10U_BUILD,
-    blocker10qBuild: BLOCKER10U_BUILD,
+    blocker10u2Build: BLOCKER10U2_BUILD,
+    blocker10uBuild: BLOCKER10U2_BUILD,
+    blocker10tBuild: BLOCKER10U2_BUILD,
+    blocker10sBuild: BLOCKER10U2_BUILD,
+    blocker10rBuild: BLOCKER10U2_BUILD,
+    blocker10qBuild: BLOCKER10U2_BUILD,
   });
 }
 
@@ -1157,6 +1202,9 @@ function handleUpdateBackpack(req, res) {
     liveTrackDB[key].lastItemCounts = catchDelta.buildItemCountsFromItems(rawItems);
     if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
 
+    const persistBase = `${req.protocol}://${req.get('host')}`;
+    persistSessionState(key, persistBase).catch(() => {});
+
     console.log(
       `[fishit-tracker] POST ok=true user=${cleanUser} sessionKey=${key}` +
       ` accepted=${acceptedCount} lastSeenAt=${now} lastInventoryAt=${now} online=true` +
@@ -1499,15 +1547,19 @@ module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
 module.exports.PUBLIC_API_BUILD = PUBLIC_API_BUILD;
-module.exports.BLOCKER10U_BUILD = BLOCKER10U_BUILD;
-module.exports.BLOCKER10T_BUILD = BLOCKER10U_BUILD;
-module.exports.BLOCKER10S_BUILD = BLOCKER10U_BUILD;
-module.exports.BLOCKER10R_BUILD = BLOCKER10U_BUILD;
-module.exports.BLOCKER10Q_BUILD = BLOCKER10U_BUILD;
-module.exports.BLOCKER10P_BUILD = BLOCKER10U_BUILD;
-module.exports.BLOCKER10O_BUILD = BLOCKER10U_BUILD;
-module.exports.BLOCKER10N2_BUILD = BLOCKER10U_BUILD;
-module.exports.BLOCKER10N_BUILD = BLOCKER10U_BUILD;
+module.exports.BLOCKER10U2_BUILD = BLOCKER10U2_BUILD;
+module.exports.BLOCKER10U_BUILD = BLOCKER10U2_BUILD;
+module.exports.BLOCKER10T_BUILD = BLOCKER10U2_BUILD;
+module.exports.BLOCKER10S_BUILD = BLOCKER10U2_BUILD;
+module.exports.BLOCKER10R_BUILD = BLOCKER10U2_BUILD;
+module.exports.BLOCKER10Q_BUILD = BLOCKER10U2_BUILD;
+module.exports.BLOCKER10P_BUILD = BLOCKER10U2_BUILD;
+module.exports.BLOCKER10O_BUILD = BLOCKER10U2_BUILD;
+module.exports.BLOCKER10N2_BUILD = BLOCKER10U2_BUILD;
+module.exports.BLOCKER10N_BUILD = BLOCKER10U2_BUILD;
+module.exports.persistSessionState = persistSessionState;
+module.exports.sessionStore = sessionStore;
+module.exports.canonicalCatalog = canonicalCatalog;
 module.exports.ingestLearnedFishEntry = ingestLearnedFishEntry;
 module.exports.runCatchDeltaOnUpload = runCatchDeltaOnUpload;
 module.exports.catalogMetaForItemId = catalogMetaForItemId;

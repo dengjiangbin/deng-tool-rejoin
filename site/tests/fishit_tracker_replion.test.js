@@ -12,7 +12,7 @@
  *   - Replion field aliases (count, maxWeight, tier) are normalised.
  */
 
-const { describe, test, beforeEach } = require('node:test');
+const { describe, test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
@@ -2213,7 +2213,7 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06/);
+    assert.match(out, /BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06/);
   });
 
   test('targeted diagnostics disabled by default; heavy flags remain disabled', () => {
@@ -2279,9 +2279,9 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
 
   test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(src.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
   });
 
   test('Item #990 upgrades only with exact catalog metadata', async () => {
@@ -2400,7 +2400,7 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
   test('validate_tracker_compile.js passes on tracker.lua', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06/);
+    assert.match(out, /BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06/);
   });
 
   test('safe minimal flags default off for heavy work', () => {
@@ -2420,9 +2420,9 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
 
   test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(src.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
   });
 
   test('inventory upload and fish downgrade guards remain', () => {
@@ -2492,7 +2492,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
 
   test('TRACKER_BOOT_BEGIN appears before catalog scan code', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06');
+    const boot = src.indexOf('TRACKER_BOOT_BEGIN BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06');
     const catalog = src.indexOf('scanReplicatedStorageFishCatalog');
     assert.ok(boot >= 0, 'TRACKER_BOOT_BEGIN missing');
     assert.ok(catalog >= 0, 'catalog scan missing');
@@ -2528,7 +2528,7 @@ describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06/);
+    assert.match(out, /BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06/);
   });
 
   test('player-data-only flags default correctly', () => {
@@ -2664,7 +2664,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06/);
+    assert.match(out, /BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06/);
   });
 
   test('light sync defaults: 10s loop, no attachReplionListeners by default', () => {
@@ -2679,9 +2679,9 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
 
   test('boot marker is BLOCKER10N build', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
-    assert.ok(src.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(src.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
   });
 
   test('itemId 117 raw enriches to Bandit Angelfish / fish on debug firstItems', async () => {
@@ -2693,7 +2693,7 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
         userId: 15001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06',
+        trackerBuild: 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06',
         items: [{ name: 'Item #117', count: 3, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -2832,7 +2832,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
 
   test('validate_tracker_compile.js passes with BLOCKER10J marker', () => {
     const out = execFileSync(process.execPath, [compileScript, trackerPath], { encoding: 'utf8' });
-    assert.match(out, /BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06/);
+    assert.match(out, /BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06/);
   });
 
   test('light sync defaults and no attachReplionListeners on default path', () => {
@@ -2967,7 +2967,7 @@ describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
         userId: 16001,
         source: 'replion',
         isOnline: true,
-        trackerBuild: 'BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06',
+        trackerBuild: 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06',
         items: [{ name: 'Item #117', count: 1, category: 'items', itemId: '117' }],
       })
       .expect(200);
@@ -3109,7 +3109,7 @@ describe('BLOCKER10K fish-only public + raw proof', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
     assert.ok(tpl.includes('getPublicFishItems'));
     assert.ok(tpl.includes('fishCountLabel'));
-    assert.ok(tpl.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(tpl.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(tpl.includes('RENDER_BUILD'));
     assert.ok(!tpl.match(/inventory\.all/));
     assert.ok(!tpl.match(/Items:\s*<strong>/));
@@ -3200,7 +3200,7 @@ describe('BLOCKER10K1 public fish-only UI regression', () => {
     const fs = require('fs');
     const path = require('path');
     const html = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(html.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(html.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(html.includes('data-render-build'));
     assert.ok(html.includes('getPublicFishItems'));
     assert.ok(!html.match(/Items:\s*<strong>/));
@@ -3354,7 +3354,7 @@ describe('BLOCKER10L fish image asset catalog', () => {
     const fs = require('fs');
     const path = require('path');
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(tpl.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(tpl.includes('imageAssetId'));
     assert.ok(tpl.includes('loading="lazy"'));
     assert.ok(tpl.includes('isUsableImageUrl'));
@@ -3556,7 +3556,7 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
 
   test('tracker.lua includes BLOCKER10M catch delta markers', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(src.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(src.includes('normalizeCatchFishName'));
     assert.ok(src.includes('pendingCatchName'));
     assert.ok(src.includes('previousItemCounts'));
@@ -3628,7 +3628,7 @@ describe('BLOCKER10N2 image proxy label fix', () => {
 
   test('HTML contains N2 marker, Fish label, and image src for all 5 fish', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(tpl.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(tpl.includes('fishCountLabel'));
     assert.ok(tpl.includes('data-fish-count'));
     assert.ok(tpl.includes('onFishImageError'));
@@ -3740,7 +3740,7 @@ describe('BLOCKER10N2 image proxy label fix', () => {
 
   test('tracker.lua has single BLOCKER10O boot marker', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
     assert.equal((src.match(/TRACKER_BOOT_BEGIN/g) || []).length, 1);
   });
@@ -3991,10 +3991,10 @@ describe('BLOCKER10O full catalog safe learning', () => {
 
     const get = await request(app).get('/api/fishit-tracker/get-backpack/B10OLabel').expect(200);
     assert.equal(get.body.fishCounts.label, 'Fish');
-    assert.equal(get.body.publicApiBuild, 'BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06');
+    assert.equal(get.body.publicApiBuild, 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06');
 
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(tpl.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(!tpl.match(/Items:\s*<strong>/));
   });
 });
@@ -4187,12 +4187,12 @@ describe('BLOCKER10P false rarity learn fix (regression)', () => {
 
   test('8: build markers BLOCKER10Q in tracker.lua and template', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
-    assert.ok(src.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
+    assert.ok(src.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(src.includes('isRarityTok'));
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
-    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06');
+    assert.ok(tpl.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06');
   });
 });
 
@@ -4483,12 +4483,12 @@ describe('BLOCKER10Q global collective catalog rarity', () => {
 
   test('14: build markers BLOCKER10R', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(src.includes('payload.gameId'));
     assert.ok(src.includes('payload.placeId'));
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
-    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06');
+    assert.ok(tpl.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06');
   });
 });
 
@@ -4542,7 +4542,7 @@ describe('BLOCKER10R real live new itemId proof', () => {
   test('1: evidence source mode distinguishes live_roblox from api_simulation', () => {
     assert.equal(liveCatchProof.resolveEvidenceSourceMode({
       clientOrigin: 'roblox_tracker',
-      trackerBuild: 'BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06',
+      trackerBuild: 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06',
     }), 'live_roblox');
     assert.equal(liveCatchProof.resolveEvidenceSourceMode({
       pendingCatchName: { fishName: 'Flame Angelfish', source: 'catch_notification' },
@@ -4675,7 +4675,7 @@ describe('BLOCKER10R real live new itemId proof', () => {
         userId: 25002,
         isOnline: true,
         clientOrigin: 'roblox_tracker',
-        trackerBuild: 'BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06',
+        trackerBuild: 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06',
         evidenceSourceMode: 'live_roblox',
         items: knownFish.map((f) => ({ name: f.name, amount: 3, category: 'fish', itemId: f.itemId })),
         pendingCatchName: {
@@ -4710,7 +4710,7 @@ describe('BLOCKER10R real live new itemId proof', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
     assert.ok(src.includes('LIVE_CATCH_TEXT'));
     assert.ok(src.includes('evidenceSourceMode'));
-    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06');
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06');
   });
 });
 
@@ -4834,8 +4834,8 @@ describe('BLOCKER10S fish path discovery and no empty wipe (carried into BLOCKER
     assert.ok(src.includes('discoverFishInventoryPaths'));
     assert.ok(src.includes('FISH_PATH_SELECTED'));
     assert.ok(src.includes('scanPlayerGuiForCatchText'));
-    assert.ok(src.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
-    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06');
+    assert.ok(src.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06');
   });
 });
 
@@ -4911,7 +4911,7 @@ describe('BLOCKER10T live catch normalize and public promote', () => {
         userId: 27001,
         isOnline: true,
         clientOrigin: 'roblox_tracker',
-        trackerBuild: 'BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06',
+        trackerBuild: 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06',
         pendingCatchName: {
           fishName: 'Jellyfish',
           displayName: 'Shiny Jellyfish',
@@ -4975,7 +4975,7 @@ describe('BLOCKER10T live catch normalize and public promote', () => {
 
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
     assert.ok(src.includes('parseCatchNameFull'));
-    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06');
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06');
   });
 });
 
@@ -5107,11 +5107,11 @@ describe('BLOCKER10U global catalog polish images rarity', () => {
 
   test('enrichItemsFromCatalog strips weight from learned names', () => {
     const enriched = enrichItemsFromCatalog([
-      { name: 'Deep Sea Crab (1.31K kg)', itemId: '152', amount: 2, category: 'fish' },
-      { name: 'Armor Catfish (2.65K kg)', itemId: '215', amount: 1, category: 'fish' },
+      { name: 'Deep Sea Crab (1.31K kg)', itemId: '9152', amount: 2, category: 'fish' },
+      { name: 'Armor Catfish (2.65K kg)', itemId: '9215', amount: 1, category: 'fish' },
     ]);
-    const crab = enriched.find((i) => i.itemId === '152');
-    const armor = enriched.find((i) => i.itemId === '215');
+    const crab = enriched.find((i) => i.itemId === '9152');
+    const armor = enriched.find((i) => i.itemId === '9215');
     assert.equal(crab.name, 'Deep Sea Crab');
     assert.equal(crab.weightKg, 1310);
     assert.equal(armor.name, 'Armor Catfish');
@@ -5127,9 +5127,121 @@ describe('BLOCKER10U global catalog polish images rarity', () => {
   });
 
   test('build marker and tracker compile marker', () => {
-    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06');
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06');
     const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('BLOCKER10U_GLOBAL_CATALOG_POLISH_IMAGES_RARITY_2026_06_06'));
+    assert.ok(src.includes('BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06'));
     assert.ok(src.includes('stripAllMutationPrefixes'));
+  });
+});
+
+describe('BLOCKER10U2 catalog data backfill and persistence', () => {
+  const canonicalCatalog = require('../src/fishitCanonicalCatalog');
+  const sessionStore = require('../src/fishitSessionStore');
+  const fishImageCache = require('../src/fishitFishImageCache');
+  const fishCatalog = require('../src/fishitFishCatalog');
+  const os = require('os');
+  const {
+    buildPublicFishFields,
+    persistSessionState,
+    PUBLIC_API_BUILD,
+  } = require('../src/fishitTrackerRoutes');
+
+  let tmpDir;
+  let prevCanon;
+  let prevSession;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fishit-u2-'));
+    prevCanon = process.env.FISHIT_CANONICAL_CATALOG_PATH;
+    prevSession = process.env.FISHIT_LIVE_SESSIONS_PATH;
+    process.env.FISHIT_CANONICAL_CATALOG_PATH = path.join(tmpDir, 'canonical.json');
+    process.env.FISHIT_LIVE_SESSIONS_PATH = path.join(tmpDir, 'sessions.json');
+    canonicalCatalog._reset();
+    fishCatalog._reset();
+    fishImageCache._reset();
+    sessionStore._reset();
+  });
+
+  afterEach(() => {
+    process.env.FISHIT_CANONICAL_CATALOG_PATH = prevCanon;
+    process.env.FISHIT_LIVE_SESSIONS_PATH = prevSession;
+    canonicalCatalog._reset();
+    fishCatalog._reset();
+    fishImageCache._reset();
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) { /* */ }
+  });
+
+  test('rebuild searches all configured sources', () => {
+    canonicalCatalog.rebuildFromAllSources({ persist: true });
+    const audit = canonicalCatalog.getAudit();
+    const ids = audit.sourcesSearched.map((s) => s.id);
+    assert.ok(ids.includes('fishit_fish_image_assets'));
+    assert.ok(ids.includes('fishit_catalog'));
+    assert.ok(ids.includes('fishit_global_fish_item_catalog'));
+    assert.ok(audit.totalEntries >= 40);
+  });
+
+  test('import script rows update canonical catalog image and rarity', async () => {
+    const importRows = canonicalCatalog.importRows([
+      {
+        itemId: '157',
+        baseFishName: 'Jellyfish',
+        rarity: 'rare',
+        imageAssetId: '128385926161840',
+      },
+    ], { persist: true });
+    assert.equal(importRows.accepted, 1);
+    fishCatalog._reset();
+    const hit = canonicalCatalog.lookupByItemId('157');
+    assert.equal(hit.baseFishName, 'Jellyfish');
+    assert.equal(hit.rarity, 'Rare');
+    assert.equal(hit.imageAssetId, '128385926161840');
+    const pub = await buildPublicFishFields([
+      { name: 'Jellyfish', amount: 10, category: 'fish', itemId: '157' },
+    ]);
+    assert.equal(pub.publicItems[0].rarity, 'Rare');
+    assert.equal(pub.publicItems[0].imageStatus, 'cached');
+  });
+
+  test('session persistence restores lastGoodPublicFishItems after restart simulation', async () => {
+    const live = {};
+    const session = {
+      username: 'PersistUser',
+      userId: 999,
+      items: [{ name: 'Deep Sea Crab', itemId: '152', amount: 5, category: 'fish' }],
+      rawItems: [{ name: 'Deep Sea Crab', itemId: '152', amount: 5, category: 'fish' }],
+      lastGoodPublicFishItems: [{
+        name: 'Deep Sea Crab',
+        itemId: '152',
+        amount: 5,
+        category: 'fish',
+        baseFishName: 'Deep Sea Crab',
+      }],
+      lastGoodPublicFishCount: 1,
+      lastSeenAt: new Date().toISOString(),
+      lastInventoryAt: new Date().toISOString(),
+      isOnline: true,
+      phase: 'live',
+    };
+    sessionStore.saveSession('persistuser', session, live);
+    const reloaded = {};
+    const meta = sessionStore.loadIntoLiveTrackDB(reloaded);
+    assert.equal(meta.loaded, 1);
+    assert.ok(reloaded.persistuser.lastGoodPublicFishItems.length >= 1);
+    assert.equal(reloaded.persistuser.lastGoodPublicFishItems[0].name, 'Deep Sea Crab');
+  });
+
+  test('public cards stay clean with Unknown rarity badge when no source', async () => {
+    const pub = await buildPublicFishFields([
+      { name: 'Deep Sea Crab', itemId: '152', amount: 2, category: 'fish' },
+      { name: 'Item #72', itemId: '72', amount: 1, category: 'items' },
+    ]);
+    assert.equal(pub.publicItems.length, 1);
+    assert.equal(pub.publicItems[0].name, 'Deep Sea Crab');
+    assert.equal(pub.publicItems[0].rarity, 'Unknown');
+  });
+
+  test('build marker is BLOCKER10U2', () => {
+    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10U2_CATALOG_DATA_BACKFILL_AND_PERSISTENCE_2026_06_06');
   });
 });

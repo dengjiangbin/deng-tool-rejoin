@@ -8,6 +8,7 @@ const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const catalogStore = require('./fishitCatalogStore');
 const catchNameParser = require('./fishitCatchNameParser');
 const rarityLabels = require('./fishitRarityLabels');
+const canonicalCatalog = require('./fishitCanonicalCatalog');
 
 const _proof = [];
 const _sourcesUsed = new Set();
@@ -32,6 +33,20 @@ function lookupRarityForItem(item) {
   if (baseName && rarityLabels.isRarityLabel(baseName)
       && !catchNameParser.MUTATION_LABELS.has(String(baseName).toLowerCase())) {
     return null;
+  }
+
+  const canon = canonicalCatalog.resolveForItem({
+    itemId,
+    baseFishName: baseName,
+    name: item.name,
+    displayName: item.displayName,
+  });
+  if (canon?.rarity) {
+    return {
+      rarity: fishCatalog.normalizeRarity(canon.rarity),
+      raritySource: canon.raritySource || 'canonical_catalog',
+      rarityConfidence: canon.rarityConfidence || 'confirmed',
+    };
   }
 
   if (itemId) {
@@ -86,14 +101,24 @@ function attachRarityFields(item) {
 
   const hit = lookupRarityForItem(item);
   if (!hit || !hit.rarity) {
+    const miss = canonicalCatalog.resolveForItem(item) || {};
     recordProof({
       itemId: item.itemId || null,
       baseFishName: item.baseFishName || item.name,
-      rarity: null,
+      rarity: 'Unknown',
       raritySource: null,
       confidence: null,
+      triedAliases: miss.triedAliases || [item.baseFishName, item.name].filter(Boolean),
+      searchedSources: miss.searchedSources || [],
     });
-    return item;
+    return {
+      ...item,
+      rarity: 'Unknown',
+      tier: 'Unknown',
+      raritySource: null,
+      rarityConfidence: null,
+      rarityNeedsData: true,
+    };
   }
 
   recordProof({

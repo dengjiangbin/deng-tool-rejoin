@@ -1,0 +1,3413 @@
+{
+  "updatedAt": "2026-06-06T04:55:14.440Z",
+  "sourcesSearched": [
+    {
+      "id": "fishit_fish_image_assets",
+      "path": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_fish_image_assets.json",
+      "exists": true,
+      "type": "name_asset",
+      "rows": 5,
+      "error": null
+    },
+    {
+      "id": "fishit_image_assets",
+      "path": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_image_assets.json",
+      "exists": true,
+      "type": "name_url_map",
+      "rows": 4,
+      "error": null
+    },
+    {
+      "id": "fishit_fish_confirmed_catalog",
+      "path": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_fish_confirmed_catalog.json",
+      "exists": true,
+      "type": "item_list",
+      "rows": 5,
+      "error": null
+    },
+    {
+      "id": "fishit_catalog",
+      "path": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_catalog.json",
+      "exists": true,
+      "type": "catalog_store",
+      "rows": 38,
+      "error": null
+    },
+    {
+      "id": "fishit_learned_fish_catalog",
+      "path": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_learned_fish_catalog.json",
+      "exists": true,
+      "type": "learned",
+      "rows": 25,
+      "error": null
+    },
+    {
+      "id": "fishit_global_fish_item_catalog",
+      "path": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_global_fish_item_catalog.json",
+      "exists": true,
+      "type": "global",
+      "rows": 43,
+      "error": null
+    },
+    {
+      "id": "fish_image_cache_index",
+      "path": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fish_image_cache\\index.json",
+      "exists": true,
+      "type": "image_cache",
+      "rows": 2,
+      "error": null
+    },
+    {
+      "id": "fishit_db_image_index",
+      "count": 52,
+      "type": "db"
+    },
+    {
+      "id": "fishit_db_rarity_hints",
+      "count": 52,
+      "type": "db"
+    }
+  ],
+  "byItemId": {
+    "57": {
+      "itemId": "57",
+      "baseFishName": "Jewel Tang",
+      "displayName": "Jewel Tang",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Jewel Tang",
+        "jewel tang",
+        "Cow Clownfish",
+        "cow clownfish"
+      ],
+      "mutation": null
+    },
+    "58": {
+      "itemId": "58",
+      "baseFishName": "Cute Octopus",
+      "displayName": "Sandy Big Cute Octopus",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Cute Octopus",
+        "cute octopus",
+        "Vintage Damsel",
+        "vintage damsel"
+      ],
+      "mutation": "Sandy Big"
+    },
+    "59": {
+      "itemId": "59",
+      "baseFishName": "Vintage Damsel",
+      "displayName": "Candy Butterfly",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Vintage Damsel",
+        "vintage damsel",
+        "Candy Butterfly",
+        "candy butterfly"
+      ],
+      "mutation": "Albino"
+    },
+    "60": {
+      "itemId": "60",
+      "baseFishName": "Vintage Damsel",
+      "displayName": "Shiny Traffic Cone Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Vintage Damsel",
+        "vintage damsel",
+        "Jewel Tang",
+        "jewel tang",
+        "Traffic Cone Fish",
+        "traffic cone fish"
+      ],
+      "mutation": "Shiny"
+    },
+    "68": {
+      "itemId": "68",
+      "baseFishName": "Flame Angelfish",
+      "displayName": "Flame Angelfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": "128385926161840",
+      "imageUrl": null,
+      "imageSource": "local_asset_cache",
+      "sourceUrl": null,
+      "sources": [
+        "fishit_fish_confirmed_catalog",
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog",
+        "fish_image_cache_index"
+      ],
+      "triedAliases": [
+        "Flame Angelfish",
+        "flame angelfish"
+      ],
+      "mutation": null
+    },
+    "70": {
+      "itemId": "70",
+      "baseFishName": "Yello Damelfish",
+      "displayName": "Yello Damselfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": "125066072333378",
+      "imageUrl": null,
+      "imageSource": "fishit_fish_confirmed_catalog",
+      "sourceUrl": null,
+      "sources": [
+        "fishit_fish_confirmed_catalog",
+        "fishit_catalog"
+      ],
+      "triedAliases": [
+        "Yello Damelfish",
+        "yello damelfish",
+        "Yello Damselfish",
+        "yello damselfish"
+      ],
+      "mutation": null
+    },
+    "71": {
+      "itemId": "71",
+      "baseFishName": "Darwin Clownfish",
+      "displayName": "Darwin Clownfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": "109996187340520",
+      "imageUrl": null,
+      "imageSource": "fishit_fish_confirmed_catalog",
+      "sourceUrl": null,
+      "sources": [
+        "fishit_fish_confirmed_catalog",
+        "fishit_catalog"
+      ],
+      "triedAliases": [
+        "Darwin Clownfish",
+        "darwin clownfish"
+      ],
+      "mutation": null
+    },
+    "82": {
+      "itemId": "82",
+      "baseFishName": "Traffic Cone Fish",
+      "displayName": "Traffic Cone Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Traffic Cone Fish",
+        "traffic cone fish"
+      ],
+      "mutation": null
+    },
+    "83": {
+      "itemId": "83",
+      "baseFishName": "Candy Butterfly",
+      "displayName": "Albino Blue Moonfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Candy Butterfly",
+        "candy butterfly",
+        "Blue Moonfish",
+        "blue moonfish"
+      ],
+      "mutation": "Albino"
+    },
+    "117": {
+      "itemId": "117",
+      "baseFishName": "Bandit Angelfish",
+      "displayName": "Bandit Angelfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": "86776001616210",
+      "imageUrl": null,
+      "imageSource": "fishit_fish_confirmed_catalog",
+      "sourceUrl": null,
+      "sources": [
+        "fishit_fish_confirmed_catalog",
+        "fishit_catalog"
+      ],
+      "triedAliases": [
+        "Bandit Angelfish",
+        "bandit angelfish"
+      ],
+      "mutation": null
+    },
+    "119": {
+      "itemId": "119",
+      "baseFishName": "Ballina Angelfish",
+      "displayName": "Ballina Angelfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": "99236757363784",
+      "imageUrl": null,
+      "imageSource": "fishit_fish_confirmed_catalog",
+      "sourceUrl": null,
+      "sources": [
+        "fishit_fish_confirmed_catalog",
+        "fishit_catalog"
+      ],
+      "triedAliases": [
+        "Ballina Angelfish",
+        "ballina angelfish"
+      ],
+      "mutation": null
+    },
+    "149": {
+      "itemId": "149",
+      "baseFishName": "Angler Fish",
+      "displayName": "Angler Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Angler Fish",
+        "angler fish"
+      ],
+      "mutation": "Shiny"
+    },
+    "150": {
+      "itemId": "150",
+      "baseFishName": "Blob Fish",
+      "displayName": "Blob Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Blob Fish",
+        "blob fish"
+      ],
+      "mutation": null
+    },
+    "152": {
+      "itemId": "152",
+      "baseFishName": "Deep Sea Crab",
+      "displayName": "Deep Sea Crab (1.04K kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Deep Sea Crab",
+        "deep sea crab"
+      ],
+      "mutation": null
+    },
+    "155": {
+      "itemId": "155",
+      "baseFishName": "Fangtooth",
+      "displayName": "Fangtooth",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Fangtooth",
+        "fangtooth"
+      ],
+      "mutation": "Ghost"
+    },
+    "157": {
+      "itemId": "157",
+      "baseFishName": "Jellyfish",
+      "displayName": "Jellyfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Jellyfish",
+        "jellyfish"
+      ],
+      "mutation": "Holographic"
+    },
+    "160": {
+      "itemId": "160",
+      "baseFishName": "Monk Fish",
+      "displayName": "Monk Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Monk Fish",
+        "monk fish"
+      ],
+      "mutation": "Shiny"
+    },
+    "162": {
+      "itemId": "162",
+      "baseFishName": "Vampire Squid",
+      "displayName": "Vampire Squid",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Vampire Squid",
+        "vampire squid"
+      ],
+      "mutation": "Shiny"
+    },
+    "196": {
+      "itemId": "196",
+      "baseFishName": "Forgotten",
+      "displayName": "Forgotten",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [],
+      "mutation": null
+    },
+    "215": {
+      "itemId": "215",
+      "baseFishName": "Armor Catfish",
+      "displayName": "Armor Catfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Armor Catfish",
+        "armor catfish"
+      ],
+      "mutation": "Shiny"
+    },
+    "224": {
+      "itemId": "224",
+      "baseFishName": "Synodontis",
+      "displayName": "Synodontis",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Synodontis",
+        "synodontis"
+      ],
+      "mutation": "Shiny"
+    },
+    "227": {
+      "itemId": "227",
+      "baseFishName": "Blue Moonfish",
+      "displayName": "Big Shiny Blue Moonfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Blue Moonfish",
+        "blue moonfish"
+      ],
+      "mutation": "Big"
+    },
+    "233": {
+      "itemId": "233",
+      "baseFishName": "Expensive Chain",
+      "displayName": "Expensive Chain",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Expensive Chain",
+        "expensive chain"
+      ],
+      "mutation": "Galaxy"
+    },
+    "235": {
+      "itemId": "235",
+      "baseFishName": "Pearl",
+      "displayName": "Sandy Pearl",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Pearl",
+        "pearl"
+      ],
+      "mutation": "Sandy"
+    },
+    "238": {
+      "itemId": "238",
+      "baseFishName": "Antique Watch",
+      "displayName": "Antique Watch",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Antique Watch",
+        "antique watch"
+      ],
+      "mutation": "Big"
+    },
+    "243": {
+      "itemId": "243",
+      "baseFishName": "Ruby",
+      "displayName": "Ruby",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Ruby",
+        "ruby"
+      ],
+      "mutation": "Big"
+    },
+    "339": {
+      "itemId": "339",
+      "baseFishName": "Vintage Damsel",
+      "displayName": "Vintage Damsel",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Vintage Damsel",
+        "vintage damsel"
+      ],
+      "mutation": null
+    },
+    "361": {
+      "itemId": "361",
+      "baseFishName": "Liar Nose Fish",
+      "displayName": "Liar Nose Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Liar Nose Fish",
+        "liar nose fish"
+      ],
+      "mutation": "Big"
+    },
+    "377": {
+      "itemId": "377",
+      "baseFishName": "Traffic Cone Fish",
+      "displayName": "Traffic Cone Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Traffic Cone Fish",
+        "traffic cone fish"
+      ],
+      "mutation": "Big"
+    },
+    "382": {
+      "itemId": "382",
+      "baseFishName": "Expensive Chain",
+      "displayName": "Expensive Chain",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Expensive Chain",
+        "expensive chain"
+      ],
+      "mutation": "Galaxy"
+    },
+    "780": {
+      "itemId": "780",
+      "baseFishName": "Azure Reef Crab",
+      "displayName": "Azure Reef Crab (2.08kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Azure Reef Crab",
+        "azure reef crab"
+      ],
+      "mutation": "Ghost"
+    },
+    "781": {
+      "itemId": "781",
+      "baseFishName": "Sea Urchin",
+      "displayName": "Sea Urchin (5.5kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Sea Urchin",
+        "sea urchin"
+      ],
+      "mutation": "Shiny"
+    },
+    "782": {
+      "itemId": "782",
+      "baseFishName": "Crown",
+      "displayName": "Crown",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Crown",
+        "crown",
+        "Whitefin",
+        "whitefin"
+      ],
+      "mutation": "Big"
+    },
+    "783": {
+      "itemId": "783",
+      "baseFishName": "Cloudswimmer",
+      "displayName": "Cloudswimmer",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Cloudswimmer",
+        "cloudswimmer"
+      ],
+      "mutation": null
+    },
+    "784": {
+      "itemId": "784",
+      "baseFishName": "Goldmask Tetra",
+      "displayName": "Crown (5.5kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Goldmask Tetra",
+        "goldmask tetra",
+        "Crown",
+        "crown"
+      ],
+      "mutation": "Big"
+    },
+    "785": {
+      "itemId": "785",
+      "baseFishName": "Longfish",
+      "displayName": "Sea Urchin",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Longfish",
+        "longfish",
+        "Starback Catfish",
+        "starback catfish",
+        "Sea Urchin",
+        "sea urchin"
+      ],
+      "mutation": "Shiny"
+    },
+    "786": {
+      "itemId": "786",
+      "baseFishName": "Whitefin",
+      "displayName": "Ghost Ghost Whitefin",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Whitefin",
+        "whitefin",
+        "Deepblue Lion Fish",
+        "deepblue lion fish"
+      ],
+      "mutation": "Ghost"
+    },
+    "787": {
+      "itemId": "787",
+      "baseFishName": "Deep Sea Eel",
+      "displayName": "Deep Sea Eel",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Deep Sea Eel",
+        "deep sea eel"
+      ],
+      "mutation": "Shiny"
+    },
+    "789": {
+      "itemId": "789",
+      "baseFishName": "Sea Urchin",
+      "displayName": "Big Sea Urchin",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Sea Urchin",
+        "sea urchin"
+      ],
+      "mutation": "Big"
+    },
+    "792": {
+      "itemId": "792",
+      "baseFishName": "Goldmask Tetra",
+      "displayName": "Goldmask Tetra",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Goldmask Tetra",
+        "goldmask tetra"
+      ],
+      "mutation": null
+    },
+    "793": {
+      "itemId": "793",
+      "baseFishName": "Starback Catfish",
+      "displayName": "Starback Catfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Starback Catfish",
+        "starback catfish"
+      ],
+      "mutation": null
+    },
+    "799": {
+      "itemId": "799",
+      "baseFishName": "Violet Frog",
+      "displayName": "Big Violet Frog",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Violet Frog",
+        "violet frog"
+      ],
+      "mutation": "Big"
+    },
+    "811": {
+      "itemId": "811",
+      "baseFishName": "Traffic Cone Fish",
+      "displayName": "Traffic Cone Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Traffic Cone Fish",
+        "traffic cone fish",
+        "Blue Moonfish",
+        "blue moonfish"
+      ],
+      "mutation": null
+    },
+    "828": {
+      "itemId": "828",
+      "baseFishName": "Violet Frog",
+      "displayName": "Violet Frog",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Violet Frog",
+        "violet frog"
+      ],
+      "mutation": "Ghost"
+    },
+    "829": {
+      "itemId": "829",
+      "baseFishName": "Gemstone Orange Octopus",
+      "displayName": "Gemstone Orange Octopus",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Gemstone Orange Octopus",
+        "gemstone orange octopus"
+      ],
+      "mutation": null
+    },
+    "830": {
+      "itemId": "830",
+      "baseFishName": "Deep Sea Diving Helmet",
+      "displayName": "Deep Sea Diving Helmet",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Deep Sea Diving Helmet",
+        "deep sea diving helmet"
+      ],
+      "mutation": null
+    },
+    "881": {
+      "itemId": "881",
+      "baseFishName": "Deepsea Dweller",
+      "displayName": "Deepsea Dweller (19.8kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Deepsea Dweller",
+        "deepsea dweller"
+      ],
+      "mutation": null
+    }
+  },
+  "byName": {
+    "jewel tang": {
+      "itemId": "57",
+      "baseFishName": "Jewel Tang",
+      "displayName": "Jewel Tang",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Jewel Tang",
+        "jewel tang",
+        "Cow Clownfish",
+        "cow clownfish"
+      ],
+      "mutation": null
+    },
+    "cute octopus": {
+      "itemId": "58",
+      "baseFishName": "Cute Octopus",
+      "displayName": "Sandy Big Cute Octopus",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Cute Octopus",
+        "cute octopus",
+        "Vintage Damsel",
+        "vintage damsel"
+      ],
+      "mutation": "Sandy Big"
+    },
+    "sandy big cute octopus": {
+      "itemId": "58",
+      "baseFishName": "Cute Octopus",
+      "displayName": "Sandy Big Cute Octopus",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Cute Octopus",
+        "cute octopus",
+        "Vintage Damsel",
+        "vintage damsel"
+      ],
+      "mutation": "Sandy Big"
+    },
+    "vintage damsel": {
+      "itemId": "59",
+      "baseFishName": "Vintage Damsel",
+      "displayName": "Candy Butterfly",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Vintage Damsel",
+        "vintage damsel",
+        "Candy Butterfly",
+        "candy butterfly"
+      ],
+      "mutation": "Albino"
+    },
+    "candy butterfly": {
+      "itemId": "59",
+      "baseFishName": "Vintage Damsel",
+      "displayName": "Candy Butterfly",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Vintage Damsel",
+        "vintage damsel",
+        "Candy Butterfly",
+        "candy butterfly"
+      ],
+      "mutation": "Albino"
+    },
+    "shiny traffic cone fish": {
+      "itemId": "60",
+      "baseFishName": "Vintage Damsel",
+      "displayName": "Shiny Traffic Cone Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Vintage Damsel",
+        "vintage damsel",
+        "Jewel Tang",
+        "jewel tang",
+        "Traffic Cone Fish",
+        "traffic cone fish"
+      ],
+      "mutation": "Shiny"
+    },
+    "flame angelfish": {
+      "itemId": "68",
+      "baseFishName": "Flame Angelfish",
+      "displayName": "Flame Angelfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": "128385926161840",
+      "imageUrl": null,
+      "imageSource": "local_asset_cache",
+      "sourceUrl": null,
+      "sources": [
+        "fishit_fish_confirmed_catalog",
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog",
+        "fish_image_cache_index"
+      ],
+      "triedAliases": [
+        "Flame Angelfish",
+        "flame angelfish"
+      ],
+      "mutation": null
+    },
+    "yello damelfish": {
+      "itemId": "70",
+      "baseFishName": "Yello Damelfish",
+      "displayName": "Yello Damselfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": "125066072333378",
+      "imageUrl": null,
+      "imageSource": "fishit_fish_confirmed_catalog",
+      "sourceUrl": null,
+      "sources": [
+        "fishit_fish_confirmed_catalog",
+        "fishit_catalog"
+      ],
+      "triedAliases": [
+        "Yello Damelfish",
+        "yello damelfish",
+        "Yello Damselfish",
+        "yello damselfish"
+      ],
+      "mutation": null
+    },
+    "yello damselfish": {
+      "itemId": "70",
+      "baseFishName": "Yello Damelfish",
+      "displayName": "Yello Damselfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": "125066072333378",
+      "imageUrl": null,
+      "imageSource": "fishit_fish_confirmed_catalog",
+      "sourceUrl": null,
+      "sources": [
+        "fishit_fish_confirmed_catalog",
+        "fishit_catalog"
+      ],
+      "triedAliases": [
+        "Yello Damelfish",
+        "yello damelfish",
+        "Yello Damselfish",
+        "yello damselfish"
+      ],
+      "mutation": null
+    },
+    "darwin clownfish": {
+      "itemId": "71",
+      "baseFishName": "Darwin Clownfish",
+      "displayName": "Darwin Clownfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": "109996187340520",
+      "imageUrl": null,
+      "imageSource": "fishit_fish_confirmed_catalog",
+      "sourceUrl": null,
+      "sources": [
+        "fishit_fish_confirmed_catalog",
+        "fishit_catalog"
+      ],
+      "triedAliases": [
+        "Darwin Clownfish",
+        "darwin clownfish"
+      ],
+      "mutation": null
+    },
+    "traffic cone fish": {
+      "itemId": "82",
+      "baseFishName": "Traffic Cone Fish",
+      "displayName": "Traffic Cone Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Traffic Cone Fish",
+        "traffic cone fish"
+      ],
+      "mutation": null
+    },
+    "albino blue moonfish": {
+      "itemId": "83",
+      "baseFishName": "Candy Butterfly",
+      "displayName": "Albino Blue Moonfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Candy Butterfly",
+        "candy butterfly",
+        "Blue Moonfish",
+        "blue moonfish"
+      ],
+      "mutation": "Albino"
+    },
+    "bandit angelfish": {
+      "itemId": "117",
+      "baseFishName": "Bandit Angelfish",
+      "displayName": "Bandit Angelfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": "86776001616210",
+      "imageUrl": null,
+      "imageSource": "fishit_fish_confirmed_catalog",
+      "sourceUrl": null,
+      "sources": [
+        "fishit_fish_confirmed_catalog",
+        "fishit_catalog"
+      ],
+      "triedAliases": [
+        "Bandit Angelfish",
+        "bandit angelfish"
+      ],
+      "mutation": null
+    },
+    "ballina angelfish": {
+      "itemId": "119",
+      "baseFishName": "Ballina Angelfish",
+      "displayName": "Ballina Angelfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": "99236757363784",
+      "imageUrl": null,
+      "imageSource": "fishit_fish_confirmed_catalog",
+      "sourceUrl": null,
+      "sources": [
+        "fishit_fish_confirmed_catalog",
+        "fishit_catalog"
+      ],
+      "triedAliases": [
+        "Ballina Angelfish",
+        "ballina angelfish"
+      ],
+      "mutation": null
+    },
+    "angler fish": {
+      "itemId": "149",
+      "baseFishName": "Angler Fish",
+      "displayName": "Angler Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Angler Fish",
+        "angler fish"
+      ],
+      "mutation": "Shiny"
+    },
+    "blob fish": {
+      "itemId": "150",
+      "baseFishName": "Blob Fish",
+      "displayName": "Blob Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Blob Fish",
+        "blob fish"
+      ],
+      "mutation": null
+    },
+    "deep sea crab": {
+      "itemId": "152",
+      "baseFishName": "Deep Sea Crab",
+      "displayName": "Deep Sea Crab (1.04K kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Deep Sea Crab",
+        "deep sea crab"
+      ],
+      "mutation": null
+    },
+    "deep sea crab (1.04k kg)": {
+      "itemId": "152",
+      "baseFishName": "Deep Sea Crab",
+      "displayName": "Deep Sea Crab (1.04K kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Deep Sea Crab",
+        "deep sea crab"
+      ],
+      "mutation": null
+    },
+    "fangtooth": {
+      "itemId": "155",
+      "baseFishName": "Fangtooth",
+      "displayName": "Fangtooth",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Fangtooth",
+        "fangtooth"
+      ],
+      "mutation": "Ghost"
+    },
+    "jellyfish": {
+      "itemId": "157",
+      "baseFishName": "Jellyfish",
+      "displayName": "Jellyfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Jellyfish",
+        "jellyfish"
+      ],
+      "mutation": "Holographic"
+    },
+    "monk fish": {
+      "itemId": "160",
+      "baseFishName": "Monk Fish",
+      "displayName": "Monk Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Monk Fish",
+        "monk fish"
+      ],
+      "mutation": "Shiny"
+    },
+    "vampire squid": {
+      "itemId": "162",
+      "baseFishName": "Vampire Squid",
+      "displayName": "Vampire Squid",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Vampire Squid",
+        "vampire squid"
+      ],
+      "mutation": "Shiny"
+    },
+    "forgotten": {
+      "itemId": "196",
+      "baseFishName": "Forgotten",
+      "displayName": "Forgotten",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [],
+      "mutation": null
+    },
+    "armor catfish": {
+      "itemId": "215",
+      "baseFishName": "Armor Catfish",
+      "displayName": "Armor Catfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Armor Catfish",
+        "armor catfish"
+      ],
+      "mutation": "Shiny"
+    },
+    "synodontis": {
+      "itemId": "224",
+      "baseFishName": "Synodontis",
+      "displayName": "Synodontis",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Synodontis",
+        "synodontis"
+      ],
+      "mutation": "Shiny"
+    },
+    "blue moonfish": {
+      "itemId": "227",
+      "baseFishName": "Blue Moonfish",
+      "displayName": "Big Shiny Blue Moonfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Blue Moonfish",
+        "blue moonfish"
+      ],
+      "mutation": "Big"
+    },
+    "big shiny blue moonfish": {
+      "itemId": "227",
+      "baseFishName": "Blue Moonfish",
+      "displayName": "Big Shiny Blue Moonfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Blue Moonfish",
+        "blue moonfish"
+      ],
+      "mutation": "Big"
+    },
+    "expensive chain": {
+      "itemId": "233",
+      "baseFishName": "Expensive Chain",
+      "displayName": "Expensive Chain",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Expensive Chain",
+        "expensive chain"
+      ],
+      "mutation": "Galaxy"
+    },
+    "pearl": {
+      "itemId": "235",
+      "baseFishName": "Pearl",
+      "displayName": "Sandy Pearl",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Pearl",
+        "pearl"
+      ],
+      "mutation": "Sandy"
+    },
+    "sandy pearl": {
+      "itemId": "235",
+      "baseFishName": "Pearl",
+      "displayName": "Sandy Pearl",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Pearl",
+        "pearl"
+      ],
+      "mutation": "Sandy"
+    },
+    "antique watch": {
+      "itemId": "238",
+      "baseFishName": "Antique Watch",
+      "displayName": "Antique Watch",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Antique Watch",
+        "antique watch"
+      ],
+      "mutation": "Big"
+    },
+    "ruby": {
+      "itemId": "243",
+      "baseFishName": "Ruby",
+      "displayName": "Ruby",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Ruby",
+        "ruby"
+      ],
+      "mutation": "Big"
+    },
+    "liar nose fish": {
+      "itemId": "361",
+      "baseFishName": "Liar Nose Fish",
+      "displayName": "Liar Nose Fish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Liar Nose Fish",
+        "liar nose fish"
+      ],
+      "mutation": "Big"
+    },
+    "azure reef crab": {
+      "itemId": "780",
+      "baseFishName": "Azure Reef Crab",
+      "displayName": "Azure Reef Crab (2.08kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Azure Reef Crab",
+        "azure reef crab"
+      ],
+      "mutation": "Ghost"
+    },
+    "azure reef crab (2.08kg)": {
+      "itemId": "780",
+      "baseFishName": "Azure Reef Crab",
+      "displayName": "Azure Reef Crab (2.08kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Azure Reef Crab",
+        "azure reef crab"
+      ],
+      "mutation": "Ghost"
+    },
+    "sea urchin": {
+      "itemId": "781",
+      "baseFishName": "Sea Urchin",
+      "displayName": "Sea Urchin (5.5kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Sea Urchin",
+        "sea urchin"
+      ],
+      "mutation": "Shiny"
+    },
+    "sea urchin (5.5kg)": {
+      "itemId": "781",
+      "baseFishName": "Sea Urchin",
+      "displayName": "Sea Urchin (5.5kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Sea Urchin",
+        "sea urchin"
+      ],
+      "mutation": "Shiny"
+    },
+    "crown": {
+      "itemId": "782",
+      "baseFishName": "Crown",
+      "displayName": "Crown",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Crown",
+        "crown",
+        "Whitefin",
+        "whitefin"
+      ],
+      "mutation": "Big"
+    },
+    "cloudswimmer": {
+      "itemId": "783",
+      "baseFishName": "Cloudswimmer",
+      "displayName": "Cloudswimmer",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Cloudswimmer",
+        "cloudswimmer"
+      ],
+      "mutation": null
+    },
+    "goldmask tetra": {
+      "itemId": "784",
+      "baseFishName": "Goldmask Tetra",
+      "displayName": "Crown (5.5kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Goldmask Tetra",
+        "goldmask tetra",
+        "Crown",
+        "crown"
+      ],
+      "mutation": "Big"
+    },
+    "crown (5.5kg)": {
+      "itemId": "784",
+      "baseFishName": "Goldmask Tetra",
+      "displayName": "Crown (5.5kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Goldmask Tetra",
+        "goldmask tetra",
+        "Crown",
+        "crown"
+      ],
+      "mutation": "Big"
+    },
+    "longfish": {
+      "itemId": "785",
+      "baseFishName": "Longfish",
+      "displayName": "Sea Urchin",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Longfish",
+        "longfish",
+        "Starback Catfish",
+        "starback catfish",
+        "Sea Urchin",
+        "sea urchin"
+      ],
+      "mutation": "Shiny"
+    },
+    "whitefin": {
+      "itemId": "786",
+      "baseFishName": "Whitefin",
+      "displayName": "Ghost Ghost Whitefin",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Whitefin",
+        "whitefin",
+        "Deepblue Lion Fish",
+        "deepblue lion fish"
+      ],
+      "mutation": "Ghost"
+    },
+    "ghost ghost whitefin": {
+      "itemId": "786",
+      "baseFishName": "Whitefin",
+      "displayName": "Ghost Ghost Whitefin",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Whitefin",
+        "whitefin",
+        "Deepblue Lion Fish",
+        "deepblue lion fish"
+      ],
+      "mutation": "Ghost"
+    },
+    "deep sea eel": {
+      "itemId": "787",
+      "baseFishName": "Deep Sea Eel",
+      "displayName": "Deep Sea Eel",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Deep Sea Eel",
+        "deep sea eel"
+      ],
+      "mutation": "Shiny"
+    },
+    "big sea urchin": {
+      "itemId": "789",
+      "baseFishName": "Sea Urchin",
+      "displayName": "Big Sea Urchin",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Sea Urchin",
+        "sea urchin"
+      ],
+      "mutation": "Big"
+    },
+    "starback catfish": {
+      "itemId": "793",
+      "baseFishName": "Starback Catfish",
+      "displayName": "Starback Catfish",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Starback Catfish",
+        "starback catfish"
+      ],
+      "mutation": null
+    },
+    "violet frog": {
+      "itemId": "799",
+      "baseFishName": "Violet Frog",
+      "displayName": "Big Violet Frog",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Violet Frog",
+        "violet frog"
+      ],
+      "mutation": "Big"
+    },
+    "big violet frog": {
+      "itemId": "799",
+      "baseFishName": "Violet Frog",
+      "displayName": "Big Violet Frog",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Violet Frog",
+        "violet frog"
+      ],
+      "mutation": "Big"
+    },
+    "gemstone orange octopus": {
+      "itemId": "829",
+      "baseFishName": "Gemstone Orange Octopus",
+      "displayName": "Gemstone Orange Octopus",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Gemstone Orange Octopus",
+        "gemstone orange octopus"
+      ],
+      "mutation": null
+    },
+    "deep sea diving helmet": {
+      "itemId": "830",
+      "baseFishName": "Deep Sea Diving Helmet",
+      "displayName": "Deep Sea Diving Helmet",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Deep Sea Diving Helmet",
+        "deep sea diving helmet"
+      ],
+      "mutation": null
+    },
+    "deepsea dweller": {
+      "itemId": "881",
+      "baseFishName": "Deepsea Dweller",
+      "displayName": "Deepsea Dweller (19.8kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Deepsea Dweller",
+        "deepsea dweller"
+      ],
+      "mutation": null
+    },
+    "deepsea dweller (19.8kg)": {
+      "itemId": "881",
+      "baseFishName": "Deepsea Dweller",
+      "displayName": "Deepsea Dweller (19.8kg)",
+      "rarity": null,
+      "raritySource": null,
+      "rarityConfidence": null,
+      "imageAssetId": null,
+      "imageUrl": null,
+      "imageSource": null,
+      "sourceUrl": null,
+      "sources": [
+        "fishit_catalog",
+        "fishit_learned_fish_catalog",
+        "fishit_global_fish_item_catalog"
+      ],
+      "triedAliases": [
+        "Deepsea Dweller",
+        "deepsea dweller"
+      ],
+      "mutation": null
+    },
+    "elshark gran maja": {
+      "itemId": null,
+      "baseFishName": "Elshark Gran Maja",
+      "displayName": "Elshark Gran Maja",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-800c7ad9501897afb5ac2b8ee732937c/420/420/Image/Png/noFilter",
+      "imageSource": "fishit_image_assets",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-800c7ad9501897afb5ac2b8ee732937c/420/420/Image/Png/noFilter",
+      "sources": [
+        "fishit_image_assets",
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "Elshark Gran Maja",
+        "elshark gran maja"
+      ],
+      "mutation": null
+    },
+    "king jelly": {
+      "itemId": null,
+      "baseFishName": "King Jelly",
+      "displayName": "King Jelly",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-686ea124937e28c6466829ac8d993edf/420/420/Image/Png/noFilter",
+      "imageSource": "fishit_image_assets",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-686ea124937e28c6466829ac8d993edf/420/420/Image/Png/noFilter",
+      "sources": [
+        "fishit_image_assets",
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "King Jelly",
+        "king jelly"
+      ],
+      "mutation": null
+    },
+    "skeleton narwhal": {
+      "itemId": null,
+      "baseFishName": "Skeleton Narwhal",
+      "displayName": "Skeleton Narwhal",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-ac004bd7c6670241b705afafcb7c35e1/420/420/Image/Png/noFilter",
+      "imageSource": "fishit_image_assets",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-ac004bd7c6670241b705afafcb7c35e1/420/420/Image/Png/noFilter",
+      "sources": [
+        "fishit_image_assets",
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "Skeleton Narwhal",
+        "skeleton narwhal"
+      ],
+      "mutation": null
+    },
+    "bone whale": {
+      "itemId": null,
+      "baseFishName": "bone whale",
+      "displayName": "Bone Whale",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-1191dcbe796481d122ace7c3ff8e0a67/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-1191dcbe796481d122ace7c3ff8e0a67/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "bone whale",
+        "Bone Whale"
+      ],
+      "mutation": null
+    },
+    "deepsea monster axolotl": {
+      "itemId": null,
+      "baseFishName": "deepsea monster axolotl",
+      "displayName": "Deepsea Monster Axolotl",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-62266e2aea0788c7ba213db5f264f1f6/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-62266e2aea0788c7ba213db5f264f1f6/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "deepsea monster axolotl",
+        "Deepsea Monster Axolotl"
+      ],
+      "mutation": null
+    },
+    "pirate megalodon": {
+      "itemId": null,
+      "baseFishName": "pirate megalodon",
+      "displayName": "Pirate Megalodon",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-19adb64e61762329e98d73f41f50edf8/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-19adb64e61762329e98d73f41f50edf8/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "pirate megalodon",
+        "Pirate Megalodon"
+      ],
+      "mutation": null
+    },
+    "worm fish": {
+      "itemId": null,
+      "baseFishName": "worm fish",
+      "displayName": "Worm Fish",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-7299ff7cfe763fc20a4ad726678c8059/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-7299ff7cfe763fc20a4ad726678c8059/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "worm fish",
+        "Worm Fish"
+      ],
+      "mutation": null
+    },
+    "mosasaur shark": {
+      "itemId": null,
+      "baseFishName": "mosasaur shark",
+      "displayName": "Mosasaur Shark",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-29dc60dcc3e75b8e823eeab85f4b27bd/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-29dc60dcc3e75b8e823eeab85f4b27bd/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "mosasaur shark",
+        "Mosasaur Shark"
+      ],
+      "mutation": null
+    },
+    "great whale": {
+      "itemId": null,
+      "baseFishName": "great whale",
+      "displayName": "Great Whale",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-427f3f35097642ce11568366678b16af/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-427f3f35097642ce11568366678b16af/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "great whale",
+        "Great Whale"
+      ],
+      "mutation": null
+    },
+    "elpirate gran maja": {
+      "itemId": null,
+      "baseFishName": "elpirate gran maja",
+      "displayName": "Elpirate Gran Maja",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-d96dc045cc06f44d9ae00958de4b4628/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-d96dc045cc06f44d9ae00958de4b4628/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "elpirate gran maja",
+        "Elpirate Gran Maja"
+      ],
+      "mutation": null
+    },
+    "orca": {
+      "itemId": null,
+      "baseFishName": "orca",
+      "displayName": "Orca",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-e3d4495262428ed404619d8e6f16d6ec/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-e3d4495262428ed404619d8e6f16d6ec/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "orca",
+        "Orca"
+      ],
+      "mutation": null
+    },
+    "crystal crab": {
+      "itemId": null,
+      "baseFishName": "crystal crab",
+      "displayName": "Crystal Crab",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-644fdd8d9b29c3c4da83e170b9b3eab0/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-644fdd8d9b29c3c4da83e170b9b3eab0/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "crystal crab",
+        "Crystal Crab"
+      ],
+      "mutation": null
+    },
+    "blocky lochness monster": {
+      "itemId": null,
+      "baseFishName": "blocky lochness monster",
+      "displayName": "Blocky Lochness Monster",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-511451ad017b322fee87fbdc1d6f6ba1/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-511451ad017b322fee87fbdc1d6f6ba1/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "blocky lochness monster",
+        "Blocky Lochness Monster"
+      ],
+      "mutation": null
+    },
+    "squid": {
+      "itemId": null,
+      "baseFishName": "squid",
+      "displayName": "Giant Squid",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-ad8d392c5e6afe4cf421b5d1071b9a5e/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-ad8d392c5e6afe4cf421b5d1071b9a5e/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "squid",
+        "Squid"
+      ],
+      "mutation": "Giant"
+    },
+    "giant squid": {
+      "itemId": null,
+      "baseFishName": "squid",
+      "displayName": "Giant Squid",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-ad8d392c5e6afe4cf421b5d1071b9a5e/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-ad8d392c5e6afe4cf421b5d1071b9a5e/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "squid",
+        "Squid"
+      ],
+      "mutation": "Giant"
+    },
+    "viridis lurker": {
+      "itemId": null,
+      "baseFishName": "viridis lurker",
+      "displayName": "Viridis Lurker",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-6c7e204d1ee288ecea2da4389f06db3a/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-6c7e204d1ee288ecea2da4389f06db3a/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "viridis lurker",
+        "Viridis Lurker"
+      ],
+      "mutation": null
+    },
+    "thunderzilla": {
+      "itemId": null,
+      "baseFishName": "thunderzilla",
+      "displayName": "Thunderzilla",
+      "rarity": "Forgotten",
+      "raritySource": "fishit_db_forgotten",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-36b95a62962d5bdd9982ea4a05dd5a87/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-36b95a62962d5bdd9982ea4a05dd5a87/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_forgotten"
+      ],
+      "triedAliases": [
+        "thunderzilla",
+        "Thunderzilla"
+      ],
+      "mutation": null
+    },
+    "depthseeker ray": {
+      "itemId": null,
+      "baseFishName": "depthseeker ray",
+      "displayName": "Depthseeker Ray",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-40969bf064ea5e0893d78709820617d3/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-40969bf064ea5e0893d78709820617d3/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "depthseeker ray",
+        "Depthseeker Ray"
+      ],
+      "mutation": null
+    },
+    "thin armor shark": {
+      "itemId": null,
+      "baseFishName": "thin armor shark",
+      "displayName": "Thin Armor Shark",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-8a7367e05d165777b24e0289cb259b11/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-8a7367e05d165777b24e0289cb259b11/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "thin armor shark",
+        "Thin Armor Shark"
+      ],
+      "mutation": null
+    },
+    "sea eater": {
+      "itemId": null,
+      "baseFishName": "sea eater",
+      "displayName": "Sea Eater",
+      "rarity": "Forgotten",
+      "raritySource": "fishit_db_forgotten",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-49f22f92ce5be81f1e4921db36acd3de/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-49f22f92ce5be81f1e4921db36acd3de/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_forgotten"
+      ],
+      "triedAliases": [
+        "sea eater",
+        "Sea Eater"
+      ],
+      "mutation": null
+    },
+    "megalodon": {
+      "itemId": null,
+      "baseFishName": "megalodon",
+      "displayName": "Megalodon",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-b40deac72b233956bea9972023ab7b14/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-b40deac72b233956bea9972023ab7b14/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "megalodon",
+        "Megalodon"
+      ],
+      "mutation": null
+    },
+    "scare": {
+      "itemId": null,
+      "baseFishName": "scare",
+      "displayName": "Scare",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-27479cde873295578148da1c36d81390/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-27479cde873295578148da1c36d81390/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "scare",
+        "Scare"
+      ],
+      "mutation": null
+    },
+    "bonemaw tyrant": {
+      "itemId": null,
+      "baseFishName": "bonemaw tyrant",
+      "displayName": "Bonemaw Tyrant",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-ffb01b47de89664a0908ac51d2f52340/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-ffb01b47de89664a0908ac51d2f52340/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "bonemaw tyrant",
+        "Bonemaw Tyrant"
+      ],
+      "mutation": null
+    },
+    "robot kraken": {
+      "itemId": null,
+      "baseFishName": "robot kraken",
+      "displayName": "Robot Kraken",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-489ffa039a70e41ad60d70997ada55ed/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-489ffa039a70e41ad60d70997ada55ed/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "robot kraken",
+        "Robot Kraken"
+      ],
+      "mutation": null
+    },
+    "ancient whale": {
+      "itemId": null,
+      "baseFishName": "ancient whale",
+      "displayName": "Ancient Whale",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-085ed01cd8c089e0354c3d01cc113f26/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-085ed01cd8c089e0354c3d01cc113f26/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "ancient whale",
+        "Ancient Whale"
+      ],
+      "mutation": null
+    },
+    "monster shark": {
+      "itemId": null,
+      "baseFishName": "monster shark",
+      "displayName": "Monster Shark",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-64489f77e3319c5639d380d34ad871a5/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-64489f77e3319c5639d380d34ad871a5/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "monster shark",
+        "Monster Shark"
+      ],
+      "mutation": null
+    },
+    "ancient lochness monster": {
+      "itemId": null,
+      "baseFishName": "ancient lochness monster",
+      "displayName": "Ancient Lochness Monster",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-7263c3f92e0b0384f3bd09f1bbb1ca7c/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-7263c3f92e0b0384f3bd09f1bbb1ca7c/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "ancient lochness monster",
+        "Ancient Lochness Monster"
+      ],
+      "mutation": null
+    },
+    "leviathan": {
+      "itemId": null,
+      "baseFishName": "leviathan",
+      "displayName": "Leviathan",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-231c51179e38a66d4cd007a93268a467/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-231c51179e38a66d4cd007a93268a467/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "leviathan",
+        "Leviathan"
+      ],
+      "mutation": null
+    },
+    "mutant runic koi": {
+      "itemId": null,
+      "baseFishName": "mutant runic koi",
+      "displayName": "Mutant Runic Koi",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-b425f27a944d0dc89f3ed663565568e4/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-b425f27a944d0dc89f3ed663565568e4/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "mutant runic koi",
+        "Mutant Runic Koi"
+      ],
+      "mutation": null
+    },
+    "strawberry orca": {
+      "itemId": null,
+      "baseFishName": "strawberry orca",
+      "displayName": "Strawberry Orca",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-09156836cf975ceac1f309aa211405c2/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-09156836cf975ceac1f309aa211405c2/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "strawberry orca",
+        "Strawberry Orca"
+      ],
+      "mutation": null
+    },
+    "iridesca": {
+      "itemId": null,
+      "baseFishName": "iridesca",
+      "displayName": "Iridesca",
+      "rarity": "Forgotten",
+      "raritySource": "fishit_db_forgotten",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-93cc985574728e282d6b69f3f86b78a2/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-93cc985574728e282d6b69f3f86b78a2/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_forgotten"
+      ],
+      "triedAliases": [
+        "iridesca",
+        "Iridesca"
+      ],
+      "mutation": null
+    },
+    "ancient magma whale": {
+      "itemId": null,
+      "baseFishName": "ancient magma whale",
+      "displayName": "Ancient Magma Whale",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-14c974dff464534f1290cfef54d0cf9b/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-14c974dff464534f1290cfef54d0cf9b/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "ancient magma whale",
+        "Ancient Magma Whale"
+      ],
+      "mutation": null
+    },
+    "ketupat whale": {
+      "itemId": null,
+      "baseFishName": "ketupat whale",
+      "displayName": "Ketupat Whale",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-8608fa62a91c0ad9cbd5a2532861a956/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-8608fa62a91c0ad9cbd5a2532861a956/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "ketupat whale",
+        "Ketupat Whale"
+      ],
+      "mutation": null
+    },
+    "frostborn shark": {
+      "itemId": null,
+      "baseFishName": "frostborn shark",
+      "displayName": "Frostborn Shark",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-95e31005ee70d0dd081590e066e2d8a8/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-95e31005ee70d0dd081590e066e2d8a8/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "frostborn shark",
+        "Frostborn Shark"
+      ],
+      "mutation": null
+    },
+    "disco frogalloon": {
+      "itemId": null,
+      "baseFishName": "disco frogalloon",
+      "displayName": "Disco Frogalloon",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-79aa3e2357698d0dd10a134e9c1ef077/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-79aa3e2357698d0dd10a134e9c1ef077/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "disco frogalloon",
+        "Disco Frogalloon"
+      ],
+      "mutation": null
+    },
+    "gladiator shark": {
+      "itemId": null,
+      "baseFishName": "gladiator shark",
+      "displayName": "Gladiator Shark",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-1a1afca7d1f7b300afa13a0fc99504d5/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-1a1afca7d1f7b300afa13a0fc99504d5/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "gladiator shark",
+        "Gladiator Shark"
+      ],
+      "mutation": null
+    },
+    "queen crab": {
+      "itemId": null,
+      "baseFishName": "queen crab",
+      "displayName": "Queen Crab",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-75f017dc45d893c85ae39873590042b1/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-75f017dc45d893c85ae39873590042b1/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "queen crab",
+        "Queen Crab"
+      ],
+      "mutation": null
+    },
+    "king crab": {
+      "itemId": null,
+      "baseFishName": "king crab",
+      "displayName": "King Crab",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-759396ad59e6d31e9d6bf6a025288e4b/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-759396ad59e6d31e9d6bf6a025288e4b/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "king crab",
+        "King Crab"
+      ],
+      "mutation": null
+    },
+    "shark": {
+      "itemId": null,
+      "baseFishName": "shark",
+      "displayName": "Ghost Shark",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-6821cd73df0603ad9d833fd93eca7558/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-6821cd73df0603ad9d833fd93eca7558/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "shark",
+        "Shark"
+      ],
+      "mutation": "Ghost"
+    },
+    "ghost shark": {
+      "itemId": null,
+      "baseFishName": "shark",
+      "displayName": "Ghost Shark",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-6821cd73df0603ad9d833fd93eca7558/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-6821cd73df0603ad9d833fd93eca7558/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "shark",
+        "Shark"
+      ],
+      "mutation": "Ghost"
+    },
+    "aurelion": {
+      "itemId": null,
+      "baseFishName": "aurelion",
+      "displayName": "Aurelion",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-de4d5bef1556173a9e45ccc97c8bb345/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-de4d5bef1556173a9e45ccc97c8bb345/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "aurelion",
+        "Aurelion"
+      ],
+      "mutation": null
+    },
+    "eerie shark": {
+      "itemId": null,
+      "baseFishName": "eerie shark",
+      "displayName": "Eerie Shark",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-b24c218862625f0b1c7a8c84b161cd6d/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-b24c218862625f0b1c7a8c84b161cd6d/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "eerie shark",
+        "Eerie Shark"
+      ],
+      "mutation": null
+    },
+    "blob shark": {
+      "itemId": null,
+      "baseFishName": "blob shark",
+      "displayName": "Blob Shark",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-de341f23e8add220fefbe2db159fd9ec/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-de341f23e8add220fefbe2db159fd9ec/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "blob shark",
+        "Blob Shark"
+      ],
+      "mutation": null
+    },
+    "cursed kraken": {
+      "itemId": null,
+      "baseFishName": "cursed kraken",
+      "displayName": "Cursed Kraken",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-0b6194604e571daee32702e98c9bc5fb/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-0b6194604e571daee32702e98c9bc5fb/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "cursed kraken",
+        "Cursed Kraken"
+      ],
+      "mutation": null
+    },
+    "cryoshade glider": {
+      "itemId": null,
+      "baseFishName": "cryoshade glider",
+      "displayName": "Cryoshade Glider",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-0ce44b25092b07e5431211628c211d5c/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-0ce44b25092b07e5431211628c211d5c/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "cryoshade glider",
+        "Cryoshade Glider"
+      ],
+      "mutation": null
+    },
+    "frostbite leviathan": {
+      "itemId": null,
+      "baseFishName": "frostbite leviathan",
+      "displayName": "Frostbite Leviathan",
+      "rarity": "Forgotten",
+      "raritySource": "fishit_db_forgotten",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-bd8302230b2ae63fa0f2c07687615993/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-bd8302230b2ae63fa0f2c07687615993/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_forgotten"
+      ],
+      "triedAliases": [
+        "frostbite leviathan",
+        "Frostbite Leviathan"
+      ],
+      "mutation": null
+    },
+    "lochness monster": {
+      "itemId": null,
+      "baseFishName": "lochness monster",
+      "displayName": "Lochness Monster",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-149cbd94bae62d2f673c5ad30d038017/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-149cbd94bae62d2f673c5ad30d038017/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "lochness monster",
+        "Lochness Monster"
+      ],
+      "mutation": null
+    },
+    "panther eel": {
+      "itemId": null,
+      "baseFishName": "panther eel",
+      "displayName": "Panther Eel",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-021ba48e5493b7c549ec051119f6a2b6/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-021ba48e5493b7c549ec051119f6a2b6/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "panther eel",
+        "Panther Eel"
+      ],
+      "mutation": null
+    },
+    "cosmic mutant shark": {
+      "itemId": null,
+      "baseFishName": "cosmic mutant shark",
+      "displayName": "Cosmic Mutant Shark",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-a6481e514f78469a369dc4293f53f1fe/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-a6481e514f78469a369dc4293f53f1fe/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "cosmic mutant shark",
+        "Cosmic Mutant Shark"
+      ],
+      "mutation": null
+    },
+    "fluorivane": {
+      "itemId": null,
+      "baseFishName": "fluorivane",
+      "displayName": "Fluorivane",
+      "rarity": "Forgotten",
+      "raritySource": "fishit_db_forgotten",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-4aad16f8d5942235378702b041579a8a/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-4aad16f8d5942235378702b041579a8a/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_forgotten"
+      ],
+      "triedAliases": [
+        "fluorivane",
+        "Fluorivane"
+      ],
+      "mutation": null
+    },
+    "coral whale": {
+      "itemId": null,
+      "baseFishName": "coral whale",
+      "displayName": "Coral Whale",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-8c3a3ef5ef5a09724fdbadabe3b84f6d/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-8c3a3ef5ef5a09724fdbadabe3b84f6d/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "coral whale",
+        "Coral Whale"
+      ],
+      "mutation": null
+    },
+    "bloodmoon whale": {
+      "itemId": null,
+      "baseFishName": "bloodmoon whale",
+      "displayName": "Bloodmoon Whale",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-ad8577146c37ad5a510037f4ecc01d82/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-ad8577146c37ad5a510037f4ecc01d82/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "bloodmoon whale",
+        "Bloodmoon Whale"
+      ],
+      "mutation": null
+    },
+    "flame tyrant": {
+      "itemId": null,
+      "baseFishName": "flame tyrant",
+      "displayName": "Flame Tyrant",
+      "rarity": "Secret",
+      "raritySource": "fishit_db_secret",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-029206d1b9a1d07ae4aeaa410325123a/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-029206d1b9a1d07ae4aeaa410325123a/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_secret"
+      ],
+      "triedAliases": [
+        "flame tyrant",
+        "Flame Tyrant"
+      ],
+      "mutation": null
+    },
+    "cerulean dragon": {
+      "itemId": null,
+      "baseFishName": "cerulean dragon",
+      "displayName": "Cerulean Dragon",
+      "rarity": "Forgotten",
+      "raritySource": "fishit_db_forgotten",
+      "rarityConfidence": "pending",
+      "imageAssetId": null,
+      "imageUrl": "https://tr.rbxcdn.com/180DAY-271d514f6ff378836cd9d97ded88a1b8/420/420/Image/Png/noFilter",
+      "imageSource": "fish_catalog_seen",
+      "sourceUrl": "https://tr.rbxcdn.com/180DAY-271d514f6ff378836cd9d97ded88a1b8/420/420/Image/Png/noFilter",
+      "sources": [
+        "fish_catalog_seen",
+        "fishit_db_forgotten"
+      ],
+      "triedAliases": [
+        "cerulean dragon",
+        "Cerulean Dragon"
+      ],
+      "mutation": null
+    }
+  },
+  "rowsScanned": 330
+}
