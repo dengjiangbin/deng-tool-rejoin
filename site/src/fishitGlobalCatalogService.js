@@ -262,13 +262,18 @@ function recordObservation(raw) {
   if (uniqueCount >= 2 || evidenceCount >= 3) {
     confidence = globalDb.VERIFICATION.MULTI_USER_CONFIRMED;
   }
+  let source = 'live_observed';
+  if (existing && _confidenceRank(existing.confidence) >= _confidenceRank(globalDb.VERIFICATION.MANUAL_VERIFIED)) {
+    confidence = existing.confidence;
+    source = existing.source || source;
+  }
 
   globalDb.upsertItemMapping({
     item_id: itemId,
     species_id: speciesId,
     canonical_name: baseName,
     confidence,
-    source: 'live_observed',
+    source,
     evidence_count: evidenceCount,
     unique_user_count: uniqueCount,
     game_id: raw.gameId,
