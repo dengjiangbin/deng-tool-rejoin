@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import threading
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -36,6 +37,17 @@ from .license import generate_license_key, hash_license_key, normalize_license_k
 # ── Public constants ───────────────────────────────────────────────────────────
 
 STORE_PATH = APP_HOME / "license_store.json"
+
+_LOCAL_STORE_IO_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _local_store_io_lock(path: Path) -> threading.RLock:
+    key = str(path.resolve())
+    lock = _LOCAL_STORE_IO_LOCKS.get(key)
+    if lock is None:
+        lock = threading.RLock()
+        _LOCAL_STORE_IO_LOCKS[key] = lock
+    return lock
 
 RESULT_ACTIVE              = "active"
 RESULT_EXPIRED             = "expired"
@@ -55,6 +67,15 @@ DEFAULT_GLOBAL_MAX_KEYS     = 2           # default global max active keys per u
 DEFAULT_GLOBAL_MAX_PANEL    = 1           # default max Reset HWID panel uses per user per WIB day
 GENERATION_COOLDOWN_SECONDS = 60          # minimum seconds between key generations
 UNREDEEMED_KEY_EXPIRY_SECONDS = 86400    # 24 hours — unredeemed keys expire
+
+KEY_SLOT_LIMIT_MESSAGE = (
+    "You already reached the maximum of 2 key slots. "
+    "Delete/reset/revoke an old key or contact an admin."
+)
+HWID_RESET_LIMIT_MESSAGE = (
+    "You already used your 1 HWID reset for today. "
+    "Your reset limit refreshes at 00:00 WIB."
+)
 
 
 # ── Custom exceptions ──────────────────────────────────────────────────────────
@@ -218,8 +239,46 @@ class BaseLicenseStore(ABC):
         Excludes expired, revoked, inactive, deleted, and test/dev keys.
         """
         from agent.key_stats_format import filter_active_visible_license_rows
-        rows = self.list_user_keys_for_stats(discord_user_id)
+        rows = self._list_slot_rows_for_limit(discord_user_id)
         return len(filter_active_visible_license_rows(rows))
+
+    def get_active_key_slot_count(self, discord_user_id: str) -> int:
+        """Alias for count_active_keys_for_limit."""
+        return self.count_active_keys_for_limit(discord_user_id)
+
+    def assert_can_have_new_key_slot(
+        self, discord_user_id: str, *, limit: int | None = None
+    ) -> None:
+        """Raise UserLimitError when the user cannot receive another active key slot."""
+        effective = (
+            int(limit)
+            if limit is not None
+            else self.get_effective_max_keys(discord_user_id)
+        )
+        active = self.get_active_key_slot_count(discord_user_id)
+        if active >= effective:
+            raise UserLimitError(KEY_SLOT_LIMIT_MESSAGE)
+
+    def _list_slot_rows_for_limit(self, discord_user_id: str) -> list[dict[str, Any]]:
+        """Return license rows considered for slot counting (override in subclasses)."""
+        return self.list_user_keys_for_stats(discord_user_id)
+
+    def get_successful_hwid_resets_today(self, discord_user_id: str) -> int:
+        """Successful Reset HWID panel uses today (WIB day bucket)."""
+        return self.get_panel_reset_usage_today(discord_user_id)
+
+    def assert_can_reset_hwid(
+        self, discord_user_id: str, *, daily_limit: int | None = None
+    ) -> None:
+        """Raise PanelLimitError when the user has no daily HWID reset quota left."""
+        limit = (
+            int(daily_limit)
+            if daily_limit is not None
+            else self.get_effective_max_panel(discord_user_id)
+        )
+        used = self.get_successful_hwid_resets_today(discord_user_id)
+        if used >= limit:
+            raise PanelLimitError(HWID_RESET_LIMIT_MESSAGE)
 
     def set_global_max_keys(self, max_keys: int, updated_by: str) -> None:
         """Set the global default max active keys per user.
@@ -341,12 +400,17 @@ class BaseLicenseStore(ABC):
         """
 
     @abstractmethod
-    def reset_hwid(self, discord_user_id: str, key_id: str) -> None:
+    def reset_hwid(
+        self,
+        discord_user_id: str,
+        key_id: str,
+        *,
+        consume_daily_quota: bool = True,
+    ) -> None:
         """Clear the active device binding for a key.
-        Raises NoActiveBindingError if no active binding exists (nothing to reset).
-        Raises ResetLimitError if >= 5 resets in last 24 h.
-        Raises ActiveKeyWarning if last heartbeat < 5 minutes ago.
-        Raises KeyNotFoundError if key does not exist.
+
+        When ``consume_daily_quota`` is True, enforce the daily HWID reset limit
+        and record one successful panel use after unbinding.
         """
 
     @abstractmethod
@@ -519,22 +583,28 @@ class LocalJsonLicenseStore(BaseLicenseStore):
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or STORE_PATH
 
+    @property
+    def _io_lock(self) -> threading.RLock:
+        return _local_store_io_lock(self._path)
+
     # ── I/O ───────────────────────────────────────────────────────────────────
 
     def _load(self) -> dict[str, Any]:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        if not self._path.exists():
-            return self._empty_db()
-        try:
-            return json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return self._empty_db()
+        with self._io_lock:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            if not self._path.exists():
+                return self._empty_db()
+            try:
+                return json.loads(self._path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return self._empty_db()
 
     def _save(self, db: dict[str, Any]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(
-            json.dumps(db, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        with self._io_lock:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(
+                json.dumps(db, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
 
     @staticmethod
     def _empty_db() -> dict[str, Any]:
@@ -710,10 +780,7 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         # Atomic check + increment
         max_panel = self.get_effective_max_panel(discord_user_id)
         if current_count >= max_panel:
-            raise PanelLimitError(
-                f"Daily Reset Limit Reached. Reset Uses: {current_count} / {max_panel}. "
-                "Resets again at 12:00 AM WIB."
-            )
+            raise PanelLimitError(HWID_RESET_LIMIT_MESSAGE)
         new_count = current_count + 1
         db["panel_usage"][key] = {
             "discord_user_id": discord_user_id,
@@ -783,15 +850,6 @@ class LocalJsonLicenseStore(BaseLicenseStore):
         # don't silently accumulate in the stats as "active".
         self._expire_unredeemed_keys(discord_user_id)
 
-        # Check max active key limit after expiring old keys
-        effective_max = self.get_effective_max_keys(discord_user_id)
-        active_count = self.count_active_keys_for_limit(discord_user_id)
-        if active_count >= effective_max:
-            raise UserLimitError(
-                f"Key Limit Reached. Active Keys: {active_count} / {effective_max}. "
-                "Ask an admin if you need a higher limit."
-            )
-
         raw_key = generate_license_key()
         key_hash = hash_license_key(raw_key)
         parts = raw_key.split("-")
@@ -799,25 +857,30 @@ class LocalJsonLicenseStore(BaseLicenseStore):
 
         ciphertext = lke.encrypt_license_key_plaintext(raw_key)
         now = _utc_now()
-        db = self._load()
-        db["keys"][key_hash] = {
-            "id": key_hash,
-            "prefix": f"{parts[0]}-{parts[1]}",
-            "suffix": parts[-1],
-            "owner_discord_id": discord_user_id,
-            "status": "active",
-            "plan": "standard",
-            "expires_at": None,
-            "redeemed_at": None,
-            "created_by": created_by or discord_user_id,
-            "created_at": now,
-            "updated_at": now,
-            "key_ciphertext": ciphertext,
-            "key_export_available": bool(ciphertext),
-        }
-        db["users"][discord_user_id]["last_key_generated_at"] = now
-        db["users"][discord_user_id]["updated_at"] = now
-        self._save(db)
+        with self._io_lock:
+            db = self._load()
+            self.assert_can_have_new_key_slot(discord_user_id)
+            db["keys"][key_hash] = {
+                "id": key_hash,
+                "prefix": f"{parts[0]}-{parts[1]}",
+                "suffix": parts[-1],
+                "owner_discord_id": discord_user_id,
+                "status": "active",
+                "plan": "standard",
+                "expires_at": None,
+                "redeemed_at": None,
+                "created_by": created_by or discord_user_id,
+                "created_at": now,
+                "updated_at": now,
+                "key_ciphertext": ciphertext,
+                "key_export_available": bool(ciphertext),
+            }
+            db["users"][discord_user_id]["last_key_generated_at"] = now
+            db["users"][discord_user_id]["updated_at"] = now
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(
+                json.dumps(db, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
         self.audit_admin_action(
             created_by or discord_user_id,
             "create_key",
@@ -916,19 +979,25 @@ class LocalJsonLicenseStore(BaseLicenseStore):
                         )
 
         self.get_or_create_user(discord_user_id)
-        # Check max active key limit before attaching the key
-        effective_max = self.get_effective_max_keys(discord_user_id)
-        active_count = self.count_active_keys_for_limit(discord_user_id)
-        if active_count >= effective_max:
-            raise UserLimitError(
-                f"Key Limit Reached. Active Keys: {active_count} / {effective_max}. "
-                "You cannot redeem another key unless your limit is increased or an active key is removed."
-            )
         now = _utc_now()
-        db["keys"][key_hash]["owner_discord_id"] = discord_user_id
-        db["keys"][key_hash]["redeemed_at"] = now
-        db["keys"][key_hash]["updated_at"] = now
-        self._save(db)
+        with self._io_lock:
+            db = self._load()
+            key_record = db["keys"].get(key_hash)
+            if not key_record:
+                raise KeyNotFoundError("Key not found. Check the key and try again.")
+            owner_now = key_record.get("owner_discord_id")
+            if owner_now == discord_user_id:
+                raise KeyAlreadySelfOwned("This key is already attached to your account.")
+            if owner_now and owner_now != discord_user_id:
+                raise KeyOwnershipError("This key belongs to another user.")
+            self.assert_can_have_new_key_slot(discord_user_id)
+            db["keys"][key_hash]["owner_discord_id"] = discord_user_id
+            db["keys"][key_hash]["redeemed_at"] = now
+            db["keys"][key_hash]["updated_at"] = now
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.write_text(
+                json.dumps(db, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
         self.audit_admin_action(discord_user_id, "redeem_key", target_type="key", target_id=key_hash[:8])
         return normalized
 
@@ -1030,6 +1099,7 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             reset_count = self.get_reset_count_24h(key_hash)
             plan = record.get("plan", "standard") or "standard"
             rows.append({
+                "key_id": key_hash,
                 "masked_key": masked,
                 "full_key_plaintext": full_plain,
                 "has_stored_ciphertext": has_blob,
@@ -1092,7 +1162,15 @@ class LocalJsonLicenseStore(BaseLicenseStore):
 
     # ── HWID reset ────────────────────────────────────────────────────────────
 
-    def reset_hwid(self, discord_user_id: str, key_id: str) -> None:
+    def reset_hwid(
+        self,
+        discord_user_id: str,
+        key_id: str,
+        *,
+        consume_daily_quota: bool = True,
+    ) -> None:
+        if consume_daily_quota:
+            self.assert_can_reset_hwid(discord_user_id)
         db = self._load()
         key_record = db["keys"].get(key_id)
         if not key_record:
@@ -1121,6 +1199,8 @@ class LocalJsonLicenseStore(BaseLicenseStore):
             "created_at": _utc_now(),
         })
         self._save(db)
+        if consume_daily_quota:
+            self.record_successful_panel_reset(discord_user_id, 1)
         self.audit_admin_action(
             discord_user_id, "reset_hwid",
             target_type="key", target_id=key_id[:8],
@@ -1818,10 +1898,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
             current_count = int(res.data[0]["used_count"]) if res.data else 0
             max_panel = self.get_effective_max_panel(discord_user_id)
             if current_count >= max_panel:
-                raise PanelLimitError(
-                    f"Daily Reset Limit Reached. Reset Uses: {current_count} / {max_panel}. "
-                    "Resets again at 12:00 AM WIB."
-                )
+                raise PanelLimitError(HWID_RESET_LIMIT_MESSAGE)
             new_count = current_count + 1
             if res.data:
                 self._client.table("license_panel_reset_usage").update({
@@ -1897,13 +1974,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 pass
 
         # Check max active key limit
-        effective_max = self.get_effective_max_keys(discord_user_id)
-        active_count = self.count_active_keys_for_limit(discord_user_id)
-        if active_count >= effective_max:
-            raise UserLimitError(
-                f"Key Limit Reached. Active Keys: {active_count} / {effective_max}. "
-                "Ask an admin if you need a higher limit."
-            )
+        self.assert_can_have_new_key_slot(discord_user_id)
 
         raw_key = generate_license_key()
         key_hash = hash_license_key(raw_key)
@@ -1927,6 +1998,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
             row["key_export_available"] = True
         else:
             row["key_export_available"] = False
+        self.assert_can_have_new_key_slot(discord_user_id)
         try:
             self._client.table("license_keys").insert(row).execute()
         except Exception as exc:
@@ -2018,14 +2090,22 @@ class SupabaseLicenseStore(BaseLicenseStore):
             )
         if owner and owner != discord_user_id:
             raise KeyOwnershipError("This key belongs to another user.")
-        # Check max active key limit before attaching
-        effective_max = self.get_effective_max_keys(discord_user_id)
-        active_count = self.count_active_keys_for_limit(discord_user_id)
-        if active_count >= effective_max:
-            raise UserLimitError(
-                f"Key Limit Reached. Active Keys: {active_count} / {effective_max}. "
-                "You cannot redeem another key unless your limit is increased or an active key is removed."
-            )
+        self.assert_can_have_new_key_slot(discord_user_id)
+        res = (
+            self._client.table("license_keys")
+            .select("owner_discord_id, status")
+            .eq("id", key_hash)
+            .execute()
+        )
+        if not res.data:
+            raise KeyNotFoundError("Key not found. Check the key and try again.")
+        record = res.data[0]
+        owner_now = record.get("owner_discord_id")
+        if owner_now == discord_user_id:
+            raise KeyAlreadySelfOwned("This key is already attached to your account.")
+        if owner_now and owner_now != discord_user_id:
+            raise KeyOwnershipError("This key belongs to another user.")
+        self.assert_can_have_new_key_slot(discord_user_id)
         update_payload = {"owner_discord_id": discord_user_id, "expires_at": None}
         try:
             update_payload["redeemed_at"] = _utc_now()
@@ -2211,6 +2291,7 @@ class SupabaseLicenseStore(BaseLicenseStore):
             reset_count = self.get_reset_count_24h(key_id)
             plan = record.get("plan", "standard") or "standard"
             rows.append({
+                "key_id": key_id,
                 "masked_key": masked,
                 "full_key_plaintext": full_plain,
                 "has_stored_ciphertext": has_blob,
@@ -2227,6 +2308,103 @@ class SupabaseLicenseStore(BaseLicenseStore):
             })
         rows.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
         return rows
+
+    def _linked_site_user_ids(self, discord_user_id: str) -> list[str]:
+        try:
+            res = (
+                self._client.table("site_users")
+                .select("id")
+                .eq("discord_user_id", discord_user_id)
+                .execute()
+            )
+            return [
+                str(row["id"]).strip()
+                for row in (res.data or [])
+                if row.get("id")
+            ]
+        except Exception:
+            return []
+
+    def _list_slot_rows_for_limit(self, discord_user_id: str) -> list[dict[str, Any]]:
+        rows_by_id: dict[str, dict[str, Any]] = {}
+        owners = {str(discord_user_id).strip()}
+        for site_id in self._linked_site_user_ids(discord_user_id):
+            owners.add(f"site:{site_id}")
+        for owner in owners:
+            if not owner:
+                continue
+            for row in self.list_user_keys_for_stats(owner):
+                key_id = str(row.get("key_id") or row.get("id") or "")
+                dedupe = key_id or (
+                    str(row.get("created_at") or "") + "|" + str(row.get("masked_key") or "")
+                )
+                rows_by_id[dedupe] = row
+        site_ids = self._linked_site_user_ids(discord_user_id)
+        if site_ids:
+            try:
+                res = (
+                    self._client.table("license_keys")
+                    .select(
+                        "id, prefix, suffix, status, plan, created_at, expires_at, "
+                        "redeemed_at, key_ciphertext, key_export_available"
+                    )
+                    .in_("site_user_id", site_ids)
+                    .execute()
+                )
+                from . import license_key_export as lke
+
+                for record in res.data or []:
+                    key_id = record["id"]
+                    if key_id in rows_by_id:
+                        continue
+                    b_res = (
+                        self._client.table("device_bindings")
+                        .select("device_model, device_label, last_seen_at, is_active")
+                        .eq("key_id", key_id)
+                        .execute()
+                    )
+                    binding = b_res.data[0] if b_res.data else {}
+                    active_binding = bool(binding.get("is_active"))
+                    masked = (
+                        f"{record.get('prefix', 'DENG-????')}..."
+                        f"{record.get('suffix', '????')}"
+                    )
+                    ciphertext = (
+                        (record.get("key_ciphertext") or "")
+                        if "key_ciphertext" in record
+                        else ""
+                    )
+                    full_plain = (
+                        lke.decrypt_license_key_ciphertext(ciphertext)
+                        if ciphertext
+                        else None
+                    )
+                    device = (
+                        (
+                            binding.get("device_model")
+                            or binding.get("device_label")
+                            or ""
+                        ).strip()
+                        if active_binding
+                        else ""
+                    ) or None
+                    rows_by_id[key_id] = {
+                        "key_id": key_id,
+                        "masked_key": masked,
+                        "full_key_plaintext": full_plain,
+                        "license_status": record.get("status", "active"),
+                        "used": active_binding,
+                        "device_display": device,
+                        "last_seen_at": binding.get("last_seen_at"),
+                        "created_at": record.get("created_at"),
+                        "expires_at": record.get("expires_at"),
+                        "redeemed_at": record.get("redeemed_at"),
+                        "plan": record.get("plan", "standard") or "standard",
+                        "reset_count_24h": self.get_reset_count_24h(key_id),
+                    }
+            except Exception:
+                pass
+        return list(rows_by_id.values())
 
     def recover_key_export_for_user(self, discord_user_id: str, raw_key: str) -> str:
         from . import license_key_export as lke
@@ -2287,7 +2465,15 @@ class SupabaseLicenseStore(BaseLicenseStore):
 
     # ── HWID reset ────────────────────────────────────────────────────────────
 
-    def reset_hwid(self, discord_user_id: str, key_id: str) -> None:
+    def reset_hwid(
+        self,
+        discord_user_id: str,
+        key_id: str,
+        *,
+        consume_daily_quota: bool = True,
+    ) -> None:
+        if consume_daily_quota:
+            self.assert_can_reset_hwid(discord_user_id)
         res = (
             self._client.table("license_keys")
             .select("owner_discord_id")
@@ -2325,6 +2511,8 @@ class SupabaseLicenseStore(BaseLicenseStore):
                 "reason": "user_requested",
             }
         ).execute()
+        if consume_daily_quota:
+            self.record_successful_panel_reset(discord_user_id, 1)
         self.audit_admin_action(
             discord_user_id,
             "reset_hwid",

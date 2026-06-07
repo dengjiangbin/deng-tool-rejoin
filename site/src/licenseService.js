@@ -11,8 +11,18 @@ const PUBLIC_STATS_CACHE_MS = 10_000;
 let publicStatsCache = null;
 
 const DEFAULT_GLOBAL_MAX_KEYS = 2;
+const DEFAULT_GLOBAL_MAX_PANEL = 1;
+const KEY_SLOT_LIMIT_MESSAGE = (
+  'You already reached the maximum of 2 key slots. '
+  + 'Delete/reset/revoke an old key or contact an admin.'
+);
+const HWID_RESET_LIMIT_MESSAGE = (
+  'You already used your 1 HWID reset for today. '
+  + 'Your reset limit refreshes at 00:00 WIB.'
+);
 const KEY_LIMIT_CACHE_MS = 30_000;
 let keyLimitGlobalCache = null;
+let panelLimitGlobalCache = null;
 
 function isoExpired(value) {
   if (!value) return false;
@@ -621,14 +631,22 @@ async function redeemLicenseKey(discordUserId, rawKey) {
   if (!limitCheck.allowed) {
     throw serviceError(
       'key_limit_reached',
-      `Key Limit Reached. Active Keys: ${limitCheck.activeCount} / ${limitCheck.maxKeys}. ` +
-      'You cannot redeem another key unless your limit is increased or an active key is removed.',
+      KEY_SLOT_LIMIT_MESSAGE,
       403,
       { activeCount: limitCheck.activeCount, maxKeys: limitCheck.maxKeys },
     );
   }
 
   const encrypted = encryptLicenseKeyPlaintext(normalized);
+  const recheck = await canUserReceiveNewKey(owner, null);
+  if (!recheck.allowed) {
+    throw serviceError(
+      'key_limit_reached',
+      KEY_SLOT_LIMIT_MESSAGE,
+      403,
+      { activeCount: recheck.activeCount, maxKeys: recheck.maxKeys },
+    );
+  }
   const payload = {
     owner_discord_id: owner,
     expires_at: null,
@@ -646,6 +664,16 @@ async function resetLicenseHwid(discordUserId, keyIdOrKey) {
   const raw = String(keyIdOrKey || '').trim();
   const keyId = raw.startsWith('DENG-') ? hashLicenseKey(raw) : raw;
   if (!/^[a-f0-9]{64}$/i.test(keyId)) throw serviceError('key_not_found', 'Key not found.');
+
+  const panelCheck = await canUserResetPanelToday(owner);
+  if (!panelCheck.allowed) {
+    throw serviceError(
+      'panel_reset_limit_reached',
+      HWID_RESET_LIMIT_MESSAGE,
+      403,
+      { usedCount: panelCheck.usedCount, maxPanel: panelCheck.maxPanel },
+    );
+  }
 
   const record = await getRawLicenseById(keyId);
   if (!record) throw serviceError('key_not_found', 'Key not found.');
@@ -673,7 +701,25 @@ async function resetLicenseHwid(discordUserId, keyIdOrKey) {
     old_install_id_hash: binding.install_id_hash || null,
     reason: 'user_requested',
   });
-  if (logError) throw serviceError('database_error', 'HWID was reset, but reset logging failed.', 500);
+  if (logError) {
+    await supabase
+      .from('device_bindings')
+      .update({ is_active: true })
+      .eq('key_id', keyId);
+    throw serviceError('database_error', 'HWID reset could not be completed safely.', 500);
+  }
+
+  try {
+    await recordSuccessfulPanelReset(owner, 1);
+  } catch (err) {
+    await supabase
+      .from('device_bindings')
+      .update({ is_active: true })
+      .eq('key_id', keyId);
+    await supabase.from('hwid_reset_logs').delete().eq('key_id', keyId).eq('owner_discord_id', owner);
+    if (err && err.code === 'panel_reset_limit_reached') throw err;
+    throw serviceError('database_error', 'HWID reset could not be completed safely.', 500);
+  }
 
   return { status: 'reset', message: 'HWID Reset Successful. You Can Bind This Key On A New Device.' };
 }
@@ -797,6 +843,120 @@ async function canUserReceiveNewKey(discordUserId, siteUserId) {
   return { allowed: activeCount < maxKeys, activeCount, maxKeys };
 }
 
+function getWibDay(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+async function getGlobalMaxPanel() {
+  const now = Date.now();
+  if (panelLimitGlobalCache && now - panelLimitGlobalCache.cachedAt < KEY_LIMIT_CACHE_MS) {
+    return panelLimitGlobalCache.value;
+  }
+  try {
+    const { data } = await supabase
+      .from('license_key_limits')
+      .select('max_panel')
+      .eq('scope', 'global')
+      .maybeSingle();
+    const value = (data && typeof data.max_panel === 'number') ? data.max_panel : DEFAULT_GLOBAL_MAX_PANEL;
+    panelLimitGlobalCache = { cachedAt: now, value };
+    return value;
+  } catch {
+    return DEFAULT_GLOBAL_MAX_PANEL;
+  }
+}
+
+async function getUserPanelLimit(discordUserId) {
+  if (!discordUserId) return null;
+  try {
+    const { data } = await supabase
+      .from('license_key_limits')
+      .select('max_panel')
+      .eq('scope', 'user')
+      .eq('discord_user_id', String(discordUserId))
+      .maybeSingle();
+    return (data && typeof data.max_panel === 'number') ? data.max_panel : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getEffectiveMaxPanel(discordUserId) {
+  const userLimit = await getUserPanelLimit(discordUserId);
+  if (userLimit !== null) return userLimit;
+  return getGlobalMaxPanel();
+}
+
+async function getPanelResetUsageToday(discordUserId) {
+  if (!discordUserId) return 0;
+  try {
+    const { data } = await supabase
+      .from('license_panel_reset_usage')
+      .select('used_count')
+      .eq('discord_user_id', String(discordUserId))
+      .eq('reset_day_wib', getWibDay())
+      .maybeSingle();
+    return (data && typeof data.used_count === 'number') ? data.used_count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function canUserResetPanelToday(discordUserId) {
+  const [usedCount, maxPanel] = await Promise.all([
+    getPanelResetUsageToday(discordUserId),
+    getEffectiveMaxPanel(discordUserId),
+  ]);
+  return { allowed: usedCount < maxPanel, usedCount, maxPanel };
+}
+
+async function recordSuccessfulPanelReset(discordUserId, unboundKeyCount = 1) {
+  const owner = String(discordUserId || '').trim();
+  if (!owner) throw serviceError('auth_required', 'Please login with Discord first.', 401);
+  const wibDay = getWibDay();
+  const maxPanel = await getEffectiveMaxPanel(owner);
+  const { data: existing } = await supabase
+    .from('license_panel_reset_usage')
+    .select('used_count')
+    .eq('discord_user_id', owner)
+    .eq('reset_day_wib', wibDay)
+    .maybeSingle();
+  const currentCount = (existing && typeof existing.used_count === 'number') ? existing.used_count : 0;
+  if (currentCount >= maxPanel) {
+    throw serviceError(
+      'panel_reset_limit_reached',
+      HWID_RESET_LIMIT_MESSAGE,
+      403,
+      { usedCount: currentCount, maxPanel },
+    );
+  }
+  const now = new Date().toISOString();
+  if (existing) {
+    const { error } = await supabase
+      .from('license_panel_reset_usage')
+      .update({ used_count: currentCount + 1, last_reset_at: now, updated_at: now })
+      .eq('discord_user_id', owner)
+      .eq('reset_day_wib', wibDay);
+    if (error) throw serviceError('database_error', 'Could not record HWID reset usage.', 500);
+    return currentCount + 1;
+  }
+  const { error } = await supabase.from('license_panel_reset_usage').insert({
+    discord_user_id: owner,
+    reset_day_wib: wibDay,
+    used_count: 1,
+    last_reset_at: now,
+    created_at: now,
+    updated_at: now,
+  });
+  if (error) throw serviceError('database_error', 'Could not record HWID reset usage.', 500);
+  return 1;
+}
+
 module.exports = {
   FULL_KEY_UNAVAILABLE,
   classifyLicenseLifecycle,
@@ -822,6 +982,13 @@ module.exports = {
   getEffectiveMaxKeys,
   countActiveKeysForLimit,
   canUserReceiveNewKey,
+  canUserResetPanelToday,
+  getEffectiveMaxPanel,
+  getPanelResetUsageToday,
+  getWibDay,
+  recordSuccessfulPanelReset,
+  KEY_SLOT_LIMIT_MESSAGE,
+  HWID_RESET_LIMIT_MESSAGE,
   _buildPublicStatsPayload: buildPublicStatsPayload,
   _clearPublicStatsCache: clearPublicStatsCache,
   _clearKeyLimitCache,

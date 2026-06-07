@@ -123,21 +123,18 @@ def _format_user_mention(user_id_raw: "str | None") -> str:
     return f"`{uid}`"
 
 
-# ── Owner helpers ─────────────────────────────────────────────────────────────
+# ── Owner helpers (central guard in bot.owner_guard) ──────────────────────────
 
-def _owner_ids() -> frozenset[int]:
-    """Parse LICENSE_OWNER_DISCORD_IDS env var; evaluated each call so live reload works."""
-    raw = os.environ.get("LICENSE_OWNER_DISCORD_IDS", "")
-    ids: list[int] = []
-    for part in raw.split(","):
-        part = part.strip()
-        if part.isdigit():
-            ids.append(int(part))
-    return frozenset(ids)
+from bot.owner_guard import (
+    OWNER_ENV_VAR,
+    is_bot_owner,
+    owner_guard_enabled,
+    parse_owner_discord_ids,
+)
 
-
-def _is_owner(user: discord.User | discord.Member) -> bool:
-    return user.id in _owner_ids()
+# Back-compat aliases used by tests and command handlers.
+_is_owner = is_bot_owner
+_owner_ids = parse_owner_discord_ids
 
 
 def _tester_ids() -> frozenset[int]:
@@ -505,7 +502,7 @@ class ConfirmResetButton(discord.ui.Button):
                 })
                 continue
             try:
-                self._store.reset_hwid(self._uid, key_id)
+                self._store.reset_hwid(self._uid, key_id, consume_daily_quota=False)
                 results.append({
                     "display_key": display_key,
                     "masked_key": masked,
@@ -539,8 +536,25 @@ class ConfirmResetButton(discord.ui.Button):
                 new_usage_count = self._store.record_successful_panel_reset(
                     self._uid, successful_count
                 )
-            except (PanelLimitError, StoreError):
-                pass
+            except PanelLimitError:
+                for child in self.view.children:
+                    child.disabled = True
+                embed = _embed_from_payload(
+                    build_panel_limit_blocked_response(max_panel_val, used_count=used_today)
+                )
+                try:
+                    await interaction.response.edit_message(embed=embed, view=self.view)
+                except discord.HTTPException:
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+            except StoreError as exc:
+                for child in self.view.children:
+                    child.disabled = True
+                await interaction.response.send_message(
+                    f"⚠️ Reset succeeded but quota could not be recorded: {exc}",
+                    ephemeral=True,
+                )
+                return
 
         # Post log for each successfully reset key (with updated usage)
         if interaction.guild and keys_to_log:
@@ -1001,6 +1015,15 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
     def _owner_denied(self) -> discord.Embed:
         return _embed_from_payload(build_not_owner_response(), include_thumbnail=False)
 
+    async def _require_owner(self, interaction: discord.Interaction) -> bool:
+        """Return True when the caller is an owner; otherwise send ephemeral denial."""
+        if _is_owner(interaction.user):
+            return True
+        await interaction.response.send_message(
+            embed=self._owner_denied(), ephemeral=True
+        )
+        return False
+
     async def _get_panel_channel(
         self, guild: discord.Guild, channel_id: str
     ) -> discord.TextChannel | None:
@@ -1323,6 +1346,27 @@ class LicensePanelCog(commands.Cog, name="LicensePanel"):
                 color=0x2F80ED,
                 timestamp=datetime.now(timezone.utc),
             )
+            guard_status = "Enabled" if owner_guard_enabled() else "Disabled (no owners configured)"
+            registration_lines = (
+                "**Mode:** Global\n"
+                f"**Owner Guard:** {guard_status}\n"
+                f"**Owner Source:** `{OWNER_ENV_VAR}`"
+            )
+            db_scope_lines = (
+                "**License Data:** Global\n"
+                "**Panel Config:** Per Guild\n"
+                "**Log Config:** Per Guild"
+            )
+            guild_name = interaction.guild.name if interaction.guild else "Unknown"
+            guild_lines = f"**Current Guild:** {guild_name} (`{guild_id}`)"
+
+            embed.add_field(
+                name="Global Command Registration",
+                value=registration_lines,
+                inline=False,
+            )
+            embed.add_field(name="Database Scope", value=db_scope_lines, inline=False)
+            embed.add_field(name="Guild", value=guild_lines, inline=False)
             embed.add_field(name="Panel Config", value=panel_lines, inline=False)
             embed.add_field(name="Global Config", value=global_lines, inline=False)
             embed.add_field(name="License Store", value=store_lines, inline=False)

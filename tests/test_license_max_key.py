@@ -238,8 +238,7 @@ class TestGenerateKeyEnforcement(unittest.TestCase):
         self.assertEqual(active, 1)
         with self.assertRaises(UserLimitError) as ctx:
             self.store.create_key_for_user(self.uid)
-        self.assertIn("Key Limit Reached", str(ctx.exception))
-        self.assertIn("1 / 1", str(ctx.exception))
+        self.assertIn("maximum of 2 key slots", str(ctx.exception))
 
     def test_07_generate_allowed_when_below_limit(self):
         """Test 7 — Generate Key is allowed when active count < effective max."""
@@ -298,7 +297,7 @@ class TestRedeemKeyEnforcement(unittest.TestCase):
         unredeemed = self._make_unredeemed_key()
         with self.assertRaises(UserLimitError) as ctx:
             self.store.redeem_key_for_user(self.redeemer_uid, unredeemed)
-        self.assertIn("Key Limit Reached", str(ctx.exception))
+        self.assertIn("maximum of 2 key slots", str(ctx.exception))
 
     def test_09_redeem_does_not_consume_key_if_blocked(self):
         """Test 9 — Redeem Key does not change the key if blocked."""

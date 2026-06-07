@@ -69,6 +69,13 @@ SLASH_STATUS        = "status"
 SLASH_CLEAR         = "clear"
 SLASH_ADMIN_STATUS  = "admin_status"
 
+# Top-level slash command names owned by DENG Tool Rejoin (for deploy/cleanup).
+DENG_SLASH_ROOT_COMMANDS: tuple[str, ...] = (
+    SLASH_GROUP,
+    "license_log_channel",
+    "license",
+)
+
 
 # ── Panel embed builder ────────────────────────────────────────────────────────
 
@@ -200,20 +207,18 @@ def build_generate_limit_response(
     max_keys: int, *, active_count: int | None = None
 ) -> dict[str, Any]:
     """Ephemeral embed when a user has reached their key limit."""
+    from agent.license_store import KEY_SLOT_LIMIT_MESSAGE
+
     if active_count is not None:
-        count_line = f"Active Keys: **{active_count} / {max_keys}**\n"
+        count_line = f"Active Keys: **{active_count} / {max_keys}**\n\n"
     else:
-        count_line = f"Active Keys: **{max_keys} / {max_keys}**\n"
+        count_line = ""
     return {
         "ephemeral": True,
         "embed": {
             "title": "\u274c Key Limit Reached",
             "color": 0xE74C3C,
-            "description": (
-                "You already reached your key limit.\n\n"
-                + count_line
-                + "\nAsk an admin if you need a higher limit."
-            ),
+            "description": count_line + KEY_SLOT_LIMIT_MESSAGE,
         },
     }
 
@@ -222,21 +227,18 @@ def build_redeem_limit_response(
     max_keys: int, *, active_count: int | None = None
 ) -> dict[str, Any]:
     """Ephemeral embed when a user tries to redeem a key but is at their limit."""
+    from agent.license_store import KEY_SLOT_LIMIT_MESSAGE
+
     if active_count is not None:
-        count_line = f"Active Keys: **{active_count} / {max_keys}**\n"
+        count_line = f"Active Keys: **{active_count} / {max_keys}**\n\n"
     else:
-        count_line = f"Active Keys: **{max_keys} / {max_keys}**\n"
+        count_line = ""
     return {
         "ephemeral": True,
         "embed": {
             "title": "\u274c Key Limit Reached",
             "color": 0xE74C3C,
-            "description": (
-                "You already reached your key limit.\n\n"
-                + count_line
-                + "\nYou cannot redeem another key unless your limit is increased "
-                "or an active key is removed."
-            ),
+            "description": count_line + KEY_SLOT_LIMIT_MESSAGE,
         },
     }
 
@@ -428,13 +430,13 @@ def build_redeem_already_owned_response(
 
 
 def build_not_owner_response() -> dict[str, Any]:
-    """Ephemeral embed when a non-owner tries an admin-only panel operation."""
+    """Ephemeral embed when a non-owner tries an owner-only slash command."""
     return {
         "ephemeral": True,
         "embed": {
-            "title": "\U0001f6ab Unauthorized",
+            "title": "\u274c Owner Only",
             "color": 0xE74C3C,
-            "description": "You do not have permission to manage the license panel.",
+            "description": "\u274c This command is owner-only.",
         },
     }
 
@@ -536,7 +538,8 @@ def build_panel_limit_blocked_response(
     max_panel: int, *, used_count: int | None = None
 ) -> dict[str, Any]:
     """Ephemeral embed when the user has reached their daily Reset HWID panel limit."""
-    count = used_count if used_count is not None else max_panel
+    from agent.license_store import HWID_RESET_LIMIT_MESSAGE
+
     if max_panel == 0:
         title = "\u26d4 Reset HWID Disabled"
         description = (
@@ -545,11 +548,10 @@ def build_panel_limit_blocked_response(
         )
     else:
         title = "\U0001f6ab Daily Reset Limit Reached"
+        count = used_count if used_count is not None else max_panel
         description = (
-            "You already used your Reset HWID limit for today.\n\n"
-            f"Reset Uses: **{count} / {max_panel}**\n"
-            "Resets again at: **12:00 AM WIB**\n\n"
-            "Ask an admin if you need a higher limit."
+            f"Reset Uses: **{count} / {max_panel}**\n\n"
+            + HWID_RESET_LIMIT_MESSAGE
         )
     return {
         "ephemeral": True,

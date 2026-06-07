@@ -702,7 +702,7 @@ class TestPanelLimitResponseBuilder(unittest.TestCase):
         from agent.license_panel import build_panel_limit_blocked_response
         payload = build_panel_limit_blocked_response(1, used_count=1)
         self.assertIn("1 / 1", payload["embed"]["description"])
-        self.assertIn("12:00 AM WIB", payload["embed"]["description"])
+        self.assertIn("00:00 WIB", payload["embed"]["description"])
 
     def test_panel_limit_blocked_response_zero_limit(self):
         """build_panel_limit_blocked_response with max=0 shows disabled message."""
