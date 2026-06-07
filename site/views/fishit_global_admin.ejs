@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0; margin: 0; padding: 24px; }
+    h1, h2 { margin: 0 0 12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+    .card { background: #1a1f2e; border: 1px solid #2a3040; border-radius: 8px; padding: 14px; }
+    .card strong { display: block; font-size: 1.4rem; color: #93c5fd; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: .85rem; }
+    th, td { border: 1px solid #2a3040; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #141824; }
+    .muted { color: #8a94a6; font-size: .8rem; }
+    .btn { background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+    .warn { color: #fbbf24; }
+    .ok { color: #4ade80; }
+  </style>
+</head>
+<body>
+  <h1>Fish It Global Catalog Admin</h1>
+  <p class="muted">BLOCKER10V — global SQLite collective DB. Quiz Bot is seed only; this DB is source of truth.</p>
+
+  <div class="grid">
+    <div class="card"><span class="muted">Species</span><strong><%= stats.speciesCount %></strong></div>
+    <div class="card"><span class="muted">Image assets</span><strong><%= stats.imageAssetCount %></strong></div>
+    <div class="card"><span class="muted">Item mappings</span><strong><%= stats.mappingCount %></strong></div>
+    <div class="card"><span class="muted">Observations</span><strong><%= stats.observationCount %></strong></div>
+    <div class="card"><span class="muted">Open conflicts</span><strong class="<%= stats.openConflictCount > 0 ? 'warn' : 'ok' %>"><%= stats.openConflictCount %></strong></div>
+    <div class="card"><span class="muted">Seed imported</span><strong><%= stats.seedImportedCount %></strong></div>
+  </div>
+
+  <p>
+    <button class="btn" type="button" onclick="reimportQuizBot()">Reimport Quiz Bot Seed (621)</button>
+    <span id="importStatus" class="muted"></span>
+  </p>
+
+  <h2>Unresolved Species (missing image/rarity or live-only)</h2>
+  <% if (!unresolved || unresolved.length === 0) { %>
+    <p class="ok">All seeded species have image + rarity metadata.</p>
+  <% } else { %>
+    <table>
+      <tr><th>ID</th><th>Name</th><th>Rarity</th><th>Status</th><th>Image</th><th>Action</th></tr>
+      <% for (const s of unresolved) { %>
+        <tr>
+          <td><%= s.id %></td>
+          <td><%= s.canonical_name %></td>
+          <td><%= s.rarity || '-' %></td>
+          <td><%= s.verification_status %></td>
+          <td><%= s.cached_image_url ? 'yes' : 'no' %></td>
+          <td>
+            <button class="btn" type="button" onclick="verifySpecies(<%= s.id %>, '<%= s.canonical_name %>')">Mark verified</button>
+          </td>
+        </tr>
+      <% } %>
+    </table>
+  <% } %>
+
+  <h2>Open Conflicts</h2>
+  <% if (!conflicts || conflicts.length === 0) { %>
+    <p class="ok">No open conflicts.</p>
+  <% } else { %>
+    <table>
+      <tr><th>Item ID</th><th>Type</th><th>Candidates</th><th>Status</th><th>Updated</th></tr>
+      <% for (const c of conflicts) { %>
+        <tr>
+          <td><%= c.item_id %></td>
+          <td><%= c.conflict_type %></td>
+          <td><%= (c.candidate_names || []).join(', ') %></td>
+          <td><%= c.status %></td>
+          <td><%= c.updated_at %></td>
+        </tr>
+      <% } %>
+    </table>
+  <% } %>
+
+  <h2>Recent Item Mappings</h2>
+  <table>
+    <tr><th>Item ID</th><th>Name</th><th>Confidence</th><th>Evidence</th><th>Users</th><th>Conflict</th></tr>
+    <% for (const m of mappings) { %>
+      <tr>
+        <td><%= m.item_id %></td>
+        <td><%= m.canonical_name %></td>
+        <td><%= m.confidence %></td>
+        <td><%= m.evidence_count %></td>
+        <td><%= m.unique_user_count %></td>
+        <td><%= m.conflict_status || '-' %></td>
+      </tr>
+    <% } %>
+  </table>
+
+  <h2>Species Sample</h2>
+  <table>
+    <tr><th>ID</th><th>Name</th><th>Rarity</th><th>Status</th><th>Cached Image</th><th>Source</th></tr>
+    <% for (const s of species) { %>
+      <tr>
+        <td><%= s.id %></td>
+        <td><%= s.canonical_name %></td>
+        <td><%= s.rarity || '-' %></td>
+        <td><%= s.verification_status %></td>
+        <td><%= s.cached_image_url ? 'yes' : 'no' %></td>
+        <td><%= s.source %></td>
+      </tr>
+    <% } %>
+  </table>
+
+  <script>
+    async function reimportQuizBot() {
+      const el = document.getElementById('importStatus');
+      el.textContent = 'Importing...';
+      const token = new URLSearchParams(location.search).get('admin_token') || '';
+      try {
+        const r = await fetch('/api/fishit-global/import-quiz-bot?admin_token=' + encodeURIComponent(token), {
+          method: 'POST',
+          headers: token ? { 'x-admin-token': token } : {},
+        });
+        const data = await r.json();
+        el.textContent = data.ok
+          ? `Imported ${data.result.speciesImported} species, ${data.result.imagesImported} images`
+          : ('Failed: ' + (data.error || data.result?.reason));
+        if (data.ok) setTimeout(() => location.reload(), 1200);
+      } catch (e) {
+        el.textContent = 'Error: ' + e.message;
+      }
+    }
+    async function verifySpecies(id, name) {
+      const token = new URLSearchParams(location.search).get('admin_token') || '';
+      const rarity = prompt('Rarity for ' + name + ' (optional):', '');
+      await fetch('/api/fishit-global/species/' + id + '/verify?admin_token=' + encodeURIComponent(token), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'x-admin-token': token } : {}) },
+        body: JSON.stringify({ canonical_name: name, rarity: rarity || undefined }),
+      });
+      location.reload();
+    }
+  </script>
+</body>
+</html>

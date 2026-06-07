@@ -60,6 +60,7 @@ function isRarityLabel(raw) {
 function isGenericStatusLabel(raw) {
   const t = normalizeToken(raw);
   if (!t) return false;
+  if (/^item #\d+$/.test(t)) return false;
   if (STATUS_LABELS.has(t)) return true;
   for (const phrase of STATUS_LABELS) {
     if (t === phrase || t.startsWith(`${phrase} `)) return true;

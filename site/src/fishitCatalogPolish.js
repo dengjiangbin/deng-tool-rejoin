@@ -260,6 +260,73 @@ function polishPublicFishItems(items) {
   return items.map(polishPublicItem);
 }
 
+function normalizeMutationGroup(item) {
+  const mut = item?.mutation || null;
+  if (!mut) return '__base__';
+  return String(mut).toLowerCase().trim();
+}
+
+/** Public card aggregation key: canonical species + mutation group (BLOCKER10W). */
+function publicAggregationKey(item) {
+  const speciesId = item?.speciesId || item?.globalSpeciesId || null;
+  const base = String(item?.baseFishName || item?.cardName || item?.name || '').trim();
+  const normBase = base.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+  const mutGroup = normalizeMutationGroup(item);
+  return `${speciesId || normBase}::${mutGroup}`;
+}
+
+/**
+ * Group duplicate species cards — sum amounts, keep weight internal/debug only.
+ * Same base species with different weights becomes one public card.
+ */
+function groupPublicFishItems(items) {
+  if (!Array.isArray(items)) return [];
+  const groups = new Map();
+  for (const raw of items) {
+    const item = polishPublicItem(raw);
+    const key = publicAggregationKey(item);
+    const amt = Number(item.amount) > 0 ? Math.floor(Number(item.amount)) : 1;
+    const w = item.weightKg != null ? Number(item.weightKg) : (item.weight != null ? Number(item.weight) : null);
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        ...item,
+        amount: amt,
+        groupedInstanceCount: 1,
+        _weightSamples: Number.isFinite(w) ? [w] : [],
+      });
+      continue;
+    }
+    existing.amount = (Number(existing.amount) || 1) + amt;
+    existing.groupedInstanceCount = (existing.groupedInstanceCount || 1) + 1;
+    if (Number.isFinite(w)) existing._weightSamples.push(w);
+    if (!existing.imageUrl && item.imageUrl) {
+      existing.imageUrl = item.imageUrl;
+      existing.imageSource = item.imageSource;
+      existing.imageStatus = item.imageStatus;
+    }
+    if ((!existing.rarity || existing.rarity === 'Unknown') && item.rarity && item.rarity !== 'Unknown') {
+      existing.rarity = item.rarity;
+      existing.raritySource = item.raritySource;
+    }
+  }
+  return [...groups.values()].map((g) => {
+    const samples = g._weightSamples || [];
+    const { _weightSamples, weight, weightKg, ...rest } = g;
+    return {
+      ...rest,
+      publicWeightHidden: true,
+      debugWeight: samples.length ? {
+        totalWeightKg: samples.reduce((a, b) => a + b, 0),
+        minWeightKg: Math.min(...samples),
+        maxWeightKg: Math.max(...samples),
+        sampleWeights: samples.slice(0, 8),
+        instances: samples.length,
+      } : null,
+    };
+  });
+}
+
 function getCatalogPolishStats(imageCacheStats, rarityStats) {
   return {
     enabled: true,
@@ -351,6 +418,9 @@ module.exports = {
   repairCatalogStoreEntries,
   polishPublicItem,
   polishPublicFishItems,
+  groupPublicFishItems,
+  publicAggregationKey,
+  normalizeMutationGroup,
   getCatalogPolishStats,
   getNameNormalizationProof,
   buildPublicNameContractProof,

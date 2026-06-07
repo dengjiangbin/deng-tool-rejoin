@@ -44,8 +44,10 @@ const rarityLabels = require('./fishitRarityLabels');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10U6_BUILD, BLOCKER10U6_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10V_BUILD, BLOCKER10V_UI_MARKER } = require('./fishitTrackerBuild');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
+const globalCatalogService = require('./fishitGlobalCatalogService');
+const globalDb = require('./fishitGlobalDb');
 const catalogPolish = require('./fishitCatalogPolish');
 const fishImageCache = require('./fishitFishImageCache');
 const rarityEnrichment = require('./fishitRarityEnrichment');
@@ -82,6 +84,40 @@ function resolveServerCommit() {
 let fishitDb = null;
 try { fishitDb = require('./fishitDb'); } catch (_) { fishitDb = null; }
 
+function recordGlobalObservationsFromItems(items, ctx = {}) {
+  if (!Array.isArray(items) || process.env.FISHIT_GLOBAL_OBSERVATIONS === '0') return { written: 0 };
+  const seen = new Set();
+  let written = 0;
+  for (const it of items) {
+    if (!it || !it.itemId) continue;
+    const fishLike = isPublicFishItem(it) || isLikelyFishInventoryItem(it);
+    if (!fishLike) continue;
+    const id = String(it.itemId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const baseName = it.baseFishName || it.cardName
+      || (catalogStore.isPlaceholderItemName(it.name, it.itemId) ? null : it.name);
+    if (!baseName && !isLikelyFishInventoryItem(it)) continue;
+    try {
+      const result = globalCatalogService.recordObservation({
+        itemId: id,
+        rawName: it.name,
+        baseFishName: baseName,
+        mutation: it.mutation,
+        weightKg: it.weightKg ?? it.weight,
+        rarity: it.rarity,
+        userId: ctx.userId,
+        sessionKey: ctx.sessionKey,
+        gameId: ctx.gameId,
+        placeId: ctx.placeId,
+        sourcePayloadType: 'inventory_snapshot',
+      });
+      if (result?.accepted !== false) written += 1;
+    } catch (_) { /* non-blocking */ }
+  }
+  return { written };
+}
+
 function dbImageFor(name) {
   if (!fishitDb || typeof fishitDb.resolveSpeciesImage !== 'function') return null;
   try {
@@ -97,8 +133,25 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10U6_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10U6_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10V_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10V_BUILD;
+
+let _globalDbBootstrapped = false;
+async function ensureGlobalDbSeeded() {
+  if (_globalDbBootstrapped) return;
+  _globalDbBootstrapped = true;
+  try {
+    const stats = globalDb.getStats();
+    if (stats.speciesCount < 100 && process.env.NODE_ENV !== 'test') {
+      console.log('[fishit-global] seeding global DB from Quiz Bot catalog...');
+      await globalCatalogService.importQuizBotSeed();
+      console.log('[fishit-global] seed complete:', globalDb.getStats());
+    }
+  } catch (err) {
+    console.warn('[fishit-global] bootstrap failed:', err && err.message ? err.message : err);
+  }
+}
+ensureGlobalDbSeeded();
 
 const CONFIRMED_FISH_IMAGE_ASSET_IDS = [
   '128385926161840',
@@ -257,6 +310,27 @@ function mergeItemsNoDowngrade(incoming, existing) {
 
 /** BLOCKER10H: enrich incoming placeholders from persistent catalog before store. */
 function catalogMetaForItemId(itemId) {
+  const manual = manualVerifiedCatalog.lookupByItemId(itemId);
+  if (manual && manual.baseFishName && !rarityLabels.isBlockedLearnName(manual.baseFishName)) {
+    return {
+      name: manual.baseFishName,
+      displayName: manual.displayName || manual.baseFishName,
+      baseFishName: manual.baseFishName,
+      mutation: manual.mutation || null,
+      category: manual.category || 'fish',
+      source: 'manual_verified_catalog',
+      tier: manual.rarity || null,
+      imageUrl: manual.imageUrl || manual.sourceUrl || null,
+      imageAssetId: manual.imageAssetId || null,
+      confidence: manual.confidence || 'user_verified',
+      publicEligible: true,
+    };
+  }
+  const globalStrong = globalCatalogService.resolveCatalogMetaForItemId(itemId);
+  if (globalStrong && globalStrong.publicEligible
+      && !rarityLabels.isBlockedLearnName(globalStrong.baseFishName || globalStrong.name)) {
+    return globalStrong;
+  }
   const canon = canonicalCatalog.lookupByItemId(itemId);
   if (canon && canon.baseFishName && !rarityLabels.isBlockedLearnName(canon.baseFishName)) {
     const isManual = (canon.sources || []).includes('fishit_manual_verified_catalog');
@@ -271,22 +345,6 @@ function catalogMetaForItemId(itemId) {
       imageUrl: canon.imageUrl || canon.sourceUrl || null,
       imageAssetId: canon.imageAssetId || null,
       confidence: canon.rarityConfidence || (isManual ? 'user_verified' : 'confirmed'),
-      publicEligible: true,
-    };
-  }
-  const manual = manualVerifiedCatalog.lookupByItemId(itemId);
-  if (manual && manual.baseFishName && !rarityLabels.isBlockedLearnName(manual.baseFishName)) {
-    return {
-      name: manual.baseFishName,
-      displayName: manual.displayName || manual.baseFishName,
-      baseFishName: manual.baseFishName,
-      mutation: manual.mutation || null,
-      category: manual.category || 'fish',
-      source: 'manual_verified_catalog',
-      tier: manual.rarity || null,
-      imageUrl: manual.imageUrl || manual.sourceUrl || null,
-      imageAssetId: manual.imageAssetId || null,
-      confidence: manual.confidence || 'user_verified',
       publicEligible: true,
     };
   }
@@ -337,6 +395,11 @@ function catalogMetaForItemId(itemId) {
       confidence: String(learned.confidence),
       publicEligible: true,
     };
+  }
+  const globalLive = globalCatalogService.resolveCatalogMetaForItemId(itemId, { allowLiveObserved: true });
+  if (globalLive && globalLive.publicEligible
+      && !rarityLabels.isBlockedLearnName(globalLive.baseFishName || globalLive.name)) {
+    return globalLive;
   }
   return main;
 }
@@ -515,6 +578,38 @@ function enrichItemsFromCatalog(items) {
       if (img) imageAssetId = img.assetId;
     }
 
+    let speciesId = meta?.speciesId || null;
+    let globalResolvedFish = false;
+    if (it.itemId) {
+      const gMeta = globalCatalogService.resolveCatalogMetaForItemId(String(it.itemId), { allowLiveObserved: true });
+      if (gMeta?.speciesId) speciesId = gMeta.speciesId;
+      if (gMeta && catalogStore.isFishCategory(gMeta.category || 'fish')) {
+        if (isPlaceholder || !trackerHasRealName) {
+          name = gMeta.displayName || gMeta.name;
+          displayName = gMeta.displayName || gMeta.name;
+          baseFishName = gMeta.baseFishName || gMeta.name;
+          category = 'fish';
+          globalResolvedFish = true;
+          if (!rarity && gMeta.tier) rarity = fishCatalog.normalizeRarity(gMeta.tier);
+        }
+      }
+    }
+    if (!speciesId && baseFishName) {
+      const sp = globalCatalogService.resolveSpeciesForItem({ ...it, baseFishName, name: baseFishName });
+      speciesId = sp.species?.id || null;
+      if (sp.species && (isPlaceholder || catalogStore.isFishCategory(category))) {
+        globalResolvedFish = true;
+      }
+    }
+    const gImg = globalCatalogService.resolveImageForItem({ ...it, baseFishName, name: displayName || name });
+    if (gImg.image?.cachedUrl) {
+      imageUrl = gImg.image.cachedUrl;
+    }
+    const gRarity = globalCatalogService.resolveRarityForItem({ ...it, baseFishName, name: displayName || name });
+    if (gRarity.rarity?.rarity) {
+      rarity = gRarity.rarity.rarity;
+    }
+
     out.push({
       ...it,
       name,
@@ -525,11 +620,14 @@ function enrichItemsFromCatalog(items) {
       weightKg: weightVal != null ? weightVal : it.weightKg,
       rarity,
       tier: rarity || it.tier || null,
-      raritySource: it.raritySource || (meta && meta.source && rarity ? meta.source : null),
-      rarityConfidence: it.rarityConfidence || (meta && meta.confidence) || null,
+      raritySource: it.raritySource || gRarity.rarity?.raritySource || (meta && meta.source && rarity ? meta.source : null),
+      rarityConfidence: it.rarityConfidence || gRarity.rarity?.rarityConfidence || (meta && meta.confidence) || null,
       category,
       imageUrl,
       imageAssetId: imageAssetId || it.imageAssetId || null,
+      speciesId,
+      globalSpeciesId: speciesId,
+      globalResolvedFish,
       resolved,
       catalogReason,
       catalogSource,
@@ -607,11 +705,175 @@ function sumItemAmounts(items) {
   return items.reduce((s, it) => s + (Number(it.amount) > 0 ? Math.floor(Number(it.amount)) : 1), 0);
 }
 
+const KNOWN_NON_FISH_ITEM_IDS = new Set(['10', '990', '388']);
+
+function isKnownNonFishInventoryItem(item) {
+  if (!item?.itemId) return false;
+  const id = String(item.itemId).trim();
+  if (KNOWN_NON_FISH_ITEM_IDS.has(id)) return true;
+  const cat = String(item.category || '').toLowerCase();
+  if (cat === 'bait' || cat === 'rod') return true;
+  const meta = catalogStore.lookupById(id);
+  if (meta && !catalogStore.isFishCategory(meta.category)) return true;
+  return false;
+}
+
+/** Fish-like Replion row: numeric itemId, not bait/crate/rod, often has weight or Metadata. */
+function isLikelyFishInventoryItem(item) {
+  if (!item?.itemId) return false;
+  if (isKnownNonFishInventoryItem(item)) return false;
+  const id = String(item.itemId).trim();
+  if (!/^\d+$/.test(id)) return false;
+  const cat = String(item.category || '').toLowerCase();
+  if (cat === 'fish') return true;
+  const w = item.weightKg != null ? Number(item.weightKg) : Number(item.weight);
+  const hasWeight = Number.isFinite(w) && w > 0;
+  const placeholder = catalogStore.isPlaceholderItemName(item.name, item.itemId);
+  if (placeholder && hasWeight) return true;
+  if (placeholder && item.rawProof?.rawObjectPreview?.Metadata) return true;
+  if (placeholder && item.rawProof?.rawObjectPreview?.Favorited != null) return true;
+  const globalMeta = globalCatalogService.resolveCatalogMetaForItemId(id, { allowLiveObserved: true });
+  if (globalMeta && catalogStore.isFishCategory(globalMeta.category)) return true;
+  const fish = fishCatalog.lookupByItemId(id);
+  if (fish && fish.category === 'fish') return true;
+  const canon = canonicalCatalog.lookupByItemId(id);
+  if (canon && catalogStore.isFishCategory(canon.category || 'fish')) return true;
+  return false;
+}
+
+function explainPublicExclusionReason(item) {
+  if (!item) return 'null_item';
+  const cat = String(item.category || '').toLowerCase();
+  if (cat === 'rod' || cat === 'bait') return 'non_fish_category_rod_or_bait';
+  if (isKnownNonFishInventoryItem(item)) return 'known_non_fish_item_id';
+  if (rarityLabels.isBlockedLearnName(item.name)) return 'blocked_learn_name';
+  if (item.itemId) {
+    const mapping = globalDb.getItemMapping(String(item.itemId));
+    if (mapping?.conflict_status === 'quarantined') return 'quarantined_global_mapping';
+  }
+  if (cat === 'items' && catalogStore.isPlaceholderItemName(item.name, item.itemId)) {
+    if (isLikelyFishInventoryItem(item)) return 'no_global_item_mapping_for_fish_candidate';
+    return 'non_fish_items_category_placeholder';
+  }
+  if (catalogStore.isPlaceholderItemName(item.name, item.itemId)) return 'placeholder_name_unresolved';
+  if (!catalogStore.isFishCategory(cat)) return 'non_fish_category';
+  return 'filtered_by_public_gate';
+}
+
+function buildPublicFilterTrace(enrichedFlat) {
+  return (enrichedFlat || []).map((item) => {
+    const parsed = catchNameParser.canonicalizeFishName(item.name || '', {
+      mutation: item.mutation,
+      weightKg: item.weightKg ?? item.weight,
+    });
+    const globalMeta = item.itemId
+      ? globalCatalogService.resolveCatalogMetaForItemId(String(item.itemId), { allowLiveObserved: true })
+      : null;
+    const species = globalCatalogService.resolveSpeciesForItem(item);
+    const image = globalCatalogService.resolveImageForItem(item);
+    const rarity = globalCatalogService.resolveRarityForItem(item);
+    const included = isPublicFishItem(item);
+    return {
+      itemId: item.itemId || null,
+      rawName: item.name || null,
+      parsedBaseName: parsed.baseFishName || item.baseFishName || null,
+      canonicalName: species.species?.canonical_name || globalMeta?.baseFishName || item.baseFishName || null,
+      amount: item.amount || 1,
+      mutation: item.mutation || parsed.mutation || null,
+      category: item.category || null,
+      includedPublic: included,
+      exclusionReason: included ? null : explainPublicExclusionReason(item),
+      globalSpeciesId: species.species?.id || globalMeta?.speciesId || null,
+      globalMappingId: item.itemId || null,
+      confidence: globalMeta?.confidence || species.mapping?.confidence || null,
+      imageStatus: image.image?.cachedUrl ? 'cached' : (item.imageStatus || 'missing'),
+      rarityStatus: rarity.rarity?.rarity || item.rarity || null,
+      fishCandidate: isLikelyFishInventoryItem(item),
+    };
+  });
+}
+
+function buildInventoryParityProof(rawItems, enrichedFlat, publicItems, sessionData) {
+  const trace = buildPublicFilterTrace(enrichedFlat);
+  const publicItemIds = new Set((publicItems || []).map((p) => String(p.itemId)).filter(Boolean));
+  const publicNames = new Set(
+    (publicItems || []).map((p) => String(p.baseFishName || p.canonicalName || p.name || '').toLowerCase()).filter(Boolean),
+  );
+  const missingFromPublic = [];
+  const excludedWithReasons = [];
+  const groupedDuplicates = [];
+  const seenAgg = new Map();
+
+  for (const row of trace) {
+    const inPublicOutput = (row.itemId && publicItemIds.has(String(row.itemId)))
+      || (row.canonicalName && publicNames.has(String(row.canonicalName).toLowerCase()))
+      || (row.parsedBaseName && publicNames.has(String(row.parsedBaseName).toLowerCase()));
+
+    if (inPublicOutput) {
+      const key = `${row.globalSpeciesId || row.canonicalName || row.parsedBaseName || row.itemId}::${row.mutation || '__base__'}`;
+      if (seenAgg.has(key)) {
+        groupedDuplicates.push({ key, itemId: row.itemId, canonicalName: row.canonicalName });
+      } else {
+        seenAgg.set(key, row.itemId);
+      }
+      continue;
+    }
+
+    if (row.fishCandidate || row.includedPublic) {
+      missingFromPublic.push({
+        itemId: row.itemId,
+        rawName: row.rawName,
+        reason: row.exclusionReason || 'resolved_in_trace_but_missing_from_public_output',
+      });
+    }
+    if (row.exclusionReason) {
+      excludedWithReasons.push({
+        itemId: row.itemId,
+        rawName: row.rawName,
+        reason: row.exclusionReason,
+      });
+    } else if (!row.includedPublic && row.fishCandidate) {
+      excludedWithReasons.push({
+        itemId: row.itemId,
+        rawName: row.rawName,
+        reason: 'no_global_item_mapping_for_fish_candidate',
+      });
+    }
+  }
+
+  const fishLike = trace.filter((t) => t.fishCandidate || t.includedPublic);
+  const lastInv = sessionData?.lastInventoryAt || sessionData?.updatedAt || null;
+  const lastSyncAgeSeconds = lastInv
+    ? Math.max(0, Math.floor((Date.now() - Date.parse(lastInv)) / 1000))
+    : null;
+
+  return {
+    rawFishLikeCount: fishLike.length,
+    publicFishCardCount: (publicItems || []).length,
+    missingFromPublic,
+    excludedWithReasons,
+    groupedDuplicates,
+    stalePayload: lastSyncAgeSeconds != null && lastSyncAgeSeconds > 600,
+    lastInventoryAt: lastInv,
+    lastSyncAgeSeconds,
+  };
+}
+
 function isPublicFishItem(item) {
   if (!item) return false;
   const cat = String(item.category || '').toLowerCase();
   if (cat === 'rod' || cat === 'bait') return false;
+  if (isKnownNonFishInventoryItem(item)) return false;
   if (item.itemId) {
+    const globalMeta = globalCatalogService.resolveCatalogMetaForItemId(
+      String(item.itemId),
+      { allowLiveObserved: true },
+    );
+    if (globalMeta && globalMeta.publicEligible
+        && catalogStore.isFishCategory(globalMeta.category || 'fish')
+        && !rarityLabels.isBlockedLearnName(globalMeta.baseFishName || globalMeta.name)) {
+      return true;
+    }
     const canon = canonicalCatalog.lookupByItemId(item.itemId);
     if (canon && canon.baseFishName && !rarityLabels.isBlockedLearnName(canon.baseFishName)
         && catalogStore.isFishCategory(canon.category || 'fish')) {
@@ -643,7 +905,23 @@ function isPublicFishItem(item) {
     const meta = catalogStore.lookupById(item.itemId);
     if (meta && !catalogStore.isFishCategory(meta.category)) return false;
   }
-  if (cat === 'items') return false;
+  const base = item.baseFishName || item.name;
+  if (base && !catalogStore.isPlaceholderItemName(base, item.itemId)) {
+    const resolved = globalCatalogService.resolveSpeciesForItem(item);
+    if (resolved.species
+        && resolved.species.verification_status !== globalDb.VERIFICATION.QUARANTINED_CONFLICT
+        && catalogStore.isFishCategory(item.category || 'fish')) {
+      return true;
+    }
+  }
+  if (item.globalResolvedFish === true) return true;
+  if (cat === 'items') {
+    if (isLikelyFishInventoryItem(item) && item.baseFishName
+        && !catalogStore.isPlaceholderItemName(item.baseFishName, item.itemId)) {
+      return true;
+    }
+    return false;
+  }
   if (catalogStore.isPlaceholderItemName(item.name, item.itemId)) return false;
   if (catalogStore.isFishCategory(cat)) return true;
   return cat !== 'rod' && cat !== 'bait' && cat !== 'items';
@@ -661,7 +939,31 @@ async function buildPublicFishFields(enrichedFlat, baseUrl) {
   );
   const withAssets = fishImageAssets.attachFishImagesToItems(polished);
   const withRarity = rarityEnrichment.attachRarityToItems(withAssets);
-  const fishItems = await fishImageCache.attachCachedImagesToItems(withRarity, baseUrl);
+  const withImages = await fishImageCache.attachCachedImagesToItems(withRarity, baseUrl);
+  const grouped = catalogPolish.groupPublicFishItems(withImages);
+  const fishItems = grouped.map((item) => ({
+    speciesId: item.speciesId || item.globalSpeciesId || null,
+    canonicalName: item.baseFishName || item.cardName || item.name,
+    displayName: item.displayName || item.baseFishName || item.name,
+    name: item.cardName || item.baseFishName || item.name,
+    cardName: item.cardName || item.baseFishName || item.name,
+    baseFishName: item.baseFishName || item.cardName || item.name,
+    amount: item.amount || 1,
+    rarity: item.rarity || null,
+    raritySource: item.raritySource || null,
+    imageUrl: item.imageUrl || null,
+    imageSource: item.imageSource || 'global_db',
+    imageStatus: item.imageStatus || (item.imageUrl ? 'cached' : 'missing'),
+    mutationTags: item.mutation ? [item.mutation] : [],
+    sourcePriority: item.catalogSource || item.catalogEnrichmentSource || null,
+    confidence: item.rarityConfidence || item.catalogReason || null,
+    groupedInstanceCount: item.groupedInstanceCount || 1,
+    itemId: item.itemId || null,
+    category: 'fish',
+    publicWeightHidden: true,
+    debugWeight: item.debugWeight || null,
+    shiny: item.shiny === true,
+  }));
   const hidden = (enrichedFlat || []).filter((it) => !isPublicFishItem(it));
   const fishCounts = {
     label: 'Fish',
@@ -673,9 +975,11 @@ async function buildPublicFishFields(enrichedFlat, baseUrl) {
   return {
     fishItems,
     publicItems: fishItems,
+    publicFishItems: fishItems,
     fishInventory: buildInventoryGroups(fishItems),
     fishCounts,
     publicCounts: fishCounts,
+    publicFilterTrace: buildPublicFilterTrace(enriched),
   };
 }
 
@@ -898,15 +1202,16 @@ function renderTrackerPage(_req, res) {
     title: '🎣 Fish It Live Inventory Tracker',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
-    blocker10u6Build: BLOCKER10U6_BUILD,
-    blocker10u5Build: BLOCKER10U6_BUILD,
-    blocker10u3u4Build: BLOCKER10U6_BUILD,
-    blocker10u2Build: BLOCKER10U6_BUILD,
-    blocker10uBuild: BLOCKER10U6_BUILD,
-    blocker10tBuild: BLOCKER10U6_BUILD,
-    blocker10sBuild: BLOCKER10U6_BUILD,
-    blocker10rBuild: BLOCKER10U6_BUILD,
-    blocker10qBuild: BLOCKER10U6_BUILD,
+    blocker10vBuild: BLOCKER10V_BUILD,
+    blocker10u6Build: BLOCKER10V_BUILD,
+    blocker10u5Build: BLOCKER10V_BUILD,
+    blocker10u3u4Build: BLOCKER10V_BUILD,
+    blocker10u2Build: BLOCKER10V_BUILD,
+    blocker10uBuild: BLOCKER10V_BUILD,
+    blocker10tBuild: BLOCKER10V_BUILD,
+    blocker10sBuild: BLOCKER10V_BUILD,
+    blocker10rBuild: BLOCKER10V_BUILD,
+    blocker10qBuild: BLOCKER10V_BUILD,
   });
 }
 
@@ -1274,6 +1579,12 @@ function handleUpdateBackpack(req, res) {
     };
 
     const enrichedForGood = enrichItemsFromCatalog(liveTrackDB[key].items);
+    recordGlobalObservationsFromItems(enrichedForGood, {
+      userId: cleanUserId,
+      sessionKey: key,
+      gameId: body.gameId || null,
+      placeId: body.placeId || null,
+    });
     const publicFishCount = enrichedForGood.filter(isPublicFishItem).length;
     partialSnapshot.updateLastGoodFishOnSession(
       liveTrackDB[key],
@@ -1422,9 +1733,13 @@ async function handleGetBackpack(req, res) {
     counts:          buildPublicLegacyCounts(publicFish.fishCounts),
     fishItems:       publicFish.fishItems,
     publicItems:     publicFish.publicItems,
+    publicFishItems: publicFish.publicFishItems,
     fishInventory:   publicFish.fishInventory,
     fishCounts:      publicFish.fishCounts,
     publicCounts:    publicFish.publicCounts,
+    globalCatalogProof: globalCatalogService.buildGlobalDbSummaryProof(),
+    globalImageProof: globalCatalogService.buildGlobalImageProof(publicFish.fishItems),
+    globalRarityProof: globalCatalogService.buildGlobalRarityProof(publicFish.fishItems),
     imageResolutionProof,
     fishCatalogTotal: fishCatalogStats.fishCatalogTotal,
     fishCatalogWithImages: fishCatalogStats.fishCatalogWithImages,
@@ -1555,6 +1870,22 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     quizBotImageAudit: quizBotImageCatalog.auditNames(
       publicFishDbg.fishItems.map((f) => f.baseFishName || f.name).filter(Boolean),
     ),
+    globalCatalogProof: globalCatalogService.buildGlobalDbSummaryProof(),
+    globalCatalogItemProof: globalCatalogService.buildGlobalCatalogProof(publicFishDbg.fishItems),
+    globalImageProof: globalCatalogService.buildGlobalImageProof(publicFishDbg.fishItems),
+    globalRarityProof: globalCatalogService.buildGlobalRarityProof(publicFishDbg.fishItems),
+    globalEvidenceProof: globalCatalogService.buildGlobalEvidenceProof(15),
+    globalConflictProof: globalCatalogService.buildGlobalConflictProof(15),
+    globalContributionProof: globalCatalogService.buildGlobalContributionProof(),
+    quizBotSeedImportProof: globalCatalogService.buildQuizBotSeedImportProof(),
+    globalDbStats: globalDb.getStats(),
+    publicFilterTrace: buildPublicFilterTrace(enrichedAll),
+    inventoryParityProof: buildInventoryParityProof(
+      rawItemsArr,
+      enrichedAll,
+      publicFishDbg.fishItems,
+      data,
+    ),
     rarityResolutionProof: rarityEnrichment.getRarityResolutionProof(25),
     raritySourcesUsed: rarityStats.raritySourcesUsed,
     rarityCatalogCount: rarityStats.rarityCatalogCount,
@@ -1656,20 +1987,28 @@ module.exports.buildRawInspector = buildRawInspector;
 module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
+module.exports.isLikelyFishInventoryItem = isLikelyFishInventoryItem;
+module.exports.buildPublicFilterTrace = buildPublicFilterTrace;
+module.exports.buildInventoryParityProof = buildInventoryParityProof;
+module.exports.explainPublicExclusionReason = explainPublicExclusionReason;
 module.exports.PUBLIC_API_BUILD = PUBLIC_API_BUILD;
-module.exports.BLOCKER10U6_BUILD = BLOCKER10U6_BUILD;
-module.exports.BLOCKER10U5_BUILD = BLOCKER10U6_BUILD;
-module.exports.BLOCKER10U3_U4_BUILD = BLOCKER10U6_BUILD;
-module.exports.BLOCKER10U2_BUILD = BLOCKER10U6_BUILD;
-module.exports.BLOCKER10U_BUILD = BLOCKER10U6_BUILD;
-module.exports.BLOCKER10T_BUILD = BLOCKER10U6_BUILD;
-module.exports.BLOCKER10S_BUILD = BLOCKER10U6_BUILD;
-module.exports.BLOCKER10R_BUILD = BLOCKER10U6_BUILD;
-module.exports.BLOCKER10Q_BUILD = BLOCKER10U6_BUILD;
-module.exports.BLOCKER10P_BUILD = BLOCKER10U6_BUILD;
-module.exports.BLOCKER10O_BUILD = BLOCKER10U6_BUILD;
-module.exports.BLOCKER10N2_BUILD = BLOCKER10U6_BUILD;
-module.exports.BLOCKER10N_BUILD = BLOCKER10U6_BUILD;
+module.exports.BLOCKER10W_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10V_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10U6_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10U5_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10U3_U4_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10U2_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10U_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10T_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10S_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10R_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10Q_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10P_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10O_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10N2_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10N_BUILD = BLOCKER10V_BUILD;
+module.exports.globalCatalogService = globalCatalogService;
+module.exports.globalDb = globalDb;
 module.exports.persistSessionState = persistSessionState;
 module.exports.sessionStore = sessionStore;
 module.exports.canonicalCatalog = canonicalCatalog;
