@@ -20,11 +20,11 @@ if (src.charCodeAt(0) === 0xfeff) {
 if (/^\s*loadstring\s*\(/.test(src)) {
   errors.push('tracker.lua must not begin with loadstring() wrapper');
 }
-if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07')) {
-  errors.push('TRACKER_BOOT_BEGIN BLOCKER10Y marker missing');
+if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07')) {
+  errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z marker missing');
 }
-if (!src.includes('BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07')) {
-  errors.push('BLOCKER10Y build marker missing');
+if (!src.includes('BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07')) {
+  errors.push('BLOCKER10Z build marker missing');
 }
 if (!src.includes('parseCatchNameFull')) {
   errors.push('parseCatchNameFull catch normalizer missing');

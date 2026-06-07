@@ -18,7 +18,7 @@ const SUFFIX_RE = /\s*(?:!|\.)\s*$/i;
 
 /** Mutation/effect labels — longest multi-word first (BLOCKER10U). */
 const MUTATION_LABELS_ORDERED = [
-  'fairy dust', 'radioactive shiny',
+  'fairy dust', 'radioactive shiny', 'radiant',
   'big', 'shiny', 'baby', 'giant', 'mutated', 'albino', 'darkened', 'glossy',
   'mosaic', 'silver', 'golden', 'gold', 'mythical', 'frozen', 'electric',
   'sandy', 'corrupt', 'ghost', 'midnight', 'radioactive', 'galaxy',

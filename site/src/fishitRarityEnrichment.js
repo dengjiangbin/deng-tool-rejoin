@@ -75,11 +75,11 @@ function lookupRarityForItem(item) {
     } catch (_) { /* fallback */ }
   }
 
-  // 2. captured in-game UI name color evidence
+  // 2. captured in-game UI name color evidence from visible bag
   if (item.uiRarityFromColor) {
     return {
       rarity: fishCatalog.normalizeRarity(item.uiRarityFromColor),
-      raritySource: 'ui_name_color',
+      raritySource: 'inventory_ui_color',
       rarityConfidence: item.uiRarityConfidence || 'ui_color',
     };
   }
@@ -88,7 +88,7 @@ function lookupRarityForItem(item) {
     if (colorHit?.rarity) {
       return {
         rarity: colorHit.rarity,
-        raritySource: 'ui_name_color',
+        raritySource: 'inventory_ui_color',
         rarityConfidence: colorHit.confidence || 'ui_color',
       };
     }

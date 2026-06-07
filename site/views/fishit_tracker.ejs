@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07' %>">
+<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07' %>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -121,6 +121,8 @@
     .global-db-proof .gdb-row { display:flex; justify-content:space-between; gap:8px; }
     .global-db-proof .gdb-on { color:#4ade80; font-weight:600; }
     .global-db-debug { margin-top:6px; font-size:.68rem; color:#8a94a6; max-height:120px; overflow:auto; }
+    .gdb-indicator { display:inline-block; margin:0 16px 8px; padding:2px 8px; border-radius:99px; font-size:.72rem; color:#93c5fd; background:var(--surface2); border:1px solid var(--border); }
+    .gdb-indicator .gdb-on { color:#4ade80; font-weight:600; }
     .ic-badges { display:flex; flex-wrap:wrap; gap:4px; align-items:center; flex-shrink:0; margin-top:2px; }
     .ic-meta { display:flex; flex-wrap:wrap; gap:5px; }
     .badge { font-size:.72rem; padding:2px 9px; border-radius:99px; border:1px solid var(--border); background:var(--surface); color:var(--muted); }
@@ -152,8 +154,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07">
-<!-- BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07 -->
+<body data-ui-marker="BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07">
+<!-- BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07 -->
 <div class="page">
   <div class="inner">
 
@@ -203,9 +205,9 @@
   const POLL_MS       = 5000;
   const DEBUG_GLOBAL  = /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
   const RENDER_BUILD  = document.documentElement.getAttribute('data-render-build')
-    || 'BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07';
+    || 'BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07';
   const PUBLIC_API_BUILD = document.documentElement.getAttribute('data-public-api-build')
-    || 'BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07';
+    || 'BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07';
   const RARITY_NAME_COLORS = {
     common:'#9ca3af', uncommon:'#4ade80', rare:'#60a5fa', epic:'#c084fc',
     legendary:'#eab308', legend:'#eab308', mythic:'#f472b6', secret:'#22d3ee', forgotten:'#818cf8',
@@ -261,16 +263,27 @@
   function fishCountLabel(data, fishList) {
     const fc = data && data.fishCounts;
     const cp = data && data.countParityProof;
-    const bag = (fc && fc.bagItemInstances != null) ? fc.bagItemInstances
-      : (cp && cp.acceptedInstances != null ? cp.acceptedInstances : null);
-    const fishTotal = (fc && fc.enrichedFishInstances != null) ? fc.enrichedFishInstances
-      : (cp && cp.enrichedFishInstances != null ? cp.enrichedFishInstances
+    const snapshotItems = (fc && fc.fullSnapshotItemInstances != null) ? fc.fullSnapshotItemInstances
+      : (cp && cp.fullSnapshotItemInstances != null ? cp.fullSnapshotItemInstances
+        : (cp && cp.acceptedInstances != null ? cp.acceptedInstances : null));
+    const fishCandidates = (fc && fc.fullSnapshotFishCandidates != null) ? fc.fullSnapshotFishCandidates
+      : (cp && cp.fullSnapshotFishCandidates != null ? cp.fullSnapshotFishCandidates
+        : (cp && cp.enrichedFishInstances != null ? cp.enrichedFishInstances : null));
+    const shownFish = (fc && fc.shownFishInstances != null) ? fc.shownFishInstances
+      : (cp && cp.groupedPublicInstances != null ? cp.groupedPublicInstances
         : (fc && fc.fishInstances != null ? fc.fishInstances : null));
     const types = (fc && fc.fishTypes != null) ? fc.fishTypes : fishList.length;
     const unmapped = (fc && fc.unmappedFishInstances != null) ? fc.unmappedFishInstances
       : (cp && cp.unmappedFishCandidateInstances != null ? cp.unmappedFishCandidateInstances : 0);
-    if (bag != null && fishTotal != null) {
-      let label = `Bag: <strong>${bag}</strong> items &middot; Fish: <strong>${fishTotal}</strong> &middot; <span style="color:#8a94a6;">${types} types</span>`;
+    const visiblePage = (fc && fc.visibleBagPageCaptured && fc.visibleBagPageFishCount != null)
+      ? fc.visibleBagPageFishCount
+      : (cp && cp.visibleBagPageCaptured && cp.visibleBagPageFishCount != null ? cp.visibleBagPageFishCount : null);
+    if (snapshotItems != null && fishCandidates != null && shownFish != null) {
+      let label = `Snapshot: <strong>${snapshotItems}</strong> items &middot; Fish: <strong>${fishCandidates}</strong>`;
+      if (visiblePage != null) {
+        label += ` &middot; Visible page: <strong>${visiblePage}</strong> fish`;
+      }
+      label += ` &middot; Shown: <strong>${shownFish}</strong> / <span style="color:#8a94a6;">${types} types</span>`;
       if (unmapped > 0) label += ` &middot; <span style="color:#fbbf24;">${unmapped} unmapped</span>`;
       return label;
     }
@@ -280,25 +293,34 @@
     const total = fishList.reduce((sum, item) => sum + (Number(item.amount || item.count) || 1), 0);
     return `Fish: <strong>${total}</strong> <span style="color:#8a94a6;">(${fishList.length} types)</span>`;
   }
-  function rarityNameStyle(item) {
-    const r = item && item.rarity ? String(item.rarity).toLowerCase() : '';
-    const accent = item.rarityAccentColor || RARITY_NAME_COLORS[r] || null;
-    return accent ? `color:${accent};` : '';
-  }
   function buildGlobalDbProofHtml(data) {
     const g = (data && data.globalDbUiProof) || (data && data.globalCatalogProof) || null;
     if (!g) return '';
+    if (!DEBUG_GLOBAL) {
+      return `<span class="gdb-indicator" title="Global collective fish catalog active">Global DB: <span class="gdb-on">ON</span></span>`;
+    }
     const imgLabel = g.cardsUsingGlobalDbImagesLabel
       || `${g.cardsUsingGlobalDbImages || 0}/${g.cardsTotal || '?'}`;
     const rarLabel = g.cardsUsingGlobalDbRarityLabel
       || `${g.cardsUsingGlobalDbRarity || 0}/${g.cardsTotal || '?'}`;
     let debugRows = '';
-    if (DEBUG_GLOBAL && Array.isArray(data.publicFishItems)) {
+    if (Array.isArray(data.publicFishItems)) {
       debugRows = data.publicFishItems.slice(0, 12).map((it) =>
         `<div>${escHtml(it.canonicalName || it.name)} &mdash; img:${escHtml(it.dataImageSource || it.imageSource || '-')} rarity:${escHtml(it.dataRaritySource || it.raritySource || '-')}</div>`
       ).join('');
     }
-    return `<details class="global-db-proof"${DEBUG_GLOBAL ? ' open' : ''}>
+    let parityRows = '';
+    const cp = data.countParityProof;
+    if (cp) {
+      parityRows = `<div class="global-db-debug">countParity: snapshot=${cp.fullSnapshotItemInstances || '?'} fish=${cp.fullSnapshotFishCandidates || '?'} visible=${cp.visibleBagPageCaptured ? cp.visibleBagPageFishCount : 'not captured'} shown=${cp.groupedPublicInstances || '?'}</div>`;
+    }
+    let rarityRows = '';
+    if (Array.isArray(data.rarityColorProof) && data.rarityColorProof.length) {
+      rarityRows = `<div class="global-db-debug">${data.rarityColorProof.slice(0, 8).map((r) =>
+        escHtml(`${r.canonicalName || '?'}: ${r.finalRarity || 'unknown'} (${r.finalRaritySource || '-'})`)
+      ).join('<br>')}</div>`;
+    }
+    return `<details class="global-db-proof" open>
   <summary>Global DB: <span class="gdb-on">ON</span> &mdash; ${escHtml(g.sourceOfTruth || 'global_db')} &mdash; images ${escHtml(imgLabel)}</summary>
   <div class="gdb-body">
     <div class="gdb-row"><span>Source</span><span>SQLite global_db</span></div>
@@ -308,9 +330,14 @@
     <div class="gdb-row"><span>Images</span><span>${g.imageAssetCount != null ? g.imageAssetCount : '?'}</span></div>
     <div class="gdb-row"><span>Cards w/ global image</span><span>${escHtml(imgLabel)}</span></div>
     <div class="gdb-row"><span>Cards w/ global rarity</span><span>${escHtml(rarLabel)}</span></div>
-    ${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
+    ${parityRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
   </div>
 </details>`;
+  }
+  function rarityNameStyle(item) {
+    const r = item && item.rarity ? String(item.rarity).toLowerCase() : '';
+    const accent = item.rarityAccentColor || RARITY_NAME_COLORS[r] || null;
+    return accent ? `color:${accent};` : '';
   }
   function itemImageSrc(item) {
     if (isUsableImageUrl(item.imageUrl)) return item.imageUrl;

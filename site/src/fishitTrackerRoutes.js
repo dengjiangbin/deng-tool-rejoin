@@ -860,27 +860,46 @@ function buildInventoryParityProof(rawItems, enrichedFlat, publicItems, sessionD
   };
 }
 
+function _hintBaseKey(name) {
+  const canon = catchNameParser.canonicalizeFishName(name || '');
+  const base = canon.baseFishName || name;
+  return globalDb.normalizeNamePunct(base);
+}
+
 function applyInventoryUiHints(items, hints) {
   if (!Array.isArray(items) || !Array.isArray(hints) || hints.length === 0) return items;
-  const hintByName = new Map();
+  const hintByBase = new Map();
   for (const h of hints) {
-    if (!h?.name) continue;
-    const key = globalDb.normalizeNamePunct(h.name);
-    if (key) hintByName.set(key, h);
+    const visibleName = h.visibleName || h.name;
+    if (!visibleName) continue;
+    const key = _hintBaseKey(visibleName);
+    if (!key) continue;
+    const textColor = h.textColor || h.nameColorHex;
+    if (!textColor) continue;
+    if (!hintByBase.has(key)) {
+      hintByBase.set(key, { ...h, visibleName, textColor });
+    }
   }
   return items.map((item) => {
-    const base = item.baseFishName || item.name;
+    const base = item.baseFishName
+      || catchNameParser.canonicalizeFishName(item.name || '').baseFishName
+      || item.name;
     const key = globalDb.normalizeNamePunct(base);
-    const hint = key ? hintByName.get(key) : null;
+    const hint = key ? hintByBase.get(key) : null;
     if (!hint) return item;
-    const colorHit = hint.nameColorHex
-      ? rarityColorMap.resolveRarityFromUiColor(hint.nameColorHex)
-      : null;
+    const textColor = hint.textColor || hint.nameColorHex;
+    const colorHit = textColor ? rarityColorMap.resolveRarityFromUiColor(textColor) : null;
     return {
       ...item,
-      uiNameColor: hint.nameColorHex || item.uiNameColor || null,
+      uiVisibleName: hint.visibleName || hint.name || null,
+      uiNameColor: textColor || item.uiNameColor || null,
+      uiStrokeColor: hint.strokeColor || item.uiStrokeColor || null,
       uiRarityFromColor: colorHit?.rarity || item.uiRarityFromColor || null,
       uiRarityConfidence: colorHit?.confidence || item.uiRarityConfidence || null,
+      uiColorDistance: colorHit?.colorDistance ?? item.uiColorDistance ?? null,
+      uiClosestTierColor: colorHit?.closestTierColor || colorHit?.mappedTierFromUi
+        ? String(colorHit.mappedTierFromUi || colorHit.mappedTierFromColor).toLowerCase()
+        : (item.uiClosestTierColor || null),
     };
   });
 }
@@ -909,8 +928,15 @@ function buildCountParityProof(rawItems, enrichedFlat, publicItems, sessionData)
   } else if (groupedPublicInstances !== publicFishInstances) {
     mismatchReason = 'grouped_card_amounts_differ_from_trace_public_instances_due_to_species_grouping';
   }
+  const visibleBagPageFishCount = Number.isFinite(Number(sessionData?.visibleBagPageFishCount))
+    ? Number(sessionData.visibleBagPageFishCount)
+    : (Array.isArray(sessionData?.inventoryUiHints) && sessionData.inventoryUiHints.length > 0
+      ? sessionData.inventoryUiHints.length : null);
+  const visibleBagPageCaptured = visibleBagPageFishCount != null && visibleBagPageFishCount > 0;
   return {
     trackerRawInstanceCount,
+    fullSnapshotItemInstances: acceptedInstances,
+    fullSnapshotFishCandidates: enrichedFishInstances,
     acceptedInstances,
     enrichedFishInstances,
     publicFishInstances,
@@ -919,6 +945,10 @@ function buildCountParityProof(rawItems, enrichedFlat, publicItems, sessionData)
     unmappedFishCandidateInstances,
     unmappedFishCandidateTypes: unmappedRows.length,
     nonFishInstances,
+    visibleBagPageFishCount: visibleBagPageCaptured ? visibleBagPageFishCount : null,
+    visibleBagPageCaptured,
+    visibleBagPageMismatch: false,
+    explanation: 'Full snapshot includes all inventory items/pages; visible page count comes from current inventory UI page.',
     inGameBagCountEvidence: sessionData?.bagInstanceCount != null
       ? `tracker_bagInstanceCount=${sessionData.bagInstanceCount}`
       : (parseStats.acceptedInstances != null ? `parseStats.acceptedInstances=${parseStats.acceptedInstances}` : null),
@@ -1080,16 +1110,16 @@ function isPublicFishItem(item) {
 async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
   const sessionData = options.sessionData || null;
   let items = enrichedFlat || [];
-  if (sessionData?.inventoryUiHints?.length) {
-    items = applyInventoryUiHints(items, sessionData.inventoryUiHints);
-  }
   const needsCatalogEnrich = items.some(
     (it) => it && catalogStore.isPlaceholderItemName(it.name, it.itemId),
   );
   const enriched = needsCatalogEnrich ? enrichItemsFromCatalog(items) : items;
-  const polished = catalogPolish.polishPublicFishItems(
+  let polished = catalogPolish.polishPublicFishItems(
     enriched.filter(isPublicFishItem),
   );
+  if (sessionData?.inventoryUiHints?.length) {
+    polished = applyInventoryUiHints(polished, sessionData.inventoryUiHints);
+  }
   const withAssets = fishImageAssets.attachFishImagesToItems(polished);
   const withRarity = rarityEnrichment.attachRarityToItems(withAssets);
   const withImages = await fishImageCache.attachCachedImagesToItems(withRarity, baseUrl);
@@ -1137,8 +1167,13 @@ async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
     label: 'Fish',
     fishTypes: fishItems.length,
     fishInstances: countParity.groupedPublicInstances,
+    shownFishInstances: countParity.groupedPublicInstances,
     enrichedFishInstances: countParity.enrichedFishInstances,
-    bagItemInstances: countParity.acceptedInstances,
+    fullSnapshotFishCandidates: countParity.fullSnapshotFishCandidates,
+    bagItemInstances: countParity.fullSnapshotItemInstances,
+    fullSnapshotItemInstances: countParity.fullSnapshotItemInstances,
+    visibleBagPageFishCount: countParity.visibleBagPageFishCount,
+    visibleBagPageCaptured: countParity.visibleBagPageCaptured,
     unmappedFishInstances: countParity.unmappedFishCandidateInstances,
     unmappedFishTypes: countParity.unmappedFishCandidateTypes,
     nonFishInstances: countParity.nonFishInstances,
@@ -1764,11 +1799,21 @@ function handleUpdateBackpack(req, res) {
       bagInstanceCount: Number.isFinite(Number(body.bagInstanceCount))
         ? Number(body.bagInstanceCount)
         : (ps?.acceptedInstances ?? existing?.bagInstanceCount ?? null),
+      visibleBagPageFishCount: Number.isFinite(Number(body.visibleBagPageFishCount))
+        ? Number(body.visibleBagPageFishCount)
+        : (Array.isArray(body.inventoryUiHints) && body.inventoryUiHints.length > 0
+          ? body.inventoryUiHints.length
+          : (existing?.visibleBagPageFishCount ?? null)),
       inventoryUiHints: Array.isArray(body.inventoryUiHints)
         ? body.inventoryUiHints.slice(0, 40).map((h) => ({
-          name: String(h?.name || '').slice(0, 80),
-          nameColorHex: String(h?.nameColorHex || '').slice(0, 16),
-        })).filter((h) => h.name && h.nameColorHex)
+          visibleName: String(h?.visibleName || h?.name || '').slice(0, 80),
+          name: String(h?.visibleName || h?.name || '').slice(0, 80),
+          textColor: String(h?.textColor || h?.nameColorHex || '').slice(0, 16),
+          nameColorHex: String(h?.textColor || h?.nameColorHex || '').slice(0, 16),
+          strokeColor: h?.strokeColor ? String(h.strokeColor).slice(0, 16) : null,
+          screenOrder: Number.isFinite(Number(h?.screenOrder)) ? Number(h.screenOrder) : null,
+          source: h?.source || 'inventory_ui_hint',
+        })).filter((h) => h.name && h.textColor)
         : (existing?.inventoryUiHints || null),
       trackerClientProof: body.trackerClientProof && typeof body.trackerClientProof === 'object'
         ? {

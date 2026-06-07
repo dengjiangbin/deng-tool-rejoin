@@ -1,19 +1,19 @@
 'use strict';
 /**
- * BLOCKER10Y — map in-game fish name TextColor3 hex to rarity tiers.
- * Colors align with Fish It UI tiers and tracker card CSS accents.
+ * BLOCKER10Z — map in-game fish name TextColor3 hex to rarity tiers.
+ * Uses tolerance-based nearest-color matching for Fish It bag UI labels.
  */
 
 const fishCatalog = require('./fishitFishCatalog');
 
 /** Documented Fish It name-color → tier mapping (approximate UI TextColor3). */
 const COLOR_TIER_RULES = [
-  { tier: 'Secret', keys: ['#22d3ee', '#67e8f9', '#0e7490', '#06b6d4', '#0891b2'], dist: 48 },
-  { tier: 'Mythic', keys: ['#f472b6', '#ec4899', '#db2777', '#ff69b4'], dist: 52 },
-  { tier: 'Legendary', keys: ['#eab308', '#fbbf24', '#f59e0b', '#ca8a04', '#ffd700'], dist: 52 },
-  { tier: 'Epic', keys: ['#c084fc', '#a855f7', '#9333ea', '#8b5cf6'], dist: 52 },
-  { tier: 'Rare', keys: ['#60a5fa', '#3b82f6', '#2563eb', '#2196f3'], dist: 52 },
-  { tier: 'Uncommon', keys: ['#4ade80', '#22c55e', '#16a34a', '#4caf50'], dist: 52 },
+  { tier: 'Secret', keys: ['#22d3ee', '#67e8f9', '#0e7490', '#06b6d4', '#0891b2', '#00ffff', '#00ced1', '#2dd4bf'], dist: 55 },
+  { tier: 'Mythic', keys: ['#f472b6', '#ec4899', '#db2777', '#ff69b4', '#ff00ff', '#e879f9', '#d946ef'], dist: 58 },
+  { tier: 'Legendary', keys: ['#eab308', '#fbbf24', '#f59e0b', '#ca8a04', '#ffd700', '#ffa500', '#ff8800', '#ff9500', '#ffb347'], dist: 58 },
+  { tier: 'Epic', keys: ['#c084fc', '#a855f7', '#9333ea', '#8b5cf6', '#b388ff', '#9c27b0'], dist: 58 },
+  { tier: 'Rare', keys: ['#60a5fa', '#3b82f6', '#2563eb', '#2196f3', '#6080ff', '#4a90e2', '#5b9bd5'], dist: 58 },
+  { tier: 'Uncommon', keys: ['#4ade80', '#22c55e', '#16a34a', '#4caf50', '#7dff3a', '#7df93a', '#00ff00', '#32cd32', '#00e676'], dist: 58 },
   { tier: 'Forgotten', keys: ['#818cf8', '#6366f1', '#4f46e5'], dist: 52 },
   { tier: 'Common', keys: ['#ffffff', '#e5e7eb', '#d1d5db', '#9ca3af', '#6b7280'], dist: 40 },
 ];
@@ -67,8 +67,12 @@ function resolveRarityFromUiColor(hex) {
           tier: rule.tier,
           rarity: fishCatalog.normalizeRarity(rule.tier),
           mappedTierFromColor: rule.tier,
+          mappedTierFromUi: rule.tier,
           inGameNameColor: norm,
-          source: 'ui_name_color',
+          uiTextColor: norm,
+          nearestReferenceColor: key,
+          colorDistance: 0,
+          source: 'inventory_ui_color',
           confidence: 'ui_color_exact',
         };
       }
@@ -87,15 +91,20 @@ function resolveRarityFromUiColor(hex) {
     }
   }
   if (!best) return null;
+  const conf = best.dist <= 20 ? 'ui_color_near' : (best.dist <= 40 ? 'ui_color_approx' : 'ui_color_weak');
+  if (best.dist > 55) return null;
   return {
     tier: best.tier,
     rarity: fishCatalog.normalizeRarity(best.tier),
     mappedTierFromColor: best.tier,
+    mappedTierFromUi: best.tier,
     inGameNameColor: norm,
+    uiTextColor: norm,
     nearestReferenceColor: best.ref,
-    colorDistance: Math.round(best.dist),
-    source: 'ui_name_color',
-    confidence: best.dist <= 24 ? 'ui_color_near' : 'ui_color_approx',
+    closestTierColor: best.tier.toLowerCase(),
+    colorDistance: Math.round(best.dist * 10) / 10,
+    source: 'inventory_ui_color',
+    confidence: conf,
   };
 }
 
@@ -116,6 +125,12 @@ function buildRarityColorProofRow(item) {
   return {
     itemId: item?.itemId || null,
     canonicalName: item?.canonicalName || item?.baseFishName || item?.name || null,
+    visibleName: item?.uiVisibleName || null,
+    uiTextColor: item?.uiNameColor || null,
+    closestTierColor: item?.uiClosestTierColor || (item?.uiRarityFromColor
+      ? String(item.uiRarityFromColor).toLowerCase() : null),
+    colorDistance: item?.uiColorDistance ?? null,
+    mappedTierFromUi: item?.uiRarityFromColor || null,
     finalRarity,
     finalRaritySource: item?.raritySource || null,
     inGameNameColor: item?.uiNameColor || null,
