@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07' %>">
+<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07' %>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -121,8 +121,6 @@
     .global-db-proof .gdb-row { display:flex; justify-content:space-between; gap:8px; }
     .global-db-proof .gdb-on { color:#4ade80; font-weight:600; }
     .global-db-debug { margin-top:6px; font-size:.68rem; color:#8a94a6; max-height:120px; overflow:auto; }
-    .gdb-indicator { display:inline-block; margin:0 16px 8px; padding:2px 8px; border-radius:99px; font-size:.72rem; color:#93c5fd; background:var(--surface2); border:1px solid var(--border); }
-    .gdb-indicator .gdb-on { color:#4ade80; font-weight:600; }
     .ic-badges { display:flex; flex-wrap:wrap; gap:4px; align-items:center; flex-shrink:0; margin-top:2px; }
     .ic-meta { display:flex; flex-wrap:wrap; gap:5px; }
     .badge { font-size:.72rem; padding:2px 9px; border-radius:99px; border:1px solid var(--border); background:var(--surface); color:var(--muted); }
@@ -154,8 +152,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07">
-<!-- BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07 -->
+<body data-ui-marker="BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07">
+<!-- BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07 -->
 <div class="page">
   <div class="inner">
 
@@ -205,9 +203,9 @@
   const POLL_MS       = 5000;
   const DEBUG_GLOBAL  = /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
   const RENDER_BUILD  = document.documentElement.getAttribute('data-render-build')
-    || 'BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07';
+    || 'BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07';
   const PUBLIC_API_BUILD = document.documentElement.getAttribute('data-public-api-build')
-    || 'BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07';
+    || 'BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07';
   const RARITY_NAME_COLORS = {
     common:'#9ca3af', uncommon:'#4ade80', rare:'#60a5fa', epic:'#c084fc',
     legendary:'#eab308', legend:'#eab308', mythic:'#f472b6', secret:'#22d3ee', forgotten:'#818cf8',
@@ -263,42 +261,23 @@
   function fishCountLabel(data, fishList) {
     const fc = data && data.fishCounts;
     const cp = data && data.countParityProof;
-    const snapshotItems = (fc && fc.fullSnapshotItemInstances != null) ? fc.fullSnapshotItemInstances
-      : (cp && cp.fullSnapshotItemInstances != null ? cp.fullSnapshotItemInstances
-        : (cp && cp.acceptedInstances != null ? cp.acceptedInstances : null));
-    const fishCandidates = (fc && fc.fullSnapshotFishCandidates != null) ? fc.fullSnapshotFishCandidates
-      : (cp && cp.fullSnapshotFishCandidates != null ? cp.fullSnapshotFishCandidates
-        : (cp && cp.enrichedFishInstances != null ? cp.enrichedFishInstances : null));
-    const shownFish = (fc && fc.shownFishInstances != null) ? fc.shownFishInstances
-      : (cp && cp.groupedPublicInstances != null ? cp.groupedPublicInstances
-        : (fc && fc.fishInstances != null ? fc.fishInstances : null));
+    const fishTotal = (fc && fc.fishInstances != null) ? fc.fishInstances
+      : (cp && cp.groupedPublicInstances != null ? cp.groupedPublicInstances : null);
     const types = (fc && fc.fishTypes != null) ? fc.fishTypes : fishList.length;
     const unmapped = (fc && fc.unmappedFishInstances != null) ? fc.unmappedFishInstances
       : (cp && cp.unmappedFishCandidateInstances != null ? cp.unmappedFishCandidateInstances : 0);
-    const visiblePage = (fc && fc.visibleBagPageCaptured && fc.visibleBagPageFishCount != null)
-      ? fc.visibleBagPageFishCount
-      : (cp && cp.visibleBagPageCaptured && cp.visibleBagPageFishCount != null ? cp.visibleBagPageFishCount : null);
-    if (snapshotItems != null && fishCandidates != null && shownFish != null) {
-      let label = `Snapshot: <strong>${snapshotItems}</strong> items &middot; Fish: <strong>${fishCandidates}</strong>`;
-      if (visiblePage != null) {
-        label += ` &middot; Visible page: <strong>${visiblePage}</strong> fish`;
-      }
-      label += ` &middot; Shown: <strong>${shownFish}</strong> / <span style="color:#8a94a6;">${types} types</span>`;
-      if (unmapped > 0) label += ` &middot; <span style="color:#fbbf24;">${unmapped} unmapped</span>`;
+    if (fishTotal != null) {
+      let label = `Fish: <strong>${fishTotal}</strong> &middot; Types: <span style="color:#8a94a6;">${types}</span>`;
+      if (unmapped > 0) label += ` &middot; <span style="color:#fbbf24;">Unmapped: ${unmapped}</span>`;
       return label;
-    }
-    if (fc && Number.isFinite(fc.fishInstances)) {
-      return `Fish: <strong>${fc.fishInstances}</strong> <span style="color:#8a94a6;">(${fc.fishTypes || fishList.length} types)</span>`;
     }
     const total = fishList.reduce((sum, item) => sum + (Number(item.amount || item.count) || 1), 0);
     return `Fish: <strong>${total}</strong> <span style="color:#8a94a6;">(${fishList.length} types)</span>`;
   }
   function buildGlobalDbProofHtml(data) {
+    if (!DEBUG_GLOBAL) return '';
     const g = (data && data.globalDbUiProof) || (data && data.globalCatalogProof) || null;
     if (!g) return '';
-    if (!DEBUG_GLOBAL) {
-      return `<span class="gdb-indicator" title="Global collective fish catalog active">Global DB: <span class="gdb-on">ON</span></span>`;
-    }
     const imgLabel = g.cardsUsingGlobalDbImagesLabel
       || `${g.cardsUsingGlobalDbImages || 0}/${g.cardsTotal || '?'}`;
     const rarLabel = g.cardsUsingGlobalDbRarityLabel
@@ -310,9 +289,14 @@
       ).join('');
     }
     let parityRows = '';
-    const cp = data.countParityProof;
-    if (cp) {
-      parityRows = `<div class="global-db-debug">countParity: snapshot=${cp.fullSnapshotItemInstances || '?'} fish=${cp.fullSnapshotFishCandidates || '?'} visible=${cp.visibleBagPageCaptured ? cp.visibleBagPageFishCount : 'not captured'} shown=${cp.groupedPublicInstances || '?'}</div>`;
+    const rp = data.replionCountProof || data.countParityProof;
+    if (rp) {
+      parityRows = `<div class="global-db-debug">Replion: snapshot=${rp.snapshotItemInstances || rp.fullSnapshotItemInstances || '?'} fish=${rp.fishCandidates || rp.fullSnapshotFishCandidates || '?'} shown=${rp.publicFishInstances || rp.groupedPublicInstances || '?'} unmapped=${rp.unmappedFishCandidates || rp.unmappedFishCandidateInstances || 0}</div>`;
+    }
+    let catchRows = '';
+    const cl = data.catchLearningProof;
+    if (cl) {
+      catchRows = `<div class="global-db-debug">Catch learning: ${cl.catchEvidenceSupported ? 'ON' : 'OFF'}${cl.pendingCatch ? ` pending=${escHtml(cl.pendingCatch.fishName || '-')}` : ''}</div>`;
     }
     let rarityRows = '';
     if (Array.isArray(data.rarityColorProof) && data.rarityColorProof.length) {
@@ -330,7 +314,7 @@
     <div class="gdb-row"><span>Images</span><span>${g.imageAssetCount != null ? g.imageAssetCount : '?'}</span></div>
     <div class="gdb-row"><span>Cards w/ global image</span><span>${escHtml(imgLabel)}</span></div>
     <div class="gdb-row"><span>Cards w/ global rarity</span><span>${escHtml(rarLabel)}</span></div>
-    ${parityRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
+    ${parityRows}${catchRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
   </div>
 </details>`;
   }

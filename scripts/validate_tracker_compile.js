@@ -20,11 +20,14 @@ if (src.charCodeAt(0) === 0xfeff) {
 if (/^\s*loadstring\s*\(/.test(src)) {
   errors.push('tracker.lua must not begin with loadstring() wrapper');
 }
-if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07')) {
-  errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z marker missing');
+if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07')) {
+  errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z3 marker missing');
 }
-if (!src.includes('BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07')) {
-  errors.push('BLOCKER10Z build marker missing');
+if (!src.includes('BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07')) {
+  errors.push('BLOCKER10Z3 build marker missing');
+}
+if (src.includes('payload.inventoryUiHints')) {
+  errors.push('payload.inventoryUiHints must not be sent — Replion is source of truth');
 }
 if (!src.includes('parseCatchNameFull')) {
   errors.push('parseCatchNameFull catch normalizer missing');

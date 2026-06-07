@@ -59,21 +59,36 @@ function collectAliases(itemOrName) {
 }
 
 function resolveSpeciesForItem(item) {
-  const aliases = collectAliases(item);
   const itemId = item?.itemId ? String(item.itemId).trim() : null;
+  const lockedBase = item?.baseFishName ? String(item.baseFishName).trim() : null;
+  const aliases = lockedBase ? [lockedBase] : collectAliases(item);
 
   if (itemId) {
     const mapping = globalDb.getItemMapping(itemId);
-    if (mapping && mapping.conflict_status !== 'quarantined' && mapping.species_id) {
-      const sp = globalDb.getSpeciesById(mapping.species_id);
-      if (sp && sp.verification_status !== globalDb.VERIFICATION.QUARANTINED_CONFLICT) {
-        return {
-          species: sp,
-          mapping,
-          matchedAlias: sp.canonical_name,
-          triedAliases: aliases,
-          resolveSource: 'global_item_mapping',
-        };
+    if (mapping && mapping.conflict_status !== 'quarantined') {
+      if (mapping.species_id) {
+        const sp = globalDb.getSpeciesById(mapping.species_id);
+        if (sp && sp.verification_status !== globalDb.VERIFICATION.QUARANTINED_CONFLICT) {
+          return {
+            species: sp,
+            mapping,
+            matchedAlias: mapping.canonical_name || sp.canonical_name,
+            triedAliases: aliases,
+            resolveSource: 'global_item_mapping',
+          };
+        }
+      }
+      if (mapping.canonical_name) {
+        const spHit = globalDb.findSpeciesByAliases([mapping.canonical_name]);
+        if (spHit?.species) {
+          return {
+            species: spHit.species,
+            mapping,
+            matchedAlias: mapping.canonical_name,
+            triedAliases: aliases,
+            resolveSource: 'global_item_mapping',
+          };
+        }
       }
     }
   }
@@ -85,7 +100,7 @@ function resolveSpeciesForItem(item) {
       mapping: itemId ? globalDb.getItemMapping(itemId) : null,
       matchedAlias: hit.matchedAlias,
       triedAliases: aliases,
-      resolveSource: 'global_species_name',
+      resolveSource: lockedBase ? 'global_species_locked_base' : 'global_species_name',
     };
   }
 

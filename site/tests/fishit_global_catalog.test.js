@@ -16,19 +16,23 @@ const {
   buildPublicFilterTrace,
   buildInventoryParityProof,
   buildCountParityProof,
+  buildReplionCountProof,
+  buildCatchLearningProof,
   buildUnmappedReviewProof,
   buildRarityColorProof,
   buildTrackerClientProof,
   isPublicFishItem,
   isLikelyFishInventoryItem,
   catalogMetaForItemId,
+  _itemIdLockedBaseName,
 } = require('../src/fishitTrackerRoutes');
 const rarityColorMap = require('../src/fishitRarityColorMap');
 
-const Z_BUILD = 'BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07';
-const Y_BUILD = Z_BUILD;
-const X_BUILD = Z_BUILD;
-const W_BUILD = Z_BUILD;
+const Z3_BUILD = 'BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07';
+const Z_BUILD = Z3_BUILD;
+const Y_BUILD = Z3_BUILD;
+const X_BUILD = Z3_BUILD;
+const W_BUILD = Z3_BUILD;
 let tmpDb;
 
 function setupTestDb() {
@@ -93,7 +97,7 @@ describe('BLOCKER10W global fish parity', { concurrency: 1 }, () => {
     assert.equal(hit.species.rarity, 'Rare');
   });
 
-  test('public fish resolves image from global DB not quiz bot path', async () => {
+  test('public fish resolves image from global DB using itemId locked base name', async () => {
     setupTestDb();
     if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
     await globalCatalogService.importQuizBotSeed();
@@ -106,6 +110,8 @@ describe('BLOCKER10W global fish parity', { concurrency: 1 }, () => {
       itemId: '287',
     }], 'http://127.0.0.1:8791');
     const item = pub.publicItems[0];
+    assert.equal(item.baseFishName, 'Zebra Snakehead');
+    assert.equal(item.canonicalName || item.name, 'Zebra Snakehead');
     assert.equal(item.imageSource, 'global_db');
     assert.ok(String(item.imageUrl).startsWith('/api/fishit-tracker/assets/fish/'));
     assert.ok(!String(item.imageUrl).includes('DENG Quiz'));
@@ -186,15 +192,14 @@ describe('BLOCKER10W global fish parity', { concurrency: 1 }, () => {
     assert.equal(proof.rawIdentityExposed, false);
   });
 
-  test('duplicate same species with different weights groups into one card', () => {
+  test('duplicate same species with different itemIds stay separate when catalog base differs', () => {
     const grouped = catalogPolish.groupPublicFishItems([
       { baseFishName: 'Mossy Fishlet', name: 'Mossy Fishlet', amount: 2, weight: 6.2, category: 'fish', itemId: '277' },
-      { baseFishName: 'Mossy Fishlet', name: 'Mossy Fishlet', amount: 2, weight: 333.9, category: 'fish', itemId: '287' },
+      { baseFishName: 'Zebra Snakehead', name: 'Zebra Snakehead', amount: 2, weight: 333.9, category: 'fish', itemId: '287' },
     ]);
-    assert.equal(grouped.length, 1);
-    assert.equal(grouped[0].amount, 4);
-    assert.equal(grouped[0].publicWeightHidden, true);
-    assert.ok(grouped[0].debugWeight);
+    assert.equal(grouped.length, 2);
+    assert.equal(grouped[0].amount, 2);
+    assert.equal(grouped[1].amount, 2);
   });
 
   test('public card payload does not include visible weight field', async () => {
@@ -500,13 +505,13 @@ describe('BLOCKER10X live images flicker and Panther Eel mapping', { concurrency
 });
 
 describe('BLOCKER10Y rarity color count global proof', { concurrency: 1 }, () => {
-  test('build marker is BLOCKER10Y in tracker build and tracker.lua', () => {
+  test('build marker is BLOCKER10Z3 in tracker build and tracker.lua', () => {
     const { BLOCKER10Z_BUILD } = require('../src/fishitTrackerBuild');
-    assert.equal(BLOCKER10Z_BUILD, Z_BUILD);
+    assert.equal(BLOCKER10Z_BUILD, Z3_BUILD);
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(lua.includes('BLOCKER10Z_RARITY_UI_HINTS_COUNT_DEBUG_GATE_2026_06_07'));
-    assert.ok(lua.includes('captureInventoryUiHints'));
-    assert.ok(lua.includes('visibleBagPageFishCount'));
+    assert.ok(lua.includes('BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07'));
+    assert.ok(!lua.includes('payload.inventoryUiHints'));
+    assert.ok(lua.includes('replionSourceOfTruth = true'));
   });
 
   test('countParityProof separates raw enriched grouped and unmapped counts', () => {
@@ -528,12 +533,14 @@ describe('BLOCKER10Y rarity color count global proof', { concurrency: 1 }, () =>
     assert.equal(cp.inGameBagCountEvidence, 'tracker_bagInstanceCount=3');
   });
 
-  test('website header template shows snapshot shown unmapped counts', () => {
+  test('website header template shows replion-based fish count without visible page', () => {
     const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
     assert.ok(ejs.includes('fishCountLabel'));
-    assert.ok(ejs.includes('Snapshot:'));
-    assert.ok(ejs.includes('Shown:'));
-    assert.ok(ejs.includes('unmapped'));
+    assert.ok(ejs.includes('Fish:'));
+    assert.ok(ejs.includes('Types:'));
+    assert.ok(ejs.includes('Unmapped:'));
+    assert.ok(!ejs.includes('Visible page:'));
+    assert.ok(!ejs.includes('Snapshot:'));
     assert.ok(ejs.includes('buildGlobalDbProofHtml'));
   });
 
@@ -577,7 +584,7 @@ describe('BLOCKER10Y rarity color count global proof', { concurrency: 1 }, () =>
     }
   });
 
-  test('rarity color source priority prefers ui_name_color then global_db', async () => {
+  test('rarity stays neutral without global DB evidence when no tier source', async () => {
     setupTestDb();
     if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
     await globalCatalogService.importQuizBotSeed();
@@ -589,9 +596,8 @@ describe('BLOCKER10Y rarity color count global proof', { concurrency: 1 }, () =>
       },
     });
     const item = pub.publicItems[0];
-    assert.equal(item.rarity, 'Secret');
-    assert.equal(item.raritySource, 'inventory_ui_color');
-    assert.equal(item.dataRaritySource, 'inventory_ui_color');
+    assert.equal(item.baseFishName, 'Zebra Snakehead');
+    assert.notEqual(item.raritySource, 'inventory_ui_color');
   });
 
   test('card rarity class matches final rarity tier', () => {
@@ -658,21 +664,21 @@ describe('BLOCKER10Y rarity color count global proof', { concurrency: 1 }, () =>
     assert.equal(review[0].autoMapped, false);
   });
 
-  test('trackerClientProof reports BLOCKER10Y capabilities', () => {
+  test('trackerClientProof reports BLOCKER10Z3 Replion capabilities', () => {
     const proof = buildTrackerClientProof({
       trackerBuild: Y_BUILD,
       bagInstanceCount: 61,
-      inventoryUiHints: [{ name: 'Giant Squid', nameColorHex: '#22d3ee' }],
       trackerClientProof: {
         trackerBuild: Y_BUILD,
         uploadedAt: '2026-06-07T12:00:00.000Z',
-        supportsRarityColorEvidence: true,
         supportsBagInstanceCount: true,
         noHeavyScanner: true,
+        replionSourceOfTruth: true,
       },
     });
     assert.equal(proof.trackerBuild, Y_BUILD);
-    assert.equal(proof.supportsRarityColorEvidence, true);
+    assert.equal(proof.replionSourceOfTruth, true);
+    assert.equal(proof.inventoryUiOptional, true);
     assert.equal(proof.supportsBagInstanceCount, true);
     assert.equal(proof.noHeavyScanner, true);
   });
@@ -688,18 +694,24 @@ describe('BLOCKER10Y rarity color count global proof', { concurrency: 1 }, () =>
   });
 });
 
-describe('BLOCKER10Z rarity UI hints count debug gate', { concurrency: 1 }, () => {
-  test('build marker is BLOCKER10Z', () => {
-    const { BLOCKER10Z_BUILD } = require('../src/fishitTrackerBuild');
-    assert.equal(BLOCKER10Z_BUILD, Z_BUILD);
+describe('BLOCKER10Z3 replion global db no UI dependency', { concurrency: 1 }, () => {
+  test('build marker is BLOCKER10Z3', () => {
+    const { BLOCKER10Z3_BUILD } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10Z3_BUILD, Z3_BUILD);
   });
 
-  test('normal tracker template hides global-db-proof details panel', () => {
+  test('itemId 287 locked base is Zebra Snakehead not Mossy Fishlet alias', () => {
+    assert.equal(_itemIdLockedBaseName('287'), 'Zebra Snakehead');
+    const meta = catalogMetaForItemId('287');
+    assert.equal(meta.baseFishName, 'Zebra Snakehead');
+    assert.equal(meta.name, 'Zebra Snakehead');
+  });
+
+  test('normal tracker template hides global-db-proof panel entirely', () => {
     const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
     assert.ok(ejs.includes('DEBUG_GLOBAL'));
-    assert.ok(ejs.includes('gdb-indicator'));
-    assert.ok(ejs.includes('if (!DEBUG_GLOBAL)'));
-    assert.ok(!ejs.match(/if\s*\(\s*!DEBUG_GLOBAL\s*\)[\s\S]{0,200}global-db-proof[\s\S]{0,80}open/));
+    assert.ok(ejs.includes('if (!DEBUG_GLOBAL) return'));
+    assert.ok(!ejs.includes('gdb-indicator'));
   });
 
   test('debug=global template renders full global-db-proof panel', () => {
@@ -707,55 +719,55 @@ describe('BLOCKER10Z rarity UI hints count debug gate', { concurrency: 1 }, () =
     assert.ok(ejs.includes('debug=global'));
     assert.ok(ejs.includes('global-db-proof'));
     assert.ok(ejs.includes('rarityColorProof'));
-    assert.ok(ejs.includes('countParityProof'));
+    assert.ok(ejs.includes('replionCountProof'));
+    assert.ok(ejs.includes('catchLearningProof'));
   });
 
   test('poll refresh uses buildGlobalDbProofHtml gated by DEBUG_GLOBAL', () => {
     const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
     assert.ok(ejs.includes('gdb.innerHTML = buildGlobalDbProofHtml(data)'));
-    assert.ok(ejs.includes('if (!DEBUG_GLOBAL)'));
+    assert.ok(ejs.includes('if (!DEBUG_GLOBAL) return'));
   });
 
-  test('countParityProof includes visible page and explanation fields', () => {
+  test('countParityProof uses Replion snapshot without visible page fields', () => {
     const enriched = [
       { name: 'Giant Squid', itemId: '156', category: 'fish', amount: 1, baseFishName: 'Giant Squid' },
     ];
     const pub = [{ name: 'Giant Squid', itemId: '156', amount: 1, baseFishName: 'Giant Squid' }];
     const cp = buildCountParityProof(enriched, enriched, pub, {
       parseStats: { raw: 61, acceptedInstances: 61 },
-      visibleBagPageFishCount: 20,
-      inventoryUiHints: [{ visibleName: 'Giant Squid', textColor: '#22d3ee' }],
     });
     assert.equal(cp.fullSnapshotItemInstances, 61);
-    assert.equal(cp.visibleBagPageFishCount, 20);
-    assert.equal(cp.visibleBagPageCaptured, true);
-    assert.ok(cp.explanation.includes('visible page'));
+    assert.ok(cp.explanation.includes('Replion'));
+    assert.equal(cp.visibleBagPageFishCount, undefined);
+    assert.equal(cp.visibleBagPageCaptured, undefined);
   });
 
-  test('visible page count omitted when not captured', () => {
-    const cp = buildCountParityProof([], [], [], { parseStats: { acceptedInstances: 61 } });
-    assert.equal(cp.visibleBagPageCaptured, false);
-    assert.equal(cp.visibleBagPageFishCount, null);
+  test('buildReplionCountProof exposes debug snapshot fields', () => {
+    const cp = buildCountParityProof(
+      [{ name: 'Giant Squid', itemId: '156', category: 'fish', amount: 2, baseFishName: 'Giant Squid' }],
+      [{ name: 'Giant Squid', itemId: '156', category: 'fish', amount: 2, baseFishName: 'Giant Squid' }],
+      [{ name: 'Giant Squid', itemId: '156', amount: 2, baseFishName: 'Giant Squid' }],
+      { parseStats: { acceptedInstances: 61 } },
+    );
+    const rp = buildReplionCountProof(cp);
+    assert.equal(rp.snapshotItemInstances, 61);
+    assert.equal(rp.fishCandidates, 2);
+    assert.equal(rp.publicFishInstances, 2);
   });
 
-  test('UI color hint maps green to Uncommon tier', () => {
-    const hit = rarityColorMap.resolveRarityFromUiColor('#7dff3a');
-    assert.ok(hit);
-    assert.equal(hit.rarity, 'Uncommon');
-    assert.equal(hit.source, 'inventory_ui_color');
+  test('buildCatchLearningProof reports pending catch without raw identity', () => {
+    const proof = buildCatchLearningProof({
+      lastPendingCatchName: { fishName: 'New Fish', rarityCandidate: 'Rare', source: 'catch_popup' },
+    }, null);
+    assert.equal(proof.catchEvidenceSupported, true);
+    assert.equal(proof.pendingCatch.fishName, 'New Fish');
   });
 
-  test('UI color hint loses to manual_verified rarity', async () => {
+  test('UI color map module exists but is not used in public rarity pipeline', async () => {
     setupTestDb();
     if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
     await globalCatalogService.importQuizBotSeed();
-    globalDb.upsertSpecies({
-      normalized_name: 'giant squid',
-      canonical_name: 'Giant Squid',
-      rarity: 'Secret',
-      verification_status: globalDb.VERIFICATION.MANUAL_VERIFIED,
-      source: 'manual_verified_catalog',
-    });
     const pub = await buildPublicFishFields([{
       name: 'Giant Squid', baseFishName: 'Giant Squid', amount: 1, category: 'fish', itemId: '156',
     }], 'http://127.0.0.1:8791', {
@@ -764,37 +776,15 @@ describe('BLOCKER10Z rarity UI hints count debug gate', { concurrency: 1 }, () =
       },
     });
     assert.equal(pub.publicItems[0].rarity, 'Secret');
-    assert.equal(pub.publicItems[0].raritySource, 'manual_verified');
+    assert.notEqual(pub.publicItems[0].raritySource, 'inventory_ui_color');
   });
 
-  test('Shiny Red Goatfish UI hint applies rarity to Red Goatfish card', async () => {
-    setupTestDb();
-    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
-    await globalCatalogService.importQuizBotSeed();
-    const pub = await buildPublicFishFields([{
-      name: 'Red Goatfish', baseFishName: 'Red Goatfish', amount: 2, category: 'fish', itemId: '285',
-    }], 'http://127.0.0.1:8791', {
-      sessionData: {
-        inventoryUiHints: [{ visibleName: 'Shiny Red Goatfish', textColor: '#7dff3a' }],
-      },
-    });
-    const item = pub.publicItems[0];
-    assert.equal(item.rarity, 'Uncommon');
-    assert.equal(item.raritySource, 'inventory_ui_color');
-    const proof = buildRarityColorProof([item], 1)[0];
-    assert.equal(proof.cardClass, 'rarity-uncommon');
-    assert.equal(proof.cardUsesFullRarityStyle, true);
-  });
-
-  test('tracker.lua enforces UI hint budget and no heavy scanner', () => {
+  test('tracker.lua uses Replion source of truth without UI hint upload', () => {
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(lua.includes('budget = 0.06'));
-    assert.ok(lua.includes('#hints >= 24'));
+    assert.ok(lua.includes('replionSourceOfTruth = true'));
     assert.ok(lua.includes('noHeavyScanner = true'));
-    assert.ok(lua.includes('visibleBagPageFishCount'));
-    const cap = lua.slice(lua.indexOf('function LiveSafe.captureInventoryUiHints'), lua.indexOf('function LiveSafe.scanPlayerGuiForCatchText'));
-    assert.ok(!cap.includes('WaitForChild'));
-    assert.ok(!cap.includes('GetDescendants()') || cap.includes('gui:GetDescendants()'));
+    assert.ok(!lua.includes('payload.inventoryUiHints'));
+    assert.ok(!lua.includes('visibleBagPageFishCount'));
   });
 
   test('Panther Eel remains visible with Secret rarity when mapped', async () => {

@@ -75,24 +75,8 @@ function lookupRarityForItem(item) {
     } catch (_) { /* fallback */ }
   }
 
-  // 2. captured in-game UI name color evidence from visible bag
-  if (item.uiRarityFromColor) {
-    return {
-      rarity: fishCatalog.normalizeRarity(item.uiRarityFromColor),
-      raritySource: 'inventory_ui_color',
-      rarityConfidence: item.uiRarityConfidence || 'ui_color',
-    };
-  }
-  if (item.uiNameColor && rarityColorMap) {
-    const colorHit = rarityColorMap.resolveRarityFromUiColor(item.uiNameColor);
-    if (colorHit?.rarity) {
-      return {
-        rarity: colorHit.rarity,
-        raritySource: 'inventory_ui_color',
-        rarityConfidence: colorHit.confidence || 'ui_color',
-      };
-    }
-  }
+  // 2. captured in-game UI name color evidence from visible bag — debug-only, never required
+  // (BLOCKER10Z3: removed from normal rarity pipeline; Global DB + catalog only)
 
   // 3. Quiz Bot / global seed rarity (global DB species)
   if (globalCatalogService) {
