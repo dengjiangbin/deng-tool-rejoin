@@ -833,17 +833,22 @@ function buildImageRenderProof(items, limit = 10) {
     const apiImageUrl = item?.imageUrl || null;
     const file = apiImageUrl ? filenameFromCachedUrl(apiImageUrl) : null;
     const localExists = file ? fs.existsSync(path.join(CACHE_DIR, file)) : false;
+    const hasImage = !!(apiImageUrl && (localExists || apiImageUrl.startsWith('http')));
     rows.push({
       canonicalName: item?.canonicalName || item?.baseFishName || item?.name || null,
       itemId: item?.itemId || null,
       imageRenderProof: {
         apiImageUrl,
+        imageUrl: apiImageUrl,
         frontendUsesField: 'imageUrl',
+        imageUrlPresent: item?.imageUrlPresent === true || hasImage,
+        imageResolved: item?.imageResolved === true || (item?.imageStatus === 'cached' && hasImage),
         localFileExists: localExists,
         localHttpStatus: localExists ? 200 : (apiImageUrl ? 302 : null),
         publicHttpStatus: localExists ? 200 : (apiImageUrl ? 302 : null),
         contentType: localExists && file && file.endsWith('.webp') ? 'image/webp' : null,
-        placeholderUsed: !localExists && !apiImageUrl,
+        frontendImgSrc: apiImageUrl,
+        placeholderUsed: !hasImage,
         source: item?.imageSource || null,
         imageStatus: item?.imageStatus || null,
       },

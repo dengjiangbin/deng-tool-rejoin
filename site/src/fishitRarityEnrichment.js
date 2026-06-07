@@ -9,6 +9,12 @@ const catalogStore = require('./fishitCatalogStore');
 const catchNameParser = require('./fishitCatchNameParser');
 const rarityLabels = require('./fishitRarityLabels');
 const canonicalCatalog = require('./fishitCanonicalCatalog');
+let globalCatalogService = null;
+try { globalCatalogService = require('./fishitGlobalCatalogService'); } catch (_) { globalCatalogService = null; }
+let rarityColorMap = null;
+try { rarityColorMap = require('./fishitRarityColorMap'); } catch (_) { rarityColorMap = null; }
+let fishitDb = null;
+try { fishitDb = require('./fishitDb'); } catch (_) { fishitDb = null; }
 
 const _proof = [];
 const _sourcesUsed = new Set();
@@ -35,6 +41,79 @@ function lookupRarityForItem(item) {
     return null;
   }
 
+  // 1. manual_verified global DB mapping/species rarity
+  if (globalCatalogService) {
+    try {
+      if (itemId) {
+        const mapping = globalCatalogService.resolveCatalogMetaForItemId(itemId);
+        if (mapping?.tier && mapping.confidence === 'manual_verified') {
+          return {
+            rarity: fishCatalog.normalizeRarity(mapping.tier),
+            raritySource: 'manual_verified',
+            rarityConfidence: 'manual_verified',
+          };
+        }
+      }
+      const globalHit = globalCatalogService.resolveRarityForItem({
+        itemId,
+        baseFishName: baseName,
+        name: item.name,
+        displayName: item.displayName,
+        cardName: item.cardName,
+      });
+      if (globalHit?.rarity?.rarity) {
+        const src = globalHit.rarity.raritySource || globalCatalogService.SOURCE_GLOBAL;
+        const conf = globalHit.rarity.rarityConfidence || 'seed_imported';
+        if (conf === 'manual_verified' || src === 'manual_verified_catalog') {
+          return {
+            rarity: fishCatalog.normalizeRarity(globalHit.rarity.rarity),
+            raritySource: 'manual_verified',
+            rarityConfidence: 'manual_verified',
+          };
+        }
+      }
+    } catch (_) { /* fallback */ }
+  }
+
+  // 2. captured in-game UI name color evidence
+  if (item.uiRarityFromColor) {
+    return {
+      rarity: fishCatalog.normalizeRarity(item.uiRarityFromColor),
+      raritySource: 'ui_name_color',
+      rarityConfidence: item.uiRarityConfidence || 'ui_color',
+    };
+  }
+  if (item.uiNameColor && rarityColorMap) {
+    const colorHit = rarityColorMap.resolveRarityFromUiColor(item.uiNameColor);
+    if (colorHit?.rarity) {
+      return {
+        rarity: colorHit.rarity,
+        raritySource: 'ui_name_color',
+        rarityConfidence: colorHit.confidence || 'ui_color',
+      };
+    }
+  }
+
+  // 3. Quiz Bot / global seed rarity (global DB species)
+  if (globalCatalogService) {
+    try {
+      const globalHit = globalCatalogService.resolveRarityForItem({
+        itemId,
+        baseFishName: baseName,
+        name: item.name,
+        displayName: item.displayName,
+        cardName: item.cardName,
+      });
+      if (globalHit?.rarity?.rarity) {
+        return {
+          rarity: fishCatalog.normalizeRarity(globalHit.rarity.rarity),
+          raritySource: globalHit.rarity.raritySource || globalCatalogService.SOURCE_GLOBAL,
+          rarityConfidence: globalHit.rarity.rarityConfidence || 'seed_imported',
+        };
+      }
+    } catch (_) { /* fallback */ }
+  }
+
   const canon = canonicalCatalog.resolveForItem({
     itemId,
     baseFishName: baseName,
@@ -47,6 +126,35 @@ function lookupRarityForItem(item) {
       raritySource: canon.raritySource || 'canonical_catalog',
       rarityConfidence: canon.rarityConfidence || 'confirmed',
     };
+  }
+
+  // 5. tracker payload tier/rarity from Replion metadata
+  const payloadTier = item.tier || item.rarity;
+  if (payloadTier && String(payloadTier).toLowerCase() !== 'unknown') {
+    const norm = fishCatalog.normalizeRarity(payloadTier);
+    if (norm) {
+      return {
+        rarity: norm,
+        raritySource: 'tracker_payload_tier',
+        rarityConfidence: 'live_observed',
+      };
+    }
+  }
+
+  // fishit_db secret/forgotten hints
+  if (fishitDb && typeof fishitDb.exportRarityHints === 'function' && baseName) {
+    try {
+      const hints = fishitDb.exportRarityHints();
+      const key = String(baseName).toLowerCase().trim();
+      const hit = hints.find((h) => h.normalizedKey === key || String(h.name).toLowerCase() === key);
+      if (hit?.rarity) {
+        return {
+          rarity: fishCatalog.normalizeRarity(hit.rarity),
+          raritySource: hit.source || 'fishit_db_fallback',
+          rarityConfidence: 'confirmed',
+        };
+      }
+    } catch (_) { /* */ }
   }
 
   if (itemId) {
@@ -144,6 +252,7 @@ function attachRarityFields(item) {
     raritySource: hit.raritySource,
     rarityConfidence: hit.rarityConfidence,
     rarityNeedsData: false,
+    rarityAccentColor: rarityColorMap?.getRarityAccentColor(hit.rarity) || null,
     rarityUpdatedAt: new Date().toISOString(),
   };
 }

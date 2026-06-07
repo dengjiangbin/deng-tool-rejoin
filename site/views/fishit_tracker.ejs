@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07' %>">
+<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07' %>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -115,6 +115,12 @@
     .ic-head { display:flex; align-items:center; gap:8px; flex-wrap:nowrap; }
     .ic-title-wrap { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
     .item-name { font-weight:600; font-size:.9rem; line-height:1.35; min-width:0; word-break:normal; overflow-wrap:break-word; white-space:normal; display:block; overflow:hidden; text-overflow:ellipsis; }
+    .global-db-proof { margin-top:8px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface2); }
+    .global-db-proof summary { cursor:pointer; padding:8px 10px; font-size:.78rem; color:#93c5fd; user-select:none; }
+    .global-db-proof .gdb-body { padding:8px 10px 10px; font-size:.74rem; color:var(--muted); line-height:1.45; }
+    .global-db-proof .gdb-row { display:flex; justify-content:space-between; gap:8px; }
+    .global-db-proof .gdb-on { color:#4ade80; font-weight:600; }
+    .global-db-debug { margin-top:6px; font-size:.68rem; color:#8a94a6; max-height:120px; overflow:auto; }
     .ic-badges { display:flex; flex-wrap:wrap; gap:4px; align-items:center; flex-shrink:0; margin-top:2px; }
     .ic-meta { display:flex; flex-wrap:wrap; gap:5px; }
     .badge { font-size:.72rem; padding:2px 9px; border-radius:99px; border:1px solid var(--border); background:var(--surface); color:var(--muted); }
@@ -146,8 +152,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07">
-<!-- BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07 -->
+<body data-ui-marker="BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07">
+<!-- BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07 -->
 <div class="page">
   <div class="inner">
 
@@ -182,7 +188,7 @@
     <div class="loadstring-box">
       <h3>Executor Script � copy &amp; run in-game</h3>
       <div class="code-row">
-        <div class="code-block" id="loadstringCode">loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/scripts/loader.lua"))()</div>
+        <div class="code-block" id="loadstringCode">loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua?t=" .. tostring(os.time())))()</div>
         <button class="btn-copy" id="copyBtn" type="button">Copy</button>
       </div>
     </div>
@@ -195,10 +201,15 @@
 
   const LS_KEY        = 'fishit_tracked_users';
   const POLL_MS       = 5000;
+  const DEBUG_GLOBAL  = /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
   const RENDER_BUILD  = document.documentElement.getAttribute('data-render-build')
-    || 'BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07';
+    || 'BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07';
   const PUBLIC_API_BUILD = document.documentElement.getAttribute('data-public-api-build')
-    || 'BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07';
+    || 'BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07';
+  const RARITY_NAME_COLORS = {
+    common:'#9ca3af', uncommon:'#4ade80', rare:'#60a5fa', epic:'#c084fc',
+    legendary:'#eab308', legend:'#eab308', mythic:'#f472b6', secret:'#22d3ee', forgotten:'#818cf8',
+  };
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret badge-rarity-secret', forgotten:'rarity-forgotten' };
   const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
 
@@ -249,15 +260,64 @@
   }
   function fishCountLabel(data, fishList) {
     const fc = data && data.fishCounts;
-    const label = (fc && fc.label) || (data && data.counts && data.counts.label) || 'Fish';
-    if (label !== 'Fish') {
-      console.warn('[fishit-tracker-ui] non-fish count label blocked:', label);
+    const cp = data && data.countParityProof;
+    const bag = (fc && fc.bagItemInstances != null) ? fc.bagItemInstances
+      : (cp && cp.acceptedInstances != null ? cp.acceptedInstances : null);
+    const fishTotal = (fc && fc.enrichedFishInstances != null) ? fc.enrichedFishInstances
+      : (cp && cp.enrichedFishInstances != null ? cp.enrichedFishInstances
+        : (fc && fc.fishInstances != null ? fc.fishInstances : null));
+    const types = (fc && fc.fishTypes != null) ? fc.fishTypes : fishList.length;
+    const unmapped = (fc && fc.unmappedFishInstances != null) ? fc.unmappedFishInstances
+      : (cp && cp.unmappedFishCandidateInstances != null ? cp.unmappedFishCandidateInstances : 0);
+    if (bag != null && fishTotal != null) {
+      let label = `Bag: <strong>${bag}</strong> items &middot; Fish: <strong>${fishTotal}</strong> &middot; <span style="color:#8a94a6;">${types} types</span>`;
+      if (unmapped > 0) label += ` &middot; <span style="color:#fbbf24;">${unmapped} unmapped</span>`;
+      return label;
     }
     if (fc && Number.isFinite(fc.fishInstances)) {
       return `Fish: <strong>${fc.fishInstances}</strong> <span style="color:#8a94a6;">(${fc.fishTypes || fishList.length} types)</span>`;
     }
     const total = fishList.reduce((sum, item) => sum + (Number(item.amount || item.count) || 1), 0);
     return `Fish: <strong>${total}</strong> <span style="color:#8a94a6;">(${fishList.length} types)</span>`;
+  }
+  function rarityNameStyle(item) {
+    const r = item && item.rarity ? String(item.rarity).toLowerCase() : '';
+    const accent = item.rarityAccentColor || RARITY_NAME_COLORS[r] || null;
+    return accent ? `color:${accent};` : '';
+  }
+  function buildGlobalDbProofHtml(data) {
+    const g = (data && data.globalDbUiProof) || (data && data.globalCatalogProof) || null;
+    if (!g) return '';
+    const imgLabel = g.cardsUsingGlobalDbImagesLabel
+      || `${g.cardsUsingGlobalDbImages || 0}/${g.cardsTotal || '?'}`;
+    const rarLabel = g.cardsUsingGlobalDbRarityLabel
+      || `${g.cardsUsingGlobalDbRarity || 0}/${g.cardsTotal || '?'}`;
+    let debugRows = '';
+    if (DEBUG_GLOBAL && Array.isArray(data.publicFishItems)) {
+      debugRows = data.publicFishItems.slice(0, 12).map((it) =>
+        `<div>${escHtml(it.canonicalName || it.name)} &mdash; img:${escHtml(it.dataImageSource || it.imageSource || '-')} rarity:${escHtml(it.dataRaritySource || it.raritySource || '-')}</div>`
+      ).join('');
+    }
+    return `<details class="global-db-proof"${DEBUG_GLOBAL ? ' open' : ''}>
+  <summary>Global DB: <span class="gdb-on">ON</span> &mdash; ${escHtml(g.sourceOfTruth || 'global_db')} &mdash; images ${escHtml(imgLabel)}</summary>
+  <div class="gdb-body">
+    <div class="gdb-row"><span>Source</span><span>SQLite global_db</span></div>
+    <div class="gdb-row"><span>Species</span><span>${g.speciesCount != null ? g.speciesCount : '?'}</span></div>
+    <div class="gdb-row"><span>Mappings</span><span>${g.mappingCount != null ? g.mappingCount : '?'}</span></div>
+    <div class="gdb-row"><span>Observations</span><span>${g.observationCount != null ? g.observationCount.toLocaleString('en-US') : '?'}</span></div>
+    <div class="gdb-row"><span>Images</span><span>${g.imageAssetCount != null ? g.imageAssetCount : '?'}</span></div>
+    <div class="gdb-row"><span>Cards w/ global image</span><span>${escHtml(imgLabel)}</span></div>
+    <div class="gdb-row"><span>Cards w/ global rarity</span><span>${escHtml(rarLabel)}</span></div>
+    ${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
+  </div>
+</details>`;
+  }
+  function itemImageSrc(item) {
+    if (isUsableImageUrl(item.imageUrl)) return item.imageUrl;
+    if (item.imageAssetId && /^\d{10,22}$/.test(String(item.imageAssetId))) {
+      return `/api/fishit-tracker/image/${item.imageAssetId}`;
+    }
+    return null;
   }
   function rarityClass(r) { return r ? (RARITY_MAP[r.toLowerCase()] || 'badge') : ''; }
   function cardRarityClass(r) { return r ? (CARD_RARITY_MAP[r.toLowerCase()] || '') : ''; }
@@ -289,16 +349,6 @@
     if (u.startsWith('http')) return true;
     if (u.startsWith('/assets/')) return true;
     return false;
-  }
-  function itemImageSrc(item) {
-    if (item.imageUrlPresent === true && isUsableImageUrl(item.imageUrl)) return item.imageUrl;
-    if (item.imageResolved === true && isUsableImageUrl(item.imageUrl)) return item.imageUrl;
-    if (item.verifiedProxy === true && isUsableImageUrl(item.imageUrl)) return item.imageUrl;
-    if (isUsableImageUrl(item.imageUrl)) return item.imageUrl;
-    if (item.imageAssetId && /^\d{10,22}$/.test(String(item.imageAssetId))) {
-      return `/api/fishit-tracker/image/${item.imageAssetId}`;
-    }
-    return null;
   }
   function onFishImageError(img, item) {
     console.warn('[fishit-tracker-ui] image load failed', {
@@ -337,9 +387,13 @@
     const amount  = Number(item.amount || 1);
     const title   = cardTitle(item);
     const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
+    const nameStyle = rarityNameStyle(item);
     const card = document.createElement('div');
     card.className = 'item-card';
     card.setAttribute('data-card-key', cardKey(item));
+    if (item.dataSource) card.setAttribute('data-source', item.dataSource);
+    if (item.dataImageSource) card.setAttribute('data-image-source', item.dataImageSource);
+    if (item.dataRaritySource) card.setAttribute('data-rarity-source', item.dataRaritySource);
     if (item.mutation) card.setAttribute('data-mutation', item.mutation);
     if (isShiny) card.setAttribute('data-shiny', 'true');
     if (rarityLow) card.setAttribute('data-rarity', rarityLow);
@@ -350,7 +404,7 @@
       ? item.mutationTags.map(m => `<span class="badge" style="font-size:.68rem;">${escHtml(m)}</span>`).join('')
       : (item.mutation ? `<span class="badge" style="font-size:.68rem;">${escHtml(item.mutation)}</span>` : '');
     card.innerHTML = `
-  <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${escHtml(title)}" decoding="async" style="width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;" data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}"><div class="ic-title-wrap"><span class="item-name">${escHtml(title)}</span><div class="ic-badges">${qty}${mutTags}</div></div></div>
+  <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${escHtml(title)}" decoding="async" style="width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;" data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}"><div class="ic-title-wrap"><span class="item-name" style="${nameStyle}">${escHtml(title)}</span><div class="ic-badges">${qty}${mutTags}</div></div></div>
   <div class="ic-meta">${rarity ? `<span class="badge ${rc}">${escHtml(rarity)}</span>` : ''}</div>`;
     const img = card.querySelector('img');
     if (img) img.onerror = () => onFishImageError(img, item);
@@ -373,8 +427,18 @@
     else card.removeAttribute('data-shiny');
     if (rarityLow) card.setAttribute('data-rarity', rarityLow);
     else card.removeAttribute('data-rarity');
+    if (item.dataSource) card.setAttribute('data-source', item.dataSource);
+    else card.removeAttribute('data-source');
+    if (item.dataImageSource) card.setAttribute('data-image-source', item.dataImageSource);
+    else card.removeAttribute('data-image-source');
+    if (item.dataRaritySource) card.setAttribute('data-rarity-source', item.dataRaritySource);
+    else card.removeAttribute('data-rarity-source');
     const nameEl = card.querySelector('.item-name');
-    if (nameEl && nameEl.textContent !== title) nameEl.textContent = title;
+    const nameStyle = rarityNameStyle(item);
+    if (nameEl) {
+      nameEl.textContent = title;
+      nameEl.style.cssText = nameStyle;
+    }
     const amount = Number(item.amount || 1);
     const qtyEl = card.querySelector('.ic-badges span[style]');
     if (qtyEl) qtyEl.textContent = `x${Number.isFinite(amount) ? amount : 1}`;
@@ -463,8 +527,12 @@
       const mutAttr = item.mutation ? ` data-mutation="${escHtml(item.mutation)}"` : '';
       const shinyAttr = isShiny ? ' data-shiny="true"' : '';
       const rarityAttr = rarityLow ? ` data-rarity="${escHtml(rarityLow)}"` : '';
-      return `<div class="${cardCls.join(' ')}" data-card-key="${escHtml(cardKey(item))}"${mutAttr}${shinyAttr}${rarityAttr}>
-  <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${altText}" decoding="async" style="width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;" data-item-id="${escHtml(item.itemId || '')}" onerror="this.onerror=null;this.src='${ITEM_IMAGES.Default}';"><div class="ic-title-wrap"><span class="item-name">${escHtml(title)}</span><div class="ic-badges">${qty}${mutTags}</div></div></div>
+      const srcAttr = item.dataSource ? ` data-source="${escHtml(item.dataSource)}"` : '';
+      const imgSrcAttr = item.dataImageSource ? ` data-image-source="${escHtml(item.dataImageSource)}"` : '';
+      const rarSrcAttr = item.dataRaritySource ? ` data-rarity-source="${escHtml(item.dataRaritySource)}"` : '';
+      const nameStyle = rarityNameStyle(item);
+      return `<div class="${cardCls.join(' ')}" data-card-key="${escHtml(cardKey(item))}"${mutAttr}${shinyAttr}${rarityAttr}${srcAttr}${imgSrcAttr}${rarSrcAttr}>
+  <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${altText}" decoding="async" style="width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;" data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}" onerror="this.onerror=null;this.src='${ITEM_IMAGES.Default}';"><div class="ic-title-wrap"><span class="item-name" style="${nameStyle}">${escHtml(title)}</span><div class="ic-badges">${qty}${mutTags}</div></div></div>
   <div class="ic-meta">${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
 </div>`;
     }).join('')}</div>`;
@@ -495,6 +563,7 @@
   <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>
 </div>
 <div class="card-status-line" data-status-line>&#x23F3; Waiting for <strong>${escHtml(username)}</strong> to execute the script in-game...</div>
+<div data-global-db-proof></div>
 <div class="card-body" data-card-body><div class="card-empty">&#x23F3; Awaiting first data...</div></div>`
 
     el.querySelector('.card-head').addEventListener('click', e => { if (!e.target.closest('[data-remove-btn]')) el.classList.toggle('expanded'); });
@@ -514,6 +583,8 @@
     if (c) c.innerHTML = fishCountLabel(data, fishList);
     if (s) s.textContent = `Last sync: ${fmtTime(syncTimestamp(data))}`;
     if (l) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;
+    const gdb = card.querySelector('[data-global-db-proof]');
+    if (gdb) gdb.innerHTML = buildGlobalDbProofHtml(data);
     if (b) patchItemsGrid(b, fishList);
   }
 

@@ -18,6 +18,7 @@ const SEED_SOURCE_QUIZ = 'quiz_bot_import';
 const SPECIES_RARITY_SEED = {
   'freshwater piranha': { rarity: 'Rare', source: 'game_verified_seed' },
   'giant squid': { rarity: 'Secret', source: 'manual_verified_catalog' },
+  'panther eel': { rarity: 'Secret', source: 'manual_verified_catalog' },
 };
 
 const CONFIDENCE_RANK = {
@@ -552,6 +553,33 @@ function buildQuizBotSeedImportProof() {
   };
 }
 
+function buildGlobalDbUiProof(publicItems) {
+  const stats = globalDb.getStats();
+  const items = publicItems || [];
+  const globalImages = items.filter((i) => i.imageSource === 'global_db' && i.imageUrl).length;
+  const globalRarity = items.filter((i) => i.raritySource && (
+    i.raritySource === 'global_db'
+    || i.raritySource === 'manual_verified'
+    || i.raritySource === 'ui_name_color'
+    || String(i.raritySource).includes('seed')
+    || String(i.raritySource).includes('canonical')
+  )).length;
+  return {
+    enabled: true,
+    sourceOfTruth: 'global_db',
+    backend: 'sqlite',
+    speciesCount: stats.speciesCount,
+    mappingCount: stats.mappingCount,
+    observationCount: stats.observationCount,
+    imageAssetCount: stats.imageAssetCount,
+    cardsUsingGlobalDbImages: globalImages,
+    cardsUsingGlobalDbRarity: globalRarity,
+    cardsTotal: items.length,
+    cardsUsingGlobalDbImagesLabel: `${globalImages}/${items.length}`,
+    cardsUsingGlobalDbRarityLabel: `${globalRarity}/${items.length}`,
+  };
+}
+
 function _reset() {
   globalDb._reset();
   _lastImportResult = null;
@@ -631,6 +659,7 @@ module.exports = {
   buildGlobalConflictProof,
   buildGlobalContributionProof,
   buildQuizBotSeedImportProof,
+  buildGlobalDbUiProof,
   approveItemMapping,
   _reset,
 };

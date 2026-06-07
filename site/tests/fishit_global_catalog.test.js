@@ -15,13 +15,19 @@ const {
   buildPublicFishFields,
   buildPublicFilterTrace,
   buildInventoryParityProof,
+  buildCountParityProof,
+  buildUnmappedReviewProof,
+  buildRarityColorProof,
+  buildTrackerClientProof,
   isPublicFishItem,
   isLikelyFishInventoryItem,
   catalogMetaForItemId,
 } = require('../src/fishitTrackerRoutes');
+const rarityColorMap = require('../src/fishitRarityColorMap');
 
-const X_BUILD = 'BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07';
-const W_BUILD = X_BUILD;
+const Y_BUILD = 'BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07';
+const X_BUILD = Y_BUILD;
+const W_BUILD = Y_BUILD;
 let tmpDb;
 
 function setupTestDb() {
@@ -344,8 +350,8 @@ describe('BLOCKER10W global fish parity', { concurrency: 1 }, () => {
 
 describe('BLOCKER10X live images flicker and Panther Eel mapping', { concurrency: 1 }, () => {
   test('build marker is BLOCKER10X', () => {
-    const { BLOCKER10X_BUILD } = require('../src/fishitTrackerBuild');
-    assert.equal(BLOCKER10X_BUILD, X_BUILD);
+    const { BLOCKER10Y_BUILD } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10Y_BUILD, Y_BUILD);
   });
 
   test('stale test_quiz cachedUrl repairs from Quiz Bot seed file', async () => {
@@ -489,5 +495,194 @@ describe('BLOCKER10X live images flicker and Panther Eel mapping', { concurrency
     assert.ok(!ejs.includes('badge-fish'));
     assert.ok(!ejs.includes('debugWeight'));
     assert.ok(!ejs.includes('weight-badge'));
+  });
+});
+
+describe('BLOCKER10Y rarity color count global proof', { concurrency: 1 }, () => {
+  test('build marker is BLOCKER10Y in tracker build and tracker.lua', () => {
+    const { BLOCKER10Y_BUILD } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10Y_BUILD, Y_BUILD);
+    const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    assert.ok(lua.includes('BLOCKER10Y_RARITY_COLOR_COUNT_GLOBAL_PROOF_2026_06_07'));
+    assert.ok(lua.includes('captureInventoryUiHints'));
+    assert.ok(lua.includes('trackerClientProof'));
+  });
+
+  test('countParityProof separates raw enriched grouped and unmapped counts', () => {
+    const enriched = [
+      { name: 'Giant Squid', itemId: '156', category: 'fish', amount: 2, baseFishName: 'Giant Squid' },
+      { name: 'Item #265', itemId: '265', category: 'items', amount: 1, weight: 50,
+        rawProof: { rawObjectPreview: { Favorited: 'false' } } },
+    ];
+    const pub = [{ name: 'Giant Squid', itemId: '156', amount: 2, baseFishName: 'Giant Squid' }];
+    const cp = buildCountParityProof(enriched, enriched, pub, {
+      parseStats: { raw: 3, acceptedInstances: 3 },
+      bagInstanceCount: 3,
+    });
+    assert.equal(cp.trackerRawInstanceCount, 3);
+    assert.equal(cp.acceptedInstances, 3);
+    assert.ok(cp.enrichedFishInstances >= 2);
+    assert.equal(cp.publicFishTypes, 1);
+    assert.ok(cp.unmappedFishCandidateInstances >= 1);
+    assert.equal(cp.inGameBagCountEvidence, 'tracker_bagInstanceCount=3');
+  });
+
+  test('website header template shows bag fish types unmapped', () => {
+    const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(ejs.includes('fishCountLabel'));
+    assert.ok(ejs.includes('Bag:'));
+    assert.ok(ejs.includes('unmapped'));
+    assert.ok(ejs.includes('buildGlobalDbProofHtml'));
+    assert.ok(ejs.includes('global-db-proof'));
+  });
+
+  test('imageUrl imageUrlPresent imageResolved cannot contradict when cached', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    fishImageCache._reset();
+    const pub = await buildPublicFishFields([{
+      name: 'Giant Squid', baseFishName: 'Giant Squid', amount: 1, category: 'fish', itemId: '156',
+    }], 'http://127.0.0.1:8791');
+    const item = pub.publicItems[0];
+    assert.ok(item.imageUrl);
+    assert.equal(item.imageUrlPresent, true);
+    assert.equal(item.imageResolved, true);
+    const proof = fishImageCache.buildImageRenderProof(pub.publicItems, 1)[0].imageRenderProof;
+    assert.equal(proof.imageUrlPresent, true);
+    assert.equal(proof.imageResolved, true);
+    assert.equal(proof.placeholderUsed, false);
+  });
+
+  test('public frontend uses imageUrl field only', () => {
+    const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(ejs.includes('itemImageSrc(item)'));
+    assert.ok(ejs.includes('item.imageUrl'));
+    assert.ok(!ejs.includes('imageProxyUrl'));
+  });
+
+  test('Flowery Fish missing image explained when not in Quiz Bot seed', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const audit = quizBotCatalog.auditNames(['Flowery Fish']);
+    assert.equal(audit[0]?.matched, false);
+    const pub = await buildPublicFishFields([{
+      name: 'Flowery Fish', baseFishName: 'Flowery Fish', amount: 1, category: 'fish',
+    }], 'http://127.0.0.1:8791');
+    const flowery = pub.publicItems.find((f) => /flowery fish/i.test(f.name));
+    if (flowery) {
+      assert.equal(flowery.imageUrlPresent, false);
+    }
+  });
+
+  test('rarity color source priority prefers ui_name_color then global_db', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const pub = await buildPublicFishFields([{
+      name: 'Mossy Fishlet', baseFishName: 'Mossy Fishlet', amount: 1, category: 'fish', itemId: '287',
+    }], 'http://127.0.0.1:8791', {
+      sessionData: {
+        inventoryUiHints: [{ name: 'Mossy Fishlet', nameColorHex: '#22d3ee' }],
+      },
+    });
+    const item = pub.publicItems[0];
+    assert.equal(item.rarity, 'Secret');
+    assert.equal(item.raritySource, 'ui_name_color');
+    assert.equal(item.dataRaritySource, 'ui_name_color');
+  });
+
+  test('card rarity class matches final rarity tier', () => {
+    const proof = rarityColorMap.buildRarityColorProofRow({
+      itemId: '156', canonicalName: 'Giant Squid', rarity: 'Secret', raritySource: 'global_db',
+    });
+    assert.equal(proof.cardClass, 'rarity-secret');
+    assert.equal(proof.cardUsesFullRarityStyle, true);
+  });
+
+  test('card name accent follows rarity color in template', () => {
+    const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(ejs.includes('rarityNameStyle'));
+    assert.ok(ejs.includes('RARITY_NAME_COLORS'));
+    assert.ok(ejs.includes('style="${nameStyle}"') || ejs.includes("nameEl.style.cssText = nameStyle"));
+  });
+
+  test('unknown rarity stays neutral with explicit reason in proof', () => {
+    const proof = buildRarityColorProof([{
+      itemId: '999', name: 'Unknown Fish', rarity: null, rarityNeedsData: true,
+    }], 1)[0];
+    assert.equal(proof.finalRarity, null);
+    assert.equal(proof.rarityUnknownReason, 'no_tier_source');
+    assert.equal(proof.cardUsesFullRarityStyle, false);
+  });
+
+  test('global DB proof UI displays source and card usage counts', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const pub = await buildPublicFishFields([{
+      name: 'Giant Squid', baseFishName: 'Giant Squid', amount: 1, category: 'fish', itemId: '156',
+    }], 'http://127.0.0.1:8791');
+    const ui = pub.globalDbUiProof;
+    assert.equal(ui.sourceOfTruth, 'global_db');
+    assert.ok(ui.speciesCount >= 620);
+    assert.equal(ui.cardsTotal, 1);
+    assert.ok(ui.cardsUsingGlobalDbImages >= 1);
+  });
+
+  test('per-card data attributes expose global_db source', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const pub = await buildPublicFishFields([{
+      name: 'Freshwater Piranha', baseFishName: 'Freshwater Piranha', amount: 1, category: 'fish', itemId: '284',
+    }], 'http://127.0.0.1:8791');
+    const item = pub.publicItems[0];
+    assert.equal(item.dataImageSource, 'global_db');
+    const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(ejs.includes('data-image-source'));
+    assert.ok(ejs.includes('data-rarity-source'));
+  });
+
+  test('unmapped review proof lists candidates and manual_review_required', () => {
+    const enriched = [
+      { name: 'Item #265', itemId: '265', category: 'items', amount: 2, weight: 50,
+        rawProof: { rawObjectPreview: { Favorited: 'false' } } },
+    ];
+    const review = buildUnmappedReviewProof(enriched);
+    assert.equal(review.length, 1);
+    assert.equal(review[0].itemId, '265');
+    assert.equal(review[0].recommendedAction, 'manual_review_required');
+    assert.equal(review[0].autoMapped, false);
+  });
+
+  test('trackerClientProof reports BLOCKER10Y capabilities', () => {
+    const proof = buildTrackerClientProof({
+      trackerBuild: Y_BUILD,
+      bagInstanceCount: 61,
+      inventoryUiHints: [{ name: 'Giant Squid', nameColorHex: '#22d3ee' }],
+      trackerClientProof: {
+        trackerBuild: Y_BUILD,
+        uploadedAt: '2026-06-07T12:00:00.000Z',
+        supportsRarityColorEvidence: true,
+        supportsBagInstanceCount: true,
+        noHeavyScanner: true,
+      },
+    });
+    assert.equal(proof.trackerBuild, Y_BUILD);
+    assert.equal(proof.supportsRarityColorEvidence, true);
+    assert.equal(proof.supportsBagInstanceCount, true);
+    assert.equal(proof.noHeavyScanner, true);
+  });
+
+  test('no raw session key or user identity in trackerClientProof', () => {
+    const proof = buildTrackerClientProof({
+      sessionKey: 'denghub2_secret',
+      userId: 12345678,
+      trackerClientProof: { trackerBuild: Y_BUILD },
+    });
+    assert.ok(!JSON.stringify(proof).includes('denghub2_secret'));
+    assert.ok(!JSON.stringify(proof).includes('12345678'));
   });
 });
