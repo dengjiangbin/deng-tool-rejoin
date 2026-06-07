@@ -23,12 +23,15 @@ const {
   buildTrackerClientProof,
   isPublicFishItem,
   isLikelyFishInventoryItem,
+  buildAmountProof,
+  extractReplionAmount,
   catalogMetaForItemId,
   _itemIdLockedBaseName,
 } = require('../src/fishitTrackerRoutes');
 const rarityColorMap = require('../src/fishitRarityColorMap');
 
-const Z3_BUILD = 'BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07';
+const Z4_BUILD = 'BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07';
+const Z3_BUILD = Z4_BUILD;
 const Z_BUILD = Z3_BUILD;
 const Y_BUILD = Z3_BUILD;
 const X_BUILD = Z3_BUILD;
@@ -805,5 +808,104 @@ describe('BLOCKER10Z3 replion global db no UI dependency', { concurrency: 1 }, (
     assert.ok(panther);
     assert.equal(panther.rarity, 'Secret');
     assert.ok(panther.imageUrlPresent);
+  });
+});
+
+describe('BLOCKER10Z4 amount regression fix', { concurrency: 1 }, () => {
+  test('build marker is BLOCKER10Z4', () => {
+    const { BLOCKER10Z4_BUILD } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10Z4_BUILD, Z4_BUILD);
+    const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    assert.ok(lua.includes('BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07'));
+    assert.ok(lua.includes('LiveSafe.resolveOwnedStorageKey'));
+  });
+
+  test('Topwater Bait Quantity 135 parses from rawProof not amount 1', () => {
+    const hit = extractReplionAmount({
+      name: 'Topwater Bait', itemId: '10', amount: 1,
+      rawProof: { rawObjectPreview: { Quantity: 135, Id: '10' } },
+    });
+    assert.equal(hit.amount, 135);
+    assert.equal(hit.source, 'replion_raw_object_quantity');
+  });
+
+  test('fish public amount comes from replion fields not global DB', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const pub = await buildPublicFishFields([
+      { name: 'Item #267', itemId: '267', category: 'fish', amount: 1,
+        replionUuid: 'e0ce8a51-2b73-41fb-a319-ebc1c949a9f3',
+        replionAmountSource: 'replion_uuid_instance' },
+    ], 'http://127.0.0.1:8791');
+    const item = pub.publicItems[0];
+    assert.equal(item.amount, 1);
+    assert.equal(item.dataAmountSource, 'replion_uuid_instance');
+    assert.ok(pub.amountProof);
+    assert.equal(pub.amountProof.rows[0].amountFromGlobalDb, false);
+  });
+
+  test('itemId 267 stays Parrot Blopfish not Catfish alias', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const pub = await buildPublicFishFields([
+      { name: 'Item #267', itemId: '267', category: 'fish', amount: 1,
+        replionUuid: 'uuid-test-267-a', replionAmountSource: 'replion_uuid_instance' },
+    ], 'http://127.0.0.1:8791');
+    const item = pub.publicItems[0];
+    assert.equal(item.baseFishName, 'Parrot Blopfish');
+    assert.notEqual(item.baseFishName, 'Catfish');
+    assert.ok(!/catfish/i.test(item.name || ''));
+  });
+
+  test('itemId 1008 stays Goliath Tiger not Spear Guardian alias', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const canon = catalogMetaForItemId('1008');
+    if (!canon || !/goliath tiger/i.test(canon.baseFishName || '')) return;
+    const pub = await buildPublicFishFields([
+      { name: 'Item #1008', itemId: '1008', category: 'fish', amount: 1,
+        replionUuid: 'uuid-test-1008-a', replionAmountSource: 'replion_uuid_instance' },
+    ], 'http://127.0.0.1:8791');
+    const item = pub.publicItems[0];
+    assert.equal(item.baseFishName, 'Goliath Tiger');
+    assert.ok(!/spear guardian/i.test(item.name || ''));
+  });
+
+  test('regression fixture does not output Catfish x32 from single uuid row', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const pub = await buildPublicFishFields([
+      { name: 'Item #267', itemId: '267', category: 'fish', amount: 1,
+        replionUuid: 'e0ce8a51-2b73-41fb-a319-ebc1c949a9f3',
+        replionAmountSource: 'replion_uuid_instance' },
+    ], 'http://127.0.0.1:8791');
+    const catfish = pub.publicItems.find((f) => /catfish/i.test(f.name || ''));
+    if (catfish) assert.notEqual(catfish.amount, 32);
+    assert.ok(!pub.publicItems.some((f) => f.amount === 32 && /catfish/i.test(f.name || '')));
+  });
+
+  test('header template hides unverified Fish total', () => {
+    const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(ejs.includes('fishInstancesVerified'));
+    assert.ok(ejs.includes('Types:'));
+    assert.ok(!ejs.match(/Fish:\s*<strong>\$\{fishTotal\}/));
+  });
+
+  test('buildAmountProof exposes per-card replion amount source', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const pub = await buildPublicFishFields([
+      { name: 'Item #267', itemId: '267', category: 'fish', amount: 1,
+        replionUuid: 'proof-uuid-267', replionAmountSource: 'replion_uuid_instance' },
+    ], 'http://127.0.0.1:8791');
+    assert.ok(pub.amountProof.rows.length >= 1);
+    assert.equal(pub.amountProof.rows[0].publicAmount, 1);
+    assert.equal(pub.amountProof.rows[0].amountFromGlobalDb, false);
+    assert.ok(pub.amountProof.rows[0].whyAmountCorrect.includes('Replion'));
   });
 });

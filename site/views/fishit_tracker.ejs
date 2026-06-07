@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07' %>">
+<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07' %>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -152,8 +152,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07">
-<!-- BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07 -->
+<body data-ui-marker="BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07">
+<!-- BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07 -->
 <div class="page">
   <div class="inner">
 
@@ -203,9 +203,9 @@
   const POLL_MS       = 5000;
   const DEBUG_GLOBAL  = /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
   const RENDER_BUILD  = document.documentElement.getAttribute('data-render-build')
-    || 'BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07';
+    || 'BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07';
   const PUBLIC_API_BUILD = document.documentElement.getAttribute('data-public-api-build')
-    || 'BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07';
+    || 'BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07';
   const RARITY_NAME_COLORS = {
     common:'#9ca3af', uncommon:'#4ade80', rare:'#60a5fa', epic:'#c084fc',
     legendary:'#eab308', legend:'#eab308', mythic:'#f472b6', secret:'#22d3ee', forgotten:'#818cf8',
@@ -261,18 +261,19 @@
   function fishCountLabel(data, fishList) {
     const fc = data && data.fishCounts;
     const cp = data && data.countParityProof;
-    const fishTotal = (fc && fc.fishInstances != null) ? fc.fishInstances
-      : (cp && cp.groupedPublicInstances != null ? cp.groupedPublicInstances : null);
     const types = (fc && fc.fishTypes != null) ? fc.fishTypes : fishList.length;
     const unmapped = (fc && fc.unmappedFishInstances != null) ? fc.unmappedFishInstances
       : (cp && cp.unmappedFishCandidateInstances != null ? cp.unmappedFishCandidateInstances : 0);
-    if (fishTotal != null) {
-      let label = `Fish: <strong>${fishTotal}</strong> &middot; Types: <span style="color:#8a94a6;">${types}</span>`;
+    const verified = fc && fc.fishInstancesVerified === true;
+    const fishTotal = verified && fc.fishInstances != null ? fc.fishInstances : null;
+    if (verified && fishTotal != null) {
+      let label = `Tracked fish: <strong>${fishTotal}</strong> &middot; Types: <span style="color:#8a94a6;">${types}</span>`;
       if (unmapped > 0) label += ` &middot; <span style="color:#fbbf24;">Unmapped: ${unmapped}</span>`;
       return label;
     }
-    const total = fishList.reduce((sum, item) => sum + (Number(item.amount || item.count) || 1), 0);
-    return `Fish: <strong>${total}</strong> <span style="color:#8a94a6;">(${fishList.length} types)</span>`;
+    let label = `Types: <strong>${types}</strong>`;
+    if (unmapped > 0) label += ` &middot; <span style="color:#fbbf24;">Unmapped: ${unmapped}</span>`;
+    return label;
   }
   function buildGlobalDbProofHtml(data) {
     if (!DEBUG_GLOBAL) return '';
@@ -292,6 +293,13 @@
     const rp = data.replionCountProof || data.countParityProof;
     if (rp) {
       parityRows = `<div class="global-db-debug">Replion: snapshot=${rp.snapshotItemInstances || rp.fullSnapshotItemInstances || '?'} fish=${rp.fishCandidates || rp.fullSnapshotFishCandidates || '?'} shown=${rp.publicFishInstances || rp.groupedPublicInstances || '?'} unmapped=${rp.unmappedFishCandidates || rp.unmappedFishCandidateInstances || 0}</div>`;
+    }
+    let amountRows = '';
+    const ap = data.amountProof;
+    if (ap && Array.isArray(ap.rows)) {
+      amountRows = `<div class="global-db-debug">amountProof verified=${ap.allVerified ? 'yes' : 'no'}${ap.rows.slice(0, 10).map((r) =>
+        `<br>${escHtml(r.publicCardName || '?')} id=${escHtml(r.itemId || '-')} amt=${r.publicAmount} src=${escHtml(r.amountSource || '-')} catalog=${escHtml(r.catalogName || '-')} final=${escHtml(r.finalName || '-')}`
+      ).join('')}</div>`;
     }
     let catchRows = '';
     const cl = data.catchLearningProof;
@@ -314,7 +322,7 @@
     <div class="gdb-row"><span>Images</span><span>${g.imageAssetCount != null ? g.imageAssetCount : '?'}</span></div>
     <div class="gdb-row"><span>Cards w/ global image</span><span>${escHtml(imgLabel)}</span></div>
     <div class="gdb-row"><span>Cards w/ global rarity</span><span>${escHtml(rarLabel)}</span></div>
-    ${parityRows}${catchRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
+    ${parityRows}${amountRows}${catchRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
   </div>
 </details>`;
   }

@@ -128,6 +128,22 @@ function repairAllEntries(byItemId) {
 function polishPublicItem(item) {
   if (!item || typeof item !== 'object') return item;
   const raw = item.name || item.displayName || '';
+  if (item.catalogLockedBaseName) {
+    const base = String(item.catalogLockedBaseName).trim();
+    const mutation = item.mutation || null;
+    const displayName = mutation ? `${mutation} ${base}` : (item.displayName || base);
+    return {
+      ...item,
+      cardName: base,
+      name: base,
+      baseFishName: base,
+      displayName,
+      mutation,
+      weight: item.weightKg != null ? item.weightKg : item.weight,
+      weightKg: item.weightKg != null ? item.weightKg : item.weight,
+      shiny: item.shiny === true || String(mutation || '').toLowerCase().includes('shiny'),
+    };
+  }
   if (protectedFishNames.isProtectedBaseName(item.baseFishName)
       || protectedFishNames.isProtectedBaseName(raw)) {
     const base = protectedFishNames.normalizeProtected(item.baseFishName || raw);
@@ -266,13 +282,21 @@ function normalizeMutationGroup(item) {
   return String(mut).toLowerCase().trim();
 }
 
-/** Public card aggregation key: canonical species + mutation group (BLOCKER10W). */
+/** Public card aggregation key: Replion identity first, never Global DB speciesId alone (BLOCKER10Z4). */
 function publicAggregationKey(item) {
-  const speciesId = item?.speciesId || item?.globalSpeciesId || null;
-  const base = String(item?.baseFishName || item?.cardName || item?.name || '').trim();
-  const normBase = base.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
   const mutGroup = normalizeMutationGroup(item);
-  return `${speciesId || normBase}::${mutGroup}`;
+  if (item?.replionUuid) {
+    const mfish = item?.metadataFishId ? String(item.metadataFishId) : null;
+    const base = String(item?.catalogLockedBaseName || item?.baseFishName || item?.cardName || '').trim().toLowerCase();
+    if (mfish) return `mfish:${mfish}::${mutGroup}`;
+    if (base) return `uuidbase:${base}::${mutGroup}`;
+    return `uuid:${String(item.replionUuid).toLowerCase()}`;
+  }
+  const itemId = item?.itemId ? String(item.itemId) : null;
+  const base = String(item?.catalogLockedBaseName || item?.baseFishName || item?.cardName || item?.name || '').trim();
+  const normBase = base.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+  if (itemId) return `item:${itemId}::${normBase}::${mutGroup}`;
+  return `${normBase}::${mutGroup}`;
 }
 
 /**

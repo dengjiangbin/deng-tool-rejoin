@@ -20,11 +20,14 @@ if (src.charCodeAt(0) === 0xfeff) {
 if (/^\s*loadstring\s*\(/.test(src)) {
   errors.push('tracker.lua must not begin with loadstring() wrapper');
 }
-if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07')) {
-  errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z3 marker missing');
+if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07')) {
+  errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z4 marker missing');
 }
-if (!src.includes('BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07')) {
-  errors.push('BLOCKER10Z3 build marker missing');
+if (!src.includes('BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07')) {
+  errors.push('BLOCKER10Z4 build marker missing');
+}
+if (!src.includes('LiveSafe.resolveOwnedStorageKey')) {
+  errors.push('LiveSafe.resolveOwnedStorageKey missing — UUID-per-instance amount fix required');
 }
 if (src.includes('payload.inventoryUiHints')) {
   errors.push('payload.inventoryUiHints must not be sent — Replion is source of truth');

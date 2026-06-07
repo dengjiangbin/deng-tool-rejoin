@@ -242,6 +242,57 @@ function sanitiseUsername(raw) {
   return USERNAME_RE.test(s) ? s : null;
 }
 
+function extractReplionAmount(item) {
+  if (!item || typeof item !== 'object') return { amount: 1, source: 'default_1', stackQuantity: null };
+  let stackFromPreview = null;
+  const preview = item.rawProof?.rawObjectPreview;
+  if (preview && typeof preview === 'object') {
+    for (const k of ['Quantity', 'quantity', 'Amount', 'amount', 'Count', 'count', 'Stack', 'stack']) {
+      const v = Number(preview[k]);
+      if (Number.isFinite(v) && v > 0) {
+        stackFromPreview = Math.floor(v);
+        break;
+      }
+    }
+  }
+  const direct = item.amount ?? item.count ?? item.Amount ?? item.Count
+    ?? item.quantity ?? item.Quantity;
+  const directNum = Number(direct);
+  if (stackFromPreview != null && (!Number.isFinite(directNum) || directNum <= 1)) {
+    return {
+      amount: stackFromPreview,
+      source: 'replion_raw_object_quantity',
+      stackQuantity: stackFromPreview,
+    };
+  }
+  if (Number.isFinite(directNum) && directNum > 0) {
+    return {
+      amount: Math.floor(directNum),
+      source: item.replionAmountSource || 'replion_flat_amount',
+      stackQuantity: stackFromPreview,
+    };
+  }
+  if (stackFromPreview != null) {
+    return {
+      amount: stackFromPreview,
+      source: 'replion_raw_object_quantity',
+      stackQuantity: stackFromPreview,
+    };
+  }
+  return { amount: 1, source: item.replionUuid ? 'replion_uuid_instance' : 'default_1', stackQuantity: null };
+}
+
+function extractReplionIdentityFields(item) {
+  const preview = item?.rawProof?.rawObjectPreview;
+  const meta = preview?.Metadata && typeof preview.Metadata === 'object' ? preview.Metadata : null;
+  return {
+    replionUuid: item?.replionUuid || item?.uuid || preview?.UUID || preview?.Uuid || preview?.uuid || null,
+    metadataFishId: item?.metadataFishId || meta?.FishId || meta?.fishId || meta?.FishID || null,
+    metadataFishName: item?.metadataFishName || meta?.FishName || meta?.fishName || meta?.Name || meta?.name || null,
+    replionAmountSource: item?.replionAmountSource || null,
+  };
+}
+
 function sanitiseItems(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
@@ -253,9 +304,9 @@ function sanitiseItems(raw) {
     if (!name || catalogStore.isStatLabel(name)) continue;
 
     const rawWeight = item.weight ?? item.maxWeight ?? item.totalWeight ?? item.Weight;
-    const rawAmount = item.amount ?? item.count ?? item.Amount ?? item.Count ?? 1;
+    const amountHit = extractReplionAmount(item);
     const weight = Number(rawWeight);
-    const amount = Number(rawAmount);
+    const identity = extractReplionIdentityFields(item);
 
     const rarity = typeof item.rarity === 'string'
       ? item.rarity
@@ -264,7 +315,12 @@ function sanitiseItems(raw) {
     out.push({
       name:     name.slice(0, 100),
       weight:   Number.isFinite(weight) ? weight : null,
-      amount:   Number.isFinite(amount) && amount > 0 ? Math.floor(amount) : 1,
+      amount:   amountHit.amount,
+      replionAmountSource: amountHit.source,
+      replionStackQuantity: amountHit.stackQuantity,
+      replionUuid: identity.replionUuid,
+      metadataFishId: identity.metadataFishId,
+      metadataFishName: identity.metadataFishName,
       category: typeof item.category === 'string' ? item.category.slice(0, 50)  : null,
       tab:      typeof item.tab === 'string'      ? item.tab.slice(0, 50)       : null,
       rarity:   rarity ? rarity.slice(0, 50) : null,
@@ -313,16 +369,20 @@ function mergeItemsNoDowngrade(incoming, existing) {
 function _itemIdLockedBaseName(itemId) {
   const id = String(itemId || '').trim();
   if (!id) return null;
+  const manual = manualVerifiedCatalog.lookupByItemId(id);
+  if (manual?.baseFishName && !rarityLabels.isBlockedLearnName(manual.baseFishName)) {
+    return manual.baseFishName;
+  }
+  const canon = canonicalCatalog.lookupByItemId(id);
+  if (canon?.baseFishName && !rarityLabels.isBlockedLearnName(canon.baseFishName)) {
+    return canon.baseFishName;
+  }
   const learned = learnedFishCatalog.lookupById(id);
   if (learned?.baseFishName && !rarityLabels.isBlockedLearnName(learned.baseFishName)) {
     return learned.baseFishName;
   }
   if (learned?.name && !rarityLabels.isBlockedLearnName(learned.name)) {
     return learned.name;
-  }
-  const canon = canonicalCatalog.lookupByItemId(id);
-  if (canon?.baseFishName && !rarityLabels.isBlockedLearnName(canon.baseFishName)) {
-    return canon.baseFishName;
   }
   return null;
 }
@@ -345,6 +405,23 @@ function catalogMetaForItemId(itemId) {
     };
   }
   const learned = learnedFishCatalog.lookupById(itemId);
+  const canonEarly = canonicalCatalog.lookupByItemId(itemId);
+  if (canonEarly && canonEarly.baseFishName && !rarityLabels.isBlockedLearnName(canonEarly.baseFishName)) {
+    const isManual = (canonEarly.sources || []).includes('fishit_manual_verified_catalog');
+    return {
+      name: canonEarly.baseFishName,
+      displayName: canonEarly.baseFishName,
+      baseFishName: canonEarly.baseFishName,
+      mutation: canonEarly.mutation || null,
+      category: canonEarly.category || 'fish',
+      source: isManual ? 'manual_verified_catalog' : 'canonical_catalog',
+      tier: canonEarly.rarity || null,
+      imageUrl: canonEarly.imageUrl || canonEarly.sourceUrl || null,
+      imageAssetId: canonEarly.imageAssetId || null,
+      confidence: canonEarly.rarityConfidence || (isManual ? 'user_verified' : 'confirmed'),
+      publicEligible: true,
+    };
+  }
   if (learned && learned.publicEligible && learned.name
       && !rarityLabels.isBlockedLearnName(learned.name)) {
     const base = learned.baseFishName || learned.name;
@@ -360,23 +437,6 @@ function catalogMetaForItemId(itemId) {
       publicEligible: true,
     };
   }
-  const canon = canonicalCatalog.lookupByItemId(itemId);
-  if (canon && canon.baseFishName && !rarityLabels.isBlockedLearnName(canon.baseFishName)) {
-    const isManual = (canon.sources || []).includes('fishit_manual_verified_catalog');
-    return {
-      name: canon.baseFishName,
-      displayName: canon.baseFishName,
-      baseFishName: canon.baseFishName,
-      mutation: canon.mutation || null,
-      category: canon.category || 'fish',
-      source: isManual ? 'manual_verified_catalog' : 'canonical_catalog',
-      tier: canon.rarity || null,
-      imageUrl: canon.imageUrl || canon.sourceUrl || null,
-      imageAssetId: canon.imageAssetId || null,
-      confidence: canon.rarityConfidence || (isManual ? 'user_verified' : 'confirmed'),
-      publicEligible: true,
-    };
-  }
   const lockedBase = _itemIdLockedBaseName(itemId);
   const globalStrong = globalCatalogService.resolveCatalogMetaForItemId(itemId);
   if (globalStrong && globalStrong.publicEligible
@@ -389,19 +449,22 @@ function catalogMetaForItemId(itemId) {
   const global = globalFishCatalog.lookupById(itemId);
   if (global && (global.publicEligible || global.confidence === 'confirmed')
       && !rarityLabels.isBlockedLearnName(global.baseFishName || global.fishName)) {
-    return {
-      name: global.displayName || global.fishName,
-      displayName: global.displayName || global.fishName,
-      baseFishName: global.baseFishName || global.fishName,
-      mutation: global.mutation || null,
-      category: 'fish',
-      source: global.source || 'live_roblox_catch_delta',
-      tier: global.rarity || null,
-      imageUrl: global.imageUrl || null,
-      imageAssetId: global.imageAssetId || null,
-      confidence: global.confidence || null,
-      publicEligible: global.publicEligible,
-    };
+    const gBase = global.baseFishName || global.fishName;
+    if (!lockedBase || globalDb.normalizeNamePunct(gBase) === globalDb.normalizeNamePunct(lockedBase)) {
+      return {
+        name: gBase,
+        displayName: gBase,
+        baseFishName: gBase,
+        mutation: global.mutation || null,
+        category: 'fish',
+        source: global.source || 'live_roblox_catch_delta',
+        tier: global.rarity || null,
+        imageUrl: global.imageUrl || null,
+        imageAssetId: global.imageAssetId || null,
+        confidence: global.confidence || null,
+        publicEligible: global.publicEligible,
+      };
+    }
   }
   const fish = fishCatalog.lookupByItemId(itemId);
   if (fish) {
@@ -601,15 +664,16 @@ function enrichItemsFromCatalog(items) {
     }
 
     const itemIdLockedBase = it.itemId ? _itemIdLockedBaseName(it.itemId) : null;
+    const catalogLockedName = itemIdLockedBase
+      || ((meta?.source === 'canonical_catalog' || meta?.source === 'manual_verified_catalog'
+        || meta?.source === 'catch_learned_catalog') && meta?.baseFishName
+        ? meta.baseFishName : null);
     if (itemIdLockedBase) {
       baseFishName = itemIdLockedBase;
+      mutation = meta?.mutation || it.mutation || null;
       const lockedDisplay = mutation ? `${mutation} ${itemIdLockedBase}` : itemIdLockedBase;
       displayName = lockedDisplay;
-      const trackerBase = catchNameParser.canonicalizeFishName(name, { mutation }).baseFishName || name;
-      if (isPlaceholder || !trackerHasRealName
-          || globalDb.normalizeNamePunct(trackerBase) !== globalDb.normalizeNamePunct(itemIdLockedBase)) {
-        name = lockedDisplay;
-      }
+      name = lockedDisplay;
     }
 
     if (!imageAssetId && catalogStore.isFishCategory(category)) {
@@ -623,7 +687,7 @@ function enrichItemsFromCatalog(items) {
       const gMeta = globalCatalogService.resolveCatalogMetaForItemId(String(it.itemId), { allowLiveObserved: true });
       if (gMeta?.speciesId) speciesId = gMeta.speciesId;
       if (gMeta && catalogStore.isFishCategory(gMeta.category || 'fish')) {
-        if (isPlaceholder || !trackerHasRealName) {
+        if ((isPlaceholder || !trackerHasRealName) && !catalogLockedName) {
           const gBase = gMeta.baseFishName || gMeta.name;
           if (!itemIdLockedBase
               || globalDb.normalizeNamePunct(gBase) === globalDb.normalizeNamePunct(itemIdLockedBase)) {
@@ -654,14 +718,22 @@ function enrichItemsFromCatalog(items) {
       rarity = gRarity.rarity.rarity;
     }
 
+    const amountHit = extractReplionAmount(it);
+
     out.push({
       ...it,
       name,
       displayName,
       baseFishName,
       mutation,
+      catalogLockedBaseName: catalogLockedName || itemIdLockedBase || null,
       weight: weightVal != null ? weightVal : it.weight,
       weightKg: weightVal != null ? weightVal : it.weightKg,
+      amount: amountHit.amount,
+      replionAmountSource: it.replionAmountSource || amountHit.source,
+      replionUuid: it.replionUuid || extractReplionIdentityFields(it).replionUuid,
+      metadataFishId: it.metadataFishId || extractReplionIdentityFields(it).metadataFishId,
+      metadataFishName: it.metadataFishName || extractReplionIdentityFields(it).metadataFishName,
       rarity,
       tier: rarity || it.tier || null,
       raritySource: it.raritySource || gRarity.rarity?.raritySource || (meta && meta.source && rarity ? meta.source : null),
@@ -1034,6 +1106,68 @@ function buildCatchLearningProof(sessionData, nameCatalogDiscovery) {
   };
 }
 
+function buildAmountProof(publicItems, enrichedFlat) {
+  const byItemId = new Map();
+  for (const it of enrichedFlat || []) {
+    if (!it?.itemId) continue;
+    const id = String(it.itemId);
+    if (!byItemId.has(id)) byItemId.set(id, []);
+    byItemId.get(id).push(it);
+  }
+  const rows = (publicItems || []).map((item) => {
+    const catalog = item.itemId ? catalogMetaForItemId(String(item.itemId)) : null;
+    const catalogName = catalog?.baseFishName || catalog?.name || null;
+    const rawEntries = item.itemId ? (byItemId.get(String(item.itemId)) || []) : [];
+    const replionAmountSum = rawEntries.reduce(
+      (s, e) => s + (Number(e.amount) > 0 ? Math.floor(Number(e.amount)) : 1),
+      0,
+    );
+    const rawEntryCount = rawEntries.length;
+    const uuidCount = rawEntries.filter((e) => e.replionUuid).length;
+    const amountSource = item.replionAmountSource || item.dataAmountSource || 'replion_flat_amount';
+    const publicAmount = Number(item.amount) > 0 ? Math.floor(Number(item.amount)) : 1;
+    const legacyInflatedMerge = publicAmount > 1
+      && !['replion_uuid_instance', 'replion_stack_quantity', 'replion_raw_object_quantity'].includes(amountSource);
+    const amountMatchesReplion = legacyInflatedMerge
+      ? false
+      : (publicAmount === replionAmountSum || (uuidCount > 0 && publicAmount === uuidCount));
+    const nameMatchesCatalog = !catalogName || !item.baseFishName
+      || globalDb.normalizeNamePunct(catalogName) === globalDb.normalizeNamePunct(item.baseFishName);
+    return {
+      publicCardName: item.displayName || item.name,
+      itemId: item.itemId || null,
+      publicAmount,
+      amountSource,
+      rawEntryCount,
+      uuidCount,
+      stackQuantity: item.replionStackQuantity ?? null,
+      metadataIdentity: item.metadataFishId || item.metadataFishName || null,
+      metadataFishName: item.metadataFishName || null,
+      metadataFishId: item.metadataFishId || null,
+      groupedBy: 'itemId_baseFishName_mutation_or_uuid',
+      catalogName,
+      finalName: item.baseFishName || item.name,
+      nameConflictQuarantined: !nameMatchesCatalog,
+      amountFromGlobalDb: false,
+      legacyInflatedMerge,
+      amountVerified: amountMatchesReplion && !legacyInflatedMerge,
+      replionAmountSum,
+      whyAmountCorrect: legacyInflatedMerge
+        ? `Legacy item_id merge amount ${publicAmount} — needs tracker Z4 resync per UUID`
+        : (amountMatchesReplion
+          ? `Amount ${publicAmount} from live Replion (${amountSource}); ${rawEntries.length} source row(s)`
+          : `Grouped card amount ${publicAmount} differs from Replion sum ${replionAmountSum}`),
+    };
+  });
+  const allVerified = rows.length > 0 && rows.every(
+    (r) => r.amountVerified && !r.nameConflictQuarantined && r.amountFromGlobalDb === false,
+  );
+  const publicFishTotalVerified = allVerified
+    ? rows.reduce((s, r) => s + (Number(r.publicAmount) || 0), 0)
+    : null;
+  return { rows, allVerified, publicFishTotalVerified };
+}
+
 function buildUnmappedReviewProof(enrichedFlat) {
   const trace = buildPublicFilterTrace(enrichedFlat);
   const quizBotCatalog = require('./fishitQuizBotImageCatalog');
@@ -1210,7 +1344,14 @@ async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
       name: item.cardName || item.baseFishName || item.name,
       cardName: item.cardName || item.baseFishName || item.name,
       baseFishName: item.baseFishName || item.cardName || item.name,
-      amount: item.amount || 1,
+      amount: Number(item.amount) > 0 ? Math.floor(Number(item.amount)) : 1,
+      replionAmountSource: item.replionAmountSource || null,
+      replionStackQuantity: item.replionStackQuantity ?? null,
+      replionUuid: item.replionUuid || null,
+      metadataFishId: item.metadataFishId || null,
+      metadataFishName: item.metadataFishName || null,
+      catalogLockedBaseName: item.catalogLockedBaseName || null,
+      dataAmountSource: item.replionAmountSource || 'replion_snapshot',
       rarity: item.rarity && item.rarity !== 'Unknown' ? item.rarity : null,
       raritySource: item.raritySource || null,
       rarityAccentColor: item.rarityAccentColor || rarityColorMap.getRarityAccentColor(item.rarity) || null,
@@ -1238,10 +1379,13 @@ async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
   });
   const hidden = (enrichedFlat || []).filter((it) => !isPublicFishItem(it));
   const countParity = buildCountParityProof(enrichedFlat, enriched, fishItems, sessionData);
+  const amountProof = buildAmountProof(fishItems, enriched);
   const fishCounts = {
     label: 'Fish',
     fishTypes: fishItems.length,
-    fishInstances: countParity.groupedPublicInstances,
+    fishInstances: amountProof.publicFishTotalVerified,
+    fishInstancesVerified: amountProof.allVerified,
+    fishInstancesRawGrouped: countParity.groupedPublicInstances,
     enrichedFishInstances: countParity.enrichedFishInstances,
     unmappedFishInstances: countParity.unmappedFishCandidateInstances,
     unmappedFishTypes: countParity.unmappedFishCandidateTypes,
@@ -1257,6 +1401,7 @@ async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
     fishCounts,
     publicCounts: fishCounts,
     countParityProof: countParity,
+    amountProof,
     publicFilterTrace: buildPublicFilterTrace(enriched),
     rarityColorProof: buildRarityColorProof(fishItems, 25),
     globalDbUiProof: globalCatalogService.buildGlobalDbUiProof(fishItems),
@@ -2183,6 +2328,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     countParityProof: publicFishDbg.countParityProof,
     replionCountProof: buildReplionCountProof(publicFishDbg.countParityProof),
     catchLearningProof: buildCatchLearningProof(data, data.nameCatalogDiscovery),
+    amountProof: publicFishDbg.amountProof || buildAmountProof(publicFishDbg.fishItems, enrichedAll),
     rarityColorProof: publicFishDbg.rarityColorProof,
     globalDbUiProof: publicFishDbg.globalDbUiProof,
     unmappedReviewProof: buildUnmappedReviewProof(enrichedAll),
@@ -2307,6 +2453,9 @@ module.exports.buildInventoryParityProof = buildInventoryParityProof;
 module.exports.buildCountParityProof = buildCountParityProof;
 module.exports.buildUnmappedReviewProof = buildUnmappedReviewProof;
 module.exports.buildRarityColorProof = buildRarityColorProof;
+module.exports.buildAmountProof = buildAmountProof;
+module.exports.extractReplionAmount = extractReplionAmount;
+module.exports.extractReplionIdentityFields = extractReplionIdentityFields;
 module.exports.buildReplionCountProof = buildReplionCountProof;
 module.exports.buildCatchLearningProof = buildCatchLearningProof;
 module.exports._itemIdLockedBaseName = _itemIdLockedBaseName;
