@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10W_GLOBAL_FISH_PARITY_2026_06_07' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10W_GLOBAL_FISH_PARITY_2026_06_07' %>">
+<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07' %>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -146,8 +146,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10W_GLOBAL_FISH_PARITY_2026_06_07">
-<!-- BLOCKER10W_GLOBAL_FISH_PARITY_2026_06_07 -->
+<body data-ui-marker="BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07">
+<!-- BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07 -->
 <div class="page">
   <div class="inner">
 
@@ -194,11 +194,11 @@
   'use strict';
 
   const LS_KEY        = 'fishit_tracked_users';
-  const POLL_MS       = 2500;
+  const POLL_MS       = 5000;
   const RENDER_BUILD  = document.documentElement.getAttribute('data-render-build')
-    || 'BLOCKER10W_GLOBAL_FISH_PARITY_2026_06_07';
+    || 'BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07';
   const PUBLIC_API_BUILD = document.documentElement.getAttribute('data-public-api-build')
-    || 'BLOCKER10W_GLOBAL_FISH_PARITY_2026_06_07';
+    || 'BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07';
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret badge-rarity-secret', forgotten:'rarity-forgotten' };
   const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
 
@@ -323,6 +323,124 @@
   function cardTitle(item) {
     return item.cardName || item.baseFishName || item.name || 'Unknown';
   }
+  function cardKey(item) {
+    const id = item.speciesId || item.itemId || item.canonicalName || item.baseFishName || item.name || 'unknown';
+    const mut = (Array.isArray(item.mutationTags) && item.mutationTags[0]) || item.mutation || '';
+    return `${String(id).toLowerCase()}|${String(mut).toLowerCase()}`;
+  }
+  function buildItemCardElement(item) {
+    const isShiny = item.shiny === true;
+    const rarity  = item.rarity && item.rarity !== 'Unknown' ? item.rarity : null;
+    const rc      = rarityClass(rarity);
+    const crc     = cardRarityClass(rarity);
+    const rarityLow = rarity ? rarity.toLowerCase() : '';
+    const amount  = Number(item.amount || 1);
+    const title   = cardTitle(item);
+    const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    card.setAttribute('data-card-key', cardKey(item));
+    if (item.mutation) card.setAttribute('data-mutation', item.mutation);
+    if (isShiny) card.setAttribute('data-shiny', 'true');
+    if (rarityLow) card.setAttribute('data-rarity', rarityLow);
+    if (crc) card.classList.add(crc);
+    if (isShiny && rarityLow !== 'secret') card.classList.add('shiny');
+    const qty = `<span style="padding:1px 6px;border-radius:4px;font-size:.75em;background:#0a0c10;color:#e2e8f0;border:1px solid #2a3040;">x${Number.isFinite(amount) ? amount : 1}</span>`;
+    const mutTags = Array.isArray(item.mutationTags) && item.mutationTags.length
+      ? item.mutationTags.map(m => `<span class="badge" style="font-size:.68rem;">${escHtml(m)}</span>`).join('')
+      : (item.mutation ? `<span class="badge" style="font-size:.68rem;">${escHtml(item.mutation)}</span>` : '');
+    card.innerHTML = `
+  <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${escHtml(title)}" decoding="async" style="width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;" data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}"><div class="ic-title-wrap"><span class="item-name">${escHtml(title)}</span><div class="ic-badges">${qty}${mutTags}</div></div></div>
+  <div class="ic-meta">${rarity ? `<span class="badge ${rc}">${escHtml(rarity)}</span>` : ''}</div>`;
+    const img = card.querySelector('img');
+    if (img) img.onerror = () => onFishImageError(img, item);
+    return card;
+  }
+  function patchItemCardElement(card, item) {
+    const isShiny = item.shiny === true;
+    const rarity  = item.rarity && item.rarity !== 'Unknown' ? item.rarity : null;
+    const crc     = cardRarityClass(rarity);
+    const rarityLow = rarity ? rarity.toLowerCase() : '';
+    const title   = cardTitle(item);
+    const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
+    card.setAttribute('data-card-key', cardKey(item));
+    card.className = 'item-card';
+    if (crc) card.classList.add(crc);
+    if (isShiny && rarityLow !== 'secret') card.classList.add('shiny');
+    if (item.mutation) card.setAttribute('data-mutation', item.mutation);
+    else card.removeAttribute('data-mutation');
+    if (isShiny) card.setAttribute('data-shiny', 'true');
+    else card.removeAttribute('data-shiny');
+    if (rarityLow) card.setAttribute('data-rarity', rarityLow);
+    else card.removeAttribute('data-rarity');
+    const nameEl = card.querySelector('.item-name');
+    if (nameEl && nameEl.textContent !== title) nameEl.textContent = title;
+    const amount = Number(item.amount || 1);
+    const qtyEl = card.querySelector('.ic-badges span[style]');
+    if (qtyEl) qtyEl.textContent = `x${Number.isFinite(amount) ? amount : 1}`;
+    const metaEl = card.querySelector('.ic-meta');
+    if (metaEl) {
+      const rc = rarityClass(rarity);
+      metaEl.innerHTML = rarity ? `<span class="badge ${rc}">${escHtml(rarity)}</span>` : '';
+    }
+    let img = card.querySelector('img');
+    if (!img) {
+      const head = card.querySelector('.ic-head');
+      if (head) {
+        img = document.createElement('img');
+        img.style.cssText = 'width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;';
+        img.decoding = 'async';
+        head.insertBefore(img, head.firstChild);
+      }
+    }
+    if (img) {
+      const currentSrc = img.getAttribute('src') || '';
+      if (currentSrc !== imgSrc) {
+        img.setAttribute('src', imgSrc);
+      }
+      img.alt = title;
+      img.setAttribute('data-item-id', String(item.itemId || ''));
+      img.setAttribute('data-asset-id', String(item.imageAssetId || ''));
+      img.onerror = () => onFishImageError(img, item);
+    }
+  }
+  function patchItemsGrid(container, items) {
+    if (!items || items.length === 0) {
+      if (!container.querySelector('.card-empty')) {
+        container.innerHTML = '<div class="card-empty">&#x1F9F3; Inventory is empty.</div>';
+      }
+      return;
+    }
+    let grid = container.querySelector('.items-grid');
+    if (!grid) {
+      container.innerHTML = '<div class="items-grid"></div>';
+      grid = container.querySelector('.items-grid');
+    }
+    const empty = container.querySelector('.card-empty');
+    if (empty) empty.remove();
+    const nextKeys = new Set();
+    const existing = new Map();
+    grid.querySelectorAll('.item-card[data-card-key]').forEach((el) => {
+      existing.set(el.getAttribute('data-card-key'), el);
+    });
+    items.forEach((item, idx) => {
+      const key = cardKey(item);
+      nextKeys.add(key);
+      let card = existing.get(key);
+      if (!card) {
+        card = buildItemCardElement(item);
+        const ref = grid.children[idx] || null;
+        grid.insertBefore(card, ref);
+      } else {
+        patchItemCardElement(card, item);
+        const ref = grid.children[idx] || null;
+        if (card !== ref) grid.insertBefore(card, ref);
+      }
+    });
+    existing.forEach((el, key) => {
+      if (!nextKeys.has(key)) el.remove();
+    });
+  }
   function buildItemsHtml(items) {
     if (!items || items.length === 0) return '<div class="card-empty">&#x1F9F3; Inventory is empty.</div>';
     return `<div class="items-grid">${items.map(item => {
@@ -345,8 +463,8 @@
       const mutAttr = item.mutation ? ` data-mutation="${escHtml(item.mutation)}"` : '';
       const shinyAttr = isShiny ? ' data-shiny="true"' : '';
       const rarityAttr = rarityLow ? ` data-rarity="${escHtml(rarityLow)}"` : '';
-      return `<div class="${cardCls.join(' ')}"${mutAttr}${shinyAttr}${rarityAttr}>
-  <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${altText}" loading="lazy" decoding="async" style="width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;" onerror="this.onerror=null;this.src='${ITEM_IMAGES.Default}';"><div class="ic-title-wrap"><span class="item-name">${escHtml(title)}</span><div class="ic-badges">${qty}${mutTags}</div></div></div>
+      return `<div class="${cardCls.join(' ')}" data-card-key="${escHtml(cardKey(item))}"${mutAttr}${shinyAttr}${rarityAttr}>
+  <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${altText}" decoding="async" style="width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;" data-item-id="${escHtml(item.itemId || '')}" onerror="this.onerror=null;this.src='${ITEM_IMAGES.Default}';"><div class="ic-title-wrap"><span class="item-name">${escHtml(title)}</span><div class="ic-badges">${qty}${mutTags}</div></div></div>
   <div class="ic-meta">${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
 </div>`;
     }).join('')}</div>`;
@@ -396,7 +514,7 @@
     if (c) c.innerHTML = fishCountLabel(data, fishList);
     if (s) s.textContent = `Last sync: ${fmtTime(syncTimestamp(data))}`;
     if (l) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;
-    if (b) b.innerHTML = buildItemsHtml(fishList);
+    if (b) patchItemsGrid(b, fishList);
   }
 
   function setCardWaiting(card, name) {
@@ -478,7 +596,7 @@
     if (lastData) {
       const fishList = getPublicFishItems(lastData);
       if (c) c.innerHTML = fishCountLabel(lastData, fishList).replace('</span>', ' &mdash; Offline</span>');
-      if (b) { b.innerHTML = buildItemsHtml(fishList); wireFishImageErrors(b); }
+      if (b) patchItemsGrid(b, fishList);
     }
   }
 

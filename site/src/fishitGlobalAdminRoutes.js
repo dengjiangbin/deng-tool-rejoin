@@ -93,6 +93,14 @@ router.post('/api/fishit-global/mapping/:itemId/quarantine', requireAdmin, (req,
   return res.json({ ok: true, mapping: globalDb.getItemMapping(itemId) });
 });
 
+router.post('/api/fishit-global/admin/mappings/approve', requireAdmin, (req, res) => {
+  const result = globalCatalogService.approveItemMapping(req.body || {});
+  if (!result.ok) {
+    return res.status(result.error === 'species_not_found' ? 404 : 400).json(result);
+  }
+  return res.json(result);
+});
+
 router.get('/api/fishit-global/conflicts', requireAdmin, (_req, res) => {
   res.json({ ok: true, conflicts: globalDb.listConflicts(50) });
 });

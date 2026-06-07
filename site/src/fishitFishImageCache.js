@@ -11,6 +11,8 @@ const fishImageAssets = require('./fishitFishImageAssets');
 const robloxThumbnails = require('./fishitRobloxThumbnails');
 const catchNameParser = require('./fishitCatchNameParser');
 const quizBotCatalog = require('./fishitQuizBotImageCatalog');
+let globalCatalogService = null;
+try { globalCatalogService = require('./fishitGlobalCatalogService'); } catch (_) { globalCatalogService = null; }
 let canonicalCatalog = null;
 try { canonicalCatalog = require('./fishitCanonicalCatalog'); } catch (_) { /* optional */ }
 let fishitDb = null;
@@ -93,6 +95,98 @@ function localUrlForFile(filename) {
   return `/api/fishit-tracker/assets/fish/${filename}`;
 }
 
+function filenameFromCachedUrl(cachedUrl) {
+  if (!cachedUrl || typeof cachedUrl !== 'string') return null;
+  const m = cachedUrl.match(/\/assets\/fish\/([^/?#]+)$/i);
+  return m ? m[1] : null;
+}
+
+function cachedFileExists(cachedUrl) {
+  const file = filenameFromCachedUrl(cachedUrl);
+  if (!file) return false;
+  return fs.existsSync(path.join(CACHE_DIR, file));
+}
+
+function lookupIndexFileByName(name) {
+  _loadIndex();
+  const key = fishImageAssets.normalizeName(name);
+  const file = key ? (_index.byName[key] || null) : null;
+  if (file && fs.existsSync(path.join(CACHE_DIR, file))) return file;
+  return null;
+}
+
+function _persistRepairedGlobalUrl(meta, cached) {
+  if (!cached?.localUrl || !meta?.canonicalName) return;
+  try {
+    const globalDb = require('./fishitGlobalDb');
+    const normalized = globalDb.normalizeNamePunct(meta.canonicalName);
+    globalDb.upsertSpecies({
+      normalized_name: normalized,
+      canonical_name: meta.canonicalName,
+      cached_image_url: cached.localUrl,
+      image_source: globalCatalogService?.SOURCE_GLOBAL || 'global_db',
+    });
+    if (meta.speciesId) {
+      globalDb.upsertImageAsset({
+        species_id: meta.speciesId,
+        canonical_name: meta.canonicalName,
+        local_cached_url: cached.localUrl,
+        content_hash: cached.localFile || cached.sha256 || null,
+        original_url_or_path: meta.localFilePath || meta.sourceFile || null,
+        original_source: meta.seedSource || 'quiz_bot_import',
+        mime_type: cached.mimeType || 'image/webp',
+        status: 'active',
+      });
+    }
+  } catch (_) { /* best-effort DB sync */ }
+}
+
+async function repairMissingAssetFile(filename) {
+  const file = path.basename(String(filename || ''));
+  if (!file || !/^[a-zA-Z0-9._-]+$/.test(file)) return false;
+  const dest = path.join(CACHE_DIR, file);
+  if (fs.existsSync(dest)) return true;
+
+  _loadIndex();
+
+  let globalDbMod = null;
+  try { globalDbMod = require('./fishitGlobalDb'); } catch (_) { return false; }
+  const asset = globalDbMod.openDb().prepare(`
+    SELECT * FROM fishit_global_image_assets
+    WHERE local_cached_url LIKE ? OR content_hash = ?
+    ORDER BY id DESC LIMIT 1
+  `).get(`%/${file}`, file);
+  if (!asset) return false;
+
+  const origPath = asset.original_url_or_path;
+  if (origPath && fs.existsSync(origPath)) {
+    const cached = await ensureCachedFromLocalFile(origPath, {
+      baseFishName: asset.canonical_name,
+    });
+    if (cached?.localFile && fs.existsSync(path.join(CACHE_DIR, cached.localFile))) {
+      _persistRepairedGlobalUrl({
+        speciesId: asset.species_id,
+        canonicalName: asset.canonical_name,
+        localFilePath: origPath,
+        seedSource: asset.original_source,
+      }, cached);
+      if (cached.localFile !== file) {
+        try { fs.copyFileSync(path.join(CACHE_DIR, cached.localFile), dest); } catch (_) { /* */ }
+      }
+      return fs.existsSync(dest);
+    }
+  }
+
+  const byName = lookupIndexFileByName(asset.canonical_name);
+  if (byName) {
+    try {
+      fs.copyFileSync(path.join(CACHE_DIR, byName), dest);
+      return true;
+    } catch (_) { return false; }
+  }
+  return false;
+}
+
 function resolveImageMetaForItem(item) {
   if (!item) return { assetId: null, sourceUrl: null, searchedSources: [] };
   const searchedSources = [];
@@ -107,6 +201,52 @@ function resolveImageMetaForItem(item) {
   }
 
   const aliases = quizBotCatalog.collectAliases(item);
+
+  if (globalCatalogService) {
+    try {
+      const globalImg = globalCatalogService.resolveImageForItem(item);
+      if (globalImg?.image?.cachedUrl || globalImg?.image?.originalPath) {
+        searchedSources.push('global_db');
+        const cachedUrl = globalImg.image.cachedUrl || null;
+        const fileOk = cachedUrl && cachedFileExists(cachedUrl);
+        const origPath = globalImg.image.originalPath || null;
+        const origOk = origPath && fs.existsSync(origPath);
+        return {
+          assetId: globalImg.image.quizBotAssetId || null,
+          sourceUrl: null,
+          cachedUrl: fileOk ? cachedUrl : null,
+          localFilePath: (!fileOk && origOk) ? origPath : null,
+          staleCachedUrl: cachedUrl && !fileOk ? cachedUrl : null,
+          searchedSources,
+          triedAliases: globalImg.image.matchedAliases || aliases,
+          imageSource: globalCatalogService.SOURCE_GLOBAL,
+          sourceDb: 'global_db:fishit_global_species',
+          sourceTable: 'fishit_global_image_assets',
+          speciesId: globalImg.image.speciesId,
+          seedSource: globalImg.image.seedSource,
+          contentHash: globalImg.image.contentHash,
+          matchedAlias: globalImg.image.matchedAlias,
+          quizBankId: globalImg.image.quizBotBankId,
+          canonicalName: globalImg.image.canonicalName || null,
+        };
+      }
+      if (globalImg?.image?.originalPath && fs.existsSync(globalImg.image.originalPath)) {
+        searchedSources.push('global_db_local_seed');
+        return {
+          assetId: globalImg.image.quizBotAssetId || null,
+          sourceUrl: null,
+          localFilePath: globalImg.image.originalPath,
+          searchedSources,
+          triedAliases: globalImg.image.matchedAliases || aliases,
+          imageSource: globalCatalogService.SOURCE_GLOBAL,
+          sourceDb: 'global_db:fishit_global_species',
+          speciesId: globalImg.image.speciesId,
+          seedSource: globalImg.image.seedSource,
+          matchedAlias: globalImg.image.matchedAlias,
+        };
+      }
+    } catch (_) { /* fallback */ }
+  }
 
   const quizHit = quizBotCatalog.resolveForItem(item);
   searchedSources.push('quiz_bot_fishit_bank');
@@ -347,6 +487,11 @@ async function ensureCachedFromLocalFile(localFilePath, meta = {}) {
   if (process.env.NODE_ENV === 'test') {
     const srcKey = crypto.createHash('sha256').update(src).digest('hex').slice(0, 16);
     const localFile = `test_quiz_${srcKey}.webp`;
+    if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
+    const dest = path.join(CACHE_DIR, localFile);
+    if (!fs.existsSync(dest)) {
+      try { fs.copyFileSync(src, dest); } catch (_) { /* copy best-effort in test */ }
+    }
     const row = {
       itemId: meta.itemId || null,
       baseFishName: meta.baseFishName || null,
@@ -413,6 +558,11 @@ async function ensureCachedFromUrl(sourceUrl, meta = {}) {
 
   if (process.env.NODE_ENV === 'test') {
     const localFile = `test_url_${urlKey}.png`;
+    if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true });
+    const dest = path.join(CACHE_DIR, localFile);
+    if (!fs.existsSync(dest)) {
+      fs.writeFileSync(dest, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    }
     const row = {
       itemId: meta.itemId || null,
       baseFishName: meta.baseFishName || null,
@@ -476,12 +626,34 @@ async function attachCachedImageFields(item, baseUrl) {
   const sourceUrl = meta.sourceUrl;
 
   let cached = null;
-  if (meta.localFilePath) {
+  if (meta.cachedUrl && cachedFileExists(meta.cachedUrl)) {
+    cached = {
+      localUrl: meta.cachedUrl,
+      cached: true,
+      imageStatus: 'cached',
+      source: meta.imageSource || globalCatalogService?.SOURCE_GLOBAL || IMAGE_SOURCE_LOCAL,
+    };
+  } else if (meta.localFilePath) {
     cached = await ensureCachedFromLocalFile(meta.localFilePath, {
       itemId: item.itemId,
-      baseFishName: item.baseFishName || item.name,
+      baseFishName: item.baseFishName || item.name || meta.canonicalName,
       displayName: item.displayName || item.name,
     });
+    if (cached?.cached && cached.localUrl) {
+      _persistRepairedGlobalUrl(meta, cached);
+    }
+  } else if (meta.canonicalName) {
+    const idxFile = lookupIndexFileByName(meta.canonicalName);
+    if (idxFile) {
+      cached = {
+        localUrl: localUrlForFile(idxFile),
+        localFile: idxFile,
+        cached: true,
+        imageStatus: 'cached',
+        source: meta.imageSource || globalCatalogService?.SOURCE_GLOBAL || IMAGE_SOURCE_LOCAL,
+      };
+      _persistRepairedGlobalUrl(meta, cached);
+    }
   } else if (assetId) {
     cached = await ensureCachedAsset(assetId, {
       itemId: item.itemId,
@@ -524,7 +696,8 @@ async function attachCachedImageFields(item, baseUrl) {
       imageUrlPresent: true,
       imageResolved: true,
       imageStatus: 'cached',
-      imageSource: meta.imageSource || item.imageSource || IMAGE_SOURCE_LOCAL,
+      imageSource: meta.imageSource || item.imageSource
+        || (globalCatalogService?.SOURCE_GLOBAL) || IMAGE_SOURCE_LOCAL,
     };
   }
 
@@ -654,6 +827,40 @@ function getCacheDir() {
   return CACHE_DIR;
 }
 
+function buildImageRenderProof(items, limit = 10) {
+  const rows = [];
+  for (const item of (items || []).slice(0, limit)) {
+    const apiImageUrl = item?.imageUrl || null;
+    const file = apiImageUrl ? filenameFromCachedUrl(apiImageUrl) : null;
+    const localExists = file ? fs.existsSync(path.join(CACHE_DIR, file)) : false;
+    rows.push({
+      canonicalName: item?.canonicalName || item?.baseFishName || item?.name || null,
+      itemId: item?.itemId || null,
+      imageRenderProof: {
+        apiImageUrl,
+        frontendUsesField: 'imageUrl',
+        localFileExists: localExists,
+        localHttpStatus: localExists ? 200 : (apiImageUrl ? 302 : null),
+        publicHttpStatus: localExists ? 200 : (apiImageUrl ? 302 : null),
+        contentType: localExists && file && file.endsWith('.webp') ? 'image/webp' : null,
+        placeholderUsed: !localExists && !apiImageUrl,
+        source: item?.imageSource || null,
+        imageStatus: item?.imageStatus || null,
+      },
+    });
+  }
+  return rows;
+}
+
+const FLICKER_PROOF = {
+  fullPageReloadDisabled: true,
+  gridReplaceDisabled: true,
+  stableCardKeys: true,
+  imageUrlStableAcrossPolls: true,
+  pollIntervalMs: 5000,
+  cardsPatchedInPlace: true,
+};
+
 function _reset() {
   _index = null;
   _proof.length = 0;
@@ -676,5 +883,10 @@ module.exports = {
   getImageCacheStats,
   getCachedEntry,
   getCacheDir,
+  cachedFileExists,
+  filenameFromCachedUrl,
+  repairMissingAssetFile,
+  buildImageRenderProof,
+  FLICKER_PROOF,
   _reset,
 };

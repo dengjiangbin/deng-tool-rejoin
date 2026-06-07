@@ -553,6 +553,59 @@ function _reset() {
   _obsRate.clear();
 }
 
+/**
+ * Admin-approved manual itemId → species mapping (BLOCKER10X).
+ * @param {{ itemId: string|number, canonicalName: string, source?: string, verificationStatus?: string, reason?: string }} body
+ */
+function approveItemMapping(body) {
+  const itemId = String(body?.itemId || '').trim();
+  const canonicalName = String(body?.canonicalName || '').trim();
+  if (!itemId || !canonicalName) {
+    return { ok: false, error: 'invalid_input' };
+  }
+
+  const hit = globalDb.findSpeciesByAliases([canonicalName]);
+  if (!hit?.species) {
+    return { ok: false, error: 'species_not_found', canonicalName };
+  }
+
+  const existing = globalDb.getItemMapping(itemId);
+  const evidenceCount = (existing?.evidence_count || 0) + 1;
+  const conflictStatus = body.verificationStatus === 'manual_verified'
+    ? 'resolved'
+    : (body.conflict_status || 'manual_verified');
+
+  globalDb.upsertItemMapping({
+    item_id: itemId,
+    species_id: hit.species.id,
+    canonical_name: canonicalName,
+    confidence: globalDb.VERIFICATION.MANUAL_VERIFIED,
+    source: body.source || 'admin_manual_screenshot_confirmation',
+    evidence_count: evidenceCount,
+    unique_user_count: Math.max(existing?.unique_user_count || 0, 1),
+    conflict_status: conflictStatus,
+  });
+
+  const mapping = globalDb.getItemMapping(itemId);
+  return {
+    ok: true,
+    itemId,
+    mappingId: mapping?.id || null,
+    speciesId: hit.species.id,
+    quizBotBankId: hit.species.quiz_bot_bank_id || null,
+    canonicalName,
+    confidence: globalDb.VERIFICATION.MANUAL_VERIFIED,
+    source: body.source || 'admin_manual_screenshot_confirmation',
+    reason: body.reason || null,
+    species: {
+      id: hit.species.id,
+      canonical_name: hit.species.canonical_name,
+      quiz_bot_bank_id: hit.species.quiz_bot_bank_id,
+      cached_image_url: hit.species.cached_image_url,
+    },
+  };
+}
+
 module.exports = {
   SOURCE_GLOBAL,
   SEED_SOURCE_QUIZ,
@@ -573,5 +626,6 @@ module.exports = {
   buildGlobalConflictProof,
   buildGlobalContributionProof,
   buildQuizBotSeedImportProof,
+  approveItemMapping,
   _reset,
 };

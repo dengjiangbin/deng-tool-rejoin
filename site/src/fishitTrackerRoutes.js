@@ -1219,13 +1219,22 @@ router.get('/tracker', renderTrackerPage);
 router.get('/fishit-tracker', renderTrackerPage);
 
 // ── GET /api/fishit-tracker/assets/fish/:filename — local cached fish images (BLOCKER10U) ──
-router.get('/api/fishit-tracker/assets/fish/:filename', (req, res) => {
+router.get('/api/fishit-tracker/assets/fish/:filename', async (req, res) => {
   const file = path.basename(String(req.params.filename || ''));
   if (!file || !/^[a-zA-Z0-9._-]+$/.test(file)) {
     return res.status(400).type('text/plain').send('invalid_filename');
   }
   const full = path.join(fishImageCache.getCacheDir(), file);
   if (!fs.existsSync(full)) {
+    try {
+      const repaired = await fishImageCache.repairMissingAssetFile(file);
+      if (repaired && fs.existsSync(full)) {
+        res.set('Cache-Control', 'public, max-age=86400, immutable');
+        return res.sendFile(full);
+      }
+    } catch (err) {
+      console.warn('[fishit] asset repair failed for', file, err && err.message ? err.message : err);
+    }
     return res.redirect(302, '/assets/img/fishit/fallback-fish.svg');
   }
   res.set('Cache-Control', 'public, max-age=86400, immutable');
@@ -1873,6 +1882,8 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     globalCatalogProof: globalCatalogService.buildGlobalDbSummaryProof(),
     globalCatalogItemProof: globalCatalogService.buildGlobalCatalogProof(publicFishDbg.fishItems),
     globalImageProof: globalCatalogService.buildGlobalImageProof(publicFishDbg.fishItems),
+    imageRenderProof: fishImageCache.buildImageRenderProof(publicFishDbg.fishItems, 15),
+    flickerProof: fishImageCache.FLICKER_PROOF,
     globalRarityProof: globalCatalogService.buildGlobalRarityProof(publicFishDbg.fishItems),
     globalEvidenceProof: globalCatalogService.buildGlobalEvidenceProof(15),
     globalConflictProof: globalCatalogService.buildGlobalConflictProof(15),

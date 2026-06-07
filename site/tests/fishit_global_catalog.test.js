@@ -20,7 +20,8 @@ const {
   catalogMetaForItemId,
 } = require('../src/fishitTrackerRoutes');
 
-const W_BUILD = 'BLOCKER10W_GLOBAL_FISH_PARITY_2026_06_07';
+const X_BUILD = 'BLOCKER10X_LIVE_IMAGES_FLICKER_PANTHER_2026_06_07';
+const W_BUILD = X_BUILD;
 let tmpDb;
 
 function setupTestDb() {
@@ -338,5 +339,155 @@ describe('BLOCKER10W global fish parity', { concurrency: 1 }, () => {
     assert.equal(proof.enabled, true);
     assert.equal(proof.sourceOfTruth, 'global_db');
     assert.equal(proof.backend, 'sqlite');
+  });
+});
+
+describe('BLOCKER10X live images flicker and Panther Eel mapping', { concurrency: 1 }, () => {
+  test('build marker is BLOCKER10X', () => {
+    const { BLOCKER10X_BUILD } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10X_BUILD, X_BUILD);
+  });
+
+  test('stale test_quiz cachedUrl repairs from Quiz Bot seed file', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    fishImageCache._reset();
+    const pub = await buildPublicFishFields([{
+      name: 'Giant Squid',
+      baseFishName: 'Giant Squid',
+      amount: 1,
+      category: 'fish',
+      itemId: '156',
+    }], 'http://127.0.0.1:8791');
+    const item = pub.publicItems[0];
+    assert.equal(item.imageSource, 'global_db');
+    assert.ok(item.imageUrl);
+    assert.ok(String(item.imageUrl).startsWith('/api/fishit-tracker/assets/fish/'));
+    const file = fishImageCache.filenameFromCachedUrl(item.imageUrl);
+    assert.ok(file);
+    assert.ok(fishImageCache.cachedFileExists(item.imageUrl), 'cached file must exist on disk after repair');
+  });
+
+  test('imageRenderProof reports placeholderUsed false when file exists', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    fishImageCache._reset();
+    const pub = await buildPublicFishFields([{
+      name: 'Freshwater Piranha',
+      baseFishName: 'Freshwater Piranha',
+      amount: 1,
+      category: 'fish',
+      itemId: '284',
+    }], 'http://127.0.0.1:8791');
+    const proof = fishImageCache.buildImageRenderProof(pub.publicItems, 5);
+    assert.ok(proof.length >= 1);
+    assert.equal(proof[0].imageRenderProof.frontendUsesField, 'imageUrl');
+    assert.equal(proof[0].imageRenderProof.placeholderUsed, false);
+    assert.equal(proof[0].imageRenderProof.localFileExists, true);
+  });
+
+  test('flickerProof constants match tracker polling contract', () => {
+    assert.equal(fishImageCache.FLICKER_PROOF.fullPageReloadDisabled, true);
+    assert.equal(fishImageCache.FLICKER_PROOF.gridReplaceDisabled, true);
+    assert.equal(fishImageCache.FLICKER_PROOF.cardsPatchedInPlace, true);
+    assert.equal(fishImageCache.FLICKER_PROOF.pollIntervalMs, 5000);
+    const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(ejs.includes('patchItemsGrid'));
+    assert.ok(ejs.includes('data-card-key'));
+    assert.ok(!ejs.includes('location.reload'));
+    assert.ok(ejs.includes('POLL_MS       = 5000'));
+  });
+
+  test('poll refresh preserves img node when image URL unchanged', () => {
+    const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(ejs.includes('if (currentSrc !== imgSrc)'));
+    assert.ok(ejs.includes('patchItemCardElement'));
+  });
+
+  test('admin approveItemMapping maps itemId 248 to Panther Eel', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const result = globalCatalogService.approveItemMapping({
+      itemId: 248,
+      canonicalName: 'Panther Eel',
+      source: 'admin_manual_screenshot_confirmation',
+      verificationStatus: 'manual_verified',
+      reason: 'User/admin confirmed Item #248 is Panther Eel from live inventory screenshot.',
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.confidence, globalDb.VERIFICATION.MANUAL_VERIFIED);
+    assert.equal(result.quizBotBankId, 'fi0176');
+    const meta = catalogMetaForItemId('248');
+    assert.ok(meta);
+    assert.equal(meta.baseFishName, 'Panther Eel');
+  });
+
+  test('after itemId 248 approval includedPublic true and appears in publicFishItems', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    globalCatalogService.approveItemMapping({
+      itemId: 248,
+      canonicalName: 'Panther Eel',
+      source: 'admin_manual_screenshot_confirmation',
+      verificationStatus: 'manual_verified',
+    });
+    const enriched = [
+      { name: 'Item #248', itemId: '248', category: 'items', amount: 1, weight: 92210,
+        rawProof: { rawObjectPreview: { Favorited: 'false' } } },
+    ];
+    const trace = buildPublicFilterTrace(enriched);
+    const row248 = trace.find((r) => String(r.itemId) === '248');
+    assert.ok(row248);
+    assert.equal(row248.includedPublic, true);
+    assert.equal(row248.canonicalName, 'Panther Eel');
+    assert.equal(row248.confidence, globalDb.VERIFICATION.MANUAL_VERIFIED);
+    const pub = await buildPublicFishFields(enriched, 'http://127.0.0.1:8791');
+    assert.ok(pub.publicFishItems.some((f) => /panther eel/i.test(f.canonicalName || f.name)));
+    const parity = buildInventoryParityProof(enriched, enriched, pub.publicFishItems, {});
+    assert.ok(!parity.missingFromPublic.some((m) => String(m.itemId) === '248'));
+  });
+
+  test('Panther Eel imageSource is global_db with resolvable cached file', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    globalCatalogService.approveItemMapping({
+      itemId: 248,
+      canonicalName: 'Panther Eel',
+      source: 'admin_manual_screenshot_confirmation',
+      verificationStatus: 'manual_verified',
+    });
+    fishImageCache._reset();
+    const pub = await buildPublicFishFields([
+      { name: 'Item #248', itemId: '248', category: 'items', amount: 1, weight: 100,
+        rawProof: { rawObjectPreview: { Favorited: 'false' } } },
+    ], 'http://127.0.0.1:8791');
+    const panther = pub.publicFishItems.find((f) => /panther eel/i.test(f.canonicalName || f.name));
+    assert.ok(panther);
+    assert.equal(panther.imageSource, 'global_db');
+    assert.ok(fishImageCache.cachedFileExists(panther.imageUrl));
+  });
+
+  test('public card HTML uses imageUrl img src not placeholder-only path', () => {
+    const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(ejs.includes('itemImageSrc(item)'));
+    assert.ok(ejs.includes('img src="${escHtml(imgSrc)}"') || ejs.includes("img.setAttribute('src', imgSrc)"));
+  });
+
+  test('full-card rarity class remains on card root', () => {
+    const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(ejs.includes('.item-card.rarity-secret'));
+    assert.ok(ejs.includes('cardRarityClass'));
+  });
+
+  test('no public card weight or fish badge in template', () => {
+    const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.ok(!ejs.includes('badge-fish'));
+    assert.ok(!ejs.includes('debugWeight'));
+    assert.ok(!ejs.includes('weight-badge'));
   });
 });
