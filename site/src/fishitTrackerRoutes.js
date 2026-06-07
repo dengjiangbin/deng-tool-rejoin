@@ -2132,6 +2132,12 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     globalDbUiProof: publicFishDbg.globalDbUiProof,
     unmappedReviewProof: buildUnmappedReviewProof(enrichedAll),
     trackerClientProof: buildTrackerClientProof(data),
+    inventoryUiHintSample: Array.isArray(data.inventoryUiHints)
+      ? data.inventoryUiHints.slice(0, 8).map((h) => ({
+        visibleName: h.visibleName || h.name || null,
+        textColor: h.textColor || h.nameColorHex || null,
+      }))
+      : [],
     globalRarityProof: globalCatalogService.buildGlobalRarityProof(publicFishDbg.fishItems),
     globalEvidenceProof: globalCatalogService.buildGlobalEvidenceProof(15),
     globalConflictProof: globalCatalogService.buildGlobalConflictProof(15),
