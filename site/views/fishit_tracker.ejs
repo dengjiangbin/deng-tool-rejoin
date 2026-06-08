@@ -97,22 +97,28 @@
 
     .items-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; margin-top:4px; }
 
-    .item-card, .fish-card { border:0; border-radius:12px; padding:12px; min-height:118px; display:flex; flex-direction:column; gap:8px; color:#fff; box-shadow:0 10px 24px rgba(0,0,0,.22); overflow:hidden; transition:transform .15s,box-shadow .2s; animation:fadeIn .2s ease; }
+    .item-card, .fish-card { border:0; border-radius:12px; padding:12px; min-height:118px; display:flex; flex-direction:column; gap:8px; --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.88); --badge-bg:rgba(0,0,0,.42); --badge-fg:#fff; color:var(--card-fg); box-shadow:0 10px 24px rgba(0,0,0,.22); overflow:hidden; transition:transform .15s,box-shadow .2s; animation:fadeIn .2s ease; }
     .item-card:hover, .fish-card:hover { transform:translateY(-2px); box-shadow:0 14px 28px rgba(0,0,0,.28); }
-    .item-card.rarity-common, .fish-card.rarity-common { background:linear-gradient(135deg,#242936 0%,#141820 100%); }
-    .item-card.rarity-uncommon, .fish-card.rarity-uncommon { background:linear-gradient(135deg,#2a3440 0%,#1a2030 100%); }
-    .item-card.rarity-rare, .fish-card.rarity-rare { background:linear-gradient(135deg,#60b4ff 0%,#3d88dc 100%); }
-    .item-card.rarity-epic, .fish-card.rarity-epic { background:linear-gradient(135deg,#b879ff 0%,#8152d6 100%); }
-    .item-card.rarity-legendary, .fish-card.rarity-legendary { background:linear-gradient(135deg,#ffc936 0%,#d79413 100%); }
-    .item-card.rarity-mythic, .fish-card.rarity-mythic { background:linear-gradient(135deg,#ff2525 0%,#c90d12 100%); }
-    .item-card.rarity-secret, .fish-card.rarity-secret { background:linear-gradient(135deg,#10e487 0%,#09c96f 55%,#079b59 100%); }
-    .item-card.rarity-forgotten, .fish-card.rarity-forgotten { background:linear-gradient(135deg,#f0f0f0 0%,#777 50%,#111 100%); }
-    .item-card:not([class*="rarity-"]), .fish-card:not([class*="rarity-"]) { background:linear-gradient(135deg,#242936 0%,#141820 100%); border:1px solid var(--border); }
+    .item-card.rarity-common, .fish-card.rarity-common { --card-fg:#e2e8f0; --card-muted-fg:#8a94a6; --badge-bg:rgba(0,0,0,.35); background:linear-gradient(135deg,#242936 0%,#141820 100%); }
+    .item-card.rarity-uncommon, .fish-card.rarity-uncommon { --card-fg:#e2e8f0; --card-muted-fg:rgba(255,255,255,.85); --badge-bg:rgba(0,0,0,.38); background:linear-gradient(135deg,#2a3440 0%,#1a2030 100%); }
+    .item-card.rarity-rare, .fish-card.rarity-rare { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.48); background:linear-gradient(135deg,#60b4ff 0%,#3d88dc 100%); }
+    .item-card.rarity-epic, .fish-card.rarity-epic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.48); background:linear-gradient(135deg,#b879ff 0%,#8152d6 100%); }
+    .item-card.rarity-legendary, .fish-card.rarity-legendary { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); background:linear-gradient(135deg,#ffc936 0%,#d79413 100%); }
+    .item-card.rarity-mythic, .fish-card.rarity-mythic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); background:linear-gradient(135deg,#ff2525 0%,#c90d12 100%); }
+    .item-card.rarity-secret, .fish-card.rarity-secret { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.48); background:linear-gradient(135deg,#10e487 0%,#09c96f 55%,#079b59 100%); }
+    .item-card.rarity-forgotten, .fish-card.rarity-forgotten { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.92); --badge-bg:rgba(0,0,0,.55); background:linear-gradient(135deg,#f0f0f0 0%,#777 50%,#111 100%); }
+    .item-card:not([class*="rarity-"]), .fish-card:not([class*="rarity-"]) { --card-fg:#e2e8f0; --card-muted-fg:#8a94a6; --badge-bg:rgba(0,0,0,.35); background:linear-gradient(135deg,#242936 0%,#141820 100%); border:1px solid var(--border); }
 
-    .item-card .item-name, .fish-card .item-name { color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.35); }
-    .item-card .ic-meta .badge, .fish-card .ic-meta .badge { background:rgba(0,0,0,.35); border-color:rgba(255,255,255,.25); color:#fff; }
-    .item-card .ic-badges span[style], .fish-card .ic-badges span[style] { background:rgba(0,0,0,.35)!important; border-color:rgba(255,255,255,.2)!important; color:#fff!important; }
+    .item-card .item-name, .fish-card .item-name { color:var(--card-fg)!important; text-shadow:0 1px 3px rgba(0,0,0,.45); }
+    .item-card .ic-meta .badge, .fish-card .ic-meta .badge { background:var(--badge-bg); border-color:rgba(255,255,255,.28); color:var(--badge-fg)!important; }
+    .item-card .ic-badges .badge, .fish-card .ic-badges .badge,
+    .item-card .ic-badges .ic-qty, .fish-card .ic-badges .ic-qty { background:var(--badge-bg)!important; border:1px solid rgba(255,255,255,.22)!important; color:var(--badge-fg)!important; }
     .item-card .ic-head img, .fish-card .ic-head img { background:rgba(0,0,0,.25)!important; box-shadow:0 2px 8px rgba(0,0,0,.25); }
+    .fish-card.rarity-rare .ic-meta .badge, .fish-card.rarity-secret .ic-meta .badge,
+    .fish-card.rarity-epic .ic-meta .badge, .fish-card.rarity-legendary .ic-meta .badge,
+    .fish-card.rarity-mythic .ic-meta .badge, .fish-card.rarity-forgotten .ic-meta .badge {
+      background:var(--badge-bg)!important; color:var(--badge-fg)!important; border-color:rgba(255,255,255,.28)!important;
+    }
 
     @keyframes fadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
 
@@ -156,8 +162,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10Z9_PUBLIC_SNAPSHOT_TRUTH_AND_FULL_RARITY_CARDS_2026_06_08">
-<!-- BLOCKER10Z9_PUBLIC_SNAPSHOT_TRUTH_AND_FULL_RARITY_CARDS_2026_06_08 -->
+<body data-ui-marker="BLOCKER10Z10_CARD_CONTRAST_AND_RADIANT_NAME_FIX_2026_06_08">
+<!-- BLOCKER10Z10_CARD_CONTRAST_AND_RADIANT_NAME_FIX_2026_06_08 -->
 <div class="page">
   <div class="inner">
 
@@ -325,6 +331,12 @@
       const r = mfp['Radiant Catfish'];
       missingFishRows = `<div class="global-db-debug">missingExpectedFishProof Radiant Catfish catalog=${r.foundInTrustedCatalog ? 'yes' : 'no'} matched=${r.currentSnapshotRowMatched ? 'yes' : 'no'} id=${escHtml(r.itemId || '-')} image=${r.imageResolved ? 'yes' : 'no'}</div>`;
     }
+    let parserRows = '';
+    if (Array.isArray(data.nameParserProof) && data.nameParserProof.length) {
+      parserRows = `<div class="global-db-debug">nameParserProof${data.nameParserProof.slice(0, 10).map((p) =>
+        `<br>${escHtml(p.publicName || '?')} orig=${escHtml(p.originalName || '-')} base=${escHtml(p.baseFishName || '-')} stripped=${escHtml(JSON.stringify(p.strippedTags || []))} badges=${escHtml(JSON.stringify(p.publicBadges || []))} protected=${escHtml(p.protectedNameReason || '-')}`
+      ).join('')}</div>`;
+    }
     let catchRows = '';
     const cl = data.catchLearningProof;
     if (cl) {
@@ -346,14 +358,28 @@
     <div class="gdb-row"><span>Images</span><span>${g.imageAssetCount != null ? g.imageAssetCount : '?'}</span></div>
     <div class="gdb-row"><span>Cards w/ global image</span><span>${escHtml(imgLabel)}</span></div>
     <div class="gdb-row"><span>Cards w/ global rarity</span><span>${escHtml(rarLabel)}</span></div>
-    ${parityRows}${amountRows}${ambiguousRows}${hiddenRows}${quarantineRows}${missingFishRows}${catchRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
+    ${parityRows}${amountRows}${ambiguousRows}${hiddenRows}${quarantineRows}${missingFishRows}${parserRows}${catchRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
   </div>
 </details>`;
   }
   function rarityNameStyle(item) {
     const r = item && item.rarity ? String(item.rarity).toLowerCase() : '';
+    if (r && CARD_RARITY_MAP[r]) return '';
     const accent = item.rarityAccentColor || RARITY_NAME_COLORS[r] || null;
     return accent ? `color:${accent};` : '';
+  }
+  function publicMutationBadges(item) {
+    const tags = [];
+    if (Array.isArray(item.mutationTags)) tags.push(...item.mutationTags);
+    else if (item.mutation) tags.push(item.mutation);
+    const title = cardTitle(item);
+    return tags.filter((t) => {
+      if (!t) return false;
+      const low = String(t).toLowerCase();
+      if (low === 'big' || low === 'shiny' || low === 'big shiny') return false;
+      if (title && title.toLowerCase().startsWith(`${low} `) && title.length > low.length + 1) return false;
+      return true;
+    });
   }
   function itemImageSrc(item) {
     if (isUsableImageUrl(item.imageUrl)) return item.imageUrl;
@@ -442,10 +468,9 @@
     if (rarityLow) card.setAttribute('data-rarity', rarityLow);
     if (crc) card.classList.add(crc);
     if (isShiny && rarityLow !== 'secret') card.classList.add('shiny');
-    const qty = `<span style="padding:1px 6px;border-radius:4px;font-size:.75em;background:#0a0c10;color:#e2e8f0;border:1px solid #2a3040;">x${Number.isFinite(amount) ? amount : 1}</span>`;
-    const mutTags = Array.isArray(item.mutationTags) && item.mutationTags.length
-      ? item.mutationTags.map(m => `<span class="badge" style="font-size:.68rem;">${escHtml(m)}</span>`).join('')
-      : (item.mutation ? `<span class="badge" style="font-size:.68rem;">${escHtml(item.mutation)}</span>` : '');
+    const qty = `<span class="badge ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
+    const mutTags = publicMutationBadges(item)
+      .map(m => `<span class="badge">${escHtml(m)}</span>`).join('');
     card.innerHTML = `
   <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${escHtml(title)}" decoding="async" style="width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;" data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}"><div class="ic-title-wrap"><span class="item-name" style="${nameStyle}">${escHtml(title)}</span><div class="ic-badges">${qty}${mutTags}</div></div></div>
   <div class="ic-meta">${rarity ? `<span class="badge ${rc}">${escHtml(rarity)}</span>` : ''}</div>`;
@@ -483,8 +508,13 @@
       nameEl.style.cssText = nameStyle;
     }
     const amount = Number(item.amount || 1);
-    const qtyEl = card.querySelector('.ic-badges span[style]');
-    if (qtyEl) qtyEl.textContent = `x${Number.isFinite(amount) ? amount : 1}`;
+    const badgesEl = card.querySelector('.ic-badges');
+    if (badgesEl) {
+      const qty = `<span class="badge ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
+      const mutTags = publicMutationBadges(item)
+        .map(m => `<span class="badge">${escHtml(m)}</span>`).join('');
+      badgesEl.innerHTML = qty + mutTags;
+    }
     const metaEl = card.querySelector('.ic-meta');
     if (metaEl) {
       const rc = rarityClass(rarity);
@@ -558,10 +588,9 @@
       const rarityLow = rarity ? rarity.toLowerCase() : '';
       const amount  = Number(item.amount || 1);
       const title   = cardTitle(item);
-      const qty     = `<span style="padding:1px 6px;border-radius:4px;font-size:.75em;background:#0a0c10;color:#e2e8f0;border:1px solid #2a3040;">x${Number.isFinite(amount) ? amount : 1}</span>`;
-      const mutTags = Array.isArray(item.mutationTags) && item.mutationTags.length
-        ? item.mutationTags.map(m => `<span class="badge" style="font-size:.68rem;">${escHtml(m)}</span>`).join('')
-        : (item.mutation ? `<span class="badge" style="font-size:.68rem;">${escHtml(item.mutation)}</span>` : '');
+      const qty     = `<span class="badge ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
+      const mutTags = publicMutationBadges(item)
+        .map(m => `<span class="badge">${escHtml(m)}</span>`).join('');
       const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
       const altText = escHtml(title);
       const cardCls = ['item-card', 'fish-card'];

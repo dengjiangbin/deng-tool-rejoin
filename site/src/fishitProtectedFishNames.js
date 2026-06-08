@@ -8,6 +8,8 @@ const manualVerified = require('./fishitManualVerifiedCatalog');
 
 const HARDCODED_PROTECTED = [
   'Giant Squid',
+  'Radiant Catfish',
+  'Zebra Snakehead',
 ];
 
 let _set = null;

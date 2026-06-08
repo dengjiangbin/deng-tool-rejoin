@@ -41,10 +41,11 @@ const robloxThumbnails = require('./fishitRobloxThumbnails');
 const staticCatalogAudit = require('./fishitStaticCatalogAudit');
 const nameOnlyCatalog = require('./fishitNameOnlyCatalog');
 const rarityLabels = require('./fishitRarityLabels');
+const protectedFishNames = require('./fishitProtectedFishNames');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10Z9_BUILD, BLOCKER10Z9_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10Z10_BUILD, BLOCKER10Z10_UI_MARKER } = require('./fishitTrackerBuild');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
 const globalCatalogService = require('./fishitGlobalCatalogService');
 const globalDb = require('./fishitGlobalDb');
@@ -134,8 +135,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10Z9_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10Z9_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10Z10_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10Z10_BUILD;
 
 const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
@@ -723,6 +724,8 @@ function promoteTrustedAmbiguousContainerRows(items) {
       catalogSource: 'quiz_bot_catalog',
       catalogReason: 'ambiguous_container_quiz_bot_promoted',
       snapshotPromotion: 'radiant_catfish_trusted_quiz',
+      mutation: null,
+      mutationTags: [],
     };
   });
 }
@@ -1822,6 +1825,56 @@ function stripHiddenPublicCosmeticPrefix(name) {
   return s;
 }
 
+function isMutationEmbeddedInCanonicalName(publicName, tag) {
+  if (!publicName || !tag) return false;
+  const name = String(publicName).trim();
+  const t = String(tag).trim();
+  if (!name || !t) return false;
+  if (protectedFishNames.isProtectedBaseName(name)) {
+    const prefix = `${t} `;
+    if (name.toLowerCase().startsWith(prefix.toLowerCase()) && name.length > prefix.length) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function buildNameParserProof(item) {
+  if (!item) return null;
+  const originalName = item.debugRawDisplayName || item.displayName || item.name || null;
+  const publicName = item.publicCardName || item.cardName || item.name || null;
+  const baseFishName = item.baseFishName || item.metadataFishName || null;
+  const strippedTags = Array.isArray(item.debugRawMutationTags)
+    ? item.debugRawMutationTags.filter((t) => !(
+      isHiddenPublicCosmeticTag(t)
+      || isMutationEmbeddedInCanonicalName(publicName, t)
+    ))
+    : [];
+  const publicBadges = [];
+  if (item.mutation) publicBadges.push(item.mutation);
+  if (Array.isArray(item.mutationTags)) {
+    for (const t of item.mutationTags) {
+      if (t && !publicBadges.includes(t)) publicBadges.push(t);
+    }
+  }
+  if (item.rarity && item.rarity !== 'Unknown') publicBadges.push(String(item.rarity));
+  let protectedNameReason = null;
+  if (protectedFishNames.isProtectedBaseName(publicName)) {
+    protectedNameReason = 'protected_canonical_fish_name';
+  } else if (protectedFishNames.isProtectedBaseName(baseFishName)) {
+    protectedNameReason = 'protected_base_fish_name';
+  }
+  return {
+    originalName,
+    publicName,
+    baseFishName,
+    strippedTags,
+    protectedNameReason,
+    publicBadges,
+    raritySource: item.raritySource || item.dataRaritySource || null,
+  };
+}
+
 function applyPublicCosmeticCleanup(item) {
   if (!item || typeof item !== 'object') return item;
   const rawDisplay = item.displayName || item.cardName || item.name || '';
@@ -1832,9 +1885,16 @@ function applyPublicCosmeticCleanup(item) {
   const baseName = stripHiddenPublicCosmeticPrefix(
     item.metadataFishName || item.baseFishName || item.catalogLockedBaseName || rawDisplay,
   );
-  const cleanMutation = isHiddenPublicCosmeticTag(rawMutation) ? null : rawMutation;
-  const cleanMutationTags = rawMutationTags.filter((t) => !isHiddenPublicCosmeticTag(t));
   const publicCardName = baseName || stripHiddenPublicCosmeticPrefix(rawDisplay);
+  const cleanMutationTags = rawMutationTags.filter((t) => {
+    if (isHiddenPublicCosmeticTag(t)) return false;
+    if (isMutationEmbeddedInCanonicalName(publicCardName, t)) return false;
+    return true;
+  });
+  const cleanMutation = isHiddenPublicCosmeticTag(rawMutation)
+    || isMutationEmbeddedInCanonicalName(publicCardName, rawMutation)
+    ? null
+    : (cleanMutationTags.length ? (cleanMutationTags.includes(rawMutation) ? rawMutation : cleanMutationTags[0]) : null);
   const hideShiny = item.shiny === true
     || isHiddenPublicCosmeticTag(rawMutation)
     || rawMutationTags.some((t) => isHiddenPublicCosmeticTag(t))
@@ -2022,6 +2082,7 @@ async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
       debugRawDisplayName: cleaned.debugRawDisplayName || null,
       debugRawMutationTags: cleaned.debugRawMutationTags || null,
       publicIdentityProof: identityProof,
+      nameParserProof: buildNameParserProof(cleaned),
       shiny: cleaned.shiny === true,
       dataSource: cleaned.imageSource === 'global_db' ? 'global_db' : (cleaned.raritySource || null),
       dataImageSource: cleaned.imageSource || null,
@@ -3016,6 +3077,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     hiddenPublicRows: publicFishDbg.hiddenPublicRows,
     quarantinedPublicNames: publicFishDbg.quarantinedPublicNames,
     missingExpectedFishProof: publicFishDbg.missingExpectedFishProof,
+    nameParserProof: publicFishDbg.fishItems.map((f) => f.nameParserProof).filter(Boolean),
     publicCounts: publicFishDbg.publicCounts,
     rarityColorProof: publicFishDbg.rarityColorProof,
     globalDbUiProof: publicFishDbg.globalDbUiProof,
@@ -3163,8 +3225,11 @@ module.exports.buildAmbiguousContainerProof = buildAmbiguousContainerProof;
 module.exports.AMBIGUOUS_CONTAINER_IDS = AMBIGUOUS_CONTAINER_IDS;
 module.exports.resolveAmbiguousContainerDisplay = resolveAmbiguousContainerDisplay;
 module.exports.trustedCatalogMetaForMetadataId = trustedCatalogMetaForMetadataId;
-module.exports.BLOCKER10Z9_BUILD = BLOCKER10Z9_BUILD;
-module.exports.BLOCKER10Z8_BUILD = BLOCKER10Z9_BUILD;
+module.exports.BLOCKER10Z10_BUILD = BLOCKER10Z10_BUILD;
+module.exports.BLOCKER10Z9_BUILD = BLOCKER10Z10_BUILD;
+module.exports.BLOCKER10Z8_BUILD = BLOCKER10Z10_BUILD;
+module.exports.isMutationEmbeddedInCanonicalName = isMutationEmbeddedInCanonicalName;
+module.exports.buildNameParserProof = buildNameParserProof;
 module.exports.isTrustedPublicNameSource = isTrustedPublicNameSource;
 module.exports.isSnapshotBackedPublicCard = isSnapshotBackedPublicCard;
 module.exports.buildPublicIdentityProof = buildPublicIdentityProof;
@@ -3173,7 +3238,7 @@ module.exports.promoteTrustedAmbiguousContainerRows = promoteTrustedAmbiguousCon
 module.exports.buildQuarantinedPublicNames = buildQuarantinedPublicNames;
 module.exports.buildMissingExpectedFishProof = buildMissingExpectedFishProof;
 module.exports.isTrustedRadiantCatfishInCatalog = isTrustedRadiantCatfishInCatalog;
-module.exports.BLOCKER10Z7_BUILD = BLOCKER10Z9_BUILD;
+module.exports.BLOCKER10Z7_BUILD = BLOCKER10Z10_BUILD;
 module.exports.renderTrackerPage = renderTrackerPage;
 module.exports.buildTrackerPageLocals = buildTrackerPageLocals;
 module.exports.BLOCKER10V_BUILD = PUBLIC_API_BUILD;
