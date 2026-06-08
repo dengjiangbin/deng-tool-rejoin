@@ -282,14 +282,25 @@ function normalizeMutationGroup(item) {
   return String(mut).toLowerCase().trim();
 }
 
-/** Public card aggregation key: Replion identity first, never Global DB speciesId alone (BLOCKER10Z4). */
+/** Public card aggregation key: Replion metadata identity first (BLOCKER10Z5). */
 function publicAggregationKey(item) {
   const mutGroup = normalizeMutationGroup(item);
+  if (item?.replionIdentityUnverified) {
+    if (item?.replionUuid) return `uuid:${String(item.replionUuid).toLowerCase()}`;
+    const cid = item?.containerItemId || item?.itemId || '?';
+    const w = Number(item?.weightKg != null ? item.weightKg : item?.weight);
+    const wKey = Number.isFinite(w) ? w.toFixed(2) : 'na';
+    return `unverified:${cid}:${wKey}:${String(item?.name || '').toLowerCase()}`;
+  }
   if (item?.replionUuid) {
     const mfish = item?.metadataFishId ? String(item.metadataFishId) : null;
-    const base = String(item?.catalogLockedBaseName || item?.baseFishName || item?.cardName || '').trim().toLowerCase();
     if (mfish) return `mfish:${mfish}::${mutGroup}`;
-    if (base) return `uuidbase:${base}::${mutGroup}`;
+    if (item?.metadataFishName) {
+      const base = String(item.metadataFishName).trim().toLowerCase();
+      if (base) return `mfname:${base}::${mutGroup}`;
+    }
+    const base = String(item?.catalogLockedBaseName || item?.baseFishName || item?.cardName || '').trim().toLowerCase();
+    if (base && item?.itemId) return `uuidbase:${base}::${item.itemId}::${mutGroup}`;
     return `uuid:${String(item.replionUuid).toLowerCase()}`;
   }
   const itemId = item?.itemId ? String(item.itemId) : null;

@@ -25,12 +25,14 @@ const {
   isLikelyFishInventoryItem,
   buildAmountProof,
   extractReplionAmount,
+  annotateReplionIdentity,
   catalogMetaForItemId,
   _itemIdLockedBaseName,
 } = require('../src/fishitTrackerRoutes');
 const rarityColorMap = require('../src/fishitRarityColorMap');
 
-const Z4_BUILD = 'BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07';
+const Z5_BUILD = 'BLOCKER10Z5_REPLION_IDENTITY_NO_FAKE_MERGE_2026_06_08';
+const Z4_BUILD = Z5_BUILD;
 const Z3_BUILD = Z4_BUILD;
 const Z_BUILD = Z3_BUILD;
 const Y_BUILD = Z3_BUILD;
@@ -816,7 +818,7 @@ describe('BLOCKER10Z4 amount regression fix', { concurrency: 1 }, () => {
     const { BLOCKER10Z4_BUILD } = require('../src/fishitTrackerBuild');
     assert.equal(BLOCKER10Z4_BUILD, Z4_BUILD);
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(lua.includes('BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07'));
+    assert.ok(lua.includes('BLOCKER10Z5_REPLION_IDENTITY_NO_FAKE_MERGE_2026_06_08'));
     assert.ok(lua.includes('LiveSafe.resolveOwnedStorageKey'));
   });
 
@@ -907,5 +909,94 @@ describe('BLOCKER10Z4 amount regression fix', { concurrency: 1 }, () => {
     assert.equal(pub.amountProof.rows[0].publicAmount, 1);
     assert.equal(pub.amountProof.rows[0].amountFromGlobalDb, false);
     assert.ok(pub.amountProof.rows[0].whyAmountCorrect.includes('Replion'));
+  });
+});
+
+describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () => {
+  test('build marker is BLOCKER10Z5', () => {
+    const { BLOCKER10Z5_BUILD } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10Z5_BUILD, Z5_BUILD);
+    const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    assert.ok(lua.includes('BLOCKER10Z5_REPLION_IDENTITY_NO_FAKE_MERGE_2026_06_08'));
+    assert.ok(lua.includes('replion_identity_unverified'));
+  });
+
+  test('publicAggregationKey does not merge unverified UUID rows by catalog name', () => {
+    const keyA = catalogPolish.publicAggregationKey({
+      replionUuid: 'uuid-a',
+      itemId: '267',
+      baseFishName: 'Parrot Blopfish',
+      catalogLockedBaseName: 'Parrot Blopfish',
+      replionIdentityUnverified: true,
+    });
+    const keyB = catalogPolish.publicAggregationKey({
+      replionUuid: 'uuid-b',
+      itemId: '267',
+      baseFishName: 'Parrot Blopfish',
+      catalogLockedBaseName: 'Parrot Blopfish',
+      replionIdentityUnverified: true,
+    });
+    assert.notEqual(keyA, keyB);
+    assert.match(keyA, /^uuid:/);
+  });
+
+  test('32 UUID rows with container id 267 do not produce Parrot Blopfish x32', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const rows = Array.from({ length: 32 }, (_, i) => ({
+      name: 'Parrot Blopfish',
+      itemId: '267',
+      containerItemId: '267',
+      category: 'fish',
+      amount: 1,
+      weight: 0.5 + (i * 0.02),
+      replionUuid: `uuid-267-${i}`,
+      replionAmountSource: 'replion_uuid_instance',
+    }));
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    const fakeMerge = pub.publicItems.find(
+      (f) => f.amount === 32 && /parrot blopfish/i.test(f.name || f.baseFishName || ''),
+    );
+    assert.equal(fakeMerge, undefined);
+    assert.equal(
+      pub.publicItems.reduce((s, f) => s + (Number(f.amount) || 0), 0),
+      32,
+    );
+    assert.ok(pub.publicItems.every((f) => (Number(f.amount) || 0) === 1));
+  });
+
+  test('legacy session rows without uuid still avoid fake x32 merge', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const rows = Array.from({ length: 32 }, (_, i) => ({
+      name: 'Parrot Blopfish',
+      itemId: '267',
+      category: 'fish',
+      amount: 1,
+      weight: 0.5 + (i * 0.02),
+    }));
+    const annotated = annotateReplionIdentity(rows);
+    assert.ok(annotated.every((r) => r.replionIdentityUnverified));
+    const pub = await buildPublicFishFields(annotated, 'http://127.0.0.1:8791');
+    const fakeMerge = pub.publicItems.find((f) => f.amount === 32);
+    assert.equal(fakeMerge, undefined);
+  });
+
+  test('verified metadataFishId rows still group by species', () => {
+    const keyA = catalogPolish.publicAggregationKey({
+      replionUuid: 'uuid-a',
+      metadataFishId: '385',
+      mutation: 'Shiny',
+      identityVerified: true,
+    });
+    const keyB = catalogPolish.publicAggregationKey({
+      replionUuid: 'uuid-b',
+      metadataFishId: '385',
+      mutation: 'Shiny',
+      identityVerified: true,
+    });
+    assert.equal(keyA, keyB);
   });
 });

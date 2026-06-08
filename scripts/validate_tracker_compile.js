@@ -20,11 +20,14 @@ if (src.charCodeAt(0) === 0xfeff) {
 if (/^\s*loadstring\s*\(/.test(src)) {
   errors.push('tracker.lua must not begin with loadstring() wrapper');
 }
-if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07')) {
-  errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z4 marker missing');
+if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z5_REPLION_IDENTITY_NO_FAKE_MERGE_2026_06_08')) {
+  errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z5 marker missing');
 }
-if (!src.includes('BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07')) {
-  errors.push('BLOCKER10Z4 build marker missing');
+if (!src.includes('BLOCKER10Z5_REPLION_IDENTITY_NO_FAKE_MERGE_2026_06_08')) {
+  errors.push('BLOCKER10Z5 build marker missing');
+}
+if (!src.includes('LiveSafe.extractReplionMetaFields')) {
+  errors.push('LiveSafe.extractReplionMetaFields missing — metadata fish identity required');
 }
 if (!src.includes('LiveSafe.resolveOwnedStorageKey')) {
   errors.push('LiveSafe.resolveOwnedStorageKey missing — UUID-per-instance amount fix required');
