@@ -184,28 +184,41 @@
     .fish-card__meta, .ic-meta {
       display:flex;
       flex-wrap:wrap;
-      gap:6px;
+      gap:8px;
       align-items:center;
+      min-height:30px;
     }
-    .fish-card__amount, .fish-card__rarity, .ic-badges .badge, .ic-badges .ic-qty, .ic-meta .badge {
+    .fish-card__pill,
+    .fish-card__amount,
+    .fish-card__rarity,
+    .ic-badges .ic-qty.fish-card__amount,
+    .ic-meta .fish-card__rarity {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height:30px;
+      padding:0 12px;
+      border-radius:999px;
       background:var(--badge-bg)!important;
-      border:1px solid rgba(255,255,255,.24)!important;
+      border:1px solid rgba(255,255,255,.26)!important;
       color:var(--badge-fg)!important;
-      font-size:.72rem;
-      font-weight:600;
-      padding:3px 10px;
-      border-radius:99px;
-      text-shadow:0 1px 2px rgba(0,0,0,.35);
+      font-size:.84rem;
+      font-weight:700;
+      line-height:1;
+      letter-spacing:.01em;
+      white-space:nowrap;
+      text-shadow:0 1px 2px rgba(0,0,0,.4);
+      box-sizing:border-box;
     }
-    .fish-card.rarity-rare .fish-card__rarity, .fish-card.rarity-secret .fish-card__rarity,
-    .fish-card.rarity-epic .fish-card__rarity, .fish-card.rarity-legendary .fish-card__rarity,
-    .fish-card.rarity-mythic .fish-card__rarity, .fish-card.rarity-forgotten .fish-card__rarity,
-    .fish-card.rarity-rare .ic-meta .badge, .fish-card.rarity-secret .ic-meta .badge,
-    .fish-card.rarity-epic .ic-meta .badge, .fish-card.rarity-legendary .ic-meta .badge,
-    .fish-card.rarity-mythic .ic-meta .badge, .fish-card.rarity-forgotten .ic-meta .badge {
+    .fish-card.rarity-rare .fish-card__rarity,
+    .fish-card.rarity-secret .fish-card__rarity,
+    .fish-card.rarity-epic .fish-card__rarity,
+    .fish-card.rarity-legendary .fish-card__rarity,
+    .fish-card.rarity-mythic .fish-card__rarity,
+    .fish-card.rarity-forgotten .fish-card__rarity {
       background:var(--badge-bg)!important;
       color:var(--badge-fg)!important;
-      border-color:rgba(255,255,255,.28)!important;
+      border-color:rgba(255,255,255,.3)!important;
     }
 
     /* Legacy hooks kept for patch/update paths */
@@ -254,8 +267,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10Z12_MODERN_FISH_CARD_LAYOUT_2026_06_08">
-<!-- BLOCKER10Z12_MODERN_FISH_CARD_LAYOUT_2026_06_08 -->
+<body data-ui-marker="BLOCKER10Z13_PUBLIC_CARD_POLISH_SIMPLE_BADGES_2026_06_08">
+<!-- BLOCKER10Z13_PUBLIC_CARD_POLISH_SIMPLE_BADGES_2026_06_08 -->
 <div class="page">
   <div class="inner">
 
@@ -561,10 +574,8 @@
     const title   = cardTitle(item);
     const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
     const nameStyle = rarityNameStyle(item);
-    const qty = `<span class="badge ic-qty fish-card__amount">x${Number.isFinite(amount) ? amount : 1}</span>`;
-    const mutTags = publicMutationBadges(item)
-      .map(m => `<span class="badge fish-card__tag">${escHtml(m)}</span>`).join('');
-    const rarityBadge = rarity ? `<span class="badge fish-card__rarity ${rc}">${escHtml(rarity)}</span>` : '';
+    const qty = `<span class="fish-card__pill fish-card__amount ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
+    const rarityBadge = rarity ? `<span class="fish-card__pill fish-card__rarity ${rc}">${escHtml(rarity)}</span>` : '';
     const isPlaceholder = imgSrc === ITEM_IMAGES.Default;
     return `
   <div class="fish-card__imageWrap ic-head">
@@ -572,7 +583,7 @@
   </div>
   <div class="fish-card__body ic-title-wrap">
     <span class="fish-card__name item-name" title="${escHtml(title)}" style="${nameStyle}">${escHtml(title)}</span>
-    <div class="fish-card__meta ic-meta ic-badges">${qty}${mutTags}${rarityBadge}</div>
+    <div class="fish-card__meta ic-meta ic-badges">${qty}${rarityBadge}</div>
   </div>`;
   }
   function buildItemCardElement(item) {
@@ -635,11 +646,9 @@
     const metaEl = card.querySelector('.fish-card__meta, .ic-meta');
     if (metaEl) {
       const rc = rarityClass(rarity);
-      const qty = `<span class="badge ic-qty fish-card__amount">x${Number.isFinite(amount) ? amount : 1}</span>`;
-      const mutTags = publicMutationBadges(item)
-        .map(m => `<span class="badge fish-card__tag">${escHtml(m)}</span>`).join('');
-      const rarityBadge = rarity ? `<span class="badge fish-card__rarity ${rc}">${escHtml(rarity)}</span>` : '';
-      metaEl.innerHTML = qty + mutTags + rarityBadge;
+      const qty = `<span class="fish-card__pill fish-card__amount ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
+      const rarityBadge = rarity ? `<span class="fish-card__pill fish-card__rarity ${rc}">${escHtml(rarity)}</span>` : '';
+      metaEl.innerHTML = qty + rarityBadge;
     }
     let img = card.querySelector('.fish-card__image, img');
     if (!img) {

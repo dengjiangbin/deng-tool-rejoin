@@ -31,10 +31,11 @@ const {
 } = require('../src/fishitTrackerRoutes');
 const rarityColorMap = require('../src/fishitRarityColorMap');
 
-const Z12_BUILD = 'BLOCKER10Z12_MODERN_FISH_CARD_LAYOUT_2026_06_08';
-const Z11_BUILD = Z12_BUILD;
-const Z10_BUILD = Z12_BUILD;
-const Z9_BUILD = Z12_BUILD;
+const Z13_BUILD = 'BLOCKER10Z13_PUBLIC_CARD_POLISH_SIMPLE_BADGES_2026_06_08';
+const Z12_BUILD = Z13_BUILD;
+const Z11_BUILD = Z13_BUILD;
+const Z10_BUILD = Z13_BUILD;
+const Z9_BUILD = Z13_BUILD;
 const Z8_BUILD = Z11_BUILD;
 const Z7_BUILD = Z11_BUILD;
 const Z6_BUILD = Z11_BUILD;
@@ -1639,9 +1640,9 @@ describe('BLOCKER10Z10 — card contrast and Radiant Catfish name fix', { concur
     assert.ok(!gPub.publicItems.some((f) => /goliath/i.test(f.name || '')));
   });
 
-  test('F: build marker is BLOCKER10Z12', () => {
+  test('F: build marker is BLOCKER10Z13', () => {
     const { buildTrackerPageLocals, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
-    assert.equal(BLOCKER10Z10_BUILD, Z12_BUILD);
+    assert.equal(BLOCKER10Z10_BUILD, Z13_BUILD);
     assert.equal(PUBLIC_API_BUILD, BLOCKER10Z10_BUILD);
     const locals = buildTrackerPageLocals();
     assert.equal(locals.renderBuild, BLOCKER10Z10_BUILD);
@@ -1666,7 +1667,7 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   test('GET /tracker returns HTTP 200 with no session data', async () => {
     const res = await request(makeApp()).get('/tracker').expect(200);
     assert.match(res.text, /Fish It Live Inventory Tracker/i);
-    assert.match(res.text, /BLOCKER10Z12/);
+    assert.match(res.text, /BLOCKER10Z13/);
   });
 
   test('GET /tracker?debug=global returns HTTP 200', async () => {
@@ -1677,9 +1678,9 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   test('buildTrackerPageLocals does not reference undefined build constants', () => {
     const { buildTrackerPageLocals } = require('../src/fishitTrackerRoutes');
     const locals = buildTrackerPageLocals();
-    assert.equal(locals.publicApiBuild, Z12_BUILD);
-    assert.equal(locals.blocker10vBuild, Z12_BUILD);
-    assert.equal(locals.renderBuild, Z12_BUILD);
+    assert.equal(locals.publicApiBuild, Z13_BUILD);
+    assert.equal(locals.blocker10vBuild, Z13_BUILD);
+    assert.equal(locals.renderBuild, Z13_BUILD);
   });
 
   test('buildGlobalDbProofHtml handles missing ambiguousContainerProof', () => {
@@ -1746,8 +1747,8 @@ describe('BLOCKER10Z11 — DENG Fish It bot rarity + safe global relearn', { con
     globalLearning._reset();
   });
 
-  test('build marker is BLOCKER10Z12', () => {
-    assert.equal(BLOCKER10Z11_BUILD, Z12_BUILD);
+  test('build marker is BLOCKER10Z13', () => {
+    assert.equal(BLOCKER10Z11_BUILD, Z13_BUILD);
   });
 
   test('A: DENG Fish It bot catalog loader loads rarity source', () => {
@@ -1985,7 +1986,7 @@ describe('BLOCKER10Z12 — modern fish card layout', { concurrency: 1 }, () => {
   }
 
   test('1: build marker is BLOCKER10Z12', () => {
-    assert.equal(BLOCKER10Z12_BUILD, Z12_BUILD);
+    assert.equal(BLOCKER10Z12_BUILD, Z13_BUILD);
   });
 
   test('2: rendered HTML contains modern fish card image wrapper/class', () => {
@@ -2052,7 +2053,7 @@ describe('BLOCKER10Z12 — modern fish card layout', { concurrency: 1 }, () => {
       imageUrl: 'http://127.0.0.1:8791/x.webp',
     }]);
     assert.match(html, /Radiant Catfish/);
-    assert.doesNotMatch(html, /fish-card__tag[^>]*>Radiant</);
+    assert.doesNotMatch(html, /fish-card__tag/);
   });
 
   test('7: rendered HTML does not contain Unknown Fish #267', async () => {
@@ -2115,5 +2116,157 @@ describe('BLOCKER10Z12 — modern fish card layout', { concurrency: 1 }, () => {
     const html = buildItemsHtml([{ ...cleaned, rarity: 'Rare', amount: 1, imageUrl: 'http://127.0.0.1/x.webp' }]);
     assert.match(html, /Freshwater Piranha/);
     assert.doesNotMatch(html, />Big</);
+  });
+});
+
+describe('BLOCKER10Z13 — public card polish simple badges', { concurrency: 1 }, () => {
+  const { BLOCKER10Z13_BUILD } = require('../src/fishitTrackerBuild');
+
+  function loadTrackerScriptFns() {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    const script = tpl.slice(tpl.indexOf('<script>'), tpl.indexOf('</script>') + 9);
+    const fn = script.match(/function buildItemsHtml\(items\)\s*\{[\s\S]*?\n  \}/);
+    assert.ok(fn, 'buildItemsHtml must exist');
+    const ctx = new Function(`
+      const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
+      const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', mythic:'rarity-mythic', secret:'badge-rarity-secret', forgotten:'rarity-forgotten' };
+      const RARITY_NAME_COLORS = {};
+      const ITEM_IMAGES = { Default:'/assets/img/fishit/fallback-fish.svg' };
+      function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+      function rarityClass(r){ return r ? (RARITY_MAP[r.toLowerCase()]||'badge') : ''; }
+      function cardRarityClass(r){ return r ? (CARD_RARITY_MAP[r.toLowerCase()]||'') : ''; }
+      function cardTitle(item){ return item.cardName||item.baseFishName||item.name||'Unknown'; }
+      function cardKey(item){ return String(item.name||'x').toLowerCase(); }
+      function rarityNameStyle(){ return ''; }
+      function publicMutationBadges(item){
+        const tags=[]; if(Array.isArray(item.mutationTags)) tags.push(...item.mutationTags); else if(item.mutation) tags.push(item.mutation);
+        const title=cardTitle(item);
+        return tags.filter(t=>{ if(!t) return false; const low=String(t).toLowerCase(); if(low==='big'||low==='shiny') return false; if(title&&title.toLowerCase().startsWith(low+' ')) return false; return true; });
+      }
+      function isUsableImageUrl(url){ return typeof url==='string' && url.startsWith('http'); }
+      function itemImageSrc(item){ return isUsableImageUrl(item.imageUrl)?item.imageUrl:null; }
+      ${script.match(/function buildFishCardInnerHtml\(item\)\s*\{[\s\S]*?\n  \}/)[0]}
+      ${fn[0]}
+      return buildItemsHtml;
+    `)();
+    return ctx;
+  }
+
+  test('1: build marker is BLOCKER10Z13', () => {
+    assert.equal(BLOCKER10Z13_BUILD, Z13_BUILD);
+  });
+
+  test('2: public HTML removes mutation/detail labels Ghost Corrupt Albino Sandy', () => {
+    const buildItemsHtml = loadTrackerScriptFns();
+    const cases = [
+      { name: 'Parrot Fish', mutation: 'Ghost', mutationTags: ['Ghost'], amount: 5, rarity: null },
+      { name: 'Parrot Blopfish', mutation: 'Corrupt', mutationTags: ['Corrupt'], amount: 1, rarity: null },
+      { name: 'Mossy Fishlet', mutation: 'Albino', mutationTags: ['Albino'], amount: 1, rarity: null },
+      { name: 'Flowery Fish', mutation: 'Sandy', mutationTags: ['Sandy'], amount: 1, rarity: null },
+    ];
+    const html = buildItemsHtml(cases.map((c) => ({
+      ...c,
+      baseFishName: c.name,
+      imageUrl: 'http://127.0.0.1/x.webp',
+    })));
+    assert.doesNotMatch(html, /fish-card__tag/);
+    assert.doesNotMatch(html, />Ghost</);
+    assert.doesNotMatch(html, />Corrupt</);
+    assert.doesNotMatch(html, />Albino</);
+    assert.doesNotMatch(html, />Sandy</);
+    assert.match(html, /Parrot Fish/);
+    assert.match(html, /x5/);
+  });
+
+  test('3: canonical rarity labels Secret Rare Forgotten still render', () => {
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml([
+      { name: 'Giant Squid', baseFishName: 'Giant Squid', rarity: 'Secret', amount: 1, imageUrl: 'http://127.0.0.1/x.webp' },
+      { name: 'Freshwater Piranha', baseFishName: 'Freshwater Piranha', rarity: 'Rare', amount: 5, imageUrl: 'http://127.0.0.1/x.webp' },
+      { name: 'Thunderzilla', baseFishName: 'Thunderzilla', rarity: 'Forgotten', amount: 1, imageUrl: 'http://127.0.0.1/x.webp' },
+    ]);
+    assert.match(html, /fish-card__rarity[^>]*>Secret</);
+    assert.match(html, /fish-card__rarity[^>]*>Rare</);
+    assert.match(html, /fish-card__rarity[^>]*>Forgotten</);
+  });
+
+  test('4: full fish names still render correctly', () => {
+    const buildItemsHtml = loadTrackerScriptFns();
+    const names = [
+      'Giant Squid', 'Panther Eel', 'Radiant Catfish', 'Zebra Snakehead',
+      'Freshwater Piranha', 'Skeleton Angler Fish', 'Seaweed Pufferfish',
+    ];
+    const html = buildItemsHtml(names.map((name) => ({
+      name,
+      baseFishName: name,
+      amount: 1,
+      imageUrl: 'http://127.0.0.1/x.webp',
+    })));
+    for (const name of names) assert.match(html, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  });
+
+  test('5: Radiant Catfish has no fake Radiant mutation badge', () => {
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml([{
+      name: 'Radiant Catfish',
+      baseFishName: 'Radiant Catfish',
+      mutation: null,
+      mutationTags: [],
+      amount: 1,
+      imageUrl: 'http://127.0.0.1/x.webp',
+    }]);
+    assert.match(html, /Radiant Catfish/);
+    assert.doesNotMatch(html, /fish-card__tag/);
+    assert.doesNotMatch(html, />Radiant</);
+  });
+
+  test('6: no Unknown Fish #267 in public card HTML', async () => {
+    setupTestDb();
+    const { buildPublicFishFields } = require('../src/fishitTrackerRoutes');
+    const pub = await buildPublicFishFields([{
+      name: 'Unknown Fish #267',
+      itemId: '267',
+      category: 'fish',
+      amount: 1,
+    }], 'http://127.0.0.1:8791');
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml(pub.publicItems);
+    assert.doesNotMatch(html, /Unknown Fish #267/i);
+  });
+
+  test('7: no Goliath Tiger in public card HTML', async () => {
+    setupTestDb();
+    const { buildPublicFishFields } = require('../src/fishitTrackerRoutes');
+    const pub = await buildPublicFishFields([{
+      name: 'Goliath Tiger',
+      itemId: '1008',
+      category: 'fish',
+      amount: 1,
+    }], 'http://127.0.0.1:8791');
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml(pub.publicItems);
+    assert.doesNotMatch(html, /Goliath Tiger/i);
+  });
+
+  test('8: CSS includes shared fish-card__pill base style', () => {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.match(tpl, /\.fish-card__pill/);
+    assert.match(tpl, /\.fish-card__amount/);
+    assert.match(tpl, /\.fish-card__rarity/);
+  });
+
+  test('9: amount and rarity pills share same height alignment system', () => {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.match(tpl, /\.fish-card__pill[\s\S]*min-height:30px/);
+    assert.match(tpl, /\.fish-card__pill[\s\S]*inline-flex/);
+    assert.match(tpl, /\.fish-card__pill[\s\S]*align-items:center/);
+  });
+
+  test('10: pill font sizes are larger than previous tiny .72rem style', () => {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    const pillBlock = tpl.match(/\.fish-card__pill[\s\S]*?box-sizing:border-box;/);
+    assert.ok(pillBlock, 'fish-card__pill block must exist');
+    assert.match(pillBlock[0], /font-size:\.84rem/);
+    assert.doesNotMatch(pillBlock[0], /font-size:\.72rem/);
   });
 });

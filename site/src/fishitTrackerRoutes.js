@@ -45,7 +45,7 @@ const protectedFishNames = require('./fishitProtectedFishNames');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10Z12_BUILD, BLOCKER10Z12_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
 const globalCatalogService = require('./fishitGlobalCatalogService');
 const globalDb = require('./fishitGlobalDb');
@@ -137,8 +137,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10Z12_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10Z12_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10Z13_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10Z13_BUILD;
 
 const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
@@ -3233,11 +3233,12 @@ module.exports.buildAmbiguousContainerProof = buildAmbiguousContainerProof;
 module.exports.AMBIGUOUS_CONTAINER_IDS = AMBIGUOUS_CONTAINER_IDS;
 module.exports.resolveAmbiguousContainerDisplay = resolveAmbiguousContainerDisplay;
 module.exports.trustedCatalogMetaForMetadataId = trustedCatalogMetaForMetadataId;
-module.exports.BLOCKER10Z12_BUILD = BLOCKER10Z12_BUILD;
-module.exports.BLOCKER10Z11_BUILD = BLOCKER10Z12_BUILD;
-module.exports.BLOCKER10Z10_BUILD = BLOCKER10Z12_BUILD;
-module.exports.BLOCKER10Z9_BUILD = BLOCKER10Z12_BUILD;
-module.exports.BLOCKER10Z8_BUILD = BLOCKER10Z12_BUILD;
+module.exports.BLOCKER10Z13_BUILD = BLOCKER10Z13_BUILD;
+module.exports.BLOCKER10Z12_BUILD = BLOCKER10Z13_BUILD;
+module.exports.BLOCKER10Z11_BUILD = BLOCKER10Z13_BUILD;
+module.exports.BLOCKER10Z10_BUILD = BLOCKER10Z13_BUILD;
+module.exports.BLOCKER10Z9_BUILD = BLOCKER10Z13_BUILD;
+module.exports.BLOCKER10Z8_BUILD = BLOCKER10Z13_BUILD;
 module.exports.isMutationEmbeddedInCanonicalName = isMutationEmbeddedInCanonicalName;
 module.exports.buildNameParserProof = buildNameParserProof;
 module.exports.isTrustedPublicNameSource = isTrustedPublicNameSource;
@@ -3248,7 +3249,7 @@ module.exports.promoteTrustedAmbiguousContainerRows = promoteTrustedAmbiguousCon
 module.exports.buildQuarantinedPublicNames = buildQuarantinedPublicNames;
 module.exports.buildMissingExpectedFishProof = buildMissingExpectedFishProof;
 module.exports.isTrustedRadiantCatfishInCatalog = isTrustedRadiantCatfishInCatalog;
-module.exports.BLOCKER10Z7_BUILD = BLOCKER10Z12_BUILD;
+module.exports.BLOCKER10Z7_BUILD = BLOCKER10Z13_BUILD;
 module.exports.renderTrackerPage = renderTrackerPage;
 module.exports.buildTrackerPageLocals = buildTrackerPageLocals;
 module.exports.BLOCKER10V_BUILD = PUBLIC_API_BUILD;
