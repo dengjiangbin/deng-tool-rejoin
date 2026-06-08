@@ -31,14 +31,16 @@ const {
 } = require('../src/fishitTrackerRoutes');
 const rarityColorMap = require('../src/fishitRarityColorMap');
 
-const Z6_BUILD = 'BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08';
-const Z5_BUILD = Z6_BUILD;
-const Z4_BUILD = Z5_BUILD;
-const Z3_BUILD = Z4_BUILD;
-const Z_BUILD = Z3_BUILD;
-const Y_BUILD = Z3_BUILD;
-const X_BUILD = Z3_BUILD;
-const W_BUILD = Z3_BUILD;
+const Z8_BUILD = 'BLOCKER10Z8_PUBLIC_HIDE_FAKE_267_AND_COSMETIC_TAGS_2026_06_08';
+const Z7_BUILD = Z8_BUILD;
+const Z6_BUILD = Z8_BUILD;
+const Z5_BUILD = Z8_BUILD;
+const Z4_BUILD = Z8_BUILD;
+const Z3_BUILD = Z8_BUILD;
+const Z_BUILD = Z8_BUILD;
+const Y_BUILD = Z8_BUILD;
+const X_BUILD = Z8_BUILD;
+const W_BUILD = Z8_BUILD;
 let tmpDb;
 
 function setupTestDb() {
@@ -839,6 +841,8 @@ describe('BLOCKER10Z4 amount regression fix', { concurrency: 1 }, () => {
     await globalCatalogService.importQuizBotSeed();
     const pub = await buildPublicFishFields([
       { name: 'Item #267', itemId: '267', category: 'fish', amount: 1,
+        metadataFishName: 'Parrot Blopfish',
+        identityVerified: true,
         replionUuid: 'e0ce8a51-2b73-41fb-a319-ebc1c949a9f3',
         replionAmountSource: 'replion_uuid_instance' },
     ], 'http://127.0.0.1:8791');
@@ -849,7 +853,7 @@ describe('BLOCKER10Z4 amount regression fix', { concurrency: 1 }, () => {
     assert.equal(pub.amountProof.rows[0].amountFromGlobalDb, false);
   });
 
-  test('itemId 267 stays Parrot Blopfish not Catfish alias', async () => {
+  test('itemId 267 without metadata stays hidden from public (Z8)', async () => {
     setupTestDb();
     if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
     await globalCatalogService.importQuizBotSeed();
@@ -857,10 +861,8 @@ describe('BLOCKER10Z4 amount regression fix', { concurrency: 1 }, () => {
       { name: 'Item #267', itemId: '267', category: 'fish', amount: 1,
         replionUuid: 'uuid-test-267-a', replionAmountSource: 'replion_uuid_instance' },
     ], 'http://127.0.0.1:8791');
-    const item = pub.publicItems[0];
-    assert.equal(item.baseFishName, 'Parrot Blopfish');
-    assert.notEqual(item.baseFishName, 'Catfish');
-    assert.ok(!/catfish/i.test(item.name || ''));
+    assert.equal(pub.publicItems.length, 0);
+    assert.equal(pub.hiddenPublicRows.ambiguousContainerUnresolved, 1);
   });
 
   test('itemId 1008 stays Goliath Tiger not Spear Guardian alias', async () => {
@@ -1090,7 +1092,9 @@ describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () =>
       (f) => f.amount === 32 && /parrot blopfish|catfish/i.test(f.name || f.baseFishName || ''),
     );
     assert.equal(fakeMerge, undefined);
-    assert.equal(pub.publicItems.reduce((s, f) => s + (Number(f.amount) || 0), 0), 32);
+    assert.equal(pub.publicItems.length, 0);
+    assert.equal(pub.hiddenPublicRows.ambiguousContainerUnresolved, 32);
+    assert.ok(!pub.publicItems.some((f) => /unknown fish #267/i.test(f.name || '')));
   });
 
   test('BLOCKER10Z7: 267 row with metadataFishName Panther Eel resolves correctly', async () => {
@@ -1129,7 +1133,7 @@ describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () =>
     assert.ok(pub.publicItems.some((f) => /panther eel/i.test(f.name || f.baseFishName || f.displayName || '')));
   });
 
-  test('BLOCKER10Z7: 267 row without metadata stays unmapped placeholder', async () => {
+  test('BLOCKER10Z7: 267 row without metadata stays hidden from public (debug only)', async () => {
     setupTestDb();
     const rows = [{
       name: 'Item #267',
@@ -1142,7 +1146,9 @@ describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () =>
       replionAmountSource: 'replion_uuid_instance',
     }];
     const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
-    assert.ok(pub.publicItems.some((f) => /unknown fish #267|unmapped fish/i.test(f.name || f.displayName || '')));
+    assert.equal(pub.publicItems.length, 0);
+    assert.equal(pub.hiddenPublicRows.ambiguousContainerUnresolved, 1);
+    assert.ok(!pub.publicItems.some((f) => /unknown fish #267|unmapped fish/i.test(f.name || f.displayName || '')));
     assert.ok(!pub.publicItems.some((f) => /parrot blopfish/i.test(f.name || '')));
   });
 
@@ -1175,10 +1181,11 @@ describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () =>
     const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
     const parrotCards = pub.publicItems.filter((f) => /parrot blopfish/i.test(f.name || f.displayName || ''));
     assert.equal(parrotCards.reduce((s, f) => s + (Number(f.amount) || 0), 0), 1);
-    assert.ok(pub.publicItems.some((f) => /unknown fish #267/i.test(f.name || f.displayName || '')));
+    assert.equal(pub.hiddenPublicRows.ambiguousContainerUnresolved, 5);
+    assert.ok(!pub.publicItems.some((f) => /unknown fish #267/i.test(f.name || f.displayName || '')));
   });
 
-  test('BLOCKER10Z7: header count uses verified per-row UUID instances', async () => {
+  test('BLOCKER10Z7: header count excludes hidden ambiguous 267 rows', async () => {
     setupTestDb();
     const rows = Array.from({ length: 32 }, (_, i) => ({
       name: 'Item #267',
@@ -1191,8 +1198,9 @@ describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () =>
       replionAmountSource: 'replion_uuid_instance',
     }));
     const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
-    assert.equal(pub.fishCounts.fishInstances, 32);
-    assert.equal(pub.amountProof.allVerified, true);
+    assert.equal(pub.fishCounts.fishInstances, 0);
+    assert.equal(pub.publicCounts.visibleFishInstances, 0);
+    assert.equal(pub.publicCounts.hiddenUnresolvedFishRows, 32);
   });
 
   test('BLOCKER10Z7: buildAmbiguousContainerProof exposes sample stats', () => {
@@ -1221,12 +1229,164 @@ describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () =>
   });
 });
 
+describe('BLOCKER10Z8 — hide fake 267 and cosmetic tags', { concurrency: 1 }, () => {
+  const {
+    buildPublicFishFields,
+    buildAmountProof,
+    isPublicFishCardVisible,
+    applyPublicCosmeticCleanup,
+    stripHiddenPublicCosmeticPrefix,
+  } = require('../src/fishitTrackerRoutes');
+
+  function fake267Row(i) {
+    return {
+      name: 'Item #267',
+      itemId: '267',
+      containerItemId: '267',
+      replionTopLevelId: '267',
+      isAmbiguousContainerId: true,
+      containerIdCollision: true,
+      replionIdentityUnverified: true,
+      identityVerified: false,
+      metadataFishId: null,
+      metadataFishName: null,
+      category: 'fish',
+      amount: 1,
+      replionUuid: `uuid-fake-${i}`,
+      replionAmountSource: 'replion_uuid_instance',
+      confidence: 'ambiguous_container_unmapped',
+    };
+  }
+
+  test('A: 32 fake 267 rows hidden from public cards and counts', async () => {
+    setupTestDb();
+    const rows = Array.from({ length: 32 }, (_, i) => fake267Row(i));
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    assert.equal(pub.publicItems.length, 0);
+    assert.ok(!pub.publicItems.some((f) => /unknown fish #267/i.test(f.name || f.cardName || '')));
+    assert.equal(pub.publicCounts.visibleFishInstances, 0);
+    assert.equal(pub.hiddenPublicRows.ambiguousContainerUnresolved, 32);
+    assert.deepEqual(pub.hiddenPublicRows.hiddenItemIds, ['267']);
+  });
+
+  test('B: trusted 267 with metadataFishName still shows resolved fish', async () => {
+    setupTestDb();
+    const rows = [{
+      ...fake267Row(0),
+      metadataFishName: 'Panther Eel',
+      identityVerified: true,
+      replionIdentityUnverified: false,
+    }];
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    assert.ok(pub.publicItems.some((f) => /panther eel/i.test(f.name || f.baseFishName || '')));
+    assert.ok(!pub.publicItems.some((f) => /unknown fish #267/i.test(f.name || '')));
+    assert.equal(pub.publicCounts.visibleFishInstances, 1);
+  });
+
+  test('C: Big/Shiny stripped from public names and badges', () => {
+    const cases = [
+      { in: 'Big Freshwater Piranha', out: 'Freshwater Piranha' },
+      { in: 'Shiny Parrot Fish', out: 'Parrot Fish' },
+      { in: 'Big Shiny Seaweed Pufferfish', out: 'Seaweed Pufferfish' },
+    ];
+    for (const c of cases) {
+      assert.equal(stripHiddenPublicCosmeticPrefix(c.in), c.out);
+      const cleaned = applyPublicCosmeticCleanup({
+        name: c.in,
+        baseFishName: c.in,
+        displayName: c.in,
+        mutation: c.in.startsWith('Shiny') ? 'Shiny' : (c.in.startsWith('Big Shiny') ? 'Big Shiny' : 'Big'),
+        shiny: true,
+      });
+      assert.equal(cleaned.publicCardName, c.out);
+      assert.equal(cleaned.mutation, null);
+      assert.equal(cleaned.shiny, false);
+      assert.equal(cleaned.mutationTags.length, 0);
+    }
+  });
+
+  test('D: amountProof publicCardName excludes Big/Shiny', async () => {
+    setupTestDb();
+    const rows = [{
+      name: 'Big Freshwater Piranha',
+      itemId: '99901',
+      category: 'fish',
+      amount: 1,
+      baseFishName: 'Big Freshwater Piranha',
+      catalogLockedBaseName: 'Freshwater Piranha',
+      catalogSource: 'manual_verified_catalog',
+      identityVerified: true,
+    }];
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    const proof = pub.amountProof || buildAmountProof(pub.fishItems, rows);
+    assert.ok(proof.rows.length >= 1);
+    for (const r of proof.rows) {
+      assert.ok(!/\bbig\b/i.test(r.publicCardName || ''));
+      assert.ok(!/\bshiny\b/i.test(r.publicCardName || ''));
+    }
+  });
+
+  test('E: header counts visible fish only with hidden 267 rows', async () => {
+    setupTestDb();
+    const verified = Array.from({ length: 20 }, (_, i) => ({
+      name: `Species ${i % 12}`,
+      itemId: String(100 + i),
+      category: 'fish',
+      amount: 1,
+      baseFishName: `Species ${i % 12}`,
+      metadataFishName: `Species ${i % 12}`,
+      identityVerified: true,
+      replionUuid: `uuid-verified-${i}`,
+      replionAmountSource: 'replion_uuid_instance',
+    }));
+    const fake267 = Array.from({ length: 32 }, (_, i) => fake267Row(i));
+    const pub = await buildPublicFishFields([...verified, ...fake267], 'http://127.0.0.1:8791');
+    assert.equal(pub.publicCounts.visibleFishInstances, 20);
+    assert.equal(pub.publicCounts.hiddenUnresolvedFishRows, 32);
+    assert.equal(pub.fishCounts.fishInstances, 20);
+  });
+
+  test('F: isPublicFishCardVisible rejects unknown 267 without trusted identity', () => {
+    assert.equal(isPublicFishCardVisible(fake267Row(0)), false);
+    assert.equal(isPublicFishCardVisible({
+      ...fake267Row(0),
+      metadataFishName: 'Panther Eel',
+      identityVerified: true,
+    }), true);
+  });
+
+  test('G: GET /tracker HTTP 200 without Unknown Fish #267 or Shiny badges in HTML', async () => {
+    const express = require('express');
+    const request = require('supertest');
+    const trackerRouter = require('../src/fishitTrackerRoutes');
+    const app = express();
+    app.set('view engine', 'ejs');
+    app.set('views', path.join(__dirname, '..', 'views'));
+    app.use(trackerRouter);
+    const res = await request(app).get('/tracker').expect(200);
+    assert.doesNotMatch(res.text, /Unknown Fish #267/i);
+    assert.doesNotMatch(res.text, /Big Shiny/i);
+  });
+
+  test('H: GET /tracker?debug=global includes hidden rows proof without crash', async () => {
+    const express = require('express');
+    const request = require('supertest');
+    const trackerRouter = require('../src/fishitTrackerRoutes');
+    const app = express();
+    app.set('view engine', 'ejs');
+    app.set('views', path.join(__dirname, '..', 'views'));
+    app.use(trackerRouter);
+    const res = await request(app).get('/tracker?debug=global').expect(200);
+    assert.match(res.text, /hiddenPublicRows|hiddenUnresolved/i);
+  });
+});
+
 describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   const express = require('express');
   const request = require('supertest');
   const trackerRouter = require('../src/fishitTrackerRoutes');
   const ejs = require('ejs');
-  const { BLOCKER10Z7_BUILD } = require('../src/fishitTrackerBuild');
+  const { BLOCKER10Z8_BUILD } = require('../src/fishitTrackerBuild');
 
   function makeApp() {
     const app = express();
@@ -1239,7 +1399,7 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   test('GET /tracker returns HTTP 200 with no session data', async () => {
     const res = await request(makeApp()).get('/tracker').expect(200);
     assert.match(res.text, /Fish It Live Inventory Tracker/i);
-    assert.match(res.text, /BLOCKER10Z7/);
+    assert.match(res.text, /BLOCKER10Z8/);
   });
 
   test('GET /tracker?debug=global returns HTTP 200', async () => {
@@ -1250,9 +1410,9 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   test('buildTrackerPageLocals does not reference undefined build constants', () => {
     const { buildTrackerPageLocals } = require('../src/fishitTrackerRoutes');
     const locals = buildTrackerPageLocals();
-    assert.equal(locals.publicApiBuild, BLOCKER10Z7_BUILD);
-    assert.equal(locals.blocker10vBuild, BLOCKER10Z7_BUILD);
-    assert.equal(locals.renderBuild, BLOCKER10Z7_BUILD);
+    assert.equal(locals.publicApiBuild, BLOCKER10Z8_BUILD);
+    assert.equal(locals.blocker10vBuild, BLOCKER10Z8_BUILD);
+    assert.equal(locals.renderBuild, BLOCKER10Z8_BUILD);
   });
 
   test('buildGlobalDbProofHtml handles missing ambiguousContainerProof', () => {

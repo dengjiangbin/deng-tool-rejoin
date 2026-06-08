@@ -44,7 +44,7 @@ const rarityLabels = require('./fishitRarityLabels');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10Z7_BUILD, BLOCKER10Z7_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10Z8_BUILD, BLOCKER10Z8_UI_MARKER } = require('./fishitTrackerBuild');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
 const globalCatalogService = require('./fishitGlobalCatalogService');
 const globalDb = require('./fishitGlobalDb');
@@ -134,8 +134,10 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10Z7_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10Z7_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10Z8_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10Z8_BUILD;
+
+const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
 /** Top-level Replion ids shared across many species — never catalog-guess (BLOCKER10Z7). */
 const AMBIGUOUS_CONTAINER_IDS = new Set(['267']);
@@ -1146,7 +1148,8 @@ function buildPublicFilterTrace(enrichedFlat) {
     const species = globalCatalogService.resolveSpeciesForItem(item);
     const image = globalCatalogService.resolveImageForItem(item);
     const rarity = globalCatalogService.resolveRarityForItem(item);
-    const included = isPublicFishItem(item);
+    const fishCandidate = isPublicFishItem(item);
+    const included = fishCandidate && isPublicFishCardVisible(item);
     return {
       itemId: item.itemId || null,
       rawName: item.name || null,
@@ -1156,7 +1159,11 @@ function buildPublicFilterTrace(enrichedFlat) {
       mutation: item.mutation || parsed.mutation || null,
       category: item.category || null,
       includedPublic: included,
-      exclusionReason: included ? null : explainPublicExclusionReason(item),
+      exclusionReason: included ? null : (
+        fishCandidate && !isPublicFishCardVisible(item)
+          ? 'hidden_ambiguous_container_unresolved'
+          : explainPublicExclusionReason(item)
+      ),
       globalSpeciesId: species.species?.id || globalMeta?.speciesId || null,
       globalMappingId: item.itemId || null,
       confidence: globalMeta?.confidence || species.mapping?.confidence || null,
@@ -1394,7 +1401,7 @@ function buildAmountProof(publicItems, enrichedFlat) {
     const nameMatchesCatalog = !catalogName || !item.baseFishName
       || globalDb.normalizeNamePunct(catalogName) === globalDb.normalizeNamePunct(item.baseFishName);
     return {
-      publicCardName: item.displayName || item.name,
+      publicCardName: stripHiddenPublicCosmeticPrefix(item.publicCardName || item.displayName || item.name),
       itemId: item.itemId || null,
       publicAmount,
       amountSource,
@@ -1507,6 +1514,111 @@ function isUsablePublicImageUrl(url) {
   return false;
 }
 
+function hasTrustedPublicIdentity(item) {
+  if (!item) return false;
+  return item.identityVerified === true
+    || !!item.catalogLockedBaseName
+    || !!item.metadataFishName
+    || !!item.metadataFishId
+    || !!item.speciesId
+    || item.confidence === 'manual_verified'
+    || item.confidence === 'trusted_catalog'
+    || item.sourcePriority === 'manual_verified_catalog'
+    || item.catalogSource === 'manual_verified_catalog';
+}
+
+/** Hide unresolved ambiguous container rows from public cards/counts (BLOCKER10Z8). */
+function isPublicFishCardVisible(item) {
+  if (!item) return false;
+
+  const itemId = String(item.itemId || item.containerItemId || '');
+  const isAmbiguousContainer =
+    item.containerIdCollision === true
+    || item.isAmbiguousContainerId === true
+    || item.confidence === 'ambiguous_container_unmapped'
+    || item.catalogReason === 'ambiguous_container_unmapped'
+    || item.replionIdentityUnverified === true;
+
+  const hasTrustedIdentity = hasTrustedPublicIdentity(item);
+
+  const isUnknownName =
+    /^Unknown Fish #/i.test(String(item.cardName || item.name || item.baseFishName || ''));
+
+  if (isAmbiguousContainer && !hasTrustedIdentity) return false;
+  if (itemId === '267' && isUnknownName) return false;
+
+  return true;
+}
+
+function isHiddenPublicCosmeticTag(tag) {
+  if (!tag) return false;
+  return HIDDEN_PUBLIC_COSMETIC_TAGS.has(String(tag).toLowerCase().trim());
+}
+
+function stripHiddenPublicCosmeticPrefix(name) {
+  if (!name || typeof name !== 'string') return name;
+  let s = name.trim();
+  let prev;
+  do {
+    prev = s;
+    for (const tag of ['Big Shiny', 'Big', 'Shiny']) {
+      const re = new RegExp(`^${tag.replace(/\s+/g, '\\s+')}\\s+`, 'i');
+      if (re.test(s)) s = s.replace(re, '').trim();
+    }
+  } while (s !== prev);
+  return s;
+}
+
+function applyPublicCosmeticCleanup(item) {
+  if (!item || typeof item !== 'object') return item;
+  const rawDisplay = item.displayName || item.cardName || item.name || '';
+  const rawMutation = item.mutation || null;
+  const rawMutationTags = Array.isArray(item.mutationTags)
+    ? item.mutationTags
+    : (rawMutation ? [rawMutation] : []);
+  const baseName = stripHiddenPublicCosmeticPrefix(
+    item.baseFishName || item.catalogLockedBaseName || rawDisplay,
+  );
+  const cleanMutation = isHiddenPublicCosmeticTag(rawMutation) ? null : rawMutation;
+  const cleanMutationTags = rawMutationTags.filter((t) => !isHiddenPublicCosmeticTag(t));
+  const publicCardName = baseName || stripHiddenPublicCosmeticPrefix(rawDisplay);
+  const hideShiny = item.shiny === true
+    || isHiddenPublicCosmeticTag(rawMutation)
+    || rawMutationTags.some((t) => isHiddenPublicCosmeticTag(t))
+    || /\bshiny\b/i.test(rawDisplay);
+  return {
+    ...item,
+    debugRawDisplayName: rawDisplay,
+    debugRawMutationTags: rawMutationTags,
+    cardName: publicCardName,
+    name: publicCardName,
+    displayName: publicCardName,
+    baseFishName: publicCardName,
+    publicCardName,
+    mutation: cleanMutation,
+    mutationTags: cleanMutationTags,
+    shiny: hideShiny ? false : item.shiny === true,
+  };
+}
+
+function buildHiddenPublicRows(enrichedFlat) {
+  const ambiguousUnresolved = (enrichedFlat || []).filter((it) => {
+    const isAmbiguous = isAmbiguousContainerItem(it)
+      || it.isAmbiguousContainerId === true
+      || it.containerIdCollision === true;
+    if (!isAmbiguous) return false;
+    return !isPublicFishCardVisible(it);
+  });
+  const hiddenItemIds = [...new Set(
+    ambiguousUnresolved.map((it) => String(it.containerItemId || it.itemId)).filter(Boolean),
+  )];
+  return {
+    ambiguousContainerUnresolved: sumItemAmounts(ambiguousUnresolved),
+    hiddenItemIds,
+    reason: 'ambiguous container rows have no metadataFishId/metadataFishName and no trusted identity',
+  };
+}
+
 function isPublicFishItem(item) {
   if (!item) return false;
   const cat = String(item.category || '').toLowerCase();
@@ -1514,13 +1626,14 @@ function isPublicFishItem(item) {
   if (isKnownNonFishInventoryItem(item)) return false;
 
   if (item.replionIdentityUnverified === true && item.replionUuid) {
-    return catalogStore.isFishCategory(cat) || isLikelyFishInventoryItem(item)
-      || item.isAmbiguousContainerId === true;
+    if (isAmbiguousContainerItem(item)) {
+      return hasReplionMetadataIdentity(item) || item.identityVerified === true;
+    }
+    return catalogStore.isFishCategory(cat) || isLikelyFishInventoryItem(item);
   }
 
   if (isAmbiguousContainerItem(item)) {
-    return catalogStore.isFishCategory(cat) || isLikelyFishInventoryItem(item)
-      || hasReplionMetadataIdentity(item);
+    return hasReplionMetadataIdentity(item) || item.identityVerified === true;
   }
 
   if (item.itemId) {
@@ -1597,68 +1710,83 @@ async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
     ),
   );
   const enriched = needsCatalogEnrich ? enrichItemsFromCatalog(items) : items;
-  let polished = catalogPolish.polishPublicFishItems(
-    enriched.filter(isPublicFishItem),
-  );
+  const candidateItems = enriched.filter(isPublicFishItem);
+  const visibleCandidates = candidateItems.filter(isPublicFishCardVisible);
+  const hiddenPublicRows = buildHiddenPublicRows(enriched);
+  let polished = catalogPolish.polishPublicFishItems(visibleCandidates);
   const withAssets = fishImageAssets.attachFishImagesToItems(polished);
   const withRarity = rarityEnrichment.attachRarityToItems(withAssets);
   const withImages = await fishImageCache.attachCachedImagesToItems(withRarity, baseUrl);
   const grouped = catalogPolish.groupPublicFishItems(withImages);
   const fishItems = grouped.map((item) => {
-    const imageUrl = item.imageUrl || null;
+    const cleaned = applyPublicCosmeticCleanup(item);
+    const imageUrl = cleaned.imageUrl || null;
     const hasImage = isUsablePublicImageUrl(imageUrl);
-    const imageResolved = item.imageStatus === 'cached' && hasImage;
+    const imageResolved = cleaned.imageStatus === 'cached' && hasImage;
     return {
-      speciesId: item.speciesId || item.globalSpeciesId || null,
-      canonicalName: item.baseFishName || item.cardName || item.name,
-      displayName: item.displayName || item.baseFishName || item.name,
-      name: item.cardName || item.baseFishName || item.name,
-      cardName: item.cardName || item.baseFishName || item.name,
-      baseFishName: item.baseFishName || item.cardName || item.name,
-      amount: Number(item.amount) > 0 ? Math.floor(Number(item.amount)) : 1,
-      replionAmountSource: item.replionAmountSource || null,
-      replionStackQuantity: item.replionStackQuantity ?? null,
-      replionUuid: item.replionUuid || null,
-      metadataFishId: item.metadataFishId || null,
-      metadataFishName: item.metadataFishName || null,
-      containerItemId: item.containerItemId || null,
-      containerIdCollision: item.containerIdCollision === true,
-      replionIdentityUnverified: item.replionIdentityUnverified === true,
-      identityVerified: item.identityVerified === true,
-      catalogLockedBaseName: item.catalogLockedBaseName || null,
-      dataAmountSource: item.replionAmountSource || 'replion_snapshot',
-      rarity: item.rarity && item.rarity !== 'Unknown' ? item.rarity : null,
-      raritySource: item.raritySource || null,
-      rarityAccentColor: item.rarityAccentColor || rarityColorMap.getRarityAccentColor(item.rarity) || null,
+      speciesId: cleaned.speciesId || cleaned.globalSpeciesId || null,
+      canonicalName: cleaned.baseFishName || cleaned.cardName || cleaned.name,
+      displayName: cleaned.displayName || cleaned.baseFishName || cleaned.name,
+      name: cleaned.cardName || cleaned.baseFishName || cleaned.name,
+      cardName: cleaned.cardName || cleaned.baseFishName || cleaned.name,
+      publicCardName: cleaned.publicCardName || cleaned.cardName || cleaned.name,
+      baseFishName: cleaned.baseFishName || cleaned.cardName || cleaned.name,
+      amount: Number(cleaned.amount) > 0 ? Math.floor(Number(cleaned.amount)) : 1,
+      replionAmountSource: cleaned.replionAmountSource || null,
+      replionStackQuantity: cleaned.replionStackQuantity ?? null,
+      replionUuid: cleaned.replionUuid || null,
+      metadataFishId: cleaned.metadataFishId || null,
+      metadataFishName: cleaned.metadataFishName || null,
+      containerItemId: cleaned.containerItemId || null,
+      containerIdCollision: cleaned.containerIdCollision === true,
+      replionIdentityUnverified: cleaned.replionIdentityUnverified === true,
+      identityVerified: cleaned.identityVerified === true,
+      catalogLockedBaseName: cleaned.catalogLockedBaseName || null,
+      dataAmountSource: cleaned.replionAmountSource || 'replion_snapshot',
+      rarity: cleaned.rarity && cleaned.rarity !== 'Unknown' ? cleaned.rarity : null,
+      raritySource: cleaned.raritySource || null,
+      rarityAccentColor: cleaned.rarityAccentColor || rarityColorMap.getRarityAccentColor(cleaned.rarity) || null,
       imageUrl,
       imageUrlPresent: hasImage,
       imageResolved,
-      imageAssetId: item.imageAssetId || null,
+      imageAssetId: cleaned.imageAssetId || null,
       verifiedProxy: false,
-      imageSource: item.imageSource || (hasImage ? 'global_db' : 'missing_image_asset'),
-      imageStatus: item.imageStatus || (hasImage ? 'cached' : 'missing'),
-      mutationTags: item.mutation ? [item.mutation] : [],
-      mutation: item.mutation || (item.mutationTags && item.mutationTags[0]) || null,
-      sourcePriority: item.catalogSource || item.catalogEnrichmentSource || null,
-      confidence: item.rarityConfidence || item.catalogReason || null,
-      groupedInstanceCount: item.groupedInstanceCount || 1,
-      itemId: item.itemId || null,
+      imageSource: cleaned.imageSource || (hasImage ? 'global_db' : 'missing_image_asset'),
+      imageStatus: cleaned.imageStatus || (hasImage ? 'cached' : 'missing'),
+      mutationTags: cleaned.mutationTags || [],
+      mutation: cleaned.mutation || (cleaned.mutationTags && cleaned.mutationTags[0]) || null,
+      sourcePriority: cleaned.catalogSource || cleaned.catalogEnrichmentSource || null,
+      confidence: cleaned.rarityConfidence || cleaned.catalogReason || null,
+      groupedInstanceCount: cleaned.groupedInstanceCount || 1,
+      itemId: cleaned.itemId || null,
       category: 'fish',
       publicWeightHidden: true,
-      debugWeight: item.debugWeight || null,
-      shiny: item.shiny === true,
-      dataSource: item.imageSource === 'global_db' ? 'global_db' : (item.raritySource || null),
-      dataImageSource: item.imageSource || null,
-      dataRaritySource: item.raritySource || null,
+      debugWeight: cleaned.debugWeight || null,
+      debugRawDisplayName: cleaned.debugRawDisplayName || null,
+      debugRawMutationTags: cleaned.debugRawMutationTags || null,
+      shiny: cleaned.shiny === true,
+      dataSource: cleaned.imageSource === 'global_db' ? 'global_db' : (cleaned.raritySource || null),
+      dataImageSource: cleaned.imageSource || null,
+      dataRaritySource: cleaned.raritySource || null,
     };
   });
   const hidden = (enrichedFlat || []).filter((it) => !isPublicFishItem(it));
   const countParity = buildCountParityProof(enrichedFlat, enriched, fishItems, sessionData);
   const amountProof = buildAmountProof(fishItems, enriched);
+  const visibleFishInstances = fishItems.reduce(
+    (s, f) => s + (Number(f.amount) > 0 ? Math.floor(Number(f.amount)) : 1),
+    0,
+  );
+  const publicCounts = {
+    visibleFishInstances,
+    visibleFishTypes: fishItems.length,
+    hiddenUnresolvedFishRows: hiddenPublicRows.ambiguousContainerUnresolved,
+    hiddenAmbiguousContainerRows: hiddenPublicRows.ambiguousContainerUnresolved,
+  };
   const fishCounts = {
     label: 'Fish',
     fishTypes: fishItems.length,
-    fishInstances: amountProof.publicFishTotalVerified,
+    fishInstances: visibleFishInstances,
     fishInstancesVerified: amountProof.allVerified,
     fishInstancesRawGrouped: countParity.groupedPublicInstances,
     enrichedFishInstances: countParity.enrichedFishInstances,
@@ -1667,6 +1795,7 @@ async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
     nonFishInstances: countParity.nonFishInstances,
     hiddenNonFishTypes: hidden.length,
     hiddenNonFishInstances: sumItemAmounts(hidden),
+    hiddenUnresolvedFishRows: hiddenPublicRows.ambiguousContainerUnresolved,
   };
   return {
     fishItems,
@@ -1674,7 +1803,8 @@ async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
     publicFishItems: fishItems,
     fishInventory: buildInventoryGroups(fishItems),
     fishCounts,
-    publicCounts: fishCounts,
+    publicCounts,
+    hiddenPublicRows,
     countParityProof: countParity,
     amountProof,
     publicFilterTrace: buildPublicFilterTrace(enriched),
@@ -2471,6 +2601,7 @@ async function handleGetBackpack(req, res) {
     fishInventory:   publicFish.fishInventory,
     fishCounts:      publicFish.fishCounts,
     publicCounts:    publicFish.publicCounts,
+    hiddenPublicRows: publicFish.hiddenPublicRows,
     countParityProof: publicFish.countParityProof,
     rarityColorProof: publicFish.rarityColorProof,
     globalDbUiProof: publicFish.globalDbUiProof,
@@ -2619,6 +2750,8 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     amountProof: publicFishDbg.amountProof || buildAmountProof(publicFishDbg.fishItems, enrichedAll),
     ambiguousContainerIds: [...AMBIGUOUS_CONTAINER_IDS],
     ambiguousContainerProof: buildAmbiguousContainerProof(enrichedAll, data),
+    hiddenPublicRows: publicFishDbg.hiddenPublicRows,
+    publicCounts: publicFishDbg.publicCounts,
     rarityColorProof: publicFishDbg.rarityColorProof,
     globalDbUiProof: publicFishDbg.globalDbUiProof,
     unmappedReviewProof: buildUnmappedReviewProof(enrichedAll),
@@ -2737,6 +2870,11 @@ module.exports.buildRawInspector = buildRawInspector;
 module.exports.deriveResolution = deriveResolution;
 module.exports.sanitiseRawProof = sanitiseRawProof;
 module.exports.isPublicFishItem = isPublicFishItem;
+module.exports.isPublicFishCardVisible = isPublicFishCardVisible;
+module.exports.applyPublicCosmeticCleanup = applyPublicCosmeticCleanup;
+module.exports.stripHiddenPublicCosmeticPrefix = stripHiddenPublicCosmeticPrefix;
+module.exports.buildHiddenPublicRows = buildHiddenPublicRows;
+module.exports.HIDDEN_PUBLIC_COSMETIC_TAGS = HIDDEN_PUBLIC_COSMETIC_TAGS;
 module.exports.isLikelyFishInventoryItem = isLikelyFishInventoryItem;
 module.exports.buildPublicFilterTrace = buildPublicFilterTrace;
 module.exports.buildInventoryParityProof = buildInventoryParityProof;
@@ -2760,7 +2898,8 @@ module.exports.buildAmbiguousContainerProof = buildAmbiguousContainerProof;
 module.exports.AMBIGUOUS_CONTAINER_IDS = AMBIGUOUS_CONTAINER_IDS;
 module.exports.resolveAmbiguousContainerDisplay = resolveAmbiguousContainerDisplay;
 module.exports.trustedCatalogMetaForMetadataId = trustedCatalogMetaForMetadataId;
-module.exports.BLOCKER10Z7_BUILD = BLOCKER10Z7_BUILD;
+module.exports.BLOCKER10Z8_BUILD = BLOCKER10Z8_BUILD;
+module.exports.BLOCKER10Z7_BUILD = BLOCKER10Z8_BUILD;
 module.exports.renderTrackerPage = renderTrackerPage;
 module.exports.buildTrackerPageLocals = buildTrackerPageLocals;
 module.exports.BLOCKER10V_BUILD = PUBLIC_API_BUILD;
