@@ -45,7 +45,7 @@ const protectedFishNames = require('./fishitProtectedFishNames');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
 const globalCatalogService = require('./fishitGlobalCatalogService');
 const globalDb = require('./fishitGlobalDb');
@@ -137,8 +137,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10Z13_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10Z13_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10Z14_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10Z14_BUILD;
 
 const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
@@ -640,7 +640,9 @@ function buildPublicIdentityProof(item) {
   const catchDeltaOnly = !hasMeta && !hasRealName
     && /catch|live_roblox/i.test(String(catalogSource || ''));
   const trustedCatalogSource = isTrustedCatalogSourceForPublic(catalogSource || item?.catalogSource);
+  const isUnknownFishLabel = /^Unknown Fish #/i.test(String(item?.cardName || item?.name || item?.baseFishName || ''));
   const nameTrusted = !isPublicPhantomItemWithoutMetadata(item)
+    && !isUnknownFishLabel
     && (hasMeta || item?.snapshotPromotion || (hasRealName && (trusted || trustedCatalogSource)));
 
   return {
@@ -1773,15 +1775,19 @@ function isUsablePublicImageUrl(url) {
 
 function hasTrustedPublicIdentity(item) {
   if (!item) return false;
-  return item.identityVerified === true
+  const metadataTrusted = item.identityVerified === true
     || !!item.catalogLockedBaseName
     || !!item.metadataFishName
     || !!item.metadataFishId
-    || !!item.speciesId
     || item.confidence === 'manual_verified'
     || item.confidence === 'trusted_catalog'
     || item.sourcePriority === 'manual_verified_catalog'
     || item.catalogSource === 'manual_verified_catalog';
+  // Catalog speciesId alone must not override unverified Replion collision rows (BLOCKER10Z14).
+  if (item.replionIdentityUnverified || item.containerIdCollision) {
+    return metadataTrusted;
+  }
+  return metadataTrusted || !!item.speciesId;
 }
 
 /** Hide unresolved ambiguous container rows from public cards/counts (BLOCKER10Z8). */
@@ -1802,7 +1808,7 @@ function isPublicFishCardVisible(item) {
     /^Unknown Fish #/i.test(String(item.cardName || item.name || item.baseFishName || ''));
 
   if (isAmbiguousContainer && !hasTrustedIdentity) return false;
-  if (itemId === '267' && isUnknownName) return false;
+  if (isUnknownName && !hasTrustedIdentity) return false;
   if (isPublicPhantomItemWithoutMetadata(item)) return false;
   if (!isSnapshotBackedPublicCard(item)) return false;
 
@@ -3233,6 +3239,7 @@ module.exports.buildAmbiguousContainerProof = buildAmbiguousContainerProof;
 module.exports.AMBIGUOUS_CONTAINER_IDS = AMBIGUOUS_CONTAINER_IDS;
 module.exports.resolveAmbiguousContainerDisplay = resolveAmbiguousContainerDisplay;
 module.exports.trustedCatalogMetaForMetadataId = trustedCatalogMetaForMetadataId;
+module.exports.BLOCKER10Z14_BUILD = BLOCKER10Z14_BUILD;
 module.exports.BLOCKER10Z13_BUILD = BLOCKER10Z13_BUILD;
 module.exports.BLOCKER10Z12_BUILD = BLOCKER10Z13_BUILD;
 module.exports.BLOCKER10Z11_BUILD = BLOCKER10Z13_BUILD;

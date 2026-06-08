@@ -31,7 +31,8 @@ const {
 } = require('../src/fishitTrackerRoutes');
 const rarityColorMap = require('../src/fishitRarityColorMap');
 
-const Z13_BUILD = 'BLOCKER10Z13_PUBLIC_CARD_POLISH_SIMPLE_BADGES_2026_06_08';
+const Z14_BUILD = 'BLOCKER10Z14_PUBLIC_MINIMAL_CARD_AND_HIDE_FAKE_285_2026_06_08';
+const Z13_BUILD = Z14_BUILD;
 const Z12_BUILD = Z13_BUILD;
 const Z11_BUILD = Z13_BUILD;
 const Z10_BUILD = Z13_BUILD;
@@ -585,18 +586,22 @@ describe('BLOCKER10Y rarity color count global proof', { concurrency: 1 }, () =>
     assert.ok(!ejs.includes('imageProxyUrl'));
   });
 
-  test('Flowery Fish missing image explained when not in Quiz Bot seed', async () => {
+  test('Flowery Fish image resolution path audited; trusted fallback when no asset', async () => {
     setupTestDb();
     if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
     await globalCatalogService.importQuizBotSeed();
     const audit = quizBotCatalog.auditNames(['Flowery Fish']);
     assert.equal(audit[0]?.matched, false);
     const pub = await buildPublicFishFields([{
-      name: 'Flowery Fish', baseFishName: 'Flowery Fish', amount: 1, category: 'fish',
+      name: 'Flowery Fish', baseFishName: 'Flowery Fish', amount: 1, category: 'fish', itemId: '1007',
     }], 'http://127.0.0.1:8791');
     const flowery = pub.publicItems.find((f) => /flowery fish/i.test(f.name));
-    if (flowery) {
-      assert.equal(flowery.imageUrlPresent, false);
+    assert.ok(flowery, 'Flowery Fish should remain a public card');
+    const meta = fishImageCache.resolveImageMetaForItem(flowery);
+    assert.ok(Array.isArray(meta.searchedSources));
+    assert.ok(meta.searchedSources.includes('quiz_bot_fishit_bank'));
+    if (!flowery.imageUrlPresent) {
+      assert.equal(flowery.imageResolved, false);
     }
   });
 
@@ -942,10 +947,10 @@ describe('BLOCKER10Z6 catalog names without fake merge', { concurrency: 1 }, () 
     ], 'http://127.0.0.1:8791');
     assert.ok(pub.publicItems.length >= 1);
     assert.match(pub.publicItems[0].name || '', /giant squid/i);
-    assert.notMatch(pub.publicItems[0].name || '', /item #156/i);
+    assert.doesNotMatch(pub.publicItems[0].name || '', /item #156/i);
   });
 
-  test('container collision rows keep Item placeholder without metadata', async () => {
+  test('container collision rows for ambiguous id 267 stay hidden without metadata', async () => {
     setupTestDb();
     if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
     await globalCatalogService.importQuizBotSeed();
@@ -961,16 +966,12 @@ describe('BLOCKER10Z6 catalog names without fake merge', { concurrency: 1 }, () 
       identityVerified: false,
     }));
     const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
-    assert.equal(
-      pub.publicItems.reduce((s, f) => s + (Number(f.amount) || 0), 0),
-      32,
-    );
-    assert.ok(pub.publicItems.every((f) => /item #267/i.test(f.name || '')));
-    assert.ok(pub.publicItems.every((f) => (Number(f.amount) || 0) === 1));
+    assert.equal(pub.publicItems.length, 0);
     assert.equal(
       pub.publicItems.find((f) => f.amount === 32 && /parrot blopfish/i.test(f.name || '')),
       undefined,
     );
+    assert.ok(!pub.publicItems.some((f) => /unknown fish #267|item #267/i.test(f.name || '')));
   });
 
   test('same-species rows below collision threshold group with real names', async () => {
@@ -1667,7 +1668,7 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   test('GET /tracker returns HTTP 200 with no session data', async () => {
     const res = await request(makeApp()).get('/tracker').expect(200);
     assert.match(res.text, /Fish It Live Inventory Tracker/i);
-    assert.match(res.text, /BLOCKER10Z13/);
+    assert.match(res.text, /BLOCKER10Z14/);
   });
 
   test('GET /tracker?debug=global returns HTTP 200', async () => {
@@ -2178,16 +2179,19 @@ describe('BLOCKER10Z13 — public card polish simple badges', { concurrency: 1 }
     assert.match(html, /x5/);
   });
 
-  test('3: canonical rarity labels Secret Rare Forgotten still render', () => {
+  test('3: public HTML does not show rarity text labels on cards', () => {
     const buildItemsHtml = loadTrackerScriptFns();
     const html = buildItemsHtml([
       { name: 'Giant Squid', baseFishName: 'Giant Squid', rarity: 'Secret', amount: 1, imageUrl: 'http://127.0.0.1/x.webp' },
       { name: 'Freshwater Piranha', baseFishName: 'Freshwater Piranha', rarity: 'Rare', amount: 5, imageUrl: 'http://127.0.0.1/x.webp' },
       { name: 'Thunderzilla', baseFishName: 'Thunderzilla', rarity: 'Forgotten', amount: 1, imageUrl: 'http://127.0.0.1/x.webp' },
     ]);
-    assert.match(html, /fish-card__rarity[^>]*>Secret</);
-    assert.match(html, /fish-card__rarity[^>]*>Rare</);
-    assert.match(html, /fish-card__rarity[^>]*>Forgotten</);
+    assert.doesNotMatch(html, /fish-card__rarity/);
+    assert.doesNotMatch(html, />Secret</);
+    assert.doesNotMatch(html, />Rare</);
+    assert.doesNotMatch(html, />Forgotten</);
+    assert.match(html, /Freshwater Piranha/);
+    assert.match(html, /x5/);
   });
 
   test('4: full fish names still render correctly', () => {
@@ -2248,25 +2252,239 @@ describe('BLOCKER10Z13 — public card polish simple badges', { concurrency: 1 }
     assert.doesNotMatch(html, /Goliath Tiger/i);
   });
 
-  test('8: CSS includes shared fish-card__pill base style', () => {
+  test('8: CSS includes prominent fish-card__amount badge style', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.match(tpl, /\.fish-card__pill/);
     assert.match(tpl, /\.fish-card__amount/);
-    assert.match(tpl, /\.fish-card__rarity/);
+    assert.doesNotMatch(tpl, /\.fish-card__rarity/);
   });
 
-  test('9: amount and rarity pills share same height alignment system', () => {
+  test('9: amount badge uses top-right anchored placement', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.match(tpl, /\.fish-card__pill[\s\S]*min-height:30px/);
-    assert.match(tpl, /\.fish-card__pill[\s\S]*inline-flex/);
-    assert.match(tpl, /\.fish-card__pill[\s\S]*align-items:center/);
+    const amountBlock = tpl.match(/\.fish-card__amount[\s\S]*?box-sizing:border-box;/);
+    assert.ok(amountBlock, 'fish-card__amount block must exist');
+    assert.match(amountBlock[0], /position:absolute/);
+    assert.match(amountBlock[0], /top:10px/);
+    assert.match(amountBlock[0], /right:10px/);
+    assert.match(amountBlock[0], /font-weight:800/);
   });
 
-  test('10: pill font sizes are larger than previous tiny .72rem style', () => {
+  test('10: amount font size is larger than previous tiny .84rem pill style', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    const pillBlock = tpl.match(/\.fish-card__pill[\s\S]*?box-sizing:border-box;/);
-    assert.ok(pillBlock, 'fish-card__pill block must exist');
-    assert.match(pillBlock[0], /font-size:\.84rem/);
-    assert.doesNotMatch(pillBlock[0], /font-size:\.72rem/);
+    const amountBlock = tpl.match(/\.fish-card__amount[\s\S]*?box-sizing:border-box;/);
+    assert.ok(amountBlock, 'fish-card__amount block must exist');
+    assert.match(amountBlock[0], /font-size:clamp\(1rem/);
+    assert.doesNotMatch(amountBlock[0], /font-size:\.72rem/);
+  });
+});
+
+describe('BLOCKER10Z14 — public minimal card hide fake 285', { concurrency: 1 }, () => {
+  const { BLOCKER10Z14_BUILD, PUBLIC_API_BUILD, buildTrackerPageLocals } = require('../src/fishitTrackerRoutes');
+
+  function loadTrackerScriptFns() {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    const script = tpl.slice(tpl.indexOf('<script>'), tpl.indexOf('</script>') + 9);
+    const fn = script.match(/function buildItemsHtml\(items\)\s*\{[\s\S]*?\n  \}/);
+    assert.ok(fn, 'buildItemsHtml must exist');
+    const ctx = new Function(`
+      const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
+      const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', mythic:'rarity-mythic', secret:'badge-rarity-secret', forgotten:'rarity-forgotten' };
+      const RARITY_NAME_COLORS = {};
+      const ITEM_IMAGES = { Default:'/assets/img/fishit/fallback-fish.svg' };
+      function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+      function rarityClass(r){ return r ? (RARITY_MAP[r.toLowerCase()]||'badge') : ''; }
+      function cardRarityClass(r){ return r ? (CARD_RARITY_MAP[r.toLowerCase()]||'') : ''; }
+      function cardTitle(item){ return item.cardName||item.baseFishName||item.name||'Unknown'; }
+      function cardKey(item){ return String(item.name||'x').toLowerCase(); }
+      function rarityNameStyle(){ return ''; }
+      function isUsableImageUrl(url){ return typeof url==='string' && url.startsWith('http'); }
+      function itemImageSrc(item){ return isUsableImageUrl(item.imageUrl)?item.imageUrl:null; }
+      ${script.match(/function buildFishCardInnerHtml\(item\)\s*\{[\s\S]*?\n  \}/)[0]}
+      ${fn[0]}
+      return buildItemsHtml;
+    `)();
+    return ctx;
+  }
+
+  test('1: build marker is BLOCKER10Z14', () => {
+    assert.equal(BLOCKER10Z14_BUILD, Z14_BUILD);
+    assert.equal(PUBLIC_API_BUILD, Z14_BUILD);
+    const locals = buildTrackerPageLocals({});
+    assert.equal(locals.renderBuild, Z14_BUILD);
+    assert.equal(locals.publicApiBuild, Z14_BUILD);
+  });
+
+  test('2: public HTML has no rarity text labels on fish cards', () => {
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml([
+      { name: 'Freshwater Piranha', baseFishName: 'Freshwater Piranha', rarity: 'Rare', amount: 5, imageUrl: 'http://127.0.0.1/x.webp' },
+      { name: 'Giant Squid', baseFishName: 'Giant Squid', rarity: 'Secret', amount: 1, imageUrl: 'http://127.0.0.1/x.webp' },
+    ]);
+    assert.doesNotMatch(html, /fish-card__rarity/);
+    assert.doesNotMatch(html, />Rare</);
+    assert.doesNotMatch(html, />Secret</);
+  });
+
+  test('3: public HTML still shows fish names and amount as primary metadata', () => {
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml([
+      { name: 'Manoai Statue Fish', baseFishName: 'Manoai Statue Fish', amount: 2, imageUrl: 'http://127.0.0.1/x.webp' },
+    ]);
+    assert.match(html, /Manoai Statue Fish/);
+    assert.match(html, /fish-card__amount[^>]*>x2</);
+    assert.doesNotMatch(html, /fish-card__meta/);
+  });
+
+  test('4: amount CSS is larger and stronger than old tiny pill', () => {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    const amountBlock = tpl.match(/\.fish-card__amount[\s\S]*?box-sizing:border-box;/);
+    assert.ok(amountBlock);
+    assert.match(amountBlock[0], /font-weight:800/);
+    assert.match(amountBlock[0], /font-size:clamp\(1rem/);
+    assert.match(amountBlock[0], /position:absolute/);
+  });
+
+  test('5: full canonical fish names render in HTML', () => {
+    const buildItemsHtml = loadTrackerScriptFns();
+    const names = [
+      'Freshwater Piranha', 'Manoai Statue Fish', 'Zebra Snakehead',
+      'Flowery Fish', 'Mossy Fishlet', 'Radiant Catfish',
+    ];
+    const html = buildItemsHtml(names.map((name) => ({
+      name, baseFishName: name, amount: 1, imageUrl: 'http://127.0.0.1/x.webp',
+    })));
+    for (const name of names) {
+      assert.match(html, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    }
+  });
+
+  test('6: Radiant Catfish has no fake mutation badge', () => {
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml([{
+      name: 'Radiant Catfish', baseFishName: 'Radiant Catfish', amount: 1,
+      imageUrl: 'http://127.0.0.1/x.webp',
+    }]);
+    assert.match(html, /Radiant Catfish/);
+    assert.doesNotMatch(html, /fish-card__tag/);
+    assert.doesNotMatch(html, />Radiant</);
+  });
+
+  test('7: public /tracker does not expose debug proof when DEBUG_GLOBAL false', () => {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    const script = tpl.slice(tpl.indexOf('<script>'), tpl.indexOf('</script>') + 9);
+    const fn = script.match(/function buildGlobalDbProofHtml\(data\)\s*\{[\s\S]*?\n  \}/);
+    const buildGlobalDbProofHtml = new Function('DEBUG_GLOBAL', 'escHtml', `${fn[0]}; return buildGlobalDbProofHtml;`)(
+      false,
+      (s) => String(s),
+    );
+    assert.equal(buildGlobalDbProofHtml({ globalDbUiProof: { sourceOfTruth: 'global_db' } }), '');
+  });
+
+  test('8: Flowery Fish image resolution path proof', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const pub = await buildPublicFishFields([{
+      name: 'Flowery Fish', baseFishName: 'Flowery Fish', amount: 1, category: 'fish', itemId: '1007',
+    }], 'http://127.0.0.1:8791');
+    const flowery = pub.publicItems.find((f) => /flowery fish/i.test(f.name));
+    assert.ok(flowery);
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml([flowery]);
+    assert.match(html, /Flowery Fish/);
+    if (flowery.imageUrlPresent) {
+      assert.doesNotMatch(html, /data-placeholder="true"/);
+    } else {
+      assert.match(html, /fallback-fish\.svg|data-placeholder="true"/);
+    }
+  });
+
+  test('9: repeated Unknown Fish #285 rows hidden when identity untrusted', async () => {
+    setupTestDb();
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      name: 'Item #285', itemId: '285', category: 'items', amount: 1, weight: 2.7 + (i * 0.1),
+      replionUuid: `uuid-285-${i}`, replionAmountSource: 'replion_uuid_instance',
+    }));
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml(pub.publicItems);
+    assert.equal(pub.publicItems.length, 0);
+    assert.doesNotMatch(html, /Unknown Fish #285/i);
+  });
+
+  test('10: public HTML does not flood with Unknown Fish #285', async () => {
+    setupTestDb();
+    const rows = Array.from({ length: 9 }, (_, i) => ({
+      name: 'Item #285', itemId: '285', category: 'fish', amount: 1, weight: 2.0 + (i * 0.2),
+      replionUuid: `uuid-285-flood-${i}`, replionAmountSource: 'replion_uuid_instance',
+    }));
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    const unknown285 = pub.publicItems.filter((f) => /unknown fish #285/i.test(f.name || ''));
+    assert.equal(unknown285.length, 0);
+  });
+
+  test('11: trusted goatfish stack below collision threshold still visible', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const rows = [
+      { name: 'Item #285', itemId: '285', category: 'fish', amount: 1, weight: 3.4,
+        replionUuid: 'uuid-285-a', replionAmountSource: 'replion_uuid_instance', identityVerified: false },
+      { name: 'Item #285', itemId: '285', category: 'fish', amount: 1, weight: 3.0,
+        replionUuid: 'uuid-285-b', replionAmountSource: 'replion_uuid_instance', identityVerified: false },
+      { name: 'Item #285', itemId: '285', category: 'fish', amount: 1, weight: 2.8,
+        replionUuid: 'uuid-285-c', replionAmountSource: 'replion_uuid_instance', identityVerified: false },
+    ];
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    const goat = pub.publicItems.find((f) => /goatfish/i.test(f.name || f.baseFishName || ''));
+    assert.ok(goat);
+    assert.equal(goat.amount, 3);
+  });
+
+  test('12: visible counts based on visible trusted cards only', async () => {
+    setupTestDb();
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) => ({
+        name: 'Item #285', itemId: '285', category: 'items', amount: 1, weight: 2.7 + i,
+        replionUuid: `uuid-hide-${i}`, replionAmountSource: 'replion_uuid_instance',
+      })),
+      { name: 'Parrot Fish', baseFishName: 'Parrot Fish', itemId: '248', category: 'fish', amount: 3,
+        imageUrl: 'http://127.0.0.1/x.webp' },
+    ];
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    const visibleAmount = pub.publicItems.reduce((s, f) => s + (Number(f.amount) || 0), 0);
+    assert.equal(visibleAmount, 3);
+    assert.ok(!pub.publicItems.some((f) => /unknown fish #285/i.test(f.name || '')));
+  });
+
+  test('13: no Goliath Tiger in public card HTML', async () => {
+    setupTestDb();
+    const pub = await buildPublicFishFields([{
+      name: 'Goliath Tiger', itemId: '1008', category: 'fish', amount: 1,
+    }], 'http://127.0.0.1:8791');
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml(pub.publicItems);
+    assert.doesNotMatch(html, /Goliath Tiger/i);
+  });
+
+  test('14: no Unknown Fish #267 in public card HTML', async () => {
+    setupTestDb();
+    const pub = await buildPublicFishFields([{
+      name: 'Unknown Fish #267', itemId: '267', category: 'fish', amount: 1,
+    }], 'http://127.0.0.1:8791');
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml(pub.publicItems);
+    assert.doesNotMatch(html, /Unknown Fish #267/i);
+  });
+
+  test('15: /tracker page includes Z14 build marker', async () => {
+    const express = require('express');
+    const request = require('supertest');
+    const trackerRouter = require('../src/fishitTrackerRoutes');
+    const app = express();
+    app.set('view engine', 'ejs');
+    app.set('views', path.join(__dirname, '..', 'views'));
+    app.use(trackerRouter);
+    const res = await request(app).get('/tracker').expect(200);
+    assert.match(res.text, /BLOCKER10Z14_PUBLIC_MINIMAL_CARD_AND_HIDE_FAKE_285_2026_06_08/);
   });
 });
