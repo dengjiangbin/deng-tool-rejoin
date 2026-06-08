@@ -31,7 +31,8 @@ const {
 } = require('../src/fishitTrackerRoutes');
 const rarityColorMap = require('../src/fishitRarityColorMap');
 
-const Z5_BUILD = 'BLOCKER10Z5_REPLION_IDENTITY_NO_FAKE_MERGE_2026_06_08';
+const Z6_BUILD = 'BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08';
+const Z5_BUILD = Z6_BUILD;
 const Z4_BUILD = Z5_BUILD;
 const Z3_BUILD = Z4_BUILD;
 const Z_BUILD = Z3_BUILD;
@@ -818,7 +819,7 @@ describe('BLOCKER10Z4 amount regression fix', { concurrency: 1 }, () => {
     const { BLOCKER10Z4_BUILD } = require('../src/fishitTrackerBuild');
     assert.equal(BLOCKER10Z4_BUILD, Z4_BUILD);
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(lua.includes('BLOCKER10Z5_REPLION_IDENTITY_NO_FAKE_MERGE_2026_06_08'));
+    assert.ok(lua.includes('BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08'));
     assert.ok(lua.includes('LiveSafe.resolveOwnedStorageKey'));
   });
 
@@ -912,12 +913,81 @@ describe('BLOCKER10Z4 amount regression fix', { concurrency: 1 }, () => {
   });
 });
 
+describe('BLOCKER10Z6 catalog names without fake merge', { concurrency: 1 }, () => {
+  test('manual verified item shows catalog name when tracker sends identityVerified false', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const pub = await buildPublicFishFields([
+      {
+        name: 'Item #156',
+        itemId: '156',
+        category: 'fish',
+        amount: 1,
+        weight: 105545,
+        replionUuid: 'd43bc063-75cb-4681-9095-1b140060476f',
+        replionAmountSource: 'replion_uuid_instance',
+        identityVerified: false,
+      },
+    ], 'http://127.0.0.1:8791');
+    assert.ok(pub.publicItems.length >= 1);
+    assert.match(pub.publicItems[0].name || '', /giant squid/i);
+    assert.notMatch(pub.publicItems[0].name || '', /item #156/i);
+  });
+
+  test('container collision rows keep Item placeholder without metadata', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const rows = Array.from({ length: 32 }, (_, i) => ({
+      name: 'Item #267',
+      itemId: '267',
+      containerItemId: '267',
+      category: 'fish',
+      amount: 1,
+      weight: 0.5 + (i * 0.02),
+      replionUuid: `uuid-267-${i}`,
+      replionAmountSource: 'replion_uuid_instance',
+      identityVerified: false,
+    }));
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    assert.equal(
+      pub.publicItems.reduce((s, f) => s + (Number(f.amount) || 0), 0),
+      32,
+    );
+    assert.ok(pub.publicItems.every((f) => /item #267/i.test(f.name || '')));
+    assert.ok(pub.publicItems.every((f) => (Number(f.amount) || 0) === 1));
+    assert.equal(
+      pub.publicItems.find((f) => f.amount === 32 && /parrot blopfish/i.test(f.name || '')),
+      undefined,
+    );
+  });
+
+  test('same-species rows below collision threshold group with real names', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const rows = [
+      { name: 'Item #285', itemId: '285', category: 'fish', amount: 1, weight: 3.4,
+        replionUuid: 'uuid-285-a', replionAmountSource: 'replion_uuid_instance', identityVerified: false },
+      { name: 'Item #285', itemId: '285', category: 'fish', amount: 1, weight: 3.0,
+        replionUuid: 'uuid-285-b', replionAmountSource: 'replion_uuid_instance', identityVerified: false },
+      { name: 'Item #285', itemId: '285', category: 'fish', amount: 1, weight: 2.8,
+        replionUuid: 'uuid-285-c', replionAmountSource: 'replion_uuid_instance', identityVerified: false },
+    ];
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    const goat = pub.publicItems.find((f) => /goatfish/i.test(f.name || f.baseFishName || ''));
+    assert.ok(goat);
+    assert.equal(goat.amount, 3);
+  });
+});
+
 describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () => {
-  test('build marker is BLOCKER10Z5', () => {
-    const { BLOCKER10Z5_BUILD } = require('../src/fishitTrackerBuild');
-    assert.equal(BLOCKER10Z5_BUILD, Z5_BUILD);
+  test('build marker is BLOCKER10Z6', () => {
+    const { BLOCKER10Z6_BUILD } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10Z6_BUILD, Z6_BUILD);
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(lua.includes('BLOCKER10Z5_REPLION_IDENTITY_NO_FAKE_MERGE_2026_06_08'));
+    assert.ok(lua.includes('BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08'));
     assert.ok(lua.includes('replion_identity_unverified'));
   });
 

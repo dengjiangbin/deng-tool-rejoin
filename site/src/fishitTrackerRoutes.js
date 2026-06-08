@@ -348,7 +348,9 @@ function annotateReplionIdentity(items) {
       && (weightSets.get(cid)?.size || 0) > 1
       && catalogStore.isFishCategory(it.category);
     const collision = uuidCollision || legacyCollision;
-    const unverified = !meta && (collision || it?.identityVerified === false);
+    // Unverified only when container id is shared across many UUID rows without metadata species.
+    // Tracker identityVerified=false alone must not strip catalog names (e.g. manual Giant Squid #156).
+    const unverified = !meta && collision;
     if (!uuidInstance && !legacyCollision) {
       return {
         ...it,
@@ -738,14 +740,15 @@ function enrichItemsFromCatalog(items) {
       );
     }
 
-    const itemIdLockedBase = it.itemId && !it.replionIdentityUnverified
+    const containerCollision = it.containerIdCollision === true;
+    const itemIdLockedBase = it.itemId && !containerCollision
       ? _itemIdLockedBaseName(it.itemId) : null;
     const catalogLockedName = itemIdLockedBase
       || ((meta?.source === 'canonical_catalog' || meta?.source === 'manual_verified_catalog'
         || meta?.source === 'catch_learned_catalog') && meta?.baseFishName
-        && !it.replionIdentityUnverified
+        && !containerCollision
         ? meta.baseFishName : null);
-    if (it.replionIdentityUnverified) {
+    if (it.replionIdentityUnverified && containerCollision && !hasReplionMetadataIdentity(it)) {
       const cid = it.containerItemId || it.itemId;
       name = cid ? `Item #${cid}` : (it.name || 'Unknown');
       baseFishName = null;
@@ -774,7 +777,7 @@ function enrichItemsFromCatalog(items) {
       const gMeta = globalCatalogService.resolveCatalogMetaForItemId(String(it.itemId), { allowLiveObserved: true });
       if (gMeta?.speciesId) speciesId = gMeta.speciesId;
       if (gMeta && catalogStore.isFishCategory(gMeta.category || 'fish')) {
-        if ((isPlaceholder || !trackerHasRealName) && !catalogLockedName) {
+        if ((isPlaceholder || !trackerHasRealName) && !catalogLockedName && !containerCollision) {
           const gBase = gMeta.baseFishName || gMeta.name;
           if (!itemIdLockedBase
               || globalDb.normalizeNamePunct(gBase) === globalDb.normalizeNamePunct(itemIdLockedBase)) {
@@ -813,7 +816,7 @@ function enrichItemsFromCatalog(items) {
       displayName,
       baseFishName,
       mutation,
-      catalogLockedBaseName: it.replionIdentityUnverified ? null : (catalogLockedName || itemIdLockedBase || null),
+      catalogLockedBaseName: containerCollision ? null : (catalogLockedName || itemIdLockedBase || null),
       containerItemId: it.containerItemId || it.itemId || null,
       containerIdCollision: it.containerIdCollision === true,
       replionIdentityUnverified: it.replionIdentityUnverified === true,
