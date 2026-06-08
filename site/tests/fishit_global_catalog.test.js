@@ -48,6 +48,7 @@ function setupTestDb() {
   globalDb._reset();
   globalCatalogService._reset();
   fishImageCache._reset();
+  fs.mkdirSync(path.join(__dirname, '..', 'data', 'fish_image_cache'), { recursive: true });
 }
 
 describe('BLOCKER10W global fish parity', { concurrency: 1 }, () => {
@@ -1068,5 +1069,154 @@ describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () =>
       identityVerified: true,
     });
     assert.equal(keyA, keyB);
+  });
+
+  test('BLOCKER10Z7: 32 rows Id 267 with UUIDs do not merge to Parrot Blopfish x32', async () => {
+    setupTestDb();
+    const rows = Array.from({ length: 32 }, (_, i) => ({
+      name: 'Item #267',
+      itemId: '267',
+      replionTopLevelId: '267',
+      containerItemId: '267',
+      isAmbiguousContainerId: true,
+      category: 'fish',
+      amount: 1,
+      weight: 0.5 + (i * 0.02),
+      replionUuid: `uuid-267-${i}`,
+      replionAmountSource: 'replion_uuid_instance',
+    }));
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    const fakeMerge = pub.publicItems.find(
+      (f) => f.amount === 32 && /parrot blopfish|catfish/i.test(f.name || f.baseFishName || ''),
+    );
+    assert.equal(fakeMerge, undefined);
+    assert.equal(pub.publicItems.reduce((s, f) => s + (Number(f.amount) || 0), 0), 32);
+  });
+
+  test('BLOCKER10Z7: 267 row with metadataFishName Panther Eel resolves correctly', async () => {
+    setupTestDb();
+    const rows = [{
+      name: 'Item #267',
+      itemId: '267',
+      replionTopLevelId: '267',
+      isAmbiguousContainerId: true,
+      metadataFishName: 'Panther Eel',
+      category: 'fish',
+      amount: 1,
+      replionUuid: 'uuid-panther',
+      replionAmountSource: 'replion_uuid_instance',
+      identityVerified: true,
+    }];
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    assert.ok(pub.publicItems.some((f) => /panther eel/i.test(f.name || f.displayName || '')));
+  });
+
+  test('BLOCKER10Z7: 267 row with trusted metadataFishId resolves via catalog', async () => {
+    setupTestDb();
+    const rows = [{
+      name: 'Item #267',
+      itemId: '267',
+      replionTopLevelId: '267',
+      isAmbiguousContainerId: true,
+      metadataFishId: '248',
+      category: 'fish',
+      amount: 1,
+      replionUuid: 'uuid-meta-id',
+      replionAmountSource: 'replion_uuid_instance',
+      identityVerified: true,
+    }];
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    assert.ok(pub.publicItems.some((f) => /panther eel/i.test(f.name || f.baseFishName || f.displayName || '')));
+  });
+
+  test('BLOCKER10Z7: 267 row without metadata stays unmapped placeholder', async () => {
+    setupTestDb();
+    const rows = [{
+      name: 'Item #267',
+      itemId: '267',
+      replionTopLevelId: '267',
+      isAmbiguousContainerId: true,
+      category: 'fish',
+      amount: 1,
+      replionUuid: 'uuid-unmapped',
+      replionAmountSource: 'replion_uuid_instance',
+    }];
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    assert.ok(pub.publicItems.some((f) => /unknown fish #267|unmapped fish/i.test(f.name || f.displayName || '')));
+    assert.ok(!pub.publicItems.some((f) => /parrot blopfish/i.test(f.name || '')));
+  });
+
+  test('BLOCKER10Z7: one Shiny Parrot Blopfish metadata row does not name all 267 rows', async () => {
+    setupTestDb();
+    const rows = [
+      {
+        name: 'Item #267',
+        itemId: '267',
+        replionTopLevelId: '267',
+        isAmbiguousContainerId: true,
+        metadataFishName: 'Shiny Parrot Blopfish',
+        category: 'fish',
+        amount: 1,
+        replionUuid: 'uuid-parrot-one',
+        replionAmountSource: 'replion_uuid_instance',
+        identityVerified: true,
+      },
+      ...Array.from({ length: 5 }, (_, i) => ({
+        name: 'Item #267',
+        itemId: '267',
+        replionTopLevelId: '267',
+        isAmbiguousContainerId: true,
+        category: 'fish',
+        amount: 1,
+        replionUuid: `uuid-other-${i}`,
+        replionAmountSource: 'replion_uuid_instance',
+      })),
+    ];
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    const parrotCards = pub.publicItems.filter((f) => /parrot blopfish/i.test(f.name || f.displayName || ''));
+    assert.equal(parrotCards.reduce((s, f) => s + (Number(f.amount) || 0), 0), 1);
+    assert.ok(pub.publicItems.some((f) => /unknown fish #267/i.test(f.name || f.displayName || '')));
+  });
+
+  test('BLOCKER10Z7: header count uses verified per-row UUID instances', async () => {
+    setupTestDb();
+    const rows = Array.from({ length: 32 }, (_, i) => ({
+      name: 'Item #267',
+      itemId: '267',
+      replionTopLevelId: '267',
+      isAmbiguousContainerId: true,
+      category: 'fish',
+      amount: 1,
+      replionUuid: `uuid-hdr-${i}`,
+      replionAmountSource: 'replion_uuid_instance',
+    }));
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    assert.equal(pub.fishCounts.fishInstances, 32);
+    assert.equal(pub.amountProof.allVerified, true);
+  });
+
+  test('BLOCKER10Z7: buildAmbiguousContainerProof exposes sample stats', () => {
+    const { buildAmbiguousContainerProof } = require('../src/fishitTrackerRoutes');
+    const rows = Array.from({ length: 32 }, (_, i) => ({
+      itemId: '267',
+      replionTopLevelId: '267',
+      isAmbiguousContainerId: true,
+      replionUuid: `uuid-proof-${i}`,
+      metadataFishName: i === 0 ? 'Giant Squid' : null,
+    }));
+    const proof = buildAmbiguousContainerProof(rows, {
+      ambiguousContainerIds: [267],
+      ambiguousContainerProof: {
+        rowsSeen: 32,
+        rowsWithMetadataFishId: 0,
+        rowsWithMetadataFishName: 1,
+        rowsUnresolved: 31,
+        sample: [{ topLevelId: 267, uuid: 'uuid-proof-0' }],
+      },
+    });
+    assert.equal(proof.rowsSeen, 32);
+    assert.equal(proof.rowsWithMetadataFishName, 1);
+    assert.equal(proof.rowsUnresolved, 31);
+    assert.ok(Array.isArray(proof.sample));
   });
 });

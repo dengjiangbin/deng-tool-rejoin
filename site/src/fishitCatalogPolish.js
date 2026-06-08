@@ -282,9 +282,20 @@ function normalizeMutationGroup(item) {
   return String(mut).toLowerCase().trim();
 }
 
-/** Public card aggregation key: Replion metadata identity first (BLOCKER10Z5). */
+/** Public card aggregation key: Replion metadata identity first (BLOCKER10Z5/Z7). */
 function publicAggregationKey(item) {
   const mutGroup = normalizeMutationGroup(item);
+  if (item?.isAmbiguousContainerId) {
+    if (item?.metadataFishId) return `mfish:${String(item.metadataFishId)}::${mutGroup}`;
+    const mbase = item?.metadataFishName || item?.metadataBaseFishName;
+    if (mbase) {
+      const base = String(mbase).trim().toLowerCase();
+      if (base) return `mfname:${base}::${mutGroup}`;
+    }
+    if (item?.replionUuid) return `uuid:${String(item.replionUuid).toLowerCase()}`;
+    const top = item?.replionTopLevelId || item?.containerItemId || item?.itemId || '?';
+    return `ambig:${top}:${String(item?.name || '').toLowerCase()}`;
+  }
   if (item?.replionIdentityUnverified) {
     if (item?.replionUuid) return `uuid:${String(item.replionUuid).toLowerCase()}`;
     const cid = item?.containerItemId || item?.itemId || '?';

@@ -20,11 +20,14 @@ if (src.charCodeAt(0) === 0xfeff) {
 if (/^\s*loadstring\s*\(/.test(src)) {
   errors.push('tracker.lua must not begin with loadstring() wrapper');
 }
-if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08')) {
-  errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z5 marker missing');
+if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
+  errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z7 marker missing');
 }
-if (!src.includes('BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08')) {
-  errors.push('BLOCKER10Z5 build marker missing');
+if (!src.includes('BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
+  errors.push('BLOCKER10Z7 build marker missing');
+}
+if (!src.includes('LiveSafe.extractFishMetadata')) {
+  errors.push('LiveSafe.extractFishMetadata missing — metadata species extraction required');
 }
 if (!src.includes('LiveSafe.extractReplionMetaFields')) {
   errors.push('LiveSafe.extractReplionMetaFields missing — metadata fish identity required');

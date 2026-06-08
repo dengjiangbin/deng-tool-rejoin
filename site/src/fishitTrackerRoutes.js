@@ -44,7 +44,7 @@ const rarityLabels = require('./fishitRarityLabels');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10V_BUILD, BLOCKER10V_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10Z7_BUILD, BLOCKER10Z7_UI_MARKER } = require('./fishitTrackerBuild');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
 const globalCatalogService = require('./fishitGlobalCatalogService');
 const globalDb = require('./fishitGlobalDb');
@@ -134,8 +134,104 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10V_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10V_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10Z7_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10Z7_BUILD;
+
+/** Top-level Replion ids shared across many species — never catalog-guess (BLOCKER10Z7). */
+const AMBIGUOUS_CONTAINER_IDS = new Set(['267']);
+
+function isAmbiguousContainerItem(item) {
+  if (item?.isAmbiguousContainerId === true) return true;
+  const top = String(item?.replionTopLevelId || item?.containerItemId || '').trim();
+  return top && AMBIGUOUS_CONTAINER_IDS.has(top);
+}
+
+function trustedCatalogMetaForMetadataId(metadataId) {
+  const id = String(metadataId || '').trim();
+  if (!id || !/^\d+$/.test(id)) return null;
+  const manual = manualVerifiedCatalog.lookupByItemId(id);
+  if (manual?.baseFishName && !rarityLabels.isBlockedLearnName(manual.baseFishName)) {
+    return manual;
+  }
+  const canon = canonicalCatalog.lookupByItemId(id);
+  if (canon?.baseFishName && !rarityLabels.isBlockedLearnName(canon.baseFishName)) {
+    return canon;
+  }
+  const globalMeta = globalCatalogService.resolveCatalogMetaForItemId(id, { allowLiveObserved: false });
+  if (globalMeta?.baseFishName && globalMeta.publicEligible !== false
+      && globalMeta.verificationStatus !== globalDb.VERIFICATION?.QUARANTINED_CONFLICT) {
+    return globalMeta;
+  }
+  return null;
+}
+
+function resolveAmbiguousContainerDisplay(item) {
+  const topId = item?.replionTopLevelId || item?.containerItemId || item?.itemId;
+  const metaName = item?.metadataFishName || item?.metadataBaseFishName;
+  if (metaName && !catalogStore.isPlaceholderItemName(metaName, topId)) {
+    return {
+      name: metaName,
+      baseFishName: item.metadataBaseFishName || metaName,
+      displayName: metaName,
+      source: 'replion_metadata_name',
+      resolved: true,
+    };
+  }
+  const metaId = item?.metadataFishId || item?.metadataSpeciesId;
+  if (metaId) {
+    const trusted = trustedCatalogMetaForMetadataId(metaId);
+    if (trusted) {
+      const base = trusted.baseFishName || trusted.name;
+      return {
+        name: trusted.displayName || base,
+        baseFishName: base,
+        displayName: trusted.displayName || base,
+        source: 'trusted_metadata_fish_id',
+        resolved: true,
+        speciesItemId: String(metaId),
+      };
+    }
+  }
+  return {
+    name: topId ? `Unknown Fish #${topId}` : 'Unmapped Fish',
+    baseFishName: null,
+    displayName: topId ? `Unknown Fish #${topId}` : 'Unmapped Fish',
+    source: 'ambiguous_container_unmapped',
+    resolved: false,
+  };
+}
+
+function buildAmbiguousContainerProof(items, sessionData) {
+  const fromPayload = sessionData?.ambiguousContainerProof;
+  const ambiguousRows = (items || []).filter(isAmbiguousContainerItem);
+  if (fromPayload && typeof fromPayload === 'object') {
+    return {
+      ambiguousContainerIds: sessionData?.ambiguousContainerIds || [...AMBIGUOUS_CONTAINER_IDS],
+      rowsSeen: fromPayload.rowsSeen ?? ambiguousRows.length,
+      rowsWithMetadataFishId: fromPayload.rowsWithMetadataFishId
+        ?? ambiguousRows.filter((r) => r.metadataFishId || r.metadataSpeciesId).length,
+      rowsWithMetadataFishName: fromPayload.rowsWithMetadataFishName
+        ?? ambiguousRows.filter((r) => r.metadataFishName || r.metadataBaseFishName).length,
+      rowsUnresolved: fromPayload.rowsUnresolved
+        ?? ambiguousRows.filter((r) => !r.metadataFishId && !r.metadataFishName && !r.metadataBaseFishName).length,
+      sample: Array.isArray(fromPayload.sample) ? fromPayload.sample.slice(0, 10) : [],
+    };
+  }
+  return {
+    ambiguousContainerIds: [...AMBIGUOUS_CONTAINER_IDS],
+    rowsSeen: ambiguousRows.length,
+    rowsWithMetadataFishId: ambiguousRows.filter((r) => r.metadataFishId || r.metadataSpeciesId).length,
+    rowsWithMetadataFishName: ambiguousRows.filter((r) => r.metadataFishName || r.metadataBaseFishName).length,
+    rowsUnresolved: ambiguousRows.filter((r) => !r.metadataFishId && !r.metadataFishName && !r.metadataBaseFishName).length,
+    sample: ambiguousRows.slice(0, 10).map((r) => ({
+      topLevelId: Number(r.replionTopLevelId || r.containerItemId || r.itemId) || r.itemId,
+      uuid: r.replionUuid || r.uuid || null,
+      metadataFishId: r.metadataFishId || null,
+      metadataFishName: r.metadataFishName || null,
+      metadataSourcePath: r.metadataSourcePath || null,
+    })),
+  };
+}
 
 let _globalDbBootstrapped = false;
 async function ensureGlobalDbSeeded() {
@@ -285,12 +381,18 @@ function extractReplionAmount(item) {
 function extractReplionIdentityFields(item) {
   const preview = item?.rawProof?.rawObjectPreview;
   const meta = preview?.Metadata && typeof preview.Metadata === 'object' ? preview.Metadata : null;
-  const metaFishId = item?.metadataFishId || meta?.FishId || meta?.fishId || meta?.FishID || null;
-  const metaFishName = item?.metadataFishName || meta?.FishName || meta?.fishName || meta?.Name || meta?.name || null;
+  const metaFishId = item?.metadataFishId || item?.metadataSpeciesId
+    || meta?.FishId || meta?.fishId || meta?.FishID || null;
+  const metaFishName = item?.metadataFishName || item?.metadataBaseFishName
+    || meta?.FishName || meta?.fishName || meta?.Name || meta?.name || null;
   return {
     replionUuid: item?.replionUuid || item?.uuid || preview?.UUID || preview?.Uuid || preview?.uuid || null,
     metadataFishId: metaFishId,
     metadataFishName: metaFishName,
+    metadataBaseFishName: item?.metadataBaseFishName || null,
+    metadataSpeciesId: item?.metadataSpeciesId || null,
+    replionTopLevelId: item?.replionTopLevelId || null,
+    isAmbiguousContainerId: item?.isAmbiguousContainerId === true,
     replionAmountSource: item?.replionAmountSource || null,
   };
 }
@@ -304,7 +406,8 @@ function isReplionUuidInstance(item) {
 
 function hasReplionMetadataIdentity(item) {
   const idf = extractReplionIdentityFields(item);
-  return !!(item?.metadataFishId || item?.metadataFishName || idf.metadataFishId || idf.metadataFishName);
+  return !!(item?.metadataFishId || item?.metadataFishName || item?.metadataBaseFishName
+    || item?.metadataSpeciesId || idf.metadataFishId || idf.metadataFishName || idf.metadataBaseFishName);
 }
 
 /** Replion container ids reused across many UUID rows — below this, same-species stacks may group. */
@@ -337,7 +440,8 @@ function annotateReplionIdentity(items) {
         identityVerified: it?.identityVerified === true || hasReplionMetadataIdentity(it),
       };
     }
-    const cid = String(it.containerItemId || it.itemId);
+    const cid = String(it.containerItemId || it.replionTopLevelId || it.itemId);
+    const ambiguousContainer = isAmbiguousContainerItem(it) || AMBIGUOUS_CONTAINER_IDS.has(cid);
     const uuidInstance = isReplionUuidInstance(it);
     const meta = hasReplionMetadataIdentity(it) || it?.identityVerified === true;
     const uuidCount = uuidSets.get(cid)?.size || 0;
@@ -347,14 +451,14 @@ function annotateReplionIdentity(items) {
       && rowCount >= REPLION_CONTAINER_COLLISION_MIN
       && (weightSets.get(cid)?.size || 0) > 1
       && catalogStore.isFishCategory(it.category);
-    const collision = uuidCollision || legacyCollision;
-    // Unverified only when container id is shared across many UUID rows without metadata species.
-    // Tracker identityVerified=false alone must not strip catalog names (e.g. manual Giant Squid #156).
+    const collision = ambiguousContainer || uuidCollision || legacyCollision;
     const unverified = !meta && collision;
-    if (!uuidInstance && !legacyCollision) {
+    if (!uuidInstance && !legacyCollision && !ambiguousContainer) {
       return {
         ...it,
-        containerItemId: it.containerItemId || it.itemId || null,
+        containerItemId: it.containerItemId || it.replionTopLevelId || it.itemId || null,
+        replionTopLevelId: it.replionTopLevelId || (ambiguousContainer ? cid : null),
+        isAmbiguousContainerId: ambiguousContainer,
         containerIdCollision: collision,
         replionIdentityUnverified: unverified,
         identityVerified: meta && !unverified,
@@ -362,7 +466,9 @@ function annotateReplionIdentity(items) {
     }
     return {
       ...it,
-      containerItemId: it.containerItemId || it.itemId || null,
+      containerItemId: it.containerItemId || it.replionTopLevelId || it.itemId || null,
+      replionTopLevelId: it.replionTopLevelId || (ambiguousContainer ? cid : null),
+      isAmbiguousContainerId: ambiguousContainer,
       containerIdCollision: collision,
       replionIdentityUnverified: unverified,
       identityVerified: meta && !unverified,
@@ -396,8 +502,17 @@ function sanitiseItems(raw) {
       replionAmountSource: amountHit.source,
       replionStackQuantity: amountHit.stackQuantity,
       replionUuid: identity.replionUuid,
+      replionTopLevelId: item.replionTopLevelId || null,
+      isAmbiguousContainerId: item.isAmbiguousContainerId === true,
       metadataFishId: identity.metadataFishId,
       metadataFishName: identity.metadataFishName,
+      metadataBaseFishName: item.metadataBaseFishName || identity.metadataBaseFishName || null,
+      metadataSpeciesId: item.metadataSpeciesId || identity.metadataSpeciesId || null,
+      metadataRarity: typeof item.metadataRarity === 'string' ? item.metadataRarity.slice(0, 50) : null,
+      metadataMutation: typeof item.metadataMutation === 'string' ? item.metadataMutation.slice(0, 50) : null,
+      metadataWeightKg: Number.isFinite(Number(item.metadataWeightKg)) ? Number(item.metadataWeightKg) : null,
+      metadataSourcePath: typeof item.metadataSourcePath === 'string' ? item.metadataSourcePath.slice(0, 120) : null,
+      metadataConfidence: typeof item.metadataConfidence === 'string' ? item.metadataConfidence.slice(0, 20) : null,
       category: typeof item.category === 'string' ? item.category.slice(0, 50)  : null,
       tab:      typeof item.tab === 'string'      ? item.tab.slice(0, 50)       : null,
       rarity:   rarity ? rarity.slice(0, 50) : null,
@@ -667,8 +782,50 @@ function enrichItemsFromCatalog(items) {
   const out = [];
   for (const it of items) {
     if (!it || !it.name || catalogStore.isStatLabel(it.name)) continue;
+    const ambiguousContainer = isAmbiguousContainerItem(it);
     const isPlaceholder = catalogStore.isPlaceholderItemName(it.name, it.itemId);
     const trackerHasRealName = !isPlaceholder && !!it.name;
+
+    if (ambiguousContainer) {
+      const resolved = resolveAmbiguousContainerDisplay(it);
+      const metaId = it.metadataFishId || it.metadataSpeciesId;
+      const trustedMeta = metaId ? trustedCatalogMetaForMetadataId(metaId) : null;
+      let rarity = it.metadataRarity || it.rarity || (trustedMeta && trustedMeta.rarity) || null;
+      if (rarity) rarity = fishCatalog.normalizeRarity(rarity) || catalogStore.normalizeTier(rarity);
+      const weightVal = it.metadataWeightKg != null ? it.metadataWeightKg : (it.weightKg != null ? it.weightKg : it.weight);
+      const amountHit = extractReplionAmount(it);
+      out.push({
+        ...it,
+        name: resolved.name,
+        displayName: resolved.displayName,
+        baseFishName: resolved.baseFishName,
+        mutation: it.metadataMutation || it.mutation || null,
+        itemId: metaId || it.replionTopLevelId || it.containerItemId || it.itemId,
+        containerItemId: it.replionTopLevelId || it.containerItemId || it.itemId,
+        replionTopLevelId: it.replionTopLevelId || it.containerItemId || it.itemId,
+        isAmbiguousContainerId: true,
+        containerIdCollision: true,
+        replionIdentityUnverified: !hasReplionMetadataIdentity(it),
+        identityVerified: hasReplionMetadataIdentity(it),
+        weight: weightVal != null ? weightVal : it.weight,
+        weightKg: weightVal != null ? weightVal : it.weightKg,
+        amount: amountHit.amount,
+        replionAmountSource: it.replionAmountSource || amountHit.source,
+        rarity,
+        tier: rarity || it.tier || null,
+        category: 'fish',
+        resolved: resolved.resolved,
+        catalogReason: resolved.source,
+        catalogSource: resolved.resolved ? resolved.source : null,
+        speciesId: trustedMeta?.speciesId || null,
+        globalSpeciesId: trustedMeta?.speciesId || null,
+        metadataFishId: it.metadataFishId || null,
+        metadataFishName: it.metadataFishName || null,
+        metadataBaseFishName: it.metadataBaseFishName || null,
+        metadataSpeciesId: it.metadataSpeciesId || null,
+      });
+      continue;
+    }
 
     let meta = it.itemId ? catalogMetaForItemId(it.itemId) : null;
     if (!meta) meta = catalogStore.lookup(it.name);
@@ -741,16 +898,18 @@ function enrichItemsFromCatalog(items) {
     }
 
     const containerCollision = it.containerIdCollision === true;
-    const itemIdLockedBase = it.itemId && !containerCollision
+    const ambiguousTop = isAmbiguousContainerItem(it);
+    const itemIdLockedBase = it.itemId && !containerCollision && !ambiguousTop
       ? _itemIdLockedBaseName(it.itemId) : null;
     const catalogLockedName = itemIdLockedBase
       || ((meta?.source === 'canonical_catalog' || meta?.source === 'manual_verified_catalog'
         || meta?.source === 'catch_learned_catalog') && meta?.baseFishName
-        && !containerCollision
+        && !containerCollision && !ambiguousTop
         ? meta.baseFishName : null);
-    if (it.replionIdentityUnverified && containerCollision && !hasReplionMetadataIdentity(it)) {
-      const cid = it.containerItemId || it.itemId;
-      name = cid ? `Item #${cid}` : (it.name || 'Unknown');
+    if ((it.replionIdentityUnverified && containerCollision && !hasReplionMetadataIdentity(it))
+        || (ambiguousTop && !hasReplionMetadataIdentity(it))) {
+      const cid = it.replionTopLevelId || it.containerItemId || it.itemId;
+      name = cid ? `Unknown Fish #${cid}` : 'Unmapped Fish';
       baseFishName = null;
       displayName = name;
       mutation = it.mutation || null;
@@ -773,7 +932,7 @@ function enrichItemsFromCatalog(items) {
 
     let speciesId = meta?.speciesId || null;
     let globalResolvedFish = false;
-    if (it.itemId) {
+    if (it.itemId && !ambiguousTop) {
       const gMeta = globalCatalogService.resolveCatalogMetaForItemId(String(it.itemId), { allowLiveObserved: true });
       if (gMeta?.speciesId) speciesId = gMeta.speciesId;
       if (gMeta && catalogStore.isFishCategory(gMeta.category || 'fish')) {
@@ -828,6 +987,10 @@ function enrichItemsFromCatalog(items) {
       replionUuid: it.replionUuid || extractReplionIdentityFields(it).replionUuid,
       metadataFishId: it.metadataFishId || extractReplionIdentityFields(it).metadataFishId,
       metadataFishName: it.metadataFishName || extractReplionIdentityFields(it).metadataFishName,
+      metadataBaseFishName: it.metadataBaseFishName || null,
+      metadataSpeciesId: it.metadataSpeciesId || null,
+      replionTopLevelId: it.replionTopLevelId || null,
+      isAmbiguousContainerId: it.isAmbiguousContainerId === true,
       rarity,
       tier: rarity || it.tier || null,
       raritySource: it.raritySource || gRarity.rarity?.raritySource || (meta && meta.source && rarity ? meta.source : null),
@@ -1350,7 +1513,13 @@ function isPublicFishItem(item) {
   if (isKnownNonFishInventoryItem(item)) return false;
 
   if (item.replionIdentityUnverified === true && item.replionUuid) {
-    return catalogStore.isFishCategory(cat) || isLikelyFishInventoryItem(item);
+    return catalogStore.isFishCategory(cat) || isLikelyFishInventoryItem(item)
+      || item.isAmbiguousContainerId === true;
+  }
+
+  if (isAmbiguousContainerItem(item)) {
+    return catalogStore.isFishCategory(cat) || isLikelyFishInventoryItem(item)
+      || hasReplionMetadataIdentity(item);
   }
 
   if (item.itemId) {
@@ -2434,6 +2603,8 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     replionCountProof: buildReplionCountProof(publicFishDbg.countParityProof),
     catchLearningProof: buildCatchLearningProof(data, data.nameCatalogDiscovery),
     amountProof: publicFishDbg.amountProof || buildAmountProof(publicFishDbg.fishItems, enrichedAll),
+    ambiguousContainerIds: [...AMBIGUOUS_CONTAINER_IDS],
+    ambiguousContainerProof: buildAmbiguousContainerProof(enrichedAll, data),
     rarityColorProof: publicFishDbg.rarityColorProof,
     globalDbUiProof: publicFishDbg.globalDbUiProof,
     unmappedReviewProof: buildUnmappedReviewProof(enrichedAll),
@@ -2570,21 +2741,26 @@ module.exports._itemIdLockedBaseName = _itemIdLockedBaseName;
 module.exports.buildTrackerClientProof = buildTrackerClientProof;
 module.exports.explainPublicExclusionReason = explainPublicExclusionReason;
 module.exports.PUBLIC_API_BUILD = PUBLIC_API_BUILD;
-module.exports.BLOCKER10W_BUILD = PUBLIC_API_BUILD;
+module.exports.isAmbiguousContainerItem = isAmbiguousContainerItem;
+module.exports.buildAmbiguousContainerProof = buildAmbiguousContainerProof;
+module.exports.AMBIGUOUS_CONTAINER_IDS = AMBIGUOUS_CONTAINER_IDS;
+module.exports.resolveAmbiguousContainerDisplay = resolveAmbiguousContainerDisplay;
+module.exports.trustedCatalogMetaForMetadataId = trustedCatalogMetaForMetadataId;
+module.exports.BLOCKER10Z7_BUILD = BLOCKER10Z7_BUILD;
 module.exports.BLOCKER10V_BUILD = PUBLIC_API_BUILD;
-module.exports.BLOCKER10U6_BUILD = BLOCKER10V_BUILD;
-module.exports.BLOCKER10U5_BUILD = BLOCKER10V_BUILD;
-module.exports.BLOCKER10U3_U4_BUILD = BLOCKER10V_BUILD;
-module.exports.BLOCKER10U2_BUILD = BLOCKER10V_BUILD;
-module.exports.BLOCKER10U_BUILD = BLOCKER10V_BUILD;
-module.exports.BLOCKER10T_BUILD = BLOCKER10V_BUILD;
-module.exports.BLOCKER10S_BUILD = BLOCKER10V_BUILD;
-module.exports.BLOCKER10R_BUILD = BLOCKER10V_BUILD;
-module.exports.BLOCKER10Q_BUILD = BLOCKER10V_BUILD;
-module.exports.BLOCKER10P_BUILD = BLOCKER10V_BUILD;
-module.exports.BLOCKER10O_BUILD = BLOCKER10V_BUILD;
-module.exports.BLOCKER10N2_BUILD = BLOCKER10V_BUILD;
-module.exports.BLOCKER10N_BUILD = BLOCKER10V_BUILD;
+module.exports.BLOCKER10U6_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10U5_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10U3_U4_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10U2_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10U_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10T_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10S_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10R_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10Q_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10P_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10O_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10N2_BUILD = PUBLIC_API_BUILD;
+module.exports.BLOCKER10N_BUILD = PUBLIC_API_BUILD;
 module.exports.globalCatalogService = globalCatalogService;
 module.exports.globalDb = globalDb;
 module.exports.persistSessionState = persistSessionState;

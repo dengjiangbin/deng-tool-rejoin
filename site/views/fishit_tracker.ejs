@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08' %>">
+<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08' %>">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -152,8 +152,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08">
-<!-- BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08 -->
+<body data-ui-marker="BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08">
+<!-- BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08 -->
 <div class="page">
   <div class="inner">
 
@@ -203,9 +203,9 @@
   const POLL_MS       = 5000;
   const DEBUG_GLOBAL  = /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
   const RENDER_BUILD  = document.documentElement.getAttribute('data-render-build')
-    || 'BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08';
+    || 'BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08';
   const PUBLIC_API_BUILD = document.documentElement.getAttribute('data-public-api-build')
-    || 'BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08';
+    || 'BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08';
   const RARITY_NAME_COLORS = {
     common:'#9ca3af', uncommon:'#4ade80', rare:'#60a5fa', epic:'#c084fc',
     legendary:'#eab308', legend:'#eab308', mythic:'#f472b6', secret:'#22d3ee', forgotten:'#818cf8',
@@ -301,6 +301,11 @@
         `<br>${escHtml(r.publicCardName || '?')} id=${escHtml(r.itemId || '-')} amt=${r.publicAmount} src=${escHtml(r.amountSource || '-')} catalog=${escHtml(r.catalogName || '-')} final=${escHtml(r.finalName || '-')}`
       ).join('')}</div>`;
     }
+    let ambiguousRows = '';
+    const acp = data.ambiguousContainerProof;
+    if (acp) {
+      ambiguousRows = `<div class="global-db-debug">ambiguousContainerIds=${escHtml(JSON.stringify(data.ambiguousContainerIds || [267]))}<br>ambiguousContainerProof rowsSeen=${acp.rowsSeen} metaId=${acp.rowsWithMetadataFishId} metaName=${acp.rowsWithMetadataFishName} unresolved=${acp.rowsUnresolved}</div>`;
+    }
     let catchRows = '';
     const cl = data.catchLearningProof;
     if (cl) {
@@ -322,7 +327,7 @@
     <div class="gdb-row"><span>Images</span><span>${g.imageAssetCount != null ? g.imageAssetCount : '?'}</span></div>
     <div class="gdb-row"><span>Cards w/ global image</span><span>${escHtml(imgLabel)}</span></div>
     <div class="gdb-row"><span>Cards w/ global rarity</span><span>${escHtml(rarLabel)}</span></div>
-    ${parityRows}${amountRows}${catchRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
+    ${parityRows}${amountRows}${ambiguousRows}${catchRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
   </div>
 </details>`;
   }
