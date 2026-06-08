@@ -95,44 +95,131 @@
     .card-body { padding:0 16px 16px; display:none; }
     .tracker-card.expanded .card-body { display:block; }
 
-    .items-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; margin-top:4px; }
+    .items-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; margin-top:4px; }
 
-    .item-card, .fish-card { border:0; border-radius:12px; padding:12px; min-height:118px; display:flex; flex-direction:column; gap:8px; --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.88); --badge-bg:rgba(0,0,0,.42); --badge-fg:#fff; color:var(--card-fg); box-shadow:0 10px 24px rgba(0,0,0,.22); overflow:hidden; transition:transform .15s,box-shadow .2s; animation:fadeIn .2s ease; }
-    .item-card:hover, .fish-card:hover { transform:translateY(-2px); box-shadow:0 14px 28px rgba(0,0,0,.28); }
-    .item-card.rarity-common, .fish-card.rarity-common { --card-fg:#e2e8f0; --card-muted-fg:#8a94a6; --badge-bg:rgba(0,0,0,.35); background:linear-gradient(135deg,#242936 0%,#141820 100%); }
-    .item-card.rarity-uncommon, .fish-card.rarity-uncommon { --card-fg:#e2e8f0; --card-muted-fg:rgba(255,255,255,.85); --badge-bg:rgba(0,0,0,.38); background:linear-gradient(135deg,#2a3440 0%,#1a2030 100%); }
-    .item-card.rarity-rare, .fish-card.rarity-rare { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.48); background:linear-gradient(135deg,#60b4ff 0%,#3d88dc 100%); }
-    .item-card.rarity-epic, .fish-card.rarity-epic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.48); background:linear-gradient(135deg,#b879ff 0%,#8152d6 100%); }
-    .item-card.rarity-legendary, .fish-card.rarity-legendary { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); background:linear-gradient(135deg,#ffc936 0%,#d79413 100%); }
-    .item-card.rarity-mythic, .fish-card.rarity-mythic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); background:linear-gradient(135deg,#ff2525 0%,#c90d12 100%); }
-    .item-card.rarity-secret, .fish-card.rarity-secret { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.48); background:linear-gradient(135deg,#10e487 0%,#09c96f 55%,#079b59 100%); }
-    .item-card.rarity-forgotten, .fish-card.rarity-forgotten { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.92); --badge-bg:rgba(0,0,0,.55); background:linear-gradient(135deg,#f0f0f0 0%,#777 50%,#111 100%); }
-    .item-card:not([class*="rarity-"]), .fish-card:not([class*="rarity-"]) { --card-fg:#e2e8f0; --card-muted-fg:#8a94a6; --badge-bg:rgba(0,0,0,.35); background:linear-gradient(135deg,#242936 0%,#141820 100%); border:1px solid var(--border); }
+    .item-card, .fish-card {
+      --card-fg:#fff;
+      --card-muted-fg:rgba(255,255,255,.88);
+      --badge-bg:rgba(0,0,0,.42);
+      --badge-fg:#fff;
+      --image-glow:rgba(255,255,255,.1);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:14px;
+      padding:12px 14px;
+      min-height:0;
+      display:grid;
+      grid-template-columns:auto 1fr;
+      grid-template-areas:"image body";
+      gap:10px 12px;
+      align-items:start;
+      color:var(--card-fg);
+      box-shadow:0 10px 24px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.06);
+      overflow:hidden;
+      transition:transform .15s,box-shadow .2s;
+      animation:fadeIn .2s ease;
+      position:relative;
+    }
+    .item-card:hover, .fish-card:hover { transform:translateY(-2px); box-shadow:0 14px 28px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08); }
+    .item-card.rarity-common, .fish-card.rarity-common { --card-fg:#e2e8f0; --card-muted-fg:#8a94a6; --badge-bg:rgba(0,0,0,.35); --image-glow:rgba(148,163,184,.12); background:linear-gradient(135deg,#242936 0%,#141820 100%); }
+    .item-card.rarity-uncommon, .fish-card.rarity-uncommon { --card-fg:#e2e8f0; --card-muted-fg:rgba(255,255,255,.85); --badge-bg:rgba(0,0,0,.38); --image-glow:rgba(74,222,128,.14); background:linear-gradient(135deg,#2a3440 0%,#1a2030 100%); }
+    .item-card.rarity-rare, .fish-card.rarity-rare { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.52); --image-glow:rgba(96,180,255,.28); background:linear-gradient(135deg,#60b4ff 0%,#3d88dc 100%); }
+    .item-card.rarity-epic, .fish-card.rarity-epic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.48); --image-glow:rgba(184,121,255,.24); background:linear-gradient(135deg,#b879ff 0%,#8152d6 100%); }
+    .item-card.rarity-legendary, .fish-card.rarity-legendary { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,201,54,.24); background:linear-gradient(135deg,#ffc936 0%,#d79413 100%); }
+    .item-card.rarity-mythic, .fish-card.rarity-mythic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,37,37,.22); background:linear-gradient(135deg,#ff2525 0%,#c90d12 100%); }
+    .item-card.rarity-secret, .fish-card.rarity-secret { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.52); --image-glow:rgba(16,228,135,.28); background:linear-gradient(135deg,#10e487 0%,#09c96f 55%,#079b59 100%); }
+    .item-card.rarity-forgotten, .fish-card.rarity-forgotten { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.92); --badge-bg:rgba(0,0,0,.58); --image-glow:rgba(255,255,255,.16); background:linear-gradient(135deg,#f0f0f0 0%,#777 50%,#111 100%); }
+    .item-card:not([class*="rarity-"]), .fish-card:not([class*="rarity-"]) { --card-fg:#e2e8f0; --card-muted-fg:#8a94a6; --badge-bg:rgba(0,0,0,.35); --image-glow:rgba(148,163,184,.1); background:linear-gradient(135deg,#242936 0%,#141820 100%); border:1px solid var(--border); }
 
-    .item-card .item-name, .fish-card .item-name { color:var(--card-fg)!important; text-shadow:0 1px 3px rgba(0,0,0,.45); }
-    .item-card .ic-meta .badge, .fish-card .ic-meta .badge { background:var(--badge-bg); border-color:rgba(255,255,255,.28); color:var(--badge-fg)!important; }
-    .item-card .ic-badges .badge, .fish-card .ic-badges .badge,
-    .item-card .ic-badges .ic-qty, .fish-card .ic-badges .ic-qty { background:var(--badge-bg)!important; border:1px solid rgba(255,255,255,.22)!important; color:var(--badge-fg)!important; }
-    .item-card .ic-head img, .fish-card .ic-head img { background:rgba(0,0,0,.25)!important; box-shadow:0 2px 8px rgba(0,0,0,.25); }
+    .fish-card__imageWrap {
+      grid-area:image;
+      width:clamp(64px, 20vw, 88px);
+      height:clamp(64px, 20vw, 88px);
+      min-width:64px;
+      min-height:64px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      border-radius:12px;
+      background:rgba(0,0,0,.28);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 4px 18px var(--image-glow);
+      flex-shrink:0;
+    }
+    .fish-card__image, .fish-card__imageWrap img {
+      width:100%;
+      height:100%;
+      max-width:88px;
+      max-height:88px;
+      object-fit:contain;
+      border-radius:8px;
+      filter:drop-shadow(0 2px 8px rgba(0,0,0,.35));
+      background:transparent!important;
+    }
+    .fish-card__imageWrap img[data-placeholder="true"] {
+      opacity:.55;
+      filter:none;
+    }
+    .fish-card__body {
+      grid-area:body;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      min-width:0;
+      justify-content:center;
+    }
+    .fish-card__name, .item-card .item-name, .fish-card .item-name {
+      color:var(--card-fg)!important;
+      font-weight:650;
+      font-size:clamp(.84rem, 2.4vw, .96rem);
+      line-height:1.22;
+      min-width:0;
+      word-break:normal;
+      overflow-wrap:break-word;
+      white-space:normal;
+      display:-webkit-box;
+      -webkit-line-clamp:2;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
+      text-shadow:0 1px 3px rgba(0,0,0,.5), 0 0 1px rgba(0,0,0,.35);
+    }
+    .fish-card__meta, .ic-meta {
+      display:flex;
+      flex-wrap:wrap;
+      gap:6px;
+      align-items:center;
+    }
+    .fish-card__amount, .fish-card__rarity, .ic-badges .badge, .ic-badges .ic-qty, .ic-meta .badge {
+      background:var(--badge-bg)!important;
+      border:1px solid rgba(255,255,255,.24)!important;
+      color:var(--badge-fg)!important;
+      font-size:.72rem;
+      font-weight:600;
+      padding:3px 10px;
+      border-radius:99px;
+      text-shadow:0 1px 2px rgba(0,0,0,.35);
+    }
+    .fish-card.rarity-rare .fish-card__rarity, .fish-card.rarity-secret .fish-card__rarity,
+    .fish-card.rarity-epic .fish-card__rarity, .fish-card.rarity-legendary .fish-card__rarity,
+    .fish-card.rarity-mythic .fish-card__rarity, .fish-card.rarity-forgotten .fish-card__rarity,
     .fish-card.rarity-rare .ic-meta .badge, .fish-card.rarity-secret .ic-meta .badge,
     .fish-card.rarity-epic .ic-meta .badge, .fish-card.rarity-legendary .ic-meta .badge,
     .fish-card.rarity-mythic .ic-meta .badge, .fish-card.rarity-forgotten .ic-meta .badge {
-      background:var(--badge-bg)!important; color:var(--badge-fg)!important; border-color:rgba(255,255,255,.28)!important;
+      background:var(--badge-bg)!important;
+      color:var(--badge-fg)!important;
+      border-color:rgba(255,255,255,.28)!important;
     }
 
-    @keyframes fadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
-
-    .ic-head { display:flex; align-items:center; gap:8px; flex-wrap:nowrap; }
-    .ic-title-wrap { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
-    .item-name { font-weight:600; font-size:.9rem; line-height:1.35; min-width:0; word-break:normal; overflow-wrap:break-word; white-space:normal; display:block; overflow:hidden; text-overflow:ellipsis; }
+    /* Legacy hooks kept for patch/update paths */
+    .ic-head { display:contents; }
+    .ic-title-wrap { display:contents; }
+    .ic-badges { display:contents; }
     .global-db-proof { margin-top:8px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface2); }
     .global-db-proof summary { cursor:pointer; padding:8px 10px; font-size:.78rem; color:#93c5fd; user-select:none; }
     .global-db-proof .gdb-body { padding:8px 10px 10px; font-size:.74rem; color:var(--muted); line-height:1.45; }
     .global-db-proof .gdb-row { display:flex; justify-content:space-between; gap:8px; }
     .global-db-proof .gdb-on { color:#4ade80; font-weight:600; }
     .global-db-debug { margin-top:6px; font-size:.68rem; color:#8a94a6; max-height:120px; overflow:auto; }
-    .ic-badges { display:flex; flex-wrap:wrap; gap:4px; align-items:center; flex-shrink:0; margin-top:2px; }
-    .ic-meta { display:flex; flex-wrap:wrap; gap:5px; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
+
     .badge { font-size:.72rem; padding:2px 9px; border-radius:99px; border:1px solid var(--border); background:var(--surface); color:var(--muted); }
     .badge-weight  { color:var(--accent2); border-color:#1d3a5c; background:#0d1f30; }
     .rarity-common    { color:var(--muted); }
@@ -159,11 +246,16 @@
       .code-row { flex-direction:column; }
       .btn-copy { padding:10px; }
       .card-meta-row { gap:6px; }
+      .items-grid { grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; }
+      .fish-card__imageWrap { width:clamp(56px, 18vw, 72px); height:clamp(56px, 18vw, 72px); min-width:56px; min-height:56px; }
+    }
+    @media (min-width:900px) {
+      .items-grid { grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); }
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10Z10_CARD_CONTRAST_AND_RADIANT_NAME_FIX_2026_06_08">
-<!-- BLOCKER10Z10_CARD_CONTRAST_AND_RADIANT_NAME_FIX_2026_06_08 -->
+<body data-ui-marker="BLOCKER10Z12_MODERN_FISH_CARD_LAYOUT_2026_06_08">
+<!-- BLOCKER10Z12_MODERN_FISH_CARD_LAYOUT_2026_06_08 -->
 <div class="page">
   <div class="inner">
 
@@ -462,6 +554,27 @@
     const mut = (Array.isArray(item.mutationTags) && item.mutationTags[0]) || item.mutation || '';
     return `${String(id).toLowerCase()}|${String(mut).toLowerCase()}`;
   }
+  function buildFishCardInnerHtml(item) {
+    const rarity  = item.rarity && item.rarity !== 'Unknown' ? item.rarity : null;
+    const rc      = rarityClass(rarity);
+    const amount  = Number(item.amount || 1);
+    const title   = cardTitle(item);
+    const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
+    const nameStyle = rarityNameStyle(item);
+    const qty = `<span class="badge ic-qty fish-card__amount">x${Number.isFinite(amount) ? amount : 1}</span>`;
+    const mutTags = publicMutationBadges(item)
+      .map(m => `<span class="badge fish-card__tag">${escHtml(m)}</span>`).join('');
+    const rarityBadge = rarity ? `<span class="badge fish-card__rarity ${rc}">${escHtml(rarity)}</span>` : '';
+    const isPlaceholder = imgSrc === ITEM_IMAGES.Default;
+    return `
+  <div class="fish-card__imageWrap ic-head">
+    <img class="fish-card__image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async"${isPlaceholder ? ' data-placeholder="true"' : ''} data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}">
+  </div>
+  <div class="fish-card__body ic-title-wrap">
+    <span class="fish-card__name item-name" title="${escHtml(title)}" style="${nameStyle}">${escHtml(title)}</span>
+    <div class="fish-card__meta ic-meta ic-badges">${qty}${mutTags}${rarityBadge}</div>
+  </div>`;
+  }
   function buildItemCardElement(item) {
     const isShiny = item.shiny === true;
     const rarity  = item.rarity && item.rarity !== 'Unknown' ? item.rarity : null;
@@ -483,13 +596,8 @@
     if (rarityLow) card.setAttribute('data-rarity', rarityLow);
     if (crc) card.classList.add(crc);
     if (isShiny && rarityLow !== 'secret') card.classList.add('shiny');
-    const qty = `<span class="badge ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
-    const mutTags = publicMutationBadges(item)
-      .map(m => `<span class="badge">${escHtml(m)}</span>`).join('');
-    card.innerHTML = `
-  <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${escHtml(title)}" decoding="async" style="width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;" data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}"><div class="ic-title-wrap"><span class="item-name" style="${nameStyle}">${escHtml(title)}</span><div class="ic-badges">${qty}${mutTags}</div></div></div>
-  <div class="ic-meta">${rarity ? `<span class="badge ${rc}">${escHtml(rarity)}</span>` : ''}</div>`;
-    const img = card.querySelector('img');
+    card.innerHTML = buildFishCardInnerHtml(item);
+    const img = card.querySelector('.fish-card__image');
     if (img) img.onerror = () => onFishImageError(img, item);
     return card;
   }
@@ -516,43 +624,42 @@
     else card.removeAttribute('data-image-source');
     if (item.dataRaritySource) card.setAttribute('data-rarity-source', item.dataRaritySource);
     else card.removeAttribute('data-rarity-source');
-    const nameEl = card.querySelector('.item-name');
+    const nameEl = card.querySelector('.fish-card__name, .item-name');
     const nameStyle = rarityNameStyle(item);
     if (nameEl) {
       nameEl.textContent = title;
+      nameEl.setAttribute('title', title);
       nameEl.style.cssText = nameStyle;
     }
     const amount = Number(item.amount || 1);
-    const badgesEl = card.querySelector('.ic-badges');
-    if (badgesEl) {
-      const qty = `<span class="badge ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
-      const mutTags = publicMutationBadges(item)
-        .map(m => `<span class="badge">${escHtml(m)}</span>`).join('');
-      badgesEl.innerHTML = qty + mutTags;
-    }
-    const metaEl = card.querySelector('.ic-meta');
+    const metaEl = card.querySelector('.fish-card__meta, .ic-meta');
     if (metaEl) {
       const rc = rarityClass(rarity);
-      metaEl.innerHTML = rarity ? `<span class="badge ${rc}">${escHtml(rarity)}</span>` : '';
+      const qty = `<span class="badge ic-qty fish-card__amount">x${Number.isFinite(amount) ? amount : 1}</span>`;
+      const mutTags = publicMutationBadges(item)
+        .map(m => `<span class="badge fish-card__tag">${escHtml(m)}</span>`).join('');
+      const rarityBadge = rarity ? `<span class="badge fish-card__rarity ${rc}">${escHtml(rarity)}</span>` : '';
+      metaEl.innerHTML = qty + mutTags + rarityBadge;
     }
-    let img = card.querySelector('img');
+    let img = card.querySelector('.fish-card__image, img');
     if (!img) {
-      const head = card.querySelector('.ic-head');
-      if (head) {
+      const wrap = card.querySelector('.fish-card__imageWrap');
+      if (wrap) {
         img = document.createElement('img');
-        img.style.cssText = 'width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;';
+        img.className = 'fish-card__image';
         img.decoding = 'async';
-        head.insertBefore(img, head.firstChild);
+        wrap.appendChild(img);
       }
     }
     if (img) {
       const currentSrc = img.getAttribute('src') || '';
-      if (currentSrc !== imgSrc) {
-        img.setAttribute('src', imgSrc);
-      }
+      if (currentSrc !== imgSrc) img.setAttribute('src', imgSrc);
       img.alt = title;
+      img.title = title;
       img.setAttribute('data-item-id', String(item.itemId || ''));
       img.setAttribute('data-asset-id', String(item.imageAssetId || ''));
+      if (imgSrc === ITEM_IMAGES.Default) img.setAttribute('data-placeholder', 'true');
+      else img.removeAttribute('data-placeholder');
       img.onerror = () => onFishImageError(img, item);
     }
   }
@@ -598,16 +705,8 @@
     return `<div class="items-grid">${items.map(item => {
       const isShiny = item.shiny === true;
       const rarity  = item.rarity && item.rarity !== 'Unknown' ? item.rarity : null;
-      const rc      = rarityClass(rarity);
       const crc     = cardRarityClass(rarity);
       const rarityLow = rarity ? rarity.toLowerCase() : '';
-      const amount  = Number(item.amount || 1);
-      const title   = cardTitle(item);
-      const qty     = `<span class="badge ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
-      const mutTags = publicMutationBadges(item)
-        .map(m => `<span class="badge">${escHtml(m)}</span>`).join('');
-      const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
-      const altText = escHtml(title);
       const cardCls = ['item-card', 'fish-card'];
       if (crc) cardCls.push(crc);
       if (isShiny && rarityLow !== 'secret') cardCls.push('shiny');
@@ -617,11 +716,7 @@
       const srcAttr = item.dataSource ? ` data-source="${escHtml(item.dataSource)}"` : '';
       const imgSrcAttr = item.dataImageSource ? ` data-image-source="${escHtml(item.dataImageSource)}"` : '';
       const rarSrcAttr = item.dataRaritySource ? ` data-rarity-source="${escHtml(item.dataRaritySource)}"` : '';
-      const nameStyle = rarityNameStyle(item);
-      return `<div class="${cardCls.join(' ')}" data-card-key="${escHtml(cardKey(item))}"${mutAttr}${shinyAttr}${rarityAttr}${srcAttr}${imgSrcAttr}${rarSrcAttr}>
-  <div class="ic-head"><img src="${escHtml(imgSrc)}" alt="${altText}" decoding="async" style="width:28px;height:28px;border-radius:6px;object-fit:cover;background:#2a3040;flex-shrink:0;" data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}" onerror="this.onerror=null;this.src='${ITEM_IMAGES.Default}';"><div class="ic-title-wrap"><span class="item-name" style="${nameStyle}">${escHtml(title)}</span><div class="ic-badges">${qty}${mutTags}</div></div></div>
-  <div class="ic-meta">${rarity?`<span class="badge ${rc}">${escHtml(rarity)}</span>`:''}</div>
-</div>`;
+      return `<div class="${cardCls.join(' ')}" data-card-key="${escHtml(cardKey(item))}"${mutAttr}${shinyAttr}${rarityAttr}${srcAttr}${imgSrcAttr}${rarSrcAttr}>${buildFishCardInnerHtml(item)}</div>`;
     }).join('')}</div>`;
   }
   function wireFishImageErrors(root) {
