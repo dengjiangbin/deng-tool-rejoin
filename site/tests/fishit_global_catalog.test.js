@@ -1237,6 +1237,7 @@ describe('BLOCKER10Z8 — hide fake 267 and cosmetic tags', { concurrency: 1 }, 
     isPublicFishCardVisible,
     applyPublicCosmeticCleanup,
     stripHiddenPublicCosmeticPrefix,
+    isTrustedRadiantCatfishInCatalog,
   } = require('../src/fishitTrackerRoutes');
 
   function fake267Row(i) {
@@ -1263,10 +1264,16 @@ describe('BLOCKER10Z8 — hide fake 267 and cosmetic tags', { concurrency: 1 }, 
     setupTestDb();
     const rows = Array.from({ length: 32 }, (_, i) => fake267Row(i));
     const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
-    assert.equal(pub.publicItems.length, 0);
     assert.ok(!pub.publicItems.some((f) => /unknown fish #267/i.test(f.name || f.cardName || '')));
-    assert.equal(pub.publicCounts.visibleFishInstances, 0);
-    assert.equal(pub.hiddenPublicRows.ambiguousContainerUnresolved, 32);
+    if (isTrustedRadiantCatfishInCatalog()) {
+      assert.equal(pub.publicCounts.visibleFishInstances, 1);
+      assert.ok(pub.publicItems.some((f) => /radiant catfish/i.test(f.name || f.baseFishName || '')));
+      assert.equal(pub.hiddenPublicRows.ambiguousContainerUnresolved, 31);
+    } else {
+      assert.equal(pub.publicItems.length, 0);
+      assert.equal(pub.publicCounts.visibleFishInstances, 0);
+      assert.equal(pub.hiddenPublicRows.ambiguousContainerUnresolved, 32);
+    }
     assert.deepEqual(pub.hiddenPublicRows.hiddenItemIds, ['267']);
   });
 
@@ -1344,9 +1351,10 @@ describe('BLOCKER10Z8 — hide fake 267 and cosmetic tags', { concurrency: 1 }, 
     }));
     const fake267 = Array.from({ length: 32 }, (_, i) => fake267Row(i));
     const pub = await buildPublicFishFields([...verified, ...fake267], 'http://127.0.0.1:8791');
-    assert.equal(pub.publicCounts.visibleFishInstances, 20);
-    assert.equal(pub.publicCounts.hiddenUnresolvedFishRows, 32);
-    assert.equal(pub.fishCounts.fishInstances, 20);
+    const radiantExtra = isTrustedRadiantCatfishInCatalog() ? 1 : 0;
+    assert.equal(pub.publicCounts.visibleFishInstances, 20 + radiantExtra);
+    assert.equal(pub.publicCounts.hiddenUnresolvedFishRows, 32 - radiantExtra);
+    assert.equal(pub.fishCounts.fishInstances, 20 + radiantExtra);
   });
 
   test('F: isPublicFishCardVisible rejects unknown 267 without trusted identity', () => {

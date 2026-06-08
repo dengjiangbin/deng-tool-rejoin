@@ -40,6 +40,17 @@ function _trimItems(items) {
       shiny: it.shiny,
       resolved: it.resolved,
       catalogSource: it.catalogSource,
+      replionUuid: it.replionUuid || null,
+      replionAmountSource: it.replionAmountSource || null,
+      metadataFishName: it.metadataFishName || null,
+      metadataFishId: it.metadataFishId || null,
+      metadataBaseFishName: it.metadataBaseFishName || null,
+      containerItemId: it.containerItemId || null,
+      rawProof: it.rawProof?.sourcePath
+        ? { sourcePath: it.rawProof.sourcePath }
+        : (it.rawProof || null),
+      identityVerified: it.identityVerified === true,
+      replionIdentityUnverified: it.replionIdentityUnverified === true,
     };
   });
 }

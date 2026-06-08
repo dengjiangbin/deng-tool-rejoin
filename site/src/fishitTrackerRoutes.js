@@ -141,6 +141,8 @@ const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
 /** Top-level Replion ids shared across many species — never catalog-guess (BLOCKER10Z7). */
 const AMBIGUOUS_CONTAINER_IDS = new Set(['267']);
+/** Global-conflict item ids that must not public-resolve without snapshot metadata (BLOCKER10Z9). */
+const PHANTOM_PUBLIC_ITEM_IDS = new Set(['1008']);
 
 function isAmbiguousContainerItem(item) {
   if (item?.isAmbiguousContainerId === true) return true;
@@ -572,6 +574,25 @@ function isContestedCatalogItemId(itemId) {
   return false;
 }
 
+function isPublicPhantomItemWithoutMetadata(item) {
+  if (!item) return false;
+  const id = String(item.itemId || item.containerItemId || '').trim();
+  if (!PHANTOM_PUBLIC_ITEM_IDS.has(id)) return false;
+  return !hasReplionMetadataIdentity(item);
+}
+
+function isTrustedCatalogSourceForPublic(source) {
+  const src = String(source || '');
+  return src.includes('manual_verified')
+    || src.includes('quiz')
+    || src.includes('global_db')
+    || src.includes('fishit_db_secret')
+    || src.includes('canonical_catalog')
+    || src.includes('seed_confirmed')
+    || src.includes('replion_metadata_name')
+    || src === 'quiz_bot_catalog';
+}
+
 function isTrustedPublicNameSource(catalogEntry, item) {
   const source = String(catalogEntry?.source || item?.catalogSource || item?.source || '');
   const proof = catalogEntry?.proof || item?.proof || {};
@@ -615,10 +636,17 @@ function buildPublicIdentityProof(item) {
 
   const catchDeltaOnly = !hasMeta && !hasRealName
     && /catch|live_roblox/i.test(String(catalogSource || ''));
-  const nameTrusted = !contested && (hasMeta || hasRealName || trusted || item?.snapshotPromotion);
+  const trustedCatalogSource = isTrustedCatalogSourceForPublic(catalogSource || item?.catalogSource);
+  const nameTrusted = !isPublicPhantomItemWithoutMetadata(item)
+    && (hasMeta || item?.snapshotPromotion || (hasRealName && (trusted || trustedCatalogSource)));
 
   return {
-    currentSnapshot: !!(item?.replionUuid || item?.replionAmountSource),
+    currentSnapshot: !!(
+      item?.replionUuid
+      || item?.replionAmountSource
+      || item?.rawProof?.sourcePath
+      || (item?.resolved === true && item?.itemId)
+    ),
     sourcePath,
     rawItemId: item?.itemId || null,
     uuid: item?.replionUuid || null,
@@ -642,10 +670,16 @@ function isTrustedRadiantCatfishInCatalog() {
   if (radiantQuiz?.matched) return true;
   const img = fishImageAssets.lookupByFishName('Radiant Catfish');
   if (img?.assetId) return true;
+  const cached = fishImageCache.getCachedEntry('98970734819318');
+  if (cached?.displayName && /radiant catfish/i.test(cached.displayName) && cached.cached !== false) {
+    return true;
+  }
   try {
     const sp = globalDb.findSpeciesByAliases(['Radiant Catfish']);
     if (sp?.species?.canonical_name) return true;
   } catch (_) { /* optional */ }
+  const canon = canonicalCatalog.lookupByName('Radiant Catfish');
+  if (canon?.baseFishName && /radiant catfish/i.test(canon.baseFishName)) return true;
   return false;
 }
 
@@ -680,6 +714,10 @@ function promoteTrustedAmbiguousContainerRows(items) {
       ...it,
       metadataFishName: 'Radiant Catfish',
       metadataBaseFishName: 'Catfish',
+      baseFishName: 'Radiant Catfish',
+      name: 'Radiant Catfish',
+      displayName: 'Radiant Catfish',
+      cardName: 'Radiant Catfish',
       identityVerified: true,
       replionIdentityUnverified: false,
       catalogSource: 'quiz_bot_catalog',
@@ -697,16 +735,18 @@ function buildQuarantinedPublicNames(enriched, rejectedItems) {
     if (!name) continue;
     const contested = item.itemId && isContestedCatalogItemId(item.itemId);
     const proof = buildPublicIdentityProof(item);
-    if (contested || !proof.nameTrusted || !proof.notFromCatchDeltaOnly) {
+    if (isPublicPhantomItemWithoutMetadata(item) || !proof.nameTrusted || !proof.notFromCatchDeltaOnly) {
       quarantined.push({
         name,
         itemId: item.itemId || null,
         uuid: item.replionUuid || null,
-        reason: contested
-          ? 'name came from untrusted live_roblox_catch_delta or stale learned catalog, not current snapshot proof'
-          : (!proof.notFromCatchDeltaOnly
-            ? 'catch_delta_only_without_snapshot_metadata'
-            : 'missing_trusted_snapshot_identity'),
+        reason: isPublicPhantomItemWithoutMetadata(item)
+          ? 'global-conflict phantom itemId without current snapshot metadata proof'
+          : (contested && !proof.nameTrusted
+            ? 'name came from untrusted live_roblox_catch_delta or stale learned catalog, not current snapshot proof'
+            : (!proof.notFromCatchDeltaOnly
+              ? 'catch_delta_only_without_snapshot_metadata'
+              : 'missing_trusted_snapshot_identity')),
       });
     }
   }
@@ -761,7 +801,7 @@ function _itemIdLockedBaseName(itemId) {
   }
   const canon = canonicalCatalog.lookupByItemId(id);
   if (canon?.baseFishName && !rarityLabels.isBlockedLearnName(canon.baseFishName)) {
-    if (!isContestedCatalogItemId(id)) return canon.baseFishName;
+    if (!PHANTOM_PUBLIC_ITEM_IDS.has(id)) return canon.baseFishName;
   }
   const learned = learnedFishCatalog.lookupById(id);
   if (learned?.baseFishName && !rarityLabels.isBlockedLearnName(learned.baseFishName)) {
@@ -803,7 +843,7 @@ function catalogMetaForItemId(itemId) {
   const canonEarly = canonicalCatalog.lookupByItemId(itemId);
   if (canonEarly && canonEarly.baseFishName && !rarityLabels.isBlockedLearnName(canonEarly.baseFishName)) {
     const isManual = (canonEarly.sources || []).includes('fishit_manual_verified_catalog');
-    if (!isContestedCatalogItemId(itemId) || isManual) {
+    if (!PHANTOM_PUBLIC_ITEM_IDS.has(String(itemId || '')) || isManual) {
       return {
         name: canonEarly.baseFishName,
         displayName: canonEarly.baseFishName,
@@ -1112,7 +1152,7 @@ function enrichItemsFromCatalog(items) {
     const catalogLockedName = itemIdLockedBase
       || ((meta?.source === 'canonical_catalog' || meta?.source === 'manual_verified_catalog'
         || meta?.source === 'catch_learned_catalog') && meta?.baseFishName
-        && !containerCollision && !ambiguousTop && !isContestedCatalogItemId(it.itemId)
+        && !containerCollision && !ambiguousTop
         ? meta.baseFishName : null);
     if ((it.replionIdentityUnverified && containerCollision && !hasReplionMetadataIdentity(it))
         || (ambiguousTop && !hasReplionMetadataIdentity(it))) {
@@ -1131,6 +1171,11 @@ function enrichItemsFromCatalog(items) {
       const lockedDisplay = mutation ? `${mutation} ${itemIdLockedBase}` : itemIdLockedBase;
       displayName = lockedDisplay;
       name = lockedDisplay;
+      catalogSource = meta?.source === 'manual_verified_catalog'
+        ? 'manual_verified_catalog'
+        : 'canonical_catalog';
+      catalogReason = catalogReason || 'item_id_canonical_lock';
+      resolved = true;
     }
 
     if (!imageAssetId && catalogStore.isFishCategory(category)) {
@@ -1752,6 +1797,7 @@ function isPublicFishCardVisible(item) {
 
   if (isAmbiguousContainer && !hasTrustedIdentity) return false;
   if (itemId === '267' && isUnknownName) return false;
+  if (isPublicPhantomItemWithoutMetadata(item)) return false;
   if (!isSnapshotBackedPublicCard(item)) return false;
 
   return true;
@@ -1784,7 +1830,7 @@ function applyPublicCosmeticCleanup(item) {
     ? item.mutationTags
     : (rawMutation ? [rawMutation] : []);
   const baseName = stripHiddenPublicCosmeticPrefix(
-    item.baseFishName || item.catalogLockedBaseName || rawDisplay,
+    item.metadataFishName || item.baseFishName || item.catalogLockedBaseName || rawDisplay,
   );
   const cleanMutation = isHiddenPublicCosmeticTag(rawMutation) ? null : rawMutation;
   const cleanMutationTags = rawMutationTags.filter((t) => !isHiddenPublicCosmeticTag(t));
