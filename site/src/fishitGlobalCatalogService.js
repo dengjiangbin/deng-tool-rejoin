@@ -10,9 +10,12 @@ const globalDb = require('./fishitGlobalDb');
 const catchNameParser = require('./fishitCatchNameParser');
 const protectedFishNames = require('./fishitProtectedFishNames');
 const quizBotCatalog = require('./fishitQuizBotImageCatalog');
+const dengBotCatalog = require('./fishitDengFishItBotCatalog');
+const globalLearning = require('./fishitGlobalLearning');
 
 const SOURCE_GLOBAL = 'global_db';
 const SEED_SOURCE_QUIZ = 'quiz_bot_import';
+const SEED_SOURCE_DENG_BOT = 'deng_fish_it_bot_import';
 
 /** Known species rarities (game-verified seeds, not guessed from color/name). */
 const SPECIES_RARITY_SEED = {
@@ -30,6 +33,7 @@ const CONFIDENCE_RANK = {
 };
 
 let _lastImportResult = null;
+let _lastResetSeedProof = null;
 
 /** Per-session observation rate limit (anti-poisoning). */
 const _obsRate = new Map();
@@ -210,6 +214,16 @@ function recordObservation(raw) {
   if (!_checkObservationRateLimit(sessionHash)) {
     return { accepted: false, reason: 'rate_limited' };
   }
+
+  const learning = globalLearning.recordLearningEvidence(raw);
+  if (learning.status === globalLearning.STATUS.BLOCKED) {
+    return { accepted: false, reason: learning.reason, learning };
+  }
+  if (learning.status === globalLearning.STATUS.QUARANTINED && !raw?.metadataFishName && !raw?.metadataFishId) {
+    if (itemId) globalDb.quarantineMapping(itemId, learning.reason || 'learning_quarantine');
+    return { accepted: true, decision: 'quarantined', itemId, learning };
+  }
+
   const parsed = catchNameParser.parseCatchInput({
     fishName: raw.rawName || raw.name || raw.baseFishName,
     rawText: raw.rawName || raw.name,
@@ -308,7 +322,157 @@ function recordObservation(raw) {
     uniqueUserCount: uniqueCount,
     userHash,
     sessionHash,
+    learning,
   };
+}
+
+function importDengFishItBotSeed(options = {}) {
+  const entries = dengBotCatalog.getAllEntries();
+  let speciesUpdated = 0;
+  let skippedManual = 0;
+  const proof = [];
+
+  for (const entry of entries) {
+    if (entry.status === 'quarantined') continue;
+    const normalized = globalDb.normalizeNamePunct(entry.baseFishName);
+    const existing = globalDb.getSpeciesByNormalizedName(entry.baseFishName);
+    if (existing?.verification_status === globalDb.VERIFICATION.MANUAL_VERIFIED
+        || existing?.rarity_source === 'game_verified_seed'
+        || existing?.rarity_source === 'manual_verified_catalog') {
+      skippedManual += 1;
+      continue;
+    }
+    globalDb.upsertSpecies({
+      normalized_name: normalized,
+      canonical_name: entry.baseFishName,
+      display_name: entry.baseFishName,
+      rarity: entry.rarity,
+      rarity_source: entry.raritySource || dengBotCatalog.SOURCE_ID,
+      rarity_confidence: entry.rarityConfidence || 'bot_catch_bucket',
+      source: SEED_SOURCE_DENG_BOT,
+      verification_status: globalDb.VERIFICATION.SEED_IMPORTED,
+    });
+    speciesUpdated += 1;
+    if (proof.length < 15) {
+      proof.push({
+        baseFishName: entry.baseFishName,
+        rarity: entry.rarity,
+        rarityConfidence: entry.rarityConfidence,
+        sourceEvidence: entry.sourceEvidence,
+      });
+    }
+  }
+
+  const result = {
+    ok: true,
+    speciesUpdated,
+    skippedManual,
+    totalBotEntries: entries.length,
+    seedSource: SEED_SOURCE_DENG_BOT,
+    proof,
+    catalogProof: dengBotCatalog.buildCatalogProof(),
+    stats: globalDb.getStats(),
+  };
+  return result;
+}
+
+/**
+ * Safe global catalog reset — backs up, clears learned poison, re-seeds trusted sources.
+ * @param {{ dryRun?: boolean, resetImages?: boolean, resetSessions?: boolean, backupDir?: string }} options
+ */
+async function resetGlobalCatalog(options = {}) {
+  const dryRun = !options.confirm;
+  const siteData = path.join(__dirname, '..', 'data');
+  const resetTargets = [
+    globalDb.dbPath(),
+    path.join(siteData, 'fishit_global_fish_item_catalog.json'),
+    path.join(siteData, 'fishit_live_sessions.json'),
+  ];
+  const preservedFiles = [];
+  const backupCreated = [];
+
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupDir = options.backupDir || path.join(siteData, 'backups', `fishit_reset_${ts}`);
+
+  for (const target of resetTargets) {
+    if (fs.existsSync(target)) {
+      const dest = path.join(backupDir, path.basename(target));
+      backupCreated.push({ from: target, to: dest });
+      if (!dryRun) {
+        fs.mkdirSync(backupDir, { recursive: true });
+        fs.copyFileSync(target, dest);
+      }
+    }
+  }
+
+  const imageCacheDir = path.join(siteData, 'fish_image_cache');
+  if (!options.resetImages && fs.existsSync(imageCacheDir)) {
+    preservedFiles.push(imageCacheDir);
+  }
+
+  const sessionsPath = path.join(siteData, 'fishit_live_sessions.json');
+  if (!options.resetSessions && fs.existsSync(sessionsPath)) {
+    preservedFiles.push(sessionsPath);
+  }
+
+  const quarantinedEntries = [
+    { itemId: '1008', reason: 'phantom_goliath_tiger_without_snapshot_metadata' },
+    { itemId: '267', reason: 'ambiguous_container_without_metadata_species_proof' },
+  ];
+
+  let seededEntries = { bot: 0, quiz: 0, manual: 0 };
+  let conflicts = dengBotCatalog.getQuarantinedConflicts();
+
+  if (!dryRun) {
+    globalDb.closeDb();
+    globalDb.clearLearnedData({ preserveManualVerified: true });
+    globalDb.quarantineItemIds(
+      quarantinedEntries.map((q) => q.itemId),
+      'reset_quarantine',
+    );
+    dengBotCatalog._reset();
+    globalLearning._reset();
+
+    const botSeed = importDengFishItBotSeed();
+    seededEntries.bot = botSeed.speciesUpdated;
+
+    const quizSeed = await importQuizBotSeed(options);
+    seededEntries.quiz = quizSeed.speciesImported || 0;
+
+    const manual = require('./fishitManualVerifiedCatalog');
+    seededEntries.manual = manual.getCount();
+  } else {
+    seededEntries = {
+      bot: dengBotCatalog.getAllEntries().length,
+      quiz: 'dry-run',
+      manual: require('./fishitManualVerifiedCatalog').getCount(),
+    };
+  }
+
+  const proof = {
+    backupCreated,
+    resetTargets: resetTargets.filter((t) => fs.existsSync(t) || !dryRun),
+    preservedFiles,
+    seededEntries,
+    quarantinedEntries,
+    conflicts: conflicts.slice(0, 20),
+    dryRun,
+    completedAt: new Date().toISOString(),
+  };
+  if (!dryRun) _lastResetSeedProof = proof;
+  return proof;
+}
+
+function getLastResetSeedProof() {
+  return _lastResetSeedProof;
+}
+
+function buildDengFishItBotCatalogProof(publicFishNames) {
+  return dengBotCatalog.buildCatalogProof(publicFishNames);
+}
+
+function buildGlobalLearningProof(limit) {
+  return globalLearning.buildGlobalLearningProof(limit);
 }
 
 async function importQuizBotSeed(options = {}) {
@@ -575,6 +739,7 @@ function buildGlobalDbUiProof(publicItems) {
   const globalRarity = items.filter((i) => i.raritySource && (
     i.raritySource === 'global_db'
     || i.raritySource === 'manual_verified'
+    || i.raritySource === 'deng_fish_it_bot'
     || i.raritySource === 'ui_name_color'
     || String(i.raritySource).includes('seed')
     || String(i.raritySource).includes('canonical')
@@ -598,7 +763,10 @@ function buildGlobalDbUiProof(publicItems) {
 function _reset() {
   globalDb._reset();
   _lastImportResult = null;
+  _lastResetSeedProof = null;
   _obsRate.clear();
+  dengBotCatalog._reset();
+  globalLearning._reset();
 }
 
 /**
@@ -657,6 +825,7 @@ function approveItemMapping(body) {
 module.exports = {
   SOURCE_GLOBAL,
   SEED_SOURCE_QUIZ,
+  SEED_SOURCE_DENG_BOT,
   SPECIES_RARITY_SEED,
   collectAliases,
   resolveSpeciesForItem,
@@ -665,6 +834,9 @@ module.exports = {
   resolveCatalogMetaForItemId,
   recordObservation,
   importQuizBotSeed,
+  importDengFishItBotSeed,
+  resetGlobalCatalog,
+  getLastResetSeedProof,
   getLastImportResult,
   buildGlobalCatalogProof,
   buildGlobalDbSummaryProof,
@@ -674,6 +846,8 @@ module.exports = {
   buildGlobalConflictProof,
   buildGlobalContributionProof,
   buildQuizBotSeedImportProof,
+  buildDengFishItBotCatalogProof,
+  buildGlobalLearningProof,
   buildGlobalDbUiProof,
   approveItemMapping,
   _reset,

@@ -529,6 +529,71 @@ function quarantineMapping(itemId, reason) {
   });
 }
 
+function clearLearnedData(options = {}) {
+  const db = openDb();
+  const preserveManual = options.preserveManualVerified !== false;
+  if (preserveManual) {
+    db.prepare(`
+      DELETE FROM fishit_global_item_mappings
+      WHERE confidence NOT IN ('manual_verified', 'seed_imported')
+         OR conflict_status = 'quarantined'
+    `).run();
+    db.prepare(`
+      DELETE FROM fishit_global_observations
+    `).run();
+    db.prepare(`
+      DELETE FROM fishit_global_conflicts
+    `).run();
+    db.prepare(`
+      UPDATE fishit_global_species SET
+        verification_status = 'seed_imported',
+        updated_at = ?
+      WHERE verification_status IN ('live_observed', 'multi_user_confirmed', 'quarantined_conflict')
+    `).run(_now());
+  } else {
+    db.exec(`
+      DELETE FROM fishit_global_image_assets;
+      DELETE FROM fishit_global_item_mappings;
+      DELETE FROM fishit_global_observations;
+      DELETE FROM fishit_global_conflicts;
+      DELETE FROM fishit_global_species;
+    `);
+  }
+  return getStats();
+}
+
+function quarantineItemIds(itemIds, reason) {
+  const db = openDb();
+  const now = _now();
+  for (const raw of itemIds || []) {
+    const itemId = String(raw).trim();
+    if (!itemId) continue;
+    const existing = db.prepare('SELECT * FROM fishit_global_item_mappings WHERE item_id = ?').get(itemId);
+    if (existing) {
+      quarantineMapping(itemId, reason);
+    } else {
+      upsertItemMapping({
+        item_id: itemId,
+        canonical_name: null,
+        confidence: VERIFICATION.QUARANTINED_CONFLICT,
+        source: 'reset_quarantine',
+        conflict_status: 'quarantined',
+        evidence_count: 0,
+        unique_user_count: 0,
+      });
+      db.prepare(`
+        UPDATE fishit_global_item_mappings SET conflict_status = 'quarantined' WHERE item_id = ?
+      `).run(itemId);
+    }
+    upsertConflict({
+      conflict_type: 'reset_quarantine',
+      item_id: itemId,
+      candidate_names: [reason],
+      status: 'open',
+    });
+  }
+}
+
 function _reset() {
   if (_db) {
     try { _db.close(); } catch (_) { /* */ }
@@ -570,5 +635,7 @@ module.exports = {
   updateSpeciesRarity,
   setSpeciesManualVerified,
   quarantineMapping,
+  clearLearnedData,
+  quarantineItemIds,
   _reset,
 };

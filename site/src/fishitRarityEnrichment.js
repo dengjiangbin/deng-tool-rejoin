@@ -15,6 +15,8 @@ let rarityColorMap = null;
 try { rarityColorMap = require('./fishitRarityColorMap'); } catch (_) { rarityColorMap = null; }
 let fishitDb = null;
 try { fishitDb = require('./fishitDb'); } catch (_) { fishitDb = null; }
+let dengBotCatalog = null;
+try { dengBotCatalog = require('./fishitDengFishItBotCatalog'); } catch (_) { dengBotCatalog = null; }
 
 const _proof = [];
 const _sourcesUsed = new Set();
@@ -78,7 +80,7 @@ function lookupRarityForItem(item) {
   // 2. captured in-game UI name color evidence from visible bag — debug-only, never required
   // (BLOCKER10Z3: removed from normal rarity pipeline; Global DB + catalog only)
 
-  // 3. Quiz Bot / global seed rarity (global DB species)
+  // 3. Quiz Bot / global seed rarity (global DB species — includes game_verified_seed)
   if (globalCatalogService) {
     try {
       const globalHit = globalCatalogService.resolveRarityForItem({
@@ -89,10 +91,26 @@ function lookupRarityForItem(item) {
         cardName: item.cardName,
       });
       if (globalHit?.rarity?.rarity) {
+        const src = globalHit.rarity.raritySource || globalCatalogService.SOURCE_GLOBAL;
+        const conf = globalHit.rarity.rarityConfidence || 'seed_imported';
         return {
           rarity: fishCatalog.normalizeRarity(globalHit.rarity.rarity),
-          raritySource: globalHit.rarity.raritySource || globalCatalogService.SOURCE_GLOBAL,
-          rarityConfidence: globalHit.rarity.rarityConfidence || 'seed_imported',
+          raritySource: src,
+          rarityConfidence: conf,
+        };
+      }
+    } catch (_) { /* fallback */ }
+  }
+
+  // 4. DENG Fish It bot Secret/Forgotten authority (never guesses Rare/Epic/etc.)
+  if (dengBotCatalog && baseName) {
+    try {
+      const botHit = dengBotCatalog.lookupRarity(baseName);
+      if (botHit?.rarity && botHit.rarityConfidence !== 'quarantined') {
+        return {
+          rarity: fishCatalog.normalizeRarity(botHit.rarity),
+          raritySource: botHit.raritySource || dengBotCatalog.SOURCE_ID,
+          rarityConfidence: botHit.rarityConfidence || 'bot_catch_bucket',
         };
       }
     } catch (_) { /* fallback */ }
@@ -125,8 +143,8 @@ function lookupRarityForItem(item) {
     }
   }
 
-  // fishit_db secret/forgotten hints
-  if (fishitDb && typeof fishitDb.exportRarityHints === 'function' && baseName) {
+  // Legacy fishit_db hints (superseded by fishitDengFishItBotCatalog when loaded)
+  if (!dengBotCatalog && fishitDb && typeof fishitDb.exportRarityHints === 'function' && baseName) {
     try {
       const hints = fishitDb.exportRarityHints();
       const key = String(baseName).toLowerCase().trim();

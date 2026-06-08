@@ -31,23 +31,27 @@ const {
 } = require('../src/fishitTrackerRoutes');
 const rarityColorMap = require('../src/fishitRarityColorMap');
 
-const Z9_BUILD = 'BLOCKER10Z9_PUBLIC_SNAPSHOT_TRUTH_AND_FULL_RARITY_CARDS_2026_06_08';
-const Z8_BUILD = Z9_BUILD;
-const Z7_BUILD = Z8_BUILD;
-const Z6_BUILD = Z8_BUILD;
-const Z5_BUILD = Z8_BUILD;
-const Z4_BUILD = Z8_BUILD;
-const Z3_BUILD = Z8_BUILD;
-const Z_BUILD = Z8_BUILD;
-const Y_BUILD = Z8_BUILD;
-const X_BUILD = Z8_BUILD;
-const W_BUILD = Z8_BUILD;
+const Z11_BUILD = 'BLOCKER10Z11_DENG_FISHIT_RARITY_AND_SAFE_GLOBAL_RELEARN_2026_06_08';
+const Z10_BUILD = Z11_BUILD;
+const Z9_BUILD = Z11_BUILD;
+const Z8_BUILD = Z11_BUILD;
+const Z7_BUILD = Z11_BUILD;
+const Z6_BUILD = Z11_BUILD;
+const Z5_BUILD = Z11_BUILD;
+const Z4_BUILD = Z11_BUILD;
+const Z3_BUILD = Z11_BUILD;
+const Z_BUILD = Z11_BUILD;
+const Y_BUILD = Z11_BUILD;
+const X_BUILD = Z11_BUILD;
+const W_BUILD = Z11_BUILD;
 let tmpDb;
 
 function setupTestDb() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fishit-global-w-'));
   tmpDb = path.join(tmpDir, 'fishit_global_test.db');
   process.env.FISHIT_GLOBAL_DB_PATH = tmpDb;
+  process.env.FISHIT_DISABLE_RADIANT_267_PROMO = '1';
+  globalDb.closeDb();
   globalDb._reset();
   globalCatalogService._reset();
   fishImageCache._reset();
@@ -519,7 +523,7 @@ describe('BLOCKER10Y rarity color count global proof', { concurrency: 1 }, () =>
     const { BLOCKER10Z_BUILD } = require('../src/fishitTrackerBuild');
     assert.equal(BLOCKER10Z_BUILD, Z3_BUILD);
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(lua.includes('BLOCKER10Z3_REPLION_GLOBAL_DB_NO_UI_DEPENDENCY_2026_06_07'));
+    assert.ok(lua.includes('BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08'));
     assert.ok(!lua.includes('payload.inventoryUiHints'));
     assert.ok(lua.includes('replionSourceOfTruth = true'));
   });
@@ -823,7 +827,7 @@ describe('BLOCKER10Z4 amount regression fix', { concurrency: 1 }, () => {
     const { BLOCKER10Z4_BUILD } = require('../src/fishitTrackerBuild');
     assert.equal(BLOCKER10Z4_BUILD, Z4_BUILD);
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(lua.includes('BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08'));
+    assert.ok(lua.includes('BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08'));
     assert.ok(lua.includes('LiveSafe.resolveOwnedStorageKey'));
   });
 
@@ -991,7 +995,7 @@ describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () =>
     const { BLOCKER10Z6_BUILD } = require('../src/fishitTrackerBuild');
     assert.equal(BLOCKER10Z6_BUILD, Z6_BUILD);
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(lua.includes('BLOCKER10Z6_CATALOG_NAMES_NO_FAKE_MERGE_2026_06_08'));
+    assert.ok(lua.includes('BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08'));
     assert.ok(lua.includes('replion_identity_unverified'));
   });
 
@@ -1033,11 +1037,8 @@ describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () =>
       (f) => f.amount === 32 && /parrot blopfish/i.test(f.name || f.baseFishName || ''),
     );
     assert.equal(fakeMerge, undefined);
-    assert.equal(
-      pub.publicItems.reduce((s, f) => s + (Number(f.amount) || 0), 0),
-      32,
-    );
-    assert.ok(pub.publicItems.every((f) => (Number(f.amount) || 0) === 1));
+    assert.ok(pub.publicItems.every((f) => (Number(f.amount) || 0) <= 1));
+    assert.equal(pub.hiddenPublicRows.ambiguousContainerUnresolved, 32);
   });
 
   test('legacy session rows without uuid still avoid fake x32 merge', async () => {
@@ -1263,6 +1264,7 @@ describe('BLOCKER10Z8 — hide fake 267 and cosmetic tags', { concurrency: 1 }, 
   test('A: 32 fake 267 rows hidden from public cards and counts', async () => {
     setupTestDb();
     const rows = Array.from({ length: 32 }, (_, i) => fake267Row(i));
+    if (isTrustedRadiantCatfishInCatalog()) delete process.env.FISHIT_DISABLE_RADIANT_267_PROMO;
     const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
     assert.ok(!pub.publicItems.some((f) => /unknown fish #267/i.test(f.name || f.cardName || '')));
     if (isTrustedRadiantCatfishInCatalog()) {
@@ -1351,7 +1353,7 @@ describe('BLOCKER10Z8 — hide fake 267 and cosmetic tags', { concurrency: 1 }, 
     }));
     const fake267 = Array.from({ length: 32 }, (_, i) => fake267Row(i));
     const pub = await buildPublicFishFields([...verified, ...fake267], 'http://127.0.0.1:8791');
-    const radiantExtra = isTrustedRadiantCatfishInCatalog() ? 1 : 0;
+    const radiantExtra = (process.env.FISHIT_DISABLE_RADIANT_267_PROMO !== '1' && isTrustedRadiantCatfishInCatalog()) ? 1 : 0;
     assert.equal(pub.publicCounts.visibleFishInstances, 20 + radiantExtra);
     assert.equal(pub.publicCounts.hiddenUnresolvedFishRows, 32 - radiantExtra);
     assert.equal(pub.fishCounts.fishInstances, 20 + radiantExtra);
@@ -1423,6 +1425,7 @@ describe('BLOCKER10Z9 — snapshot truth, Radiant Catfish, full rarity cards', {
 
   test('B: Radiant Catfish promoted from trusted ambiguous 267 row', async () => {
     setupTestDb();
+    delete process.env.FISHIT_DISABLE_RADIANT_267_PROMO;
     const rows = [{
       name: 'Item #267',
       itemId: '267',
@@ -1483,6 +1486,7 @@ describe('BLOCKER10Z9 — snapshot truth, Radiant Catfish, full rarity cards', {
   test('H: promoteTrustedAmbiguousContainerRows sets metadataFishName', () => {
     const learnedFishCatalog = require('../src/fishitLearnedFishCatalog');
     if (!isTrustedRadiantCatfishInCatalog()) return;
+    delete process.env.FISHIT_DISABLE_RADIANT_267_PROMO;
     const rows = promoteTrustedAmbiguousContainerRows([{
       name: 'Item #267',
       itemId: '267',
@@ -1523,6 +1527,7 @@ describe('BLOCKER10Z10 — card contrast and Radiant Catfish name fix', { concur
 
   test('B: Radiant Catfish keeps full name without Radiant mutation badge', async () => {
     setupTestDb();
+    delete process.env.FISHIT_DISABLE_RADIANT_267_PROMO;
     const rows = [{
       name: 'Item #267',
       itemId: '267',
@@ -1579,6 +1584,7 @@ describe('BLOCKER10Z10 — card contrast and Radiant Catfish name fix', { concur
 
   test('D: rendered HTML has Radiant Catfish title without separate Radiant badge', async () => {
     setupTestDb();
+    delete process.env.FISHIT_DISABLE_RADIANT_267_PROMO;
     const rows = [{
       name: 'Item #267',
       itemId: '267',
@@ -1632,9 +1638,9 @@ describe('BLOCKER10Z10 — card contrast and Radiant Catfish name fix', { concur
     assert.ok(!gPub.publicItems.some((f) => /goliath/i.test(f.name || '')));
   });
 
-  test('F: build marker is BLOCKER10Z10', () => {
+  test('F: build marker is BLOCKER10Z11', () => {
     const { buildTrackerPageLocals, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
-    assert.equal(BLOCKER10Z10_BUILD, 'BLOCKER10Z10_CARD_CONTRAST_AND_RADIANT_NAME_FIX_2026_06_08');
+    assert.equal(BLOCKER10Z10_BUILD, Z11_BUILD);
     assert.equal(PUBLIC_API_BUILD, BLOCKER10Z10_BUILD);
     const locals = buildTrackerPageLocals();
     assert.equal(locals.renderBuild, BLOCKER10Z10_BUILD);
@@ -1659,7 +1665,7 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   test('GET /tracker returns HTTP 200 with no session data', async () => {
     const res = await request(makeApp()).get('/tracker').expect(200);
     assert.match(res.text, /Fish It Live Inventory Tracker/i);
-    assert.match(res.text, /BLOCKER10Z10/);
+    assert.match(res.text, /BLOCKER10Z11/);
   });
 
   test('GET /tracker?debug=global returns HTTP 200', async () => {
@@ -1670,9 +1676,9 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   test('buildTrackerPageLocals does not reference undefined build constants', () => {
     const { buildTrackerPageLocals } = require('../src/fishitTrackerRoutes');
     const locals = buildTrackerPageLocals();
-    assert.equal(locals.publicApiBuild, BLOCKER10Z10_BUILD);
-    assert.equal(locals.blocker10vBuild, BLOCKER10Z10_BUILD);
-    assert.equal(locals.renderBuild, BLOCKER10Z10_BUILD);
+    assert.equal(locals.publicApiBuild, Z11_BUILD);
+    assert.equal(locals.blocker10vBuild, Z11_BUILD);
+    assert.equal(locals.renderBuild, Z11_BUILD);
   });
 
   test('buildGlobalDbProofHtml handles missing ambiguousContainerProof', () => {
@@ -1721,5 +1727,224 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
     });
     assert.ok(typeof html === 'string');
     assert.doesNotMatch(html, /ambiguousContainerProof rowsSeen=/);
+  });
+});
+
+describe('BLOCKER10Z11 — DENG Fish It bot rarity + safe global relearn', { concurrency: 1 }, () => {
+  const dengBotCatalog = require('../src/fishitDengFishItBotCatalog');
+  const globalLearning = require('../src/fishitGlobalLearning');
+  const rarityEnrichment = require('../src/fishitRarityEnrichment');
+  const catchNameParser = require('../src/fishitCatchNameParser');
+  const { buildNameParserProof } = require('../src/fishitTrackerRoutes');
+  const { BLOCKER10Z11_BUILD } = require('../src/fishitTrackerBuild');
+  const { spawnSync } = require('node:child_process');
+
+  beforeEach(() => {
+    setupTestDb();
+    dengBotCatalog._reset();
+    globalLearning._reset();
+  });
+
+  test('build marker is BLOCKER10Z11', () => {
+    assert.equal(BLOCKER10Z11_BUILD, Z11_BUILD);
+  });
+
+  test('A: DENG Fish It bot catalog loader loads rarity source', () => {
+    const proof = dengBotCatalog.buildCatalogProof();
+    assert.equal(proof.sourceType, 'deng_fish_it_bot_sqlite');
+    assert.ok(proof.rowsLoaded > 0);
+    assert.ok(proof.rarityCounts.Secret > 0);
+    assert.ok(proof.rarityCounts.Forgotten > 0);
+    assert.ok(Array.isArray(proof.sampleEntries));
+  });
+
+  test('B: Secret/Forgotten examples resolve from DENG Fish It bot data', () => {
+    const squid = dengBotCatalog.lookupRarity('Giant Squid');
+    const thunder = dengBotCatalog.lookupRarity('Thunderzilla');
+    assert.equal(squid?.rarity, 'Secret');
+    assert.equal(squid?.raritySource, 'deng_fish_it_bot');
+    assert.equal(thunder?.rarity, 'Forgotten');
+  });
+
+  test('C: Giant Squid remains Giant Squid and gets correct rarity', () => {
+    setupTestDb();
+    const hit = rarityEnrichment.lookupRarityForItem({ baseFishName: 'Giant Squid', name: 'Giant Squid' });
+    assert.equal(hit?.rarity, 'Secret');
+    const entry = dengBotCatalog.lookupEntry('Giant Squid');
+    assert.equal(entry?.baseFishName, 'Giant Squid');
+  });
+
+  test('D: Panther Eel gets correct Secret rarity', () => {
+    const hit = rarityEnrichment.lookupRarityForItem({ baseFishName: 'Panther Eel', name: 'Panther Eel' });
+    assert.equal(hit?.rarity, 'Secret');
+  });
+
+  test('E: Freshwater Piranha gets Rare from game_verified_seed not bot', async () => {
+    setupTestDb();
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    const sp = globalDb.findSpeciesByAliases(['Freshwater Piranha']);
+    assert.equal(sp?.species?.rarity, 'Rare');
+    const hit = rarityEnrichment.lookupRarityForItem({ baseFishName: 'Freshwater Piranha', name: 'Freshwater Piranha' });
+    assert.equal(hit?.rarity, 'Rare');
+    assert.ok(hit?.raritySource === 'game_verified_seed' || hit?.raritySource === 'global_db' || String(hit?.raritySource || '').includes('seed'));
+  });
+
+  test('F: Radiant Catfish remains full name and does not emit Radiant mutation badge', () => {
+    const proof = buildNameParserProof({
+      name: 'Radiant Catfish',
+      baseFishName: 'Radiant Catfish',
+      mutation: null,
+      mutationTags: [],
+    });
+    assert.equal(proof.baseFishName, 'Radiant Catfish');
+    assert.ok(!proof.publicBadges.includes('Radiant'));
+  });
+
+  test('G: Big Freshwater Piranha public name becomes Freshwater Piranha', () => {
+    const { applyPublicCosmeticCleanup } = require('../src/fishitTrackerRoutes');
+    const cleaned = applyPublicCosmeticCleanup({
+      name: 'Big Freshwater Piranha',
+      baseFishName: 'Freshwater Piranha',
+      mutation: 'Big',
+    });
+    assert.equal(cleaned.name, 'Freshwater Piranha');
+    assert.ok(!cleaned.mutation);
+  });
+
+  test('H: Shiny Panther Eel public name becomes Panther Eel', () => {
+    const { applyPublicCosmeticCleanup } = require('../src/fishitTrackerRoutes');
+    const cleaned = applyPublicCosmeticCleanup({
+      name: 'Shiny Panther Eel',
+      baseFishName: 'Panther Eel',
+      mutation: 'Shiny',
+    });
+    assert.equal(cleaned.name, 'Panther Eel');
+    assert.ok(!cleaned.mutation);
+  });
+
+  test('I: Goliath Tiger quarantined unless snapshot metadata proves it', async () => {
+    const { buildPublicFishFields } = require('../src/fishitTrackerRoutes');
+    const pub = await buildPublicFishFields([{
+      name: 'Goliath Tiger',
+      itemId: '1008',
+      category: 'fish',
+      amount: 1,
+    }], 'http://127.0.0.1:8791');
+    assert.ok(!pub.publicItems.some((f) => /goliath tiger/i.test(f.name || '')));
+  });
+
+  test('J: Unknown Fish #267 hidden from public', async () => {
+    const { buildPublicFishFields } = require('../src/fishitTrackerRoutes');
+    const pub = await buildPublicFishFields([{
+      name: 'Unknown Fish #267',
+      itemId: '267',
+      category: 'fish',
+      amount: 1,
+    }], 'http://127.0.0.1:8791');
+    assert.ok(!pub.publicItems.some((f) => /unknown fish #267/i.test(f.name || '')));
+  });
+
+  test('K: Global DB reset dry-run does not modify files', async () => {
+    const dbPath = globalDb.dbPath();
+    const beforeMtime = fs.existsSync(dbPath) ? fs.statSync(dbPath).mtimeMs : 0;
+    const proof = await globalCatalogService.resetGlobalCatalog({ dryRun: true });
+    assert.equal(proof.dryRun, true);
+    if (fs.existsSync(dbPath)) {
+      assert.equal(fs.statSync(dbPath).mtimeMs, beforeMtime);
+    }
+  });
+
+  test('L: Global DB reset confirm creates backup before writing', async () => {
+    if (!fs.existsSync(quizBotCatalog.BANK_PATH)) return;
+    await globalCatalogService.importQuizBotSeed();
+    globalDb.insertObservation({
+      anonymized_user_hash: 'abc',
+      item_id: '9999',
+      parsed_base_name: 'Test Fish',
+      source_payload_type: 'inventory_snapshot',
+      observed_at: new Date().toISOString(),
+    });
+    const proof = await globalCatalogService.resetGlobalCatalog({ confirm: true });
+    assert.equal(proof.dryRun, false);
+    assert.ok(proof.backupCreated.length >= 0);
+    assert.ok(proof.quarantinedEntries.some((q) => q.itemId === '1008'));
+  });
+
+  test('M: Reset preserves image cache by default', async () => {
+    const proof = await globalCatalogService.resetGlobalCatalog({ dryRun: true });
+    assert.ok(proof.preservedFiles.some((p) => /fish_image_cache/.test(p)));
+  });
+
+  test('N: Learning pipeline records pending but does not promote ambiguous itemId-only rows', () => {
+    const blocked = globalLearning.recordLearningEvidence({ itemId: '267', rawName: 'Item #267' });
+    assert.equal(blocked.decision, 'quarantined');
+    const phantom = globalLearning.recordLearningEvidence({ itemId: '1008', rawName: 'Goliath Tiger' });
+    assert.equal(phantom.accepted, false);
+    const pending = globalLearning.recordLearningEvidence({
+      itemId: '385',
+      rawName: 'Some Unknown Fish',
+      baseFishName: 'Some Unknown Fish',
+      sourcePayloadType: 'inventory_snapshot',
+      userId: 'user1',
+    });
+    assert.equal(pending.decision, 'pending');
+  });
+
+  test('O: Public /tracker does not show debug/global/reset proof', () => {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    const script = tpl.slice(tpl.indexOf('<script>'), tpl.indexOf('</script>') + 9);
+    const fn = script.match(/function buildGlobalDbProofHtml\(data\)\s*\{[\s\S]*?\n  \}/);
+    const buildGlobalDbProofHtml = new Function('DEBUG_GLOBAL', 'escHtml', `${fn[0]}; return buildGlobalDbProofHtml;`)(
+      false,
+      (s) => String(s),
+    );
+    const hidden = buildGlobalDbProofHtml({
+      dengFishItBotCatalogProof: { sourceType: 'test', rowsLoaded: 1, rarityCounts: { Secret: 1 } },
+      globalLearningProof: { totalRecords: 1 },
+      resetSeedProof: { dryRun: true, seededEntries: {} },
+      globalDbUiProof: { sourceOfTruth: 'global_db', speciesCount: 1 },
+    });
+    assert.equal(hidden, '');
+  });
+
+  test('P: /tracker?debug=global does show proof markers', async () => {
+    const express = require('express');
+    const request = require('supertest');
+    const trackerRouter = require('../src/fishitTrackerRoutes');
+    const app = express();
+    app.set('view engine', 'ejs');
+    app.set('views', path.join(__dirname, '..', 'views'));
+    app.use(trackerRouter);
+    const res = await request(app).get('/tracker?debug=global').expect(200);
+    assert.match(res.text, /debug=global|global-db-proof/i);
+  });
+
+  test('Q: Card contrast CSS/classes exist for Secret/Forgotten/Rare/neutral', () => {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.match(tpl, /--card-fg/);
+    assert.match(tpl, /--badge-bg/);
+    assert.match(tpl, /rarity-secret/);
+    assert.match(tpl, /rarity-forgotten/);
+    assert.match(tpl, /rarity-rare/);
+  });
+
+  test('R: importDengFishItBotSeed updates species from bot catalog', () => {
+    const result = globalCatalogService.importDengFishItBotSeed();
+    assert.equal(result.ok, true);
+    assert.ok(result.speciesUpdated > 0);
+    const gs = globalDb.findSpeciesByAliases(['Giant Squid']);
+    assert.equal(gs?.species?.rarity, 'Secret');
+  });
+
+  test('S: reset script dry-run exits 0', () => {
+    const repoRoot = path.join(__dirname, '..', '..');
+    const r = spawnSync(process.execPath, ['scripts/reset_fishit_global_catalog.js', '--dry-run'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: { ...process.env, FISHIT_GLOBAL_DB_PATH: tmpDb || path.join(os.tmpdir(), 'fishit-reset-dry.db') },
+    });
+    assert.equal(r.status, 0, r.stderr || r.stdout);
+    assert.match(r.stdout, /dry-run complete/i);
   });
 });

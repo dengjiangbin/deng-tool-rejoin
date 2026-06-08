@@ -337,6 +337,21 @@
         `<br>${escHtml(p.publicName || '?')} orig=${escHtml(p.originalName || '-')} base=${escHtml(p.baseFishName || '-')} stripped=${escHtml(JSON.stringify(p.strippedTags || []))} badges=${escHtml(JSON.stringify(p.publicBadges || []))} protected=${escHtml(p.protectedNameReason || '-')}`
       ).join('')}</div>`;
     }
+    let botCatalogRows = '';
+    const dbp = data.dengFishItBotCatalogProof;
+    if (dbp) {
+      botCatalogRows = `<div class="global-db-debug">dengFishItBotCatalogProof source=${escHtml(dbp.sourceType || '-')} rows=${dbp.rowsLoaded != null ? dbp.rowsLoaded : '?'} Secret=${dbp.rarityCounts && dbp.rarityCounts.Secret != null ? dbp.rarityCounts.Secret : 0} Forgotten=${dbp.rarityCounts && dbp.rarityCounts.Forgotten != null ? dbp.rarityCounts.Forgotten : 0}${Array.isArray(dbp.sampleEntries) ? dbp.sampleEntries.slice(0, 6).map((e) => `<br>${escHtml(e.baseFishName)} → ${escHtml(e.rarity)} (${escHtml(e.rarityConfidence || '-')})`).join('') : ''}</div>`;
+    }
+    let learningRows = '';
+    const glp = data.globalLearningProof;
+    if (glp) {
+      learningRows = `<div class="global-db-debug">globalLearningProof total=${glp.totalRecords != null ? glp.totalRecords : 0} status=${escHtml(JSON.stringify(glp.statusCounts || {}))}</div>`;
+    }
+    let resetRows = '';
+    if (data.resetSeedProof) {
+      const rsp = data.resetSeedProof;
+      resetRows = `<div class="global-db-debug">resetSeedProof dryRun=${rsp.dryRun ? 'yes' : 'no'} seeded=${escHtml(JSON.stringify(rsp.seededEntries || {}))}</div>`;
+    }
     let catchRows = '';
     const cl = data.catchLearningProof;
     if (cl) {
@@ -358,7 +373,7 @@
     <div class="gdb-row"><span>Images</span><span>${g.imageAssetCount != null ? g.imageAssetCount : '?'}</span></div>
     <div class="gdb-row"><span>Cards w/ global image</span><span>${escHtml(imgLabel)}</span></div>
     <div class="gdb-row"><span>Cards w/ global rarity</span><span>${escHtml(rarLabel)}</span></div>
-    ${parityRows}${amountRows}${ambiguousRows}${hiddenRows}${quarantineRows}${missingFishRows}${parserRows}${catchRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
+    ${parityRows}${amountRows}${ambiguousRows}${hiddenRows}${quarantineRows}${missingFishRows}${parserRows}${botCatalogRows}${learningRows}${resetRows}${catchRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
   </div>
 </details>`;
   }

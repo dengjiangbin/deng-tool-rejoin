@@ -45,7 +45,7 @@ const protectedFishNames = require('./fishitProtectedFishNames');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10Z10_BUILD, BLOCKER10Z10_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10Z11_BUILD, BLOCKER10Z11_UI_MARKER } = require('./fishitTrackerBuild');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
 const globalCatalogService = require('./fishitGlobalCatalogService');
 const globalDb = require('./fishitGlobalDb');
@@ -113,6 +113,8 @@ function recordGlobalObservationsFromItems(items, ctx = {}) {
         gameId: ctx.gameId,
         placeId: ctx.placeId,
         sourcePayloadType: 'inventory_snapshot',
+        metadataFishName: it.metadataFishName,
+        metadataFishId: it.metadataFishId,
       });
       if (result?.accepted !== false) written += 1;
     } catch (_) { /* non-blocking */ }
@@ -135,8 +137,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10Z10_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10Z10_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10Z11_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10Z11_BUILD;
 
 const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
@@ -687,6 +689,7 @@ function isTrustedRadiantCatfishInCatalog() {
 /** Promote ONE trusted ambiguous-container row when catalog confirms species (BLOCKER10Z9). */
 function promoteTrustedAmbiguousContainerRows(items) {
   if (!Array.isArray(items)) return items;
+  if (process.env.FISHIT_DISABLE_RADIANT_267_PROMO === '1') return items;
   const amb267 = items.filter(
     (it) => isAmbiguousContainerItem(it) && it?.replionUuid && !hasReplionMetadataIdentity(it),
   );
@@ -3088,6 +3091,11 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     globalConflictProof: globalCatalogService.buildGlobalConflictProof(15),
     globalContributionProof: globalCatalogService.buildGlobalContributionProof(),
     quizBotSeedImportProof: globalCatalogService.buildQuizBotSeedImportProof(),
+    dengFishItBotCatalogProof: globalCatalogService.buildDengFishItBotCatalogProof(
+      publicFishDbg.fishItems.map((f) => f.baseFishName || f.name).filter(Boolean),
+    ),
+    globalLearningProof: globalCatalogService.buildGlobalLearningProof(25),
+    resetSeedProof: globalCatalogService.getLastResetSeedProof(),
     globalDbStats: globalDb.getStats(),
     publicFilterTrace: buildPublicFilterTrace(enrichedAll),
     inventoryParityProof: buildInventoryParityProof(
@@ -3225,9 +3233,10 @@ module.exports.buildAmbiguousContainerProof = buildAmbiguousContainerProof;
 module.exports.AMBIGUOUS_CONTAINER_IDS = AMBIGUOUS_CONTAINER_IDS;
 module.exports.resolveAmbiguousContainerDisplay = resolveAmbiguousContainerDisplay;
 module.exports.trustedCatalogMetaForMetadataId = trustedCatalogMetaForMetadataId;
-module.exports.BLOCKER10Z10_BUILD = BLOCKER10Z10_BUILD;
-module.exports.BLOCKER10Z9_BUILD = BLOCKER10Z10_BUILD;
-module.exports.BLOCKER10Z8_BUILD = BLOCKER10Z10_BUILD;
+module.exports.BLOCKER10Z11_BUILD = BLOCKER10Z11_BUILD;
+module.exports.BLOCKER10Z10_BUILD = BLOCKER10Z11_BUILD;
+module.exports.BLOCKER10Z9_BUILD = BLOCKER10Z11_BUILD;
+module.exports.BLOCKER10Z8_BUILD = BLOCKER10Z11_BUILD;
 module.exports.isMutationEmbeddedInCanonicalName = isMutationEmbeddedInCanonicalName;
 module.exports.buildNameParserProof = buildNameParserProof;
 module.exports.isTrustedPublicNameSource = isTrustedPublicNameSource;
@@ -3238,7 +3247,7 @@ module.exports.promoteTrustedAmbiguousContainerRows = promoteTrustedAmbiguousCon
 module.exports.buildQuarantinedPublicNames = buildQuarantinedPublicNames;
 module.exports.buildMissingExpectedFishProof = buildMissingExpectedFishProof;
 module.exports.isTrustedRadiantCatfishInCatalog = isTrustedRadiantCatfishInCatalog;
-module.exports.BLOCKER10Z7_BUILD = BLOCKER10Z10_BUILD;
+module.exports.BLOCKER10Z7_BUILD = BLOCKER10Z11_BUILD;
 module.exports.renderTrackerPage = renderTrackerPage;
 module.exports.buildTrackerPageLocals = buildTrackerPageLocals;
 module.exports.BLOCKER10V_BUILD = PUBLIC_API_BUILD;
