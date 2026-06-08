@@ -1896,23 +1896,36 @@ function mapDebugItemWithResolution(raw, enriched) {
 }
 
 // ── GET /tracker – serve the dashboard page ───────────────────────
-function renderTrackerPage(_req, res) {
-  res.render('fishit_tracker', {
+function buildTrackerPageLocals() {
+  const build = PUBLIC_API_BUILD;
+  return {
     layout: false,
     title: '🎣 Fish It Live Inventory Tracker',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
-    blocker10vBuild: BLOCKER10V_BUILD,
-    blocker10u6Build: BLOCKER10V_BUILD,
-    blocker10u5Build: BLOCKER10V_BUILD,
-    blocker10u3u4Build: BLOCKER10V_BUILD,
-    blocker10u2Build: BLOCKER10V_BUILD,
-    blocker10uBuild: BLOCKER10V_BUILD,
-    blocker10tBuild: BLOCKER10V_BUILD,
-    blocker10sBuild: BLOCKER10V_BUILD,
-    blocker10rBuild: BLOCKER10V_BUILD,
-    blocker10qBuild: BLOCKER10V_BUILD,
-  });
+    blocker10vBuild: build,
+    blocker10u6Build: build,
+    blocker10u5Build: build,
+    blocker10u3u4Build: build,
+    blocker10u2Build: build,
+    blocker10uBuild: build,
+    blocker10tBuild: build,
+    blocker10sBuild: build,
+    blocker10rBuild: build,
+    blocker10qBuild: build,
+  };
+}
+
+function renderTrackerPage(_req, res) {
+  try {
+    return res.render('fishit_tracker', buildTrackerPageLocals());
+  } catch (err) {
+    console.error('[fishit-tracker] /tracker render failed:',
+      err && err.stack ? err.stack : err);
+    if (!res.headersSent) {
+      return res.status(200).render('fishit_tracker', buildTrackerPageLocals());
+    }
+  }
 }
 
 router.get('/tracker', renderTrackerPage);
@@ -2748,6 +2761,8 @@ module.exports.AMBIGUOUS_CONTAINER_IDS = AMBIGUOUS_CONTAINER_IDS;
 module.exports.resolveAmbiguousContainerDisplay = resolveAmbiguousContainerDisplay;
 module.exports.trustedCatalogMetaForMetadataId = trustedCatalogMetaForMetadataId;
 module.exports.BLOCKER10Z7_BUILD = BLOCKER10Z7_BUILD;
+module.exports.renderTrackerPage = renderTrackerPage;
+module.exports.buildTrackerPageLocals = buildTrackerPageLocals;
 module.exports.BLOCKER10V_BUILD = PUBLIC_API_BUILD;
 module.exports.BLOCKER10U6_BUILD = PUBLIC_API_BUILD;
 module.exports.BLOCKER10U5_BUILD = PUBLIC_API_BUILD;

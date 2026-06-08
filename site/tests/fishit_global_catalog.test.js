@@ -1220,3 +1220,86 @@ describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () =>
     assert.ok(Array.isArray(proof.sample));
   });
 });
+
+describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
+  const express = require('express');
+  const request = require('supertest');
+  const trackerRouter = require('../src/fishitTrackerRoutes');
+  const ejs = require('ejs');
+  const { BLOCKER10Z7_BUILD } = require('../src/fishitTrackerBuild');
+
+  function makeApp() {
+    const app = express();
+    app.set('view engine', 'ejs');
+    app.set('views', path.join(__dirname, '..', 'views'));
+    app.use(trackerRouter);
+    return app;
+  }
+
+  test('GET /tracker returns HTTP 200 with no session data', async () => {
+    const res = await request(makeApp()).get('/tracker').expect(200);
+    assert.match(res.text, /Fish It Live Inventory Tracker/i);
+    assert.match(res.text, /BLOCKER10Z7/);
+  });
+
+  test('GET /tracker?debug=global returns HTTP 200', async () => {
+    const res = await request(makeApp()).get('/tracker?debug=global').expect(200);
+    assert.match(res.text, /DEBUG_GLOBAL|global-db-proof|fishit-tracker/i);
+  });
+
+  test('buildTrackerPageLocals does not reference undefined build constants', () => {
+    const { buildTrackerPageLocals } = require('../src/fishitTrackerRoutes');
+    const locals = buildTrackerPageLocals();
+    assert.equal(locals.publicApiBuild, BLOCKER10Z7_BUILD);
+    assert.equal(locals.blocker10vBuild, BLOCKER10Z7_BUILD);
+    assert.equal(locals.renderBuild, BLOCKER10Z7_BUILD);
+  });
+
+  test('buildGlobalDbProofHtml handles missing ambiguousContainerProof', () => {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    const fnStart = tpl.indexOf('function buildGlobalDbProofHtml(data)');
+    const fnBody = tpl.slice(fnStart, tpl.indexOf('function rarityNameStyle', fnStart));
+    assert.ok(fnBody.includes('ambiguousContainerProof'));
+    assert.ok(fnBody.includes('rowsSeen != null'));
+  });
+
+  test('buildGlobalDbProofHtml renders with Z7 debug payload', () => {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    const script = tpl.slice(tpl.indexOf('<script>'), tpl.indexOf('</script>') + 9);
+    const fn = script.match(/function buildGlobalDbProofHtml\(data\)\s*\{[\s\S]*?\n  \}/);
+    assert.ok(fn, 'buildGlobalDbProofHtml must exist');
+    const buildGlobalDbProofHtml = new Function('DEBUG_GLOBAL', 'escHtml', `${fn[0]}; return buildGlobalDbProofHtml;`)(
+      true,
+      (s) => String(s),
+    );
+    const html = buildGlobalDbProofHtml({
+      globalDbUiProof: { sourceOfTruth: 'global_db', speciesCount: 1 },
+      amountProof: { allVerified: true, rows: [] },
+      ambiguousContainerProof: {
+        rowsSeen: 32,
+        rowsWithMetadataFishId: 0,
+        rowsWithMetadataFishName: 0,
+        rowsUnresolved: 32,
+        sample: [],
+      },
+      ambiguousContainerIds: [267],
+    });
+    assert.match(html, /ambiguousContainerProof rowsSeen=32/);
+  });
+
+  test('buildGlobalDbProofHtml renders when ambiguousContainerProof is missing', () => {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    const script = tpl.slice(tpl.indexOf('<script>'), tpl.indexOf('</script>') + 9);
+    const fn = script.match(/function buildGlobalDbProofHtml\(data\)\s*\{[\s\S]*?\n  \}/);
+    const buildGlobalDbProofHtml = new Function('DEBUG_GLOBAL', 'escHtml', `${fn[0]}; return buildGlobalDbProofHtml;`)(
+      true,
+      (s) => String(s),
+    );
+    const html = buildGlobalDbProofHtml({
+      globalDbUiProof: { sourceOfTruth: 'global_db' },
+      amountProof: { allVerified: true, rows: [] },
+    });
+    assert.ok(typeof html === 'string');
+    assert.doesNotMatch(html, /ambiguousContainerProof rowsSeen=/);
+  });
+});

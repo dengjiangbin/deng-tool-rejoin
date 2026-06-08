@@ -302,9 +302,11 @@
       ).join('')}</div>`;
     }
     let ambiguousRows = '';
-    const acp = data.ambiguousContainerProof;
+    const acp = (data && data.ambiguousContainerProof && typeof data.ambiguousContainerProof === 'object')
+      ? data.ambiguousContainerProof : null;
     if (acp) {
-      ambiguousRows = `<div class="global-db-debug">ambiguousContainerIds=${escHtml(JSON.stringify(data.ambiguousContainerIds || [267]))}<br>ambiguousContainerProof rowsSeen=${acp.rowsSeen} metaId=${acp.rowsWithMetadataFishId} metaName=${acp.rowsWithMetadataFishName} unresolved=${acp.rowsUnresolved}</div>`;
+      const ids = Array.isArray(data.ambiguousContainerIds) ? data.ambiguousContainerIds : [267];
+      ambiguousRows = `<div class="global-db-debug">ambiguousContainerIds=${escHtml(JSON.stringify(ids))}<br>ambiguousContainerProof rowsSeen=${acp.rowsSeen != null ? acp.rowsSeen : 0} metaId=${acp.rowsWithMetadataFishId != null ? acp.rowsWithMetadataFishId : 0} metaName=${acp.rowsWithMetadataFishName != null ? acp.rowsWithMetadataFishName : 0} unresolved=${acp.rowsUnresolved != null ? acp.rowsUnresolved : 0}</div>`;
     }
     let catchRows = '';
     const cl = data.catchLearningProof;
