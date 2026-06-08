@@ -626,12 +626,14 @@
       nameEl.style.cssText = nameStyle;
     }
     const amount = Number(item.amount || 1);
-    const metaEl = card.querySelector('.fish-card__meta, .ic-meta');
-    if (metaEl) {
-      const rc = rarityClass(rarity);
-      const qty = `<span class="fish-card__pill fish-card__amount ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
-      const rarityBadge = rarity ? `<span class="fish-card__pill fish-card__rarity ${rc}">${escHtml(rarity)}</span>` : '';
-      metaEl.innerHTML = qty + rarityBadge;
+    let amountEl = card.querySelector('.fish-card__amount, .ic-qty');
+    const qtyHtml = `<span class="fish-card__amount ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
+    if (amountEl) {
+      amountEl.outerHTML = qtyHtml;
+    } else {
+      const metaEl = card.querySelector('.fish-card__meta, .ic-meta');
+      if (metaEl) metaEl.remove();
+      card.insertAdjacentHTML('afterbegin', qtyHtml);
     }
     let img = card.querySelector('.fish-card__image, img');
     if (!img) {
