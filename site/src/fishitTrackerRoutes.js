@@ -142,7 +142,7 @@ const AMBIGUOUS_CONTAINER_IDS = new Set(['267']);
 
 function isAmbiguousContainerItem(item) {
   if (item?.isAmbiguousContainerId === true) return true;
-  const top = String(item?.replionTopLevelId || item?.containerItemId || '').trim();
+  const top = String(item?.replionTopLevelId || item?.containerItemId || item?.itemId || '').trim();
   return top && AMBIGUOUS_CONTAINER_IDS.has(top);
 }
 
@@ -560,7 +560,7 @@ function mergeItemsNoDowngrade(incoming, existing) {
 /** BLOCKER10H: enrich incoming placeholders from persistent catalog before store. */
 function _itemIdLockedBaseName(itemId) {
   const id = String(itemId || '').trim();
-  if (!id) return null;
+  if (!id || AMBIGUOUS_CONTAINER_IDS.has(id)) return null;
   const manual = manualVerifiedCatalog.lookupByItemId(id);
   if (manual?.baseFishName && !rarityLabels.isBlockedLearnName(manual.baseFishName)) {
     return manual.baseFishName;
@@ -580,6 +580,7 @@ function _itemIdLockedBaseName(itemId) {
 }
 
 function catalogMetaForItemId(itemId) {
+  if (AMBIGUOUS_CONTAINER_IDS.has(String(itemId || ''))) return null;
   const manual = manualVerifiedCatalog.lookupByItemId(itemId);
   if (manual && manual.baseFishName && !rarityLabels.isBlockedLearnName(manual.baseFishName)) {
     return {

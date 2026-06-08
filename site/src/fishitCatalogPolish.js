@@ -294,7 +294,9 @@ function publicAggregationKey(item) {
     }
     if (item?.replionUuid) return `uuid:${String(item.replionUuid).toLowerCase()}`;
     const top = item?.replionTopLevelId || item?.containerItemId || item?.itemId || '?';
-    return `ambig:${top}:${String(item?.name || '').toLowerCase()}`;
+    const w = Number(item?.weightKg != null ? item.weightKg : item?.weight);
+    const wKey = Number.isFinite(w) ? w.toFixed(2) : 'na';
+    return `ambig:${top}:${wKey}:${String(item?.name || '').toLowerCase()}`;
   }
   if (item?.replionIdentityUnverified) {
     if (item?.replionUuid) return `uuid:${String(item.replionUuid).toLowerCase()}`;

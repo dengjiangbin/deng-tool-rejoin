@@ -139,6 +139,9 @@ function itemsForSessionDisplay(data) {
   if (data.partialSnapshotDetected && data.lastGoodFishPreserved && data.lastGoodFishItems?.length) {
     return data.lastGoodFishItems;
   }
+  if (Array.isArray(data.inventory?.all) && data.inventory.all.length) {
+    return data.inventory.all;
+  }
   return (data.rawItems && data.rawItems.length) ? data.rawItems : (data.items || []);
 }
 
