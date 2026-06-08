@@ -97,18 +97,22 @@
 
     .items-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; margin-top:4px; }
 
-    .item-card { background:var(--surface2); border:1.5px solid var(--border); border-radius:var(--radius); padding:14px; display:flex; flex-direction:column; gap:8px; transition:border-color .2s,transform .15s,box-shadow .2s; animation:fadeIn .2s ease; }
-    .item-card:hover { transform:translateY(-2px); }
-    .item-card.shiny { border-color:var(--shine); background:linear-gradient(135deg,#1a1500 0%,var(--surface2) 60%); }
-    .item-card.rarity-common { border-color:#4b5563; background:linear-gradient(145deg,#111318 0%,#1a1d24 55%,var(--surface2) 100%); }
-    .item-card.rarity-uncommon { border-color:#4ade80; background:linear-gradient(145deg,#091a0f 0%,#0f2418 55%,var(--surface2) 100%); box-shadow:0 0 8px rgba(74,222,128,.08); }
-    .item-card.rarity-rare { border-color:#60a5fa; background:linear-gradient(145deg,#0d1f30 0%,#122a42 55%,var(--surface2) 100%); box-shadow:0 0 10px rgba(96,165,250,.12); }
-    .item-card.rarity-epic { border-color:#c084fc; background:linear-gradient(145deg,#1a0f2e 0%,#251540 55%,var(--surface2) 100%); box-shadow:0 0 10px rgba(192,132,252,.12); }
-    .item-card.rarity-legendary { border-color:#eab308; background:linear-gradient(145deg,#3d2c00 0%,#4a3600 55%,var(--surface2) 100%); box-shadow:0 0 10px rgba(234,179,8,.14); }
-    .item-card.rarity-mythic { border-color:#f472b6; background:linear-gradient(145deg,#3b1024 0%,#4a1530 55%,var(--surface2) 100%); box-shadow:0 0 10px rgba(244,114,182,.12); }
-    .item-card.rarity-secret { border-color:#22d3ee; background:linear-gradient(145deg,#042f2e 0%,#064e45 50%,#0a1a18 100%); box-shadow:0 0 14px rgba(34,211,238,.18); }
-    .item-card.rarity-secret:hover { border-color:#67e8f9; box-shadow:0 0 18px rgba(34,211,238,.25); }
-    .item-card.rarity-forgotten { border-color:#818cf8; background:linear-gradient(145deg,#0d0d30 0%,#151540 55%,var(--surface2) 100%); }
+    .item-card, .fish-card { border:0; border-radius:12px; padding:12px; min-height:118px; display:flex; flex-direction:column; gap:8px; color:#fff; box-shadow:0 10px 24px rgba(0,0,0,.22); overflow:hidden; transition:transform .15s,box-shadow .2s; animation:fadeIn .2s ease; }
+    .item-card:hover, .fish-card:hover { transform:translateY(-2px); box-shadow:0 14px 28px rgba(0,0,0,.28); }
+    .item-card.rarity-common, .fish-card.rarity-common { background:linear-gradient(135deg,#242936 0%,#141820 100%); }
+    .item-card.rarity-uncommon, .fish-card.rarity-uncommon { background:linear-gradient(135deg,#2a3440 0%,#1a2030 100%); }
+    .item-card.rarity-rare, .fish-card.rarity-rare { background:linear-gradient(135deg,#60b4ff 0%,#3d88dc 100%); }
+    .item-card.rarity-epic, .fish-card.rarity-epic { background:linear-gradient(135deg,#b879ff 0%,#8152d6 100%); }
+    .item-card.rarity-legendary, .fish-card.rarity-legendary { background:linear-gradient(135deg,#ffc936 0%,#d79413 100%); }
+    .item-card.rarity-mythic, .fish-card.rarity-mythic { background:linear-gradient(135deg,#ff2525 0%,#c90d12 100%); }
+    .item-card.rarity-secret, .fish-card.rarity-secret { background:linear-gradient(135deg,#10e487 0%,#09c96f 55%,#079b59 100%); }
+    .item-card.rarity-forgotten, .fish-card.rarity-forgotten { background:linear-gradient(135deg,#f0f0f0 0%,#777 50%,#111 100%); }
+    .item-card:not([class*="rarity-"]), .fish-card:not([class*="rarity-"]) { background:linear-gradient(135deg,#242936 0%,#141820 100%); border:1px solid var(--border); }
+
+    .item-card .item-name, .fish-card .item-name { color:#fff; text-shadow:0 1px 2px rgba(0,0,0,.35); }
+    .item-card .ic-meta .badge, .fish-card .ic-meta .badge { background:rgba(0,0,0,.35); border-color:rgba(255,255,255,.25); color:#fff; }
+    .item-card .ic-badges span[style], .fish-card .ic-badges span[style] { background:rgba(0,0,0,.35)!important; border-color:rgba(255,255,255,.2)!important; color:#fff!important; }
+    .item-card .ic-head img, .fish-card .ic-head img { background:rgba(0,0,0,.25)!important; box-shadow:0 2px 8px rgba(0,0,0,.25); }
 
     @keyframes fadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
 
@@ -152,8 +156,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08">
-<!-- BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08 -->
+<body data-ui-marker="BLOCKER10Z9_PUBLIC_SNAPSHOT_TRUTH_AND_FULL_RARITY_CARDS_2026_06_08">
+<!-- BLOCKER10Z9_PUBLIC_SNAPSHOT_TRUTH_AND_FULL_RARITY_CARDS_2026_06_08 -->
 <div class="page">
   <div class="inner">
 
@@ -260,20 +264,15 @@
   }
   function fishCountLabel(data, fishList) {
     const fc = data && data.fishCounts;
-    const cp = data && data.countParityProof;
-    const types = (fc && fc.fishTypes != null) ? fc.fishTypes : fishList.length;
-    const unmapped = (fc && fc.unmappedFishInstances != null) ? fc.unmappedFishInstances
-      : (cp && cp.unmappedFishCandidateInstances != null ? cp.unmappedFishCandidateInstances : 0);
-    const verified = fc && fc.fishInstancesVerified === true;
-    const fishTotal = verified && fc.fishInstances != null ? fc.fishInstances : null;
-    if (verified && fishTotal != null) {
-      let label = `Tracked fish: <strong>${fishTotal}</strong> &middot; Types: <span style="color:#8a94a6;">${types}</span>`;
-      if (unmapped > 0) label += ` &middot; <span style="color:#fbbf24;">Unmapped: ${unmapped}</span>`;
-      return label;
+    const pc = data && data.publicCounts;
+    const types = (pc && pc.visibleFishTypes != null) ? pc.visibleFishTypes
+      : ((fc && fc.fishTypes != null) ? fc.fishTypes : fishList.length);
+    const fishTotal = (pc && pc.visibleFishInstances != null) ? pc.visibleFishInstances
+      : ((fc && fc.fishInstances != null) ? fc.fishInstances : null);
+    if (fishTotal != null) {
+      return `Tracked fish: <strong>${fishTotal}</strong> &middot; Types: <span style="color:#8a94a6;">${types}</span>`;
     }
-    let label = `Types: <strong>${types}</strong>`;
-    if (unmapped > 0) label += ` &middot; <span style="color:#fbbf24;">Unmapped: ${unmapped}</span>`;
-    return label;
+    return `Types: <strong>${types}</strong>`;
   }
   function buildGlobalDbProofHtml(data) {
     if (!DEBUG_GLOBAL) return '';
@@ -314,6 +313,18 @@
     if (hpr || pc) {
       hiddenRows = `<div class="global-db-debug">publicCounts visible=${pc && pc.visibleFishInstances != null ? pc.visibleFishInstances : '?'} types=${pc && pc.visibleFishTypes != null ? pc.visibleFishTypes : '?'} hiddenUnresolved=${pc && pc.hiddenUnresolvedFishRows != null ? pc.hiddenUnresolvedFishRows : '?'}${hpr ? `<br>hiddenPublicRows ambiguousUnresolved=${hpr.ambiguousContainerUnresolved != null ? hpr.ambiguousContainerUnresolved : 0} ids=${escHtml(JSON.stringify(hpr.hiddenItemIds || []))}` : ''}</div>`;
     }
+    let quarantineRows = '';
+    if (Array.isArray(data.quarantinedPublicNames) && data.quarantinedPublicNames.length) {
+      quarantineRows = `<div class="global-db-debug">quarantinedPublicNames${data.quarantinedPublicNames.slice(0, 8).map((q) =>
+        `<br>${escHtml(q.name || '?')} id=${escHtml(q.itemId || '-')} reason=${escHtml(q.reason || '-')}`
+      ).join('')}</div>`;
+    }
+    let missingFishRows = '';
+    const mfp = data.missingExpectedFishProof;
+    if (mfp && mfp['Radiant Catfish']) {
+      const r = mfp['Radiant Catfish'];
+      missingFishRows = `<div class="global-db-debug">missingExpectedFishProof Radiant Catfish catalog=${r.foundInTrustedCatalog ? 'yes' : 'no'} matched=${r.currentSnapshotRowMatched ? 'yes' : 'no'} id=${escHtml(r.itemId || '-')} image=${r.imageResolved ? 'yes' : 'no'}</div>`;
+    }
     let catchRows = '';
     const cl = data.catchLearningProof;
     if (cl) {
@@ -335,7 +346,7 @@
     <div class="gdb-row"><span>Images</span><span>${g.imageAssetCount != null ? g.imageAssetCount : '?'}</span></div>
     <div class="gdb-row"><span>Cards w/ global image</span><span>${escHtml(imgLabel)}</span></div>
     <div class="gdb-row"><span>Cards w/ global rarity</span><span>${escHtml(rarLabel)}</span></div>
-    ${parityRows}${amountRows}${ambiguousRows}${hiddenRows}${catchRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
+    ${parityRows}${amountRows}${ambiguousRows}${hiddenRows}${quarantineRows}${missingFishRows}${catchRows}${rarityRows}${debugRows ? `<div class="global-db-debug">${debugRows}</div>` : ''}
   </div>
 </details>`;
   }
@@ -421,7 +432,7 @@
     const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
     const nameStyle = rarityNameStyle(item);
     const card = document.createElement('div');
-    card.className = 'item-card';
+    card.className = 'item-card fish-card';
     card.setAttribute('data-card-key', cardKey(item));
     if (item.dataSource) card.setAttribute('data-source', item.dataSource);
     if (item.dataImageSource) card.setAttribute('data-image-source', item.dataImageSource);
@@ -450,7 +461,7 @@
     const title   = cardTitle(item);
     const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
     card.setAttribute('data-card-key', cardKey(item));
-    card.className = 'item-card';
+    card.className = 'item-card fish-card';
     if (crc) card.classList.add(crc);
     if (isShiny && rarityLow !== 'secret') card.classList.add('shiny');
     if (item.mutation) card.setAttribute('data-mutation', item.mutation);
@@ -553,7 +564,7 @@
         : (item.mutation ? `<span class="badge" style="font-size:.68rem;">${escHtml(item.mutation)}</span>` : '');
       const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
       const altText = escHtml(title);
-      const cardCls = ['item-card'];
+      const cardCls = ['item-card', 'fish-card'];
       if (crc) cardCls.push(crc);
       if (isShiny && rarityLow !== 'secret') cardCls.push('shiny');
       const mutAttr = item.mutation ? ` data-mutation="${escHtml(item.mutation)}"` : '';
