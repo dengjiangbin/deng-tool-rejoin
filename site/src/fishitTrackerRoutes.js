@@ -46,8 +46,9 @@ const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
 const snapshotRecovery = require('./fishitSnapshotRecovery');
-const { BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const stoneImageAssets = require('./fishitStoneImageAssets');
+const inventorySort = require('./fishitInventorySort');
 const itemUtilityPublic = require('./fishitItemUtilityPublic');
 const gameItemDbPublic = require('./fishitGameItemDbPublic');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
@@ -141,8 +142,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10ZE_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10ZE_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10ZF_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10ZF_BUILD;
 
 const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
@@ -2163,19 +2164,23 @@ function isPublicFishItem(item) {
 async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
   const sessionData = options.sessionData || null;
   if (gameItemDbPublic.usesPlayerDataGameItemDbPublicIdentity(sessionData)) {
-    return gameItemDbPublic.buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, {
-      fishImageCache,
-    });
+    return inventorySort.applyPublicInventorySort(
+      await gameItemDbPublic.buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, {
+        fishImageCache,
+      }),
+    );
   }
   if (gameItemDbPublic.expectsPlayerDataGameItemDbPayload(sessionData)) {
     return gameItemDbPublic.buildWaitingForPlayerDataGameItemDbResponse(sessionData);
   }
   if (itemUtilityPublic.usesPlayerDataItemUtilityPublicIdentity(sessionData)) {
-    return itemUtilityPublic.buildPublicFromPlayerDataItemUtility(sessionData, baseUrl, {
-      fishImageAssets,
-      rarityEnrichment,
-      fishImageCache,
-    });
+    return inventorySort.applyPublicInventorySort(
+      await itemUtilityPublic.buildPublicFromPlayerDataItemUtility(sessionData, baseUrl, {
+        fishImageAssets,
+        rarityEnrichment,
+        fishImageCache,
+      }),
+    );
   }
   let items = annotateReplionIdentity(enrichedFlat || []);
   items = promoteTrustedAmbiguousContainerRows(items);
@@ -2251,9 +2256,9 @@ async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
     merged.fishInventory = buildInventoryGroups(merged.fishItems);
     merged.recoveredSpeciesImageResolutionProof = snapshotRecovery
       .buildRecoveredSpeciesImageResolutionProof(merged.fishItems);
-    return merged;
+    return inventorySort.applyPublicInventorySort(merged);
   }
-  return baseResult;
+  return inventorySort.applyPublicInventorySort(baseResult);
 }
 
 /** Legacy `counts` shape for public UI — fish metrics only (never mixed type totals). */
@@ -2473,7 +2478,7 @@ function buildTrackerPageLocals() {
   const build = PUBLIC_API_BUILD;
   return {
     layout: false,
-    title: '🎣 Fish It Live Inventory Tracker',
+    title: 'Inventory — Fish It',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
     blocker10vBuild: build,
@@ -2502,6 +2507,7 @@ function renderTrackerPage(_req, res) {
 }
 
 router.get('/tracker', renderTrackerPage);
+router.get('/inventory', renderTrackerPage);
 router.get('/fishit-tracker', renderTrackerPage);
 
 // ── GET /api/fishit-tracker/assets/stones/:filename — manual stone image cache (BLOCKER10ZD) ──
@@ -3222,6 +3228,7 @@ async function handleGetBackpack(req, res) {
       : 0,
     manualRarityProof: publicFish.manualRarityProof || null,
     stoneAssetProof: publicFish.stoneAssetProof || null,
+    inventorySortProof: publicFish.inventorySortProof || null,
     globalCatalogProof: (gameItemDbPublic.usesPlayerDataGameItemDbPublicIdentity(data)
       || itemUtilityPublic.usesPlayerDataItemUtilityPublicIdentity(data))
       ? null

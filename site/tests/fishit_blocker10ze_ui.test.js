@@ -6,10 +6,10 @@ const fs = require('fs');
 const path = require('path');
 
 const { formatQuantity, formatAmountLabel } = require('../src/fishitQuantityFormat');
-const { BLOCKER10ZE_BUILD } = require('../src/fishitTrackerBuild');
+const { BLOCKER10ZF_BUILD } = require('../src/fishitTrackerBuild');
 const { PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
 
-const FINAL_BUILD = 'BLOCKER10ZE_QUANTITY_FORMAT_BOTTOM_BADGES_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZF_INVENTORY_RENAME_RARITY_SORT_2026_06_09';
 const TPL_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
 
 function loadTrackerCardFns() {
@@ -42,8 +42,8 @@ function loadTrackerCardFns() {
 }
 
 describe('BLOCKER10ZE quantity format + bottom amount badges', () => {
-  test('build marker is BLOCKER10ZE', () => {
-    assert.equal(BLOCKER10ZE_BUILD, FINAL_BUILD);
+  test('build marker is BLOCKER10ZF', () => {
+    assert.equal(BLOCKER10ZF_BUILD, FINAL_BUILD);
     assert.equal(PUBLIC_API_BUILD, FINAL_BUILD);
   });
 

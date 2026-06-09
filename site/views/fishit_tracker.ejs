@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>&#x1F3A3; Fish It Live Inventory Tracker</title>
+  <title>Inventory &mdash; Fish It</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -270,8 +270,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10ZE_QUANTITY_FORMAT_BOTTOM_BADGES_2026_06_09">
-<!-- BLOCKER10ZE_QUANTITY_FORMAT_BOTTOM_BADGES_2026_06_09 -->
+<body data-ui-marker="BLOCKER10ZF_INVENTORY_RENAME_RARITY_SORT_2026_06_09">
+<!-- BLOCKER10ZF_INVENTORY_RENAME_RARITY_SORT_2026_06_09 -->
 <div class="page">
   <div class="inner">
 
@@ -283,24 +283,24 @@
     </a>
 
     <header class="header">
-      <h1>&#x1F3A3; Fish It Live Inventory Tracker</h1>
-      <p>Track unlimited players simultaneously � sessions are saved and restored on page reload.</p>
+      <h1>Inventory</h1>
+      <p>View Fish It inventories for unlimited players &mdash; sessions are saved and restored on page reload.</p>
     </header>
 
     <div class="add-row">
       <input type="text" id="usernameInput" placeholder="Enter Roblox Username..." maxlength="20" autocomplete="off" spellcheck="false" aria-label="Roblox username">
-      <button class="btn btn-primary" id="addBtn" type="button">+ Add Tracker</button>
+      <button class="btn btn-primary" id="addBtn" type="button">+ Add Player</button>
     </div>
 
     <div class="summary-bar">
-      <span id="summaryText">No active trackers</span>
+      <span id="summaryText">No players added yet</span>
     </div>
 
     <div id="trackerList"></div>
 
     <div class="no-trackers" id="noTrackersMsg">
-      <div class="icon">&#x1F3A3;</div>
-      <p>Add a Roblox username above to start live tracking.<br>Sessions are saved automatically and restored on page reload.</p>
+      <div class="icon">&#x1F392;</div>
+      <p>Add a Roblox username above to view their inventory.<br>Sessions are saved automatically and restored on page reload.</p>
     </div>
 
     <div class="loadstring-box">
@@ -330,6 +330,15 @@
   };
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret badge-rarity-secret', forgotten:'rarity-forgotten' };
   const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
+  const RARITY_ORDER = {
+    Forgotten: 800, Secret: 700, Mythic: 600, Legendary: 500, Epic: 400,
+    Rare: 300, Uncommon: 200, Common: 100, Unknown: 0,
+  };
+  const STONE_TYPE_ORDER = { Normal: 10, Double: 20, Evolved: 30, Eggy: 40, Runic: 50 };
+  const TIER_TO_RARITY = {
+    1: 'Common', 2: 'Uncommon', 3: 'Rare', 4: 'Epic',
+    5: 'Legendary', 6: 'Mythic', 7: 'Secret', 8: 'Forgotten',
+  };
 
   const trackers       = new Map();
   const inputEl        = document.getElementById('usernameInput');
@@ -359,6 +368,50 @@
   function amountBadgeHtml(item) {
     return `<span class="amount-badge fish-card__amount ic-qty">${escHtml(formatAmountLabel(resolveItemAmount(item)))}</span>`;
   }
+  function normalizeRarityLabel(item) {
+    if (!item || typeof item !== 'object') return 'Unknown';
+    const raw = item.rarity ?? item.Rarity;
+    if (raw != null && String(raw).trim() && String(raw).trim() !== 'Unknown') return String(raw).trim();
+    const tier = Number(item.tier ?? item.Tier);
+    if (Number.isFinite(tier) && TIER_TO_RARITY[tier]) return TIER_TO_RARITY[tier];
+    return 'Unknown';
+  }
+  function rarityRank(item) {
+    return RARITY_ORDER[normalizeRarityLabel(item)] ?? RARITY_ORDER.Unknown;
+  }
+  function inventoryItemName(item) {
+    return String(item?.name || item?.Name || item?.baseFishName || item?.displayName || '').trim();
+  }
+  function inventoryItemId(item) {
+    return String(item?.itemId ?? item?.ItemId ?? item?.speciesId ?? '').trim();
+  }
+  function sortInventoryFish(items) {
+    if (!Array.isArray(items)) return [];
+    return [...items].sort((a, b) => {
+      const rarityDiff = rarityRank(b) - rarityRank(a);
+      if (rarityDiff) return rarityDiff;
+      const nameA = inventoryItemName(a).toLowerCase();
+      const nameB = inventoryItemName(b).toLowerCase();
+      if (nameA !== nameB) return nameA.localeCompare(nameB);
+      return inventoryItemId(a).localeCompare(inventoryItemId(b));
+    });
+  }
+  function stoneTypeRank(item) {
+    const type = String(item?.stoneType || item?.StoneType || '').trim();
+    if (type && STONE_TYPE_ORDER[type] != null) return STONE_TYPE_ORDER[type];
+    const byId = { 10: 10, 246: 20, 558: 30, 873: 40, 929: 50 };
+    const id = inventoryItemId(item);
+    if (id && byId[id] != null) return byId[id];
+    return 999;
+  }
+  function sortInventoryStones(items) {
+    if (!Array.isArray(items)) return [];
+    return [...items].sort((a, b) => {
+      const typeDiff = stoneTypeRank(a) - stoneTypeRank(b);
+      if (typeDiff) return typeDiff;
+      return inventoryItemId(a).localeCompare(inventoryItemId(b));
+    });
+  }
   function fmtTime(iso) {
     if (!iso) return '-';
     try {
@@ -372,20 +425,22 @@
   }
   /** Public fish-only list (BLOCKER10K1). Never reads mixed enrichedItems or full inventory groups. */
   function getPublicFishItems(data) {
-    if (!data) return [];
-    if (Array.isArray(data.fishItems)) return data.fishItems;
-    if (Array.isArray(data.publicItems)) return data.publicItems;
-    if (data.fishInventory && Array.isArray(data.fishInventory.fish)) return data.fishInventory.fish;
-    if (data.renderBuild === RENDER_BUILD && Array.isArray(data.items)) {
-      return data.items.filter((it) => String(it.category || '').toLowerCase() === 'fish');
+    let items = [];
+    if (!data) return items;
+    if (Array.isArray(data.fishItems)) items = data.fishItems;
+    else if (Array.isArray(data.publicItems)) items = data.publicItems;
+    else if (data.fishInventory && Array.isArray(data.fishInventory.fish)) items = data.fishInventory.fish;
+    else if (data.renderBuild === RENDER_BUILD && Array.isArray(data.items)) {
+      items = data.items.filter((it) => String(it.category || '').toLowerCase() === 'fish');
     }
-    return [];
+    return sortInventoryFish(items);
   }
   function getPublicStoneItems(data) {
     if (!data) return [];
-    if (Array.isArray(data.stoneItems)) return data.stoneItems;
-    if (Array.isArray(data.stoneInventory)) return data.stoneInventory;
-    return [];
+    let items = [];
+    if (Array.isArray(data.stoneItems)) items = data.stoneItems;
+    else if (Array.isArray(data.stoneInventory)) items = data.stoneInventory;
+    return sortInventoryStones(items);
   }
   function stoneCardKey(item) {
     return `stone|${String(item.stoneType || item.itemId || item.name || 'unknown').toLowerCase()}`;
@@ -731,8 +786,8 @@
 
   function updateSummary() {
     const n = trackers.size;
-    if (n === 0) { summaryTextEl.textContent = 'No active trackers'; noTrackersMsg.style.display = 'block'; }
-    else { summaryTextEl.innerHTML = `Tracking <strong>${n}</strong> player${n>1?'s':''} &mdash; sessions saved automatically`; noTrackersMsg.style.display = 'none'; }
+    if (n === 0) { summaryTextEl.textContent = 'No players added yet'; noTrackersMsg.style.display = 'block'; }
+    else { summaryTextEl.innerHTML = `Watching <strong>${n}</strong> player${n>1?'s':''} &mdash; sessions saved automatically`; noTrackersMsg.style.display = 'none'; }
   }
 
   function cardTitle(item) {
@@ -1030,7 +1085,7 @@
     const s = card.querySelector('[data-sync-time]');
     const c = card.querySelector('[data-fish-count]');
     const b = card.querySelector('[data-card-body]');
-    if (l) l.innerHTML = `&#x1F534; Offline &mdash; <strong>${escHtml(name)}</strong> is not running the tracker`;
+    if (l) l.innerHTML = `&#x1F534; Offline &mdash; <strong>${escHtml(name)}</strong> has not synced inventory recently`;
     if (s && lastData) s.textContent = `Last sync: ${fmtTime(syncTimestamp(lastData))}`;
     if (lastData) {
       const fishList = getPublicFishItems(lastData);
