@@ -45,7 +45,7 @@ const protectedFishNames = require('./fishitProtectedFishNames');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
 const globalCatalogService = require('./fishitGlobalCatalogService');
 const globalDb = require('./fishitGlobalDb');
@@ -137,8 +137,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10Z14_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10Z14_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10Z15_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10Z15_BUILD;
 
 const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
@@ -3239,6 +3239,7 @@ module.exports.buildAmbiguousContainerProof = buildAmbiguousContainerProof;
 module.exports.AMBIGUOUS_CONTAINER_IDS = AMBIGUOUS_CONTAINER_IDS;
 module.exports.resolveAmbiguousContainerDisplay = resolveAmbiguousContainerDisplay;
 module.exports.trustedCatalogMetaForMetadataId = trustedCatalogMetaForMetadataId;
+module.exports.BLOCKER10Z15_BUILD = BLOCKER10Z15_BUILD;
 module.exports.BLOCKER10Z14_BUILD = BLOCKER10Z14_BUILD;
 module.exports.BLOCKER10Z13_BUILD = BLOCKER10Z13_BUILD;
 module.exports.BLOCKER10Z12_BUILD = BLOCKER10Z13_BUILD;

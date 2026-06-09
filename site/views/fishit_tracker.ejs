@@ -162,10 +162,9 @@
       grid-area:body;
       display:flex;
       flex-direction:column;
-      gap:6px;
+      gap:8px;
       min-width:0;
       justify-content:center;
-      padding-right:4px;
     }
     .fish-card__name, .item-card .item-name, .fish-card .item-name {
       color:var(--card-fg)!important;
@@ -182,11 +181,12 @@
       overflow:hidden;
       text-shadow:0 1px 3px rgba(0,0,0,.5), 0 0 1px rgba(0,0,0,.35);
     }
+    .fish-card__amountRow {
+      display:flex;
+      align-items:center;
+      margin-top:2px;
+    }
     .fish-card__amount, .ic-qty.fish-card__amount {
-      position:absolute;
-      top:10px;
-      right:10px;
-      z-index:2;
       display:inline-flex;
       align-items:center;
       justify-content:center;
@@ -253,8 +253,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10Z14_PUBLIC_MINIMAL_CARD_AND_HIDE_FAKE_285_2026_06_08">
-<!-- BLOCKER10Z14_PUBLIC_MINIMAL_CARD_AND_HIDE_FAKE_285_2026_06_08 -->
+<body data-ui-marker="BLOCKER10Z15_AMOUNT_MOVED_TO_MIDDLE_SECTION_2026_06_08">
+<!-- BLOCKER10Z15_AMOUNT_MOVED_TO_MIDDLE_SECTION_2026_06_08 -->
 <div class="page">
   <div class="inner">
 
@@ -561,12 +561,12 @@
     const qty = `<span class="fish-card__amount ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
     const isPlaceholder = imgSrc === ITEM_IMAGES.Default;
     return `
-  ${qty}
   <div class="fish-card__imageWrap ic-head">
     <img class="fish-card__image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async"${isPlaceholder ? ' data-placeholder="true"' : ''} data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}">
   </div>
   <div class="fish-card__body ic-title-wrap">
     <span class="fish-card__name item-name" title="${escHtml(title)}" style="${nameStyle}">${escHtml(title)}</span>
+    <div class="fish-card__amountRow ic-meta">${qty}</div>
   </div>`;
   }
   function buildItemCardElement(item) {
@@ -626,14 +626,18 @@
       nameEl.style.cssText = nameStyle;
     }
     const amount = Number(item.amount || 1);
-    let amountEl = card.querySelector('.fish-card__amount, .ic-qty');
     const qtyHtml = `<span class="fish-card__amount ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
-    if (amountEl) {
-      amountEl.outerHTML = qtyHtml;
+    let amountRow = card.querySelector('.fish-card__amountRow, .ic-meta');
+    if (amountRow) {
+      amountRow.innerHTML = qtyHtml;
     } else {
-      const metaEl = card.querySelector('.fish-card__meta, .ic-meta');
-      if (metaEl) metaEl.remove();
-      card.insertAdjacentHTML('afterbegin', qtyHtml);
+      const bodyEl = card.querySelector('.fish-card__body, .ic-title-wrap');
+      if (bodyEl) {
+        amountRow = document.createElement('div');
+        amountRow.className = 'fish-card__amountRow ic-meta';
+        amountRow.innerHTML = qtyHtml;
+        bodyEl.appendChild(amountRow);
+      }
     }
     let img = card.querySelector('.fish-card__image, img');
     if (!img) {

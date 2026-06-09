@@ -31,7 +31,8 @@ const {
 } = require('../src/fishitTrackerRoutes');
 const rarityColorMap = require('../src/fishitRarityColorMap');
 
-const Z14_BUILD = 'BLOCKER10Z14_PUBLIC_MINIMAL_CARD_AND_HIDE_FAKE_285_2026_06_08';
+const Z15_BUILD = 'BLOCKER10Z15_AMOUNT_MOVED_TO_MIDDLE_SECTION_2026_06_08';
+const Z14_BUILD = Z15_BUILD;
 const Z13_BUILD = Z14_BUILD;
 const Z12_BUILD = Z13_BUILD;
 const Z11_BUILD = Z13_BUILD;
@@ -1668,7 +1669,7 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   test('GET /tracker returns HTTP 200 with no session data', async () => {
     const res = await request(makeApp()).get('/tracker').expect(200);
     assert.match(res.text, /Fish It Live Inventory Tracker/i);
-    assert.match(res.text, /BLOCKER10Z14/);
+    assert.match(res.text, /BLOCKER10Z15/);
   });
 
   test('GET /tracker?debug=global returns HTTP 200', async () => {
@@ -2258,14 +2259,14 @@ describe('BLOCKER10Z13 — public card polish simple badges', { concurrency: 1 }
     assert.doesNotMatch(tpl, /\.fish-card__rarity/);
   });
 
-  test('9: amount badge uses top-right anchored placement', () => {
+  test('9: amount badge sits in body middle section below name', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.match(tpl, /\.fish-card__amountRow/);
     const amountBlock = tpl.match(/\.fish-card__amount[\s\S]*?box-sizing:border-box;/);
     assert.ok(amountBlock, 'fish-card__amount block must exist');
-    assert.match(amountBlock[0], /position:absolute/);
-    assert.match(amountBlock[0], /top:10px/);
-    assert.match(amountBlock[0], /right:10px/);
+    assert.doesNotMatch(amountBlock[0], /position:absolute/);
     assert.match(amountBlock[0], /font-weight:800/);
+    assert.match(tpl, /fish-card__amountRow[\s\S]*fish-card__amount/);
   });
 
   test('10: amount font size is larger than previous tiny .84rem pill style', () => {
@@ -2340,7 +2341,7 @@ describe('BLOCKER10Z14 — public minimal card hide fake 285', { concurrency: 1 
     assert.ok(amountBlock);
     assert.match(amountBlock[0], /font-weight:800/);
     assert.match(amountBlock[0], /font-size:clamp\(1rem/);
-    assert.match(amountBlock[0], /position:absolute/);
+    assert.doesNotMatch(amountBlock[0], /position:absolute/);
   });
 
   test('5: full canonical fish names render in HTML', () => {
@@ -2476,7 +2477,7 @@ describe('BLOCKER10Z14 — public minimal card hide fake 285', { concurrency: 1 
     assert.doesNotMatch(html, /Unknown Fish #267/i);
   });
 
-  test('15: /tracker page includes Z14 build marker', async () => {
+  test('15: /tracker page includes Z15 build marker', async () => {
     const express = require('express');
     const request = require('supertest');
     const trackerRouter = require('../src/fishitTrackerRoutes');
@@ -2485,6 +2486,139 @@ describe('BLOCKER10Z14 — public minimal card hide fake 285', { concurrency: 1 
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
     const res = await request(app).get('/tracker').expect(200);
-    assert.match(res.text, /BLOCKER10Z14_PUBLIC_MINIMAL_CARD_AND_HIDE_FAKE_285_2026_06_08/);
+    assert.match(res.text, /BLOCKER10Z15_AMOUNT_MOVED_TO_MIDDLE_SECTION_2026_06_08/);
+  });
+});
+
+describe('BLOCKER10Z15 — amount moved to middle section', { concurrency: 1 }, () => {
+  const { BLOCKER10Z15_BUILD, PUBLIC_API_BUILD, buildTrackerPageLocals } = require('../src/fishitTrackerRoutes');
+
+  function loadTrackerScriptFns() {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    const script = tpl.slice(tpl.indexOf('<script>'), tpl.indexOf('</script>') + 9);
+    const fn = script.match(/function buildItemsHtml\(items\)\s*\{[\s\S]*?\n  \}/);
+    assert.ok(fn, 'buildItemsHtml must exist');
+    const ctx = new Function(`
+      const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
+      const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', mythic:'rarity-mythic', secret:'badge-rarity-secret', forgotten:'rarity-forgotten' };
+      const RARITY_NAME_COLORS = {};
+      const ITEM_IMAGES = { Default:'/assets/img/fishit/fallback-fish.svg' };
+      function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+      function rarityClass(r){ return r ? (RARITY_MAP[r.toLowerCase()]||'badge') : ''; }
+      function cardRarityClass(r){ return r ? (CARD_RARITY_MAP[r.toLowerCase()]||'') : ''; }
+      function cardTitle(item){ return item.cardName||item.baseFishName||item.name||'Unknown'; }
+      function cardKey(item){ return String(item.name||'x').toLowerCase(); }
+      function rarityNameStyle(){ return ''; }
+      function isUsableImageUrl(url){ return typeof url==='string' && url.startsWith('http'); }
+      function itemImageSrc(item){ return isUsableImageUrl(item.imageUrl)?item.imageUrl:null; }
+      ${script.match(/function buildFishCardInnerHtml\(item\)\s*\{[\s\S]*?\n  \}/)[0]}
+      ${fn[0]}
+      return buildItemsHtml;
+    `)();
+    return ctx;
+  }
+
+  test('1: build marker is BLOCKER10Z15', () => {
+    assert.equal(BLOCKER10Z15_BUILD, Z15_BUILD);
+    assert.equal(PUBLIC_API_BUILD, Z15_BUILD);
+    const locals = buildTrackerPageLocals({});
+    assert.equal(locals.renderBuild, Z15_BUILD);
+  });
+
+  test('2: public HTML shows image name amount only', () => {
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml([
+      { name: 'Parrot Fish', baseFishName: 'Parrot Fish', amount: 3, imageUrl: 'http://127.0.0.1/x.webp' },
+    ]);
+    assert.match(html, /fish-card__image/);
+    assert.match(html, /Parrot Fish/);
+    assert.match(html, /fish-card__amount[^>]*>x3</);
+    assert.doesNotMatch(html, /fish-card__rarity/);
+    assert.doesNotMatch(html, /fish-card__tag/);
+  });
+
+  test('3: amount rendered inside body middle section not overlapping name', () => {
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml([
+      { name: 'Giant Squid', baseFishName: 'Giant Squid', amount: 6, imageUrl: 'http://127.0.0.1/x.webp' },
+    ]);
+    assert.match(html, /fish-card__body[\s\S]*fish-card__name[\s\S]*Giant Squid[\s\S]*fish-card__amountRow[\s\S]*fish-card__amount[^>]*>x6</);
+  });
+
+  test('4: CSS places amount in body flow not title overlay zone', () => {
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.match(tpl, /\.fish-card__amountRow/);
+    const amountBlock = tpl.match(/\.fish-card__amount[\s\S]*?box-sizing:border-box;/);
+    assert.ok(amountBlock);
+    assert.doesNotMatch(amountBlock[0], /position:absolute/);
+    assert.match(tpl, /fish-card__body[\s\S]*flex-direction:column/);
+  });
+
+  test('5: canonical fish names render in HTML', () => {
+    const buildItemsHtml = loadTrackerScriptFns();
+    const names = [
+      'Giant Squid', 'Panther Eel', 'Radiant Catfish', 'Zebra Snakehead', 'Freshwater Piranha',
+    ];
+    const html = buildItemsHtml(names.map((name) => ({
+      name, baseFishName: name, amount: 1, imageUrl: 'http://127.0.0.1/x.webp',
+    })));
+    for (const name of names) {
+      assert.match(html, new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    }
+  });
+
+  test('6: Radiant Catfish has no fake mutation badge', () => {
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml([{
+      name: 'Radiant Catfish', baseFishName: 'Radiant Catfish', amount: 1,
+      imageUrl: 'http://127.0.0.1/x.webp',
+    }]);
+    assert.match(html, /Radiant Catfish/);
+    assert.doesNotMatch(html, />Radiant</);
+  });
+
+  test('7: no Goliath Tiger in public card HTML', async () => {
+    setupTestDb();
+    const pub = await buildPublicFishFields([{
+      name: 'Goliath Tiger', itemId: '1008', category: 'fish', amount: 1,
+    }], 'http://127.0.0.1:8791');
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml(pub.publicItems);
+    assert.doesNotMatch(html, /Goliath Tiger/i);
+  });
+
+  test('8: no Unknown Fish #267 in public card HTML', async () => {
+    setupTestDb();
+    const pub = await buildPublicFishFields([{
+      name: 'Unknown Fish #267', itemId: '267', category: 'fish', amount: 1,
+    }], 'http://127.0.0.1:8791');
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml(pub.publicItems);
+    assert.doesNotMatch(html, /Unknown Fish #267/i);
+  });
+
+  test('9: no noisy Unknown Fish #285 flood', async () => {
+    setupTestDb();
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      name: 'Item #285', itemId: '285', category: 'items', amount: 1, weight: 2.7 + i,
+      replionUuid: `uuid-285-z15-${i}`, replionAmountSource: 'replion_uuid_instance',
+    }));
+    const pub = await buildPublicFishFields(rows, 'http://127.0.0.1:8791');
+    const buildItemsHtml = loadTrackerScriptFns();
+    const html = buildItemsHtml(pub.publicItems);
+    assert.equal(pub.publicItems.length, 0);
+    assert.doesNotMatch(html, /Unknown Fish #285/i);
+  });
+
+  test('10: /tracker page includes Z15 build marker', async () => {
+    const express = require('express');
+    const request = require('supertest');
+    const trackerRouter = require('../src/fishitTrackerRoutes');
+    const app = express();
+    app.set('view engine', 'ejs');
+    app.set('views', path.join(__dirname, '..', 'views'));
+    app.use(trackerRouter);
+    const res = await request(app).get('/tracker').expect(200);
+    assert.match(res.text, /BLOCKER10Z15_AMOUNT_MOVED_TO_MIDDLE_SECTION_2026_06_08/);
   });
 });
