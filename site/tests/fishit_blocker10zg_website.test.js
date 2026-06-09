@@ -68,9 +68,16 @@ describe('BLOCKER10ZG clean icons + loader script', () => {
     const res = await request(makeTrackerApp()).get('/tracker').expect(200);
     assert.match(res.text, /id="loadstringCode"/);
     assert.match(res.text, new RegExp(CLEAN_TRACKER_LOADSTRING.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-    const publicBlock = res.text.split('id="loadstringCode"')[1].split('loadstring-debug')[0];
-    assert.doesNotMatch(publicBlock, /tostring\(os\.time\(\)\)/);
-    assert.doesNotMatch(publicBlock, /\?t=/);
+    assert.doesNotMatch(res.text, /tostring\(os\.time\(\)\)/);
+    assert.doesNotMatch(res.text, /\?t=/);
+    assert.doesNotMatch(res.text, /Debug loader \(cache-busted\)/);
+  });
+
+  test('/tracker?debug=global exposes cache-busted debug loader only in debug mode', async () => {
+    const res = await request(makeTrackerApp()).get('/tracker?debug=global').expect(200);
+    assert.match(res.text, /loadstringDebugBox/);
+    assert.match(res.text, /\?t=/);
+    assert.match(res.text, /os\.time/);
   });
 
   test('copy button uses clean script constant not debug loader', async () => {

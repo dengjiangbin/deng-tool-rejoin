@@ -2475,15 +2475,15 @@ function mapDebugItemWithResolution(raw, enriched) {
 }
 
 // ── GET /tracker – serve the dashboard page ───────────────────────
-function buildTrackerPageLocals() {
+function buildTrackerPageLocals(req) {
   const build = PUBLIC_API_BUILD;
-  return {
+  const debugGlobal = req && req.query && String(req.query.debug || '') === 'global';
+  const locals = {
     layout: false,
     title: 'Inventory — Fish It',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
     trackerLoadstring: CLEAN_TRACKER_LOADSTRING,
-    trackerLoadstringDebug: DEBUG_TRACKER_LOADSTRING,
     blocker10vBuild: build,
     blocker10u6Build: build,
     blocker10u5Build: build,
@@ -2495,16 +2495,20 @@ function buildTrackerPageLocals() {
     blocker10rBuild: build,
     blocker10qBuild: build,
   };
+  if (debugGlobal) {
+    locals.trackerLoadstringDebug = DEBUG_TRACKER_LOADSTRING;
+  }
+  return locals;
 }
 
-function renderTrackerPage(_req, res) {
+function renderTrackerPage(req, res) {
   try {
-    return res.render('fishit_tracker', buildTrackerPageLocals());
+    return res.render('fishit_tracker', buildTrackerPageLocals(req));
   } catch (err) {
     console.error('[fishit-tracker] /tracker render failed:',
       err && err.stack ? err.stack : err);
     if (!res.headersSent) {
-      return res.status(200).render('fishit_tracker', buildTrackerPageLocals());
+      return res.status(200).render('fishit_tracker', buildTrackerPageLocals(req));
     }
   }
 }

@@ -376,10 +376,12 @@
         <div class="code-block" id="loadstringCode" data-copy-script='<%- typeof trackerLoadstring !== "undefined" ? trackerLoadstring : "" %>'><%- typeof trackerLoadstring !== "undefined" ? trackerLoadstring : "" %></div>
         <button class="btn-copy" id="copyBtn" type="button">Copy</button>
       </div>
-      <div class="loadstring-debug" id="loadstringDebugBox" data-debug-script='<%- typeof trackerLoadstringDebug !== "undefined" ? trackerLoadstringDebug : "" %>'>
+      <% if (typeof trackerLoadstringDebug !== 'undefined' && trackerLoadstringDebug) { %>
+      <div class="loadstring-debug is-visible" id="loadstringDebugBox" data-debug-script='<%- trackerLoadstringDebug %>'>
         <strong>Debug loader (cache-busted)</strong>
-        <div class="code-block" id="loadstringDebugCode"></div>
+        <div class="code-block" id="loadstringDebugCode"><%- trackerLoadstringDebug %></div>
       </div>
+      <% } %>
     </div>
 
   </div>
