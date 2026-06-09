@@ -295,6 +295,37 @@ if (process.env.NODE_ENV !== 'test' || process.env.FISHIT_SESSION_PERSIST === '1
   }
 }
 
+function hydrateRecoverySessionsFromRegistry() {
+  try {
+    const registry = snapshotRecovery.loadRecoveryRegistry();
+    for (const [key, recovery] of Object.entries(registry.sessions || {})) {
+      const existing = liveTrackDB[key];
+      if (existing) {
+        if (!existing.userSnapshotRecovery) existing.userSnapshotRecovery = recovery;
+        continue;
+      }
+      liveTrackDB[key] = {
+        username: key,
+        userId: recovery.userId || 0,
+        source: 'snapshot_recovery_registry',
+        items: [],
+        rawItems: [],
+        isOnline: false,
+        userSnapshotRecovery: recovery,
+        restoredFromRecoveryRegistry: true,
+        lastSeenAt: recovery.seededAt || null,
+      };
+      if (recovery.userId) liveTrackDB[`uid:${recovery.userId}`] = key;
+    }
+  } catch (err) {
+    console.warn('[fishit-tracker] recovery registry hydrate failed:', err?.message || err);
+  }
+}
+
+if (process.env.FISHIT_TEST_FIXTURE !== '1') {
+  hydrateRecoverySessionsFromRegistry();
+}
+
 async function persistSessionState(key, baseUrl) {
   const data = liveTrackDB[key];
   if (!data || key.startsWith('uid:')) return;
