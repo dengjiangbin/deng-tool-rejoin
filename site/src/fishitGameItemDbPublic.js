@@ -6,7 +6,7 @@ const GAMEITEMDB_ICON_SOURCE = 'gameitemdb_icon';
 const PLAYERDATA_GAMEITEMDB_SOURCE = 'playerdata_gameitemdb';
 const STONE_MANUAL_ASSET_SOURCE = stoneImageAssets.STONE_MANUAL_ASSET_SOURCE;
 const QUIZ_BOT_FALLBACK_SOURCE = 'quiz_bot_fishit_bank';
-const FINAL_BUILD = 'BLOCKER10ZD_STONE_ASSETS_MANUAL_RARITY_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZE_QUANTITY_FORMAT_BOTTOM_BADGES_2026_06_09';
 const WAITING_ACTIVATION = 'waiting_for_playerdata_gameitemdb_payload';
 
 const ENCHANT_STONE_IDS = new Set(['10', '246', '558', '873', '929']);
@@ -108,7 +108,7 @@ function detectGameItemDbUpload(body) {
 
 function expectsPlayerDataGameItemDbPayload(sessionData) {
   const build = String(sessionData?.trackerBuild || sessionData?.trackerClientProof?.trackerBuild || '');
-  return /BLOCKER10Z[ABCD]|PLAYERDATA_GAMEITEMDB/i.test(build);
+  return /BLOCKER10Z[ABCDE]|PLAYERDATA_GAMEITEMDB/i.test(build);
 }
 
 function defaultSourceTruth() {

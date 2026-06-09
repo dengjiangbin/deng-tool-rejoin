@@ -1983,6 +1983,10 @@ describe('BLOCKER10Z12 — modern fish card layout', { concurrency: 1 }, () => {
       }
       function isUsableImageUrl(url){ return typeof url==='string' && url.startsWith('http'); }
       function itemImageSrc(item){ return isUsableImageUrl(item.imageUrl)?item.imageUrl:null; }
+      function formatQuantity(value){ const n=Number(value||0); if(!Number.isFinite(n)) return '0'; return Math.max(0,Math.floor(n)).toLocaleString('en-US'); }
+      function formatAmountLabel(value){ return 'x'+formatQuantity(value); }
+      function resolveItemAmount(item){ if(!item||typeof item!=='object') return 1; return item.amount ?? item.quantity ?? item.Quantity ?? 1; }
+      function amountBadgeHtml(item){ return '<span class="amount-badge fish-card__amount ic-qty">'+escHtml(formatAmountLabel(resolveItemAmount(item)))+'</span>'; }
       ${script.match(/function buildFishCardInnerHtml\(item\)\s*\{[\s\S]*?\n  \}/)[0]}
       ${fn[0]}
       return buildItemsHtml;
@@ -2150,6 +2154,10 @@ describe('BLOCKER10Z13 — public card polish simple badges', { concurrency: 1 }
       }
       function isUsableImageUrl(url){ return typeof url==='string' && url.startsWith('http'); }
       function itemImageSrc(item){ return isUsableImageUrl(item.imageUrl)?item.imageUrl:null; }
+      function formatQuantity(value){ const n=Number(value||0); if(!Number.isFinite(n)) return '0'; return Math.max(0,Math.floor(n)).toLocaleString('en-US'); }
+      function formatAmountLabel(value){ return 'x'+formatQuantity(value); }
+      function resolveItemAmount(item){ if(!item||typeof item!=='object') return 1; return item.amount ?? item.quantity ?? item.Quantity ?? 1; }
+      function amountBadgeHtml(item){ return '<span class="amount-badge fish-card__amount ic-qty">'+escHtml(formatAmountLabel(resolveItemAmount(item)))+'</span>'; }
       ${script.match(/function buildFishCardInnerHtml\(item\)\s*\{[\s\S]*?\n  \}/)[0]}
       ${fn[0]}
       return buildItemsHtml;
@@ -2262,21 +2270,22 @@ describe('BLOCKER10Z13 — public card polish simple badges', { concurrency: 1 }
     assert.doesNotMatch(tpl, /\.fish-card__rarity/);
   });
 
-  test('9: amount badge sits in body middle section below name', () => {
+  test('9: amount badge is bottom-left anchored on card', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.match(tpl, /\.fish-card__amountRow/);
-    const amountBlock = tpl.match(/\.fish-card__amount[\s\S]*?box-sizing:border-box;/);
-    assert.ok(amountBlock, 'fish-card__amount block must exist');
-    assert.doesNotMatch(amountBlock[0], /position:absolute/);
-    assert.match(amountBlock[0], /font-weight:800/);
-    assert.match(tpl, /fish-card__amountRow[\s\S]*fish-card__amount/);
+    assert.match(tpl, /\.amount-badge/);
+    const amountBlock = tpl.match(/\.fish-card \.amount-badge[\s\S]*?box-sizing:border-box;/);
+    assert.ok(amountBlock, 'amount-badge block must exist');
+    assert.match(amountBlock[0], /position:absolute/);
+    assert.match(amountBlock[0], /bottom:14px/);
+    assert.match(amountBlock[0], /font-weight:900/);
+    assert.match(tpl, /amountBadgeHtml/);
   });
 
-  test('10: amount font size is larger than previous tiny .84rem pill style', () => {
+  test('10: amount font size remains readable for large comma values', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    const amountBlock = tpl.match(/\.fish-card__amount[\s\S]*?box-sizing:border-box;/);
-    assert.ok(amountBlock, 'fish-card__amount block must exist');
-    assert.match(amountBlock[0], /font-size:clamp\(1rem/);
+    const amountBlock = tpl.match(/\.fish-card \.amount-badge[\s\S]*?box-sizing:border-box;/);
+    assert.ok(amountBlock, 'amount-badge block must exist');
+    assert.match(amountBlock[0], /font-size:clamp\(/);
     assert.doesNotMatch(amountBlock[0], /font-size:\.72rem/);
   });
 });
@@ -2302,6 +2311,10 @@ describe('BLOCKER10Z14 — public minimal card hide fake 285', { concurrency: 1 
       function rarityNameStyle(){ return ''; }
       function isUsableImageUrl(url){ return typeof url==='string' && url.startsWith('http'); }
       function itemImageSrc(item){ return isUsableImageUrl(item.imageUrl)?item.imageUrl:null; }
+      function formatQuantity(value){ const n=Number(value||0); if(!Number.isFinite(n)) return '0'; return Math.max(0,Math.floor(n)).toLocaleString('en-US'); }
+      function formatAmountLabel(value){ return 'x'+formatQuantity(value); }
+      function resolveItemAmount(item){ if(!item||typeof item!=='object') return 1; return item.amount ?? item.quantity ?? item.Quantity ?? 1; }
+      function amountBadgeHtml(item){ return '<span class="amount-badge fish-card__amount ic-qty">'+escHtml(formatAmountLabel(resolveItemAmount(item)))+'</span>'; }
       ${script.match(/function buildFishCardInnerHtml\(item\)\s*\{[\s\S]*?\n  \}/)[0]}
       ${fn[0]}
       return buildItemsHtml;
@@ -2338,13 +2351,13 @@ describe('BLOCKER10Z14 — public minimal card hide fake 285', { concurrency: 1 
     assert.doesNotMatch(html, /fish-card__meta/);
   });
 
-  test('4: amount CSS is larger and stronger than old tiny pill', () => {
+  test('4: amount CSS uses bottom-left absolute badge', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    const amountBlock = tpl.match(/\.fish-card__amount[\s\S]*?box-sizing:border-box;/);
+    const amountBlock = tpl.match(/\.fish-card \.amount-badge[\s\S]*?box-sizing:border-box;/);
     assert.ok(amountBlock);
-    assert.match(amountBlock[0], /font-weight:800/);
-    assert.match(amountBlock[0], /font-size:clamp\(1rem/);
-    assert.doesNotMatch(amountBlock[0], /position:absolute/);
+    assert.match(amountBlock[0], /font-weight:900/);
+    assert.match(amountBlock[0], /position:absolute/);
+    assert.match(amountBlock[0], /bottom:14px/);
   });
 
   test('5: full canonical fish names render in HTML', () => {
@@ -2514,6 +2527,10 @@ describe('BLOCKER10Z15 — amount moved to middle section', { concurrency: 1 }, 
       function rarityNameStyle(){ return ''; }
       function isUsableImageUrl(url){ return typeof url==='string' && url.startsWith('http'); }
       function itemImageSrc(item){ return isUsableImageUrl(item.imageUrl)?item.imageUrl:null; }
+      function formatQuantity(value){ const n=Number(value||0); if(!Number.isFinite(n)) return '0'; return Math.max(0,Math.floor(n)).toLocaleString('en-US'); }
+      function formatAmountLabel(value){ return 'x'+formatQuantity(value); }
+      function resolveItemAmount(item){ if(!item||typeof item!=='object') return 1; return item.amount ?? item.quantity ?? item.Quantity ?? 1; }
+      function amountBadgeHtml(item){ return '<span class="amount-badge fish-card__amount ic-qty">'+escHtml(formatAmountLabel(resolveItemAmount(item)))+'</span>'; }
       ${script.match(/function buildFishCardInnerHtml\(item\)\s*\{[\s\S]*?\n  \}/)[0]}
       ${fn[0]}
       return buildItemsHtml;
@@ -2540,20 +2557,22 @@ describe('BLOCKER10Z15 — amount moved to middle section', { concurrency: 1 }, 
     assert.doesNotMatch(html, /fish-card__tag/);
   });
 
-  test('3: amount rendered inside body middle section not overlapping name', () => {
+  test('3: amount rendered as bottom badge outside body flow', () => {
     const buildItemsHtml = loadTrackerScriptFns();
     const html = buildItemsHtml([
       { name: 'Giant Squid', baseFishName: 'Giant Squid', amount: 6, imageUrl: 'http://127.0.0.1/x.webp' },
     ]);
-    assert.match(html, /fish-card__body[\s\S]*fish-card__name[\s\S]*Giant Squid[\s\S]*fish-card__amountRow[\s\S]*fish-card__amount[^>]*>x6</);
+    assert.match(html, /fish-card__body[\s\S]*fish-card__name[\s\S]*Giant Squid[\s\S]*amount-badge[^>]*>x6</);
+    assert.doesNotMatch(html, /fish-card__amountRow/);
   });
 
-  test('4: CSS places amount in body flow not title overlay zone', () => {
+  test('4: CSS places amount badge bottom-left on card', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.match(tpl, /\.fish-card__amountRow/);
-    const amountBlock = tpl.match(/\.fish-card__amount[\s\S]*?box-sizing:border-box;/);
+    assert.match(tpl, /\.amount-badge/);
+    const amountBlock = tpl.match(/\.fish-card \.amount-badge[\s\S]*?box-sizing:border-box;/);
     assert.ok(amountBlock);
-    assert.doesNotMatch(amountBlock[0], /position:absolute/);
+    assert.match(amountBlock[0], /position:absolute/);
+    assert.match(amountBlock[0], /bottom:14px/);
     assert.match(tpl, /fish-card__body[\s\S]*flex-direction:column/);
   });
 
@@ -2613,7 +2632,7 @@ describe('BLOCKER10Z15 — amount moved to middle section', { concurrency: 1 }, 
     assert.doesNotMatch(html, /Unknown Fish #285/i);
   });
 
-  test('10: /tracker page keeps Z15 amount row layout', async () => {
+  test('10: /tracker page keeps bottom amount badge layout', async () => {
     const express = require('express');
     const request = require('supertest');
     const trackerRouter = require('../src/fishitTrackerRoutes');
@@ -2622,7 +2641,8 @@ describe('BLOCKER10Z15 — amount moved to middle section', { concurrency: 1 }, 
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
     const res = await request(app).get('/tracker').expect(200);
-    assert.match(res.text, /fish-card__amountRow/);
+    assert.match(res.text, /amount-badge/);
+    assert.match(res.text, /formatAmountLabel/);
   });
 });
 

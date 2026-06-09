@@ -105,8 +105,8 @@
       --image-glow:rgba(255,255,255,.1);
       border:1px solid rgba(255,255,255,.08);
       border-radius:14px;
-      padding:12px 14px;
-      min-height:0;
+      padding:12px 14px 50px;
+      min-height:108px;
       display:grid;
       grid-template-columns:auto 1fr;
       grid-template-areas:"image body";
@@ -170,7 +170,9 @@
       flex-direction:column;
       gap:8px;
       min-width:0;
-      justify-content:center;
+      justify-content:flex-start;
+      align-self:start;
+      padding-bottom:0;
     }
     .fish-card__name, .item-card .item-name, .fish-card .item-name {
       color:var(--card-fg)!important;
@@ -187,31 +189,39 @@
       overflow:hidden;
       text-shadow:0 1px 3px rgba(0,0,0,.5), 0 0 1px rgba(0,0,0,.35);
     }
-    .fish-card__amountRow {
-      display:flex;
-      align-items:center;
-      margin-top:2px;
-    }
-    .fish-card__amount, .ic-qty.fish-card__amount {
+    .fish-card .amount-badge,
+    .stone-card .amount-badge,
+    .item-card .amount-badge,
+    .fish-card__amount.amount-badge,
+    .ic-qty.fish-card__amount.amount-badge {
+      position:absolute;
+      left:14px;
+      bottom:14px;
+      top:auto;
+      transform:none;
+      z-index:4;
+      max-width:calc(100% - 28px);
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
       display:inline-flex;
       align-items:center;
       justify-content:center;
       min-width:44px;
-      min-height:34px;
-      padding:0 14px;
-      border-radius:10px;
+      padding:7px 11px;
+      border-radius:9px;
       background:rgba(0,0,0,.68)!important;
       border:1px solid rgba(255,255,255,.34)!important;
       color:#fff!important;
-      font-size:clamp(1rem, 2.8vw, 1.12rem);
-      font-weight:800;
+      font-size:clamp(.92rem, 2.6vw, 1.08rem);
+      font-weight:900;
       line-height:1;
       letter-spacing:.02em;
-      white-space:nowrap;
       text-shadow:0 1px 3px rgba(0,0,0,.55);
       box-shadow:0 4px 14px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.12);
       box-sizing:border-box;
     }
+    .fish-card__amountRow { display:none; }
 
     /* Legacy hooks kept for patch/update paths */
     .ic-head { display:contents; }
@@ -260,8 +270,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10Z15_AMOUNT_MOVED_TO_MIDDLE_SECTION_2026_06_08">
-<!-- BLOCKER10Z15_AMOUNT_MOVED_TO_MIDDLE_SECTION_2026_06_08 -->
+<body data-ui-marker="BLOCKER10ZE_QUANTITY_FORMAT_BOTTOM_BADGES_2026_06_09">
+<!-- BLOCKER10ZE_QUANTITY_FORMAT_BOTTOM_BADGES_2026_06_09 -->
 <div class="page">
   <div class="inner">
 
@@ -333,6 +343,22 @@
   function saveCurrent() { try { localStorage.setItem(LS_KEY, JSON.stringify([...trackers.keys()])); } catch {} }
 
   function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function formatQuantity(value) {
+    const n = Number(value || 0);
+    if (!Number.isFinite(n)) return '0';
+    return Math.max(0, Math.floor(n)).toLocaleString('en-US');
+  }
+  function formatAmountLabel(value) {
+    return 'x' + formatQuantity(value);
+  }
+  function resolveItemAmount(item) {
+    if (!item || typeof item !== 'object') return 1;
+    const raw = item.amount ?? item.quantity ?? item.Quantity ?? 1;
+    return raw;
+  }
+  function amountBadgeHtml(item) {
+    return `<span class="amount-badge fish-card__amount ic-qty">${escHtml(formatAmountLabel(resolveItemAmount(item)))}</span>`;
+  }
   function fmtTime(iso) {
     if (!iso) return '-';
     try {
@@ -365,7 +391,6 @@
     return `stone|${String(item.stoneType || item.itemId || item.name || 'unknown').toLowerCase()}`;
   }
   function buildStoneCardInnerHtml(item) {
-    const amount = Number(item.amount || item.quantity || 1);
     const title = item.displayName || item.name || 'Enchant Stone';
     const imgSrc = itemImageSrc(item);
     const imageHtml = imgSrc
@@ -375,8 +400,8 @@
   <div class="fish-card__imageWrap ic-head stone-card__icon">${imageHtml}</div>
   <div class="fish-card__body ic-title-wrap">
     <span class="fish-card__name item-name stone-card__name" title="${escHtml(title)}">${escHtml(title)}</span>
-    <div class="fish-card__amountRow ic-meta"><span class="fish-card__amount ic-qty">x${Number.isFinite(amount) ? amount : 1}</span></div>
-  </div>`;
+  </div>
+  ${amountBadgeHtml(item)}`;
   }
   function buildStoneCardElement(item) {
     const card = document.createElement('div');
@@ -461,8 +486,8 @@
       : ((fc && fc.stoneInstances != null) ? fc.stoneInstances
         : stoneList.reduce((s, st) => s + (Number(st.amount || st.quantity) > 0 ? Math.floor(Number(st.amount || st.quantity)) : 1), 0));
     if (fishTotal != null) {
-      let label = `Fish: <strong>${fishTotal}</strong> &middot; Types: <span style="color:#8a94a6;">${types}</span>`;
-      if (stoneTotal > 0) label += ` &middot; Stones: <strong>${stoneTotal}</strong>`;
+      let label = `Fish: <strong>${formatQuantity(fishTotal)}</strong> &middot; Types: <span style="color:#8a94a6;">${types}</span>`;
+      if (stoneTotal > 0) label += ` &middot; Stones: <strong>${formatQuantity(stoneTotal)}</strong>`;
       return label;
     }
     return `Types: <strong>${types}</strong>`;
@@ -719,11 +744,9 @@
     return `${String(id).toLowerCase()}|${String(mut).toLowerCase()}`;
   }
   function buildFishCardInnerHtml(item) {
-    const amount  = Number(item.amount || 1);
     const title   = cardTitle(item);
     const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
     const nameStyle = rarityNameStyle(item);
-    const qty = `<span class="fish-card__amount ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
     const isPlaceholder = imgSrc === ITEM_IMAGES.Default;
     return `
   <div class="fish-card__imageWrap ic-head">
@@ -731,8 +754,8 @@
   </div>
   <div class="fish-card__body ic-title-wrap">
     <span class="fish-card__name item-name" title="${escHtml(title)}" style="${nameStyle}">${escHtml(title)}</span>
-    <div class="fish-card__amountRow ic-meta">${qty}</div>
-  </div>`;
+  </div>
+  ${amountBadgeHtml(item)}`;
   }
   function buildItemCardElement(item) {
     const isShiny = item.shiny === true;
@@ -790,20 +813,19 @@
       nameEl.setAttribute('title', title);
       nameEl.style.cssText = nameStyle;
     }
-    const amount = Number(item.amount || 1);
-    const qtyHtml = `<span class="fish-card__amount ic-qty">x${Number.isFinite(amount) ? amount : 1}</span>`;
-    let amountRow = card.querySelector('.fish-card__amountRow, .ic-meta');
-    if (amountRow) {
-      amountRow.innerHTML = qtyHtml;
+    const amountLabel = formatAmountLabel(resolveItemAmount(item));
+    let badge = card.querySelector('.amount-badge, .fish-card__amount.ic-qty');
+    if (badge) {
+      badge.textContent = amountLabel;
+      if (!badge.classList.contains('amount-badge')) badge.classList.add('amount-badge');
     } else {
-      const bodyEl = card.querySelector('.fish-card__body, .ic-title-wrap');
-      if (bodyEl) {
-        amountRow = document.createElement('div');
-        amountRow.className = 'fish-card__amountRow ic-meta';
-        amountRow.innerHTML = qtyHtml;
-        bodyEl.appendChild(amountRow);
-      }
+      badge = document.createElement('span');
+      badge.className = 'amount-badge fish-card__amount ic-qty';
+      badge.textContent = amountLabel;
+      card.appendChild(badge);
     }
+    const oldRow = card.querySelector('.fish-card__amountRow');
+    if (oldRow) oldRow.remove();
     let img = card.querySelector('.fish-card__image, img');
     if (!img) {
       const wrap = card.querySelector('.fish-card__imageWrap');

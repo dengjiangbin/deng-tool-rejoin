@@ -9,9 +9,9 @@ const gameItemDbPublic = require('../src/fishitGameItemDbPublic');
 const manualRarity = require('../src/fishitManualRarityOverrides');
 const stoneImageAssets = require('../src/fishitStoneImageAssets');
 const { buildPublicFishFields, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
-const { BLOCKER10ZD_BUILD } = require('../src/fishitTrackerBuild');
+const { BLOCKER10ZE_BUILD } = require('../src/fishitTrackerBuild');
 
-const FINAL_BUILD = 'BLOCKER10ZD_STONE_ASSETS_MANUAL_RARITY_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZE_QUANTITY_FORMAT_BOTTOM_BADGES_2026_06_09';
 const BASE_URL = 'http://127.0.0.1:8791';
 
 function fishRow(overrides = {}) {
@@ -54,9 +54,9 @@ function sessionWith(fishItems = [], stoneItems = []) {
   };
 }
 
-describe('BLOCKER10ZD stone assets + manual rarity polish', () => {
-  test('build marker is BLOCKER10ZD', () => {
-    assert.equal(BLOCKER10ZD_BUILD, FINAL_BUILD);
+describe('BLOCKER10ZE stone assets + manual rarity polish', () => {
+  test('build marker is BLOCKER10ZE', () => {
+    assert.equal(BLOCKER10ZE_BUILD, FINAL_BUILD);
     assert.equal(PUBLIC_API_BUILD, FINAL_BUILD);
     assert.equal(gameItemDbPublic.FINAL_BUILD, FINAL_BUILD);
   });
