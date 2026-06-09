@@ -11,7 +11,8 @@ const fishImageAssets = require('./fishitFishImageAssets');
 const robloxThumbnails = require('./fishitRobloxThumbnails');
 const catchNameParser = require('./fishitCatchNameParser');
 const quizBotCatalog = require('./fishitQuizBotImageCatalog');
-const { parseGameFishIcon, GAME_FISH_ICON_SOURCE, PLAYERDATA_ITEMUTILITY_SOURCE } = require('./fishitItemUtilityPublic');
+const { parseGameItemIcon, GAMEITEMDB_ICON_SOURCE, PLAYERDATA_GAMEITEMDB_SOURCE } = require('./fishitGameItemDbPublic');
+const { PLAYERDATA_ITEMUTILITY_SOURCE } = require('./fishitItemUtilityPublic');
 let globalCatalogService = null;
 try { globalCatalogService = require('./fishitGlobalCatalogService'); } catch (_) { globalCatalogService = null; }
 let canonicalCatalog = null;
@@ -192,29 +193,31 @@ function resolveImageMetaForItem(item) {
   if (!item) return { assetId: null, sourceUrl: null, searchedSources: [] };
   const searchedSources = [];
   const aliases = quizBotCatalog.collectAliases(item);
-  const isItemUtility = item.source === PLAYERDATA_ITEMUTILITY_SOURCE
-    || item.imageSource === GAME_FISH_ICON_SOURCE;
+  const isPlayerDataPublic = item.source === PLAYERDATA_GAMEITEMDB_SOURCE
+    || item.source === PLAYERDATA_ITEMUTILITY_SOURCE
+    || item.imageSource === GAMEITEMDB_ICON_SOURCE
+    || item.imageSource === 'game_fish_icon_catalog';
 
-  const gameIcon = parseGameFishIcon(item.icon);
+  const gameIcon = parseGameItemIcon(item.icon);
   if (gameIcon?.assetId) {
     return {
       assetId: gameIcon.assetId,
       sourceUrl: null,
-      searchedSources: ['game_fish_icon_catalog'],
+      searchedSources: ['gameitemdb_icon'],
       triedAliases: aliases,
-      imageSource: GAME_FISH_ICON_SOURCE,
+      imageSource: GAMEITEMDB_ICON_SOURCE,
       iconDebug: item.icon || null,
     };
   }
 
   const direct = robloxThumbnails.sanitiseAssetId(item.imageAssetId);
-  if (direct && isItemUtility) {
+  if (direct && isPlayerDataPublic) {
     return {
       assetId: direct,
       sourceUrl: item.imageUrl || null,
-      searchedSources: ['game_fish_icon_catalog'],
+      searchedSources: ['gameitemdb_icon'],
       triedAliases: aliases,
-      imageSource: item.imageSource || GAME_FISH_ICON_SOURCE,
+      imageSource: item.imageSource || GAMEITEMDB_ICON_SOURCE,
     };
   }
   if (direct) {
@@ -226,7 +229,7 @@ function resolveImageMetaForItem(item) {
     };
   }
 
-  if (!isItemUtility && globalCatalogService) {
+  if (!isPlayerDataPublic && globalCatalogService) {
     try {
       const globalImg = globalCatalogService.resolveImageForItem(item);
       if (globalImg?.image?.cachedUrl || globalImg?.image?.originalPath) {
@@ -306,7 +309,7 @@ function resolveImageMetaForItem(item) {
     };
   }
 
-  if (isItemUtility) {
+  if (isPlayerDataPublic) {
     return {
       assetId: null,
       sourceUrl: null,
@@ -766,7 +769,7 @@ async function attachItemUtilityGameIcons(items, baseUrl) {
   for (const it of items) {
     const row = {
       ...it,
-      source: it.source || PLAYERDATA_ITEMUTILITY_SOURCE,
+      source: it.source || PLAYERDATA_GAMEITEMDB_SOURCE,
     };
     out.push(await attachCachedImageFields(row, baseUrl));
   }

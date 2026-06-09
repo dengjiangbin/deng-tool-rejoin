@@ -48,6 +48,7 @@ const partialSnapshot = require('./fishitPartialSnapshot');
 const snapshotRecovery = require('./fishitSnapshotRecovery');
 const { BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const itemUtilityPublic = require('./fishitItemUtilityPublic');
+const gameItemDbPublic = require('./fishitGameItemDbPublic');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
 const globalCatalogService = require('./fishitGlobalCatalogService');
 const globalDb = require('./fishitGlobalDb');
@@ -2158,6 +2159,11 @@ function isPublicFishItem(item) {
 /** Fish-only view for public website/API (storage keeps full inventory). */
 async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
   const sessionData = options.sessionData || null;
+  if (gameItemDbPublic.usesPlayerDataGameItemDbPublicIdentity(sessionData)) {
+    return gameItemDbPublic.buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, {
+      fishImageCache,
+    });
+  }
   if (itemUtilityPublic.usesPlayerDataItemUtilityPublicIdentity(sessionData)) {
     return itemUtilityPublic.buildPublicFromPlayerDataItemUtility(sessionData, baseUrl, {
       fishImageAssets,
@@ -2859,18 +2865,25 @@ function handleUpdateBackpack(req, res) {
 
     const acceptedCount = cleanItems.length || (ps && ps.accepted) || 0;
 
-    const usesItemUtility = body.inventorySource === itemUtilityPublic.PLAYERDATA_ITEMUTILITY_SOURCE
+    const usesGameItemDb = body.inventorySource === gameItemDbPublic.PLAYERDATA_GAMEITEMDB_SOURCE
       && Array.isArray(body.fishItems);
-    const playerDataFishItems = usesItemUtility
-      ? body.fishItems.filter(itemUtilityPublic.isPlayerDataItemUtilityRow)
-      : null;
-    const playerDataStoneItems = usesItemUtility && Array.isArray(body.stoneItems)
-      ? body.stoneItems.filter(itemUtilityPublic.isPlayerDataItemUtilityRow)
+    const usesItemUtility = !usesGameItemDb
+      && body.inventorySource === itemUtilityPublic.PLAYERDATA_ITEMUTILITY_SOURCE
+      && Array.isArray(body.fishItems);
+    const playerDataFishItems = usesGameItemDb
+      ? body.fishItems.filter(gameItemDbPublic.isPlayerDataGameItemDbRow)
+      : (usesItemUtility ? body.fishItems.filter(itemUtilityPublic.isPlayerDataItemUtilityRow) : null);
+    const playerDataStoneItems = (usesGameItemDb || usesItemUtility) && Array.isArray(body.stoneItems)
+      ? body.stoneItems.filter(
+        usesGameItemDb
+          ? gameItemDbPublic.isPlayerDataGameItemDbRow
+          : itemUtilityPublic.isPlayerDataItemUtilityRow,
+      )
       : [];
 
     const hasDisplayItems = cleanItems.length > 0
       || (partialInfo.lastGoodFishPreserved && existing && existing.items?.length)
-      || (usesItemUtility && playerDataFishItems && playerDataFishItems.length > 0);
+      || ((usesGameItemDb || usesItemUtility) && playerDataFishItems && playerDataFishItems.length > 0);
     const sessionPhase = partialInfo.lastGoodFishPreserved
       ? 'live'
       : effectivePhase(phase, ps, hasDisplayItems);
@@ -2906,18 +2919,28 @@ function handleUpdateBackpack(req, res) {
       lastGoodInventory: existing?.lastGoodInventory || null,
       lastGoodPublicFishCount: existing?.lastGoodPublicFishCount || 0,
       catchWatcherStatus: body.catchWatcherStatus || (existing && existing.catchWatcherStatus) || null,
-      inventorySource: usesItemUtility
-        ? itemUtilityPublic.PLAYERDATA_ITEMUTILITY_SOURCE
-        : (existing?.inventorySource || null),
-      playerDataFishItems: usesItemUtility
+      inventorySource: usesGameItemDb
+        ? gameItemDbPublic.PLAYERDATA_GAMEITEMDB_SOURCE
+        : (usesItemUtility
+          ? itemUtilityPublic.PLAYERDATA_ITEMUTILITY_SOURCE
+          : (existing?.inventorySource || null)),
+      playerDataFishItems: (usesGameItemDb || usesItemUtility)
         ? playerDataFishItems
         : (existing?.playerDataFishItems || null),
-      playerDataStoneItems: usesItemUtility
+      playerDataStoneItems: (usesGameItemDb || usesItemUtility)
         ? playerDataStoneItems
         : (existing?.playerDataStoneItems || null),
-      sourceTruth: usesItemUtility
-        ? (body.sourceTruth || itemUtilityPublic.defaultSourceTruth())
-        : (existing?.sourceTruth || null),
+      sourceTruth: usesGameItemDb
+        ? (body.sourceTruth || gameItemDbPublic.defaultSourceTruth())
+        : (usesItemUtility
+          ? (body.sourceTruth || itemUtilityPublic.defaultSourceTruth())
+          : (existing?.sourceTruth || null)),
+      playerDataUnresolvedItems: usesGameItemDb
+        ? (Array.isArray(body.unresolvedItems) ? body.unresolvedItems.slice(0, 50) : [])
+        : (existing?.playerDataUnresolvedItems || []),
+      playerDataGameItemDbProof: usesGameItemDb && body.playerDataGameItemDbProof
+        ? body.playerDataGameItemDbProof
+        : (existing?.playerDataGameItemDbProof || null),
       playerDataHiddenUnresolved: usesItemUtility
         ? (Array.isArray(body.hiddenUnresolvedRows) ? body.hiddenUnresolvedRows.slice(0, 50) : [])
         : (existing?.playerDataHiddenUnresolved || []),
@@ -2946,7 +2969,9 @@ function handleUpdateBackpack(req, res) {
       placeId: body.placeId || null,
     });
     let publicFishCount = enrichedForGood.filter(isPublicFishItem).length;
-    if (usesItemUtility && playerDataFishItems) {
+    if (usesGameItemDb && playerDataFishItems) {
+      publicFishCount = gameItemDbPublic.groupFishRows(playerDataFishItems).length;
+    } else if (usesItemUtility && playerDataFishItems) {
       publicFishCount = itemUtilityPublic.groupFishRows(playerDataFishItems).length;
     }
     partialSnapshot.updateLastGoodFishOnSession(
@@ -3120,6 +3145,7 @@ async function handleGetBackpack(req, res) {
     stoneInventory:  publicFish.stoneInventory || publicFish.stoneItems || [],
     fishCounts:      publicFish.fishCounts,
     publicCounts:    publicFish.publicCounts,
+    playerDataGameItemDbProof: publicFish.playerDataGameItemDbProof || null,
     playerDataItemUtilityProof: publicFish.playerDataItemUtilityProof || null,
     hiddenPublicRows: publicFish.hiddenPublicRows,
     quarantinedPublicNames: publicFish.quarantinedPublicNames,
@@ -3127,7 +3153,8 @@ async function handleGetBackpack(req, res) {
     countParityProof: publicFish.countParityProof,
     rarityColorProof: publicFish.rarityColorProof,
     globalDbUiProof: publicFish.globalDbUiProof,
-    globalCatalogProof: itemUtilityPublic.usesPlayerDataItemUtilityPublicIdentity(data)
+    globalCatalogProof: (gameItemDbPublic.usesPlayerDataGameItemDbPublicIdentity(data)
+      || itemUtilityPublic.usesPlayerDataItemUtilityPublicIdentity(data))
       ? null
       : globalCatalogService.buildGlobalDbSummaryProof(),
     globalImageProof: globalCatalogService.buildGlobalImageProof(publicFish.fishItems),
@@ -3297,6 +3324,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     globalLearningProof: globalCatalogService.buildGlobalLearningProof(25),
     resetSeedProof: globalCatalogService.getLastResetSeedProof(),
     globalDbStats: globalDb.getStats(),
+    playerDataGameItemDbProof: publicFishDbg.playerDataGameItemDbProof || null,
     playerDataItemUtilityProof: publicFishDbg.playerDataItemUtilityProof || null,
     inventorySource: data.inventorySource || null,
     sourceTruth: data.sourceTruth || null,

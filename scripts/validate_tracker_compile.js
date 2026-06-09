@@ -23,17 +23,20 @@ if (/^\s*loadstring\s*\(/.test(src)) {
 if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
   errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z7 marker missing');
 }
-if (!src.includes('BLOCKER10ZA_PLAYERDATA_ITEMUTILITY_STONES_UPLOAD_2026_06_09')) {
-  errors.push('BLOCKER10ZA build marker missing');
+if (!src.includes('BLOCKER10ZA_FINAL_PLAYERDATA_GAMEITEMDB_UPLOAD_2026_06_09')) {
+  errors.push('BLOCKER10ZA FINAL build marker missing');
 }
-if (!src.includes('scanPlayerDataItemUtilityInventory')) {
-  errors.push('scanPlayerDataItemUtilityInventory missing — PlayerData ItemUtility scan required');
+if (!src.includes('scanPlayerDataGameItemDbInventory')) {
+  errors.push('scanPlayerDataGameItemDbInventory missing — GameItemDB scan required');
 }
-if (!src.includes('LiveSafe.getFishIcon')) {
-  errors.push('LiveSafe.getFishIcon missing — game fish icon resolver required');
+if (!src.includes('LiveSafe.GetIcon')) {
+  errors.push('LiveSafe.GetIcon missing — GameItemDB icon resolver required');
 }
-if (!src.includes('game_fish_icon_catalog')) {
-  errors.push('game_fish_icon_catalog missing — fish icon upload source required');
+if (!src.includes('LiveSafe.buildGameItemDB')) {
+  errors.push('LiveSafe.buildGameItemDB missing — ReplicatedStorage.Items scan required');
+}
+if (!src.includes('playerdata_gameitemdb')) {
+  errors.push('playerdata_gameitemdb source missing');
 }
 if (!src.includes('BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
   errors.push('BLOCKER10Z7 build marker missing');

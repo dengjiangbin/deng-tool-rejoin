@@ -123,9 +123,9 @@
     .item-card.rarity-common, .fish-card.rarity-common { --card-fg:#e2e8f0; --card-muted-fg:#8a94a6; --badge-bg:rgba(0,0,0,.35); --image-glow:rgba(148,163,184,.12); background:linear-gradient(135deg,#242936 0%,#141820 100%); }
     .item-card.rarity-uncommon, .fish-card.rarity-uncommon { --card-fg:#e2e8f0; --card-muted-fg:rgba(255,255,255,.85); --badge-bg:rgba(0,0,0,.38); --image-glow:rgba(74,222,128,.14); background:linear-gradient(135deg,#2a3440 0%,#1a2030 100%); }
     .item-card.rarity-rare, .fish-card.rarity-rare { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.52); --image-glow:rgba(96,180,255,.28); background:linear-gradient(135deg,#60b4ff 0%,#3d88dc 100%); }
-    .item-card.rarity-epic, .fish-card.rarity-epic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.48); --image-glow:rgba(184,121,255,.24); background:linear-gradient(135deg,#b879ff 0%,#8152d6 100%); }
+    .item-card.rarity-epic, .fish-card.rarity-epic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,37,37,.22); background:linear-gradient(135deg,#ff2525 0%,#c90d12 100%); }
     .item-card.rarity-legendary, .fish-card.rarity-legendary { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,201,54,.24); background:linear-gradient(135deg,#ffc936 0%,#d79413 100%); }
-    .item-card.rarity-mythic, .fish-card.rarity-mythic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,37,37,.22); background:linear-gradient(135deg,#ff2525 0%,#c90d12 100%); }
+    .item-card.rarity-mythic, .fish-card.rarity-mythic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.48); --image-glow:rgba(184,121,255,.24); background:linear-gradient(135deg,#b879ff 0%,#8152d6 100%); }
     .item-card.rarity-secret, .fish-card.rarity-secret { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.52); --image-glow:rgba(16,228,135,.28); background:linear-gradient(135deg,#10e487 0%,#09c96f 55%,#079b59 100%); }
     .item-card.rarity-forgotten, .fish-card.rarity-forgotten { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.92); --badge-bg:rgba(0,0,0,.58); --image-glow:rgba(255,255,255,.16); background:linear-gradient(135deg,#f0f0f0 0%,#777 50%,#111 100%); }
 
@@ -460,6 +460,36 @@
       return label;
     }
     return `Types: <strong>${types}</strong>`;
+  }
+  function buildPlayerDataGameItemDbProofHtml(data) {
+    if (!DEBUG_GLOBAL) return '';
+    const proof = data && data.playerDataGameItemDbProof;
+    if (!proof || proof.enabled !== true) return '';
+    const fishSample = (proof.sampleFish || []).map((f) =>
+      `<div>${escHtml(f.name || '?')} id=${escHtml(String(f.itemId || '-'))} qty=${f.quantity || 1} tier=${escHtml(String(f.tier || '-'))} rarity=${escHtml(f.rarity || '-')} icon=${escHtml(f.icon || '-')}</div>`
+    ).join('');
+    const stoneSample = (proof.sampleStones || []).map((s) =>
+      `<div>${escHtml(s.name || '?')} type=${escHtml(s.stoneType || '-')} qty=${s.quantity || 1} icon=${escHtml(s.icon || '-')}</div>`
+    ).join('');
+    const unresolved = (proof.unresolvedItems || []).slice(0, 8).map((r) =>
+      `<div>hidden id=${escHtml(String(r.itemId || '-'))} reason=${escHtml(r.reason || '-')}</div>`
+    ).join('');
+    return `<details class="global-db-proof gameitemdb-proof" open>
+  <summary>PlayerData + GameItemDB: <span class="gdb-on">ON</span> &mdash; Global DB not used for public identity</summary>
+  <div class="gdb-body">
+    <div class="gdb-row"><span>Build</span><span>${escHtml(proof.build || 'BLOCKER10ZA_FINAL')}</span></div>
+    <div class="gdb-row"><span>inventorySource</span><span>${escHtml(proof.inventorySource || 'playerdata_gameitemdb')}</span></div>
+    <div class="gdb-row"><span>gameItemDbBuilt</span><span>${proof.gameItemDbBuilt === true ? 'true' : 'false'}</span></div>
+    <div class="gdb-row"><span>gameItemDbCount</span><span>${proof.gameItemDbCount != null ? proof.gameItemDbCount : '?'}</span></div>
+    <div class="gdb-row"><span>uploadedFishCount</span><span>${proof.uploadedFishCount != null ? proof.uploadedFishCount : '?'}</span></div>
+    <div class="gdb-row"><span>uploadedStoneCount</span><span>${proof.uploadedStoneCount != null ? proof.uploadedStoneCount : '?'}</span></div>
+    <div class="gdb-row"><span>fishIconResolvedCount</span><span>${proof.fishIconResolvedCount != null ? proof.fishIconResolvedCount : '?'}</span></div>
+    <div class="gdb-row"><span>globalDbUsedForPublicIdentity</span><span>false</span></div>
+    ${fishSample ? `<div class="global-db-debug"><strong>sampleFish</strong>${fishSample}</div>` : ''}
+    ${stoneSample ? `<div class="global-db-debug"><strong>sampleStones</strong>${stoneSample}</div>` : ''}
+    ${unresolved ? `<div class="global-db-debug"><strong>unresolvedItems</strong>${unresolved}</div>` : ''}
+  </div>
+</details>`;
   }
   function buildPlayerDataItemUtilityProofHtml(data) {
     if (!DEBUG_GLOBAL) return '';
@@ -886,7 +916,7 @@
     if (s) s.textContent = `Last sync: ${fmtTime(syncTimestamp(data))}`;
     if (l) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;
     const gdb = card.querySelector('[data-global-db-proof]');
-    if (gdb) gdb.innerHTML = buildPlayerDataItemUtilityProofHtml(data) + buildGlobalDbProofHtml(data);
+    if (gdb) gdb.innerHTML = buildPlayerDataGameItemDbProofHtml(data) + buildPlayerDataItemUtilityProofHtml(data) + buildGlobalDbProofHtml(data);
     if (b) patchCardInventory(b, fishList, stoneList);
   }
 
