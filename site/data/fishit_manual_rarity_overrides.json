@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "updatedAt": "2026-06-09T00:00:00.000Z",
+  "byName": {
+    "Panther Eel": "Secret",
+    "Skeleton Angler Fish": "Epic",
+    "King Crab": "Secret",
+    "Mystic Squid": "Mythic",
+    "Red Goatfish": "Uncommon",
+    "Zebra Snakehead": "Uncommon"
+  },
+  "byItemId": {
+    "248": "Secret",
+    "268": "Epic",
+    "285": "Uncommon",
+    "287": "Uncommon"
+  }
+}

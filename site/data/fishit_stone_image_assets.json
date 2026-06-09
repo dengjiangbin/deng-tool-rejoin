@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "updatedAt": "2026-06-09T00:00:00.000Z",
+  "source": "admin_uploaded_stone_asset",
+  "stones": {
+    "10": {
+      "itemId": "10",
+      "stoneType": "Normal",
+      "name": "Normal Enchant Stone",
+      "filename": "stone_10_normal.png",
+      "imageSource": "stone_manual_asset"
+    },
+    "246": {
+      "itemId": "246",
+      "stoneType": "Double",
+      "name": "Double Enchant Stone",
+      "filename": "stone_246_double.png",
+      "imageSource": "stone_manual_asset"
+    },
+    "558": {
+      "itemId": "558",
+      "stoneType": "Evolved",
+      "name": "Evolved Enchant Stone",
+      "filename": "stone_558_evolved.png",
+      "imageSource": "stone_manual_asset"
+    },
+    "873": {
+      "itemId": "873",
+      "stoneType": "Eggy",
+      "name": "Eggy Enchant Stone",
+      "filename": "stone_873_eggy.png",
+      "imageSource": "stone_manual_asset"
+    },
+    "929": {
+      "itemId": "929",
+      "stoneType": "Runic",
+      "name": "Runic Enchant Stone",
+      "filename": "stone_929_runic.png",
+      "imageSource": "stone_manual_asset"
+    }
+  }
+}
