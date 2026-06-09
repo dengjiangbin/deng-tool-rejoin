@@ -19,7 +19,7 @@ const fishitRoutes = require('../src/fishitRoutes');
 const { BLOCKER10ZJ_BUILD } = require('../src/fishitTrackerBuild');
 const { PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
 
-const FINAL_BUILD = 'BLOCKER10ZJ_INVENTORY_SEARCH_MENU_STATS_APK_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZK_INVENTORY_MOBILE_BULK_APK_2026_06_09';
 const LAYOUT_PATH = path.join(__dirname, '..', 'views', 'layout.ejs');
 const TRACKER_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
 const FISHIT_PATH = path.join(__dirname, '..', 'views', 'fishit.ejs');
@@ -150,7 +150,7 @@ describe('BLOCKER10ZJ inventory search, menu, stats images, APK inventory', () =
     assert.doesNotMatch(appRoot, /"Snapshot"/);
     assert.match(inventoryScreen, /"Inventory"/);
     assert.match(inventoryScreen, /Open in website/);
-    assert.match(inventoryScreen, /\/tracker"/);
+    assert.match(inventoryScreen, /\/tracker\?apk=1"/);
     assert.doesNotMatch(inventoryScreen, /Waiting for snapshot/i);
   });
 });

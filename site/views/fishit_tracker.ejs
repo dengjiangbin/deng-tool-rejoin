@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : 'BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08' %>">
+<html lang="en" data-theme="dark"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -154,33 +154,34 @@
     .inventory-card-image-wrap,
     .stone-card__icon {
       position:absolute;
-      left:14px;
-      top:14px;
+      left:16px;
+      top:16px;
       width:78px;
       height:78px;
       min-width:78px;
       min-height:78px;
       max-width:78px;
       max-height:78px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
+      display:grid;
+      place-items:center;
       border-radius:12px;
       background:rgba(0,0,0,.28);
       box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 4px 18px var(--image-glow);
       flex-shrink:0;
       pointer-events:none;
+      overflow:hidden;
     }
     .fish-card__image,
     .inventory-card-image,
     .stone-card__image,
     .fish-card img,
     .stone-card img,
-    .fish-card__imageWrap img {
-      width:78px;
-      height:78px;
-      max-width:78px;
-      max-height:78px;
+    .fish-card__imageWrap img,
+    .inventory-card-image-wrap img {
+      max-width:100%;
+      max-height:100%;
+      width:auto;
+      height:auto;
       object-fit:contain;
       border-radius:8px;
       filter:drop-shadow(0 2px 8px rgba(0,0,0,.35));
@@ -330,6 +331,85 @@
       font-size:.85rem;
     }
 
+    .inventory-mode-tabs {
+      display:flex;
+      gap:8px;
+      margin-bottom:14px;
+      padding:4px;
+      border-radius:12px;
+      background:var(--surface);
+      border:1px solid var(--border);
+    }
+    .inventory-mode-tab {
+      flex:1;
+      border:none;
+      background:transparent;
+      color:var(--muted);
+      padding:10px 12px;
+      border-radius:9px;
+      font-weight:650;
+      font-family:var(--font);
+      cursor:pointer;
+      transition:background .15s,color .15s;
+    }
+    .inventory-mode-tab.is-active {
+      background:var(--surface2);
+      color:var(--text);
+      box-shadow:inset 0 0 0 1px var(--border);
+    }
+    .bulk-inventory-panel { margin-bottom:14px; }
+    .bulk-inventory-header {
+      font-size:.85rem;
+      color:var(--muted);
+      margin-bottom:10px;
+    }
+    .bulk-inventory-header strong { color:var(--text); }
+    .bulk-card-accounts {
+      position:absolute;
+      right:10px;
+      bottom:10px;
+      font-size:.68rem;
+      color:var(--card-muted-fg);
+      opacity:.95;
+      z-index:3;
+      pointer-events:none;
+    }
+    .card-empty-sub {
+      display:block;
+      margin-top:6px;
+      font-size:.82rem;
+      color:var(--muted);
+    }
+    .inventory-apk-embed .back-link,
+    .inventory-apk-embed .loadstring-box { display:none !important; }
+    .inventory-apk-embed .page { padding-top:12px; padding-bottom:24px; }
+    .inventory-skeleton-grid {
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:8px;
+      margin-top:8px;
+    }
+    .inventory-skeleton-card {
+      height:104px;
+      border-radius:10px;
+      background:linear-gradient(90deg,var(--surface2) 25%,var(--surface) 50%,var(--surface2) 75%);
+      background-size:200% 100%;
+      animation:inventoryShimmer 1.2s ease-in-out infinite;
+    }
+    @keyframes inventoryShimmer {
+      0% { background-position:100% 0; }
+      100% { background-position:-100% 0; }
+    }
+    .inventory-offline-notice {
+      margin:8px 0 12px;
+      padding:8px 12px;
+      border-radius:9px;
+      border:1px solid rgba(245,158,11,.35);
+      background:rgba(245,158,11,.08);
+      color:#fbbf24;
+      font-size:.82rem;
+    }
+
     .loadstring-box { margin-top:36px; background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius-lg); padding:20px; }
     .header__lead {
       display:flex;
@@ -393,7 +473,67 @@
       .fish-grid,
       .stones-grid,
       .stone-grid {
-        grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+        grid-template-columns:repeat(2,minmax(0,1fr));
+        gap:8px;
+      }
+      .item-card,
+      .fish-card,
+      .stone-card,
+      .inventory-card {
+        width:100%;
+        min-width:0;
+        max-width:none;
+        height:104px;
+        min-height:104px;
+        max-height:104px;
+        border-radius:10px;
+        padding:0;
+      }
+      .fish-card__imageWrap,
+      .inventory-card-image-wrap,
+      .stone-card__icon {
+        left:12px;
+        top:14px;
+        width:54px;
+        height:54px;
+        min-width:54px;
+        min-height:54px;
+        max-width:54px;
+        max-height:54px;
+      }
+      .fish-card__name,
+      .item-card .item-name,
+      .fish-card .item-name,
+      .inventory-card-name,
+      .stone-card__name {
+        left:74px;
+        right:10px;
+        top:12px;
+        font-size:11px;
+        line-height:1.1;
+        max-height:34px;
+      }
+      .fish-card .amount-badge,
+      .stone-card .amount-badge,
+      .item-card .amount-badge,
+      .fish-card__amount.amount-badge,
+      .ic-qty.fish-card__amount.amount-badge {
+        left:12px;
+        bottom:10px;
+        padding:6px 8px;
+        font-size:12px;
+        max-width:calc(100% - 24px);
+      }
+      .bulk-card-accounts { font-size:.62rem; right:8px; bottom:8px; }
+    }
+    @media (max-width:360px) {
+      .inventory-grid,
+      .items-grid,
+      .fish-grid,
+      .stones-grid,
+      .stone-grid,
+      .inventory-skeleton-grid {
+        grid-template-columns:1fr;
       }
     }
     @media (max-width:560px) {
@@ -405,8 +545,7 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10ZJ_INVENTORY_SEARCH_MENU_STATS_APK_2026_06_09">
-<!-- BLOCKER10ZJ_INVENTORY_SEARCH_MENU_STATS_APK_2026_06_09 -->
+<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : 'inventory-public' %>">
 <div class="page">
   <div class="inner">
 
@@ -439,6 +578,26 @@
 
     <div class="summary-bar">
       <span id="summaryText">No players added yet</span>
+    </div>
+
+    <div class="inventory-mode-tabs" role="tablist" aria-label="Inventory view">
+      <button type="button" class="inventory-mode-tab is-active" data-inventory-mode="individual" aria-selected="true">Individual</button>
+      <button type="button" class="inventory-mode-tab" data-inventory-mode="bulk" aria-selected="false">Bulk / All</button>
+    </div>
+
+    <div id="bulkInventoryPanel" class="bulk-inventory-panel" hidden>
+      <div class="bulk-inventory-header" id="bulkInventoryHeader">Bulk Inventory</div>
+      <div class="inventory-search-row" data-bulk-search-row>
+        <div class="inventory-search" role="search">
+          <svg class="inventory-search__icon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m20 20-3.5-3.5"></path>
+          </svg>
+          <input class="inventory-search__input" type="search" placeholder="Search fish or stones..." autocomplete="off" spellcheck="false" aria-label="Search fish or stones" data-bulk-search-input>
+          <button class="inventory-search__clear" type="button" aria-label="Clear search" data-bulk-search-clear>Clear</button>
+        </div>
+      </div>
+      <div id="bulkInventoryBody"></div>
     </div>
 
     <div id="trackerList"></div>
@@ -477,12 +636,17 @@
   'use strict';
 
   const LS_KEY        = 'fishit_tracked_users';
+  const LS_BULK_CACHE = 'fishit_bulk_inventory_cache_v1';
   const POLL_MS       = 5000;
-  const DEBUG_GLOBAL  = /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
-  const RENDER_BUILD  = document.documentElement.getAttribute('data-render-build')
-    || 'BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08';
-  const PUBLIC_API_BUILD = document.documentElement.getAttribute('data-public-api-build')
-    || 'BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08';
+  const DEBUG_INVENTORY = <%= (typeof debugInventory !== 'undefined' && debugInventory) ? 'true' : 'false' %>;
+  const APK_EMBED = <%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'true' : 'false' %>;
+  const DEBUG_GLOBAL  = DEBUG_INVENTORY && /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
+  const RENDER_BUILD  = DEBUG_INVENTORY
+    ? (document.documentElement.getAttribute('data-render-build') || '')
+    : '';
+  const PUBLIC_API_BUILD = DEBUG_INVENTORY
+    ? (document.documentElement.getAttribute('data-public-api-build') || '')
+    : '';
   const RARITY_NAME_COLORS = {
     common:'#f8fafc', uncommon:'#84cc16', rare:'#1e3a8a', epic:'#a855f7',
     legendary:'#ff8c00', legend:'#ff8c00', mythic:'#ef4444', secret:'#00ff7f', forgotten:'#e5e7eb',
@@ -500,9 +664,14 @@
   };
 
   const trackers       = new Map();
+  let inventoryMode    = 'individual';
+  let bulkSearchQuery  = '';
   const inputEl        = document.getElementById('usernameInput');
   const addBtn         = document.getElementById('addBtn');
   const trackerListEl  = document.getElementById('trackerList');
+  const bulkPanelEl    = document.getElementById('bulkInventoryPanel');
+  const bulkBodyEl     = document.getElementById('bulkInventoryBody');
+  const bulkHeaderEl   = document.getElementById('bulkInventoryHeader');
   const noTrackersMsg  = document.getElementById('noTrackersMsg');
   const summaryTextEl  = document.getElementById('summaryText');
   const copyBtn        = document.getElementById('copyBtn');
@@ -573,6 +742,192 @@
       if (typeDiff) return typeDiff;
       return inventoryItemId(a).localeCompare(inventoryItemId(b));
     });
+  }
+  function fmtRelativeAgo(iso) {
+    if (!iso) return '';
+    try {
+      const ms = Date.now() - new Date(iso).getTime();
+      if (!Number.isFinite(ms) || ms < 0) return '';
+      const mins = Math.floor(ms / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return `${mins}m ago`;
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return `${hrs}h ago`;
+      return `${Math.floor(hrs / 24)}d ago`;
+    } catch { return ''; }
+  }
+  function publicWaitingHtml() {
+    return `<div class="card-empty">Waiting for inventory sync...<span class="card-empty-sub">Run the script in-game to start tracking this account.</span></div>`;
+  }
+  function canonicalBulkName(item) {
+    return String(item?.baseFishName || item?.displayName || item?.name || item?.Name || '').trim()
+      || inventoryItemName(item);
+  }
+  function bulkGroupKey(category, item) {
+    const cat = String(category || 'fish').toLowerCase();
+    const name = canonicalBulkName(item);
+    if (cat === 'stone') {
+      const stoneType = String(item?.stoneType || item?.StoneType || '').trim();
+      return `${cat}:${name.toLowerCase()}:${stoneType.toLowerCase() || normalizeRarityLabel(item).toLowerCase()}`;
+    }
+    return `${cat}:${name.toLowerCase()}:${normalizeRarityLabel(item).toLowerCase()}`;
+  }
+  function mergeBulkItem(existing, item, username, category) {
+    const amount = Math.max(0, Math.floor(Number(resolveItemAmount(item)) || 0));
+    const owners = new Set(existing.owners || []);
+    if (username) owners.add(username);
+    const candidate = item.imageUrl || null;
+    const imageUrl = candidate && !/fallback|placeholder/i.test(candidate)
+      ? candidate
+      : (existing.imageUrl || candidate);
+    return {
+      ...existing,
+      name: existing.name || canonicalBulkName(item),
+      category: category || existing.category,
+      rarity: existing.rarity || normalizeRarityLabel(item),
+      stoneType: existing.stoneType || item.stoneType || item.StoneType || null,
+      itemId: existing.itemId || inventoryItemId(item) || null,
+      imageUrl,
+      amount: (existing.amount || 0) + amount,
+      accountCount: owners.size,
+      owners: [...owners],
+      dataSource: 'bulk_playerdata_gameitemdb',
+      groupKey: existing.groupKey,
+    };
+  }
+  function aggregateBulkInventory(sessions) {
+    const fishMap = new Map();
+    const stoneMap = new Map();
+    const accountSet = new Set();
+    for (const session of sessions || []) {
+      const username = String(session?.username || '').trim();
+      if (username) accountSet.add(username.toLowerCase());
+      for (const item of session?.fishList || []) {
+        const key = bulkGroupKey('fish', item);
+        fishMap.set(key, mergeBulkItem(fishMap.get(key) || {
+          groupKey: key, name: canonicalBulkName(item), category: 'fish',
+          rarity: normalizeRarityLabel(item), amount: 0, accountCount: 0, owners: [], imageUrl: null,
+        }, item, username, 'fish'));
+      }
+      for (const item of session?.stoneList || []) {
+        const key = bulkGroupKey('stone', item);
+        stoneMap.set(key, mergeBulkItem(stoneMap.get(key) || {
+          groupKey: key, name: canonicalBulkName(item), category: 'stone',
+          rarity: normalizeRarityLabel(item), stoneType: item.stoneType || item.StoneType || null,
+          amount: 0, accountCount: 0, owners: [], imageUrl: null,
+        }, item, username, 'stone'));
+      }
+    }
+    return {
+      fish: sortInventoryFish([...fishMap.values()]),
+      stones: sortInventoryStones([...stoneMap.values()]),
+      accountCount: accountSet.size,
+      fishTypeCount: fishMap.size,
+      stoneTypeCount: stoneMap.size,
+    };
+  }
+  function bulkSearchHaystack(item) {
+    if (!item || typeof item !== 'object') return '';
+    return [
+      item.name, item.rarity, item.stoneType, item.itemId, item.groupKey,
+      ...(Array.isArray(item.owners) ? item.owners : []),
+      formatQuantity(item.amount || 0),
+    ].filter(Boolean).join(' ').toLowerCase();
+  }
+  function filterBulkItems(items, query) {
+    if (!Array.isArray(items)) return [];
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((item) => bulkSearchHaystack(item).includes(q));
+  }
+  function collectBulkSessions() {
+    const sessions = [];
+    trackers.forEach((entry) => {
+      const data = entry.lastData;
+      if (!data) return;
+      const fishList = getPublicFishItems(data);
+      const stoneList = getPublicStoneItems(data);
+      if (!fishList.length && !stoneList.length) return;
+      sessions.push({ username: entry.displayName, fishList, stoneList });
+    });
+    return sessions;
+  }
+  function bulkCardKey(item) {
+    return item.groupKey || `${item.category}|${item.name}|${item.rarity}`;
+  }
+  function buildBulkCardInnerHtml(item) {
+    const title = item.name || 'Unknown';
+    const imgSrc = itemImageSrc(item) || ITEM_IMAGES.Default;
+    const isPlaceholder = imgSrc === ITEM_IMAGES.Default;
+    const accountLine = item.accountCount > 1
+      ? `<span class="bulk-card-accounts">${formatQuantity(item.accountCount)} accounts</span>`
+      : '';
+    return `
+  <div class="fish-card__imageWrap ic-head inventory-card-image-wrap">
+    <img class="fish-card__image inventory-card-image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async"${isPlaceholder ? ' data-placeholder="true"' : ''} data-item-id="${escHtml(item.itemId || '')}">
+  </div>
+  <div class="fish-card__body ic-title-wrap">
+    <span class="fish-card__name item-name inventory-card-name" title="${escHtml(title)}">${escHtml(title)}</span>
+  </div>
+  ${amountBadgeHtml({ amount: item.amount })}
+  ${accountLine}`;
+  }
+  function buildBulkCardElement(item) {
+    const rarity = publicRarity(item);
+    const crc = cardRarityClass(rarity);
+    const card = document.createElement('div');
+    card.className = 'item-card fish-card inventory-card';
+    if (item.category === 'stone') card.classList.add('stone-card');
+    if (crc) card.classList.add(crc);
+    card.setAttribute('data-card-key', bulkCardKey(item));
+    card.setAttribute('data-source', item.dataSource || 'bulk_playerdata_gameitemdb');
+    card.innerHTML = buildBulkCardInnerHtml(item);
+    const img = card.querySelector('.fish-card__image');
+    if (img) img.onerror = () => onFishImageError(img, item);
+    return card;
+  }
+  function renderBulkInventory() {
+    if (!bulkBodyEl || !bulkHeaderEl) return;
+    const sessions = collectBulkSessions();
+    const bulk = aggregateBulkInventory(sessions);
+    bulkHeaderEl.innerHTML = `Bulk Inventory &mdash; Fish: <strong>${formatQuantity(bulk.fishTypeCount)}</strong> types &middot; Stones: <strong>${formatQuantity(bulk.stoneTypeCount)}</strong> types &middot; Accounts: <strong>${formatQuantity(bulk.accountCount)}</strong>`;
+    const fish = filterBulkItems(bulk.fish, bulkSearchQuery);
+    const stones = filterBulkItems(bulk.stones, bulkSearchQuery);
+    if (!bulk.accountCount) {
+      bulkBodyEl.innerHTML = `<div class="card-empty">Add players in Individual mode to see combined inventory here.</div>`;
+      return;
+    }
+    if (!fish.length && !stones.length) {
+      bulkBodyEl.innerHTML = `<div class="inventory-search-empty">No inventory items found</div>`;
+      return;
+    }
+    let html = '';
+    if (fish.length) {
+      html += `<div class="items-grid inventory-grid fish-grid">${fish.map((item) => {
+        const crc = cardRarityClass(publicRarity(item));
+        return `<div class="item-card fish-card inventory-card ${crc}" data-card-key="${escHtml(bulkCardKey(item))}" data-source="bulk_playerdata_gameitemdb">${buildBulkCardInnerHtml(item)}</div>`;
+      }).join('')}</div>`;
+    }
+    if (stones.length) {
+      html += `<div class="stones-section"><div class="stones-section__title">Enchant Stones</div><div class="items-grid inventory-grid stones-grid stone-grid">${stones.map((item) =>
+        `<div class="item-card fish-card stone-card inventory-card" data-card-key="${escHtml(bulkCardKey(item))}" data-source="bulk_playerdata_gameitemdb">${buildBulkCardInnerHtml(item)}</div>`
+      ).join('')}</div></div>`;
+    }
+    bulkBodyEl.innerHTML = html;
+    wireFishImageErrors(bulkBodyEl);
+    try { localStorage.setItem(LS_BULK_CACHE, JSON.stringify({ at: Date.now(), bulk })); } catch {}
+  }
+  function setInventoryMode(mode) {
+    inventoryMode = mode === 'bulk' ? 'bulk' : 'individual';
+    document.querySelectorAll('[data-inventory-mode]').forEach((btn) => {
+      const active = btn.getAttribute('data-inventory-mode') === inventoryMode;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    if (bulkPanelEl) bulkPanelEl.hidden = inventoryMode !== 'bulk';
+    if (trackerListEl) trackerListEl.style.display = inventoryMode === 'bulk' ? 'none' : '';
+    if (noTrackersMsg) noTrackersMsg.style.display = (inventoryMode === 'individual' && trackers.size === 0) ? 'block' : 'none';
+    if (inventoryMode === 'bulk') renderBulkInventory();
   }
   function fmtTime(iso) {
     if (!iso) return '-';
@@ -1245,9 +1600,9 @@
   <button class="btn-remove" data-remove-btn aria-label="Remove">x Remove</button>
   <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>
 </div>
-<div class="card-status-line" data-status-line>&#x23F3; Waiting for <strong>${escHtml(username)}</strong> to execute the script in-game...</div>
-<div data-global-db-proof></div>
-<div class="card-body" data-card-body><div class="card-empty">&#x23F3; Awaiting first data...</div></div>`
+<div class="card-status-line" data-status-line>Waiting for inventory sync...</div>
+${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
+<div class="card-body" data-card-body>${publicWaitingHtml()}</div>`;
 
     el.querySelector('.card-head').addEventListener('click', e => { if (!e.target.closest('[data-remove-btn]')) el.classList.toggle('expanded'); });
     el.querySelector('[data-remove-btn]').addEventListener('click', e => { e.stopPropagation(); removeTracker(username.toLowerCase()); });
@@ -1266,10 +1621,16 @@
     logFishOnlyRender(card.dataset.user, data, fishList);
     if (c) c.innerHTML = fishCountLabel(data, fishList);
     if (s) s.textContent = `Last sync: ${fmtTime(syncTimestamp(data))}`;
-    if (l) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;
-    const gdb = card.querySelector('[data-global-db-proof]');
-    if (gdb) gdb.innerHTML = buildPlayerDataGameItemDbProofHtml(data) + buildPlayerDataItemUtilityProofHtml(data) + buildGlobalDbProofHtml(data);
+    if (l) {
+      if (DEBUG_INVENTORY) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;
+      else l.textContent = 'Live';
+    }
+    if (DEBUG_INVENTORY) {
+      const gdb = card.querySelector('[data-global-db-proof]');
+      if (gdb) gdb.innerHTML = buildPlayerDataGameItemDbProofHtml(data) + buildPlayerDataItemUtilityProofHtml(data) + buildGlobalDbProofHtml(data);
+    }
     if (b) patchCardInventory(b, fishList, stoneList);
+    if (inventoryMode === 'bulk') renderBulkInventory();
   }
 
   function setCardWaiting(card, name) {
@@ -1277,8 +1638,10 @@
     card.classList.add('state-waiting');
     const l = card.querySelector('[data-status-line]');
     const s = card.querySelector('[data-sync-time]');
-    if (l) l.innerHTML = `&#x23F3; Waiting for <strong>${escHtml(name)}</strong> to execute the script in-game...`;
+    const b = card.querySelector('[data-card-body]');
+    if (l) l.textContent = DEBUG_INVENTORY ? `Waiting for ${name} to execute the script in-game...` : 'Waiting for inventory sync...';
     if (s) s.textContent = '';
+    if (b && !DEBUG_INVENTORY) b.innerHTML = publicWaitingHtml();
   }
 
   // Map a tracker_status discovery phase to a human-readable message.
@@ -1305,38 +1668,48 @@
     }
   }
 
-  // Script is executing (tracker_status online) but no inventory snapshot yet.
-  // Green dot + phase message instead of "Awaiting first data".
   function setCardRunning(card, name, data) {
+    const fishList = getPublicFishItems(data);
+    const stoneList = getPublicStoneItems(data);
+    if (fishList.length || stoneList.length) {
+      updateCard(card, data);
+      return;
+    }
     card.classList.remove('state-waiting','state-error');
     card.classList.add('state-live');
     const l = card.querySelector('[data-status-line]');
     const s = card.querySelector('[data-sync-time]');
     const c = card.querySelector('[data-fish-count]');
     const b = card.querySelector('[data-card-body]');
-    if (l) l.innerHTML = `&#x1F7E2; ${escHtml(phaseMessage(data.phase))}`;
-    if (s) s.textContent = syncTimestamp(data) ? `Sync: ${fmtTime(syncTimestamp(data))}` : '';
-    if (c) c.innerHTML = `Fish: <strong>-</strong>`;
-    let bodyHtml = `<div class="card-empty">&#x1F7E2; ${escHtml(phaseMessage(data.phase))}</div>`;
-    // Show parse stats whenever raw>0 accepted=0, regardless of phase label.
-    const ps = data.parseStats;
-    const showParseDebug = ps && ps.raw > 0
-      && (ps.acceptedInstances === 0 || ps.acceptedInstances === undefined)
-      && (ps.accepted === 0 || ps.accepted === undefined)
-      && (data.phase === 'inventory_parse_failed' || data.phase === 'inventory_empty');
-    if (showParseDebug) {
-      bodyHtml += `<div class="card-empty" style="font-size:0.8em;color:#8a94a6;margin-top:4px">`
-        + `Raw: ${ps.raw ?? '?'} &middot; Accepted: ${ps.accepted ?? 0} &middot; Instances: ${ps.acceptedInstances ?? 0} &middot; Rejected: ${ps.rejected ?? '?'}`
-        + (ps.selectedPath ? ` &middot; Path: ${escHtml(ps.selectedPath)}` : '')
-        + (data.trackerBuild ? ` &middot; Build: ${escHtml(data.trackerBuild)}` : '')
-        + `</div>`;
-    } else if (data.trackerBuild || (ps && ps.acceptedInstances > 0)) {
-      bodyHtml += `<div class="card-empty" style="font-size:0.75em;color:#6b7280;margin-top:4px">`
-        + (data.trackerBuild ? `Build: ${escHtml(data.trackerBuild)}` : '')
-        + (ps && ps.acceptedInstances > 0 ? ` &middot; Instances: ${ps.acceptedInstances} &middot; Unique: ${ps.accepted ?? 0}` : '')
-        + `</div>`;
+    if (DEBUG_INVENTORY) {
+      if (l) l.innerHTML = `&#x1F7E2; ${escHtml(phaseMessage(data.phase))}`;
+      if (s) s.textContent = syncTimestamp(data) ? `Sync: ${fmtTime(syncTimestamp(data))}` : '';
+      if (c) c.innerHTML = `Fish: <strong>-</strong>`;
+      let bodyHtml = `<div class="card-empty">&#x1F7E2; ${escHtml(phaseMessage(data.phase))}</div>`;
+      const ps = data.parseStats;
+      const showParseDebug = ps && ps.raw > 0
+        && (ps.acceptedInstances === 0 || ps.acceptedInstances === undefined)
+        && (ps.accepted === 0 || ps.accepted === undefined)
+        && (data.phase === 'inventory_parse_failed' || data.phase === 'inventory_empty');
+      if (showParseDebug) {
+        bodyHtml += `<div class="card-empty" style="font-size:0.8em;color:#8a94a6;margin-top:4px">`
+          + `Raw: ${ps.raw ?? '?'} &middot; Accepted: ${ps.accepted ?? 0} &middot; Instances: ${ps.acceptedInstances ?? 0} &middot; Rejected: ${ps.rejected ?? '?'}`
+          + (ps.selectedPath ? ` &middot; Path: ${escHtml(ps.selectedPath)}` : '')
+          + (data.trackerBuild ? ` &middot; Build: ${escHtml(data.trackerBuild)}` : '')
+          + `</div>`;
+      } else if (data.trackerBuild || (ps && ps.acceptedInstances > 0)) {
+        bodyHtml += `<div class="card-empty" style="font-size:0.75em;color:#6b7280;margin-top:4px">`
+          + (data.trackerBuild ? `Build: ${escHtml(data.trackerBuild)}` : '')
+          + (ps && ps.acceptedInstances > 0 ? ` &middot; Instances: ${ps.acceptedInstances} &middot; Unique: ${ps.accepted ?? 0}` : '')
+          + `</div>`;
+      }
+      if (b) b.innerHTML = bodyHtml;
+      return;
     }
-    if (b) b.innerHTML = bodyHtml;
+    if (l) l.textContent = 'Live';
+    if (s) s.textContent = syncTimestamp(data) ? `Last sync: ${fmtTime(syncTimestamp(data))}` : '';
+    if (c) c.innerHTML = `Fish: <strong>-</strong>`;
+    if (b) b.innerHTML = publicWaitingHtml();
   }
 
   function setCardOffline(card, name, lastData) {
@@ -1346,13 +1719,16 @@
     const s = card.querySelector('[data-sync-time]');
     const c = card.querySelector('[data-fish-count]');
     const b = card.querySelector('[data-card-body]');
-    if (l) l.innerHTML = `&#x1F534; Offline &mdash; <strong>${escHtml(name)}</strong> has not synced inventory recently`;
+    const ago = fmtRelativeAgo(syncTimestamp(lastData));
+    if (l) l.textContent = ago ? `Offline · Last sync ${ago}` : 'Offline';
     if (s && lastData) s.textContent = `Last sync: ${fmtTime(syncTimestamp(lastData))}`;
     if (lastData) {
       const fishList = getPublicFishItems(lastData);
-      if (c) c.innerHTML = fishCountLabel(lastData, fishList).replace('</span>', ' &mdash; Offline</span>');
-      if (b) patchItemsGrid(b, fishList);
+      const stoneList = getPublicStoneItems(lastData);
+      if (c) c.innerHTML = fishCountLabel(lastData, fishList);
+      if (b) patchCardInventory(b, fishList, stoneList);
     }
+    if (inventoryMode === 'bulk') renderBulkInventory();
   }
 
   function setCardError(card) {
@@ -1380,18 +1756,16 @@
       const data = await res.json();
       entry.lastData = data;
       const fishList = getPublicFishItems(data);
-      const hasFish = fishList.length > 0;
+      const stoneList = getPublicStoneItems(data);
+      const hasInventory = fishList.length > 0 || stoneList.length > 0;
       if (data.isOnline === false) {
-        // Offline: keep the last known inventory visible with a red dot.
         setCardOffline(entry.el, entry.displayName, data);
-      } else if (hasFish) {
-        // Online with a real inventory snapshot.
+      } else if (hasInventory) {
         updateCard(entry.el, data);
       } else {
-        // Online (tracker_status heartbeat) but no inventory yet: show the
-        // running phase with a green dot, never "Awaiting first data".
         setCardRunning(entry.el, entry.displayName, data);
       }
+      if (inventoryMode === 'bulk') renderBulkInventory();
     } catch { if (trackers.has(key)) setCardError(entry.el); }
   }
 
@@ -1446,6 +1820,30 @@
   // Restore saved sessions
   loadSaved().forEach(u => addTracker(u));
   updateSummary();
+
+  document.querySelectorAll('[data-inventory-mode]').forEach((btn) => {
+    btn.addEventListener('click', () => setInventoryMode(btn.getAttribute('data-inventory-mode')));
+  });
+  const bulkSearchInput = document.querySelector('[data-bulk-search-input]');
+  const bulkSearchClear = document.querySelector('[data-bulk-search-clear]');
+  if (bulkSearchInput) {
+    bulkSearchInput.addEventListener('input', () => {
+      bulkSearchQuery = bulkSearchInput.value;
+      if (bulkSearchClear) bulkSearchClear.classList.toggle('is-visible', String(bulkSearchQuery).trim().length > 0);
+      if (inventoryMode === 'bulk') renderBulkInventory();
+    });
+  }
+  if (bulkSearchClear) {
+    bulkSearchClear.addEventListener('click', () => {
+      bulkSearchQuery = '';
+      if (bulkSearchInput) bulkSearchInput.value = '';
+      bulkSearchClear.classList.remove('is-visible');
+      if (inventoryMode === 'bulk') renderBulkInventory();
+      if (bulkSearchInput) bulkSearchInput.focus();
+    });
+  }
+  if (APK_EMBED) document.documentElement.style.background = '#0d0f14';
+  setInventoryMode('individual');
 }());
 </script>
 </body>

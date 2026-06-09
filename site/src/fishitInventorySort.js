@@ -127,6 +127,8 @@ module.exports = {
   STONE_TYPE_ORDER,
   normalizeRarityLabel,
   rarityRank,
+  itemDisplayName,
+  itemStableId,
   sortInventoryFish,
   sortInventoryStones,
   applyPublicInventorySort,

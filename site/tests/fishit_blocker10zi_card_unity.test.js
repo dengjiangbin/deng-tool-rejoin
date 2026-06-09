@@ -8,7 +8,7 @@ const path = require('path');
 const { BLOCKER10ZI_BUILD } = require('../src/fishitTrackerBuild');
 const { PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
 
-const FINAL_BUILD = 'BLOCKER10ZJ_INVENTORY_SEARCH_MENU_STATS_APK_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZK_INVENTORY_MOBILE_BULK_APK_2026_06_09';
 const TPL_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
 
 function loadTrackerCardFns() {
@@ -57,17 +57,17 @@ describe('BLOCKER10ZI inventory card size unity', () => {
     assert.match(tpl, /\.fish-card[\s\S]*width:220px[\s\S]*height:138px[\s\S]*max-height:138px/);
     assert.match(tpl, /\.stone-card[\s\S]*width:220px/);
     assert.match(tpl, /\.inventory-card[\s\S]*max-width:220px/);
-    assert.doesNotMatch(tpl, /\.fish-card[\s\S]*height:auto/);
     assert.doesNotMatch(tpl, /\.fish-card[\s\S]*min-height:108px/);
   });
 
   test('CSS fixes image box and name clamp without content-driven card height', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /\.fish-card__image[\s\S]*width:78px[\s\S]*height:78px[\s\S]*object-fit:contain/);
+    assert.match(tpl, /\.fish-card__imageWrap[\s\S]*left:16px[\s\S]*width:78px[\s\S]*object-fit:contain/);
     assert.match(tpl, /\.inventory-card-name/);
     assert.match(tpl, /\.fish-card__name[\s\S]*max-height:42px[\s\S]*-webkit-line-clamp:2/);
     assert.match(tpl, /\.fish-card \.amount-badge[\s\S]*position:absolute[\s\S]*left:14px[\s\S]*bottom:14px/);
-    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*minmax\(160px,1fr\)/);
+    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*height:104px/);
   });
 
   test('rendered fish cards share inventory-card class and fixed layout hooks', () => {

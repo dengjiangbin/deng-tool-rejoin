@@ -6,7 +6,7 @@ const GAMEITEMDB_ICON_SOURCE = 'gameitemdb_icon';
 const PLAYERDATA_GAMEITEMDB_SOURCE = 'playerdata_gameitemdb';
 const STONE_MANUAL_ASSET_SOURCE = stoneImageAssets.STONE_MANUAL_ASSET_SOURCE;
 const QUIZ_BOT_FALLBACK_SOURCE = 'quiz_bot_fishit_bank';
-const FINAL_BUILD = 'BLOCKER10ZJ_INVENTORY_SEARCH_MENU_STATS_APK_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZK_INVENTORY_MOBILE_BULK_APK_2026_06_09';
 const WAITING_ACTIVATION = 'waiting_for_playerdata_gameitemdb_payload';
 
 const ENCHANT_STONE_IDS = new Set(['10', '246', '558', '873', '929']);

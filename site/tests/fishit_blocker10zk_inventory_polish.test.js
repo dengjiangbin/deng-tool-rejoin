@@ -1,0 +1,99 @@
+'use strict';
+
+const { describe, test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
+
+const bulk = require('../src/fishitInventoryBulk');
+const { BLOCKER10ZK_BUILD } = require('../src/fishitTrackerBuild');
+const { PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
+
+const FINAL_BUILD = 'BLOCKER10ZK_INVENTORY_MOBILE_BULK_APK_2026_06_09';
+const TPL_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
+const INVENTORY_KT = path.join(__dirname, '..', '..', 'android', 'app', 'src', 'main', 'kotlin', 'my', 'id', 'deng', 'monitor', 'ui', 'InventoryScreen.kt');
+
+describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
+  test('build marker is BLOCKER10ZK', () => {
+    assert.equal(BLOCKER10ZK_BUILD, FINAL_BUILD);
+    assert.equal(PUBLIC_API_BUILD, FINAL_BUILD);
+  });
+
+  test('public tracker template hides debug noise by default', () => {
+    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
+    assert.match(tpl, /const DEBUG_INVENTORY = <%= \(typeof debugInventory/);
+    assert.match(tpl, /Waiting for inventory sync/);
+    assert.doesNotMatch(tpl, /Awaiting first data/);
+    assert.match(tpl, /data-ui-marker="<%= \(typeof debugInventory/);
+    assert.match(tpl, /inventory-public/);
+    assert.doesNotMatch(tpl, /<!-- BLOCKER10/);
+  });
+
+  test('debug-only proof blocks stay gated behind DEBUG_INVENTORY', () => {
+    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
+    assert.match(tpl, /if \(DEBUG_INVENTORY\) \{/);
+    assert.match(tpl, /buildPlayerDataGameItemDbProofHtml/);
+    assert.match(tpl, /phaseMessage\(data\.phase\)/);
+  });
+
+  test('Individual and Bulk tabs render', () => {
+    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
+    assert.match(tpl, /data-inventory-mode="individual"/);
+    assert.match(tpl, /data-inventory-mode="bulk"/);
+    assert.match(tpl, /Bulk \/ All/);
+    assert.match(tpl, /function aggregateBulkInventory/);
+    assert.match(tpl, /function renderBulkInventory/);
+  });
+
+  test('mobile CSS uses 2-column compact cards with padded image wrapper', () => {
+    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
+    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*height:104px[\s\S]*max-height:104px/);
+    assert.match(tpl, /\.inventory-card-image-wrap[\s\S]*left:16px[\s\S]*top:16px/);
+    assert.match(tpl, /\.inventory-card-image-wrap img[\s\S]*object-fit:contain/);
+    assert.doesNotMatch(tpl, /\.inventory-card-image[\s\S]*left:\s*0/);
+    assert.match(tpl, /@media \(max-width:360px\)[\s\S]*grid-template-columns:1fr/);
+  });
+
+  test('bulk aggregation sums quantities and tracks account count', () => {
+    const result = bulk.aggregateBulkInventory([
+      {
+        username: 'user1',
+        fishList: [{ name: 'King Crab', baseFishName: 'King Crab', rarity: 'Secret', amount: 10, imageUrl: 'http://127.0.0.1/a.webp' }],
+        stoneList: [{ name: 'Normal Enchant Stone', stoneType: 'Normal', amount: 5 }],
+      },
+      {
+        username: 'user2',
+        fishList: [{ name: 'King Crab', baseFishName: 'King Crab', rarity: 'Secret', amount: 22 }],
+        stoneList: [{ name: 'Normal Enchant Stone', stoneType: 'Normal', amount: 8 }],
+      },
+    ]);
+    assert.equal(result.accountCount, 2);
+    assert.equal(result.fish.length, 1);
+    assert.equal(result.fish[0].amount, 32);
+    assert.equal(result.fish[0].accountCount, 2);
+    assert.equal(result.stones[0].amount, 13);
+    assert.equal(result.fish[0].dataSource, 'bulk_playerdata_gameitemdb');
+  });
+
+  test('bulk search filters by fish name and owner username', () => {
+    const aggregated = bulk.aggregateBulkInventory([
+      { username: 'alpha', fishList: [{ name: 'Panther Eel', rarity: 'Secret', amount: 1 }], stoneList: [] },
+      { username: 'beta', fishList: [{ name: 'Red Goatfish', rarity: 'Uncommon', amount: 2 }], stoneList: [] },
+    ]);
+    assert.equal(bulk.filterBulkItems(aggregated.fish, 'panther').length, 1);
+    assert.equal(bulk.filterBulkItems(aggregated.fish, 'alpha').length, 1);
+    assert.equal(bulk.filterBulkItems(aggregated.fish, 'nope').length, 0);
+  });
+
+  test('APK inventory screen uses apk=1 route, skeleton, and no Snapshot', () => {
+    const kt = fs.readFileSync(INVENTORY_KT, 'utf8');
+    const appRoot = fs.readFileSync(path.join(__dirname, '..', '..', 'android', 'app', 'src', 'main', 'kotlin', 'my', 'id', 'deng', 'monitor', 'ui', 'AppRoot.kt'), 'utf8');
+    assert.match(kt, /\/tracker\?apk=1/);
+    assert.match(kt, /InventoryLoadingSkeleton/);
+    assert.match(kt, /Open in website/);
+    assert.doesNotMatch(kt, /Snapshot/i);
+    assert.match(appRoot, /NavItem\("inventory"/);
+    assert.doesNotMatch(appRoot, /NavItem\("snapshot"/);
+  });
+});

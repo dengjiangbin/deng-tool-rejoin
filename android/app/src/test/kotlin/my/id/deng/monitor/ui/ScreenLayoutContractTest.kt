@@ -105,8 +105,12 @@ class ScreenLayoutContractTest {
     fun `InventoryScreen loads tracker page and offers Open in website`() {
         val src = ui("InventoryScreen.kt")
         assertTrue(
-            "InventoryScreen must load the website tracker/inventory page",
-            src.contains("/tracker"),
+            "InventoryScreen must load the optimized apk inventory page",
+            src.contains("/tracker?apk=1"),
+        )
+        assertTrue(
+            "InventoryScreen must show skeleton while loading",
+            src.contains("InventoryLoadingSkeleton"),
         )
         assertTrue(
             "InventoryScreen must offer Open in website",

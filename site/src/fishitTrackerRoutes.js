@@ -46,7 +46,7 @@ const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
 const snapshotRecovery = require('./fishitSnapshotRecovery');
-const { BLOCKER10ZJ_BUILD, BLOCKER10ZJ_UI_MARKER, BLOCKER10ZI_BUILD, BLOCKER10ZI_UI_MARKER, BLOCKER10ZH_BUILD, BLOCKER10ZH_UI_MARKER, BLOCKER10ZG_BUILD, BLOCKER10ZG_UI_MARKER, BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10ZK_BUILD, BLOCKER10ZK_UI_MARKER, BLOCKER10ZJ_BUILD, BLOCKER10ZJ_UI_MARKER, BLOCKER10ZI_BUILD, BLOCKER10ZI_UI_MARKER, BLOCKER10ZH_BUILD, BLOCKER10ZH_UI_MARKER, BLOCKER10ZG_BUILD, BLOCKER10ZG_UI_MARKER, BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const stoneImageAssets = require('./fishitStoneImageAssets');
 const inventorySort = require('./fishitInventorySort');
 const { CLEAN_TRACKER_LOADSTRING, DEBUG_TRACKER_LOADSTRING } = require('./fishitTrackerLoadstring');
@@ -144,7 +144,7 @@ const NO_STORE_HEADERS = {
   Expires: '0',
 };
 const PUBLIC_RENDER_BUILD = BLOCKER10ZJ_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10ZJ_BUILD;
+const PUBLIC_API_BUILD = BLOCKER10ZK_BUILD;
 
 const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
@@ -2477,12 +2477,16 @@ function mapDebugItemWithResolution(raw, enriched) {
 // ── GET /tracker – serve the dashboard page ───────────────────────
 function buildTrackerPageLocals(req) {
   const build = PUBLIC_API_BUILD;
-  const debugGlobal = req && req.query && String(req.query.debug || '') === 'global';
+  const debugInventory = !!(req && req.query && (req.query.debug === '1' || req.query.debug === 'true' || req.query.debug === 'global'));
+  const apkEmbed = !!(req && req.query && req.query.apk === '1');
+  const debugGlobal = debugInventory && req.query.debug === 'global';
   const locals = {
     layout: false,
     title: 'Inventory — Fish It',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
+    debugInventory,
+    apkEmbed,
     trackerLoadstring: CLEAN_TRACKER_LOADSTRING,
     blocker10vBuild: build,
     blocker10u6Build: build,
