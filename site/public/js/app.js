@@ -108,6 +108,25 @@
   }
 }());
 
+(function initProviderReturnResume() {
+  try {
+    var path = window.location.pathname || '';
+    if (path !== '/license' && path !== '/license/') return;
+    var params = new URLSearchParams(window.location.search || '');
+    var hash = params.get('hash');
+    var state = params.get('s');
+    if (hash) {
+      window.location.replace('/unlock/linkvertise/complete?hash=' + encodeURIComponent(hash));
+      return;
+    }
+    if (state) {
+      window.location.replace('/unlock/lootlabs/complete?s=' + encodeURIComponent(state));
+    }
+  } catch (e) {
+    // Server-side completion routes remain authoritative.
+  }
+}());
+
 (function initCooldown() {
   var notice = document.querySelector('.cooldown-notice');
   if (!notice) return;

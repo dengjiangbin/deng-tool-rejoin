@@ -58,10 +58,13 @@ const SAFE_MESSAGES = {
   SITE_USER_UPSERT_FAILED: 'Could not prepare your license account. Please try again.',
   CHALLENGE_INSERT_FAILED: 'Could not start key generation. Please try again.',
   PROVIDER_NOT_CONFIGURED: 'This ad provider is not configured yet.',
-  PROVIDER_CHALLENGE_MISSING: 'Please start key generation again.',
-  PROVIDER_CHALLENGE_EXPIRED: 'This key generation session expired. Please start again.',
-  PROVIDER_CHALLENGE_OWNER_MISMATCH: 'Please start key generation again.',
-  PROVIDER_CHALLENGE_ALREADY_USED: 'Please start key generation again.',
+  PROVIDER_CHALLENGE_MISSING: 'No active key generation attempt was found. Tap Generate Key to start again.',
+  PROVIDER_CHALLENGE_EXPIRED: 'Your ad session expired. Tap Generate Key to start a new one.',
+  PROVIDER_CHALLENGE_OWNER_MISMATCH: 'This ad completion belongs to another account. Please login with the correct Discord account.',
+  PROVIDER_CHALLENGE_ALREADY_USED: 'This ad completion was already used. Check your keys below or wait for cooldown.',
+  PROVIDER_ATTEMPT_PENDING: 'Your ad step is still pending. Finish the ad or wait a moment, then return here.',
+  PROVIDER_ATTEMPT_REJECTED: 'The ad provider could not verify completion. Please try the ad again.',
+  PROVIDER_TOKEN_REPLAYED: 'This ad completion link was already used and cannot generate another key.',
   PROVIDER_RETURN_UNVERIFIED: 'Could not verify ad completion. Please complete the ad step again.',
   PROVIDER_RETURN_SECRET_MISSING: 'Ad unlock security is not configured yet.',
   PROVIDER_RETURN_TOKEN_MISSING: 'Invalid or expired key generation session. Please start again.',
@@ -140,6 +143,80 @@ function codeFromError(err, fallback = 'UNEXPECTED_ERROR') {
 
 function messageFor(code) {
   return SAFE_MESSAGES[code] || SAFE_MESSAGES.UNEXPECTED_ERROR;
+}
+
+function flashBlock(req, code, extra = {}) {
+  safeFlash(req, 'error', messageFor(code));
+  req.session.flash = {
+    ...(req.session.flash || {}),
+    error: messageFor(code),
+    blockReason: extra.blockReason || codeToBlockReason(code),
+    ...extra,
+  };
+}
+
+function codeToBlockReason(code) {
+  const map = {
+    PROVIDER_CHALLENGE_MISSING: 'provider_attempt_invalid',
+    PROVIDER_CHALLENGE_EXPIRED: 'attempt_expired',
+    PROVIDER_CHALLENGE_ALREADY_USED: 'provider_token_replayed',
+    CHALLENGE_ALREADY_USED: 'provider_token_replayed',
+    PROVIDER_RETURN_UNVERIFIED: 'provider_rejected',
+    PROVIDER_RETURN_TOKEN_MISSING: 'provider_attempt_invalid',
+    PROVIDER_RETURN_TOKEN_INVALID: 'provider_attempt_invalid',
+    PROVIDER_RETURN_TOKEN_EXPIRED: 'attempt_expired',
+    PROVIDER_WAIT_INCOMPLETE: 'provider_pending',
+    PROVIDER_CHALLENGE_OWNER_MISMATCH: 'auth_required',
+    COOLDOWN_ACTIVE: 'cooldown_active',
+    KEY_LIMIT_REACHED: 'max_key_limit',
+    AUTH_REQUIRED: 'auth_required',
+  };
+  return map[code] || 'server_error';
+}
+
+async function finishProviderCompletion(req, res, result, { provider, challengeRow = null } = {}) {
+  const { key, alreadyDone, recoveredExisting, challengeRow: resultRow } = result || {};
+  const row = challengeRow || resultRow || null;
+
+  if (alreadyDone) {
+    const recovered = key || (row ? await challenge.recoverGeneratedKeyFromChallenge(row) : null);
+    if (recovered) {
+      req.session.generatedKey = recovered;
+      req.session.generatedKeyAt = Date.now();
+      req.session.generatedKeyRecovery = true;
+      delete req.session.pendingChallenge;
+      delete req.session.pendingProvider;
+      delete req.session.pendingSignedChallenge;
+      delete req.session.activeAdChallengeId;
+      return res.redirect('/key/result');
+    }
+    flashBlock(req, 'PROVIDER_CHALLENGE_ALREADY_USED', { blockReason: 'provider_token_replayed' });
+    return res.redirect('/license');
+  }
+
+  if (recoveredExisting && key) {
+    req.session.generatedKey = key;
+    req.session.generatedKeyRecovery = true;
+    delete req.session.pendingChallenge;
+    delete req.session.pendingProvider;
+    delete req.session.pendingSignedChallenge;
+    delete req.session.activeAdChallengeId;
+    return res.redirect('/key/result');
+  }
+
+  if (!key) {
+    flashBlock(req, 'KEY_GENERATION_FAILED');
+    return res.redirect('/license');
+  }
+
+  req.session.generatedKey = key;
+  req.session.generatedKeyAt = Date.now();
+  delete req.session.pendingChallenge;
+  delete req.session.pendingProvider;
+  delete req.session.pendingSignedChallenge;
+  delete req.session.activeAdChallengeId;
+  if (row?.id) req.session.lastCompletedChallengeId = row.id;
+  return res.redirect('/key/result');
 }
 
 function logSafeError(scope, code, err) {
@@ -540,10 +617,14 @@ async function handleProvider(req, res) {
     return res.redirect('/license');
   }
   if (!challengeId || challengeId !== req.session.pendingChallenge) {
-    const code = 'PROVIDER_CHALLENGE_MISSING';
-    if (wantsJson(req)) return res.status(400).json({ error: code, message: messageFor(code) });
-    safeFlash(req, 'error', messageFor(code));
-    return res.redirect('/license');
+    const recovered = await challenge.loadChallengeById(challengeId);
+    if (!recovered || !challenge.challengeOwnedByUser(recovered, req)) {
+      const code = 'PROVIDER_CHALLENGE_MISSING';
+      if (wantsJson(req)) return res.status(400).json({ error: code, message: messageFor(code), blockReason: 'provider_attempt_invalid' });
+      flashBlock(req, code, { blockReason: 'provider_attempt_invalid' });
+      return res.redirect('/license');
+    }
+    req.session.pendingChallenge = recovered.id;
   }
 
   try {
@@ -772,12 +853,12 @@ async function handleLinkvertiseComplete(req, res) {
 
   let row;
   try {
-    row = await challenge.getActiveLinkvertiseChallenge(req);
+    row = await challenge.getActiveLinkvertiseChallenge(req, hash);
   } catch (err) {
     const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
     console.warn('[unlock/linkvertise/complete] rid=%s reason=session_or_challenge code=%s', requestId, code);
     logSafeError('unlock/linkvertise/complete', code, err);
-    safeFlash(req, 'error', messageFor(code));
+    flashBlock(req, code, { blockReason: codeToBlockReason(code) });
     return res.redirect('/license');
   }
 
@@ -789,37 +870,27 @@ async function handleLinkvertiseComplete(req, res) {
 
   if (!verification.ok) {
     const code = LINKVERTISE_REASON_TO_CODE[verification.reason] || 'PROVIDER_RETURN_UNVERIFIED';
-    safeFlash(req, 'error', messageFor(code));
+    flashBlock(req, code, { blockReason: 'provider_rejected', providerVerifyReason: verification.reason });
     return res.redirect('/license');
   }
 
   try {
-    const { key, alreadyDone, recoveredExisting } = await challenge.completeAdAndGenerateKey(row);
-    if (recoveredExisting && key && !alreadyDone) {
-      req.session.generatedKey = key;
-      req.session.generatedKeyRecovery = true;
+    await challenge.bindLinkvertiseHash(row.id, hash);
+    if (row.status === 'key_generated') {
+      return finishProviderCompletion(req, res, {
+        key: await challenge.recoverGeneratedKeyFromChallenge(row),
+        alreadyDone: true,
+        challengeRow: row,
+      }, { provider: 'linkvertise', challengeRow: row });
     }
-    if (alreadyDone && req.session.generatedKey) {
-      return res.redirect('/key/result');
-    }
-    if (alreadyDone) {
-      console.warn('[unlock/linkvertise/complete] rid=%s reason=already_completed', requestId);
-      safeFlash(req, 'error', messageFor('PROVIDER_CHALLENGE_ALREADY_USED'));
-      return res.redirect('/license');
-    }
+    const result = await challenge.completeAdAndGenerateKey(row);
     console.log('[unlock/linkvertise/complete] rid=%s status=success', requestId);
-    req.session.generatedKey = key;
-    req.session.generatedKeyAt = Date.now();
-    delete req.session.pendingChallenge;
-    delete req.session.pendingProvider;
-    delete req.session.pendingSignedChallenge;
-    delete req.session.activeAdChallengeId;
-    return res.redirect('/key/result');
+    return finishProviderCompletion(req, res, result, { provider: 'linkvertise', challengeRow: row });
   } catch (err) {
     const code = codeFromError(err, 'KEY_GENERATION_FAILED');
     console.warn('[unlock/linkvertise/complete] rid=%s reason=consume_failed code=%s', requestId, code);
     logSafeError('unlock/linkvertise/complete', code, err);
-    safeFlash(req, 'error', messageFor(code));
+    flashBlock(req, code, { blockReason: codeToBlockReason(code) });
     return res.redirect('/license');
   }
 }
@@ -886,37 +957,26 @@ async function handleLootLabsComplete(req, res) {
     const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
     console.warn('[unlock/lootlabs/complete] rid=%s reason=session_or_challenge code=%s', requestId, code);
     logSafeError('unlock/lootlabs/complete', code, err);
-    safeFlash(req, 'error', messageFor(code));
+    flashBlock(req, code, { blockReason: codeToBlockReason(code) });
     return res.redirect('/license');
   }
 
   try {
-    const { key, alreadyDone, recoveredExisting } = await challenge.completeAdAndGenerateKey(row);
-    if (recoveredExisting && key && !alreadyDone) {
-      req.session.generatedKey = key;
-      req.session.generatedKeyRecovery = true;
+    if (row.status === 'key_generated') {
+      return finishProviderCompletion(req, res, {
+        key: await challenge.recoverGeneratedKeyFromChallenge(row),
+        alreadyDone: true,
+        challengeRow: row,
+      }, { provider: 'lootlabs', challengeRow: row });
     }
-    if (alreadyDone && req.session.generatedKey) {
-      return res.redirect('/key/result');
-    }
-    if (alreadyDone) {
-      console.warn('[unlock/lootlabs/complete] rid=%s reason=already_completed', requestId);
-      safeFlash(req, 'error', messageFor('PROVIDER_CHALLENGE_ALREADY_USED'));
-      return res.redirect('/license');
-    }
+    const result = await challenge.completeAdAndGenerateKey(row);
     console.log('[unlock/lootlabs/complete] rid=%s status=success', requestId);
-    req.session.generatedKey = key;
-    req.session.generatedKeyAt = Date.now();
-    delete req.session.pendingChallenge;
-    delete req.session.pendingProvider;
-    delete req.session.pendingSignedChallenge;
-    delete req.session.activeAdChallengeId;
-    return res.redirect('/key/result');
+    return finishProviderCompletion(req, res, result, { provider: 'lootlabs', challengeRow: row });
   } catch (err) {
     const code = codeFromError(err, 'KEY_GENERATION_FAILED');
     console.warn('[unlock/lootlabs/complete] rid=%s reason=consume_failed code=%s', requestId, code);
     logSafeError('unlock/lootlabs/complete', code, err);
-    safeFlash(req, 'error', messageFor(code));
+    flashBlock(req, code, { blockReason: codeToBlockReason(code) });
     return res.redirect('/license');
   }
 }
@@ -1104,7 +1164,16 @@ router.get('/api/admin/license/eligibility', requireSiteAdmin, async (req, res) 
       siteUserId,
       skipProviderCheck: false,
     });
-    return res.json(eligibility);
+    const attempt = await challenge.getGenerationAttemptDiagnostic({
+      discordUserId,
+      siteUserId,
+    });
+    return res.json({
+      ...eligibility,
+      ...attempt,
+      providerAttemptStatus: attempt.attemptStatus,
+      cooldownRemainingSeconds: eligibility.remainingSeconds || 0,
+    });
   } catch (err) {
     console.error('[api/admin/license/eligibility]', err.message || err);
     return res.status(500).json({
@@ -1207,8 +1276,23 @@ router.get('/unlock/linkvertise/done', requireLogin, (_req, res) => {
   res.redirect('/license');
 });
 
-router.get('/key/result', requireLogin, (req, res) => {
-  const key = req.session.generatedKey;
+router.get('/key/result', requireLogin, repairSiteUser, async (req, res) => {
+  let key = req.session.generatedKey;
+  if (!key && req.session.lastCompletedChallengeId) {
+    const row = await challenge.loadChallengeById(req.session.lastCompletedChallengeId);
+    key = await challenge.recoverGeneratedKeyFromChallenge(row);
+    if (key) req.session.generatedKey = key;
+  }
+  if (!key) {
+    const attempt = await challenge.getLatestProviderAttemptStatus(req.session.user.id);
+    if (attempt?.challengeId) {
+      const row = await challenge.loadChallengeById(attempt.challengeId);
+      if (row?.status === 'key_generated') {
+        key = await challenge.recoverGeneratedKeyFromChallenge(row);
+        if (key) req.session.generatedKey = key;
+      }
+    }
+  }
   if (!key) {
     safeFlash(req, 'error', 'No key available. Please generate a new one.');
     return res.redirect('/license');
@@ -1216,6 +1300,36 @@ router.get('/key/result', requireLogin, (req, res) => {
   const recoveredExisting = Boolean(req.session.generatedKeyRecovery);
   delete req.session.generatedKeyRecovery;
   res.render('key_result', { title: 'Your Key - DENG Tool', key, recoveredExisting });
+});
+
+router.get('/api/key/attempt/status', requireLogin, repairSiteUser, async (req, res) => {
+  try {
+    const siteUserId = req.session.user.id;
+    const discordUserId = discordOwnerId(req);
+    const attempt = await challenge.getLatestProviderAttemptStatus(siteUserId);
+    const eligibility = await licenseEligibility.getLicenseGenerationEligibility({
+      discordUserId,
+      siteUserId,
+      skipProviderCheck: true,
+    });
+    const diagnostic = await challenge.getGenerationAttemptDiagnostic({
+      discordUserId,
+      siteUserId,
+      challengeId: attempt.challengeId,
+    });
+    return res.json({
+      ...diagnostic,
+      discordUserId,
+      canGenerate: eligibility.canGenerate,
+      blockReason: eligibility.blockReason,
+      activeUnredeemedKeyCount: eligibility.activeUnredeemedCount,
+      cooldownRemainingSeconds: eligibility.remainingSeconds || 0,
+      providerAttemptStatus: attempt.status,
+    });
+  } catch (err) {
+    console.error('[api/key/attempt/status]', err.message || err);
+    return res.status(500).json({ error: 'server_error', message: 'Could not load attempt status.' });
+  }
 });
 
 async function handlePublicStats(_req, res) {

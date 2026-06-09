@@ -16,6 +16,12 @@
     </div>
   </div>
 
+  <% if (flash && flash.error) { %>
+    <div class="block-notice license-block-notice license-flash-error" data-block-reason="<%= flash.blockReason || 'server_error' %>">
+      <%= flash.error %>
+    </div>
+  <% } %>
+
   <% if (flash && flash.cooldown && flash.cooldown > 0) { %>
     <div class="cooldown-notice block-notice" data-block-reason="cooldown_active" data-seconds="<%= flash.cooldown %>">
       Cooldown active: <span class="countdown"></span>

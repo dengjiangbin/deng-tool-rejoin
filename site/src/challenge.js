@@ -8,7 +8,7 @@
 const supabase = require('./db');
 const { signChallenge, verifyChallenge, sha256, randomHex } = require('./crypto');
 const { generateDengKey } = require('./keyGen');
-const { encryptLicenseKeyPlaintext } = require('./licenseCrypto');
+const { encryptLicenseKeyPlaintext, decryptLicenseKeyCiphertext } = require('./licenseCrypto');
 const licenseService = require('./licenseService');
 const crypto = require('crypto');
 
@@ -369,13 +369,214 @@ function assertProviderReturnProof(req, row, expectedProvider, returnToken) {
 }
 
 function rowBelongsToRequest(row, req) {
+  return challengeOwnedByUser(row, req);
+}
+
+function challengeOwnedByUser(row, req) {
+  if (!row || !req?.session?.user) return false;
+  const user = req.session.user;
+  if (row.site_user_id) {
+    if (!user.id || row.site_user_id !== user.id) return false;
+    if (row.discord_user_id && user.discord_user_id && row.discord_user_id !== user.discord_user_id) {
+      return false;
+    }
+    return true;
+  }
   return Boolean(
-    row &&
-    req.session &&
-    req.session.user &&
-    row.site_user_id === req.session.user.id &&
-    row.session_hash === hashSession(req),
+    row.discord_user_id &&
+    user.discord_user_id &&
+    row.discord_user_id === user.discord_user_id,
   );
+}
+
+function sessionHashMatches(row, req) {
+  return Boolean(row?.session_hash && row.session_hash === hashSession(req));
+}
+
+async function loadChallengeById(challengeId) {
+  if (!challengeId) return null;
+  const { data, error } = await supabase
+    .from('license_ad_challenges')
+    .select('*')
+    .eq('id', challengeId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data;
+}
+
+async function findLatestPendingChallengeForUser(req, provider) {
+  const user = req?.session?.user;
+  if (!user?.id) return null;
+  const { data, error } = await supabase
+    .from('license_ad_challenges')
+    .select('*')
+    .eq('site_user_id', user.id)
+    .eq('provider', provider)
+    .in('status', COMPLETABLE_STATUSES)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (error || !data?.length) return null;
+  const row = data[0];
+  return challengeOwnedByUser(row, req) ? row : null;
+}
+
+async function findChallengeByLinkvertiseHash(hash) {
+  const needle = String(hash || '').trim();
+  if (!needle) return null;
+  const { data, error } = await supabase
+    .from('license_ad_challenges')
+    .select('*')
+    .eq('provider', 'linkvertise')
+    .order('created_at', { ascending: false })
+    .limit(25);
+  if (error || !data?.length) return null;
+  return data.find((row) => {
+    const payload = normalizeJson(row.provider_payload);
+    return payload.linkvertise_hash === needle;
+  }) || null;
+}
+
+async function bindLinkvertiseHash(challengeId, hash) {
+  const row = await loadChallengeById(challengeId);
+  if (!row) return;
+  const payload = normalizeJson(row.provider_payload);
+  if (payload.linkvertise_hash === hash) return;
+  await supabase
+    .from('license_ad_challenges')
+    .update({
+      provider_payload: {
+        ...payload,
+        linkvertise_hash: String(hash || '').trim(),
+        linkvertise_hash_bound_at: new Date().toISOString(),
+      },
+    })
+    .eq('id', challengeId);
+}
+
+function assertChallengeReadyForCompletion(row, req, provider, { allowConsumedRecovery = false } = {}) {
+  if (!row) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Provider challenge missing');
+  }
+  if (!challengeOwnedByUser(row, req)) {
+    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'Provider challenge owner mismatch');
+  }
+  if (row.provider !== provider) {
+    throw safeError('PROVIDER_MISMATCH', 'Provider challenge provider mismatch');
+  }
+  if (new Date(row.expires_at) < new Date()) {
+    throw safeError('PROVIDER_CHALLENGE_EXPIRED', 'Provider challenge expired');
+  }
+  if (CONSUMED_STATUSES.includes(row.status)) {
+    if (allowConsumedRecovery && row.status === 'key_generated' && row.license_key_id) {
+      return;
+    }
+    throw safeError('CHALLENGE_ALREADY_USED', 'Provider challenge already used');
+  }
+  if (!COMPLETABLE_STATUSES.includes(row.status)) {
+    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Provider challenge is not pending');
+  }
+  const payload = normalizeJson(row.provider_payload);
+  if (provider === 'linkvertise' && payload.linkvertise_started !== true) {
+    throw safeError('PROVIDER_RETURN_UNVERIFIED', 'Linkvertise challenge not started');
+  }
+  if (provider === 'lootlabs' && payload.lootlabs_started !== true) {
+    throw safeError('PROVIDER_RETURN_UNVERIFIED', 'LootLabs challenge not started');
+  }
+}
+
+async function recoverGeneratedKeyFromChallenge(row) {
+  if (!row) return null;
+  if (row.status === 'key_generated' && row.license_key_id) {
+    const { data } = await supabase
+      .from('license_keys')
+      .select('id, prefix, suffix, key_ciphertext, key_export_available')
+      .eq('id', row.license_key_id)
+      .maybeSingle();
+    const decrypted = data?.key_ciphertext ? decryptLicenseKeyCiphertext(data.key_ciphertext) : '';
+    if (decrypted) return decrypted;
+  }
+  if (row.key_prefix && row.key_suffix) {
+    return `${row.key_prefix}-${row.key_suffix}`;
+  }
+  return null;
+}
+
+async function resolveProviderChallenge(req, provider, { challengeId = null, linkvertiseHash = '' } = {}) {
+  if (!req?.session?.user) {
+    throw safeError('AUTH_REQUIRED', 'Login required');
+  }
+
+  if (provider === 'linkvertise' && linkvertiseHash) {
+    const byHash = await findChallengeByLinkvertiseHash(linkvertiseHash);
+    if (byHash) {
+      assertChallengeReadyForCompletion(byHash, req, provider, { allowConsumedRecovery: true });
+      return byHash;
+    }
+  }
+
+  const sessionIds = [
+    challengeId,
+    req.session?.activeAdChallengeId,
+    req.session?.pendingChallenge,
+  ].filter(Boolean);
+
+  for (const id of sessionIds) {
+    const row = await loadChallengeById(id);
+    if (row && row.provider === provider && challengeOwnedByUser(row, req)) {
+      try {
+        assertChallengeReadyForCompletion(row, req, provider);
+        return row;
+      } catch (err) {
+        if (err?.code === 'CHALLENGE_ALREADY_USED' && row.status === 'key_generated') {
+          return row;
+        }
+        if (err?.code !== 'PROVIDER_CHALLENGE_MISSING') throw err;
+      }
+    }
+  }
+
+  const recovered = await findLatestPendingChallengeForUser(req, provider);
+  if (recovered) {
+    assertChallengeReadyForCompletion(recovered, req, provider);
+    if (!sessionHashMatches(recovered, req) && process.env.NODE_ENV !== 'test') {
+      console.log(
+        '[challenge/recover] provider=%s challenge=%s recovered pending attempt without session binding (mobile-safe)',
+        provider,
+        String(recovered.id).slice(0, 8),
+      );
+    }
+    return recovered;
+  }
+
+  throw safeError('PROVIDER_CHALLENGE_MISSING', 'No recoverable provider challenge');
+}
+
+async function getGenerationAttemptDiagnostic({ discordUserId = '', siteUserId = '', challengeId = null } = {}) {
+  let row = null;
+  if (challengeId) {
+    row = await loadChallengeById(challengeId);
+  } else if (siteUserId) {
+    const { data } = await supabase
+      .from('license_ad_challenges')
+      .select('*')
+      .eq('site_user_id', siteUserId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    row = data?.[0] || null;
+  }
+  const payload = normalizeJson(row?.provider_payload);
+  return {
+    latestAttemptId: row?.id || null,
+    provider: row?.provider || null,
+    attemptStatus: row?.status || 'none',
+    attemptCreatedAt: row?.created_at || null,
+    attemptExpiresAt: row?.expires_at || null,
+    providerVerifyStatus: payload.linkvertise_hash ? 'hash_bound' : (payload.lootlabs_started ? 'lootlabs_started' : null),
+    providerVerifyReason: row?.failure_reason || null,
+    consumedKeyId: row?.license_key_id ? String(row.license_key_id).slice(0, 8) + '…' : null,
+    linkvertiseHashBound: Boolean(payload.linkvertise_hash),
+    sessionHashStored: Boolean(row?.session_hash),
+  };
 }
 
 async function checkCooldown(siteUserId) {
@@ -493,7 +694,6 @@ async function selectProvider(challengeId, provider, req, siteUser) {
     })
     .eq('id', challengeId)
     .eq('site_user_id', siteUser.id)
-    .eq('session_hash', hashSession(req))
     .eq('status', 'created')
     .select()
     .single();
@@ -504,7 +704,6 @@ async function selectProvider(challengeId, provider, req, siteUser) {
       .select('*')
       .eq('id', challengeId)
       .eq('site_user_id', siteUser.id)
-      .eq('session_hash', hashSession(req))
       .maybeSingle();
 
     if (
@@ -550,13 +749,19 @@ async function markPendingAdById(challengeId, req, siteUser, providerUrl = '') {
     })
     .eq('id', challengeId)
     .eq('site_user_id', siteUser.id)
-    .eq('session_hash', hashSession(req))
     .in('status', ['provider_selected', 'pending_ad'])
     .select()
     .single();
 
   if (error || !data) throw safeError('PROVIDER_CHALLENGE_MISSING', 'Challenge not found or already advanced');
   return { ...data, return_token: returnToken };
+}
+
+async function refreshChallengeSession(challengeId, req) {
+  await supabase
+    .from('license_ad_challenges')
+    .update({ session_hash: hashSession(req) })
+    .eq('id', challengeId);
 }
 
 /**
@@ -583,10 +788,10 @@ async function markLinkvertisePendingById(challengeId, req, siteUser, { targetLi
     .update({
       status: 'pending_ad',
       provider_payload: payload,
+      session_hash: hashSession(req),
     })
     .eq('id', challengeId)
     .eq('site_user_id', siteUser.id)
-    .eq('session_hash', hashSession(req))
     .in('status', ['provider_selected', 'pending_ad'])
     .select()
     .single();
@@ -625,10 +830,10 @@ async function markLootLabsPendingById(challengeId, req, siteUser, { baseLink = 
     .update({
       status: 'pending_ad',
       provider_payload: payload,
+      session_hash: hashSession(req),
     })
     .eq('id', challengeId)
     .eq('site_user_id', siteUser.id)
-    .eq('session_hash', hashSession(req))
     .in('status', ['provider_selected', 'pending_ad'])
     .select()
     .single();
@@ -640,43 +845,7 @@ async function markLootLabsPendingById(challengeId, req, siteUser, { baseLink = 
 }
 
 async function getActiveSessionChallenge(req, expectedProvider) {
-  const challengeId = req.session?.pendingChallenge;
-  if (!challengeId || !req.session?.user) {
-    throw safeError('PROVIDER_CHALLENGE_MISSING', 'No active provider challenge in session');
-  }
-
-  const { data: owned, error } = await supabase
-    .from('license_ad_challenges')
-    .select('*')
-    .eq('id', challengeId)
-    .maybeSingle();
-
-  if (error || !owned) {
-    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Provider challenge missing');
-  }
-  if (owned.site_user_id !== req.session.user.id || owned.session_hash !== hashSession(req)) {
-    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'Provider challenge owner mismatch');
-  }
-  if (
-    owned.discord_user_id &&
-    req.session.user.discord_user_id &&
-    owned.discord_user_id !== req.session.user.discord_user_id
-  ) {
-    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'Provider challenge Discord owner mismatch');
-  }
-  if (owned.provider !== expectedProvider) {
-    throw safeError('PROVIDER_MISMATCH', 'Provider challenge mismatch');
-  }
-  if (new Date(owned.expires_at) < new Date()) {
-    throw safeError('PROVIDER_CHALLENGE_EXPIRED', 'Provider challenge expired');
-  }
-  if (CONSUMED_STATUSES.includes(owned.status)) {
-    throw safeError('CHALLENGE_ALREADY_USED', 'Provider challenge already used');
-  }
-  if (!COMPLETABLE_STATUSES.includes(owned.status)) {
-    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Provider challenge is not ready');
-  }
-  return owned;
+  return resolveProviderChallenge(req, expectedProvider);
 }
 
 async function completeActiveProviderChallenge(req, expectedProvider, returnToken) {
@@ -692,52 +861,8 @@ async function completeActiveProviderChallenge(req, expectedProvider, returnToke
  *
  * Throws codeful safeError on any mismatch (PROVIDER_CHALLENGE_*, etc).
  */
-async function getActiveLinkvertiseChallenge(req) {
-  const challengeId = req.session?.activeAdChallengeId || req.session?.pendingChallenge;
-  if (!challengeId || !req.session?.user) {
-    throw safeError('PROVIDER_CHALLENGE_MISSING', 'No active Linkvertise challenge in session');
-  }
-
-  const { data: owned, error } = await supabase
-    .from('license_ad_challenges')
-    .select('*')
-    .eq('id', challengeId)
-    .maybeSingle();
-
-  if (error || !owned) {
-    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Linkvertise challenge missing');
-  }
-  if (owned.site_user_id !== req.session.user.id || owned.session_hash !== hashSession(req)) {
-    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'Linkvertise challenge owner mismatch');
-  }
-  if (
-    owned.discord_user_id &&
-    req.session.user.discord_user_id &&
-    owned.discord_user_id !== req.session.user.discord_user_id
-  ) {
-    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'Linkvertise challenge Discord owner mismatch');
-  }
-  if (owned.provider !== 'linkvertise') {
-    throw safeError('PROVIDER_MISMATCH', 'Linkvertise challenge provider mismatch');
-  }
-  if (owned.license_key_id) {
-    throw safeError('CHALLENGE_ALREADY_USED', 'Linkvertise challenge already produced a key');
-  }
-  if (new Date(owned.expires_at) < new Date()) {
-    throw safeError('PROVIDER_CHALLENGE_EXPIRED', 'Linkvertise challenge expired');
-  }
-  if (CONSUMED_STATUSES.includes(owned.status)) {
-    throw safeError('CHALLENGE_ALREADY_USED', 'Linkvertise challenge already used');
-  }
-  if (!COMPLETABLE_STATUSES.includes(owned.status)) {
-    throw safeError('PROVIDER_CHALLENGE_MISSING', 'Linkvertise challenge is not pending');
-  }
-
-  const payload = normalizeJson(owned.provider_payload);
-  if (payload.linkvertise_started !== true) {
-    throw safeError('PROVIDER_RETURN_UNVERIFIED', 'Linkvertise challenge not started');
-  }
-  return owned;
+async function getActiveLinkvertiseChallenge(req, linkvertiseHash = '') {
+  return resolveProviderChallenge(req, 'linkvertise', { linkvertiseHash });
 }
 
 /**
@@ -751,50 +876,7 @@ async function getActiveLinkvertiseChallenge(req) {
  * Throws codeful safeError on any mismatch (PROVIDER_CHALLENGE_*).
  */
 async function getActiveLootLabsChallengeById(challengeId, req) {
-  if (!challengeId || !req.session?.user) {
-    throw safeError('PROVIDER_CHALLENGE_MISSING', 'No active LootLabs challenge in session');
-  }
-
-  const { data: owned, error } = await supabase
-    .from('license_ad_challenges')
-    .select('*')
-    .eq('id', challengeId)
-    .maybeSingle();
-
-  if (error || !owned) {
-    throw safeError('PROVIDER_CHALLENGE_MISSING', 'LootLabs challenge missing');
-  }
-  if (owned.site_user_id !== req.session.user.id || owned.session_hash !== hashSession(req)) {
-    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'LootLabs challenge owner mismatch');
-  }
-  if (
-    owned.discord_user_id &&
-    req.session.user.discord_user_id &&
-    owned.discord_user_id !== req.session.user.discord_user_id
-  ) {
-    throw safeError('PROVIDER_CHALLENGE_OWNER_MISMATCH', 'LootLabs challenge Discord owner mismatch');
-  }
-  if (owned.provider !== 'lootlabs') {
-    throw safeError('PROVIDER_MISMATCH', 'LootLabs challenge provider mismatch');
-  }
-  if (owned.license_key_id) {
-    throw safeError('CHALLENGE_ALREADY_USED', 'LootLabs challenge already produced a key');
-  }
-  if (new Date(owned.expires_at) < new Date()) {
-    throw safeError('PROVIDER_CHALLENGE_EXPIRED', 'LootLabs challenge expired');
-  }
-  if (CONSUMED_STATUSES.includes(owned.status)) {
-    throw safeError('CHALLENGE_ALREADY_USED', 'LootLabs challenge already used');
-  }
-  if (!COMPLETABLE_STATUSES.includes(owned.status)) {
-    throw safeError('PROVIDER_CHALLENGE_MISSING', 'LootLabs challenge is not pending');
-  }
-
-  const payload = normalizeJson(owned.provider_payload);
-  if (payload.lootlabs_started !== true) {
-    throw safeError('PROVIDER_RETURN_UNVERIFIED', 'LootLabs challenge not started');
-  }
-  return owned;
+  return resolveProviderChallenge(req, 'lootlabs', { challengeId });
 }
 
 async function getChallengeByToken(signedToken) {
@@ -853,7 +935,8 @@ async function completeAdAndGenerateKey(challengeRow) {
         .eq('id', challengeId)
         .single();
       if (existing && ['ad_completed', 'key_generated'].includes(existing.status)) {
-        return { key: null, alreadyDone: true };
+        const recovered = await recoverGeneratedKeyFromChallenge({ ...challengeRow, ...existing });
+        return { key: recovered, alreadyDone: true, challengeRow: { ...challengeRow, ...existing } };
       }
       throw safeError('PROVIDER_CHALLENGE_ALREADY_USED', 'Challenge state conflict');
     }
@@ -958,6 +1041,12 @@ module.exports = {
   markLootLabsPendingById,
   getActiveLinkvertiseChallenge,
   getActiveLootLabsChallengeById,
+  resolveProviderChallenge,
+  recoverGeneratedKeyFromChallenge,
+  bindLinkvertiseHash,
+  getGenerationAttemptDiagnostic,
+  challengeOwnedByUser,
+  loadChallengeById,
   hashSession,
   classifyChallengeInsertError,
 };

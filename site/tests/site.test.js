@@ -3175,17 +3175,11 @@ describe('provider UI and security gate', () => {
     assert.doesNotMatch(license.text, /Cooldown active:\s*<span[^>]*class="countdown"[^>]*><\/span>/);
   });
 
-  test('direct Linkvertise completion from a different session does not generate key', async () => {
-    // Directly hitting the completion URL without going through the provider
-    // flow in this session must be blocked, even with an otherwise-valid hash
-    // and even if a real Linkvertise call would have returned TRUE.
+  test('mobile-safe return: same Discord user in a new session can complete Linkvertise after ad redirect', async () => {
     const agent = request.agent(app);
     await login(agent);
     const { returnToken: hash } = await chooseProvider(agent, 'linkvertise');
 
-    // A second fresh agent (same Discord user, different session) tries the
-    // first session's hash — must be rejected because the second session has
-    // no activeAdChallengeId.
     const other = request.agent(app);
     const originalGet = fakeAxios.get;
     fakeAxios.get = async () => ({
@@ -3195,8 +3189,8 @@ describe('provider UI and security gate', () => {
       await login(other);
       const res = await other.get(`/unlock/linkvertise/complete?hash=${encodeURIComponent(hash)}`);
       assert.equal(res.status, 302);
-      assert.equal(res.headers.location, '/license');
-      assert.equal(memoryDb.license_keys.length, 0);
+      assert.equal(res.headers.location, '/key/result');
+      assert.equal(memoryDb.license_keys.length, 1);
     } finally {
       fakeAxios.get = originalGet;
     }
@@ -3240,9 +3234,9 @@ describe('provider UI and security gate', () => {
     assert.equal(first.headers.location, '/key/result');
     assert.equal(memoryDb.license_keys.length, 1);
 
-    // Replay: same signed state, second hit must not generate another key.
+    // Replay: same signed state, second hit must not mint another key (safe recovery is OK).
     const second = await completeProvider(agent, 'lootlabs', signedState);
-    assert.notEqual(second.headers.location, '/key/result');
+    assert.equal(second.headers.location, '/key/result');
     assert.equal(memoryDb.license_keys.length, 1);
   });
 
@@ -3263,14 +3257,11 @@ describe('provider UI and security gate', () => {
     assert.equal(memoryDb.license_keys.length, 0);
   });
 
-  test('LootLabs Anti-Bypass: direct completion from a different session does not generate a key', async () => {
+  test('mobile-safe return: same Discord user in a new session can complete LootLabs after ad redirect', async () => {
     const agent = request.agent(app);
     await login(agent);
     const { returnToken: signedState } = await chooseProvider(agent, 'lootlabs');
 
-    // A second fresh session (same Discord user re-logged in) tries the first
-    // session's signed state — must fail because the second session has a
-    // different session_hash on the challenge row.
     const other = request.agent(app);
     const originalGet = fakeAxios.get;
     fakeAxios.get = async () => ({
@@ -3280,8 +3271,8 @@ describe('provider UI and security gate', () => {
       await login(other);
       const res = await other.get(`/unlock/lootlabs/complete?s=${encodeURIComponent(signedState)}`);
       assert.equal(res.status, 302);
-      assert.equal(res.headers.location, '/license');
-      assert.equal(memoryDb.license_keys.length, 0);
+      assert.equal(res.headers.location, '/key/result');
+      assert.equal(memoryDb.license_keys.length, 1);
     } finally {
       fakeAxios.get = originalGet;
     }
