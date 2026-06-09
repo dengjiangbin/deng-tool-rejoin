@@ -62,7 +62,7 @@ fun FishItScreen(api: MonitorApi) {
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(16.dp))
         Text(
-            "Fish It Stats",
+            "Stats",
             style = MaterialTheme.typography.headlineMedium,
             color = DengColors.TextPrimary,
             fontWeight = FontWeight.SemiBold,

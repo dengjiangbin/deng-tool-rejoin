@@ -1463,9 +1463,13 @@ router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
 
 router.get('/fishit', requireLogin, repairSiteUser, (req, res) => {
   res.render('fishit', {
-    title: 'Fish It Stats - DENG Tool',
+    title: 'Stats — DENG Tool',
     activePage: 'fishit',
   });
+});
+
+router.get('/stats', requireLogin, repairSiteUser, (req, res) => {
+  res.redirect(301, '/fishit');
 });
 
 router.get('/api/license/eligibility', requireLogin, repairSiteUser, async (req, res) => {

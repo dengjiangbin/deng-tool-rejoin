@@ -4,8 +4,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.Backpack
 import androidx.compose.material.icons.outlined.Dashboard
-import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Waves
 import androidx.compose.material3.Icon
@@ -34,11 +34,11 @@ private data class NavItem(
 )
 
 private val NAV_ITEMS = listOf(
-    NavItem("dashboard", "Dashboard") { Icon(Icons.Outlined.Dashboard, contentDescription = null) },
-    NavItem("fishit",    "Fish It")   { Icon(Icons.Outlined.Waves, contentDescription = null) },
-    NavItem("packages",  "Packages")  { Icon(Icons.Outlined.Apps, contentDescription = null) },
-    NavItem("snapshot",  "Snapshot")  { Icon(Icons.Outlined.Image, contentDescription = null) },
-    NavItem("settings",  "Settings")  { Icon(Icons.Outlined.Settings, contentDescription = null) },
+    NavItem("dashboard",  "Dashboard")  { Icon(Icons.Outlined.Dashboard, contentDescription = null) },
+    NavItem("fishit",     "Stats")      { Icon(Icons.Outlined.Waves, contentDescription = null) },
+    NavItem("packages",   "Packages")    { Icon(Icons.Outlined.Apps, contentDescription = null) },
+    NavItem("inventory",  "Inventory")  { Icon(Icons.Outlined.Backpack, contentDescription = null) },
+    NavItem("settings",   "Settings")   { Icon(Icons.Outlined.Settings, contentDescription = null) },
 )
 
 @Composable
@@ -91,7 +91,7 @@ fun AppRoot(
             composable("dashboard") { DashboardScreen(api = api, sessionStore = sessionStore) }
             composable("fishit")    { FishItScreen(api = api) }
             composable("packages")  { PackagesScreen(api = api, sessionStore = sessionStore) }
-            composable("snapshot")  { SnapshotScreen(api = api, sessionStore = sessionStore) }
+            composable("inventory") { InventoryScreen(api = api) }
             composable("settings")  { SettingsScreen(api = api, sessionStore = sessionStore, appPreferences = appPreferences) }
         }
     }

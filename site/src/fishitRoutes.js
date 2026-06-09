@@ -16,9 +16,12 @@
 
 const express = require('express');
 const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs');
 const rateLimit = require('express-rate-limit');
 const supabase = require('./db');
 const fishit = require('./fishitDb');
+const manualStatsFishImages = require('./fishitManualStatsFishImages');
 
 const router = express.Router();
 const jsonParser = express.json({ limit: '16kb' });
@@ -96,6 +99,18 @@ router.get('/api/fishit/global', fishitLimiter, (req, res) => {
   } catch (err) {
     return res.status(200).json({ available: false });
   }
+});
+
+// ── Public: manual verified stats fish images (BLOCKER10ZJ) ────────────────
+router.get('/api/fishit/assets/stats-fish/:filename', fishitLimiter, (req, res) => {
+  const file = path.basename(String(req.params.filename || ''));
+  if (!file || !/^[a-zA-Z0-9._-]+$/.test(file)) {
+    return res.status(404).json({ error: 'not_found' });
+  }
+  const full = path.join(manualStatsFishImages.getCacheDir(), file);
+  if (!fs.existsSync(full)) return res.status(404).json({ error: 'not_found' });
+  res.set('Cache-Control', 'public, max-age=86400');
+  return res.sendFile(full);
 });
 
 // ── Public: safe asset/fallback URLs + forgotten species images ──────────────

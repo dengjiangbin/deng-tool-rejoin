@@ -1,20 +1,17 @@
 {
   "app_name": "DENG Tool: Rejoin APK",
-  "version_name": "1.0.9",
-  "version_code": 10,
-  "file_name": "deng-tool-rejoin-apk-v1.0.9.apk",
-  "sha256": "5831bd0bf76796d396b2e2e080d9a9f6b88f99a630b8300a9eae9b26d64cbec3",
-  "size_bytes": 2077157,
-  "released_at": "2026-05-29",
+  "version_name": "1.0.11",
+  "version_code": 12,
+  "file_name": "deng-tool-rejoin-apk-v1.0.11.apk",
+  "sha256": "4512546ade9b9335f30a34378449dd019be9e1035be0eabcaec1fcee2c524d38",
+  "size_bytes": 2077153,
+  "released_at": "2026-06-09",
   "min_sdk": 26,
   "purpose": "Monitoring companion app for DENG Tool: Rejoin",
   "changelog": [
-    "Fish It: rod and fish images render from real DB/CDN URLs (CSP allows rbxcdn; home page shows rod images).",
-    "Fish It: exact catch counts (2,095 not 2.1K) on website and APK.",
-    "Dashboard: Interval shows configured monitor refresh (e.g. 30s), not hardcoded 5s.",
-    "Monitor: connection TTL scales with refresh interval so devices stay connected while bridge heartbeats.",
-    "Bridge: push interval follows APK app_refresh_interval_seconds from server settings.",
-    "Website: live APK download count below the download button.",
-    "Agent: deng-rejoin doctor versions, monitor restart, improved monitor snapshot-test --upload-probe."
+    "Monitor APK v1.0.11 / versionCode 12: Snapshot tab replaced with Inventory.",
+    "Inventory loads live fish and stone cards from playerdata_gameitemdb with Open in website.",
+    "Fish It nav label renamed to Stats to match the website menu.",
+    "Website: Inventory search, menu rename/reorder, and Stats fish image repairs ship alongside this APK."
   ]
 }

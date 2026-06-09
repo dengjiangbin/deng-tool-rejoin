@@ -46,18 +46,6 @@
         </a>
       </li>
       <li>
-        <a href="/fishit" class="nav-link <%= locals.activePage === 'fishit' ? 'active' : '' %>">
-          <span class="nav-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <path d="M2 12c3-5 7-7 11-7 5 0 8 3 9 7-1 4-4 7-9 7-4 0-8-2-11-7Z"></path>
-              <circle cx="16" cy="11" r="1.2"></circle>
-              <path d="M2 12c-.5-1.5-.5-3 0-4M2 12c-.5 1.5-.5 3 0 4"></path>
-            </svg>
-          </span>
-          <span>Fish It</span>
-        </a>
-      </li>
-      <li>
         <a href="/license" class="nav-link <%= locals.activePage === 'license' ? 'active' : '' %>">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" focusable="false">
@@ -71,18 +59,7 @@
         </a>
       </li>
       <li>
-        <a href="/download" class="nav-link <%= locals.activePage === 'download' ? 'active' : '' %>">
-          <span class="nav-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <rect x="6" y="2" width="12" height="20" rx="2"></rect>
-              <line x1="10" y1="18" x2="14" y2="18"></line>
-            </svg>
-          </span>
-          <span>Rejoin APK</span>
-        </a>
-      </li>
-      <li>
-        <a href="/tracker" class="nav-link <%= locals.activePage === 'tracker' ? 'active' : '' %>" target="_blank" rel="noopener">
+        <a href="/tracker" class="nav-link <%= locals.activePage === 'tracker' ? 'active' : '' %>">
           <span class="nav-icon" aria-hidden="true" data-nav-icon="backpack">
             <svg viewBox="0 0 24 24" focusable="false">
               <path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10Z"></path>
@@ -91,6 +68,32 @@
             </svg>
           </span>
           <span>Inventory</span>
+        </a>
+      </li>
+      <li>
+        <a href="/fishit" class="nav-link <%= locals.activePage === 'fishit' ? 'active' : '' %>">
+          <span class="nav-icon" aria-hidden="true" data-nav-icon="stats">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M4 19V5"></path>
+              <path d="M4 19h16"></path>
+              <path d="M8 17V9"></path>
+              <path d="M12 17V6"></path>
+              <path d="M16 17v-4"></path>
+            </svg>
+          </span>
+          <span>Stats</span>
+        </a>
+      </li>
+      <li>
+        <a href="/download" class="nav-link <%= locals.activePage === 'download' ? 'active' : '' %>">
+          <span class="nav-icon" aria-hidden="true" data-nav-icon="download">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M12 3v12"></path>
+              <path d="m7 10 5 5 5-5"></path>
+              <path d="M5 21h14"></path>
+            </svg>
+          </span>
+          <span>Download</span>
         </a>
       </li>
     </ul>

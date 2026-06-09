@@ -6,6 +6,10 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
+const latestApk = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'releases', 'android', 'latest.json'), 'utf8'));
+const latestFile = latestApk.file_name;
+const latestVersion = latestApk.version_name;
+
 describe('apkDownloadStats', () => {
   let tmpDir;
   let statsMod;
@@ -26,22 +30,22 @@ describe('apkDownloadStats', () => {
   });
 
   test('GET download increments count', () => {
-    statsMod.recordDownload('deng-tool-rejoin-apk-v1.0.9.apk');
+    statsMod.recordDownload(latestFile);
     const s = statsMod.getStats();
     assert.equal(s.ok, true);
-    assert.equal(s.latest.version, '1.0.9');
+    assert.equal(s.latest.version, latestVersion);
     assert.equal(s.latest.downloads, 1);
-    statsMod.recordDownload('deng-tool-rejoin-apk-v1.0.9.apk');
+    statsMod.recordDownload(latestFile);
     assert.equal(statsMod.getStats().latest.downloads, 2);
   });
 
   test('stats API returns exact count with separators via consumer', () => {
-    for (let i = 0; i < 1248; i++) statsMod.recordDownload('deng-tool-rejoin-apk-v1.0.9.apk');
+    for (let i = 0; i < 1248; i++) statsMod.recordDownload(latestFile);
     const { formatExact } = require('../src/formatNumbers');
     assert.equal(formatExact(statsMod.getStats().latest.downloads), '1,248');
   });
 
   test('_versionFromFilename parses semantic version', () => {
-    assert.equal(statsMod._versionFromFilename('deng-tool-rejoin-apk-v1.0.9.apk'), '1.0.9');
+    assert.equal(statsMod._versionFromFilename(latestFile), latestVersion);
   });
 });

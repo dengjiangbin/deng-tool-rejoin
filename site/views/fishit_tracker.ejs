@@ -277,6 +277,59 @@
 
     .card-empty { text-align:center; padding:24px; color:var(--muted); font-size:.85rem; }
 
+    .inventory-search-row {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      margin:0 0 12px;
+    }
+    .inventory-search {
+      flex:1;
+      min-width:0;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:10px 12px;
+      border:1.5px solid var(--border);
+      border-radius:var(--radius);
+      background:var(--surface2);
+    }
+    .inventory-search__icon {
+      width:16px;
+      height:16px;
+      color:var(--muted);
+      flex-shrink:0;
+    }
+    .inventory-search__input {
+      flex:1;
+      min-width:0;
+      border:none;
+      background:transparent;
+      color:var(--text);
+      font-size:.9rem;
+      font-family:var(--font);
+      outline:none;
+    }
+    .inventory-search__input::placeholder { color:var(--muted); }
+    .inventory-search__clear {
+      border:none;
+      background:var(--surface);
+      color:var(--muted);
+      border-radius:8px;
+      padding:4px 10px;
+      font-size:.78rem;
+      font-family:var(--font);
+      cursor:pointer;
+      display:none;
+    }
+    .inventory-search__clear.is-visible { display:inline-flex; }
+    .inventory-search-empty {
+      text-align:center;
+      padding:18px 12px;
+      color:var(--muted);
+      font-size:.85rem;
+    }
+
     .loadstring-box { margin-top:36px; background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius-lg); padding:20px; }
     .header__lead {
       display:flex;
@@ -352,8 +405,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10ZI_INVENTORY_CARD_UNITY_2026_06_09">
-<!-- BLOCKER10ZI_INVENTORY_CARD_UNITY_2026_06_09 -->
+<body data-ui-marker="BLOCKER10ZJ_INVENTORY_SEARCH_MENU_STATS_APK_2026_06_09">
+<!-- BLOCKER10ZJ_INVENTORY_SEARCH_MENU_STATS_APK_2026_06_09 -->
 <div class="page">
   <div class="inner">
 
@@ -575,6 +628,71 @@
     card.innerHTML = buildStoneCardInnerHtml(item);
     return card;
   }
+  function inventorySearchHaystack(item) {
+    if (!item || typeof item !== 'object') return '';
+    const parts = [
+      item.name,
+      item.baseFishName,
+      item.baseName,
+      item.displayName,
+      item.cardName,
+      item.rarity,
+      item.stoneType,
+      item.itemId,
+      item.speciesId,
+      formatAmountLabel(resolveItemAmount(item)),
+    ];
+    return parts.filter(Boolean).join(' ').toLowerCase();
+  }
+  function filterByInventorySearch(items, query) {
+    if (!Array.isArray(items)) return [];
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((item) => inventorySearchHaystack(item).includes(q));
+  }
+  function ensureInventorySearchRow(cardBody) {
+    if (!cardBody) return null;
+    let row = cardBody.querySelector('[data-inventory-search-row]');
+    if (row) return row;
+    row = document.createElement('div');
+    row.className = 'inventory-search-row';
+    row.setAttribute('data-inventory-search-row', '');
+    row.innerHTML = `
+<div class="inventory-search" role="search">
+  <svg class="inventory-search__icon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+    <circle cx="11" cy="11" r="7"></circle>
+    <path d="m20 20-3.5-3.5"></path>
+  </svg>
+  <input class="inventory-search__input" type="search" placeholder="Search fish or stones..." autocomplete="off" spellcheck="false" aria-label="Search fish or stones">
+  <button class="inventory-search__clear" type="button" aria-label="Clear search">Clear</button>
+</div>`;
+    cardBody.insertBefore(row, cardBody.firstChild);
+    const input = row.querySelector('.inventory-search__input');
+    const clearBtn = row.querySelector('.inventory-search__clear');
+    const card = cardBody.closest('.tracker-card');
+    const key = card && card.dataset.user;
+    const syncClear = () => {
+      const active = String(input.value || '').trim().length > 0;
+      clearBtn.classList.toggle('is-visible', active);
+    };
+    input.addEventListener('input', () => {
+      syncClear();
+      const entry = key && trackers.get(key);
+      if (!entry) return;
+      entry.inventorySearch = input.value;
+      patchCardInventory(cardBody, entry.lastFishList || [], entry.lastStoneList || [], entry.inventorySearch);
+    });
+    clearBtn.addEventListener('click', () => {
+      input.value = '';
+      syncClear();
+      const entry = key && trackers.get(key);
+      if (!entry) return;
+      entry.inventorySearch = '';
+      patchCardInventory(cardBody, entry.lastFishList || [], entry.lastStoneList || [], '');
+      input.focus();
+    });
+    return row;
+  }
   function patchStonesGrid(container, items) {
     if (!container) return;
     if (!items || items.length === 0) {
@@ -615,17 +733,51 @@
     });
     existing.forEach((el, key) => { if (!nextKeys.has(key)) el.remove(); });
   }
-  function patchCardInventory(cardBody, fishList, stoneList) {
+  function patchCardInventory(cardBody, fishList, stoneList, searchQuery) {
     if (!cardBody) return;
+    const card = cardBody.closest('.tracker-card');
+    const key = card && card.dataset.user;
+    const entry = key && trackers.get(key);
+    if (entry) {
+      entry.lastFishList = Array.isArray(fishList) ? fishList : [];
+      entry.lastStoneList = Array.isArray(stoneList) ? stoneList : [];
+    }
+    const hasItems = (fishList && fishList.length) || (stoneList && stoneList.length);
+    if (hasItems) ensureInventorySearchRow(cardBody);
+    const q = searchQuery != null ? searchQuery : (entry && entry.inventorySearch) || '';
+    const searchRow = cardBody.querySelector('[data-inventory-search-row]');
+    if (searchRow) {
+      searchRow.style.display = hasItems ? '' : 'none';
+      const input = searchRow.querySelector('.inventory-search__input');
+      const clearBtn = searchRow.querySelector('.inventory-search__clear');
+      if (input && input.value !== q) input.value = q;
+      if (clearBtn) clearBtn.classList.toggle('is-visible', String(q).trim().length > 0);
+    }
+    const filteredFish = filterByInventorySearch(fishList || [], q);
+    const filteredStones = filterByInventorySearch(stoneList || [], q);
     let fishHost = cardBody.querySelector('[data-fish-grid-host]');
     let stoneHost = cardBody.querySelector('[data-stones-section]');
     if (!fishHost || !stoneHost) {
-      cardBody.innerHTML = '<div data-fish-grid-host></div><div class="stones-section" data-stones-section></div>';
+      const hostsHtml = '<div data-fish-grid-host></div><div class="stones-section" data-stones-section></div>';
+      if (searchRow) {
+        searchRow.insertAdjacentHTML('afterend', hostsHtml);
+      } else {
+        cardBody.innerHTML = hostsHtml;
+      }
       fishHost = cardBody.querySelector('[data-fish-grid-host]');
       stoneHost = cardBody.querySelector('[data-stones-section]');
     }
-    patchItemsGrid(fishHost, fishList);
-    patchStonesGrid(stoneHost, stoneList);
+    cardBody.querySelectorAll('[data-inventory-search-empty]').forEach((el) => el.remove());
+    if (hasItems && String(q).trim() && filteredFish.length === 0 && filteredStones.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'inventory-search-empty';
+      empty.setAttribute('data-inventory-search-empty', '');
+      empty.textContent = 'No inventory items found';
+      if (stoneHost) stoneHost.insertAdjacentElement('afterend', empty);
+      else if (fishHost) fishHost.insertAdjacentElement('afterend', empty);
+    }
+    patchItemsGrid(fishHost, filteredFish);
+    patchStonesGrid(stoneHost, filteredStones);
   }
   function logFishOnlyRender(key, data, fishList) {
     if (!data || data.renderBuild !== RENDER_BUILD) return;

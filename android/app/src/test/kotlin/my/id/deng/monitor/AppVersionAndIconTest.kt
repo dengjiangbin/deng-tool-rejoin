@@ -22,20 +22,20 @@ class AppVersionAndIconTest {
     }
 
     @Test
-    fun `versionName is bumped to 1_0_9`() {
+    fun `versionName is bumped to 1_0_11`() {
         val gradle = buildGradle()
         assertTrue(
-            "expected versionName = \"1.0.9\" in build.gradle.kts",
-            gradle.contains(Regex("""versionName\s*=\s*"1\.0\.9"""")),
+            "expected versionName = \"1.0.11\" in build.gradle.kts",
+            gradle.contains(Regex("""versionName\s*=\s*"1\.0\.11""")),
         )
     }
 
     @Test
-    fun `versionCode is bumped to 10`() {
+    fun `versionCode is bumped to 12`() {
         val gradle = buildGradle()
         assertTrue(
-            "expected versionCode = 10 in build.gradle.kts",
-            gradle.contains(Regex("""versionCode\s*=\s*10\b""")),
+            "expected versionCode = 12 in build.gradle.kts",
+            gradle.contains(Regex("""versionCode\s*=\s*12\b""")),
         )
     }
 

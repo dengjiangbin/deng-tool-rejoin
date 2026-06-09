@@ -81,6 +81,44 @@ class ScreenLayoutContractTest {
     }
 
     @Test
+    fun `AppRoot nav uses Inventory instead of Snapshot`() {
+        val src = ui("AppRoot.kt")
+        assertTrue(
+            "AppRoot must expose an Inventory nav item",
+            src.contains("NavItem(\"inventory\"") && src.contains("\"Inventory\""),
+        )
+        assertTrue(
+            "AppRoot must route to InventoryScreen",
+            src.contains("composable(\"inventory\")") && src.contains("InventoryScreen("),
+        )
+        assertFalse(
+            "AppRoot must not expose Snapshot in bottom nav",
+            Regex("""NavItem\("snapshot"""").containsMatchIn(src),
+        )
+        assertFalse(
+            "AppRoot must not show Snapshot label in nav",
+            src.contains("NavItem(") && src.contains("\"Snapshot\""),
+        )
+    }
+
+    @Test
+    fun `InventoryScreen loads tracker page and offers Open in website`() {
+        val src = ui("InventoryScreen.kt")
+        assertTrue(
+            "InventoryScreen must load the website tracker/inventory page",
+            src.contains("/tracker"),
+        )
+        assertTrue(
+            "InventoryScreen must offer Open in website",
+            src.contains("Open in website"),
+        )
+        assertFalse(
+            "InventoryScreen must not show Waiting for snapshot copy",
+            src.contains("Waiting for snapshot", ignoreCase = true),
+        )
+    }
+
+    @Test
     fun `SnapshotScreen shows interval-off guidance instead of silent empty`() {
         val src = ui("SnapshotScreen.kt")
         assertTrue(

@@ -22,6 +22,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const manualStatsFishImages = require('./fishitManualStatsFishImages');
 const rodAssets = require('./fishitRodAssets');
 
 // Default path resolves to the sibling "DENG Fish It" project on this host.
@@ -178,6 +179,7 @@ const DENG_LOGO_HINTS = [/deng[-_]hub/i, /qZ1thB4/i];
 
 function isValidImg(url) {
   const u = String(url || '').trim();
+  if (u.startsWith('/api/fishit/assets/stats-fish/')) return true;
   if (!/^https?:\/\//i.test(u)) return false;
   if (DENG_LOGO_HINTS.some((re) => re.test(u))) return false;
   return true;
@@ -236,13 +238,18 @@ function buildImageIndex() {
   if (_imgIndex && now - _imgIndexAt < CACHE_TTL_MS) return _imgIndex;
   const idx = new Map();
   const put = (name, url, source) => {
-    if (!isValidImg(url)) return;
+    if (!isValidImg(url) && !String(url || '').startsWith('/api/fishit/assets/stats-fish/')) return;
     const u = String(url).trim();
     const nk = normKey(name);
     const fk = foldKey(name);
     if (nk && !idx.has(nk)) idx.set(nk, { url: u, source: source || 'index' });
     if (fk && fk !== nk && !idx.has(fk)) idx.set(fk, { url: u, source: source || 'index' });
   };
+
+  // 0. Manual verified stats fish images (Quiz Bot bank copies — BLOCKER10ZJ).
+  try {
+    manualStatsFishImages.seedImageIndex(put);
+  } catch (_) { /* optional catalog */ }
 
   // 1. fish_catalog_seen table (PokéMeow/kolam catalog — same as bot).
   try {

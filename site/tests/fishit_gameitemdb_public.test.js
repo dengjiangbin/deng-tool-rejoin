@@ -9,7 +9,7 @@ const gameItemDbPublic = require('../src/fishitGameItemDbPublic');
 const { buildPublicFishFields, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
 const { BLOCKER10ZG_BUILD } = require('../src/fishitTrackerBuild');
 
-const FINAL_BUILD = 'BLOCKER10ZI_INVENTORY_CARD_UNITY_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZJ_INVENTORY_SEARCH_MENU_STATS_APK_2026_06_09';
 
 function fishRow(overrides = {}) {
   return {

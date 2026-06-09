@@ -15,7 +15,7 @@ const { BLOCKER10ZG_BUILD } = require('../src/fishitTrackerBuild');
 const { PUBLIC_API_BUILD, buildTrackerPageLocals } = require('../src/fishitTrackerRoutes');
 const trackerRouter = require('../src/fishitTrackerRoutes');
 
-const FINAL_BUILD = 'BLOCKER10ZI_INVENTORY_CARD_UNITY_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZJ_INVENTORY_SEARCH_MENU_STATS_APK_2026_06_09';
 const TRACKER_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
 const MOJIBAKE = '\uFFFD';
 

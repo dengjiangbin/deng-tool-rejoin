@@ -13,7 +13,7 @@ const gameItemDbPublic = require('../src/fishitGameItemDbPublic');
 const trackerRouter = require('../src/fishitTrackerRoutes');
 const { BLOCKER10ZG_BUILD } = require('../src/fishitTrackerBuild');
 
-const FINAL_BUILD = 'BLOCKER10ZI_INVENTORY_CARD_UNITY_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZJ_INVENTORY_SEARCH_MENU_STATS_APK_2026_06_09';
 const LAYOUT_PATH = path.join(__dirname, '..', 'views', 'layout.ejs');
 const TRACKER_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
 
@@ -31,13 +31,15 @@ describe('BLOCKER10ZF Inventory rename + rarity sorting', () => {
     assert.equal(PUBLIC_API_BUILD, FINAL_BUILD);
   });
 
-  test('sidebar shows Inventory with backpack icon and no Live Tracker label', () => {
+  test('sidebar shows Inventory with backpack icon in correct menu order', () => {
     const layout = fs.readFileSync(LAYOUT_PATH, 'utf8');
-    assert.match(layout, /<span>Inventory<\/span>/);
-    assert.doesNotMatch(layout, /<span>Live Tracker<\/span>/);
+    const labels = [...layout.matchAll(/<span>(Dashboard|My License|Inventory|Stats|Download)<\/span>/g)].map((m) => m[1]);
+    assert.deepEqual(labels, ['Dashboard', 'My License', 'Inventory', 'Stats', 'Download']);
     assert.match(layout, /href="\/tracker"/);
     assert.match(layout, /data-nav-icon="backpack"/);
-    assert.match(layout, /M4 10a4 4 0 0 1 4-4h8/);
+    assert.doesNotMatch(layout, /<span>Live Tracker<\/span>/);
+    assert.doesNotMatch(layout, /<span>Fish It<\/span>/);
+    assert.doesNotMatch(layout, /<span>Rejoin APK<\/span>/);
   });
 
   test('/tracker page visible title/header says Inventory', async () => {

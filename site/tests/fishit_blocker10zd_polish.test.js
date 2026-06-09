@@ -11,7 +11,7 @@ const stoneImageAssets = require('../src/fishitStoneImageAssets');
 const { buildPublicFishFields, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
 const { BLOCKER10ZG_BUILD } = require('../src/fishitTrackerBuild');
 
-const FINAL_BUILD = 'BLOCKER10ZI_INVENTORY_CARD_UNITY_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZJ_INVENTORY_SEARCH_MENU_STATS_APK_2026_06_09';
 const BASE_URL = 'http://127.0.0.1:8791';
 
 function fishRow(overrides = {}) {

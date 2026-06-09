@@ -17,8 +17,8 @@ android {
         // Termux / package version. Bump versionCode whenever the
         // APK is rebuilt and republished, even for branding-only
         // changes, so Android sees it as a real upgrade.
-        versionCode = 10
-        versionName = "1.0.9"
+        versionCode = 12
+        versionName = "1.0.11"
 
         // Default backend URL. Can be overridden at build time:
         //   ./gradlew assembleRelease -PbridgeUrl=https://staging.example.com

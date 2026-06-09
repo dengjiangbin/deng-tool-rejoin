@@ -12,6 +12,9 @@ process.env.SUPABASE_URL = 'https://placeholder.supabase.co';
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-key';
 
 const downloadStats = require('../src/downloadStats');
+const latestApk = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'releases', 'android', 'latest.json'), 'utf8'));
+const latestFile = latestApk.file_name;
+const latestVersion = latestApk.version_name;
 
 describe('downloadStats platform support', () => {
   let tmpDir;
@@ -30,7 +33,7 @@ describe('downloadStats platform support', () => {
 
   test('android and ios counts are independent', () => {
     const ds = require('../src/downloadStats');
-    ds.recordDownload('android', 'deng-tool-rejoin-apk-v1.0.9.apk');
+    ds.recordDownload('android', latestFile);
     ds.recordDownload('ios', 'deng-tool-monitor-ios-v1.0.0.ipa');
     const all = ds.getAllStats();
     assert.equal(all.android.downloads, 1);
@@ -47,7 +50,7 @@ describe('downloadStats platform support', () => {
 
   test('stats reads are deterministic and do not increment counts', () => {
     const ds = require('../src/downloadStats');
-    ds.recordDownload('android', 'deng-tool-rejoin-apk-v1.0.9.apk');
+    ds.recordDownload('android', latestFile);
     const before = ds.getPlatformStats('android').latest.downloads;
     for (let i = 0; i < 5; i++) {
       assert.equal(ds.getPlatformStats('android').latest.downloads, before);
@@ -57,12 +60,12 @@ describe('downloadStats platform support', () => {
 
   test('older versioned APK downloads do not replace published latest stats', () => {
     const ds = require('../src/downloadStats');
-    ds.recordDownload('android', 'deng-tool-rejoin-apk-v1.0.9.apk');
+    ds.recordDownload('android', latestFile);
     ds.recordDownload('android', 'deng-tool-rejoin-apk-v1.0.0.apk');
     ds.recordDownload('android', 'deng-tool-rejoin-apk-v1.0.0.apk');
     const latest = ds.getApkStats().latest;
-    assert.equal(latest.version, '1.0.9');
-    assert.equal(latest.file_name, 'deng-tool-rejoin-apk-v1.0.9.apk');
+    assert.equal(latest.version, latestVersion);
+    assert.equal(latest.file_name, latestFile);
     assert.equal(latest.downloads, 1);
   });
 
@@ -72,7 +75,7 @@ describe('downloadStats platform support', () => {
     const ds = require('../src/downloadStats');
     const latest = ds.getApkStats().latest;
     assert.equal(ds.getApkStats().ok, true);
-    assert.equal(latest.version, '1.0.9');
+    assert.equal(latest.version, latestVersion);
     assert.equal(latest.downloads, 0);
   });
 

@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "updatedAt": "2026-06-09T00:00:00.000Z",
+  "byName": {
+    "Skeleton Narwhal": {
+      "filename": "Skeleton_Narwhal.webp",
+      "assetId": "72248976760148",
+      "imageSource": "manual_verified_image",
+      "sourceFile": "DENG Quiz/assets/FishItFish/Skeleton_Narwhal.webp",
+      "quizBotBankId": "fi0240"
+    },
+    "Elshark Gran Maja": {
+      "filename": "Elshark_Gran_Maja.webp",
+      "assetId": "115522161459382",
+      "imageSource": "manual_verified_image",
+      "sourceFile": "DENG Quiz/assets/FishItFish/Elshark_Gran_Maja.webp",
+      "quizBotBankId": "fi0203"
+    },
+    "Cryoshade Glider": {
+      "filename": "Cryoshade_Glider.webp",
+      "assetId": "107008051913908",
+      "imageSource": "manual_verified_image",
+      "sourceFile": "DENG Quiz/assets/FishItFish/Cryoshade_Glider.webp",
+      "quizBotBankId": "fi0276"
+    },
+    "King Jelly": {
+      "filename": "King_Jelly.webp",
+      "assetId": "104757933481327",
+      "imageSource": "manual_verified_image",
+      "sourceFile": "DENG Quiz/assets/FishItFish/King_Jelly.webp",
+      "quizBotBankId": "fi0198"
+    }
+  }
+}
