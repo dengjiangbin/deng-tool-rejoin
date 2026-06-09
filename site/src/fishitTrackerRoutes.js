@@ -3217,6 +3217,11 @@ async function handleGetBackpack(req, res) {
     countParityProof: publicFish.countParityProof,
     rarityColorProof: publicFish.rarityColorProof,
     globalDbUiProof: publicFish.globalDbUiProof,
+    missingPublicRarityCount: publicFish.missingPublicRarityCount != null
+      ? publicFish.missingPublicRarityCount
+      : 0,
+    manualRarityProof: publicFish.manualRarityProof || null,
+    stoneAssetProof: publicFish.stoneAssetProof || null,
     globalCatalogProof: (gameItemDbPublic.usesPlayerDataGameItemDbPublicIdentity(data)
       || itemUtilityPublic.usesPlayerDataItemUtilityPublicIdentity(data))
       ? null
@@ -3375,6 +3380,11 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     publicCounts: publicFishDbg.publicCounts,
     rarityColorProof: publicFishDbg.rarityColorProof,
     globalDbUiProof: publicFishDbg.globalDbUiProof,
+    missingPublicRarityCount: publicFishDbg.missingPublicRarityCount != null
+      ? publicFishDbg.missingPublicRarityCount
+      : 0,
+    manualRarityProof: publicFishDbg.manualRarityProof || null,
+    stoneAssetProof: publicFishDbg.stoneAssetProof || null,
     unmappedReviewProof: buildUnmappedReviewProof(enrichedAll),
     trackerClientProof: buildTrackerClientProof(data),
     globalRarityProof: globalCatalogService.buildGlobalRarityProof(publicFishDbg.fishItems),
