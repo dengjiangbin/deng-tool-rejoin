@@ -1,9 +1,12 @@
 'use strict';
 
-const PLAYERDATA_GAMEITEMDB_SOURCE = 'playerdata_gameitemdb';
+const manualRarity = require('./fishitManualRarityOverrides');
+const stoneImageAssets = require('./fishitStoneImageAssets');
 const GAMEITEMDB_ICON_SOURCE = 'gameitemdb_icon';
+const PLAYERDATA_GAMEITEMDB_SOURCE = 'playerdata_gameitemdb';
+const STONE_MANUAL_ASSET_SOURCE = stoneImageAssets.STONE_MANUAL_ASSET_SOURCE;
 const QUIZ_BOT_FALLBACK_SOURCE = 'quiz_bot_fishit_bank';
-const FINAL_BUILD = 'BLOCKER10ZC_DIRECT_REPLION_GAMEITEMDB_PUBLIC_PATH_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZD_STONE_ASSETS_MANUAL_RARITY_2026_06_09';
 const WAITING_ACTIVATION = 'waiting_for_playerdata_gameitemdb_payload';
 
 const ENCHANT_STONE_IDS = new Set(['10', '246', '558', '873', '929']);
@@ -105,7 +108,7 @@ function detectGameItemDbUpload(body) {
 
 function expectsPlayerDataGameItemDbPayload(sessionData) {
   const build = String(sessionData?.trackerBuild || sessionData?.trackerClientProof?.trackerBuild || '');
-  return /BLOCKER10Z[ABC]|PLAYERDATA_GAMEITEMDB/i.test(build);
+  return /BLOCKER10Z[ABCD]|PLAYERDATA_GAMEITEMDB/i.test(build);
 }
 
 function defaultSourceTruth() {
@@ -244,7 +247,9 @@ function applyPublicCosmetic(item) {
 function mapToPublicFishCardItem(item) {
   const cleaned = applyPublicCosmetic(item);
   const amount = Number(cleaned.quantity) > 0 ? Math.floor(Number(cleaned.quantity)) : 1;
-  const rarity = cleaned.rarity && cleaned.rarity !== 'Unknown' ? cleaned.rarity : null;
+  const rarityResolved = manualRarity.resolvePublicFishRarity(cleaned, tierToRarity);
+  const rarity = rarityResolved.rarity;
+  const tier = rarityResolved.tier;
   const imageSource = cleaned.imageSource === GAMEITEMDB_ICON_SOURCE
     ? GAMEITEMDB_ICON_SOURCE
     : (cleaned.imageSource === QUIZ_BOT_FALLBACK_SOURCE
@@ -262,7 +267,7 @@ function mapToPublicFishCardItem(item) {
     quantity: amount,
     count: amount,
     rarity,
-    tier: cleaned.tier || null,
+    tier,
     itemId: cleaned.itemId || null,
     category: 'fish',
     uuid: cleaned.uuid || null,
@@ -274,6 +279,7 @@ function mapToPublicFishCardItem(item) {
     identityVerified: true,
     identitySource: PLAYERDATA_GAMEITEMDB_SOURCE,
     globalDbUsedForPublicIdentity: false,
+    raritySource: rarityResolved.raritySource,
     publicIdentityProof: {
       identitySource: PLAYERDATA_GAMEITEMDB_SOURCE,
       globalDbUsedForPublicIdentity: false,
@@ -287,7 +293,7 @@ function mapToPublicFishCardItem(item) {
     imageUrlPresent: Boolean(cleaned.imageUrl),
     imageSource,
     dataImageSource: imageSource,
-    dataRaritySource: 'playerdata_itemutility_tier',
+    dataRaritySource: rarityResolved.raritySource,
     icon: cleaned.iconRaw || cleaned.icon || null,
     debugIcon: cleaned.iconRaw || cleaned.icon || null,
     publicWeightHidden: true,
@@ -297,10 +303,13 @@ function mapToPublicFishCardItem(item) {
 
 function mapToPublicStoneCardItem(item) {
   const amount = Number(item.quantity) > 0 ? Math.floor(Number(item.quantity)) : 1;
-  const iconParsed = parseGameItemIcon(item.icon || item.iconRaw);
-  const imageSource = iconParsed
-    ? GAMEITEMDB_ICON_SOURCE
-    : (item.imageSource === QUIZ_BOT_FALLBACK_SOURCE ? QUIZ_BOT_FALLBACK_SOURCE : null);
+  const manualAsset = item.imageSource === STONE_MANUAL_ASSET_SOURCE && item.imageUrl;
+  const iconParsed = manualAsset ? null : parseGameItemIcon(item.icon || item.iconRaw);
+  const imageSource = manualAsset
+    ? STONE_MANUAL_ASSET_SOURCE
+    : (iconParsed
+      ? GAMEITEMDB_ICON_SOURCE
+      : (item.imageSource === QUIZ_BOT_FALLBACK_SOURCE ? QUIZ_BOT_FALLBACK_SOURCE : null));
   return {
     kind: 'stone',
     category: 'stone',
@@ -330,7 +339,8 @@ function buildPlayerDataGameItemDbProof(fishItems, stoneItems, unresolvedItems =
     (f) => f.imageSource === GAMEITEMDB_ICON_SOURCE && f.imageUrlPresent,
   ).length;
   const stoneIconResolvedCount = stoneItems.filter(
-    (s) => s.imageSource === GAMEITEMDB_ICON_SOURCE && s.imageUrlPresent,
+    (s) => (s.imageSource === GAMEITEMDB_ICON_SOURCE || s.imageSource === STONE_MANUAL_ASSET_SOURCE)
+      && s.imageUrlPresent,
   ).length;
   return {
     enabled: true,
@@ -497,13 +507,28 @@ async function buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, deps = 
     withImages = await fishImageCache.attachCachedImagesToItems(groupedFish, baseUrl);
   }
 
-  let stonesWithImages = groupedStones;
+  let stonesWithImages = stoneImageAssets.attachStoneImagesToItems(groupedStones, baseUrl);
   if (fishImageCache && typeof fishImageCache.attachItemUtilityGameIcons === 'function') {
-    stonesWithImages = await fishImageCache.attachItemUtilityGameIcons(groupedStones, baseUrl);
+    stonesWithImages = await fishImageCache.attachItemUtilityGameIcons(
+      stonesWithImages.filter((s) => !s.imageUrlPresent),
+      baseUrl,
+    ).then((fallbackRows) => {
+      const byKey = new Map(stonesWithImages.map((s) => [
+        `${s.itemId}|${s.stoneType || ''}`,
+        s,
+      ]));
+      for (const row of fallbackRows) {
+        byKey.set(`${row.itemId}|${row.stoneType || ''}`, { ...byKey.get(`${row.itemId}|${row.stoneType || ''}`), ...row });
+      }
+      return [...byKey.values()];
+    });
   }
 
   const fishItems = withImages.map((item) => mapToPublicFishCardItem(item));
   const stoneItems = stonesWithImages.map((item) => mapToPublicStoneCardItem(item));
+  const missingPublicRarityCount = manualRarity.countMissingPublicRarity(fishItems);
+  const manualRarityProof = manualRarity.buildManualRarityProof(fishItems);
+  const stoneAssetProof = stoneImageAssets.buildStoneAssetProof(stoneItems);
   const fishCounts = buildFishCounts(fishItems, stoneItems, unresolvedItems.length);
   const publicCounts = buildPublicCounts(fishItems, stoneItems);
   const storedProof = sessionData?.playerDataGameItemDbProof || {};
@@ -534,6 +559,9 @@ async function buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, deps = 
       reason: 'gameitemdb_unresolved',
     },
     globalDbUiProof: null,
+    missingPublicRarityCount,
+    manualRarityProof,
+    stoneAssetProof,
   };
 }
 

@@ -46,7 +46,8 @@ const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
 const snapshotRecovery = require('./fishitSnapshotRecovery');
-const { BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const stoneImageAssets = require('./fishitStoneImageAssets');
 const itemUtilityPublic = require('./fishitItemUtilityPublic');
 const gameItemDbPublic = require('./fishitGameItemDbPublic');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
@@ -1813,6 +1814,7 @@ function isUsablePublicImageUrl(url) {
   const u = url.trim();
   if (!u) return false;
   if (u.startsWith('/api/fishit-tracker/assets/fish/')) return true;
+  if (u.startsWith('/api/fishit-tracker/assets/stones/')) return true;
   if (u.startsWith('/api/fishit-tracker/image/')) return true;
   if (u.startsWith('/assets/')) return true;
   if (u.startsWith('http')) return true;
@@ -1824,7 +1826,8 @@ function mapToPublicFishCardItem(cleaned) {
   const imageUrl = cleaned.imageUrl || null;
   const hasImage = isUsablePublicImageUrl(imageUrl);
   const imageResolved = cleaned.imageStatus === 'cached' && hasImage
-    && String(imageUrl).startsWith('/api/fishit-tracker/assets/fish/');
+    && (String(imageUrl).startsWith('/api/fishit-tracker/assets/fish/')
+      || String(imageUrl).startsWith('/api/fishit-tracker/assets/stones/'));
   return {
     speciesId: cleaned.speciesId || cleaned.globalSpeciesId || null,
     canonicalName: cleaned.baseFishName || cleaned.cardName || cleaned.name,
@@ -2500,6 +2503,20 @@ function renderTrackerPage(_req, res) {
 
 router.get('/tracker', renderTrackerPage);
 router.get('/fishit-tracker', renderTrackerPage);
+
+// ── GET /api/fishit-tracker/assets/stones/:filename — manual stone image cache (BLOCKER10ZD) ──
+router.get('/api/fishit-tracker/assets/stones/:filename', (req, res) => {
+  const file = path.basename(String(req.params.filename || ''));
+  if (!file || !/^[a-zA-Z0-9._-]+$/.test(file)) {
+    return res.status(400).type('text/plain').send('invalid_filename');
+  }
+  const full = path.join(stoneImageAssets.getCacheDir(), file);
+  if (!fs.existsSync(full)) {
+    return res.status(404).type('text/plain').send('stone_asset_not_found');
+  }
+  res.set('Cache-Control', 'public, max-age=86400, immutable');
+  return res.sendFile(full);
+});
 
 // ── GET /api/fishit-tracker/assets/fish/:filename — local cached fish images (BLOCKER10U) ──
 router.get('/api/fishit-tracker/assets/fish/:filename', async (req, res) => {

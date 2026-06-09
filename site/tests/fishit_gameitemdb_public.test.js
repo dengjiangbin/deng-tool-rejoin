@@ -7,9 +7,9 @@ const path = require('path');
 
 const gameItemDbPublic = require('../src/fishitGameItemDbPublic');
 const { buildPublicFishFields, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
-const { BLOCKER10ZC_BUILD } = require('../src/fishitTrackerBuild');
+const { BLOCKER10ZD_BUILD } = require('../src/fishitTrackerBuild');
 
-const FINAL_BUILD = 'BLOCKER10ZC_DIRECT_REPLION_GAMEITEMDB_PUBLIC_PATH_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZD_STONE_ASSETS_MANUAL_RARITY_2026_06_09';
 
 function fishRow(overrides = {}) {
   return {
@@ -42,9 +42,9 @@ function stoneRow(type, itemId, qty = 1) {
   };
 }
 
-describe('BLOCKER10ZC PlayerData GameItemDB public identity', () => {
-  test('build marker is BLOCKER10ZC', () => {
-    assert.equal(BLOCKER10ZC_BUILD, FINAL_BUILD);
+describe('BLOCKER10ZD PlayerData GameItemDB public identity', () => {
+  test('build marker is BLOCKER10ZD', () => {
+    assert.equal(BLOCKER10ZD_BUILD, FINAL_BUILD);
     assert.equal(PUBLIC_API_BUILD, FINAL_BUILD);
     assert.equal(gameItemDbPublic.FINAL_BUILD, FINAL_BUILD);
   });
