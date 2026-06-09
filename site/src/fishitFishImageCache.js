@@ -11,6 +11,7 @@ const fishImageAssets = require('./fishitFishImageAssets');
 const robloxThumbnails = require('./fishitRobloxThumbnails');
 const catchNameParser = require('./fishitCatchNameParser');
 const quizBotCatalog = require('./fishitQuizBotImageCatalog');
+const { parseGameFishIcon, GAME_FISH_ICON_SOURCE, PLAYERDATA_ITEMUTILITY_SOURCE } = require('./fishitItemUtilityPublic');
 let globalCatalogService = null;
 try { globalCatalogService = require('./fishitGlobalCatalogService'); } catch (_) { globalCatalogService = null; }
 let canonicalCatalog = null;
@@ -190,19 +191,42 @@ async function repairMissingAssetFile(filename) {
 function resolveImageMetaForItem(item) {
   if (!item) return { assetId: null, sourceUrl: null, searchedSources: [] };
   const searchedSources = [];
+  const aliases = quizBotCatalog.collectAliases(item);
+  const isItemUtility = item.source === PLAYERDATA_ITEMUTILITY_SOURCE
+    || item.imageSource === GAME_FISH_ICON_SOURCE;
+
+  const gameIcon = parseGameFishIcon(item.icon);
+  if (gameIcon?.assetId) {
+    return {
+      assetId: gameIcon.assetId,
+      sourceUrl: null,
+      searchedSources: ['game_fish_icon_catalog'],
+      triedAliases: aliases,
+      imageSource: GAME_FISH_ICON_SOURCE,
+      iconDebug: item.icon || null,
+    };
+  }
+
   const direct = robloxThumbnails.sanitiseAssetId(item.imageAssetId);
+  if (direct && isItemUtility) {
+    return {
+      assetId: direct,
+      sourceUrl: item.imageUrl || null,
+      searchedSources: ['game_fish_icon_catalog'],
+      triedAliases: aliases,
+      imageSource: item.imageSource || GAME_FISH_ICON_SOURCE,
+    };
+  }
   if (direct) {
     return {
       assetId: direct,
       sourceUrl: item.imageUrl || null,
       searchedSources: ['item_imageAssetId'],
-      triedAliases: quizBotCatalog.collectAliases(item),
+      triedAliases: aliases,
     };
   }
 
-  const aliases = quizBotCatalog.collectAliases(item);
-
-  if (globalCatalogService) {
+  if (!isItemUtility && globalCatalogService) {
     try {
       const globalImg = globalCatalogService.resolveImageForItem(item);
       if (globalImg?.image?.cachedUrl || globalImg?.image?.originalPath) {
@@ -279,6 +303,17 @@ function resolveImageMetaForItem(item) {
       matchedAlias: quizHit.matchedAlias,
       quizBankId: quizHit.bankId,
       canonicalName: quizHit.name,
+    };
+  }
+
+  if (isItemUtility) {
+    return {
+      assetId: null,
+      sourceUrl: null,
+      searchedSources,
+      triedAliases: aliases,
+      imageSource: null,
+      quizBotTried: true,
     };
   }
 
@@ -725,6 +760,19 @@ async function attachCachedImageFields(item, baseUrl) {
   };
 }
 
+async function attachItemUtilityGameIcons(items, baseUrl) {
+  if (!Array.isArray(items)) return [];
+  const out = [];
+  for (const it of items) {
+    const row = {
+      ...it,
+      source: it.source || PLAYERDATA_ITEMUTILITY_SOURCE,
+    };
+    out.push(await attachCachedImageFields(row, baseUrl));
+  }
+  return out;
+}
+
 async function attachCachedImagesToItems(items, baseUrl) {
   if (!Array.isArray(items)) return [];
   const out = [];
@@ -883,6 +931,7 @@ module.exports = {
   ensureCachedAssets,
   attachCachedImageFields,
   attachCachedImagesToItems,
+  attachItemUtilityGameIcons,
   getImageCacheProof,
   buildImageSourceProof,
   getImageCacheStats,

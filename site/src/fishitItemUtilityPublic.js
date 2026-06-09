@@ -1,8 +1,37 @@
 'use strict';
 
 const PLAYERDATA_ITEMUTILITY_SOURCE = 'playerdata_itemutility';
+const GAME_FISH_ICON_SOURCE = 'game_fish_icon_catalog';
 
 const ENCHANT_STONE_IDS = new Set(['10', '246', '558', '873', '929']);
+
+function parseGameFishIcon(raw) {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim();
+  if (!s || s === '0' || s.toLowerCase() === 'rbxassetid://0') return null;
+  const prefixed = s.match(/^rbxassetid:\/\/(\d+)$/i);
+  if (prefixed) {
+    if (prefixed[1] === '0') return null;
+    return {
+      icon: s,
+      assetId: prefixed[1],
+      imageSource: GAME_FISH_ICON_SOURCE,
+    };
+  }
+  if (/^\d+$/.test(s)) {
+    if (s === '0') return null;
+    return {
+      icon: `rbxassetid://${s}`,
+      assetId: s,
+      imageSource: GAME_FISH_ICON_SOURCE,
+    };
+  }
+  return null;
+}
+
+function isValidPublicGameIcon(parsed) {
+  return Boolean(parsed?.assetId && parsed.assetId !== '0');
+}
 
 function isPlayerDataItemUtilityRow(item) {
   return Boolean(
@@ -42,6 +71,7 @@ function normaliseUploadRow(row) {
   if (row.kind === 'fish' || row.type === 'Fish') {
     const name = String(row.baseName || row.name || '').trim();
     if (!name) return null;
+    const iconParsed = parseGameFishIcon(row.icon);
     return {
       ...base,
       kind: 'fish',
@@ -52,6 +82,10 @@ function normaliseUploadRow(row) {
       tier: row.tier || row.rarity || null,
       rarity: row.tier || row.rarity || null,
       type: row.type || 'Fish',
+      icon: iconParsed?.icon || null,
+      iconRaw: row.icon || null,
+      imageAssetId: iconParsed?.assetId || null,
+      imageSource: iconParsed ? GAME_FISH_ICON_SOURCE : null,
     };
   }
   return null;
@@ -147,6 +181,8 @@ function mapToPublicFishCardItem(item) {
     imageUrl: cleaned.imageUrl || null,
     imageUrlPresent: Boolean(cleaned.imageUrl),
     imageSource: cleaned.imageSource || null,
+    icon: cleaned.iconRaw || cleaned.icon || null,
+    debugIcon: cleaned.iconRaw || cleaned.icon || null,
     publicWeightHidden: true,
   };
 }
@@ -172,12 +208,19 @@ function mapToPublicStoneCardItem(item) {
   };
 }
 
-function buildPlayerDataItemUtilityProof(fishItems, stoneItems, hiddenUnresolvedRows = []) {
+function buildPlayerDataItemUtilityProof(fishItems, stoneItems, hiddenUnresolvedRows = [], extra = {}) {
+  const fishIconResolvedCount = fishItems.filter((f) => f.imageSource === GAME_FISH_ICON_SOURCE && f.imageUrlPresent).length;
+  const fishIconMissingCount = fishItems.filter((f) => !f.imageUrlPresent).length;
   return {
     enabled: true,
     source: PLAYERDATA_ITEMUTILITY_SOURCE,
+    imageSource: GAME_FISH_ICON_SOURCE,
+    fishIconCatalogLoaded: extra.fishIconCatalogLoaded === true,
+    fishIconCatalogSourcePath: extra.fishIconCatalogSourcePath || null,
     itemUtilityResolvedFishCount: fishItems.length,
     itemUtilityResolvedStoneCount: stoneItems.length,
+    fishIconResolvedCount: extra.fishIconResolvedCount != null ? extra.fishIconResolvedCount : fishIconResolvedCount,
+    fishIconMissingCount: extra.fishIconMissingCount != null ? extra.fishIconMissingCount : fishIconMissingCount,
     itemUtilityResolvedFishInstances: fishItems.reduce(
       (s, f) => s + (Number(f.amount) > 0 ? Math.floor(Number(f.amount)) : 1),
       0,
@@ -192,6 +235,12 @@ function buildPlayerDataItemUtilityProof(fishItems, stoneItems, hiddenUnresolved
       name: f.baseFishName || f.name,
       amount: f.amount,
       mutation: f.debugMutation || null,
+    })),
+    sampleFishIcons: fishItems.slice(0, 5).map((f) => ({
+      name: f.baseFishName || f.name,
+      itemId: f.itemId,
+      icon: f.debugIcon || f.icon || null,
+      imageSource: f.imageSource || null,
     })),
     sampleStones: stoneItems.slice(0, 5).map((s) => ({
       itemId: s.itemId,
@@ -279,23 +328,20 @@ function extractSessionRows(sessionData, body = null) {
 }
 
 async function buildPublicFromPlayerDataItemUtility(sessionData, baseUrl, deps = {}) {
-  const fishImageAssets = deps.fishImageAssets;
   const rarityEnrichment = deps.rarityEnrichment;
   const fishImageCache = deps.fishImageCache;
   const { rawFish, rawStones, hiddenUnresolvedRows } = extractSessionRows(sessionData);
   const groupedFish = groupFishRows(rawFish);
   const groupedStones = groupStoneRows(rawStones);
 
-  let withAssets = groupedFish;
-  if (fishImageAssets && typeof fishImageAssets.attachFishImagesToItems === 'function') {
-    withAssets = fishImageAssets.attachFishImagesToItems(groupedFish);
-  }
-  let withRarity = withAssets;
+  let withRarity = groupedFish;
   if (rarityEnrichment && typeof rarityEnrichment.attachRarityToItems === 'function') {
-    withRarity = rarityEnrichment.attachRarityToItems(withAssets);
+    withRarity = rarityEnrichment.attachRarityToItems(groupedFish);
   }
   let withImages = withRarity;
-  if (fishImageCache && typeof fishImageCache.attachCachedImagesToItems === 'function') {
+  if (fishImageCache && typeof fishImageCache.attachItemUtilityGameIcons === 'function') {
+    withImages = await fishImageCache.attachItemUtilityGameIcons(withRarity, baseUrl);
+  } else if (fishImageCache && typeof fishImageCache.attachCachedImagesToItems === 'function') {
     withImages = await fishImageCache.attachCachedImagesToItems(withRarity, baseUrl);
   }
 
@@ -307,6 +353,12 @@ async function buildPublicFromPlayerDataItemUtility(sessionData, baseUrl, deps =
     fishItems,
     stoneItems,
     hiddenUnresolvedRows,
+    {
+      fishIconCatalogLoaded: sessionData?.playerDataItemUtilityProof?.fishIconCatalogLoaded,
+      fishIconCatalogSourcePath: sessionData?.playerDataItemUtilityProof?.fishIconCatalogSourcePath,
+      fishIconResolvedCount: sessionData?.playerDataItemUtilityProof?.fishIconResolvedCount,
+      fishIconMissingCount: sessionData?.playerDataItemUtilityProof?.fishIconMissingCount,
+    },
   );
 
   return {
@@ -338,7 +390,10 @@ function usesPlayerDataItemUtilityPublicIdentity(sessionData) {
 
 module.exports = {
   PLAYERDATA_ITEMUTILITY_SOURCE,
+  GAME_FISH_ICON_SOURCE,
   ENCHANT_STONE_IDS,
+  parseGameFishIcon,
+  isValidPublicGameIcon,
   isPlayerDataItemUtilityRow,
   normaliseUploadRow,
   groupFishRows,

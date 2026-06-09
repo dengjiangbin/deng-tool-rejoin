@@ -155,7 +155,80 @@ describe('BLOCKER10ZA PlayerData ItemUtility public identity', () => {
     assert.match(lua, /BLOCKER10ZA_PLAYERDATA_ITEMUTILITY_STONES_UPLOAD_2026_06_09/);
     assert.match(lua, /scanPlayerDataItemUtilityInventory/);
     assert.match(lua, /ItemUtility\.GetItemDataFromItemType/);
+    assert.match(lua, /LiveSafe\.getFishIcon/);
+    assert.match(lua, /game_fish_icon_catalog/);
     assert.match(lua, /payload\.fishItems/);
     assert.match(lua, /payload\.stoneItems/);
+  });
+
+  test('parseGameFishIcon resolves numeric and rbxassetid icons', () => {
+    assert.deepEqual(itemUtilityPublic.parseGameFishIcon('123456789012'), {
+      icon: 'rbxassetid://123456789012',
+      assetId: '123456789012',
+      imageSource: 'game_fish_icon_catalog',
+    });
+    assert.deepEqual(itemUtilityPublic.parseGameFishIcon('rbxassetid://987654321098'), {
+      icon: 'rbxassetid://987654321098',
+      assetId: '987654321098',
+      imageSource: 'game_fish_icon_catalog',
+    });
+    assert.equal(itemUtilityPublic.parseGameFishIcon('rbxassetid://0'), null);
+    assert.equal(itemUtilityPublic.parseGameFishIcon('0'), null);
+    assert.equal(itemUtilityPublic.isValidPublicGameIcon(null), false);
+  });
+
+  test('public fish cards prefer uploaded game icon over Global DB fallback', async () => {
+    const assetId = '1234567890123';
+    const session = {
+      inventorySource: 'playerdata_itemutility',
+      playerDataFishItems: [fishRow({
+        icon: `rbxassetid://${assetId}`,
+        imageSource: 'game_fish_icon_catalog',
+      })],
+      playerDataStoneItems: [],
+      sourceTruth: itemUtilityPublic.defaultSourceTruth(),
+    };
+    const pub = await buildPublicFishFields([], 'http://127.0.0.1:8791', { sessionData: session });
+    assert.equal(pub.fishItems.length, 1);
+    assert.equal(pub.fishItems[0].imageSource, 'game_fish_icon_catalog');
+    assert.ok(pub.fishItems[0].imageUrlPresent || pub.fishItems[0].imageUrl);
+    assert.notEqual(pub.fishItems[0].imageSource, 'global_db');
+  });
+
+  test('missing icon does not create fake unknown fish cards', async () => {
+    const session = {
+      inventorySource: 'playerdata_itemutility',
+      playerDataFishItems: [fishRow({ itemId: '267', name: 'Radiant Catfish', baseName: 'Radiant Catfish', icon: null })],
+      playerDataStoneItems: [],
+      sourceTruth: itemUtilityPublic.defaultSourceTruth(),
+    };
+    const pub = await buildPublicFishFields([], 'http://127.0.0.1:8791', { sessionData: session });
+    assert.equal(pub.fishItems.length, 1);
+    assert.equal(pub.fishItems[0].name, 'Radiant Catfish');
+    assert.doesNotMatch(pub.fishItems[0].name, /Unknown Fish #/i);
+    assert.equal(pub.fishItems[0].imageUrlPresent, false);
+  });
+
+  test('debug proof shows imageSource game_fish_icon_catalog', async () => {
+    const session = {
+      inventorySource: 'playerdata_itemutility',
+      playerDataFishItems: [fishRow({ icon: 'rbxassetid://1234567890123' })],
+      playerDataStoneItems: [],
+      playerDataItemUtilityProof: {
+        enabled: true,
+        imageSource: 'game_fish_icon_catalog',
+        fishIconCatalogLoaded: true,
+        fishIconResolvedCount: 1,
+        fishIconMissingCount: 0,
+      },
+      sourceTruth: itemUtilityPublic.defaultSourceTruth(),
+    };
+    const pub = await buildPublicFishFields([], 'http://127.0.0.1:8791', { sessionData: session });
+    assert.equal(pub.playerDataItemUtilityProof.imageSource, 'game_fish_icon_catalog');
+    assert.equal(pub.playerDataItemUtilityProof.fishIconCatalogLoaded, true);
+    assert.ok(Array.isArray(pub.playerDataItemUtilityProof.sampleFishIcons));
+    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
+    assert.match(tpl, /sampleFishIcons/);
+    assert.match(tpl, /game_fish_icon_catalog/);
   });
 });

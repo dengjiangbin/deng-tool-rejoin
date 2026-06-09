@@ -478,10 +478,15 @@
   <summary>PlayerData + ItemUtility: <span class="gdb-on">ON</span> &mdash; Global DB not used for public identity</summary>
   <div class="gdb-body">
     <div class="gdb-row"><span>Source</span><span>${escHtml(proof.source || 'playerdata_itemutility')}</span></div>
+    <div class="gdb-row"><span>Image source</span><span>${escHtml(proof.imageSource || 'game_fish_icon_catalog')}</span></div>
+    <div class="gdb-row"><span>fishIconCatalogLoaded</span><span>${proof.fishIconCatalogLoaded === true ? 'true' : 'false'}</span></div>
     <div class="gdb-row"><span>Fish types</span><span>${proof.itemUtilityResolvedFishCount != null ? proof.itemUtilityResolvedFishCount : '?'}</span></div>
     <div class="gdb-row"><span>Stone types</span><span>${proof.itemUtilityResolvedStoneCount != null ? proof.itemUtilityResolvedStoneCount : '?'}</span></div>
+    <div class="gdb-row"><span>fishIconResolvedCount</span><span>${proof.fishIconResolvedCount != null ? proof.fishIconResolvedCount : '?'}</span></div>
+    <div class="gdb-row"><span>fishIconMissingCount</span><span>${proof.fishIconMissingCount != null ? proof.fishIconMissingCount : '?'}</span></div>
     <div class="gdb-row"><span>globalDbUsedForPublicIdentity</span><span>false</span></div>
     ${fishSample ? `<div class="global-db-debug"><strong>sampleFish</strong>${fishSample}</div>` : ''}
+    ${(proof.sampleFishIcons || []).length ? `<div class="global-db-debug"><strong>sampleFishIcons</strong>${(proof.sampleFishIcons || []).map((f) => `<div>${escHtml(f.name || '?')} id=${escHtml(String(f.itemId || '-'))} icon=${escHtml(f.icon || '-')} src=${escHtml(f.imageSource || '-')}</div>`).join('')}</div>` : ''}
     ${stoneSample ? `<div class="global-db-debug"><strong>sampleStones</strong>${stoneSample}</div>` : ''}
     ${hidden ? `<div class="global-db-debug"><strong>hiddenUnresolvedRows</strong>${hidden}</div>` : ''}
   </div>

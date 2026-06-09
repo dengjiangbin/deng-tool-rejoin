@@ -29,6 +29,12 @@ if (!src.includes('BLOCKER10ZA_PLAYERDATA_ITEMUTILITY_STONES_UPLOAD_2026_06_09')
 if (!src.includes('scanPlayerDataItemUtilityInventory')) {
   errors.push('scanPlayerDataItemUtilityInventory missing — PlayerData ItemUtility scan required');
 }
+if (!src.includes('LiveSafe.getFishIcon')) {
+  errors.push('LiveSafe.getFishIcon missing — game fish icon resolver required');
+}
+if (!src.includes('game_fish_icon_catalog')) {
+  errors.push('game_fish_icon_catalog missing — fish icon upload source required');
+}
 if (!src.includes('BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
   errors.push('BLOCKER10Z7 build marker missing');
 }

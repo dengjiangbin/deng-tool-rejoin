@@ -2921,6 +2921,9 @@ function handleUpdateBackpack(req, res) {
       playerDataHiddenUnresolved: usesItemUtility
         ? (Array.isArray(body.hiddenUnresolvedRows) ? body.hiddenUnresolvedRows.slice(0, 50) : [])
         : (existing?.playerDataHiddenUnresolved || []),
+      playerDataItemUtilityProof: usesItemUtility && body.playerDataItemUtilityProof
+        ? body.playerDataItemUtilityProof
+        : (existing?.playerDataItemUtilityProof || null),
       bagInstanceCount: Number.isFinite(Number(body.bagInstanceCount))
         ? Number(body.bagInstanceCount)
         : (ps?.acceptedInstances ?? existing?.bagInstanceCount ?? null),
