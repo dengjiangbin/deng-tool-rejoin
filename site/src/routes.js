@@ -174,12 +174,40 @@ function codeToBlockReason(code) {
   return map[code] || 'server_error';
 }
 
+function logGenerateKeyStart(fields) {
+  console.log('[GENERATE_KEY_START]', JSON.stringify({ ...fields, ts: new Date().toISOString() }));
+}
+
+function logGenerateKeyReturn(fields) {
+  console.log('[GENERATE_KEY_RETURN]', JSON.stringify({ ...fields, ts: new Date().toISOString() }));
+}
+
+function accountIdsFromReq(req) {
+  return {
+    userId: req.session?.user?.discord_user_id || null,
+    accountId: req.session?.user?.id || null,
+  };
+}
+
 async function finishProviderCompletion(req, res, result, { provider, challengeRow = null } = {}) {
   const { key, alreadyDone, recoveredExisting, challengeRow: resultRow } = result || {};
   const row = challengeRow || resultRow || null;
+  const ids = accountIdsFromReq(req);
 
   if (alreadyDone) {
     const recovered = key || (row ? await challenge.recoverGeneratedKeyFromChallenge(row) : null);
+    logGenerateKeyReturn({
+      ...ids,
+      provider,
+      attemptId: row?.id || null,
+      stateValid: true,
+      attemptFound: !!row,
+      attemptStatus: row?.status || null,
+      attemptExpired: row ? new Date(row.expires_at) < new Date() : null,
+      keyIssued: !!recovered,
+      recoveredExistingKey: true,
+      failureReason: null,
+    });
     if (recovered) {
       req.session.generatedKey = recovered;
       req.session.generatedKeyAt = Date.now();
@@ -205,10 +233,32 @@ async function finishProviderCompletion(req, res, result, { provider, challengeR
   }
 
   if (!key) {
+    logGenerateKeyReturn({
+      ...ids,
+      provider,
+      attemptId: row?.id || null,
+      stateValid: true,
+      attemptFound: !!row,
+      attemptStatus: row?.status || null,
+      keyIssued: false,
+      failureReason: 'server_error',
+    });
     flashBlock(req, 'KEY_GENERATION_FAILED');
     return res.redirect('/license');
   }
 
+  logGenerateKeyReturn({
+    ...ids,
+    provider,
+    attemptId: row?.id || null,
+    stateValid: true,
+    attemptFound: !!row,
+    attemptStatus: row?.status || 'key_generated',
+    attemptExpired: false,
+    keyIssued: true,
+    recoveredExistingKey: !!recoveredExisting,
+    failureReason: null,
+  });
   req.session.generatedKey = key;
   req.session.generatedKeyAt = Date.now();
   delete req.session.pendingChallenge;
@@ -504,6 +554,16 @@ async function handleKeyStart(req, res) {
           siteUserId: user.id,
         });
         const payload = existingUnusedPayload(existingUnused);
+        logGenerateKeyStart({
+          ...accountIdsFromReq(req),
+          provider: null,
+          existingActiveKeyFound: true,
+          activeSlotCount: eligibility.activeKeySlotCount,
+          maxKeyLimit: eligibility.maxKeyPolicyUsed,
+          createdAttemptId: null,
+          redirectUrlCreated: false,
+          failureReason: 'existing_key_recovery',
+        });
         if (wantsJson(req)) {
           return res.status(200).json({
             status: 'existing_unused_key',
@@ -575,13 +635,27 @@ async function handleKeyStart(req, res) {
       throw err;
     }
 
-    const row = await challenge.createChallenge(req, user);
-    req.session.pendingChallenge = row.id;
+    const row = await challenge.findOrCreateResumableChallenge(req, user);
+    req.session.pendingChallenge = row.row.id;
+    req.session.activeAdChallengeId = row.row.id;
 
-    if (wantsJson(req)) return res.json({ challenge_id: row.id, status: row.status });
+    logGenerateKeyStart({
+      ...accountIdsFromReq(req),
+      provider: null,
+      existingActiveKeyFound: false,
+      activeSlotCount: eligibility.activeKeySlotCount,
+      maxKeyLimit: eligibility.maxKeyPolicyUsed,
+      createdAttemptId: row.row.id,
+      attemptExpiresAt: row.row.expires_at,
+      attemptStatus: row.row.status,
+      resumedExistingAttempt: row.resumed,
+      redirectUrlCreated: false,
+    });
+
+    if (wantsJson(req)) return res.json({ challenge_id: row.row.id, status: row.row.status, resumed: row.resumed });
     return res.render('choose_provider', {
       title: 'Choose Unlock Method - DENG Tool',
-      challengeId: row.id,
+      challengeId: row.row.id,
       providers: enabledProviders(),
       providerLabel,
     });
@@ -603,7 +677,7 @@ async function handleProvider(req, res) {
   }
 
   const provider = ensureProvider(String(req.params.provider || req.body.provider || ''));
-  const challengeId = String(req.body.challenge_id || req.session.pendingChallenge || '');
+  const challengeIdFromBody = String(req.body.challenge_id || '');
   const { user } = req.session;
 
   if (!provider) {
@@ -616,46 +690,93 @@ async function handleProvider(req, res) {
     safeFlash(req, 'error', messageFor(code));
     return res.redirect('/license');
   }
-  if (!challengeId || challengeId !== req.session.pendingChallenge) {
-    const recovered = await challenge.loadChallengeById(challengeId);
-    if (!recovered || !challenge.challengeOwnedByUser(recovered, req)) {
-      const code = 'PROVIDER_CHALLENGE_MISSING';
-      if (wantsJson(req)) return res.status(400).json({ error: code, message: messageFor(code), blockReason: 'provider_attempt_invalid' });
-      flashBlock(req, code, { blockReason: 'provider_attempt_invalid' });
-      return res.redirect('/license');
-    }
-    req.session.pendingChallenge = recovered.id;
+
+  let resolved;
+  try {
+    resolved = await challenge.resolveChallengeForProvider(req, user, {
+      challengeId: challengeIdFromBody,
+      provider,
+    });
+  } catch (err) {
+    const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
+    logGenerateKeyStart({
+      ...accountIdsFromReq(req),
+      provider,
+      existingActiveKeyFound: false,
+      activeSlotCount: null,
+      maxKeyLimit: null,
+      createdAttemptId: null,
+      attemptExpiresAt: null,
+      redirectUrlCreated: false,
+      failureReason: challenge.mapErrorToFailureReason(err),
+    });
+    flashBlock(req, code, { blockReason: codeToBlockReason(code), failureReason: challenge.mapErrorToFailureReason(err) });
+    return res.redirect('/license');
   }
 
+  if (!resolved.row) {
+    logGenerateKeyStart({
+      ...accountIdsFromReq(req),
+      provider,
+      existingActiveKeyFound: false,
+      activeSlotCount: null,
+      maxKeyLimit: null,
+      createdAttemptId: null,
+      attemptExpiresAt: null,
+      redirectUrlCreated: false,
+      failureReason: 'missing_attempt_id',
+      recoverySource: resolved.source,
+      storageMissing: !req.session?.pendingChallenge,
+    });
+    flashBlock(req, 'PROVIDER_CHALLENGE_MISSING', {
+      blockReason: 'provider_attempt_invalid',
+      failureReason: 'missing_attempt_id',
+    });
+    if (wantsJson(req)) {
+      return res.status(400).json({
+        error: 'PROVIDER_CHALLENGE_MISSING',
+        message: messageFor('PROVIDER_CHALLENGE_MISSING'),
+        blockReason: 'provider_attempt_invalid',
+        failureReason: 'missing_attempt_id',
+      });
+    }
+    return res.redirect('/license');
+  }
+
+  const row = resolved.row;
+  req.session.pendingChallenge = row.id;
+  req.session.activeAdChallengeId = row.id;
+
   try {
-    const row = await challenge.selectProvider(challengeId, provider, req, user);
+    let workingRow = row;
+    if (row.status === 'created' || (row.status === 'provider_selected' && row.provider !== provider)) {
+      workingRow = await challenge.selectProvider(row.id, provider, req, user);
+    } else if (row.status === 'provider_selected' && row.provider === provider) {
+      workingRow = row;
+    } else if (row.status === 'pending_ad' && row.provider === provider) {
+      workingRow = row;
+    } else if (row.status === 'pending_ad' && row.provider !== provider) {
+      workingRow = await challenge.selectProvider(row.id, provider, req, user);
+    } else {
+      workingRow = await challenge.selectProvider(row.id, provider, req, user);
+    }
     const providerCfg = getProviderConfig(provider);
 
     let redirectUrl;
     let returnTokenLen = 0;
 
     if (provider === 'linkvertise') {
-      // Linkvertise Target-Link Anti-Bypass flow: no signed return token,
-      // verification happens server-side using the hash that Linkvertise
-      // appends to the configured callback URL.
       const targetLinkUrl = linkvertise.getLinkvertiseTargetLinkUrl();
       const callbackUrl = linkvertise.getLinkvertiseCallbackUrl();
-      await challenge.markLinkvertisePendingById(row.id, req, user, {
+      await challenge.markLinkvertisePendingById(workingRow.id, req, user, {
         targetLinkUrl,
         callbackUrl,
       });
       redirectUrl = targetLinkUrl;
-      req.session.activeAdChallengeId = row.id;
+      req.session.activeAdChallengeId = workingRow.id;
     } else if (provider === 'lootlabs') {
-      // LootLabs Redirect API / Anti-Bypass flow:
-      //   1. Sign a one-time state {cid, provider, exp}.
-      //   2. Build the DENG callback URL with `?s=<signed_state>`.
-      //   3. Encrypt that URL server-side through LootLabs' encrypt API
-      //      (API token sent in Authorization header, never in URL/logs).
-      //   4. Append `&data=<encrypted>` to the canonical lootdest.org link
-      //      WITHOUT touching the shortlink id.
-      const ttlMs = 30 * 60 * 1000; // 30 minutes
-      const signedState = signChallenge(row.id, 'lootlabs', Date.now() + ttlMs);
+      const ttlMs = 30 * 60 * 1000;
+      const signedState = signChallenge(workingRow.id, 'lootlabs', Date.now() + ttlMs);
       const callbackUrl = lootlabs.buildLootLabsCallbackUrl({
         signedState,
         publicUrl: publicUrl(),
@@ -683,29 +804,41 @@ async function handleProvider(req, res) {
         baseLink,
       });
 
-      await challenge.markLootLabsPendingById(row.id, req, user, {
+      await challenge.markLootLabsPendingById(workingRow.id, req, user, {
         baseLink,
         callbackPath: '/unlock/lootlabs/complete',
       });
 
       redirectUrl = startUrl;
-      req.session.activeAdChallengeId = row.id;
-      returnTokenLen = 0; // no plaintext return token in the redirect
+      req.session.activeAdChallengeId = workingRow.id;
+      returnTokenLen = 0;
     } else {
-      const started = await challenge.markPendingAdById(row.id, req, user, providerCfg.monetizedUrl);
+      const started = await challenge.markPendingAdById(workingRow.id, req, user, providerCfg.monetizedUrl);
       redirectUrl = providerRedirectUrl(providerCfg, started.return_token);
       returnTokenLen = (started.return_token || '').length;
     }
 
     req.session.pendingProvider = provider;
 
-    // Safe debug log: URL host only (never full signed token, never encrypted data, never API token)
     let redirectHost = '';
     try { redirectHost = new URL(redirectUrl).hostname; } catch {}
+    logGenerateKeyStart({
+      ...accountIdsFromReq(req),
+      provider,
+      existingActiveKeyFound: false,
+      activeSlotCount: null,
+      maxKeyLimit: null,
+      createdAttemptId: workingRow.id,
+      attemptExpiresAt: workingRow.expires_at,
+      attemptStatus: workingRow.status,
+      recoverySource: resolved.source,
+      redirectUrlCreated: true,
+      redirectHost,
+    });
     console.log(
       '[key/provider] provider=%s challenge_prefix=%s url_host=%s token_len=%d status=303',
       provider,
-      String(challengeId).slice(0, 8),
+      String(workingRow.id).slice(0, 8),
       redirectHost,
       returnTokenLen,
     );
@@ -719,9 +852,18 @@ async function handleProvider(req, res) {
     return res.redirect(303, redirectUrl);
   } catch (err) {
     const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
+    const failureReason = challenge.mapErrorToFailureReason(err);
+    logGenerateKeyStart({
+      ...accountIdsFromReq(req),
+      provider,
+      existingActiveKeyFound: false,
+      createdAttemptId: resolved?.row?.id || null,
+      redirectUrlCreated: false,
+      failureReason,
+    });
     logSafeError('api/key/provider', code, err);
-    if (wantsJson(req)) return res.status(400).json({ error: code, message: messageFor(code) });
-    safeFlash(req, 'error', messageFor(code));
+    if (wantsJson(req)) return res.status(400).json({ error: code, message: messageFor(code), failureReason });
+    flashBlock(req, code, { blockReason: codeToBlockReason(code), failureReason });
     return res.redirect('/license');
   }
 }
@@ -856,9 +998,20 @@ async function handleLinkvertiseComplete(req, res) {
     row = await challenge.getActiveLinkvertiseChallenge(req, hash);
   } catch (err) {
     const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
-    console.warn('[unlock/linkvertise/complete] rid=%s reason=session_or_challenge code=%s', requestId, code);
+    const failureReason = challenge.mapErrorToFailureReason(err);
+    logGenerateKeyReturn({
+      ...accountIdsFromReq(req),
+      provider: 'linkvertise',
+      attemptId: null,
+      stateValid: !!hash,
+      attemptFound: false,
+      attemptStatus: null,
+      keyIssued: false,
+      failureReason,
+    });
+    console.warn('[unlock/linkvertise/complete] rid=%s reason=session_or_challenge code=%s failure=%s', requestId, code, failureReason);
     logSafeError('unlock/linkvertise/complete', code, err);
-    flashBlock(req, code, { blockReason: codeToBlockReason(code) });
+    flashBlock(req, code, { blockReason: codeToBlockReason(code), failureReason });
     return res.redirect('/license');
   }
 
@@ -955,9 +1108,19 @@ async function handleLootLabsComplete(req, res) {
     row = await challenge.getActiveLootLabsChallengeById(decoded.cid, req);
   } catch (err) {
     const code = codeFromError(err, 'PROVIDER_CHALLENGE_MISSING');
-    console.warn('[unlock/lootlabs/complete] rid=%s reason=session_or_challenge code=%s', requestId, code);
+    const failureReason = challenge.mapErrorToFailureReason(err);
+    logGenerateKeyReturn({
+      ...accountIdsFromReq(req),
+      provider: 'lootlabs',
+      attemptId: decoded.cid || null,
+      stateValid: true,
+      attemptFound: false,
+      keyIssued: false,
+      failureReason,
+    });
+    console.warn('[unlock/lootlabs/complete] rid=%s reason=session_or_challenge code=%s failure=%s', requestId, code, failureReason);
     logSafeError('unlock/lootlabs/complete', code, err);
-    flashBlock(req, code, { blockReason: codeToBlockReason(code) });
+    flashBlock(req, code, { blockReason: codeToBlockReason(code), failureReason });
     return res.redirect('/license');
   }
 
@@ -1237,14 +1400,35 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
   }
 });
 
-router.get('/key/provider', requireLogin, repairSiteUser, (req, res) => {
-  if (!req.session.pendingChallenge) {
-    safeFlash(req, 'error', messageFor('PROVIDER_CHALLENGE_MISSING'));
+router.get('/key/provider', requireLogin, repairSiteUser, async (req, res) => {
+  let challengeId = req.session.pendingChallenge;
+  if (!challengeId) {
+    const recovered = await challenge.findLatestResumableChallengeForUser(req);
+    if (recovered) {
+      challengeId = recovered.id;
+      req.session.pendingChallenge = recovered.id;
+      req.session.activeAdChallengeId = recovered.id;
+    }
+  }
+  if (!challengeId) {
+    logGenerateKeyStart({
+      ...accountIdsFromReq(req),
+      provider: null,
+      existingActiveKeyFound: false,
+      createdAttemptId: null,
+      redirectUrlCreated: false,
+      failureReason: 'missing_attempt_id',
+      storageMissing: true,
+    });
+    flashBlock(req, 'PROVIDER_CHALLENGE_MISSING', {
+      blockReason: 'provider_attempt_invalid',
+      failureReason: 'missing_attempt_id',
+    });
     return res.redirect('/license');
   }
   return res.render('choose_provider', {
     title: 'Choose Unlock Method - DENG Tool',
-    challengeId: req.session.pendingChallenge,
+    challengeId,
     providers: enabledProviders(),
     providerLabel,
   });

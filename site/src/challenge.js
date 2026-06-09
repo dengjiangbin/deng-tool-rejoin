@@ -45,6 +45,7 @@ const ALLOWED_PROVIDER_REFERERS = {
 
 const CONSUMED_STATUSES = ['ad_completed', 'key_generated', 'completed', 'used'];
 const COMPLETABLE_STATUSES = ['provider_selected', 'pending_ad', 'ad_started'];
+const RESUMABLE_STATUSES = ['created', 'provider_selected', 'pending_ad', 'ad_started'];
 const GENERATION_LOCKS = new Map();
 
 function safeError(code, message) {
@@ -418,6 +419,94 @@ async function findLatestPendingChallengeForUser(req, provider) {
   if (error || !data?.length) return null;
   const row = data[0];
   return challengeOwnedByUser(row, req) ? row : null;
+}
+
+async function findLatestResumableChallengeForUser(req, { provider = null } = {}) {
+  const user = req?.session?.user;
+  if (!user?.id) return null;
+  let query = supabase
+    .from('license_ad_challenges')
+    .select('*')
+    .eq('site_user_id', user.id)
+    .in('status', RESUMABLE_STATUSES)
+    .order('created_at', { ascending: false })
+    .limit(10);
+  if (provider) query = query.eq('provider', provider);
+  const { data, error } = await query;
+  if (error || !data?.length) return null;
+  for (const row of data) {
+    if (new Date(row.expires_at) < new Date()) continue;
+    if (challengeOwnedByUser(row, req)) return row;
+  }
+  return null;
+}
+
+async function supersedeOpenAttempts(siteUserId, reason = 'superseded_by_new_attempt') {
+  if (!siteUserId) return;
+  await supabase
+    .from('license_ad_challenges')
+    .update({
+      status: 'failed',
+      failure_reason: reason,
+    })
+    .eq('site_user_id', siteUserId)
+    .in('status', RESUMABLE_STATUSES);
+}
+
+async function findOrCreateResumableChallenge(req, siteUser) {
+  const existing = await findLatestResumableChallengeForUser(req);
+  if (existing) {
+    return { row: existing, resumed: true };
+  }
+  await supersedeOpenAttempts(siteUser.id);
+  const row = await createChallenge(req, siteUser);
+  return { row, resumed: false };
+}
+
+async function resolveChallengeForProvider(req, siteUser, { challengeId = '', provider = '' } = {}) {
+  const id = String(
+    challengeId || req.session?.pendingChallenge || req.session?.activeAdChallengeId || '',
+  ).trim();
+
+  if (id) {
+    const row = await loadChallengeById(id);
+    if (row && challengeOwnedByUser(row, req) && new Date(row.expires_at) >= new Date()) {
+      if (!provider || !row.provider || row.provider === provider || row.status === 'created') {
+        return { row, source: 'challenge_id' };
+      }
+    }
+  }
+
+  if (provider) {
+    const byProvider = await findLatestResumableChallengeForUser(req, { provider });
+    if (byProvider) return { row: byProvider, source: 'latest_resumable_provider' };
+  }
+
+  const latest = await findLatestResumableChallengeForUser(req);
+  if (latest && (!provider || latest.provider === provider || latest.status === 'created')) {
+    return { row: latest, source: 'latest_resumable' };
+  }
+
+  return { row: null, source: 'none' };
+}
+
+function mapErrorToFailureReason(err) {
+  const code = err?.code || '';
+  const map = {
+    AUTH_REQUIRED: 'missing_user',
+    PROVIDER_CHALLENGE_MISSING: 'missing_attempt_id',
+    PROVIDER_CHALLENGE_EXPIRED: 'expired_attempt',
+    CHALLENGE_ALREADY_USED: 'already_consumed',
+    PROVIDER_CHALLENGE_ALREADY_USED: 'already_consumed',
+    PROVIDER_RETURN_TOKEN_MISSING: 'provider_callback_missing',
+    PROVIDER_RETURN_TOKEN_INVALID: 'provider_callback_missing',
+    PROVIDER_CHALLENGE_OWNER_MISMATCH: 'session_mismatch',
+    PROVIDER_MISMATCH: 'missing_state',
+    KEY_LIMIT_REACHED: 'quota_blocked',
+    COOLDOWN_ACTIVE: 'quota_blocked',
+    KEY_GENERATION_FAILED: 'server_error',
+  };
+  return map[code] || 'server_error';
 }
 
 async function findChallengeByLinkvertiseHash(hash) {
@@ -1047,6 +1136,12 @@ module.exports = {
   getGenerationAttemptDiagnostic,
   challengeOwnedByUser,
   loadChallengeById,
+  findLatestResumableChallengeForUser,
+  findOrCreateResumableChallenge,
+  resolveChallengeForProvider,
+  supersedeOpenAttempts,
+  mapErrorToFailureReason,
+  RESUMABLE_STATUSES,
   hashSession,
   classifyChallengeInsertError,
 };

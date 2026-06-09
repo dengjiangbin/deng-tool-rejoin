@@ -3290,6 +3290,108 @@ describe('provider UI and security gate', () => {
     assert.doesNotMatch(dashboard.text, /\*\*\*\*/);
   });
 
+  test('generate creates pending attempt when none exists', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { challengeId } = await startChallenge(agent);
+    assert.ok(challengeId);
+    const row = memoryDb.license_ad_challenges.find((r) => r.id === challengeId);
+    assert.ok(row);
+    assert.equal(row.status, 'created');
+  });
+
+  test('provider return succeeds using signed state without session pendingChallenge', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { returnToken: signedState, started } = await chooseProvider(agent, 'lootlabs');
+    ageProviderStart();
+
+    const other = request.agent(app);
+    const originalGet = fakeAxios.get;
+    fakeAxios.get = async () => ({
+      data: { id: 'discord-user-1', username: 'DiscordTester', avatar: null },
+    });
+    try {
+      await login(other);
+      const res = await other.get(`/unlock/lootlabs/complete?s=${encodeURIComponent(signedState)}`);
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.location, '/key/result');
+      assert.equal(memoryDb.license_keys.length, 1);
+      assert.equal(memoryDb.license_ad_challenges.find((r) => r.id === started.challengeId).status, 'key_generated');
+    } finally {
+      fakeAxios.get = originalGet;
+    }
+  });
+
+  test('provider POST recovers attempt from DB when session pendingChallenge is lost', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { challengeId } = await startChallenge(agent);
+    const page = await agent.get('/license');
+    const csrf = csrfFrom(page.text);
+    const res = await agent.post('/key/provider/linkvertise').type('form').send({
+      _csrf: csrf,
+      challenge_id: challengeId,
+      provider: 'linkvertise',
+    });
+    assert.equal(res.status, 303);
+    assert.ok(memoryDb.license_ad_challenges.find((r) => r.id === challengeId).status === 'pending_ad');
+  });
+
+  test('expired pending attempt returns attempt_expired not generic missing', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const { returnToken: hash, started } = await chooseProvider(agent, 'linkvertise');
+    memoryDb.license_ad_challenges.find((r) => r.id === started.challengeId).expires_at =
+      new Date(Date.now() - 1000).toISOString();
+    const res = await completeProvider(agent, 'linkvertise', hash);
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    const rendered = await agent.get('/license');
+    assert.match(rendered.text, /expired|Tap Generate Key to start a new one/i);
+    assert.equal(memoryDb.license_keys.length, 0);
+  });
+
+  test('max key limit returns quota error not missing attempt message', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    memoryDb.license_key_limits.push({
+      id: randomUUID(),
+      scope: 'user',
+      max_keys: 2,
+      discord_user_id: 'discord-user-1',
+      updated_by_discord_id: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    const redeemedAt = new Date().toISOString();
+    insertLicenseFixture('DENG-MAX-A-1111-2222-3333', {
+      redeemed_at: redeemedAt,
+      expires_at: null,
+    });
+    insertLicenseFixture('DENG-MAX-B-1111-2222-3333', {
+      redeemed_at: redeemedAt,
+      expires_at: null,
+    });
+    const page = await agent.get('/license');
+    const csrf = csrfFrom(page.text);
+    const res = await agent.post('/api/key/start').type('form').send({ _csrf: csrf });
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.location, '/license');
+    const rendered = await agent.get('/license');
+    assert.match(rendered.text, /maximum of 2 key slots|Key limit reached/i);
+    assert.doesNotMatch(rendered.text, /No active key generation attempt was found/);
+  });
+
+  test('findOrCreateResumableChallenge resumes open attempt instead of duplicating', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const first = await startChallenge(agent);
+    const second = await startChallenge(agent);
+    assert.equal(first.challengeId, second.challengeId);
+    assert.equal(memoryDb.license_ad_challenges.filter((r) => r.status === 'created').length, 1);
+  });
+
   test('unauthenticated users cannot reach key result or license history', async () => {
     const res1 = await request(app).get('/key/result');
     assert.equal(res1.status, 302);
