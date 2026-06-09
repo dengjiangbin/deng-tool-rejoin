@@ -2768,6 +2768,47 @@ function handleUpdateBackpack(req, res) {
     }
 
     // ── Inventory snapshot ────────────────────────────────────────
+    const incomingBuild = sanitiseTrackerBuild(body.trackerBuild) || existing?.trackerBuild || '';
+    const expectsPlayerDataGameItemDb = /BLOCKER10Z[ABC]|PLAYERDATA_GAMEITEMDB/i.test(incomingBuild);
+    const isPlayerDataPayload = gameItemDbPublic.detectGameItemDbUpload(body);
+    if (expectsPlayerDataGameItemDb && payloadType === 'inventory_snapshot' && !isPlayerDataPayload) {
+      liveTrackDB[key] = {
+        ...(existing || { username: cleanUser, userId: cleanUserId, items: [], inventory: null }),
+        username: cleanUser,
+        userId: cleanUserId || existing?.userId || 0,
+        source: source !== 'unknown' ? source : (existing?.source || source),
+        items: existing?.items || [],
+        inventory: existing?.inventory || null,
+        isOnline: online,
+        phase: existing?.phase || phase || 'live',
+        trackerBuild: incomingBuild || null,
+        lastPayloadType: 'inventory_snapshot',
+        lastSeenAt: now,
+        updatedAt: now,
+        lastInventoryAt: existing?.lastInventoryAt || existing?.updatedAt || null,
+        legacySnapshotIgnored: true,
+        legacySnapshotIgnoreReason: 'missing_playerdata_gameitemdb_inventorySource',
+        inventorySource: existing?.inventorySource || null,
+        playerDataFishItems: existing?.playerDataFishItems || null,
+        playerDataStoneItems: existing?.playerDataStoneItems || null,
+        sourceTruth: existing?.sourceTruth || null,
+        playerDataGameItemDbProof: existing?.playerDataGameItemDbProof || null,
+      };
+      if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
+      console.log(
+        `[fishit-tracker] legacy snapshot ignored user=${cleanUser} sessionKey=${key}` +
+        ' reason=missing_playerdata_gameitemdb_inventorySource',
+      );
+      return res.status(200).json({
+        ok: true,
+        status: 'success',
+        legacySnapshotIgnored: true,
+        ignoreReason: 'missing_playerdata_gameitemdb_inventorySource',
+        lastSeenAt: now,
+        online: isSessionLive(liveTrackDB[key]),
+      });
+    }
+
     let rawItems = normaliseInventoryItems(body);
     const learnedIngest = ingestLearnedFishCatalogFromBody(body);
     const evidenceSourceMode = liveCatchProof.resolveEvidenceSourceMode(body);

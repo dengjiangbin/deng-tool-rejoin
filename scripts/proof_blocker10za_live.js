@@ -14,7 +14,7 @@ function fail(msg) {
 async function main() {
   const trackerRes = await fetch(`${base}/tracker`);
   const trackerHtml = await trackerRes.text();
-  const buildMatch = trackerHtml.match(/BLOCKER10Z[AB][_A-Z0-9]+/g) || [];
+  const buildMatch = trackerHtml.match(/BLOCKER10Z[ABC][_A-Z0-9]+/g) || [];
   console.log('TRACKER_PAGE', {
     status: trackerRes.status,
     buildMarkers: [...new Set(buildMatch)],

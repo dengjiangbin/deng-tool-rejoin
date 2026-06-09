@@ -23,11 +23,29 @@ if (/^\s*loadstring\s*\(/.test(src)) {
 if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
   errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z7 marker missing');
 }
-if (!src.includes('BLOCKER10ZB_PLAYERDATA_GAMEITEMDB_PUBLIC_PATH_2026_06_09')) {
-  errors.push('BLOCKER10ZB build marker missing');
+if (!src.includes('BLOCKER10ZC_DIRECT_REPLION_GAMEITEMDB_PUBLIC_PATH_2026_06_09')) {
+  errors.push('BLOCKER10ZC build marker missing');
+}
+if (!src.includes('getDataReplionDirect')) {
+  errors.push('getDataReplionDirect missing — direct Replion path required');
+}
+if (!src.includes('REPLION_DIRECT_OK')) {
+  errors.push('REPLION_DIRECT_OK log missing');
+}
+if (!src.includes('PLAYERDATA_INVENTORY_READ')) {
+  errors.push('PLAYERDATA_INVENTORY_READ log missing');
 }
 if (!src.includes('PLAYERDATA_GAMEITEMDB_UPLOAD_OK')) {
   errors.push('PLAYERDATA_GAMEITEMDB_UPLOAD_OK log missing');
+}
+if (!src.includes('LiveSafe.runDirectStartup')) {
+  errors.push('LiveSafe.runDirectStartup missing');
+}
+if (/task\.spawn\(runReplionStartupPhase\)/.test(src)) {
+  errors.push('main() must not spawn legacy runReplionStartupPhase');
+}
+if (/task\.spawn\(runDirectPlayerDataStartupPhase\)/.test(src)) {
+  errors.push('main() must spawn LiveSafe.runDirectStartup');
 }
 if (!src.includes('scanPlayerDataGameItemDbInventory')) {
   errors.push('scanPlayerDataGameItemDbInventory missing — GameItemDB scan required');

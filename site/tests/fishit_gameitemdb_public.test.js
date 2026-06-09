@@ -7,9 +7,9 @@ const path = require('path');
 
 const gameItemDbPublic = require('../src/fishitGameItemDbPublic');
 const { buildPublicFishFields, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
-const { BLOCKER10ZB_BUILD } = require('../src/fishitTrackerBuild');
+const { BLOCKER10ZC_BUILD } = require('../src/fishitTrackerBuild');
 
-const FINAL_BUILD = 'BLOCKER10ZB_PLAYERDATA_GAMEITEMDB_PUBLIC_PATH_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZC_DIRECT_REPLION_GAMEITEMDB_PUBLIC_PATH_2026_06_09';
 
 function fishRow(overrides = {}) {
   return {
@@ -42,9 +42,9 @@ function stoneRow(type, itemId, qty = 1) {
   };
 }
 
-describe('BLOCKER10ZB PlayerData GameItemDB public identity', () => {
-  test('build marker is BLOCKER10ZB', () => {
-    assert.equal(BLOCKER10ZB_BUILD, FINAL_BUILD);
+describe('BLOCKER10ZC PlayerData GameItemDB public identity', () => {
+  test('build marker is BLOCKER10ZC', () => {
+    assert.equal(BLOCKER10ZC_BUILD, FINAL_BUILD);
     assert.equal(PUBLIC_API_BUILD, FINAL_BUILD);
     assert.equal(gameItemDbPublic.FINAL_BUILD, FINAL_BUILD);
   });
@@ -210,15 +210,21 @@ describe('BLOCKER10ZB PlayerData GameItemDB public identity', () => {
     }), true);
   });
 
-  test('tracker.lua has GameItemDB scan and BLOCKER10ZB build marker', () => {
+  test('tracker.lua has direct Replion path and BLOCKER10ZC build marker', () => {
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.match(lua, /BLOCKER10ZB_PLAYERDATA_GAMEITEMDB_PUBLIC_PATH_2026_06_09/);
+    assert.match(lua, /BLOCKER10ZC_DIRECT_REPLION_GAMEITEMDB_PUBLIC_PATH_2026_06_09/);
+    assert.match(lua, /getDataReplionDirect/);
+    assert.match(lua, /REPLION_DIRECT_OK/);
+    assert.match(lua, /PLAYERDATA_INVENTORY_READ/);
     assert.match(lua, /buildGameItemDB/);
     assert.match(lua, /LiveSafe\.GetIcon/);
     assert.match(lua, /scanPlayerDataGameItemDbInventory/);
     assert.match(lua, /playerdata_gameitemdb/);
     assert.match(lua, /playerDataGameItemDbProof/);
     assert.match(lua, /PLAYERDATA_GAMEITEMDB_UPLOAD_OK/);
+    assert.match(lua, /runDirectStartup/);
+    assert.doesNotMatch(lua, /task\.spawn\(runReplionStartupPhase\)/);
+    assert.doesNotMatch(lua, /task\.spawn\(runDirectPlayerDataStartupPhase\)/);
   });
 
   test('tracker template has GameItemDB debug proof and stones section', () => {
