@@ -113,7 +113,7 @@
   if (!notice) return;
   var seconds = parseInt(notice.dataset.seconds || '0', 10);
   // If the cooldown has already expired (server rendered a stale state), hide immediately.
-  if (!seconds || seconds <= 0) {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
     notice.style.display = 'none';
     return;
   }
@@ -137,6 +137,52 @@
     setTimeout(tick, 1000);
   }
   tick();
+}());
+
+(function initLicenseEligibilityRefresh() {
+  var root = document.querySelector('[data-eligibility-refresh]');
+  if (!root || !window.fetch) return;
+
+  var btn = document.getElementById('btn-generate');
+  var notice = document.querySelector('[data-eligibility-notice]');
+
+  function formatBlockMessage(body) {
+    if (!body || body.canGenerate) return '';
+    var reason = body.blockReason || '';
+    var msg = body.message || '';
+    if (reason === 'cooldown_active' && body.remainingSeconds > 0) {
+      return msg || ('Please wait before generating another key. Try again in ' + body.remainingSeconds + 's.');
+    }
+    if (reason === 'active_unredeemed_key' && body.remainingSeconds > 0) {
+      var mins = Math.ceil(body.remainingSeconds / 60);
+      return msg || ('You already have an unused key. Expires in ' + mins + ' min.');
+    }
+    return msg || 'Key generation is temporarily unavailable.';
+  }
+
+  fetch('/api/license/eligibility', { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+    .then(function(res) { return res.json(); })
+    .then(function(body) {
+      try { localStorage.removeItem('deng_tool_key_blocked'); } catch (e) { /* ignore */ }
+
+      if (body && body.canGenerate) {
+        if (notice) notice.hidden = true;
+        if (btn && !document.querySelector('.unused-key-recovery')) btn.disabled = false;
+        return;
+      }
+
+      var text = formatBlockMessage(body);
+      if (notice && text) {
+        notice.textContent = text;
+        notice.dataset.blockReason = body.blockReason || '';
+        notice.hidden = false;
+      }
+      if (btn && body.blockReason === 'cooldown_active') btn.disabled = true;
+      if (btn && body.blockReason === 'max_key_limit') btn.disabled = true;
+    })
+    .catch(function() {
+      // Backend remains authoritative; ignore refresh failures.
+    });
 }());
 
 (function initAlerts() {

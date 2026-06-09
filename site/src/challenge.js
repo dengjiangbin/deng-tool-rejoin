@@ -379,24 +379,76 @@ function rowBelongsToRequest(row, req) {
 }
 
 async function checkCooldown(siteUserId) {
-  const since = new Date(Date.now() - COOLDOWN_SECONDS * 1000).toISOString();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('license_ad_challenges')
-    .select('created_at, completed_at')
+    .select('completed_at')
     .eq('site_user_id', siteUserId)
     .in('status', ['ad_completed', 'key_generated'])
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(1);
+    .order('completed_at', { ascending: false })
+    .limit(5);
 
-  if (data && data.length > 0) {
-    const lastMs = new Date(data[0].completed_at || data[0].created_at).getTime();
-    const secondsLeft = Math.ceil((lastMs + COOLDOWN_SECONDS * 1000 - Date.now()) / 1000);
-    // If the cooldown window has already expired (secondsLeft <= 0), treat as allowed.
-    if (secondsLeft <= 0) return { allowed: true, secondsLeft: 0 };
-    return { allowed: false, secondsLeft };
+  if (error || !data?.length) {
+    return { allowed: true, secondsLeft: 0, cooldownUntil: null };
   }
-  return { allowed: true, secondsLeft: 0 };
+
+  for (const row of data) {
+    const lastMs = Date.parse(row.completed_at);
+    if (!Number.isFinite(lastMs)) continue;
+
+    const cooldownUntilMs = lastMs + COOLDOWN_SECONDS * 1000;
+    const secondsLeft = Math.ceil((cooldownUntilMs - Date.now()) / 1000);
+    if (secondsLeft <= 0) continue;
+
+    return {
+      allowed: false,
+      secondsLeft,
+      cooldownUntil: new Date(cooldownUntilMs).toISOString(),
+    };
+  }
+
+  return { allowed: true, secondsLeft: 0, cooldownUntil: null };
+}
+
+async function getLatestProviderAttemptStatus(siteUserId) {
+  const { data, error } = await supabase
+    .from('license_ad_challenges')
+    .select('id, status, expires_at, created_at, completed_at')
+    .eq('site_user_id', siteUserId)
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  if (error || !data?.length) {
+    return { status: 'none', blocking: false, blockReason: null, challengeId: null };
+  }
+
+  const now = Date.now();
+  for (const row of data) {
+    if (row.status === 'failed' || row.status === 'key_generated') continue;
+
+    const expMs = Date.parse(row.expires_at || '');
+    const expired = Number.isFinite(expMs) && expMs <= now;
+    if (expired) continue;
+
+    if (row.status === 'ad_completed') {
+      return {
+        status: 'ad_completed',
+        blocking: false,
+        blockReason: null,
+        challengeId: row.id,
+      };
+    }
+
+    if (['created', 'provider_selected', 'pending_ad', 'ad_started'].includes(row.status)) {
+      return {
+        status: row.status,
+        blocking: false,
+        blockReason: null,
+        challengeId: row.id,
+      };
+    }
+  }
+
+  return { status: 'none', blocking: false, blockReason: null, challengeId: null };
 }
 
 async function createChallenge(req, siteUser) {
@@ -893,6 +945,7 @@ module.exports = {
   createReturnToken,
   verifyReturnToken,
   checkCooldown,
+  getLatestProviderAttemptStatus,
   createChallenge,
   selectProvider,
   markPendingAd,

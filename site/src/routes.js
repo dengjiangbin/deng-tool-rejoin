@@ -20,6 +20,7 @@ const {
 const challenge = require('./challenge');
 const supabase = require('./db');
 const licenseService = require('./licenseService');
+const licenseEligibility = require('./licenseEligibility');
 const { formatWibTimestamp, licenseExportFilename } = require('./licenseFormat');
 const linkvertise = require('./providers/linkvertise');
 const lootlabs = require('./providers/lootlabs');
@@ -48,6 +49,7 @@ const SAFE_MESSAGES = {
   NO_PROVIDER_CONFIGURED: 'No ad provider is configured yet.',
   AUTH_REQUIRED: 'Please login with Discord first.',
   COOLDOWN_ACTIVE: 'Please wait before generating another key.',
+  KEY_LIMIT_REACHED: 'Key limit reached for your account. Ask an admin if you need a higher limit.',
   EXISTING_UNUSED_KEY: 'You already have an unused key. Copy or redeem this key before generating another.',
   TOO_MANY_ATTEMPTS: 'Too many key generation attempts. Please wait before trying again.',
   CHALLENGE_TABLE_MISSING: 'Key generation database is not ready yet.',
@@ -339,6 +341,27 @@ function discordOwnerId(req) {
   return String(req.session?.user?.discord_user_id || '').trim();
 }
 
+function requireSiteAdmin(req, res, next) {
+  const token = process.env.TOOL_SITE_ADMIN_TOKEN || process.env.FISHIT_GLOBAL_ADMIN_TOKEN;
+  const provided = req.headers['x-admin-token'] || req.query.admin_token || req.body?.admin_token;
+  if (!token || !provided || String(provided) !== String(token)) {
+    if (wantsJson(req)) return res.status(401).json({ error: 'unauthorized', message: 'Admin token required.' });
+    return res.status(401).send('Unauthorized');
+  }
+  return next();
+}
+
+async function resolveSiteUserIdForDiscord(discordUserId) {
+  const owner = String(discordUserId || '').trim();
+  if (!owner) return '';
+  const { data } = await supabase
+    .from('site_users')
+    .select('id')
+    .eq('discord_user_id', owner)
+    .maybeSingle();
+  return data?.id || '';
+}
+
 function handleLicenseApiError(res, err, fallback = 'license_action_failed') {
   const status = err?.status || 500;
   const code = err?.code || fallback;
@@ -391,43 +414,81 @@ async function handleKeyStart(req, res) {
     await ensureRealSiteUser(req);
     const { user } = req.session;
 
-    const existingUnused = await licenseService.findActiveUnredeemedKey({
+    const eligibility = await licenseEligibility.getLicenseGenerationEligibility({
       discordUserId: discordOwnerId(req),
       siteUserId: user.id,
+      skipProviderCheck: true,
     });
-    if (existingUnused) {
-      const payload = existingUnusedPayload(existingUnused);
-      if (wantsJson(req)) {
-        return res.status(200).json({
-          status: 'existing_unused_key',
-          existing_key: payload,
-          message: payload.message,
-        });
-      }
-      req.session.recoveredExistingKey = payload;
-      safeFlash(req, 'success', payload.message);
-      return res.redirect(303, '/license');
-    }
 
-    // Check max active key limit before starting an ad challenge
-    const limitResult = await licenseService.canUserReceiveNewKey(
-      discordOwnerId(req), user.id
-    );
-    if (!limitResult.allowed) {
+    if (!eligibility.canGenerate) {
+      if (eligibility.blockReason === 'active_unredeemed_key') {
+        const existingUnused = await licenseService.findActiveUnredeemedKey({
+          discordUserId: discordOwnerId(req),
+          siteUserId: user.id,
+        });
+        const payload = existingUnusedPayload(existingUnused);
+        if (wantsJson(req)) {
+          return res.status(200).json({
+            status: 'existing_unused_key',
+            blockReason: 'active_unredeemed_key',
+            existing_key: payload,
+            message: payload.message,
+            remainingSeconds: eligibility.remainingSeconds,
+            expiresAt: eligibility.expiresAt,
+          });
+        }
+        req.session.recoveredExistingKey = payload;
+        safeFlash(req, 'success', payload.message);
+        return res.redirect(303, '/license');
+      }
+
+      if (eligibility.blockReason === 'max_key_limit') {
+        const msg = licenseEligibility.messageForBlockReason('max_key_limit');
+        if (wantsJson(req)) {
+          return res.status(429).json({
+            error: 'KEY_LIMIT_REACHED',
+            blockReason: 'max_key_limit',
+            message: msg,
+            activeCount: eligibility.activeKeySlotCount,
+            maxKeys: eligibility.maxKeyPolicyUsed,
+          });
+        }
+        req.session.flash = {
+          error: msg,
+          keyLimitReached: true,
+          activeCount: eligibility.activeKeySlotCount,
+          maxKeys: eligibility.maxKeyPolicyUsed,
+        };
+        return res.redirect('/license');
+      }
+
+      if (eligibility.blockReason === 'cooldown_active') {
+        const msg = licenseEligibility.messageForBlockReason('cooldown_active', eligibility.remainingSeconds);
+        if (wantsJson(req)) {
+          return res.status(429).json({
+            error: 'COOLDOWN_ACTIVE',
+            blockReason: 'cooldown_active',
+            message: msg,
+            remainingSeconds: eligibility.remainingSeconds,
+            cooldownUntil: eligibility.cooldownUntil,
+          });
+        }
+        req.session.flash = {
+          error: msg,
+          cooldown: eligibility.remainingSeconds,
+        };
+        return res.redirect('/license');
+      }
+
+      const msg = eligibility.message || messageFor('UNEXPECTED_ERROR');
       if (wantsJson(req)) {
         return res.status(429).json({
-          error: 'KEY_LIMIT_REACHED',
-          message: `Key Limit Reached. You have ${limitResult.activeCount} / ${limitResult.maxKeys} active keys. Ask an admin if you need a higher limit.`,
-          activeCount: limitResult.activeCount,
-          maxKeys: limitResult.maxKeys,
+          error: eligibility.blockReason || 'GENERATION_BLOCKED',
+          blockReason: eligibility.blockReason,
+          message: msg,
         });
       }
-      req.session.flash = {
-        error: `Key Limit Reached. You have ${limitResult.activeCount} / ${limitResult.maxKeys} active keys. Ask an admin if you need a higher limit.`,
-        keyLimitReached: true,
-        activeCount: limitResult.activeCount,
-        maxKeys: limitResult.maxKeys,
-      };
+      safeFlash(req, 'error', msg);
       return res.redirect('/license');
     }
 
@@ -435,22 +496,6 @@ async function handleKeyStart(req, res) {
       const err = new Error('No enabled ad providers');
       err.code = 'NO_PROVIDER_CONFIGURED';
       throw err;
-    }
-
-    const { allowed, secondsLeft } = await challenge.checkCooldown(user.id);
-    if (!allowed) {
-      if (wantsJson(req)) {
-        return res.status(429).json({
-          error: 'COOLDOWN_ACTIVE',
-          message: messageFor('COOLDOWN_ACTIVE'),
-          secondsLeft,
-        });
-      }
-      req.session.flash = {
-        error: messageFor('COOLDOWN_ACTIVE'),
-        cooldown: secondsLeft,
-      };
-      return res.redirect('/license');
     }
 
     const row = await challenge.createChallenge(req, user);
@@ -1029,15 +1074,67 @@ router.get('/fishit', requireLogin, repairSiteUser, (req, res) => {
   });
 });
 
+router.get('/api/license/eligibility', requireLogin, repairSiteUser, async (req, res) => {
+  try {
+    const eligibility = await licenseEligibility.getLicenseGenerationEligibility({
+      discordUserId: discordOwnerId(req),
+      siteUserId: req.session.user.id,
+      skipProviderCheck: true,
+    });
+    return res.json(eligibility);
+  } catch (err) {
+    console.error('[api/license/eligibility]', err.message || err);
+    return res.status(500).json({
+      canGenerate: false,
+      blockReason: 'server_error',
+      message: licenseEligibility.messageForBlockReason('server_error'),
+    });
+  }
+});
+
+router.get('/api/admin/license/eligibility', requireSiteAdmin, async (req, res) => {
+  try {
+    const discordUserId = String(req.query.discord_user_id || '').trim();
+    if (!discordUserId) {
+      return res.status(400).json({ error: 'discord_user_id required' });
+    }
+    const siteUserId = await resolveSiteUserIdForDiscord(discordUserId);
+    const eligibility = await licenseEligibility.getLicenseGenerationEligibility({
+      discordUserId,
+      siteUserId,
+      skipProviderCheck: false,
+    });
+    return res.json(eligibility);
+  } catch (err) {
+    console.error('[api/admin/license/eligibility]', err.message || err);
+    return res.status(500).json({
+      canGenerate: false,
+      blockReason: 'server_error',
+      message: licenseEligibility.messageForBlockReason('server_error'),
+    });
+  }
+});
+
 router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
   try {
     const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req), { activeOnly: false });
     const activeHistory = licenseService.filterActiveLicenses(history);
-    const cooldown = await challenge.checkCooldown(req.session.user.id);
-    const existingUnused = await licenseService.findActiveUnredeemedKey({
+    const eligibility = await licenseEligibility.getLicenseGenerationEligibility({
       discordUserId: discordOwnerId(req),
       siteUserId: req.session.user.id,
+      skipProviderCheck: true,
     });
+    const cooldown = {
+      allowed: eligibility.blockReason !== 'cooldown_active',
+      secondsLeft: eligibility.blockReason === 'cooldown_active' ? eligibility.remainingSeconds : 0,
+      cooldownUntil: eligibility.cooldownUntil,
+    };
+    const existingUnused = eligibility.activeUnredeemedCount > 0
+      ? await licenseService.findActiveUnredeemedKey({
+        discordUserId: discordOwnerId(req),
+        siteUserId: req.session.user.id,
+      })
+      : null;
     const recoveredExistingKey = req.session.recoveredExistingKey || null;
     delete req.session.recoveredExistingKey;
     res.render('license', {
@@ -1045,6 +1142,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
       history,
       stats: summarizeHistory(activeHistory),
       cooldown,
+      eligibility,
       existingUnusedKey: existingUnusedPayload(existingUnused) || recoveredExistingKey,
       maskKeyRow,
       fullKeyRow,
@@ -1059,6 +1157,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
       history: [],
       stats: summarizeHistory([]),
       cooldown: { allowed: true, secondsLeft: 0 },
+      eligibility: { canGenerate: true, blockReason: null },
       existingUnusedKey: null,
       maskKeyRow,
       fullKeyRow,

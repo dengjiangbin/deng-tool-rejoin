@@ -42,11 +42,28 @@ function isBound(row) {
 }
 
 function hasOwner(row) {
-  return Boolean(row?.owner_discord_id || row?.site_user_id || row?.license_key_id);
+  return Boolean(row?.owner_discord_id || row?.site_user_id);
 }
 
 function hasUnredeemedExpiry(row) {
-  return Boolean(row?.expires_at);
+  return Boolean(row?.expires_at || row?.key_expires_at);
+}
+
+function effectiveExpiryIso(row) {
+  return row?.expires_at || row?.key_expires_at || null;
+}
+
+function isActiveUnredeemedKey(row) {
+  if (!row) return false;
+  const status = licenseStatus(row);
+  if (['revoked', 'deleted', 'disabled', 'expired'].includes(status)) return false;
+  if (row?.is_deleted || row?.deleted || row?.is_disabled || row?.disabled) return false;
+  if (Boolean(row?.redeemed_at) || isBound(row)) return false;
+  const expiry = effectiveExpiryIso(row);
+  if (expiry && isoExpired(expiry)) return false;
+  if (status !== 'active' && status !== 'expired') return false;
+  if (status === 'expired') return false;
+  return true;
 }
 
 function classifyLicenseLifecycle(row) {
@@ -54,8 +71,9 @@ function classifyLicenseLifecycle(row) {
   const revoked = ['revoked', 'deleted', 'disabled'].includes(status) ||
     Boolean(row?.is_deleted || row?.deleted || row?.is_disabled || row?.disabled);
   const bound = !revoked && isBound(row);
-  const redeemed = !revoked && (Boolean(row?.redeemed_at) || bound || (hasOwner(row) && !hasUnredeemedExpiry(row)));
-  const expired = !revoked && (status === 'expired' || (!redeemed && isoExpired(row?.expires_at || row?.key_expires_at)));
+  const redeemed = !revoked && (Boolean(row?.redeemed_at) || bound);
+  const expiry = effectiveExpiryIso(row);
+  const expired = !revoked && (status === 'expired' || (!redeemed && expiry && isoExpired(expiry)));
   const unredeemed = !revoked && !expired && !redeemed && !bound && status === 'active';
   const unbound = !revoked && !expired && redeemed && !bound;
   const lifecycleStatus = revoked
@@ -512,12 +530,12 @@ async function getPortalUserLicenses({ discordUserId = '', siteUserId = '', limi
 }
 
 function isUnusedLicense(row) {
-  return Boolean(row && classifyLicenseLifecycle(row).blocks_generation);
+  return isActiveUnredeemedKey(row);
 }
 
 function isUnredeemedCandidate(row) {
   const status = licenseStatus(row);
-  if (['revoked', 'deleted', 'disabled'].includes(status)) return false;
+  if (['revoked', 'deleted', 'disabled', 'expired'].includes(status)) return false;
   return Boolean(row && !row.redeemed_at && !isBound(row));
 }
 
@@ -526,7 +544,7 @@ async function markExpiredUnredeemedKeys({ discordUserId = '', siteUserId = '' }
   const expired = rows.filter((row) => (
     isUnredeemedCandidate(row) &&
     licenseStatus(row) === 'active' &&
-    isoExpired(row.expires_at || row.key_expires_at)
+    isoExpired(effectiveExpiryIso(row))
   ));
   await Promise.all(expired.map((row) => (
     supabase.from('license_keys').update({ status: 'expired' }).eq('id', row.id)
@@ -537,9 +555,7 @@ async function markExpiredUnredeemedKeys({ discordUserId = '', siteUserId = '' }
 async function findActiveUnredeemedKey({ discordUserId = '', siteUserId = '' } = {}) {
   await markExpiredUnredeemedKeys({ discordUserId, siteUserId });
   const rows = await getPortalUserLicenses({ discordUserId, siteUserId, limit: 500 });
-  return rows.find((row) => (
-    isUnusedLicense(row)
-  )) || null;
+  return rows.find((row) => isActiveUnredeemedKey(row)) || null;
 }
 
 async function getActiveUserLicenses(discordUserId, opts = {}) {
@@ -962,6 +978,7 @@ module.exports = {
   classifyLicenseLifecycle,
   computeStats,
   findActiveUnredeemedKey,
+  isActiveUnredeemedKey,
   filterActiveLicenses,
   formatLicenseStatus,
   getActiveUserLicenses,
@@ -973,6 +990,7 @@ module.exports = {
   formatWibTimestamp,
   getRecoverableFullKey: recoverableFullKey,
   isActiveLicense,
+  isUnusedLicense,
   normalizeLicenseKey,
   providerLabel,
   redeemLicenseKey,
@@ -987,6 +1005,7 @@ module.exports = {
   getPanelResetUsageToday,
   getWibDay,
   recordSuccessfulPanelReset,
+  markExpiredUnredeemedKeys,
   KEY_SLOT_LIMIT_MESSAGE,
   HWID_RESET_LIMIT_MESSAGE,
   _buildPublicStatsPayload: buildPublicStatsPayload,

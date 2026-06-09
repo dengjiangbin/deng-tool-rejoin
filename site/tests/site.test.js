@@ -47,6 +47,7 @@ class MemoryQuery {
     this.inFilters = [];
     this.gteFilters = [];
     this.neqFilters = [];
+    this.notNullFilters = [];
     this.orderSpec = null;
     this.limitCount = null;
     this.singleMode = false;
@@ -90,6 +91,13 @@ class MemoryQuery {
     return this;
   }
 
+  not(field, op, value) {
+    if (op === 'is' && value === null) {
+      this.notNullFilters.push(field);
+    }
+    return this;
+  }
+
   order(field, spec = {}) {
     this.orderSpec = { field, ascending: spec.ascending !== false };
     return this;
@@ -123,7 +131,8 @@ class MemoryQuery {
     return this.filters.every((f) => row[f.field] === f.value) &&
       this.inFilters.every((f) => f.values.includes(row[f.field])) &&
       this.gteFilters.every((f) => String(row[f.field] || '') >= String(f.value)) &&
-      this.neqFilters.every((f) => row[f.field] !== f.value);
+      this.neqFilters.every((f) => row[f.field] !== f.value) &&
+      this.notNullFilters.every((field) => row[field] != null && row[field] !== '');
   }
 
   async execute() {
@@ -182,6 +191,7 @@ const memoryDb = {
   hwid_reset_logs: [],
   license_key_executions: [],
   license_key_limits: [],
+  license_panel_reset_usage: [],
 };
 
 const mockSupabase = {
@@ -389,6 +399,17 @@ function resetDb() {
   memoryDb.hwid_reset_logs.splice(0);
   memoryDb.license_key_executions.splice(0);
   memoryDb.license_key_limits.splice(0);
+  memoryDb.license_panel_reset_usage.splice(0);
+}
+
+function ageGenerationCooldowns(secondsAgo = 120) {
+  const past = new Date(Date.now() - secondsAgo * 1000).toISOString();
+  memoryDb.license_ad_challenges.forEach((row) => {
+    if (['ad_completed', 'key_generated'].includes(row.status)) {
+      row.completed_at = past;
+      row.created_at = past;
+    }
+  });
 }
 
 function csrfFrom(html) {
@@ -1790,6 +1811,161 @@ describe('Luarmor-style key flow', () => {
     assert.ok(memoryDb.license_keys.find((row) => row.id === redeemed.id).redeemed_at);
   });
 
+  test('getLicenseGenerationEligibility: zero keys can generate', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/api/license/eligibility');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.canGenerate, true);
+    assert.equal(res.body.blockReason, null);
+  });
+
+  test('getLicenseGenerationEligibility: active unredeemed blocks with remaining expiry', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    insertLicenseFixture('DENG-ACTIVE-UNREDEEMED-KEY1', {
+      expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+    });
+    const res = await agent.get('/api/license/eligibility');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.canGenerate, false);
+    assert.equal(res.body.blockReason, 'active_unredeemed_key');
+    assert.ok(res.body.remainingSeconds > 0);
+    assert.equal(res.body.activeUnredeemedCount, 1);
+  });
+
+  test('getLicenseGenerationEligibility: expired unredeemed does not block', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    insertLicenseFixture('DENG-EXPIRED-UNREDEEMED-KEY', {
+      expires_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+    });
+    ageGenerationCooldowns();
+    const res = await agent.get('/api/license/eligibility');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.canGenerate, true);
+    assert.equal(res.body.activeUnredeemedCount, 0);
+    assert.ok(res.body.expiredUnredeemedCount >= 1);
+  });
+
+  test('getLicenseGenerationEligibility: redeemed key does not block when under max_key limit', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    insertLicenseFixture('DENG-REDEEMED-ONLY-KEY1', {
+      redeemed_at: new Date().toISOString(),
+      expires_at: null,
+    });
+    ageGenerationCooldowns();
+    const res = await agent.get('/api/license/eligibility');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.canGenerate, true);
+    assert.equal(res.body.activeUnredeemedCount, 0);
+  });
+
+  test('getLicenseGenerationEligibility: revoked key does not block', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    insertLicenseFixture('DENG-REVOKED-ONLY-KEY1', {
+      status: 'revoked',
+      expires_at: null,
+    });
+    ageGenerationCooldowns();
+    const res = await agent.get('/api/license/eligibility');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.canGenerate, true);
+    assert.ok(res.body.revokedKeysCount >= 1);
+  });
+
+  test('getLicenseGenerationEligibility: cooldown blocks with remaining seconds', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const siteUserId = memoryDb.site_users[0].id;
+    memoryDb.license_ad_challenges.push({
+      id: randomUUID(),
+      site_user_id: siteUserId,
+      discord_user_id: 'discord-user-1',
+      status: 'key_generated',
+      created_at: new Date().toISOString(),
+      completed_at: new Date(Date.now() - 20 * 1000).toISOString(),
+    });
+    const res = await agent.get('/api/license/eligibility');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.canGenerate, false);
+    assert.equal(res.body.blockReason, 'cooldown_active');
+    assert.ok(res.body.remainingSeconds > 0);
+    assert.ok(res.body.remainingSeconds <= 60);
+  });
+
+  test('getLicenseGenerationEligibility: cooldown clears after 60 seconds (UTC-safe)', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const siteUserId = memoryDb.site_users[0].id;
+    memoryDb.license_ad_challenges.push({
+      id: randomUUID(),
+      site_user_id: siteUserId,
+      discord_user_id: 'discord-user-1',
+      status: 'key_generated',
+      created_at: new Date(Date.now() - 120 * 1000).toISOString(),
+      completed_at: new Date(Date.now() - 65 * 1000).toISOString(),
+    });
+    const res = await agent.get('/api/license/eligibility');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.canGenerate, true);
+    assert.notEqual(res.body.blockReason, 'cooldown_active');
+  });
+
+  test('checkCooldown ignores invalid completed_at instead of permanent block', async () => {
+    const challenge = require('../src/challenge');
+    const siteUserId = memoryDb.site_users[0]?.id || randomUUID();
+    memoryDb.license_ad_challenges.push({
+      id: randomUUID(),
+      site_user_id: siteUserId,
+      status: 'key_generated',
+      created_at: new Date().toISOString(),
+      completed_at: 'not-a-real-date',
+    });
+    const result = await challenge.checkCooldown(siteUserId);
+    assert.equal(result.allowed, true);
+    assert.equal(result.secondsLeft, 0);
+  });
+
+  test('stale pending provider attempt does not block eligibility', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    memoryDb.license_ad_challenges.push({
+      id: randomUUID(),
+      site_user_id: memoryDb.site_users[0].id,
+      discord_user_id: 'discord-user-1',
+      status: 'pending_ad',
+      created_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+      expires_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+    });
+    const res = await agent.get('/api/license/eligibility');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.canGenerate, true);
+    assert.equal(res.body.providerAttemptBlocking, false);
+  });
+
+  test('license page exposes eligibility refresh hook', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/license');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /data-eligibility-refresh="1"/);
+    assert.match(res.text, /data-eligibility-notice/);
+  });
+
+  test('admin license eligibility diagnostic requires token', async () => {
+    process.env.TOOL_SITE_ADMIN_TOKEN = 'test-admin-token';
+    const res = await request(app).get('/api/admin/license/eligibility?discord_user_id=discord-user-1');
+    assert.equal(res.status, 401);
+    const ok = await request(app)
+      .get('/api/admin/license/eligibility?discord_user_id=discord-user-1&admin_token=test-admin-token');
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.discordUserId, 'discord-user-1');
+    assert.ok(Object.prototype.hasOwnProperty.call(ok.body, 'queryFilters'));
+  });
+
   test('Generate Key repairs stale fallback site_user_id before challenge insert', async () => {
     const agent = request.agent(app);
     await login(agent);
@@ -2627,7 +2803,7 @@ describe('canonical license service', () => {
     assert.equal(svc.isActiveLicense({ status: 'active', expires_at: new Date(Date.now() + 1000).toISOString() }), true);
     assert.equal(svc.formatLicenseStatus({ status: 'active', active_binding: true }), 'Bound');
     assert.equal(svc.formatLicenseStatus({ status: 'active', redeemed_at: new Date().toISOString(), license_key_id: 'owned' }), 'Unbound');
-    assert.equal(svc.formatLicenseStatus({ status: 'active', license_key_id: 'owned' }), 'Unbound');
+    assert.equal(svc.formatLicenseStatus({ status: 'active', license_key_id: 'owned' }), 'Unredeemed');
   });
 });
 
@@ -2722,6 +2898,7 @@ describe('My License action APIs', () => {
     assert.equal(memoryDb.hwid_reset_logs[0].owner_discord_id, 'discord-user-1');
     assert.equal(memoryDb.hwid_reset_logs[0].old_install_id_hash, 'old-hwid');
 
+    memoryDb.license_panel_reset_usage.splice(0);
     const noDevice = await agent.post('/api/license/reset-hwid')
       .set('X-CSRF-Token', csrf)
       .send({ key_id: ownedId });

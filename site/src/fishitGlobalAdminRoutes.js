@@ -13,6 +13,7 @@ const router = express.Router();
 const adminLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
+  skip: () => process.env.NODE_ENV === 'test',
   standardHeaders: true,
   legacyHeaders: false,
 });

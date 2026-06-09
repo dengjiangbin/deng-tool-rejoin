@@ -17,14 +17,20 @@
   </div>
 
   <% if (flash && flash.cooldown && flash.cooldown > 0) { %>
-    <div class="cooldown-notice" data-seconds="<%= flash.cooldown %>">
+    <div class="cooldown-notice block-notice" data-block-reason="cooldown_active" data-seconds="<%= flash.cooldown %>">
       Cooldown active: <span class="countdown"></span>
     </div>
   <% } else if (!existingUnusedKey && cooldown && !cooldown.allowed && cooldown.secondsLeft > 0) { %>
-    <div class="cooldown-notice" data-seconds="<%= cooldown.secondsLeft %>">
+    <div class="cooldown-notice block-notice" data-block-reason="cooldown_active" data-seconds="<%= cooldown.secondsLeft %>">
       Cooldown active: <span class="countdown"></span>
     </div>
+  <% } else if (eligibility && !eligibility.canGenerate && eligibility.blockReason === 'max_key_limit') { %>
+    <div class="block-notice license-block-notice" data-block-reason="max_key_limit">
+      <%= eligibility.message || 'Key limit reached for your account.' %>
+    </div>
   <% } %>
+
+  <div class="eligibility-notice block-notice license-block-notice" data-eligibility-notice hidden></div>
 
   <% if (existingUnusedKey) { %>
     <div class="unused-key-recovery">
@@ -40,7 +46,7 @@
     </div>
   <% } %>
 
-  <div class="license-actions" data-license-actions data-csrf="<%= csrfToken %>">
+  <div class="license-actions" data-license-actions data-csrf="<%= csrfToken %>" data-eligibility-refresh="1">
     <form method="POST" action="/api/key/start" class="license-action-form">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
       <button type="submit" class="btn btn-primary btn-generate" id="btn-generate">
