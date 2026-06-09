@@ -1226,7 +1226,7 @@ describe('theme and dashboard UI', () => {
     assert.match(css, /:root\[data-theme="light"\]/);
     assert.match(css, /--body-bg:/);
     assert.match(css, /color-scheme:\s*dark/);
-    assert.match(css, /\.nav-link\.active/);
+    assert.match(css, /\.nav-link\.is-active,\s*\n\.nav-link\.active/);
     assert.match(css, /@media \(max-width: 760px\)/);
     assert.doesNotMatch(css, /#00C7A3/i);
   });
