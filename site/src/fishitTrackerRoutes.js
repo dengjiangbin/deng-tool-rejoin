@@ -3332,8 +3332,9 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     globalDbStats: globalDb.getStats(),
     playerDataGameItemDbProof: publicFishDbg.playerDataGameItemDbProof || null,
     playerDataItemUtilityProof: publicFishDbg.playerDataItemUtilityProof || null,
-    inventorySource: data.inventorySource || null,
-    sourceTruth: data.sourceTruth || null,
+    activationState: publicFishDbg.activationState || null,
+    inventorySource: publicFishDbg.inventorySource || data.inventorySource || null,
+    sourceTruth: publicFishDbg.sourceTruth || data.sourceTruth || null,
     stoneItems: publicFishDbg.stoneItems || [],
     fishItems: publicFishDbg.fishItems || [],
     inventoryParityProof: buildInventoryParityProof(
