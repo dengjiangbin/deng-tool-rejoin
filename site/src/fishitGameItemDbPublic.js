@@ -2,7 +2,9 @@
 
 const PLAYERDATA_GAMEITEMDB_SOURCE = 'playerdata_gameitemdb';
 const GAMEITEMDB_ICON_SOURCE = 'gameitemdb_icon';
-const FINAL_BUILD = 'BLOCKER10ZA_FINAL_PLAYERDATA_GAMEITEMDB_UPLOAD_2026_06_09';
+const QUIZ_BOT_FALLBACK_SOURCE = 'quiz_bot_fishit_bank';
+const FINAL_BUILD = 'BLOCKER10ZB_PLAYERDATA_GAMEITEMDB_PUBLIC_PATH_2026_06_09';
+const WAITING_ACTIVATION = 'waiting_for_playerdata_gameitemdb_payload';
 
 const ENCHANT_STONE_IDS = new Set(['10', '246', '558', '873', '929']);
 
@@ -60,61 +62,109 @@ function isValidPublicGameIcon(parsed) {
   return Boolean(parsed?.assetId && parsed.assetId !== '0');
 }
 
+function rowItemId(row) {
+  if (!row || typeof row !== 'object') return '';
+  const raw = row.itemId ?? row.ItemId ?? row.id ?? row.Id;
+  return raw != null ? String(raw).trim() : '';
+}
+
+function rowSource(row) {
+  if (!row || typeof row !== 'object') return null;
+  return row.source || row.Source || null;
+}
+
+function isEnchantStoneRow(row) {
+  const itemId = rowItemId(row);
+  if (ENCHANT_STONE_IDS.has(itemId)) return true;
+  const cat = String(row.category || row.Category || '').toLowerCase();
+  const kind = String(row.kind || row.Kind || '').toLowerCase();
+  const type = String(row.type || row.Type || '').toLowerCase();
+  return cat === 'stone' || kind === 'stone' || type === 'enchantstone';
+}
+
 function isPlayerDataGameItemDbRow(item) {
-  return Boolean(
-    item
-    && item.source === PLAYERDATA_GAMEITEMDB_SOURCE
-    && item.identityVerified === true,
-  );
+  if (!item || typeof item !== 'object') return false;
+  if (rowSource(item) === PLAYERDATA_GAMEITEMDB_SOURCE) return true;
+  if (item.identityVerified === true && (isEnchantStoneRow(item) || item.kind === 'fish' || item.type === 'Fish')) {
+    return true;
+  }
+  return false;
+}
+
+function detectGameItemDbUpload(body) {
+  if (!body || typeof body !== 'object') return false;
+  if (body.inventorySource === PLAYERDATA_GAMEITEMDB_SOURCE) return true;
+  if (body.playerDataGameItemDbProof?.uploadPath === 'playerdata_gameitemdb') return true;
+  if (body.sourceTruth?.identity === 'playerdata_itemutility_gameitemdb') return true;
+  if (body.sourceTruth?.globalDbUsedForPublicIdentity === false
+    && body.sourceTruth?.fishImage === GAMEITEMDB_ICON_SOURCE) {
+    return true;
+  }
+  return false;
+}
+
+function expectsPlayerDataGameItemDbPayload(sessionData) {
+  const build = String(sessionData?.trackerBuild || sessionData?.trackerClientProof?.trackerBuild || '');
+  return /BLOCKER10Z[AB]|PLAYERDATA_GAMEITEMDB/i.test(build);
 }
 
 function defaultSourceTruth() {
   return {
+    globalDbUsedForPublicIdentity: false,
+    identity: 'playerdata_itemutility_gameitemdb',
+    rarity: 'itemutility_tier',
+    fishImage: GAMEITEMDB_ICON_SOURCE,
+    stoneImage: GAMEITEMDB_ICON_SOURCE,
     fishIdentity: PLAYERDATA_GAMEITEMDB_SOURCE,
     fishRarity: 'playerdata_itemutility_tier',
-    fishImage: GAMEITEMDB_ICON_SOURCE,
     stoneIdentity: PLAYERDATA_GAMEITEMDB_SOURCE,
-    globalDbUsedForPublicIdentity: false,
   };
 }
 
 function normaliseUploadRow(row) {
   if (!row || typeof row !== 'object') return null;
-  const itemId = row.itemId != null ? String(row.itemId).trim() : '';
+  const itemId = rowItemId(row);
+  if (!itemId) return null;
   const quantity = Math.max(
     1,
-    Math.floor(Number(row.quantity ?? row.amount ?? row.count ?? 1)),
+    Math.floor(Number(row.quantity ?? row.Quantity ?? row.amount ?? row.count ?? 1)),
   );
-  const iconParsed = parseGameItemIcon(row.icon);
+  const iconRaw = row.icon ?? row.Icon ?? null;
+  const iconParsed = parseGameItemIcon(iconRaw);
   const base = {
     itemId,
     quantity,
     amount: quantity,
     count: quantity,
-    uuid: row.uuid || row.replionUuid || null,
-    mutation: row.mutation || 'None',
+    uuid: row.uuid || row.UUID || row.replionUuid || null,
+    mutation: row.mutation || row.Mutation
+      || (row.Metadata && row.Metadata.VariantId) || 'None',
     source: PLAYERDATA_GAMEITEMDB_SOURCE,
     identityVerified: true,
     icon: iconParsed?.icon || null,
-    iconRaw: row.icon || null,
+    iconRaw,
     imageAssetId: iconParsed?.assetId || null,
     imageSource: iconParsed ? GAMEITEMDB_ICON_SOURCE : null,
   };
-  if (row.kind === 'stone' || ENCHANT_STONE_IDS.has(itemId)) {
-    const stoneType = row.stoneType || row.stone_type || null;
+  if (isEnchantStoneRow(row)) {
+    const stoneType = row.stoneType || row.StoneType || row.stone_type || null;
+    const typeName = stoneType || 'Enchant';
     return {
       ...base,
       kind: 'stone',
       category: 'stone',
-      stoneType,
-      name: row.name || (stoneType ? `${stoneType} Enchant Stone` : 'Enchant Stone'),
+      stoneType: typeName,
+      name: row.name || row.Name || `${typeName} Enchant Stone`,
+      type: 'EnchantStone',
     };
   }
-  if (row.kind === 'fish' || row.type === 'Fish') {
-    const name = String(row.baseName || row.name || '').trim();
+  const rowType = row.type || row.Type;
+  const rowKind = row.kind || row.Kind;
+  if (rowKind === 'fish' || rowType === 'Fish') {
+    const name = String(row.baseName || row.base_name || row.name || row.Name || '').trim();
     if (!name || /^Unknown Fish #/i.test(name)) return null;
-    const tier = row.tier != null ? row.tier : 1;
-    const rarity = row.rarity || tierToRarity(tier);
+    const tier = row.tier != null ? row.tier : (row.Tier != null ? row.Tier : 1);
+    const rarity = row.rarity || row.Rarity || tierToRarity(tier);
     return {
       ...base,
       kind: 'fish',
@@ -124,10 +174,15 @@ function normaliseUploadRow(row) {
       baseFishName: name,
       tier,
       rarity,
-      type: row.type || 'Fish',
+      type: 'Fish',
     };
   }
   return null;
+}
+
+function normaliseUploadRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.map(normaliseUploadRow).filter(Boolean);
 }
 
 function groupFishRows(rows) {
@@ -182,6 +237,7 @@ function applyPublicCosmetic(item) {
     identitySource: PLAYERDATA_GAMEITEMDB_SOURCE,
     globalDbUsedForPublicIdentity: false,
     raritySource: 'playerdata_itemutility_tier',
+    dataSource: PLAYERDATA_GAMEITEMDB_SOURCE,
   };
 }
 
@@ -189,6 +245,11 @@ function mapToPublicFishCardItem(item) {
   const cleaned = applyPublicCosmetic(item);
   const amount = Number(cleaned.quantity) > 0 ? Math.floor(Number(cleaned.quantity)) : 1;
   const rarity = cleaned.rarity && cleaned.rarity !== 'Unknown' ? cleaned.rarity : null;
+  const imageSource = cleaned.imageSource === GAMEITEMDB_ICON_SOURCE
+    ? GAMEITEMDB_ICON_SOURCE
+    : (cleaned.imageSource === QUIZ_BOT_FALLBACK_SOURCE
+      ? QUIZ_BOT_FALLBACK_SOURCE
+      : (cleaned.imageSource || null));
   return {
     speciesId: cleaned.itemId || null,
     canonicalName: cleaned.baseFishName,
@@ -209,6 +270,7 @@ function mapToPublicFishCardItem(item) {
     mutationTags: [],
     debugMutation: cleaned.debugMutation || null,
     source: PLAYERDATA_GAMEITEMDB_SOURCE,
+    dataSource: PLAYERDATA_GAMEITEMDB_SOURCE,
     identityVerified: true,
     identitySource: PLAYERDATA_GAMEITEMDB_SOURCE,
     globalDbUsedForPublicIdentity: false,
@@ -223,7 +285,9 @@ function mapToPublicFishCardItem(item) {
     },
     imageUrl: cleaned.imageUrl || null,
     imageUrlPresent: Boolean(cleaned.imageUrl),
-    imageSource: cleaned.imageSource || null,
+    imageSource,
+    dataImageSource: imageSource,
+    dataRaritySource: 'playerdata_itemutility_tier',
     icon: cleaned.iconRaw || cleaned.icon || null,
     debugIcon: cleaned.iconRaw || cleaned.icon || null,
     publicWeightHidden: true,
@@ -234,6 +298,9 @@ function mapToPublicFishCardItem(item) {
 function mapToPublicStoneCardItem(item) {
   const amount = Number(item.quantity) > 0 ? Math.floor(Number(item.quantity)) : 1;
   const iconParsed = parseGameItemIcon(item.icon || item.iconRaw);
+  const imageSource = iconParsed
+    ? GAMEITEMDB_ICON_SOURCE
+    : (item.imageSource === QUIZ_BOT_FALLBACK_SOURCE ? QUIZ_BOT_FALLBACK_SOURCE : null);
   return {
     kind: 'stone',
     category: 'stone',
@@ -249,7 +316,8 @@ function mapToPublicStoneCardItem(item) {
     icon: iconParsed?.icon || item.icon || null,
     imageUrl: item.imageUrl || null,
     imageUrlPresent: Boolean(item.imageUrl),
-    imageSource: iconParsed ? GAMEITEMDB_ICON_SOURCE : (item.imageSource || null),
+    imageSource,
+    dataSource: PLAYERDATA_GAMEITEMDB_SOURCE,
     source: PLAYERDATA_GAMEITEMDB_SOURCE,
     identityVerified: true,
     identitySource: PLAYERDATA_GAMEITEMDB_SOURCE,
@@ -266,10 +334,18 @@ function buildPlayerDataGameItemDbProof(fishItems, stoneItems, unresolvedItems =
   ).length;
   return {
     enabled: true,
-    build: FINAL_BUILD,
+    build: extra.build || FINAL_BUILD,
+    uploadPath: 'playerdata_gameitemdb',
     inventorySource: PLAYERDATA_GAMEITEMDB_SOURCE,
     gameItemDbBuilt: extra.gameItemDbBuilt !== false,
     gameItemDbCount: extra.gameItemDbCount != null ? extra.gameItemDbCount : null,
+    gameItemDbTypeCounts: extra.gameItemDbTypeCounts || null,
+    playerDataInventoryCount: extra.playerDataInventoryCount != null
+      ? extra.playerDataInventoryCount
+      : null,
+    fishCount: fishItems.length,
+    stoneCount: stoneItems.length,
+    unresolvedCount: (unresolvedItems || []).length,
     itemUtilityResolvedFishCount: extra.itemUtilityResolvedFishCount != null
       ? extra.itemUtilityResolvedFishCount
       : fishItems.length,
@@ -361,16 +437,51 @@ function extractSessionRows(sessionData, body = null) {
     || body?.unresolvedItems
     || [];
   return {
-    rawFish: Array.isArray(rawFish) ? rawFish.filter(isPlayerDataGameItemDbRow) : [],
-    rawStones: Array.isArray(rawStones) ? rawStones.filter(isPlayerDataGameItemDbRow) : [],
+    rawFish: normaliseUploadRows(Array.isArray(rawFish) ? rawFish : []),
+    rawStones: normaliseUploadRows(Array.isArray(rawStones) ? rawStones : []),
     unresolvedItems: Array.isArray(unresolved) ? unresolved : [],
   };
 }
 
 function usesPlayerDataGameItemDbPublicIdentity(sessionData) {
-  return sessionData?.inventorySource === PLAYERDATA_GAMEITEMDB_SOURCE
-    || (sessionData?.sourceTruth?.globalDbUsedForPublicIdentity === false
-      && sessionData?.sourceTruth?.fishIdentity === PLAYERDATA_GAMEITEMDB_SOURCE);
+  if (!sessionData) return false;
+  if (sessionData.inventorySource === PLAYERDATA_GAMEITEMDB_SOURCE) return true;
+  if (sessionData.sourceTruth?.globalDbUsedForPublicIdentity === false
+    && (sessionData.sourceTruth?.identity === 'playerdata_itemutility_gameitemdb'
+      || sessionData.sourceTruth?.fishImage === GAMEITEMDB_ICON_SOURCE)) {
+    return Boolean(
+      (Array.isArray(sessionData.playerDataFishItems) && sessionData.playerDataFishItems.length)
+      || (Array.isArray(sessionData.playerDataStoneItems) && sessionData.playerDataStoneItems.length)
+      || sessionData.playerDataGameItemDbProof?.gameItemDbBuilt === true,
+    );
+  }
+  return false;
+}
+
+function buildWaitingForPlayerDataGameItemDbResponse(sessionData = {}) {
+  const storedProof = sessionData?.playerDataGameItemDbProof || {};
+  return {
+    activationState: WAITING_ACTIVATION,
+    fishItems: [],
+    stoneItems: [],
+    publicItems: [],
+    publicFishItems: [],
+    fishInventory: buildInventoryGroups([]),
+    stoneInventory: [],
+    fishCounts: buildFishCounts([], [], 0),
+    publicCounts: buildPublicCounts([], []),
+    inventorySource: null,
+    sourceTruth: sessionData?.sourceTruth || defaultSourceTruth(),
+    playerDataGameItemDbProof: storedProof.enabled ? storedProof : null,
+    playerDataItemUtilityProof: null,
+    hiddenPublicRows: {
+      ambiguousContainerUnresolved: 0,
+      hiddenItemIds: [],
+      reason: WAITING_ACTIVATION,
+    },
+    globalDbUiProof: null,
+    trackerBuild: sessionData?.trackerBuild || null,
+  };
 }
 
 async function buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, deps = {}) {
@@ -404,6 +515,7 @@ async function buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, deps = 
   );
 
   return {
+    activationState: 'playerdata_gameitemdb_active',
     fishItems,
     stoneItems,
     publicItems: fishItems,
@@ -427,18 +539,25 @@ async function buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, deps = 
 
 module.exports = {
   FINAL_BUILD,
+  WAITING_ACTIVATION,
   PLAYERDATA_GAMEITEMDB_SOURCE,
   GAMEITEMDB_ICON_SOURCE,
+  QUIZ_BOT_FALLBACK_SOURCE,
   TIER_NAMES,
   ENCHANT_STONE_IDS,
   tierToRarity,
   parseGameItemIcon,
   isValidPublicGameIcon,
   isPlayerDataGameItemDbRow,
+  isEnchantStoneRow,
+  detectGameItemDbUpload,
+  expectsPlayerDataGameItemDbPayload,
   normaliseUploadRow,
+  normaliseUploadRows,
   groupFishRows,
   groupStoneRows,
   buildPublicFromPlayerDataGameItemDb,
+  buildWaitingForPlayerDataGameItemDbResponse,
   buildPlayerDataGameItemDbProof,
   usesPlayerDataGameItemDbPublicIdentity,
   defaultSourceTruth,

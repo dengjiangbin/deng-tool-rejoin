@@ -659,9 +659,20 @@ async function ensureCachedAssets(assetIds, metaByAssetId = {}) {
 
 async function attachCachedImageFields(item, baseUrl) {
   if (!item || typeof item !== 'object') return item;
+  const isPlayerDataRow = item.source === PLAYERDATA_GAMEITEMDB_SOURCE
+    || item.source === PLAYERDATA_ITEMUTILITY_SOURCE
+    || item.imageSource === GAMEITEMDB_ICON_SOURCE;
   const meta = resolveImageMetaForItem(item);
   const assetId = meta.assetId;
   const sourceUrl = meta.sourceUrl;
+
+  const resolvedImageSource = () => {
+    if (meta.imageSource === GAMEITEMDB_ICON_SOURCE) return GAMEITEMDB_ICON_SOURCE;
+    if (isPlayerDataRow && meta.imageSource === IMAGE_SOURCE_QUIZ_BOT) return IMAGE_SOURCE_QUIZ_BOT;
+    if (isPlayerDataRow) return item.imageSource || meta.imageSource || null;
+    return meta.imageSource || item.imageSource
+      || (globalCatalogService?.SOURCE_GLOBAL) || IMAGE_SOURCE_LOCAL;
+  };
 
   let cached = null;
   if (meta.cachedUrl && cachedFileExists(meta.cachedUrl)) {
@@ -734,8 +745,7 @@ async function attachCachedImageFields(item, baseUrl) {
       imageUrlPresent: true,
       imageResolved: true,
       imageStatus: 'cached',
-      imageSource: meta.imageSource || item.imageSource
-        || (globalCatalogService?.SOURCE_GLOBAL) || IMAGE_SOURCE_LOCAL,
+      imageSource: resolvedImageSource(),
     };
   }
 
@@ -747,15 +757,17 @@ async function attachCachedImageFields(item, baseUrl) {
       imageUrl: proxy,
       imageUrlPresent: !!proxy,
       imageResolved: false,
-      imageStatus: cached?.imageStatus || 'missing',
-      imageSource: item.imageSource || fishImageAssets.IMAGE_SOURCE_MATCHED,
+      imageStatus: meta.imageSource === GAMEITEMDB_ICON_SOURCE ? 'gameitemdb_proxy' : 'proxy',
+      imageSource: resolvedImageSource(),
     };
   }
 
   return {
     ...item,
     imageStatus: 'missing',
-    imageSource: item.imageSource || fishImageAssets.IMAGE_SOURCE_MISSING,
+    imageSource: isPlayerDataRow
+      ? (item.imageSource || meta.imageSource || fishImageAssets.IMAGE_SOURCE_MISSING)
+      : (item.imageSource || fishImageAssets.IMAGE_SOURCE_MISSING),
     imageMissingProof: {
       triedAliases: meta.triedAliases || [item.baseFishName, item.name].filter(Boolean),
       searchedSources: meta.searchedSources || [],

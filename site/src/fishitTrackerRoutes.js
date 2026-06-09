@@ -2164,6 +2164,9 @@ async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
       fishImageCache,
     });
   }
+  if (gameItemDbPublic.expectsPlayerDataGameItemDbPayload(sessionData)) {
+    return gameItemDbPublic.buildWaitingForPlayerDataGameItemDbResponse(sessionData);
+  }
   if (itemUtilityPublic.usesPlayerDataItemUtilityPublicIdentity(sessionData)) {
     return itemUtilityPublic.buildPublicFromPlayerDataItemUtility(sessionData, baseUrl, {
       fishImageAssets,
@@ -2865,25 +2868,27 @@ function handleUpdateBackpack(req, res) {
 
     const acceptedCount = cleanItems.length || (ps && ps.accepted) || 0;
 
-    const usesGameItemDb = body.inventorySource === gameItemDbPublic.PLAYERDATA_GAMEITEMDB_SOURCE
-      && Array.isArray(body.fishItems);
+    const usesGameItemDb = gameItemDbPublic.detectGameItemDbUpload(body)
+      && (Array.isArray(body.fishItems) || Array.isArray(body.stoneItems));
     const usesItemUtility = !usesGameItemDb
       && body.inventorySource === itemUtilityPublic.PLAYERDATA_ITEMUTILITY_SOURCE
       && Array.isArray(body.fishItems);
     const playerDataFishItems = usesGameItemDb
-      ? body.fishItems.filter(gameItemDbPublic.isPlayerDataGameItemDbRow)
+      ? gameItemDbPublic.normaliseUploadRows(body.fishItems || [])
       : (usesItemUtility ? body.fishItems.filter(itemUtilityPublic.isPlayerDataItemUtilityRow) : null);
-    const playerDataStoneItems = (usesGameItemDb || usesItemUtility) && Array.isArray(body.stoneItems)
-      ? body.stoneItems.filter(
-        usesGameItemDb
-          ? gameItemDbPublic.isPlayerDataGameItemDbRow
-          : itemUtilityPublic.isPlayerDataItemUtilityRow,
-      )
-      : [];
+    const playerDataStoneItems = usesGameItemDb
+      ? gameItemDbPublic.normaliseUploadRows(body.stoneItems || [])
+      : ((usesItemUtility && Array.isArray(body.stoneItems))
+        ? body.stoneItems.filter(itemUtilityPublic.isPlayerDataItemUtilityRow)
+        : []);
 
     const hasDisplayItems = cleanItems.length > 0
       || (partialInfo.lastGoodFishPreserved && existing && existing.items?.length)
-      || ((usesGameItemDb || usesItemUtility) && playerDataFishItems && playerDataFishItems.length > 0);
+      || (usesGameItemDb && (
+        (playerDataFishItems && playerDataFishItems.length > 0)
+        || (playerDataStoneItems && playerDataStoneItems.length > 0)
+      ))
+      || ((usesItemUtility) && playerDataFishItems && playerDataFishItems.length > 0);
     const sessionPhase = partialInfo.lastGoodFishPreserved
       ? 'live'
       : effectivePhase(phase, ps, hasDisplayItems);
@@ -2938,8 +2943,8 @@ function handleUpdateBackpack(req, res) {
       playerDataUnresolvedItems: usesGameItemDb
         ? (Array.isArray(body.unresolvedItems) ? body.unresolvedItems.slice(0, 50) : [])
         : (existing?.playerDataUnresolvedItems || []),
-      playerDataGameItemDbProof: usesGameItemDb && body.playerDataGameItemDbProof
-        ? body.playerDataGameItemDbProof
+      playerDataGameItemDbProof: usesGameItemDb
+        ? (body.playerDataGameItemDbProof || existing?.playerDataGameItemDbProof || null)
         : (existing?.playerDataGameItemDbProof || null),
       playerDataHiddenUnresolved: usesItemUtility
         ? (Array.isArray(body.hiddenUnresolvedRows) ? body.hiddenUnresolvedRows.slice(0, 50) : [])
@@ -3139,6 +3144,7 @@ async function handleGetBackpack(req, res) {
     counts:          buildPublicLegacyCounts(publicFish.fishCounts),
     fishItems:       publicFish.fishItems,
     stoneItems:      publicFish.stoneItems || [],
+    activationState: publicFish.activationState || null,
     publicItems:     publicFish.publicItems,
     publicFishItems: publicFish.publicFishItems,
     fishInventory:   publicFish.fishInventory,

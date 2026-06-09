@@ -7,9 +7,9 @@ const path = require('path');
 
 const gameItemDbPublic = require('../src/fishitGameItemDbPublic');
 const { buildPublicFishFields, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
-const { BLOCKER10ZA_BUILD } = require('../src/fishitTrackerBuild');
+const { BLOCKER10ZB_BUILD } = require('../src/fishitTrackerBuild');
 
-const FINAL_BUILD = 'BLOCKER10ZA_FINAL_PLAYERDATA_GAMEITEMDB_UPLOAD_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZB_PLAYERDATA_GAMEITEMDB_PUBLIC_PATH_2026_06_09';
 
 function fishRow(overrides = {}) {
   return {
@@ -42,9 +42,9 @@ function stoneRow(type, itemId, qty = 1) {
   };
 }
 
-describe('BLOCKER10ZA FINAL PlayerData GameItemDB public identity', () => {
-  test('build marker is FINAL GameItemDB', () => {
-    assert.equal(BLOCKER10ZA_BUILD, FINAL_BUILD);
+describe('BLOCKER10ZB PlayerData GameItemDB public identity', () => {
+  test('build marker is BLOCKER10ZB', () => {
+    assert.equal(BLOCKER10ZB_BUILD, FINAL_BUILD);
     assert.equal(PUBLIC_API_BUILD, FINAL_BUILD);
     assert.equal(gameItemDbPublic.FINAL_BUILD, FINAL_BUILD);
   });
@@ -96,6 +96,7 @@ describe('BLOCKER10ZA FINAL PlayerData GameItemDB public identity', () => {
     assert.equal(pub.fishItems[0].mutation, null);
     assert.equal(pub.fishItems[0].debugMutation, 'Shiny');
     assert.equal(pub.fishItems[0].imageSource, 'gameitemdb_icon');
+    assert.notEqual(pub.fishItems[0].dataSource, 'global_db');
   });
 
   test('stone inventory returns Normal Double Evolved Eggy Runic stones', async () => {
@@ -114,6 +115,21 @@ describe('BLOCKER10ZA FINAL PlayerData GameItemDB public identity', () => {
     const pub = await buildPublicFishFields([], 'http://127.0.0.1:8791', { sessionData: session });
     assert.equal(pub.stoneItems.length, 5);
     assert.deepEqual(pub.stoneItems.map((s) => s.stoneType).sort(), ['Double', 'Eggy', 'Evolved', 'Normal', 'Runic']);
+  });
+
+  test('itemId 10 is stone not fish', async () => {
+    const session = {
+      inventorySource: 'playerdata_gameitemdb',
+      playerDataFishItems: [fishRow()],
+      playerDataStoneItems: [stoneRow('Normal', 10, 2)],
+      sourceTruth: gameItemDbPublic.defaultSourceTruth(),
+    };
+    const pub = await buildPublicFishFields([], 'http://127.0.0.1:8791', { sessionData: session });
+    assert.equal(pub.fishItems.length, 1);
+    assert.equal(pub.stoneItems.length, 1);
+    assert.equal(pub.stoneItems[0].category, 'stone');
+    assert.equal(pub.stoneItems[0].itemId, '10');
+    assert.ok(!pub.fishItems.some((f) => f.itemId === '10'));
   });
 
   test('stones do not affect fish count or fish type count', async () => {
@@ -143,6 +159,8 @@ describe('BLOCKER10ZA FINAL PlayerData GameItemDB public identity', () => {
     assert.equal(pub.fishItems[0].rarity, 'Legendary');
     assert.equal(pub.globalDbUiProof, null);
     assert.equal(pub.sourceTruth.globalDbUsedForPublicIdentity, false);
+    assert.notEqual(pub.fishItems[0].imageSource, 'global_db');
+    assert.notEqual(pub.fishItems[0].dataSource, 'global_db');
   });
 
   test('unknown unresolved items are hidden publicly', async () => {
@@ -172,14 +190,35 @@ describe('BLOCKER10ZA FINAL PlayerData GameItemDB public identity', () => {
     assert.ok(pub.fishItems[0].imageUrlPresent || pub.fishItems[0].imageUrl);
   });
 
-  test('tracker.lua has GameItemDB scan and FINAL build marker', () => {
+  test('FINAL client without payload returns waiting activation state', async () => {
+    const session = {
+      trackerBuild: FINAL_BUILD,
+      inventorySource: null,
+      items: [{ name: 'Legacy Fish', category: 'fish', amount: 1, imageSource: 'global_db' }],
+    };
+    const pub = await buildPublicFishFields(session.items, 'http://127.0.0.1:8791', { sessionData: session });
+    assert.equal(pub.activationState, 'waiting_for_playerdata_gameitemdb_payload');
+    assert.equal(pub.fishItems.length, 0);
+    assert.equal(pub.globalDbUiProof, null);
+  });
+
+  test('detectGameItemDbUpload accepts proof uploadPath', () => {
+    assert.equal(gameItemDbPublic.detectGameItemDbUpload({
+      playerDataGameItemDbProof: { uploadPath: 'playerdata_gameitemdb' },
+      fishItems: [],
+      stoneItems: [stoneRow('Normal', 10)],
+    }), true);
+  });
+
+  test('tracker.lua has GameItemDB scan and BLOCKER10ZB build marker', () => {
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.match(lua, /BLOCKER10ZA_FINAL_PLAYERDATA_GAMEITEMDB_UPLOAD_2026_06_09/);
+    assert.match(lua, /BLOCKER10ZB_PLAYERDATA_GAMEITEMDB_PUBLIC_PATH_2026_06_09/);
     assert.match(lua, /buildGameItemDB/);
     assert.match(lua, /LiveSafe\.GetIcon/);
     assert.match(lua, /scanPlayerDataGameItemDbInventory/);
     assert.match(lua, /playerdata_gameitemdb/);
     assert.match(lua, /playerDataGameItemDbProof/);
+    assert.match(lua, /PLAYERDATA_GAMEITEMDB_UPLOAD_OK/);
   });
 
   test('tracker template has GameItemDB debug proof and stones section', () => {

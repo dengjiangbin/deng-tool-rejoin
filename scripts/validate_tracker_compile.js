@@ -23,8 +23,11 @@ if (/^\s*loadstring\s*\(/.test(src)) {
 if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
   errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z7 marker missing');
 }
-if (!src.includes('BLOCKER10ZA_FINAL_PLAYERDATA_GAMEITEMDB_UPLOAD_2026_06_09')) {
-  errors.push('BLOCKER10ZA FINAL build marker missing');
+if (!src.includes('BLOCKER10ZB_PLAYERDATA_GAMEITEMDB_PUBLIC_PATH_2026_06_09')) {
+  errors.push('BLOCKER10ZB build marker missing');
+}
+if (!src.includes('PLAYERDATA_GAMEITEMDB_UPLOAD_OK')) {
+  errors.push('PLAYERDATA_GAMEITEMDB_UPLOAD_OK log missing');
 }
 if (!src.includes('scanPlayerDataGameItemDbInventory')) {
   errors.push('scanPlayerDataGameItemDbInventory missing — GameItemDB scan required');

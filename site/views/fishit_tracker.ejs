@@ -524,6 +524,8 @@
   }
   function buildGlobalDbProofHtml(data) {
     if (!DEBUG_GLOBAL) return '';
+    if (data && data.inventorySource === 'playerdata_gameitemdb') return '';
+    if (data && data.activationState === 'waiting_for_playerdata_gameitemdb_payload') return '';
     const g = (data && data.globalDbUiProof) || (data && data.globalCatalogProof) || null;
     if (!g) return '';
     const imgLabel = g.cardsUsingGlobalDbImagesLabel
