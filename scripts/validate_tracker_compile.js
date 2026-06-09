@@ -23,6 +23,12 @@ if (/^\s*loadstring\s*\(/.test(src)) {
 if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
   errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z7 marker missing');
 }
+if (!src.includes('BLOCKER10ZA_PLAYERDATA_ITEMUTILITY_STONES_UPLOAD_2026_06_09')) {
+  errors.push('BLOCKER10ZA build marker missing');
+}
+if (!src.includes('scanPlayerDataItemUtilityInventory')) {
+  errors.push('scanPlayerDataItemUtilityInventory missing — PlayerData ItemUtility scan required');
+}
 if (!src.includes('BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
   errors.push('BLOCKER10Z7 build marker missing');
 }

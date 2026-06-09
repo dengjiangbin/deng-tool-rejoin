@@ -46,7 +46,8 @@ const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
 const snapshotRecovery = require('./fishitSnapshotRecovery');
-const { BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const itemUtilityPublic = require('./fishitItemUtilityPublic');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
 const globalCatalogService = require('./fishitGlobalCatalogService');
 const globalDb = require('./fishitGlobalDb');
@@ -138,8 +139,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10Z18_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10Z18_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10ZA_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10ZA_BUILD;
 
 const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
@@ -2157,6 +2158,13 @@ function isPublicFishItem(item) {
 /** Fish-only view for public website/API (storage keeps full inventory). */
 async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
   const sessionData = options.sessionData || null;
+  if (itemUtilityPublic.usesPlayerDataItemUtilityPublicIdentity(sessionData)) {
+    return itemUtilityPublic.buildPublicFromPlayerDataItemUtility(sessionData, baseUrl, {
+      fishImageAssets,
+      rarityEnrichment,
+      fishImageCache,
+    });
+  }
   let items = annotateReplionIdentity(enrichedFlat || []);
   items = promoteTrustedAmbiguousContainerRows(items);
   const needsCatalogEnrich = items.some(
@@ -2851,8 +2859,18 @@ function handleUpdateBackpack(req, res) {
 
     const acceptedCount = cleanItems.length || (ps && ps.accepted) || 0;
 
+    const usesItemUtility = body.inventorySource === itemUtilityPublic.PLAYERDATA_ITEMUTILITY_SOURCE
+      && Array.isArray(body.fishItems);
+    const playerDataFishItems = usesItemUtility
+      ? body.fishItems.filter(itemUtilityPublic.isPlayerDataItemUtilityRow)
+      : null;
+    const playerDataStoneItems = usesItemUtility && Array.isArray(body.stoneItems)
+      ? body.stoneItems.filter(itemUtilityPublic.isPlayerDataItemUtilityRow)
+      : [];
+
     const hasDisplayItems = cleanItems.length > 0
-      || (partialInfo.lastGoodFishPreserved && existing && existing.items?.length);
+      || (partialInfo.lastGoodFishPreserved && existing && existing.items?.length)
+      || (usesItemUtility && playerDataFishItems && playerDataFishItems.length > 0);
     const sessionPhase = partialInfo.lastGoodFishPreserved
       ? 'live'
       : effectivePhase(phase, ps, hasDisplayItems);
@@ -2888,6 +2906,21 @@ function handleUpdateBackpack(req, res) {
       lastGoodInventory: existing?.lastGoodInventory || null,
       lastGoodPublicFishCount: existing?.lastGoodPublicFishCount || 0,
       catchWatcherStatus: body.catchWatcherStatus || (existing && existing.catchWatcherStatus) || null,
+      inventorySource: usesItemUtility
+        ? itemUtilityPublic.PLAYERDATA_ITEMUTILITY_SOURCE
+        : (existing?.inventorySource || null),
+      playerDataFishItems: usesItemUtility
+        ? playerDataFishItems
+        : (existing?.playerDataFishItems || null),
+      playerDataStoneItems: usesItemUtility
+        ? playerDataStoneItems
+        : (existing?.playerDataStoneItems || null),
+      sourceTruth: usesItemUtility
+        ? (body.sourceTruth || itemUtilityPublic.defaultSourceTruth())
+        : (existing?.sourceTruth || null),
+      playerDataHiddenUnresolved: usesItemUtility
+        ? (Array.isArray(body.hiddenUnresolvedRows) ? body.hiddenUnresolvedRows.slice(0, 50) : [])
+        : (existing?.playerDataHiddenUnresolved || []),
       bagInstanceCount: Number.isFinite(Number(body.bagInstanceCount))
         ? Number(body.bagInstanceCount)
         : (ps?.acceptedInstances ?? existing?.bagInstanceCount ?? null),
@@ -2909,7 +2942,10 @@ function handleUpdateBackpack(req, res) {
       gameId: body.gameId || null,
       placeId: body.placeId || null,
     });
-    const publicFishCount = enrichedForGood.filter(isPublicFishItem).length;
+    let publicFishCount = enrichedForGood.filter(isPublicFishItem).length;
+    if (usesItemUtility && playerDataFishItems) {
+      publicFishCount = itemUtilityPublic.groupFishRows(playerDataFishItems).length;
+    }
     partialSnapshot.updateLastGoodFishOnSession(
       liveTrackDB[key],
       cleanItems,
@@ -3068,22 +3104,29 @@ async function handleGetBackpack(req, res) {
     renderBuild:     PUBLIC_RENDER_BUILD,
     publicApiBuild:  PUBLIC_API_BUILD,
     trackerBuild:    data.trackerBuild || null,
+    inventorySource: data.inventorySource || null,
+    sourceTruth:     data.sourceTruth || null,
     items:           publicFish.fishItems,
     inventory:       publicFish.fishInventory,
     counts:          buildPublicLegacyCounts(publicFish.fishCounts),
     fishItems:       publicFish.fishItems,
+    stoneItems:      publicFish.stoneItems || [],
     publicItems:     publicFish.publicItems,
     publicFishItems: publicFish.publicFishItems,
     fishInventory:   publicFish.fishInventory,
+    stoneInventory:  publicFish.stoneInventory || publicFish.stoneItems || [],
     fishCounts:      publicFish.fishCounts,
     publicCounts:    publicFish.publicCounts,
+    playerDataItemUtilityProof: publicFish.playerDataItemUtilityProof || null,
     hiddenPublicRows: publicFish.hiddenPublicRows,
     quarantinedPublicNames: publicFish.quarantinedPublicNames,
     missingExpectedFishProof: publicFish.missingExpectedFishProof,
     countParityProof: publicFish.countParityProof,
     rarityColorProof: publicFish.rarityColorProof,
     globalDbUiProof: publicFish.globalDbUiProof,
-    globalCatalogProof: globalCatalogService.buildGlobalDbSummaryProof(),
+    globalCatalogProof: itemUtilityPublic.usesPlayerDataItemUtilityPublicIdentity(data)
+      ? null
+      : globalCatalogService.buildGlobalDbSummaryProof(),
     globalImageProof: globalCatalogService.buildGlobalImageProof(publicFish.fishItems),
     globalRarityProof: globalCatalogService.buildGlobalRarityProof(publicFish.fishItems),
     imageRenderProof: fishImageCache.buildImageRenderProof(publicFish.fishItems, 20),
@@ -3251,7 +3294,11 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     globalLearningProof: globalCatalogService.buildGlobalLearningProof(25),
     resetSeedProof: globalCatalogService.getLastResetSeedProof(),
     globalDbStats: globalDb.getStats(),
-    publicFilterTrace: buildPublicFilterTrace(enrichedAll),
+    playerDataItemUtilityProof: publicFishDbg.playerDataItemUtilityProof || null,
+    inventorySource: data.inventorySource || null,
+    sourceTruth: data.sourceTruth || null,
+    stoneItems: publicFishDbg.stoneItems || [],
+    fishItems: publicFishDbg.fishItems || [],
     inventoryParityProof: buildInventoryParityProof(
       rawItemsArr,
       enrichedAll,
@@ -3392,7 +3439,8 @@ module.exports.buildAmbiguousContainerProof = buildAmbiguousContainerProof;
 module.exports.AMBIGUOUS_CONTAINER_IDS = AMBIGUOUS_CONTAINER_IDS;
 module.exports.resolveAmbiguousContainerDisplay = resolveAmbiguousContainerDisplay;
 module.exports.trustedCatalogMetaForMetadataId = trustedCatalogMetaForMetadataId;
-module.exports.BLOCKER10Z18_BUILD = BLOCKER10Z18_BUILD;
+module.exports.BLOCKER10ZA_BUILD = BLOCKER10ZA_BUILD;
+module.exports.itemUtilityPublic = itemUtilityPublic;
 module.exports.BLOCKER10Z17_BUILD = BLOCKER10Z17_BUILD;
 module.exports.BLOCKER10Z16_BUILD = BLOCKER10Z16_BUILD;
 module.exports.BLOCKER10Z15_BUILD = BLOCKER10Z15_BUILD;

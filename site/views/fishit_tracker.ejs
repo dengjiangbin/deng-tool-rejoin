@@ -128,6 +128,11 @@
     .item-card.rarity-mythic, .fish-card.rarity-mythic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,37,37,.22); background:linear-gradient(135deg,#ff2525 0%,#c90d12 100%); }
     .item-card.rarity-secret, .fish-card.rarity-secret { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.52); --image-glow:rgba(16,228,135,.28); background:linear-gradient(135deg,#10e487 0%,#09c96f 55%,#079b59 100%); }
     .item-card.rarity-forgotten, .fish-card.rarity-forgotten { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.92); --badge-bg:rgba(0,0,0,.58); --image-glow:rgba(255,255,255,.16); background:linear-gradient(135deg,#f0f0f0 0%,#777 50%,#111 100%); }
+
+    .stones-section { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .stones-section__title { font-size: 0.82rem; color: var(--muted); margin-bottom: 8px; font-weight: 600; letter-spacing: 0.02em; }
+    .stone-card { background: linear-gradient(135deg, #252b3a 0%, #171c28 100%); }
+    .stone-card__icon { display: flex; align-items: center; justify-content: center; font-size: 1.55rem; min-height: 56px; }
     .item-card:not([class*="rarity-"]), .fish-card:not([class*="rarity-"]) { --card-fg:#e2e8f0; --card-muted-fg:#8a94a6; --badge-bg:rgba(0,0,0,.35); --image-glow:rgba(148,163,184,.1); background:linear-gradient(135deg,#242936 0%,#141820 100%); border:1px solid var(--border); }
 
     .fish-card__imageWrap {
@@ -348,6 +353,85 @@
     }
     return [];
   }
+  function getPublicStoneItems(data) {
+    if (!data) return [];
+    if (Array.isArray(data.stoneItems)) return data.stoneItems;
+    if (Array.isArray(data.stoneInventory)) return data.stoneInventory;
+    return [];
+  }
+  function stoneCardKey(item) {
+    return `stone|${String(item.stoneType || item.itemId || item.name || 'unknown').toLowerCase()}`;
+  }
+  function buildStoneCardInnerHtml(item) {
+    const amount = Number(item.amount || item.quantity || 1);
+    const title = item.displayName || item.name || 'Enchant Stone';
+    return `
+  <div class="fish-card__imageWrap ic-head stone-card__icon">&#x1F48E;</div>
+  <div class="fish-card__body ic-title-wrap">
+    <span class="fish-card__name item-name stone-card__name" title="${escHtml(title)}">${escHtml(title)}</span>
+    <div class="fish-card__amountRow ic-meta"><span class="fish-card__amount ic-qty">x${Number.isFinite(amount) ? amount : 1}</span></div>
+  </div>`;
+  }
+  function buildStoneCardElement(item) {
+    const card = document.createElement('div');
+    card.className = 'item-card fish-card stone-card';
+    card.setAttribute('data-card-key', stoneCardKey(item));
+    card.setAttribute('data-kind', 'stone');
+    card.innerHTML = buildStoneCardInnerHtml(item);
+    return card;
+  }
+  function patchStonesGrid(container, items) {
+    if (!container) return;
+    if (!items || items.length === 0) {
+      container.innerHTML = '';
+      container.style.display = 'none';
+      return;
+    }
+    container.style.display = '';
+    let title = container.querySelector('.stones-section__title');
+    if (!title) {
+      container.innerHTML = '<div class="stones-section__title">Enchant Stones</div><div class="items-grid stones-grid"></div>';
+      title = container.querySelector('.stones-section__title');
+    }
+    let grid = container.querySelector('.stones-grid');
+    if (!grid) {
+      grid = document.createElement('div');
+      grid.className = 'items-grid stones-grid';
+      container.appendChild(grid);
+    }
+    const nextKeys = new Set();
+    const existing = new Map();
+    grid.querySelectorAll('.stone-card[data-card-key]').forEach((el) => {
+      existing.set(el.getAttribute('data-card-key'), el);
+    });
+    items.forEach((item, idx) => {
+      const key = stoneCardKey(item);
+      nextKeys.add(key);
+      let card = existing.get(key);
+      if (!card) {
+        card = buildStoneCardElement(item);
+        const ref = grid.children[idx] || null;
+        grid.insertBefore(card, ref);
+      } else {
+        card.innerHTML = buildStoneCardInnerHtml(item);
+        const ref = grid.children[idx] || null;
+        if (card !== ref) grid.insertBefore(card, ref);
+      }
+    });
+    existing.forEach((el, key) => { if (!nextKeys.has(key)) el.remove(); });
+  }
+  function patchCardInventory(cardBody, fishList, stoneList) {
+    if (!cardBody) return;
+    let fishHost = cardBody.querySelector('[data-fish-grid-host]');
+    let stoneHost = cardBody.querySelector('[data-stones-section]');
+    if (!fishHost || !stoneHost) {
+      cardBody.innerHTML = '<div data-fish-grid-host></div><div class="stones-section" data-stones-section></div>';
+      fishHost = cardBody.querySelector('[data-fish-grid-host]');
+      stoneHost = cardBody.querySelector('[data-stones-section]');
+    }
+    patchItemsGrid(fishHost, fishList);
+    patchStonesGrid(stoneHost, stoneList);
+  }
   function logFishOnlyRender(key, data, fishList) {
     if (!data || data.renderBuild !== RENDER_BUILD) return;
     const entry = trackers.get(key);
@@ -362,14 +446,46 @@
   function fishCountLabel(data, fishList) {
     const fc = data && data.fishCounts;
     const pc = data && data.publicCounts;
+    const stoneList = getPublicStoneItems(data);
     const types = (pc && pc.visibleFishTypes != null) ? pc.visibleFishTypes
       : ((fc && fc.fishTypes != null) ? fc.fishTypes : fishList.length);
     const fishTotal = (pc && pc.visibleFishInstances != null) ? pc.visibleFishInstances
       : ((fc && fc.fishInstances != null) ? fc.fishInstances : null);
+    const stoneTotal = (pc && pc.visibleStoneInstances != null) ? pc.visibleStoneInstances
+      : ((fc && fc.stoneInstances != null) ? fc.stoneInstances
+        : stoneList.reduce((s, st) => s + (Number(st.amount || st.quantity) > 0 ? Math.floor(Number(st.amount || st.quantity)) : 1), 0));
     if (fishTotal != null) {
-      return `Tracked fish: <strong>${fishTotal}</strong> &middot; Types: <span style="color:#8a94a6;">${types}</span>`;
+      let label = `Fish: <strong>${fishTotal}</strong> &middot; Types: <span style="color:#8a94a6;">${types}</span>`;
+      if (stoneTotal > 0) label += ` &middot; Stones: <strong>${stoneTotal}</strong>`;
+      return label;
     }
     return `Types: <strong>${types}</strong>`;
+  }
+  function buildPlayerDataItemUtilityProofHtml(data) {
+    if (!DEBUG_GLOBAL) return '';
+    const proof = data && data.playerDataItemUtilityProof;
+    if (!proof || proof.enabled !== true) return '';
+    const fishSample = (proof.sampleFish || []).map((f) =>
+      `<div>${escHtml(f.name || '?')} id=${escHtml(String(f.itemId || '-'))} x${f.amount || 1}${f.mutation ? ` mut=${escHtml(f.mutation)}` : ''}</div>`
+    ).join('');
+    const stoneSample = (proof.sampleStones || []).map((s) =>
+      `<div>${escHtml(s.name || '?')} type=${escHtml(s.stoneType || '-')} x${s.amount || 1}</div>`
+    ).join('');
+    const hidden = (proof.hiddenUnresolvedRows || []).slice(0, 8).map((r) =>
+      `<div>hidden id=${escHtml(String(r.itemId || '-'))} reason=${escHtml(r.reason || '-')}</div>`
+    ).join('');
+    return `<details class="global-db-proof itemutility-proof" open>
+  <summary>PlayerData + ItemUtility: <span class="gdb-on">ON</span> &mdash; Global DB not used for public identity</summary>
+  <div class="gdb-body">
+    <div class="gdb-row"><span>Source</span><span>${escHtml(proof.source || 'playerdata_itemutility')}</span></div>
+    <div class="gdb-row"><span>Fish types</span><span>${proof.itemUtilityResolvedFishCount != null ? proof.itemUtilityResolvedFishCount : '?'}</span></div>
+    <div class="gdb-row"><span>Stone types</span><span>${proof.itemUtilityResolvedStoneCount != null ? proof.itemUtilityResolvedStoneCount : '?'}</span></div>
+    <div class="gdb-row"><span>globalDbUsedForPublicIdentity</span><span>false</span></div>
+    ${fishSample ? `<div class="global-db-debug"><strong>sampleFish</strong>${fishSample}</div>` : ''}
+    ${stoneSample ? `<div class="global-db-debug"><strong>sampleStones</strong>${stoneSample}</div>` : ''}
+    ${hidden ? `<div class="global-db-debug"><strong>hiddenUnresolvedRows</strong>${hidden}</div>` : ''}
+  </div>
+</details>`;
   }
   function buildGlobalDbProofHtml(data) {
     if (!DEBUG_GLOBAL) return '';
@@ -759,13 +875,14 @@
     const l = card.querySelector('[data-status-line]');
     const b = card.querySelector('[data-card-body]');
     const fishList = getPublicFishItems(data);
+    const stoneList = getPublicStoneItems(data);
     logFishOnlyRender(card.dataset.user, data, fishList);
     if (c) c.innerHTML = fishCountLabel(data, fishList);
     if (s) s.textContent = `Last sync: ${fmtTime(syncTimestamp(data))}`;
     if (l) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;
     const gdb = card.querySelector('[data-global-db-proof]');
-    if (gdb) gdb.innerHTML = buildGlobalDbProofHtml(data);
-    if (b) patchItemsGrid(b, fishList);
+    if (gdb) gdb.innerHTML = buildPlayerDataItemUtilityProofHtml(data) + buildGlobalDbProofHtml(data);
+    if (b) patchCardInventory(b, fishList, stoneList);
   }
 
   function setCardWaiting(card, name) {
