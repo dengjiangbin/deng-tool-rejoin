@@ -5,7 +5,22 @@
  */
 const crypto = require('crypto');
 
-const CHALLENGE_SECRET = process.env.TOOL_SITE_STATE_SECRET;
+function challengeSecret() {
+  return process.env.TOOL_SITE_STATE_SECRET || '';
+}
+
+function isStateSecretConfigured() {
+  const secret = challengeSecret();
+  return Boolean(secret && secret.length >= 32);
+}
+
+function assertStateSecretConfigured() {
+  if (!isStateSecretConfigured()) {
+    const err = new Error('TOOL_SITE_STATE_SECRET must be at least 32 characters');
+    err.code = 'STATE_SECRET_NOT_CONFIGURED';
+    throw err;
+  }
+}
 
 /**
  * Sign a challenge token.
@@ -17,14 +32,13 @@ const CHALLENGE_SECRET = process.env.TOOL_SITE_STATE_SECRET;
  * @returns {string} signed token
  */
 function signChallenge(challengeId, provider, expiresAt) {
-  if (!CHALLENGE_SECRET || CHALLENGE_SECRET.length < 32) {
-    throw new Error('TOOL_SITE_STATE_SECRET must be at least 32 characters');
-  }
+  assertStateSecretConfigured();
+  const secret = challengeSecret();
   const payload = Buffer.from(
     JSON.stringify({ cid: challengeId, p: provider || '', exp: expiresAt }),
   ).toString('base64url');
   const sig = crypto
-    .createHmac('sha256', CHALLENGE_SECRET)
+    .createHmac('sha256', secret)
     .update(payload)
     .digest('hex');
   return `${payload}.${sig}`;
@@ -37,9 +51,8 @@ function signChallenge(challengeId, provider, expiresAt) {
  * @returns {{ cid: string, p: string, exp: number } | null}
  */
 function verifyChallenge(token) {
-  if (!CHALLENGE_SECRET || CHALLENGE_SECRET.length < 32) {
-    throw new Error('TOOL_SITE_STATE_SECRET must be at least 32 characters');
-  }
+  assertStateSecretConfigured();
+  const secret = challengeSecret();
   if (!token || typeof token !== 'string') return null;
   const dot = token.indexOf('.');
   if (dot < 1 || dot === token.length - 1) return null;
@@ -49,7 +62,7 @@ function verifyChallenge(token) {
   let expectedBuf;
   try {
     const expectedHex = crypto
-      .createHmac('sha256', CHALLENGE_SECRET)
+      .createHmac('sha256', secret)
       .update(payload)
       .digest('hex');
     expectedBuf = Buffer.from(expectedHex, 'hex');
@@ -91,4 +104,4 @@ function randomHex(bytes = 16) {
   return crypto.randomBytes(bytes).toString('hex');
 }
 
-module.exports = { signChallenge, verifyChallenge, sha256, randomHex };
+module.exports = { signChallenge, verifyChallenge, sha256, randomHex, isStateSecretConfigured, assertStateSecretConfigured };

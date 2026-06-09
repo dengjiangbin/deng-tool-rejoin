@@ -46,6 +46,7 @@ class MemoryQuery {
     this.filters = [];
     this.inFilters = [];
     this.gteFilters = [];
+    this.ltFilters = [];
     this.neqFilters = [];
     this.notNullFilters = [];
     this.orderSpec = null;
@@ -83,6 +84,11 @@ class MemoryQuery {
 
   gte(field, value) {
     this.gteFilters.push({ field, value });
+    return this;
+  }
+
+  lt(field, value) {
+    this.ltFilters.push({ field, value });
     return this;
   }
 
@@ -131,6 +137,7 @@ class MemoryQuery {
     return this.filters.every((f) => row[f.field] === f.value) &&
       this.inFilters.every((f) => f.values.includes(row[f.field])) &&
       this.gteFilters.every((f) => String(row[f.field] || '') >= String(f.value)) &&
+      this.ltFilters.every((f) => String(row[f.field] || '') < String(f.value)) &&
       this.neqFilters.every((f) => row[f.field] !== f.value) &&
       this.notNullFilters.every((field) => row[field] != null && row[field] !== '');
   }
@@ -3390,6 +3397,29 @@ describe('provider UI and security gate', () => {
     const second = await startChallenge(agent);
     assert.equal(first.challengeId, second.challengeId);
     assert.equal(memoryDb.license_ad_challenges.filter((r) => r.status === 'created').length, 1);
+  });
+
+  test('missing TOOL_SITE_STATE_SECRET shows signing error not generic missing attempt', async () => {
+    const prev = process.env.TOOL_SITE_STATE_SECRET;
+    process.env.TOOL_SITE_STATE_SECRET = '';
+    try {
+      const agent = request.agent(app);
+      await login(agent);
+      const { challengeId } = await startChallenge(agent);
+      const page = await agent.get('/license');
+      const csrf = csrfFrom(page.text);
+      const res = await agent.post('/key/provider/linkvertise').type('form').send({
+        _csrf: csrf,
+        challenge_id: challengeId,
+        provider: 'linkvertise',
+      });
+      assert.equal(res.status, 302);
+      const rendered = await agent.get('/license');
+      assert.match(rendered.text, /signing not configured|temporarily unavailable/i);
+      assert.doesNotMatch(rendered.text, /No active key generation attempt was found/);
+    } finally {
+      process.env.TOOL_SITE_STATE_SECRET = prev;
+    }
   });
 
   test('unauthenticated users cannot reach key result or license history', async () => {

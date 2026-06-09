@@ -4,6 +4,8 @@
  */
 const express = require('express');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
+const { execFileSync } = require('child_process');
 
 const auth = require('./auth');
 const {
@@ -24,7 +26,7 @@ const licenseEligibility = require('./licenseEligibility');
 const { formatWibTimestamp, licenseExportFilename } = require('./licenseFormat');
 const linkvertise = require('./providers/linkvertise');
 const lootlabs = require('./providers/lootlabs');
-const { signChallenge, verifyChallenge } = require('./crypto');
+const { signChallenge, verifyChallenge, isStateSecretConfigured } = require('./crypto');
 
 const router = express.Router();
 
@@ -59,6 +61,7 @@ const SAFE_MESSAGES = {
   CHALLENGE_INSERT_FAILED: 'Could not start key generation. Please try again.',
   PROVIDER_NOT_CONFIGURED: 'This ad provider is not configured yet.',
   PROVIDER_CHALLENGE_MISSING: 'No active key generation attempt was found. Tap Generate Key to start again.',
+  STATE_SECRET_NOT_CONFIGURED: 'Key generation is temporarily unavailable (server signing not configured). Contact an admin.',
   PROVIDER_CHALLENGE_EXPIRED: 'Your ad session expired. Tap Generate Key to start a new one.',
   PROVIDER_CHALLENGE_OWNER_MISMATCH: 'This ad completion belongs to another account. Please login with the correct Discord account.',
   PROVIDER_CHALLENGE_ALREADY_USED: 'This ad completion was already used. Check your keys below or wait for cooldown.',
@@ -138,6 +141,9 @@ function providerIsReady(provider) {
 }
 
 function codeFromError(err, fallback = 'UNEXPECTED_ERROR') {
+  if (err?.code && SAFE_MESSAGES[err.code]) return err.code;
+  const msg = String(err?.message || '');
+  if (/TOOL_SITE_STATE_SECRET/i.test(msg)) return 'STATE_SECRET_NOT_CONFIGURED';
   return err && err.code && SAFE_MESSAGES[err.code] ? err.code : fallback;
 }
 
@@ -157,6 +163,7 @@ function flashBlock(req, code, extra = {}) {
 
 function codeToBlockReason(code) {
   const map = {
+    STATE_SECRET_NOT_CONFIGURED: 'server_error',
     PROVIDER_CHALLENGE_MISSING: 'provider_attempt_invalid',
     PROVIDER_CHALLENGE_EXPIRED: 'attempt_expired',
     PROVIDER_CHALLENGE_ALREADY_USED: 'provider_token_replayed',
@@ -464,6 +471,156 @@ function friendlyStatus(row) {
   return licenseService.formatLicenseStatus(row);
 }
 
+function resolveServerCommit() {
+  if (process.env.GIT_COMMIT) return String(process.env.GIT_COMMIT).trim();
+  try {
+    const root = path.join(__dirname, '..', '..');
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch (_) {
+    return 'unknown';
+  }
+}
+
+async function buildLicenseUserDebugReport({ username = '', discordUserId = '' } = {}) {
+  const cleanUsername = String(username || '').trim().toLowerCase();
+  let siteUser = null;
+  if (discordUserId) {
+    const { data } = await supabase
+      .from('site_users')
+      .select('id, discord_user_id, username')
+      .eq('discord_user_id', String(discordUserId))
+      .maybeSingle();
+    siteUser = data || null;
+  } else if (cleanUsername) {
+    const { data } = await supabase
+      .from('site_users')
+      .select('id, discord_user_id, username')
+      .ilike('username', cleanUsername)
+      .limit(1)
+      .maybeSingle();
+    siteUser = data || null;
+    if (!siteUser?.id) {
+      const { data: licenseUser } = await supabase
+        .from('license_users')
+        .select('discord_user_id, discord_username')
+        .ilike('discord_username', cleanUsername)
+        .limit(1)
+        .maybeSingle();
+      if (licenseUser?.discord_user_id) {
+        const { data: byDiscord } = await supabase
+          .from('site_users')
+          .select('id, discord_user_id, username')
+          .eq('discord_user_id', String(licenseUser.discord_user_id))
+          .maybeSingle();
+        siteUser = byDiscord ? { ...byDiscord, username: byDiscord.username || licenseUser.discord_username } : null;
+      }
+    }
+  }
+  if (!siteUser?.id) {
+    return { ok: false, error: 'user_not_found', username: cleanUsername || null, discordUserId: discordUserId || null };
+  }
+
+  const eligibility = await licenseEligibility.getLicenseGenerationEligibility({
+    discordUserId: siteUser.discord_user_id,
+    siteUserId: siteUser.id,
+    skipProviderCheck: false,
+  });
+  const attemptDiag = await challenge.getGenerationAttemptDiagnostic({
+    discordUserId: siteUser.discord_user_id,
+    siteUserId: siteUser.id,
+  });
+  const { data: attempts } = await supabase
+    .from('license_ad_challenges')
+    .select('id, status, provider, created_at, expires_at, completed_at, failure_reason, provider_payload, license_key_id')
+    .eq('site_user_id', siteUser.id)
+    .order('created_at', { ascending: false })
+    .limit(15);
+  const keys = await licenseService.getPortalUserLicenses({
+    discordUserId: siteUser.discord_user_id,
+    siteUserId: siteUser.id,
+    limit: 50,
+  });
+  const activeKeys = licenseService.filterActiveLicenses(keys);
+  const unredeemed = keys.filter(licenseService.isActiveUnredeemedKey);
+  const expired = keys.filter((row) => licenseService.classifyLicenseLifecycle(row).is_expired);
+  const pendingAd = (attempts || []).filter((row) => row.status === 'pending_ad' || row.status === 'ad_started');
+  const resumable = (attempts || []).filter((row) => challenge.RESUMABLE_STATUSES.includes(row.status));
+
+  let generateAction = 'create_new_attempt';
+  if (!eligibility.canGenerate) {
+    generateAction = `blocked:${eligibility.blockReason || 'unknown'}`;
+  } else if (unredeemed.length > 0) {
+    generateAction = 'recover_existing_unredeemed_key';
+  } else if (resumable.some((row) => new Date(row.expires_at) >= new Date())) {
+    generateAction = 'resume_open_attempt';
+  }
+
+  const mappedAttempts = (attempts || []).map((row) => {
+    const payload = row.provider_payload && typeof row.provider_payload === 'object'
+      ? row.provider_payload
+      : (() => { try { return JSON.parse(row.provider_payload || '{}'); } catch { return {}; } })();
+    return {
+      id: row.id,
+      status: row.status,
+      provider: row.provider,
+      created_at: row.created_at,
+      expires_at: row.expires_at,
+      completed_at: row.completed_at,
+      failure_reason: row.failure_reason,
+      linkvertise_hash: payload.linkvertise_hash || null,
+      linkvertise_started: payload.linkvertise_started === true,
+      lootlabs_started: payload.lootlabs_started === true,
+      license_key_id: row.license_key_id || null,
+      expired: new Date(row.expires_at) < new Date(),
+    };
+  });
+
+  return {
+    ok: true,
+    serverCommit: resolveServerCommit(),
+    stateSecretConfigured: isStateSecretConfigured(),
+    pm2Process: {
+      pid: process.pid,
+      nodeEnv: process.env.NODE_ENV || null,
+      uptimeSeconds: Math.floor(process.uptime()),
+    },
+    account: {
+      siteUserId: siteUser.id,
+      discordUserId: siteUser.discord_user_id,
+      username: siteUser.username,
+    },
+    activeKeyCount: activeKeys.length,
+    maxKeyLimit: eligibility.maxKeyPolicyUsed,
+    canGenerate: eligibility.canGenerate,
+    blockReason: eligibility.blockReason,
+    existingRecoverableKey: unredeemed[0]
+      ? { masked: unredeemed[0].masked_key || `${unredeemed[0].prefix}-****-${unredeemed[0].suffix}`, expires_at: unredeemed[0].expires_at }
+      : null,
+    generateKeyWould: generateAction,
+    latestAttemptDiagnostic: attemptDiag,
+    latestAttempts: mappedAttempts,
+    pendingAdAttempts: mappedAttempts.filter((row) => row.status === 'pending_ad' || row.status === 'ad_started'),
+    expiredKeys: expired.map((row) => ({
+      id: row.id,
+      prefix: row.prefix,
+      suffix: row.suffix,
+      status: row.status,
+      expires_at: row.expires_at,
+    })),
+    recommendedAction: !isStateSecretConfigured()
+      ? 'set_TOOL_SITE_STATE_SECRET_and_restart_deng-tool-site'
+      : (!eligibility.canGenerate
+        ? `blocked_by_${eligibility.blockReason}`
+        : (generateAction === 'resume_open_attempt'
+          ? 'select_provider_to_bind_hash'
+          : 'generate_key_allowed')),
+  };
+}
+
 function discordOwnerId(req) {
   return String(req.session?.user?.discord_user_id || '').trim();
 }
@@ -688,6 +845,20 @@ async function handleProvider(req, res) {
     const code = 'PROVIDER_NOT_CONFIGURED';
     if (wantsJson(req)) return res.status(503).json({ error: code, message: messageFor(code) });
     safeFlash(req, 'error', messageFor(code));
+    return res.redirect('/license');
+  }
+  if (!isStateSecretConfigured()) {
+    const code = 'STATE_SECRET_NOT_CONFIGURED';
+    logGenerateKeyStart({
+      ...accountIdsFromReq(req),
+      provider,
+      existingActiveKeyFound: false,
+      createdAttemptId: null,
+      redirectUrlCreated: false,
+      failureReason: 'state_secret_missing',
+    });
+    flashBlock(req, code, { blockReason: 'server_error', failureReason: 'state_secret_missing' });
+    if (wantsJson(req)) return res.status(503).json({ error: code, message: messageFor(code) });
     return res.redirect('/license');
   }
 
@@ -1347,6 +1518,24 @@ router.get('/api/admin/license/eligibility', requireSiteAdmin, async (req, res) 
   }
 });
 
+async function handleAdminLicenseDebugUser(req, res) {
+  try {
+    const username = String(req.query.username || '').trim();
+    const discordUserId = String(req.query.discord_user_id || '').trim();
+    if (!username && !discordUserId) {
+      return res.status(400).json({ ok: false, error: 'username_or_discord_user_id_required' });
+    }
+    const report = await buildLicenseUserDebugReport({ username, discordUserId });
+    return res.json(report);
+  } catch (err) {
+    console.error('[admin/license/debug-user]', err.message || err);
+    return res.status(500).json({ ok: false, error: 'server_error', message: err.message || 'debug failed' });
+  }
+}
+
+router.get('/api/admin/license/debug-user', requireSiteAdmin, handleAdminLicenseDebugUser);
+router.get('/admin/license/debug-user', requireSiteAdmin, handleAdminLicenseDebugUser);
+
 router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
   try {
     const history = await loadHistory(req.session.user.id, 20, discordOwnerId(req), { activeOnly: false });
@@ -1674,7 +1863,6 @@ router.get('/api/license/download', requireLicenseDownloadLogin, repairSiteUser,
 // ───────────────────────────────────────────────────────────────────────────
 // DENG Tool: Rejoin APK — public download page + binary serve
 // ───────────────────────────────────────────────────────────────────────────
-const path = require('path');
 const fs   = require('fs');
 const downloadStats = require('./downloadStats');
 
@@ -1942,3 +2130,5 @@ router.get('/downloads/:file', (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.buildLicenseUserDebugReport = buildLicenseUserDebugReport;
+module.exports.resolveServerCommit = resolveServerCommit;

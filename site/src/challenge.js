@@ -453,7 +453,21 @@ async function supersedeOpenAttempts(siteUserId, reason = 'superseded_by_new_att
     .in('status', RESUMABLE_STATUSES);
 }
 
+async function cleanupExpiredResumableAttempts(siteUserId) {
+  if (!siteUserId) return;
+  await supabase
+    .from('license_ad_challenges')
+    .update({
+      status: 'failed',
+      failure_reason: 'expired_attempt',
+    })
+    .eq('site_user_id', siteUserId)
+    .in('status', RESUMABLE_STATUSES)
+    .lt('expires_at', new Date().toISOString());
+}
+
 async function findOrCreateResumableChallenge(req, siteUser) {
+  await cleanupExpiredResumableAttempts(siteUser.id);
   const existing = await findLatestResumableChallengeForUser(req);
   if (existing) {
     return { row: existing, resumed: true };
@@ -494,6 +508,7 @@ function mapErrorToFailureReason(err) {
   const code = err?.code || '';
   const map = {
     AUTH_REQUIRED: 'missing_user',
+    STATE_SECRET_NOT_CONFIGURED: 'state_secret_missing',
     PROVIDER_CHALLENGE_MISSING: 'missing_attempt_id',
     PROVIDER_CHALLENGE_EXPIRED: 'expired_attempt',
     CHALLENGE_ALREADY_USED: 'already_consumed',

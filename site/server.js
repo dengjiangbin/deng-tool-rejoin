@@ -11,6 +11,15 @@ dotenv.config({ path: path.join(__dirname, '..', '.env') });
 dotenv.config({ path: path.join(__dirname, '..', 'env') });
 
 const app = require('./src/app');
+const { isStateSecretConfigured } = require('./src/crypto');
+
+if (!isStateSecretConfigured()) {
+  console.error(
+    '[deng-tool-site] FATAL: TOOL_SITE_STATE_SECRET is missing or shorter than 32 characters. '
+    + 'License key provider redirects cannot be signed until this is set in .env',
+  );
+  process.exit(1);
+}
 
 const HOST = process.env.TOOL_SITE_HOST || '127.0.0.1';
 const PORT = parseInt(process.env.TOOL_SITE_PORT || '8791', 10);
