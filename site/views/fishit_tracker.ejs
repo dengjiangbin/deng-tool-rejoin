@@ -123,9 +123,9 @@
     .item-card.rarity-common, .fish-card.rarity-common { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.88); --badge-bg:rgba(0,0,0,.35); --image-glow:rgba(255,255,255,.12); background:linear-gradient(135deg,#f8fafc 0%,#cbd5e1 55%,#64748b 100%); }
     .item-card.rarity-uncommon, .fish-card.rarity-uncommon { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.92); --badge-bg:rgba(0,0,0,.38); --image-glow:rgba(132,204,22,.22); background:linear-gradient(135deg,#84cc16 0%,#65a30d 55%,#3f6212 100%); }
     .item-card.rarity-rare, .fish-card.rarity-rare { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.52); --image-glow:rgba(30,58,138,.28); background:linear-gradient(135deg,#1e3a8a 0%,#172554 100%); }
-    .item-card.rarity-epic, .fish-card.rarity-epic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,37,37,.22); background:linear-gradient(135deg,#ff2525 0%,#c90d12 100%); }
+    .item-card.rarity-epic, .fish-card.rarity-epic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.48); --image-glow:rgba(168,85,247,.24); background:linear-gradient(135deg,#a855f7 0%,#7e22ce 100%); }
     .item-card.rarity-legendary, .fish-card.rarity-legendary { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,140,0,.24); background:linear-gradient(135deg,#ff8c00 0%,#d97706 100%); }
-    .item-card.rarity-mythic, .fish-card.rarity-mythic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.48); --image-glow:rgba(168,85,247,.24); background:linear-gradient(135deg,#a855f7 0%,#7e22ce 100%); }
+    .item-card.rarity-mythic, .fish-card.rarity-mythic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,37,37,.22); background:linear-gradient(135deg,#ff2525 0%,#c90d12 100%); }
     .item-card.rarity-secret, .fish-card.rarity-secret { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.52); --image-glow:rgba(0,255,127,.28); background:linear-gradient(135deg,#00ff7f 0%,#00c96f 55%,#059669 100%); }
     .item-card.rarity-forgotten, .fish-card.rarity-forgotten { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.92); --badge-bg:rgba(0,0,0,.58); --image-glow:rgba(255,255,255,.16); background:linear-gradient(135deg,#f0f0f0 0%,#777 50%,#111 100%); }
 
@@ -240,9 +240,9 @@
     .rarity-common    { color:#f8fafc; }
     .rarity-uncommon  { color:#84cc16; border-color:#3f6212; background:#1a2e05; }
     .rarity-rare      { color:#93c5fd; border-color:#1e3a8a; background:#0f172a; }
-    .rarity-epic      { color:#fca5a5; border-color:#991b1b; background:#450a0a; }
+    .rarity-epic      { color:#d8b4fe; border-color:#6b21a8; background:#3b0764; }
     .rarity-legendary { color:#fb923c; border-color:#9a3412; background:#431407; }
-    .rarity-mythic    { color:#d8b4fe; border-color:#6b21a8; background:#3b0764; }
+    .rarity-mythic    { color:#fca5a5; border-color:#991b1b; background:#450a0a; }
     .rarity-secret, .badge-rarity-secret { color:#00ff7f; border-color:#047857; background:#022c22; }
     .rarity-forgotten { color:#e5e7eb; border-color:#6b7280; background:#374151; }
 
@@ -319,8 +319,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10ZG_CLEAN_ICONS_LOADER_SCRIPT_2026_06_09">
-<!-- BLOCKER10ZG_CLEAN_ICONS_LOADER_SCRIPT_2026_06_09 -->
+<body data-ui-marker="BLOCKER10ZH_EPIC_PURPLE_MYTHIC_RED_2026_06_09">
+<!-- BLOCKER10ZH_EPIC_PURPLE_MYTHIC_RED_2026_06_09 -->
 <div class="page">
   <div class="inner">
 
@@ -398,8 +398,8 @@
   const PUBLIC_API_BUILD = document.documentElement.getAttribute('data-public-api-build')
     || 'BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08';
   const RARITY_NAME_COLORS = {
-    common:'#f8fafc', uncommon:'#84cc16', rare:'#1e3a8a', epic:'#ef4444',
-    legendary:'#ff8c00', legend:'#ff8c00', mythic:'#a855f7', secret:'#00ff7f', forgotten:'#e5e7eb',
+    common:'#f8fafc', uncommon:'#84cc16', rare:'#1e3a8a', epic:'#a855f7',
+    legendary:'#ff8c00', legend:'#ff8c00', mythic:'#ef4444', secret:'#00ff7f', forgotten:'#e5e7eb',
   };
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret badge-rarity-secret', forgotten:'rarity-forgotten' };
   const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };

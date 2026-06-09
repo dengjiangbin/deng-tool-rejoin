@@ -9,7 +9,7 @@ const { formatQuantity, formatAmountLabel } = require('../src/fishitQuantityForm
 const { BLOCKER10ZG_BUILD } = require('../src/fishitTrackerBuild');
 const { PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
 
-const FINAL_BUILD = 'BLOCKER10ZG_CLEAN_ICONS_LOADER_SCRIPT_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZH_EPIC_PURPLE_MYTHIC_RED_2026_06_09';
 const TPL_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
 
 function loadTrackerCardFns() {

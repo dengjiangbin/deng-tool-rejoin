@@ -13,7 +13,7 @@ const gameItemDbPublic = require('../src/fishitGameItemDbPublic');
 const trackerRouter = require('../src/fishitTrackerRoutes');
 const { BLOCKER10ZG_BUILD } = require('../src/fishitTrackerBuild');
 
-const FINAL_BUILD = 'BLOCKER10ZG_CLEAN_ICONS_LOADER_SCRIPT_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZH_EPIC_PURPLE_MYTHIC_RED_2026_06_09';
 const LAYOUT_PATH = path.join(__dirname, '..', 'views', 'layout.ejs');
 const TRACKER_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
 
