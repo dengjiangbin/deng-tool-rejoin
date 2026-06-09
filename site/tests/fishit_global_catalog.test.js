@@ -31,7 +31,8 @@ const {
 } = require('../src/fishitTrackerRoutes');
 const rarityColorMap = require('../src/fishitRarityColorMap');
 
-const Z17_BUILD = 'BLOCKER10Z17_SNAPSHOT_RECOVERY_AND_GLOBAL_COMPLETION_2026_06_09';
+const Z18_BUILD = 'BLOCKER10Z18_RECOVERED_SPECIES_IMAGE_RESOLUTION_2026_06_09';
+const Z17_BUILD = Z18_BUILD;
 const Z16_BUILD = Z17_BUILD;
 const Z15_BUILD = 'BLOCKER10Z15_AMOUNT_MOVED_TO_MIDDLE_SECTION_2026_06_08';
 const Z14_BUILD = Z16_BUILD;
@@ -1671,7 +1672,7 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   test('GET /tracker returns HTTP 200 with no session data', async () => {
     const res = await request(makeApp()).get('/tracker').expect(200);
     assert.match(res.text, /Fish It Live Inventory Tracker/i);
-    assert.match(res.text, /BLOCKER10Z16/);
+    assert.match(res.text, /BLOCKER10Z18/);
   });
 
   test('GET /tracker?debug=global returns HTTP 200', async () => {
@@ -1682,9 +1683,9 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   test('buildTrackerPageLocals does not reference undefined build constants', () => {
     const { buildTrackerPageLocals } = require('../src/fishitTrackerRoutes');
     const locals = buildTrackerPageLocals();
-    assert.equal(locals.publicApiBuild, Z13_BUILD);
-    assert.equal(locals.blocker10vBuild, Z13_BUILD);
-    assert.equal(locals.renderBuild, Z13_BUILD);
+    assert.equal(locals.publicApiBuild, Z18_BUILD);
+    assert.equal(locals.blocker10vBuild, Z18_BUILD);
+    assert.equal(locals.renderBuild, Z18_BUILD);
   });
 
   test('buildGlobalDbProofHtml handles missing ambiguousContainerProof', () => {
@@ -2488,7 +2489,7 @@ describe('BLOCKER10Z14 — public minimal card hide fake 285', { concurrency: 1 
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
     const res = await request(app).get('/tracker').expect(200);
-    assert.match(res.text, /BLOCKER10Z17_SNAPSHOT_RECOVERY_AND_GLOBAL_COMPLETION_2026_06_09/);
+    assert.match(res.text, /BLOCKER10Z18_RECOVERED_SPECIES_IMAGE_RESOLUTION_2026_06_09/);
   });
 });
 
@@ -2842,9 +2843,9 @@ describe('BLOCKER10Z16 — live catch global evidence binding', { concurrency: 1
     assert.equal(PUBLIC_API_BUILD, Z17_BUILD);
   });
 
-  test('11: tracker.lua has Z17 boot marker', () => {
+  test('11: tracker.lua has Z18 boot marker', () => {
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.match(lua, /BLOCKER10Z17_SNAPSHOT_RECOVERY_AND_GLOBAL_COMPLETION_2026_06_09/);
+    assert.match(lua, /BLOCKER10Z18_RECOVERED_SPECIES_IMAGE_RESOLUTION_2026_06_09/);
     assert.match(lua, /LIVE_GLOBAL_EVIDENCE result=/);
   });
 });
@@ -3094,5 +3095,128 @@ describe('BLOCKER10Z17 — snapshot recovery and global completion', { concurren
     assert.equal(proof.itemIdMappingStatus, 'pending');
     assert.equal(proof.publicCountExplanation.expectedTrackedFish, 27);
     assert.equal(proof.publicCountExplanation.expectedTypes, 12);
+  });
+});
+
+describe('BLOCKER10Z18 — recovered species image resolution', { concurrency: 1 }, () => {
+  const snapshotRecovery = require('../src/fishitSnapshotRecovery');
+  const quizBotImageCatalog = require('../src/fishitQuizBotImageCatalog');
+  const request = require('supertest');
+
+  beforeEach(() => {
+    setupTestDb();
+    snapshotRecovery._resetForTests();
+    quizBotImageCatalog._reset();
+    fishImageCache._reset();
+  });
+
+  test('1: species-level recovery resolves Elshark Gran Maja image without itemId', async () => {
+    snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      confirm: true,
+    });
+    const pub = await buildPublicFishFields([], 'http://127.0.0.1:8791', {
+      sessionKey: 'denghub2',
+      sessionData: { username: 'denghub2', userSnapshotRecovery: snapshotRecovery.getSessionRecoveryMeta('denghub2') },
+    });
+    const card = pub.fishItems.find((f) => (f.baseFishName || f.name) === 'Elshark Gran Maja');
+    assert.ok(card, 'Elshark Gran Maja card present');
+    assert.equal(card.amount, 1);
+    assert.ok(String(card.imageUrl).startsWith('/api/fishit-tracker/assets/fish/'), card.imageUrl);
+    assert.equal(card.imageResolved, true);
+    assert.equal(card.imageUrlPresent, true);
+  });
+
+  test('2: Mosasaur Shark image resolves from quiz bank by canonical name', async () => {
+    snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      confirm: true,
+    });
+    const pub = await buildPublicFishFields([], 'http://127.0.0.1:8791', {
+      sessionKey: 'denghub2',
+      sessionData: { username: 'denghub2', userSnapshotRecovery: snapshotRecovery.getSessionRecoveryMeta('denghub2') },
+    });
+    const card = pub.fishItems.find((f) => (f.baseFishName || f.name) === 'Mosasaur Shark');
+    assert.ok(card);
+    assert.ok(String(card.imageUrl).startsWith('/api/fishit-tracker/assets/fish/'));
+    assert.equal(card.imageResolved, true);
+    const hit = quizBotImageCatalog.lookupByFishName('Mosasaur Shark');
+    assert.ok(hit?.localFile || hit?.assetId);
+  });
+
+  test('3: Sparkly Eel stays visible with placeholder when no trusted image exists', async () => {
+    snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      confirm: true,
+    });
+    const pub = await buildPublicFishFields([], 'http://127.0.0.1:8791', {
+      sessionKey: 'denghub2',
+      sessionData: { username: 'denghub2', userSnapshotRecovery: snapshotRecovery.getSessionRecoveryMeta('denghub2') },
+    });
+    const card = pub.fishItems.find((f) => (f.baseFishName || f.name) === 'Sparkly Eel');
+    assert.ok(card);
+    assert.equal(card.amount, 2);
+    assert.equal(card.imageResolved, false);
+    assert.ok(!card.imageUrl || !String(card.imageUrl).startsWith('/api/fishit-tracker/assets/fish/'));
+  });
+
+  test('4: cached public image URLs return HTTP 200', async () => {
+    snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      confirm: true,
+    });
+    const pub = await buildPublicFishFields([], 'http://127.0.0.1:8791', {
+      sessionKey: 'denghub2',
+      sessionData: { username: 'denghub2', userSnapshotRecovery: snapshotRecovery.getSessionRecoveryMeta('denghub2') },
+    });
+    const elshark = pub.fishItems.find((f) => (f.baseFishName || f.name) === 'Elshark Gran Maja');
+    assert.ok(elshark?.imageUrl);
+    const file = fishImageCache.filenameFromCachedUrl(elshark.imageUrl);
+    assert.ok(file);
+    assert.ok(fishImageCache.cachedFileExists(elshark.imageUrl));
+  });
+
+  test('5: imageResolutionProof includes searched aliases and source proof', () => {
+    const proof = snapshotRecovery.buildRecoveredSpeciesImageResolutionProof([], {
+      probeNames: ['Elshark Gran Maja', 'Mosasaur Shark', 'Sparkly Eel'],
+    });
+    assert.equal(proof.length, 3);
+    const elshark = proof.find((p) => p.baseFishName === 'Elshark Gran Maja');
+    assert.ok(elshark.searchedAliases.length >= 1);
+    assert.ok(elshark.searchedSources.includes('quiz_bot_fishit_bank'));
+    assert.ok(elshark.quizBankId || elshark.sourceFile);
+    const sparkly = proof.find((p) => p.baseFishName === 'Sparkly Eel');
+    assert.equal(sparkly.imageResolved, false);
+    assert.equal(sparkly.missingReason, 'noTrustedImageFound');
+  });
+
+  test('6: public counts remain 27 fish / 12 types after image cache pass', async () => {
+    snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      confirm: true,
+    });
+    const pub = await buildPublicFishFields([], 'http://127.0.0.1:8791', {
+      sessionKey: 'denghub2',
+      sessionData: { username: 'denghub2', userSnapshotRecovery: snapshotRecovery.getSessionRecoveryMeta('denghub2') },
+    });
+    assert.equal(pub.fishCounts.fishInstances, 27);
+    assert.equal(pub.fishCounts.fishTypes, 12);
+  });
+
+  test('7: build marker is BLOCKER10Z18', () => {
+    const { BLOCKER10Z18_BUILD, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
+    assert.equal(BLOCKER10Z18_BUILD, Z18_BUILD);
+    assert.equal(PUBLIC_API_BUILD, Z18_BUILD);
+  });
+
+  test('8: quiz alias lookup resolves El Shark Gran Maja variant', () => {
+    const hit = quizBotImageCatalog.lookupByFishName('El Shark Gran Maja');
+    assert.ok(hit);
+    assert.equal(hit.name, 'Elshark Gran Maja');
   });
 });

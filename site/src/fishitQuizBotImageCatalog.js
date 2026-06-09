@@ -23,6 +23,15 @@ const ASSETS_DIR = process.env.QUIZ_BOT_FISHIT_ASSETS_DIR
 const SOURCE_ID = 'quiz_bot_fishit_bank';
 const SOURCE_TABLE = 'data/fishit_bank.json';
 
+/** Canonical spellings for alias variants used in recovery / screenshot labels. */
+const NAME_ALIASES = {
+  'el shark gran maja': 'Elshark Gran Maja',
+  'elshark granmaja': 'Elshark Gran Maja',
+  'elshark gran-maja': 'Elshark Gran Maja',
+  'mossasaur shark': 'Mosasaur Shark',
+  'sparkly eel': 'Sparkly Eel',
+};
+
 let _byLower = null;
 let _byPunct = null;
 let _entryCount = 0;
@@ -93,7 +102,37 @@ function lookupByFishName(name) {
   if (!raw) return null;
   const lower = normalizeName(raw);
   const punct = normalizeNamePunct(raw);
+  const aliasCanonical = NAME_ALIASES[lower] || NAME_ALIASES[punct] || null;
+  if (aliasCanonical) {
+    const aliasHit = _byLower.get(normalizeName(aliasCanonical))
+      || _byPunct.get(normalizeNamePunct(aliasCanonical));
+    if (aliasHit) return aliasHit;
+  }
   return _byLower.get(lower) || _byPunct.get(punct) || _byPunct.get(lower) || null;
+}
+
+function searchAliasesForName(name) {
+  const raw = String(name || '').trim();
+  const out = [];
+  const seen = new Set();
+  const add = (n) => {
+    const s = String(n || '').trim();
+    if (!s) return;
+    const k = normalizeName(s);
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(s);
+  };
+  add(raw);
+  add(NAME_ALIASES[normalizeName(raw)]);
+  add(NAME_ALIASES[normalizeNamePunct(raw)]);
+  if (/elshark/i.test(raw)) {
+    add('El Shark Gran Maja');
+    add('Elshark GranMaja');
+  }
+  if (/mosasaur/i.test(raw)) add('Mossasaur Shark');
+  for (const alias of collectAliases(raw)) add(alias);
+  return out;
 }
 
 function collectAliases(itemOrName) {
@@ -201,9 +240,11 @@ module.exports = {
   ASSETS_DIR,
   SOURCE_ID,
   SOURCE_TABLE,
+  NAME_ALIASES,
   normalizeName,
   normalizeNamePunct,
   lookupByFishName,
+  searchAliasesForName,
   collectAliases,
   resolveForItem,
   resolveByFishName,
