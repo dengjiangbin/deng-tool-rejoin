@@ -12,6 +12,7 @@ const protectedFishNames = require('./fishitProtectedFishNames');
 const quizBotCatalog = require('./fishitQuizBotImageCatalog');
 const dengBotCatalog = require('./fishitDengFishItBotCatalog');
 const globalLearning = require('./fishitGlobalLearning');
+const nameOnlyCatalog = require('./fishitNameOnlyCatalog');
 
 const SOURCE_GLOBAL = 'global_db';
 const SEED_SOURCE_QUIZ = 'quiz_bot_import';
@@ -323,6 +324,100 @@ function recordObservation(raw) {
     userHash,
     sessionHash,
     learning,
+  };
+}
+
+/**
+ * Record a verified catch notification without itemId (BLOCKER10Z16).
+ */
+function recordCatchNotification(raw) {
+  const parsed = catchNameParser.parseCatchInput({
+    fishName: raw?.rawText || raw?.baseFishName || raw?.name,
+    rawText: raw?.rawText,
+    rarityCandidate: raw?.rarity,
+  });
+  let baseName = raw?.baseFishName || parsed.baseFishName || parsed.fishNameCandidate || raw?.name;
+  if (baseName && protectedFishNames.isProtectedBaseName(baseName)) {
+    baseName = protectedFishNames.normalizeProtected(baseName);
+  }
+  if (!baseName) return { accepted: false, rejected: true, reason: 'missing_name' };
+
+  const sessionHash = raw?.sessionKey
+    ? globalDb.hashContributor(raw.sessionKey, 'fishit_session_v1') : null;
+  if (sessionHash && !_checkObservationRateLimit(sessionHash)) {
+    return { accepted: false, rejected: true, reason: 'rate_limited' };
+  }
+
+  const userHash = globalDb.hashContributor(raw.userId || raw.userIdHash);
+  const now = raw?.observedAt || new Date().toISOString();
+  const nameValidation = nameOnlyCatalog.validateFishName(baseName);
+
+  const observationId = globalDb.insertObservation({
+    anonymized_user_hash: userHash,
+    session_key_hash: sessionHash,
+    game_id: raw.gameId || null,
+    place_id: raw.placeId || null,
+    item_id: null,
+    raw_name: raw.rawText || raw.rawName || baseName,
+    parsed_base_name: baseName,
+    mutation: raw.mutation || parsed.mutation || null,
+    weight_kg: raw.weightKg ?? parsed.weightKg ?? null,
+    rarity: raw.rarity || parsed.rarityCandidate || null,
+    source_payload_type: 'catch_notification',
+    observed_at: now,
+  });
+
+  const speciesHit = globalDb.findSpeciesByAliases([baseName]);
+  const speciesId = globalDb.upsertSpecies({
+    canonical_name: baseName,
+    display_name: raw.displayName || baseName,
+    rarity: raw.rarity || parsed.rarityCandidate || speciesHit?.species?.rarity || null,
+    image_url: nameValidation.imageUrl || speciesHit?.species?.image_url || null,
+    cached_image_url: nameValidation.imageUrl || speciesHit?.species?.cached_image_url || null,
+    image_source: nameValidation.imageUrl ? 'name_catalog' : (speciesHit?.species?.image_source || null),
+    quiz_bot_asset_id: nameValidation.imageAssetId || speciesHit?.species?.quiz_bot_asset_id || null,
+    source: 'live_catch_notification',
+    verification_status: globalDb.VERIFICATION.LIVE_OBSERVED,
+  });
+
+  return {
+    accepted: true,
+    rejected: false,
+    pending: true,
+    decision: 'pending',
+    reason: 'catch_notification_name_level',
+    observationId,
+    speciesId,
+    baseName,
+    itemIdMappings: 'pending_until_proven',
+    evidenceSource: 'live_catch_notification',
+    imageStatus: nameValidation.imageUrl || nameValidation.imageAssetId ? 'catalog_asset' : 'missing',
+  };
+}
+
+function buildGlobalSpeciesEvidenceProof(baseFishName) {
+  if (!baseFishName) return null;
+  const hit = globalDb.findSpeciesByAliases([baseFishName]);
+  const species = hit?.species || null;
+  const db = globalDb.openDb();
+  const obs = db.prepare(`
+    SELECT id, parsed_base_name, item_id, weight_kg, source_payload_type, observed_at
+    FROM fishit_global_observations
+    WHERE parsed_base_name = ? OR raw_name LIKE ?
+    ORDER BY observed_at DESC LIMIT 10
+  `).all(baseFishName, `%${baseFishName}%`);
+  const mapping = species ? db.prepare(`
+    SELECT item_id, canonical_name, confidence, evidence_count
+    FROM fishit_global_item_mappings
+    WHERE species_id = ? OR canonical_name = ?
+  `).all(species.id, baseFishName) : [];
+  return {
+    speciesName: baseFishName,
+    species,
+    observations: obs,
+    itemIdMappings: mapping,
+    hasItemIdMapping: mapping.length > 0,
+    source: species?.source || 'live_catch_notification',
   };
 }
 
@@ -833,6 +928,7 @@ module.exports = {
   resolveRarityForItem,
   resolveCatalogMetaForItemId,
   recordObservation,
+  recordCatchNotification,
   importQuizBotSeed,
   importDengFishItBotSeed,
   resetGlobalCatalog,
@@ -849,6 +945,7 @@ module.exports = {
   buildDengFishItBotCatalogProof,
   buildGlobalLearningProof,
   buildGlobalDbUiProof,
+  buildGlobalSpeciesEvidenceProof,
   approveItemMapping,
   _reset,
 };

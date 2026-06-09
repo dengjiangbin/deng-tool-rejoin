@@ -1,6 +1,6 @@
 'use strict';
 
-const { describe, test, beforeEach } = require('node:test');
+const { describe, test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
@@ -31,23 +31,24 @@ const {
 } = require('../src/fishitTrackerRoutes');
 const rarityColorMap = require('../src/fishitRarityColorMap');
 
+const Z16_BUILD = 'BLOCKER10Z16_LIVE_CATCH_GLOBAL_EVIDENCE_BINDING_FIX_2026_06_09';
 const Z15_BUILD = 'BLOCKER10Z15_AMOUNT_MOVED_TO_MIDDLE_SECTION_2026_06_08';
-const Z14_BUILD = Z15_BUILD;
-const Z13_BUILD = Z14_BUILD;
-const Z12_BUILD = Z13_BUILD;
-const Z11_BUILD = Z13_BUILD;
-const Z10_BUILD = Z13_BUILD;
-const Z9_BUILD = Z13_BUILD;
-const Z8_BUILD = Z11_BUILD;
-const Z7_BUILD = Z11_BUILD;
-const Z6_BUILD = Z11_BUILD;
-const Z5_BUILD = Z11_BUILD;
-const Z4_BUILD = Z11_BUILD;
-const Z3_BUILD = Z11_BUILD;
-const Z_BUILD = Z11_BUILD;
-const Y_BUILD = Z11_BUILD;
-const X_BUILD = Z11_BUILD;
-const W_BUILD = Z11_BUILD;
+const Z14_BUILD = Z16_BUILD;
+const Z13_BUILD = Z16_BUILD;
+const Z12_BUILD = Z16_BUILD;
+const Z11_BUILD = Z16_BUILD;
+const Z10_BUILD = Z16_BUILD;
+const Z9_BUILD = Z16_BUILD;
+const Z8_BUILD = Z16_BUILD;
+const Z7_BUILD = Z16_BUILD;
+const Z6_BUILD = Z16_BUILD;
+const Z5_BUILD = Z16_BUILD;
+const Z4_BUILD = Z16_BUILD;
+const Z3_BUILD = Z16_BUILD;
+const Z_BUILD = Z16_BUILD;
+const Y_BUILD = Z16_BUILD;
+const X_BUILD = Z16_BUILD;
+const W_BUILD = Z16_BUILD;
 let tmpDb;
 
 function setupTestDb() {
@@ -1669,7 +1670,7 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   test('GET /tracker returns HTTP 200 with no session data', async () => {
     const res = await request(makeApp()).get('/tracker').expect(200);
     assert.match(res.text, /Fish It Live Inventory Tracker/i);
-    assert.match(res.text, /BLOCKER10Z15/);
+    assert.match(res.text, /BLOCKER10Z16/);
   });
 
   test('GET /tracker?debug=global returns HTTP 200', async () => {
@@ -2477,7 +2478,7 @@ describe('BLOCKER10Z14 — public minimal card hide fake 285', { concurrency: 1 
     assert.doesNotMatch(html, /Unknown Fish #267/i);
   });
 
-  test('15: /tracker page includes Z15 build marker', async () => {
+  test('15: /tracker page includes current build marker', async () => {
     const express = require('express');
     const request = require('supertest');
     const trackerRouter = require('../src/fishitTrackerRoutes');
@@ -2486,7 +2487,7 @@ describe('BLOCKER10Z14 — public minimal card hide fake 285', { concurrency: 1 
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
     const res = await request(app).get('/tracker').expect(200);
-    assert.match(res.text, /BLOCKER10Z15_AMOUNT_MOVED_TO_MIDDLE_SECTION_2026_06_08/);
+    assert.match(res.text, /BLOCKER10Z16_LIVE_CATCH_GLOBAL_EVIDENCE_BINDING_FIX_2026_06_09/);
   });
 });
 
@@ -2520,9 +2521,9 @@ describe('BLOCKER10Z15 — amount moved to middle section', { concurrency: 1 }, 
 
   test('1: build marker is BLOCKER10Z15', () => {
     assert.equal(BLOCKER10Z15_BUILD, Z15_BUILD);
-    assert.equal(PUBLIC_API_BUILD, Z15_BUILD);
+    assert.equal(PUBLIC_API_BUILD, Z16_BUILD);
     const locals = buildTrackerPageLocals({});
-    assert.equal(locals.renderBuild, Z15_BUILD);
+    assert.equal(locals.renderBuild, Z16_BUILD);
   });
 
   test('2: public HTML shows image name amount only', () => {
@@ -2610,7 +2611,7 @@ describe('BLOCKER10Z15 — amount moved to middle section', { concurrency: 1 }, 
     assert.doesNotMatch(html, /Unknown Fish #285/i);
   });
 
-  test('10: /tracker page includes Z15 build marker', async () => {
+  test('10: /tracker page keeps Z15 amount row layout', async () => {
     const express = require('express');
     const request = require('supertest');
     const trackerRouter = require('../src/fishitTrackerRoutes');
@@ -2619,6 +2620,230 @@ describe('BLOCKER10Z15 — amount moved to middle section', { concurrency: 1 }, 
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
     const res = await request(app).get('/tracker').expect(200);
-    assert.match(res.text, /BLOCKER10Z15_AMOUNT_MOVED_TO_MIDDLE_SECTION_2026_06_08/);
+    assert.match(res.text, /fish-card__amountRow/);
+  });
+});
+
+describe('BLOCKER10Z16 — live catch global evidence binding', { concurrency: 1 }, () => {
+  const catchDelta = require('../src/fishitCatalogCatchDelta');
+  const globalFishCatalog = require('../src/fishitGlobalFishItemCatalog');
+  const globalCatalogService = require('../src/fishitGlobalCatalogService');
+  const catalogStore = require('../src/fishitCatalogStore');
+  const learnedFishCatalog = require('../src/fishitLearnedFishCatalog');
+  const { ingestLearnedFishEntry } = require('../src/fishitTrackerRoutes');
+  const Z16_BUILD = 'BLOCKER10Z16_LIVE_CATCH_GLOBAL_EVIDENCE_BINDING_FIX_2026_06_09';
+
+  beforeEach(() => {
+    globalFishCatalog._reset();
+    globalCatalogService._reset();
+    learnedFishCatalog._reset();
+    process.env.FISHIT_TEST_FIXTURE = '1';
+  });
+
+  afterEach(() => {
+    delete process.env.FISHIT_TEST_FIXTURE;
+  });
+
+  test('1: Elshark Gran Maja catch stored as pending observation (bait-only delta)', () => {
+    const discovery = catchDelta.processCatchDelta({
+      pendingCatch: {
+        rawText: 'Elshark Gran Maja (514.28K kg)',
+        fishName: 'Elshark Gran Maja',
+        source: 'catch_notification',
+        detectedAt: new Date().toISOString(),
+      },
+      previousItemCounts: { 10: 0 },
+      currentItems: [{ name: 'Topwater Bait', itemId: '10', amount: 1, category: 'bait' }],
+      ingestLearned: ingestLearnedFishEntry,
+      mainCatalogLookup: (id) => catalogStore.lookupById(id),
+      globalContext: {
+        enabled: true,
+        userId: 11033782953,
+        evidenceSourceMode: 'live_roblox',
+        sessionKey: 'denghub2',
+      },
+    });
+    assert.equal(discovery.liveCatchAccepted, true);
+    assert.equal(discovery.lastCatchParsed.baseFishName, 'Elshark Gran Maja');
+    assert.ok(discovery.ignoredDeltaProof.some((d) => d.itemId === '10' && d.ignoredReason === 'known_non_fish'));
+    assert.ok(discovery.globalEvidence);
+    assert.equal(discovery.globalEvidence.pending, true);
+    assert.equal(discovery.globalEvidence.decision, 'pending');
+    assert.ok(discovery.globalEvidence.observationId);
+    const stats = globalFishCatalog.getGlobalEvidenceStats(discovery);
+    assert.ok(stats.globalEvidenceAccepted >= 1 || stats.globalEvidencePending >= 1);
+  });
+
+  test('2: global evidence counters not both zero after name-only submit', () => {
+    const result = globalFishCatalog.submitNameOnlyEvidence({
+      fishNameCandidate: 'Elshark Gran Maja',
+      sourceText: 'Elshark Gran Maja (514.28K kg)',
+      source: 'catch_notification',
+      evidenceSourceMode: 'live_roblox',
+      userId: 1,
+      sessionKey: 'test',
+    });
+    assert.equal(result.accepted, true);
+    assert.equal(result.pending, true);
+    const stats = globalFishCatalog.getGlobalEvidenceStats({ globalEvidence: result });
+    assert.ok(stats.globalEvidenceAccepted >= 1 || stats.globalEvidencePending >= 1);
+    assert.equal(stats.globalEvidenceRejected, 0);
+  });
+
+  test('3: no fake itemId mapping from catch text alone', () => {
+    globalFishCatalog.submitNameOnlyEvidence({
+      fishNameCandidate: 'Elshark Gran Maja',
+      source: 'catch_notification',
+      evidenceSourceMode: 'live_roblox',
+      userId: 2,
+      sessionKey: 'test2',
+    });
+    assert.equal(globalFishCatalog.lookupById('10'), null);
+    const elsharkMapping = globalFishCatalog.getAllMappings().find(
+      (m) => m.baseFishName === 'Elshark Gran Maja' || m.fishName === 'Elshark Gran Maja',
+    );
+    assert.equal(elsharkMapping, undefined);
+  });
+
+  test('4: catch remains pending when no safe row binding exists', () => {
+    const proof = catchDelta.attemptCatchSnapshotBinding({
+      pendingCatch: {
+        fishName: 'Elshark Gran Maja',
+        source: 'catch_notification',
+        detectedAt: new Date().toISOString(),
+      },
+      previousItems: [{ itemId: '156', amount: 1, category: 'fish' }],
+      currentItems: [{ itemId: '156', amount: 1, category: 'fish' }],
+      mainCatalogLookup: (id) => catalogStore.lookupById(id),
+      ingestLearned: ingestLearnedFishEntry,
+      globalContext: { enabled: true, userId: 1, evidenceSourceMode: 'live_roblox' },
+    });
+    assert.equal(proof.bound, false);
+    assert.match(proof.reason, /waiting for inventory row binding/i);
+  });
+
+  test('5: new UUID after catch can bind catch name to row safely', () => {
+    const discovery = { learnedMappings: [] };
+    const proof = catchDelta.attemptCatchSnapshotBinding({
+      pendingCatch: {
+        fishName: 'Elshark Gran Maja',
+        baseFishName: 'Elshark Gran Maja',
+        source: 'catch_notification',
+        detectedAt: new Date().toISOString(),
+      },
+      previousItems: [{ itemId: '156', amount: 1, category: 'fish', replionUuid: 'uuid-old' }],
+      currentItems: [
+        { itemId: '156', amount: 1, category: 'fish', replionUuid: 'uuid-old' },
+        { itemId: '999', amount: 1, category: 'fish', replionUuid: 'uuid-new-elshark' },
+      ],
+      mainCatalogLookup: () => null,
+      ingestLearned: ingestLearnedFishEntry,
+      globalContext: { enabled: true, userId: 1, evidenceSourceMode: 'live_roblox', sessionKey: 'bindtest' },
+      existingDiscovery: discovery,
+    });
+    assert.equal(proof.bound, true);
+    assert.equal(proof.itemId, '999');
+    assert.equal(proof.replionUuid, 'uuid-new-elshark');
+  });
+
+  test('6: global species entry can exist without itemId mapping', () => {
+    const species = globalCatalogService.recordCatchNotification({
+      baseFishName: 'Elshark Gran Maja',
+      rawText: 'Elshark Gran Maja (514.28K kg)',
+      userId: 3,
+      sessionKey: 'species-test',
+    });
+    assert.equal(species.accepted, true);
+    assert.equal(species.pending, true);
+    assert.ok(species.speciesId);
+    assert.equal(species.itemIdMappings, 'pending_until_proven');
+    const proof = globalCatalogService.buildGlobalSpeciesEvidenceProof('Elshark Gran Maja');
+    assert.ok(proof.species);
+    assert.equal(proof.hasItemIdMapping, false);
+  });
+
+  test('7: POST response includes liveCatchEvidence fields', async () => {
+    const express = require('express');
+    const request = require('supertest');
+    const trackerRouter = require('../src/fishitTrackerRoutes');
+    const app = express();
+    app.use(express.json());
+    app.use(trackerRouter);
+    const res = await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'Z16CatchUser',
+        userId: 33001,
+        isOnline: true,
+        clientOrigin: 'roblox_tracker',
+        evidenceSourceMode: 'live_roblox',
+        previousItemCounts: { 10: 0 },
+        pendingCatchName: {
+          rawText: 'Elshark Gran Maja (514.28K kg)',
+          fishName: 'Elshark Gran Maja',
+          source: 'catch_notification',
+          detectedAt: new Date().toISOString(),
+        },
+        items: [{ itemId: '10', amount: 1, category: 'bait', name: 'Topwater Bait' }],
+      });
+    assert.equal(res.status, 200);
+    assert.ok(res.body.liveCatchEvidence);
+    assert.equal(res.body.liveCatchEvidence.liveCatchAccepted, true);
+    assert.ok(res.body.liveCatchEvidence.pending || res.body.liveCatchEvidence.decision === 'pending');
+  });
+
+  test('8: debug=global exposes catch binding proof', async () => {
+    const express = require('express');
+    const request = require('supertest');
+    const trackerRouter = require('../src/fishitTrackerRoutes');
+    const app = express();
+    app.use(express.json());
+    app.use(trackerRouter);
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send({
+        username: 'Z16DebugUser',
+        userId: 33002,
+        isOnline: true,
+        clientOrigin: 'roblox_tracker',
+        previousItemCounts: { 10: 0 },
+        pendingCatchName: {
+          rawText: 'Elshark Gran Maja (514.28K kg)',
+          source: 'catch_notification',
+          detectedAt: new Date().toISOString(),
+        },
+        items: [{ itemId: '10', amount: 1, category: 'bait' }],
+      });
+    const dbg = await request(app).get('/api/fishit-tracker/debug/Z16DebugUser?debug=global');
+    assert.equal(dbg.status, 200);
+    assert.equal(dbg.body.lastCatchParsed.baseFishName, 'Elshark Gran Maja');
+    assert.ok(dbg.body.catchLearningProof);
+    assert.ok(Array.isArray(dbg.body.nameCatalogDiscovery?.ignoredDeltaProof)
+      || dbg.body.catchLearningProof.lastDiscovery?.ignoredDeltaProof);
+  });
+
+  test('9: normal /tracker has no debug proof', async () => {
+    const express = require('express');
+    const request = require('supertest');
+    const trackerRouter = require('../src/fishitTrackerRoutes');
+    const app = express();
+    app.set('view engine', 'ejs');
+    app.set('views', path.join(__dirname, '..', 'views'));
+    app.use(trackerRouter);
+    const res = await request(app).get('/tracker').expect(200);
+    assert.doesNotMatch(res.text, /ignoredDeltaProof/i);
+    assert.doesNotMatch(res.text, /liveCatchAccepted/i);
+  });
+
+  test('10: build marker is BLOCKER10Z16', () => {
+    const { BLOCKER10Z16_BUILD, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
+    assert.equal(BLOCKER10Z16_BUILD, Z16_BUILD);
+    assert.equal(PUBLIC_API_BUILD, Z16_BUILD);
+  });
+
+  test('11: tracker.lua has Z16 boot marker', () => {
+    const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    assert.match(lua, /BLOCKER10Z16_LIVE_CATCH_GLOBAL_EVIDENCE_BINDING_FIX_2026_06_09/);
+    assert.match(lua, /LIVE_GLOBAL_EVIDENCE result=/);
   });
 });

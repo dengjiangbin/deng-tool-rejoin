@@ -45,7 +45,7 @@ const protectedFishNames = require('./fishitProtectedFishNames');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
 const globalCatalogService = require('./fishitGlobalCatalogService');
 const globalDb = require('./fishitGlobalDb');
@@ -137,8 +137,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10Z15_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10Z15_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10Z16_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10Z16_BUILD;
 
 const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
@@ -1607,6 +1607,8 @@ function buildReplionCountProof(countParity) {
 function buildCatchLearningProof(sessionData, nameCatalogDiscovery) {
   const pending = sessionData?.lastPendingCatchName || sessionData?.pendingCatchName || null;
   const discovery = nameCatalogDiscovery || sessionData?.nameCatalogDiscovery || null;
+  const catchName = discovery?.lastCatchParsed?.baseFishName
+    || discovery?.lastFishNameCandidate || pending?.fishName || null;
   return {
     catchEvidenceSupported: true,
     pendingCatch: pending ? {
@@ -1618,15 +1620,25 @@ function buildCatchLearningProof(sessionData, nameCatalogDiscovery) {
     lastDiscovery: discovery ? {
       learnedMappings: (discovery.learnedMappings || []).slice(0, 5).map((m) => ({
         itemId: m.itemId,
-        name: m.name || m.baseFishName,
+        name: m.name || m.baseFishName || m.learnedName,
         source: m.source,
       })),
       rejectedEvents: (discovery.rejectedEvents || []).slice(0, 3).map((e) => ({
         reason: e.reason,
         itemId: e.itemId,
       })),
+      liveCatchAccepted: discovery.liveCatchAccepted ?? null,
+      liveCatchAcceptReason: discovery.liveCatchAcceptReason ?? null,
+      ignoredDeltaProof: discovery.ignoredDeltaProof || [],
+      catchToSnapshotBindingProof: discovery.catchToSnapshotBindingProof || null,
+      nextExpectedAction: discovery.nextExpectedAction ?? null,
     } : null,
-    globalDbLearning: 'Catch events and Replion snapshots feed Global DB via recordObservation with confidence rules.',
+    pendingCatchObservations: discovery?.pendingCatchObservations || [],
+    liveGlobalEvidenceProof: discovery?.liveGlobalEvidenceProof
+      || discovery?.globalEvidence || null,
+    globalSpeciesEvidence: catchName
+      ? globalCatalogService.buildGlobalSpeciesEvidenceProof(catchName) : null,
+    globalDbLearning: 'Catch notifications store name-level evidence; row binding promotes public cards.',
   };
 }
 
@@ -2661,7 +2673,44 @@ function handleUpdateBackpack(req, res) {
     // ── Inventory snapshot ────────────────────────────────────────
     let rawItems = normaliseInventoryItems(body);
     const learnedIngest = ingestLearnedFishCatalogFromBody(body);
-    const nameCatalogDiscovery = runCatchDeltaOnUpload(body, rawItems, existing, key);
+    const evidenceSourceMode = liveCatchProof.resolveEvidenceSourceMode(body);
+    const globalContext = {
+      enabled: true,
+      userId: cleanUserId,
+      userIdHash: globalFishCatalog.hashContributorId(cleanUserId),
+      gameId: body.gameId || body.game_id || null,
+      placeId: body.placeId || body.place_id || null,
+      gameVersion: body.gameVersion || body.game_version || null,
+      evidenceSourceMode,
+      sessionKey: key,
+    };
+    let nameCatalogDiscovery = runCatchDeltaOnUpload(body, rawItems, existing, key);
+    const pendingCatchPayload = body.pendingCatchName || body.pendingCatch;
+    if (pendingCatchPayload) {
+      const bindingProof = catchDelta.attemptCatchSnapshotBinding({
+        pendingCatch: pendingCatchPayload,
+        previousItems: existing?.items || [],
+        currentItems: rawItems,
+        mainCatalogLookup: (id) => catalogStore.lookupById(id),
+        ingestLearned: ingestLearnedFishEntry,
+        globalContext,
+        existingDiscovery: nameCatalogDiscovery,
+      });
+      if (nameCatalogDiscovery) {
+        if (!nameCatalogDiscovery.catchToSnapshotBindingProof) {
+          nameCatalogDiscovery.catchToSnapshotBindingProof = bindingProof;
+        }
+        if (!nameCatalogDiscovery.nextExpectedAction && bindingProof.nextExpectedAction) {
+          nameCatalogDiscovery.nextExpectedAction = bindingProof.nextExpectedAction;
+        }
+      } else if (bindingProof.attempted) {
+        nameCatalogDiscovery = {
+          catchToSnapshotBindingProof: bindingProof,
+          lastCatchParsed: catchDelta.sanitisePendingCatch(pendingCatchPayload),
+          nextExpectedAction: bindingProof.nextExpectedAction,
+        };
+      }
+    }
     catalogStore.learnFromTrackerItems(rawItems);
     let cleanItems = mergeItemsNoDowngradeFromCatalog(rawItems);
     if (existing && existing.items && cleanItems.length) {
@@ -2808,7 +2857,7 @@ function handleUpdateBackpack(req, res) {
     console.log(
       `[fishit-tracker] POST ok=true user=${cleanUser} sessionKey=${key}` +
       ` accepted=${acceptedCount} lastSeenAt=${now} lastInventoryAt=${now} online=true` +
-      (nameCatalogDiscovery && nameCatalogDiscovery.learnedMappings.length
+      (nameCatalogDiscovery && nameCatalogDiscovery.learnedMappings?.length
         ? ` catchDeltaLearned=${nameCatalogDiscovery.learnedMappings.length}` : '')
     );
 
@@ -2820,6 +2869,7 @@ function handleUpdateBackpack(req, res) {
       lastSeenAt: now,
       online: true,
       nameCatalogDiscovery: nameCatalogDiscovery || undefined,
+      liveCatchEvidence: catchDelta.buildLiveCatchEvidenceResponse(nameCatalogDiscovery) || undefined,
     });
 }
 
@@ -3239,6 +3289,7 @@ module.exports.buildAmbiguousContainerProof = buildAmbiguousContainerProof;
 module.exports.AMBIGUOUS_CONTAINER_IDS = AMBIGUOUS_CONTAINER_IDS;
 module.exports.resolveAmbiguousContainerDisplay = resolveAmbiguousContainerDisplay;
 module.exports.trustedCatalogMetaForMetadataId = trustedCatalogMetaForMetadataId;
+module.exports.BLOCKER10Z16_BUILD = BLOCKER10Z16_BUILD;
 module.exports.BLOCKER10Z15_BUILD = BLOCKER10Z15_BUILD;
 module.exports.BLOCKER10Z14_BUILD = BLOCKER10Z14_BUILD;
 module.exports.BLOCKER10Z13_BUILD = BLOCKER10Z13_BUILD;

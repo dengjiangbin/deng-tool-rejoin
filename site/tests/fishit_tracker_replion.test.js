@@ -3912,8 +3912,11 @@ describe('BLOCKER10O full catalog safe learning', () => {
       currentItems: [{ name: 'Topwater Bait', itemId: '10', amount: 1, category: 'bait' }],
       ingestLearned: ingestLearnedFishEntry,
       mainCatalogLookup: (id) => catalogStore.lookupById(id),
+      globalContext: { enabled: true, userId: 1, evidenceSourceMode: 'live_roblox' },
     });
-    assert.ok(bait.rejectedEvents.some((e) => e.reason === 'known_non_fish'));
+    assert.ok(bait.ignoredDeltaProof.some((d) => d.itemId === '10' && d.ignoredReason === 'known_non_fish'));
+    assert.equal(bait.liveCatchAccepted, true);
+    assert.notEqual(bait.globalEvidence?.decision, 'rejected');
   });
 
   test('rarity label ingest is blocked and persisted as rejected mapping', () => {
@@ -3991,10 +3994,10 @@ describe('BLOCKER10O full catalog safe learning', () => {
 
     const get = await request(app).get('/api/fishit-tracker/get-backpack/B10OLabel').expect(200);
     assert.equal(get.body.fishCounts.label, 'Fish');
-    assert.equal(get.body.publicApiBuild, 'BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07');
+    assert.equal(get.body.publicApiBuild, PUBLIC_API_BUILD);
 
-    const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.ok(tpl.includes('BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07'));
+    const page = await request(app).get('/tracker').expect(200);
+    assert.match(page.text, new RegExp(PUBLIC_API_BUILD.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.ok(!tpl.match(/Items:\s*<strong>/));
   });
 });
