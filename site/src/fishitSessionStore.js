@@ -96,6 +96,7 @@ function sanitiseSession(key, data) {
         learnedMappings: (data.nameCatalogDiscovery.learnedMappings || []).slice(0, 20),
       }
       : null,
+    userSnapshotRecovery: data.userSnapshotRecovery || null,
     restoredFromDisk: false,
   };
 }

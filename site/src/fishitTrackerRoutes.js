@@ -45,7 +45,8 @@ const protectedFishNames = require('./fishitProtectedFishNames');
 const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
-const { BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const snapshotRecovery = require('./fishitSnapshotRecovery');
+const { BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
 const globalCatalogService = require('./fishitGlobalCatalogService');
 const globalDb = require('./fishitGlobalDb');
@@ -137,8 +138,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10Z16_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10Z16_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10Z17_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10Z17_BUILD;
 
 const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
@@ -2138,7 +2139,7 @@ async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
     hiddenNonFishInstances: sumItemAmounts(hidden),
     hiddenUnresolvedFishRows: hiddenPublicRows.ambiguousContainerUnresolved,
   };
-  return {
+  const baseResult = {
     fishItems,
     publicItems: fishItems,
     publicFishItems: fishItems,
@@ -2154,6 +2155,12 @@ async function buildPublicFishFields(enrichedFlat, baseUrl, options = {}) {
     rarityColorProof: buildRarityColorProof(fishItems, 25),
     globalDbUiProof: globalCatalogService.buildGlobalDbUiProof(fishItems),
   };
+  const sessionKey = options.sessionKey
+    || (sessionData?.username ? String(sessionData.username).toLowerCase() : null);
+  if (sessionKey) {
+    return snapshotRecovery.mergeRecoveryIntoPublicFish(baseResult, sessionKey, sessionData);
+  }
+  return baseResult;
 }
 
 /** Legacy `counts` shape for public UI — fish metrics only (never mixed type totals). */
@@ -2847,6 +2854,19 @@ function handleUpdateBackpack(req, res) {
     }
     if (nameCatalogDiscovery) {
       liveTrackDB[key].nameCatalogDiscovery = nameCatalogDiscovery;
+      if (nameCatalogDiscovery.globalEvidence?.accepted
+          && nameCatalogDiscovery.lastCatchParsed?.baseFishName) {
+        snapshotRecovery.registerLiveCatchSpeciesEvidence(
+          key,
+          nameCatalogDiscovery.lastCatchParsed.baseFishName,
+          nameCatalogDiscovery.globalEvidence.observationId
+            || nameCatalogDiscovery.liveCatchPendingObservationId,
+        );
+      }
+    }
+    const recoveryMeta = snapshotRecovery.getSessionRecoveryMeta(key, existing);
+    if (recoveryMeta) {
+      liveTrackDB[key].userSnapshotRecovery = recoveryMeta;
     }
     liveTrackDB[key].lastItemCounts = catchDelta.buildItemCountsFromItems(rawItems);
     if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
@@ -3222,6 +3242,11 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
       enrichedAll,
       publicFishDbg.fishItems,
     ),
+    userSnapshotRecoveryProof: snapshotRecovery.buildUserSnapshotRecoveryProof(
+      key,
+      data,
+      publicFishDbg.fishItems,
+    ),
     manualVerifiedCatalogCount: manualVerifiedCatalog.getCount(),
     knownRarityCount: rarityStats.knownCount,
     publicFishContainsGiantSquid: publicFishDbg.fishItems.some(
@@ -3289,6 +3314,7 @@ module.exports.buildAmbiguousContainerProof = buildAmbiguousContainerProof;
 module.exports.AMBIGUOUS_CONTAINER_IDS = AMBIGUOUS_CONTAINER_IDS;
 module.exports.resolveAmbiguousContainerDisplay = resolveAmbiguousContainerDisplay;
 module.exports.trustedCatalogMetaForMetadataId = trustedCatalogMetaForMetadataId;
+module.exports.BLOCKER10Z17_BUILD = BLOCKER10Z17_BUILD;
 module.exports.BLOCKER10Z16_BUILD = BLOCKER10Z16_BUILD;
 module.exports.BLOCKER10Z15_BUILD = BLOCKER10Z15_BUILD;
 module.exports.BLOCKER10Z14_BUILD = BLOCKER10Z14_BUILD;

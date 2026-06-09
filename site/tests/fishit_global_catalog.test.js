@@ -31,7 +31,8 @@ const {
 } = require('../src/fishitTrackerRoutes');
 const rarityColorMap = require('../src/fishitRarityColorMap');
 
-const Z16_BUILD = 'BLOCKER10Z16_LIVE_CATCH_GLOBAL_EVIDENCE_BINDING_FIX_2026_06_09';
+const Z17_BUILD = 'BLOCKER10Z17_SNAPSHOT_RECOVERY_AND_GLOBAL_COMPLETION_2026_06_09';
+const Z16_BUILD = Z17_BUILD;
 const Z15_BUILD = 'BLOCKER10Z15_AMOUNT_MOVED_TO_MIDDLE_SECTION_2026_06_08';
 const Z14_BUILD = Z16_BUILD;
 const Z13_BUILD = Z16_BUILD;
@@ -2487,7 +2488,7 @@ describe('BLOCKER10Z14 — public minimal card hide fake 285', { concurrency: 1 
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
     const res = await request(app).get('/tracker').expect(200);
-    assert.match(res.text, /BLOCKER10Z16_LIVE_CATCH_GLOBAL_EVIDENCE_BINDING_FIX_2026_06_09/);
+    assert.match(res.text, /BLOCKER10Z17_SNAPSHOT_RECOVERY_AND_GLOBAL_COMPLETION_2026_06_09/);
   });
 });
 
@@ -2631,7 +2632,7 @@ describe('BLOCKER10Z16 — live catch global evidence binding', { concurrency: 1
   const catalogStore = require('../src/fishitCatalogStore');
   const learnedFishCatalog = require('../src/fishitLearnedFishCatalog');
   const { ingestLearnedFishEntry } = require('../src/fishitTrackerRoutes');
-  const Z16_BUILD = 'BLOCKER10Z16_LIVE_CATCH_GLOBAL_EVIDENCE_BINDING_FIX_2026_06_09';
+  const Z16_BUILD = Z17_BUILD;
 
   beforeEach(() => {
     globalFishCatalog._reset();
@@ -2835,15 +2836,263 @@ describe('BLOCKER10Z16 — live catch global evidence binding', { concurrency: 1
     assert.doesNotMatch(res.text, /liveCatchAccepted/i);
   });
 
-  test('10: build marker is BLOCKER10Z16', () => {
-    const { BLOCKER10Z16_BUILD, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
-    assert.equal(BLOCKER10Z16_BUILD, Z16_BUILD);
-    assert.equal(PUBLIC_API_BUILD, Z16_BUILD);
+  test('10: build marker is BLOCKER10Z17', () => {
+    const { BLOCKER10Z17_BUILD, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
+    assert.equal(BLOCKER10Z17_BUILD, Z17_BUILD);
+    assert.equal(PUBLIC_API_BUILD, Z17_BUILD);
   });
 
-  test('11: tracker.lua has Z16 boot marker', () => {
+  test('11: tracker.lua has Z17 boot marker', () => {
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.match(lua, /BLOCKER10Z16_LIVE_CATCH_GLOBAL_EVIDENCE_BINDING_FIX_2026_06_09/);
+    assert.match(lua, /BLOCKER10Z17_SNAPSHOT_RECOVERY_AND_GLOBAL_COMPLETION_2026_06_09/);
     assert.match(lua, /LIVE_GLOBAL_EVIDENCE result=/);
+  });
+});
+
+describe('BLOCKER10Z17 — snapshot recovery and global completion', { concurrency: 1 }, () => {
+  const snapshotRecovery = require('../src/fishitSnapshotRecovery');
+  const catchDelta = require('../src/fishitCatalogCatchDelta');
+  const globalFishCatalog = require('../src/fishitGlobalFishItemCatalog');
+  const globalCatalogService = require('../src/fishitGlobalCatalogService');
+  const catalogStore = require('../src/fishitCatalogStore');
+  const { buildPublicFishFields, mergeItemsNoDowngradeFromCatalog } = require('../src/fishitTrackerRoutes');
+
+  beforeEach(() => {
+    setupTestDb();
+    snapshotRecovery._resetForTests();
+    globalFishCatalog._reset();
+    globalCatalogService._reset();
+    process.env.FISHIT_TEST_FIXTURE = '1';
+  });
+
+  afterEach(() => {
+    delete process.env.FISHIT_TEST_FIXTURE;
+  });
+
+  test('1: snapshot recovery dry-run does not modify files', () => {
+    const proof = snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      dryRun: true,
+    });
+    assert.equal(proof.ok, true);
+    assert.equal(proof.mode, 'dry-run');
+    assert.equal(proof.backup, null);
+    assert.equal(proof.filesModified?.length || 0, 0);
+  });
+
+  test('2: snapshot recovery confirm creates backup before writing', () => {
+    const proof = snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      confirm: true,
+    });
+    assert.equal(proof.ok, true);
+    assert.equal(proof.mode, 'confirm');
+    assert.ok(proof.backup?.backupDir);
+    assert.ok(proof.filesModified?.length >= 1);
+  });
+
+  test('3: snapshot recovery creates species evidence for Elshark, Mosasaur, Sparkly Eel', () => {
+    snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      confirm: true,
+    });
+    for (const name of ['Elshark Gran Maja', 'Mosasaur Shark', 'Sparkly Eel']) {
+      const sp = globalDb.findSpeciesByAliases([name]);
+      assert.ok(sp?.species, `species missing: ${name}`);
+      assert.equal(sp.species.canonical_name, name);
+    }
+  });
+
+  test('4: snapshot recovery does not create fake itemId mappings', () => {
+    snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      confirm: true,
+    });
+    const db = globalDb.openDb();
+    const rows = db.prepare(
+      "SELECT * FROM fishit_global_item_mappings WHERE canonical_name IN ('Elshark Gran Maja','Mosasaur Shark','Sparkly Eel')",
+    ).all();
+    assert.equal(rows.length, 0);
+  });
+
+  test('5: recovery produces public counts 27 fish / 12 types', async () => {
+    snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      confirm: true,
+    });
+    const snapshotItems = [
+      { name: 'Giant Squid', baseFishName: 'Giant Squid', itemId: '156', amount: 1, category: 'fish', replionUuid: 'a1', metadataFishName: 'Giant Squid', identityVerified: true },
+      { name: 'Panther Eel', baseFishName: 'Panther Eel', itemId: '200', amount: 1, category: 'fish', replionUuid: 'a2', metadataFishName: 'Panther Eel', identityVerified: true },
+      { name: 'Parrot Fish', baseFishName: 'Parrot Fish', itemId: '201', amount: 3, category: 'fish', replionUuid: 'a3', metadataFishName: 'Parrot Fish', identityVerified: true },
+      { name: 'Viperangler Fish', baseFishName: 'Viperangler Fish', itemId: '202', amount: 1, category: 'fish', replionUuid: 'a4', metadataFishName: 'Viperangler Fish', identityVerified: true },
+      { name: 'Red Goatfish', baseFishName: 'Red Goatfish', itemId: '203', amount: 4, category: 'fish', replionUuid: 'a5', metadataFishName: 'Red Goatfish', identityVerified: true },
+      { name: 'Zebra Snakehead', baseFishName: 'Zebra Snakehead', itemId: '204', amount: 7, category: 'fish', replionUuid: 'a6', metadataFishName: 'Zebra Snakehead', identityVerified: true },
+      { name: 'Skeleton Angler Fish', baseFishName: 'Skeleton Angler Fish', itemId: '205', amount: 2, category: 'fish', replionUuid: 'a7', metadataFishName: 'Skeleton Angler Fish', identityVerified: true },
+      { name: 'Freshwater Piranha', baseFishName: 'Freshwater Piranha', itemId: '206', amount: 2, category: 'fish', replionUuid: 'a8', metadataFishName: 'Freshwater Piranha', identityVerified: true },
+      { name: 'Mossy Fishlet', baseFishName: 'Mossy Fishlet', itemId: '207', amount: 2, category: 'fish', replionUuid: 'a9', metadataFishName: 'Mossy Fishlet', identityVerified: true },
+    ];
+    const enriched = mergeItemsNoDowngradeFromCatalog(snapshotItems);
+    const sessionData = {
+      username: 'denghub2',
+      userSnapshotRecovery: snapshotRecovery.getSessionRecoveryMeta('denghub2'),
+    };
+    const pub = await buildPublicFishFields(enriched, 'http://127.0.0.1:8791', { sessionData, sessionKey: 'denghub2' });
+    assert.equal(pub.publicCounts.visibleFishInstances, 27);
+    assert.equal(pub.publicCounts.visibleFishTypes, 12);
+  });
+
+  test('6: Big Skeleton Angler Fish stacks into Skeleton Angler Fish', () => {
+    const norm = snapshotRecovery.normalizeSnapshotFishName('Big Skeleton Angler Fish');
+    assert.equal(norm.baseFishName, 'Skeleton Angler Fish');
+    assert.match(norm.mutation || '', /big/i);
+  });
+
+  test('7: Big Viperangler Fish stacks into Viperangler Fish', () => {
+    const norm = snapshotRecovery.normalizeSnapshotFishName('Big Viperangler Fish');
+    assert.equal(norm.baseFishName, 'Viperangler Fish');
+  });
+
+  test('8: Parrot Fish Albino stacks into Parrot Fish', () => {
+    const norm = snapshotRecovery.normalizeSnapshotFishName('Parrot Fish Albino');
+    assert.equal(norm.baseFishName, 'Parrot Fish');
+  });
+
+  test('9: Red Goatfish Sandy stacks into Red Goatfish', () => {
+    const norm = snapshotRecovery.normalizeSnapshotFishName('Red Goatfish Sandy');
+    assert.equal(norm.baseFishName, 'Red Goatfish');
+  });
+
+  test('10: Sparkly Eel remains Sparkly Eel', () => {
+    const norm = snapshotRecovery.normalizeSnapshotFishName('Sparkly Eel');
+    assert.equal(norm.baseFishName, 'Sparkly Eel');
+  });
+
+  test('11-13: recovered species appear in public cards', async () => {
+    snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      confirm: true,
+    });
+    const snapshotItems = [
+      { name: 'Giant Squid', baseFishName: 'Giant Squid', itemId: '156', amount: 1, category: 'fish', replionUuid: 'b1', metadataFishName: 'Giant Squid', identityVerified: true },
+    ];
+    const sessionData = {
+      username: 'denghub2',
+      userSnapshotRecovery: snapshotRecovery.getSessionRecoveryMeta('denghub2'),
+    };
+    const pub = await buildPublicFishFields(
+      mergeItemsNoDowngradeFromCatalog(snapshotItems),
+      'http://127.0.0.1:8791',
+      { sessionData, sessionKey: 'denghub2' },
+    );
+    const names = pub.fishItems.map((f) => f.baseFishName || f.name);
+    assert.ok(names.includes('Elshark Gran Maja'));
+    assert.ok(names.includes('Mosasaur Shark'));
+    const sparkly = pub.fishItems.find((f) => (f.baseFishName || f.name) === 'Sparkly Eel');
+    assert.ok(sparkly);
+    assert.equal(sparkly.amount, 2);
+  });
+
+  test('14-16: normal public cards have no rarity/mutation/debug labels', async () => {
+    snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      confirm: true,
+    });
+    const pub = await buildPublicFishFields([], 'http://127.0.0.1:8791', {
+      sessionKey: 'denghub2',
+      sessionData: { username: 'denghub2', userSnapshotRecovery: snapshotRecovery.getSessionRecoveryMeta('denghub2') },
+    });
+    for (const card of pub.fishItems) {
+      assert.equal(card.rarity, null);
+      assert.equal(card.mutation, null);
+      assert.equal(card.userSnapshotRecovery, true);
+      assert.equal(card.publicIdentityProof?.identitySource, 'user_snapshot_recovery');
+    }
+  });
+
+  test('17-19: Goliath Tiger and Unknown Fish rows hidden from snapshot public merge', async () => {
+    const items = [
+      { name: 'Unknown Fish #267', itemId: '267', amount: 1, category: 'fish', replionUuid: 'x1' },
+      { name: 'Unknown Fish #285', itemId: '285', amount: 5, category: 'fish', replionUuid: 'x2' },
+      { name: 'Goliath Tiger', itemId: '1008', amount: 1, category: 'fish', replionUuid: 'x3' },
+    ];
+    const pub = await buildPublicFishFields(mergeItemsNoDowngradeFromCatalog(items), 'http://127.0.0.1:8791', {});
+    const names = pub.fishItems.map((f) => f.name);
+    assert.ok(!names.some((n) => /Goliath Tiger/i.test(n)));
+    assert.ok(!names.some((n) => /Unknown Fish #267/i.test(n)));
+    assert.ok(!names.some((n) => /Unknown Fish #285/i.test(n)));
+  });
+
+  test('20: live catch evidence creates species-level pending record before itemId binding', () => {
+    const discovery = catchDelta.processCatchDelta({
+      pendingCatch: {
+        rawText: 'Elshark Gran Maja (514.28K kg)',
+        fishName: 'Elshark Gran Maja',
+        source: 'catch_notification',
+        detectedAt: new Date().toISOString(),
+      },
+      previousItemCounts: { 10: 0 },
+      currentItems: [{ name: 'Topwater Bait', itemId: '10', amount: 1, category: 'bait' }],
+      ingestLearned: () => {},
+      mainCatalogLookup: (id) => catalogStore.lookupById(id),
+      globalContext: {
+        enabled: true,
+        userId: 11033782953,
+        evidenceSourceMode: 'live_roblox',
+        sessionKey: 'denghub2',
+      },
+    });
+    const resp = catchDelta.buildLiveCatchEvidenceResponse(discovery);
+    assert.equal(resp.pending, true);
+    assert.ok(resp.speciesEvidenceProof);
+    assert.equal(resp.itemIdMappingStatus, 'pending');
+  });
+
+  test('21: bait itemId 10 delta ignored and does not kill catch evidence', () => {
+    const discovery = catchDelta.processCatchDelta({
+      pendingCatch: {
+        rawText: 'Elshark Gran Maja (514.28K kg)',
+        fishName: 'Elshark Gran Maja',
+        source: 'catch_notification',
+      },
+      previousItemCounts: { 10: 0 },
+      currentItems: [{ name: 'Topwater Bait', itemId: '10', amount: 1, category: 'bait' }],
+      ingestLearned: () => {},
+      mainCatalogLookup: (id) => catalogStore.lookupById(id),
+      globalContext: { enabled: true, userId: 1, evidenceSourceMode: 'live_roblox', sessionKey: 't' },
+    });
+    assert.equal(discovery.liveCatchAccepted, true);
+    assert.ok(discovery.ignoredDeltaProof.some((d) => d.itemId === '10'));
+  });
+
+  test('22: build marker is BLOCKER10Z17', () => {
+    const { BLOCKER10Z17_BUILD, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
+    assert.equal(BLOCKER10Z17_BUILD, Z17_BUILD);
+    assert.equal(PUBLIC_API_BUILD, Z17_BUILD);
+  });
+
+  test('23: userSnapshotRecoveryProof includes expected debug fields', () => {
+    snapshotRecovery.applySnapshotRecovery({
+      sessionKey: 'denghub2',
+      sourceId: 'user_snapshot_2026_06_09',
+      confirm: true,
+    });
+    const proof = snapshotRecovery.buildUserSnapshotRecoveryProof('denghub2', {
+      username: 'denghub2',
+      userSnapshotRecovery: snapshotRecovery.getSessionRecoveryMeta('denghub2'),
+    }, []);
+    assert.equal(proof.active, true);
+    assert.equal(proof.source, 'user_snapshot_2026_06_09');
+    assert.ok(proof.expectedInventoryCounts['Elshark Gran Maja']);
+    assert.ok(proof.recoveredSpecies.includes('Sparkly Eel'));
+    assert.equal(proof.itemIdMappingStatus, 'pending');
+    assert.equal(proof.publicCountExplanation.expectedTrackedFish, 27);
+    assert.equal(proof.publicCountExplanation.expectedTypes, 12);
   });
 });

@@ -914,6 +914,14 @@ function unresolvedReasonForItem(itemId, learnedLookup, mainLookup) {
 function buildLiveCatchEvidenceResponse(discovery) {
   if (!discovery) return null;
   const ge = discovery.globalEvidence || null;
+  let speciesEvidenceProof = null;
+  if (ge?.baseFishName || discovery.lastCatchParsed?.baseFishName) {
+    try {
+      const baseName = ge?.baseFishName || discovery.lastCatchParsed.baseFishName;
+      speciesEvidenceProof = require('./fishitGlobalCatalogService')
+        .buildGlobalSpeciesEvidenceProof(baseName);
+    } catch (_) { /* optional */ }
+  }
   return {
     liveCatchAccepted: discovery.liveCatchAccepted === true,
     liveCatchAcceptReason: discovery.liveCatchAcceptReason || null,
@@ -927,6 +935,8 @@ function buildLiveCatchEvidenceResponse(discovery) {
     conflictId: ge?.conflictId || null,
     decision: ge?.decision || discovery.liveCatchGlobalEvidenceStatus || null,
     nextExpectedAction: discovery.nextExpectedAction || null,
+    speciesEvidenceProof,
+    itemIdMappingStatus: speciesEvidenceProof?.hasItemIdMapping ? 'bound' : 'pending',
   };
 }
 
