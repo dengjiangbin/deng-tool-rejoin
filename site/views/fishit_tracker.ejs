@@ -95,23 +95,39 @@
     .card-body { padding:0 16px 16px; display:none; }
     .tracker-card.expanded .card-body { display:block; }
 
-    .items-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; margin-top:4px; }
+    .inventory-grid,
+    .items-grid,
+    .fish-grid,
+    .stones-grid,
+    .stone-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(220px,220px));
+      gap:12px;
+      align-items:stretch;
+      justify-content:start;
+      margin-top:4px;
+    }
 
-    .item-card, .fish-card {
+    .item-card,
+    .fish-card,
+    .stone-card,
+    .inventory-card {
       --card-fg:#fff;
       --card-muted-fg:rgba(255,255,255,.88);
       --badge-bg:rgba(0,0,0,.42);
       --badge-fg:#fff;
       --image-glow:rgba(255,255,255,.1);
+      width:220px;
+      height:138px;
+      min-width:220px;
+      max-width:220px;
+      min-height:138px;
+      max-height:138px;
+      box-sizing:border-box;
       border:1px solid rgba(255,255,255,.08);
       border-radius:14px;
-      padding:12px 14px 50px;
-      min-height:108px;
-      display:grid;
-      grid-template-columns:auto 1fr;
-      grid-template-areas:"image body";
-      gap:10px 12px;
-      align-items:start;
+      padding:0;
+      display:block;
       color:var(--card-fg);
       box-shadow:0 10px 24px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.06);
       overflow:hidden;
@@ -131,17 +147,21 @@
 
     .stones-section { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
     .stones-section__title { font-size: 0.82rem; color: var(--muted); margin-bottom: 8px; font-weight: 600; letter-spacing: 0.02em; }
-    .stone-card { background: linear-gradient(135deg, #252b3a 0%, #171c28 100%); }
-    .stone-card__icon { display:flex; align-items:center; justify-content:center; min-height:56px; font-size:1.55rem; }
-    .stone-card__icon img { width:100%; height:100%; object-fit:contain; display:block; }
+    .stone-card { background:linear-gradient(135deg,#252b3a 0%,#171c28 100%); }
     .item-card:not([class*="rarity-"]), .fish-card:not([class*="rarity-"]) { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.88); --badge-bg:rgba(0,0,0,.35); --image-glow:rgba(255,255,255,.1); background:linear-gradient(135deg,#f8fafc 0%,#cbd5e1 55%,#64748b 100%); border:1px solid var(--border); }
 
-    .fish-card__imageWrap {
-      grid-area:image;
-      width:clamp(64px, 20vw, 88px);
-      height:clamp(64px, 20vw, 88px);
-      min-width:64px;
-      min-height:64px;
+    .fish-card__imageWrap,
+    .inventory-card-image-wrap,
+    .stone-card__icon {
+      position:absolute;
+      left:14px;
+      top:14px;
+      width:78px;
+      height:78px;
+      min-width:78px;
+      min-height:78px;
+      max-width:78px;
+      max-height:78px;
       display:flex;
       align-items:center;
       justify-content:center;
@@ -149,39 +169,48 @@
       background:rgba(0,0,0,.28);
       box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 4px 18px var(--image-glow);
       flex-shrink:0;
+      pointer-events:none;
     }
-    .fish-card__image, .fish-card__imageWrap img {
-      width:100%;
-      height:100%;
-      max-width:88px;
-      max-height:88px;
+    .fish-card__image,
+    .inventory-card-image,
+    .stone-card__image,
+    .fish-card img,
+    .stone-card img,
+    .fish-card__imageWrap img {
+      width:78px;
+      height:78px;
+      max-width:78px;
+      max-height:78px;
       object-fit:contain;
       border-radius:8px;
       filter:drop-shadow(0 2px 8px rgba(0,0,0,.35));
       background:transparent!important;
+      pointer-events:none;
     }
-    .fish-card__imageWrap img[data-placeholder="true"] {
+    .fish-card__imageWrap img[data-placeholder="true"],
+    .inventory-card-image[data-placeholder="true"] {
       opacity:.55;
       filter:none;
     }
-    .fish-card__body {
-      grid-area:body;
-      display:flex;
-      flex-direction:column;
-      gap:8px;
-      min-width:0;
-      justify-content:flex-start;
-      align-self:start;
-      padding-bottom:0;
-    }
-    .fish-card__name, .item-card .item-name, .fish-card .item-name {
+    .fish-card__body { display:contents; }
+    .fish-card__name,
+    .item-card .item-name,
+    .fish-card .item-name,
+    .inventory-card-name,
+    .stone-card__name {
+      position:absolute;
+      left:104px;
+      right:12px;
+      top:14px;
+      min-height:34px;
+      max-height:42px;
       color:var(--card-fg)!important;
       font-weight:650;
-      font-size:clamp(.84rem, 2.4vw, .96rem);
-      line-height:1.22;
+      font-size:.92rem;
+      line-height:1.08;
       min-width:0;
       word-break:normal;
-      overflow-wrap:break-word;
+      overflow-wrap:anywhere;
       white-space:normal;
       display:-webkit-box;
       -webkit-line-clamp:2;
@@ -305,22 +334,26 @@
     .btn-copy:hover  { background:var(--accent); border-color:var(--accent); color:#fff; }
     .btn-copy.copied { background:var(--success); border-color:var(--success); color:#fff; }
 
+    @media (max-width:640px) {
+      .inventory-grid,
+      .items-grid,
+      .fish-grid,
+      .stones-grid,
+      .stone-grid {
+        grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+      }
+    }
     @media (max-width:560px) {
       .add-row { flex-wrap:wrap; }
       .btn { width:100%; }
       .code-row { flex-direction:column; }
       .btn-copy { padding:10px; }
       .card-meta-row { gap:6px; }
-      .items-grid { grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; }
-      .fish-card__imageWrap { width:clamp(56px, 18vw, 72px); height:clamp(56px, 18vw, 72px); min-width:56px; min-height:56px; }
-    }
-    @media (min-width:900px) {
-      .items-grid { grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); }
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10ZH_EPIC_PURPLE_MYTHIC_RED_2026_06_09">
-<!-- BLOCKER10ZH_EPIC_PURPLE_MYTHIC_RED_2026_06_09 -->
+<body data-ui-marker="BLOCKER10ZI_INVENTORY_CARD_UNITY_2026_06_09">
+<!-- BLOCKER10ZI_INVENTORY_CARD_UNITY_2026_06_09 -->
 <div class="page">
   <div class="inner">
 
@@ -525,18 +558,18 @@
     const title = item.displayName || item.name || 'Enchant Stone';
     const imgSrc = itemImageSrc(item);
     const imageHtml = imgSrc
-      ? `<img class="fish-card__image stone-card__image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async" data-item-id="${escHtml(item.itemId || '')}">`
+      ? `<img class="fish-card__image inventory-card-image stone-card__image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async" data-item-id="${escHtml(item.itemId || '')}">`
       : '&#x1F48E;';
     return `
-  <div class="fish-card__imageWrap ic-head stone-card__icon">${imageHtml}</div>
+  <div class="fish-card__imageWrap ic-head stone-card__icon inventory-card-image-wrap">${imageHtml}</div>
   <div class="fish-card__body ic-title-wrap">
-    <span class="fish-card__name item-name stone-card__name" title="${escHtml(title)}">${escHtml(title)}</span>
+    <span class="fish-card__name item-name stone-card__name inventory-card-name" title="${escHtml(title)}">${escHtml(title)}</span>
   </div>
   ${amountBadgeHtml(item)}`;
   }
   function buildStoneCardElement(item) {
     const card = document.createElement('div');
-    card.className = 'item-card fish-card stone-card';
+    card.className = 'item-card fish-card stone-card inventory-card';
     card.setAttribute('data-card-key', stoneCardKey(item));
     card.setAttribute('data-kind', 'stone');
     card.innerHTML = buildStoneCardInnerHtml(item);
@@ -552,13 +585,13 @@
     container.style.display = '';
     let title = container.querySelector('.stones-section__title');
     if (!title) {
-      container.innerHTML = '<div class="stones-section__title">Enchant Stones</div><div class="items-grid stones-grid"></div>';
+      container.innerHTML = '<div class="stones-section__title">Enchant Stones</div><div class="items-grid inventory-grid stones-grid stone-grid"></div>';
       title = container.querySelector('.stones-section__title');
     }
     let grid = container.querySelector('.stones-grid');
     if (!grid) {
       grid = document.createElement('div');
-      grid.className = 'items-grid stones-grid';
+      grid.className = 'items-grid inventory-grid stones-grid stone-grid';
       container.appendChild(grid);
     }
     const nextKeys = new Set();
@@ -880,11 +913,11 @@
     const nameStyle = rarityNameStyle(item);
     const isPlaceholder = imgSrc === ITEM_IMAGES.Default;
     return `
-  <div class="fish-card__imageWrap ic-head">
-    <img class="fish-card__image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async"${isPlaceholder ? ' data-placeholder="true"' : ''} data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}">
+  <div class="fish-card__imageWrap ic-head inventory-card-image-wrap">
+    <img class="fish-card__image inventory-card-image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async"${isPlaceholder ? ' data-placeholder="true"' : ''} data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}">
   </div>
   <div class="fish-card__body ic-title-wrap">
-    <span class="fish-card__name item-name" title="${escHtml(title)}" style="${nameStyle}">${escHtml(title)}</span>
+    <span class="fish-card__name item-name inventory-card-name" title="${escHtml(title)}" style="${nameStyle}">${escHtml(title)}</span>
   </div>
   ${amountBadgeHtml(item)}`;
   }
@@ -899,7 +932,7 @@
     const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
     const nameStyle = rarityNameStyle(item);
     const card = document.createElement('div');
-    card.className = 'item-card fish-card';
+    card.className = 'item-card fish-card inventory-card';
     card.setAttribute('data-card-key', cardKey(item));
     if (item.dataSource) card.setAttribute('data-source', item.dataSource);
     if (item.dataImageSource) card.setAttribute('data-image-source', item.dataImageSource);
@@ -922,7 +955,7 @@
     const title   = cardTitle(item);
     const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
     card.setAttribute('data-card-key', cardKey(item));
-    card.className = 'item-card fish-card';
+    card.className = 'item-card fish-card inventory-card';
     if (crc) card.classList.add(crc);
     if (isShiny && rarityLow !== 'secret') card.classList.add('shiny');
     if (item.mutation) card.setAttribute('data-mutation', item.mutation);
@@ -988,7 +1021,7 @@
     }
     let grid = container.querySelector('.items-grid');
     if (!grid) {
-      container.innerHTML = '<div class="items-grid"></div>';
+      container.innerHTML = '<div class="items-grid inventory-grid fish-grid"></div>';
       grid = container.querySelector('.items-grid');
     }
     const empty = container.querySelector('.card-empty');
@@ -1018,12 +1051,12 @@
   }
   function buildItemsHtml(items) {
     if (!items || items.length === 0) return '<div class="card-empty">&#x1F9F3; Inventory is empty.</div>';
-    return `<div class="items-grid">${items.map(item => {
+    return `<div class="items-grid inventory-grid fish-grid">${items.map(item => {
       const isShiny = item.shiny === true;
       const rarity  = item.rarity && item.rarity !== 'Unknown' ? item.rarity : null;
       const crc     = cardRarityClass(rarity);
       const rarityLow = rarity ? rarity.toLowerCase() : '';
-      const cardCls = ['item-card', 'fish-card'];
+      const cardCls = ['item-card', 'fish-card', 'inventory-card'];
       if (crc) cardCls.push(crc);
       if (isShiny && rarityLow !== 'secret') cardCls.push('shiny');
       const mutAttr = item.mutation ? ` data-mutation="${escHtml(item.mutation)}"` : '';

@@ -9,7 +9,7 @@ const { formatQuantity, formatAmountLabel } = require('../src/fishitQuantityForm
 const { BLOCKER10ZG_BUILD } = require('../src/fishitTrackerBuild');
 const { PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
 
-const FINAL_BUILD = 'BLOCKER10ZH_EPIC_PURPLE_MYTHIC_RED_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZI_INVENTORY_CARD_UNITY_2026_06_09';
 const TPL_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
 
 function loadTrackerCardFns() {
@@ -98,9 +98,10 @@ describe('BLOCKER10ZE quantity format + bottom amount badges', () => {
     assert.match(tpl, /function amountBadgeHtml/);
   });
 
-  test('fish and stone cards reserve bottom padding for fixed badge', () => {
+  test('fish and stone cards use fixed height contract for badge placement', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /\.item-card, \.fish-card[\s\S]*padding:[^;]*50px/);
-    assert.match(tpl, /\.fish-card__body[\s\S]*justify-content:flex-start/);
+    assert.match(tpl, /\.fish-card[\s\S]*height:138px[\s\S]*max-height:138px/);
+    assert.match(tpl, /\.stone-card[\s\S]*height:138px/);
+    assert.match(tpl, /\.fish-card__body[\s\S]*display:contents/);
   });
 });

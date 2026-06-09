@@ -2006,10 +2006,9 @@ describe('BLOCKER10Z12 — modern fish card layout', { concurrency: 1 }, () => {
     assert.match(tpl, /fish-card__name/);
   });
 
-  test('3: fish image CSS uses larger responsive sizing not tiny icons', () => {
+  test('3: fish image CSS uses fixed 78px bounding box not tiny icons', () => {
     const tpl = fs.readFileSync(path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'), 'utf8');
-    assert.match(tpl, /clamp\(64px/);
-    assert.match(tpl, /max-width:88px/);
+    assert.match(tpl, /width:78px[\s\S]*height:78px/);
     assert.match(tpl, /object-fit:contain/);
     assert.doesNotMatch(tpl, /width:28px;height:28px/);
   });
@@ -2573,7 +2572,7 @@ describe('BLOCKER10Z15 — amount moved to middle section', { concurrency: 1 }, 
     assert.ok(amountBlock);
     assert.match(amountBlock[0], /position:absolute/);
     assert.match(amountBlock[0], /bottom:14px/);
-    assert.match(tpl, /fish-card__body[\s\S]*flex-direction:column/);
+    assert.match(tpl, /fish-card__body[\s\S]*display:contents/);
   });
 
   test('5: canonical fish names render in HTML', () => {
