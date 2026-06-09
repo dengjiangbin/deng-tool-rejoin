@@ -46,9 +46,10 @@ const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
 const snapshotRecovery = require('./fishitSnapshotRecovery');
-const { BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10ZG_BUILD, BLOCKER10ZG_UI_MARKER, BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const stoneImageAssets = require('./fishitStoneImageAssets');
 const inventorySort = require('./fishitInventorySort');
+const { CLEAN_TRACKER_LOADSTRING, DEBUG_TRACKER_LOADSTRING } = require('./fishitTrackerLoadstring');
 const itemUtilityPublic = require('./fishitItemUtilityPublic');
 const gameItemDbPublic = require('./fishitGameItemDbPublic');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
@@ -142,8 +143,8 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10ZF_UI_MARKER;
-const PUBLIC_API_BUILD = BLOCKER10ZF_BUILD;
+const PUBLIC_RENDER_BUILD = BLOCKER10ZG_UI_MARKER;
+const PUBLIC_API_BUILD = BLOCKER10ZG_BUILD;
 
 const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
@@ -2481,6 +2482,8 @@ function buildTrackerPageLocals() {
     title: 'Inventory — Fish It',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
+    trackerLoadstring: CLEAN_TRACKER_LOADSTRING,
+    trackerLoadstringDebug: DEBUG_TRACKER_LOADSTRING,
     blocker10vBuild: build,
     blocker10u6Build: build,
     blocker10u5Build: build,

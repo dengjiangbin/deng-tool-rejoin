@@ -249,7 +249,56 @@
     .card-empty { text-align:center; padding:24px; color:var(--muted); font-size:.85rem; }
 
     .loadstring-box { margin-top:36px; background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius-lg); padding:20px; }
-    .loadstring-box h3 { font-size:.8rem; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-bottom:12px; }
+    .header__lead {
+      display:flex;
+      align-items:flex-start;
+      justify-content:center;
+      gap:8px;
+      max-width:640px;
+      margin:0 auto;
+      color:var(--muted);
+      font-size:.9rem;
+      line-height:1.55;
+    }
+    .header__lead-icon,
+    .loadstring-box__icon {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      flex-shrink:0;
+      width:18px;
+      height:18px;
+      color:var(--accent2);
+      margin-top:1px;
+    }
+    .header__lead-icon svg,
+    .loadstring-box__icon svg {
+      width:18px;
+      height:18px;
+      stroke:currentColor;
+      fill:none;
+      stroke-width:2;
+      stroke-linecap:round;
+      stroke-linejoin:round;
+    }
+    .loadstring-box h3 {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:.8rem;
+      color:var(--muted);
+      text-transform:uppercase;
+      letter-spacing:.06em;
+      margin-bottom:12px;
+    }
+    .loadstring-debug {
+      display:none;
+      margin-top:10px;
+      font-size:.72rem;
+      color:var(--muted);
+    }
+    .loadstring-debug.is-visible { display:block; }
+    .loadstring-debug .code-block { margin-top:6px; white-space:pre-wrap; }
     .code-row { display:flex; gap:8px; align-items:stretch; }
     .code-block { flex:1; font-family:'Consolas','Fira Code',monospace; font-size:.82rem; background:#0a0c10; border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; color:#93c5fd; overflow-x:auto; white-space:nowrap; }
     .btn-copy { padding:0 16px; background:var(--surface2); border:1.5px solid var(--border); border-radius:var(--radius); color:var(--text); cursor:pointer; font-size:.85rem; font-family:var(--font); font-weight:600; white-space:nowrap; transition:background .15s,border-color .15s,color .15s; }
@@ -270,8 +319,8 @@
     }
   </style>
 </head>
-<body data-ui-marker="BLOCKER10ZF_INVENTORY_RENAME_RARITY_SORT_2026_06_09">
-<!-- BLOCKER10ZF_INVENTORY_RENAME_RARITY_SORT_2026_06_09 -->
+<body data-ui-marker="BLOCKER10ZG_CLEAN_ICONS_LOADER_SCRIPT_2026_06_09">
+<!-- BLOCKER10ZG_CLEAN_ICONS_LOADER_SCRIPT_2026_06_09 -->
 <div class="page">
   <div class="inner">
 
@@ -284,7 +333,17 @@
 
     <header class="header">
       <h1>Inventory</h1>
-      <p>View Fish It inventories for unlimited players &mdash; sessions are saved and restored on page reload.</p>
+      <p class="header__lead">
+        <span class="header__lead-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+        </span>
+        <span>Track unlimited players simultaneously &mdash; sessions are saved and restored on page reload.</span>
+      </p>
     </header>
 
     <div class="add-row">
@@ -304,10 +363,22 @@
     </div>
 
     <div class="loadstring-box">
-      <h3>Executor Script � copy &amp; run in-game</h3>
+      <h3>
+        <span class="loadstring-box__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+        </span>
+        <span>Executor Script &mdash; copy &amp; run in-game</span>
+      </h3>
       <div class="code-row">
-        <div class="code-block" id="loadstringCode">loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua?t=" .. tostring(os.time())))()</div>
+        <div class="code-block" id="loadstringCode" data-copy-script='<%- typeof trackerLoadstring !== "undefined" ? trackerLoadstring : "" %>'><%- typeof trackerLoadstring !== "undefined" ? trackerLoadstring : "" %></div>
         <button class="btn-copy" id="copyBtn" type="button">Copy</button>
+      </div>
+      <div class="loadstring-debug" id="loadstringDebugBox" data-debug-script='<%- typeof trackerLoadstringDebug !== "undefined" ? trackerLoadstringDebug : "" %>'>
+        <strong>Debug loader (cache-busted)</strong>
+        <div class="code-block" id="loadstringDebugCode"></div>
       </div>
     </div>
 
@@ -347,6 +418,9 @@
   const noTrackersMsg  = document.getElementById('noTrackersMsg');
   const summaryTextEl  = document.getElementById('summaryText');
   const copyBtn        = document.getElementById('copyBtn');
+  const CLEAN_LOADSTRING = document.getElementById('loadstringCode')?.getAttribute('data-copy-script')
+    || 'loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua"))()';
+  const DEBUG_LOADSTRING = document.getElementById('loadstringDebugBox')?.getAttribute('data-debug-script') || '';
 
   function loadSaved() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; } }
   function saveCurrent() { try { localStorage.setItem(LS_KEY, JSON.stringify([...trackers.keys()])); } catch {} }
@@ -1163,13 +1237,21 @@
   }
 
   copyBtn.addEventListener('click', () => {
-    const code = document.getElementById('loadstringCode').textContent;
-    navigator.clipboard.writeText(code).then(() => {
-      copyBtn.textContent = '? Copied!';
+    navigator.clipboard.writeText(CLEAN_LOADSTRING).then(() => {
+      copyBtn.textContent = 'Copied!';
       copyBtn.classList.add('copied');
       setTimeout(() => { copyBtn.textContent = 'Copy'; copyBtn.classList.remove('copied'); }, 2000);
     });
   });
+
+  if (DEBUG_GLOBAL && DEBUG_LOADSTRING) {
+    const debugBox = document.getElementById('loadstringDebugBox');
+    const debugCode = document.getElementById('loadstringDebugCode');
+    if (debugBox && debugCode) {
+      debugCode.textContent = DEBUG_LOADSTRING;
+      debugBox.classList.add('is-visible');
+    }
+  }
 
   addBtn.addEventListener('click', () => { const v=inputEl.value.trim(); if(v){addTracker(v);inputEl.value='';} inputEl.focus(); });
   inputEl.addEventListener('keydown', e => { if(e.key==='Enter'){const v=inputEl.value.trim();if(v){addTracker(v);inputEl.value='';}} });

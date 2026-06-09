@@ -1,0 +1,90 @@
+'use strict';
+
+const { describe, test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
+const express = require('express');
+const request = require('supertest');
+
+const {
+  CLEAN_TRACKER_LOADSTRING,
+  DEBUG_TRACKER_LOADSTRING,
+} = require('../src/fishitTrackerLoadstring');
+const { BLOCKER10ZG_BUILD } = require('../src/fishitTrackerBuild');
+const { PUBLIC_API_BUILD, buildTrackerPageLocals } = require('../src/fishitTrackerRoutes');
+const trackerRouter = require('../src/fishitTrackerRoutes');
+
+const FINAL_BUILD = 'BLOCKER10ZG_CLEAN_ICONS_LOADER_SCRIPT_2026_06_09';
+const TRACKER_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
+const MOJIBAKE = '\uFFFD';
+
+function makeTrackerApp() {
+  const app = express();
+  app.set('view engine', 'ejs');
+  app.set('views', path.join(__dirname, '..', 'views'));
+  app.use(trackerRouter);
+  return app;
+}
+
+describe('BLOCKER10ZG clean icons + loader script', () => {
+  test('build marker is BLOCKER10ZG', () => {
+    assert.equal(BLOCKER10ZG_BUILD, FINAL_BUILD);
+    assert.equal(PUBLIC_API_BUILD, FINAL_BUILD);
+    assert.equal(buildTrackerPageLocals().trackerLoadstring, CLEAN_TRACKER_LOADSTRING);
+  });
+
+  test('clean loader script has no cache-busting noise', () => {
+    assert.equal(
+      CLEAN_TRACKER_LOADSTRING,
+      'loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua"))()',
+    );
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /tostring/);
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /os\.time/);
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\?t=/);
+  });
+
+  test('debug loader script is separate and cache-busted', () => {
+    assert.match(DEBUG_TRACKER_LOADSTRING, /\?t=/);
+    assert.match(DEBUG_TRACKER_LOADSTRING, /os\.time/);
+    assert.notEqual(DEBUG_TRACKER_LOADSTRING, CLEAN_TRACKER_LOADSTRING);
+  });
+
+  test('tracker template has no mojibake replacement character', () => {
+    const tpl = fs.readFileSync(TRACKER_PATH, 'utf8');
+    assert.doesNotMatch(tpl, new RegExp(MOJIBAKE));
+  });
+
+  test('/tracker renders clean executor label and unlimited players text', async () => {
+    const res = await request(makeTrackerApp()).get('/tracker').expect(200);
+    assert.doesNotMatch(res.text, new RegExp(MOJIBAKE));
+    assert.match(res.text, /Executor Script &mdash; copy &amp; run in-game/);
+    assert.match(res.text, /Track unlimited players simultaneously &mdash; sessions are saved and restored on page reload/);
+    assert.match(res.text, /loadstring-box__icon/);
+    assert.match(res.text, /header__lead-icon/);
+  });
+
+  test('/tracker public loader script is clean without tostring or ?t=', async () => {
+    const res = await request(makeTrackerApp()).get('/tracker').expect(200);
+    assert.match(res.text, /id="loadstringCode"/);
+    assert.match(res.text, new RegExp(CLEAN_TRACKER_LOADSTRING.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    const publicBlock = res.text.split('id="loadstringCode"')[1].split('loadstring-debug')[0];
+    assert.doesNotMatch(publicBlock, /tostring\(os\.time\(\)\)/);
+    assert.doesNotMatch(publicBlock, /\?t=/);
+  });
+
+  test('copy button uses clean script constant not debug loader', async () => {
+    const tpl = fs.readFileSync(TRACKER_PATH, 'utf8');
+    assert.match(tpl, /navigator\.clipboard\.writeText\(CLEAN_LOADSTRING\)/);
+    assert.doesNotMatch(tpl, /writeText\(document\.getElementById\('loadstringCode'\)\.textContent\)/);
+    assert.match(tpl, /Copied!/);
+    assert.doesNotMatch(tpl, /\? Copied!/);
+  });
+
+  test('debug loader panel only appears when DEBUG_GLOBAL is true', () => {
+    const tpl = fs.readFileSync(TRACKER_PATH, 'utf8');
+    assert.match(tpl, /if \(DEBUG_GLOBAL && DEBUG_LOADSTRING\)/);
+    assert.match(tpl, /loadstring-debug/);
+    assert.match(tpl, /loadstringDebugBox/);
+  });
+});

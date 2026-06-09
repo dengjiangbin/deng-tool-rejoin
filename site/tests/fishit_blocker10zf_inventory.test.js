@@ -11,9 +11,9 @@ const inventorySort = require('../src/fishitInventorySort');
 const { PUBLIC_API_BUILD, buildPublicFishFields } = require('../src/fishitTrackerRoutes');
 const gameItemDbPublic = require('../src/fishitGameItemDbPublic');
 const trackerRouter = require('../src/fishitTrackerRoutes');
-const { BLOCKER10ZF_BUILD } = require('../src/fishitTrackerBuild');
+const { BLOCKER10ZG_BUILD } = require('../src/fishitTrackerBuild');
 
-const FINAL_BUILD = 'BLOCKER10ZF_INVENTORY_RENAME_RARITY_SORT_2026_06_09';
+const FINAL_BUILD = 'BLOCKER10ZG_CLEAN_ICONS_LOADER_SCRIPT_2026_06_09';
 const LAYOUT_PATH = path.join(__dirname, '..', 'views', 'layout.ejs');
 const TRACKER_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
 
@@ -26,8 +26,8 @@ function makeTrackerApp() {
 }
 
 describe('BLOCKER10ZF Inventory rename + rarity sorting', () => {
-  test('build marker is BLOCKER10ZF', () => {
-    assert.equal(BLOCKER10ZF_BUILD, FINAL_BUILD);
+  test('build marker is BLOCKER10ZG', () => {
+    assert.equal(BLOCKER10ZG_BUILD, FINAL_BUILD);
     assert.equal(PUBLIC_API_BUILD, FINAL_BUILD);
   });
 
