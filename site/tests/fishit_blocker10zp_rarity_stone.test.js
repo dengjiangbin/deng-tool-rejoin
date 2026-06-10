@@ -14,6 +14,7 @@ const {
   BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_MARKER,
   BLOCKER10ZO_REMOVE_PUBLIC_RAW_TRACKER_SOURCE_MARKER,
   BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER,
+  BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
 } = require('../src/fishitTrackerBuild');
 
@@ -25,7 +26,7 @@ function loadTrackerCardFns() {
   const script = tpl.slice(tpl.indexOf('<script>'), tpl.indexOf('</script>') + 9);
   const helperNames = [
     'formatQuantity', 'formatAmountLabel', 'resolveItemAmount',
-    'stoneDisplayName', 'buildCardBadgesHtml', 'buildFishCardInnerHtml', 'formatCardWeight',
+    'stoneDisplayName', 'buildCardBadgesHtml', 'buildFishCardInnerHtml', 'formatCardWeight', 'formatWeightFromGrams', 'ownersChipHtml',
     'fishCardClassList', 'cardTitle', 'publicRarity', 'itemImageSrc', 'escHtml',
   ];
   const helpers = helperNames.map((name) => script.match(new RegExp(`function ${name}\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n  \\}`)));
@@ -37,6 +38,7 @@ function loadTrackerCardFns() {
     function escHtml(s){ return String(s||''); }
     function publicRarity(item){ return item && item.rarity && item.rarity !== 'Unknown' ? item.rarity : 'Unknown'; }
     function isUsableImageUrl(url){ return typeof url==='string' && (url.startsWith('http') || url.startsWith('/api/')); }
+    const PEOPLE_ICON_SVG = '';
     ${trackerRarityStyle.buildTrackerRarityJsBootstrap()}
     ${helpers.map((h) => h[0]).join('\n')}
     return { ftRarityClass, fishCardClassList, buildFishCardInnerHtml, stoneDisplayName };
@@ -63,9 +65,10 @@ describe('BLOCKER10ZP rarity mapping + Transcended Stone image', () => {
       BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_MARKER,
       'BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10',
     );
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER);
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER);
     const tpl = fs.readFileSync(TRACKER_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZP — flex-only fish cards \+ canonical rarity backgrounds/);
+    assert.match(tpl, /BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10/);
   });
 
   test('Epic resolves to purple ft-card class and background', () => {

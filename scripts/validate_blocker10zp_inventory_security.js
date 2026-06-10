@@ -8,6 +8,7 @@ const https = require('https');
 const ejs = require(path.join(__dirname, '..', 'site', 'node_modules', 'ejs'));
 
 const {
+  BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
   BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER,
   BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_MARKER,
 } = require('../site/src/fishitTrackerBuild');
@@ -53,17 +54,21 @@ async function main() {
   const queryHtml = await renderInventoryHtml({ username: 'denghub2' });
 
   for (const [label, page] of [['inventory', html], ['inventory?username=denghub2', queryHtml]]) {
-    if (!page.includes(BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER)) {
-      errors.push(`${label}: missing BLOCKER10ZQ marker`);
+    if (!page.includes(BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER)) {
+      errors.push(`${label}: missing BLOCKER10ZR marker`);
     }
+    if (!page.includes('data-inventory-js="pending"')) errors.push(`${label}: missing data-inventory-js marker`);
+    if (page.includes('id="copyScriptTextarea"')) errors.push(`${label}: duplicate script textarea must be removed`);
+    if (page.includes('id="selectScriptBtn"')) errors.push(`${label}: Select script button must be removed`);
     if (!page.includes('id="usernameInput"')) errors.push(`${label}: missing username input`);
     if (page.includes('id="usernameInput" disabled')) errors.push(`${label}: username input disabled`);
     if (!page.includes('id="copyBtn"')) errors.push(`${label}: missing copy button`);
-    if (!page.includes('id="copyScriptTextarea"')) errors.push(`${label}: missing copy textarea fallback`);
+    if (!page.includes('id="loadstringCode"')) errors.push(`${label}: missing single script field`);
     if (!page.includes(CLEAN_TRACKER_LOADSTRING)) errors.push(`${label}: missing canonical loadstring`);
     if (page.includes('/main/tracker.lua')) errors.push(`${label}: exposes root raw tracker URL`);
     if (!page.includes('dist/tracker.lua')) errors.push(`${label}: missing dist/tracker.lua reference`);
     if (!page.includes('copyTrackerScript')) errors.push(`${label}: missing copy fallback JS`);
+    if (!page.includes('safeBind(')) errors.push(`${label}: missing safeBind init guard`);
     if (!page.includes('initFromQueryUsername')) errors.push(`${label}: missing query username bootstrap`);
   }
 
@@ -92,7 +97,7 @@ async function main() {
   }
 
   console.log('BLOCKER10ZP_INVENTORY_SECURITY_VALIDATION OK');
-  console.log('  marker:', BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER);
+  console.log('  marker:', BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER);
   console.log('  loadstring URL:', PROTECTED_DIST_RAW_URL);
   console.log('  legacy root:', rootLegacy, 'legacy dist:', distLegacy);
   console.log('  clean root:', rootPublic || 'skipped', 'clean dist:', distPublic || 'skipped');

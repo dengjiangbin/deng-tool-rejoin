@@ -19,6 +19,7 @@ const {
   PUBLIC_TRACKER_GITHUB_REPO,
 } = require('../src/fishitTrackerLoadstring');
 const {
+  BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
   BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER,
   BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
@@ -38,12 +39,16 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
-  test('build marker is BLOCKER10ZQ clean dist repo marker', () => {
+  test('build marker is BLOCKER10ZR inventory button/copy fix marker', () => {
+    assert.equal(
+      BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
+      'BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10',
+    );
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER);
     assert.equal(
       BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER,
       'BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_2026_06_10',
     );
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER);
     assert.equal(
       BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_MARKER,
       'BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_2026_06_10',
@@ -66,16 +71,17 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
 
   test('/inventory renders enabled username input and copy fallback UI', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
-    assert.match(res.text, /BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_2026_06_10/);
+    assert.match(res.text, /BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10/);
+    assert.match(res.text, /data-inventory-js="pending"/);
     assert.match(res.text, /id="usernameInput"/);
     assert.doesNotMatch(res.text, /id="usernameInput" disabled/);
     assert.match(res.text, /id="addBtn"/);
     assert.match(res.text, /id="copyBtn"/);
-    assert.match(res.text, /id="copyScriptTextarea"/);
-    assert.match(res.text, /id="selectScriptBtn"/);
+    assert.match(res.text, /id="loadstringCode"/);
+    assert.doesNotMatch(res.text, /id="copyScriptTextarea"/);
+    assert.doesNotMatch(res.text, /id="selectScriptBtn"/);
     assert.match(res.text, /copyTrackerScript/);
-    assert.match(res.text, /fallbackCopyText/);
-    assert.match(res.text, /Copy failed — long-press\/select all to copy manually/);
+    assert.match(res.text, /safeBind\(/);
     assert.match(res.text, new RegExp(CLEAN_TRACKER_LOADSTRING.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.doesNotMatch(res.text, /\/main\/tracker\.lua/);
   });
@@ -97,7 +103,7 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
     assert.equal(locals.canonicalInventoryPath, '/inventory');
     assert.equal(locals.initialUsername, 'TestUser1');
     assert.equal(locals.trackerLoadstring, CLEAN_TRACKER_LOADSTRING);
-    assert.equal(locals.trackerUiDeployMarker, BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER);
+    assert.equal(locals.trackerUiDeployMarker, BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER);
   });
 
   test('tracker template documents username validation feedback', () => {

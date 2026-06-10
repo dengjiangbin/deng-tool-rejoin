@@ -1,15 +1,15 @@
 <!DOCTYPE html>
-<!-- BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_2026_06_10 -->
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_2026_06_10' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
+<!-- BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10 -->
+<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_2026_06_10' %>">
+  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10' %>">
   <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/inventory' %>">
   <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
   <title>Inventory &mdash; Fish It</title>
   <style>
-    /* BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_2026_06_10 */
+    /* BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10 */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
@@ -372,9 +372,6 @@
     .copy-status { font-size:.78rem; color:var(--muted); margin-top:8px; min-height:1.1em; }
     .copy-status.is-error { color:var(--warn); }
     .copy-status.is-success { color:var(--success); }
-    .copy-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
-    .btn-copy-secondary { padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text); cursor:pointer; font-size:.78rem; font-family:var(--font); }
-    .copy-script-textarea { width:100%; min-height:72px; margin-top:8px; padding:10px 12px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text); font-family:ui-monospace,Consolas,monospace; font-size:.75rem; resize:vertical; }
     .inventory-skeleton-grid {
       display:grid;
       grid-template-columns:repeat(2,minmax(0,1fr));
@@ -455,6 +452,7 @@
     .loadstring-debug .code-block { margin-top:6px; white-space:pre-wrap; }
     .code-row { display:flex; gap:8px; align-items:stretch; }
     .code-block { flex:1; font-family:'Consolas','Fira Code',monospace; font-size:.82rem; background:#0a0c10; border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; color:#93c5fd; overflow-x:auto; white-space:nowrap; }
+    textarea.code-block.code-block--script { width:100%; min-height:52px; resize:none; white-space:pre; overflow-x:auto; line-height:1.45; }
     .btn-copy { padding:0 16px; background:var(--surface2); border:1.5px solid var(--border); border-radius:var(--radius); color:var(--text); cursor:pointer; font-size:.85rem; font-family:var(--font); font-weight:600; white-space:nowrap; transition:background .15s,border-color .15s,color .15s; }
     .btn-copy:hover  { background:var(--accent); border-color:var(--accent); color:#fff; }
     .btn-copy.copied { background:var(--success); border-color:var(--success); color:#fff; }
@@ -497,7 +495,7 @@
     }
   </style>
 </head>
-<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_2026_06_10') %>">
+<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10') %>">
 <div class="page">
   <div class="inner">
 
@@ -571,12 +569,8 @@
         <span>Executor Script &mdash; copy &amp; run in-game</span>
       </h3>
       <div class="code-row">
-        <div class="code-block" id="loadstringCode" data-copy-script="<%= typeof trackerLoadstring !== 'undefined' ? trackerLoadstring.replace(/"/g, '&quot;') : '' %>"><%- typeof trackerLoadstring !== 'undefined' ? trackerLoadstring : '' %></div>
+        <textarea class="code-block code-block--script" id="loadstringCode" readonly rows="2" spellcheck="false" aria-label="Tracker executor script"><%- typeof trackerLoadstring !== 'undefined' ? trackerLoadstring : '' %></textarea>
         <button class="btn-copy" id="copyBtn" type="button">Copy</button>
-      </div>
-      <textarea class="copy-script-textarea" id="copyScriptTextarea" readonly aria-label="Tracker executor script"><%- typeof trackerLoadstring !== 'undefined' ? trackerLoadstring : '' %></textarea>
-      <div class="copy-actions">
-        <button class="btn-copy-secondary" id="selectScriptBtn" type="button">Select script</button>
       </div>
       <div class="copy-status" id="copyStatus" aria-live="polite"></div>
     </div>
@@ -593,7 +587,7 @@
   const DEBUG_INVENTORY = <%= (typeof debugInventory !== 'undefined' && debugInventory) ? 'true' : 'false' %>;
   const APK_EMBED = <%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'true' : 'false' %>;
   const DEBUG_GLOBAL  = DEBUG_INVENTORY && /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
-  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_2026_06_10" %>';
+  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10" %>';
   const INITIAL_USERNAME = <%- JSON.stringify(typeof initialUsername !== 'undefined' ? initialUsername : '') %>;
   const RENDER_BUILD  = DEBUG_INVENTORY
     ? (document.documentElement.getAttribute('data-render-build') || '')
@@ -607,13 +601,13 @@
   };
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret badge-rarity-secret', forgotten:'rarity-forgotten' };
   const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
-  <%= typeof trackerRarityJsBootstrap !== 'undefined' ? trackerRarityJsBootstrap : 'const FT_RARITY_CLASS = { common:\'ft-rarity-COMMON\', uncommon:\'ft-rarity-UNCOMMON\', rare:\'ft-rarity-RARE\', epic:\'ft-rarity-EPIC\', legendary:\'ft-rarity-LEGENDARY\', legend:\'ft-rarity-LEGENDARY\', mythic:\'ft-rarity-MYTHIC\', secret:\'ft-rarity-SECRET\', forgotten:\'ft-rarity-FORGOTTEN\' }; function ftRarityClass(r) { return r ? (FT_RARITY_CLASS[String(r).toLowerCase()] || \'ft-rarity-COMMON\') : \'ft-rarity-COMMON\'; }' %>
+  <%- typeof trackerRarityJsBootstrap !== 'undefined' ? trackerRarityJsBootstrap : 'const FT_RARITY_CLASS = { common:\'ft-rarity-COMMON\', uncommon:\'ft-rarity-UNCOMMON\', rare:\'ft-rarity-RARE\', epic:\'ft-rarity-EPIC\', legendary:\'ft-rarity-LEGENDARY\', legend:\'ft-rarity-LEGENDARY\', mythic:\'ft-rarity-MYTHIC\', secret:\'ft-rarity-SECRET\', forgotten:\'ft-rarity-FORGOTTEN\' }; function ftRarityClass(r) { return r ? (FT_RARITY_CLASS[String(r).toLowerCase()] || \'ft-rarity-COMMON\') : \'ft-rarity-COMMON\'; }' %>
   const RARITY_ORDER = {
     Forgotten: 800, Secret: 700, Mythic: 600, Legendary: 500, Epic: 400,
     Rare: 300, Uncommon: 200, Common: 100, Unknown: 0,
   };
   const STONE_TYPE_ORDER = { Normal: 10, Double: 20, Evolved: 30, Eggy: 40, Runic: 50 };
-  <%= typeof trackerStoneJsBootstrap !== 'undefined' ? trackerStoneJsBootstrap : 'const STONE_DISPLAY_NAMES = { Double: \'Transcended Stone\' };' %>
+  <%- typeof trackerStoneJsBootstrap !== 'undefined' ? trackerStoneJsBootstrap : 'const STONE_DISPLAY_NAMES = { Double: \'Transcended Stone\' };' %>
   const PEOPLE_ICON_SVG = '<svg class="card-chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>';
   const TIER_TO_RARITY = {
     1: 'Common', 2: 'Uncommon', 3: 'Rare', 4: 'Epic',
@@ -633,17 +627,21 @@
   const summaryTextEl  = document.getElementById('summaryText');
   const copyBtn        = document.getElementById('copyBtn');
   const copyStatusEl   = document.getElementById('copyStatus');
-  const copyTextareaEl = document.getElementById('copyScriptTextarea');
-  const selectScriptBtn = document.getElementById('selectScriptBtn');
+  const loadstringCodeEl = document.getElementById('loadstringCode');
   const usernameErrorEl = document.getElementById('usernameError');
-  const CLEAN_LOADSTRING = (copyTextareaEl && copyTextareaEl.value)
-    || document.getElementById('loadstringCode')?.getAttribute('data-copy-script')?.replace(/&quot;/g, '"')
-    || '<%- typeof trackerLoadstring !== "undefined" ? trackerLoadstring.replace(/'/g, "\\'") : "" %>';
+  const CLEAN_LOADSTRING = (loadstringCodeEl && loadstringCodeEl.value)
+    || '<%- typeof trackerLoadstring !== "undefined" ? trackerLoadstring.replace(/'/g, "\\'").replace(/\\/g, "\\\\") : "" %>';
 
   function loadSaved() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; } }
   function saveCurrent() { try { localStorage.setItem(LS_KEY, JSON.stringify([...trackers.keys()])); } catch {} }
 
-  function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '\u0026amp;')
+      .replace(/</g, '\u0026lt;')
+      .replace(/>/g, '\u0026gt;')
+      .replace(/"/g, '\u0026quot;');
+  }
   function formatQuantity(value) {
     const n = Number(value || 0);
     if (!Number.isFinite(n)) return '0';
@@ -1761,29 +1759,43 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     showUsernameError('');
   }
 
+  function selectLoadstringField() {
+    if (!loadstringCodeEl) return;
+    loadstringCodeEl.focus();
+    loadstringCodeEl.select();
+  }
+
   function fallbackCopyText(text) {
     return new Promise((resolve, reject) => {
-      const textarea = copyTextareaEl || document.createElement('textarea');
-      const created = !copyTextareaEl;
-      if (created) {
-        textarea.value = text;
-        textarea.setAttribute('readonly', '');
-        textarea.style.position = 'fixed';
-        textarea.style.top = '-1000px';
-        textarea.style.left = '-1000px';
-        document.body.appendChild(textarea);
-      } else {
-        textarea.value = text;
-        textarea.focus();
-        textarea.select();
+      if (loadstringCodeEl) {
+        loadstringCodeEl.value = text;
+        selectLoadstringField();
+        try {
+          const ok = document.execCommand && document.execCommand('copy');
+          if (ok) resolve();
+          else reject(new Error('copy_failed'));
+          return;
+        } catch (err) {
+          reject(err);
+          return;
+        }
       }
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.top = '-1000px';
+      textarea.style.left = '-1000px';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
       try {
         const ok = document.execCommand && document.execCommand('copy');
-        if (created) document.body.removeChild(textarea);
+        document.body.removeChild(textarea);
         if (ok) resolve();
         else reject(new Error('copy_failed'));
       } catch (err) {
-        if (created) document.body.removeChild(textarea);
+        document.body.removeChild(textarea);
         reject(err);
       }
     });
@@ -1807,11 +1819,8 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       }
       return true;
     }).catch(() => {
-      if (copyTextareaEl) {
-        copyTextareaEl.focus();
-        copyTextareaEl.select();
-      }
-      setCopyStatus('Copy failed — long-press/select all to copy manually.', true);
+      selectLoadstringField();
+      setCopyStatus('Copy failed — select the script box and copy manually.', true);
       return false;
     });
   }
@@ -1821,13 +1830,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     copyStatusEl.textContent = message || '';
     copyStatusEl.classList.toggle('is-error', !!isError);
     copyStatusEl.classList.toggle('is-success', !!isSuccess);
-  }
-
-  function selectTrackerScript() {
-    if (!copyTextareaEl) return;
-    copyTextareaEl.focus();
-    copyTextareaEl.select();
-    setCopyStatus('Script selected — use Copy or long-press to copy.', false, true);
   }
 
   function addTracker(username) {
@@ -1873,14 +1875,21 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     saveCurrent();
   }
 
-  if (copyBtn) {
-    copyBtn.addEventListener('click', () => { copyTrackerScript(); });
-  }
-  if (selectScriptBtn) {
-    selectScriptBtn.addEventListener('click', () => { selectTrackerScript(); });
+  function safeBind(name, fn) {
+    try {
+      fn();
+    } catch (error) {
+      console.error('[inventory] failed to bind ' + name, error);
+    }
   }
 
-  if (addBtn && inputEl) {
+  function bindCopyScript() {
+    if (!copyBtn) return;
+    copyBtn.addEventListener('click', () => { copyTrackerScript(); });
+  }
+
+  function bindAddPlayer() {
+    if (!addBtn || !inputEl) return;
     addBtn.addEventListener('click', () => {
       const v = inputEl.value;
       if (addTracker(v)) inputEl.value = '';
@@ -1896,9 +1905,29 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     inputEl.addEventListener('input', () => { if (inputEl.value.trim()) clearUsernameError(); });
   }
 
-  // Restore saved sessions
-  loadSaved().forEach((u) => addTracker(u));
-  updateSummary();
+  function bindInventoryTabs() {
+    document.querySelectorAll('[data-inventory-mode]').forEach((btn) => {
+      btn.addEventListener('click', () => setInventoryMode(btn.getAttribute('data-inventory-mode')));
+    });
+    const bulkSearchInput = document.querySelector('[data-bulk-search-input]');
+    const bulkSearchClear = document.querySelector('[data-bulk-search-clear]');
+    if (bulkSearchInput) {
+      bulkSearchInput.addEventListener('input', () => {
+        bulkSearchQuery = bulkSearchInput.value;
+        if (bulkSearchClear) bulkSearchClear.classList.toggle('is-visible', String(bulkSearchQuery).trim().length > 0);
+        if (inventoryMode === 'bulk') renderBulkInventory();
+      });
+    }
+    if (bulkSearchClear) {
+      bulkSearchClear.addEventListener('click', () => {
+        bulkSearchQuery = '';
+        if (bulkSearchInput) bulkSearchInput.value = '';
+        bulkSearchClear.classList.remove('is-visible');
+        if (inventoryMode === 'bulk') renderBulkInventory();
+        if (bulkSearchInput) bulkSearchInput.focus();
+      });
+    }
+  }
 
   function initFromQueryUsername() {
     const params = new URLSearchParams(window.location.search);
@@ -1915,31 +1944,28 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       if (inputEl) inputEl.value = fromQuery;
     }
   }
-  initFromQueryUsername();
 
-  document.querySelectorAll('[data-inventory-mode]').forEach((btn) => {
-    btn.addEventListener('click', () => setInventoryMode(btn.getAttribute('data-inventory-mode')));
-  });
-  const bulkSearchInput = document.querySelector('[data-bulk-search-input]');
-  const bulkSearchClear = document.querySelector('[data-bulk-search-clear]');
-  if (bulkSearchInput) {
-    bulkSearchInput.addEventListener('input', () => {
-      bulkSearchQuery = bulkSearchInput.value;
-      if (bulkSearchClear) bulkSearchClear.classList.toggle('is-visible', String(bulkSearchQuery).trim().length > 0);
-      if (inventoryMode === 'bulk') renderBulkInventory();
+  function initInventoryUi() {
+    safeBind('copy script', bindCopyScript);
+    safeBind('add player', bindAddPlayer);
+    safeBind('tabs', bindInventoryTabs);
+    safeBind('restore sessions', () => {
+      loadSaved().forEach((u) => addTracker(u));
+      updateSummary();
     });
+    safeBind('query username', initFromQueryUsername);
+    safeBind('inventory mode', () => setInventoryMode('individual'));
+    if (APK_EMBED) document.documentElement.style.background = '#0d0f14';
+    document.body.setAttribute('data-inventory-js', 'ready');
+    window.__fishInventoryUiReady = true;
+    console.log('[inventory] UI initialized');
   }
-  if (bulkSearchClear) {
-    bulkSearchClear.addEventListener('click', () => {
-      bulkSearchQuery = '';
-      if (bulkSearchInput) bulkSearchInput.value = '';
-      bulkSearchClear.classList.remove('is-visible');
-      if (inventoryMode === 'bulk') renderBulkInventory();
-      if (bulkSearchInput) bulkSearchInput.focus();
-    });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initInventoryUi);
+  } else {
+    initInventoryUi();
   }
-  if (APK_EMBED) document.documentElement.style.background = '#0d0f14';
-  setInventoryMode('individual');
 }());
 </script>
 </body>
