@@ -66,7 +66,8 @@ describe('BLOCKER10ZP rarity mapping + Transcended Stone image', () => {
       BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_MARKER,
       'BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10',
     );
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER);
+    const { BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER);
     const tpl = fs.readFileSync(TRACKER_PATH, 'utf8');
     assert.match(tpl, /BLOCKER10ZP — flex-only fish cards \+ canonical rarity backgrounds/);
     assert.match(tpl, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);

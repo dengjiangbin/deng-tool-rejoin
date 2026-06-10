@@ -31,7 +31,7 @@ describe('BLOCKER10ZT5A UI stats + indicator regression', () => {
     assert.match(tpl, /col-coins/);
     assert.match(tpl, /col-caught/);
     assert.match(tpl, /col-rare/);
-    assert.match(tpl, /\.sync-age \{ display:none;/);
+    assert.match(tpl, /data-card-sync-text/);
     assert.match(tpl, /accounts-status \[data-table-sync-age\] \{ display:none;/);
     assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Last sync/);
   });

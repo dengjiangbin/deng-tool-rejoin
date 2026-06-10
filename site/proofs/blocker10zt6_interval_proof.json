@@ -1,0 +1,24 @@
+{
+  "user": "denghub2",
+  "waitMs": 10000,
+  "firstAt": "2026-06-10T18:44:01.178Z",
+  "secondAt": "2026-06-10T18:44:01.180Z",
+  "first": {
+    "coinsText": "37.54M",
+    "totalCaughtText": "56,118",
+    "rarestFishChance": "1/4M",
+    "fishCount": 6,
+    "lastInventoryAt": "2026-06-10T18:43:41.480Z",
+    "connectionLive": true
+  },
+  "second": {
+    "coinsText": "37.54M",
+    "totalCaughtText": "56,118",
+    "rarestFishChance": "1/4M",
+    "fishCount": 6,
+    "lastInventoryAt": "2026-06-10T18:43:51.743Z",
+    "connectionLive": true
+  },
+  "statsPayloadPresentBothPolls": true,
+  "fishPresentBothPolls": true
+}

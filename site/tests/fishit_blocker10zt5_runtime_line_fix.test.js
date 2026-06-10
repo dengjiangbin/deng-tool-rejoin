@@ -26,7 +26,8 @@ function readRawLua() {
 describe('BLOCKER10ZT5 runtime line fix', () => {
   test('build markers point to BLOCKER10ZT5', () => {
     assert.equal(EXPECTED_CLIENT_TRACKER_BUILD, 'BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10');
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER);
+    const { BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER);
     assert.equal(LOADER_BUILD, EXPECTED_CLIENT_TRACKER_BUILD);
     const loader = fs.readFileSync(LOADER_LUA, 'utf8');
     assert.match(loader, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);

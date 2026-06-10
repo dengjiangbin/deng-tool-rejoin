@@ -23,6 +23,7 @@ const {
 } = require('../src/fishitTrackerLoadstring');
 const {
   BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER,
+  BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER,
   BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
   BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER,
   BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_MARKER,
@@ -48,7 +49,7 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
       BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER,
       'BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10',
     );
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER);
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER);
     assert.equal(
       BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
       'BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10',
@@ -112,7 +113,7 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
     assert.equal(locals.canonicalInventoryPath, '/inventory');
     assert.equal(locals.initialUsername, 'TestUser1');
     assert.equal(locals.trackerLoadstring, CLEAN_TRACKER_LOADSTRING);
-    assert.equal(locals.trackerUiDeployMarker, BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER);
+    assert.equal(locals.trackerUiDeployMarker, BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER);
   });
 
   test('tracker template documents username validation feedback', () => {

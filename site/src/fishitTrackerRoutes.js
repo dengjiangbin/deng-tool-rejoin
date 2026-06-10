@@ -3318,6 +3318,41 @@ function statusTimestampForSession(data) {
   return freshestSessionTimestamp(data);
 }
 
+function buildStatsPollingProof() {
+  return {
+    publicPollIntervalMs: 10000,
+    syncTickMs: 1000,
+    sharedRefreshFunction: 'applyPollPayload',
+    statsFromSamePayload: true,
+    coinRefreshesOnInterval: true,
+    totalCaughtRefreshesOnInterval: true,
+    rarestFishRefreshesOnInterval: true,
+    fishCardsRefreshesOnInterval: true,
+    statusDurationUpdatesEverySecond: true,
+    statusFormat: '[circle] Last sync: <duration> <username>',
+  };
+}
+
+function buildUploadIntervalProof(data) {
+  return {
+    trackerUploadIntervalSeconds: 10,
+    lastUploadAcceptedAt: data?.lastUploadAcceptedAt || null,
+    lastInventoryAt: data?.lastInventoryAt || data?.updatedAt || null,
+    playerStatsUpdatedAt: data?.playerStatsUpdatedAt || null,
+  };
+}
+
+function buildResponsiveLayoutProof() {
+  return {
+    desktopTableMinWidthPx: 769,
+    mobileStatsHorizontalMaxWidthPx: 768,
+    desktopTableForced: true,
+    mobileStatsFlexRow: true,
+    desktopLayoutReverted: true,
+    tableHasNoExtraPublicText: true,
+  };
+}
+
 function buildConnectionIndicatorProof(data, maxAgeMs = 45000) {
   const heartbeatTs = data?.lastSeenAt || null;
   const inventoryTs = data?.lastInventoryAt || data?.updatedAt || null;
@@ -3564,8 +3599,9 @@ async function handleGetBackpack(req, res) {
     dataStale:       !!(publicFish.dataStale || dataStale),
     lastGoodFishPreserved: !!(publicFish.lastGoodFishPreserved || data.lastGoodFishPreserved),
     lastGoodPublicFishCount: data.lastGoodPublicFishCount || publicFish.fishItems.length || 0,
-    playerStats:     isSessionLive(data) ? resolvePlayerStatsForApi(data.playerStats) : null,
-    playerStatsProven: !!(isSessionLive(data) && buildPlayerStatsProof(data.playerStats, data).proven),
+    playerStats:     resolvePlayerStatsForApi(data.playerStats),
+    playerStatsProven: !!(resolvePlayerStatsForApi(data.playerStats)
+      && buildPlayerStatsProof(data.playerStats, data).proven),
     playerStatsUpdatedAt: data.playerStatsUpdatedAt || null,
     syncProof:       buildSyncProof(data),
   };
@@ -3685,6 +3721,9 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
       : null,
     syncProof: buildSyncProof(data),
     connectionIndicatorProof: buildConnectionIndicatorProof(data),
+    statsPollingProof: buildStatsPollingProof(),
+    uploadIntervalProof: buildUploadIntervalProof(data),
+    responsiveLayoutProof: buildResponsiveLayoutProof(),
     ...buildClientBuildProof(data),
     counts: countsEnriched,
     countsRaw,

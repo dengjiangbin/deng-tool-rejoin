@@ -1,0 +1,15 @@
+{
+  "status": 200,
+  "deploy": "BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_2026_06_10",
+  "pollMs10k": true,
+  "syncTick1s": true,
+  "applyPollPayload": true,
+  "formatEntrySyncStatusLine": true,
+  "cardSyncText": true,
+  "desktopTable769": true,
+  "mobileStatsRow": true,
+  "noLiveLastSync": true,
+  "noLastSyncMobile": true,
+  "tableSyncAgeHidden": true,
+  "marker": true
+}

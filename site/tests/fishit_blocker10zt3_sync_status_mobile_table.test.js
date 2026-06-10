@@ -31,9 +31,10 @@ function makeApp() {
 
 describe('BLOCKER10ZT3 sync status + coin probe + mobile account cards', () => {
   test('UI deploy marker points to BLOCKER10ZT3A hotfix', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER);
+    const { BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_2026_06_10/);
   });
 
   test('frontend uses freshest session timestamp for connection', () => {
@@ -42,10 +43,11 @@ describe('BLOCKER10ZT3 sync status + coin probe + mobile account cards', () => {
     assert.match(tpl, /function syncTimestamp[\s\S]*bestSyncTimestamp\(data\)/);
   });
 
-  test('pollUser uses connection freshness not isOnline alone', () => {
+  test('pollUser uses shared applyPollPayload and connection freshness', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     assert.match(tpl, /function isEntryConnectionLive/);
-    assert.match(tpl, /const live = isEntryConnectionLive\(data, entry\)/);
+    assert.match(tpl, /function applyPollPayload/);
+    assert.match(tpl, /applyPollPayload\(entry, key, data\)/);
     assert.doesNotMatch(tpl, /if \(data\.isOnline === false\)/);
   });
 
