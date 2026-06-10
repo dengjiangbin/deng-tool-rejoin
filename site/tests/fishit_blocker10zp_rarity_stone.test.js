@@ -14,6 +14,7 @@ const {
   BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_MARKER,
   BLOCKER10ZO_REMOVE_PUBLIC_RAW_TRACKER_SOURCE_MARKER,
   BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER,
+  BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER,
   BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
 } = require('../src/fishitTrackerBuild');
@@ -65,10 +66,10 @@ describe('BLOCKER10ZP rarity mapping + Transcended Stone image', () => {
       BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_MARKER,
       'BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10',
     );
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER);
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER);
     const tpl = fs.readFileSync(TRACKER_PATH, 'utf8');
     assert.match(tpl, /BLOCKER10ZP — flex-only fish cards \+ canonical rarity backgrounds/);
-    assert.match(tpl, /BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_2026_06_10/);
   });
 
   test('Epic resolves to purple ft-card class and background', () => {
@@ -128,7 +129,7 @@ describe('BLOCKER10ZP rarity mapping + Transcended Stone image', () => {
     assert.ok(stone);
     assert.equal(stone.displayName, 'Transcended Stone');
     assert.equal(stone.name, 'Transcended Stone');
-    assert.match(stone.imageUrl, /\/api\/fishit-tracker\/assets\/stones\/stone_246_transcended\.png$/);
+    assert.match(stone.imageUrl, /\/api\/fishit-tracker\/assets\/stones\/stone_246_transcended\.png\?v=\d+/);
     assert.doesNotMatch(stone.imageUrl, /stone_246_double\.png/);
   });
 

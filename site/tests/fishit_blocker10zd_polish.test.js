@@ -81,7 +81,7 @@ describe('BLOCKER10ZG stone assets + manual rarity polish', () => {
     assert.equal(stone.category, 'stone');
     assert.equal(stone.imageSource, 'stone_manual_asset');
     assert.ok(stone.imageUrlPresent);
-    assert.match(stone.imageUrl, /\/api\/fishit-tracker\/assets\/stones\/stone_10_normal\.png$/);
+    assert.match(stone.imageUrl, /\/api\/fishit-tracker\/assets\/stones\/stone_10_normal\.png\?v=\d+/);
     assert.equal(stone.dataSource, 'playerdata_gameitemdb');
     assert.equal(stone.identitySource, 'playerdata_gameitemdb');
   });

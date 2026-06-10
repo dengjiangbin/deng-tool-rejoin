@@ -33,9 +33,32 @@ function getCacheDir() {
   return CACHE_DIR;
 }
 
-function localStoneUrl(baseUrl, filename) {
+function getStoneAssetFilePath(filename) {
+  const file = path.basename(String(filename || ''));
+  if (!file) return null;
+  return path.join(CACHE_DIR, file);
+}
+
+function getStoneAssetVersion(filename) {
+  const full = getStoneAssetFilePath(filename);
+  if (!full || !fs.existsSync(full)) return '0';
+  try {
+    const stat = fs.statSync(full);
+    return String(Math.floor(stat.mtimeMs));
+  } catch {
+    return '0';
+  }
+}
+
+function getStoneAssetUrl(baseUrl, filename) {
   const base = String(baseUrl || '').replace(/\/$/, '');
-  return `${base}/api/fishit-tracker/assets/stones/${filename}`;
+  const file = path.basename(String(filename || ''));
+  const version = getStoneAssetVersion(file);
+  return `${base}/api/fishit-tracker/assets/stones/${file}?v=${version}`;
+}
+
+function localStoneUrl(baseUrl, filename) {
+  return getStoneAssetUrl(baseUrl, filename);
 }
 
 function resolveCatalogStoneEntry(itemId, stoneType) {
@@ -141,6 +164,9 @@ module.exports = {
   ENCHANT_STONES,
   publicStoneDisplayName,
   getCacheDir,
+  getStoneAssetFilePath,
+  getStoneAssetVersion,
+  getStoneAssetUrl,
   loadCatalog,
   lookupStoneAsset,
   attachStoneImagesToItems,

@@ -6,6 +6,7 @@ const http = require('http');
 const path = require('path');
 const ejs = require(path.join(__dirname, '..', 'site', 'node_modules', 'ejs'));
 const {
+  BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER,
   BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
 } = require('../site/src/fishitTrackerBuild');
 const {
@@ -56,8 +57,8 @@ async function main() {
   const apkHtml = await renderInventoryHtml({ apk: '1' });
 
   for (const [label, page] of [['inventory', html], ['inventory?apk=1', apkHtml]]) {
-    if (!page.includes(BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER)) {
-      errors.push(`${label}: missing BLOCKER10ZR marker`);
+    if (!page.includes(BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER)) {
+      errors.push(`${label}: missing BLOCKER10ZS marker`);
     }
     if (!page.includes('data-inventory-js="pending"')) {
       errors.push(`${label}: missing data-inventory-js pending marker on body`);
@@ -92,8 +93,8 @@ async function main() {
   }
   if (live) {
     if (live.status !== 200) errors.push(`live /inventory HTTP ${live.status}`);
-    if (!live.body.includes(BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER)) {
-      errors.push('live /inventory missing BLOCKER10ZR marker');
+    if (!live.body.includes(BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER)) {
+      errors.push('live /inventory missing BLOCKER10ZS marker');
     }
     if (live.body.includes('selectScriptBtn')) errors.push('live /inventory still has Select script button');
     if (live.body.includes('copyScriptTextarea')) errors.push('live /inventory still has duplicate script textarea');
@@ -111,7 +112,7 @@ async function main() {
   }
 
   console.log('BLOCKER10ZR_INVENTORY_BUTTONS_VALIDATION OK');
-  console.log('  marker:', BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER);
+  console.log('  marker:', BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER);
   console.log('  loadstring URL:', PROTECTED_DIST_RAW_URL);
   console.log('  live /inventory HTTP:', live ? live.status : 'skipped');
 }

@@ -2559,11 +2559,13 @@ router.get('/api/fishit-tracker/assets/stones/:filename', (req, res) => {
   if (!file || !/^[a-zA-Z0-9._-]+$/.test(file)) {
     return res.status(400).type('text/plain').send('invalid_filename');
   }
-  const full = path.join(stoneImageAssets.getCacheDir(), file);
-  if (!fs.existsSync(full)) {
+  const full = stoneImageAssets.getStoneAssetFilePath(file);
+  if (!full || !fs.existsSync(full)) {
     return res.status(404).type('text/plain').send('stone_asset_not_found');
   }
-  res.set('Cache-Control', 'public, max-age=86400, immutable');
+  const stat = fs.statSync(full);
+  res.set('Cache-Control', 'public, max-age=300');
+  res.set('ETag', `"stone-${stat.size}-${Math.floor(stat.mtimeMs)}"`);
   return res.sendFile(full);
 });
 

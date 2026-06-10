@@ -8,6 +8,7 @@ const https = require('https');
 const ejs = require(path.join(__dirname, '..', 'site', 'node_modules', 'ejs'));
 
 const {
+  BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER,
   BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
   BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER,
   BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_MARKER,
@@ -54,8 +55,8 @@ async function main() {
   const queryHtml = await renderInventoryHtml({ username: 'denghub2' });
 
   for (const [label, page] of [['inventory', html], ['inventory?username=denghub2', queryHtml]]) {
-    if (!page.includes(BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER)) {
-      errors.push(`${label}: missing BLOCKER10ZR marker`);
+    if (!page.includes(BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER)) {
+      errors.push(`${label}: missing BLOCKER10ZS marker`);
     }
     if (!page.includes('data-inventory-js="pending"')) errors.push(`${label}: missing data-inventory-js marker`);
     if (page.includes('id="copyScriptTextarea"')) errors.push(`${label}: duplicate script textarea must be removed`);
@@ -97,7 +98,7 @@ async function main() {
   }
 
   console.log('BLOCKER10ZP_INVENTORY_SECURITY_VALIDATION OK');
-  console.log('  marker:', BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER);
+  console.log('  marker:', BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER);
   console.log('  loadstring URL:', PROTECTED_DIST_RAW_URL);
   console.log('  legacy root:', rootLegacy, 'legacy dist:', distLegacy);
   console.log('  clean root:', rootPublic || 'skipped', 'clean dist:', distPublic || 'skipped');

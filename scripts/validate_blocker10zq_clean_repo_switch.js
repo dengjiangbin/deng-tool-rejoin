@@ -4,7 +4,7 @@
  */
 const http = require('http');
 const {
-  BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
+  BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER,
 } = require('../site/src/fishitTrackerBuild');
 const {
   CLEAN_PUBLIC_TRACKER_GITHUB_REPO,
@@ -33,9 +33,9 @@ function fetchText(path) {
 async function main() {
   const errors = [];
 
-  if (BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER
-    !== 'BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10') {
-    errors.push('BLOCKER10ZR marker mismatch in fishitTrackerBuild.js');
+  if (BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER
+    !== 'BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_2026_06_10') {
+    errors.push('BLOCKER10ZS marker mismatch in fishitTrackerBuild.js');
   }
   if (!PROTECTED_DIST_RAW_URL.includes(CLEAN_PUBLIC_TRACKER_GITHUB_REPO)) {
     errors.push('PROTECTED_DIST_RAW_URL must use clean public repo');
@@ -47,8 +47,8 @@ async function main() {
   const { status, body } = await fetchText('/inventory');
   if (status !== 200) errors.push(`/inventory HTTP ${status} (expected 200)`);
 
-  if (!body.includes(BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER)) {
-    errors.push('/inventory missing BLOCKER10ZR marker');
+  if (!body.includes(BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER)) {
+    errors.push('/inventory missing BLOCKER10ZS marker');
   }
   if (!body.includes(CLEAN_TRACKER_LOADSTRING)) {
     errors.push('/inventory missing clean repo canonical loadstring');
@@ -82,7 +82,7 @@ async function main() {
   }
 
   console.log('BLOCKER10ZQ_CLEAN_REPO_SWITCH_VALIDATION OK');
-  console.log('  marker:', BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER);
+  console.log('  marker:', BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER);
   console.log('  loadstring:', CLEAN_TRACKER_LOADSTRING);
   console.log('  /inventory HTTP:', status);
 }
