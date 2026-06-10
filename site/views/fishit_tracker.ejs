@@ -223,8 +223,12 @@
 
     .status-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; background:var(--muted); transition:background .2s; }
     .status-dot.live { background:var(--success); animation:pulse 1.4s ease-in-out infinite; }
-    .status-dot.stale { background:var(--warn); }
     .status-dot.dead { background:var(--danger); }
+    .accounts-status .status-dot.dead { background:var(--danger); box-shadow:0 0 0 1px rgba(239,68,68,.35); }
+    .accounts-status .status-dot.live { color:rgba(74,222,128,.88); }
+    .accounts-status [data-table-sync-age] { color:var(--muted); }
+    .accounts-status .status-dot.live + [data-table-sync-age] { color:rgba(74,222,128,.88); }
+    .accounts-status .status-dot.dead + [data-table-sync-age] { color:rgba(248,113,113,.92); }
 
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 
@@ -474,8 +478,9 @@
       color:var(--muted);
       font-size:.9rem;
     }
-    .accounts-overview.is-cards-only .accounts-table-wrap { display:none; }
-    #trackerList.is-table-primary .tracker-card { scroll-margin-top:84px; }
+    .accounts-overview.is-inventory-only .accounts-table-wrap { display:none; }
+    .inventory-view-section[hidden] { display:none !important; }
+    #trackerList .tracker-card { scroll-margin-top:84px; }
 
     .inventory-grid,
     .items-grid,
@@ -966,8 +971,11 @@
           <button type="button" class="accounts-icon-btn is-active" id="viewTableBtn" title="Table view" aria-label="Table view">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18M9 4v16"></path></svg>
           </button>
-          <button type="button" class="accounts-icon-btn" id="viewCardsBtn" title="Card view" aria-label="Card view">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="7" rx="1"></rect><rect x="14" y="4" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+          <button type="button" class="accounts-icon-btn" id="viewInventoryBtn" title="Inventory View" aria-label="Inventory View">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 7h12l1 5H5z"></path><path d="M6 7V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path><path d="M9 11v6a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-6"></path></svg>
+          </button>
+          <button type="button" class="accounts-icon-btn" id="hideUsernamesBtn" title="Hide usernames" aria-label="Hide usernames" aria-pressed="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-5 0-9.27-3.11-11-7 1.09-2.28 2.94-4.12 5.18-5.18"></path><path d="M1 1l22 22"></path><path d="M9.88 9.88a3 3 0 0 0 4.24 4.24"></path><path d="M10.73 5.08A10.94 10.94 0 0 1 12 4c5 0 9.27 3.11 11 7a11.8 11.8 0 0 1-2.16 3.19"></path></svg>
           </button>
           <button type="button" class="accounts-icon-btn" id="refreshAccountsBtn" title="Refresh accounts" aria-label="Refresh accounts">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
@@ -987,8 +995,6 @@
               <th scope="col">Coins</th>
               <th scope="col">Total Caught</th>
               <th scope="col">Rarest Fish</th>
-              <th scope="col">Ruin</th>
-              <th scope="col">Artifact</th>
               <th scope="col">Backpack</th>
               <th scope="col">Actions</th>
             </tr>
@@ -998,6 +1004,7 @@
       </div>
     </section>
 
+    <div id="inventoryViewSection" class="inventory-view-section" hidden>
     <div class="inventory-mode-tabs" role="tablist" aria-label="Inventory view">
       <button type="button" class="inventory-mode-tab is-active" data-inventory-mode="individual" aria-selected="true">Each Account</button>
       <button type="button" class="inventory-mode-tab" data-inventory-mode="bulk" aria-selected="false">All Accounts</button>
@@ -1035,6 +1042,7 @@
     <div class="no-trackers" id="noTrackersMsg">
       <div class="icon">&#x1F392;</div>
       <p>Add a Roblox username above to view their inventory.</p>
+    </div>
     </div>
 
     <div class="loadstring-box">
@@ -1100,6 +1108,8 @@
   let accountSearchQuery = '';
   let accountStatusFilter = 'all';
   let accountViewMode = 'table';
+  let hideUsernames = false;
+  const LS_HIDE_USERNAMES = 'fishit_hide_usernames_v1';
   const inputEl        = document.getElementById('usernameInput');
   const addBtn         = document.getElementById('addBtn');
   const multipleBtn    = document.getElementById('multipleBtn');
@@ -1127,7 +1137,9 @@
   const accountsSearchInputEl = document.getElementById('accountsSearchInput');
   const accountsTableBodyEl = document.getElementById('accountsTableBody');
   const viewTableBtn = document.getElementById('viewTableBtn');
-  const viewCardsBtn = document.getElementById('viewCardsBtn');
+  const viewInventoryBtn = document.getElementById('viewInventoryBtn');
+  const hideUsernamesBtn = document.getElementById('hideUsernamesBtn');
+  const inventoryViewSectionEl = document.getElementById('inventoryViewSection');
   const refreshAccountsBtn = document.getElementById('refreshAccountsBtn');
   const copyTableBtn = document.getElementById('copyTableBtn');
   const copyBtn        = document.getElementById('copyBtn');
@@ -1243,14 +1255,19 @@
   function isTrackerOnline(entry) {
     return syncFreshnessFromTimestamp(entry && entry.lastSyncAt) === 'live';
   }
-  function formatSyncStatusAgo(timestamp) {
+  function tableSyncFreshness(timestamp) {
+    const secs = syncAgeSeconds(timestamp);
+    if (secs == null) return 'dead';
+    if (secs <= SYNC_LIVE_MAX_SEC) return 'live';
+    return 'dead';
+  }
+  function formatTableSyncAge(timestamp) {
     const secs = syncAgeSeconds(timestamp);
     if (secs == null) return 'no sync';
-    if (secs < 10) return 'just now';
-    if (secs < 60) return `${secs}s ago`;
-    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-    if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-    return `${Math.floor(secs / 86400)}d ago`;
+    if (secs < 60) return `${secs}s`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+    if (secs < 86400) return `${Math.floor(secs / 3600)}h`;
+    return `${Math.floor(secs / 86400)}d`;
   }
   function formatCompactStatNumber(value) {
     const n = Number(value);
@@ -1291,20 +1308,23 @@
     if (!stats || !stats.rarestFishChance) return '—';
     return String(stats.rarestFishChance);
   }
-  function displayProgressStat(stats, key) {
-    const block = stats && stats[key];
-    if (!block || block.max == null || block.current == null) return '—';
-    return `${block.current}/${block.max}`;
-  }
-  function isProgressCompleteStat(stats, key) {
-    const block = stats && stats[key];
-    return !!(block && block.max > 0 && block.current >= block.max);
-  }
   function formatStatsAgeSub(stats) {
     const ts = stats && (stats.statsAt || null);
     if (!ts) return '';
-    const ago = formatSyncStatusAgo(ts);
-    return ago && ago !== 'no sync' ? `(${ago})` : '';
+    const label = formatTableSyncAge(ts);
+    return label && label !== 'no sync' ? `(${label})` : '';
+  }
+  function displayTableUsername(entry) {
+    if (!entry) return '—';
+    if (hideUsernames) return '••••••';
+    return maskUsername(entry.displayName);
+  }
+  function updateHideUsernamesUi() {
+    if (!hideUsernamesBtn) return;
+    hideUsernamesBtn.setAttribute('aria-pressed', hideUsernames ? 'true' : 'false');
+    hideUsernamesBtn.setAttribute('aria-label', hideUsernames ? 'Show usernames' : 'Hide usernames');
+    hideUsernamesBtn.setAttribute('title', hideUsernames ? 'Show usernames' : 'Hide usernames');
+    hideUsernamesBtn.classList.toggle('is-active', hideUsernames);
   }
   function accountMatchesStatusFilter(entry) {
     if (accountStatusFilter === 'online') return isTrackerOnline(entry);
@@ -1318,9 +1338,7 @@
       displayCoinsStat(stats),
       displayTotalCaughtStat(stats),
       displayRarestFishStat(stats),
-      displayProgressStat(stats, 'ruin'),
-      displayProgressStat(stats, 'artifact'),
-      formatSyncStatusAgo(entry && entry.lastSyncAt),
+      formatTableSyncAge(entry && entry.lastSyncAt),
     ].filter(Boolean).join(' ').toLowerCase();
   }
   function accountMatchesSearch(entry) {
@@ -1339,28 +1357,23 @@
     return rows;
   }
   function buildAccountStatusHtml(entry) {
-    const freshness = syncFreshnessFromTimestamp(entry && entry.lastSyncAt);
-    const label = formatSyncStatusAgo(entry && entry.lastSyncAt);
+    const freshness = tableSyncFreshness(entry && entry.lastSyncAt);
+    const label = formatTableSyncAge(entry && entry.lastSyncAt);
     return `<span class="accounts-status"><span class="status-dot ${freshness}" data-table-status-dot aria-hidden="true"></span><span data-table-sync-age>${escHtml(label)}</span></span>`;
   }
   function buildAccountRowHtml(row, index) {
     const { key, entry } = row;
     const stats = getEntryPlayerStats(entry);
-    const ruin = displayProgressStat(stats, 'ruin');
-    const artifact = displayProgressStat(stats, 'artifact');
     const caughtSub = formatStatsAgeSub(stats);
-    const ruinClass = ruin === '—' ? 'is-muted' : (isProgressCompleteStat(stats, 'ruin') ? 'is-complete' : '');
-    const artifactClass = artifact === '—' ? 'is-muted' : (isProgressCompleteStat(stats, 'artifact') ? 'is-complete' : '');
+    const inventoryLabel = `Open inventory for ${entry.displayName}`;
     return `<tr data-account-row-key="${escHtml(key)}">
   <td class="accounts-table__index">${index + 1}</td>
   <td class="accounts-table__status">${buildAccountStatusHtml(entry)}</td>
-  <td class="accounts-table__username" title="${escHtml(entry.displayName)}">${escHtml(maskUsername(entry.displayName))}</td>
+  <td class="accounts-table__username" title="${hideUsernames ? 'Username hidden' : escHtml(entry.displayName)}">${escHtml(displayTableUsername(entry))}</td>
   <td class="accounts-table__stat${displayCoinsStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayCoinsStat(stats))}</td>
   <td class="accounts-table__stat${displayTotalCaughtStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayTotalCaughtStat(stats))}${caughtSub ? `<span class="accounts-table__sub">${escHtml(caughtSub)}</span>` : ''}</td>
   <td class="accounts-table__stat${displayRarestFishStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayRarestFishStat(stats))}</td>
-  <td class="accounts-table__stat ${ruinClass}">${escHtml(ruin)}</td>
-  <td class="accounts-table__stat ${artifactClass}">${escHtml(artifact)}</td>
-  <td><button type="button" class="accounts-table__icon-btn" data-open-backpack="${escHtml(key)}" aria-label="Open backpack for ${escHtml(entry.displayName)}" title="Open backpack"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><path d="M6 7h12l1 5H5z"></path><path d="M6 7V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path><path d="M9 11v6a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-6"></path></svg></button></td>
+  <td><button type="button" class="accounts-table__icon-btn" data-open-backpack="${escHtml(key)}" aria-label="${escHtml(inventoryLabel)}" title="${escHtml(inventoryLabel)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><path d="M6 7h12l1 5H5z"></path><path d="M6 7V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path><path d="M9 11v6a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-6"></path></svg></button></td>
   <td><button type="button" class="accounts-table__icon-btn accounts-table__icon-btn--danger" data-remove-account="${escHtml(key)}" aria-label="Remove ${escHtml(entry.displayName)}" title="Remove account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></button></td>
 </tr>`;
   }
@@ -1368,38 +1381,28 @@
     if (!accountsTableBodyEl) return;
     const rows = getFilteredAccountEntries();
     if (!rows.length) {
-      accountsTableBodyEl.innerHTML = '<tr><td colspan="10" class="accounts-table__empty">No matching accounts yet.</td></tr>';
+      accountsTableBodyEl.innerHTML = '<tr><td colspan="8" class="accounts-table__empty">No matching accounts yet.</td></tr>';
       return;
     }
     accountsTableBodyEl.innerHTML = rows.map((row, idx) => buildAccountRowHtml(row, idx)).join('');
   }
-  function tickAccountsTableStatus() {
-    if (!accountsTableBodyEl) return;
-    accountsTableBodyEl.querySelectorAll('[data-account-row-key]').forEach((rowEl) => {
-      const key = rowEl.getAttribute('data-account-row-key');
-      const entry = key && trackers.get(key);
-      if (!entry) return;
-      const statusCell = rowEl.querySelector('.accounts-table__status');
-      if (statusCell) statusCell.innerHTML = buildAccountStatusHtml(entry);
-    });
-  }
   function setAccountViewMode(mode) {
-    accountViewMode = mode === 'cards' ? 'cards' : 'table';
+    accountViewMode = mode === 'inventory' ? 'inventory' : 'table';
     if (accountsOverviewEl) {
-      accountsOverviewEl.classList.toggle('is-cards-only', accountViewMode === 'cards');
+      accountsOverviewEl.classList.toggle('is-inventory-only', accountViewMode === 'inventory');
     }
-    if (trackerListEl) {
-      trackerListEl.classList.toggle('is-table-primary', accountViewMode === 'table');
-      trackerListEl.style.display = accountViewMode === 'cards' ? '' : '';
+    if (inventoryViewSectionEl) {
+      inventoryViewSectionEl.hidden = accountViewMode !== 'inventory';
     }
     if (viewTableBtn) viewTableBtn.classList.toggle('is-active', accountViewMode === 'table');
-    if (viewCardsBtn) viewCardsBtn.classList.toggle('is-active', accountViewMode === 'cards');
+    if (viewInventoryBtn) viewInventoryBtn.classList.toggle('is-active', accountViewMode === 'inventory');
+    if (accountViewMode === 'inventory') updateIndividualView();
   }
   function openAccountInventory(key) {
     const entry = trackers.get(key);
     if (!entry || !entry.el) return;
     setInventoryMode('individual');
-    setAccountViewMode('cards');
+    setAccountViewMode('inventory');
     entry.el.classList.add('expanded', 'is-highlighted');
     entry.el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     setTimeout(() => entry.el.classList.remove('is-highlighted'), 1800);
@@ -1410,18 +1413,16 @@
   }
   function copyAccountsTableSummary() {
     const rows = getFilteredAccountEntries();
-    const lines = [['#', 'Status', 'Username', 'Coins', 'Total Caught', 'Rarest Fish', 'Ruin', 'Artifact'].join('\t')];
+    const lines = [['#', 'Status', 'Username', 'Coins', 'Total Caught', 'Rarest Fish'].join('\t')];
     rows.forEach((row, idx) => {
       const stats = getEntryPlayerStats(row.entry);
       lines.push([
         idx + 1,
-        formatSyncStatusAgo(row.entry.lastSyncAt),
-        row.entry.displayName,
+        formatTableSyncAge(row.entry.lastSyncAt),
+        hideUsernames ? 'hidden' : row.entry.displayName,
         displayCoinsStat(stats),
         displayTotalCaughtStat(stats),
         displayRarestFishStat(stats),
-        displayProgressStat(stats, 'ruin'),
-        displayProgressStat(stats, 'artifact'),
       ].join('\t'));
     });
     const text = lines.join('\n');
@@ -1458,7 +1459,15 @@
       });
     });
     if (viewTableBtn) viewTableBtn.addEventListener('click', () => setAccountViewMode('table'));
-    if (viewCardsBtn) viewCardsBtn.addEventListener('click', () => setAccountViewMode('cards'));
+    if (viewInventoryBtn) viewInventoryBtn.addEventListener('click', () => setAccountViewMode('inventory'));
+    if (hideUsernamesBtn) {
+      hideUsernamesBtn.addEventListener('click', () => {
+        hideUsernames = !hideUsernames;
+        try { localStorage.setItem(LS_HIDE_USERNAMES, hideUsernames ? '1' : '0'); } catch {}
+        updateHideUsernamesUi();
+        renderAccountsTable();
+      });
+    }
     if (refreshAccountsBtn) refreshAccountsBtn.addEventListener('click', refreshAllAccounts);
     if (copyTableBtn) copyTableBtn.addEventListener('click', copyAccountsTableSummary);
     if (accountsTableBodyEl) {
@@ -1472,6 +1481,10 @@
         if (removeBtn) removeTracker(removeBtn.getAttribute('data-remove-account'));
       });
     }
+    try {
+      hideUsernames = localStorage.getItem(LS_HIDE_USERNAMES) === '1';
+    } catch {}
+    updateHideUsernamesUi();
     setAccountViewMode('table');
   }
   function computeInventoryStats() {
@@ -1609,7 +1622,6 @@
   }
   function tickAllCardSyncStatus() {
     trackers.forEach((entry) => refreshEntrySyncDisplay(entry));
-    tickAccountsTableStatus();
   }
   function setCardSyncDisplay(card, data) {
     const key = card && card.dataset.user;
@@ -2686,6 +2698,8 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
         setCardRunning(entry.el, entry.displayName, data);
       }
       if (inventoryMode === 'bulk') renderBulkInventory();
+      updateInventoryStats();
+      renderAccountsTable();
     } catch { if (trackers.has(key)) setCardError(entry.el); }
   }
 

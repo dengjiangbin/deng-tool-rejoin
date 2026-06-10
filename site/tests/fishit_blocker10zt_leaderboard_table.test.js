@@ -29,7 +29,7 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
     for (const label of [
       'Status', 'Username', 'Coins', 'Total Caught', 'Rarest Fish',
-      'Ruin', 'Artifact', 'Backpack', 'Actions',
+      'Backpack', 'Actions',
     ]) {
       assert.match(res.text, new RegExp(`>${label}<`));
     }
@@ -41,7 +41,36 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
     assert.match(res.text, /data-open-backpack/);
     assert.match(res.text, /data-remove-account/);
     assert.match(res.text, /function renderAccountsTable/);
-    assert.match(res.text, /function formatSyncStatusAgo/);
+    assert.match(res.text, /function formatTableSyncAge/);
+    assert.match(res.text, /id="hideUsernamesBtn"/);
+    assert.match(res.text, /id="viewInventoryBtn"[^>]*title="Inventory View"/);
+    assert.match(res.text, /id="viewInventoryBtn"[^>]*aria-label="Inventory View"/);
+    assert.match(res.text, /id="inventoryViewSection"/);
+    assert.match(res.text, /inventoryViewSectionEl\.hidden = accountViewMode !== 'inventory'/);
+    assert.doesNotMatch(res.text, />Ruin</);
+    assert.doesNotMatch(res.text, />Artifact</);
+    assert.doesNotMatch(res.text, />Quest</);
+    assert.doesNotMatch(res.text, /just now/i);
+    assert.doesNotMatch(res.text, /\d+s ago/i);
+  });
+
+  test('offline table status uses red dead styling, not orange stale', () => {
+    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
+    assert.match(tpl, /function tableSyncFreshness/);
+    assert.match(tpl, /accounts-status \.status-dot\.dead/);
+    assert.doesNotMatch(tpl, /accounts-status[\s\S]*status-dot\.stale/);
+    assert.doesNotMatch(tpl, /\.status-dot\.stale/);
+    assert.match(tpl, /return 'dead'/);
+  });
+
+  test('leaderboard status format is compact duration without ago or just now', () => {
+    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
+    assert.match(tpl, /function formatTableSyncAge/);
+    assert.doesNotMatch(tpl, /function formatSyncStatusAgo/);
+    assert.doesNotMatch(tpl, /just now/);
+    assert.match(tpl, /\$\{secs\}s/);
+    assert.match(tpl, /\$\{Math\.floor\(secs \/ 60\)\}m/);
+    assert.doesNotMatch(tpl, /tickAccountsTableStatus/);
   });
 
   test('quest and crossed icon/check columns are not present', () => {
@@ -53,6 +82,18 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
     assert.doesNotMatch(tpl, /elementFlags/i);
     assert.doesNotMatch(tpl, />Remove</);
     assert.doesNotMatch(tpl, /Last sync:/i);
+    assert.doesNotMatch(tpl, /displayProgressStat/);
+    assert.doesNotMatch(tpl, /viewCardsBtn/);
+    assert.doesNotMatch(tpl, /is-cards-only/);
+  });
+
+  test('table view hides inventory section; inventory view shows it', () => {
+    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
+    assert.match(tpl, /id="inventoryViewSection"[^>]*hidden/);
+    assert.match(tpl, /setAccountViewMode\('inventory'\)/);
+    assert.match(tpl, /setAccountViewMode\('table'\)/);
+    assert.match(tpl, /is-inventory-only/);
+    assert.match(tpl, /\.inventory-view-section\[hidden\]/);
   });
 
   test('update-backpack stores and returns playerStats without quest fields', async () => {
