@@ -87,6 +87,44 @@ describe('fishitPlayerStats', () => {
     assert.equal(merged.source, 'replion');
   });
 
+  test('sanitisePlayerStatsDebug keeps coinProbe proof fields', () => {
+    const out = playerStats.sanitisePlayerStatsDebug({
+      enabled: true,
+      source: 'replion',
+      build: 'BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10',
+      coinProbe: {
+        source: 'replion',
+        matchedPath: 'Coins',
+        matchedKey: 'Coins',
+        rawValue: '33.44M',
+        parsedValue: 33440000,
+        candidateKeys: ['Coins', 'Currencies.Coins'],
+      },
+    });
+    assert.equal(out.coinProbe.source, 'replion');
+    assert.equal(out.coinProbe.matchedPath, 'Coins');
+    assert.equal(out.coinProbe.rawValue, '33.44M');
+    assert.equal(out.coinProbe.parsedValue, 33440000);
+    assert.deepEqual(out.coinProbe.candidateKeys, ['Coins', 'Currencies.Coins']);
+  });
+
+  test('missing coin does not erase totalCaught and rarestFish on merge', () => {
+    const existing = playerStats.sanitisePlayerStats({
+      totalCaughtText: '54,313',
+      rarestFishChance: '1/4M',
+      source: 'leaderstats',
+      build: 'BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10',
+    });
+    const merged = playerStats.mergePlayerStats(existing, {
+      source: 'leaderstats',
+      observedAt: 1710000002,
+      build: 'BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10',
+    }, { isLiveRoblox: true });
+    assert.equal(merged.totalCaughtText, '54,313');
+    assert.equal(merged.rarestFishChance, '1/4M');
+    assert.equal(merged.coinsText, undefined);
+  });
+
   test('mergePlayerStats rejects untrusted BLOCKER10ZV incoming stats', () => {
     const merged = playerStats.mergePlayerStats(null, {
       coinsText: '201.2K',

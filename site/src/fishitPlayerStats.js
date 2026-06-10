@@ -93,6 +93,18 @@ function sanitisePlayerStatsDebug(raw) {
   out.coinsSource = clampText(raw.coinsSource, 32);
   out.caughtSource = clampText(raw.caughtSource, 32);
   out.rarestSource = clampText(raw.rarestSource, 32);
+  if (raw.coinProbe && typeof raw.coinProbe === 'object') {
+    out.coinProbe = {
+      source: clampText(raw.coinProbe.source, 32),
+      matchedPath: clampText(raw.coinProbe.matchedPath, 64),
+      matchedKey: clampText(raw.coinProbe.matchedKey, 48),
+      rawValue: clampText(raw.coinProbe.rawValue, 64),
+      parsedValue: finiteNumber(raw.coinProbe.parsedValue),
+      candidateKeys: Array.isArray(raw.coinProbe.candidateKeys)
+        ? raw.coinProbe.candidateKeys.slice(0, 40).map((k) => clampText(k, 48)).filter(Boolean)
+        : [],
+    };
+  }
   return out;
 }
 

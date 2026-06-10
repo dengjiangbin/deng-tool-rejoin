@@ -466,6 +466,26 @@
       padding:0;
     }
     .accounts-table__icon-btn:hover { border-color:#475569; }
+    .accounts-table__icon-btn .nav-icon,
+    .accounts-icon-btn .nav-icon {
+      width:18px;
+      height:18px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      background:transparent;
+      box-shadow:none;
+    }
+    .accounts-table__icon-btn .nav-icon svg,
+    .accounts-icon-btn .nav-icon svg {
+      width:16px;
+      height:16px;
+      stroke:currentColor;
+      stroke-width:2.2;
+      stroke-linecap:round;
+      stroke-linejoin:round;
+      fill:none;
+    }
     .accounts-table__icon-btn--danger {
       border-color:rgba(239,68,68,.45);
       color:#fca5a5;
@@ -838,12 +858,12 @@
       .inventory-grid,
       .items-grid,
       .fish-grid {
-        grid-template-columns:1fr;
-        gap:10px;
+        grid-template-columns:repeat(2,minmax(0,1fr));
+        gap:8px;
       }
       .stones-grid,
       .stone-grid {
-        grid-template-columns:1fr;
+        grid-template-columns:repeat(2,minmax(0,1fr));
         gap:8px;
       }
       .ft-card--fish,
@@ -854,7 +874,7 @@
       .ft-card-name { font-size:12px; }
       .ft-chip { font-size:10px; padding:0 6px; }
     }
-    @media (max-width:360px) {
+    @media (max-width:280px) {
       .inventory-grid,
       .items-grid,
       .fish-grid,
@@ -972,7 +992,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18M9 4v16"></path></svg>
           </button>
           <button type="button" class="accounts-icon-btn" id="viewInventoryBtn" title="Inventory View" aria-label="Inventory View">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 7h12l1 5H5z"></path><path d="M6 7V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path><path d="M9 11v6a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-6"></path></svg>
+            <span class="nav-icon" aria-hidden="true" data-nav-icon="backpack"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10Z"></path><path d="M9 6V5a3 3 0 0 1 3-3h0a3 3 0 0 1 3 3v1"></path><path d="M8 21v-5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v5"></path></svg></span>
           </button>
           <button type="button" class="accounts-icon-btn" id="hideUsernamesBtn" title="Hide usernames" aria-label="Hide usernames" aria-pressed="false">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-5 0-9.27-3.11-11-7 1.09-2.28 2.94-4.12 5.18-5.18"></path><path d="M1 1l22 22"></path><path d="M9.88 9.88a3 3 0 0 0 4.24 4.24"></path><path d="M10.73 5.08A10.94 10.94 0 0 1 12 4c5 0 9.27 3.11 11 7a11.8 11.8 0 0 1-2.16 3.19"></path></svg>
@@ -1283,6 +1303,7 @@
     if (!Number.isFinite(n)) return null;
     return Math.max(0, Math.floor(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   }
+  const BACKPACK_NAV_ICON = '<span class="nav-icon" aria-hidden="true" data-nav-icon="backpack"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10Z"></path><path d="M9 6V5a3 3 0 0 1 3-3h0a3 3 0 0 1 3 3v1"></path><path d="M8 21v-5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v5"></path></svg></span>';
   function formatUsernameForDisplay(username, opts) {
     opts = opts || {};
     const s = String(username || '').trim();
@@ -1439,7 +1460,7 @@
   <td class="accounts-table__stat${displayCoinsStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayCoinsStat(stats))}</td>
   <td class="accounts-table__stat${displayTotalCaughtStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayTotalCaughtStat(stats))}${caughtSub ? `<span class="accounts-table__sub">${escHtml(caughtSub)}</span>` : ''}</td>
   <td class="accounts-table__stat${displayRarestFishStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayRarestFishStat(stats))}</td>
-  <td><button type="button" class="accounts-table__icon-btn" data-open-backpack="${escHtml(key)}" aria-label="${escHtml(inventoryLabel)}" title="${escHtml(inventoryLabel)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><path d="M6 7h12l1 5H5z"></path><path d="M6 7V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path><path d="M9 11v6a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-6"></path></svg></button></td>
+  <td><button type="button" class="accounts-table__icon-btn" data-open-backpack="${escHtml(key)}" aria-label="${escHtml(inventoryLabel)}" title="${escHtml(inventoryLabel)}">${BACKPACK_NAV_ICON}</button></td>
   <td><button type="button" class="accounts-table__icon-btn accounts-table__icon-btn--danger" data-remove-account="${escHtml(key)}" aria-label="Remove ${escHtml(entry.displayName)}" title="Remove account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></button></td>
 </tr>`;
   }

@@ -87,6 +87,24 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
     assert.doesNotMatch(tpl, /is-cards-only/);
   });
 
+  test('backpack buttons reuse main website nav backpack icon', () => {
+    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
+    const layout = fs.readFileSync(path.join(__dirname, '..', 'views', 'layout.ejs'), 'utf8');
+    const backpackPath = 'M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10Z';
+    assert.match(layout, new RegExp(backpackPath));
+    assert.match(tpl, /data-nav-icon="backpack"/);
+    assert.match(tpl, new RegExp(backpackPath));
+    assert.match(tpl, /BACKPACK_NAV_ICON/);
+    assert.match(tpl, /data-open-backpack[\s\S]*\$\{BACKPACK_NAV_ICON\}/);
+  });
+
+  test('inventory view uses two-column mobile card grid', () => {
+    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
+    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*\.inventory-grid[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*\.fish-grid[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+    assert.match(tpl, /@media \(max-width:280px\)[\s\S]*grid-template-columns:1fr/);
+  });
+
   test('table view hides inventory section; inventory view shows it', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     assert.match(tpl, /id="inventoryViewSection"[^>]*hidden/);
@@ -105,7 +123,7 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
         username: 'LeaderTableUser',
         userId: 991,
         isOnline: true,
-        trackerBuild: 'BLOCKER10ZW_PLAYERSTATS_REAL_ONLY_2026_06_10',
+        trackerBuild: 'BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10',
         clientOrigin: 'roblox_tracker',
         items: [],
         playerStats: {
@@ -114,7 +132,7 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
           totalCaught: 450,
           rarestFishChance: '1/4.50K',
           source: 'leaderstats',
-          build: 'BLOCKER10ZW_PLAYERSTATS_REAL_ONLY_2026_06_10',
+          build: 'BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10',
           ruin: { current: 0, max: 4 },
           artifact: { current: 4, max: 4 },
           quest: { current: 1, max: 4 },

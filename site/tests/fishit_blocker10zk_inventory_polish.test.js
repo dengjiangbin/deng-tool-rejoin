@@ -47,12 +47,12 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
     assert.match(tpl, /function renderBulkInventory/);
   });
 
-  test('mobile CSS keeps ft-card horizontal layout full width', () => {
+  test('mobile CSS keeps ft-card horizontal layout in two-column inventory grid', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*grid-template-columns:1fr/);
+    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
     assert.match(tpl, /@media \(max-width:640px\)[\s\S]*\.ft-card--fish[\s\S]*width:100%/);
     assert.match(tpl, /\.ft-card-icon img[\s\S]*object-fit:contain/);
-    assert.match(tpl, /@media \(max-width:360px\)[\s\S]*grid-template-columns:1fr/);
+    assert.match(tpl, /@media \(max-width:280px\)[\s\S]*grid-template-columns:1fr/);
   });
 
   test('bulk aggregation sums quantities and tracks account count', () => {
