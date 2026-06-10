@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Static secret audit for tracker Lua sources (raw dev + protected dist).
- * Fails if obvious API keys, tokens, or signing secrets appear in file text.
+ * Static secret audit for tracker Lua sources (protected dist + optional private raw).
  */
 const fs = require('fs');
 const path = require('path');
+const { resolveRawTrackerSourcePath } = require('./trackerRawSourcePath');
 
 const SECRET_PATTERNS = [
   { name: 'OpenAI-style API key', re: /\bsk-[A-Za-z0-9]{20,}\b/ },
@@ -57,9 +57,11 @@ if (require.main === module) {
   const paths = process.argv.slice(2).length
     ? process.argv.slice(2)
     : [
-      path.join(root, 'tracker.lua'),
       path.join(root, 'dist', 'tracker.lua'),
     ];
+  const rawPath = resolveRawTrackerSourcePath({ root });
+  if (rawPath) paths.push(rawPath);
+  else console.log('SKIP raw secret audit: private tracker source is not present in public repo');
   auditPaths(paths);
 }
 

@@ -18,6 +18,7 @@ const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
+const { RAW_TRACKER_LUA, testIfRawTracker } = require('./helpers/trackerRawSource');
 
 process.env.NODE_ENV = 'test';
 const TMP_CATALOG = path.join(os.tmpdir(), `fishit_replion_test_${process.pid}.json`);
@@ -2204,8 +2205,8 @@ describe('BLOCKER10C non-blocking catalog and downgrade guards', () => {
   });
 });
 
-describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
-  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+(RAW_TRACKER_LUA ? describe : describe.skip)('BLOCKER10G targeted item diagnostics no-freeze', () => {
+  const trackerPath = RAW_TRACKER_LUA;
   const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
 
   beforeEach(() => { cleanup(); });
@@ -2393,8 +2394,8 @@ describe('BLOCKER10G targeted item diagnostics no-freeze', () => {
   });
 });
 
-describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER10J)', () => {
-  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+(RAW_TRACKER_LUA ? describe : describe.skip)('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER10J)', () => {
+  const trackerPath = RAW_TRACKER_LUA;
   const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
 
   test('validate_tracker_compile.js passes on tracker.lua', () => {
@@ -2433,8 +2434,8 @@ describe('BLOCKER10F safe minimal no-freeze compile gate (superseded by BLOCKER1
   });
 });
 
-describe('BLOCKER10E live freeze proof and targeted item resolution', () => {
-  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+(RAW_TRACKER_LUA ? describe : describe.skip)('BLOCKER10E live freeze proof and targeted item resolution', () => {
+  const trackerPath = RAW_TRACKER_LUA;
 
   test('freeze monitor and safe minimal mode present', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
@@ -2475,8 +2476,8 @@ describe('BLOCKER10E live freeze proof and targeted item resolution', () => {
   });
 });
 
-describe('BLOCKER10D loadstring startup safety', () => {
-  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+(RAW_TRACKER_LUA ? describe : describe.skip)('BLOCKER10D loadstring startup safety', () => {
+  const trackerPath = RAW_TRACKER_LUA;
 
   test('tracker.lua starts with comment header, not loadstring wrapper', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
@@ -2520,8 +2521,8 @@ describe('BLOCKER10D loadstring startup safety', () => {
   });
 });
 
-describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
-  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+(RAW_TRACKER_LUA ? describe : describe.skip)('BLOCKER10H ultra-light player-data-only server enrichment', () => {
+  const trackerPath = RAW_TRACKER_LUA;
   const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
 
   beforeEach(() => { cleanup(); });
@@ -2656,8 +2657,8 @@ describe('BLOCKER10H ultra-light player-data-only server enrichment', () => {
   });
 });
 
-describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
-  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+(RAW_TRACKER_LUA ? describe : describe.skip)('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
+  const trackerPath = RAW_TRACKER_LUA;
   const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
 
   beforeEach(() => { cleanup(); });
@@ -2823,8 +2824,8 @@ describe('BLOCKER10I enrichment display (carried into BLOCKER10J)', () => {
   });
 });
 
-describe('BLOCKER10J safe light sync 10s + server commit resolution', () => {
-  const trackerPath = path.join(__dirname, '..', '..', 'tracker.lua');
+(RAW_TRACKER_LUA ? describe : describe.skip)('BLOCKER10J safe light sync 10s + server commit resolution', () => {
+  const trackerPath = RAW_TRACKER_LUA;
   const compileScript = path.join(__dirname, '..', '..', 'scripts', 'validate_tracker_compile.js');
   const routes = require('../src/fishitTrackerRoutes');
 
@@ -3554,8 +3555,8 @@ describe('BLOCKER10M catch-delta name catalog discovery', () => {
     assert.ok(disc.rejectedEvents.some((e) => e.reason === 'name_is_rarity_label'));
   });
 
-  test('tracker.lua includes BLOCKER10M catch delta markers', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+  testIfRawTracker('tracker.lua includes BLOCKER10M catch delta markers', () => {
+    const src = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.ok(src.includes('BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07'));
     assert.ok(src.includes('normalizeCatchFishName'));
     assert.ok(src.includes('pendingCatchName'));
@@ -3738,8 +3739,8 @@ describe('BLOCKER10N2 image proxy label fix', () => {
     assert.equal(res.body.publicApiBuild, PUBLIC_API_BUILD);
   });
 
-  test('tracker.lua has single BLOCKER10O boot marker', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+  testIfRawTracker('tracker.lua has single BLOCKER10O boot marker', () => {
+    const src = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07'));
     assert.ok(!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J'));
     assert.equal((src.match(/TRACKER_BOOT_BEGIN/g) || []).length, 1);
@@ -4188,8 +4189,8 @@ describe('BLOCKER10P false rarity learn fix (regression)', () => {
     }
   });
 
-  test('8: build markers BLOCKER10Q in tracker.lua and template', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+  testIfRawTracker('8: build markers BLOCKER10Q in tracker.lua and template', () => {
+    const src = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07'));
     assert.ok(src.includes('BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07'));
     assert.ok(src.includes('isRarityTok'));
@@ -4484,8 +4485,8 @@ describe('BLOCKER10Q global collective catalog rarity', () => {
     assert.equal(disc.globalEvidence.accepted || disc.globalEvidence.rejected, true);
   });
 
-  test('14: build markers BLOCKER10R', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+  testIfRawTracker('14: build markers BLOCKER10R', () => {
+    const src = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.ok(src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07'));
     assert.ok(src.includes('payload.gameId'));
     assert.ok(src.includes('payload.placeId'));
@@ -4704,13 +4705,13 @@ describe('BLOCKER10R real live new itemId proof', () => {
       || dbg.body.liveCatchBinding.lastFishNameCandidate != null);
   });
 
-  test('8: regression — 5 fish images, Fish label, tracker markers', async () => {
+  testIfRawTracker('8: regression — 5 fish images, Fish label, tracker markers', async () => {
     const pub = await buildPublicFishFields(knownFish.map((f) => ({
       name: f.name, amount: 10, category: 'fish', itemId: f.itemId,
     })));
     assert.equal(pub.publicItems.length, 5);
     assert.equal(pub.fishCounts.label, 'Fish');
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    const src = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.ok(src.includes('LIVE_CATCH_TEXT'));
     assert.ok(src.includes('evidenceSourceMode'));
     assert.equal(PUBLIC_API_BUILD, 'BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07');
@@ -4832,8 +4833,8 @@ describe('BLOCKER10S fish path discovery and no empty wipe (carried into BLOCKER
     assert.equal(isPublicFishItem({ name: 'Forgotten', category: 'fish', itemId: '196' }), false);
   });
 
-  test('5: tracker.lua has fish path discovery and catch watcher markers', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+  testIfRawTracker('5: tracker.lua has fish path discovery and catch watcher markers', () => {
+    const src = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.ok(src.includes('discoverFishInventoryPaths'));
     assert.ok(src.includes('FISH_PATH_SELECTED'));
     assert.ok(src.includes('scanPlayerGuiForCatchText'));
@@ -4976,9 +4977,11 @@ describe('BLOCKER10T live catch normalize and public promote', () => {
     });
     assert.equal(info.isPartial, true);
 
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.ok(src.includes('parseCatchNameFull'));
-    assert.equal(PUBLIC_API_BUILD, 'BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07');
+    if (RAW_TRACKER_LUA) {
+      const src = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
+      assert.ok(src.includes('parseCatchNameFull'));
+      assert.equal(PUBLIC_API_BUILD, 'BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07');
+    }
   });
 });
 
@@ -5129,9 +5132,9 @@ describe('BLOCKER10U global catalog polish images rarity', () => {
     assert.equal(parsed.rarityCandidate, 'Forgotten');
   });
 
-  test('build marker and tracker compile marker', () => {
+  testIfRawTracker('build marker and tracker compile marker', () => {
     assert.equal(PUBLIC_API_BUILD, 'BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07');
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    const src = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.ok(src.includes('BLOCKER10Z4_AMOUNT_REGRESSION_FIX_2026_06_07'));
     assert.ok(src.includes('stripAllMutationPrefixes'));
   });

@@ -29,3 +29,9 @@ backups/
 /launcher/
 
 install.sh.tmp
+
+# Private FishTracker dev source — never commit raw tracker.lua to public repo (BLOCKER10ZO)
+tracker.lua
+*.raw.lua
+private/
+dev-source/

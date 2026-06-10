@@ -26,12 +26,12 @@ const {
 const { buildTrackerPageLocals } = require('../src/fishitTrackerRoutes');
 const trackerRouter = require('../src/fishitTrackerRoutes');
 const { auditFile } = require('../../scripts/audit_tracker_secrets');
+const { RAW_TRACKER_LUA, testIfRawTracker, REPO_ROOT } = require('./helpers/trackerRawSource');
 
-const ROOT = path.join(__dirname, '..', '..');
-const RAW_LUA = path.join(ROOT, 'tracker.lua');
+const ROOT = REPO_ROOT;
 const DIST_LUA = path.join(ROOT, 'dist', 'tracker.lua');
 const TRACKER_BUILD = 'BLOCKER10ZL_LURAPH_PROTECTED_RELEASE_2026_06_10';
-const PUBLIC_LOADER = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua"))()';
+const PUBLIC_LOADER = CLEAN_TRACKER_LOADSTRING;
 
 function makeApp() {
   const app = express();
@@ -98,10 +98,10 @@ describe('BLOCKER10ZM protected dist/tracker.lua public loader', () => {
     assert.equal(BLOCKER10ZL_BUILD, TRACKER_BUILD);
   });
 
-  test('raw tracker.lua exists and compile validation passes', () => {
-    assert.ok(fs.existsSync(RAW_LUA), RAW_LUA);
+  testIfRawTracker('private raw tracker source compile validation passes when present', () => {
     const out = execFileSync(process.execPath, [
       path.join(ROOT, 'scripts', 'validate_tracker_compile.js'),
+      RAW_TRACKER_LUA,
     ], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
     assert.match(out, /BLOCKER10ZL_LURAPH_PROTECTED_RELEASE_2026_06_10/);
@@ -132,24 +132,26 @@ describe('BLOCKER10ZM protected dist/tracker.lua public loader', () => {
     assert.doesNotMatch(res.text, /loadstringDebugBox/);
   });
 
-  test('tracker.lua dev source references dist/tracker.lua in usage comment', () => {
-    const lua = fs.readFileSync(RAW_LUA, 'utf8');
+  testIfRawTracker('private raw dev source references dist/tracker.lua in usage comment', () => {
+    const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.match(lua, /TRACKER_BUILD = "BLOCKER10ZL_LURAPH_PROTECTED_RELEASE_2026_06_10"/);
     assert.match(lua, /dist\/tracker\.lua/);
     assert.doesNotMatch(lua, /tracker\.luraph\.lua/);
   });
 
-  test('no secrets in raw tracker.lua', () => {
-    const audit = auditFile(RAW_LUA);
+  testIfRawTracker('no secrets in private raw tracker source', () => {
+    const audit = auditFile(RAW_TRACKER_LUA);
     assert.equal(audit.ok, true, audit.hits.join(', '));
   });
 
-  test('dist/tracker.lua exists and differs from raw source', () => {
+  test('dist/tracker.lua exists and differs from private raw source when present', () => {
     assert.ok(fs.existsSync(DIST_LUA), DIST_LUA);
-    const raw = fs.readFileSync(RAW_LUA, 'utf8');
     const dist = fs.readFileSync(DIST_LUA, 'utf8');
     assert.ok(dist.length > 4096);
-    assert.notEqual(raw.trim(), dist.trim());
+    if (RAW_TRACKER_LUA) {
+      const raw = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
+      assert.notEqual(raw.trim(), dist.trim());
+    }
   });
 
   test('dist/tracker.lua passes dist validation', () => {

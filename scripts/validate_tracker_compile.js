@@ -1,15 +1,29 @@
 #!/usr/bin/env node
 /**
- * BLOCKER10J: static compile guard for tracker.lua
+ * BLOCKER10J: static compile guard for private raw tracker.lua
  * - luaparse catches Lua syntax errors (continue stripped for parse-only)
  * - luau-compile (when present) catches Luau register-limit failures
+ *
+ * Public repo: raw source is private/local-only. Set TRACKER_RAW_SOURCE_PATH or
+ * PRIVATE_TRACKER_SOURCE_PATH to compile; otherwise raw compile is skipped.
  */
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const luaparse = require(path.join(__dirname, '..', 'site', 'node_modules', 'luaparse'));
+const { resolveRawTrackerSourcePath } = require('./trackerRawSourcePath');
 
-const trackerPath = path.resolve(process.argv[2] || path.join(__dirname, '..', 'tracker.lua'));
+const explicitPath = process.argv[2];
+const trackerPath = explicitPath
+  ? path.resolve(explicitPath)
+  : resolveRawTrackerSourcePath();
+
+if (!trackerPath || !fs.existsSync(trackerPath)) {
+  console.log('SKIP raw compile: private tracker source is not present in public repo');
+  console.log('  hint: set TRACKER_RAW_SOURCE_PATH to your private tracker.lua');
+  process.exit(0);
+}
+
 let src = fs.readFileSync(trackerPath, 'utf8');
 
 const errors = [];

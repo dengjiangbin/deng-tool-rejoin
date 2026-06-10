@@ -8,6 +8,7 @@ const path = require('path');
 const itemUtilityPublic = require('../src/fishitItemUtilityPublic');
 const { buildPublicFishFields, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
 const { BLOCKER10ZA_BUILD } = require('../src/fishitTrackerBuild');
+const { RAW_TRACKER_LUA, testIfRawTracker } = require('./helpers/trackerRawSource');
 
 const ZA_BUILD = 'BLOCKER10ZA_PLAYERDATA_ITEMUTILITY_STONES_UPLOAD_2026_06_09';
 
@@ -150,8 +151,8 @@ describe('BLOCKER10ZA PlayerData ItemUtility public identity', () => {
     assert.match(tpl, /BLOCKER10ZA|data-render-build/);
   });
 
-  test('tracker.lua has ItemUtility scan and BLOCKER10ZA build marker', () => {
-    const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+  testIfRawTracker('tracker.lua has ItemUtility scan and BLOCKER10ZA build marker', () => {
+    const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.match(lua, /BLOCKER10ZA_PLAYERDATA_ITEMUTILITY_STONES_UPLOAD_2026_06_09/);
     assert.match(lua, /scanPlayerDataItemUtilityInventory/);
     assert.match(lua, /ItemUtility\.GetItemDataFromItemType/);

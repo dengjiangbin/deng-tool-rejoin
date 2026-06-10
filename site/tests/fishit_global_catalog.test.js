@@ -11,8 +11,8 @@ const globalCatalogService = require('../src/fishitGlobalCatalogService');
 const fishImageCache = require('../src/fishitFishImageCache');
 const quizBotCatalog = require('../src/fishitQuizBotImageCatalog');
 const catalogPolish = require('../src/fishitCatalogPolish');
+const { RAW_TRACKER_LUA, testIfRawTracker } = require('./helpers/trackerRawSource');
 const {
-  buildPublicFishFields,
   buildPublicFilterTrace,
   buildInventoryParityProof,
   buildCountParityProof,
@@ -526,10 +526,10 @@ describe('BLOCKER10X live images flicker and Panther Eel mapping', { concurrency
 });
 
 describe('BLOCKER10Y rarity color count global proof', { concurrency: 1 }, () => {
-  test('build marker is BLOCKER10Z3 in tracker build and tracker.lua', () => {
+  testIfRawTracker('build marker is BLOCKER10Z3 in tracker build and tracker.lua', () => {
     const { BLOCKER10Z_BUILD } = require('../src/fishitTrackerBuild');
     assert.equal(BLOCKER10Z_BUILD, Z3_BUILD);
-    const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.ok(lua.includes('BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08'));
     assert.ok(!lua.includes('payload.inventoryUiHints'));
     assert.ok(lua.includes('replionSourceOfTruth = true'));
@@ -804,8 +804,8 @@ describe('BLOCKER10Z3 replion global db no UI dependency', { concurrency: 1 }, (
     assert.notEqual(pub.publicItems[0].raritySource, 'inventory_ui_color');
   });
 
-  test('tracker.lua uses Replion source of truth without UI hint upload', () => {
-    const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+  testIfRawTracker('tracker.lua uses Replion source of truth without UI hint upload', () => {
+    const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.ok(lua.includes('replionSourceOfTruth = true'));
     assert.ok(lua.includes('noHeavyScanner = true'));
     assert.ok(!lua.includes('payload.inventoryUiHints'));
@@ -834,10 +834,10 @@ describe('BLOCKER10Z3 replion global db no UI dependency', { concurrency: 1 }, (
 });
 
 describe('BLOCKER10Z4 amount regression fix', { concurrency: 1 }, () => {
-  test('build marker is BLOCKER10Z4', () => {
+  testIfRawTracker('build marker is BLOCKER10Z4', () => {
     const { BLOCKER10Z4_BUILD } = require('../src/fishitTrackerBuild');
     assert.equal(BLOCKER10Z4_BUILD, Z4_BUILD);
-    const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.ok(lua.includes('BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08'));
     assert.ok(lua.includes('LiveSafe.resolveOwnedStorageKey'));
   });
@@ -998,10 +998,10 @@ describe('BLOCKER10Z6 catalog names without fake merge', { concurrency: 1 }, () 
 });
 
 describe('BLOCKER10Z5 replion identity no fake merge', { concurrency: 1 }, () => {
-  test('build marker is BLOCKER10Z6', () => {
+  testIfRawTracker('build marker is BLOCKER10Z6', () => {
     const { BLOCKER10Z6_BUILD } = require('../src/fishitTrackerBuild');
     assert.equal(BLOCKER10Z6_BUILD, Z6_BUILD);
-    const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+    const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.ok(lua.includes('BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08'));
     assert.ok(lua.includes('replion_identity_unverified'));
   });
@@ -2862,8 +2862,8 @@ describe('BLOCKER10Z16 — live catch global evidence binding', { concurrency: 1
     assert.equal(PUBLIC_API_BUILD, Z17_BUILD);
   });
 
-  test('11: tracker.lua has Z18 boot marker', () => {
-    const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
+  testIfRawTracker('11: tracker.lua has Z18 boot marker', () => {
+    const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
     assert.match(lua, /BLOCKER10Z18_RECOVERED_SPECIES_IMAGE_RESOLUTION_2026_06_09/);
     assert.match(lua, /LIVE_GLOBAL_EVIDENCE result=/);
   });

@@ -8,6 +8,7 @@ const path = require('path');
 const gameItemDbPublic = require('../src/fishitGameItemDbPublic');
 const { buildPublicFishFields, PUBLIC_API_BUILD } = require('../src/fishitTrackerRoutes');
 const { BLOCKER10ZG_BUILD } = require('../src/fishitTrackerBuild');
+const { RAW_TRACKER_LUA, testIfRawTracker } = require('./helpers/trackerRawSource');
 
 const FINAL_BUILD = 'BLOCKER10ZK_INVENTORY_MOBILE_BULK_APK_2026_06_09';
 
@@ -210,9 +211,9 @@ describe('BLOCKER10ZG PlayerData GameItemDB public identity', () => {
     }), true);
   });
 
-  test('tracker.lua has direct Replion path and BLOCKER10ZC build marker', () => {
-    const lua = fs.readFileSync(path.join(__dirname, '..', '..', 'tracker.lua'), 'utf8');
-    assert.match(lua, /BLOCKER10ZC_DIRECT_REPLION_GAMEITEMDB_PUBLIC_PATH_2026_06_09/);
+  testIfRawTracker('tracker.lua has direct Replion path and BLOCKER10ZL build marker', () => {
+    const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
+    assert.match(lua, /BLOCKER10ZL_LURAPH_PROTECTED_RELEASE_2026_06_10/);
     assert.match(lua, /getDataReplionDirect/);
     assert.match(lua, /REPLION_DIRECT_OK/);
     assert.match(lua, /PLAYERDATA_INVENTORY_READ/);

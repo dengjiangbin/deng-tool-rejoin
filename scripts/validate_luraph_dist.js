@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 /**
  * BLOCKER10ZM: validate protected dist/tracker.lua before release.
- * Obfuscate raw tracker.lua manually, then save output as dist/tracker.lua
+ * Obfuscate private raw tracker.lua manually, then save output as dist/tracker.lua
  */
 const fs = require('fs');
 const path = require('path');
 const { auditFile } = require('./audit_tracker_secrets');
+const { resolveRawTrackerSourcePath } = require('./trackerRawSourcePath');
 
 const root = path.join(__dirname, '..');
-const rawPath = path.resolve(process.argv[2] || path.join(root, 'tracker.lua'));
+const rawPath = process.argv[2]
+  ? path.resolve(process.argv[2])
+  : resolveRawTrackerSourcePath({ root });
 const distPath = path.resolve(process.argv[3] || path.join(root, 'dist', 'tracker.lua'));
 
 const errors = [];
@@ -19,7 +22,8 @@ if (!fs.existsSync(distPath)) {
 
 let raw = '';
 let dist = '';
-if (fs.existsSync(rawPath)) raw = fs.readFileSync(rawPath, 'utf8');
+if (rawPath && fs.existsSync(rawPath)) raw = fs.readFileSync(rawPath, 'utf8');
+else console.log('SKIP raw compare: private tracker source is not present in public repo');
 if (fs.existsSync(distPath)) dist = fs.readFileSync(distPath, 'utf8');
 
 if (dist) {
@@ -28,15 +32,15 @@ if (dist) {
     errors.push(`dist too small (${distBytes} bytes) — expected obfuscated output`);
   }
   if (raw && dist.trim() === raw.trim()) {
-    errors.push('dist/tracker.lua must not be an unchanged copy of tracker.lua');
+    errors.push('dist/tracker.lua must not be an unchanged copy of private raw tracker.lua');
   }
   if (/^\s*--\s*=+\s*\n\s*--\s+Fish It Unified Tracker/m.test(dist)) {
-    errors.push('dist still looks like raw dev header — re-run obfuscation on tracker.lua');
+    errors.push('dist still looks like raw dev header — re-run obfuscation on private raw source');
   }
   if (dist.includes('local TRACKER_BUILD = "BLOCKER10ZL_LURAPH_PROTECTED_RELEASE_2026_06_10"')
     && dist.includes('local function fishLog(msg')
     && dist.includes('scanPlayerDataGameItemDbInventory')) {
-    errors.push('dist appears to be unobfuscated source — obfuscate tracker.lua first');
+    errors.push('dist appears to be unobfuscated source — obfuscate private raw source first');
   }
   const audit = auditFile(distPath);
   if (!audit.ok && !audit.missing) {
@@ -56,14 +60,15 @@ if (errors.length) {
   for (const err of errors) console.error('  -', err);
   console.error('');
   console.error('Manual steps:');
-  console.error(`  1. node scripts/validate_tracker_compile.js`);
-  console.error(`  2. Obfuscate ${rawPath}`);
-  console.error(`  3. Save output as ${distPath}`);
+  console.error('  1. set TRACKER_RAW_SOURCE_PATH to private tracker.lua');
+  console.error('  2. node scripts/validate_tracker_compile.js');
+  console.error(`  3. Obfuscate private raw source`);
+  console.error(`  4. Save output as ${distPath}`);
   process.exit(1);
 }
 
 console.log('DIST_TRACKER_VALIDATION OK');
-console.log('  raw:', rawPath);
+console.log('  raw:', rawPath || '(skipped — private source not present)');
 console.log('  dist:', distPath);
 console.log('  dist bytes:', Buffer.byteLength(dist, 'utf8'));
 console.log('  public URL: https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua');
