@@ -95,7 +95,7 @@ describe('BLOCKER10ZF Inventory rename + rarity sorting', () => {
       { name: 'Runic Enchant Stone', stoneType: 'Runic', itemId: '929' },
       { name: 'Normal Enchant Stone', stoneType: 'Normal', itemId: '10' },
       { name: 'Eggy Enchant Stone', stoneType: 'Eggy', itemId: '873' },
-      { name: 'Double Enchant Stone', stoneType: 'Double', itemId: '246' },
+      { name: 'Transcended Stone', stoneType: 'Double', itemId: '246' },
     ];
     const sorted = inventorySort.sortInventoryStones(stones);
     assert.deepEqual(sorted.map((s) => s.stoneType), ['Normal', 'Double', 'Eggy', 'Runic']);

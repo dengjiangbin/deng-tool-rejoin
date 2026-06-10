@@ -15,24 +15,24 @@ const TPL_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
 function loadTrackerCardFns() {
   const tpl = fs.readFileSync(TPL_PATH, 'utf8');
   const script = tpl.slice(tpl.indexOf('<script>'), tpl.indexOf('</script>') + 9);
-  const helpers = [
-    script.match(/function formatQuantity\(value\)\s*\{[\s\S]*?\n  \}/),
-    script.match(/function formatAmountLabel\(value\)\s*\{[\s\S]*?\n  \}/),
-    script.match(/function resolveItemAmount\(item\)\s*\{[\s\S]*?\n  \}/),
-    script.match(/function amountBadgeHtml\(item\)\s*\{[\s\S]*?\n  \}/),
-    script.match(/function buildFishCardInnerHtml\(item\)\s*\{[\s\S]*?\n  \}/),
-    script.match(/function buildStoneCardInnerHtml\(item\)\s*\{[\s\S]*?\n  \}/),
+  const helperNames = [
+    'formatQuantity', 'formatAmountLabel', 'resolveItemAmount', 'amountBadgeHtml',
+    'stoneDisplayName', 'formatWeightFromGrams', 'formatCardWeight', 'cardChipHtml',
+    'ownersChipHtml', 'buildCardBadgesHtml', 'buildStoneStatsHtml',
+    'buildFishCardInnerHtml', 'buildStoneCardInnerHtml',
   ];
-  for (const block of helpers) {
-    assert.ok(block, 'tracker template helper must exist');
+  const helpers = helperNames.map((name) => script.match(new RegExp(`function ${name}\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n  \\}`)));
+  for (let i = 0; i < helpers.length; i += 1) {
+    assert.ok(helpers[i], `tracker template helper must exist: ${helperNames[i]}`);
   }
   return new Function(`
-    const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
-    const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', mythic:'rarity-mythic', secret:'badge-rarity-secret', forgotten:'rarity-forgotten' };
-    const RARITY_NAME_COLORS = {};
+    const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
+    const STONE_DISPLAY_NAMES = { Double: 'Transcended Stone' };
+    const PEOPLE_ICON_SVG = '<svg></svg>';
     const ITEM_IMAGES = { Default:'/assets/img/fishit/fallback-fish.svg' };
     function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
     function cardTitle(item){ return item.cardName||item.baseFishName||item.name||'Unknown'; }
+    function publicRarity(item){ return item && item.rarity && item.rarity !== 'Unknown' ? item.rarity : 'Unknown'; }
     function rarityNameStyle(){ return ''; }
     function isUsableImageUrl(url){ return typeof url==='string' && (url.startsWith('http') || url.startsWith('/api/')); }
     function itemImageSrc(item){ return isUsableImageUrl(item.imageUrl)?item.imageUrl:null; }
@@ -41,7 +41,7 @@ function loadTrackerCardFns() {
   `)();
 }
 
-describe('BLOCKER10ZE quantity format + bottom amount badges', () => {
+describe('BLOCKER10ZE quantity format + card chip badges', () => {
   test('build marker is BLOCKER10ZG', () => {
     assert.equal(BLOCKER10ZG_BUILD, FINAL_BUILD);
     assert.equal(PUBLIC_API_BUILD, FINAL_BUILD);
@@ -64,8 +64,9 @@ describe('BLOCKER10ZE quantity format + bottom amount badges', () => {
       amount: 1000,
       imageUrl: 'http://127.0.0.1/x.webp',
     });
-    assert.match(html, /amount-badge[^>]*>x1,000</);
-    assert.doesNotMatch(html, /fish-card__amountRow/);
+    assert.match(html, /ft-chip-qty[^>]*>x1,000</);
+    assert.match(html, /ft-card-stats/);
+    assert.doesNotMatch(html, /fish-card__amount/);
   });
 
   test('stone card amount uses formatter in template render', () => {
@@ -76,32 +77,23 @@ describe('BLOCKER10ZE quantity format + bottom amount badges', () => {
       quantity: 12345,
       imageUrl: '/api/fishit-tracker/assets/stones/stone_10_normal.png',
     });
-    assert.match(html, /amount-badge[^>]*>x12,345</);
-    assert.match(html, /stone-card__name/);
+    assert.match(html, /ft-chip-qty[^>]*>x12,345</);
+    assert.match(html, /ft-card-name/);
   });
 
-  test('amount-badge CSS is bottom-left for fish and stone cards', () => {
+  test('ft-chip CSS uses inline badge row inside card content', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    const badgeBlock = tpl.match(/\.fish-card \.amount-badge[\s\S]*?box-sizing:border-box;/);
-    assert.ok(badgeBlock, 'amount-badge CSS block must exist');
-    assert.match(badgeBlock[0], /position:absolute/);
-    assert.match(badgeBlock[0], /bottom:14px/);
-    assert.match(badgeBlock[0], /left:14px/);
-    assert.match(badgeBlock[0], /top:auto/);
-    assert.match(badgeBlock[0], /transform:none/);
-    assert.match(badgeBlock[0], /white-space:nowrap/);
-    assert.match(badgeBlock[0], /text-overflow:ellipsis/);
-    assert.doesNotMatch(badgeBlock[0], /top:\s*50%/);
-    assert.doesNotMatch(badgeBlock[0], /translateY\(/);
-    assert.match(tpl, /\.stone-card \.amount-badge/);
+    assert.match(tpl, /\.ft-card-stats[\s\S]*display:flex/);
+    assert.match(tpl, /\.ft-chip[\s\S]*border-radius:6px/);
     assert.match(tpl, /function formatAmountLabel/);
-    assert.match(tpl, /function amountBadgeHtml/);
+    assert.match(tpl, /function buildCardBadgesHtml/);
   });
 
-  test('fish and stone cards use fixed height contract for badge placement', () => {
+  test('fish and stone cards use fixed height contract', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /\.fish-card[\s\S]*height:138px[\s\S]*max-height:138px/);
-    assert.match(tpl, /\.stone-card[\s\S]*height:138px/);
-    assert.match(tpl, /\.fish-card__body[\s\S]*display:contents/);
+    assert.match(tpl, /\.ft-card[\s\S]*height:84px/);
+    assert.match(tpl, /\.ft-card--stone[\s\S]*height:72px/);
+    assert.match(tpl, /\.ft-card-main[\s\S]*display:flex/);
+    assert.doesNotMatch(tpl, /height:138px/);
   });
 });

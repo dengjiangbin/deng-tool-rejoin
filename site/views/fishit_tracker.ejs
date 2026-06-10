@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<!-- BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10 -->
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
+<!-- BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10 -->
+<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10' %>">
+  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10' %>">
   <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
   <title>Inventory &mdash; Fish It</title>
   <style>
-    /* BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10 */
+    /* BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10 */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
@@ -106,64 +106,123 @@
     .items-grid,
     .fish-grid {
       display:grid;
-      grid-template-columns:repeat(auto-fill,minmax(220px,220px));
-      gap:12px;
-      align-items:stretch;
+      grid-template-columns:repeat(auto-fill,minmax(230px,240px));
+      gap:11px;
+      align-items:start;
       justify-content:start;
       margin-top:4px;
     }
     .stones-grid,
     .stone-grid {
       display:grid;
-      grid-template-columns:repeat(auto-fill,minmax(196px,196px));
+      grid-template-columns:repeat(auto-fill,minmax(196px,1fr));
       gap:10px;
-      align-items:stretch;
+      align-items:start;
       justify-content:start;
       margin-top:4px;
     }
 
-    .item-card,
-    .fish-card,
-    .stone-card,
-    .inventory-card {
-      --card-fg:#fff;
-      --card-muted-fg:rgba(255,255,255,.9);
-      --badge-bg:rgba(0,0,0,.45);
-      --badge-fg:#fff;
-      --image-glow:rgba(255,255,255,.1);
-      box-sizing:border-box;
-      border:1px solid rgba(255,255,255,.08);
-      border-radius:14px;
-      padding:0;
+    /* BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10 — flex-only fish cards */
+    .ft-card {
+      width:100%;
+      min-height:84px;
+      height:84px;
+      border-radius:10px;
+      padding:10px 12px;
       display:flex;
-      flex-direction:row;
-      align-items:stretch;
-      color:var(--card-fg);
-      box-shadow:0 10px 24px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.06);
+      align-items:center;
+      gap:10px;
       overflow:hidden;
+      box-sizing:border-box;
+      position:relative;
+      border:1px solid rgba(255,255,255,.08);
+      color:#fff;
+      box-shadow:0 4px 14px rgba(0,0,0,.18);
       transition:transform .15s,box-shadow .2s;
       animation:fadeIn .2s ease;
-      position:relative;
     }
-    .item-card,
-    .fish-card,
-    .inventory-card:not(.stone-card) {
-      width:220px;
-      height:138px;
-      min-width:220px;
-      max-width:220px;
-      min-height:138px;
-      max-height:138px;
+    .ft-card:hover { transform:translateY(-1px); box-shadow:0 6px 18px rgba(0,0,0,.24); }
+    .ft-card--fish { max-width:240px; }
+    .ft-rarity-COMMON, .ft-rarity-common { background:linear-gradient(135deg,#e2e8f0 0%,#94a3b8 100%); color:#0f172a; }
+    .ft-rarity-COMMON .ft-card-name, .ft-rarity-common .ft-card-name { color:#0f172a; text-shadow:none; }
+    .ft-rarity-COMMON .ft-card-weight, .ft-rarity-common .ft-card-weight { color:rgba(15,23,42,.82); }
+    .ft-rarity-UNCOMMON, .ft-rarity-uncommon { background:#65a30d; }
+    .ft-rarity-RARE, .ft-rarity-rare { background:#2563eb; }
+    .ft-rarity-EPIC, .ft-rarity-epic { background:#dc2626; }
+    .ft-rarity-LEGENDARY, .ft-rarity-legendary, .ft-rarity-MYTHIC, .ft-rarity-mythic { background:#ea580c; }
+    .ft-rarity-MYTHIC, .ft-rarity-mythic { background:#b91c1c; }
+    .ft-rarity-SECRET, .ft-rarity-secret { background:#16d487; }
+    .ft-rarity-FORGOTTEN, .ft-rarity-forgotten { background:linear-gradient(135deg,#9ca3af 0%,#6b7280 42%,#374151 100%); }
+    .ft-card-icon {
+      flex:0 0 54px;
+      width:54px;
+      height:54px;
+      border-radius:8px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      overflow:hidden;
+      background:rgba(255,255,255,.14);
     }
-    .item-card:hover, .fish-card:hover, .stone-card:hover { transform:translateY(-2px); box-shadow:0 14px 28px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08); }
-    .item-card.rarity-common, .fish-card.rarity-common { --badge-bg:rgba(0,0,0,.42); --image-glow:rgba(255,255,255,.12); background:linear-gradient(135deg,#64748b 0%,#475569 100%); }
-    .item-card.rarity-uncommon, .fish-card.rarity-uncommon { --badge-bg:rgba(0,0,0,.42); --image-glow:rgba(132,204,22,.22); background:#65a30d; }
-    .item-card.rarity-rare, .fish-card.rarity-rare { --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(30,58,138,.28); background:#2563eb; }
-    .item-card.rarity-epic, .fish-card.rarity-epic { --badge-bg:rgba(0,0,0,.48); --image-glow:rgba(168,85,247,.24); background:#9333ea; }
-    .item-card.rarity-legendary, .fish-card.rarity-legendary { --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,140,0,.24); background:#ea580c; }
-    .item-card.rarity-mythic, .fish-card.rarity-mythic { --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,37,37,.22); background:#dc2626; }
-    .item-card.rarity-secret, .fish-card.rarity-secret { --badge-bg:rgba(0,0,0,.52); --image-glow:rgba(0,255,127,.28); background:#00c96f; }
-    .item-card.rarity-forgotten, .fish-card.rarity-forgotten { --badge-bg:rgba(0,0,0,.58); --image-glow:rgba(255,255,255,.16); background:linear-gradient(135deg,#777 0%,#222 55%,#0a0a0a 100%); }
+    .ft-card-icon img {
+      width:100%;
+      height:100%;
+      object-fit:contain;
+      display:block;
+      background:transparent!important;
+    }
+    .ft-card-icon img[data-placeholder="true"] { opacity:.55; }
+    .ft-card-main {
+      min-width:0;
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      align-items:flex-start;
+    }
+    .ft-card-name {
+      max-width:100%;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      font-size:13px;
+      font-weight:800;
+      line-height:16px;
+      color:#fff;
+      text-shadow:0 1px 2px rgba(0,0,0,.45);
+    }
+    .ft-card-stats {
+      display:flex;
+      align-items:center;
+      gap:6px;
+      margin-top:6px;
+      flex-wrap:nowrap;
+      max-width:100%;
+    }
+    .ft-chip {
+      height:20px;
+      padding:0 7px;
+      border-radius:6px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:4px;
+      font-size:11px;
+      font-weight:700;
+      line-height:20px;
+      color:#fff;
+      background:rgba(0,0,0,.16);
+      white-space:nowrap;
+      flex-shrink:0;
+    }
+    .ft-chip-icon { width:12px; height:12px; color:#fff; flex-shrink:0; }
+    .ft-card-weight {
+      margin-top:5px;
+      font-size:11px;
+      line-height:14px;
+      color:rgba(255,255,255,.9);
+      white-space:nowrap;
+    }
 
     .stones-section { margin-top:14px; padding-top:12px; border-top:1px solid var(--border); }
     .stones-section__title {
@@ -184,147 +243,21 @@
       background:#a855f7;
       flex-shrink:0;
     }
-    .stone-card {
-      width:196px;
-      height:72px;
-      min-width:196px;
-      max-width:196px;
+    .ft-card--stone {
       min-height:72px;
-      max-height:72px;
+      height:72px;
       background:#232833;
       border:1px solid rgba(255,255,255,.06);
     }
-    .item-card:not([class*="rarity-"]), .fish-card:not([class*="rarity-"]) { --badge-bg:rgba(0,0,0,.42); --image-glow:rgba(255,255,255,.1); background:linear-gradient(135deg,#64748b 0%,#475569 100%); border:1px solid rgba(255,255,255,.08); }
-
-    .fish-card__imageWrap,
-    .inventory-card-image-wrap,
-    .stone-card__icon {
-      flex-shrink:0;
-      display:grid;
-      place-items:center;
-      border-radius:12px;
-      background:rgba(0,0,0,.32);
-      box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 4px 18px var(--image-glow);
-      pointer-events:none;
-      overflow:hidden;
-    }
-    .fish-card__imageWrap,
-    .inventory-card-image-wrap {
-      width:78px;
-      height:78px;
-      min-width:78px;
-      min-height:78px;
-      margin:16px 0 16px 16px;
-      border-radius:12px;
-    }
-    .stone-card__icon {
+    .ft-card--stone .ft-card-icon {
+      flex-basis:48px;
       width:48px;
       height:48px;
-      min-width:48px;
-      min-height:48px;
-      margin:12px 0 12px 12px;
-      border-radius:10px;
-      background:rgba(0,0,0,.38);
+      background:rgba(255,255,255,.08);
     }
-    .fish-card__image,
-    .inventory-card-image,
-    .stone-card__image,
-    .fish-card img,
-    .stone-card img,
-    .fish-card__imageWrap img,
-    .inventory-card-image-wrap img {
-      max-width:100%;
-      max-height:100%;
-      width:auto;
-      height:auto;
-      object-fit:contain;
-      border-radius:8px;
-      filter:drop-shadow(0 2px 8px rgba(0,0,0,.35));
-      background:transparent!important;
-      pointer-events:none;
-    }
-    .fish-card__imageWrap img[data-placeholder="true"],
-    .inventory-card-image[data-placeholder="true"] {
-      opacity:.55;
-      filter:none;
-    }
-    .inventory-card-content {
-      flex:1;
-      min-width:0;
-      display:flex;
-      flex-direction:column;
-      justify-content:center;
-      gap:6px;
-      padding:14px 12px 14px 8px;
-    }
-    .stone-card .inventory-card-content { gap:4px; padding:12px 10px 12px 6px; }
-    .fish-card__name,
-    .item-card .item-name,
-    .fish-card .item-name,
-    .inventory-card-name,
-    .stone-card__name {
-      position:static;
-      color:var(--card-fg)!important;
-      font-weight:700;
-      font-size:.88rem;
-      line-height:1.12;
-      min-width:0;
-      word-break:normal;
-      overflow-wrap:anywhere;
-      white-space:normal;
-      display:-webkit-box;
-      -webkit-line-clamp:2;
-      -webkit-box-orient:vertical;
-      overflow:hidden;
-      text-shadow:0 1px 3px rgba(0,0,0,.45);
-    }
-    .stone-card__name { font-size:.82rem; -webkit-line-clamp:1; }
-    .inventory-card-badges,
-    .stone-card__stats {
-      display:flex;
-      flex-wrap:wrap;
-      gap:4px;
-      align-items:center;
-    }
-    .stone-card__stats {
-      padding:4px 8px;
-      border-radius:999px;
-      background:rgba(0,0,0,.42);
-      width:fit-content;
-      max-width:100%;
-    }
-    .card-chip {
-      display:inline-flex;
-      align-items:center;
-      gap:4px;
-      padding:3px 8px;
-      border-radius:999px;
-      background:var(--badge-bg);
-      color:var(--badge-fg);
-      font-size:.68rem;
-      font-weight:700;
-      line-height:1;
-      white-space:nowrap;
-    }
-    .stone-card__stats .card-chip {
-      background:transparent;
-      padding:0;
-      font-size:.66rem;
-      color:rgba(255,255,255,.88);
-    }
-    .card-chip-icon { width:12px; height:12px; color:#60a5fa; flex-shrink:0; }
-    .inventory-card-value {
-      font-size:.78rem;
-      font-weight:700;
-      color:var(--card-muted-fg);
-      line-height:1.1;
-      text-shadow:0 1px 2px rgba(0,0,0,.35);
-    }
-    .fish-card .amount-badge,
-    .stone-card .amount-badge,
-    .item-card .amount-badge { display:none; }
+    .ft-card--stone .ft-card-name { font-size:12px; font-weight:700; }
+    .ft-card--stone .ft-card-stats { margin-top:4px; }
 
-    .ic-head, .ic-title-wrap, .ic-badges { display:contents; }
     .global-db-proof { margin-top:8px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface2); }
     .global-db-proof summary { cursor:pointer; padding:8px 10px; font-size:.78rem; color:#93c5fd; user-select:none; }
     .global-db-proof .gdb-body { padding:8px 10px 10px; font-size:.74rem; color:var(--muted); line-height:1.45; }
@@ -432,16 +365,6 @@
       margin-bottom:10px;
     }
     .bulk-inventory-header strong { color:var(--text); }
-    .bulk-card-accounts {
-      position:absolute;
-      right:10px;
-      bottom:10px;
-      font-size:.68rem;
-      color:var(--card-muted-fg);
-      opacity:.95;
-      z-index:3;
-      pointer-events:none;
-    }
     .card-empty-sub {
       display:block;
       margin-top:6px;
@@ -539,58 +462,21 @@
       .inventory-grid,
       .items-grid,
       .fish-grid {
-        grid-template-columns:repeat(2,minmax(0,1fr));
-        gap:8px;
+        grid-template-columns:1fr;
+        gap:10px;
       }
       .stones-grid,
       .stone-grid {
-        grid-template-columns:repeat(2,minmax(0,1fr));
+        grid-template-columns:1fr;
         gap:8px;
       }
-      .item-card,
-      .fish-card,
-      .inventory-card:not(.stone-card) {
-        width:100%;
-        min-width:0;
+      .ft-card--fish,
+      .ft-card--stone {
         max-width:none;
-        height:104px;
-        min-height:104px;
-        max-height:104px;
-        border-radius:10px;
-      }
-      .stone-card {
         width:100%;
-        min-width:0;
-        max-width:none;
-        height:68px;
-        min-height:68px;
-        max-height:68px;
-        border-radius:10px;
       }
-      .fish-card__imageWrap,
-      .inventory-card-image-wrap {
-        width:54px;
-        height:54px;
-        min-width:54px;
-        min-height:54px;
-        margin:14px 0 14px 12px;
-      }
-      .stone-card__icon {
-        width:42px;
-        height:42px;
-        min-width:42px;
-        min-height:42px;
-        margin:13px 0 13px 10px;
-      }
-      .inventory-card-content { padding:10px 8px 10px 4px; gap:4px; }
-      .fish-card__name,
-      .item-card .item-name,
-      .fish-card .item-name,
-      .inventory-card-name,
-      .stone-card__name { font-size:11px; line-height:1.1; }
-      .card-chip { font-size:.62rem; padding:2px 6px; }
-      .inventory-card-value { font-size:.68rem; }
-      .bulk-card-accounts { font-size:.62rem; right:8px; bottom:8px; }
+      .ft-card-name { font-size:12px; }
+      .ft-chip { font-size:10px; padding:0 6px; }
     }
     @media (max-width:360px) {
       .inventory-grid,
@@ -610,7 +496,7 @@
     }
   </style>
 </head>
-<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10') %>">
+<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10') %>">
 <div class="page">
   <div class="inner">
 
@@ -700,7 +586,7 @@
   const DEBUG_INVENTORY = <%= (typeof debugInventory !== 'undefined' && debugInventory) ? 'true' : 'false' %>;
   const APK_EMBED = <%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'true' : 'false' %>;
   const DEBUG_GLOBAL  = DEBUG_INVENTORY && /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
-  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10" %>';
+  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10" %>';
   const RENDER_BUILD  = DEBUG_INVENTORY
     ? (document.documentElement.getAttribute('data-render-build') || '')
     : '';
@@ -713,6 +599,7 @@
   };
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret badge-rarity-secret', forgotten:'rarity-forgotten' };
   const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
+  const FT_RARITY_CLASS = { common:'ft-rarity-COMMON', uncommon:'ft-rarity-UNCOMMON', rare:'ft-rarity-RARE', epic:'ft-rarity-EPIC', legendary:'ft-rarity-LEGENDARY', legend:'ft-rarity-LEGENDARY', mythic:'ft-rarity-MYTHIC', secret:'ft-rarity-SECRET', forgotten:'ft-rarity-FORGOTTEN' };
   const RARITY_ORDER = {
     Forgotten: 800, Secret: 700, Mythic: 600, Legendary: 500, Epic: 400,
     Rare: 300, Uncommon: 200, Common: 100, Unknown: 0,
@@ -789,23 +676,23 @@
     return `<span class="card-chip ${className}">${inner}</span>`;
   }
   function ownersChipHtml(count) {
-    return cardChipHtml('card-chip-owners', `${PEOPLE_ICON_SVG}${escHtml(formatQuantity(count || 1))}`);
+    return `<span class="ft-chip ft-chip-people">${PEOPLE_ICON_SVG.replace('class="card-chip-icon"', 'class="ft-chip-icon"')}${escHtml(formatQuantity(count || 1))}</span>`;
   }
   function buildCardBadgesHtml(item, opts) {
     opts = opts || {};
     const amount = formatAmountLabel(resolveItemAmount(item));
     const rarity = opts.rarity != null ? opts.rarity : publicRarity(item);
     const parts = [ownersChipHtml(opts.accountCount || 1)];
-    parts.push(cardChipHtml('card-chip-qty', escHtml(amount)));
+    parts.push(`<span class="ft-chip ft-chip-qty">${escHtml(amount)}</span>`);
     if (opts.includeRarity !== false && rarity && rarity !== 'Unknown') {
-      parts.push(cardChipHtml('card-chip-rarity', escHtml(rarity)));
+      parts.push(`<span class="ft-chip ft-chip-rarity">${escHtml(rarity)}</span>`);
     }
-    return `<div class="inventory-card-badges ic-badges">${parts.join('')}</div>`;
+    return `<div class="ft-card-stats">${parts.join('')}</div>`;
   }
   function buildStoneStatsHtml(item, opts) {
     opts = opts || {};
     const amount = formatAmountLabel(resolveItemAmount(item));
-    return `<div class="inventory-card-badges ic-badges stone-card__stats">${ownersChipHtml(opts.accountCount || 1)}${cardChipHtml('card-chip-qty', escHtml(amount))}</div>`;
+    return `<div class="ft-card-stats">${ownersChipHtml(opts.accountCount || 1)}<span class="ft-chip ft-chip-qty">${escHtml(amount)}</span></div>`;
   }
   function normalizeRarityLabel(item) {
     if (!item || typeof item !== 'object') return 'Unknown';
@@ -978,31 +865,29 @@
     const isPlaceholder = imgSrc === ITEM_IMAGES.Default;
     const opts = { accountCount: item.accountCount || 1, includeRarity: item.category !== 'stone' };
     const weight = item.category === 'stone' ? '' : formatCardWeight(item);
-    const valueHtml = weight ? `<span class="inventory-card-value">${escHtml(weight)}</span>` : '';
-    const badgesHtml = item.category === 'stone'
-      ? buildStoneStatsHtml(item, opts)
-      : buildCardBadgesHtml(item, opts);
+    const statsHtml = item.category === 'stone' ? buildStoneStatsHtml(item, opts) : buildCardBadgesHtml(item, opts);
+    const weightHtml = weight ? `<div class="ft-card-weight">${escHtml(weight)}</div>` : '';
     return `
-  <div class="fish-card__imageWrap ic-head inventory-card-image-wrap">
-    <img class="fish-card__image inventory-card-image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async"${isPlaceholder ? ' data-placeholder="true"' : ''} data-item-id="${escHtml(item.itemId || '')}">
+  <div class="ft-card-icon">
+    <img src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async"${isPlaceholder ? ' data-placeholder="true"' : ''} data-item-id="${escHtml(item.itemId || '')}">
   </div>
-  <div class="fish-card__body ic-title-wrap inventory-card-content">
-    <span class="fish-card__name item-name inventory-card-name" title="${escHtml(title)}">${escHtml(title)}</span>
-    ${badgesHtml}
-    ${valueHtml}
+  <div class="ft-card-main">
+    <div class="ft-card-name" title="${escHtml(title)}">${escHtml(title)}</div>
+    ${statsHtml}
+    ${weightHtml}
   </div>`;
   }
   function buildBulkCardElement(item) {
-    const rarity = publicRarity(item);
-    const crc = cardRarityClass(rarity);
     const card = document.createElement('div');
-    card.className = 'item-card fish-card inventory-card';
-    if (item.category === 'stone') card.classList.add('stone-card');
-    if (crc) card.classList.add(crc);
+    if (item.category === 'stone') {
+      card.className = 'ft-card ft-card--stone';
+    } else {
+      card.className = fishCardClassList(item).join(' ');
+    }
     card.setAttribute('data-card-key', bulkCardKey(item));
     card.setAttribute('data-source', item.dataSource || 'bulk_playerdata_gameitemdb');
     card.innerHTML = buildBulkCardInnerHtml(item);
-    const img = card.querySelector('.fish-card__image');
+    const img = card.querySelector('.ft-card-icon img');
     if (img) img.onerror = () => onFishImageError(img, item);
     return card;
   }
@@ -1024,14 +909,14 @@
     let html = '';
     if (fish.length) {
       html += `<div class="items-grid inventory-grid fish-grid">${fish.map((item) => {
-        const crc = cardRarityClass(publicRarity(item));
-        return `<div class="item-card fish-card inventory-card ${crc}" data-card-key="${escHtml(bulkCardKey(item))}" data-source="bulk_playerdata_gameitemdb">${buildBulkCardInnerHtml(item)}</div>`;
+        const cls = fishCardClassList(item).join(' ');
+        return `<div class="${cls}" data-card-key="${escHtml(bulkCardKey(item))}" data-source="bulk_playerdata_gameitemdb">${buildBulkCardInnerHtml(item)}</div>`;
       }).join('')}</div>`;
     }
     if (stones.length) {
       const stoneTotal = stones.reduce((sum, item) => sum + Math.max(0, Math.floor(Number(item.amount) || 0)), 0);
       html += `<div class="stones-section"><div class="stones-section__title">Enchant Stones (${formatQuantity(stoneTotal)})</div><div class="items-grid inventory-grid stones-grid stone-grid">${stones.map((item) =>
-        `<div class="item-card fish-card stone-card inventory-card" data-card-key="${escHtml(bulkCardKey(item))}" data-source="bulk_playerdata_gameitemdb">${buildBulkCardInnerHtml(item)}</div>`
+        `<div class="ft-card ft-card--stone" data-card-key="${escHtml(bulkCardKey(item))}" data-source="bulk_playerdata_gameitemdb">${buildBulkCardInnerHtml(item)}</div>`
       ).join('')}</div></div>`;
     }
     bulkBodyEl.innerHTML = html;
@@ -1088,18 +973,18 @@
     const title = stoneDisplayName(item);
     const imgSrc = itemImageSrc(item);
     const imageHtml = imgSrc
-      ? `<img class="fish-card__image inventory-card-image stone-card__image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async" data-item-id="${escHtml(item.itemId || '')}">`
+      ? `<img src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async" data-item-id="${escHtml(item.itemId || '')}">`
       : '&#x1F48E;';
     return `
-  <div class="fish-card__imageWrap ic-head stone-card__icon inventory-card-image-wrap">${imageHtml}</div>
-  <div class="fish-card__body ic-title-wrap inventory-card-content">
-    <span class="fish-card__name item-name stone-card__name inventory-card-name" title="${escHtml(title)}">${escHtml(title)}</span>
+  <div class="ft-card-icon">${imageHtml}</div>
+  <div class="ft-card-main">
+    <div class="ft-card-name" title="${escHtml(title)}">${escHtml(title)}</div>
     ${buildStoneStatsHtml(item, opts)}
   </div>`;
   }
   function buildStoneCardElement(item) {
     const card = document.createElement('div');
-    card.className = 'item-card fish-card stone-card inventory-card';
+    card.className = 'ft-card ft-card--stone';
     card.setAttribute('data-card-key', stoneCardKey(item));
     card.setAttribute('data-kind', 'stone');
     card.innerHTML = buildStoneCardInnerHtml(item);
@@ -1193,7 +1078,7 @@
     }
     const nextKeys = new Set();
     const existing = new Map();
-    grid.querySelectorAll('.stone-card[data-card-key]').forEach((el) => {
+    grid.querySelectorAll('.ft-card--stone[data-card-key]').forEach((el) => {
       existing.set(el.getAttribute('data-card-key'), el);
     });
     items.forEach((item, idx) => {
@@ -1487,6 +1372,14 @@
   }
   function rarityClass(r) { return r ? (RARITY_MAP[r.toLowerCase()] || 'badge rarity-common') : 'badge rarity-common'; }
   function cardRarityClass(r) { return r ? (CARD_RARITY_MAP[r.toLowerCase()] || 'rarity-common') : 'rarity-common'; }
+  function ftRarityClass(r) { return r ? (FT_RARITY_CLASS[r.toLowerCase()] || 'ft-rarity-COMMON') : 'ft-rarity-COMMON'; }
+  function fishCardClassList(item) {
+    const rarity = publicRarity(item);
+    const rarityLow = rarity ? rarity.toLowerCase() : '';
+    const cls = ['ft-card', 'ft-card--fish', ftRarityClass(rarity)];
+    if (item.shiny === true && rarityLow !== 'secret') cls.push('shiny');
+    return cls;
+  }
 
   const ITEM_IMAGES = {
     // Add real hosted/local URLs here as they become available, e.g.
@@ -1547,62 +1440,47 @@
   }
   function buildFishCardInnerHtml(item, opts) {
     opts = opts || {};
-    const title   = cardTitle(item);
-    const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
-    const nameStyle = rarityNameStyle(item);
+    const title = cardTitle(item);
+    const imgSrc = itemImageSrc(item) || ITEM_IMAGES.Default;
     const isPlaceholder = imgSrc === ITEM_IMAGES.Default;
     const weight = formatCardWeight(item);
-    const valueHtml = weight ? `<span class="inventory-card-value">${escHtml(weight)}</span>` : '';
+    const statsHtml = buildCardBadgesHtml(item, opts);
+    const weightHtml = weight ? `<div class="ft-card-weight">${escHtml(weight)}</div>` : '';
     return `
-  <div class="fish-card__imageWrap ic-head inventory-card-image-wrap">
-    <img class="fish-card__image inventory-card-image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async"${isPlaceholder ? ' data-placeholder="true"' : ''} data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}">
+  <div class="ft-card-icon">
+    <img src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async"${isPlaceholder ? ' data-placeholder="true"' : ''} data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}">
   </div>
-  <div class="fish-card__body ic-title-wrap inventory-card-content">
-    <span class="fish-card__name item-name inventory-card-name" title="${escHtml(title)}" style="${nameStyle}">${escHtml(title)}</span>
-    ${buildCardBadgesHtml(item, opts)}
-    ${valueHtml}
+  <div class="ft-card-main">
+    <div class="ft-card-name" title="${escHtml(title)}">${escHtml(title)}</div>
+    ${statsHtml}
+    ${weightHtml}
   </div>`;
   }
   function buildItemCardElement(item) {
-    const isShiny = item.shiny === true;
-    const rarity  = publicRarity(item);
-    const rc      = rarityClass(rarity);
-    const crc     = cardRarityClass(rarity);
-    const rarityLow = rarity.toLowerCase();
-    const amount  = Number(item.amount || 1);
-    const title   = cardTitle(item);
-    const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
-    const nameStyle = rarityNameStyle(item);
+    const rarity = publicRarity(item);
+    const rarityLow = rarity ? rarity.toLowerCase() : '';
     const card = document.createElement('div');
-    card.className = 'item-card fish-card inventory-card';
+    card.className = fishCardClassList(item).join(' ');
     card.setAttribute('data-card-key', cardKey(item));
     if (item.dataSource) card.setAttribute('data-source', item.dataSource);
     if (item.dataImageSource) card.setAttribute('data-image-source', item.dataImageSource);
     if (item.dataRaritySource) card.setAttribute('data-rarity-source', item.dataRaritySource);
     if (item.mutation) card.setAttribute('data-mutation', item.mutation);
-    if (isShiny) card.setAttribute('data-shiny', 'true');
+    if (item.shiny === true) card.setAttribute('data-shiny', 'true');
     if (rarityLow) card.setAttribute('data-rarity', rarityLow);
-    if (crc) card.classList.add(crc);
-    if (isShiny && rarityLow !== 'secret') card.classList.add('shiny');
     card.innerHTML = buildFishCardInnerHtml(item);
-    const img = card.querySelector('.fish-card__image');
+    const img = card.querySelector('.ft-card-icon img');
     if (img) img.onerror = () => onFishImageError(img, item);
     return card;
   }
   function patchItemCardElement(card, item) {
-    const isShiny = item.shiny === true;
-    const rarity  = publicRarity(item);
-    const crc     = cardRarityClass(rarity);
-    const rarityLow = rarity.toLowerCase();
-    const title   = cardTitle(item);
-    const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
+    const rarity = publicRarity(item);
+    const rarityLow = rarity ? rarity.toLowerCase() : '';
     card.setAttribute('data-card-key', cardKey(item));
-    card.className = 'item-card fish-card inventory-card';
-    if (crc) card.classList.add(crc);
-    if (isShiny && rarityLow !== 'secret') card.classList.add('shiny');
+    card.className = fishCardClassList(item).join(' ');
     if (item.mutation) card.setAttribute('data-mutation', item.mutation);
     else card.removeAttribute('data-mutation');
-    if (isShiny) card.setAttribute('data-shiny', 'true');
+    if (item.shiny === true) card.setAttribute('data-shiny', 'true');
     else card.removeAttribute('data-shiny');
     if (rarityLow) card.setAttribute('data-rarity', rarityLow);
     else card.removeAttribute('data-rarity');
@@ -1612,51 +1490,9 @@
     else card.removeAttribute('data-image-source');
     if (item.dataRaritySource) card.setAttribute('data-rarity-source', item.dataRaritySource);
     else card.removeAttribute('data-rarity-source');
-    const nameEl = card.querySelector('.fish-card__name, .item-name');
-    const nameStyle = rarityNameStyle(item);
-    if (nameEl) {
-      nameEl.textContent = title;
-      nameEl.setAttribute('title', title);
-      nameEl.style.cssText = nameStyle;
-    }
-    const badgesEl = card.querySelector('.inventory-card-badges');
-    if (badgesEl) badgesEl.outerHTML = buildCardBadgesHtml(item);
-    let valueEl = card.querySelector('.inventory-card-value');
-    const weight = formatCardWeight(item);
-    if (weight) {
-      if (!valueEl) {
-        const content = card.querySelector('.inventory-card-content');
-        if (content) {
-          valueEl = document.createElement('span');
-          valueEl.className = 'inventory-card-value';
-          content.appendChild(valueEl);
-        }
-      }
-      if (valueEl) valueEl.textContent = weight;
-    } else if (valueEl) {
-      valueEl.remove();
-    }
-    let img = card.querySelector('.fish-card__image, img');
-    if (!img) {
-      const wrap = card.querySelector('.fish-card__imageWrap');
-      if (wrap) {
-        img = document.createElement('img');
-        img.className = 'fish-card__image';
-        img.decoding = 'async';
-        wrap.appendChild(img);
-      }
-    }
-    if (img) {
-      const currentSrc = img.getAttribute('src') || '';
-      if (currentSrc !== imgSrc) img.setAttribute('src', imgSrc);
-      img.alt = title;
-      img.title = title;
-      img.setAttribute('data-item-id', String(item.itemId || ''));
-      img.setAttribute('data-asset-id', String(item.imageAssetId || ''));
-      if (imgSrc === ITEM_IMAGES.Default) img.setAttribute('data-placeholder', 'true');
-      else img.removeAttribute('data-placeholder');
-      img.onerror = () => onFishImageError(img, item);
-    }
+    card.innerHTML = buildFishCardInnerHtml(item);
+    const img = card.querySelector('.ft-card-icon img');
+    if (img) img.onerror = () => onFishImageError(img, item);
   }
   function patchItemsGrid(container, items) {
     if (!items || items.length === 0) {
@@ -1674,7 +1510,7 @@
     if (empty) empty.remove();
     const nextKeys = new Set();
     const existing = new Map();
-    grid.querySelectorAll('.item-card[data-card-key]').forEach((el) => {
+    grid.querySelectorAll('.ft-card--fish[data-card-key]').forEach((el) => {
       existing.set(el.getAttribute('data-card-key'), el);
     });
     items.forEach((item, idx) => {
@@ -1698,15 +1534,11 @@
   function buildItemsHtml(items) {
     if (!items || items.length === 0) return '<div class="card-empty">&#x1F9F3; Inventory is empty.</div>';
     return `<div class="items-grid inventory-grid fish-grid">${items.map(item => {
-      const isShiny = item.shiny === true;
       const rarity  = item.rarity && item.rarity !== 'Unknown' ? item.rarity : null;
-      const crc     = cardRarityClass(rarity);
       const rarityLow = rarity ? rarity.toLowerCase() : '';
-      const cardCls = ['item-card', 'fish-card', 'inventory-card'];
-      if (crc) cardCls.push(crc);
-      if (isShiny && rarityLow !== 'secret') cardCls.push('shiny');
+      const cardCls = fishCardClassList(item);
       const mutAttr = item.mutation ? ` data-mutation="${escHtml(item.mutation)}"` : '';
-      const shinyAttr = isShiny ? ' data-shiny="true"' : '';
+      const shinyAttr = item.shiny === true ? ' data-shiny="true"' : '';
       const rarityAttr = rarityLow ? ` data-rarity="${escHtml(rarityLow)}"` : '';
       const srcAttr = item.dataSource ? ` data-source="${escHtml(item.dataSource)}"` : '';
       const imgSrcAttr = item.dataImageSource ? ` data-image-source="${escHtml(item.dataImageSource)}"` : '';
@@ -1716,10 +1548,10 @@
   }
   function wireFishImageErrors(root) {
     if (!root) return;
-    root.querySelectorAll('.item-card img[data-item-id]:not([data-placeholder])').forEach((img) => {
-      const card = img.closest('.item-card');
+    root.querySelectorAll('.ft-card--fish img[data-item-id]:not([data-placeholder])').forEach((img) => {
+      const card = img.closest('.ft-card--fish');
       const itemId = img.getAttribute('data-item-id');
-      const item = { itemId, imageAssetId: img.getAttribute('data-asset-id'), name: card && card.querySelector('.item-name') && card.querySelector('.item-name').textContent };
+      const item = { itemId, imageAssetId: img.getAttribute('data-asset-id'), name: card && card.querySelector('.ft-card-name') && card.querySelector('.ft-card-name').textContent };
       img.onerror = () => onFishImageError(img, item);
     });
   }

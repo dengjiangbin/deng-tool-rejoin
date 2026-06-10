@@ -112,21 +112,12 @@ describe('BLOCKER10ZH Skeleton Angler Fish Epic + Epic purple / Mythic red', () 
     assert.notEqual(cardRarityClass('Epic'), 'rarity-mythic');
   });
 
-  test('rarity-epic CSS is purple and rarity-mythic CSS is red', () => {
+  test('ft-card epic background is red and mythic background is dark red', () => {
     const tpl = fs.readFileSync(TRACKER_PATH, 'utf8');
-    const epicGrad = extractCardGradientCss(tpl, 'rarity-epic');
-    const mythicGrad = extractCardGradientCss(tpl, 'rarity-mythic');
-
-    assert.match(epicGrad, /#a855f7|#7e22ce|#9333ea/i);
-    assert.doesNotMatch(epicGrad, /#ff2525|#c90d12|#ef4444/i);
-
-    assert.match(mythicGrad, /#ff2525|#c90d12|#ef4444/i);
-    assert.doesNotMatch(mythicGrad, /#a855f7|#7e22ce/i);
-
-    assert.match(tpl, /\.rarity-epic\s*\{[^}]*#d8b4fe[^}]*#6b21a8/);
-    assert.match(tpl, /\.rarity-mythic\s*\{[^}]*#fca5a5[^}]*#991b1b/);
-    assert.match(tpl, /epic:'#a855f7'/);
-    assert.match(tpl, /mythic:'#ef4444'/);
+    assert.match(tpl, /\.ft-rarity-EPIC[\s\S]*background:#dc2626/);
+    assert.match(tpl, /\.ft-rarity-MYTHIC[\s\S]*background:#b91c1c/);
+    assert.match(tpl, /\.ft-rarity-SECRET[\s\S]*background:#16d487/);
+    assert.doesNotMatch(tpl, /\.ft-rarity-EPIC[\s\S]*#9333ea/);
   });
 
   test('Skeleton Angler Fish sorts as Epic between Legendary/Mythic and Rare', () => {

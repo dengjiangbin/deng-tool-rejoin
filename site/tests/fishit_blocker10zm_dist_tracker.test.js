@@ -119,7 +119,6 @@ describe('BLOCKER10ZM protected dist/tracker.lua public loader', () => {
   test('/tracker public page shows dist/tracker.lua loader only', async () => {
     const res = await request(makeApp()).get('/tracker').expect(200);
     assert.match(res.text, /dist\/tracker\.lua/);
-    assert.match(res.text, /BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10/);
     assert.doesNotMatch(res.text, /tracker\.luraph\.lua/);
     assert.doesNotMatch(res.text, /main\/tracker\.lua"\)\)\(\)/);
     assert.doesNotMatch(res.text, /\?t=/);
