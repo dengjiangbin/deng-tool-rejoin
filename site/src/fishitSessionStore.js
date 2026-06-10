@@ -5,6 +5,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const playerStatsStore = require('./fishitPlayerStats');
 
 const STORE_PATH = process.env.FISHIT_LIVE_SESSIONS_PATH
   || path.join(__dirname, '..', 'data', 'fishit_live_sessions.json');
@@ -97,7 +98,23 @@ function sanitiseSession(key, data) {
       }
       : null,
     userSnapshotRecovery: data.userSnapshotRecovery || null,
-    playerStats: data.playerStats || null,
+    playerStats: (() => {
+      const raw = data.playerStats || null;
+      if (!raw) return null;
+      if (!playerStatsStore.isTrustedPlayerStats(raw)) return null;
+      return playerStatsStore.displayablePlayerStats(raw);
+    })(),
+    playerStatsDebug: (() => {
+      const raw = data.playerStatsDebug || null;
+      const stats = data.playerStats || null;
+      if (!raw || !playerStatsStore.isTrustedPlayerStats(stats)) return null;
+      return raw;
+    })(),
+    playerStatsUpdatedAt: (() => {
+      const raw = data.playerStats || null;
+      if (!raw || !playerStatsStore.isTrustedPlayerStats(raw)) return null;
+      return data.playerStatsUpdatedAt || null;
+    })(),
     restoredFromDisk: false,
   };
 }

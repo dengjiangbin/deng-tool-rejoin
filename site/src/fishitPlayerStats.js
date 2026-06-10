@@ -1,5 +1,7 @@
 'use strict';
 
+const TRUSTED_PLAYERSTATS_BUILD_MARK = 'BLOCKER10ZW';
+
 function clampText(value, maxLen) {
   if (value == null) return null;
   const s = String(value).trim();
@@ -72,6 +74,28 @@ function sanitisePlayerStats(raw) {
   return Object.keys(out).length ? out : null;
 }
 
+function sanitisePlayerStatsDebug(raw) {
+  if (!raw || typeof raw !== 'object' || raw.enabled !== true) return null;
+  const out = { enabled: true };
+  const source = clampText(raw.source, 32);
+  if (source) out.source = source;
+  const build = clampText(raw.build, 64);
+  if (build) out.build = build;
+  if (raw.rawKeysFound && typeof raw.rawKeysFound === 'object') {
+    out.rawKeysFound = {
+      replion: Array.isArray(raw.rawKeysFound.replion) ? raw.rawKeysFound.replion.slice(0, 40) : [],
+      leaderstats: Array.isArray(raw.rawKeysFound.leaderstats) ? raw.rawKeysFound.leaderstats.slice(0, 40) : [],
+    };
+  }
+  out.rawCoinsValue = clampText(raw.rawCoinsValue, 64);
+  out.rawTotalCaughtValue = clampText(raw.rawTotalCaughtValue, 64);
+  out.rawRarestFishValue = clampText(raw.rawRarestFishValue, 64);
+  out.coinsSource = clampText(raw.coinsSource, 32);
+  out.caughtSource = clampText(raw.caughtSource, 32);
+  out.rarestSource = clampText(raw.rarestSource, 32);
+  return out;
+}
+
 function hasPlayerStatValues(stats) {
   if (!stats || typeof stats !== 'object') return false;
   return stats.coins != null
@@ -81,35 +105,77 @@ function hasPlayerStatValues(stats) {
     || !!stats.rarestFishChance;
 }
 
-function mergePlayerStats(existing, incoming) {
-  const next = sanitisePlayerStats(incoming);
-  if (!next) return existing || null;
-  if (!hasPlayerStatValues(next) && next.source === 'missing' && existing) return existing;
-  if (!existing) return next;
-  const merged = { ...existing, ...next };
-  if (!hasPlayerStatValues(next) && existing.source && next.source === 'missing') {
-    merged.source = existing.source;
+function isTrustedPlayerStatsBuild(build) {
+  return typeof build === 'string' && build.includes(TRUSTED_PLAYERSTATS_BUILD_MARK);
+}
+
+function isTrustedPlayerStatsSource(source) {
+  return source === 'replion' || source === 'leaderstats' || source === 'missing';
+}
+
+function isTrustedPlayerStats(stats) {
+  if (!stats || typeof stats !== 'object') return false;
+  if (!isTrustedPlayerStatsBuild(stats.build)) return false;
+  return isTrustedPlayerStatsSource(stats.source);
+}
+
+function displayablePlayerStats(stats) {
+  const s = sanitisePlayerStats(stats);
+  if (!s || !isTrustedPlayerStats(s)) return null;
+  if (s.source === 'missing') {
+    if (!hasPlayerStatValues(s)) {
+      return {
+        source: 'missing',
+        build: s.build,
+        observedAt: s.observedAt,
+      };
+    }
+    return null;
   }
-  return merged;
+  if (!hasPlayerStatValues(s)) return null;
+  return s;
+}
+
+function isAcceptableIncomingPlayerStats(stats) {
+  return isTrustedPlayerStats(stats)
+    || (stats && stats.source === 'missing' && isTrustedPlayerStatsBuild(stats.build));
+}
+
+function mergePlayerStats(existing, incoming, opts = {}) {
+  const trustedExisting = isTrustedPlayerStats(existing) ? existing : null;
+  const next = sanitisePlayerStats(incoming);
+  if (!next) return trustedExisting || null;
+  if (!isAcceptableIncomingPlayerStats(next)) return trustedExisting || null;
+  const isLiveRoblox = !!(opts && opts.isLiveRoblox);
+  if (!hasPlayerStatValues(next) && next.source === 'missing') {
+    if (isLiveRoblox) return next;
+    if (trustedExisting) return trustedExisting;
+    return next;
+  }
+  if (!trustedExisting) return next;
+  return { ...trustedExisting, ...next };
 }
 
 function displayCoins(stats) {
-  if (!stats) return '—';
-  if (stats.coinsText) return stats.coinsText;
-  const compact = formatCompactStat(stats.coins);
+  const s = displayablePlayerStats(stats);
+  if (!s || s.source === 'missing') return '—';
+  if (s.coinsText) return s.coinsText;
+  const compact = formatCompactStat(s.coins);
   return compact || '—';
 }
 
 function displayTotalCaught(stats) {
-  if (!stats) return '—';
-  if (stats.totalCaughtText) return stats.totalCaughtText;
-  const grouped = formatGroupedStat(stats.totalCaught);
+  const s = displayablePlayerStats(stats);
+  if (!s || s.source === 'missing') return '—';
+  if (s.totalCaughtText) return s.totalCaughtText;
+  const grouped = formatGroupedStat(s.totalCaught);
   return grouped || '—';
 }
 
 function displayRarestFish(stats) {
-  if (!stats || !stats.rarestFishChance) return '—';
-  return stats.rarestFishChance;
+  const s = displayablePlayerStats(stats);
+  if (!s || s.source === 'missing' || !s.rarestFishChance) return '—';
+  return s.rarestFishChance;
 }
 
 function displayProgress(stats, key) {
@@ -124,9 +190,16 @@ function isProgressComplete(stats, key) {
 }
 
 module.exports = {
+  TRUSTED_PLAYERSTATS_BUILD_MARK,
   sanitisePlayerStats,
+  sanitisePlayerStatsDebug,
   mergePlayerStats,
   hasPlayerStatValues,
+  isTrustedPlayerStatsBuild,
+  isTrustedPlayerStatsSource,
+  isTrustedPlayerStats,
+  isAcceptableIncomingPlayerStats,
+  displayablePlayerStats,
   displayCoins,
   displayTotalCaught,
   displayRarestFish,

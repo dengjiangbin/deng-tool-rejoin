@@ -36,19 +36,38 @@ describe('fishitPlayerStats', () => {
     assert.equal(out.totalCaughtText, '3.077.845');
   });
 
-  test('mergePlayerStats keeps existing stats when incoming payload is empty', () => {
+  test('mergePlayerStats keeps trusted existing stats when incoming payload is empty', () => {
     const existing = playerStats.sanitisePlayerStats({
       coins: 201200,
       totalCaught: 450,
       rarestFishChance: '1/4.50K',
       source: 'leaderstats',
+      build: 'BLOCKER10ZW_PLAYERSTATS_REAL_ONLY_2026_06_10',
     });
     const merged = playerStats.mergePlayerStats(existing, null);
     assert.equal(merged.coinsText, '201.2K');
     assert.equal(merged.totalCaught, 450);
   });
 
-  test('mergePlayerStats keeps existing stats when incoming source is missing without values', () => {
+  test('mergePlayerStats clears stale stats on live roblox missing payload', () => {
+    const existing = playerStats.sanitisePlayerStats({
+      coins: 201200,
+      coinsText: '201.2K',
+      totalCaught: 450,
+      rarestFishChance: '1/4.50K',
+      source: 'leaderstats',
+    });
+    const merged = playerStats.mergePlayerStats(existing, {
+      source: 'missing',
+      observedAt: 1710000001,
+      build: 'BLOCKER10ZW_PLAYERSTATS_REAL_ONLY_2026_06_10',
+    }, { isLiveRoblox: true });
+    assert.equal(merged.source, 'missing');
+    assert.equal(merged.coinsText, undefined);
+    assert.equal(merged.rarestFishChance, undefined);
+  });
+
+  test('mergePlayerStats keeps trusted existing stats when non-live incoming source is missing', () => {
     const existing = playerStats.sanitisePlayerStats({
       coins: 653200000,
       coinsText: '653.2M',
@@ -56,6 +75,7 @@ describe('fishitPlayerStats', () => {
       totalCaughtText: '3,077,845',
       rarestFishChance: '1/25M',
       source: 'replion',
+      build: 'BLOCKER10ZW_PLAYERSTATS_REAL_ONLY_2026_06_10',
     });
     const merged = playerStats.mergePlayerStats(existing, {
       source: 'missing',
@@ -67,12 +87,65 @@ describe('fishitPlayerStats', () => {
     assert.equal(merged.source, 'replion');
   });
 
+  test('mergePlayerStats rejects untrusted BLOCKER10ZV incoming stats', () => {
+    const merged = playerStats.mergePlayerStats(null, {
+      coinsText: '201.2K',
+      totalCaught: 450,
+      rarestFishChance: '1/4.50K',
+      source: 'leaderstats',
+      build: 'BLOCKER10ZV_PLAYERSTATS_REPLION_LEADERSTATS_2026_06_10',
+    }, { isLiveRoblox: true });
+    assert.equal(merged, null);
+  });
+
+  test('displayablePlayerStats rejects stale BLOCKER10ZV seeded stats', () => {
+    const stale = playerStats.sanitisePlayerStats({
+      coins: 201200,
+      coinsText: '201.2K',
+      totalCaught: 450,
+      rarestFishChance: '1/4.50K',
+      source: 'leaderstats',
+      build: 'BLOCKER10ZV_PLAYERSTATS_REPLION_LEADERSTATS_2026_06_10',
+    });
+    assert.equal(playerStats.displayablePlayerStats(stale), null);
+    assert.equal(playerStats.displayCoins(stale), '—');
+    assert.equal(playerStats.displayTotalCaught(stale), '—');
+    assert.equal(playerStats.displayRarestFish(stale), '—');
+  });
+
+  test('displayablePlayerStats accepts BLOCKER10ZW missing probe as empty display', () => {
+    const missing = {
+      source: 'missing',
+      build: 'BLOCKER10ZW_PLAYERSTATS_REAL_ONLY_2026_06_10',
+      observedAt: 1710000001,
+    };
+    const out = playerStats.displayablePlayerStats(missing);
+    assert.equal(out.source, 'missing');
+    assert.equal(playerStats.displayCoins(out), '—');
+    assert.equal(playerStats.displayRarestFish(out), '—');
+  });
+
+  test('displayablePlayerStats accepts BLOCKER10ZW replion values', () => {
+    const real = playerStats.sanitisePlayerStats({
+      coinsText: '33.44M',
+      totalCaughtText: '68,885',
+      rarestFishChance: '1/1.20M',
+      source: 'replion',
+      build: 'BLOCKER10ZW_PLAYERSTATS_REAL_ONLY_2026_06_10',
+    });
+    assert.equal(playerStats.displayCoins(real), '33.44M');
+    assert.equal(playerStats.displayTotalCaught(real), '68,885');
+    assert.equal(playerStats.displayRarestFish(real), '1/1.20M');
+  });
+
   test('display helpers format compact values and progress', () => {
     const stats = playerStats.sanitisePlayerStats({
       coins: 201200,
       totalCaught: 450,
       rarestFishChance: '1/4.50K',
       ruin: { current: 4, max: 4 },
+      source: 'leaderstats',
+      build: 'BLOCKER10ZW_PLAYERSTATS_REAL_ONLY_2026_06_10',
     });
     assert.equal(playerStats.displayCoins(stats), '201.2K');
     assert.equal(playerStats.displayTotalCaught(stats), '450');

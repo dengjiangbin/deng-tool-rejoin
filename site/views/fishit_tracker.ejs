@@ -1309,14 +1309,32 @@
     }
     return null;
   }
+  const TRUSTED_PLAYERSTATS_BUILD_MARK = 'BLOCKER10ZW';
+  function isTrustedPlayerStats(stats) {
+    if (!stats || typeof stats !== 'object') return false;
+    const build = stats.build || '';
+    const source = stats.source || '';
+    if (!String(build).includes(TRUSTED_PLAYERSTATS_BUILD_MARK)) return false;
+    return source === 'replion' || source === 'leaderstats' || source === 'missing';
+  }
+  function displayableEntryPlayerStats(stats) {
+    if (!isTrustedPlayerStats(stats)) return null;
+    if (stats.source === 'missing') return stats;
+    const hasValues = stats.coins != null || stats.totalCaught != null
+      || stats.coinsText || stats.totalCaughtText || stats.rarestFishChance;
+    return hasValues ? stats : null;
+  }
   function getEntryPlayerStats(entry) {
     const resolved = resolveEntryPlayerStatsSource(entry);
-    return resolved ? resolved.stats : null;
+    return resolved ? displayableEntryPlayerStats(resolved.stats) : null;
   }
   function mergeEntryPlayerStats(existing, incoming) {
-    if (!incoming || typeof incoming !== 'object' || !Object.keys(incoming).length) return existing || null;
-    if (!existing || typeof existing !== 'object') return incoming;
-    return { ...existing, ...incoming };
+    if (incoming === null) return null;
+    if (!incoming || typeof incoming !== 'object' || !Object.keys(incoming).length) {
+      return displayableEntryPlayerStats(existing) || null;
+    }
+    if (!existing || typeof existing !== 'object') return displayableEntryPlayerStats(incoming);
+    return displayableEntryPlayerStats({ ...existing, ...incoming });
   }
   function refreshAllUsernameDisplays() {
     trackers.forEach((entry) => {
@@ -1339,20 +1357,23 @@
     });
   }
   function displayCoinsStat(stats) {
-    if (!stats) return '—';
-    if (stats.coinsText) return stats.coinsText;
-    const compact = formatCompactStatNumber(stats.coins);
+    const s = displayableEntryPlayerStats(stats);
+    if (!s || s.source === 'missing') return '—';
+    if (s.coinsText) return s.coinsText;
+    const compact = formatCompactStatNumber(s.coins);
     return compact || '—';
   }
   function displayTotalCaughtStat(stats) {
-    if (!stats) return '—';
-    if (stats.totalCaughtText) return stats.totalCaughtText;
-    const grouped = formatGroupedCaughtNumber(stats.totalCaught);
+    const s = displayableEntryPlayerStats(stats);
+    if (!s || s.source === 'missing') return '—';
+    if (s.totalCaughtText) return s.totalCaughtText;
+    const grouped = formatGroupedCaughtNumber(s.totalCaught);
     return grouped || '—';
   }
   function displayRarestFishStat(stats) {
-    if (!stats || !stats.rarestFishChance) return '—';
-    return String(stats.rarestFishChance);
+    const s = displayableEntryPlayerStats(stats);
+    if (!s || s.source === 'missing' || !s.rarestFishChance) return '—';
+    return String(s.rarestFishChance);
   }
   function formatStatsAgeSub(stats) {
     const ts = stats && (stats.statsAt || null);

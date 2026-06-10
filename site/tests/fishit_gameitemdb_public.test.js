@@ -211,10 +211,11 @@ describe('BLOCKER10ZG PlayerData GameItemDB public identity', () => {
     }), true);
   });
 
-  testIfRawTracker('tracker.lua has direct Replion path and BLOCKER10ZV playerStats build marker', () => {
+  testIfRawTracker('tracker.lua has direct Replion path and BLOCKER10ZW real-only playerStats build marker', () => {
     const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
-    assert.match(lua, /BLOCKER10ZV_PLAYERSTATS_REPLION_LEADERSTATS_2026_06_10/);
+    assert.match(lua, /BLOCKER10ZW_PLAYERSTATS_REAL_ONLY_2026_06_10/);
     assert.match(lua, /buildPlayerStatsPayload/);
+    assert.doesNotMatch(lua, /player_gui_fallback/);
     assert.match(lua, /getDataReplionDirect/);
     assert.match(lua, /REPLION_DIRECT_OK/);
     assert.match(lua, /PLAYERDATA_INVENTORY_READ/);

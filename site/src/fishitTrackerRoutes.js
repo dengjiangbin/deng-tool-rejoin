@@ -90,6 +90,49 @@ function resolveServerCommit() {
 
 // Commit hash resolved per-request in debug so deploy restarts show current HEAD.
 
+function isLiveRobloxUpload(body) {
+  return body && (body.clientOrigin === 'roblox_tracker' || body.evidenceSourceMode === 'live_roblox');
+}
+
+function resolvePlayerStatsForApi(raw) {
+  return playerStatsStore.displayablePlayerStats(raw);
+}
+
+function buildPlayerStatsProof(raw, data, nowFallback) {
+  const displayable = resolvePlayerStatsForApi(raw);
+  return {
+    hasPlayerStats: playerStatsStore.hasPlayerStatValues(displayable),
+    source: displayable && displayable.source || null,
+    coinsText: displayable && displayable.coinsText || null,
+    coins: displayable && displayable.coins != null ? displayable.coins : null,
+    totalCaughtText: displayable && displayable.totalCaughtText || null,
+    totalCaught: displayable && displayable.totalCaught != null ? displayable.totalCaught : null,
+    rarestFishChance: displayable && displayable.rarestFishChance || null,
+    statsAt: displayable && displayable.statsAt || null,
+    observedAt: displayable && displayable.observedAt || null,
+    build: displayable && displayable.build || data.trackerBuild || null,
+    lastUploadAt: data.playerStatsUpdatedAt || data.lastInventoryAt || data.updatedAt || data.lastSeenAt || nowFallback || null,
+    playerStatsDebug: playerStatsStore.isTrustedPlayerStats(raw) ? (data.playerStatsDebug || null) : null,
+    staleRejected: !!(raw && !playerStatsStore.isTrustedPlayerStats(raw)),
+    proofSource: 'session.playerStats',
+  };
+}
+
+function applyPlayerStatsFields(existing, body, now) {
+  const merged = playerStatsStore.mergePlayerStats(existing, body.playerStats, {
+    isLiveRoblox: isLiveRobloxUpload(body),
+  });
+  const displayable = resolvePlayerStatsForApi(merged);
+  const out = { playerStats: displayable };
+  if (displayable && (playerStatsStore.hasPlayerStatValues(displayable)
+    || (displayable.source === 'missing' && isLiveRobloxUpload(body)))) {
+    out.playerStatsUpdatedAt = now;
+  }
+  const debug = playerStatsStore.sanitisePlayerStatsDebug(body.playerStatsDebug);
+  if (debug && playerStatsStore.isTrustedPlayerStats(merged)) out.playerStatsDebug = debug;
+  return out;
+}
+
 // Optional Fish It DB image resolver (real fish artwork). Loaded lazily and
 // defensively so the tracker keeps working even if the DB module is absent.
 let fishitDb = null;
@@ -2796,7 +2839,7 @@ function handleUpdateBackpack(req, res) {
         lastSeenAt:      now,
         lastInventoryAt: base.lastInventoryAt || base.updatedAt || null,
         updatedAt:       now,
-        playerStats:     playerStatsStore.mergePlayerStats(base.playerStats, body.playerStats),
+        ...applyPlayerStatsFields(base.playerStats, body, now),
       };
       if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
         liveTrackDB[key].unresolvedDiagnostics = body.unresolvedDiagnostics.slice(0, 30);
@@ -3075,7 +3118,7 @@ function handleUpdateBackpack(req, res) {
           replionSourceOfTruth: true,
         }
         : (existing?.trackerClientProof || null),
-      playerStats: playerStatsStore.mergePlayerStats(existing?.playerStats, body.playerStats),
+      ...applyPlayerStatsFields(existing?.playerStats, body, now),
     };
 
     const enrichedForGood = enrichItemsFromCatalog(liveTrackDB[key].items);
@@ -3299,7 +3342,8 @@ async function handleGetBackpack(req, res) {
     countsInternal:  countsEnriched,
     lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
     isOnline:        isSessionLive(data),
-    playerStats:     data.playerStats || null,
+    playerStats:     resolvePlayerStatsForApi(data.playerStats),
+    playerStatsUpdatedAt: data.playerStatsUpdatedAt || null,
   };
 
   return res.status(200).json(enriched);
@@ -3387,21 +3431,10 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     publicApiBuild:  PUBLIC_API_BUILD,
     renderBuild:     PUBLIC_RENDER_BUILD,
     trackerBuild:    data.trackerBuild || null,
-    playerStats:     data.playerStats || null,
-    playerStatsProof: {
-      hasPlayerStats: playerStatsStore.hasPlayerStatValues(data.playerStats),
-      source: data.playerStats && data.playerStats.source || null,
-      coinsText: data.playerStats && data.playerStats.coinsText || null,
-      coins: data.playerStats && data.playerStats.coins != null ? data.playerStats.coins : null,
-      totalCaughtText: data.playerStats && data.playerStats.totalCaughtText || null,
-      totalCaught: data.playerStats && data.playerStats.totalCaught != null ? data.playerStats.totalCaught : null,
-      rarestFishChance: data.playerStats && data.playerStats.rarestFishChance || null,
-      statsAt: data.playerStats && data.playerStats.statsAt || null,
-      observedAt: data.playerStats && data.playerStats.observedAt || null,
-      build: data.playerStats && data.playerStats.build || data.trackerBuild || null,
-      lastUploadAt: data.lastInventoryAt || data.updatedAt || data.lastSeenAt || null,
-      proofSource: 'session.playerStats',
-    },
+    playerStats:     resolvePlayerStatsForApi(data.playerStats),
+    playerStatsDebug: playerStatsStore.isTrustedPlayerStats(data.playerStats) ? (data.playerStatsDebug || null) : null,
+    playerStatsUpdatedAt: data.playerStatsUpdatedAt || null,
+    playerStatsProof: buildPlayerStatsProof(data.playerStats, data),
     sessionKey:      key,
     username:        data.username,
     userId:          data.userId,
