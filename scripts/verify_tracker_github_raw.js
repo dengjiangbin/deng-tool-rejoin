@@ -1,17 +1,16 @@
 #!/usr/bin/env node
 /**
- * BLOCKER10J: post-push guard — raw GitHub tracker.lua must be valid Lua source.
+ * BLOCKER10ZM: post-push guard — protected dist/tracker.lua must exist on GitHub raw.
  */
 const https = require('https');
-const { execFileSync } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
-const BUILD_MARKER = process.argv[2] || 'BLOCKER10K_FISH_ONLY_RAW_PROOF_2026_06_04';
-const url = `https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua?t=${Date.now()}`;
+const url = 'https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua';
 
-function fetch(url) {
+function fetch(fetchUrl) {
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+    https.get(fetchUrl, (res) => {
       if (res.statusCode !== 200) {
         reject(new Error(`HTTP ${res.statusCode} from raw GitHub`));
         res.resume();
@@ -25,24 +24,31 @@ function fetch(url) {
 }
 
 (async () => {
-  const src = await fetch(url);
+  const src = await fetch(`${url}?v=${Date.now()}`);
   const errors = [];
-  if (!src.startsWith('--')) errors.push('raw content does not start with Lua comment');
   if (src.includes('<!DOCTYPE') || src.includes('<html')) errors.push('raw content looks like HTML error page');
-  if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10J')) errors.push('TRACKER_BOOT_BEGIN BLOCKER10J missing on raw GitHub');
-  if (!src.includes(BUILD_MARKER)) errors.push(`build marker ${BUILD_MARKER} missing on raw GitHub`);
+  if (Buffer.byteLength(src, 'utf8') < 4096) errors.push('dist/tracker.lua too small on GitHub raw');
+  if (/^\s*--\s*=+\s*\n\s*--\s+Fish It Unified Tracker/m.test(src)) {
+    errors.push('GitHub dist still looks like unobfuscated dev header');
+  }
   if (errors.length) {
-    console.error('GITHUB_RAW_VALIDATION FAILED');
-    for (const e of errors) console.error('  -', e);
+    console.error('GITHUB_DIST_RAW_VALIDATION FAILED');
+    for (const err of errors) console.error('  -', err);
     process.exit(1);
   }
-  const tmp = path.join(__dirname, '..', '_tracker_github_raw.lua');
-  require('fs').writeFileSync(tmp, src, 'utf8');
-  execFileSync(process.execPath, [path.join(__dirname, 'validate_tracker_compile.js'), tmp], { stdio: 'inherit' });
-  console.log('GITHUB_RAW_VALIDATION OK');
+  const tmp = path.join(__dirname, '..', '_dist_tracker_github_raw.lua');
+  fs.writeFileSync(tmp, src, 'utf8');
+  const { auditFile } = require('./audit_tracker_secrets');
+  const audit = auditFile(tmp);
+  if (!audit.ok) {
+    console.error('GITHUB_DIST_RAW_VALIDATION FAILED');
+    console.error('  - secret audit:', audit.hits.join(', '));
+    process.exit(1);
+  }
+  console.log('GITHUB_DIST_RAW_VALIDATION OK');
+  console.log('  url:', url);
   console.log('  bytes:', Buffer.byteLength(src, 'utf8'));
-  console.log('  build:', BUILD_MARKER);
 })().catch((e) => {
-  console.error('GITHUB_RAW_VALIDATION FAILED:', e.message);
+  console.error('GITHUB_DIST_RAW_VALIDATION FAILED:', e.message);
   process.exit(1);
 });

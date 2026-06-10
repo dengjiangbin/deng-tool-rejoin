@@ -1,0 +1,69 @@
+#!/usr/bin/env node
+/**
+ * BLOCKER10ZM: validate protected dist/tracker.lua before release.
+ * Obfuscate raw tracker.lua manually, then save output as dist/tracker.lua
+ */
+const fs = require('fs');
+const path = require('path');
+const { auditFile } = require('./audit_tracker_secrets');
+
+const root = path.join(__dirname, '..');
+const rawPath = path.resolve(process.argv[2] || path.join(root, 'tracker.lua'));
+const distPath = path.resolve(process.argv[3] || path.join(root, 'dist', 'tracker.lua'));
+
+const errors = [];
+
+if (!fs.existsSync(distPath)) {
+  errors.push(`missing protected dist — save obfuscated output to ${distPath}`);
+}
+
+let raw = '';
+let dist = '';
+if (fs.existsSync(rawPath)) raw = fs.readFileSync(rawPath, 'utf8');
+if (fs.existsSync(distPath)) dist = fs.readFileSync(distPath, 'utf8');
+
+if (dist) {
+  const distBytes = Buffer.byteLength(dist, 'utf8');
+  if (distBytes < 4096) {
+    errors.push(`dist too small (${distBytes} bytes) — expected obfuscated output`);
+  }
+  if (raw && dist.trim() === raw.trim()) {
+    errors.push('dist/tracker.lua must not be an unchanged copy of tracker.lua');
+  }
+  if (/^\s*--\s*=+\s*\n\s*--\s+Fish It Unified Tracker/m.test(dist)) {
+    errors.push('dist still looks like raw dev header — re-run obfuscation on tracker.lua');
+  }
+  if (dist.includes('local TRACKER_BUILD = "BLOCKER10ZL_LURAPH_PROTECTED_RELEASE_2026_06_10"')
+    && dist.includes('local function fishLog(msg')
+    && dist.includes('scanPlayerDataGameItemDbInventory')) {
+    errors.push('dist appears to be unobfuscated source — obfuscate tracker.lua first');
+  }
+  const audit = auditFile(distPath);
+  if (!audit.ok && !audit.missing) {
+    errors.push(`secret audit failed: ${audit.hits.join(', ')}`);
+  }
+}
+
+if (raw) {
+  const rawAudit = auditFile(rawPath);
+  if (!rawAudit.ok) {
+    errors.push(`raw secret audit failed: ${rawAudit.hits.join(', ')}`);
+  }
+}
+
+if (errors.length) {
+  console.error('DIST_TRACKER_VALIDATION FAILED');
+  for (const err of errors) console.error('  -', err);
+  console.error('');
+  console.error('Manual steps:');
+  console.error(`  1. node scripts/validate_tracker_compile.js`);
+  console.error(`  2. Obfuscate ${rawPath}`);
+  console.error(`  3. Save output as ${distPath}`);
+  process.exit(1);
+}
+
+console.log('DIST_TRACKER_VALIDATION OK');
+console.log('  raw:', rawPath);
+console.log('  dist:', distPath);
+console.log('  dist bytes:', Buffer.byteLength(dist, 'utf8'));
+console.log('  public URL: https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua');

@@ -2516,7 +2516,7 @@ describe('BLOCKER10D loadstring startup safety', () => {
 
   test('exact loader command shape is documented in tracker header', () => {
     const src = fs.readFileSync(trackerPath, 'utf8');
-    assert.ok(src.includes('loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua"))()'));
+    assert.ok(src.includes('loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua"))()'));
   });
 });
 

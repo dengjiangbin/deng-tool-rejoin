@@ -46,10 +46,10 @@ const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
 const snapshotRecovery = require('./fishitSnapshotRecovery');
-const { BLOCKER10ZK_BUILD, BLOCKER10ZK_UI_MARKER, BLOCKER10ZJ_BUILD, BLOCKER10ZJ_UI_MARKER, BLOCKER10ZI_BUILD, BLOCKER10ZI_UI_MARKER, BLOCKER10ZH_BUILD, BLOCKER10ZH_UI_MARKER, BLOCKER10ZG_BUILD, BLOCKER10ZG_UI_MARKER, BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZK_BUILD, BLOCKER10ZK_UI_MARKER, BLOCKER10ZJ_BUILD, BLOCKER10ZJ_UI_MARKER, BLOCKER10ZI_BUILD, BLOCKER10ZI_UI_MARKER, BLOCKER10ZH_BUILD, BLOCKER10ZH_UI_MARKER, BLOCKER10ZG_BUILD, BLOCKER10ZG_UI_MARKER, BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const stoneImageAssets = require('./fishitStoneImageAssets');
 const inventorySort = require('./fishitInventorySort');
-const { CLEAN_TRACKER_LOADSTRING, DEBUG_TRACKER_LOADSTRING } = require('./fishitTrackerLoadstring');
+const { CLEAN_TRACKER_LOADSTRING } = require('./fishitTrackerLoadstring');
 const itemUtilityPublic = require('./fishitItemUtilityPublic');
 const gameItemDbPublic = require('./fishitGameItemDbPublic');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
@@ -143,8 +143,18 @@ const NO_STORE_HEADERS = {
   Pragma: 'no-cache',
   Expires: '0',
 };
-const PUBLIC_RENDER_BUILD = BLOCKER10ZJ_UI_MARKER;
+const PUBLIC_RENDER_BUILD = BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER;
 const PUBLIC_API_BUILD = BLOCKER10ZK_BUILD;
+
+const TRACKER_TEMPLATE_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
+
+function trackerTemplateVersion() {
+  try {
+    return String(Math.floor(fs.statSync(TRACKER_TEMPLATE_PATH).mtimeMs));
+  } catch {
+    return String(Date.now());
+  }
+}
 
 const HIDDEN_PUBLIC_COSMETIC_TAGS = new Set(['big', 'shiny', 'big shiny']);
 
@@ -2485,6 +2495,8 @@ function buildTrackerPageLocals(req) {
     title: 'Inventory — Fish It',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
+    trackerUiDeployMarker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
+    trackerTemplateVersion: trackerTemplateVersion(),
     debugInventory,
     apkEmbed,
     trackerLoadstring: CLEAN_TRACKER_LOADSTRING,
@@ -2500,18 +2512,22 @@ function buildTrackerPageLocals(req) {
     blocker10qBuild: build,
   };
   if (debugGlobal) {
-    locals.trackerLoadstringDebug = DEBUG_TRACKER_LOADSTRING;
+    locals.debugInventoryNote = 'Inventory debug mode — public loader still uses dist/tracker.lua only';
   }
   return locals;
 }
 
 function renderTrackerPage(req, res) {
   try {
+    res.set(NO_STORE_HEADERS);
+    res.set('X-Tracker-Ui-Deploy', BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER);
+    res.set('X-Tracker-Template-Version', trackerTemplateVersion());
     return res.render('fishit_tracker', buildTrackerPageLocals(req));
   } catch (err) {
     console.error('[fishit-tracker] /tracker render failed:',
       err && err.stack ? err.stack : err);
     if (!res.headersSent) {
+      res.set(NO_STORE_HEADERS);
       return res.status(200).render('fishit_tracker', buildTrackerPageLocals(req));
     }
   }
@@ -2803,7 +2819,7 @@ function handleUpdateBackpack(req, res) {
 
     // ── Inventory snapshot ────────────────────────────────────────
     const incomingBuild = sanitiseTrackerBuild(body.trackerBuild) || existing?.trackerBuild || '';
-    const expectsPlayerDataGameItemDb = /BLOCKER10Z[ABC]|PLAYERDATA_GAMEITEMDB/i.test(incomingBuild);
+    const expectsPlayerDataGameItemDb = /BLOCKER10ZL_|BLOCKER10Z[ABC]|PLAYERDATA_GAMEITEMDB/i.test(incomingBuild);
     const isPlayerDataPayload = gameItemDbPublic.detectGameItemDbUpload(body);
     if (expectsPlayerDataGameItemDb && payloadType === 'inventory_snapshot' && !isPlayerDataPayload) {
       liveTrackDB[key] = {

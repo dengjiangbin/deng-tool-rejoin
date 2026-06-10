@@ -25,8 +25,8 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
     assert.match(tpl, /Waiting for inventory sync/);
     assert.doesNotMatch(tpl, /Awaiting first data/);
     assert.match(tpl, /data-ui-marker="<%= \(typeof debugInventory/);
-    assert.match(tpl, /inventory-public/);
-    assert.doesNotMatch(tpl, /<!-- BLOCKER10/);
+    assert.match(tpl, /BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10/);
+    assert.match(tpl, /<!-- BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10 -->/);
   });
 
   test('debug-only proof blocks stay gated behind DEBUG_INVENTORY', () => {
@@ -49,7 +49,7 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     assert.match(tpl, /@media \(max-width:640px\)[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
     assert.match(tpl, /@media \(max-width:640px\)[\s\S]*height:104px[\s\S]*max-height:104px/);
-    assert.match(tpl, /\.inventory-card-image-wrap[\s\S]*left:16px[\s\S]*top:16px/);
+    assert.match(tpl, /\.inventory-card-image-wrap[\s\S]*width:78px[\s\S]*margin:16px/);
     assert.match(tpl, /\.inventory-card-image-wrap img[\s\S]*object-fit:contain/);
     assert.doesNotMatch(tpl, /\.inventory-card-image[\s\S]*left:\s*0/);
     assert.match(tpl, /@media \(max-width:360px\)[\s\S]*grid-template-columns:1fr/);

@@ -11,6 +11,7 @@ const routes = require('./routes');
 const monitorRoutes = require('./monitorRoutes');
 const fishitRoutes = require('./fishitRoutes');
 const fishitTrackerRoutes = require('./fishitTrackerRoutes');
+const fishitGlobalAdminRoutes = require('./fishitGlobalAdminRoutes');
 const { FileSessionStore } = require('./sessionStore');
 const packageJson = require('../package.json');
 
@@ -22,6 +23,7 @@ function latestAssetStamp() {
   const files = [
     path.join(publicDir, 'css', 'style.css'),
     path.join(publicDir, 'js', 'app.js'),
+    path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'),
   ];
   let newest = 0;
   files.forEach((file) => {
@@ -124,6 +126,7 @@ app.use(globalLimiter);
 // 413 before the route is even matched.)
 // ---------------------------------------------------------------
 app.use('/', fishitTrackerRoutes);
+app.use('/', fishitGlobalAdminRoutes);
 
 // ---------------------------------------------------------------
 // Body parsers
@@ -161,6 +164,8 @@ app.use(session({
 // ---------------------------------------------------------------
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, '..', 'views'));
+// Never cache EJS in production — stale tracker UI survived PM2 restarts when port was held by a zombie process.
+app.set('view cache', false);
 app.use(ejsLayouts);
 app.set('layout', 'layout');
 app.set('layout extractScripts', true);

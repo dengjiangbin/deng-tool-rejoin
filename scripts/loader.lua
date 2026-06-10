@@ -12,7 +12,7 @@
 --    4. Cache-busting query string (avoids GitHub CDN stale cache)
 -- ================================================================
 
-local TRACKER_URL = "https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua"
+local TRACKER_URL = "https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua"
 
 -- Cache-bust: append timestamp so GitHub CDN always serves the freshest version.
 local url = TRACKER_URL .. "?v=" .. tostring(os.time())

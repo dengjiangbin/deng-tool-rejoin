@@ -1,10 +1,14 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
+<!-- BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10 -->
+<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10' %>">
+  <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
   <title>Inventory &mdash; Fish It</title>
   <style>
+    /* BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10 */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
@@ -68,41 +72,51 @@
 
     @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 
-    .card-head { display:flex; align-items:center; gap:12px; padding:14px 16px; cursor:pointer; user-select:none; }
+    .card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:14px 16px 10px; cursor:pointer; user-select:none; }
     .card-head:hover { background:var(--surface2); }
+    .card-head-main { display:flex; align-items:flex-start; gap:10px; min-width:0; flex:1; }
+    .card-head-user { display:flex; flex-direction:column; align-items:flex-start; gap:6px; min-width:0; }
 
-    .dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; background:var(--muted); transition:background .2s; }
+    .dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; background:var(--muted); transition:background .2s; margin-top:6px; }
     .state-live    .dot { background:var(--success); animation:pulse 1.4s ease-in-out infinite; }
     .state-waiting .dot { background:var(--warn);    animation:pulse 1.4s ease-in-out infinite; }
     .state-error   .dot { background:var(--danger); }
 
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 
-    .card-username { font-weight:700; font-size:1rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .card-meta-row { display:flex; align-items:center; gap:10px; font-size:.8rem; color:var(--muted); flex-shrink:0; }
+    .card-username { font-weight:700; font-size:1rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
 
-    .pill { padding:3px 10px; border-radius:99px; background:var(--surface2); border:1px solid var(--border); font-size:.78rem; color:var(--muted); white-space:nowrap; }
-    .pill strong { color:var(--text); }
-
-    .chevron { width:16px; height:16px; color:var(--muted); transition:transform .2s; flex-shrink:0; }
+    .chevron { width:16px; height:16px; color:var(--muted); transition:transform .2s; flex-shrink:0; margin-top:4px; }
     .tracker-card.expanded .chevron { transform:rotate(180deg); }
 
-    .btn-remove { background:none; border:1px solid var(--border); border-radius:var(--radius); color:var(--muted); cursor:pointer; padding:4px 10px; font-size:.78rem; font-family:var(--font); transition:color .15s,border-color .15s,background .15s; flex-shrink:0; }
+    .btn-remove { background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:999px; color:var(--muted); cursor:pointer; padding:3px 10px; font-size:.72rem; font-family:var(--font); transition:color .15s,border-color .15s,background .15s; flex-shrink:0; line-height:1.2; }
     .btn-remove:hover { color:var(--danger); border-color:var(--danger); background:#1a0808; }
 
-    .card-status-line { padding:0 16px 10px; font-size:.8rem; color:var(--muted); }
+    .card-status-line { padding:0 16px 8px; font-size:.8rem; color:var(--muted); }
+    .card-status-line:empty { display:none; }
 
-    .card-body { padding:0 16px 16px; display:none; }
+    .card-body { padding:0 16px 12px; display:none; }
     .tracker-card.expanded .card-body { display:block; }
+
+    .card-foot { padding:0 16px 10px; }
+    .card-foot [data-sync-time] { display:block; font-size:.68rem; color:var(--muted); opacity:.82; line-height:1.3; }
+    .card-foot [data-sync-time]:empty { display:none; }
 
     .inventory-grid,
     .items-grid,
-    .fish-grid,
-    .stones-grid,
-    .stone-grid {
+    .fish-grid {
       display:grid;
       grid-template-columns:repeat(auto-fill,minmax(220px,220px));
       gap:12px;
+      align-items:stretch;
+      justify-content:start;
+      margin-top:4px;
+    }
+    .stones-grid,
+    .stone-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(196px,196px));
+      gap:10px;
       align-items:stretch;
       justify-content:start;
       margin-top:4px;
@@ -113,21 +127,17 @@
     .stone-card,
     .inventory-card {
       --card-fg:#fff;
-      --card-muted-fg:rgba(255,255,255,.88);
-      --badge-bg:rgba(0,0,0,.42);
+      --card-muted-fg:rgba(255,255,255,.9);
+      --badge-bg:rgba(0,0,0,.45);
       --badge-fg:#fff;
       --image-glow:rgba(255,255,255,.1);
-      width:220px;
-      height:138px;
-      min-width:220px;
-      max-width:220px;
-      min-height:138px;
-      max-height:138px;
       box-sizing:border-box;
       border:1px solid rgba(255,255,255,.08);
       border-radius:14px;
       padding:0;
-      display:block;
+      display:flex;
+      flex-direction:row;
+      align-items:stretch;
       color:var(--card-fg);
       box-shadow:0 10px 24px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.06);
       overflow:hidden;
@@ -135,41 +145,86 @@
       animation:fadeIn .2s ease;
       position:relative;
     }
-    .item-card:hover, .fish-card:hover { transform:translateY(-2px); box-shadow:0 14px 28px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08); }
-    .item-card.rarity-common, .fish-card.rarity-common { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.88); --badge-bg:rgba(0,0,0,.35); --image-glow:rgba(255,255,255,.12); background:linear-gradient(135deg,#f8fafc 0%,#cbd5e1 55%,#64748b 100%); }
-    .item-card.rarity-uncommon, .fish-card.rarity-uncommon { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.92); --badge-bg:rgba(0,0,0,.38); --image-glow:rgba(132,204,22,.22); background:linear-gradient(135deg,#84cc16 0%,#65a30d 55%,#3f6212 100%); }
-    .item-card.rarity-rare, .fish-card.rarity-rare { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.52); --image-glow:rgba(30,58,138,.28); background:linear-gradient(135deg,#1e3a8a 0%,#172554 100%); }
-    .item-card.rarity-epic, .fish-card.rarity-epic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.48); --image-glow:rgba(168,85,247,.24); background:linear-gradient(135deg,#a855f7 0%,#7e22ce 100%); }
-    .item-card.rarity-legendary, .fish-card.rarity-legendary { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,140,0,.24); background:linear-gradient(135deg,#ff8c00 0%,#d97706 100%); }
-    .item-card.rarity-mythic, .fish-card.rarity-mythic { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,37,37,.22); background:linear-gradient(135deg,#ff2525 0%,#c90d12 100%); }
-    .item-card.rarity-secret, .fish-card.rarity-secret { --card-fg:#fff; --card-muted-fg:#fff; --badge-bg:rgba(0,0,0,.52); --image-glow:rgba(0,255,127,.28); background:linear-gradient(135deg,#00ff7f 0%,#00c96f 55%,#059669 100%); }
-    .item-card.rarity-forgotten, .fish-card.rarity-forgotten { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.92); --badge-bg:rgba(0,0,0,.58); --image-glow:rgba(255,255,255,.16); background:linear-gradient(135deg,#f0f0f0 0%,#777 50%,#111 100%); }
+    .item-card,
+    .fish-card,
+    .inventory-card:not(.stone-card) {
+      width:220px;
+      height:138px;
+      min-width:220px;
+      max-width:220px;
+      min-height:138px;
+      max-height:138px;
+    }
+    .item-card:hover, .fish-card:hover, .stone-card:hover { transform:translateY(-2px); box-shadow:0 14px 28px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08); }
+    .item-card.rarity-common, .fish-card.rarity-common { --badge-bg:rgba(0,0,0,.42); --image-glow:rgba(255,255,255,.12); background:linear-gradient(135deg,#64748b 0%,#475569 100%); }
+    .item-card.rarity-uncommon, .fish-card.rarity-uncommon { --badge-bg:rgba(0,0,0,.42); --image-glow:rgba(132,204,22,.22); background:#65a30d; }
+    .item-card.rarity-rare, .fish-card.rarity-rare { --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(30,58,138,.28); background:#2563eb; }
+    .item-card.rarity-epic, .fish-card.rarity-epic { --badge-bg:rgba(0,0,0,.48); --image-glow:rgba(168,85,247,.24); background:#9333ea; }
+    .item-card.rarity-legendary, .fish-card.rarity-legendary { --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,140,0,.24); background:#ea580c; }
+    .item-card.rarity-mythic, .fish-card.rarity-mythic { --badge-bg:rgba(0,0,0,.5); --image-glow:rgba(255,37,37,.22); background:#dc2626; }
+    .item-card.rarity-secret, .fish-card.rarity-secret { --badge-bg:rgba(0,0,0,.52); --image-glow:rgba(0,255,127,.28); background:#00c96f; }
+    .item-card.rarity-forgotten, .fish-card.rarity-forgotten { --badge-bg:rgba(0,0,0,.58); --image-glow:rgba(255,255,255,.16); background:linear-gradient(135deg,#777 0%,#222 55%,#0a0a0a 100%); }
 
-    .stones-section { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
-    .stones-section__title { font-size: 0.82rem; color: var(--muted); margin-bottom: 8px; font-weight: 600; letter-spacing: 0.02em; }
-    .stone-card { background:linear-gradient(135deg,#252b3a 0%,#171c28 100%); }
-    .item-card:not([class*="rarity-"]), .fish-card:not([class*="rarity-"]) { --card-fg:#fff; --card-muted-fg:rgba(255,255,255,.88); --badge-bg:rgba(0,0,0,.35); --image-glow:rgba(255,255,255,.1); background:linear-gradient(135deg,#f8fafc 0%,#cbd5e1 55%,#64748b 100%); border:1px solid var(--border); }
+    .stones-section { margin-top:14px; padding-top:12px; border-top:1px solid var(--border); }
+    .stones-section__title {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:.88rem;
+      color:#fff;
+      margin-bottom:10px;
+      font-weight:700;
+      letter-spacing:.01em;
+    }
+    .stones-section__title::before {
+      content:'';
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      background:#a855f7;
+      flex-shrink:0;
+    }
+    .stone-card {
+      width:196px;
+      height:72px;
+      min-width:196px;
+      max-width:196px;
+      min-height:72px;
+      max-height:72px;
+      background:#232833;
+      border:1px solid rgba(255,255,255,.06);
+    }
+    .item-card:not([class*="rarity-"]), .fish-card:not([class*="rarity-"]) { --badge-bg:rgba(0,0,0,.42); --image-glow:rgba(255,255,255,.1); background:linear-gradient(135deg,#64748b 0%,#475569 100%); border:1px solid rgba(255,255,255,.08); }
 
     .fish-card__imageWrap,
     .inventory-card-image-wrap,
     .stone-card__icon {
-      position:absolute;
-      left:16px;
-      top:16px;
+      flex-shrink:0;
+      display:grid;
+      place-items:center;
+      border-radius:12px;
+      background:rgba(0,0,0,.32);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 4px 18px var(--image-glow);
+      pointer-events:none;
+      overflow:hidden;
+    }
+    .fish-card__imageWrap,
+    .inventory-card-image-wrap {
       width:78px;
       height:78px;
       min-width:78px;
       min-height:78px;
-      max-width:78px;
-      max-height:78px;
-      display:grid;
-      place-items:center;
+      margin:16px 0 16px 16px;
       border-radius:12px;
-      background:rgba(0,0,0,.28);
-      box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 4px 18px var(--image-glow);
-      flex-shrink:0;
-      pointer-events:none;
-      overflow:hidden;
+    }
+    .stone-card__icon {
+      width:48px;
+      height:48px;
+      min-width:48px;
+      min-height:48px;
+      margin:12px 0 12px 12px;
+      border-radius:10px;
+      background:rgba(0,0,0,.38);
     }
     .fish-card__image,
     .inventory-card-image,
@@ -193,22 +248,26 @@
       opacity:.55;
       filter:none;
     }
-    .fish-card__body { display:contents; }
+    .inventory-card-content {
+      flex:1;
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      gap:6px;
+      padding:14px 12px 14px 8px;
+    }
+    .stone-card .inventory-card-content { gap:4px; padding:12px 10px 12px 6px; }
     .fish-card__name,
     .item-card .item-name,
     .fish-card .item-name,
     .inventory-card-name,
     .stone-card__name {
-      position:absolute;
-      left:104px;
-      right:12px;
-      top:14px;
-      min-height:34px;
-      max-height:42px;
+      position:static;
       color:var(--card-fg)!important;
-      font-weight:650;
-      font-size:.92rem;
-      line-height:1.08;
+      font-weight:700;
+      font-size:.88rem;
+      line-height:1.12;
       min-width:0;
       word-break:normal;
       overflow-wrap:anywhere;
@@ -217,46 +276,55 @@
       -webkit-line-clamp:2;
       -webkit-box-orient:vertical;
       overflow:hidden;
-      text-shadow:0 1px 3px rgba(0,0,0,.5), 0 0 1px rgba(0,0,0,.35);
+      text-shadow:0 1px 3px rgba(0,0,0,.45);
+    }
+    .stone-card__name { font-size:.82rem; -webkit-line-clamp:1; }
+    .inventory-card-badges,
+    .stone-card__stats {
+      display:flex;
+      flex-wrap:wrap;
+      gap:4px;
+      align-items:center;
+    }
+    .stone-card__stats {
+      padding:4px 8px;
+      border-radius:999px;
+      background:rgba(0,0,0,.42);
+      width:fit-content;
+      max-width:100%;
+    }
+    .card-chip {
+      display:inline-flex;
+      align-items:center;
+      gap:4px;
+      padding:3px 8px;
+      border-radius:999px;
+      background:var(--badge-bg);
+      color:var(--badge-fg);
+      font-size:.68rem;
+      font-weight:700;
+      line-height:1;
+      white-space:nowrap;
+    }
+    .stone-card__stats .card-chip {
+      background:transparent;
+      padding:0;
+      font-size:.66rem;
+      color:rgba(255,255,255,.88);
+    }
+    .card-chip-icon { width:12px; height:12px; color:#60a5fa; flex-shrink:0; }
+    .inventory-card-value {
+      font-size:.78rem;
+      font-weight:700;
+      color:var(--card-muted-fg);
+      line-height:1.1;
+      text-shadow:0 1px 2px rgba(0,0,0,.35);
     }
     .fish-card .amount-badge,
     .stone-card .amount-badge,
-    .item-card .amount-badge,
-    .fish-card__amount.amount-badge,
-    .ic-qty.fish-card__amount.amount-badge {
-      position:absolute;
-      left:14px;
-      bottom:14px;
-      top:auto;
-      transform:none;
-      z-index:4;
-      max-width:calc(100% - 28px);
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      min-width:44px;
-      padding:7px 11px;
-      border-radius:9px;
-      background:rgba(0,0,0,.68)!important;
-      border:1px solid rgba(255,255,255,.34)!important;
-      color:#fff!important;
-      font-size:clamp(.92rem, 2.6vw, 1.08rem);
-      font-weight:900;
-      line-height:1;
-      letter-spacing:.02em;
-      text-shadow:0 1px 3px rgba(0,0,0,.55);
-      box-shadow:0 4px 14px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.12);
-      box-sizing:border-box;
-    }
-    .fish-card__amountRow { display:none; }
+    .item-card .amount-badge { display:none; }
 
-    /* Legacy hooks kept for patch/update paths */
-    .ic-head { display:contents; }
-    .ic-title-wrap { display:contents; }
-    .ic-badges { display:contents; }
+    .ic-head, .ic-title-wrap, .ic-badges { display:contents; }
     .global-db-proof { margin-top:8px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface2); }
     .global-db-proof summary { cursor:pointer; padding:8px 10px; font-size:.78rem; color:#93c5fd; user-select:none; }
     .global-db-proof .gdb-body { padding:8px 10px 10px; font-size:.74rem; color:var(--muted); line-height:1.45; }
@@ -470,7 +538,10 @@
     @media (max-width:640px) {
       .inventory-grid,
       .items-grid,
-      .fish-grid,
+      .fish-grid {
+        grid-template-columns:repeat(2,minmax(0,1fr));
+        gap:8px;
+      }
       .stones-grid,
       .stone-grid {
         grid-template-columns:repeat(2,minmax(0,1fr));
@@ -478,8 +549,7 @@
       }
       .item-card,
       .fish-card,
-      .stone-card,
-      .inventory-card {
+      .inventory-card:not(.stone-card) {
         width:100%;
         min-width:0;
         max-width:none;
@@ -487,43 +557,39 @@
         min-height:104px;
         max-height:104px;
         border-radius:10px;
-        padding:0;
+      }
+      .stone-card {
+        width:100%;
+        min-width:0;
+        max-width:none;
+        height:68px;
+        min-height:68px;
+        max-height:68px;
+        border-radius:10px;
       }
       .fish-card__imageWrap,
-      .inventory-card-image-wrap,
-      .stone-card__icon {
-        left:12px;
-        top:14px;
+      .inventory-card-image-wrap {
         width:54px;
         height:54px;
         min-width:54px;
         min-height:54px;
-        max-width:54px;
-        max-height:54px;
+        margin:14px 0 14px 12px;
       }
+      .stone-card__icon {
+        width:42px;
+        height:42px;
+        min-width:42px;
+        min-height:42px;
+        margin:13px 0 13px 10px;
+      }
+      .inventory-card-content { padding:10px 8px 10px 4px; gap:4px; }
       .fish-card__name,
       .item-card .item-name,
       .fish-card .item-name,
       .inventory-card-name,
-      .stone-card__name {
-        left:74px;
-        right:10px;
-        top:12px;
-        font-size:11px;
-        line-height:1.1;
-        max-height:34px;
-      }
-      .fish-card .amount-badge,
-      .stone-card .amount-badge,
-      .item-card .amount-badge,
-      .fish-card__amount.amount-badge,
-      .ic-qty.fish-card__amount.amount-badge {
-        left:12px;
-        bottom:10px;
-        padding:6px 8px;
-        font-size:12px;
-        max-width:calc(100% - 24px);
-      }
+      .stone-card__name { font-size:11px; line-height:1.1; }
+      .card-chip { font-size:.62rem; padding:2px 6px; }
+      .inventory-card-value { font-size:.68rem; }
       .bulk-card-accounts { font-size:.62rem; right:8px; bottom:8px; }
     }
     @media (max-width:360px) {
@@ -541,11 +607,10 @@
       .btn { width:100%; }
       .code-row { flex-direction:column; }
       .btn-copy { padding:10px; }
-      .card-meta-row { gap:6px; }
     }
   </style>
 </head>
-<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : 'inventory-public' %>">
+<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10') %>">
 <div class="page">
   <div class="inner">
 
@@ -621,12 +686,6 @@
         <div class="code-block" id="loadstringCode" data-copy-script='<%- typeof trackerLoadstring !== "undefined" ? trackerLoadstring : "" %>'><%- typeof trackerLoadstring !== "undefined" ? trackerLoadstring : "" %></div>
         <button class="btn-copy" id="copyBtn" type="button">Copy</button>
       </div>
-      <% if (typeof trackerLoadstringDebug !== 'undefined' && trackerLoadstringDebug) { %>
-      <div class="loadstring-debug is-visible" id="loadstringDebugBox" data-debug-script='<%- trackerLoadstringDebug %>'>
-        <strong>Debug loader (cache-busted)</strong>
-        <div class="code-block" id="loadstringDebugCode"><%- trackerLoadstringDebug %></div>
-      </div>
-      <% } %>
     </div>
 
   </div>
@@ -641,6 +700,7 @@
   const DEBUG_INVENTORY = <%= (typeof debugInventory !== 'undefined' && debugInventory) ? 'true' : 'false' %>;
   const APK_EMBED = <%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'true' : 'false' %>;
   const DEBUG_GLOBAL  = DEBUG_INVENTORY && /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
+  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10" %>';
   const RENDER_BUILD  = DEBUG_INVENTORY
     ? (document.documentElement.getAttribute('data-render-build') || '')
     : '';
@@ -658,6 +718,8 @@
     Rare: 300, Uncommon: 200, Common: 100, Unknown: 0,
   };
   const STONE_TYPE_ORDER = { Normal: 10, Double: 20, Evolved: 30, Eggy: 40, Runic: 50 };
+  const STONE_DISPLAY_NAMES = { Double: 'Transcended Stone' };
+  const PEOPLE_ICON_SVG = '<svg class="card-chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>';
   const TIER_TO_RARITY = {
     1: 'Common', 2: 'Uncommon', 3: 'Rare', 4: 'Epic',
     5: 'Legendary', 6: 'Mythic', 7: 'Secret', 8: 'Forgotten',
@@ -676,8 +738,7 @@
   const summaryTextEl  = document.getElementById('summaryText');
   const copyBtn        = document.getElementById('copyBtn');
   const CLEAN_LOADSTRING = document.getElementById('loadstringCode')?.getAttribute('data-copy-script')
-    || 'loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua"))()';
-  const DEBUG_LOADSTRING = document.getElementById('loadstringDebugBox')?.getAttribute('data-debug-script') || '';
+    || 'loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua"))()';
 
   function loadSaved() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; } }
   function saveCurrent() { try { localStorage.setItem(LS_KEY, JSON.stringify([...trackers.keys()])); } catch {} }
@@ -698,6 +759,53 @@
   }
   function amountBadgeHtml(item) {
     return `<span class="amount-badge fish-card__amount ic-qty">${escHtml(formatAmountLabel(resolveItemAmount(item)))}</span>`;
+  }
+  function stoneDisplayName(item) {
+    const type = String(item?.stoneType || item?.StoneType || '').trim();
+    if (type && STONE_DISPLAY_NAMES[type]) return STONE_DISPLAY_NAMES[type];
+    const raw = String(item?.displayName || item?.name || '').trim();
+    if (/double enchant/i.test(raw)) return 'Transcended Stone';
+    return raw || 'Enchant Stone';
+  }
+  function formatWeightFromGrams(raw) {
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v <= 0) return '';
+    const trim = (s) => s.replace(/\.0([BK])?$/, '$1');
+    if (v >= 1e9) return trim((v / 1e9).toFixed(1)) + 'B';
+    if (v >= 1e6) return trim((v / 1e6).toFixed(1)) + 'M';
+    if (v >= 1e3) return trim((v / 1e3).toFixed(1)) + 'K';
+    return String(Math.round(v));
+  }
+  function formatCardWeight(item) {
+    if (!item || typeof item !== 'object') return '';
+    const dw = item.debugWeight;
+    if (dw && dw.display) return String(dw.display);
+    if (dw && dw.maxGrams != null) return formatWeightFromGrams(dw.maxGrams);
+    const raw = item.weightKg != null ? item.weightKg
+      : (item.weight != null ? item.weight : (item.maxWeightGrams != null ? item.maxWeightGrams : null));
+    return formatWeightFromGrams(raw);
+  }
+  function cardChipHtml(className, inner) {
+    return `<span class="card-chip ${className}">${inner}</span>`;
+  }
+  function ownersChipHtml(count) {
+    return cardChipHtml('card-chip-owners', `${PEOPLE_ICON_SVG}${escHtml(formatQuantity(count || 1))}`);
+  }
+  function buildCardBadgesHtml(item, opts) {
+    opts = opts || {};
+    const amount = formatAmountLabel(resolveItemAmount(item));
+    const rarity = opts.rarity != null ? opts.rarity : publicRarity(item);
+    const parts = [ownersChipHtml(opts.accountCount || 1)];
+    parts.push(cardChipHtml('card-chip-qty', escHtml(amount)));
+    if (opts.includeRarity !== false && rarity && rarity !== 'Unknown') {
+      parts.push(cardChipHtml('card-chip-rarity', escHtml(rarity)));
+    }
+    return `<div class="inventory-card-badges ic-badges">${parts.join('')}</div>`;
+  }
+  function buildStoneStatsHtml(item, opts) {
+    opts = opts || {};
+    const amount = formatAmountLabel(resolveItemAmount(item));
+    return `<div class="inventory-card-badges ic-badges stone-card__stats">${ownersChipHtml(opts.accountCount || 1)}${cardChipHtml('card-chip-qty', escHtml(amount))}</div>`;
   }
   function normalizeRarityLabel(item) {
     if (!item || typeof item !== 'object') return 'Unknown';
@@ -758,6 +866,15 @@
   }
   function publicWaitingHtml() {
     return `<div class="card-empty">Waiting for inventory sync...<span class="card-empty-sub">Run the script in-game to start tracking this account.</span></div>`;
+  }
+  function publicLiveEmptyHtml() {
+    return `<div class="card-empty">&#x1F9F3; Inventory is empty.</div>`;
+  }
+  function setCardSyncTime(card, data) {
+    const s = card && card.querySelector('[data-sync-time]');
+    if (!s) return;
+    const ts = syncTimestamp(data);
+    s.textContent = ts ? `Last sync: ${fmtTime(ts)}` : '';
   }
   function canonicalBulkName(item) {
     return String(item?.baseFishName || item?.displayName || item?.name || item?.Name || '').trim()
@@ -856,21 +973,24 @@
     return item.groupKey || `${item.category}|${item.name}|${item.rarity}`;
   }
   function buildBulkCardInnerHtml(item) {
-    const title = item.name || 'Unknown';
+    const title = item.category === 'stone' ? stoneDisplayName(item) : (item.name || 'Unknown');
     const imgSrc = itemImageSrc(item) || ITEM_IMAGES.Default;
     const isPlaceholder = imgSrc === ITEM_IMAGES.Default;
-    const accountLine = item.accountCount > 1
-      ? `<span class="bulk-card-accounts">${formatQuantity(item.accountCount)} accounts</span>`
-      : '';
+    const opts = { accountCount: item.accountCount || 1, includeRarity: item.category !== 'stone' };
+    const weight = item.category === 'stone' ? '' : formatCardWeight(item);
+    const valueHtml = weight ? `<span class="inventory-card-value">${escHtml(weight)}</span>` : '';
+    const badgesHtml = item.category === 'stone'
+      ? buildStoneStatsHtml(item, opts)
+      : buildCardBadgesHtml(item, opts);
     return `
   <div class="fish-card__imageWrap ic-head inventory-card-image-wrap">
     <img class="fish-card__image inventory-card-image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async"${isPlaceholder ? ' data-placeholder="true"' : ''} data-item-id="${escHtml(item.itemId || '')}">
   </div>
-  <div class="fish-card__body ic-title-wrap">
+  <div class="fish-card__body ic-title-wrap inventory-card-content">
     <span class="fish-card__name item-name inventory-card-name" title="${escHtml(title)}">${escHtml(title)}</span>
-  </div>
-  ${amountBadgeHtml({ amount: item.amount })}
-  ${accountLine}`;
+    ${badgesHtml}
+    ${valueHtml}
+  </div>`;
   }
   function buildBulkCardElement(item) {
     const rarity = publicRarity(item);
@@ -909,7 +1029,8 @@
       }).join('')}</div>`;
     }
     if (stones.length) {
-      html += `<div class="stones-section"><div class="stones-section__title">Enchant Stones</div><div class="items-grid inventory-grid stones-grid stone-grid">${stones.map((item) =>
+      const stoneTotal = stones.reduce((sum, item) => sum + Math.max(0, Math.floor(Number(item.amount) || 0)), 0);
+      html += `<div class="stones-section"><div class="stones-section__title">Enchant Stones (${formatQuantity(stoneTotal)})</div><div class="items-grid inventory-grid stones-grid stone-grid">${stones.map((item) =>
         `<div class="item-card fish-card stone-card inventory-card" data-card-key="${escHtml(bulkCardKey(item))}" data-source="bulk_playerdata_gameitemdb">${buildBulkCardInnerHtml(item)}</div>`
       ).join('')}</div></div>`;
     }
@@ -962,18 +1083,19 @@
   function stoneCardKey(item) {
     return `stone|${String(item.stoneType || item.itemId || item.name || 'unknown').toLowerCase()}`;
   }
-  function buildStoneCardInnerHtml(item) {
-    const title = item.displayName || item.name || 'Enchant Stone';
+  function buildStoneCardInnerHtml(item, opts) {
+    opts = opts || {};
+    const title = stoneDisplayName(item);
     const imgSrc = itemImageSrc(item);
     const imageHtml = imgSrc
       ? `<img class="fish-card__image inventory-card-image stone-card__image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async" data-item-id="${escHtml(item.itemId || '')}">`
       : '&#x1F48E;';
     return `
   <div class="fish-card__imageWrap ic-head stone-card__icon inventory-card-image-wrap">${imageHtml}</div>
-  <div class="fish-card__body ic-title-wrap">
+  <div class="fish-card__body ic-title-wrap inventory-card-content">
     <span class="fish-card__name item-name stone-card__name inventory-card-name" title="${escHtml(title)}">${escHtml(title)}</span>
-  </div>
-  ${amountBadgeHtml(item)}`;
+    ${buildStoneStatsHtml(item, opts)}
+  </div>`;
   }
   function buildStoneCardElement(item) {
     const card = document.createElement('div');
@@ -1058,9 +1180,11 @@
     container.style.display = '';
     let title = container.querySelector('.stones-section__title');
     if (!title) {
-      container.innerHTML = '<div class="stones-section__title">Enchant Stones</div><div class="items-grid inventory-grid stones-grid stone-grid"></div>';
+      container.innerHTML = '<div class="stones-section__title"></div><div class="items-grid inventory-grid stones-grid stone-grid"></div>';
       title = container.querySelector('.stones-section__title');
     }
+    const stoneTotal = items.reduce((sum, item) => sum + Math.max(0, Math.floor(Number(resolveItemAmount(item)) || 0)), 0);
+    if (title) title.textContent = `Enchant Stones (${formatQuantity(stoneTotal)})`;
     let grid = container.querySelector('.stones-grid');
     if (!grid) {
       grid = document.createElement('div');
@@ -1088,6 +1212,10 @@
     });
     existing.forEach((el, key) => { if (!nextKeys.has(key)) el.remove(); });
   }
+  function clearCardWaitingPanels(cardBody) {
+    if (!cardBody) return;
+    cardBody.querySelectorAll('.card-empty').forEach((el) => el.remove());
+  }
   function patchCardInventory(cardBody, fishList, stoneList, searchQuery) {
     if (!cardBody) return;
     const card = cardBody.closest('.tracker-card');
@@ -1098,7 +1226,10 @@
       entry.lastStoneList = Array.isArray(stoneList) ? stoneList : [];
     }
     const hasItems = (fishList && fishList.length) || (stoneList && stoneList.length);
-    if (hasItems) ensureInventorySearchRow(cardBody);
+    if (hasItems) {
+      clearCardWaitingPanels(cardBody);
+      ensureInventorySearchRow(cardBody);
+    }
     const q = searchQuery != null ? searchQuery : (entry && entry.inventorySearch) || '';
     const searchRow = cardBody.querySelector('[data-inventory-search-row]');
     if (searchRow) {
@@ -1414,19 +1545,23 @@
     const mut = (Array.isArray(item.mutationTags) && item.mutationTags[0]) || item.mutation || '';
     return `${String(id).toLowerCase()}|${String(mut).toLowerCase()}`;
   }
-  function buildFishCardInnerHtml(item) {
+  function buildFishCardInnerHtml(item, opts) {
+    opts = opts || {};
     const title   = cardTitle(item);
     const imgSrc  = itemImageSrc(item) || ITEM_IMAGES.Default;
     const nameStyle = rarityNameStyle(item);
     const isPlaceholder = imgSrc === ITEM_IMAGES.Default;
+    const weight = formatCardWeight(item);
+    const valueHtml = weight ? `<span class="inventory-card-value">${escHtml(weight)}</span>` : '';
     return `
   <div class="fish-card__imageWrap ic-head inventory-card-image-wrap">
     <img class="fish-card__image inventory-card-image" src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async"${isPlaceholder ? ' data-placeholder="true"' : ''} data-item-id="${escHtml(item.itemId || '')}" data-asset-id="${escHtml(item.imageAssetId || '')}">
   </div>
-  <div class="fish-card__body ic-title-wrap">
+  <div class="fish-card__body ic-title-wrap inventory-card-content">
     <span class="fish-card__name item-name inventory-card-name" title="${escHtml(title)}" style="${nameStyle}">${escHtml(title)}</span>
-  </div>
-  ${amountBadgeHtml(item)}`;
+    ${buildCardBadgesHtml(item, opts)}
+    ${valueHtml}
+  </div>`;
   }
   function buildItemCardElement(item) {
     const isShiny = item.shiny === true;
@@ -1484,19 +1619,23 @@
       nameEl.setAttribute('title', title);
       nameEl.style.cssText = nameStyle;
     }
-    const amountLabel = formatAmountLabel(resolveItemAmount(item));
-    let badge = card.querySelector('.amount-badge, .fish-card__amount.ic-qty');
-    if (badge) {
-      badge.textContent = amountLabel;
-      if (!badge.classList.contains('amount-badge')) badge.classList.add('amount-badge');
-    } else {
-      badge = document.createElement('span');
-      badge.className = 'amount-badge fish-card__amount ic-qty';
-      badge.textContent = amountLabel;
-      card.appendChild(badge);
+    const badgesEl = card.querySelector('.inventory-card-badges');
+    if (badgesEl) badgesEl.outerHTML = buildCardBadgesHtml(item);
+    let valueEl = card.querySelector('.inventory-card-value');
+    const weight = formatCardWeight(item);
+    if (weight) {
+      if (!valueEl) {
+        const content = card.querySelector('.inventory-card-content');
+        if (content) {
+          valueEl = document.createElement('span');
+          valueEl.className = 'inventory-card-value';
+          content.appendChild(valueEl);
+        }
+      }
+      if (valueEl) valueEl.textContent = weight;
+    } else if (valueEl) {
+      valueEl.remove();
     }
-    const oldRow = card.querySelector('.fish-card__amountRow');
-    if (oldRow) oldRow.remove();
     let img = card.querySelector('.fish-card__image, img');
     if (!img) {
       const wrap = card.querySelector('.fish-card__imageWrap');
@@ -1591,18 +1730,19 @@
     el.dataset.user = username.toLowerCase();
     el.innerHTML = `
 <div class="card-head">
-  <span class="dot" aria-hidden="true"></span>
-  <span class="card-username">${escHtml(username)}</span>
-  <div class="card-meta-row">
-    <span class="pill" data-fish-count>Fish: <strong>-</strong></span>
-    <span class="pill" data-sync-time></span>
+  <div class="card-head-main">
+    <span class="dot" aria-hidden="true"></span>
+    <div class="card-head-user">
+      <span class="card-username">${escHtml(username)}</span>
+      <button class="btn-remove" data-remove-btn aria-label="Remove">x Remove</button>
+    </div>
   </div>
-  <button class="btn-remove" data-remove-btn aria-label="Remove">x Remove</button>
   <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>
 </div>
-<div class="card-status-line" data-status-line>Waiting for inventory sync...</div>
+<div class="card-status-line" data-status-line></div>
 ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
-<div class="card-body" data-card-body>${publicWaitingHtml()}</div>`;
+<div class="card-body" data-card-body></div>
+<div class="card-foot"><span data-sync-time></span></div>`;
 
     el.querySelector('.card-head').addEventListener('click', e => { if (!e.target.closest('[data-remove-btn]')) el.classList.toggle('expanded'); });
     el.querySelector('[data-remove-btn]').addEventListener('click', e => { e.stopPropagation(); removeTracker(username.toLowerCase()); });
@@ -1612,19 +1752,13 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
   function updateCard(card, data) {
     card.classList.remove('state-waiting','state-error');
     card.classList.add('state-live');
-    const c = card.querySelector('[data-fish-count]');
-    const s = card.querySelector('[data-sync-time]');
     const l = card.querySelector('[data-status-line]');
     const b = card.querySelector('[data-card-body]');
     const fishList = getPublicFishItems(data);
     const stoneList = getPublicStoneItems(data);
     logFishOnlyRender(card.dataset.user, data, fishList);
-    if (c) c.innerHTML = fishCountLabel(data, fishList);
-    if (s) s.textContent = `Last sync: ${fmtTime(syncTimestamp(data))}`;
-    if (l) {
-      if (DEBUG_INVENTORY) l.innerHTML = `&#x1F7E2; Live &mdash; User ID: <strong>${data.userId||'-'}</strong>`;
-      else l.textContent = 'Live';
-    }
+    if (l) l.textContent = DEBUG_INVENTORY ? `Live — User ID: ${data.userId || '-'}` : '';
+    setCardSyncTime(card, data);
     if (DEBUG_INVENTORY) {
       const gdb = card.querySelector('[data-global-db-proof]');
       if (gdb) gdb.innerHTML = buildPlayerDataGameItemDbProofHtml(data) + buildPlayerDataItemUtilityProofHtml(data) + buildGlobalDbProofHtml(data);
@@ -1637,11 +1771,13 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     card.classList.remove('state-live','state-error');
     card.classList.add('state-waiting');
     const l = card.querySelector('[data-status-line]');
-    const s = card.querySelector('[data-sync-time]');
     const b = card.querySelector('[data-card-body]');
-    if (l) l.textContent = DEBUG_INVENTORY ? `Waiting for ${name} to execute the script in-game...` : 'Waiting for inventory sync...';
+    if (l) l.textContent = DEBUG_INVENTORY ? `Waiting for ${name} to execute the script in-game...` : '';
+    const s = card.querySelector('[data-sync-time]');
     if (s) s.textContent = '';
-    if (b && !DEBUG_INVENTORY) b.innerHTML = publicWaitingHtml();
+    if (b) b.innerHTML = DEBUG_INVENTORY
+      ? `<div class="card-empty">Waiting for ${escHtml(name)} to execute the script in-game...</div>`
+      : publicWaitingHtml();
   }
 
   // Map a tracker_status discovery phase to a human-readable message.
@@ -1678,13 +1814,10 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     card.classList.remove('state-waiting','state-error');
     card.classList.add('state-live');
     const l = card.querySelector('[data-status-line]');
-    const s = card.querySelector('[data-sync-time]');
-    const c = card.querySelector('[data-fish-count]');
     const b = card.querySelector('[data-card-body]');
     if (DEBUG_INVENTORY) {
       if (l) l.innerHTML = `&#x1F7E2; ${escHtml(phaseMessage(data.phase))}`;
-      if (s) s.textContent = syncTimestamp(data) ? `Sync: ${fmtTime(syncTimestamp(data))}` : '';
-      if (c) c.innerHTML = `Fish: <strong>-</strong>`;
+      setCardSyncTime(card, data);
       let bodyHtml = `<div class="card-empty">&#x1F7E2; ${escHtml(phaseMessage(data.phase))}</div>`;
       const ps = data.parseStats;
       const showParseDebug = ps && ps.raw > 0
@@ -1706,26 +1839,22 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       if (b) b.innerHTML = bodyHtml;
       return;
     }
-    if (l) l.textContent = 'Live';
-    if (s) s.textContent = syncTimestamp(data) ? `Last sync: ${fmtTime(syncTimestamp(data))}` : '';
-    if (c) c.innerHTML = `Fish: <strong>-</strong>`;
-    if (b) b.innerHTML = publicWaitingHtml();
+    if (l) l.textContent = '';
+    setCardSyncTime(card, data);
+    if (b) b.innerHTML = publicLiveEmptyHtml();
   }
 
   function setCardOffline(card, name, lastData) {
     card.classList.remove('state-live','state-waiting');
     card.classList.add('state-error');
     const l = card.querySelector('[data-status-line]');
-    const s = card.querySelector('[data-sync-time]');
-    const c = card.querySelector('[data-fish-count]');
     const b = card.querySelector('[data-card-body]');
     const ago = fmtRelativeAgo(syncTimestamp(lastData));
     if (l) l.textContent = ago ? `Offline · Last sync ${ago}` : 'Offline';
-    if (s && lastData) s.textContent = `Last sync: ${fmtTime(syncTimestamp(lastData))}`;
+    setCardSyncTime(card, lastData);
     if (lastData) {
       const fishList = getPublicFishItems(lastData);
       const stoneList = getPublicStoneItems(lastData);
-      if (c) c.innerHTML = fishCountLabel(lastData, fishList);
       if (b) patchCardInventory(b, fishList, stoneList);
     }
     if (inventoryMode === 'bulk') renderBulkInventory();
@@ -1804,15 +1933,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       setTimeout(() => { copyBtn.textContent = 'Copy'; copyBtn.classList.remove('copied'); }, 2000);
     });
   });
-
-  if (DEBUG_GLOBAL && DEBUG_LOADSTRING) {
-    const debugBox = document.getElementById('loadstringDebugBox');
-    const debugCode = document.getElementById('loadstringDebugCode');
-    if (debugBox && debugCode) {
-      debugCode.textContent = DEBUG_LOADSTRING;
-      debugBox.classList.add('is-visible');
-    }
-  }
 
   addBtn.addEventListener('click', () => { const v=inputEl.value.trim(); if(v){addTracker(v);inputEl.value='';} inputEl.focus(); });
   inputEl.addEventListener('keydown', e => { if(e.key==='Enter'){const v=inputEl.value.trim();if(v){addTracker(v);inputEl.value='';}} });

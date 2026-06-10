@@ -7,15 +7,13 @@ const path = require('path');
 const express = require('express');
 const request = require('supertest');
 
-const {
-  CLEAN_TRACKER_LOADSTRING,
-  DEBUG_TRACKER_LOADSTRING,
-} = require('../src/fishitTrackerLoadstring');
+const { CLEAN_TRACKER_LOADSTRING } = require('../src/fishitTrackerLoadstring');
 const { BLOCKER10ZG_BUILD } = require('../src/fishitTrackerBuild');
 const { PUBLIC_API_BUILD, buildTrackerPageLocals } = require('../src/fishitTrackerRoutes');
 const trackerRouter = require('../src/fishitTrackerRoutes');
 
 const FINAL_BUILD = 'BLOCKER10ZK_INVENTORY_MOBILE_BULK_APK_2026_06_09';
+const PUBLIC_LOADER = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua"))()';
 const TRACKER_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
 const MOJIBAKE = '\uFFFD';
 
@@ -34,20 +32,13 @@ describe('BLOCKER10ZG clean icons + loader script', () => {
     assert.equal(buildTrackerPageLocals().trackerLoadstring, CLEAN_TRACKER_LOADSTRING);
   });
 
-  test('clean loader script has no cache-busting noise', () => {
-    assert.equal(
-      CLEAN_TRACKER_LOADSTRING,
-      'loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua"))()',
-    );
+  test('clean loader script loads dist/tracker.lua not raw root tracker.lua', () => {
+    assert.equal(CLEAN_TRACKER_LOADSTRING, PUBLIC_LOADER);
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\/main\/tracker\.lua"\)\)\(\)/);
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /tracker\.luraph\.lua/);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /tostring/);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /os\.time/);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\?t=/);
-  });
-
-  test('debug loader script is separate and cache-busted', () => {
-    assert.match(DEBUG_TRACKER_LOADSTRING, /\?t=/);
-    assert.match(DEBUG_TRACKER_LOADSTRING, /os\.time/);
-    assert.notEqual(DEBUG_TRACKER_LOADSTRING, CLEAN_TRACKER_LOADSTRING);
   });
 
   test('tracker template has no mojibake replacement character', () => {
@@ -71,13 +62,14 @@ describe('BLOCKER10ZG clean icons + loader script', () => {
     assert.doesNotMatch(res.text, /tostring\(os\.time\(\)\)/);
     assert.doesNotMatch(res.text, /\?t=/);
     assert.doesNotMatch(res.text, /Debug loader \(cache-busted\)/);
+    assert.doesNotMatch(res.text, /tracker\.luraph\.lua/);
   });
 
-  test('/tracker?debug=global exposes cache-busted debug loader only in debug mode', async () => {
+  test('/tracker?debug=global still does not expose raw root loader', async () => {
     const res = await request(makeTrackerApp()).get('/tracker?debug=global').expect(200);
-    assert.match(res.text, /loadstringDebugBox/);
-    assert.match(res.text, /\?t=/);
-    assert.match(res.text, /os\.time/);
+    assert.match(res.text, /dist\/tracker\.lua/);
+    assert.doesNotMatch(res.text, /main\/tracker\.lua\?t=/);
+    assert.doesNotMatch(res.text, /loadstringDebugBox/);
   });
 
   test('copy button uses clean script constant not debug loader', async () => {
@@ -86,12 +78,6 @@ describe('BLOCKER10ZG clean icons + loader script', () => {
     assert.doesNotMatch(tpl, /writeText\(document\.getElementById\('loadstringCode'\)\.textContent\)/);
     assert.match(tpl, /Copied!/);
     assert.doesNotMatch(tpl, /\? Copied!/);
-  });
-
-  test('debug loader panel only appears when DEBUG_GLOBAL is true', () => {
-    const tpl = fs.readFileSync(TRACKER_PATH, 'utf8');
-    assert.match(tpl, /if \(DEBUG_GLOBAL && DEBUG_LOADSTRING\)/);
-    assert.match(tpl, /loadstring-debug/);
-    assert.match(tpl, /loadstringDebugBox/);
+    assert.doesNotMatch(tpl, /loadstringDebugBox/);
   });
 });

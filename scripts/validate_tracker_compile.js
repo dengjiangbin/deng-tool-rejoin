@@ -23,8 +23,8 @@ if (/^\s*loadstring\s*\(/.test(src)) {
 if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
   errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z7 marker missing');
 }
-if (!src.includes('BLOCKER10ZC_DIRECT_REPLION_GAMEITEMDB_PUBLIC_PATH_2026_06_09')) {
-  errors.push('BLOCKER10ZC build marker missing');
+if (!src.includes('BLOCKER10ZL_LURAPH_PROTECTED_RELEASE_2026_06_10')) {
+  errors.push('BLOCKER10ZL Luraph protected build marker missing');
 }
 if (!src.includes('getDataReplionDirect')) {
   errors.push('getDataReplionDirect missing — direct Replion path required');
