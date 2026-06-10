@@ -24,7 +24,7 @@ const CACHE_DIR = path.join(__dirname, '..', 'site', 'data', 'stone_image_cache'
 
 const IMPORTS = [
   { match: 'Enchant_Stone-f5e0aef4', out: 'stone_10_normal.png', itemId: '10' },
-  { match: 'Super_Enchant_Stone', out: 'stone_246_double.png', itemId: '246', fallback: 'image-fddc2420' },
+  { match: 'Transcended_Stone', out: 'stone_246_transcended.png', itemId: '246', fallback: '73883190545629' },
   { match: 'Evolved_Enchant_Stone', out: 'stone_558_evolved.png', itemId: '558', fallback: 'image-4fb3b4a7' },
   { match: 'Eggy_Enchant_Stone', out: 'stone_873_eggy.png', itemId: '873', fallback: 'image-c65db86d' },
   { match: 'image-4ab52ac6', out: 'stone_929_runic.png', itemId: '929' },

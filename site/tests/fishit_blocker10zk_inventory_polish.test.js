@@ -25,8 +25,8 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
     assert.match(tpl, /Waiting for inventory sync/);
     assert.doesNotMatch(tpl, /Awaiting first data/);
     assert.match(tpl, /data-ui-marker="<%= \(typeof debugInventory/);
-    assert.match(tpl, /BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10/);
-    assert.match(tpl, /<!-- BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10 -->/);
+    assert.match(tpl, /BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10/);
+    assert.match(tpl, /<!-- BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10 -->/);
   });
 
   test('debug-only proof blocks stay gated behind DEBUG_INVENTORY', () => {

@@ -3,18 +3,14 @@
 const fs = require('fs');
 const path = require('path');
 
+const stoneDisplayMap = require('./fishitStoneDisplayMap');
+
 const STONE_MANUAL_ASSET_SOURCE = 'stone_manual_asset';
 const ADMIN_UPLOADED_STONE_SOURCE = 'admin_uploaded_stone_asset';
 const CACHE_DIR = path.join(__dirname, '..', 'data', 'stone_image_cache');
 const CATALOG_PATH = path.join(__dirname, '..', 'data', 'fishit_stone_image_assets.json');
 
-const ENCHANT_STONES = {
-  10: { name: 'Normal Enchant Stone', stoneType: 'Normal' },
-  246: { name: 'Double Enchant Stone', stoneType: 'Double' },
-  558: { name: 'Evolved Enchant Stone', stoneType: 'Evolved' },
-  873: { name: 'Eggy Enchant Stone', stoneType: 'Eggy' },
-  929: { name: 'Runic Enchant Stone', stoneType: 'Runic' },
-};
+const ENCHANT_STONES = stoneDisplayMap.ENCHANT_STONES;
 
 let _catalog = null;
 
@@ -42,7 +38,7 @@ function localStoneUrl(baseUrl, filename) {
   return `${base}/api/fishit-tracker/assets/stones/${filename}`;
 }
 
-function lookupStoneAsset(itemId, stoneType) {
+function resolveCatalogStoneEntry(itemId, stoneType) {
   const catalog = loadCatalog();
   const idKey = itemId != null ? String(itemId).trim() : '';
   if (idKey && catalog.stones[idKey]) return catalog.stones[idKey];
@@ -52,9 +48,26 @@ function lookupStoneAsset(itemId, stoneType) {
       if (entry && entry.stoneType === type) return entry;
     }
   }
-  const meta = ENCHANT_STONES[idKey];
-  if (meta && catalog.stones[idKey]) return catalog.stones[idKey];
   return null;
+}
+
+function lookupStoneAsset(itemId, stoneType) {
+  const canonical = stoneDisplayMap.resolvePublicStoneMeta({ itemId, stoneType });
+  const catalogEntry = resolveCatalogStoneEntry(itemId, stoneType);
+  if (catalogEntry && catalogEntry.filename) {
+    const legacy = stoneDisplayMap.isLegacyStoneImageFilename(catalogEntry.filename);
+    if (!legacy) return catalogEntry;
+  }
+  if (canonical) {
+    return {
+      itemId: canonical.itemId,
+      stoneType: canonical.stoneType,
+      name: canonical.displayName,
+      filename: canonical.imageFilename,
+      imageSource: STONE_MANUAL_ASSET_SOURCE,
+    };
+  }
+  return catalogEntry;
 }
 
 function stoneAssetFileExists(filename) {
@@ -63,19 +76,30 @@ function stoneAssetFileExists(filename) {
   return fs.existsSync(path.join(CACHE_DIR, file));
 }
 
+function publicStoneDisplayName(item) {
+  return stoneDisplayMap.publicStoneDisplayName(item);
+}
+
 function attachStoneImagesToItems(items, baseUrl) {
   if (!Array.isArray(items)) return [];
   return items.map((item) => {
+    const displayName = publicStoneDisplayName(item);
     const asset = lookupStoneAsset(item.itemId, item.stoneType);
-    if (!asset || !asset.filename || !stoneAssetFileExists(asset.filename)) {
-      return { ...item };
+    const filename = asset?.filename || stoneDisplayMap.publicStoneImageFilename(item);
+    if (!filename || !stoneAssetFileExists(filename)) {
+      return {
+        ...item,
+        name: displayName,
+        displayName,
+      };
     }
-    const imageSource = asset.imageSource || STONE_MANUAL_ASSET_SOURCE;
+    const imageSource = asset?.imageSource || STONE_MANUAL_ASSET_SOURCE;
+    const resolvedName = asset?.name || displayName;
     return {
       ...item,
-      name: asset.name || item.name,
-      displayName: asset.name || item.displayName || item.name,
-      imageUrl: localStoneUrl(baseUrl, asset.filename),
+      name: resolvedName,
+      displayName: resolvedName,
+      imageUrl: localStoneUrl(baseUrl, filename),
       imageUrlPresent: true,
       imageSource,
       dataSource: item.dataSource || item.source || 'playerdata_gameitemdb',
@@ -115,6 +139,7 @@ module.exports = {
   STONE_MANUAL_ASSET_SOURCE,
   ADMIN_UPLOADED_STONE_SOURCE,
   ENCHANT_STONES,
+  publicStoneDisplayName,
   getCacheDir,
   loadCatalog,
   lookupStoneAsset,

@@ -7,6 +7,7 @@ const path = require('path');
 const express = require('express');
 const request = require('supertest');
 
+const trackerRarityStyle = require('../src/fishitTrackerRarityStyle');
 const { BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_BUILD } = require('../src/fishitTrackerBuild');
 const { CLEAN_TRACKER_LOADSTRING } = require('../src/fishitTrackerLoadstring');
 const trackerRouter = require('../src/fishitTrackerRoutes');
@@ -20,7 +21,7 @@ function loadFishCardFns() {
   const names = [
     'formatQuantity', 'formatAmountLabel', 'resolveItemAmount', 'stoneDisplayName',
     'formatWeightFromGrams', 'formatCardWeight', 'ownersChipHtml', 'buildCardBadgesHtml', 'buildFishCardInnerHtml',
-    'buildItemsHtml', 'cardKey', 'itemImageSrc', 'escHtml', 'publicRarity', 'ftRarityClass', 'fishCardClassList',
+    'buildItemsHtml', 'cardKey', 'itemImageSrc', 'escHtml', 'publicRarity', 'fishCardClassList',
   ];
   const blocks = names.map((name) => script.match(new RegExp(`function ${name}\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n  \\}`)));
   blocks.forEach((block, i) => assert.ok(block, `missing helper ${names[i]}`));
@@ -52,12 +53,14 @@ describe('BLOCKER10ZN reference card UI', () => {
 
   test('template uses ft-card flex layout and removes old fish-card tile CSS', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10/);
     assert.match(tpl, /\.ft-card[\s\S]*height:84px[\s\S]*display:flex/);
     assert.match(tpl, /\.ft-card-icon[\s\S]*54px[\s\S]*object-fit:contain/);
     assert.match(tpl, /\.ft-card-stats[\s\S]*display:flex/);
     assert.match(tpl, /grid-template-columns:repeat\(auto-fill,minmax\(230px,240px\)\)/);
-    assert.match(tpl, /\.ft-rarity-SECRET[\s\S]*#16d487/);
+    assert.match(tpl, /trackerRarityCardCss/);
+    assert.match(trackerRarityStyle.buildFtCardRarityCss(), /\.ft-rarity-SECRET[\s\S]*#16d487/);
+    assert.match(trackerRarityStyle.buildFtCardRarityCss(), /\.ft-rarity-EPIC[\s\S]*background:#9333ea/);
     assert.doesNotMatch(tpl, /\.fish-card__imageWrap/);
     assert.doesNotMatch(tpl, /height:138px/);
     assert.doesNotMatch(tpl, /position:\s*absolute[\s\S]*qty/);
@@ -99,13 +102,13 @@ describe('BLOCKER10ZN reference card UI', () => {
     assert.doesNotMatch(html, /amount-badge/);
   });
 
-  test('/tracker exposes BLOCKER10ZN marker and protected loader unchanged', async () => {
+  test('/tracker exposes BLOCKER10ZP marker and protected loader unchanged', async () => {
     const app = express();
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
     const res = await request(app).get('/tracker').expect(200);
-    assert.match(res.text, new RegExp(MARKER));
+    assert.match(res.text, /BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10/);
     assert.match(res.text, /ft-card--fish/);
     assert.match(res.text, /dist\/tracker\.lua/);
     assert.match(res.text, new RegExp(CLEAN_TRACKER_LOADSTRING.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));

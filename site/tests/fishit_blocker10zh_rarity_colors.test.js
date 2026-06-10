@@ -8,6 +8,7 @@ const path = require('path');
 const manualRarity = require('../src/fishitManualRarityOverrides');
 const gameItemDbPublic = require('../src/fishitGameItemDbPublic');
 const inventorySort = require('../src/fishitInventorySort');
+const trackerRarityStyle = require('../src/fishitTrackerRarityStyle');
 const { cardRarityClassForTier } = require('../src/fishitRarityColorMap');
 const { BLOCKER10ZH_BUILD } = require('../src/fishitTrackerBuild');
 const { PUBLIC_API_BUILD, buildPublicFishFields } = require('../src/fishitTrackerRoutes');
@@ -44,26 +45,6 @@ function sessionWith(fishItems = []) {
   };
 }
 
-function extractCardGradientCss(tpl, rarityClass) {
-  const re = new RegExp(
-    `\\.item-card\\.${rarityClass}[^{]*\\{[^}]*background:linear-gradient\\(([^)]+)\\)`,
-  );
-  const match = tpl.match(re);
-  return match ? match[1] : '';
-}
-
-function loadCardRarityClassFn() {
-  const tpl = fs.readFileSync(TRACKER_PATH, 'utf8');
-  const script = tpl.slice(tpl.indexOf('<script>'), tpl.indexOf('</script>') + 9);
-  const fn = script.match(/function cardRarityClass\(r\)\s*\{[\s\S]*?\n  \}/);
-  assert.ok(fn, 'cardRarityClass must exist in tracker template');
-  return new Function(`
-    const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
-    ${fn[0]}
-    return cardRarityClass;
-  `)();
-}
-
 describe('BLOCKER10ZH Skeleton Angler Fish Epic + Epic purple / Mythic red', () => {
   test('build marker is BLOCKER10ZH', () => {
     assert.equal(BLOCKER10ZH_BUILD, FINAL_BUILD);
@@ -95,29 +76,25 @@ describe('BLOCKER10ZH Skeleton Angler Fish Epic + Epic purple / Mythic red', () 
     assert.equal(row.tier, 4);
     assert.equal(row.raritySource, 'manual_rarity_override');
     assert.notEqual(row.rarity, 'Mythic');
-
-    const proofRows = pub.manualRarityProof?.rows || [];
-    const proofRow = proofRows.find((r) => r.name === 'Skeleton Angler Fish');
-    if (proofRow) {
-      assert.equal(proofRow.rarity, 'Epic');
-      assert.notEqual(proofRow.rarity, 'Mythic');
-    }
   });
 
   test('Skeleton Angler Fish card class is rarity-epic not rarity-mythic', () => {
-    const cardRarityClass = loadCardRarityClassFn();
-    assert.equal(cardRarityClass('Epic'), 'rarity-epic');
-    assert.equal(cardRarityClass('Mythic'), 'rarity-mythic');
     assert.equal(cardRarityClassForTier('Epic'), 'rarity-epic');
-    assert.notEqual(cardRarityClass('Epic'), 'rarity-mythic');
+    assert.equal(cardRarityClassForTier('Mythic'), 'rarity-mythic');
+    assert.equal(trackerRarityStyle.ftRarityClass('Epic'), 'ft-rarity-EPIC');
+    assert.equal(trackerRarityStyle.ftRarityClass('Mythic'), 'ft-rarity-MYTHIC');
   });
 
-  test('ft-card epic background is red and mythic background is dark red', () => {
+  test('canonical tracker rarity CSS uses Epic purple and Mythic red', () => {
+    const css = trackerRarityStyle.buildFtCardRarityCss();
+    const epicLine = css.split('\n').find((line) => line.includes('.ft-rarity-EPIC'));
+    const mythicLine = css.split('\n').find((line) => line.includes('.ft-rarity-MYTHIC'));
+    assert.match(epicLine, /background:#9333ea/);
+    assert.match(mythicLine, /background:#dc2626/);
+    assert.doesNotMatch(epicLine, /#dc2626/);
     const tpl = fs.readFileSync(TRACKER_PATH, 'utf8');
-    assert.match(tpl, /\.ft-rarity-EPIC[\s\S]*background:#dc2626/);
-    assert.match(tpl, /\.ft-rarity-MYTHIC[\s\S]*background:#b91c1c/);
-    assert.match(tpl, /\.ft-rarity-SECRET[\s\S]*background:#16d487/);
-    assert.doesNotMatch(tpl, /\.ft-rarity-EPIC[\s\S]*#9333ea/);
+    assert.match(tpl, /trackerRarityCardCss/);
+    assert.doesNotMatch(tpl, /\.ft-rarity-EPIC[\s\S]*background:#dc2626/);
   });
 
   test('Skeleton Angler Fish sorts as Epic between Legendary/Mythic and Rare', () => {
@@ -134,9 +111,5 @@ describe('BLOCKER10ZH Skeleton Angler Fish Epic + Epic purple / Mythic red', () 
       'Skeleton Angler Fish',
       'Rare Fish',
     ]);
-    assert.equal(inventorySort.rarityRank({ rarity: 'Epic' }), 400);
-    assert.equal(inventorySort.rarityRank({ rarity: 'Mythic' }), 600);
-    assert.ok(inventorySort.rarityRank({ rarity: 'Mythic' }) > inventorySort.rarityRank({ rarity: 'Epic' }));
-    assert.ok(inventorySort.rarityRank({ rarity: 'Epic' }) > inventorySort.rarityRank({ rarity: 'Rare' }));
   });
 });

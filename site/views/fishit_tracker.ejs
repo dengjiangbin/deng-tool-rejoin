@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<!-- BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10 -->
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
+<!-- BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10 -->
+<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10' %>">
+  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10' %>">
   <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
   <title>Inventory &mdash; Fish It</title>
   <style>
-    /* BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10 */
+    /* BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10 */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
@@ -122,7 +122,8 @@
       margin-top:4px;
     }
 
-    /* BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10 — flex-only fish cards */
+    /* BLOCKER10ZP — flex-only fish cards + canonical rarity backgrounds */
+    <%= typeof trackerRarityCardCss !== 'undefined' ? trackerRarityCardCss : '' %>
     .ft-card {
       width:100%;
       min-height:84px;
@@ -143,16 +144,6 @@
     }
     .ft-card:hover { transform:translateY(-1px); box-shadow:0 6px 18px rgba(0,0,0,.24); }
     .ft-card--fish { max-width:240px; }
-    .ft-rarity-COMMON, .ft-rarity-common { background:linear-gradient(135deg,#e2e8f0 0%,#94a3b8 100%); color:#0f172a; }
-    .ft-rarity-COMMON .ft-card-name, .ft-rarity-common .ft-card-name { color:#0f172a; text-shadow:none; }
-    .ft-rarity-COMMON .ft-card-weight, .ft-rarity-common .ft-card-weight { color:rgba(15,23,42,.82); }
-    .ft-rarity-UNCOMMON, .ft-rarity-uncommon { background:#65a30d; }
-    .ft-rarity-RARE, .ft-rarity-rare { background:#2563eb; }
-    .ft-rarity-EPIC, .ft-rarity-epic { background:#dc2626; }
-    .ft-rarity-LEGENDARY, .ft-rarity-legendary, .ft-rarity-MYTHIC, .ft-rarity-mythic { background:#ea580c; }
-    .ft-rarity-MYTHIC, .ft-rarity-mythic { background:#b91c1c; }
-    .ft-rarity-SECRET, .ft-rarity-secret { background:#16d487; }
-    .ft-rarity-FORGOTTEN, .ft-rarity-forgotten { background:linear-gradient(135deg,#9ca3af 0%,#6b7280 42%,#374151 100%); }
     .ft-card-icon {
       flex:0 0 54px;
       width:54px;
@@ -496,7 +487,7 @@
     }
   </style>
 </head>
-<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10') %>">
+<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10') %>">
 <div class="page">
   <div class="inner">
 
@@ -586,7 +577,7 @@
   const DEBUG_INVENTORY = <%= (typeof debugInventory !== 'undefined' && debugInventory) ? 'true' : 'false' %>;
   const APK_EMBED = <%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'true' : 'false' %>;
   const DEBUG_GLOBAL  = DEBUG_INVENTORY && /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
-  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZN_REFERENCE_CARD_UI_MATCH_2026_06_10" %>';
+  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10" %>';
   const RENDER_BUILD  = DEBUG_INVENTORY
     ? (document.documentElement.getAttribute('data-render-build') || '')
     : '';
@@ -599,13 +590,13 @@
   };
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret badge-rarity-secret', forgotten:'rarity-forgotten' };
   const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
-  const FT_RARITY_CLASS = { common:'ft-rarity-COMMON', uncommon:'ft-rarity-UNCOMMON', rare:'ft-rarity-RARE', epic:'ft-rarity-EPIC', legendary:'ft-rarity-LEGENDARY', legend:'ft-rarity-LEGENDARY', mythic:'ft-rarity-MYTHIC', secret:'ft-rarity-SECRET', forgotten:'ft-rarity-FORGOTTEN' };
+  <%= typeof trackerRarityJsBootstrap !== 'undefined' ? trackerRarityJsBootstrap : 'const FT_RARITY_CLASS = { common:\'ft-rarity-COMMON\', uncommon:\'ft-rarity-UNCOMMON\', rare:\'ft-rarity-RARE\', epic:\'ft-rarity-EPIC\', legendary:\'ft-rarity-LEGENDARY\', legend:\'ft-rarity-LEGENDARY\', mythic:\'ft-rarity-MYTHIC\', secret:\'ft-rarity-SECRET\', forgotten:\'ft-rarity-FORGOTTEN\' }; function ftRarityClass(r) { return r ? (FT_RARITY_CLASS[String(r).toLowerCase()] || \'ft-rarity-COMMON\') : \'ft-rarity-COMMON\'; }' %>
   const RARITY_ORDER = {
     Forgotten: 800, Secret: 700, Mythic: 600, Legendary: 500, Epic: 400,
     Rare: 300, Uncommon: 200, Common: 100, Unknown: 0,
   };
   const STONE_TYPE_ORDER = { Normal: 10, Double: 20, Evolved: 30, Eggy: 40, Runic: 50 };
-  const STONE_DISPLAY_NAMES = { Double: 'Transcended Stone' };
+  <%= typeof trackerStoneJsBootstrap !== 'undefined' ? trackerStoneJsBootstrap : 'const STONE_DISPLAY_NAMES = { Double: \'Transcended Stone\' };' %>
   const PEOPLE_ICON_SVG = '<svg class="card-chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>';
   const TIER_TO_RARITY = {
     1: 'Common', 2: 'Uncommon', 3: 'Rare', 4: 'Epic',
@@ -1372,7 +1363,6 @@
   }
   function rarityClass(r) { return r ? (RARITY_MAP[r.toLowerCase()] || 'badge rarity-common') : 'badge rarity-common'; }
   function cardRarityClass(r) { return r ? (CARD_RARITY_MAP[r.toLowerCase()] || 'rarity-common') : 'rarity-common'; }
-  function ftRarityClass(r) { return r ? (FT_RARITY_CLASS[r.toLowerCase()] || 'ft-rarity-COMMON') : 'ft-rarity-COMMON'; }
   function fishCardClassList(item) {
     const rarity = publicRarity(item);
     const rarityLow = rarity ? rarity.toLowerCase() : '';

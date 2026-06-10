@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-06-09T00:00:00.000Z",
+  "updatedAt": "2026-06-10T03:45:00.000Z",
   "source": "admin_uploaded_stone_asset",
   "stones": {
     "10": {
@@ -13,8 +13,8 @@
     "246": {
       "itemId": "246",
       "stoneType": "Double",
-      "name": "Double Enchant Stone",
-      "filename": "stone_246_double.png",
+      "name": "Transcended Stone",
+      "filename": "stone_246_transcended.png",
       "imageSource": "stone_manual_asset"
     },
     "558": {

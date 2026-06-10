@@ -19,7 +19,7 @@ function loadTrackerCardFns() {
     'stoneDisplayName', 'formatWeightFromGrams', 'formatCardWeight', 'ownersChipHtml',
     'buildCardBadgesHtml', 'buildStoneStatsHtml', 'buildFishCardInnerHtml',
     'buildStoneCardInnerHtml', 'buildItemsHtml', 'cardKey', 'itemImageSrc', 'escHtml',
-    'publicRarity', 'ftRarityClass', 'fishCardClassList',
+    'publicRarity', 'fishCardClassList',
   ];
   const helpers = helperNames.map((name) => script.match(new RegExp(`function ${name}\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n  \\}`)));
   for (let i = 0; i < helpers.length; i += 1) {
