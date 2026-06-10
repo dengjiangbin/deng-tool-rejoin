@@ -8,7 +8,7 @@ const express = require('express');
 const request = require('supertest');
 
 const trackerRouter = require('../src/fishitTrackerRoutes');
-const { BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER } = require('../src/fishitTrackerBuild');
+const { BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_MARKER } = require('../src/fishitTrackerBuild');
 
 const ROOT = path.join(__dirname, '..', '..');
 const TPL_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
@@ -30,10 +30,10 @@ describe('BLOCKER10ZT2 APK v2 mobile inventory UX', () => {
     assert.match(gradle, /versionCode\s*=\s*14\b/);
   });
 
-  test('UI deploy marker includes BLOCKER10ZT3 sync/mobile table polish', () => {
-    assert.match(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, /BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE/);
+  test('UI deploy marker includes BLOCKER10ZT3A hotfix loader/mobile cards', () => {
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_MARKER);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_2026_06_10/);
   });
 
   test('APK inventory screen removes Continue in Browser / Open in website CTA', () => {
@@ -57,12 +57,13 @@ describe('BLOCKER10ZT2 APK v2 mobile inventory UX', () => {
     assert.doesNotMatch(res.text, /data-apk-embed="1"/);
   });
 
-  test('mobile compact table includes required columns and actions', () => {
+  test('mobile account cards include readable labels, stats, and actions', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /class="col-username"/);
-    assert.match(tpl, /class="col-coins"/);
-    assert.match(tpl, /class="col-caught"/);
-    assert.match(tpl, /class="col-rare"/);
+    assert.match(tpl, /accounts-mobile-card__username/);
+    assert.match(tpl, /accounts-mobile-card__row-label">Status/);
+    assert.match(tpl, /accounts-mobile-card__row-label">Coins/);
+    assert.match(tpl, /accounts-mobile-card__row-label">Caught/);
+    assert.match(tpl, /accounts-mobile-card__row-label">Rarest/);
     assert.match(tpl, /data-open-backpack/);
     assert.match(tpl, /data-remove-account/);
     assert.match(tpl, /id="viewInventoryBtn"[^>]*title="Inventory View"/);

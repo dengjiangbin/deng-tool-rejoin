@@ -105,16 +105,13 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
     assert.match(tpl, /@media \(max-width:280px\)[\s\S]*grid-template-columns:1fr/);
   });
 
-  test('mobile table view uses compact table rows without vertical cards', () => {
+  test('mobile table view uses stacked account cards on small screens', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /th-short">User</);
-    assert.match(tpl, /th-short">Coin</);
-    assert.match(tpl, /th-short">Caught</);
-    assert.match(tpl, /th-short">Rare</);
-    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-table[\s\S]*min-width:0/);
-    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*table-layout:fixed/);
-    assert.doesNotMatch(tpl, /buildAccountMobileCardHtml/);
-    assert.doesNotMatch(tpl, /accounts-mobile-list/);
+    assert.match(tpl, /buildAccountMobileCardHtml/);
+    assert.match(tpl, /accounts-mobile-list/);
+    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-table-wrap \{ display:none/);
+    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-mobile-list \{ display:flex/);
+    assert.doesNotMatch(tpl, /@media \(max-width:768px\)[\s\S]*table-layout:fixed/);
   });
 
   test('mobile controls and compact loadstring rules exist', () => {

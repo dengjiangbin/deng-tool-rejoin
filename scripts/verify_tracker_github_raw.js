@@ -7,7 +7,8 @@ const https = require('https');
 const path = require('path');
 const fs = require('fs');
 
-const DIST_URL = 'https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua';
+const DIST_URL = 'https://raw.githubusercontent.com/dengjiangbin/deng-fishtracker-dist/main/dist/tracker.lua';
+const LEGACY_DIST_URL = 'https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua';
 const ROOT_URL = 'https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/tracker.lua';
 
 function fetchHead(fetchUrl) {
@@ -49,6 +50,10 @@ function fetch(fetchUrl) {
   const errors = [];
   if (src.includes('<!DOCTYPE') || src.includes('<html')) errors.push('raw content looks like HTML error page');
   if (Buffer.byteLength(src, 'utf8') < 4096) errors.push('dist/tracker.lua too small on GitHub raw');
+  if (!src.includes('BLOCKER10ZT3')) errors.push('GitHub dist missing BLOCKER10ZT3 build marker');
+  if (/BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10/.test(src) && !src.includes('BLOCKER10ZT3')) {
+    errors.push('GitHub dist still looks like stale BLOCKER10ZW build');
+  }
   if (/^\s*--\s*=+\s*\n\s*--\s+Fish It Unified Tracker/m.test(src)) {
     errors.push('GitHub dist still looks like unobfuscated dev header');
   }
@@ -66,6 +71,11 @@ function fetch(fetchUrl) {
     console.error('  - secret audit:', audit.hits.join(', '));
     process.exit(1);
   }
+  const legacyStatus = await fetchHead(`${LEGACY_DIST_URL}?v=${Date.now()}`);
+  console.log('GITHUB_LEGACY_DIST_NOTE');
+  console.log('  url:', LEGACY_DIST_URL);
+  console.log('  status:', legacyStatus, '(canonical loader uses deng-fishtracker-dist)');
+
   console.log('GITHUB_DIST_RAW_VALIDATION OK');
   console.log('  url:', DIST_URL);
   console.log('  bytes:', Buffer.byteLength(src, 'utf8'));

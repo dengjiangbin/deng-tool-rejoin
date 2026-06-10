@@ -36,7 +36,8 @@ describe('BLOCKER10ZG clean icons + loader script', () => {
     assert.equal(CLEAN_TRACKER_LOADSTRING, PUBLIC_LOADER);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\/main\/tracker\.lua"\)\)\(\)/);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /tracker\.luraph\.lua/);
-    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /tostring/);
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /tostring\(os\.time/);
+    assert.match(CLEAN_TRACKER_LOADSTRING, /FETCHED_TRACKER_BUILD=/);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /os\.time/);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\?t=/);
   });

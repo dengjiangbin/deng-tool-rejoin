@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10 -->
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
+<!-- BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_2026_06_10 -->
+<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_2026_06_10' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10' %>">
+  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_2026_06_10' %>">
   <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/inventory' %>">
   <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
   <title>Inventory &mdash; Fish It</title>
@@ -499,7 +499,90 @@
       font-size:.9rem;
     }
     .accounts-overview.is-inventory-only .accounts-table-wrap { display:none; }
+    .accounts-overview.is-inventory-only .accounts-mobile-list { display:none; }
     .accounts-table .th-short { display:none; }
+    .accounts-mobile-list {
+      display:none;
+      flex-direction:column;
+      gap:10px;
+    }
+    .accounts-mobile-card {
+      border:1.5px solid var(--border);
+      border-radius:var(--radius-lg);
+      padding:12px;
+      background:var(--surface);
+    }
+    .accounts-mobile-card.is-highlighted {
+      border-color:var(--accent);
+      box-shadow:0 0 0 1px rgba(59,130,246,.25);
+    }
+    .accounts-mobile-card__top {
+      display:flex;
+      flex-wrap:wrap;
+      align-items:flex-start;
+      justify-content:flex-start;
+      gap:10px;
+    }
+    .accounts-mobile-card__account {
+      flex:1 1 auto;
+      min-width:0;
+    }
+    .accounts-mobile-card__label {
+      display:block;
+      font-size:.7rem;
+      color:var(--muted);
+      text-transform:uppercase;
+      letter-spacing:.04em;
+      font-weight:700;
+      margin-bottom:2px;
+    }
+    .accounts-mobile-card__username {
+      font-weight:700;
+      font-size:.95rem;
+      overflow-wrap:anywhere;
+      word-break:break-word;
+      white-space:normal;
+      line-height:1.35;
+    }
+    .accounts-mobile-card__actions {
+      display:flex;
+      gap:8px;
+      flex-shrink:0;
+    }
+    .accounts-mobile-card__grid {
+      display:grid;
+      grid-template-columns:1fr;
+      gap:6px;
+      margin-top:10px;
+      align-items:stretch;
+      text-align:left;
+    }
+    .accounts-mobile-card__row {
+      display:flex;
+      flex-wrap:wrap;
+      align-items:baseline;
+      gap:6px;
+      font-size:.82rem;
+      min-width:0;
+    }
+    .accounts-mobile-card__row-label {
+      color:var(--muted);
+      min-width:72px;
+      flex-shrink:0;
+    }
+    .accounts-mobile-card__row-value {
+      font-weight:600;
+      overflow-wrap:anywhere;
+      min-width:0;
+      flex:1 1 auto;
+    }
+    .accounts-mobile-card__row-value.is-muted { color:var(--muted); font-weight:500; }
+    .accounts-mobile-card__empty {
+      padding:28px 16px;
+      text-align:center;
+      color:var(--muted);
+      font-size:.9rem;
+    }
     .inventory-view-section[hidden] { display:none !important; }
     #trackerList .tracker-card { scroll-margin-top:84px; }
 
@@ -764,6 +847,8 @@
       color:var(--muted);
     }
     .inventory-apk-embed .back-link { display:none !important; }
+    .inventory-apk-embed .accounts-overview:not(.is-inventory-only) .accounts-table-wrap { display:none !important; }
+    .inventory-apk-embed .accounts-overview:not(.is-inventory-only) .accounts-mobile-list { display:flex; }
     .inventory-apk-embed .loadstring-box { margin-top:10px; }
     .inventory-apk-embed .loadstring-box .code-row { flex-wrap:wrap; }
     .inventory-apk-embed .page { padding-top:8px; padding-bottom:16px; }
@@ -911,40 +996,13 @@
         height:42px;
         border-radius:10px;
       }
-      .accounts-table-wrap { overflow-x:hidden; }
-      .accounts-table {
-        min-width:0;
-        width:100%;
-        table-layout:fixed;
-        font-size:11px;
+      .accounts-overview:not(.is-inventory-only) .accounts-table-wrap { display:none !important; }
+      .accounts-overview:not(.is-inventory-only) .accounts-mobile-list { display:flex; }
+      .accounts-mobile-card__username {
+        overflow-wrap:anywhere;
+        white-space:normal;
+        text-overflow:clip;
       }
-      .accounts-table thead th,
-      .accounts-table tbody td {
-        padding:6px 4px;
-        font-size:11px;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      }
-      .accounts-table .th-full { display:none; }
-      .accounts-table .th-short { display:inline; }
-      .accounts-table .col-index,
-      .accounts-table__index { display:none; }
-      .accounts-table .col-status,
-      .accounts-table__status { width:42px; }
-      .accounts-table .col-username,
-      .accounts-table__username { width:auto; max-width:72px; }
-      .accounts-table .col-coins { width:48px; }
-      .accounts-table .col-caught { width:58px; }
-      .accounts-table .col-rare { width:64px; }
-      .accounts-table .col-backpack,
-      .accounts-table .col-actions { width:32px; text-align:center; }
-      .accounts-table__icon-btn {
-        width:32px;
-        height:32px;
-      }
-      .accounts-status { gap:4px; font-size:10px; }
-      .accounts-table__sub { display:none; }
       .inventory-grid,
       .items-grid,
       .fish-grid {
@@ -1128,6 +1186,7 @@
           <tbody id="accountsTableBody"></tbody>
         </table>
       </div>
+      <div class="accounts-mobile-list" id="accountsMobileList" aria-label="Account cards"></div>
     </section>
 
     <div id="inventoryViewSection" class="inventory-view-section" hidden>
@@ -1182,7 +1241,7 @@
         <span>Executor Script &mdash; copy &amp; run in-game</span>
       </h3>
       <div class="code-row">
-        <textarea class="code-block code-block--script" id="loadstringCode" readonly rows="2" spellcheck="false" aria-label="Tracker executor script"><%- typeof trackerLoadstring !== 'undefined' ? trackerLoadstring : '' %></textarea>
+        <textarea class="code-block code-block--script" id="loadstringCode" readonly rows="3" spellcheck="false" aria-label="Tracker executor script"><%- typeof trackerLoadstring !== 'undefined' ? trackerLoadstring : '' %></textarea>
         <button class="btn-copy" id="copyBtn" type="button">Copy</button>
       </div>
       <div class="copy-status" id="copyStatus" aria-live="polite"></div>
@@ -1262,6 +1321,7 @@
   const accountsOverviewEl = document.getElementById('accountsOverview');
   const accountsSearchInputEl = document.getElementById('accountsSearchInput');
   const accountsTableBodyEl = document.getElementById('accountsTableBody');
+  const accountsMobileListEl = document.getElementById('accountsMobileList');
   const viewTableBtn = document.getElementById('viewTableBtn');
   const viewInventoryBtn = document.getElementById('viewInventoryBtn');
   const hideUsernamesBtn = document.getElementById('hideUsernamesBtn');
@@ -1554,6 +1614,44 @@
     const label = formatTableSyncAge(entry && entry.lastSyncAt);
     return `<span class="accounts-status"><span class="status-dot ${freshness}" data-table-status-dot aria-hidden="true"></span><span data-table-sync-age>${escHtml(label)}</span></span>`;
   }
+  function getEntryFishSummary(entry) {
+    const data = entry && entry.lastData;
+    if (!data) return { fish: 0, types: 0 };
+    const fishList = getPublicFishItems(data);
+    const types = new Set(fishList.map((item) => canonicalBulkName(item) || inventoryItemName(item)).filter(Boolean)).size;
+    const fish = fishList.reduce((sum, item) => sum + Math.max(0, Math.floor(Number(resolveItemAmount(item)) || 0)), 0);
+    return { fish, types };
+  }
+  function buildAccountMobileCardHtml(row) {
+    const { key, entry } = row;
+    const stats = getEntryPlayerStats(entry);
+    const fishSummary = getEntryFishSummary(entry);
+    const syncLabel = formatTableSyncAge(entry && entry.lastSyncAt);
+    const freshness = tableSyncFreshness(entry && entry.lastSyncAt);
+    const inventoryLabel = `Open inventory for ${entry.displayName}`;
+    const username = displayTableUsername(entry);
+    return `<article class="accounts-mobile-card" data-account-mobile-key="${escHtml(key)}">
+  <div class="accounts-mobile-card__top">
+    <div class="accounts-mobile-card__account">
+      <span class="accounts-mobile-card__label">Account</span>
+      <span class="accounts-mobile-card__username">${escHtml(username)}</span>
+    </div>
+    <div class="accounts-mobile-card__actions">
+      <button type="button" class="accounts-table__icon-btn" data-open-backpack="${escHtml(key)}" aria-label="${escHtml(inventoryLabel)}" title="${escHtml(inventoryLabel)}">${BACKPACK_NAV_ICON}</button>
+      <button type="button" class="accounts-table__icon-btn accounts-table__icon-btn--danger" data-remove-account="${escHtml(key)}" aria-label="Remove ${escHtml(entry.displayName)}" title="Remove account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></button>
+    </div>
+  </div>
+  <div class="accounts-mobile-card__grid">
+    <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Status</span><span class="accounts-mobile-card__row-value"><span class="accounts-status"><span class="status-dot ${freshness}" aria-hidden="true"></span><span>${escHtml(syncLabel)}</span></span></span></div>
+    <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Coins</span><span class="accounts-mobile-card__row-value${displayCoinsStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayCoinsStat(stats))}</span></div>
+    <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Caught</span><span class="accounts-mobile-card__row-value${displayTotalCaughtStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayTotalCaughtStat(stats))}</span></div>
+    <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Rarest</span><span class="accounts-mobile-card__row-value${displayRarestFishStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayRarestFishStat(stats))}</span></div>
+    <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Fish</span><span class="accounts-mobile-card__row-value">${escHtml(String(fishSummary.fish))}</span></div>
+    <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Types</span><span class="accounts-mobile-card__row-value">${escHtml(String(fishSummary.types))}</span></div>
+    <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Last sync</span><span class="accounts-mobile-card__row-value">${escHtml(syncLabel)}</span></div>
+  </div>
+</article>`;
+  }
   function buildAccountRowHtml(row, index) {
     const { key, entry } = row;
     const stats = getEntryPlayerStats(entry);
@@ -1579,6 +1677,13 @@
         accountsTableBodyEl.innerHTML = rows.map((row, idx) => buildAccountRowHtml(row, idx)).join('');
       }
     }
+    if (accountsMobileListEl) {
+      if (!rows.length) {
+        accountsMobileListEl.innerHTML = '<div class="accounts-mobile-card__empty">No matching accounts yet.</div>';
+      } else {
+        accountsMobileListEl.innerHTML = rows.map((row) => buildAccountMobileCardHtml(row)).join('');
+      }
+    }
   }
   function setAccountViewMode(mode) {
     accountViewMode = mode === 'inventory' ? 'inventory' : 'table';
@@ -1602,6 +1707,11 @@
     if (tableRow) {
       tableRow.classList.add('is-highlighted');
       setTimeout(() => tableRow.classList.remove('is-highlighted'), 1800);
+    }
+    const mobileCard = accountsMobileListEl && accountsMobileListEl.querySelector(`[data-account-mobile-key="${CSS.escape(key)}"]`);
+    if (mobileCard) {
+      mobileCard.classList.add('is-highlighted');
+      setTimeout(() => mobileCard.classList.remove('is-highlighted'), 1800);
     }
     entry.el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     setTimeout(() => entry.el.classList.remove('is-highlighted'), 1800);
@@ -1680,6 +1790,7 @@
       if (removeBtn) removeTracker(removeBtn.getAttribute('data-remove-account'));
     }
     if (accountsTableBodyEl) accountsTableBodyEl.addEventListener('click', handleAccountsActionClick);
+    if (accountsMobileListEl) accountsMobileListEl.addEventListener('click', handleAccountsActionClick);
     try {
       hideUsernames = localStorage.getItem(LS_HIDE_USERNAMES) === '1';
     } catch {}

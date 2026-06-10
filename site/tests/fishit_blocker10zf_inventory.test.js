@@ -59,7 +59,7 @@ describe('BLOCKER10ZF Inventory rename + rarity sorting', () => {
     assert.match(res.text, /id="copyBtn"/);
     assert.match(res.text, /id="loadstringCode"/);
     assert.doesNotMatch(res.text, /id="copyScriptTextarea"/);
-    assert.match(res.text, /BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
+    assert.match(res.text, /BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_2026_06_10/);
   });
 
   test('/tracker legacy route remains compatible', async () => {

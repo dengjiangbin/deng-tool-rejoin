@@ -25,7 +25,7 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
     assert.match(tpl, /No inventory data yet for this username/);
     assert.doesNotMatch(tpl, /Awaiting first data/);
     assert.match(tpl, /data-ui-marker="<%= \(typeof debugInventory/);
-    assert.match(tpl, /BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_2026_06_10/);
   });
 
   test('debug-only proof blocks stay gated behind DEBUG_INVENTORY', () => {

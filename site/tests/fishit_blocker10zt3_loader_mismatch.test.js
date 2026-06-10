@@ -21,6 +21,7 @@ const {
   PROTECTED_DIST_RAW_URL_CACHE_BUST,
   PUBLIC_TRACKER_GITHUB_REPO,
   CLEAN_PUBLIC_TRACKER_GITHUB_REPO,
+  buildProofTrackerLoader,
 } = require('../src/fishitTrackerLoadstring');
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -42,9 +43,12 @@ describe('BLOCKER10ZT3 loader/dist mismatch fix', () => {
     assert.equal(LOADER_BUILD, 'BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10');
     assert.equal(EXPECTED_CLIENT_TRACKER_BUILD, LOADER_BUILD);
     assert.match(PROTECTED_DIST_RAW_URL_CACHE_BUST, /\?v=BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
+    assert.match(CLEAN_TRACKER_LOADSTRING, /LOADER_BUILD=/);
+    assert.match(CLEAN_TRACKER_LOADSTRING, /FETCH_URL=/);
+    assert.match(CLEAN_TRACKER_LOADSTRING, /FETCHED_TRACKER_BUILD=/);
     assert.equal(
       CLEAN_TRACKER_LOADSTRING,
-      `loadstring(game:HttpGet("${PROTECTED_DIST_RAW_URL_CACHE_BUST}"))()`,
+      buildProofTrackerLoader(PROTECTED_DIST_RAW_URL_CACHE_BUST, LOADER_BUILD),
     );
   });
 
@@ -65,8 +69,11 @@ describe('BLOCKER10ZT3 loader/dist mismatch fix', () => {
     assert.doesNotMatch(dist, /^--\[\[ DENG protected tracker dist \| BLOCKER10ZW/m);
   });
 
-  test('/inventory copy box serves cache-busted ZT3 loadstring', async () => {
+  test('/inventory copy box serves cache-busted ZT3 proof loader', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
+    assert.match(res.text, /LOADER_BUILD=/);
+    assert.match(res.text, /FETCH_URL=/);
+    assert.match(res.text, /FETCHED_TRACKER_BUILD=/);
     assert.match(res.text, /deng-fishtracker-dist\/main\/dist\/tracker\.lua\?v=BLOCKER10ZT3/);
     assert.doesNotMatch(res.text, /deng-tool-rejoin\/main\/dist\/tracker\.lua/);
   });

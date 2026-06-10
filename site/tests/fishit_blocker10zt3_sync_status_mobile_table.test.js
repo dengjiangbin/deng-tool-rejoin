@@ -14,7 +14,7 @@ process.env.FISHIT_DB_PATH = process.env.FISHIT_DB_PATH || '/nonexistent/deng-fi
 
 const trackerRouter = require('../src/fishitTrackerRoutes');
 const {
-  BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_MARKER,
+  BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
 } = require('../src/fishitTrackerBuild');
 
@@ -29,11 +29,11 @@ function makeApp() {
   return app;
 }
 
-describe('BLOCKER10ZT3 sync status + coin probe + compact mobile table', () => {
-  test('UI deploy marker points to BLOCKER10ZT3', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_MARKER);
+describe('BLOCKER10ZT3 sync status + coin probe + mobile account cards', () => {
+  test('UI deploy marker points to BLOCKER10ZT3A hotfix', () => {
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_MARKER);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_2026_06_10/);
   });
 
   test('frontend syncTimestamp prefers lastSeenAt over lastInventoryAt', () => {
@@ -49,18 +49,14 @@ describe('BLOCKER10ZT3 sync status + coin probe + compact mobile table', () => {
     assert.doesNotMatch(tpl, /if \(data\.isOnline === false\)/);
   });
 
-  test('mobile table stays table-like with compact columns, not vertical cards', () => {
+  test('mobile uses stacked account cards instead of compact desktop table', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /class="col-username"/);
-    assert.match(tpl, /th-short">User</);
-    assert.match(tpl, /th-short">Coin</);
-    assert.match(tpl, /th-short">Caught</);
-    assert.match(tpl, /th-short">Rare</);
-    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-table[\s\S]*min-width:0/);
-    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*table-layout:fixed/);
-    assert.doesNotMatch(tpl, /buildAccountMobileCardHtml/);
-    assert.doesNotMatch(tpl, /accounts-mobile-list/);
-    assert.doesNotMatch(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-table-wrap \{ display:none/);
+    assert.match(tpl, /buildAccountMobileCardHtml/);
+    assert.match(tpl, /accounts-mobile-list/);
+    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-table-wrap \{ display:none/);
+    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-mobile-list \{ display:flex/);
+    assert.match(tpl, /\.accounts-mobile-card__username[\s\S]*overflow-wrap:anywhere/);
+    assert.doesNotMatch(tpl, /@media \(max-width:768px\)[\s\S]*table-layout:fixed/);
   });
 
   test('inventory view keeps 2-column mobile grid', () => {
