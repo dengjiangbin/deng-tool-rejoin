@@ -49,10 +49,12 @@ function sanitisePlayerStats(raw) {
   if (coins != null) out.coins = Math.max(0, coins);
   const coinsText = clampText(raw.coinsText, 32);
   if (coinsText) out.coinsText = coinsText;
+  else if (out.coins != null) out.coinsText = formatCompactStat(out.coins);
   const totalCaught = finiteNumber(raw.totalCaught);
   if (totalCaught != null) out.totalCaught = Math.max(0, totalCaught);
   const totalCaughtText = clampText(raw.totalCaughtText, 32);
   if (totalCaughtText) out.totalCaughtText = totalCaughtText;
+  else if (out.totalCaught != null) out.totalCaughtText = formatGroupedStat(out.totalCaught);
   const rarestFishChance = clampText(raw.rarestFishChance ?? raw.rarestFish, 32);
   if (rarestFishChance) out.rarestFishChance = rarestFishChance;
   const ruin = normaliseProgress(raw.ruin);

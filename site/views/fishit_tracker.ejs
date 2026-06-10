@@ -1283,14 +1283,60 @@
     if (!Number.isFinite(n)) return null;
     return Math.max(0, Math.floor(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   }
-  function maskUsername(name) {
-    const s = String(name || '').trim();
-    if (s.length <= 4) return s;
+  function formatUsernameForDisplay(username, opts) {
+    opts = opts || {};
+    const s = String(username || '').trim();
+    if (!s) return '—';
+    if (!opts.hideUsernames) return s;
+    const len = s.length;
+    if (len === 1) return '*';
+    if (len === 2) return `${s[0]}*`;
+    if (len === 3) return `${s[0]}*${s[2]}`;
     return `${s.slice(0, 2)}***${s.slice(-2)}`;
   }
-  function getEntryPlayerStats(entry) {
+  function resolveEntryPlayerStatsSource(entry) {
     if (!entry) return null;
-    return (entry.lastData && entry.lastData.playerStats) || entry.playerStats || null;
+    const fromLast = entry.lastData;
+    const pairs = [
+      ['lastData.playerStats', fromLast && fromLast.playerStats],
+      ['lastData.stats', fromLast && fromLast.stats],
+      ['lastData.session.playerStats', fromLast && fromLast.session && fromLast.session.playerStats],
+      ['entry.playerStats', entry.playerStats],
+      ['entry.stats', entry.stats],
+    ];
+    for (const [source, stats] of pairs) {
+      if (stats && typeof stats === 'object' && Object.keys(stats).length) return { stats, source };
+    }
+    return null;
+  }
+  function getEntryPlayerStats(entry) {
+    const resolved = resolveEntryPlayerStatsSource(entry);
+    return resolved ? resolved.stats : null;
+  }
+  function mergeEntryPlayerStats(existing, incoming) {
+    if (!incoming || typeof incoming !== 'object' || !Object.keys(incoming).length) return existing || null;
+    if (!existing || typeof existing !== 'object') return incoming;
+    return { ...existing, ...incoming };
+  }
+  function refreshAllUsernameDisplays() {
+    trackers.forEach((entry) => {
+      if (!entry || !entry.el) return;
+      const nameEl = entry.el.querySelector('.account-name');
+      if (nameEl) nameEl.textContent = formatUsernameForDisplay(entry.displayName, { hideUsernames });
+    });
+  }
+  function debugLogEntryPlayerStats(entry) {
+    if (!DEBUG_INVENTORY || !entry) return;
+    const resolved = resolveEntryPlayerStatsSource(entry);
+    const stats = resolved ? resolved.stats : null;
+    console.debug('[fishit] playerStats proof', {
+      username: entry.displayName,
+      hasPlayerStats: !!stats,
+      coinsText: stats && (stats.coinsText || null),
+      totalCaughtText: stats && (stats.totalCaughtText || null),
+      rarestFishChance: stats && (stats.rarestFishChance || null),
+      source: resolved ? resolved.source : null,
+    });
   }
   function displayCoinsStat(stats) {
     if (!stats) return '—';
@@ -1316,8 +1362,7 @@
   }
   function displayTableUsername(entry) {
     if (!entry) return '—';
-    if (hideUsernames) return '••••••';
-    return maskUsername(entry.displayName);
+    return formatUsernameForDisplay(entry.displayName, { hideUsernames });
   }
   function updateHideUsernamesUi() {
     if (!hideUsernamesBtn) return;
@@ -1419,7 +1464,7 @@
       lines.push([
         idx + 1,
         formatTableSyncAge(row.entry.lastSyncAt),
-        hideUsernames ? 'hidden' : row.entry.displayName,
+        formatUsernameForDisplay(row.entry.displayName, { hideUsernames }),
         displayCoinsStat(stats),
         displayTotalCaughtStat(stats),
         displayRarestFishStat(stats),
@@ -1465,6 +1510,7 @@
         hideUsernames = !hideUsernames;
         try { localStorage.setItem(LS_HIDE_USERNAMES, hideUsernames ? '1' : '0'); } catch {}
         updateHideUsernamesUi();
+        refreshAllUsernameDisplays();
         renderAccountsTable();
       });
     }
@@ -2535,7 +2581,7 @@
   <div class="card-head-main">
     <span class="status-dot dead" data-status-dot aria-hidden="true"></span>
     <span class="sync-age" data-sync-age>no sync</span>
-    <span class="account-name">${escHtml(username)}</span>
+    <span class="account-name">${escHtml(formatUsernameForDisplay(username, { hideUsernames }))}</span>
   </div>
   <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>
 </div>
@@ -2685,7 +2731,8 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       if (!res.ok) { setCardError(entry.el); return; }
       const data = await res.json();
       entry.lastData = data;
-      entry.playerStats = data.playerStats || entry.playerStats || null;
+      entry.playerStats = mergeEntryPlayerStats(entry.playerStats, data.playerStats);
+      debugLogEntryPlayerStats(entry);
       const fishList = getPublicFishItems(data);
       const stoneList = getPublicStoneItems(data);
       const hasInventory = fishList.length > 0 || stoneList.length > 0;

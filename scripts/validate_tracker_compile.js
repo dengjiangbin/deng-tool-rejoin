@@ -37,8 +37,15 @@ if (/^\s*loadstring\s*\(/.test(src)) {
 if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
   errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z7 marker missing');
 }
-if (!src.includes('BLOCKER10ZL_LURAPH_PROTECTED_RELEASE_2026_06_10')) {
-  errors.push('BLOCKER10ZL Luraph protected build marker missing');
+if (!src.includes('BLOCKER10ZU_PLAYERSTATS_LEADERSTATS_2026_06_10')
+  && !src.includes('BLOCKER10ZL_LURAPH_PROTECTED_RELEASE_2026_06_10')) {
+  errors.push('BLOCKER10ZU/10ZL tracker build marker missing');
+}
+if (!src.includes('extractPlayerStats')) {
+  errors.push('extractPlayerStats missing — Replion/leaderstats player stats required');
+}
+if (!src.includes('payload.playerStats')) {
+  errors.push('payload.playerStats upload missing');
 }
 if (!src.includes('getDataReplionDirect')) {
   errors.push('getDataReplionDirect missing — direct Replion path required');

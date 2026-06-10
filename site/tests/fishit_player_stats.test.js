@@ -26,6 +26,27 @@ describe('fishitPlayerStats', () => {
     assert.equal(out.elementFlags, undefined);
   });
 
+  test('sanitisePlayerStats auto-generates coinsText and totalCaughtText from numeric values', () => {
+    const out = playerStats.sanitisePlayerStats({
+      coins: 201200,
+      totalCaught: 3077845,
+      rarestFishChance: '1/25M',
+    });
+    assert.equal(out.coinsText, '201.2K');
+    assert.equal(out.totalCaughtText, '3.077.845');
+  });
+
+  test('mergePlayerStats keeps existing stats when incoming payload is empty', () => {
+    const existing = playerStats.sanitisePlayerStats({
+      coins: 201200,
+      totalCaught: 450,
+      rarestFishChance: '1/4.50K',
+    });
+    const merged = playerStats.mergePlayerStats(existing, null);
+    assert.equal(merged.coinsText, '201.2K');
+    assert.equal(merged.totalCaught, 450);
+  });
+
   test('display helpers format compact values and progress', () => {
     const stats = playerStats.sanitisePlayerStats({
       coins: 201200,
