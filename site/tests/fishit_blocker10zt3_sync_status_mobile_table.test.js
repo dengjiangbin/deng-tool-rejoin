@@ -36,16 +36,16 @@ describe('BLOCKER10ZT3 sync status + coin probe + mobile account cards', () => {
     assert.match(tpl, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
   });
 
-  test('frontend syncTimestamp prefers lastSeenAt over lastInventoryAt', () => {
+  test('frontend uses freshest session timestamp for connection', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /function syncTimestamp[\s\S]*lastSeenAt \|\| data\.lastInventoryAt/);
-    assert.doesNotMatch(tpl, /function syncTimestamp[\s\S]*lastInventoryAt \|\| data\.lastSeenAt/);
+    assert.match(tpl, /function bestSyncTimestamp/);
+    assert.match(tpl, /function syncTimestamp[\s\S]*bestSyncTimestamp\(data\)/);
   });
 
-  test('pollUser uses sync freshness not isOnline alone', () => {
+  test('pollUser uses connection freshness not isOnline alone', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /function isEntrySyncLive/);
-    assert.match(tpl, /if \(!isEntrySyncLive\(data\)\)/);
+    assert.match(tpl, /function isEntryConnectionLive/);
+    assert.match(tpl, /const live = isEntryConnectionLive\(data, entry\)/);
     assert.doesNotMatch(tpl, /if \(data\.isOnline === false\)/);
   });
 

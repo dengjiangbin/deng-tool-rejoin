@@ -150,15 +150,16 @@ describe('BLOCKER10ZT4 connection/fish/playerStats proof', () => {
     assert.match(tpl, /if \(!entry \|\| !isTrackerOnline\(entry\)\) return null/);
   });
 
-  test('mobile public cards hide coin/caught/rarest debug rows', () => {
+  test('mobile public cards show stats only without sync/debug clutter', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /formatConnectionStatusLabel/);
-    assert.match(tpl, /accounts-mobile-card__row-label">Fish/);
-    assert.match(tpl, /accounts-mobile-card__row-label">Types/);
-    assert.match(tpl, /accounts-mobile-card__row-label">Last sync/);
-    assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Coins/);
-    assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Caught/);
-    assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Rarest/);
+    assert.match(tpl, /accounts-mobile-card__row-label">Coin/);
+    assert.match(tpl, /accounts-mobile-card__row-label">Caught/);
+    assert.match(tpl, /accounts-mobile-card__row-label">Rare/);
+    assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Fish/);
+    assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Types/);
+    assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Last sync/);
+    assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Status/);
+    assert.doesNotMatch(tpl, /buildAccountStatusHtml[\s\S]*data-table-sync-age/);
   });
 
   test('loader.lua and private Lua use BLOCKER10ZT4', () => {

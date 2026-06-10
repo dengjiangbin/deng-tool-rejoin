@@ -3291,10 +3291,56 @@ const updateBackpackMiddleware = [
 router.post('/api/fishit-tracker/update-backpack', updateBackpackMiddleware);
 router.post('/api/tracker/update-backpack', updateBackpackMiddleware);
 
-/** Canonical sync timestamp — heartbeat (lastSeenAt) wins over stale inventory time. */
-function statusTimestampForSession(data) {
+/** Use the freshest sync signal — inventory/heartbeat/upload timestamps compete by age. */
+function freshestSessionTimestamp(data) {
   if (!data) return null;
-  return data.lastSeenAt || data.lastInventoryAt || data.updatedAt || null;
+  const fields = [
+    data.lastSeenAt,
+    data.lastInventoryAt,
+    data.updatedAt,
+    data.playerStatsUpdatedAt,
+    data.lastUploadAcceptedAt,
+  ];
+  let best = null;
+  let bestMs = -1;
+  for (const ts of fields) {
+    if (!ts) continue;
+    const ms = new Date(ts).getTime();
+    if (Number.isFinite(ms) && ms > bestMs) {
+      bestMs = ms;
+      best = ts;
+    }
+  }
+  return best;
+}
+
+function statusTimestampForSession(data) {
+  return freshestSessionTimestamp(data);
+}
+
+function buildConnectionIndicatorProof(data, maxAgeMs = 45000) {
+  const heartbeatTs = data?.lastSeenAt || null;
+  const inventoryTs = data?.lastInventoryAt || data?.updatedAt || null;
+  const chosen = freshestSessionTimestamp(data);
+  const ageSeconds = syncAgeSecondsFromTimestamp(chosen);
+  const heartbeatAge = syncAgeSecondsFromTimestamp(heartbeatTs);
+  const inventoryAge = syncAgeSecondsFromTimestamp(inventoryTs);
+  const connected = ageSeconds != null && ageSeconds * 1000 < maxAgeMs;
+  let chosenReason = 'none';
+  if (connected && chosen) {
+    if (inventoryTs && chosen === inventoryTs) chosenReason = 'freshest_inventory';
+    else if (heartbeatTs && chosen === heartbeatTs) chosenReason = 'freshest_heartbeat';
+    else if (data?.lastUploadAcceptedAt && chosen === data.lastUploadAcceptedAt) chosenReason = 'freshest_upload';
+    else chosenReason = 'freshest_session_timestamp';
+  }
+  return {
+    connected,
+    indicatorColor: connected ? 'green' : 'red',
+    timestampUsed: chosen,
+    heartbeatAgeSeconds: heartbeatAge,
+    inventoryAgeSeconds: inventoryAge,
+    chosenReason,
+  };
 }
 
 function syncAgeSecondsFromTimestamp(ts) {
@@ -3638,6 +3684,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
       ? data.lastUploadStatusCodeReturned
       : null,
     syncProof: buildSyncProof(data),
+    connectionIndicatorProof: buildConnectionIndicatorProof(data),
     ...buildClientBuildProof(data),
     counts: countsEnriched,
     countsRaw,

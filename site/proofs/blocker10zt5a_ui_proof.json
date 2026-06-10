@@ -1,0 +1,18 @@
+{
+  "status": 200,
+  "deploy": "BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10",
+  "hasCoinCol": true,
+  "hasCaughtCol": true,
+  "hasRareCol": true,
+  "hasCoinMobile": true,
+  "hasCaughtMobile": true,
+  "hasRareMobile": true,
+  "noLastSyncMobile": true,
+  "noFishMobile": true,
+  "noTypesMobile": true,
+  "noStatusMobile": true,
+  "syncAgeHidden": true,
+  "tableSyncAgeHidden": true,
+  "bestSyncTimestamp": true,
+  "isEntryConnectionLive": true
+}
