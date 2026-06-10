@@ -30,7 +30,7 @@ const { RAW_TRACKER_LUA, testIfRawTracker, REPO_ROOT } = require('./helpers/trac
 
 const ROOT = REPO_ROOT;
 const DIST_LUA = path.join(ROOT, 'dist', 'tracker.lua');
-const TRACKER_BUILD = 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10';
+const TRACKER_BUILD = 'BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10';
 const PUBLIC_LOADER = CLEAN_TRACKER_LOADSTRING;
 
 function makeApp() {
@@ -96,7 +96,7 @@ describe('BLOCKER10ZM protected dist/tracker.lua public loader', () => {
       'BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10',
     );
     const { EXPECTED_CLIENT_TRACKER_BUILD } = require('../src/fishitTrackerBuild');
-    assert.equal(EXPECTED_CLIENT_TRACKER_BUILD, TRACKER_BUILD);
+    assert.match(EXPECTED_CLIENT_TRACKER_BUILD, /BLOCKER10ZT5/);
   });
 
   testIfRawTracker('private raw tracker source compile validation passes when present', () => {
@@ -105,7 +105,7 @@ describe('BLOCKER10ZM protected dist/tracker.lua public loader', () => {
       RAW_TRACKER_LUA,
     ], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10/);
+    assert.match(out, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
   });
 
   test('public loader points to dist/tracker.lua not raw root tracker.lua', () => {

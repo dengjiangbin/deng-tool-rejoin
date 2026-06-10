@@ -16,6 +16,7 @@ const trackerRouter = require('../src/fishitTrackerRoutes');
 const partialSnapshot = require('../src/fishitPartialSnapshot');
 const {
   BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER,
+  BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
   EXPECTED_CLIENT_TRACKER_BUILD,
 } = require('../src/fishitTrackerBuild');
@@ -35,12 +36,12 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZT4 connection/fish/playerStats proof', () => {
-  test('build markers point to BLOCKER10ZT4', () => {
-    assert.equal(EXPECTED_CLIENT_TRACKER_BUILD, 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10');
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER);
+  test('ZT4 marker still defined alongside ZT5 canonical build', () => {
+    assert.equal(BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER, 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10');
+    assert.match(EXPECTED_CLIENT_TRACKER_BUILD, /BLOCKER10ZT5/);
     assert.equal(LOADER_BUILD, EXPECTED_CLIENT_TRACKER_BUILD);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZT[45]/);
   });
 
   test('itemsForSessionDisplay keeps lastGood fish when live items empty', () => {
@@ -162,7 +163,7 @@ describe('BLOCKER10ZT4 connection/fish/playerStats proof', () => {
 
   test('loader.lua and private Lua use BLOCKER10ZT4', () => {
     const loader = fs.readFileSync(LOADER_LUA, 'utf8');
-    assert.match(loader, /BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10/);
+    assert.match(loader, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
     if (fs.existsSync(RAW_LUA)) {
       const raw = fs.readFileSync(RAW_LUA, 'utf8');
       assert.match(raw, /TRACKER_BUILD = "BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10"/);

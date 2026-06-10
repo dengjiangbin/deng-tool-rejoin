@@ -37,7 +37,8 @@ if (/^\s*loadstring\s*\(/.test(src)) {
 if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
   errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z7 marker missing');
 }
-if (!src.includes('BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10')
+if (!src.includes('BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10')
+  && !src.includes('BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10')
   && !src.includes('BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10')
   && !src.includes('BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10')
   && !src.includes('BLOCKER10ZW_PLAYERSTATS_REAL_ONLY_2026_06_10')
@@ -57,6 +58,15 @@ if (!src.includes('coinProbe')) {
 }
 if (!src.includes('resolveReplionStatData')) {
   errors.push('resolveReplionStatData missing — direct Replion coin read required');
+}
+if (!/local function readReplionData\(replion\)/.test(src)) {
+  errors.push('readReplionData early definition missing — line 951 runtime fix required');
+}
+if (!src.includes('runtimeLineFixProof')) {
+  errors.push('runtimeLineFixProof log missing — reported line fix proof required');
+}
+if (!src.includes('ZidEulFJFvuuEFDERxXTMbGj')) {
+  errors.push('RUNTIME_LINE_FIX_MARKER missing — failing log marker proof required');
 }
 if (!src.includes('payload.playerStats')) {
   errors.push('payload.playerStats upload missing');

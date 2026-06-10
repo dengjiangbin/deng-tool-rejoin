@@ -21,7 +21,7 @@ const {
   buildProofTrackerLoader,
 } = require('../src/fishitTrackerLoadstring');
 const {
-  BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER,
+  BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER,
   BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
 } = require('../src/fishitTrackerBuild');
@@ -111,10 +111,10 @@ function createMockElement(id, opts = {}) {
 describe('BLOCKER10ZR inventory buttons + clean copy UI', () => {
   test('build marker is BLOCKER10ZT3A and wired to deploy marker', () => {
     assert.equal(
-      BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER,
-      'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10',
+      BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER,
+      'BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10',
     );
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER);
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER);
     assert.equal(
       BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
       'BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10',
@@ -123,7 +123,7 @@ describe('BLOCKER10ZR inventory buttons + clean copy UI', () => {
 
   test('/inventory HTML has single script field and one Copy button', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
-    assert.match(res.text, /BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10/);
+    assert.match(res.text, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
     assert.match(res.text, /data-inventory-js="pending"/);
     assert.equal(countMatches(res.text, /id="loadstringCode"/g), 1);
     assert.equal(countMatches(res.text, /id="copyBtn"/g), 1);

@@ -1,6 +1,6 @@
 'use strict';
 
-const TRUSTED_PLAYERSTATS_BUILD_MARKS = ['BLOCKER10ZT4', 'BLOCKER10ZT3', 'BLOCKER10ZW'];
+const TRUSTED_PLAYERSTATS_BUILD_MARKS = ['BLOCKER10ZT5', 'BLOCKER10ZT4', 'BLOCKER10ZT3', 'BLOCKER10ZW'];
 
 function clampText(value, maxLen) {
   if (value == null) return null;

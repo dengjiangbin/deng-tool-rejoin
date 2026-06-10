@@ -9,7 +9,7 @@ const request = require('supertest');
 
 const trackerRouter = require('../src/fishitTrackerRoutes');
 const {
-  BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER,
+  BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
 } = require('../src/fishitTrackerBuild');
 const {
@@ -31,16 +31,16 @@ function makeApp() {
 
 describe('BLOCKER10ZT4 — proof loader + mobile account cards', () => {
   test('UI deploy marker points to BLOCKER10ZT4', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER);
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
   });
 
   test('website copy loader prints LOADER_BUILD / FETCH_URL / FETCHED_TRACKER_BUILD proof', () => {
     assert.match(CLEAN_TRACKER_LOADSTRING, /LOADER_BUILD=/);
     assert.match(CLEAN_TRACKER_LOADSTRING, /FETCH_URL=/);
     assert.match(CLEAN_TRACKER_LOADSTRING, /FETCHED_TRACKER_BUILD=/);
-    assert.match(CLEAN_TRACKER_LOADSTRING, /deng-fishtracker-dist\/main\/dist\/tracker\.lua\?v=BLOCKER10ZT4/);
+    assert.match(CLEAN_TRACKER_LOADSTRING, /deng-fishtracker-dist\/main\/dist\/tracker\.lua\?v=BLOCKER10ZT5/);
     assert.equal(
       CLEAN_TRACKER_LOADSTRING,
       buildProofTrackerLoader(PROTECTED_DIST_RAW_URL_CACHE_BUST, LOADER_BUILD),

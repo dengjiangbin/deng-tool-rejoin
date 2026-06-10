@@ -213,7 +213,7 @@ describe('BLOCKER10ZG PlayerData GameItemDB public identity', () => {
 
   testIfRawTracker('tracker.lua has direct Replion path and BLOCKER10ZW real-only playerStats build marker', () => {
     const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
-    assert.match(lua, /BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10/);
+    assert.match(lua, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
     assert.match(lua, /coinProbe/);
     assert.match(lua, /buildPlayerStatsPayload/);
     assert.doesNotMatch(lua, /player_gui_fallback/);

@@ -31,9 +31,9 @@ function makeApp() {
 
 describe('BLOCKER10ZT3 sync status + coin probe + mobile account cards', () => {
   test('UI deploy marker points to BLOCKER10ZT3A hotfix', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER);
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT5_RUNTIME_LINE_FIX_MARKER);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
   });
 
   test('frontend syncTimestamp prefers lastSeenAt over lastInventoryAt', () => {

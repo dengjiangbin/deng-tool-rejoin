@@ -46,8 +46,8 @@ if (dist) {
   if (!audit.ok && !audit.missing) {
     errors.push(`secret audit failed: ${audit.hits.join(', ')}`);
   }
-  if (!dist.includes('BLOCKER10ZT4') && !dist.includes('BLOCKER10ZT3')) {
-    errors.push('dist header must contain BLOCKER10ZT4 or BLOCKER10ZT3 build marker');
+  if (!dist.includes('BLOCKER10ZT5') && !dist.includes('BLOCKER10ZT4') && !dist.includes('BLOCKER10ZT3')) {
+    errors.push('dist header must contain BLOCKER10ZT5, BLOCKER10ZT4, or BLOCKER10ZT3 build marker');
   }
 }
 

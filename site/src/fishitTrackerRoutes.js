@@ -101,7 +101,7 @@ function resolvePlayerStatsForApi(raw) {
 function isTrustedClientBuild(build) {
   if (!build) return false;
   const s = String(build);
-  return s.includes('BLOCKER10ZT4') || s.includes('BLOCKER10ZT3');
+  return s.includes('BLOCKER10ZT5') || s.includes('BLOCKER10ZT4') || s.includes('BLOCKER10ZT3');
 }
 
 function buildPlayerStatsProof(raw, data, nowFallback) {
