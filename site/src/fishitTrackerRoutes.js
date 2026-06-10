@@ -33,6 +33,7 @@ const fs        = require('fs');
 const { execFileSync } = require('child_process');
 
 const catalogStore = require('./fishitCatalogStore');
+const playerStatsStore = require('./fishitPlayerStats');
 const fishImageAssets = require('./fishitFishImageAssets');
 const learnedFishCatalog = require('./fishitLearnedFishCatalog');
 const catchDelta = require('./fishitCatalogCatchDelta');
@@ -2795,6 +2796,7 @@ function handleUpdateBackpack(req, res) {
         lastSeenAt:      now,
         lastInventoryAt: base.lastInventoryAt || base.updatedAt || null,
         updatedAt:       now,
+        playerStats:     playerStatsStore.mergePlayerStats(base.playerStats, body.playerStats),
       };
       if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
         liveTrackDB[key].unresolvedDiagnostics = body.unresolvedDiagnostics.slice(0, 30);
@@ -3073,6 +3075,7 @@ function handleUpdateBackpack(req, res) {
           replionSourceOfTruth: true,
         }
         : (existing?.trackerClientProof || null),
+      playerStats: playerStatsStore.mergePlayerStats(existing?.playerStats, body.playerStats),
     };
 
     const enrichedForGood = enrichItemsFromCatalog(liveTrackDB[key].items);
@@ -3296,6 +3299,7 @@ async function handleGetBackpack(req, res) {
     countsInternal:  countsEnriched,
     lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
     isOnline:        isSessionLive(data),
+    playerStats:     data.playerStats || null,
   };
 
   return res.status(200).json(enriched);

@@ -97,6 +97,7 @@ function sanitiseSession(key, data) {
       }
       : null,
     userSnapshotRecovery: data.userSnapshotRecovery || null,
+    playerStats: data.playerStats || null,
     restoredFromDisk: false,
   };
 }

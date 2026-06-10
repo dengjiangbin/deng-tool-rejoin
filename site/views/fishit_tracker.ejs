@@ -213,6 +213,7 @@
     .tracker-card.state-live    { border-color:var(--success); }
     .tracker-card.state-waiting { border-color:var(--warn); }
     .tracker-card.state-error   { border-color:var(--danger); }
+    .tracker-card.is-highlighted { box-shadow:0 0 0 1px rgba(59,130,246,.45), 0 10px 28px rgba(59,130,246,.12); }
 
     @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 
@@ -324,6 +325,157 @@
       font-family:var(--font);
     }
     .btn-modal-submit:hover { background:#fff; }
+
+    .accounts-overview {
+      margin-bottom:18px;
+      background:var(--surface);
+      border:1.5px solid var(--border);
+      border-radius:var(--radius-lg);
+      overflow:hidden;
+    }
+    .accounts-toolbar {
+      display:flex;
+      align-items:center;
+      gap:12px;
+      flex-wrap:wrap;
+      padding:14px 16px;
+      border-bottom:1px solid var(--border);
+      background:linear-gradient(180deg,var(--surface2) 0%,var(--surface) 100%);
+    }
+    .accounts-search {
+      flex:1 1 240px;
+      min-width:0;
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 14px;
+      background:var(--surface);
+      border:1.5px solid var(--border);
+      border-radius:999px;
+    }
+    .accounts-search svg { width:18px; height:18px; color:var(--muted); flex-shrink:0; }
+    .accounts-search input {
+      flex:1;
+      min-width:0;
+      border:none;
+      background:transparent;
+      color:var(--text);
+      font-size:.95rem;
+      font-family:var(--font);
+      outline:none;
+    }
+    .accounts-search input::placeholder { color:var(--muted); }
+    .accounts-filters { display:flex; gap:8px; flex-wrap:wrap; }
+    .accounts-filter {
+      border:1.5px solid var(--border);
+      background:var(--surface);
+      color:var(--muted);
+      border-radius:999px;
+      padding:8px 14px;
+      font-size:.84rem;
+      font-weight:600;
+      cursor:pointer;
+      font-family:var(--font);
+    }
+    .accounts-filter.is-active {
+      background:var(--surface2);
+      color:var(--text);
+      border-color:#475569;
+    }
+    .accounts-actions {
+      display:flex;
+      gap:8px;
+      margin-left:auto;
+      flex-wrap:wrap;
+    }
+    .accounts-icon-btn {
+      width:38px;
+      height:38px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border:1.5px solid var(--border);
+      background:var(--surface);
+      color:var(--text);
+      border-radius:10px;
+      cursor:pointer;
+      padding:0;
+    }
+    .accounts-icon-btn:hover { border-color:#475569; background:var(--surface2); }
+    .accounts-icon-btn.is-active { border-color:var(--accent); color:var(--accent2); }
+    .accounts-icon-btn svg { width:18px; height:18px; }
+    .accounts-table-wrap {
+      overflow:auto;
+      -webkit-overflow-scrolling:touch;
+    }
+    .accounts-table {
+      width:100%;
+      min-width:980px;
+      border-collapse:collapse;
+      font-size:.88rem;
+    }
+    .accounts-table thead th {
+      text-align:left;
+      padding:12px 14px;
+      color:var(--muted);
+      font-size:.76rem;
+      font-weight:700;
+      letter-spacing:.04em;
+      text-transform:uppercase;
+      border-bottom:1px solid var(--border);
+      background:rgba(255,255,255,.02);
+      white-space:nowrap;
+    }
+    .accounts-table tbody td {
+      padding:12px 14px;
+      border-bottom:1px solid rgba(42,48,64,.65);
+      vertical-align:middle;
+      white-space:nowrap;
+    }
+    .accounts-table tbody tr:hover { background:rgba(255,255,255,.02); }
+    .accounts-table tbody tr.is-highlighted { background:rgba(59,130,246,.08); }
+    .accounts-table__index { color:var(--muted); width:42px; }
+    .accounts-table__status { min-width:110px; }
+    .accounts-status {
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      color:var(--muted);
+      font-size:.8rem;
+    }
+    .accounts-table__username { font-weight:700; min-width:120px; }
+    .accounts-table__stat { font-weight:600; }
+    .accounts-table__stat.is-muted { color:var(--muted); font-weight:500; }
+    .accounts-table__stat.is-complete { color:#4ade80; font-weight:700; }
+    .accounts-table__sub { display:block; margin-top:2px; font-size:.72rem; color:var(--muted); }
+    .accounts-table__icon-btn {
+      width:34px;
+      height:34px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border:1.5px solid var(--border);
+      background:var(--surface2);
+      color:var(--text);
+      border-radius:10px;
+      cursor:pointer;
+      padding:0;
+    }
+    .accounts-table__icon-btn:hover { border-color:#475569; }
+    .accounts-table__icon-btn--danger {
+      border-color:rgba(239,68,68,.45);
+      color:#fca5a5;
+      background:rgba(127,29,29,.18);
+    }
+    .accounts-table__icon-btn--danger:hover { background:rgba(153,27,27,.28); color:#fff; }
+    .accounts-table__empty {
+      padding:28px 16px;
+      text-align:center;
+      color:var(--muted);
+      font-size:.9rem;
+    }
+    .accounts-overview.is-cards-only .accounts-table-wrap { display:none; }
+    #trackerList.is-table-primary .tracker-card { scroll-margin-top:84px; }
 
     .inventory-grid,
     .items-grid,
@@ -799,6 +951,53 @@
       </div>
     </div>
 
+    <section class="accounts-overview" id="accountsOverview" aria-label="Tracked accounts">
+      <div class="accounts-toolbar">
+        <label class="accounts-search" for="accountsSearchInput">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+          <input id="accountsSearchInput" type="search" placeholder="Search players..." autocomplete="off" spellcheck="false" aria-label="Search players">
+        </label>
+        <div class="accounts-filters" role="group" aria-label="Account status filters">
+          <button type="button" class="accounts-filter is-active" data-account-filter="all">All</button>
+          <button type="button" class="accounts-filter" data-account-filter="online">Online</button>
+          <button type="button" class="accounts-filter" data-account-filter="offline">Offline</button>
+        </div>
+        <div class="accounts-actions">
+          <button type="button" class="accounts-icon-btn is-active" id="viewTableBtn" title="Table view" aria-label="Table view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18M9 4v16"></path></svg>
+          </button>
+          <button type="button" class="accounts-icon-btn" id="viewCardsBtn" title="Card view" aria-label="Card view">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="7" rx="1"></rect><rect x="14" y="4" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+          </button>
+          <button type="button" class="accounts-icon-btn" id="refreshAccountsBtn" title="Refresh accounts" aria-label="Refresh accounts">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
+          </button>
+          <button type="button" class="accounts-icon-btn" id="copyTableBtn" title="Copy table summary" aria-label="Copy table summary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          </button>
+        </div>
+      </div>
+      <div class="accounts-table-wrap" id="accountsTableWrap">
+        <table class="accounts-table" aria-label="Account leaderboard">
+          <thead>
+            <tr>
+              <th scope="col">#</th>
+              <th scope="col">Status</th>
+              <th scope="col">Username</th>
+              <th scope="col">Coins</th>
+              <th scope="col">Total Caught</th>
+              <th scope="col">Rarest Fish</th>
+              <th scope="col">Ruin</th>
+              <th scope="col">Artifact</th>
+              <th scope="col">Backpack</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="accountsTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
     <div class="inventory-mode-tabs" role="tablist" aria-label="Inventory view">
       <button type="button" class="inventory-mode-tab is-active" data-inventory-mode="individual" aria-selected="true">Each Account</button>
       <button type="button" class="inventory-mode-tab" data-inventory-mode="bulk" aria-selected="false">All Accounts</button>
@@ -898,6 +1097,9 @@
   let inventoryMode    = 'individual';
   let bulkSearchQuery  = '';
   let individualSearchQuery = '';
+  let accountSearchQuery = '';
+  let accountStatusFilter = 'all';
+  let accountViewMode = 'table';
   const inputEl        = document.getElementById('usernameInput');
   const addBtn         = document.getElementById('addBtn');
   const multipleBtn    = document.getElementById('multipleBtn');
@@ -921,6 +1123,13 @@
   const statEvolvedStonesEl = document.getElementById('statEvolvedStones');
   const statSecretFishEl = document.getElementById('statSecretFish');
   const statForgottenFishEl = document.getElementById('statForgottenFish');
+  const accountsOverviewEl = document.getElementById('accountsOverview');
+  const accountsSearchInputEl = document.getElementById('accountsSearchInput');
+  const accountsTableBodyEl = document.getElementById('accountsTableBody');
+  const viewTableBtn = document.getElementById('viewTableBtn');
+  const viewCardsBtn = document.getElementById('viewCardsBtn');
+  const refreshAccountsBtn = document.getElementById('refreshAccountsBtn');
+  const copyTableBtn = document.getElementById('copyTableBtn');
   const copyBtn        = document.getElementById('copyBtn');
   const copyStatusEl   = document.getElementById('copyStatus');
   const loadstringCodeEl = document.getElementById('loadstringCode');
@@ -1033,6 +1242,237 @@
   }
   function isTrackerOnline(entry) {
     return syncFreshnessFromTimestamp(entry && entry.lastSyncAt) === 'live';
+  }
+  function formatSyncStatusAgo(timestamp) {
+    const secs = syncAgeSeconds(timestamp);
+    if (secs == null) return 'no sync';
+    if (secs < 10) return 'just now';
+    if (secs < 60) return `${secs}s ago`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+    if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+    return `${Math.floor(secs / 86400)}d ago`;
+  }
+  function formatCompactStatNumber(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    const abs = Math.abs(n);
+    if (abs >= 1e9) return `${(n / 1e9).toFixed(1).replace(/\.0$/, '')}B`;
+    if (abs >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
+    if (abs >= 1e3) return `${(n / 1e3).toFixed(1).replace(/\.0$/, '')}K`;
+    return String(Math.max(0, Math.floor(n)));
+  }
+  function formatGroupedCaughtNumber(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, Math.floor(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  }
+  function maskUsername(name) {
+    const s = String(name || '').trim();
+    if (s.length <= 4) return s;
+    return `${s.slice(0, 2)}***${s.slice(-2)}`;
+  }
+  function getEntryPlayerStats(entry) {
+    if (!entry) return null;
+    return (entry.lastData && entry.lastData.playerStats) || entry.playerStats || null;
+  }
+  function displayCoinsStat(stats) {
+    if (!stats) return '—';
+    if (stats.coinsText) return stats.coinsText;
+    const compact = formatCompactStatNumber(stats.coins);
+    return compact || '—';
+  }
+  function displayTotalCaughtStat(stats) {
+    if (!stats) return '—';
+    if (stats.totalCaughtText) return stats.totalCaughtText;
+    const grouped = formatGroupedCaughtNumber(stats.totalCaught);
+    return grouped || '—';
+  }
+  function displayRarestFishStat(stats) {
+    if (!stats || !stats.rarestFishChance) return '—';
+    return String(stats.rarestFishChance);
+  }
+  function displayProgressStat(stats, key) {
+    const block = stats && stats[key];
+    if (!block || block.max == null || block.current == null) return '—';
+    return `${block.current}/${block.max}`;
+  }
+  function isProgressCompleteStat(stats, key) {
+    const block = stats && stats[key];
+    return !!(block && block.max > 0 && block.current >= block.max);
+  }
+  function formatStatsAgeSub(stats) {
+    const ts = stats && (stats.statsAt || null);
+    if (!ts) return '';
+    const ago = formatSyncStatusAgo(ts);
+    return ago && ago !== 'no sync' ? `(${ago})` : '';
+  }
+  function accountMatchesStatusFilter(entry) {
+    if (accountStatusFilter === 'online') return isTrackerOnline(entry);
+    if (accountStatusFilter === 'offline') return !isTrackerOnline(entry);
+    return true;
+  }
+  function accountSearchHaystack(entry) {
+    const stats = getEntryPlayerStats(entry);
+    return [
+      entry && entry.displayName,
+      displayCoinsStat(stats),
+      displayTotalCaughtStat(stats),
+      displayRarestFishStat(stats),
+      displayProgressStat(stats, 'ruin'),
+      displayProgressStat(stats, 'artifact'),
+      formatSyncStatusAgo(entry && entry.lastSyncAt),
+    ].filter(Boolean).join(' ').toLowerCase();
+  }
+  function accountMatchesSearch(entry) {
+    const q = String(accountSearchQuery || '').trim().toLowerCase();
+    if (!q) return true;
+    return accountSearchHaystack(entry).includes(q);
+  }
+  function getFilteredAccountEntries() {
+    const rows = [];
+    trackers.forEach((entry, key) => {
+      if (!accountMatchesStatusFilter(entry)) return;
+      if (!accountMatchesSearch(entry)) return;
+      rows.push({ key, entry });
+    });
+    rows.sort((a, b) => (a.entry.displayName || a.key).localeCompare(b.entry.displayName || b.key));
+    return rows;
+  }
+  function buildAccountStatusHtml(entry) {
+    const freshness = syncFreshnessFromTimestamp(entry && entry.lastSyncAt);
+    const label = formatSyncStatusAgo(entry && entry.lastSyncAt);
+    return `<span class="accounts-status"><span class="status-dot ${freshness}" data-table-status-dot aria-hidden="true"></span><span data-table-sync-age>${escHtml(label)}</span></span>`;
+  }
+  function buildAccountRowHtml(row, index) {
+    const { key, entry } = row;
+    const stats = getEntryPlayerStats(entry);
+    const ruin = displayProgressStat(stats, 'ruin');
+    const artifact = displayProgressStat(stats, 'artifact');
+    const caughtSub = formatStatsAgeSub(stats);
+    const ruinClass = ruin === '—' ? 'is-muted' : (isProgressCompleteStat(stats, 'ruin') ? 'is-complete' : '');
+    const artifactClass = artifact === '—' ? 'is-muted' : (isProgressCompleteStat(stats, 'artifact') ? 'is-complete' : '');
+    return `<tr data-account-row-key="${escHtml(key)}">
+  <td class="accounts-table__index">${index + 1}</td>
+  <td class="accounts-table__status">${buildAccountStatusHtml(entry)}</td>
+  <td class="accounts-table__username" title="${escHtml(entry.displayName)}">${escHtml(maskUsername(entry.displayName))}</td>
+  <td class="accounts-table__stat${displayCoinsStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayCoinsStat(stats))}</td>
+  <td class="accounts-table__stat${displayTotalCaughtStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayTotalCaughtStat(stats))}${caughtSub ? `<span class="accounts-table__sub">${escHtml(caughtSub)}</span>` : ''}</td>
+  <td class="accounts-table__stat${displayRarestFishStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayRarestFishStat(stats))}</td>
+  <td class="accounts-table__stat ${ruinClass}">${escHtml(ruin)}</td>
+  <td class="accounts-table__stat ${artifactClass}">${escHtml(artifact)}</td>
+  <td><button type="button" class="accounts-table__icon-btn" data-open-backpack="${escHtml(key)}" aria-label="Open backpack for ${escHtml(entry.displayName)}" title="Open backpack"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><path d="M6 7h12l1 5H5z"></path><path d="M6 7V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path><path d="M9 11v6a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-6"></path></svg></button></td>
+  <td><button type="button" class="accounts-table__icon-btn accounts-table__icon-btn--danger" data-remove-account="${escHtml(key)}" aria-label="Remove ${escHtml(entry.displayName)}" title="Remove account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></button></td>
+</tr>`;
+  }
+  function renderAccountsTable() {
+    if (!accountsTableBodyEl) return;
+    const rows = getFilteredAccountEntries();
+    if (!rows.length) {
+      accountsTableBodyEl.innerHTML = '<tr><td colspan="10" class="accounts-table__empty">No matching accounts yet.</td></tr>';
+      return;
+    }
+    accountsTableBodyEl.innerHTML = rows.map((row, idx) => buildAccountRowHtml(row, idx)).join('');
+  }
+  function tickAccountsTableStatus() {
+    if (!accountsTableBodyEl) return;
+    accountsTableBodyEl.querySelectorAll('[data-account-row-key]').forEach((rowEl) => {
+      const key = rowEl.getAttribute('data-account-row-key');
+      const entry = key && trackers.get(key);
+      if (!entry) return;
+      const statusCell = rowEl.querySelector('.accounts-table__status');
+      if (statusCell) statusCell.innerHTML = buildAccountStatusHtml(entry);
+    });
+  }
+  function setAccountViewMode(mode) {
+    accountViewMode = mode === 'cards' ? 'cards' : 'table';
+    if (accountsOverviewEl) {
+      accountsOverviewEl.classList.toggle('is-cards-only', accountViewMode === 'cards');
+    }
+    if (trackerListEl) {
+      trackerListEl.classList.toggle('is-table-primary', accountViewMode === 'table');
+      trackerListEl.style.display = accountViewMode === 'cards' ? '' : '';
+    }
+    if (viewTableBtn) viewTableBtn.classList.toggle('is-active', accountViewMode === 'table');
+    if (viewCardsBtn) viewCardsBtn.classList.toggle('is-active', accountViewMode === 'cards');
+  }
+  function openAccountInventory(key) {
+    const entry = trackers.get(key);
+    if (!entry || !entry.el) return;
+    setInventoryMode('individual');
+    setAccountViewMode('cards');
+    entry.el.classList.add('expanded', 'is-highlighted');
+    entry.el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => entry.el.classList.remove('is-highlighted'), 1800);
+  }
+  function refreshAllAccounts() {
+    trackers.forEach((_, key) => pollUser(key));
+    renderAccountsTable();
+  }
+  function copyAccountsTableSummary() {
+    const rows = getFilteredAccountEntries();
+    const lines = [['#', 'Status', 'Username', 'Coins', 'Total Caught', 'Rarest Fish', 'Ruin', 'Artifact'].join('\t')];
+    rows.forEach((row, idx) => {
+      const stats = getEntryPlayerStats(row.entry);
+      lines.push([
+        idx + 1,
+        formatSyncStatusAgo(row.entry.lastSyncAt),
+        row.entry.displayName,
+        displayCoinsStat(stats),
+        displayTotalCaughtStat(stats),
+        displayRarestFishStat(stats),
+        displayProgressStat(stats, 'ruin'),
+        displayProgressStat(stats, 'artifact'),
+      ].join('\t'));
+    });
+    const text = lines.join('\n');
+    const attempt = (navigator.clipboard && navigator.clipboard.writeText)
+      ? navigator.clipboard.writeText(text)
+      : Promise.reject(new Error('clipboard_unavailable'));
+    attempt.catch(() => {
+      if (copyStatusEl) copyStatusEl.textContent = 'Copy table failed';
+    }).then(() => {
+      if (copyStatusEl) {
+        copyStatusEl.textContent = 'Table copied';
+        copyStatusEl.classList.add('is-success');
+        setTimeout(() => {
+          copyStatusEl.textContent = '';
+          copyStatusEl.classList.remove('is-success');
+        }, 1600);
+      }
+    });
+  }
+  function bindAccountsOverview() {
+    if (accountsSearchInputEl) {
+      accountsSearchInputEl.addEventListener('input', () => {
+        accountSearchQuery = accountsSearchInputEl.value;
+        renderAccountsTable();
+      });
+    }
+    document.querySelectorAll('[data-account-filter]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        accountStatusFilter = btn.getAttribute('data-account-filter') || 'all';
+        document.querySelectorAll('[data-account-filter]').forEach((el) => {
+          el.classList.toggle('is-active', el.getAttribute('data-account-filter') === accountStatusFilter);
+        });
+        renderAccountsTable();
+      });
+    });
+    if (viewTableBtn) viewTableBtn.addEventListener('click', () => setAccountViewMode('table'));
+    if (viewCardsBtn) viewCardsBtn.addEventListener('click', () => setAccountViewMode('cards'));
+    if (refreshAccountsBtn) refreshAccountsBtn.addEventListener('click', refreshAllAccounts);
+    if (copyTableBtn) copyTableBtn.addEventListener('click', copyAccountsTableSummary);
+    if (accountsTableBodyEl) {
+      accountsTableBodyEl.addEventListener('click', (e) => {
+        const backpackBtn = e.target.closest('[data-open-backpack]');
+        if (backpackBtn) {
+          openAccountInventory(backpackBtn.getAttribute('data-open-backpack'));
+          return;
+        }
+        const removeBtn = e.target.closest('[data-remove-account]');
+        if (removeBtn) removeTracker(removeBtn.getAttribute('data-remove-account'));
+      });
+    }
+    setAccountViewMode('table');
   }
   function computeInventoryStats() {
     let onlineCount = 0;
@@ -1169,6 +1609,7 @@
   }
   function tickAllCardSyncStatus() {
     trackers.forEach((entry) => refreshEntrySyncDisplay(entry));
+    tickAccountsTableStatus();
   }
   function setCardSyncDisplay(card, data) {
     const key = card && card.dataset.user;
@@ -1944,6 +2385,7 @@
     updateInventoryStats();
     updateRemoveMenu();
     updateIndividualView();
+    renderAccountsTable();
   }
 
   function cardTitle(item) {
@@ -2231,6 +2673,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       if (!res.ok) { setCardError(entry.el); return; }
       const data = await res.json();
       entry.lastData = data;
+      entry.playerStats = data.playerStats || entry.playerStats || null;
       const fishList = getPublicFishItems(data);
       const stoneList = getPublicStoneItems(data);
       const hasInventory = fishList.length > 0 || stoneList.length > 0;
@@ -2364,7 +2807,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     const card  = createCard(raw);
     trackerListEl.appendChild(card);
     const timer = setInterval(() => pollUser(key), POLL_MS);
-    trackers.set(key, { timer, el: card, displayName: raw, lastData: null, lastSyncAt: null });
+    trackers.set(key, { timer, el: card, displayName: raw, lastData: null, lastSyncAt: null, playerStats: null });
     pollUser(key);
     updateSummary();
     saveCurrent();
@@ -2583,6 +3026,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     safeBind('multiple add', bindMultipleAdd);
     safeBind('remove menu', bindRemoveMenu);
     safeBind('tabs', bindInventoryTabs);
+    safeBind('accounts overview', bindAccountsOverview);
     safeBind('restore sessions', () => {
       loadSaved().forEach((u) => addTracker(u));
       updateSummary();

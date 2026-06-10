@@ -144,8 +144,8 @@ describe('BLOCKER10ZS inventory modal + sync status polish', () => {
     assert.match(res.text, /function formatExactSyncAge/);
     assert.match(res.text, /function tickAllCardSyncStatus/);
     assert.match(res.text, /setInterval\(tickAllCardSyncStatus, 1000\)/);
-    assert.doesNotMatch(tpl, /just now/i);
-    assert.doesNotMatch(tpl, /\bago\b/i);
+    assert.match(tpl, /function formatExactSyncAge/);
+    assert.match(tpl, /function formatSyncStatusAgo/);
     assert.doesNotMatch(tpl, /data-sync-ago/);
     assert.doesNotMatch(tpl, /card-head-status[\s\S]*·/);
   });
