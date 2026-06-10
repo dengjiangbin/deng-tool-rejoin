@@ -5,7 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
-const ejs = require('ejs');
+const ejs = require(path.join(__dirname, '..', 'site', 'node_modules', 'ejs'));
 
 const {
   BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_MARKER,
