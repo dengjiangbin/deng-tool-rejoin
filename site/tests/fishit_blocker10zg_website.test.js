@@ -13,7 +13,7 @@ const { PUBLIC_API_BUILD, buildTrackerPageLocals } = require('../src/fishitTrack
 const trackerRouter = require('../src/fishitTrackerRoutes');
 
 const FINAL_BUILD = 'BLOCKER10ZK_INVENTORY_MOBILE_BULK_APK_2026_06_09';
-const PUBLIC_LOADER = 'loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua"))()';
+const PUBLIC_LOADER = CLEAN_TRACKER_LOADSTRING;
 const TRACKER_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
 const MOJIBAKE = '\uFFFD';
 
@@ -74,7 +74,9 @@ describe('BLOCKER10ZG clean icons + loader script', () => {
 
   test('copy button uses clean script constant not debug loader', async () => {
     const tpl = fs.readFileSync(TRACKER_PATH, 'utf8');
-    assert.match(tpl, /navigator\.clipboard\.writeText\(CLEAN_LOADSTRING\)/);
+    assert.match(tpl, /copyTrackerScript/);
+    assert.match(tpl, /fallbackCopyText/);
+    assert.match(tpl, /CLEAN_LOADSTRING/);
     assert.doesNotMatch(tpl, /writeText\(document\.getElementById\('loadstringCode'\)\.textContent\)/);
     assert.match(tpl, /Copied!/);
     assert.doesNotMatch(tpl, /\? Copied!/);

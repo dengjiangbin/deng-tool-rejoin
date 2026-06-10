@@ -150,7 +150,7 @@ describe('BLOCKER10ZJ inventory search, menu, stats images, APK inventory', () =
     assert.doesNotMatch(appRoot, /"Snapshot"/);
     assert.match(inventoryScreen, /"Inventory"/);
     assert.match(inventoryScreen, /Open in website/);
-    assert.match(inventoryScreen, /\/tracker\?apk=1"/);
+    assert.match(inventoryScreen, /\/inventory\?apk=1"/);
     assert.doesNotMatch(inventoryScreen, /Waiting for snapshot/i);
   });
 });

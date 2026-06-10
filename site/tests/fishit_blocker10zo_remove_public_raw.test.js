@@ -63,7 +63,7 @@ describe('BLOCKER10ZO remove public raw tracker.lua', () => {
   });
 
   test('public loader points to dist/tracker.lua only', () => {
-    assert.equal(PROTECTED_DIST_RAW_URL, 'https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua');
+    assert.match(PROTECTED_DIST_RAW_URL, /\/main\/dist\/tracker\.lua$/);
     assert.equal(PROTECTED_DIST_REL_PATH, 'dist/tracker.lua');
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\/main\/tracker\.lua"\)\)\(\)/);
     assert.equal(buildTrackerPageLocals().trackerLoadstring, CLEAN_TRACKER_LOADSTRING);

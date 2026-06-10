@@ -35,7 +35,8 @@ describe('BLOCKER10ZF Inventory rename + rarity sorting', () => {
     const layout = fs.readFileSync(LAYOUT_PATH, 'utf8');
     const labels = [...layout.matchAll(/<span>(Dashboard|My License|Inventory|Stats|Download)<\/span>/g)].map((m) => m[1]);
     assert.deepEqual(labels, ['Dashboard', 'My License', 'Inventory', 'Stats', 'Download']);
-    assert.match(layout, /href="\/tracker"/);
+    assert.match(layout, /href="\/inventory"/);
+    assert.doesNotMatch(layout, /Inventory[\s\S]{0,120}href="\/tracker"/);
     assert.match(layout, /data-nav-icon="backpack"/);
     assert.doesNotMatch(layout, /<span>Live Tracker<\/span>/);
     assert.doesNotMatch(layout, /<span>Fish It<\/span>/);
@@ -50,9 +51,25 @@ describe('BLOCKER10ZF Inventory rename + rarity sorting', () => {
     assert.doesNotMatch(res.text, /\+ Add Tracker/);
   });
 
-  test('/inventory alias serves the same Inventory page', async () => {
+  test('/inventory is the canonical Inventory page', async () => {
     const res = await request(makeTrackerApp()).get('/inventory').expect(200);
     assert.match(res.text, /<h1[^>]*>[^<]*Inventory[^<]*<\/h1>/i);
+    assert.match(res.text, /id="usernameInput"/);
+    assert.doesNotMatch(res.text, /id="usernameInput" disabled/);
+    assert.match(res.text, /id="copyBtn"/);
+    assert.match(res.text, /id="copyScriptTextarea"/);
+    assert.match(res.text, /BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_2026_06_10/);
+  });
+
+  test('/tracker legacy route remains compatible', async () => {
+    const res = await request(makeTrackerApp()).get('/tracker').expect(200);
+    assert.match(res.text, /<h1[^>]*>[^<]*Inventory[^<]*<\/h1>/i);
+  });
+
+  test('/inventory?username=denghub2 bootstraps initial username', async () => {
+    const res = await request(makeTrackerApp()).get('/inventory?username=denghub2').expect(200);
+    assert.match(res.text, /"denghub2"/);
+    assert.match(res.text, /initFromQueryUsername/);
   });
 
   test('sortInventoryFish orders rarities rarest to common', () => {

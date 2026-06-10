@@ -106,7 +106,7 @@ class ScreenLayoutContractTest {
         val src = ui("InventoryScreen.kt")
         assertTrue(
             "InventoryScreen must load the optimized apk inventory page",
-            src.contains("/tracker?apk=1"),
+            src.contains("/inventory?apk=1"),
         )
         assertTrue(
             "InventoryScreen must show skeleton while loading",

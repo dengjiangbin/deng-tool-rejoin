@@ -291,7 +291,7 @@ if (process.env.NODE_ENV !== 'test') {
 
 router.use((req, res, next) => {
   const p = req.path || '';
-  if (p === '/tracker' || p === '/fishit-tracker'
+  if (p === '/tracker' || p === '/inventory' || p === '/fishit-tracker'
       || p.startsWith('/api/fishit-tracker/')
       || p.startsWith('/api/tracker/')) {
     res.set(NO_STORE_HEADERS);
@@ -2487,6 +2487,15 @@ function mapDebugItemWithResolution(raw, enriched) {
 }
 
 // ── GET /tracker – serve the dashboard page ───────────────────────
+function resolveInitialUsername(req) {
+  if (!req || !req.query) return '';
+  for (const key of ['username', 'u', 'user']) {
+    const val = req.query[key];
+    if (typeof val === 'string' && val.trim()) return val.trim();
+  }
+  return '';
+}
+
 function buildTrackerPageLocals(req) {
   const build = PUBLIC_API_BUILD;
   const debugInventory = !!(req && req.query && (req.query.debug === '1' || req.query.debug === 'true' || req.query.debug === 'global'));
@@ -2498,6 +2507,8 @@ function buildTrackerPageLocals(req) {
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
     trackerUiDeployMarker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
+    canonicalInventoryPath: '/inventory',
+    initialUsername: resolveInitialUsername(req),
     trackerRarityCardCss: trackerRarityStyle.buildFtCardRarityCss(),
     trackerRarityJsBootstrap: trackerRarityStyle.buildTrackerRarityJsBootstrap(),
     trackerStoneJsBootstrap: fishitStoneDisplayMap.buildTrackerStoneJsBootstrap(),

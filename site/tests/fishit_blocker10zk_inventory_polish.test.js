@@ -22,11 +22,11 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
   test('public tracker template hides debug noise by default', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     assert.match(tpl, /const DEBUG_INVENTORY = <%= \(typeof debugInventory/);
-    assert.match(tpl, /Waiting for inventory sync/);
+    assert.match(tpl, /No inventory data yet for this username/);
     assert.doesNotMatch(tpl, /Awaiting first data/);
     assert.match(tpl, /data-ui-marker="<%= \(typeof debugInventory/);
-    assert.match(tpl, /BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10/);
-    assert.match(tpl, /<!-- BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10 -->/);
+    assert.match(tpl, /BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_2026_06_10/);
+    assert.match(tpl, /<!-- BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_2026_06_10 -->/);
   });
 
   test('debug-only proof blocks stay gated behind DEBUG_INVENTORY', () => {
@@ -87,7 +87,7 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
   test('APK inventory screen uses apk=1 route, skeleton, and no Snapshot', () => {
     const kt = fs.readFileSync(INVENTORY_KT, 'utf8');
     const appRoot = fs.readFileSync(path.join(__dirname, '..', '..', 'android', 'app', 'src', 'main', 'kotlin', 'my', 'id', 'deng', 'monitor', 'ui', 'AppRoot.kt'), 'utf8');
-    assert.match(kt, /\/tracker\?apk=1/);
+    assert.match(kt, /\/inventory\?apk=1/);
     assert.match(kt, /InventoryLoadingSkeleton/);
     assert.match(kt, /Open in website/);
     assert.doesNotMatch(kt, /Snapshot/i);

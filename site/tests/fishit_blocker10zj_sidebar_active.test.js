@@ -11,7 +11,7 @@ const CSS_PATH = path.join(__dirname, '..', 'public', 'css', 'style.css');
 const MENU = [
   { label: 'Dashboard', href: '/dashboard', activePage: 'dashboard' },
   { label: 'My License', href: '/license', activePage: 'license' },
-  { label: 'Inventory', href: '/tracker', activePage: 'tracker' },
+  { label: 'Inventory', href: '/inventory', activePage: 'inventory' },
   { label: 'Stats', href: '/fishit', activePage: 'fishit' },
   { label: 'Download', href: '/download', activePage: 'download' },
 ];

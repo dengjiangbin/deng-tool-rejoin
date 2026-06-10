@@ -49,10 +49,10 @@ private fun InventoryLoadingSkeleton(modifier: Modifier = Modifier) {
 @Composable
 fun InventoryScreen(api: MonitorApi) {
     val inventoryUrl = remember(api.baseUrl) {
-        api.baseUrl.trimEnd('/') + "/tracker?apk=1"
+        api.baseUrl.trimEnd('/') + "/inventory?apk=1"
     }
     val websiteUrl = remember(api.baseUrl) {
-        api.baseUrl.trimEnd('/') + "/tracker"
+        api.baseUrl.trimEnd('/') + "/inventory"
     }
 
     val context = LocalContext.current
