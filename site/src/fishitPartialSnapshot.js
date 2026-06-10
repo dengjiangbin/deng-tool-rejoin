@@ -142,7 +142,12 @@ function itemsForSessionDisplay(data) {
   if (Array.isArray(data.inventory?.all) && data.inventory.all.length) {
     return data.inventory.all;
   }
-  return (data.rawItems && data.rawItems.length) ? data.rawItems : (data.items || []);
+  const live = (data.rawItems && data.rawItems.length) ? data.rawItems : (data.items || []);
+  if (live.length) return live;
+  if (Array.isArray(data.lastGoodFishItems) && data.lastGoodFishItems.length) {
+    return data.lastGoodFishItems;
+  }
+  return [];
 }
 
 function sanitiseFishPathDiscovery(raw) {

@@ -22,7 +22,7 @@ const {
   buildProofTrackerLoader,
 } = require('../src/fishitTrackerLoadstring');
 const {
-  BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_MARKER,
+  BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER,
   BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
   BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER,
   BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_MARKER,
@@ -45,10 +45,10 @@ function makeApp() {
 describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
   test('build marker is BLOCKER10ZT3A hotfix deploy marker', () => {
     assert.equal(
-      BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_MARKER,
-      'BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_2026_06_10',
+      BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER,
+      'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10',
     );
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_MARKER);
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER);
     assert.equal(
       BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
       'BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10',
@@ -80,7 +80,7 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
 
   test('/inventory renders enabled username input and copy fallback UI', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
-    assert.match(res.text, /BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
+    assert.match(res.text, /BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10/);
     assert.match(res.text, /data-inventory-js="pending"/);
     assert.match(res.text, /id="usernameInput"/);
     assert.doesNotMatch(res.text, /id="usernameInput" disabled/);
@@ -112,7 +112,7 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
     assert.equal(locals.canonicalInventoryPath, '/inventory');
     assert.equal(locals.initialUsername, 'TestUser1');
     assert.equal(locals.trackerLoadstring, CLEAN_TRACKER_LOADSTRING);
-    assert.equal(locals.trackerUiDeployMarker, BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_MARKER);
+    assert.equal(locals.trackerUiDeployMarker, BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER);
   });
 
   test('tracker template documents username validation feedback', () => {

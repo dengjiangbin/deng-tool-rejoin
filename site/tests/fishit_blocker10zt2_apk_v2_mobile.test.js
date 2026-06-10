@@ -8,7 +8,7 @@ const express = require('express');
 const request = require('supertest');
 
 const trackerRouter = require('../src/fishitTrackerRoutes');
-const { BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_MARKER } = require('../src/fishitTrackerBuild');
+const { BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER } = require('../src/fishitTrackerBuild');
 
 const ROOT = path.join(__dirname, '..', '..');
 const TPL_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
@@ -31,9 +31,9 @@ describe('BLOCKER10ZT2 APK v2 mobile inventory UX', () => {
   });
 
   test('UI deploy marker includes BLOCKER10ZT3A hotfix loader/mobile cards', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_MARKER);
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_MARKER);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10/);
   });
 
   test('APK inventory screen removes Continue in Browser / Open in website CTA', () => {

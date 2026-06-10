@@ -50,8 +50,10 @@ function fetch(fetchUrl) {
   const errors = [];
   if (src.includes('<!DOCTYPE') || src.includes('<html')) errors.push('raw content looks like HTML error page');
   if (Buffer.byteLength(src, 'utf8') < 4096) errors.push('dist/tracker.lua too small on GitHub raw');
-  if (!src.includes('BLOCKER10ZT3')) errors.push('GitHub dist missing BLOCKER10ZT3 build marker');
-  if (/BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10/.test(src) && !src.includes('BLOCKER10ZT3')) {
+  if (!src.includes('BLOCKER10ZT4') && !src.includes('BLOCKER10ZT3')) {
+    errors.push('GitHub dist missing BLOCKER10ZT4/ZT3 build marker');
+  }
+  if (/BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10/.test(src) && !src.includes('BLOCKER10ZT4') && !src.includes('BLOCKER10ZT3')) {
     errors.push('GitHub dist still looks like stale BLOCKER10ZW build');
   }
   if (/^\s*--\s*=+\s*\n\s*--\s+Fish It Unified Tracker/m.test(src)) {

@@ -40,9 +40,9 @@ describe('BLOCKER10ZT3 loader/dist mismatch fix', () => {
   test('canonical loader targets deng-fishtracker-dist with cache-bust ZT3', () => {
     assert.equal(PUBLIC_TRACKER_GITHUB_REPO, CLEAN_PUBLIC_TRACKER_GITHUB_REPO);
     assert.match(PROTECTED_DIST_RAW_URL, /deng-fishtracker-dist\/main\/dist\/tracker\.lua$/);
-    assert.equal(LOADER_BUILD, 'BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10');
+    assert.equal(LOADER_BUILD, 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10');
     assert.equal(EXPECTED_CLIENT_TRACKER_BUILD, LOADER_BUILD);
-    assert.match(PROTECTED_DIST_RAW_URL_CACHE_BUST, /\?v=BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
+    assert.match(PROTECTED_DIST_RAW_URL_CACHE_BUST, /\?v=BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10/);
     assert.match(CLEAN_TRACKER_LOADSTRING, /LOADER_BUILD=/);
     assert.match(CLEAN_TRACKER_LOADSTRING, /FETCH_URL=/);
     assert.match(CLEAN_TRACKER_LOADSTRING, /FETCHED_TRACKER_BUILD=/);
@@ -56,16 +56,16 @@ describe('BLOCKER10ZT3 loader/dist mismatch fix', () => {
     const loader = fs.readFileSync(LOADER_LUA, 'utf8');
     assert.match(loader, /deng-fishtracker-dist\/main\/dist\/tracker\.lua/);
     assert.doesNotMatch(loader, /deng-tool-rejoin\/main\/dist\/tracker\.lua/);
-    assert.match(loader, /LOADER_BUILD = "BLOCKER10ZT3/);
+    assert.match(loader, /LOADER_BUILD = "BLOCKER10ZT4/);
     assert.match(loader, /print\("LOADER_BUILD="/);
     assert.match(loader, /FETCH_URL=/);
     assert.match(loader, /FETCHED_TRACKER_BUILD=/);
-    assert.match(loader, /BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
+    assert.match(loader, /BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10/);
   });
 
   test('local dist/tracker.lua contains BLOCKER10ZT3 not stale ZW-only header', () => {
     const dist = fs.readFileSync(DIST_PATH, 'utf8');
-    assert.match(dist, /BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
+    assert.match(dist, /BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10/);
     assert.doesNotMatch(dist, /^--\[\[ DENG protected tracker dist \| BLOCKER10ZW/m);
   });
 
@@ -74,7 +74,7 @@ describe('BLOCKER10ZT3 loader/dist mismatch fix', () => {
     assert.match(res.text, /LOADER_BUILD=/);
     assert.match(res.text, /FETCH_URL=/);
     assert.match(res.text, /FETCHED_TRACKER_BUILD=/);
-    assert.match(res.text, /deng-fishtracker-dist\/main\/dist\/tracker\.lua\?v=BLOCKER10ZT3/);
+    assert.match(res.text, /deng-fishtracker-dist\/main\/dist\/tracker\.lua\?v=BLOCKER10ZT4/);
     assert.doesNotMatch(res.text, /deng-tool-rejoin\/main\/dist\/tracker\.lua/);
   });
 
@@ -95,7 +95,7 @@ describe('BLOCKER10ZT3 loader/dist mismatch fix', () => {
 
     const debug = await request(app).get(`/api/fishit-tracker/debug/${username}`).expect(200);
     assert.equal(debug.body.latestClientBuild, 'BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10');
-    assert.equal(debug.body.expectedClientBuild, 'BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10');
+    assert.equal(debug.body.expectedClientBuild, 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10');
     assert.equal(debug.body.buildMismatch, true);
     assert.equal(debug.body.mismatchReason, 'client_loader_still_executing_old_build');
   });
@@ -110,13 +110,13 @@ describe('BLOCKER10ZT3 loader/dist mismatch fix', () => {
         username,
         userId: 5511,
         isOnline: true,
-        trackerBuild: 'BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10',
+        trackerBuild: 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10',
         phase: 'live',
       })
       .expect(200);
 
     const debug = await request(app).get(`/api/fishit-tracker/debug/${username}`).expect(200);
-    assert.equal(debug.body.latestClientBuild, 'BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10');
+    assert.equal(debug.body.latestClientBuild, 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10');
     assert.equal(debug.body.buildMismatch, false);
     assert.equal(debug.body.mismatchReason, null);
   });

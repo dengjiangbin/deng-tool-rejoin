@@ -98,23 +98,80 @@ function resolvePlayerStatsForApi(raw) {
   return playerStatsStore.displayablePlayerStats(raw);
 }
 
+function isTrustedClientBuild(build) {
+  if (!build) return false;
+  const s = String(build);
+  return s.includes('BLOCKER10ZT4') || s.includes('BLOCKER10ZT3');
+}
+
 function buildPlayerStatsProof(raw, data, nowFallback) {
+  const connected = isSessionLive(data);
+  const acceptedUploadFresh = connected && !!(data && data.lastUploadAcceptedAt);
   const displayable = resolvePlayerStatsForApi(raw);
+  const trusted = playerStatsStore.isTrustedPlayerStats(raw);
+  const hasDebug = !!(data && data.playerStatsDebug && data.playerStatsDebug.enabled);
+  const build = (displayable && displayable.build) || data?.trackerBuild || null;
+
+  if (!connected) {
+    return {
+      proven: false,
+      connected: false,
+      acceptedUploadFresh: false,
+      reason: 'tracker_disconnected',
+      trackerBuild: build,
+      lastUploadAt: data?.playerStatsUpdatedAt || data?.lastInventoryAt || data?.updatedAt
+        || data?.lastSeenAt || nowFallback || null,
+    };
+  }
+
+  if (!trusted || !playerStatsStore.hasPlayerStatValues(displayable) || displayable?.source === 'missing') {
+    let reason = 'missing_real_stats_source';
+    if (build && !isTrustedClientBuild(build)) reason = 'old_client_build';
+    return {
+      proven: false,
+      connected: true,
+      acceptedUploadFresh,
+      reason,
+      trackerBuild: build,
+      playerStatsDebug: hasDebug ? data.playerStatsDebug : null,
+      lastUploadAt: data?.playerStatsUpdatedAt || data?.lastInventoryAt || data?.updatedAt
+        || data?.lastSeenAt || nowFallback || null,
+    };
+  }
+
+  const provenSource = displayable.source === 'replion'
+    ? 'real_replion'
+    : (displayable.source === 'leaderstats' ? 'real_leaderstats' : null);
+  if (!provenSource) {
+    return {
+      proven: false,
+      connected: true,
+      acceptedUploadFresh,
+      reason: 'missing_real_stats_source',
+      trackerBuild: build,
+      lastUploadAt: data?.playerStatsUpdatedAt || data?.lastInventoryAt || data?.updatedAt
+        || data?.lastSeenAt || nowFallback || null,
+    };
+  }
+
   return {
-    hasPlayerStats: playerStatsStore.hasPlayerStatValues(displayable),
-    source: displayable && displayable.source || null,
-    coinsText: displayable && displayable.coinsText || null,
-    coins: displayable && displayable.coins != null ? displayable.coins : null,
-    totalCaughtText: displayable && displayable.totalCaughtText || null,
-    totalCaught: displayable && displayable.totalCaught != null ? displayable.totalCaught : null,
-    rarestFishChance: displayable && displayable.rarestFishChance || null,
-    statsAt: displayable && displayable.statsAt || null,
-    observedAt: displayable && displayable.observedAt || null,
-    build: displayable && displayable.build || data.trackerBuild || null,
-    lastUploadAt: data.playerStatsUpdatedAt || data.lastInventoryAt || data.updatedAt || data.lastSeenAt || nowFallback || null,
-    playerStatsDebug: playerStatsStore.isTrustedPlayerStats(raw) ? (data.playerStatsDebug || null) : null,
-    staleRejected: !!(raw && !playerStatsStore.isTrustedPlayerStats(raw)),
-    proofSource: 'session.playerStats',
+    proven: true,
+    connected: true,
+    acceptedUploadFresh,
+    source: provenSource,
+    coins: displayable.coins != null ? displayable.coins : null,
+    level: null,
+    rod: null,
+    coinsText: displayable.coinsText || null,
+    totalCaughtText: displayable.totalCaughtText || null,
+    totalCaught: displayable.totalCaught != null ? displayable.totalCaught : null,
+    rarestFishChance: displayable.rarestFishChance || null,
+    statsAt: displayable.statsAt || null,
+    observedAt: displayable.observedAt || null,
+    trackerBuild: build,
+    lastUploadAt: data?.playerStatsUpdatedAt || data?.lastInventoryAt || data?.updatedAt
+      || data?.lastSeenAt || nowFallback || null,
+    playerStatsDebug: hasDebug ? data.playerStatsDebug : null,
   };
 }
 
@@ -2873,11 +2930,14 @@ function handleUpdateBackpack(req, res) {
       return res.status(200).json({
         ok: true,
         status: 'success',
+        accepted: true,
         note: 'status_only',
         phase: liveTrackDB[key].phase,
         lastSeenAt: now,
         lastInventoryAt: liveTrackDB[key].lastInventoryAt || null,
         online: isSessionLive(liveTrackDB[key]),
+        serverTime: now,
+        heartbeatAccepted: true,
       });
     }
 
@@ -3210,10 +3270,13 @@ function handleUpdateBackpack(req, res) {
     return res.status(200).json({
       ok: true,
       status: 'success',
-      accepted: acceptedCount,
+      accepted: true,
+      acceptedCount,
       lastInventoryAt: now,
       lastSeenAt: now,
       online: true,
+      serverTime: now,
+      heartbeatAccepted: true,
       nameCatalogDiscovery: nameCatalogDiscovery || undefined,
       liveCatchEvidence: catchDelta.buildLiveCatchEvidenceResponse(nameCatalogDiscovery) || undefined,
     });
@@ -3260,7 +3323,7 @@ function buildSyncProof(data, maxAgeMs = 45000) {
 function buildClientBuildProof(data) {
   const latestClientBuild = data?.trackerBuild || data?.lastUploadTrackerBuild || null;
   const expectedClientBuild = EXPECTED_CLIENT_TRACKER_BUILD;
-  const buildMismatch = !!(latestClientBuild && !String(latestClientBuild).includes('BLOCKER10ZT3'));
+  const buildMismatch = !!(latestClientBuild && !isTrustedClientBuild(latestClientBuild));
   return {
     latestClientBuild,
     expectedClientBuild,
@@ -3375,7 +3438,20 @@ async function handleGetBackpack(req, res) {
   const countsRaw = inventoryCountsFromGroups(rawInventory);
   const countsEnriched = inventoryCountsFromGroups(enrichedInventory);
   const baseUrl = `${req.protocol}://${req.get('host')}`;
-  const publicFish = await buildPublicFishFields(enrichedFlat, baseUrl, { sessionData: data, sessionKey: key });
+  let publicFish = await buildPublicFishFields(enrichedFlat, baseUrl, { sessionData: data, sessionKey: key });
+  const liveFishCount = Array.isArray(publicFish.fishItems) ? publicFish.fishItems.length : 0;
+  const dataStale = !isSessionLive(data);
+  if (liveFishCount === 0 && Array.isArray(data.lastGoodPublicFishItems) && data.lastGoodPublicFishItems.length) {
+    publicFish = {
+      ...publicFish,
+      fishItems: data.lastGoodPublicFishItems,
+      publicItems: data.lastGoodPublicFishItems,
+      publicFishItems: data.lastGoodPublicFishItems,
+      fishInventory: buildInventoryGroups(data.lastGoodPublicFishItems),
+      dataStale: true,
+      lastGoodFishPreserved: true,
+    };
+  }
   const imageResolutionProof = fishImageAssets.buildImageResolutionProof(publicFish.fishItems);
   const recoveredSpeciesImageResolutionProof = publicFish.recoveredSpeciesImageResolutionProof
     || snapshotRecovery.buildRecoveredSpeciesImageResolutionProof(publicFish.fishItems);
@@ -3436,9 +3512,16 @@ async function handleGetBackpack(req, res) {
     countsEnriched,
     countsInternal:  countsEnriched,
     lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
+    lastSeenAt:      data.lastSeenAt || null,
     isOnline:        isSessionLive(data),
-    playerStats:     resolvePlayerStatsForApi(data.playerStats),
+    connectionLive:  isSessionLive(data),
+    dataStale:       !!(publicFish.dataStale || dataStale),
+    lastGoodFishPreserved: !!(publicFish.lastGoodFishPreserved || data.lastGoodFishPreserved),
+    lastGoodPublicFishCount: data.lastGoodPublicFishCount || publicFish.fishItems.length || 0,
+    playerStats:     isSessionLive(data) ? resolvePlayerStatsForApi(data.playerStats) : null,
+    playerStatsProven: !!(isSessionLive(data) && buildPlayerStatsProof(data.playerStats, data).proven),
     playerStatsUpdatedAt: data.playerStatsUpdatedAt || null,
+    syncProof:       buildSyncProof(data),
   };
 
   return res.status(200).json(enriched);
@@ -3724,6 +3807,7 @@ module.exports.catalogMapForItems = catalogMapForItems;
 module.exports.debugItemSlice = debugItemSlice;
 module.exports.resolveServerCommit = resolveServerCommit;
 module.exports.isSessionLive = isSessionLive;
+module.exports.buildPlayerStatsProof = buildPlayerStatsProof;
 module.exports.buildPublicFishFields = buildPublicFishFields;
 module.exports.buildPublicLegacyCounts = buildPublicLegacyCounts;
 module.exports.PUBLIC_RENDER_BUILD = PUBLIC_RENDER_BUILD;

@@ -37,13 +37,14 @@ if (/^\s*loadstring\s*\(/.test(src)) {
 if (!src.includes('TRACKER_BOOT_BEGIN BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08')) {
   errors.push('TRACKER_BOOT_BEGIN BLOCKER10Z7 marker missing');
 }
-if (!src.includes('BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10')
+if (!src.includes('BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10')
+  && !src.includes('BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10')
   && !src.includes('BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10')
   && !src.includes('BLOCKER10ZW_PLAYERSTATS_REAL_ONLY_2026_06_10')
   && !src.includes('BLOCKER10ZV_PLAYERSTATS_REPLION_LEADERSTATS_2026_06_10')
   && !src.includes('BLOCKER10ZU_PLAYERSTATS_LEADERSTATS_2026_06_10')
   && !src.includes('BLOCKER10ZL_LURAPH_PROTECTED_RELEASE_2026_06_10')) {
-  errors.push('BLOCKER10ZT3/ZW/10ZV/10ZU/10ZL tracker build marker missing');
+  errors.push('BLOCKER10ZT4/ZT3/ZW/10ZV/10ZU/10ZL tracker build marker missing');
 }
 if (!src.includes('buildPlayerStatsPayload')) {
   errors.push('buildPlayerStatsPayload missing — Replion/leaderstats player stats required');

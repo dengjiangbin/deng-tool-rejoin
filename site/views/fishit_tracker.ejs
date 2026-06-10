@@ -1,15 +1,15 @@
 <!DOCTYPE html>
-<!-- BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_2026_06_10 -->
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_2026_06_10' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
+<!-- BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10 -->
+<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT3A_HOTFIX_LOADER_MOBILE_2026_06_10' %>">
+  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10' %>">
   <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/inventory' %>">
   <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
   <title>Inventory &mdash; Fish It</title>
   <style>
-    /* BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10 */
+    /* BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10 */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
@@ -1063,7 +1063,7 @@
     }
   </style>
 </head>
-<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10') %>">
+<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10') %>">
 <div class="page">
   <div class="inner">
 
@@ -1259,7 +1259,7 @@
   const DEBUG_INVENTORY = <%= (typeof debugInventory !== 'undefined' && debugInventory) ? 'true' : 'false' %>;
   const APK_EMBED = <%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'true' : 'false' %>;
   const DEBUG_GLOBAL  = DEBUG_INVENTORY && /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
-  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10" %>';
+  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10" %>';
   const INITIAL_USERNAME = <%- JSON.stringify(typeof initialUsername !== 'undefined' ? initialUsername : '') %>;
   const RENDER_BUILD  = DEBUG_INVENTORY
     ? (document.documentElement.getAttribute('data-render-build') || '')
@@ -1496,7 +1496,7 @@
     }
     return null;
   }
-  const TRUSTED_PLAYERSTATS_BUILD_MARKS = ['BLOCKER10ZT3', 'BLOCKER10ZW'];
+  const TRUSTED_PLAYERSTATS_BUILD_MARKS = ['BLOCKER10ZT4', 'BLOCKER10ZT3', 'BLOCKER10ZW'];
   function isTrustedPlayerStats(stats) {
     if (!stats || typeof stats !== 'object') return false;
     const build = stats.build || '';
@@ -1512,8 +1512,14 @@
     return hasValues ? stats : null;
   }
   function getEntryPlayerStats(entry) {
+    if (!entry || !isTrackerOnline(entry)) return null;
     const resolved = resolveEntryPlayerStatsSource(entry);
     return resolved ? displayableEntryPlayerStats(resolved.stats) : null;
+  }
+  function formatConnectionStatusLabel(entry) {
+    const freshness = tableSyncFreshness(entry && entry.lastSyncAt);
+    if (freshness === 'live') return 'Connected';
+    return 'Disconnected';
   }
   function mergeEntryPlayerStats(existing, incoming) {
     if (incoming === null) return null;
@@ -1624,10 +1630,10 @@
   }
   function buildAccountMobileCardHtml(row) {
     const { key, entry } = row;
-    const stats = getEntryPlayerStats(entry);
     const fishSummary = getEntryFishSummary(entry);
     const syncLabel = formatTableSyncAge(entry && entry.lastSyncAt);
     const freshness = tableSyncFreshness(entry && entry.lastSyncAt);
+    const statusLabel = formatConnectionStatusLabel(entry);
     const inventoryLabel = `Open inventory for ${entry.displayName}`;
     const username = displayTableUsername(entry);
     return `<article class="accounts-mobile-card" data-account-mobile-key="${escHtml(key)}">
@@ -1642,10 +1648,7 @@
     </div>
   </div>
   <div class="accounts-mobile-card__grid">
-    <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Status</span><span class="accounts-mobile-card__row-value"><span class="accounts-status"><span class="status-dot ${freshness}" aria-hidden="true"></span><span>${escHtml(syncLabel)}</span></span></span></div>
-    <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Coins</span><span class="accounts-mobile-card__row-value${displayCoinsStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayCoinsStat(stats))}</span></div>
-    <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Caught</span><span class="accounts-mobile-card__row-value${displayTotalCaughtStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayTotalCaughtStat(stats))}</span></div>
-    <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Rarest</span><span class="accounts-mobile-card__row-value${displayRarestFishStat(stats) === '—' ? ' is-muted' : ''}">${escHtml(displayRarestFishStat(stats))}</span></div>
+    <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Status</span><span class="accounts-mobile-card__row-value"><span class="accounts-status"><span class="status-dot ${freshness}" aria-hidden="true"></span><span>${escHtml(statusLabel)}</span></span></span></div>
     <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Fish</span><span class="accounts-mobile-card__row-value">${escHtml(String(fishSummary.fish))}</span></div>
     <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Types</span><span class="accounts-mobile-card__row-value">${escHtml(String(fishSummary.types))}</span></div>
     <div class="accounts-mobile-card__row"><span class="accounts-mobile-card__row-label">Last sync</span><span class="accounts-mobile-card__row-value">${escHtml(syncLabel)}</span></div>
@@ -2299,6 +2302,9 @@
     else if (data.fishInventory && Array.isArray(data.fishInventory.fish)) items = data.fishInventory.fish;
     else if (data.renderBuild === RENDER_BUILD && Array.isArray(data.items)) {
       items = data.items.filter((it) => String(it.category || '').toLowerCase() === 'fish');
+    }
+    if (!items.length && Array.isArray(data.lastGoodPublicFishItems) && data.lastGoodPublicFishItems.length) {
+      items = data.lastGoodPublicFishItems;
     }
     return sortInventoryFish(items);
   }
@@ -2978,7 +2984,15 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     card.classList.remove('state-live','state-waiting');
     card.classList.add('state-error');
     const l = card.querySelector('[data-status-line]');
-    if (l) l.textContent = 'Network error - retrying...';
+    if (l) l.textContent = DEBUG_INVENTORY ? 'Network error - retrying...' : '';
+  }
+  function setCardRefreshFailed(entry) {
+    if (!entry || !entry.el) return;
+    if (entry.lastData) {
+      setCardOffline(entry.el, entry.displayName, entry.lastData);
+      return;
+    }
+    setCardError(entry.el);
   }
 
   async function pollUser(key) {
@@ -2995,10 +3009,12 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
         }
         return;
       }
-      if (!res.ok) { setCardError(entry.el); return; }
+      if (!res.ok) { setCardRefreshFailed(entry); return; }
       const data = await res.json();
       entry.lastData = data;
-      entry.playerStats = mergeEntryPlayerStats(entry.playerStats, data.playerStats);
+      if (isEntrySyncLive(data)) {
+        entry.playerStats = mergeEntryPlayerStats(entry.playerStats, data.playerStats);
+      }
       debugLogEntryPlayerStats(entry);
       const fishList = getPublicFishItems(data);
       const stoneList = getPublicStoneItems(data);
@@ -3014,7 +3030,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       if (inventoryMode === 'bulk') renderBulkInventory();
       updateInventoryStats();
       renderAccountsTable();
-    } catch { if (trackers.has(key)) setCardError(entry.el); }
+    } catch { if (trackers.has(key)) setCardRefreshFailed(entry); }
   }
 
   function normalizeUsername(raw) {

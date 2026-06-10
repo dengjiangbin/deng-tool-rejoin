@@ -6,7 +6,7 @@
 --    https://raw.githubusercontent.com/dengjiangbin/deng-fishtracker-dist/main/dist/tracker.lua
 -- ================================================================
 
-local LOADER_BUILD = "BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10"
+local LOADER_BUILD = "BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10"
 local TRACKER_URL = "https://raw.githubusercontent.com/dengjiangbin/deng-fishtracker-dist/main/dist/tracker.lua"
 local url = TRACKER_URL .. "?v=" .. LOADER_BUILD
 
@@ -32,8 +32,9 @@ source = source:gsub("^\239\187\191", "")
 local fetchedBuild = source:match("DENG protected tracker dist | ([^\n%]]+)") or "unknown"
 print("FETCHED_TRACKER_BUILD=" .. tostring(fetchedBuild))
 
-if not tostring(fetchedBuild):find("BLOCKER10ZT3", 1, true) then
-    warn("[DENG LOADER] stale dist fetched — expected BLOCKER10ZT3, got:", fetchedBuild)
+if not tostring(fetchedBuild):find("BLOCKER10ZT4", 1, true)
+    and not tostring(fetchedBuild):find("BLOCKER10ZT3", 1, true) then
+    warn("[DENG LOADER] stale dist fetched — expected BLOCKER10ZT4, got:", fetchedBuild)
 end
 
 local fn, compileErr = loadstring(source)
