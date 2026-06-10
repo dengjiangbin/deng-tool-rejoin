@@ -14,7 +14,7 @@
         "TOOL_SITE_HOST": "127.0.0.1",
         "TOOL_SITE_PORT": "8791",
         "PUBLIC_TRACKER_GITHUB_REPO": "dengjiangbin/deng-fishtracker-dist",
-        "GIT_COMMIT": "9e5f65d"
+        "GIT_COMMIT": "1e5f7d1"
       }
     }
   ]
