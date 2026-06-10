@@ -19,6 +19,7 @@ const {
   PUBLIC_TRACKER_GITHUB_REPO,
 } = require('../src/fishitTrackerLoadstring');
 const {
+  BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER,
   BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
 } = require('../src/fishitTrackerBuild');
@@ -37,12 +38,16 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
-  test('build marker is BLOCKER10ZP security purge marker', () => {
+  test('build marker is BLOCKER10ZQ clean dist repo marker', () => {
+    assert.equal(
+      BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER,
+      'BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_2026_06_10',
+    );
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER);
     assert.equal(
       BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_MARKER,
       'BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_2026_06_10',
     );
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_MARKER);
   });
 
   test('canonical loadstring uses dist path from public repo constant', () => {
@@ -61,7 +66,7 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
 
   test('/inventory renders enabled username input and copy fallback UI', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
-    assert.match(res.text, /BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_2026_06_10/);
+    assert.match(res.text, /BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_2026_06_10/);
     assert.match(res.text, /id="usernameInput"/);
     assert.doesNotMatch(res.text, /id="usernameInput" disabled/);
     assert.match(res.text, /id="addBtn"/);
@@ -92,7 +97,7 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
     assert.equal(locals.canonicalInventoryPath, '/inventory');
     assert.equal(locals.initialUsername, 'TestUser1');
     assert.equal(locals.trackerLoadstring, CLEAN_TRACKER_LOADSTRING);
-    assert.equal(locals.trackerUiDeployMarker, BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_MARKER);
+    assert.equal(locals.trackerUiDeployMarker, BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER);
   });
 
   test('tracker template documents username validation feedback', () => {

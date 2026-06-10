@@ -4,8 +4,8 @@
 const CLEAN_PUBLIC_TRACKER_GITHUB_REPO = 'dengjiangbin/deng-fishtracker-dist';
 const LEGACY_TRACKER_GITHUB_REPO = 'dengjiangbin/deng-tool-rejoin';
 
-/** Active public repo — defaults to legacy until clean repo is live; override with PUBLIC_TRACKER_GITHUB_REPO. */
-const PUBLIC_TRACKER_GITHUB_REPO = process.env.PUBLIC_TRACKER_GITHUB_REPO || LEGACY_TRACKER_GITHUB_REPO;
+/** Active public repo — clean dist-only repo is canonical; override with PUBLIC_TRACKER_GITHUB_REPO. */
+const PUBLIC_TRACKER_GITHUB_REPO = process.env.PUBLIC_TRACKER_GITHUB_REPO || CLEAN_PUBLIC_TRACKER_GITHUB_REPO;
 
 const PROTECTED_DIST_RAW_URL = `https://raw.githubusercontent.com/${PUBLIC_TRACKER_GITHUB_REPO}/main/dist/tracker.lua`;
 const LEGACY_DIST_RAW_URL = `https://raw.githubusercontent.com/${LEGACY_TRACKER_GITHUB_REPO}/main/dist/tracker.lua`;

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * BLOCKER10ZP: verify clean public dist repo — root tracker.lua 404, dist/tracker.lua 200.
+ * BLOCKER10ZQ: verify legacy + clean public dist repos — root tracker.lua 404, dist/tracker.lua 200.
  */
 const https = require('https');
 const {
@@ -33,15 +33,12 @@ async function checkRepo(repo, label) {
 (async () => {
   const checks = await Promise.all([
     checkRepo(LEGACY_TRACKER_GITHUB_REPO, 'legacy'),
+    checkRepo(CLEAN_PUBLIC_TRACKER_GITHUB_REPO, 'clean'),
   ]);
-  try {
-    const clean = await checkRepo(CLEAN_PUBLIC_TRACKER_GITHUB_REPO, 'clean');
-    if (clean.distStatus === 200) checks.push(clean);
-    else console.log('SKIP clean repo check: dist not live yet (HTTP ' + clean.distStatus + ')');
-  } catch (e) {
-    console.log('SKIP clean repo check:', e.message);
-  }
   const errors = checks.flatMap((c) => c.errors);
+  if (PUBLIC_TRACKER_GITHUB_REPO !== CLEAN_PUBLIC_TRACKER_GITHUB_REPO) {
+    errors.push(`PUBLIC_TRACKER_GITHUB_REPO must be clean repo (${CLEAN_PUBLIC_TRACKER_GITHUB_REPO}), got ${PUBLIC_TRACKER_GITHUB_REPO}`);
+  }
   if (errors.length) {
     console.error('PUBLIC_DIST_REPO_VALIDATION FAILED');
     for (const err of errors) console.error('  -', err);
@@ -52,7 +49,7 @@ async function checkRepo(repo, label) {
   }
   console.log('PUBLIC_DIST_REPO_VALIDATION OK');
   for (const c of checks) {
-    const repoName = c.label === 'clean' ? CLEAN_PUBLIC_TRACKER_GITHUB_REPO : (c.label === 'legacy' ? LEGACY_TRACKER_GITHUB_REPO : PUBLIC_TRACKER_GITHUB_REPO);
+    const repoName = c.label === 'clean' ? CLEAN_PUBLIC_TRACKER_GITHUB_REPO : LEGACY_TRACKER_GITHUB_REPO;
     console.log(`  ${c.label} repo:`, repoName);
     console.log(`  ${c.label} root tracker.lua:`, c.rootStatus);
     console.log(`  ${c.label} dist/tracker.lua:`, c.distStatus);
