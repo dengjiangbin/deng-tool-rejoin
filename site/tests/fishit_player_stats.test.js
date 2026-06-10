@@ -41,10 +41,30 @@ describe('fishitPlayerStats', () => {
       coins: 201200,
       totalCaught: 450,
       rarestFishChance: '1/4.50K',
+      source: 'leaderstats',
     });
     const merged = playerStats.mergePlayerStats(existing, null);
     assert.equal(merged.coinsText, '201.2K');
     assert.equal(merged.totalCaught, 450);
+  });
+
+  test('mergePlayerStats keeps existing stats when incoming source is missing without values', () => {
+    const existing = playerStats.sanitisePlayerStats({
+      coins: 653200000,
+      coinsText: '653.2M',
+      totalCaught: 3077845,
+      totalCaughtText: '3,077,845',
+      rarestFishChance: '1/25M',
+      source: 'replion',
+    });
+    const merged = playerStats.mergePlayerStats(existing, {
+      source: 'missing',
+      observedAt: 1710000000,
+      build: 'BLOCKER10ZV_PLAYERSTATS_REPLION_LEADERSTATS_2026_06_10',
+    });
+    assert.equal(merged.coinsText, '653.2M');
+    assert.equal(merged.rarestFishChance, '1/25M');
+    assert.equal(merged.source, 'replion');
   });
 
   test('display helpers format compact values and progress', () => {

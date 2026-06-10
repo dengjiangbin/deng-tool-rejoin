@@ -63,14 +63,34 @@ function sanitisePlayerStats(raw) {
   if (artifact) out.artifact = artifact;
   const statsAt = clampText(raw.statsAt ?? raw.updatedAt, 40);
   if (statsAt) out.statsAt = statsAt;
+  const source = clampText(raw.source, 32);
+  if (source) out.source = source;
+  const observedAt = finiteNumber(raw.observedAt);
+  if (observedAt != null) out.observedAt = Math.max(0, Math.floor(observedAt));
+  const build = clampText(raw.build, 64);
+  if (build) out.build = build;
   return Object.keys(out).length ? out : null;
+}
+
+function hasPlayerStatValues(stats) {
+  if (!stats || typeof stats !== 'object') return false;
+  return stats.coins != null
+    || stats.totalCaught != null
+    || !!stats.coinsText
+    || !!stats.totalCaughtText
+    || !!stats.rarestFishChance;
 }
 
 function mergePlayerStats(existing, incoming) {
   const next = sanitisePlayerStats(incoming);
   if (!next) return existing || null;
+  if (!hasPlayerStatValues(next) && next.source === 'missing' && existing) return existing;
   if (!existing) return next;
-  return { ...existing, ...next };
+  const merged = { ...existing, ...next };
+  if (!hasPlayerStatValues(next) && existing.source && next.source === 'missing') {
+    merged.source = existing.source;
+  }
+  return merged;
 }
 
 function displayCoins(stats) {
@@ -106,6 +126,7 @@ function isProgressComplete(stats, key) {
 module.exports = {
   sanitisePlayerStats,
   mergePlayerStats,
+  hasPlayerStatValues,
   displayCoins,
   displayTotalCaught,
   displayRarestFish,

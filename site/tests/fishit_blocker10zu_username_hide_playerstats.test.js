@@ -156,6 +156,8 @@ describe('BLOCKER10ZU username hide + playerStats table display', () => {
     assert.equal(dbg.body.playerStats.coinsText, '201.2K');
     assert.equal(dbg.body.playerStatsProof.hasPlayerStats, true);
     assert.equal(dbg.body.playerStatsProof.rarestFishChance, '1/4.50K');
+    assert.equal(dbg.body.playerStatsProof.coins, 201200);
+    assert.equal(dbg.body.playerStatsProof.totalCaught, 450);
 
     const page = await request(app).get('/inventory').expect(200);
     assert.doesNotMatch(page.text, /playerStatsProof/);
