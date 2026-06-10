@@ -50,7 +50,8 @@ describe('BLOCKER10ZG clean icons + loader script', () => {
     const res = await request(makeTrackerApp()).get('/tracker').expect(200);
     assert.doesNotMatch(res.text, new RegExp(MOJIBAKE));
     assert.match(res.text, /Executor Script &mdash; copy &amp; run in-game/);
-    assert.match(res.text, /Track unlimited players simultaneously &mdash; sessions are saved and restored on page reload/);
+    assert.match(res.text, /Track unlimited players simultaneously\./);
+    assert.doesNotMatch(res.text, /sessions are saved and restored on page reload/i);
     assert.match(res.text, /loadstring-box__icon/);
     assert.match(res.text, /header__lead-icon/);
   });

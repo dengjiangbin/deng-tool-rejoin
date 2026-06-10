@@ -36,11 +36,13 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
     assert.match(tpl, /phaseMessage\(data\.phase\)/);
   });
 
-  test('Individual and Bulk tabs render', () => {
+  test('Each Account and All Accounts tabs render', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     assert.match(tpl, /data-inventory-mode="individual"/);
     assert.match(tpl, /data-inventory-mode="bulk"/);
-    assert.match(tpl, /Bulk \/ All/);
+    assert.match(tpl, />Each Account</);
+    assert.match(tpl, />All Accounts</);
+    assert.doesNotMatch(tpl, /Bulk \/ All/);
     assert.match(tpl, /function aggregateBulkInventory/);
     assert.match(tpl, /function renderBulkInventory/);
   });

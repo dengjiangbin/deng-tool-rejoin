@@ -82,9 +82,12 @@ describe('BLOCKER10ZJ inventory search, menu, stats images, APK inventory', () =
     const tpl = fs.readFileSync(TRACKER_PATH, 'utf8');
     assert.match(tpl, /placeholder="Search fish or stones\.\.\."/);
     assert.match(tpl, /inventory-search-row/);
+    assert.match(tpl, /data-individual-search-input/);
     assert.match(tpl, /No inventory items found/);
     assert.match(tpl, /function filterByInventorySearch/);
-    assert.match(tpl, /function ensureInventorySearchRow/);
+    assert.match(tpl, /function searchEachAccountInventory/);
+    assert.match(tpl, /function renderIndividualSearchResults/);
+    assert.doesNotMatch(tpl, /function ensureInventorySearchRow/);
   });
 
   test('inventory search filters fish, stones, rarity, and clears', () => {

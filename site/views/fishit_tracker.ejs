@@ -49,17 +49,158 @@
     .header h1 { font-size:clamp(1.5rem,4vw,2.2rem); font-weight:700; background:linear-gradient(135deg,#3b82f6,#60a5fa,#93c5fd); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; letter-spacing:-.5px; margin-bottom:6px; }
     .header p { color:var(--muted); font-size:.9rem; }
 
-    .add-row { display:flex; gap:10px; margin-bottom:20px; }
-    .add-row input { flex:1; padding:12px 16px; background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius); color:var(--text); font-size:.95rem; font-family:var(--font); outline:none; transition:border-color .15s; }
-    .add-row input:focus { border-color:var(--accent); }
-    .add-row input.is-invalid { border-color:var(--danger); }
-    .add-row input::placeholder { color:var(--muted); }
+    .inventory-stats {
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:12px;
+      margin-bottom:18px;
+    }
+    .stat-card {
+      background:linear-gradient(160deg,var(--surface2) 0%,var(--surface) 100%);
+      border:1.5px solid var(--border);
+      border-radius:var(--radius-lg);
+      padding:18px 16px;
+      min-height:96px;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      gap:6px;
+      box-shadow:0 8px 24px rgba(0,0,0,.18);
+    }
+    .stat-card__label {
+      font-size:.78rem;
+      font-weight:600;
+      letter-spacing:.02em;
+      color:var(--muted);
+      text-transform:uppercase;
+    }
+    .stat-card__value {
+      font-size:clamp(1.35rem,3vw,1.85rem);
+      font-weight:800;
+      color:var(--text);
+      line-height:1.1;
+      letter-spacing:-.02em;
+    }
+    .stat-card--online .stat-card__value { color:#4ade80; }
+    .stat-card--stones .stat-card__value { color:#fbbf24; }
+    .stat-card--secret .stat-card__value { color:#00ff7f; }
+    .stat-card--forgotten .stat-card__value { color:#e5e7eb; }
+
+    .player-control-bar {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-bottom:10px;
+      padding:12px;
+      border:1.5px solid var(--border);
+      border-radius:var(--radius-lg);
+      background:var(--surface);
+    }
+    .player-control-bar input {
+      flex:1 1 220px;
+      min-width:0;
+      padding:12px 16px;
+      background:var(--surface2);
+      border:1.5px solid var(--border);
+      border-radius:var(--radius);
+      color:var(--text);
+      font-size:.95rem;
+      font-family:var(--font);
+      outline:none;
+      transition:border-color .15s;
+    }
+    .player-control-bar input:focus { border-color:var(--accent); }
+    .player-control-bar input.is-invalid { border-color:var(--danger); }
+    .player-control-bar input::placeholder { color:var(--muted); }
     .username-error { flex:1 1 100%; font-size:.82rem; color:var(--danger); min-height:1.1em; }
 
-    .btn { padding:12px 22px; border-radius:var(--radius); border:none; cursor:pointer; font-size:.9rem; font-weight:600; font-family:var(--font); transition:opacity .15s,transform .1s; white-space:nowrap; }
+    .btn { padding:12px 18px; border-radius:var(--radius); border:none; cursor:pointer; font-size:.9rem; font-weight:650; font-family:var(--font); transition:opacity .15s,transform .1s,background .15s,border-color .15s; white-space:nowrap; }
     .btn:active { transform:scale(.97); }
-    .btn-primary { background:linear-gradient(135deg,#3b82f6,#2563eb); color:#fff; }
-    .btn-primary:hover { opacity:.9; }
+    .btn-add {
+      background:#f8fafc;
+      color:#0f172a;
+      border:1.5px solid #e2e8f0;
+    }
+    .btn-add:hover { background:#fff; }
+    .btn-multiple {
+      background:var(--surface2);
+      color:var(--text);
+      border:1.5px solid var(--border);
+    }
+    .btn-multiple:hover { border-color:#475569; }
+    .btn-remove-menu {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:4px;
+      min-width:46px;
+      padding:10px 12px;
+      background:linear-gradient(180deg,#7f1d1d 0%,#991b1b 100%);
+      border:1.5px solid #ef4444;
+      border-radius:var(--radius);
+      color:#fecaca;
+      box-shadow:0 0 0 1px rgba(239,68,68,.25),0 8px 20px rgba(127,29,29,.35);
+    }
+    .btn-remove-menu:hover { background:linear-gradient(180deg,#991b1b 0%,#b91c1c 100%); color:#fff; }
+    .btn-remove-menu svg { width:18px; height:18px; flex-shrink:0; }
+    .btn-remove-menu__caret { width:14px; height:14px; opacity:.9; }
+    .remove-dropdown { position:relative; flex-shrink:0; }
+    .remove-dropdown__menu {
+      position:absolute;
+      top:calc(100% + 8px);
+      right:0;
+      min-width:220px;
+      max-width:min(320px,90vw);
+      max-height:280px;
+      overflow:auto;
+      background:var(--surface2);
+      border:1.5px solid var(--border);
+      border-radius:var(--radius);
+      box-shadow:0 16px 40px rgba(0,0,0,.35);
+      z-index:30;
+      padding:6px;
+    }
+    .remove-dropdown__item {
+      width:100%;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:8px;
+      border:none;
+      background:transparent;
+      color:var(--text);
+      padding:10px 12px;
+      border-radius:8px;
+      font-family:var(--font);
+      font-size:.88rem;
+      cursor:pointer;
+      text-align:left;
+    }
+    .remove-dropdown__item:hover { background:rgba(239,68,68,.12); color:#fecaca; }
+    .remove-dropdown__empty {
+      padding:12px 14px;
+      color:var(--muted);
+      font-size:.84rem;
+      text-align:center;
+    }
+    .remove-dropdown__empty {
+      padding:12px;
+      color:var(--muted);
+      font-size:.82rem;
+      text-align:center;
+    }
+
+    .ft-chip-owner {
+      background:rgba(59,130,246,.18);
+      border:1px solid rgba(96,165,250,.35);
+      color:#dbeafe;
+      font-size:.72rem;
+      font-weight:700;
+      max-width:100%;
+    }
+    .ft-chip-owner-qty { color:#93c5fd; margin-left:2px; }
+    .ft-card-stats--owners { flex-wrap:wrap; gap:5px; margin-top:6px; }
 
     .summary-bar { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; font-size:.85rem; color:var(--muted); }
     .summary-bar strong { color:var(--text); }
@@ -75,19 +216,23 @@
 
     @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
 
-    .card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:14px 16px 10px; cursor:pointer; user-select:none; }
+    .card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px 10px; cursor:pointer; user-select:none; }
     .card-head:hover { background:var(--surface2); }
-    .card-head-main { display:flex; align-items:flex-start; gap:10px; min-width:0; flex:1; }
-    .card-head-user { display:flex; flex-direction:column; align-items:flex-start; gap:6px; min-width:0; }
+    .card-head-main { display:flex; align-items:center; gap:8px; min-width:0; flex:1; }
 
-    .dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; background:var(--muted); transition:background .2s; margin-top:6px; }
-    .state-live    .dot { background:var(--success); animation:pulse 1.4s ease-in-out infinite; }
-    .state-waiting .dot { background:var(--warn);    animation:pulse 1.4s ease-in-out infinite; }
-    .state-error   .dot { background:var(--danger); }
+    .status-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; background:var(--muted); transition:background .2s; }
+    .status-dot.live { background:var(--success); animation:pulse 1.4s ease-in-out infinite; }
+    .status-dot.stale { background:var(--warn); }
+    .status-dot.dead { background:var(--danger); }
 
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 
-    .card-username { font-weight:700; font-size:1rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+    .sync-age { font-size:.78rem; color:var(--muted); white-space:nowrap; line-height:1.2; flex-shrink:0; }
+    .account-name { font-weight:700; font-size:1rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:1; }
+
+    .state-live    .status-dot.live { background:var(--success); }
+    .state-waiting .status-dot.dead { background:var(--muted); }
+    .state-error   .status-dot.dead { background:var(--danger); }
 
     .chevron { width:16px; height:16px; color:var(--muted); transition:transform .2s; flex-shrink:0; margin-top:4px; }
     .tracker-card.expanded .chevron { transform:rotate(180deg); }
@@ -101,9 +246,84 @@
     .card-body { padding:0 16px 12px; display:none; }
     .tracker-card.expanded .card-body { display:block; }
 
-    .card-foot { padding:0 16px 10px; }
-    .card-foot [data-sync-time] { display:block; font-size:.68rem; color:var(--muted); opacity:.82; line-height:1.3; }
-    .card-foot [data-sync-time]:empty { display:none; }
+    .modal-overlay {
+      position:fixed;
+      inset:0;
+      z-index:120;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:16px;
+      background:rgba(0,0,0,.68);
+      backdrop-filter:blur(2px);
+    }
+    .modal-overlay[hidden] { display:none !important; }
+    .modal-dialog {
+      width:min(500px,100%);
+      max-height:calc(100vh - 32px);
+      overflow:auto;
+      background:linear-gradient(160deg,var(--surface2) 0%,var(--surface) 100%);
+      border:1.5px solid var(--border);
+      border-radius:var(--radius-lg);
+      padding:24px;
+      box-shadow:0 24px 56px rgba(0,0,0,.45);
+    }
+    .modal-title { font-size:1.2rem; font-weight:700; margin-bottom:8px; letter-spacing:-.02em; }
+    .modal-helper { color:var(--muted); font-size:.92rem; margin-bottom:4px; }
+    .modal-example { color:var(--muted); font-size:.84rem; margin-bottom:14px; opacity:.92; }
+    .modal-textarea {
+      width:100%;
+      min-height:140px;
+      resize:vertical;
+      padding:14px 16px;
+      background:var(--surface);
+      border:1.5px solid var(--border);
+      border-radius:var(--radius);
+      color:var(--text);
+      font-family:var(--font);
+      font-size:17px;
+      line-height:1.45;
+      outline:none;
+      transition:border-color .15s;
+    }
+    .modal-textarea:focus { border-color:var(--accent); }
+    .modal-textarea::placeholder { color:var(--muted); font-size:17px; opacity:.78; }
+    .modal-error {
+      margin-top:10px;
+      font-size:.86rem;
+      color:var(--danger);
+      min-height:1.1em;
+    }
+    .modal-error[hidden] { display:none; }
+    .modal-actions {
+      display:flex;
+      justify-content:flex-end;
+      gap:10px;
+      margin-top:18px;
+      flex-wrap:wrap;
+    }
+    .btn-modal-cancel {
+      background:var(--surface2);
+      color:var(--text);
+      border:1.5px solid var(--border);
+      padding:11px 18px;
+      border-radius:var(--radius);
+      font-weight:600;
+      cursor:pointer;
+      font-family:var(--font);
+    }
+    .btn-modal-cancel:hover { border-color:#475569; }
+    .btn-modal-submit {
+      background:#f8fafc;
+      color:#0f172a;
+      border:1.5px solid #e2e8f0;
+      padding:11px 20px;
+      border-radius:var(--radius);
+      font-weight:700;
+      cursor:pointer;
+      font-family:var(--font);
+    }
+    .btn-modal-submit:hover { background:#fff; }
 
     .inventory-grid,
     .items-grid,
@@ -487,9 +707,16 @@
         grid-template-columns:1fr;
       }
     }
+    @media (max-width:900px) {
+      .inventory-stats { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    }
     @media (max-width:560px) {
-      .add-row { flex-wrap:wrap; }
-      .btn { width:100%; }
+      .player-control-bar { flex-wrap:wrap; }
+      .player-control-bar .btn-add,
+      .player-control-bar .btn-multiple,
+      .remove-dropdown { flex:1 1 calc(50% - 5px); }
+      .player-control-bar input { flex:1 1 100%; }
+      .inventory-stats { grid-template-columns:1fr; }
       .code-row { flex-direction:column; }
       .btn-copy { padding:10px; }
     }
@@ -517,27 +744,80 @@
             <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
           </svg>
         </span>
-        <span>Track unlimited players simultaneously &mdash; sessions are saved and restored on page reload.</span>
+        <span>Track unlimited players simultaneously.</span>
       </p>
     </header>
 
-    <div class="add-row">
-      <input type="text" id="usernameInput" name="username" placeholder="Enter Roblox Username..." maxlength="20" autocomplete="username" spellcheck="false" aria-label="Roblox username" aria-describedby="usernameError" inputmode="text">
-      <button class="btn btn-primary" id="addBtn" type="button">+ Add Player</button>
+    <div class="inventory-stats" id="inventoryStats" aria-label="Inventory summary">
+      <div class="stat-card stat-card--online">
+        <div class="stat-card__label">Online / Accounts</div>
+        <div class="stat-card__value" id="statOnlineAccounts">0 / 0</div>
+      </div>
+      <div class="stat-card stat-card--stones">
+        <div class="stat-card__label">Evolved Enchant Stone</div>
+        <div class="stat-card__value" id="statEvolvedStones">0</div>
+      </div>
+      <div class="stat-card stat-card--secret">
+        <div class="stat-card__label">Secret Fish</div>
+        <div class="stat-card__value" id="statSecretFish">0</div>
+      </div>
+      <div class="stat-card stat-card--forgotten">
+        <div class="stat-card__label">Forgotten Fish</div>
+        <div class="stat-card__value" id="statForgottenFish">0</div>
+      </div>
+    </div>
+
+    <div class="player-control-bar">
+      <input type="text" id="usernameInput" name="username" placeholder="Enter nickname..." maxlength="20" autocomplete="username" spellcheck="false" aria-label="Roblox nickname" aria-describedby="usernameError" inputmode="text">
+      <button class="btn btn-add" id="addBtn" type="button">+ Add</button>
+      <button class="btn btn-multiple" id="multipleBtn" type="button">+ Multiple</button>
+      <div class="remove-dropdown">
+        <button class="btn-remove-menu" id="removeMenuBtn" type="button" aria-label="Remove account" aria-haspopup="menu" aria-expanded="false" aria-controls="removeMenu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+          <svg class="btn-remove-menu__caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+        <div class="remove-dropdown__menu" id="removeMenu" role="menu" hidden></div>
+      </div>
       <div class="username-error" id="usernameError" role="status" aria-live="polite"></div>
     </div>
 
-    <div class="summary-bar">
+    <div class="summary-bar" id="summaryBar">
       <span id="summaryText">No players added yet</span>
     </div>
 
-    <div class="inventory-mode-tabs" role="tablist" aria-label="Inventory view">
-      <button type="button" class="inventory-mode-tab is-active" data-inventory-mode="individual" aria-selected="true">Individual</button>
-      <button type="button" class="inventory-mode-tab" data-inventory-mode="bulk" aria-selected="false">Bulk / All</button>
+    <div id="multipleAddModal" class="modal-overlay" hidden aria-hidden="true">
+      <div class="modal-dialog" role="dialog" aria-labelledby="multipleAddModalTitle" aria-modal="true">
+        <h2 id="multipleAddModalTitle" class="modal-title">Add Multiple Accounts</h2>
+        <p class="modal-helper">Enter usernames separated by comma or new line.</p>
+        <p class="modal-example">Example: denghub2, player123, testaccount</p>
+        <textarea id="multipleAddTextarea" class="modal-textarea" rows="5" placeholder="denghub2, player123&#10;testaccount" spellcheck="false" autocomplete="off"></textarea>
+        <p class="modal-error" id="multipleAddError" role="alert" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="btn-modal-cancel" id="multipleAddCancel">Cancel</button>
+          <button type="button" class="btn-modal-submit" id="multipleAddSubmit">Add Accounts</button>
+        </div>
+      </div>
     </div>
 
+    <div class="inventory-mode-tabs" role="tablist" aria-label="Inventory view">
+      <button type="button" class="inventory-mode-tab is-active" data-inventory-mode="individual" aria-selected="true">Each Account</button>
+      <button type="button" class="inventory-mode-tab" data-inventory-mode="bulk" aria-selected="false">All Accounts</button>
+    </div>
+
+    <div id="individualSearchPanel" class="inventory-search-row" data-individual-search-row>
+      <div class="inventory-search" role="search">
+        <svg class="inventory-search__icon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"></circle>
+          <path d="m20 20-3.5-3.5"></path>
+        </svg>
+        <input class="inventory-search__input" type="search" placeholder="Search fish or stones..." autocomplete="off" spellcheck="false" aria-label="Search fish or stones across accounts" data-individual-search-input>
+        <button class="inventory-search__clear" type="button" aria-label="Clear search" data-individual-search-clear>Clear</button>
+      </div>
+    </div>
+    <div id="individualSearchResults" hidden></div>
+
     <div id="bulkInventoryPanel" class="bulk-inventory-panel" hidden>
-      <div class="bulk-inventory-header" id="bulkInventoryHeader">Bulk Inventory</div>
+      <div class="bulk-inventory-header" id="bulkInventoryHeader">All Accounts Inventory</div>
       <div class="inventory-search-row" data-bulk-search-row>
         <div class="inventory-search" role="search">
           <svg class="inventory-search__icon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
@@ -555,7 +835,7 @@
 
     <div class="no-trackers" id="noTrackersMsg">
       <div class="icon">&#x1F392;</div>
-      <p>Add a Roblox username above to view their inventory.<br>Sessions are saved automatically and restored on page reload.</p>
+      <p>Add a Roblox username above to view their inventory.</p>
     </div>
 
     <div class="loadstring-box">
@@ -617,14 +897,30 @@
   const trackers       = new Map();
   let inventoryMode    = 'individual';
   let bulkSearchQuery  = '';
+  let individualSearchQuery = '';
   const inputEl        = document.getElementById('usernameInput');
   const addBtn         = document.getElementById('addBtn');
+  const multipleBtn    = document.getElementById('multipleBtn');
+  const multipleAddModalEl = document.getElementById('multipleAddModal');
+  const multipleAddTextareaEl = document.getElementById('multipleAddTextarea');
+  const multipleAddErrorEl = document.getElementById('multipleAddError');
+  const multipleAddCancelEl = document.getElementById('multipleAddCancel');
+  const multipleAddSubmitEl = document.getElementById('multipleAddSubmit');
+  const removeMenuBtn  = document.getElementById('removeMenuBtn');
+  const removeMenuEl   = document.getElementById('removeMenu');
+  const summaryBarEl   = document.getElementById('summaryBar');
   const trackerListEl  = document.getElementById('trackerList');
+  const individualSearchPanelEl = document.getElementById('individualSearchPanel');
+  const individualSearchResultsEl = document.getElementById('individualSearchResults');
   const bulkPanelEl    = document.getElementById('bulkInventoryPanel');
   const bulkBodyEl     = document.getElementById('bulkInventoryBody');
   const bulkHeaderEl   = document.getElementById('bulkInventoryHeader');
   const noTrackersMsg  = document.getElementById('noTrackersMsg');
   const summaryTextEl  = document.getElementById('summaryText');
+  const statOnlineAccountsEl = document.getElementById('statOnlineAccounts');
+  const statEvolvedStonesEl = document.getElementById('statEvolvedStones');
+  const statSecretFishEl = document.getElementById('statSecretFish');
+  const statForgottenFishEl = document.getElementById('statForgottenFish');
   const copyBtn        = document.getElementById('copyBtn');
   const copyStatusEl   = document.getElementById('copyStatus');
   const loadstringCodeEl = document.getElementById('loadstringCode');
@@ -689,6 +985,96 @@
   function ownersChipHtml(count) {
     return `<span class="ft-chip ft-chip-people">${PEOPLE_ICON_SVG.replace('class="card-chip-icon"', 'class="ft-chip-icon"')}${escHtml(formatQuantity(count || 1))}</span>`;
   }
+  function buildOwnerBreakdownHtml(ownerAmounts) {
+    const entries = Object.entries(ownerAmounts || {})
+      .filter(([, amt]) => Math.max(0, Math.floor(Number(amt) || 0)) > 0)
+      .sort((a, b) => b[1] - a[1]);
+    if (!entries.length) return '';
+    const parts = entries.map(([user, amt]) =>
+      `<span class="ft-chip ft-chip-owner" title="${escHtml(user)}">${escHtml(user)} <span class="ft-chip-owner-qty">${escHtml(formatAmountLabel(amt))}</span></span>`
+    );
+    return `<div class="ft-card-stats ft-card-stats--owners">${parts.join('')}</div>`;
+  }
+  const SYNC_LIVE_MAX_SEC = 30;
+  const SYNC_STALE_MAX_SEC = 120;
+  function pad2(value) {
+    return String(Math.max(0, Math.floor(Number(value) || 0))).padStart(2, '0');
+  }
+  function syncAgeSeconds(timestamp) {
+    if (!timestamp) return null;
+    try {
+      const secs = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
+      if (!Number.isFinite(secs) || secs < 0) return null;
+      return secs;
+    } catch { return null; }
+  }
+  function formatExactSyncAge(timestamp) {
+    const secs = syncAgeSeconds(timestamp);
+    if (secs == null) return 'no sync';
+    if (secs < 60) return `${secs}s`;
+    if (secs < 3600) {
+      const mins = Math.floor(secs / 60);
+      const remSecs = secs % 60;
+      return `${mins}m ${pad2(remSecs)}s`;
+    }
+    if (secs < 86400) {
+      const hrs = Math.floor(secs / 3600);
+      const remMins = Math.floor((secs % 3600) / 60);
+      return `${hrs}h ${pad2(remMins)}m`;
+    }
+    return `${Math.floor(secs / 86400)}D`;
+  }
+  function syncFreshnessFromTimestamp(timestamp) {
+    const secs = syncAgeSeconds(timestamp);
+    if (secs == null) return 'dead';
+    if (secs <= SYNC_LIVE_MAX_SEC) return 'live';
+    if (secs <= SYNC_STALE_MAX_SEC) return 'stale';
+    return 'dead';
+  }
+  function isTrackerOnline(entry) {
+    return syncFreshnessFromTimestamp(entry && entry.lastSyncAt) === 'live';
+  }
+  function computeInventoryStats() {
+    let onlineCount = 0;
+    let evolvedStones = 0;
+    let secretFish = 0;
+    let forgottenFish = 0;
+    trackers.forEach((entry) => {
+      if (isTrackerOnline(entry)) onlineCount += 1;
+      const data = entry.lastData;
+      if (!data) return;
+      const fishList = getPublicFishItems(data);
+      const stoneList = getPublicStoneItems(data);
+      for (const item of fishList) {
+        const rarity = normalizeRarityLabel(item);
+        const amount = Math.max(0, Math.floor(Number(resolveItemAmount(item)) || 0));
+        if (rarity === 'Secret') secretFish += amount;
+        else if (rarity === 'Forgotten') forgottenFish += amount;
+      }
+      for (const item of stoneList) {
+        const stoneType = String(item?.stoneType || item?.StoneType || '').trim();
+        if (stoneType === 'Evolved') {
+          evolvedStones += Math.max(0, Math.floor(Number(resolveItemAmount(item)) || 0));
+        }
+      }
+    });
+    return {
+      totalAccounts: trackers.size,
+      onlineCount,
+      evolvedStones,
+      secretFish,
+      forgottenFish,
+    };
+  }
+  function updateInventoryStats() {
+    const stats = computeInventoryStats();
+    if (statOnlineAccountsEl) {
+      statOnlineAccountsEl.textContent = `${formatQuantity(stats.onlineCount)} / ${formatQuantity(stats.totalAccounts)}`;
+    }
+    if (statEvolvedStonesEl) statEvolvedStonesEl.textContent = formatQuantity(stats.evolvedStones);
+    if (statSecretFishEl) statSecretFishEl.textContent = formatQuantity(stats.secretFish);
+    if (statForgottenFishEl) statForgottenFishEl.textContent = formatQuantity(stats.forgottenFish);
+  }
   function buildCardBadgesHtml(item, opts) {
     opts = opts || {};
     const amount = formatAmountLabel(resolveItemAmount(item));
@@ -749,30 +1135,46 @@
       return inventoryItemId(a).localeCompare(inventoryItemId(b));
     });
   }
-  function fmtRelativeAgo(iso) {
-    if (!iso) return '';
-    try {
-      const ms = Date.now() - new Date(iso).getTime();
-      if (!Number.isFinite(ms) || ms < 0) return '';
-      const mins = Math.floor(ms / 60000);
-      if (mins < 1) return 'just now';
-      if (mins < 60) return `${mins}m ago`;
-      const hrs = Math.floor(mins / 60);
-      if (hrs < 24) return `${hrs}h ago`;
-      return `${Math.floor(hrs / 24)}d ago`;
-    } catch { return ''; }
-  }
   function publicWaitingHtml() {
     return `<div class="card-empty">No inventory data yet for this username.<span class="card-empty-sub">Run the tracker script in-game, then refresh or wait for sync.</span></div>`;
   }
   function publicLiveEmptyHtml() {
     return `<div class="card-empty">&#x1F9F3; Inventory is empty.</div>`;
   }
-  function setCardSyncTime(card, data) {
-    const s = card && card.querySelector('[data-sync-time]');
-    if (!s) return;
-    const ts = syncTimestamp(data);
-    s.textContent = ts ? `Last sync: ${fmtTime(ts)}` : '';
+  function updateCardSyncStatus(card, timestamp) {
+    if (!card) return;
+    const ageEl = card.querySelector('[data-sync-age]');
+    const dotEl = card.querySelector('[data-status-dot]');
+    const freshness = syncFreshnessFromTimestamp(timestamp);
+    if (ageEl) ageEl.textContent = formatExactSyncAge(timestamp);
+    if (dotEl) {
+      dotEl.classList.remove('live', 'stale', 'dead');
+      dotEl.classList.add(freshness);
+    }
+  }
+  function refreshEntrySyncDisplay(entry) {
+    if (!entry || !entry.el) return;
+    updateCardSyncStatus(entry.el, entry.lastSyncAt || null);
+  }
+  function captureEntrySync(entry, data) {
+    if (!entry) return;
+    const ts = data ? syncTimestamp(data) : null;
+    if (ts) entry.lastSyncAt = ts;
+    refreshEntrySyncDisplay(entry);
+  }
+  function clearEntrySync(entry) {
+    if (!entry) return;
+    entry.lastSyncAt = null;
+    refreshEntrySyncDisplay(entry);
+  }
+  function tickAllCardSyncStatus() {
+    trackers.forEach((entry) => refreshEntrySyncDisplay(entry));
+  }
+  function setCardSyncDisplay(card, data) {
+    const key = card && card.dataset.user;
+    const entry = key && trackers.get(key);
+    if (entry) captureEntrySync(entry, data);
+    else updateCardSyncStatus(card, data ? syncTimestamp(data) : null);
   }
   function canonicalBulkName(item) {
     return String(item?.baseFishName || item?.displayName || item?.name || item?.Name || '').trim()
@@ -906,11 +1308,11 @@
     if (!bulkBodyEl || !bulkHeaderEl) return;
     const sessions = collectBulkSessions();
     const bulk = aggregateBulkInventory(sessions);
-    bulkHeaderEl.innerHTML = `Bulk Inventory &mdash; Fish: <strong>${formatQuantity(bulk.fishTypeCount)}</strong> types &middot; Stones: <strong>${formatQuantity(bulk.stoneTypeCount)}</strong> types &middot; Accounts: <strong>${formatQuantity(bulk.accountCount)}</strong>`;
+    bulkHeaderEl.innerHTML = `All Accounts Inventory &mdash; Fish: <strong>${formatQuantity(bulk.fishTypeCount)}</strong> types &middot; Stones: <strong>${formatQuantity(bulk.stoneTypeCount)}</strong> types &middot; Accounts: <strong>${formatQuantity(bulk.accountCount)}</strong>`;
     const fish = filterBulkItems(bulk.fish, bulkSearchQuery);
     const stones = filterBulkItems(bulk.stones, bulkSearchQuery);
     if (!bulk.accountCount) {
-      bulkBodyEl.innerHTML = `<div class="card-empty">Add players in Individual mode to see combined inventory here.</div>`;
+      bulkBodyEl.innerHTML = `<div class="card-empty">Add players in Each Account mode to see combined inventory here.</div>`;
       return;
     }
     if (!fish.length && !stones.length) {
@@ -934,6 +1336,170 @@
     wireFishImageErrors(bulkBodyEl);
     try { localStorage.setItem(LS_BULK_CACHE, JSON.stringify({ at: Date.now(), bulk })); } catch {}
   }
+  function individualSearchHaystack(item, username) {
+    return [inventorySearchHaystack(item), username].filter(Boolean).join(' ').toLowerCase();
+  }
+  function mergeIndividualSearchItem(existing, item, username, category) {
+    const amount = Math.max(0, Math.floor(Number(resolveItemAmount(item)) || 0));
+    const ownerAmounts = { ...(existing.ownerAmounts || {}) };
+    if (username) ownerAmounts[username] = (ownerAmounts[username] || 0) + amount;
+    const candidate = item.imageUrl || null;
+    const imageUrl = candidate && !/fallback|placeholder/i.test(candidate)
+      ? candidate
+      : (existing.imageUrl || candidate);
+    return {
+      ...existing,
+      name: existing.name || canonicalBulkName(item),
+      category: category || existing.category,
+      rarity: existing.rarity || normalizeRarityLabel(item),
+      stoneType: existing.stoneType || item.stoneType || item.StoneType || null,
+      itemId: existing.itemId || inventoryItemId(item) || null,
+      imageUrl,
+      amount: (existing.amount || 0) + amount,
+      accountCount: Object.keys(ownerAmounts).length,
+      ownerAmounts,
+      dataSource: 'individual_search',
+      groupKey: existing.groupKey,
+    };
+  }
+  function searchEachAccountInventory(query) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return { fish: [], stones: [] };
+    const fishMap = new Map();
+    const stoneMap = new Map();
+    trackers.forEach((entry) => {
+      const username = entry.displayName;
+      const data = entry.lastData;
+      if (!data) return;
+      for (const item of getPublicFishItems(data)) {
+        if (!individualSearchHaystack(item, username).includes(q)) continue;
+        const key = bulkGroupKey('fish', item);
+        fishMap.set(key, mergeIndividualSearchItem(fishMap.get(key) || {
+          groupKey: key, name: canonicalBulkName(item), category: 'fish',
+          rarity: normalizeRarityLabel(item), amount: 0, accountCount: 0, ownerAmounts: {}, imageUrl: null,
+        }, item, username, 'fish'));
+      }
+      for (const item of getPublicStoneItems(data)) {
+        if (!individualSearchHaystack(item, username).includes(q)) continue;
+        const key = bulkGroupKey('stone', item);
+        stoneMap.set(key, mergeIndividualSearchItem(stoneMap.get(key) || {
+          groupKey: key, name: canonicalBulkName(item), category: 'stone',
+          rarity: normalizeRarityLabel(item), stoneType: item.stoneType || item.StoneType || null,
+          amount: 0, accountCount: 0, ownerAmounts: {}, imageUrl: null,
+        }, item, username, 'stone'));
+      }
+    });
+    return {
+      fish: sortInventoryFish([...fishMap.values()]),
+      stones: sortInventoryStones([...stoneMap.values()]),
+    };
+  }
+  function buildIndividualSearchCardInnerHtml(item) {
+    const title = item.category === 'stone' ? stoneDisplayName(item) : (item.name || 'Unknown');
+    const imgSrc = itemImageSrc(item) || ITEM_IMAGES.Default;
+    const isPlaceholder = imgSrc === ITEM_IMAGES.Default;
+    const weight = item.category === 'stone' ? '' : formatCardWeight(item);
+    const rarity = item.category === 'stone' ? '' : publicRarity(item);
+    const rarityHtml = rarity && rarity !== 'Unknown'
+      ? `<span class="ft-chip ft-chip-rarity">${escHtml(rarity)}</span>` : '';
+    const qtyHtml = `<span class="ft-chip ft-chip-qty">${escHtml(formatAmountLabel(item.amount || 0))}</span>`;
+    const ownersHtml = buildOwnerBreakdownHtml(item.ownerAmounts);
+    const weightHtml = weight ? `<div class="ft-card-weight">${escHtml(weight)}</div>` : '';
+    return `
+  <div class="ft-card-icon">
+    <img src="${escHtml(imgSrc)}" alt="${escHtml(title)}" title="${escHtml(title)}" decoding="async"${isPlaceholder ? ' data-placeholder="true"' : ''} data-item-id="${escHtml(item.itemId || '')}">
+  </div>
+  <div class="ft-card-main">
+    <div class="ft-card-name" title="${escHtml(title)}">${escHtml(title)}</div>
+    <div class="ft-card-stats">${qtyHtml}${rarityHtml}</div>
+    ${ownersHtml}
+    ${weightHtml}
+  </div>`;
+  }
+  function renderIndividualSearchResults() {
+    if (!individualSearchResultsEl) return;
+    const q = String(individualSearchQuery || '').trim();
+    if (!q) {
+      individualSearchResultsEl.hidden = true;
+      individualSearchResultsEl.innerHTML = '';
+      return;
+    }
+    const result = searchEachAccountInventory(q);
+    const fish = result.fish;
+    const stones = result.stones;
+    if (!fish.length && !stones.length) {
+      individualSearchResultsEl.innerHTML = `<div class="inventory-search-empty">No inventory items found</div>`;
+      individualSearchResultsEl.hidden = false;
+      return;
+    }
+    let html = '';
+    if (fish.length) {
+      html += `<div class="items-grid inventory-grid fish-grid">${fish.map((item) => {
+        const cls = fishCardClassList(item).join(' ');
+        return `<div class="${cls}" data-card-key="${escHtml(bulkCardKey(item))}" data-source="individual_search">${buildIndividualSearchCardInnerHtml(item)}</div>`;
+      }).join('')}</div>`;
+    }
+    if (stones.length) {
+      const stoneTotal = stones.reduce((sum, item) => sum + Math.max(0, Math.floor(Number(item.amount) || 0)), 0);
+      html += `<div class="stones-section"><div class="stones-section__title">Enchant Stones (${formatQuantity(stoneTotal)})</div><div class="items-grid inventory-grid stones-grid stone-grid">${stones.map((item) =>
+        `<div class="ft-card ft-card--stone" data-card-key="${escHtml(bulkCardKey(item))}" data-source="individual_search">${buildIndividualSearchCardInnerHtml(item)}</div>`
+      ).join('')}</div></div>`;
+    }
+    individualSearchResultsEl.innerHTML = html;
+    individualSearchResultsEl.hidden = false;
+    wireFishImageErrors(individualSearchResultsEl);
+  }
+  function updateIndividualView() {
+    const hasSearch = String(individualSearchQuery || '').trim().length > 0;
+    const isIndividual = inventoryMode === 'individual';
+    if (individualSearchPanelEl) individualSearchPanelEl.hidden = !isIndividual;
+    if (isIndividual && hasSearch) {
+      if (trackerListEl) trackerListEl.style.display = 'none';
+      if (noTrackersMsg) noTrackersMsg.style.display = 'none';
+      renderIndividualSearchResults();
+    } else if (isIndividual) {
+      if (trackerListEl) trackerListEl.style.display = '';
+      if (individualSearchResultsEl) {
+        individualSearchResultsEl.hidden = true;
+        individualSearchResultsEl.innerHTML = '';
+      }
+      if (noTrackersMsg) noTrackersMsg.style.display = trackers.size === 0 ? 'block' : 'none';
+    } else {
+      if (individualSearchResultsEl) {
+        individualSearchResultsEl.hidden = true;
+        individualSearchResultsEl.innerHTML = '';
+      }
+    }
+  }
+  function updateRemoveMenu() {
+    if (!removeMenuEl) return;
+    const keys = [...trackers.keys()].sort((a, b) => {
+      const na = (trackers.get(a) && trackers.get(a).displayName) || a;
+      const nb = (trackers.get(b) && trackers.get(b).displayName) || b;
+      return na.localeCompare(nb);
+    });
+    if (!keys.length) {
+      removeMenuEl.innerHTML = '<div class="remove-dropdown__empty">No accounts added</div>';
+      return;
+    }
+    removeMenuEl.innerHTML = keys.map((key) => {
+      const entry = trackers.get(key);
+      const name = entry && entry.displayName ? entry.displayName : key;
+      return `<button type="button" class="remove-dropdown__item" role="menuitem" data-remove-key="${escHtml(key)}"><span>${escHtml(name)}</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg></button>`;
+    }).join('');
+  }
+  function closeRemoveMenu() {
+    if (!removeMenuEl || !removeMenuBtn) return;
+    removeMenuEl.hidden = true;
+    removeMenuBtn.setAttribute('aria-expanded', 'false');
+  }
+  function toggleRemoveMenu() {
+    if (!removeMenuEl || !removeMenuBtn) return;
+    const open = removeMenuEl.hidden;
+    updateRemoveMenu();
+    removeMenuEl.hidden = !open;
+    removeMenuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
   function setInventoryMode(mode) {
     inventoryMode = mode === 'bulk' ? 'bulk' : 'individual';
     document.querySelectorAll('[data-inventory-mode]').forEach((btn) => {
@@ -943,7 +1509,8 @@
     });
     if (bulkPanelEl) bulkPanelEl.hidden = inventoryMode !== 'bulk';
     if (trackerListEl) trackerListEl.style.display = inventoryMode === 'bulk' ? 'none' : '';
-    if (noTrackersMsg) noTrackersMsg.style.display = (inventoryMode === 'individual' && trackers.size === 0) ? 'block' : 'none';
+    closeRemoveMenu();
+    updateIndividualView();
     if (inventoryMode === 'bulk') renderBulkInventory();
   }
   function fmtTime(iso) {
@@ -1023,49 +1590,6 @@
     if (!q) return items;
     return items.filter((item) => inventorySearchHaystack(item).includes(q));
   }
-  function ensureInventorySearchRow(cardBody) {
-    if (!cardBody) return null;
-    let row = cardBody.querySelector('[data-inventory-search-row]');
-    if (row) return row;
-    row = document.createElement('div');
-    row.className = 'inventory-search-row';
-    row.setAttribute('data-inventory-search-row', '');
-    row.innerHTML = `
-<div class="inventory-search" role="search">
-  <svg class="inventory-search__icon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-    <circle cx="11" cy="11" r="7"></circle>
-    <path d="m20 20-3.5-3.5"></path>
-  </svg>
-  <input class="inventory-search__input" type="search" placeholder="Search fish or stones..." autocomplete="off" spellcheck="false" aria-label="Search fish or stones">
-  <button class="inventory-search__clear" type="button" aria-label="Clear search">Clear</button>
-</div>`;
-    cardBody.insertBefore(row, cardBody.firstChild);
-    const input = row.querySelector('.inventory-search__input');
-    const clearBtn = row.querySelector('.inventory-search__clear');
-    const card = cardBody.closest('.tracker-card');
-    const key = card && card.dataset.user;
-    const syncClear = () => {
-      const active = String(input.value || '').trim().length > 0;
-      clearBtn.classList.toggle('is-visible', active);
-    };
-    input.addEventListener('input', () => {
-      syncClear();
-      const entry = key && trackers.get(key);
-      if (!entry) return;
-      entry.inventorySearch = input.value;
-      patchCardInventory(cardBody, entry.lastFishList || [], entry.lastStoneList || [], entry.inventorySearch);
-    });
-    clearBtn.addEventListener('click', () => {
-      input.value = '';
-      syncClear();
-      const entry = key && trackers.get(key);
-      if (!entry) return;
-      entry.inventorySearch = '';
-      patchCardInventory(cardBody, entry.lastFishList || [], entry.lastStoneList || [], '');
-      input.focus();
-    });
-    return row;
-  }
   function patchStonesGrid(container, items) {
     if (!container) return;
     if (!items || items.length === 0) {
@@ -1112,7 +1636,7 @@
     if (!cardBody) return;
     cardBody.querySelectorAll('.card-empty').forEach((el) => el.remove());
   }
-  function patchCardInventory(cardBody, fishList, stoneList, searchQuery) {
+  function patchCardInventory(cardBody, fishList, stoneList) {
     if (!cardBody) return;
     const card = cardBody.closest('.tracker-card');
     const key = card && card.dataset.user;
@@ -1122,44 +1646,18 @@
       entry.lastStoneList = Array.isArray(stoneList) ? stoneList : [];
     }
     const hasItems = (fishList && fishList.length) || (stoneList && stoneList.length);
-    if (hasItems) {
-      clearCardWaitingPanels(cardBody);
-      ensureInventorySearchRow(cardBody);
-    }
-    const q = searchQuery != null ? searchQuery : (entry && entry.inventorySearch) || '';
-    const searchRow = cardBody.querySelector('[data-inventory-search-row]');
-    if (searchRow) {
-      searchRow.style.display = hasItems ? '' : 'none';
-      const input = searchRow.querySelector('.inventory-search__input');
-      const clearBtn = searchRow.querySelector('.inventory-search__clear');
-      if (input && input.value !== q) input.value = q;
-      if (clearBtn) clearBtn.classList.toggle('is-visible', String(q).trim().length > 0);
-    }
-    const filteredFish = filterByInventorySearch(fishList || [], q);
-    const filteredStones = filterByInventorySearch(stoneList || [], q);
+    if (hasItems) clearCardWaitingPanels(cardBody);
+    cardBody.querySelectorAll('[data-inventory-search-row]').forEach((el) => el.remove());
     let fishHost = cardBody.querySelector('[data-fish-grid-host]');
     let stoneHost = cardBody.querySelector('[data-stones-section]');
     if (!fishHost || !stoneHost) {
-      const hostsHtml = '<div data-fish-grid-host></div><div class="stones-section" data-stones-section></div>';
-      if (searchRow) {
-        searchRow.insertAdjacentHTML('afterend', hostsHtml);
-      } else {
-        cardBody.innerHTML = hostsHtml;
-      }
+      cardBody.innerHTML = '<div data-fish-grid-host></div><div class="stones-section" data-stones-section></div>';
       fishHost = cardBody.querySelector('[data-fish-grid-host]');
       stoneHost = cardBody.querySelector('[data-stones-section]');
     }
     cardBody.querySelectorAll('[data-inventory-search-empty]').forEach((el) => el.remove());
-    if (hasItems && String(q).trim() && filteredFish.length === 0 && filteredStones.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'inventory-search-empty';
-      empty.setAttribute('data-inventory-search-empty', '');
-      empty.textContent = 'No inventory items found';
-      if (stoneHost) stoneHost.insertAdjacentElement('afterend', empty);
-      else if (fishHost) fishHost.insertAdjacentElement('afterend', empty);
-    }
-    patchItemsGrid(fishHost, filteredFish);
-    patchStonesGrid(stoneHost, filteredStones);
+    patchItemsGrid(fishHost, fishList || []);
+    patchStonesGrid(stoneHost, stoneList || []);
   }
   function logFishOnlyRender(key, data, fishList) {
     if (!data || data.renderBuild !== RENDER_BUILD) return;
@@ -1436,8 +1934,16 @@
 
   function updateSummary() {
     const n = trackers.size;
-    if (n === 0) { summaryTextEl.textContent = 'No players added yet'; noTrackersMsg.style.display = 'block'; }
-    else { summaryTextEl.innerHTML = `Watching <strong>${n}</strong> player${n>1?'s':''} &mdash; sessions saved automatically`; noTrackersMsg.style.display = 'none'; }
+    if (n === 0) {
+      if (summaryTextEl) summaryTextEl.textContent = 'No players added yet';
+      if (summaryBarEl) summaryBarEl.style.display = '';
+    } else {
+      if (summaryTextEl) summaryTextEl.textContent = '';
+      if (summaryBarEl) summaryBarEl.style.display = 'none';
+    }
+    updateInventoryStats();
+    updateRemoveMenu();
+    updateIndividualView();
   }
 
   function cardTitle(item) {
@@ -1573,21 +2079,17 @@
     el.innerHTML = `
 <div class="card-head">
   <div class="card-head-main">
-    <span class="dot" aria-hidden="true"></span>
-    <div class="card-head-user">
-      <span class="card-username">${escHtml(username)}</span>
-      <button class="btn-remove" data-remove-btn aria-label="Remove">x Remove</button>
-    </div>
+    <span class="status-dot dead" data-status-dot aria-hidden="true"></span>
+    <span class="sync-age" data-sync-age>no sync</span>
+    <span class="account-name">${escHtml(username)}</span>
   </div>
   <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="18 15 12 9 6 15"></polyline></svg>
 </div>
 <div class="card-status-line" data-status-line></div>
 ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
-<div class="card-body" data-card-body></div>
-<div class="card-foot"><span data-sync-time></span></div>`;
+<div class="card-body" data-card-body></div>`;
 
-    el.querySelector('.card-head').addEventListener('click', e => { if (!e.target.closest('[data-remove-btn]')) el.classList.toggle('expanded'); });
-    el.querySelector('[data-remove-btn]').addEventListener('click', e => { e.stopPropagation(); removeTracker(username.toLowerCase()); });
+    el.querySelector('.card-head').addEventListener('click', () => { el.classList.toggle('expanded'); });
     return el;
   }
 
@@ -1600,13 +2102,15 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     const stoneList = getPublicStoneItems(data);
     logFishOnlyRender(card.dataset.user, data, fishList);
     if (l) l.textContent = DEBUG_INVENTORY ? `Live — User ID: ${data.userId || '-'}` : '';
-    setCardSyncTime(card, data);
+    setCardSyncDisplay(card, data);
     if (DEBUG_INVENTORY) {
       const gdb = card.querySelector('[data-global-db-proof]');
       if (gdb) gdb.innerHTML = buildPlayerDataGameItemDbProofHtml(data) + buildPlayerDataItemUtilityProofHtml(data) + buildGlobalDbProofHtml(data);
     }
     if (b) patchCardInventory(b, fishList, stoneList);
+    updateInventoryStats();
     if (inventoryMode === 'bulk') renderBulkInventory();
+    else if (String(individualSearchQuery || '').trim()) renderIndividualSearchResults();
   }
 
   function setCardWaiting(card, name) {
@@ -1615,8 +2119,8 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     const l = card.querySelector('[data-status-line]');
     const b = card.querySelector('[data-card-body]');
     if (l) l.textContent = DEBUG_INVENTORY ? `Waiting for ${name} to execute the script in-game...` : '';
-    const s = card.querySelector('[data-sync-time]');
-    if (s) s.textContent = '';
+    const waitEntry = card.dataset.user && trackers.get(card.dataset.user);
+    if (waitEntry) clearEntrySync(waitEntry);
     if (b) b.innerHTML = DEBUG_INVENTORY
       ? `<div class="card-empty">Waiting for ${escHtml(name)} to execute the script in-game...</div>`
       : publicWaitingHtml();
@@ -1659,7 +2163,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     const b = card.querySelector('[data-card-body]');
     if (DEBUG_INVENTORY) {
       if (l) l.innerHTML = `&#x1F7E2; ${escHtml(phaseMessage(data.phase))}`;
-      setCardSyncTime(card, data);
+      setCardSyncDisplay(card, data);
       let bodyHtml = `<div class="card-empty">&#x1F7E2; ${escHtml(phaseMessage(data.phase))}</div>`;
       const ps = data.parseStats;
       const showParseDebug = ps && ps.raw > 0
@@ -1682,7 +2186,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       return;
     }
     if (l) l.textContent = '';
-    setCardSyncTime(card, data);
+    setCardSyncDisplay(card, data);
     if (b) b.innerHTML = publicLiveEmptyHtml();
   }
 
@@ -1691,9 +2195,10 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     card.classList.add('state-error');
     const l = card.querySelector('[data-status-line]');
     const b = card.querySelector('[data-card-body]');
-    const ago = fmtRelativeAgo(syncTimestamp(lastData));
-    if (l) l.textContent = ago ? `Offline · Last sync ${ago}` : 'Offline';
-    setCardSyncTime(card, lastData);
+    if (l) l.textContent = DEBUG_INVENTORY ? 'Offline' : '';
+    const offlineEntry = card.dataset.user && trackers.get(card.dataset.user);
+    if (offlineEntry) refreshEntrySyncDisplay(offlineEntry);
+    else setCardSyncDisplay(card, lastData);
     if (lastData) {
       const fishList = getPublicFishItems(lastData);
       const stoneList = getPublicStoneItems(lastData);
@@ -1730,6 +2235,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       const stoneList = getPublicStoneItems(data);
       const hasInventory = fishList.length > 0 || stoneList.length > 0;
       if (data.isOnline === false) {
+        captureEntrySync(entry, data);
         setCardOffline(entry.el, entry.displayName, data);
       } else if (hasInventory) {
         updateCard(entry.el, data);
@@ -1858,7 +2364,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     const card  = createCard(raw);
     trackerListEl.appendChild(card);
     const timer = setInterval(() => pollUser(key), POLL_MS);
-    trackers.set(key, { timer, el: card, displayName: raw, lastData: null });
+    trackers.set(key, { timer, el: card, displayName: raw, lastData: null, lastSyncAt: null });
     pollUser(key);
     updateSummary();
     saveCurrent();
@@ -1905,6 +2411,114 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     inputEl.addEventListener('input', () => { if (inputEl.value.trim()) clearUsernameError(); });
   }
 
+  function parseMultipleUsernames(raw) {
+    const seen = new Set();
+    const names = [];
+    for (const part of String(raw || '').split(/[\n,;]+/)) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      names.push(trimmed);
+    }
+    return names;
+  }
+  function showMultipleAddError(message) {
+    if (!multipleAddErrorEl) return;
+    if (message) {
+      multipleAddErrorEl.textContent = message;
+      multipleAddErrorEl.hidden = false;
+    } else {
+      multipleAddErrorEl.textContent = '';
+      multipleAddErrorEl.hidden = true;
+    }
+  }
+  function openMultipleAddModal() {
+    if (!multipleAddModalEl) return;
+    showMultipleAddError('');
+    if (multipleAddTextareaEl) {
+      multipleAddTextareaEl.value = '';
+    }
+    multipleAddModalEl.hidden = false;
+    multipleAddModalEl.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+    if (multipleAddTextareaEl) {
+      setTimeout(() => multipleAddTextareaEl.focus(), 0);
+    }
+  }
+  function closeMultipleAddModal() {
+    if (!multipleAddModalEl) return;
+    multipleAddModalEl.hidden = true;
+    multipleAddModalEl.setAttribute('aria-hidden', 'true');
+    showMultipleAddError('');
+    document.body.style.overflow = '';
+    if (multipleBtn) multipleBtn.focus();
+  }
+  function submitMultipleAdd() {
+    const raw = multipleAddTextareaEl ? multipleAddTextareaEl.value : '';
+    const names = parseMultipleUsernames(raw);
+    if (!names.length) {
+      showMultipleAddError('Enter at least one username.');
+      if (multipleAddTextareaEl) multipleAddTextareaEl.focus();
+      return;
+    }
+    showMultipleAddError('');
+    let added = 0;
+    for (const name of names) {
+      if (addTracker(name)) added += 1;
+    }
+    if (added && inputEl) inputEl.value = '';
+    closeMultipleAddModal();
+  }
+  function bindMultipleAdd() {
+    if (!multipleBtn) return;
+    multipleBtn.addEventListener('click', openMultipleAddModal);
+    if (multipleAddCancelEl) {
+      multipleAddCancelEl.addEventListener('click', closeMultipleAddModal);
+    }
+    if (multipleAddSubmitEl) {
+      multipleAddSubmitEl.addEventListener('click', submitMultipleAdd);
+    }
+    if (multipleAddModalEl) {
+      multipleAddModalEl.addEventListener('click', (e) => {
+        if (e.target === multipleAddModalEl) closeMultipleAddModal();
+      });
+    }
+    if (multipleAddTextareaEl) {
+      multipleAddTextareaEl.addEventListener('input', () => {
+        if (String(multipleAddTextareaEl.value || '').trim()) showMultipleAddError('');
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && multipleAddModalEl && !multipleAddModalEl.hidden) {
+        e.preventDefault();
+        closeMultipleAddModal();
+      }
+    });
+  }
+
+  function bindRemoveMenu() {
+    if (!removeMenuBtn || !removeMenuEl) return;
+    removeMenuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleRemoveMenu();
+    });
+    removeMenuEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-remove-key]');
+      if (!btn) return;
+      const key = btn.getAttribute('data-remove-key');
+      if (key) removeTracker(key);
+      closeRemoveMenu();
+    });
+    document.addEventListener('click', (e) => {
+      if (!removeMenuEl.hidden && !e.target.closest('.remove-dropdown')) closeRemoveMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeRemoveMenu();
+    });
+  }
+
   function bindInventoryTabs() {
     document.querySelectorAll('[data-inventory-mode]').forEach((btn) => {
       btn.addEventListener('click', () => setInventoryMode(btn.getAttribute('data-inventory-mode')));
@@ -1925,6 +2539,24 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
         bulkSearchClear.classList.remove('is-visible');
         if (inventoryMode === 'bulk') renderBulkInventory();
         if (bulkSearchInput) bulkSearchInput.focus();
+      });
+    }
+    const individualSearchInput = document.querySelector('[data-individual-search-input]');
+    const individualSearchClear = document.querySelector('[data-individual-search-clear]');
+    if (individualSearchInput) {
+      individualSearchInput.addEventListener('input', () => {
+        individualSearchQuery = individualSearchInput.value;
+        if (individualSearchClear) individualSearchClear.classList.toggle('is-visible', String(individualSearchQuery).trim().length > 0);
+        updateIndividualView();
+      });
+    }
+    if (individualSearchClear) {
+      individualSearchClear.addEventListener('click', () => {
+        individualSearchQuery = '';
+        if (individualSearchInput) individualSearchInput.value = '';
+        individualSearchClear.classList.remove('is-visible');
+        updateIndividualView();
+        if (individualSearchInput) individualSearchInput.focus();
       });
     }
   }
@@ -1948,6 +2580,8 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
   function initInventoryUi() {
     safeBind('copy script', bindCopyScript);
     safeBind('add player', bindAddPlayer);
+    safeBind('multiple add', bindMultipleAdd);
+    safeBind('remove menu', bindRemoveMenu);
     safeBind('tabs', bindInventoryTabs);
     safeBind('restore sessions', () => {
       loadSaved().forEach((u) => addTracker(u));
@@ -1955,6 +2589,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     });
     safeBind('query username', initFromQueryUsername);
     safeBind('inventory mode', () => setInventoryMode('individual'));
+    safeBind('sync age tick', () => setInterval(tickAllCardSyncStatus, 1000));
     if (APK_EMBED) document.documentElement.style.background = '#0d0f14';
     document.body.setAttribute('data-inventory-js', 'ready');
     window.__fishInventoryUiReady = true;
