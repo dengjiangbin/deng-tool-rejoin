@@ -22,11 +22,14 @@ class FishItContractTest {
     private val src = "src/main/kotlin/my/id/deng/monitor"
 
     // ── Navigation / screens ─────────────────────────────────────────────────
-    @Test fun `app has a Fish It nav tab and route`() {
+    @Test fun `app has Fish It stats and inventory nav tabs and routes`() {
         val appRoot = read("$src/ui/AppRoot.kt")
-        assertTrue("Fish It NavItem must exist", appRoot.contains(Regex(""""fishit",\s*"Fish It"""")))
+        assertTrue("fishit NavItem must exist", appRoot.contains(Regex(""""fishit",\s*"Stats"""")))
+        assertTrue("inventory NavItem must exist", appRoot.contains(Regex(""""inventory",\s*"Inventory"""")))
         assertTrue("fishit composable route must exist", appRoot.contains("composable(\"fishit\")"))
+        assertTrue("inventory composable route must exist", appRoot.contains("composable(\"inventory\")"))
         assertTrue("FishItScreen must be wired", appRoot.contains("FishItScreen("))
+        assertTrue("InventoryScreen must be wired", appRoot.contains("InventoryScreen("))
     }
 
     @Test fun `FishItScreen has Daily, Stats and Fish sub-tabs`() {

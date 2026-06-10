@@ -30,7 +30,7 @@ const { RAW_TRACKER_LUA, testIfRawTracker, REPO_ROOT } = require('./helpers/trac
 
 const ROOT = REPO_ROOT;
 const DIST_LUA = path.join(ROOT, 'dist', 'tracker.lua');
-const TRACKER_BUILD = 'BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10';
+const TRACKER_BUILD = 'BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10';
 const PUBLIC_LOADER = CLEAN_TRACKER_LOADSTRING;
 
 function makeApp() {
@@ -95,7 +95,8 @@ describe('BLOCKER10ZM protected dist/tracker.lua public loader', () => {
       BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_BUILD,
       'BLOCKER10ZM_DIST_TRACKER_LUA_PROTECTED_PUBLIC_LOADER_2026_06_10',
     );
-    assert.equal(BLOCKER10ZL_BUILD, TRACKER_BUILD);
+    const { EXPECTED_CLIENT_TRACKER_BUILD } = require('../src/fishitTrackerBuild');
+    assert.equal(EXPECTED_CLIENT_TRACKER_BUILD, TRACKER_BUILD);
   });
 
   testIfRawTracker('private raw tracker source compile validation passes when present', () => {
@@ -104,7 +105,7 @@ describe('BLOCKER10ZM protected dist/tracker.lua public loader', () => {
       RAW_TRACKER_LUA,
     ], { encoding: 'utf8' });
     assert.match(out, /TRACKER_COMPILE_VALIDATION OK/);
-    assert.match(out, /BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10/);
+    assert.match(out, /BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
   });
 
   test('public loader points to dist/tracker.lua not raw root tracker.lua', () => {
@@ -134,7 +135,7 @@ describe('BLOCKER10ZM protected dist/tracker.lua public loader', () => {
 
   testIfRawTracker('private raw dev source references dist/tracker.lua in usage comment', () => {
     const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
-    assert.match(lua, /TRACKER_BUILD = "BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10"/);
+    assert.match(lua, /TRACKER_BUILD = "BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10"/);
     assert.match(lua, /dist\/tracker\.lua/);
     assert.doesNotMatch(lua, /tracker\.luraph\.lua/);
   });

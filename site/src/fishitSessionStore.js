@@ -115,6 +115,19 @@ function sanitiseSession(key, data) {
       if (!raw || !playerStatsStore.isTrustedPlayerStats(raw)) return null;
       return data.playerStatsUpdatedAt || null;
     })(),
+    lastUploadReceivedAt: data.lastUploadReceivedAt || null,
+    lastUploadAcceptedAt: data.lastUploadAcceptedAt || null,
+    lastUploadRejectedAt: data.lastUploadRejectedAt || null,
+    lastUploadRejectReason: data.lastUploadRejectReason || null,
+    lastUploadEndpoint: data.lastUploadEndpoint || null,
+    lastUploadPayloadType: data.lastUploadPayloadType || null,
+    lastUploadUsername: data.lastUploadUsername || null,
+    lastUploadSessionKey: data.lastUploadSessionKey || null,
+    lastUploadTrackerBuild: data.lastUploadTrackerBuild || null,
+    lastUploadHadPlayerStats: data.lastUploadHadPlayerStats === true,
+    lastUploadStatusCodeReturned: data.lastUploadStatusCodeReturned != null
+      ? data.lastUploadStatusCodeReturned
+      : null,
     restoredFromDisk: false,
   };
 }

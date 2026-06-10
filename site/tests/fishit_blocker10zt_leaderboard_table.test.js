@@ -100,9 +100,30 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
 
   test('inventory view uses two-column mobile card grid', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*\.inventory-grid[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*\.fish-grid[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.inventory-grid[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.fish-grid[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
     assert.match(tpl, /@media \(max-width:280px\)[\s\S]*grid-template-columns:1fr/);
+  });
+
+  test('mobile table view uses compact table rows without vertical cards', () => {
+    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
+    assert.match(tpl, /th-short">User</);
+    assert.match(tpl, /th-short">Coin</);
+    assert.match(tpl, /th-short">Caught</);
+    assert.match(tpl, /th-short">Rare</);
+    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-table[\s\S]*min-width:0/);
+    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*table-layout:fixed/);
+    assert.doesNotMatch(tpl, /buildAccountMobileCardHtml/);
+    assert.doesNotMatch(tpl, /accounts-mobile-list/);
+  });
+
+  test('mobile controls and compact loadstring rules exist', () => {
+    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
+    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-filters[\s\S]*grid-template-columns:repeat\(3/);
+    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.accounts-actions[\s\S]*grid-template-columns:repeat\(5/);
+    assert.match(tpl, /\.accounts-icon-btn[\s\S]*height:42px/);
+    assert.match(tpl, /\.loadstring-box\.is-compact/);
+    assert.match(tpl, /inventory-apk-embed/);
   });
 
   test('table view hides inventory section; inventory view shows it', () => {

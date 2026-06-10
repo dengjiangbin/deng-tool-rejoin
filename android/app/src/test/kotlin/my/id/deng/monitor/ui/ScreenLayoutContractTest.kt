@@ -102,7 +102,7 @@ class ScreenLayoutContractTest {
     }
 
     @Test
-    fun `InventoryScreen loads tracker page and offers Open in website`() {
+    fun `InventoryScreen loads tracker page without browser escape hatch`() {
         val src = ui("InventoryScreen.kt")
         assertTrue(
             "InventoryScreen must load the optimized apk inventory page",
@@ -112,9 +112,9 @@ class ScreenLayoutContractTest {
             "InventoryScreen must show skeleton while loading",
             src.contains("InventoryLoadingSkeleton"),
         )
-        assertTrue(
-            "InventoryScreen must offer Open in website",
-            src.contains("Open in website"),
+        assertFalse(
+            "InventoryScreen must not offer Open in website / Continue in Browser",
+            src.contains("Open in website") || src.contains("Continue in Browser", ignoreCase = true),
         )
         assertFalse(
             "InventoryScreen must not show Waiting for snapshot copy",

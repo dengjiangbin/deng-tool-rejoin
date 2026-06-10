@@ -1,6 +1,6 @@
 'use strict';
 
-const TRUSTED_PLAYERSTATS_BUILD_MARK = 'BLOCKER10ZW';
+const TRUSTED_PLAYERSTATS_BUILD_MARKS = ['BLOCKER10ZT3', 'BLOCKER10ZW'];
 
 function clampText(value, maxLen) {
   if (value == null) return null;
@@ -103,6 +103,14 @@ function sanitisePlayerStatsDebug(raw) {
       candidateKeys: Array.isArray(raw.coinProbe.candidateKeys)
         ? raw.coinProbe.candidateKeys.slice(0, 40).map((k) => clampText(k, 48)).filter(Boolean)
         : [],
+      leaderstatsChildren: Array.isArray(raw.coinProbe.leaderstatsChildren)
+        ? raw.coinProbe.leaderstatsChildren.slice(0, 40).map((row) => {
+          if (!row || typeof row !== 'object') return null;
+          const name = clampText(row.name, 48);
+          const value = clampText(row.value, 64);
+          return name ? { name, value: value || null } : null;
+        }).filter(Boolean)
+        : [],
     };
   }
   return out;
@@ -118,7 +126,8 @@ function hasPlayerStatValues(stats) {
 }
 
 function isTrustedPlayerStatsBuild(build) {
-  return typeof build === 'string' && build.includes(TRUSTED_PLAYERSTATS_BUILD_MARK);
+  return typeof build === 'string'
+    && TRUSTED_PLAYERSTATS_BUILD_MARKS.some((mark) => build.includes(mark));
 }
 
 function isTrustedPlayerStatsSource(source) {
@@ -202,7 +211,8 @@ function isProgressComplete(stats, key) {
 }
 
 module.exports = {
-  TRUSTED_PLAYERSTATS_BUILD_MARK,
+  TRUSTED_PLAYERSTATS_BUILD_MARKS,
+  TRUSTED_PLAYERSTATS_BUILD_MARK: TRUSTED_PLAYERSTATS_BUILD_MARKS[0],
   sanitisePlayerStats,
   sanitisePlayerStatsDebug,
   mergePlayerStats,

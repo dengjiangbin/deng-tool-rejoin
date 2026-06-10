@@ -18,7 +18,7 @@ const {
   PROTECTED_DIST_RAW_URL,
 } = require('../src/fishitTrackerLoadstring');
 const {
-  BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER,
+  BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_MARKER,
   BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
 } = require('../src/fishitTrackerBuild');
@@ -106,12 +106,12 @@ function createMockElement(id, opts = {}) {
 }
 
 describe('BLOCKER10ZR inventory buttons + clean copy UI', () => {
-  test('build marker is BLOCKER10ZS and wired to deploy marker', () => {
+  test('build marker is BLOCKER10ZT3 and wired to deploy marker', () => {
     assert.equal(
-      BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER,
-      'BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_2026_06_10',
+      BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_MARKER,
+      'BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10',
     );
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER);
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_MARKER);
     assert.equal(
       BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
       'BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10',
@@ -120,7 +120,7 @@ describe('BLOCKER10ZR inventory buttons + clean copy UI', () => {
 
   test('/inventory HTML has single script field and one Copy button', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
-    assert.match(res.text, /BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_2026_06_10/);
+    assert.match(res.text, /BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
     assert.match(res.text, /data-inventory-js="pending"/);
     assert.equal(countMatches(res.text, /id="loadstringCode"/g), 1);
     assert.equal(countMatches(res.text, /id="copyBtn"/g), 1);
@@ -251,6 +251,7 @@ describe('BLOCKER10ZR inventory buttons + clean copy UI', () => {
 
   test('canonical loadstring uses dist path from central constant', () => {
     assert.match(PROTECTED_DIST_RAW_URL, /\/main\/dist\/tracker\.lua$/);
-    assert.equal(CLEAN_TRACKER_LOADSTRING, `loadstring(game:HttpGet("${PROTECTED_DIST_RAW_URL}"))()`);
+    const { PROTECTED_DIST_RAW_URL_CACHE_BUST } = require('../src/fishitTrackerLoadstring');
+    assert.equal(CLEAN_TRACKER_LOADSTRING, `loadstring(game:HttpGet("${PROTECTED_DIST_RAW_URL_CACHE_BUST}"))()`);
   });
 });

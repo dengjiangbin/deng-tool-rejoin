@@ -106,6 +106,15 @@ describe('fishitPlayerStats', () => {
     assert.equal(out.coinProbe.rawValue, '33.44M');
     assert.equal(out.coinProbe.parsedValue, 33440000);
     assert.deepEqual(out.coinProbe.candidateKeys, ['Coins', 'Currencies.Coins']);
+    const withLeader = playerStats.sanitisePlayerStatsDebug({
+      enabled: true,
+      build: 'BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10',
+      coinProbe: {
+        source: 'missing',
+        leaderstatsChildren: [{ name: 'Caught', value: '68,885' }],
+      },
+    });
+    assert.deepEqual(withLeader.coinProbe.leaderstatsChildren, [{ name: 'Caught', value: '68,885' }]);
   });
 
   test('missing coin does not erase totalCaught and rarestFish on merge', () => {

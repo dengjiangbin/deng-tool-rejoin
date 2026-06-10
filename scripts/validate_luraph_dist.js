@@ -46,6 +46,9 @@ if (dist) {
   if (!audit.ok && !audit.missing) {
     errors.push(`secret audit failed: ${audit.hits.join(', ')}`);
   }
+  if (!dist.includes('BLOCKER10ZT3')) {
+    errors.push('dist header must contain BLOCKER10ZT3 build marker');
+  }
 }
 
 if (raw) {
@@ -71,4 +74,5 @@ console.log('DIST_TRACKER_VALIDATION OK');
 console.log('  raw:', rawPath || '(skipped — private source not present)');
 console.log('  dist:', distPath);
 console.log('  dist bytes:', Buffer.byteLength(dist, 'utf8'));
-console.log('  public URL: https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua');
+const { PROTECTED_DIST_RAW_URL_CACHE_BUST } = require('../site/src/fishitTrackerLoadstring');
+console.log('  public URL:', PROTECTED_DIST_RAW_URL_CACHE_BUST);

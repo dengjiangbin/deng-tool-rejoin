@@ -25,8 +25,7 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
     assert.match(tpl, /No inventory data yet for this username/);
     assert.doesNotMatch(tpl, /Awaiting first data/);
     assert.match(tpl, /data-ui-marker="<%= \(typeof debugInventory/);
-    assert.match(tpl, /BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_2026_06_10/);
-    assert.match(tpl, /<!-- BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_2026_06_10 -->/);
+    assert.match(tpl, /BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
   });
 
   test('debug-only proof blocks stay gated behind DEBUG_INVENTORY', () => {
@@ -49,8 +48,8 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
 
   test('mobile CSS keeps ft-card horizontal layout in two-column inventory grid', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-    assert.match(tpl, /@media \(max-width:640px\)[\s\S]*\.ft-card--fish[\s\S]*width:100%/);
+    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+    assert.match(tpl, /@media \(max-width:768px\)[\s\S]*\.ft-card--fish[\s\S]*width:100%/);
     assert.match(tpl, /\.ft-card-icon img[\s\S]*object-fit:contain/);
     assert.match(tpl, /@media \(max-width:280px\)[\s\S]*grid-template-columns:1fr/);
   });
@@ -91,7 +90,8 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
     const appRoot = fs.readFileSync(path.join(__dirname, '..', '..', 'android', 'app', 'src', 'main', 'kotlin', 'my', 'id', 'deng', 'monitor', 'ui', 'AppRoot.kt'), 'utf8');
     assert.match(kt, /\/inventory\?apk=1/);
     assert.match(kt, /InventoryLoadingSkeleton/);
-    assert.match(kt, /Open in website/);
+    assert.doesNotMatch(kt, /Open in website/);
+    assert.doesNotMatch(kt, /Continue in Browser/i);
     assert.doesNotMatch(kt, /Snapshot/i);
     assert.match(appRoot, /NavItem\("inventory"/);
     assert.doesNotMatch(appRoot, /NavItem\("snapshot"/);

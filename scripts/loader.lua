@@ -1,25 +1,18 @@
 -- ================================================================
---  DENG TRACKER — Safe Loader
---  Paste this into Roblox Studio LocalScript (or executor console).
+--  DENG TRACKER — Safe Loader (BLOCKER10ZT3)
+--  Paste into Roblox Studio LocalScript or executor console.
 --
---  This replaces the unsafe bare pattern:
---    loadstring(game:HttpGet("..."))()
---
---  It adds:
---    1. BOM stripping (handles UTF-8 BOM from editor saves)
---    2. Compile-check before calling (no nil-call crashes)
---    3. xpcall runtime traceback (real error, not "Line 1")
---    4. Cache-busting query string (avoids GitHub CDN stale cache)
+--  Canonical dist URL (deng-fishtracker-dist):
+--    https://raw.githubusercontent.com/dengjiangbin/deng-fishtracker-dist/main/dist/tracker.lua
 -- ================================================================
 
-local TRACKER_URL = "https://raw.githubusercontent.com/dengjiangbin/deng-tool-rejoin/main/dist/tracker.lua"
+local LOADER_BUILD = "BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10"
+local TRACKER_URL = "https://raw.githubusercontent.com/dengjiangbin/deng-fishtracker-dist/main/dist/tracker.lua"
+local url = TRACKER_URL .. "?v=" .. LOADER_BUILD
 
--- Cache-bust: append timestamp so GitHub CDN always serves the freshest version.
-local url = TRACKER_URL .. "?v=" .. tostring(os.time())
+print("LOADER_BUILD=" .. LOADER_BUILD)
+print("FETCH_URL=" .. url)
 
-print("[DENG LOADER] Fetching:", url)
-
--- 1. Fetch source safely
 local okFetch, source = pcall(function()
     return game:HttpGet(url)
 end)
@@ -34,27 +27,22 @@ if typeof(source) ~= "string" then
     return
 end
 
-print("[DENG LOADER] Source length:", #source)
-print("[DENG LOADER] Source preview:", string.sub(source, 1, 120))
-
--- 2. Strip UTF-8 BOM (EF BB BF) if present.
---    Without this, loadstring returns nil when the file was saved with BOM,
---    and loadstring(source)() crashes as "attempt to call a nil value".
 source = source:gsub("^\239\187\191", "")
 
--- 3. Compile — check result BEFORE calling.
-local fn, compileErr = loadstring(source)
+local fetchedBuild = source:match("DENG protected tracker dist | ([^\n%]]+)") or "unknown"
+print("FETCHED_TRACKER_BUILD=" .. tostring(fetchedBuild))
 
+if not tostring(fetchedBuild):find("BLOCKER10ZT3", 1, true) then
+    warn("[DENG LOADER] stale dist fetched — expected BLOCKER10ZT3, got:", fetchedBuild)
+end
+
+local fn, compileErr = loadstring(source)
 if typeof(fn) ~= "function" then
     warn("[DENG LOADER] loadstring compile failed:", compileErr)
     return
 end
 
-print("[DENG LOADER] loadstring compiled OK")
-
--- 4. Run with full traceback so any runtime error shows the real location.
 local okRun, runErr = xpcall(fn, debug.traceback)
-
 if not okRun then
     warn("[DENG LOADER] tracker crashed:")
     warn(runErr)

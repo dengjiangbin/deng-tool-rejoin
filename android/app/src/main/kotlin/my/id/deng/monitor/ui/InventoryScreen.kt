@@ -1,8 +1,6 @@
 package my.id.deng.monitor.ui
 
 import android.annotation.SuppressLint
-import android.content.Intent
-import android.net.Uri
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -14,7 +12,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -51,11 +48,7 @@ fun InventoryScreen(api: MonitorApi) {
     val inventoryUrl = remember(api.baseUrl) {
         api.baseUrl.trimEnd('/') + "/inventory?apk=1"
     }
-    val websiteUrl = remember(api.baseUrl) {
-        api.baseUrl.trimEnd('/') + "/inventory"
-    }
 
-    val context = LocalContext.current
     var webLoaded by remember { mutableStateOf(false) }
     var offlineNotice by remember { mutableStateOf<String?>(null) }
 
@@ -77,15 +70,6 @@ fun InventoryScreen(api: MonitorApi) {
                     style = MaterialTheme.typography.bodySmall,
                     color = DengColors.TextMuted,
                 )
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(websiteUrl)))
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Open in website")
-                }
                 offlineNotice?.let { notice ->
                     Spacer(Modifier.height(8.dp))
                     Text(

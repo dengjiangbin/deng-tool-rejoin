@@ -19,7 +19,7 @@ const {
   PUBLIC_TRACKER_GITHUB_REPO,
 } = require('../src/fishitTrackerLoadstring');
 const {
-  BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER,
+  BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_MARKER,
   BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
   BLOCKER10ZQ_CLEAN_DIST_REPO_LIVE_CACHE_REQUEST_PM2_HEALTH_MARKER,
   BLOCKER10ZP_CLEAN_PUBLIC_REPO_HISTORY_PURGE_INVENTORY_COPY_FIX_MARKER,
@@ -40,12 +40,12 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
-  test('build marker is BLOCKER10ZS deploy marker', () => {
+  test('build marker is BLOCKER10ZT3 deploy marker', () => {
     assert.equal(
-      BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER,
-      'BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_2026_06_10',
+      BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_MARKER,
+      'BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10',
     );
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER);
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_MARKER);
     assert.equal(
       BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_MARKER,
       'BLOCKER10ZR_FIX_INVENTORY_BUTTON_BINDINGS_CLEAN_COPY_UI_2026_06_10',
@@ -63,7 +63,8 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
   test('canonical loadstring uses dist path from public repo constant', () => {
     assert.match(PROTECTED_DIST_RAW_URL, new RegExp(`raw\\.githubusercontent\\.com/${PUBLIC_TRACKER_GITHUB_REPO.replace('/', '\\/')}/main/dist/tracker\\.lua`));
     assert.equal(PROTECTED_DIST_REL_PATH, 'dist/tracker.lua');
-    assert.equal(CLEAN_TRACKER_LOADSTRING, `loadstring(game:HttpGet("${PROTECTED_DIST_RAW_URL}"))()`);
+    const { PROTECTED_DIST_RAW_URL_CACHE_BUST } = require('../src/fishitTrackerLoadstring');
+    assert.equal(CLEAN_TRACKER_LOADSTRING, `loadstring(game:HttpGet("${PROTECTED_DIST_RAW_URL_CACHE_BUST}"))()`);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\/main\/tracker\.lua/);
   });
 
@@ -76,7 +77,7 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
 
   test('/inventory renders enabled username input and copy fallback UI', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
-    assert.match(res.text, /BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_2026_06_10/);
+    assert.match(res.text, /BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10/);
     assert.match(res.text, /data-inventory-js="pending"/);
     assert.match(res.text, /id="usernameInput"/);
     assert.doesNotMatch(res.text, /id="usernameInput" disabled/);
@@ -108,7 +109,7 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
     assert.equal(locals.canonicalInventoryPath, '/inventory');
     assert.equal(locals.initialUsername, 'TestUser1');
     assert.equal(locals.trackerLoadstring, CLEAN_TRACKER_LOADSTRING);
-    assert.equal(locals.trackerUiDeployMarker, BLOCKER10ZS_GITHUB_CACHE_REQUEST_AND_TRANSCENDED_STONE_LIVE_IMAGE_MARKER);
+    assert.equal(locals.trackerUiDeployMarker, BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_MARKER);
   });
 
   test('tracker template documents username validation feedback', () => {

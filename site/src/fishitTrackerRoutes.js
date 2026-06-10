@@ -47,7 +47,7 @@ const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
 const snapshotRecovery = require('./fishitSnapshotRecovery');
-const { BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_MARKER, BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZK_BUILD, BLOCKER10ZK_UI_MARKER, BLOCKER10ZJ_BUILD, BLOCKER10ZJ_UI_MARKER, BLOCKER10ZI_BUILD, BLOCKER10ZI_UI_MARKER, BLOCKER10ZH_BUILD, BLOCKER10ZH_UI_MARKER, BLOCKER10ZG_BUILD, BLOCKER10ZG_UI_MARKER, BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_MARKER, BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, EXPECTED_CLIENT_TRACKER_BUILD, BLOCKER10ZK_BUILD, BLOCKER10ZK_UI_MARKER, BLOCKER10ZJ_BUILD, BLOCKER10ZJ_UI_MARKER, BLOCKER10ZI_BUILD, BLOCKER10ZI_UI_MARKER, BLOCKER10ZH_BUILD, BLOCKER10ZH_UI_MARKER, BLOCKER10ZG_BUILD, BLOCKER10ZG_UI_MARKER, BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const trackerRarityStyle = require('./fishitTrackerRarityStyle');
 const fishitStoneDisplayMap = require('./fishitStoneDisplayMap');
 const stoneImageAssets = require('./fishitStoneImageAssets');
@@ -2816,6 +2816,16 @@ function handleUpdateBackpack(req, res) {
     const existing    = liveTrackDB[key];
     const isStatusOnly = type === 'tracker_status';
     const cleanUserId = Number.isFinite(Number(userId)) ? Number(userId) : 0;
+    const incomingBuild = sanitiseTrackerBuild(body.trackerBuild) || existing?.trackerBuild || null;
+    const hadPlayerStats = !!(body.playerStats || body.playerStatsDebug);
+    const uploadDebugBase = {
+      endpoint: req.path,
+      payloadType,
+      username: cleanUser,
+      sessionKey: key,
+      trackerBuild: incomingBuild,
+      hadPlayerStats,
+    };
 
     // ── tracker_status heartbeat ──────────────────────────────────
     // Proves the script is running. Creates the session when it does not yet
@@ -2849,6 +2859,11 @@ function handleUpdateBackpack(req, res) {
       }
       // Store userId→key alias so GET can resolve by userId if needed.
       if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
+      liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
+        ...uploadDebugBase,
+        accepted: true,
+        statusCode: 200,
+      });
       // Server-side log.
       console.log(
         `[fishit-tracker] POST hit route=${req.path} user=${cleanUser} sessionKey=${key}` +
@@ -2877,11 +2892,15 @@ function handleUpdateBackpack(req, res) {
       existing.isOnline = online;
       existing.source   = source !== 'unknown' ? source : existing.source;
       existing.updatedAt = now;
+      liveTrackDB[key] = applyUploadDebugFields(existing, {
+        ...uploadDebugBase,
+        accepted: true,
+        statusCode: 200,
+      });
       return res.status(200).json({ status: 'success', note: 'offline_keep' });
     }
 
     // ── Inventory snapshot ────────────────────────────────────────
-    const incomingBuild = sanitiseTrackerBuild(body.trackerBuild) || existing?.trackerBuild || '';
     const expectsPlayerDataGameItemDb = /BLOCKER10ZL_|BLOCKER10Z[ABC]|PLAYERDATA_GAMEITEMDB/i.test(incomingBuild);
     const isPlayerDataPayload = gameItemDbPublic.detectGameItemDbUpload(body);
     if (expectsPlayerDataGameItemDb && payloadType === 'inventory_snapshot' && !isPlayerDataPayload) {
@@ -2908,6 +2927,11 @@ function handleUpdateBackpack(req, res) {
         playerDataGameItemDbProof: existing?.playerDataGameItemDbProof || null,
       };
       if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
+      liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
+        ...uploadDebugBase,
+        accepted: true,
+        statusCode: 200,
+      });
       console.log(
         `[fishit-tracker] legacy snapshot ignored user=${cleanUser} sessionKey=${key}` +
         ' reason=missing_playerdata_gameitemdb_inventorySource',
@@ -3167,6 +3191,11 @@ function handleUpdateBackpack(req, res) {
     }
     liveTrackDB[key].lastItemCounts = catchDelta.buildItemCountsFromItems(rawItems);
     if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
+    liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
+      ...uploadDebugBase,
+      accepted: true,
+      statusCode: 200,
+    });
 
     const persistBase = `${req.protocol}://${req.get('host')}`;
     persistSessionState(key, persistBase).catch(() => {});
@@ -3199,13 +3228,79 @@ const updateBackpackMiddleware = [
 router.post('/api/fishit-tracker/update-backpack', updateBackpackMiddleware);
 router.post('/api/tracker/update-backpack', updateBackpackMiddleware);
 
-/** Session is live when a heartbeat arrived within the threshold (inventory or status). */
+/** Canonical sync timestamp — heartbeat (lastSeenAt) wins over stale inventory time. */
+function statusTimestampForSession(data) {
+  if (!data) return null;
+  return data.lastSeenAt || data.lastInventoryAt || data.updatedAt || null;
+}
+
+function syncAgeSecondsFromTimestamp(ts) {
+  if (!ts) return null;
+  const age = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  return Number.isFinite(age) && age >= 0 ? age : null;
+}
+
+function buildSyncProof(data, maxAgeMs = 45000) {
+  const statusTimestampUsed = statusTimestampForSession(data);
+  const ageSeconds = syncAgeSecondsFromTimestamp(statusTimestampUsed);
+  const isOnline = ageSeconds != null && ageSeconds * 1000 < maxAgeMs;
+  return {
+    isReceivingLua: !!(data && data.lastUploadReceivedAt),
+    statusTimestampUsed,
+    lastSeenAt: data?.lastSeenAt || null,
+    updatedAt: data?.updatedAt || null,
+    inventoryUpdatedAt: data?.lastInventoryAt || null,
+    playerStatsUpdatedAt: data?.playerStatsUpdatedAt || null,
+    ageSeconds,
+    isOnline,
+    statusColor: isOnline ? 'green' : 'red',
+  };
+}
+
+function buildClientBuildProof(data) {
+  const latestClientBuild = data?.trackerBuild || data?.lastUploadTrackerBuild || null;
+  const expectedClientBuild = EXPECTED_CLIENT_TRACKER_BUILD;
+  const buildMismatch = !!(latestClientBuild && !String(latestClientBuild).includes('BLOCKER10ZT3'));
+  return {
+    latestClientBuild,
+    expectedClientBuild,
+    buildMismatch,
+    mismatchReason: buildMismatch ? 'client_loader_still_executing_old_build' : null,
+  };
+}
+
+function applyUploadDebugFields(session, opts = {}) {
+  const now = new Date().toISOString();
+  const base = session && typeof session === 'object' ? session : {};
+  const patch = {
+    lastUploadReceivedAt: now,
+    lastUploadEndpoint: opts.endpoint || null,
+    lastUploadPayloadType: opts.payloadType || null,
+    lastUploadUsername: opts.username || base.username || null,
+    lastUploadSessionKey: opts.sessionKey || null,
+    lastUploadTrackerBuild: opts.trackerBuild || base.trackerBuild || null,
+    lastUploadHadPlayerStats: !!opts.hadPlayerStats,
+    lastUploadStatusCodeReturned: opts.statusCode != null ? opts.statusCode : null,
+  };
+  if (opts.accepted) {
+    patch.lastUploadAcceptedAt = now;
+    patch.lastUploadRejectedAt = null;
+    patch.lastUploadRejectReason = null;
+  }
+  if (opts.rejected) {
+    patch.lastUploadRejectedAt = now;
+    patch.lastUploadRejectReason = opts.rejectReason || 'rejected';
+  }
+  return { ...base, ...patch };
+}
+
+/** Session is live when a recent accepted sync timestamp is within the threshold. */
 function isSessionLive(data, maxAgeMs = 45000) {
   if (!data) return false;
-  const ts = data.lastSeenAt || data.lastInventoryAt || data.updatedAt;
-  if (!ts) return data.isOnline === true;
+  const ts = statusTimestampForSession(data);
+  if (!ts) return false;
   const age = Date.now() - new Date(ts).getTime();
-  return data.isOnline !== false && Number.isFinite(age) && age >= 0 && age < maxAgeMs;
+  return Number.isFinite(age) && age >= 0 && age < maxAgeMs;
 }
 
 // ── POST /api/tracker/update-catalog ─────────────────────────────
@@ -3446,6 +3541,21 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     lastSeenAt:      data.lastSeenAt || null,
     lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
     lastPayloadType: data.lastPayloadType || null,
+    lastUploadReceivedAt: data.lastUploadReceivedAt || null,
+    lastUploadAcceptedAt: data.lastUploadAcceptedAt || null,
+    lastUploadRejectedAt: data.lastUploadRejectedAt || null,
+    lastUploadRejectReason: data.lastUploadRejectReason || null,
+    lastUploadEndpoint: data.lastUploadEndpoint || null,
+    lastUploadPayloadType: data.lastUploadPayloadType || null,
+    lastUploadUsername: data.lastUploadUsername || null,
+    lastUploadSessionKey: data.lastUploadSessionKey || null,
+    lastUploadTrackerBuild: data.lastUploadTrackerBuild || null,
+    lastUploadHadPlayerStats: data.lastUploadHadPlayerStats === true,
+    lastUploadStatusCodeReturned: data.lastUploadStatusCodeReturned != null
+      ? data.lastUploadStatusCodeReturned
+      : null,
+    syncProof: buildSyncProof(data),
+    ...buildClientBuildProof(data),
     counts: countsEnriched,
     countsRaw,
     countsEnriched,
