@@ -1,0 +1,11 @@
+{
+  "singleHideUsernameIcon": true,
+  "noGuestUi": true,
+  "hasLogout": true,
+  "hasScript": true,
+  "normalizePollPlayerStats": true,
+  "statRefreshCycleProof": true,
+  "pollPipelineIntact": true,
+  "headerTitle": true,
+  "headerSubtitle": true
+}

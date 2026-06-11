@@ -44,6 +44,7 @@ function loadPollSnapshotFns() {
     'formatGroupedCaughtNumber',
     'isTrustedPlayerStats',
     'displayableEntryPlayerStats',
+    'normalizePollPlayerStats',
     'extractPlayerStatsFromPayload',
     'buildLiveSnapshotFromPayload',
     'syncEntryFromLiveSnapshot',
@@ -215,7 +216,7 @@ describe('BLOCKER10ZT9 unified poll pipeline', () => {
     }
 
     assert.deepEqual(seen.map((row) => row.coinsText), ['100', '200', '300']);
-    assert.deepEqual(seen.map((row) => row.totalCaughtText), ['1000', '2.000', '3.000']);
+    assert.deepEqual(seen.map((row) => row.totalCaughtText), ['1.000', '2.000', '3.000']);
     assert.deepEqual(seen.map((row) => row.rarestFishChance), ['1/100', '1/200', '1/300']);
   });
 

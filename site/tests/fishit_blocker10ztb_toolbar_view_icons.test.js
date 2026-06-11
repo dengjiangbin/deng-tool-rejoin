@@ -24,8 +24,9 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZTB toolbar view icons', () => {
-  test('deploy marker points at toolbar view icon build', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTB_TOOLBAR_VIEW_ICONS_MARKER);
+  test('deploy marker points at latest side controls stat refresh build', () => {
+    const { BLOCKER10ZTC_SIDE_CONTROLS_STAT_REFRESH_MARKER } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTC_SIDE_CONTROLS_STAT_REFRESH_MARKER);
   });
 
   test('first 3 view buttons share normalized icon wrapper and sizing rules', () => {

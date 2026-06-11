@@ -40,7 +40,9 @@ describe('BLOCKER10ZTA inventory desktop setup sidebar', () => {
     assert.match(html, /id="hideUsernamesBtn"/);
     assert.match(html, /id="sidebarScriptBtn"/);
     assert.match(html, /inventory-profile-card/);
-    assert.doesNotMatch(html, />Back to DENG Tool</);
+    assert.doesNotMatch(html, />Guest</);
+    assert.doesNotMatch(html, />Sign in</);
+    assert.doesNotMatch(html, /Sign in to sync profile/);
     assert.doesNotMatch(html, /class="nav-list"/);
     assert.doesNotMatch(html, />Dashboard</);
     assert.doesNotMatch(html, />Solver</);
@@ -49,13 +51,11 @@ describe('BLOCKER10ZTA inventory desktop setup sidebar', () => {
     assert.doesNotMatch(html, />Sailor Piece</);
   });
 
-  test('hide username control uses eye when off and crossed-eye when on', () => {
+  test('hide username control uses single icon slot', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /class="inventory-privacy-toggle"[^>]*id="hideUsernamesBtn"/);
-    assert.match(tpl, /data-icon="eye"/);
-    assert.match(tpl, /data-icon="eye-off"/);
-    assert.match(tpl, /if \(eyeIcon\) eyeIcon\.hidden = hideUsernames/);
-    assert.match(tpl, /if \(eyeOffIcon\) eyeOffIcon\.hidden = !hideUsernames/);
+    assert.match(tpl, /id="hideUsernameIcon"/);
+    assert.match(tpl, /HIDE_USERNAME_EYE_OFF_SVG/);
+    assert.doesNotMatch(tpl, /data-icon="eye-off"/);
     assert.doesNotMatch(tpl, /theme-toggle-track/);
   });
 

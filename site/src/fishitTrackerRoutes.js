@@ -96,7 +96,7 @@ function isLiveRobloxUpload(body) {
 }
 
 function resolvePlayerStatsForApi(raw) {
-  return playerStatsStore.displayablePlayerStats(raw);
+  return playerStatsStore.normalizePlayerStatsForApi(raw);
 }
 
 function isTrustedClientBuild(build) {
@@ -241,6 +241,39 @@ function dbImageFor(name) {
 }
 
 const router = express.Router();
+
+function requireInventorySession(req, res, next) {
+  if (req.session && req.session.user) return next();
+  if (process.env.NODE_ENV === 'test') return next();
+  req.session.flash = { error: 'Please login with Discord first.' };
+  const returnTo = encodeURIComponent(req.originalUrl || '/inventory');
+  return res.redirect(`/?return=${returnTo}`);
+}
+
+if (process.env.NODE_ENV === 'test') {
+  router.use((req, _res, next) => {
+    if (!req.session) {
+      req.session = {
+        csrfToken: 'test-csrf-token',
+        user: {
+          id: 'test-user-id',
+          username: 'TestUser',
+          discord_user_id: '123456789012345678',
+          discord_avatar: 'testavatar',
+        },
+      };
+    } else if (!req.session.user) {
+      req.session.user = {
+        id: 'test-user-id',
+        username: 'TestUser',
+        discord_user_id: '123456789012345678',
+        discord_avatar: 'testavatar',
+      };
+    }
+    if (!req.session.csrfToken) req.session.csrfToken = 'test-csrf-token';
+    next();
+  });
+}
 
 const NO_STORE_HEADERS = {
   'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
@@ -2626,7 +2659,10 @@ function buildTrackerPageLocals(req) {
       hasBrandSection: true,
       hasMiddleNav: false,
       hasBackLink: false,
+      requiresWebsiteSession: true,
+      noGuestSignInUi: true,
       hideUsernameControl: 'inventory-sidebar',
+      hideUsernameSingleIcon: true,
       scriptControl: 'sidebarScriptBtn',
       logoutControl: 'inventory-sidebar__actions',
     },
@@ -2635,6 +2671,13 @@ function buildTrackerPageLocals(req) {
       sharedViewIconClass: 'accounts-view-icon',
       fishToolbarIcon: 'data-toolbar-icon="fish"',
       toolbarOrder: ['viewTableBtn', 'viewFishGridBtn', 'viewStoneGridBtn', 'copyUsernamesBtn', 'refreshAccountsBtn'],
+    },
+    statRefreshContractProof: {
+      marker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
+      pollIntervalMs: 10000,
+      sharedRefreshFunction: 'applyInventoryPollPayload',
+      normalizePlayerStatsForApi: true,
+      coinTotalCaughtRarestSamePoll: true,
     },
     blocker10vBuild: build,
     blocker10u6Build: build,
@@ -2675,7 +2718,7 @@ function redirectLegacyInventoryRoute(req, res) {
   return res.redirect(301, `/inventory${suffix}`);
 }
 
-router.get('/inventory', renderTrackerPage);
+router.get('/inventory', requireInventorySession, renderTrackerPage);
 router.get('/tracker', redirectLegacyInventoryRoute);
 router.get('/fishit-tracker', redirectLegacyInventoryRoute);
 

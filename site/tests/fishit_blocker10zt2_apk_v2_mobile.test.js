@@ -30,11 +30,9 @@ describe('BLOCKER10ZT2 APK v2 mobile inventory UX', () => {
     assert.match(gradle, /versionCode\s*=\s*14\b/);
   });
 
-  test('UI deploy marker includes latest toolbar view icon marker', () => {
-    const { BLOCKER10ZTB_TOOLBAR_VIEW_ICONS_MARKER } = require('../src/fishitTrackerBuild');
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTB_TOOLBAR_VIEW_ICONS_MARKER);
-    const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /accounts-view-icon/);
+  test('UI deploy marker includes latest side controls stat refresh marker', () => {
+    const { BLOCKER10ZTC_SIDE_CONTROLS_STAT_REFRESH_MARKER } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTC_SIDE_CONTROLS_STAT_REFRESH_MARKER);
   });
 
   test('APK inventory screen removes Continue in Browser / Open in website CTA', () => {

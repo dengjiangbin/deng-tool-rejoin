@@ -49,14 +49,18 @@ function sanitisePlayerStats(raw) {
   const out = {};
   const coins = finiteNumber(raw.coins);
   if (coins != null) out.coins = Math.max(0, coins);
-  const coinsText = clampText(raw.coinsText, 32);
-  if (coinsText) out.coinsText = coinsText;
-  else if (out.coins != null) out.coinsText = formatCompactStat(out.coins);
   const totalCaught = finiteNumber(raw.totalCaught);
   if (totalCaught != null) out.totalCaught = Math.max(0, totalCaught);
-  const totalCaughtText = clampText(raw.totalCaughtText, 32);
-  if (totalCaughtText) out.totalCaughtText = totalCaughtText;
-  else if (out.totalCaught != null) out.totalCaughtText = formatGroupedStat(out.totalCaught);
+  if (out.coins != null) out.coinsText = formatCompactStat(out.coins);
+  else {
+    const coinsText = clampText(raw.coinsText, 32);
+    if (coinsText) out.coinsText = coinsText;
+  }
+  if (out.totalCaught != null) out.totalCaughtText = formatGroupedStat(out.totalCaught);
+  else {
+    const totalCaughtText = clampText(raw.totalCaughtText, 32);
+    if (totalCaughtText) out.totalCaughtText = totalCaughtText;
+  }
   const rarestFishChance = clampText(raw.rarestFishChance ?? raw.rarestFish, 32);
   if (rarestFishChance) out.rarestFishChance = rarestFishChance;
   const ruin = normaliseProgress(raw.ruin);
@@ -173,15 +177,24 @@ function mergePlayerStats(existing, incoming, opts = {}) {
     if (trustedExisting) return trustedExisting;
     return next;
   }
-  if (!trustedExisting) return next;
+  if (!trustedExisting) {
+    if (next.coins != null) next.coinsText = formatCompactStat(next.coins);
+    if (next.totalCaught != null) next.totalCaughtText = formatGroupedStat(next.totalCaught);
+    return next;
+  }
   const merged = { ...trustedExisting, ...next };
-  if (next.totalCaught != null) {
-    merged.totalCaughtText = formatGroupedStat(merged.totalCaught);
-  }
-  if (next.coins != null) {
-    merged.coinsText = formatCompactStat(merged.coins);
-  }
+  if (merged.coins != null) merged.coinsText = formatCompactStat(merged.coins);
+  if (merged.totalCaught != null) merged.totalCaughtText = formatGroupedStat(merged.totalCaught);
   return merged;
+}
+
+function normalizePlayerStatsForApi(raw) {
+  const s = displayablePlayerStats(raw);
+  if (!s) return null;
+  const out = { ...s };
+  if (out.coins != null) out.coinsText = formatCompactStat(out.coins);
+  if (out.totalCaught != null) out.totalCaughtText = formatGroupedStat(out.totalCaught);
+  return out;
 }
 
 function displayCoins(stats) {
@@ -235,6 +248,7 @@ module.exports = {
   isTrustedPlayerStats,
   isAcceptableIncomingPlayerStats,
   displayablePlayerStats,
+  normalizePlayerStatsForApi,
   displayCoins,
   displayTotalCaught,
   displayRarestFish,
