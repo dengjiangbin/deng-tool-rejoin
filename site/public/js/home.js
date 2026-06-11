@@ -207,7 +207,6 @@
     var liveVisible = 0;
     var platformVisible = 0;
     var fishitVisible = 0;
-    var rejoinVisible = 0;
     var trackedTotal = null;
     var onlineTotal = null;
 
@@ -227,7 +226,7 @@
       if (setStat('discordUsers', publicStats.uniqueUsers)) platformVisible += 1;
       if (setStat('generatedKeys', publicStats.generatedKeys)) platformVisible += 1;
       if (setStat('redeemedKeys', publicStats.redeemedKeys)) platformVisible += 1;
-      if (setSplitDevices(publicStats.activeDevices, publicStats.totalDevices)) rejoinVisible += 1;
+      if (setSplitDevices(publicStats.activeDevices, publicStats.totalDevices)) liveVisible += 1;
     }
 
     if (fishitSummary) {
@@ -249,7 +248,6 @@
     markEmpty('[data-home-live-stats-empty]', liveVisible);
     markEmpty('[data-home-platform-stats-empty]', platformVisible);
     markEmpty('[data-home-fishit-stats-empty]', fishitVisible);
-    markEmpty('[data-home-rejoin-stats-empty]', rejoinVisible);
   }
 
   bindSmoothScroll();
@@ -265,6 +263,5 @@
       markEmpty('[data-home-live-stats-empty]', 0);
       markEmpty('[data-home-platform-stats-empty]', 0);
       markEmpty('[data-home-fishit-stats-empty]', 0);
-      markEmpty('[data-home-rejoin-stats-empty]', 0);
     });
 }());

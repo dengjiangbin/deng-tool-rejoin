@@ -49,14 +49,19 @@ describe('landing stat sources and layout regression', () => {
     }
   });
 
-  test('landing page keeps Rejoin active devices out of Live Network', async () => {
+  test('landing page keeps Active Devices inside Live Network row', async () => {
     const res = await request(app).get('/');
     assert.equal(res.status, 200);
-    assert.match(res.text, /Rejoin Tool Stats/);
+    assert.doesNotMatch(res.text, /Rejoin Tool Stats/);
+    assert.match(res.text, /Live Network/);
     assert.match(res.text, /data-home-stat-card="rejoinActiveDevices"/);
     assert.match(res.text, /Rejoin Tools Running/);
     assert.doesNotMatch(res.text, /data-home-stat-card="activeAgents"/);
     assert.doesNotMatch(res.text, /Tracker Devices Running/);
+    const liveGridMatch = res.text.match(/data-home-live-stats-grid[\s\S]*?<\/div>\s*<p class="deng-home-stats-empty" data-home-live-stats-empty/);
+    assert.ok(liveGridMatch, 'expected Live Network stat grid');
+    assert.match(liveGridMatch[0], /data-home-stat-card="rejoinActiveDevices"/);
+    assert.doesNotMatch(res.text, /data-home-rejoin-stats-grid/);
   });
 
   test('landing stat cards use slower count-up duration config', async () => {

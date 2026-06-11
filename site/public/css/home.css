@@ -432,7 +432,7 @@
 }
 
 .deng-home-stat-grid--live {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .deng-home-stat-grid--platform {
@@ -441,11 +441,6 @@
 
 .deng-home-stat-grid--fishit {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.deng-home-stat-grid--rejoin {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  max-width: 420px;
 }
 
 .deng-home-stat-card {

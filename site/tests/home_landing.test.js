@@ -110,7 +110,7 @@ describe('public home landing page', () => {
     assert.match(res.text, /Platform Stats/);
     assert.match(res.text, /Fish It Stats/);
     assert.match(res.text, /Tracked Players/);
-    assert.match(res.text, /Rejoin Tool Stats/);
+    assert.doesNotMatch(res.text, /Rejoin Tool Stats/);
     assert.match(res.text, /Active Devices/);
     assert.match(res.text, /Rejoin Tools Running/);
     assert.match(res.text, /One platform\. Multiple tools\./);
@@ -118,8 +118,12 @@ describe('public home landing page', () => {
     assert.match(res.text, /href="#home"[^>]*>Home<\/a>/);
     assert.match(res.text, /href="#statistic">Statistic<\/a>/);
     assert.match(res.text, /href="#about">About<\/a>/);
-    assert.match(res.text, /data-home-stat-card="trackedPlayers"/);
-    assert.match(res.text, /data-home-stat-card="onlineNow"/);
+    assert.match(res.text, /data-home-live-stats-grid/);
+    const liveGridMatch = res.text.match(/data-home-live-stats-grid[\s\S]*?<\/div>\s*<p class="deng-home-stats-empty" data-home-live-stats-empty/);
+    assert.ok(liveGridMatch, 'expected Live Network stat grid');
+    assert.match(liveGridMatch[0], /data-home-stat-card="trackedPlayers"/);
+    assert.match(liveGridMatch[0], /data-home-stat-card="onlineNow"/);
+    assert.match(liveGridMatch[0], /data-home-stat-card="rejoinActiveDevices"/);
     assert.match(res.text, /data-home-stat-card="rejoinActiveDevices"/);
     assert.match(res.text, /data-home-stat-card="trackedFishers"/);
     assert.match(res.text, /data-home-stat-card="globalSpecies"/);
