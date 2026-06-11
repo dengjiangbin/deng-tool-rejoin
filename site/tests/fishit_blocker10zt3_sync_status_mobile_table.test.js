@@ -36,13 +36,13 @@ function makeApp() {
 describe('BLOCKER10ZT3 sync status + coin probe + mobile account cards', () => {
   test('UI deploy marker and loader register fix build are wired', () => {
     const {
-      BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_MARKER,
+      SYNC_DURATION_STATS_HOTFIX_MARKER,
       LOADER_REGISTER_LIMIT_FIX_BUILD,
     } = require('../src/fishitTrackerBuild');
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_MARKER);
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, SYNC_DURATION_STATS_HOTFIX_MARKER);
     assert.equal(LOADER_REGISTER_LIMIT_FIX_BUILD, 'LOADER_REGISTER_LIMIT_FIX_2026_06_11');
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_2026_06_11/);
+    assert.match(tpl, /SYNC_DURATION_STATS_HOTFIX_2026_06_11|SYNC_DURATION_STATS_HOTFIX/);
   });
 
   test('frontend uses stats upload timestamps for connection freshness', () => {
