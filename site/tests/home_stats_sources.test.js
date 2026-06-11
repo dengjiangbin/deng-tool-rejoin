@@ -141,4 +141,14 @@ describe('landing stat sources and layout regression', () => {
     assert.match(res.text, /data-count-duration="1200"/);
     assert.doesNotMatch(res.text, /data-count-duration="750"/);
   });
+
+  test('landing page omits removed DENG Tools network section', async () => {
+    const res = await request(app).get('/');
+    assert.doesNotMatch(res.text, /DENG Tools/);
+    assert.doesNotMatch(res.text, /id="tools"/);
+    assert.doesNotMatch(res.text, /deng-home-network-panel/);
+    assert.doesNotMatch(res.text, /deng-home-node-grid/);
+    assert.match(res.text, /id="about"/);
+    assert.match(res.text, /One platform\. Multiple tools\./);
+  });
 });

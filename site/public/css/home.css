@@ -554,129 +554,6 @@
   font-size: 0.92rem;
 }
 
-/* ── Network panel ── */
-.deng-home-section--network {
-  padding-top: 12px;
-}
-
-.deng-home-network-panel {
-  padding: 22px;
-  border-radius: 20px;
-  border: 1px solid var(--public-border);
-  background: var(--public-surface-soft);
-}
-
-.deng-home-network-panel__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
-}
-
-.deng-home-network-panel__title-wrap {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.deng-home-network-panel__icon svg {
-  width: 20px;
-  height: 20px;
-  stroke: var(--public-accent);
-  fill: none;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.deng-home-network-panel__title {
-  margin: 0;
-  font-size: 1.2rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-}
-
-.deng-home-network-panel__status {
-  margin: 0;
-  color: var(--public-muted);
-  font-size: 0.9rem;
-  white-space: nowrap;
-}
-
-.deng-home-network-panel__status strong,
-.deng-home-network-panel__status .is-accent {
-  color: var(--public-accent);
-  font-weight: 700;
-}
-
-.deng-home-node-grid {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.deng-home-node-card {
-  padding: 16px;
-  border-radius: 16px;
-  border: 1px solid var(--public-border);
-  background: rgba(255, 255, 255, 0.02);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.deng-home-node-card--online {
-  border-color: rgba(0, 230, 168, 0.16);
-}
-
-.deng-home-node-card:hover {
-  border-color: rgba(0, 230, 168, 0.28);
-  box-shadow: 0 0 0 1px rgba(0, 230, 168, 0.08);
-}
-
-.deng-home-node-card__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.deng-home-node-card__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--public-muted-2);
-}
-
-.deng-home-node-card--online .deng-home-node-card__dot {
-  background: var(--public-accent);
-  box-shadow: 0 0 10px rgba(0, 230, 168, 0.55);
-}
-
-.deng-home-node-card h3 {
-  margin: 0;
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--public-text);
-}
-
-.deng-home-node-card p {
-  margin: 0 0 12px;
-  color: var(--public-muted);
-  font-size: 0.82rem;
-  line-height: 1.5;
-}
-
-.deng-home-node-link {
-  color: var(--public-text);
-  font-size: 0.82rem;
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.deng-home-node-link:hover {
-  color: var(--public-accent);
-}
-
 /* ── Ecosystem cards ── */
 .deng-home-eco-grid {
   display: grid;
@@ -806,12 +683,6 @@
 }
 
 /* ── Responsive ── */
-@media (max-width: 1024px) {
-  .deng-home-node-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 860px) {
   .deng-home-nav__inner {
     grid-template-columns: 1fr auto;
@@ -863,10 +734,6 @@
     padding-right: 12px;
   }
 
-  .deng-home-node-grid {
-    grid-template-columns: 1fr;
-  }
-
   .deng-home-hero__actions {
     flex-direction: column;
     align-items: stretch;
@@ -874,10 +741,6 @@
 
   .deng-home-btn {
     width: 100%;
-  }
-
-  .deng-home-network-panel__head {
-    flex-direction: column;
   }
 }
 
