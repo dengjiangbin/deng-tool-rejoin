@@ -1,7 +1,13 @@
 (function initHomeLanding() {
   'use strict';
 
-  var NAV_OFFSET = 108;
+  var NAV_OFFSET = (function readNavOffset() {
+    var root = document.querySelector('.deng-home');
+    if (!root || !window.getComputedStyle) return 108;
+    var raw = getComputedStyle(root).getPropertyValue('--deng-home-nav-offset').trim();
+    var n = parseFloat(raw);
+    return Number.isFinite(n) && n > 0 ? n : 108;
+  }());
   var BASE_COUNT_DURATION = 1800;
   var countUp = function() { return window.DengCountUpStats; };
 

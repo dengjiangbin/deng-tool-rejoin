@@ -3,6 +3,7 @@
   color: var(--public-text);
   background: var(--public-bg);
   position: relative;
+  --deng-home-nav-offset: 108px;
 }
 
 .deng-home::before {
@@ -42,29 +43,34 @@
 }
 
 .deng-home-main {
-  padding-top: 108px;
+  padding-top: var(--deng-home-nav-offset);
 }
 
 .deng-home-anchor {
-  scroll-margin-top: 108px;
+  scroll-margin-top: var(--deng-home-nav-offset);
 }
 
 /* ── Navbar ── */
-.deng-home-nav-wrap--fixed {
-  position: fixed;
-  top: 16px;
-  left: 50%;
-  right: auto;
-  width: min(1180px, calc(100% - 40px));
-  transform: translateX(-50%);
-  z-index: 1000;
-  padding: 0;
-  pointer-events: none;
-}
-
 .deng-home-nav-wrap {
   position: relative;
   z-index: 100;
+}
+
+.deng-home-nav-wrap.deng-home-nav-wrap--fixed {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  z-index: 1100;
+  padding: 16px 20px 0;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.deng-home-nav-wrap.deng-home-nav-wrap--fixed .deng-home-nav {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
 }
 
 .deng-home-nav {
@@ -836,13 +842,16 @@
 }
 
 @media (max-width: 640px) {
-  .deng-home-main {
-    padding-top: 132px;
+  .deng-home {
+    --deng-home-nav-offset: 132px;
   }
 
-  .deng-home-nav-wrap--fixed {
+  .deng-home-nav-wrap.deng-home-nav-wrap--fixed {
+    padding: 12px 12px 0;
+  }
+
+  .deng-home-nav-wrap.deng-home-nav-wrap--fixed .deng-home-nav {
     width: calc(100% - 24px);
-    top: 12px;
   }
 
   .hero-word:not(.is-active) .hero-word__text {
