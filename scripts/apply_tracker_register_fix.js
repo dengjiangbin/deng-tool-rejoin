@@ -18,7 +18,7 @@ src = src.replace(/\nend\)\(\)\s*$/, '\n');
 
 src = src.replace(
   /local TRACKER_BUILD = "[^"]+"/,
-  'local TRACKER_BUILD = "LOADER_FIX_REGISTER_LIMIT_2026_06_11"',
+  'local TRACKER_BUILD = "LOADER_REGISTER_LIMIT_FIX_2026_06_11"',
 );
 
 const topLocalFn = (src.match(/^local function /gm) || []).length;

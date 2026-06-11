@@ -14,75 +14,99 @@ process.env.FISHIT_DB_PATH = process.env.FISHIT_DB_PATH || '/nonexistent/deng-fi
 
 const trackerRoutes = require('../src/fishitTrackerRoutes');
 const {
-  LOADER_FIX_REGISTER_LIMIT_BUILD,
+  LOADER_REGISTER_LIMIT_FIX_BUILD,
   MINIMUM_TRACKER_BUILD,
 } = require('../src/fishitTrackerBuild');
 const { CLEAN_TRACKER_LOADSTRING } = require('../src/fishitTrackerLoadstring');
 
-describe('loader register fix + strict connection status', () => {
-  test('minimum tracker build is register-limit fix marker', () => {
-    assert.equal(MINIMUM_TRACKER_BUILD, 'LOADER_FIX_REGISTER_LIMIT_2026_06_11');
-    assert.equal(LOADER_FIX_REGISTER_LIMIT_BUILD, MINIMUM_TRACKER_BUILD);
+const {
+  deriveConnectionStatus,
+  applyUploadSyncSuccess,
+  applyUploadSyncFailure,
+  UPLOAD_INTERVAL_SECONDS,
+  UPLOAD_GRACE_SECONDS,
+} = trackerRoutes;
+
+describe('loader register fix + upload-sync status contract', () => {
+  test('minimum tracker build is LOADER_REGISTER_LIMIT_FIX marker', () => {
+    assert.equal(MINIMUM_TRACKER_BUILD, 'LOADER_REGISTER_LIMIT_FIX_2026_06_11');
+    assert.equal(LOADER_REGISTER_LIMIT_FIX_BUILD, MINIMUM_TRACKER_BUILD);
   });
 
   test('public loader copy uses cache-busted fish-it URL', () => {
-    assert.match(CLEAN_TRACKER_LOADSTRING, /tracker\.lua\?v=LOADER_FIX_REGISTER_LIMIT_2026_06_11/);
+    assert.match(CLEAN_TRACKER_LOADSTRING, /tracker\.lua\?v=LOADER_REGISTER_LIMIT_FIX_2026_06_11/);
   });
 
-  test('green status requires fresh stats upload not heartbeat alone', () => {
+  test('green only within lastSuccessfulUploadAt + interval + grace', () => {
     const now = Date.now();
     const iso = (ms) => new Date(ms).toISOString();
-    const staleHeartbeat = {
+    const fresh = {
       trackerBuild: MINIMUM_TRACKER_BUILD,
-      lastHeartbeatAt: iso(now - 5000),
-      lastSeenAt: iso(now - 5000),
-      lastInventoryAt: iso(now - 120000),
-      playerStatsUpdatedAt: iso(now - 120000),
+      lastSuccessfulUploadAt: iso(now - 5000),
+      intervalSeconds: UPLOAD_INTERVAL_SECONDS,
+      graceSeconds: UPLOAD_GRACE_SECONDS,
     };
-    const st = trackerRoutes.deriveConnectionStatus(staleHeartbeat);
-    assert.equal(st.connectionStatus, 'stale');
-    assert.equal(st.connectionStatusColor, 'yellow');
-    assert.equal(st.connectionStatusMessage, 'Heartbeat only, stats stale');
-    assert.equal(trackerRoutes.isSessionLive(staleHeartbeat), false);
-
-    const freshStats = {
-      trackerBuild: MINIMUM_TRACKER_BUILD,
-      lastHeartbeatAt: iso(now - 5000),
-      lastStatsUploadAt: iso(now - 8000),
-      playerStatsUpdatedAt: iso(now - 8000),
-      lastSnapshotUploadAt: iso(now - 8000),
-      lastInventoryAt: iso(now - 8000),
-    };
-    const live = trackerRoutes.deriveConnectionStatus(freshStats);
+    const live = deriveConnectionStatus(fresh);
+    assert.equal(live.currentStatus, 'green');
     assert.equal(live.connectionStatus, 'live');
-    assert.equal(live.connectionStatusColor, 'green');
-    assert.match(live.connectionStatusMessage, /Fresh stats updated/);
-    assert.equal(trackerRoutes.isSessionLive(freshStats), true);
+    assert.equal(trackerRoutes.isSessionLive(fresh), true);
+
+    const missed = deriveConnectionStatus({
+      ...fresh,
+      lastSuccessfulUploadAt: iso(now - (UPLOAD_INTERVAL_SECONDS + UPLOAD_GRACE_SECONDS + 5) * 1000),
+    });
+    assert.equal(missed.currentStatus, 'red');
+    assert.equal(missed.connectionStatusReason, 'upload_interval_missed');
+    assert.ok(missed.redDurationSeconds >= 0);
   });
 
-  test('outdated loader build is error not green', () => {
+  test('heartbeat alone never turns green', () => {
+    const now = Date.now();
+    const iso = (ms) => new Date(ms).toISOString();
+    const hbOnly = {
+      trackerBuild: MINIMUM_TRACKER_BUILD,
+      lastHeartbeatAt: iso(now - 1000),
+      lastSeenAt: iso(now - 1000),
+    };
+    const st = deriveConnectionStatus(hbOnly);
+    assert.equal(st.currentStatus, 'red');
+    assert.notEqual(st.connectionStatus, 'live');
+    assert.equal(trackerRoutes.isSessionLive(hbOnly), false);
+  });
+
+  test('outdated loader build stays red even with recent upload timestamp', () => {
     const now = Date.now();
     const iso = (ms) => new Date(ms).toISOString();
     const old = {
-      trackerBuild: 'NEW_FISH_IT_ONLY_2026_06_11',
-      lastHeartbeatAt: iso(now - 1000),
-      lastStatsUploadAt: iso(now - 1000),
+      trackerBuild: 'LOADER_FIX_REGISTER_LIMIT_2026_06_11',
+      lastSuccessfulUploadAt: iso(now - 1000),
     };
-    const st = trackerRoutes.deriveConnectionStatus(old);
-    assert.equal(st.connectionStatus, 'error');
+    const st = deriveConnectionStatus(old);
+    assert.equal(st.currentStatus, 'red');
     assert.equal(st.connectionStatusReason, 'outdated_loader');
-    assert.equal(st.connectionStatusMessage, 'Outdated cached loader running');
   });
 
-  test('register-limit loader error surfaces explicit message', () => {
+  test('success clears redSince; failure sets redSince; recovery goes green', () => {
+    const now = new Date().toISOString();
+    let session = applyUploadSyncFailure({}, now, 'interval_upload_failed');
+    assert.equal(session.currentStatus, 'red');
+    assert.ok(session.redSince);
+
+    session = applyUploadSyncSuccess(session, now, { payloadHash: 'abc123' });
+    assert.equal(session.currentStatus, 'green');
+    assert.equal(session.redSince, null);
+    assert.ok(session.lastSuccessfulUploadAt);
+  });
+
+  test('register-limit loader error surfaces red status', () => {
     const now = Date.now();
-    const st = trackerRoutes.deriveConnectionStatus({
+    const st = deriveConnectionStatus({
       trackerBuild: MINIMUM_TRACKER_BUILD,
       lastLoaderErrorAt: new Date(now - 1000).toISOString(),
       lastLoaderErrorMessage: 'Out of local registers when trying to allocate main: exceeded limit 200',
+      redSince: new Date(now - 1000).toISOString(),
     });
-    assert.equal(st.connectionStatus, 'error');
+    assert.equal(st.currentStatus, 'red');
     assert.equal(st.connectionStatusReason, 'loader_register_limit');
-    assert.equal(st.connectionStatusMessage, 'Loader failed: register limit exceeded');
   });
 });

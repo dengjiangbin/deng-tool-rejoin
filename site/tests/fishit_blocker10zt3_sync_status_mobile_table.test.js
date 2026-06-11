@@ -37,10 +37,10 @@ describe('BLOCKER10ZT3 sync status + coin probe + mobile account cards', () => {
   test('UI deploy marker and loader register fix build are wired', () => {
     const {
       BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_MARKER,
-      LOADER_FIX_REGISTER_LIMIT_BUILD,
+      LOADER_REGISTER_LIMIT_FIX_BUILD,
     } = require('../src/fishitTrackerBuild');
     assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_MARKER);
-    assert.equal(LOADER_FIX_REGISTER_LIMIT_BUILD, 'LOADER_FIX_REGISTER_LIMIT_2026_06_11');
+    assert.equal(LOADER_REGISTER_LIMIT_FIX_BUILD, 'LOADER_REGISTER_LIMIT_FIX_2026_06_11');
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     assert.match(tpl, /BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_2026_06_11/);
   });
@@ -48,9 +48,8 @@ describe('BLOCKER10ZT3 sync status + coin probe + mobile account cards', () => {
   test('frontend uses stats upload timestamps for connection freshness', () => {
     const source = fs.readFileSync(SOURCE_PATH, 'utf8');
     const js = fs.readFileSync(INVENTORY_JS, 'utf8');
-    assert.match(source, /function statsSyncTimestamp/);
-    assert.match(js, /function statsSyncTimestamp/);
-    assert.match(js, /connectionStatus/);
+    assert.match(js, /function isEntryStatusGreen/);
+    assert.match(js, /currentStatus/);
     assert.match(js, /cache: 'no-store'/);
   });
 
@@ -90,7 +89,7 @@ describe('BLOCKER10ZT3 sync status + coin probe + mobile account cards', () => {
         username,
         userId: 4421,
         isOnline: true,
-        trackerBuild: 'LOADER_FIX_REGISTER_LIMIT_2026_06_11',
+        trackerBuild: 'LOADER_REGISTER_LIMIT_FIX_2026_06_11',
         phase: 'live',
       })
       .expect(200);
@@ -105,26 +104,22 @@ describe('BLOCKER10ZT3 sync status + coin probe + mobile account cards', () => {
     assert.equal(debug.body.lastUploadRejectReason, null);
     assert.equal(debug.body.lastUploadPayloadType, 'tracker_status');
     assert.equal(debug.body.syncProof.isOnline, false);
-    assert.equal(debug.body.syncProof.statusColor, 'yellow');
-    assert.equal(debug.body.syncProof.connectionStatus, 'stale');
+    assert.equal(debug.body.syncProof.currentStatus, 'red');
+    assert.equal(debug.body.syncProof.statusColor, 'red');
   });
 
-  test('heartbeat alone stays stale when inventory upload is old', () => {
+  test('heartbeat alone stays red when no successful upload exists', () => {
     const { deriveConnectionStatus } = require('../src/fishitTrackerRoutes');
     const now = Date.now();
-    const stale = new Date(now - 3600_000).toISOString();
     const freshHb = new Date(now - 1000).toISOString();
     const st = deriveConnectionStatus({
-      trackerBuild: 'LOADER_FIX_REGISTER_LIMIT_2026_06_11',
+      trackerBuild: 'LOADER_REGISTER_LIMIT_FIX_2026_06_11',
       lastHeartbeatAt: freshHb,
       lastSeenAt: freshHb,
-      lastInventoryAt: stale,
-      lastStatsUploadAt: stale,
-      lastSnapshotUploadAt: stale,
     });
-    assert.equal(st.connectionStatus, 'stale');
-    assert.equal(st.connectionStatusColor, 'yellow');
-    assert.equal(st.connectionStatusMessage, 'Heartbeat only, stats stale');
+    assert.equal(st.currentStatus, 'red');
+    assert.equal(st.connectionStatusColor, 'red');
+    assert.notEqual(st.connectionStatus, 'live');
   });
 
   test('missing coins does not force offline when sync is fresh', async () => {
@@ -184,7 +179,7 @@ describe('BLOCKER10ZT3 sync status + coin probe + mobile account cards', () => {
     if (!fs.existsSync(RAW_LUA)) return;
     const raw = fs.readFileSync(RAW_LUA, 'utf8');
     assert.match(raw, /leaderstatsChildren = collectLeaderstatsChildren\(\)/);
-    assert.match(raw, /LOADER_FIX_REGISTER_LIMIT_2026_06_11/);
+    assert.match(raw, /LOADER_REGISTER_LIMIT_FIX_2026_06_11/);
     assert.match(raw, /print\("TRACKER_BUILD=" \.\. TRACKER_BUILD\)/);
     assert.match(raw, /print\("UPLOAD_URL=" \.\. tostring\(opts\.url or TRACKER_URL\)\)/);
     assert.match(raw, /DASHBOARD_SEND tracker_status/);

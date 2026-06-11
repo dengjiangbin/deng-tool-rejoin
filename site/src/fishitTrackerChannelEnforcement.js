@@ -71,7 +71,8 @@ function isLegacyTrackerBuild(build) {
   if (!build) return true;
   const s = String(build);
   if (s === MINIMUM_TRACKER_BUILD) return false;
-  if (s.includes('LOADER_FIX_REGISTER_LIMIT')) return false;
+  if (s.includes('LOADER_REGISTER_LIMIT_FIX')) return false;
+  if (s.includes('LOADER_FIX_REGISTER_LIMIT')) return true;
   if (s.includes('NEW_FISH_IT_ONLY')) return true;
   return LEGACY_TRACKER_BUILD_PATTERNS.some((re) => re.test(s));
 }

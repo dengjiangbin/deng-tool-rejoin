@@ -4,4 +4,4 @@
 --    https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua
 --
 --  One-line executor:
-loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua?v=LOADER_FIX_REGISTER_LIMIT_2026_06_11"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua?v=LOADER_REGISTER_LIMIT_FIX_2026_06_11"))()

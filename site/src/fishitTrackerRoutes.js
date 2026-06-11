@@ -32,6 +32,7 @@ const express   = require('express');
 const rateLimit = require('express-rate-limit');
 const path      = require('path');
 const fs        = require('fs');
+const crypto    = require('crypto');
 const { execFileSync } = require('child_process');
 
 const catalogStore = require('./fishitCatalogStore');
@@ -117,7 +118,7 @@ function resolvePlayerStatsForApi(raw) {
 function isTrustedClientBuild(build) {
   if (!build) return false;
   const s = String(build);
-  return s === MINIMUM_TRACKER_BUILD || s.includes('LOADER_FIX_REGISTER_LIMIT');
+  return s === MINIMUM_TRACKER_BUILD || s.includes('LOADER_REGISTER_LIMIT_FIX');
 }
 
 function buildPlayerStatsProof(raw, data, nowFallback) {
@@ -3094,6 +3095,14 @@ function handleUpdateBackpack(req, res) {
         liveTrackDB[key].lastLoaderErrorAt = now;
         liveTrackDB[key].lastLoaderErrorMessage = String(loaderErr.errorMessage || '').slice(0, 500);
         liveTrackDB[key].lastLoaderErrorPhase = loaderErr.phase || null;
+        liveTrackDB[key] = applyUploadSyncFailure(liveTrackDB[key], now, loaderErr.errorMessage || 'loader_error');
+      }
+      if (body.uploadFailed === true || body.syncFailed === true) {
+        liveTrackDB[key] = applyUploadSyncFailure(
+          liveTrackDB[key],
+          now,
+          body.failureReason || body.failReason || body.lastFailureReason || 'upload_failed',
+        );
       }
       if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
         liveTrackDB[key].unresolvedDiagnostics = body.unresolvedDiagnostics.slice(0, 30);
@@ -3114,6 +3123,7 @@ function handleUpdateBackpack(req, res) {
         ` userId=${cleanUserId} payloadType=tracker_status accepted=0 ok=true` +
         ` lastSeenAt=${now} lastInventoryAt=${liveTrackDB[key].lastInventoryAt || 'n/a'} online=${online}`
       );
+      const conn = deriveConnectionStatus(liveTrackDB[key]);
       return res.status(200).json({
         ok: true,
         status: 'success',
@@ -3122,9 +3132,9 @@ function handleUpdateBackpack(req, res) {
         phase: liveTrackDB[key].phase,
         lastSeenAt: now,
         lastInventoryAt: liveTrackDB[key].lastInventoryAt || null,
-        online: deriveConnectionStatus(liveTrackDB[key]).connectionStatus === 'live',
-        connectionStatus: deriveConnectionStatus(liveTrackDB[key]).connectionStatus,
-        connectionStatusMessage: deriveConnectionStatus(liveTrackDB[key]).connectionStatusMessage,
+        online: conn.currentStatus === 'green',
+        currentStatus: conn.currentStatus,
+        connectionStatus: conn.connectionStatus,
         serverTime: now,
         heartbeatAccepted: true,
       });
@@ -3448,6 +3458,14 @@ function handleUpdateBackpack(req, res) {
       accepted: true,
       statusCode: 200,
     });
+    liveTrackDB[key] = applyUploadSyncSuccess(liveTrackDB[key], now, {
+      lastStatsUpdatedAt: liveTrackDB[key].lastStatsUploadAt
+        || liveTrackDB[key].playerStatsUpdatedAt
+        || now,
+      payloadHash: computeUploadPayloadHash(body, acceptedCount),
+      intervalSeconds: body.intervalSeconds || body.syncIntervalSeconds,
+      loaderOutdated: !!(incomingBuild && incomingBuild !== EXPECTED_CLIENT_TRACKER_BUILD),
+    });
 
     const persistBase = `${req.protocol}://${req.get('host')}`;
     persistSessionState(key, persistBase).catch(() => {});
@@ -3698,12 +3716,12 @@ function syncAgeSecondsFromTimestamp(ts) {
 
 function buildSyncProof(data, maxAgeMs = STATS_FRESH_MAX_MS) {
   const status = deriveConnectionStatus(data);
-  const statusTimestampUsed = statsUploadTimestamp(data) || statusTimestampForSession(data);
+  const statusTimestampUsed = data?.lastSuccessfulUploadAt || statsUploadTimestamp(data) || statusTimestampForSession(data);
   const ageSeconds = syncAgeSecondsFromTimestamp(statusTimestampUsed);
   return {
     isReceivingLua: !!(data && data.lastUploadReceivedAt),
     statusTimestampUsed,
-    statsUploadTimestampUsed: statsUploadTimestamp(data),
+    statsUploadTimestampUsed: data?.lastSuccessfulUploadAt || statsUploadTimestamp(data),
     lastSeenAt: data?.lastSeenAt || null,
     lastHeartbeatAt: data?.lastHeartbeatAt || null,
     updatedAt: data?.updatedAt || null,
@@ -3711,13 +3729,21 @@ function buildSyncProof(data, maxAgeMs = STATS_FRESH_MAX_MS) {
     lastSnapshotUploadAt: data?.lastSnapshotUploadAt || null,
     lastStatsUploadAt: data?.lastStatsUploadAt || null,
     playerStatsUpdatedAt: data?.playerStatsUpdatedAt || null,
+    lastSuccessfulUploadAt: data?.lastSuccessfulUploadAt || null,
+    lastUploadAttemptAt: data?.lastUploadAttemptAt || null,
+    lastUploadFailedAt: data?.lastUploadFailedAt || null,
+    lastFailureReason: data?.lastFailureReason || null,
+    redSince: status.redSince || null,
+    redDurationSeconds: status.redDurationSeconds != null ? status.redDurationSeconds : null,
+    currentStatus: status.currentStatus,
     ageSeconds,
-    isOnline: status.connectionStatus === 'live',
+    isOnline: status.currentStatus === 'green',
     statusColor: status.connectionStatusColor,
     connectionStatus: status.connectionStatus,
     connectionStatusReason: status.connectionStatusReason,
-    connectionStatusMessage: status.connectionStatusMessage,
     statsFreshMaxMs: maxAgeMs,
+    intervalSeconds: status.intervalSeconds,
+    graceSeconds: status.graceSeconds,
   };
 }
 
@@ -3780,112 +3806,170 @@ function statsUploadTimestamp(data) {
   return best;
 }
 
-const STATS_FRESH_MAX_MS = 30000;
+const UPLOAD_INTERVAL_SECONDS = 10;
+const UPLOAD_GRACE_SECONDS = 5;
+const LOADER_ERROR_FRESH_MAX_MS = 120000;
+
+function computeUploadPayloadHash(body, itemCount) {
+  try {
+    const digest = crypto.createHash('sha256');
+    digest.update(String(itemCount || 0));
+    digest.update('|');
+    digest.update(String(body?.playerStats?.totalCaught ?? ''));
+    digest.update('|');
+    digest.update(String(body?.playerStats?.coins ?? ''));
+    digest.update('|');
+    digest.update(String(body?.trackerBuild ?? ''));
+    return digest.digest('hex').slice(0, 16);
+  } catch {
+    return null;
+  }
+}
+
+function applyUploadSyncSuccess(session, now, opts = {}) {
+  const intervalSeconds = Number(opts.intervalSeconds) > 0
+    ? Number(opts.intervalSeconds)
+    : (Number(session?.intervalSeconds) > 0 ? Number(session.intervalSeconds) : UPLOAD_INTERVAL_SECONDS);
+  const graceSeconds = Number(opts.graceSeconds) >= 0
+    ? Number(opts.graceSeconds)
+    : (Number(session?.graceSeconds) >= 0 ? Number(session.graceSeconds) : UPLOAD_GRACE_SECONDS);
+  return {
+    ...(session || {}),
+    currentStatus: 'green',
+    lastSuccessfulUploadAt: now,
+    lastStatsUpdatedAt: opts.lastStatsUpdatedAt || session?.lastStatsUpdatedAt || now,
+    lastUploadAttemptAt: now,
+    lastStatusChangeAt: now,
+    redSince: null,
+    lastFailureReason: null,
+    lastUploadFailedAt: null,
+    intervalSeconds,
+    graceSeconds,
+    lastPayloadHash: opts.payloadHash || session?.lastPayloadHash || null,
+    expectedLoaderBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+    loaderOutdated: opts.loaderOutdated === true,
+  };
+}
+
+function applyUploadSyncFailure(session, now, reason) {
+  const patch = {
+    currentStatus: 'red',
+    lastUploadAttemptAt: now,
+    lastUploadFailedAt: now,
+    lastFailureReason: String(reason || 'upload_failed').slice(0, 240),
+    lastStatusChangeAt: now,
+  };
+  if (!session?.redSince) patch.redSince = now;
+  return { ...(session || {}), ...patch };
+}
+
+const STATS_FRESH_MAX_MS = (UPLOAD_INTERVAL_SECONDS + UPLOAD_GRACE_SECONDS) * 1000;
 const HEARTBEAT_FRESH_MAX_MS = 45000;
 
 function deriveConnectionStatus(data) {
+  const intervalSeconds = Number(data?.intervalSeconds) > 0
+    ? Number(data.intervalSeconds)
+    : UPLOAD_INTERVAL_SECONDS;
+  const graceSeconds = Number(data?.graceSeconds) >= 0
+    ? Number(data.graceSeconds)
+    : UPLOAD_GRACE_SECONDS;
   const expectedLoaderBuild = EXPECTED_CLIENT_TRACKER_BUILD;
+  const loaderBuild = data?.trackerBuild || data?.lastUploadTrackerBuild || null;
+  const lastSuccessfulUploadAt = data?.lastSuccessfulUploadAt || null;
+  const redSinceStored = data?.redSince || null;
+
   const base = {
     expectedLoaderBuild,
-    lastLoaderBuild: data?.trackerBuild || data?.lastUploadTrackerBuild || null,
+    loaderBuild,
+    lastLoaderBuild: loaderBuild,
+    intervalSeconds,
+    graceSeconds,
+    lastSuccessfulUploadAt,
+    lastUploadAttemptAt: data?.lastUploadAttemptAt || null,
+    lastUploadFailedAt: data?.lastUploadFailedAt || null,
+    lastFailureReason: data?.lastFailureReason || null,
+    lastStatusChangeAt: data?.lastStatusChangeAt || null,
+    lastStatsUpdatedAt: data?.lastStatsUpdatedAt || data?.playerStatsUpdatedAt || null,
+    lastPayloadHash: data?.lastPayloadHash || null,
+    redSince: redSinceStored,
+    currentStatus: 'red',
+    loaderOutdated: !!(loaderBuild && loaderBuild !== expectedLoaderBuild),
     lastHeartbeatAt: data?.lastHeartbeatAt || data?.lastSeenAt || null,
     lastSnapshotUploadAt: data?.lastSnapshotUploadAt || data?.lastInventoryAt || null,
-    lastStatsUploadAt: data?.lastStatsUploadAt || data?.playerStatsUpdatedAt || null,
-    lastSuccessfulUploadAt: data?.lastSuccessfulUploadAt || data?.lastUploadAcceptedAt || null,
+    lastStatsUploadAt: data?.lastStatsUploadAt || null,
     lastLoaderErrorAt: data?.lastLoaderErrorAt || null,
     lastLoaderErrorMessage: data?.lastLoaderErrorMessage || null,
     lastLoaderErrorPhase: data?.lastLoaderErrorPhase || null,
   };
 
-  if (!data) {
+  const finishRed = (reason, redStart, extra = {}) => {
+    const redSince = redStart || redSinceStored || data?.lastUploadFailedAt || null;
     return {
       ...base,
-      connectionStatus: 'offline',
+      ...extra,
+      currentStatus: 'red',
+      connectionStatus: extra.connectionStatus || 'offline',
       connectionStatusColor: 'red',
-      connectionStatusReason: 'no_session',
-      connectionStatusMessage: 'Offline',
+      connectionStatusReason: reason,
+      redSince,
+      redDurationSeconds: syncAgeSecondsFromTimestamp(redSince),
       statsFresh: false,
     };
+  };
+
+  if (!data) {
+    return finishRed('no_session', null, { connectionStatus: 'offline' });
   }
 
-  const build = base.lastLoaderBuild;
-  if (build && !isTrustedClientBuild(build)) {
-    return {
-      ...base,
+  if (loaderBuild && !isTrustedClientBuild(loaderBuild)) {
+    return finishRed('outdated_loader', redSinceStored || data?.lastUploadFailedAt || data?.updatedAt, {
       connectionStatus: 'error',
-      connectionStatusColor: 'red',
-      connectionStatusReason: 'outdated_loader',
-      connectionStatusMessage: 'Outdated cached loader running',
-      statsFresh: false,
-    };
+      loaderOutdated: true,
+    });
   }
 
   if (base.lastLoaderErrorAt && base.lastLoaderErrorMessage) {
     const errAge = Date.now() - new Date(base.lastLoaderErrorAt).getTime();
-    if (Number.isFinite(errAge) && errAge >= 0 && errAge < HEARTBEAT_FRESH_MAX_MS) {
-      const msg = String(base.lastLoaderErrorMessage);
-      const registerFail = /register|Exceeded limit 200/i.test(msg);
-      return {
-        ...base,
-        connectionStatus: 'error',
-        connectionStatusColor: 'red',
-        connectionStatusReason: registerFail ? 'loader_register_limit' : 'loader_runtime_error',
-        connectionStatusMessage: registerFail
-          ? 'Loader failed: register limit exceeded'
-          : `Loader error: ${msg.slice(0, 80)}`,
-        statsFresh: false,
-      };
+    if (Number.isFinite(errAge) && errAge >= 0 && errAge < LOADER_ERROR_FRESH_MAX_MS) {
+      const registerFail = /register|Exceeded limit 200/i.test(String(base.lastLoaderErrorMessage));
+      return finishRed(
+        registerFail ? 'loader_register_limit' : 'loader_runtime_error',
+        redSinceStored || base.lastLoaderErrorAt,
+        { connectionStatus: 'error' },
+      );
     }
   }
 
-  const statsTs = statsUploadTimestamp(data);
-  const statsAgeMs = statsTs ? Date.now() - new Date(statsTs).getTime() : Infinity;
-  if (build && isTrustedClientBuild(build) && statsTs
-    && Number.isFinite(statsAgeMs) && statsAgeMs >= 0 && statsAgeMs < STATS_FRESH_MAX_MS) {
-    const secs = Math.floor(statsAgeMs / 1000);
+  if (!lastSuccessfulUploadAt) {
+    return finishRed('no_successful_upload', redSinceStored || data?.lastUploadAttemptAt);
+  }
+
+  const successMs = new Date(lastSuccessfulUploadAt).getTime();
+  const deadlineMs = successMs + (intervalSeconds + graceSeconds) * 1000;
+  const nowMs = Date.now();
+
+  if (nowMs <= deadlineMs) {
     return {
       ...base,
+      currentStatus: 'green',
       connectionStatus: 'live',
       connectionStatusColor: 'green',
-      connectionStatusReason: 'fresh_stats_upload',
-      connectionStatusMessage: `Fresh stats updated ${secs}s ago`,
-      lastStatsUpdatedAt: statsTs,
+      connectionStatusReason: 'fresh_upload',
+      redSince: null,
+      redDurationSeconds: 0,
       statsFresh: true,
-      statsAgeSeconds: secs,
     };
   }
 
-  const hbTs = base.lastHeartbeatAt;
-  const hbAgeMs = hbTs ? Date.now() - new Date(hbTs).getTime() : Infinity;
-  if (Number.isFinite(hbAgeMs) && hbAgeMs >= 0 && hbAgeMs < HEARTBEAT_FRESH_MAX_MS) {
-    return {
-      ...base,
-      connectionStatus: 'stale',
-      connectionStatusColor: 'yellow',
-      connectionStatusReason: 'heartbeat_only_stats_stale',
-      connectionStatusMessage: 'Heartbeat only, stats stale',
-      statsFresh: false,
-    };
-  }
-
-  return {
-    ...base,
-    connectionStatus: 'offline',
-    connectionStatusColor: 'red',
-    connectionStatusReason: 'no_recent_signal',
-    connectionStatusMessage: 'Offline',
-    statsFresh: false,
-  };
+  return finishRed(
+    'upload_interval_missed',
+    redSinceStored || new Date(deadlineMs).toISOString(),
+  );
 }
 
-/** Session is live (green) only when fresh stats/inventory upload succeeded recently. */
-function isSessionLive(data, maxAgeMs = STATS_FRESH_MAX_MS) {
-  const status = deriveConnectionStatus(data);
-  if (status.connectionStatus !== 'live') return false;
-  const statsTs = statsUploadTimestamp(data);
-  if (!statsTs) return false;
-  const age = Date.now() - new Date(statsTs).getTime();
-  return Number.isFinite(age) && age >= 0 && age < maxAgeMs;
+/** Session is live (green) only when a recent successful item/stats upload is within interval+grace. */
+function isSessionLive(data) {
+  return deriveConnectionStatus(data).currentStatus === 'green';
 }
 
 function isSessionHeartbeatRecent(data, maxAgeMs = HEARTBEAT_FRESH_MAX_MS) {
@@ -4141,20 +4225,29 @@ async function handleGetBackpack(req, res) {
     lastHeartbeatAt: data.lastHeartbeatAt || data.lastSeenAt || null,
     lastSnapshotUploadAt: data.lastSnapshotUploadAt || data.lastInventoryAt || null,
     lastStatsUploadAt: data.lastStatsUploadAt || data.playerStatsUpdatedAt || null,
-    lastSuccessfulUploadAt: data.lastSuccessfulUploadAt || data.lastUploadAcceptedAt || null,
+    lastSuccessfulUploadAt: data.lastSuccessfulUploadAt || null,
     lastLoaderErrorAt: data.lastLoaderErrorAt || null,
     lastLoaderErrorMessage: data.lastLoaderErrorMessage || null,
     expectedLoaderBuild: EXPECTED_CLIENT_TRACKER_BUILD,
     lastLoaderBuild: data.trackerBuild || data.lastUploadTrackerBuild || null,
-    isOnline:        connection.connectionStatus === 'live',
-    connectionLive:  connection.connectionStatus === 'live',
+    isOnline:        connection.currentStatus === 'green',
+    connectionLive:  connection.currentStatus === 'green',
+    currentStatus:   connection.currentStatus,
     connectionStatus: connection.connectionStatus,
     connectionStatusColor: connection.connectionStatusColor,
     connectionStatusReason: connection.connectionStatusReason,
-    connectionStatusMessage: connection.connectionStatusMessage,
     lastStatsUpdatedAt: connection.lastStatsUpdatedAt || statsUploadTimestamp(data),
     statsFresh: connection.statsFresh === true,
-    dataStale:       connection.connectionStatus === 'stale'
+    redSince: connection.redSince || null,
+    redDurationSeconds: connection.redDurationSeconds != null ? connection.redDurationSeconds : null,
+    intervalSeconds: connection.intervalSeconds,
+    graceSeconds: connection.graceSeconds,
+    lastUploadAttemptAt: data.lastUploadAttemptAt || null,
+    lastUploadFailedAt: data.lastUploadFailedAt || null,
+    lastFailureReason: data.lastFailureReason || null,
+    lastStatusChangeAt: data.lastStatusChangeAt || null,
+    lastPayloadHash: data.lastPayloadHash || null,
+    dataStale:       connection.currentStatus !== 'green'
       || !!(publicFish.dataStale || !connection.statsFresh),
     lastGoodFishPreserved: !!(publicFish.lastGoodFishPreserved || data.lastGoodFishPreserved),
     lastGoodPublicFishCount: data.lastGoodPublicFishCount || publicFish.fishItems.length || 0,
@@ -4468,6 +4561,10 @@ module.exports.resolveServerCommit = resolveServerCommit;
 module.exports.isSessionLive = isSessionLive;
 module.exports.isSessionHeartbeatRecent = isSessionHeartbeatRecent;
 module.exports.deriveConnectionStatus = deriveConnectionStatus;
+module.exports.applyUploadSyncSuccess = applyUploadSyncSuccess;
+module.exports.applyUploadSyncFailure = applyUploadSyncFailure;
+module.exports.UPLOAD_INTERVAL_SECONDS = UPLOAD_INTERVAL_SECONDS;
+module.exports.UPLOAD_GRACE_SECONDS = UPLOAD_GRACE_SECONDS;
 module.exports.buildPlayerStatsProof = buildPlayerStatsProof;
 module.exports.buildPublicFishFields = buildPublicFishFields;
 module.exports.buildPublicLegacyCounts = buildPublicLegacyCounts;

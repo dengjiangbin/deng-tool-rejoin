@@ -38,18 +38,18 @@ describe('BLOCKER10ZT5A UI stats + indicator regression', () => {
     assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Last sync/);
   });
 
-  test('fresh inventory timestamp marks session live even when heartbeat is stale', () => {
+  test('fresh successful upload marks session live even when heartbeat is stale', () => {
     const now = Date.now();
     const staleHeartbeat = new Date(now - 120_000).toISOString();
-    const freshInventory = new Date(now - 5_000).toISOString();
+    const freshUpload = new Date(now - 5_000).toISOString();
     const session = {
-      trackerBuild: 'LOADER_FIX_REGISTER_LIMIT_2026_06_11',
+      trackerBuild: 'LOADER_REGISTER_LIMIT_FIX_2026_06_11',
       lastSeenAt: staleHeartbeat,
       lastHeartbeatAt: staleHeartbeat,
-      lastInventoryAt: freshInventory,
-      lastSnapshotUploadAt: freshInventory,
-      lastStatsUploadAt: freshInventory,
-      updatedAt: freshInventory,
+      lastSuccessfulUploadAt: freshUpload,
+      lastStatsUpdatedAt: freshUpload,
+      intervalSeconds: 10,
+      graceSeconds: 5,
     };
     assert.equal(isSessionLive(session), true);
   });
@@ -65,7 +65,7 @@ describe('BLOCKER10ZT5A UI stats + indicator regression', () => {
         username,
         userId: 99101,
         isOnline: true,
-        trackerBuild: 'LOADER_FIX_REGISTER_LIMIT_2026_06_11',
+        trackerBuild: 'LOADER_REGISTER_LIMIT_FIX_2026_06_11',
         fishItems: [{ itemId: '1', name: 'Clownfish', quantity: 2, source: 'playerdata_gameitemdb' }],
         playerStats: {
           coins: 1200,

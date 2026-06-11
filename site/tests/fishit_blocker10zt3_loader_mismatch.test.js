@@ -43,7 +43,7 @@ describe('BLOCKER10ZT3 loader/dist mismatch fix', () => {
     assert.equal(PUBLIC_TRACKER_GITHUB_REPO, CLEAN_PUBLIC_TRACKER_GITHUB_REPO);
     assert.match(PROTECTED_DIST_RAW_URL, /dengjiangbin\/fish-it\/main\/tracker\.lua$/);
     assert.equal(EXPECTED_CLIENT_TRACKER_BUILD, LOADER_BUILD);
-    assert.match(PROTECTED_DIST_RAW_URL_CACHE_BUST, /\?v=LOADER_FIX_REGISTER_LIMIT_2026_06_11/);
+    assert.match(PROTECTED_DIST_RAW_URL_CACHE_BUST, /\?v=LOADER_REGISTER_LIMIT_FIX_2026_06_11/);
     assert.equal(CLEAN_TRACKER_LOADSTRING, buildCleanTrackerLoader(PROTECTED_DIST_RAW_URL_CACHE_BUST));
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /LOADER_BUILD=/);
     assert.equal(DEBUG_TRACKER_LOADSTRING, buildProofTrackerLoader(PROTECTED_DIST_RAW_URL_CACHE_BUST, LOADER_BUILD));
@@ -60,7 +60,7 @@ describe('BLOCKER10ZT3 loader/dist mismatch fix', () => {
 
   test('local dist/tracker.lua contains register-limit fix build marker', () => {
     const dist = fs.readFileSync(DIST_PATH, 'utf8');
-    assert.match(dist, /LOADER_FIX_REGISTER_LIMIT_2026_06_11/);
+    assert.match(dist, /LOADER_REGISTER_LIMIT_FIX_2026_06_11/);
     assert.doesNotMatch(dist, /^--\[\[ DENG protected tracker dist \| BLOCKER10ZW/m);
   });
 

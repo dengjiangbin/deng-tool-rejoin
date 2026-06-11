@@ -48,7 +48,7 @@ describe('NEW_FISH_IT_ONLY tracker channel enforcement', () => {
   test('public loader uses fish-it/main/tracker.lua with cache-busted build query', () => {
     assert.equal(
       CLEAN_TRACKER_LOADSTRING,
-      'loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua?v=LOADER_FIX_REGISTER_LIMIT_2026_06_11"))()',
+      'loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua?v=LOADER_REGISTER_LIMIT_FIX_2026_06_11"))()',
     );
     assert.equal(PROTECTED_TRACKER_RAW_URL, ALLOWED_TRACKER_RAW_URL);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\/dist\/tracker\.lua/);
