@@ -481,7 +481,7 @@
       textEl.hidden = false;
       if (window.DengCountUpStats) {
         textEl.classList.add('js-count-up');
-        window.DengCountUpStats.set(textEl, { to: n, format: 'integer', suffix: ' downloads', duration: 750 });
+        window.DengCountUpStats.set(textEl, { to: n, format: 'integer', suffix: ' downloads' });
       } else {
         textEl.textContent = fmt(n) + ' downloads';
       }
@@ -544,7 +544,7 @@
       textEl.hidden = false;
       if (window.DengCountUpStats) {
         textEl.classList.add('js-count-up');
-        window.DengCountUpStats.set(textEl, { to: n, format: 'integer', suffix: ' downloads', duration: 750 });
+        window.DengCountUpStats.set(textEl, { to: n, format: 'integer', suffix: ' downloads' });
       } else {
         textEl.textContent = fmt(n) + ' downloads';
       }

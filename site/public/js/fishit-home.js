@@ -27,7 +27,7 @@
       section.querySelectorAll('[data-fishit-stat]').forEach(function (el) {
         var key = el.getAttribute('data-fishit-stat');
         if (window.DengCountUpStats) {
-          window.DengCountUpStats.set(el, { to: data[key], format: 'integer', duration: 750 });
+      window.DengCountUpStats.set(el, { to: data[key], format: 'integer' });
         } else {
           el.textContent = Math.round(Number(data[key]) || 0).toLocaleString('en-US');
         }
@@ -49,7 +49,7 @@
             rodImg(imageUrl(rod), rod.label) +
             '<span class="mini-stat-label">' + esc(rod.label) + '</span>' +
             '<strong class="mini-stat-value js-count-up" data-count-to="' + esc(String(amount == null ? 0 : amount)) +
-            '" data-count-format="integer" data-count-duration="750">0</strong>' +
+            '" data-count-format="integer" data-count-duration="1200">0</strong>' +
             '</article>';
         }).join('');
         if (window.DengCountUpStats) window.DengCountUpStats.refresh(rodWrap);

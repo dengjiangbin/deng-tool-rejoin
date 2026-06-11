@@ -136,9 +136,9 @@ describe('landing stat sources and layout regression', () => {
     assert.doesNotMatch(res.text, /Global Species/);
   });
 
-  test('landing stat cards use slower count-up duration config', async () => {
+  test('landing stat cards use Winter HUB count-up duration config', async () => {
     const res = await request(app).get('/');
-    assert.match(res.text, /data-count-duration="1800"/);
+    assert.match(res.text, /data-count-duration="1200"/);
     assert.doesNotMatch(res.text, /data-count-duration="750"/);
   });
 });

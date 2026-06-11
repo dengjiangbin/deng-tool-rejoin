@@ -240,7 +240,7 @@
     var el = values[key];
     if (!el) return;
     if (window.DengCountUpStats) {
-      window.DengCountUpStats.set(el, { to: value, format: 'integer', duration: 750 });
+      window.DengCountUpStats.set(el, { to: value, format: 'integer' });
       return;
     }
     var next = formatNumber(value);

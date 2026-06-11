@@ -8,19 +8,7 @@
     var n = parseFloat(raw);
     return Number.isFinite(n) && n > 0 ? n : 108;
   }());
-  var BASE_COUNT_DURATION = 1800;
   var countUp = function() { return window.DengCountUpStats; };
-
-  function countDuration(value) {
-    if (countUp() && typeof countUp().durationForValue === 'function') {
-      return countUp().durationForValue(value);
-    }
-    var n = Number(value);
-    if (!Number.isFinite(n) || n <= 0) return BASE_COUNT_DURATION;
-    if (n < 25) return 1400;
-    if (n < 250) return 1800;
-    return 2200;
-  }
 
   function fmt(value) {
     var n = Number(value);
@@ -47,8 +35,7 @@
     var el = statEl(key);
     if (!el) return false;
     showCard(key);
-    var duration = countDuration(n);
-    if (countUp()) countUp().set(el, { to: n, format: 'integer', duration: duration });
+    if (countUp()) countUp().set(el, { to: n, format: 'integer' });
     else el.textContent = n.toLocaleString('en-US');
     return true;
   }
@@ -61,11 +48,9 @@
     var totalEl = statEl('rejoinTotalDevices');
     if (!activeEl || !totalEl) return false;
     showCard('rejoinActiveDevices');
-    var activeDuration = countDuration(activeN);
-    var totalDuration = countDuration(totalN);
     if (countUp()) {
-      countUp().set(activeEl, { to: activeN, format: 'integer', duration: activeDuration });
-      countUp().set(totalEl, { to: totalN, format: 'integer', duration: totalDuration });
+      countUp().set(activeEl, { to: activeN, format: 'integer' });
+      countUp().set(totalEl, { to: totalN, format: 'integer' });
     } else {
       activeEl.textContent = activeN.toLocaleString('en-US');
       totalEl.textContent = totalN.toLocaleString('en-US');
@@ -97,7 +82,7 @@
       text.textContent = 'Live network online';
     } else if (countUp()) {
       text.classList.add('js-count-up');
-      countUp().set(text, { to: formatted, format: 'integer', suffix: ' online now', duration: countDuration(formatted) });
+      countUp().set(text, { to: formatted, format: 'integer', suffix: ' online now' });
     } else {
       text.textContent = formatted.toLocaleString('en-US') + ' online now';
     }

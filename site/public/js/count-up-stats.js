@@ -1,9 +1,8 @@
 'use strict';
 
 function createCountUpStats() {
-  var DEFAULT_DURATION = 1800;
-  var MIN_DURATION = 1400;
-  var MAX_DURATION = 2200;
+  var DEFAULT_DURATION = 1200;
+
   var observers = new WeakMap();
 
   function prefersReducedMotion() {
@@ -97,24 +96,15 @@ function createCountUpStats() {
   function readDuration(el, override) {
     if (Number.isFinite(override)) {
       if (override === 0) return 0;
-      return Math.max(MIN_DURATION, Math.min(MAX_DURATION, override));
+      return override;
     }
     var d = parseInt(el.getAttribute('data-count-duration') || '', 10);
-    if (Number.isFinite(d)) return Math.max(MIN_DURATION, Math.min(MAX_DURATION, d));
+    if (Number.isFinite(d)) return d;
     return DEFAULT_DURATION;
   }
 
   function durationForValue(value, total) {
-    var target = parseRawNumber(value);
-    var totalTarget = parseRawNumber(total);
-    var magnitude = Math.max(
-      target == null ? 0 : Math.abs(target),
-      totalTarget == null ? 0 : Math.abs(totalTarget),
-    );
-    if (magnitude <= 0) return MIN_DURATION;
-    if (magnitude < 25) return MIN_DURATION;
-    if (magnitude < 250) return DEFAULT_DURATION;
-    return MAX_DURATION;
+    return DEFAULT_DURATION;
   }
 
   function readFormat(el) {
@@ -168,24 +158,20 @@ function createCountUpStats() {
     state.running = false;
   }
 
-  function parseDisplayedValue(el, format) {
-    var text = el.textContent || '';
+  function normalizeTarget(targetValue, targetTotal, format) {
+    var target = parseRawNumber(targetValue);
+    if (target == null) target = 0;
+    var totalTarget = parseRawNumber(targetTotal);
+    if (format === 'ratio' && totalTarget == null) totalTarget = 0;
+    return { target: target, totalTarget: totalTarget == null ? 0 : totalTarget };
+  }
+
+  function targetsEqual(state, target, totalTarget, format) {
+    if (state.running) return false;
     if (format === 'ratio') {
-      var parts = text.split('/');
-      return {
-        value: parseRawNumber(parts[0]) || 0,
-        total: parseRawNumber(parts[1]) || 0,
-      };
+      return state.current === target && state.currentTotal === totalTarget;
     }
-    if (format === 'percent') {
-      return { value: parseRawNumber(text.replace(/%/g, '')) || 0, total: 0 };
-    }
-    var prefix = readPrefix(el);
-    var suffix = readSuffix(el);
-    var core = text;
-    if (prefix && core.indexOf(prefix) === 0) core = core.slice(prefix.length);
-    if (suffix && core.slice(-suffix.length) === suffix) core = core.slice(0, -suffix.length);
-    return { value: parseRawNumber(core) || 0, total: 0 };
+    return state.current === target;
   }
 
   function applyFinal(el, value, total, format, decimals) {
@@ -199,25 +185,28 @@ function createCountUpStats() {
     opts = opts || {};
     var format = opts.format || readFormat(el);
     var decimals = Number.isFinite(opts.decimals) ? opts.decimals : readDecimals(el);
-    var duration = Number.isFinite(opts.duration)
-      ? readDuration(el, opts.duration)
-      : readDuration(el, durationForValue(target, totalTarget));
+    var normalized = normalizeTarget(targetValue, targetTotal, format);
+    var target = normalized.target;
+    var totalTarget = normalized.totalTarget;
     var state = getState(el);
-    cancelAnimation(el);
 
-    var target = parseRawNumber(targetValue);
-    if (target == null) target = 0;
-    var totalTarget = parseRawNumber(targetTotal);
-    if (format === 'ratio' && totalTarget == null) totalTarget = 0;
-
-    if (prefersReducedMotion() || duration === 0) {
-      applyFinal(el, target, totalTarget == null ? 0 : totalTarget, format, decimals);
+    if (targetsEqual(state, target, totalTarget, format)) {
       return;
     }
 
-    var parsed = parseDisplayedValue(el, format);
-    var fromValue = Number.isFinite(opts.from) ? opts.from : parsed.value;
-    var fromTotal = Number.isFinite(opts.fromTotal) ? opts.fromTotal : parsed.total;
+    var duration = Number.isFinite(opts.duration)
+      ? readDuration(el, opts.duration)
+      : readDuration(el, durationForValue(target, totalTarget));
+
+    cancelAnimation(el);
+
+    if (prefersReducedMotion() || duration === 0) {
+      applyFinal(el, target, totalTarget, format, decimals);
+      return;
+    }
+
+    var fromValue = Number.isFinite(opts.from) ? opts.from : state.current;
+    var fromTotal = Number.isFinite(opts.fromTotal) ? opts.fromTotal : state.currentTotal;
     var start = performance.now();
     state.running = true;
 
@@ -225,7 +214,7 @@ function createCountUpStats() {
       var t = Math.min(1, (now - start) / duration);
       var eased = easeOutCubic(t);
       var nextValue = fromValue + (target - fromValue) * eased;
-      var nextTotal = fromTotal + ((totalTarget || 0) - fromTotal) * eased;
+      var nextTotal = fromTotal + (totalTarget - fromTotal) * eased;
       if (format === 'ratio') {
         applyFinal(el, Math.round(nextValue), Math.round(nextTotal), format, decimals);
       } else if (format === 'percent' || format === 'decimal') {
@@ -240,7 +229,7 @@ function createCountUpStats() {
       } else {
         state.rafId = 0;
         state.running = false;
-        applyFinal(el, target, totalTarget || 0, format, decimals);
+        applyFinal(el, target, totalTarget, format, decimals);
       }
     }
 

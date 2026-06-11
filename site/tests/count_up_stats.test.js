@@ -47,12 +47,12 @@ describe('count-up stats formatter', () => {
     assert.equal(typeof countUp.prefersReducedMotion(), 'boolean');
   });
 
-  test('durationForValue uses slower visible animation window', () => {
-    assert.equal(countUp.durationForValue(0), 1400);
-    assert.equal(countUp.durationForValue(12), 1400);
-    assert.equal(countUp.durationForValue(120), 1800);
-    assert.equal(countUp.durationForValue(5000), 2200);
-    assert.equal(countUp.durationForValue(20, 5000), 2200);
+  test('durationForValue uses Winter HUB default animation window', () => {
+    assert.equal(countUp.durationForValue(0), 1200);
+    assert.equal(countUp.durationForValue(12), 1200);
+    assert.equal(countUp.durationForValue(120), 1200);
+    assert.equal(countUp.durationForValue(5000), 1200);
+    assert.equal(countUp.durationForValue(20, 5000), 1200);
   });
 });
 
@@ -64,7 +64,7 @@ describe('count-up stat markup on routes', () => {
     assert.match(res.text, /data-home-stat-value="onlineNow"[^>]*data-count-format="integer"/);
     assert.match(res.text, /data-home-stat-value="rejoinActiveDevices"/);
     assert.match(res.text, /data-home-stat-value="rejoinTotalDevices"/);
-    assert.match(res.text, /data-count-duration="1800"/);
+    assert.match(res.text, /data-count-duration="1200"/);
     assert.doesNotMatch(res.text, /data-home-stat-value="activeAgents"/);
     assert.match(res.text, /count-up-stats\.js/);
   });

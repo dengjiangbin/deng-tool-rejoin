@@ -49,11 +49,11 @@
   function countUpStatHtml(value, extraAttrs) {
     return '<strong class="stat-card-value js-count-up"' + (extraAttrs || '') +
       ' data-count-to="' + esc(String(value == null ? 0 : value)) +
-      '" data-count-format="integer" data-count-duration="750">0</strong>';
+      '" data-count-format="integer" data-count-duration="1200">0</strong>';
   }
   function countUpAmountHtml(value) {
     return '<strong class="fishit-stat-amount js-count-up" data-count-to="' + esc(String(value == null ? 0 : value)) +
-      '" data-count-format="integer" data-count-duration="750">0</strong>';
+      '" data-count-format="integer" data-count-duration="1200">0</strong>';
   }
   function refreshCountUp(container) {
     if (window.DengCountUpStats) window.DengCountUpStats.refresh(container);
