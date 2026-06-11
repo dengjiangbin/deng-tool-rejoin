@@ -104,40 +104,39 @@ router.get('/api/fishit/global', fishitLimiter, (req, res) => {
 
 router.get('/api/fishit/public-summary', fishitLimiter, (_req, res) => {
   try {
-    const trackerStats = require('./fishitTrackerRoutes').collectPublicFishItTrackerStats();
-    let globalSpecies = 0;
-    let globalSpeciesSource = {
-      service: 'fishitGlobalDb',
-      store: 'fishit_global_species',
-      method: 'COUNT(*)',
+    const g = fishit.getGlobal();
+    const rods = (g && g.rods) || {};
+    const available = !!(g && g.available);
+    const botSource = {
+      service: 'fishitDb',
+      store: 'deng-fish-it-bot',
+      dbPath: fishit.DB_PATH,
     };
-    try {
-      const stats = globalDb.getStats();
-      globalSpecies = Number(stats.speciesCount) || 0;
-      globalSpeciesSource.dbPath = stats.dbPath || null;
-    } catch (_) {
-      // Global DB optional in some environments.
-    }
-
-    const available = trackerStats.available || globalSpecies > 0;
     res.set('Cache-Control', 'public, max-age=15');
     return ok(res, {
       available,
-      trackedFishers: trackerStats.trackedFishers,
-      onlineFishers: trackerStats.onlineFishers,
-      inventoriesSynced: trackerStats.inventoriesSynced,
-      fishTracked: trackerStats.fishTracked,
-      totalFish: trackerStats.fishTracked,
-      globalSpecies,
-      lastUpdated: trackerStats.updatedAt,
+      totalFish: available ? Number(g.total_fish) || 0 : null,
+      totalSecret: available ? Number(g.secret_fish) || 0 : null,
+      totalForgotten: available ? Number(g.forgotten_fish) || 0 : null,
+      ghostfinnRod: available ? Number(rods.ghostfinn) || 0 : null,
+      elementRod: available ? Number(rods.element) || 0 : null,
+      diamondRod: available ? Number(rods.diamond) || 0 : null,
+      lastUpdated: (g && g.last_updated) || null,
       sources: {
-        ...trackerStats.sources,
-        globalSpecies: globalSpeciesSource,
+        totalFish: { ...botSource, blob: 'alltime_fish_cache', field: 'totals.totalFish' },
+        totalSecret: { ...botSource, blob: 'alltime_fish_cache', field: 'totals.secretFish' },
+        totalForgotten: { ...botSource, blob: 'alltime_fish_cache', field: 'totals.forgottenFish' },
+        ghostfinnRod: { ...botSource, blob: 'alltime_rod_cache', field: 'totalGhostfinn' },
+        elementRod: { ...botSource, blob: 'alltime_rod_cache', field: 'totalElement' },
+        diamondRod: { ...botSource, blob: 'alltime_rod_cache', field: 'totalDiamond' },
       },
-      rejectedSources: trackerStats.rejectedSources,
+      rejectedSources: ['fishit-tracker', 'liveTrackDB', 'fishitGlobalDb', 'quiz_bot'],
     });
   } catch (_) {
-    return res.status(200).json({ available: false, rejectedSources: ['fishitDb', 'deng_fish_it_bot', 'quiz_bot', '!d'] });
+    return res.status(200).json({
+      available: false,
+      rejectedSources: ['fishit-tracker', 'liveTrackDB', 'fishitGlobalDb', 'quiz_bot'],
+    });
   }
 });
 

@@ -125,8 +125,8 @@ describe('public home landing page', () => {
     assert.match(liveGridMatch[0], /data-home-stat-card="onlineNow"/);
     assert.match(liveGridMatch[0], /data-home-stat-card="rejoinActiveDevices"/);
     assert.match(res.text, /data-home-stat-card="rejoinActiveDevices"/);
-    assert.match(res.text, /data-home-stat-card="trackedFishers"/);
-    assert.match(res.text, /data-home-stat-card="globalSpecies"/);
+    assert.match(res.text, /data-home-stat-card="totalFish"/);
+    assert.match(res.text, /data-home-stat-card="ghostfinnRod"/);
     assert.match(res.text, /data-home-stat-meta="onlineNow"/);
     assert.match(res.text, /Rejoin Tools Running/);
     assert.match(res.text, /deng-home-section--tight/);

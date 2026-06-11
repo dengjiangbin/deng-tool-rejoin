@@ -229,20 +229,13 @@
       if (setSplitDevices(publicStats.activeDevices, publicStats.totalDevices)) liveVisible += 1;
     }
 
-    if (fishitSummary) {
-      var fishAvailable = fishitSummary.available
-        || fishitSummary.trackedFishers > 0
-        || fishitSummary.onlineFishers > 0
-        || fishitSummary.inventoriesSynced > 0
-        || fishitSummary.fishTracked > 0
-        || fishitSummary.globalSpecies > 0;
-      if (fishAvailable) {
-        if (setStat('trackedFishers', fishitSummary.trackedFishers)) fishitVisible += 1;
-        if (setStat('onlineFishers', fishitSummary.onlineFishers)) fishitVisible += 1;
-        if (setStat('inventoriesSynced', fishitSummary.inventoriesSynced)) fishitVisible += 1;
-        if (setStat('fishTracked', fishitSummary.fishTracked != null ? fishitSummary.fishTracked : fishitSummary.totalFish)) fishitVisible += 1;
-        if (setStat('globalSpecies', fishitSummary.globalSpecies)) fishitVisible += 1;
-      }
+    if (fishitSummary && fishitSummary.available) {
+      if (setStat('totalFish', fishitSummary.totalFish)) fishitVisible += 1;
+      if (setStat('totalSecret', fishitSummary.totalSecret)) fishitVisible += 1;
+      if (setStat('totalForgotten', fishitSummary.totalForgotten)) fishitVisible += 1;
+      if (setStat('ghostfinnRod', fishitSummary.ghostfinnRod)) fishitVisible += 1;
+      if (setStat('elementRod', fishitSummary.elementRod)) fishitVisible += 1;
+      if (setStat('diamondRod', fishitSummary.diamondRod)) fishitVisible += 1;
     }
 
     markEmpty('[data-home-live-stats-empty]', liveVisible);

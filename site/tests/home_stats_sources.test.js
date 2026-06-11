@@ -17,22 +17,51 @@ const fishitDb = require('../src/fishitDb');
 const trackerRoutes = require('../src/fishitTrackerRoutes');
 
 describe('landing stat sources and layout regression', () => {
-  test('Fish It public-summary uses tracker/global catalog sources only', async () => {
+  test('Fish It public-summary uses DENG Fish It Bot database sources only', async () => {
     const res = await request(app).get('/api/fishit/public-summary');
     assert.equal(res.status, 200);
     assert.ok(res.body.sources, 'expected sources proof object');
-    assert.match(String(res.body.sources.trackedFishers.service), /fishit-tracker/);
-    assert.match(String(res.body.sources.onlineFishers.store), /liveTrackDB/);
-    assert.match(String(res.body.sources.fishTracked.method), /lastGoodPublicFishCount|visibleFishInstances/);
-    assert.match(String(res.body.sources.globalSpecies.service), /fishitGlobalDb/);
-    assert.deepEqual(res.body.rejectedSources, ['fishitDb', 'deng_fish_it_bot', 'quiz_bot', '!d']);
-    assert.doesNotMatch(JSON.stringify(res.body.sources), /fishitDb|deng_fish_it_bot|quiz_bot|!d/i);
-    for (const key of ['trackedFishers', 'onlineFishers', 'inventoriesSynced', 'fishTracked']) {
+    assert.match(String(res.body.sources.totalFish.service), /fishitDb/);
+    assert.match(String(res.body.sources.totalFish.store), /deng-fish-it-bot/);
+    assert.match(String(res.body.sources.totalSecret.blob), /alltime_fish_cache/);
+    assert.match(String(res.body.sources.totalForgotten.blob), /alltime_fish_cache/);
+    assert.match(String(res.body.sources.ghostfinnRod.blob), /alltime_rod_cache/);
+    assert.match(String(res.body.sources.elementRod.field), /totalElement/);
+    assert.match(String(res.body.sources.diamondRod.field), /totalDiamond/);
+    assert.deepEqual(
+      res.body.rejectedSources,
+      ['fishit-tracker', 'liveTrackDB', 'fishitGlobalDb', 'quiz_bot'],
+    );
+    for (const key of ['totalFish', 'totalSecret', 'totalForgotten', 'ghostfinnRod', 'elementRod', 'diamondRod']) {
       assert.ok(res.body.sources[key], 'missing source proof for ' + key);
+      assert.match(String(res.body.sources[key].service), /fishitDb/);
+      assert.doesNotMatch(String(res.body.sources[key].service), /fishit-tracker|liveTrackDB|fishitGlobalDb/i);
+    }
+    assert.equal('trackedFishers' in res.body, false);
+    assert.equal('onlineFishers' in res.body, false);
+    assert.equal('globalSpecies' in res.body, false);
+  });
+
+  test('Fish It public-summary reads bot getGlobal totals when DB is available', () => {
+    const original = fishitDb.getGlobal;
+    fishitDb.getGlobal = () => ({
+      available: true,
+      total_fish: 12345,
+      secret_fish: 678,
+      forgotten_fish: 90,
+      last_updated: '2099-01-01T00:00:00.000Z',
+      rods: { ghostfinn: 20, element: 15, diamond: 8 },
+    });
+    try {
+      const g = fishitDb.getGlobal();
+      assert.equal(g.total_fish, 12345);
+      assert.equal(g.rods.ghostfinn, 20);
+    } finally {
+      fishitDb.getGlobal = original;
     }
   });
 
-  test('Fish It public-summary does not call bot getGlobal totals', () => {
+  test('tracker public stats stay separate from bot getGlobal totals', () => {
     const original = fishitDb.getGlobal;
     fishitDb.getGlobal = () => ({
       available: true,
@@ -62,6 +91,27 @@ describe('landing stat sources and layout regression', () => {
     assert.ok(liveGridMatch, 'expected Live Network stat grid');
     assert.match(liveGridMatch[0], /data-home-stat-card="rejoinActiveDevices"/);
     assert.doesNotMatch(res.text, /data-home-rejoin-stats-grid/);
+  });
+
+  test('landing Fish It Stats shows bot catch/rod cards only', async () => {
+    const res = await request(app).get('/');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /Total Fish/);
+    assert.match(res.text, /Total Secret/);
+    assert.match(res.text, /Total Forgotten/);
+    assert.match(res.text, /Ghostfinn Rod/);
+    assert.match(res.text, /Element Rod/);
+    assert.match(res.text, /Diamond Rod/);
+    assert.match(res.text, /Fish caught in DENG Fish It Bot/);
+    assert.match(res.text, /data-home-stat-card="totalFish"/);
+    assert.match(res.text, /data-home-stat-card="ghostfinnRod"/);
+    assert.doesNotMatch(res.text, /data-home-stat-card="trackedFishers"/);
+    assert.doesNotMatch(res.text, /data-home-stat-card="onlineFishers"/);
+    assert.doesNotMatch(res.text, /data-home-stat-card="inventoriesSynced"/);
+    assert.doesNotMatch(res.text, /data-home-stat-card="fishTracked"/);
+    assert.doesNotMatch(res.text, /data-home-stat-card="globalSpecies"/);
+    assert.doesNotMatch(res.text, /Tracked Fishers/);
+    assert.doesNotMatch(res.text, /Global Species/);
   });
 
   test('landing stat cards use slower count-up duration config', async () => {
