@@ -30,11 +30,11 @@ describe('BLOCKER10ZT2 APK v2 mobile inventory UX', () => {
     assert.match(gradle, /versionCode\s*=\s*14\b/);
   });
 
-  test('UI deploy marker includes latest live stats/toolbar layout marker', () => {
-    const { BLOCKER10ZT7_LIVE_STATS_STATUS_TOOLBAR_LAYOUT_MARKER } = require('../src/fishitTrackerBuild');
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT7_LIVE_STATS_STATUS_TOOLBAR_LAYOUT_MARKER);
+  test('UI deploy marker includes latest inventory desktop sidebar marker', () => {
+    const { BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_MARKER } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_MARKER);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11/);
   });
 
   test('APK inventory screen removes Continue in Browser / Open in website CTA', () => {
@@ -52,9 +52,11 @@ describe('BLOCKER10ZT2 APK v2 mobile inventory UX', () => {
     assert.doesNotMatch(res.text, />Back to DENG Tool</);
   });
 
-  test('normal /inventory keeps back link for browser users', async () => {
+  test('normal /inventory uses setup sidebar without browser back link', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
-    assert.match(res.text, />Back to DENG Tool</);
+    assert.match(res.text, /inventory-sidebar/);
+    assert.match(res.text, /DENG Inventory/);
+    assert.doesNotMatch(res.text, />Back to DENG Tool</);
     assert.doesNotMatch(res.text, /data-apk-embed="1"/);
   });
 

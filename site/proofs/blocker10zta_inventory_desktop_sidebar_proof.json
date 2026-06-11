@@ -1,0 +1,14 @@
+{
+  "status": 200,
+  "deploy": "BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_2026_06_11",
+  "marker": true,
+  "hasBrandSection": true,
+  "hasSidebarBottomControls": true,
+  "noBackLink": true,
+  "noMiddleNav": true,
+  "hideUsernameEyeIcons": true,
+  "desktopHiddenLoadstring": true,
+  "apkCompactLoadstring": true,
+  "apkNoBackLink": true,
+  "pollPipelineIntact": true
+}

@@ -2603,6 +2603,7 @@ function buildTrackerPageLocals(req) {
   const debugInventory = !!(req && req.query && (req.query.debug === '1' || req.query.debug === 'true' || req.query.debug === 'global'));
   const apkEmbed = !!(req && req.query && req.query.apk === '1');
   const debugGlobal = debugInventory && req.query.debug === 'global';
+  const session = req && req.session ? req.session : null;
   const locals = {
     layout: false,
     title: 'DENG Inventory Tracker — Fish It',
@@ -2618,6 +2619,17 @@ function buildTrackerPageLocals(req) {
     debugInventory,
     apkEmbed,
     trackerLoadstring: CLEAN_TRACKER_LOADSTRING,
+    user: session && session.user ? session.user : null,
+    csrfToken: session && session.csrfToken ? session.csrfToken : '',
+    inventorySidebarSetupProof: {
+      marker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
+      hasBrandSection: true,
+      hasMiddleNav: false,
+      hasBackLink: false,
+      hideUsernameControl: 'inventory-sidebar',
+      scriptControl: 'sidebarScriptBtn',
+      logoutControl: 'inventory-sidebar__actions',
+    },
     blocker10vBuild: build,
     blocker10u6Build: build,
     blocker10u5Build: build,

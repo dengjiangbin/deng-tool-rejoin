@@ -119,23 +119,8 @@ const globalLimiter = rateLimit({
 app.use(globalLimiter);
 
 // ---------------------------------------------------------------
-// Fish It Live Backpack Tracker (mounted BEFORE the global body
-// parsers so that the route-level express.json({ limit: '512kb' })
-// handlers inside fishitTrackerRoutes take precedence.  The global
-// 16 KB parser would otherwise reject large tracker payloads with a
-// 413 before the route is even matched.)
-// ---------------------------------------------------------------
-app.use('/', fishitTrackerRoutes);
-app.use('/', fishitGlobalAdminRoutes);
-
-// ---------------------------------------------------------------
-// Body parsers
-// ---------------------------------------------------------------
-app.use(express.urlencoded({ extended: false, limit: '16kb' }));
-app.use(express.json({ limit: '16kb' }));
-
-// ---------------------------------------------------------------
 // Session (HttpOnly, Secure in prod, SameSite=Lax)
+// Mounted before Fish It tracker routes so /inventory can read user profile.
 // ---------------------------------------------------------------
 const sessionSecret = process.env.TOOL_SITE_COOKIE_SECRET;
 if (!sessionSecret || sessionSecret.length < 32) {
@@ -158,6 +143,29 @@ app.use(session({
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   },
 }));
+
+app.use((req, _res, next) => {
+  if (!req.session.csrfToken) {
+    req.session.csrfToken = require('crypto').randomBytes(32).toString('hex');
+  }
+  next();
+});
+
+// ---------------------------------------------------------------
+// Fish It Live Backpack Tracker (mounted BEFORE the global body
+// parsers so that the route-level express.json({ limit: '512kb' })
+// handlers inside fishitTrackerRoutes take precedence.  The global
+// 16 KB parser would otherwise reject large tracker payloads with a
+// 413 before the route is even matched.)
+// ---------------------------------------------------------------
+app.use('/', fishitTrackerRoutes);
+app.use('/', fishitGlobalAdminRoutes);
+
+// ---------------------------------------------------------------
+// Body parsers
+// ---------------------------------------------------------------
+app.use(express.urlencoded({ extended: false, limit: '16kb' }));
+app.use(express.json({ limit: '16kb' }));
 
 // ---------------------------------------------------------------
 // Template engine: EJS + layouts
@@ -187,16 +195,6 @@ app.use('/assets', express.static(path.join(__dirname, '..', 'public'), {
 app.use('/images', express.static(path.join(__dirname, '..', 'public', 'images'), {
   maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
 }));
-
-// ---------------------------------------------------------------
-// CSRF middleware – attach token to res.locals for all EJS views
-// ---------------------------------------------------------------
-app.use((req, _res, next) => {
-  if (!req.session.csrfToken) {
-    req.session.csrfToken = require('crypto').randomBytes(32).toString('hex');
-  }
-  next();
-});
 
 // ---------------------------------------------------------------
 // Flash-message helper (lightweight, no extra dep)

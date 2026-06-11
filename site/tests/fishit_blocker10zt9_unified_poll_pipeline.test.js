@@ -86,14 +86,14 @@ function trustedStats(overrides) {
 }
 
 describe('BLOCKER10ZT9 unified poll pipeline', () => {
-  test('UI deploy marker points to BLOCKER10ZT9', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_MARKER);
+  test('unified poll pipeline remains intact after sidebar deploy marker update', () => {
+    assert.equal(BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_MARKER, 'BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_2026_06_11');
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_2026_06_11/);
     assert.match(tpl, /function applyInventoryPollPayload/);
     assert.match(tpl, /entry\.liveSnapshot/);
     assert.match(tpl, /function buildLiveSnapshotFromPayload/);
     assert.match(tpl, /function applyLiveSnapshotToPublicUi/);
+    assert.match(tpl, /const POLL_MS\s*=\s*10000/);
   });
 
   test('displayTotalCaughtStat prefers numeric totalCaught over stale totalCaughtText', () => {
