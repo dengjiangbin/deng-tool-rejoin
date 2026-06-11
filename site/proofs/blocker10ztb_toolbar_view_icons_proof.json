@@ -1,0 +1,11 @@
+{
+  "marker": true,
+  "sharedViewIconClass": true,
+  "fishToolbarIcon": true,
+  "oldFishIconRemoved": true,
+  "fishTailPaths": true,
+  "tableIconPresent": true,
+  "stoneIconPresent": true,
+  "toolbarOrderOk": true,
+  "pollPipelineIntact": true
+}

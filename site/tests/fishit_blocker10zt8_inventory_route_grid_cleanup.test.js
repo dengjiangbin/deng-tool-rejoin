@@ -31,10 +31,11 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZT8 inventory route and grid cleanup', () => {
-  test('UI deploy marker points to BLOCKER10ZT9 unified poll pipeline', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_MARKER);
+  test('unified poll pipeline marker remains exported while deploy marker advances', () => {
+    assert.equal(BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_MARKER, 'BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_2026_06_11');
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_2026_06_11/);
+    assert.match(tpl, /function applyInventoryPollPayload/);
+    assert.match(tpl, /entry\.liveSnapshot/);
   });
 
   test('/inventory is the public page and uses Inventory title', async () => {
@@ -44,7 +45,7 @@ describe('BLOCKER10ZT8 inventory route and grid cleanup', () => {
     assert.match(res.text, /href="\/inventory"/);
     assert.match(res.text, /header__lead-icon[\s\S]*Track Your Fish It Accounts/);
     assert.doesNotMatch(res.text, /Track unlimited players simultaneously\./);
-    assert.equal(res.headers['x-tracker-ui-deploy'], BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_MARKER);
+    assert.equal(res.headers['x-tracker-ui-deploy'], BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER);
   });
 
   test('/tracker and /fishit-tracker redirect to /inventory without public links', async () => {
@@ -83,7 +84,9 @@ describe('BLOCKER10ZT8 inventory route and grid cleanup', () => {
 
   test('toolbar order and fish grid icon', async () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /id="viewFishGridBtn"[\s\S]*M6\.5 12c\.94-3\.01/);
+    assert.match(tpl, /id="viewFishGridBtn"[\s\S]*data-toolbar-icon="fish"/);
+    assert.match(tpl, /accounts-view-icon/);
+    assert.doesNotMatch(tpl, /M6\.5 12c\.94-3\.01/);
     assert.match(tpl, /function copyAllUsernames/);
 
     const res = await request(makeApp()).get('/inventory').expect(200);

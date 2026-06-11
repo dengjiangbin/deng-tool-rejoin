@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <!-- BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11 -->
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
+<html lang="en" data-theme="dark" data-tracker-ui-deploy="BLOCKER10ZTB_TOOLBAR_VIEW_ICONS_2026_06_11" data-tracker-template-v="1781144650424">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11' %>">
-  <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/inventory' %>">
-  <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
+  <meta name="tracker-ui-deploy" content="BLOCKER10ZTB_TOOLBAR_VIEW_ICONS_2026_06_11">
+  <link rel="canonical" href="/inventory">
+  <meta name="tracker-template-version" content="1781144650424">
   <title>DENG Inventory Tracker &mdash; Fish It</title>
   <style>
     /* BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11 */
@@ -863,7 +863,18 @@
     }
 
     /* BLOCKER10ZP — flex-only fish cards + canonical rarity backgrounds */
-    <%= typeof trackerRarityCardCss !== 'undefined' ? trackerRarityCardCss : '' %>
+    /* BLOCKER10ZP ft-card rarity backgrounds — canonical map */
+    .ft-rarity-COMMON, .ft-rarity-common { background:linear-gradient(135deg,#e2e8f0 0%,#94a3b8 100%); }
+    .ft-rarity-UNCOMMON, .ft-rarity-uncommon { background:#65a30d; }
+    .ft-rarity-RARE, .ft-rarity-rare { background:#2563eb; }
+    .ft-rarity-EPIC, .ft-rarity-epic { background:#9333ea; }
+    .ft-rarity-LEGENDARY, .ft-rarity-legendary { background:#ea580c; }
+    .ft-rarity-MYTHIC, .ft-rarity-mythic { background:#dc2626; }
+    .ft-rarity-SECRET, .ft-rarity-secret { background:#16d487; }
+    .ft-rarity-FORGOTTEN, .ft-rarity-forgotten { background:linear-gradient(135deg,#9ca3af 0%,#6b7280 42%,#374151 100%); }
+    .ft-rarity-COMMON, .ft-rarity-common { color:#0f172a; }
+    .ft-rarity-COMMON .ft-card-name, .ft-rarity-common .ft-card-name { color:#0f172a; text-shadow:none; }
+    .ft-rarity-COMMON .ft-card-weight, .ft-rarity-common .ft-card-weight { color:rgba(15,23,42,.82); }
     .ft-card {
       width:100%;
       min-height:84px;
@@ -1383,7 +1394,7 @@
     }
   </style>
 </head>
-<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11') %>">
+<body class="" data-inventory-js="pending" data-apk-embed="0" data-ui-marker="BLOCKER10ZTB_TOOLBAR_VIEW_ICONS_2026_06_11">
 <div class="inventory-shell">
   <aside class="inventory-sidebar" aria-label="Inventory setup">
     <div class="inventory-sidebar__brand">
@@ -1415,24 +1426,13 @@
         <span>Hide Username</span>
       </button>
       <div class="inventory-profile-card">
-        <% if (typeof user !== 'undefined' && user) { %>
-          <% if (user.discord_avatar && user.discord_user_id) { %>
-            <img src="https://cdn.discordapp.com/avatars/<%= user.discord_user_id %>/<%= user.discord_avatar %>.webp?size=64" alt="" class="inventory-profile-card__avatar" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">
-            <div class="inventory-profile-card__avatar-placeholder" style="display:none"><%= (user.username || '?')[0].toUpperCase() %></div>
-          <% } else { %>
-            <div class="inventory-profile-card__avatar-placeholder"><%= (user.username || '?')[0].toUpperCase() %></div>
-          <% } %>
-          <div class="inventory-profile-card__meta">
-            <div class="inventory-profile-card__name"><%= user.username || 'Account' %></div>
-            <div class="inventory-profile-card__sub">Discord account</div>
-          </div>
-        <% } else { %>
+        
           <div class="inventory-profile-card__avatar-placeholder">?</div>
           <div class="inventory-profile-card__meta">
             <div class="inventory-profile-card__name">Guest</div>
             <div class="inventory-profile-card__sub">Sign in to sync profile</div>
           </div>
-        <% } %>
+        
       </div>
       <div class="inventory-sidebar__actions">
         <button type="button" class="inventory-action-btn inventory-action-btn--script" id="sidebarScriptBtn" title="Copy tracker script" aria-label="Copy tracker script">
@@ -1442,19 +1442,7 @@
           </svg>
           <span>Script</span>
         </button>
-        <% if (typeof user !== 'undefined' && user) { %>
-          <form method="POST" action="/auth/logout">
-            <input type="hidden" name="_csrf" value="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
-            <button type="submit" class="inventory-action-btn inventory-action-btn--logout" title="Logout" aria-label="Logout">
-              <svg viewBox="0 0 24 24" focusable="false">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                <path d="M16 17l5-5-5-5"></path>
-                <path d="M21 12H9"></path>
-              </svg>
-              <span>Logout</span>
-            </button>
-          </form>
-        <% } else { %>
+        
           <a href="/auth/login" class="inventory-action-btn inventory-action-btn--login" title="Sign in" aria-label="Sign in">
             <svg viewBox="0 0 24 24" focusable="false">
               <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
@@ -1463,7 +1451,7 @@
             </svg>
             <span>Sign in</span>
           </a>
-        <% } %>
+        
       </div>
     </div>
   </aside>
@@ -1626,7 +1614,7 @@
     <div id="trackerList"></div>
     </div>
 
-    <div class="loadstring-box<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? ' is-compact' : ' loadstring-box--desktop-hidden' %>">
+    <div class="loadstring-box loadstring-box--desktop-hidden">
       <h3>
         <span class="loadstring-box__icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" focusable="false">
@@ -1637,7 +1625,7 @@
         <span>Executor Script &mdash; copy &amp; run in-game</span>
       </h3>
       <div class="code-row">
-        <textarea class="code-block code-block--script" id="loadstringCode" readonly rows="3" spellcheck="false" aria-label="Tracker executor script"><%- typeof trackerLoadstring !== 'undefined' ? trackerLoadstring : '' %></textarea>
+        <textarea class="code-block code-block--script" id="loadstringCode" readonly rows="3" spellcheck="false" aria-label="Tracker executor script">local LOADER_BUILD="BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10";local FETCH_URL="https://raw.githubusercontent.com/dengjiangbin/deng-fishtracker-dist/main/dist/tracker.lua?v=BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10";print("LOADER_BUILD="..LOADER_BUILD);print("FETCH_URL="..FETCH_URL);local __src=game:HttpGet(FETCH_URL);local FETCHED=(__src:match("DENG protected tracker dist | ([^%]]+)") or "unknown");print("FETCHED_TRACKER_BUILD="..tostring(FETCHED));loadstring(__src)()</textarea>
         <button class="btn-copy" id="copyBtn" type="button">Copy</button>
       </div>
       <div class="copy-status" id="copyStatus" aria-live="polite"></div>
@@ -1655,11 +1643,11 @@
   const LS_BULK_CACHE = 'fishit_bulk_inventory_cache_v1';
   const POLL_MS       = 10000;
   const SYNC_TICK_MS  = 1000;
-  const DEBUG_INVENTORY = <%= (typeof debugInventory !== 'undefined' && debugInventory) ? 'true' : 'false' %>;
-  const APK_EMBED = <%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'true' : 'false' %>;
+  const DEBUG_INVENTORY = false;
+  const APK_EMBED = false;
   const DEBUG_GLOBAL  = DEBUG_INVENTORY && /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
-  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11" %>';
-  const INITIAL_USERNAME = <%- JSON.stringify(typeof initialUsername !== 'undefined' ? initialUsername : '') %>;
+  const TRACKER_UI_DEPLOY = 'BLOCKER10ZTB_TOOLBAR_VIEW_ICONS_2026_06_11';
+  const INITIAL_USERNAME = "";
   const RENDER_BUILD  = DEBUG_INVENTORY
     ? (document.documentElement.getAttribute('data-render-build') || '')
     : '';
@@ -1672,13 +1660,14 @@
   };
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret badge-rarity-secret', forgotten:'rarity-forgotten' };
   const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
-  <%- typeof trackerRarityJsBootstrap !== 'undefined' ? trackerRarityJsBootstrap : 'const FT_RARITY_CLASS = { common:\'ft-rarity-COMMON\', uncommon:\'ft-rarity-UNCOMMON\', rare:\'ft-rarity-RARE\', epic:\'ft-rarity-EPIC\', legendary:\'ft-rarity-LEGENDARY\', legend:\'ft-rarity-LEGENDARY\', mythic:\'ft-rarity-MYTHIC\', secret:\'ft-rarity-SECRET\', forgotten:\'ft-rarity-FORGOTTEN\' }; function ftRarityClass(r) { return r ? (FT_RARITY_CLASS[String(r).toLowerCase()] || \'ft-rarity-COMMON\') : \'ft-rarity-COMMON\'; }' %>
+  const FT_RARITY_CLASS = {"common":"ft-rarity-COMMON","uncommon":"ft-rarity-UNCOMMON","rare":"ft-rarity-RARE","epic":"ft-rarity-EPIC","legendary":"ft-rarity-LEGENDARY","legend":"ft-rarity-LEGENDARY","mythic":"ft-rarity-MYTHIC","secret":"ft-rarity-SECRET","forgotten":"ft-rarity-FORGOTTEN"};
+  function ftRarityClass(r) { return r ? (FT_RARITY_CLASS[String(r).toLowerCase()] || 'ft-rarity-COMMON') : 'ft-rarity-COMMON'; }
   const RARITY_ORDER = {
     Forgotten: 800, Secret: 700, Mythic: 600, Legendary: 500, Epic: 400,
     Rare: 300, Uncommon: 200, Common: 100, Unknown: 0,
   };
   const STONE_TYPE_ORDER = { Normal: 10, Double: 20, Evolved: 30, Eggy: 40, Runic: 50 };
-  <%- typeof trackerStoneJsBootstrap !== 'undefined' ? trackerStoneJsBootstrap : 'const STONE_DISPLAY_NAMES = { Double: \'Transcended Stone\' };' %>
+  const STONE_DISPLAY_NAMES = {"Normal":"Normal Enchant Stone","Double":"Transcended Stone","Evolved":"Evolved Enchant Stone","Eggy":"Eggy Enchant Stone","Runic":"Runic Enchant Stone"};
   const PEOPLE_ICON_SVG = '<svg class="card-chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>';
   const TIER_TO_RARITY = {
     1: 'Common', 2: 'Uncommon', 3: 'Rare', 4: 'Epic',
@@ -1730,7 +1719,7 @@
   const loadstringCodeEl = document.getElementById('loadstringCode');
   const usernameErrorEl = document.getElementById('usernameError');
   const CLEAN_LOADSTRING = (loadstringCodeEl && loadstringCodeEl.value)
-    || '<%- typeof trackerLoadstring !== "undefined" ? trackerLoadstring.replace(/'/g, "\\'").replace(/\\/g, "\\\\") : "" %>';
+    || 'local LOADER_BUILD="BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10";local FETCH_URL="https://raw.githubusercontent.com/dengjiangbin/deng-fishtracker-dist/main/dist/tracker.lua?v=BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10";print("LOADER_BUILD="..LOADER_BUILD);print("FETCH_URL="..FETCH_URL);local __src=game:HttpGet(FETCH_URL);local FETCHED=(__src:match("DENG protected tracker dist | ([^%]]+)") or "unknown");print("FETCHED_TRACKER_BUILD="..tostring(FETCHED));loadstring(__src)()';
 
   function loadSaved() { try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; } }
   function saveCurrent() { try { localStorage.setItem(LS_KEY, JSON.stringify([...trackers.keys()])); } catch {} }

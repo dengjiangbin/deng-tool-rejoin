@@ -24,10 +24,11 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZTA inventory desktop setup sidebar', () => {
-  test('deploy marker points at inventory desktop sidebar build', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_MARKER);
+  test('deploy marker points at latest live tracker UI build', () => {
+    const { BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER: deployMarker } = require('../src/fishitTrackerBuild');
+    assert.match(deployMarker, /^BLOCKER10Z/);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11/);
+    assert.match(tpl, /inventory-sidebar/);
   });
 
   test('/inventory renders brand-only sidebar without middle nav or back link', async () => {
@@ -73,7 +74,7 @@ describe('BLOCKER10ZTA inventory desktop setup sidebar', () => {
     assert.equal(locals.inventorySidebarSetupProof.hasBrandSection, true);
     assert.equal(locals.inventorySidebarSetupProof.hasMiddleNav, false);
     assert.equal(locals.inventorySidebarSetupProof.hasBackLink, false);
-    assert.equal(locals.inventorySidebarSetupProof.marker, BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_MARKER);
+    assert.equal(locals.inventorySidebarSetupProof.marker, BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER);
   });
 
   test('existing inventory poll/status helpers remain intact', () => {

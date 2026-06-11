@@ -2630,6 +2630,12 @@ function buildTrackerPageLocals(req) {
       scriptControl: 'sidebarScriptBtn',
       logoutControl: 'inventory-sidebar__actions',
     },
+    toolbarViewIconsProof: {
+      marker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
+      sharedViewIconClass: 'accounts-view-icon',
+      fishToolbarIcon: 'data-toolbar-icon="fish"',
+      toolbarOrder: ['viewTableBtn', 'viewFishGridBtn', 'viewStoneGridBtn', 'copyUsernamesBtn', 'refreshAccountsBtn'],
+    },
     blocker10vBuild: build,
     blocker10u6Build: build,
     blocker10u5Build: build,
