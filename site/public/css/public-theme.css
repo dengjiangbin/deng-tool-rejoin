@@ -1,0 +1,41 @@
+/* Shared dark premium theme for public marketing + auth pages */
+:root,
+:root[data-theme="light"] {
+  --public-bg: #050607;
+  --public-surface: rgba(255, 255, 255, 0.035);
+  --public-surface-soft: rgba(255, 255, 255, 0.02);
+  --public-border: rgba(255, 255, 255, 0.08);
+  --public-border-strong: rgba(255, 255, 255, 0.14);
+  --public-text: #f8fafc;
+  --public-muted: #8b8f9d;
+  --public-muted-2: #9ca3af;
+  --public-accent: #00e6a8;
+  --public-accent-soft: rgba(0, 230, 168, 0.12);
+  --public-success: #00e6a8;
+  --public-warning: #fbbf24;
+  --public-danger: #f87171;
+}
+
+html[data-public-page="1"] {
+  color-scheme: dark;
+}
+
+html[data-public-page="1"],
+html[data-public-page="1"][data-theme="light"] {
+  background: var(--public-bg);
+}
+
+body.auth-layout:has(.deng-home),
+body.auth-layout:has(.login-page--split) {
+  display: block;
+  min-height: 100vh;
+  padding: 0;
+  margin: 0;
+  background: var(--public-bg);
+  color: var(--public-text);
+}
+
+body.auth-layout:has(.deng-home) .theme-toggle-floating,
+body.auth-layout:has(.login-page--split) .theme-toggle-floating {
+  display: none !important;
+}

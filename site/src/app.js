@@ -22,7 +22,11 @@ function latestAssetStamp() {
   const publicDir = path.join(__dirname, '..', 'public');
   const files = [
     path.join(publicDir, 'css', 'style.css'),
+    path.join(publicDir, 'css', 'public-theme.css'),
+    path.join(publicDir, 'css', 'home.css'),
+    path.join(publicDir, 'css', 'login-page.css'),
     path.join(publicDir, 'js', 'app.js'),
+    path.join(publicDir, 'js', 'home.js'),
     path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'),
   ];
   let newest = 0;

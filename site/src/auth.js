@@ -95,8 +95,8 @@ function discordFallbackId(discordId) {
 // Middleware
 // ---------------------------------------------------------------
 
-/** Public landing + sign-in page (Discord OAuth entry). */
-const LOGIN_HOME = '/';
+/** Public sign-in page (Discord OAuth entry). */
+const LOGIN_HOME = '/login';
 
 /**
  * Redirect unauthenticated users to the public home page.

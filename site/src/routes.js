@@ -1317,12 +1317,15 @@ async function handleLootLabsComplete(req, res) {
 
 router.get('/', (req, res) => {
   if (req.session.user) return res.redirect('/dashboard');
-  return res.render('login', { title: 'Sign In - DENG Tool' });
+  return res.render('home', {
+    title: 'DENG Tool - Roblox Automation & Stat Tracker',
+    metaDescription: 'DENG Tool is a Roblox automation and stat-tracking suite with live Fish It inventory, Rejoin agents, licenses, and monitoring in one dashboard.',
+  });
 });
 
-/** Legacy URL — permanent redirect to the public landing page. */
 router.get('/login', (req, res) => {
-  return res.redirect(301, LOGIN_HOME);
+  if (req.session.user) return res.redirect('/dashboard');
+  return res.render('login', { title: 'Sign In - DENG Tool' });
 });
 
 router.get('/health', (_req, res) => {
@@ -1435,10 +1438,10 @@ router.get('/auth/discord/callback', authLimiter, async (req, res) => {
 });
 
 router.post('/auth/logout', (req, res) => {
-  if (!verifyCsrf(req)) return res.redirect('/');
+  if (!verifyCsrf(req)) return res.redirect('/login');
   req.session.destroy(() => {
     res.clearCookie('deng_sid');
-    res.redirect(LOGIN_HOME);
+    res.redirect('/');
   });
 });
 

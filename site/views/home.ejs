@@ -1,0 +1,241 @@
+<script>document.documentElement.dataset.publicPage = '1'; document.documentElement.dataset.theme = 'dark';</script>
+<link rel="stylesheet" href="/public/css/public-theme.css?v=<%= assetVersion %>">
+<link rel="stylesheet" href="/public/css/home.css?v=<%= assetVersion %>">
+
+<div class="deng-home" id="top">
+  <div class="deng-home-nav-wrap">
+    <header class="deng-home-nav" aria-label="Site navigation">
+      <div class="deng-home-nav__inner">
+        <a class="deng-home-brand" href="/" aria-label="DENG Tool home">
+          <span class="deng-home-brand__mark" aria-hidden="true">
+            <img src="/public/img/deng-logo.png?v=<%= assetVersion %>" alt="">
+          </span>
+          <span class="deng-home-brand__text">DENG Tool</span>
+        </a>
+        <nav class="deng-home-nav__links" aria-label="Primary">
+          <a class="deng-home-nav__link is-active" href="/" data-nav-section="home">Home</a>
+          <a class="deng-home-nav__link" href="#statistic" data-nav-section="statistic">Statistic</a>
+          <a class="deng-home-nav__link" href="#about" data-nav-section="about">About</a>
+        </nav>
+        <div class="deng-home-nav__actions">
+          <a class="deng-home-nav__signin" href="/login">Sign In</a>
+        </div>
+      </div>
+    </header>
+  </div>
+
+  <main class="deng-home-main">
+    <section class="deng-home-hero" aria-labelledby="home-hero-title">
+      <div class="deng-home-container">
+        <div class="deng-home-hero__pill" data-home-online-pill hidden>
+          <span class="deng-home-hero__dot" aria-hidden="true"></span>
+          <span data-home-online-text>Live network online</span>
+        </div>
+        <h1 id="home-hero-title" class="deng-home-hero__title">DENG Tool</h1>
+        <p class="deng-home-hero__subtitle">
+          A complete automation &amp; telemetry suite for Roblox. Track player stats, inventory,
+          rejoin sessions, and manage tools from one dashboard.
+        </p>
+        <div class="deng-home-hero__actions">
+          <a class="deng-home-btn deng-home-btn--primary" href="/login">
+            <span>Get Started</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg>
+          </a>
+          <a class="deng-home-btn deng-home-btn--secondary" href="https://discord.gg/v74u5ZtuXf" target="_blank" rel="noopener noreferrer">
+            <svg class="deng-home-btn__discord" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20.317 4.369A19.8 19.8 0 0 0 15.885 3a13.6 13.6 0 0 0-.617 1.27 18.3 18.3 0 0 0-5.535 0A13 13 0 0 0 9.11 3 19.7 19.7 0 0 0 4.677 4.37C1.86 8.57 1.096 12.66 1.478 16.693a19.9 19.9 0 0 0 6.073 3.078c.49-.668.927-1.377 1.304-2.122a13 13 0 0 1-2.053-.99c.172-.126.34-.257.503-.392a14.2 14.2 0 0 0 12.087 0c.165.14.333.27.503.392-.655.39-1.345.722-2.056.99.377.745.814 1.454 1.304 2.122a19.8 19.8 0 0 0 6.075-3.078c.448-4.67-.766-8.72-3.204-12.324M8.79 14.222c-1.183 0-2.157-1.085-2.157-2.42 0-1.334.955-2.42 2.157-2.42 1.21 0 2.176 1.095 2.157 2.42 0 1.335-.955 2.42-2.157 2.42m7.42 0c-1.183 0-2.157-1.085-2.157-2.42 0-1.334.955-2.42 2.157-2.42 1.21 0 2.176 1.095 2.157 2.42 0 1.335-.946 2.42-2.157 2.42"></path>
+            </svg>
+            <span>Join Discord</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="deng-home-section" id="statistic" aria-labelledby="home-stats-title" data-home-section="statistic">
+      <div class="deng-home-container">
+        <p class="deng-home-eyebrow">Live Network</p>
+        <div class="deng-home-stat-grid" data-home-stats-grid>
+          <article class="deng-home-stat-card" data-home-stat-card="trackedPlayers" hidden>
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Tracked Players</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value" data-home-stat-value="trackedPlayers">—</strong>
+            <span class="deng-home-stat-card__meta">Across all tracked games</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--accent" data-home-stat-card="onlineNow" hidden>
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Online Now</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent" data-home-stat-value="onlineNow">—</strong>
+            <span class="deng-home-stat-card__meta" data-home-stat-meta="onlineNow">Active devices online</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--accent" data-home-stat-card="activeAgents" hidden>
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Active Agents</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect x="4" y="8" width="16" height="12" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent" data-home-stat-value="activeAgents">—</strong>
+            <span class="deng-home-stat-card__meta">Rejoin bots running</span>
+          </article>
+          <article class="deng-home-stat-card" data-home-stat-card="totalFish" hidden>
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Fish Tracked</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"></path><path d="M18 12v.5"></path><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"></path><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value" data-home-stat-value="totalFish">—</strong>
+            <span class="deng-home-stat-card__meta">Fish It global catalog</span>
+          </article>
+          <article class="deng-home-stat-card" data-home-stat-card="uniqueUsers" hidden>
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Discord Users</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M3 3v18h18"></path><path d="M7 16V9"></path><path d="M12 16V5"></path><path d="M17 16v-6"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value" data-home-stat-value="uniqueUsers">—</strong>
+            <span class="deng-home-stat-card__meta">Linked dashboard accounts</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--warn" data-home-stat-card="generatedKeys" hidden>
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">License Keys</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="m9 12 2 2 4-4"></path><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value deng-home-stat-card__value--warn" data-home-stat-value="generatedKeys">—</strong>
+            <span class="deng-home-stat-card__meta">Generated license keys</span>
+          </article>
+        </div>
+        <p class="deng-home-stats-empty" data-home-stats-empty hidden>No live stats available right now. The page will keep working — check back soon.</p>
+      </div>
+    </section>
+
+    <section class="deng-home-section deng-home-section--network" aria-labelledby="home-network-title">
+      <div class="deng-home-container">
+        <div class="deng-home-network-panel">
+          <div class="deng-home-network-panel__head">
+            <div class="deng-home-network-panel__title-wrap">
+              <span class="deng-home-network-panel__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="8" rx="2"></rect><rect x="2" y="14" width="20" height="8" rx="2"></rect><path d="M6 6h.01"></path><path d="M6 18h.01"></path></svg>
+              </span>
+              <div>
+                <p class="deng-home-eyebrow deng-home-eyebrow--inline">Tool Network</p>
+                <h2 id="home-network-title" class="deng-home-network-panel__title">Agent Network</h2>
+              </div>
+            </div>
+            <p class="deng-home-network-panel__status" data-home-network-status>Services online</p>
+          </div>
+          <div class="deng-home-node-grid">
+            <article class="deng-home-node-card deng-home-node-card--online">
+              <div class="deng-home-node-card__head">
+                <span class="deng-home-node-card__dot" aria-hidden="true"></span>
+                <h3>FishTracker</h3>
+              </div>
+              <p>Live Fish It stats, inventory sync, and leaderboards.</p>
+              <a class="deng-home-node-link" href="/login">Open dashboard →</a>
+            </article>
+            <article class="deng-home-node-card deng-home-node-card--online">
+              <div class="deng-home-node-card__head">
+                <span class="deng-home-node-card__dot" aria-hidden="true"></span>
+                <h3>Inventory Sync</h3>
+              </div>
+              <p>Upload and monitor backpacks with live poll refresh.</p>
+              <a class="deng-home-node-link" href="/login">Open inventory →</a>
+            </article>
+            <article class="deng-home-node-card deng-home-node-card--online">
+              <div class="deng-home-node-card__head">
+                <span class="deng-home-node-card__dot" aria-hidden="true"></span>
+                <h3>Auto Rejoin</h3>
+              </div>
+              <p>Keep Roblox sessions alive with configured agents.</p>
+              <a class="deng-home-node-link" href="/download">Visit agent →</a>
+            </article>
+            <article class="deng-home-node-card deng-home-node-card--online">
+              <div class="deng-home-node-card__head">
+                <span class="deng-home-node-card__dot" aria-hidden="true"></span>
+                <h3>License Panel</h3>
+              </div>
+              <p>Manage keys, access, and authorized devices.</p>
+              <a class="deng-home-node-link" href="/login">Manage license →</a>
+            </article>
+            <article class="deng-home-node-card deng-home-node-card--online">
+              <div class="deng-home-node-card__head">
+                <span class="deng-home-node-card__dot" aria-hidden="true"></span>
+                <h3>Monitor</h3>
+              </div>
+              <p>Track connected devices, bridge status, and health.</p>
+              <a class="deng-home-node-link" href="/login">Open monitor →</a>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="deng-home-section" id="about" aria-labelledby="home-ecosystem-title" data-home-section="about">
+      <div class="deng-home-container">
+        <p class="deng-home-eyebrow">Ecosystem</p>
+        <h2 id="home-ecosystem-title" class="deng-home-section__title">One platform. Multiple tools.</h2>
+        <p class="deng-home-section__lead">Each tool lives in one account — pick what you need, sign in once.</p>
+        <div class="deng-home-eco-grid">
+          <article class="deng-home-eco-card deng-home-eco-card--featured">
+            <div class="deng-home-eco-card__head">
+              <span class="deng-home-eco-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M3 3v18h18"></path><path d="M7 16V9"></path><path d="M12 16V5"></path><path d="M17 16v-6"></path></svg>
+              </span>
+              <span class="deng-home-eco-card__badge">Current</span>
+            </div>
+            <h3>FishTracker &amp; Inventory</h3>
+            <p>Real-time fish and inventory tracking, global catalog, leaderstats, and live dashboards.</p>
+            <a class="deng-home-eco-link" href="/login">Open tracker/dashboard →</a>
+          </article>
+          <article class="deng-home-eco-card">
+            <div class="deng-home-eco-card__head">
+              <span class="deng-home-eco-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
+              </span>
+            </div>
+            <h3>Auto Rejoin Agent</h3>
+            <p>Keep Roblox sessions alive and reconnect automatically with your configured agents.</p>
+            <a class="deng-home-eco-link" href="/download">Visit agent →</a>
+            <a class="deng-home-eco-link deng-home-eco-link--muted" href="https://discord.gg/v74u5ZtuXf" target="_blank" rel="noopener noreferrer">Purchase via Discord →</a>
+          </article>
+          <article class="deng-home-eco-card">
+            <div class="deng-home-eco-card__head">
+              <span class="deng-home-eco-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              </span>
+            </div>
+            <h3>License &amp; Discord Tools</h3>
+            <p>Key management, Discord login, and your signed-in user dashboard.</p>
+            <a class="deng-home-eco-link" href="/login">Open dashboard →</a>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="deng-home-footer">
+    <div class="deng-home-container deng-home-footer__inner">
+      <div class="deng-home-footer__brand">DENG Tool</div>
+      <nav class="deng-home-footer__links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="#statistic">Statistic</a>
+        <a href="#about">About</a>
+        <a href="/login">Sign In</a>
+        <a href="https://discord.gg/v74u5ZtuXf" target="_blank" rel="noopener noreferrer">Discord</a>
+      </nav>
+    </div>
+  </footer>
+</div>
+
+<script src="/public/js/home.js?v=<%= assetVersion %>" defer></script>

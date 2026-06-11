@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <% if (typeof metaDescription !== 'undefined' && metaDescription) { %>
+  <meta name="description" content="<%= metaDescription %>">
+  <% } %>
   <title><%= typeof title !== 'undefined' ? title : 'DENG Tool' %></title>
   <script>
     (function() {
@@ -145,7 +148,7 @@
         </button>
         <form method="POST" action="/auth/logout">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-          <button type="submit" class="nav-link logout-link">
+          <button type="button" class="nav-link logout-link" data-logout-confirm>
             <span class="nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" focusable="false">
                 <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>

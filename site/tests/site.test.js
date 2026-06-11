@@ -712,20 +712,20 @@ beforeEach(() => {
 });
 
 describe('auth and protected pages', () => {
-  test('root / is the public landing and login page', async () => {
+  test('root / is the public marketing home page', async () => {
     const res = await request(app).get('/');
     assert.equal(res.status, 200);
-    assert.match(res.text, /Sign in with Discord/);
-    assert.match(res.text, /data-fishit-global/);
-    assert.match(res.text, /fishit-home\.js/);
-    assert.match(res.text, /Global Stats/);
-    assert.doesNotMatch(res.text, /href="\/login"/);
+    assert.match(res.text, /class="deng-home"/);
+    assert.match(res.text, /DENG Tool - Roblox Automation/);
+    assert.match(res.text, /href="\/login"/);
+    assert.doesNotMatch(res.text, /Sign in with Discord/);
   });
 
-  test('legacy /login permanently redirects to /', async () => {
+  test('/login renders the Discord sign-in page', async () => {
     const res = await request(app).get('/login');
-    assert.equal(res.status, 301);
-    assert.equal(res.headers.location, '/');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /Sign In - DENG Tool/);
+    assert.match(res.text, /Sign in with Discord/);
   });
 
   test('signed-in users visiting / are sent to dashboard', async () => {
@@ -737,17 +737,10 @@ describe('auth and protected pages', () => {
   });
 
   test('login page shows Discord-only login with required text and no database login', async () => {
-    const res = await request(app).get('/');
+    const res = await request(app).get('/login');
     assert.equal(res.status, 200);
     assert.match(res.text, /DENG Tool/);
-    assert.match(res.text, /DENG Tool: Rejoin/);
     assert.match(res.text, /Sign in with Discord/);
-    assert.match(res.text, /Global Stats/);
-    assert.match(res.text, /Generated Keys/);
-    assert.match(res.text, /Unique Users/);
-    assert.match(res.text, /Redeemed Keys/);
-    assert.match(res.text, /Active Devices/);
-    assert.match(res.text, /data-public-stat="generatedKeys"[^>]*>—</);
     // Database login must be absent
     assert.doesNotMatch(res.text, /Username or email/);
     assert.doesNotMatch(res.text, /password/);
@@ -807,7 +800,7 @@ describe('auth and protected pages', () => {
       const state = new URL(start.headers.location).searchParams.get('state');
       const res = await agent.get(`/auth/discord/callback?code=ok&state=${state}`);
       assert.equal(res.status, 302);
-      assert.equal(res.headers.location, '/');
+      assert.equal(res.headers.location, '/login');
       // Must not expose secrets in redirect URL or response body
       assert.doesNotMatch(res.headers.location, /secret|token|code/i);
     } finally {
@@ -820,7 +813,7 @@ describe('auth and protected pages', () => {
     await agent.get('/auth/discord'); // seeds oauthState in session
     const res = await agent.get('/auth/discord/callback?code=ok&state=WRONG_STATE');
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/');
+    assert.equal(res.headers.location, '/login');
     assert.equal(memoryDb.site_users.length, 0);
   });
 
@@ -828,7 +821,7 @@ describe('auth and protected pages', () => {
     // No prior /auth/discord call, so no oauthState in session
     const res = await request(app).get('/auth/discord/callback?code=ok&state=anything');
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/');
+    assert.equal(res.headers.location, '/login');
   });
 
   test('identify-only Discord user (no email field) logs in successfully', async () => {
@@ -862,7 +855,7 @@ describe('auth and protected pages', () => {
     assert.equal(out.headers.location, '/');
     const res = await agent.get('/dashboard');
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/');
+    assert.equal(res.headers.location, '/login');
   });
 
   test('protected pages and APIs redirect unauthenticated visitors', async () => {
@@ -871,7 +864,7 @@ describe('auth and protected pages', () => {
         ? await request(app).post(route)
         : await request(app).get(route);
       assert.equal(res.status, 302, route);
-      assert.equal(res.headers.location, '/');
+      assert.equal(res.headers.location, '/login');
     }
   });
 
@@ -1161,7 +1154,7 @@ describe('theme and dashboard UI', () => {
   });
 
   test('logo image replaces DT placeholders on login and dashboard', async () => {
-    const loginPage = await request(app).get('/');
+    const loginPage = await request(app).get('/login');
     assert.match(loginPage.text, /\/public\/img\/deng-logo\.png\?v=/);
     assert.doesNotMatch(loginPage.text, />DT</);
     assert.doesNotMatch(loginPage.text, /favicon\.svg/);
@@ -1173,12 +1166,11 @@ describe('theme and dashboard UI', () => {
     assert.doesNotMatch(dashboard.text, />DT</);
   });
 
-  test('login global stats CSS is compact responsive glass layout', () => {
-    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'style.css'), 'utf8');
-    assert.match(css, /\.global-stats-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
-    assert.match(css, /\.global-stat-card\s*\{[\s\S]*backdrop-filter:\s*blur\(16px\)/);
-    assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.global-stats-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
-    assert.match(css, /\.global-stat-value\s*\{[\s\S]*min-height:/);
+  test('home landing stat CSS uses responsive card grid layout', () => {
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'home.css'), 'utf8');
+    assert.match(css, /\.deng-home-stat-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
+    assert.match(css, /@media \(max-width: 960px\)[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+    assert.match(css, /@media \(max-width: 640px\)[\s\S]*grid-template-columns:\s*1fr/);
   });
 
   test('light mode global stats cards use bright glass + slate text (no washed-out muted label)', () => {
@@ -2780,7 +2772,7 @@ describe('security controls', () => {
     const res = await request(app)
       .get('/auth/discord/callback?error=access_denied&redirect=https://evil.example');
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/');
+    assert.equal(res.headers.location, '/login');
   });
 
   test('frontend responses do not expose server secrets or full keys outside authorized result', async () => {
@@ -3955,31 +3947,33 @@ describe('LootLabs provider helper (Redirect API / Anti-Bypass)', () => {
 });
 
 describe('Fish It website integration', () => {
-  test('landing page shows a clean "Sign in with Discord" button with icon', async () => {
-    const res = await request(app).get('/');
+  test('login page shows a clean "Sign in with Discord" button with icon', async () => {
+    const res = await request(app).get('/login');
     assert.equal(res.status, 200);
     assert.match(res.text, /Sign in with Discord/);
-    assert.match(res.text, /class="discord-icon"/);
+    assert.match(res.text, /discord-icon/);
     assert.match(res.text, /href="\/auth\/discord"/);
   });
 
-  test('landing page renders the Fish It global stats section', async () => {
+  test('home page loads Fish It stats via home.js and public APIs', async () => {
     const res = await request(app).get('/');
-    assert.match(res.text, /data-fishit-global/);
-    assert.match(res.text, /Fish It — Global Stats|Fish It/);
-    assert.match(res.text, /fishit-home\.js/);
+    assert.match(res.text, /data-home-stat-value="trackedPlayers"/);
+    assert.match(res.text, /home\.js/);
+    assert.doesNotMatch(res.text, /fishit-home\.js/);
   });
 
-  test('landing page has NO email/password login (Discord only)', async () => {
-    const res = await request(app).get('/');
-    assert.doesNotMatch(res.text, /type="password"/);
-    assert.doesNotMatch(res.text, /name="email"/);
+  test('home and login pages have NO email/password login (Discord only)', async () => {
+    for (const path of ['/', '/login']) {
+      const res = await request(app).get(path);
+      assert.doesNotMatch(res.text, /type="password"/);
+      assert.doesNotMatch(res.text, /name="email"/);
+    }
   });
 
-  test('/fishit requires login (redirects to / when signed out)', async () => {
+  test('/fishit requires login (redirects to /login when signed out)', async () => {
     const res = await request(app).get('/fishit');
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/');
+    assert.equal(res.headers.location, '/login');
   });
 
   test('/fishit renders tabs + username masking hook when signed in', async () => {
@@ -4011,19 +4005,19 @@ describe('Fish It website integration', () => {
     assert.match(res.text, /\/public\/css\/style\.css\?v=/);
   });
 
-  test('/login redirects to the public landing page', async () => {
+  test('/login renders the Discord sign-in page', async () => {
     const res = await request(app).get('/login');
-    assert.equal(res.status, 301);
-    assert.equal(res.headers.location, '/');
+    assert.equal(res.status, 200);
+    assert.match(res.text, /Sign In - DENG Tool/);
+    assert.match(res.text, /Sign in with Discord/);
   });
 
-  test('landing page hides APK download CTA/count and survives missing download stats', async () => {
+  test('home page hides APK download CTA/count and survives missing download stats', async () => {
     const res = await request(app).get('/');
     assert.equal(res.status, 200);
-    assert.doesNotMatch(res.text, /href="\/download"/);
     assert.doesNotMatch(res.text, /Download Rejoin APK|Download APK/);
     assert.doesNotMatch(res.text, /download count|data-apk-download-count/i);
-    assert.match(res.text, /data-fishit-global/);
+    assert.match(res.text, /data-home-stats-grid/);
   });
 
   test('download stats API is explicitly uncached by browsers and CDN', async () => {
