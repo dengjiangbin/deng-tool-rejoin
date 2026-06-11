@@ -228,8 +228,9 @@ function hasPlayerStatValues(stats) {
 }
 
 function isTrustedPlayerStatsBuild(build) {
-  return typeof build === 'string'
-    && TRUSTED_PLAYERSTATS_BUILD_MARKS.some((mark) => build.includes(mark));
+  if (typeof build !== 'string' || !build) return false;
+  if (build.includes('LOADER_REGISTER_LIMIT_FIX')) return true;
+  return TRUSTED_PLAYERSTATS_BUILD_MARKS.some((mark) => build.includes(mark));
 }
 
 function isTrustedPlayerStatsSource(source) {

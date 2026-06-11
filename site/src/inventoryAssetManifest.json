@@ -1,8 +1,8 @@
 {
-  "marker": "HOTFIX_INVENTORY_CARD_STABILITY_MOJIBAKE_2026_06_11",
+  "marker": "SYNC_DURATION_STATS_HOTFIX_2026_06_11",
   "css": "inventory.08bfd35b7c1a.css",
-  "js": "inventory.16f1b192a1b3.js",
+  "js": "inventory.9e08ac2f95db.js",
   "cssHash": "08bfd35b7c1a",
-  "jsHash": "16f1b192a1b3",
-  "builtAt": "2026-06-11T10:50:11.388Z"
+  "jsHash": "9e08ac2f95db",
+  "builtAt": "2026-06-11T10:59:36.720Z"
 }

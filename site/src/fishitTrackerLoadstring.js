@@ -51,8 +51,8 @@ function buildProofTrackerLoader(fetchUrl, loaderBuild) {
   ].join(';');
 }
 
-/** Public executor script served by website copy box (cache-busted build query). */
-const CLEAN_TRACKER_LOADSTRING = buildCleanTrackerLoader(PROTECTED_TRACKER_RAW_URL_CACHE_BUST);
+/** Public executor script served by website copy box (clean URL, no visible cache-buster). */
+const CLEAN_TRACKER_LOADSTRING = buildCleanTrackerLoader(PROTECTED_TRACKER_RAW_URL);
 
 /** Debug/admin proof loader with cache-bust and build markers. */
 const DEBUG_TRACKER_LOADSTRING = buildProofTrackerLoader(PROTECTED_TRACKER_RAW_URL_CACHE_BUST, LOADER_BUILD);

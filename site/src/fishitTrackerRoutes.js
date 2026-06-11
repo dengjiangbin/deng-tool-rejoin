@@ -201,15 +201,19 @@ function applyPlayerStatsFields(existing, body, now) {
   const merged = playerStatsStore.mergePlayerStats(existing, incoming, {
     isLiveRoblox: isLiveRobloxUpload(body),
   });
-  const displayable = resolvePlayerStatsForApi(merged);
-  const out = { playerStats: displayable };
-  if (displayable && (playerStatsStore.hasPlayerStatValues(displayable)
-    || (displayable.source === 'missing' && isLiveRobloxUpload(body)))) {
+  const stored = playerStatsStore.isTrustedPlayerStats(merged)
+    ? merged
+    : (playerStatsStore.isTrustedPlayerStats(existing) ? existing : null);
+  const out = {};
+  if (stored) out.playerStats = stored;
+  const hasFreshStats = !!(incoming && playerStatsStore.hasPlayerStatValues(incoming));
+  if (stored && (hasFreshStats
+    || (stored.source === 'missing' && isLiveRobloxUpload(body)))) {
     out.playerStatsUpdatedAt = now;
     out.lastStatsUploadAt = now;
   }
   const debug = playerStatsStore.sanitisePlayerStatsDebug(body.playerStatsDebug);
-  if (debug && playerStatsStore.isTrustedPlayerStats(merged)) out.playerStatsDebug = debug;
+  if (debug && stored && playerStatsStore.isTrustedPlayerStats(stored)) out.playerStatsDebug = debug;
   return out;
 }
 

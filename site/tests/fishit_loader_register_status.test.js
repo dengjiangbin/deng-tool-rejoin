@@ -33,8 +33,12 @@ describe('loader register fix + upload-sync status contract', () => {
     assert.equal(LOADER_REGISTER_LIMIT_FIX_BUILD, MINIMUM_TRACKER_BUILD);
   });
 
-  test('public loader copy uses cache-busted fish-it URL', () => {
-    assert.match(CLEAN_TRACKER_LOADSTRING, /tracker\.lua\?v=LOADER_REGISTER_LIMIT_FIX_2026_06_11/);
+  test('public loader copy is clean fish-it URL without cache-bust query', () => {
+    assert.equal(
+      CLEAN_TRACKER_LOADSTRING,
+      'loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua"))()',
+    );
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\?v=/);
   });
 
   test('green only within lastSuccessfulUploadAt + interval + grace', () => {
