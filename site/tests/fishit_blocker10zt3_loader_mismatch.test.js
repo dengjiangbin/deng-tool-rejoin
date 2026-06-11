@@ -15,14 +15,16 @@ process.env.FISHIT_DB_PATH = process.env.FISHIT_DB_PATH || '/nonexistent/deng-fi
 const trackerRouter = require('../src/fishitTrackerRoutes');
 const {
   LOADER_BUILD,
-  EXPECTED_CLIENT_TRACKER_BUILD,
   CLEAN_TRACKER_LOADSTRING,
+  DEBUG_TRACKER_LOADSTRING,
   PROTECTED_DIST_RAW_URL,
   PROTECTED_DIST_RAW_URL_CACHE_BUST,
   PUBLIC_TRACKER_GITHUB_REPO,
   CLEAN_PUBLIC_TRACKER_GITHUB_REPO,
+  buildCleanTrackerLoader,
   buildProofTrackerLoader,
 } = require('../src/fishitTrackerLoadstring');
+const { EXPECTED_CLIENT_TRACKER_BUILD, MINIMUM_TRACKER_BUILD } = require('../src/fishitTrackerBuild');
 
 const ROOT = path.join(__dirname, '..', '..');
 const LOADER_LUA = path.join(ROOT, 'scripts', 'loader.lua');
@@ -37,44 +39,37 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZT3 loader/dist mismatch fix', () => {
-  test('canonical loader targets deng-fishtracker-dist with cache-bust ZT3', () => {
+  test('canonical loader targets dengjiangbin/fish-it; public copy is clean one-liner', () => {
     assert.equal(PUBLIC_TRACKER_GITHUB_REPO, CLEAN_PUBLIC_TRACKER_GITHUB_REPO);
-    assert.match(PROTECTED_DIST_RAW_URL, /deng-fishtracker-dist\/main\/dist\/tracker\.lua$/);
-    assert.equal(LOADER_BUILD, 'BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10');
+    assert.match(PROTECTED_DIST_RAW_URL, /dengjiangbin\/fish-it\/main\/tracker\.lua$/);
     assert.equal(EXPECTED_CLIENT_TRACKER_BUILD, LOADER_BUILD);
-    assert.match(PROTECTED_DIST_RAW_URL_CACHE_BUST, /\?v=BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
-    assert.match(CLEAN_TRACKER_LOADSTRING, /LOADER_BUILD=/);
-    assert.match(CLEAN_TRACKER_LOADSTRING, /FETCH_URL=/);
-    assert.match(CLEAN_TRACKER_LOADSTRING, /FETCHED_TRACKER_BUILD=/);
-    assert.equal(
-      CLEAN_TRACKER_LOADSTRING,
-      buildProofTrackerLoader(PROTECTED_DIST_RAW_URL_CACHE_BUST, LOADER_BUILD),
-    );
+    assert.match(PROTECTED_DIST_RAW_URL_CACHE_BUST, /\?v=LOADER_FIX_REGISTER_LIMIT_2026_06_11/);
+    assert.equal(CLEAN_TRACKER_LOADSTRING, buildCleanTrackerLoader(PROTECTED_DIST_RAW_URL_CACHE_BUST));
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /LOADER_BUILD=/);
+    assert.equal(DEBUG_TRACKER_LOADSTRING, buildProofTrackerLoader(PROTECTED_DIST_RAW_URL_CACHE_BUST, LOADER_BUILD));
+    assert.match(DEBUG_TRACKER_LOADSTRING, /FETCHED_TRACKER_BUILD=/);
   });
 
-  test('safe loader.lua uses deng-fishtracker-dist not legacy deng-tool-rejoin', () => {
+  test('safe loader.lua uses dengjiangbin/fish-it not legacy repos', () => {
     const loader = fs.readFileSync(LOADER_LUA, 'utf8');
-    assert.match(loader, /deng-fishtracker-dist\/main\/dist\/tracker\.lua/);
+    assert.match(loader, /dengjiangbin\/fish-it\/main\/tracker\.lua/);
+    assert.doesNotMatch(loader, /deng-fishtracker-dist\/main\/dist\/tracker\.lua/);
     assert.doesNotMatch(loader, /deng-tool-rejoin\/main\/dist\/tracker\.lua/);
-    assert.match(loader, /LOADER_BUILD = "BLOCKER10ZT4/);
-    assert.match(loader, /print\("LOADER_BUILD="/);
-    assert.match(loader, /FETCH_URL=/);
-    assert.match(loader, /FETCHED_TRACKER_BUILD=/);
-    assert.match(loader, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
+    assert.doesNotMatch(loader, /LOADER_BUILD/);
   });
 
-  test('local dist/tracker.lua contains BLOCKER10ZT3 not stale ZW-only header', () => {
+  test('local dist/tracker.lua contains register-limit fix build marker', () => {
     const dist = fs.readFileSync(DIST_PATH, 'utf8');
-    assert.match(dist, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
+    assert.match(dist, /LOADER_FIX_REGISTER_LIMIT_2026_06_11/);
     assert.doesNotMatch(dist, /^--\[\[ DENG protected tracker dist \| BLOCKER10ZW/m);
   });
 
-  test('/inventory copy box serves cache-busted ZT3 proof loader', async () => {
+  test('/inventory copy box serves clean public loader', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
-    assert.match(res.text, /LOADER_BUILD=/);
-    assert.match(res.text, /FETCH_URL=/);
-    assert.match(res.text, /FETCHED_TRACKER_BUILD=/);
-    assert.match(res.text, /deng-fishtracker-dist\/main\/dist\/tracker\.lua\?v=BLOCKER10ZT4/);
+    assert.match(res.text, new RegExp(CLEAN_TRACKER_LOADSTRING.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.doesNotMatch(res.text, /LOADER_BUILD=/);
+    assert.doesNotMatch(res.text, /FETCH_URL=/);
+    assert.doesNotMatch(res.text, /FETCHED_TRACKER_BUILD=/);
     assert.doesNotMatch(res.text, /deng-tool-rejoin\/main\/dist\/tracker\.lua/);
   });
 
@@ -89,18 +84,17 @@ describe('BLOCKER10ZT3 loader/dist mismatch fix', () => {
         userId: 5510,
         isOnline: true,
         trackerBuild: 'BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10',
+        trackerChannel: 'fish-it-main',
+        scriptSource: 'https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua',
         phase: 'live',
       })
-      .expect(200);
-
-    const debug = await request(app).get(`/api/fishit-tracker/debug/${username}`).expect(200);
-    assert.equal(debug.body.latestClientBuild, 'BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10');
-    assert.equal(debug.body.expectedClientBuild, 'BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10');
-    assert.equal(debug.body.buildMismatch, true);
-    assert.equal(debug.body.mismatchReason, 'client_loader_still_executing_old_build');
+      .expect(403);
+    assert.match(JSON.stringify({
+      error: 'tracker_client_rejected',
+    }), /tracker_client_rejected/);
   });
 
-  test('debug API shows no mismatch when client uploads ZT3 build', async () => {
+  test('debug API shows no mismatch when client uploads approved build', async () => {
     const app = makeApp();
     const username = 'LoaderMatchUser';
     await request(app)
@@ -110,13 +104,15 @@ describe('BLOCKER10ZT3 loader/dist mismatch fix', () => {
         username,
         userId: 5511,
         isOnline: true,
-        trackerBuild: 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10',
+        trackerBuild: MINIMUM_TRACKER_BUILD,
+        trackerChannel: 'fish-it-main',
+        scriptSource: 'https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua',
         phase: 'live',
       })
       .expect(200);
 
     const debug = await request(app).get(`/api/fishit-tracker/debug/${username}`).expect(200);
-    assert.equal(debug.body.latestClientBuild, 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10');
+    assert.equal(debug.body.latestClientBuild, MINIMUM_TRACKER_BUILD);
     assert.equal(debug.body.buildMismatch, false);
     assert.equal(debug.body.mismatchReason, null);
   });

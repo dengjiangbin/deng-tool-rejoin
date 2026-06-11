@@ -58,9 +58,17 @@ const inventoryAssets = require('./inventoryAssets');
 const {
   CLEAN_TRACKER_LOADSTRING,
   DEBUG_TRACKER_LOADSTRING,
-  PROTECTED_DIST_REL_PATH,
-  PROTECTED_DIST_RAW_URL_CACHE_BUST,
+  PROTECTED_TRACKER_REL_PATH,
+  PROTECTED_TRACKER_RAW_URL,
+  PROTECTED_TRACKER_RAW_URL_CACHE_BUST,
 } = require('./fishitTrackerLoadstring');
+const {
+  validateTrackerClientProof,
+  prepareTrackerRequestBody,
+  MINIMUM_TRACKER_BUILD,
+  ALLOWED_TRACKER_CHANNEL,
+  ALLOWED_TRACKER_RAW_URL,
+} = require('./fishitTrackerChannelEnforcement');
 const itemUtilityPublic = require('./fishitItemUtilityPublic');
 const gameItemDbPublic = require('./fishitGameItemDbPublic');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
@@ -109,7 +117,7 @@ function resolvePlayerStatsForApi(raw) {
 function isTrustedClientBuild(build) {
   if (!build) return false;
   const s = String(build);
-  return s.includes('BLOCKER10ZT5') || s.includes('BLOCKER10ZT4') || s.includes('BLOCKER10ZT3');
+  return s === MINIMUM_TRACKER_BUILD || s.includes('LOADER_FIX_REGISTER_LIMIT');
 }
 
 function buildPlayerStatsProof(raw, data, nowFallback) {
@@ -197,6 +205,7 @@ function applyPlayerStatsFields(existing, body, now) {
   if (displayable && (playerStatsStore.hasPlayerStatValues(displayable)
     || (displayable.source === 'missing' && isLiveRobloxUpload(body)))) {
     out.playerStatsUpdatedAt = now;
+    out.lastStatsUploadAt = now;
   }
   const debug = playerStatsStore.sanitisePlayerStatsDebug(body.playerStatsDebug);
   if (debug && playerStatsStore.isTrustedPlayerStats(merged)) out.playerStatsDebug = debug;
@@ -2794,7 +2803,7 @@ function redirectLegacyInventoryRoute(req, res) {
 router.get('/tracker.lua', (_req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.set('Pragma', 'no-cache');
-  return res.redirect(302, PROTECTED_DIST_RAW_URL_CACHE_BUST);
+  return res.redirect(302, PROTECTED_TRACKER_RAW_URL_CACHE_BUST);
 });
 
 router.get('/inventory', requireInventorySession, renderTrackerPage);
@@ -3004,7 +3013,29 @@ function runCatchDeltaOnUpload(body, rawItems, existing, sessionKey) {
 //   • tracker_status      – a lightweight online/offline + source ping with no
 //     items; keeps the last known inventory and only flips flags.
 function handleUpdateBackpack(req, res) {
-    const body = req.body || {};
+    const body = prepareTrackerRequestBody(req.body || {}, {
+      testMode: process.env.NODE_ENV === 'test',
+    });
+    const clientGate = validateTrackerClientProof(body);
+    if (!clientGate.ok) {
+      console.warn(
+        '[fishit-tracker] tracker client rejected route=%s reasons=%s build=%s channel=%s source=%s',
+        req.path,
+        (clientGate.reasons || []).join(','),
+        clientGate.proof?.trackerBuild || 'n/a',
+        clientGate.proof?.trackerChannel || 'n/a',
+        clientGate.proof?.scriptSource || 'n/a',
+      );
+      return res.status(clientGate.status || 403).json({
+        error: clientGate.error,
+        reasons: clientGate.reasons,
+        required: clientGate.required,
+        allowedTrackerChannel: ALLOWED_TRACKER_CHANNEL,
+        allowedTrackerRawUrl: ALLOWED_TRACKER_RAW_URL,
+        minimumTrackerBuild: MINIMUM_TRACKER_BUILD,
+      });
+    }
+
     const { username, userId, isOnline, type } = body;
     const source = sanitiseSource(body.source);
     const phase  = sanitisePhase(body.phase);
@@ -3039,6 +3070,7 @@ function handleUpdateBackpack(req, res) {
       const base = existing || { username: cleanUser, userId: cleanUserId, items: [], inventory: null };
       const ps = sanitiseParseStats(body.parseStats) || base.parseStats || null;
       const phaseOut = effectivePhase(phase || base.phase, ps, (base.items || []).length > 0);
+      const loaderErr = body.loaderError && typeof body.loaderError === 'object' ? body.loaderError : null;
       liveTrackDB[key] = {
         ...base,
         username:        cleanUser,
@@ -3050,12 +3082,19 @@ function handleUpdateBackpack(req, res) {
         phase:           phaseOut,
         parseStats:      ps,
         trackerBuild:    sanitiseTrackerBuild(body.trackerBuild) || base.trackerBuild || null,
+        expectedLoaderBuild: EXPECTED_CLIENT_TRACKER_BUILD,
         lastPayloadType: 'tracker_status',
+        lastHeartbeatAt: now,
         lastSeenAt:      now,
         lastInventoryAt: base.lastInventoryAt || base.updatedAt || null,
         updatedAt:       now,
         ...applyPlayerStatsFields(base.playerStats, body, now),
       };
+      if (loaderErr) {
+        liveTrackDB[key].lastLoaderErrorAt = now;
+        liveTrackDB[key].lastLoaderErrorMessage = String(loaderErr.errorMessage || '').slice(0, 500);
+        liveTrackDB[key].lastLoaderErrorPhase = loaderErr.phase || null;
+      }
       if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
         liveTrackDB[key].unresolvedDiagnostics = body.unresolvedDiagnostics.slice(0, 30);
       }
@@ -3083,7 +3122,9 @@ function handleUpdateBackpack(req, res) {
         phase: liveTrackDB[key].phase,
         lastSeenAt: now,
         lastInventoryAt: liveTrackDB[key].lastInventoryAt || null,
-        online: isSessionLive(liveTrackDB[key]),
+        online: deriveConnectionStatus(liveTrackDB[key]).connectionStatus === 'live',
+        connectionStatus: deriveConnectionStatus(liveTrackDB[key]).connectionStatus,
+        connectionStatusMessage: deriveConnectionStatus(liveTrackDB[key]).connectionStatusMessage,
         serverTime: now,
         heartbeatAccepted: true,
       });
@@ -3292,9 +3333,12 @@ function handleUpdateBackpack(req, res) {
       parseStats:      ps || (existing && existing.parseStats) || null,
       fishPathDiscovery: fishPathDiscovery || (existing && existing.fishPathDiscovery) || null,
       trackerBuild:    sanitiseTrackerBuild(body.trackerBuild) || (existing && existing.trackerBuild) || null,
+      expectedLoaderBuild: EXPECTED_CLIENT_TRACKER_BUILD,
       lastPayloadType: cleanItems.length ? 'inventory_snapshot' : (type || 'inventory_snapshot'),
       lastSeenAt:      now,
       lastInventoryAt: now,
+      lastSnapshotUploadAt: now,
+      lastSuccessfulUploadAt: now,
       updatedAt:       now,
       partialSnapshotDetected: partialInfo.partialSnapshotDetected || false,
       partialSnapshotReason: partialInfo.partialSnapshotReason || null,
@@ -3567,9 +3611,9 @@ function buildTrackerLuaTouchProof() {
   return {
     touched: false,
     reason: 'frontend_backend_route_ui_only',
-    liveDistRelativePath: PROTECTED_DIST_REL_PATH,
-    liveDistFetchUrl: PROTECTED_DIST_RAW_URL_CACHE_BUST,
-    localDistPath: path.join(__dirname, '..', '..', PROTECTED_DIST_REL_PATH),
+    liveDistRelativePath: PROTECTED_TRACKER_REL_PATH,
+    liveDistFetchUrl: PROTECTED_TRACKER_RAW_URL_CACHE_BUST,
+    localDistPath: path.join(__dirname, '..', '..', 'dist', PROTECTED_TRACKER_REL_PATH),
   };
 }
 
@@ -3652,20 +3696,28 @@ function syncAgeSecondsFromTimestamp(ts) {
   return Number.isFinite(age) && age >= 0 ? age : null;
 }
 
-function buildSyncProof(data, maxAgeMs = 45000) {
-  const statusTimestampUsed = statusTimestampForSession(data);
+function buildSyncProof(data, maxAgeMs = STATS_FRESH_MAX_MS) {
+  const status = deriveConnectionStatus(data);
+  const statusTimestampUsed = statsUploadTimestamp(data) || statusTimestampForSession(data);
   const ageSeconds = syncAgeSecondsFromTimestamp(statusTimestampUsed);
-  const isOnline = ageSeconds != null && ageSeconds * 1000 < maxAgeMs;
   return {
     isReceivingLua: !!(data && data.lastUploadReceivedAt),
     statusTimestampUsed,
+    statsUploadTimestampUsed: statsUploadTimestamp(data),
     lastSeenAt: data?.lastSeenAt || null,
+    lastHeartbeatAt: data?.lastHeartbeatAt || null,
     updatedAt: data?.updatedAt || null,
     inventoryUpdatedAt: data?.lastInventoryAt || null,
+    lastSnapshotUploadAt: data?.lastSnapshotUploadAt || null,
+    lastStatsUploadAt: data?.lastStatsUploadAt || null,
     playerStatsUpdatedAt: data?.playerStatsUpdatedAt || null,
     ageSeconds,
-    isOnline,
-    statusColor: isOnline ? 'green' : 'red',
+    isOnline: status.connectionStatus === 'live',
+    statusColor: status.connectionStatusColor,
+    connectionStatus: status.connectionStatus,
+    connectionStatusReason: status.connectionStatusReason,
+    connectionStatusMessage: status.connectionStatusMessage,
+    statsFreshMaxMs: maxAgeMs,
   };
 }
 
@@ -3706,10 +3758,139 @@ function applyUploadDebugFields(session, opts = {}) {
   return { ...base, ...patch };
 }
 
-/** Session is live when a recent accepted sync timestamp is within the threshold. */
-function isSessionLive(data, maxAgeMs = 45000) {
+function statsUploadTimestamp(data) {
+  if (!data) return null;
+  const fields = [
+    data.lastStatsUploadAt,
+    data.playerStatsUpdatedAt,
+    data.lastSnapshotUploadAt,
+    data.lastInventoryAt,
+    data.lastSuccessfulUploadAt,
+  ];
+  let best = null;
+  let bestMs = -1;
+  for (const ts of fields) {
+    if (!ts) continue;
+    const ms = new Date(ts).getTime();
+    if (Number.isFinite(ms) && ms > bestMs) {
+      bestMs = ms;
+      best = ts;
+    }
+  }
+  return best;
+}
+
+const STATS_FRESH_MAX_MS = 30000;
+const HEARTBEAT_FRESH_MAX_MS = 45000;
+
+function deriveConnectionStatus(data) {
+  const expectedLoaderBuild = EXPECTED_CLIENT_TRACKER_BUILD;
+  const base = {
+    expectedLoaderBuild,
+    lastLoaderBuild: data?.trackerBuild || data?.lastUploadTrackerBuild || null,
+    lastHeartbeatAt: data?.lastHeartbeatAt || data?.lastSeenAt || null,
+    lastSnapshotUploadAt: data?.lastSnapshotUploadAt || data?.lastInventoryAt || null,
+    lastStatsUploadAt: data?.lastStatsUploadAt || data?.playerStatsUpdatedAt || null,
+    lastSuccessfulUploadAt: data?.lastSuccessfulUploadAt || data?.lastUploadAcceptedAt || null,
+    lastLoaderErrorAt: data?.lastLoaderErrorAt || null,
+    lastLoaderErrorMessage: data?.lastLoaderErrorMessage || null,
+    lastLoaderErrorPhase: data?.lastLoaderErrorPhase || null,
+  };
+
+  if (!data) {
+    return {
+      ...base,
+      connectionStatus: 'offline',
+      connectionStatusColor: 'red',
+      connectionStatusReason: 'no_session',
+      connectionStatusMessage: 'Offline',
+      statsFresh: false,
+    };
+  }
+
+  const build = base.lastLoaderBuild;
+  if (build && !isTrustedClientBuild(build)) {
+    return {
+      ...base,
+      connectionStatus: 'error',
+      connectionStatusColor: 'red',
+      connectionStatusReason: 'outdated_loader',
+      connectionStatusMessage: 'Outdated cached loader running',
+      statsFresh: false,
+    };
+  }
+
+  if (base.lastLoaderErrorAt && base.lastLoaderErrorMessage) {
+    const errAge = Date.now() - new Date(base.lastLoaderErrorAt).getTime();
+    if (Number.isFinite(errAge) && errAge >= 0 && errAge < HEARTBEAT_FRESH_MAX_MS) {
+      const msg = String(base.lastLoaderErrorMessage);
+      const registerFail = /register|Exceeded limit 200/i.test(msg);
+      return {
+        ...base,
+        connectionStatus: 'error',
+        connectionStatusColor: 'red',
+        connectionStatusReason: registerFail ? 'loader_register_limit' : 'loader_runtime_error',
+        connectionStatusMessage: registerFail
+          ? 'Loader failed: register limit exceeded'
+          : `Loader error: ${msg.slice(0, 80)}`,
+        statsFresh: false,
+      };
+    }
+  }
+
+  const statsTs = statsUploadTimestamp(data);
+  const statsAgeMs = statsTs ? Date.now() - new Date(statsTs).getTime() : Infinity;
+  if (build && isTrustedClientBuild(build) && statsTs
+    && Number.isFinite(statsAgeMs) && statsAgeMs >= 0 && statsAgeMs < STATS_FRESH_MAX_MS) {
+    const secs = Math.floor(statsAgeMs / 1000);
+    return {
+      ...base,
+      connectionStatus: 'live',
+      connectionStatusColor: 'green',
+      connectionStatusReason: 'fresh_stats_upload',
+      connectionStatusMessage: `Fresh stats updated ${secs}s ago`,
+      lastStatsUpdatedAt: statsTs,
+      statsFresh: true,
+      statsAgeSeconds: secs,
+    };
+  }
+
+  const hbTs = base.lastHeartbeatAt;
+  const hbAgeMs = hbTs ? Date.now() - new Date(hbTs).getTime() : Infinity;
+  if (Number.isFinite(hbAgeMs) && hbAgeMs >= 0 && hbAgeMs < HEARTBEAT_FRESH_MAX_MS) {
+    return {
+      ...base,
+      connectionStatus: 'stale',
+      connectionStatusColor: 'yellow',
+      connectionStatusReason: 'heartbeat_only_stats_stale',
+      connectionStatusMessage: 'Heartbeat only, stats stale',
+      statsFresh: false,
+    };
+  }
+
+  return {
+    ...base,
+    connectionStatus: 'offline',
+    connectionStatusColor: 'red',
+    connectionStatusReason: 'no_recent_signal',
+    connectionStatusMessage: 'Offline',
+    statsFresh: false,
+  };
+}
+
+/** Session is live (green) only when fresh stats/inventory upload succeeded recently. */
+function isSessionLive(data, maxAgeMs = STATS_FRESH_MAX_MS) {
+  const status = deriveConnectionStatus(data);
+  if (status.connectionStatus !== 'live') return false;
+  const statsTs = statsUploadTimestamp(data);
+  if (!statsTs) return false;
+  const age = Date.now() - new Date(statsTs).getTime();
+  return Number.isFinite(age) && age >= 0 && age < maxAgeMs;
+}
+
+function isSessionHeartbeatRecent(data, maxAgeMs = HEARTBEAT_FRESH_MAX_MS) {
   if (!data) return false;
-  const ts = statusTimestampForSession(data);
+  const ts = data.lastHeartbeatAt || data.lastSeenAt;
   if (!ts) return false;
   const age = Date.now() - new Date(ts).getTime();
   return Number.isFinite(age) && age >= 0 && age < maxAgeMs;
@@ -3777,7 +3958,7 @@ function collectPublicFishItTrackerStats() {
     if (key.startsWith('uid:')) continue;
     if (!data || typeof data !== 'object') continue;
     trackedFishers += 1;
-    if (isSessionLive(data)) onlineFishers += 1;
+    if (isSessionHeartbeatRecent(data)) onlineFishers += 1;
     if (hasSyncedInventory(data)) {
       inventoriesSynced += 1;
       fishTracked += publicFishCountForSession(data);
@@ -3799,7 +3980,7 @@ function collectPublicFishItTrackerStats() {
       onlineFishers: {
         service: 'fishit-tracker',
         store: 'liveTrackDB',
-        method: 'isSessionLive(session) within 45s sync window',
+        method: 'isSessionHeartbeatRecent(session) within 45s heartbeat window',
       },
       inventoriesSynced: {
         service: 'fishit-tracker',
@@ -3884,7 +4065,6 @@ async function handleGetBackpack(req, res) {
   const baseUrl = `${req.protocol}://${req.get('host')}`;
   let publicFish = await buildPublicFishFields(enrichedFlat, baseUrl, { sessionData: data, sessionKey: key });
   const liveFishCount = Array.isArray(publicFish.fishItems) ? publicFish.fishItems.length : 0;
-  const dataStale = !isSessionLive(data);
   if (liveFishCount === 0 && Array.isArray(data.lastGoodPublicFishItems) && data.lastGoodPublicFishItems.length) {
     publicFish = {
       ...publicFish,
@@ -3902,6 +4082,7 @@ async function handleGetBackpack(req, res) {
 
   const fishCatalogStats = fishCatalog.getStats();
 
+  const connection = deriveConnectionStatus(data);
   const enriched = {
     ...data,
     renderBuild:     PUBLIC_RENDER_BUILD,
@@ -3957,9 +4138,24 @@ async function handleGetBackpack(req, res) {
     countsInternal:  countsEnriched,
     lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
     lastSeenAt:      data.lastSeenAt || null,
-    isOnline:        isSessionLive(data),
-    connectionLive:  isSessionLive(data),
-    dataStale:       !!(publicFish.dataStale || dataStale),
+    lastHeartbeatAt: data.lastHeartbeatAt || data.lastSeenAt || null,
+    lastSnapshotUploadAt: data.lastSnapshotUploadAt || data.lastInventoryAt || null,
+    lastStatsUploadAt: data.lastStatsUploadAt || data.playerStatsUpdatedAt || null,
+    lastSuccessfulUploadAt: data.lastSuccessfulUploadAt || data.lastUploadAcceptedAt || null,
+    lastLoaderErrorAt: data.lastLoaderErrorAt || null,
+    lastLoaderErrorMessage: data.lastLoaderErrorMessage || null,
+    expectedLoaderBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+    lastLoaderBuild: data.trackerBuild || data.lastUploadTrackerBuild || null,
+    isOnline:        connection.connectionStatus === 'live',
+    connectionLive:  connection.connectionStatus === 'live',
+    connectionStatus: connection.connectionStatus,
+    connectionStatusColor: connection.connectionStatusColor,
+    connectionStatusReason: connection.connectionStatusReason,
+    connectionStatusMessage: connection.connectionStatusMessage,
+    lastStatsUpdatedAt: connection.lastStatsUpdatedAt || statsUploadTimestamp(data),
+    statsFresh: connection.statsFresh === true,
+    dataStale:       connection.connectionStatus === 'stale'
+      || !!(publicFish.dataStale || !connection.statsFresh),
     lastGoodFishPreserved: !!(publicFish.lastGoodFishPreserved || data.lastGoodFishPreserved),
     lastGoodPublicFishCount: data.lastGoodPublicFishCount || publicFish.fishItems.length || 0,
     playerStats:     resolvePlayerStatsForApi(data.playerStats),
@@ -4270,6 +4466,8 @@ module.exports.catalogMapForItems = catalogMapForItems;
 module.exports.debugItemSlice = debugItemSlice;
 module.exports.resolveServerCommit = resolveServerCommit;
 module.exports.isSessionLive = isSessionLive;
+module.exports.isSessionHeartbeatRecent = isSessionHeartbeatRecent;
+module.exports.deriveConnectionStatus = deriveConnectionStatus;
 module.exports.buildPlayerStatsProof = buildPlayerStatsProof;
 module.exports.buildPublicFishFields = buildPublicFishFields;
 module.exports.buildPublicLegacyCounts = buildPublicLegacyCounts;

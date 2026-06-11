@@ -14,11 +14,14 @@ process.env.FISHIT_DB_PATH = process.env.FISHIT_DB_PATH || '/nonexistent/deng-fi
 
 const {
   CLEAN_TRACKER_LOADSTRING,
+  DEBUG_TRACKER_LOADSTRING,
   PROTECTED_DIST_RAW_URL,
   PROTECTED_DIST_REL_PATH,
   PUBLIC_TRACKER_GITHUB_REPO,
   PROTECTED_DIST_RAW_URL_CACHE_BUST,
   LOADER_BUILD,
+  PROTECTED_DIST_RAW_URL,
+  buildCleanTrackerLoader,
   buildProofTrackerLoader,
 } = require('../src/fishitTrackerLoadstring');
 const {
@@ -64,11 +67,12 @@ describe('BLOCKER10ZP inventory/security/copy hotfix', () => {
     );
   });
 
-  test('canonical loadstring uses dist path from public repo constant', () => {
+  test('canonical loadstring uses clean first-party loader; debug proof loader is separate', () => {
     assert.match(PROTECTED_DIST_RAW_URL, new RegExp(`raw\\.githubusercontent\\.com/${PUBLIC_TRACKER_GITHUB_REPO.replace('/', '\\/')}/main/dist/tracker\\.lua`));
     assert.equal(PROTECTED_DIST_REL_PATH, 'dist/tracker.lua');
-    assert.equal(CLEAN_TRACKER_LOADSTRING, buildProofTrackerLoader(PROTECTED_DIST_RAW_URL_CACHE_BUST, LOADER_BUILD));
-    assert.match(CLEAN_TRACKER_LOADSTRING, /LOADER_BUILD=/);
+    assert.equal(CLEAN_TRACKER_LOADSTRING, buildCleanTrackerLoader(PROTECTED_DIST_RAW_URL));
+    assert.equal(DEBUG_TRACKER_LOADSTRING, buildProofTrackerLoader(PROTECTED_DIST_RAW_URL_CACHE_BUST, LOADER_BUILD));
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /LOADER_BUILD=/);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\/main\/tracker\.lua/);
   });
 

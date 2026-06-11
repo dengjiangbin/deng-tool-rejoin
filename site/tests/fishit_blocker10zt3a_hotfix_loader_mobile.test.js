@@ -14,8 +14,11 @@ const {
 } = require('../src/fishitTrackerBuild');
 const {
   CLEAN_TRACKER_LOADSTRING,
+  DEBUG_TRACKER_LOADSTRING,
   LOADER_BUILD,
   PROTECTED_DIST_RAW_URL_CACHE_BUST,
+  PROTECTED_DIST_RAW_URL,
+  buildCleanTrackerLoader,
   buildProofTrackerLoader,
 } = require('../src/fishitTrackerLoadstring');
 
@@ -37,24 +40,33 @@ describe('BLOCKER10ZT4 — proof loader + mobile account cards', () => {
     assert.match(tpl, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
   });
 
-  test('website copy loader prints LOADER_BUILD / FETCH_URL / FETCHED_TRACKER_BUILD proof', () => {
-    assert.match(CLEAN_TRACKER_LOADSTRING, /LOADER_BUILD=/);
-    assert.match(CLEAN_TRACKER_LOADSTRING, /FETCH_URL=/);
-    assert.match(CLEAN_TRACKER_LOADSTRING, /FETCHED_TRACKER_BUILD=/);
-    assert.match(CLEAN_TRACKER_LOADSTRING, /deng-fishtracker-dist\/main\/dist\/tracker\.lua\?v=BLOCKER10ZT5/);
+  test('website copy loader is clean one-liner; debug proof loader is admin-only', () => {
+    assert.equal(CLEAN_TRACKER_LOADSTRING, buildCleanTrackerLoader(PROTECTED_DIST_RAW_URL));
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /LOADER_BUILD=/);
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /FETCH_URL=/);
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /FETCHED_TRACKER_BUILD=/);
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\?v=/);
     assert.equal(
-      CLEAN_TRACKER_LOADSTRING,
+      DEBUG_TRACKER_LOADSTRING,
       buildProofTrackerLoader(PROTECTED_DIST_RAW_URL_CACHE_BUST, LOADER_BUILD),
     );
   });
 
-  test('/inventory serves proof loader in copy box', async () => {
+  test('/inventory serves clean loader in copy box', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
+    assert.match(res.text, new RegExp(CLEAN_TRACKER_LOADSTRING.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.doesNotMatch(res.text, /LOADER_BUILD=/);
+    assert.doesNotMatch(res.text, /FETCH_URL=/);
+    assert.doesNotMatch(res.text, /FETCHED_TRACKER_BUILD=/);
+    assert.doesNotMatch(res.text, /deng-tool-rejoin\/main\/dist\/tracker\.lua/);
+  });
+
+  test('/inventory?debug=1 serves separate debug loader box', async () => {
+    const res = await request(makeApp()).get('/inventory?debug=1').expect(200);
+    assert.match(res.text, /Debug loader &mdash; admin only/);
     assert.match(res.text, /LOADER_BUILD=/);
     assert.match(res.text, /FETCH_URL=/);
     assert.match(res.text, /FETCHED_TRACKER_BUILD=/);
-    assert.match(res.text, /deng-fishtracker-dist\/main\/dist\/tracker\.lua\?v=BLOCKER10ZT3/);
-    assert.doesNotMatch(res.text, /deng-tool-rejoin\/main\/dist\/tracker\.lua/);
   });
 
   test('mobile breakpoint hides desktop table and shows stacked account cards', () => {

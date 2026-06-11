@@ -117,20 +117,22 @@ describe('BLOCKER10ZM protected dist/tracker.lua public loader', () => {
     assert.equal(buildTrackerPageLocals().trackerLoadstring, CLEAN_TRACKER_LOADSTRING);
   });
 
-  test('/inventory public page shows dist/tracker.lua loader only', async () => {
+  test('/inventory public page shows clean /tracker.lua loader only', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
-    assert.match(res.text, /dist\/tracker\.lua/);
+    assert.match(res.text, /\/tracker\.lua/);
     assert.doesNotMatch(res.text, /tracker\.luraph\.lua/);
     assert.doesNotMatch(res.text, /main\/tracker\.lua"\)\)\(\)/);
     assert.doesNotMatch(res.text, /\?t=/);
+    assert.doesNotMatch(res.text, /LOADER_BUILD=/);
     assert.doesNotMatch(res.text, /Debug loader \(cache-busted\)/);
   });
 
-  test('/inventory?debug=global does not expose raw root loader', async () => {
+  test('/inventory?debug=global exposes debug loader separately', async () => {
     const res = await request(makeApp()).get('/inventory?debug=global').expect(200);
-    assert.match(res.text, /dist\/tracker\.lua/);
+    assert.match(res.text, /\/tracker\.lua/);
+    assert.match(res.text, /Debug loader &mdash; admin only/);
+    assert.match(res.text, /LOADER_BUILD=/);
     assert.doesNotMatch(res.text, /main\/tracker\.lua\?t=/);
-    assert.doesNotMatch(res.text, /loadstringDebugBox/);
   });
 
   testIfRawTracker('private raw dev source references dist/tracker.lua in usage comment', () => {

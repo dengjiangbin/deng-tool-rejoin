@@ -32,14 +32,17 @@ describe('BLOCKER10ZG clean icons + loader script', () => {
     assert.equal(buildTrackerPageLocals().trackerLoadstring, CLEAN_TRACKER_LOADSTRING);
   });
 
-  test('clean loader script loads dist/tracker.lua not raw root tracker.lua', () => {
+  test('clean loader script loads via first-party /tracker.lua endpoint', () => {
     assert.equal(CLEAN_TRACKER_LOADSTRING, PUBLIC_LOADER);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\/main\/tracker\.lua"\)\)\(\)/);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /tracker\.luraph\.lua/);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /tostring\(os\.time/);
-    assert.match(CLEAN_TRACKER_LOADSTRING, /FETCHED_TRACKER_BUILD=/);
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /LOADER_BUILD/);
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /FETCHED_TRACKER_BUILD/);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /os\.time/);
     assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\?t=/);
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /\?v=/);
+    assert.match(CLEAN_TRACKER_LOADSTRING, /\/tracker\.lua"\)\)\(\)/);
   });
 
   test('tracker template has no mojibake replacement character', () => {
@@ -68,11 +71,12 @@ describe('BLOCKER10ZG clean icons + loader script', () => {
     assert.doesNotMatch(res.text, /tracker\.luraph\.lua/);
   });
 
-  test('/tracker?debug=global still does not expose raw root loader', async () => {
+  test('/tracker?debug=global still does not expose debug loader in public copy box', async () => {
     const res = await request(makeTrackerApp()).get('/inventory?debug=global').expect(200);
-    assert.match(res.text, /dist\/tracker\.lua/);
+    assert.match(res.text, /\/tracker\.lua/);
     assert.doesNotMatch(res.text, /main\/tracker\.lua\?t=/);
-    assert.doesNotMatch(res.text, /loadstringDebugBox/);
+    assert.match(res.text, /id="loadstringDebugCode"/);
+    assert.match(res.text, /Debug loader &mdash; admin only/);
   });
 
   test('copy button uses clean script constant not debug loader', async () => {

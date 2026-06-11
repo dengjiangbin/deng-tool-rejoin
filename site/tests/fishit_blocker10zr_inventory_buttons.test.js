@@ -15,9 +15,11 @@ process.env.FISHIT_DB_PATH = process.env.FISHIT_DB_PATH || '/nonexistent/deng-fi
 
 const {
   CLEAN_TRACKER_LOADSTRING,
+  DEBUG_TRACKER_LOADSTRING,
   PROTECTED_DIST_RAW_URL,
   PROTECTED_DIST_RAW_URL_CACHE_BUST,
   LOADER_BUILD,
+  buildCleanTrackerLoader,
   buildProofTrackerLoader,
 } = require('../src/fishitTrackerLoadstring');
 const {
@@ -253,9 +255,10 @@ describe('BLOCKER10ZR inventory buttons + clean copy UI', () => {
     );
   });
 
-  test('canonical loadstring uses dist path from central constant with proof prints', () => {
+  test('canonical loadstring uses clean first-party loader; debug proof loader is separate', () => {
     assert.match(PROTECTED_DIST_RAW_URL, /\/main\/dist\/tracker\.lua$/);
-    assert.equal(CLEAN_TRACKER_LOADSTRING, buildProofTrackerLoader(PROTECTED_DIST_RAW_URL_CACHE_BUST, LOADER_BUILD));
-    assert.match(CLEAN_TRACKER_LOADSTRING, /FETCHED_TRACKER_BUILD=/);
+    assert.equal(CLEAN_TRACKER_LOADSTRING, buildCleanTrackerLoader(PROTECTED_DIST_RAW_URL));
+    assert.equal(DEBUG_TRACKER_LOADSTRING, buildProofTrackerLoader(PROTECTED_DIST_RAW_URL_CACHE_BUST, LOADER_BUILD));
+    assert.doesNotMatch(CLEAN_TRACKER_LOADSTRING, /FETCHED_TRACKER_BUILD=/);
   });
 });

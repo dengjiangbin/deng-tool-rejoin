@@ -16,6 +16,8 @@ const trackerRouter = require('../src/fishitTrackerRoutes');
 const { isSessionLive } = require('../src/fishitTrackerRoutes');
 
 const TPL_PATH = path.join(__dirname, '..', 'views', 'fishit_tracker.ejs');
+const SOURCE_PATH = path.join(__dirname, '..', 'src', 'inventory', 'fishit_tracker.source.ejs');
+const INVENTORY_JS = path.join(__dirname, '..', 'public', 'assets', require('../src/inventoryAssetManifest.json').js);
 
 function makeApp() {
   const app = express();
@@ -31,7 +33,8 @@ describe('BLOCKER10ZT5A UI stats + indicator regression', () => {
     assert.match(tpl, /col-coins/);
     assert.match(tpl, /col-caught/);
     assert.match(tpl, /col-rare/);
-    assert.match(tpl, /data-table-sync-text/);
+    const js = fs.readFileSync(INVENTORY_JS, 'utf8');
+    assert.match(js, /data-table-sync-text/);
     assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Last sync/);
   });
 
@@ -40,8 +43,12 @@ describe('BLOCKER10ZT5A UI stats + indicator regression', () => {
     const staleHeartbeat = new Date(now - 120_000).toISOString();
     const freshInventory = new Date(now - 5_000).toISOString();
     const session = {
+      trackerBuild: 'LOADER_FIX_REGISTER_LIMIT_2026_06_11',
       lastSeenAt: staleHeartbeat,
+      lastHeartbeatAt: staleHeartbeat,
       lastInventoryAt: freshInventory,
+      lastSnapshotUploadAt: freshInventory,
+      lastStatsUploadAt: freshInventory,
       updatedAt: freshInventory,
     };
     assert.equal(isSessionLive(session), true);
@@ -58,7 +65,7 @@ describe('BLOCKER10ZT5A UI stats + indicator regression', () => {
         username,
         userId: 99101,
         isOnline: true,
-        trackerBuild: 'BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10',
+        trackerBuild: 'LOADER_FIX_REGISTER_LIMIT_2026_06_11',
         fishItems: [{ itemId: '1', name: 'Clownfish', quantity: 2, source: 'playerdata_gameitemdb' }],
         playerStats: {
           coins: 1200,

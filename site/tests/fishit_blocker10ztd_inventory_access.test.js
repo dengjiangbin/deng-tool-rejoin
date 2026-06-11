@@ -134,7 +134,7 @@ describe('BLOCKER10ZTD inventory access safe render', () => {
     const app = makeProductionApp();
     const res = await request(app).get('/inventory');
     assert.equal(res.status, 302);
-    assert.match(res.headers.location, /^\/\?return=%2Finventory$/);
+    assert.match(res.headers.location, /^\/login\?return=%2Finventory$/);
     assert.doesNotMatch(res.text || '', /An unexpected error occurred/);
     process.env.NODE_ENV = prevEnv;
   });
@@ -145,7 +145,7 @@ describe('BLOCKER10ZTD inventory access safe render', () => {
     const app = makeProductionApp();
     const res = await request(app).get('/inventory/');
     assert.equal(res.status, 302);
-    assert.match(res.headers.location, /^\/\?return=%2Finventory%2F$/);
+    assert.match(res.headers.location, /^\/login\?return=%2Finventory%2F$/);
     process.env.NODE_ENV = prevEnv;
   });
 
@@ -155,7 +155,7 @@ describe('BLOCKER10ZTD inventory access safe render', () => {
     const app = makeStaleDeployApp();
     const res = await request(app).get('/inventory');
     assert.equal(res.status, 302);
-    assert.match(res.headers.location, /^\/\?return=%2Finventory$/);
+    assert.match(res.headers.location, /^\/login\?return=%2Finventory$/);
     assert.notEqual(res.status, 500);
     process.env.NODE_ENV = prevEnv;
   });

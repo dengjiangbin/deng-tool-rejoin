@@ -59,7 +59,7 @@ if (!src.includes('coinProbe')) {
 if (!src.includes('resolveReplionStatData')) {
   errors.push('resolveReplionStatData missing — direct Replion coin read required');
 }
-if (!/local function readReplionData\(replion\)/.test(src)) {
+if (!/local function readReplionData\(replion\)/.test(src) && !/^function readReplionData\(replion\)/m.test(src)) {
   errors.push('readReplionData early definition missing — line 951 runtime fix required');
 }
 if (!src.includes('runtimeLineFixProof')) {
