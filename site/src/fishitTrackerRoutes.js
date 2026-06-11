@@ -3329,7 +3329,26 @@ function buildStatsPollingProof() {
     rarestFishRefreshesOnInterval: true,
     fishCardsRefreshesOnInterval: true,
     statusDurationUpdatesEverySecond: true,
-    statusFormat: '[circle] Last sync: <duration> <username>',
+    statusFormat: '[circle] <duration> <username>',
+  };
+}
+
+function buildStatusFormatProof() {
+  return {
+    publicFormat: '[circle] <duration> <username>',
+    literalLastSyncLabelPresent: false,
+    durationUpdatesEverySecond: true,
+    durationResetsAfterSuccessfulPoll: true,
+    noLiveLabel: true,
+    noClockTime: true,
+  };
+}
+
+function buildToolbarActionProof() {
+  return {
+    order: ['table', 'fishGrid', 'stoneGrid', 'copyUsernames', 'refresh'],
+    copyUsernamesOnly: true,
+    copyIncludesTableData: false,
   };
 }
 
@@ -3721,8 +3740,10 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
       : null,
     syncProof: buildSyncProof(data),
     connectionIndicatorProof: buildConnectionIndicatorProof(data),
+    statusFormatProof: buildStatusFormatProof(),
     statsPollingProof: buildStatsPollingProof(),
     uploadIntervalProof: buildUploadIntervalProof(data),
+    toolbarActionProof: buildToolbarActionProof(),
     responsiveLayoutProof: buildResponsiveLayoutProof(),
     ...buildClientBuildProof(data),
     counts: countsEnriched,

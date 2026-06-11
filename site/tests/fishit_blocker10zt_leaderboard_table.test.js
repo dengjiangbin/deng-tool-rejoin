@@ -43,10 +43,10 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
     assert.match(res.text, /function renderAccountsTable/);
     assert.match(res.text, /function formatTableSyncAge/);
     assert.match(res.text, /id="hideUsernamesBtn"/);
-    assert.match(res.text, /id="viewInventoryBtn"[^>]*title="Inventory View"/);
-    assert.match(res.text, /id="viewInventoryBtn"[^>]*aria-label="Inventory View"/);
+    assert.match(res.text, /id="viewFishGridBtn"[^>]*title="Fish grid"/);
+    assert.match(res.text, /id="viewFishGridBtn"[^>]*aria-label="Fish grid"/);
     assert.match(res.text, /id="inventoryViewSection"/);
-    assert.match(res.text, /inventoryViewSectionEl\.hidden = accountViewMode !== 'inventory'/);
+    assert.match(res.text, /inventoryViewSectionEl\.hidden = !isGrid/);
     assert.doesNotMatch(res.text, />Ruin</);
     assert.doesNotMatch(res.text, />Artifact</);
     assert.doesNotMatch(res.text, />Quest</);
@@ -126,7 +126,7 @@ describe('BLOCKER10ZT leaderboard-style account table', () => {
   test('table view hides inventory section; inventory view shows it', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     assert.match(tpl, /id="inventoryViewSection"[^>]*hidden/);
-    assert.match(tpl, /setAccountViewMode\('inventory'\)/);
+    assert.match(tpl, /setAccountViewMode\('fish'\)/);
     assert.match(tpl, /setAccountViewMode\('table'\)/);
     assert.match(tpl, /is-inventory-only/);
     assert.match(tpl, /\.inventory-view-section\[hidden\]/);

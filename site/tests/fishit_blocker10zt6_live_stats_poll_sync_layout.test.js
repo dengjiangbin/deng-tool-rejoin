@@ -14,7 +14,7 @@ process.env.FISHIT_DB_PATH = process.env.FISHIT_DB_PATH || '/nonexistent/deng-fi
 
 const trackerRouter = require('../src/fishitTrackerRoutes');
 const {
-  BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER,
+  BLOCKER10ZT7_LIVE_STATS_STATUS_TOOLBAR_LAYOUT_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
   EXPECTED_CLIENT_TRACKER_BUILD,
 } = require('../src/fishitTrackerBuild');
@@ -30,11 +30,11 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZT6 live stats poll, sync status, responsive layout', () => {
-  test('UI deploy marker points to BLOCKER10ZT6 while client tracker stays ZT5', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER);
+  test('UI deploy marker points to BLOCKER10ZT7 while client tracker stays ZT5', () => {
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT7_LIVE_STATS_STATUS_TOOLBAR_LAYOUT_MARKER);
     assert.match(EXPECTED_CLIENT_TRACKER_BUILD, /BLOCKER10ZT5/);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_2026_06_10/);
+    assert.match(tpl, /BLOCKER10ZT7_LIVE_STATS_STATUS_TOOLBAR_LAYOUT_2026_06_11/);
   });
 
   test('frontend uses 10s shared poll and 1s sync tick with applyPollPayload', () => {
@@ -49,11 +49,11 @@ describe('BLOCKER10ZT6 live stats poll, sync status, responsive layout', () => {
 
   test('status format uses card-sync-line with duration and username', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /function formatEntrySyncStatusLine/);
-    assert.match(tpl, /Last sync: \$\{duration\} \$\{name\}/);
+    assert.match(tpl, /function formatEntrySyncStatusText/);
+    assert.match(tpl, /return `\$\{duration\} \$\{name\}`/);
     assert.match(tpl, /data-card-sync-text/);
     assert.match(tpl, /formatSyncDurationLabel/);
-    assert.doesNotMatch(tpl, /\.sync-age \{ display:none;/);
+    assert.doesNotMatch(tpl, /Last sync:/i);
   });
 
   test('desktop table forced at min-width 769 and mobile stats horizontal', () => {
@@ -66,7 +66,7 @@ describe('BLOCKER10ZT6 live stats poll, sync status, responsive layout', () => {
 
   test('table hides sync age and mobile cards omit debug rows', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /accounts-status \[data-table-sync-age\] \{ display:none;/);
+    assert.match(tpl, /data-table-sync-text/);
     assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Last sync/);
     assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Fish/);
     assert.doesNotMatch(tpl, /accounts-mobile-card__row-label">Types/);

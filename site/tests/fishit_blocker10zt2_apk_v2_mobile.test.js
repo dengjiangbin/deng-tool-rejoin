@@ -30,9 +30,9 @@ describe('BLOCKER10ZT2 APK v2 mobile inventory UX', () => {
     assert.match(gradle, /versionCode\s*=\s*14\b/);
   });
 
-  test('UI deploy marker includes BLOCKER10ZT3A hotfix loader/mobile cards', () => {
-    const { BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER } = require('../src/fishitTrackerBuild');
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT6_LIVE_STATS_POLL_SYNC_LAYOUT_MARKER);
+  test('UI deploy marker includes latest live stats/toolbar layout marker', () => {
+    const { BLOCKER10ZT7_LIVE_STATS_STATUS_TOOLBAR_LAYOUT_MARKER } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT7_LIVE_STATS_STATUS_TOOLBAR_LAYOUT_MARKER);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     assert.match(tpl, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
   });
@@ -61,12 +61,11 @@ describe('BLOCKER10ZT2 APK v2 mobile inventory UX', () => {
   test('mobile account cards include readable labels, stats, and actions', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     assert.match(tpl, /accounts-mobile-card__username/);
-    assert.match(tpl, /accounts-mobile-card__row-label">Status/);
-    assert.match(tpl, /accounts-mobile-card__row-label">Coins/);
+    assert.match(tpl, /accounts-mobile-card__row-label">Coin/);
     assert.match(tpl, /accounts-mobile-card__row-label">Caught/);
-    assert.match(tpl, /accounts-mobile-card__row-label">Rarest/);
+    assert.match(tpl, /accounts-mobile-card__row-label">Rare/);
     assert.match(tpl, /data-open-backpack/);
     assert.match(tpl, /data-remove-account/);
-    assert.match(tpl, /id="viewInventoryBtn"[^>]*title="Inventory View"/);
+    assert.match(tpl, /id="viewFishGridBtn"[^>]*title="Fish grid"/);
   });
 });
