@@ -11,18 +11,21 @@
 </head>
 <body class="auth-layout">
 
+
+
+
 <div class="deng-home" id="top">
-  <div class="deng-home-nav-wrap">
-    <header class="deng-home-nav" aria-label="Site navigation">
+  <header class="deng-home-nav-wrap deng-home-nav-wrap--fixed" aria-label="Site navigation">
+    <div class="deng-home-nav">
       <div class="deng-home-nav__inner">
-        <a class="deng-home-brand" href="/" aria-label="DENG Tool home">
+        <a class="deng-home-brand" href="/" aria-label="Go to home">
           <span class="deng-home-brand__mark" aria-hidden="true">
             <img src="/public/img/deng-logo.png?v=proof" alt="">
           </span>
           <span class="deng-home-brand__text">DENG Tool</span>
         </a>
         <nav class="deng-home-nav__links" aria-label="Primary">
-          <a class="deng-home-nav__link is-active" href="/" data-nav-section="home">Home</a>
+          <a class="deng-home-nav__link is-active" href="#home" data-nav-section="home">Home</a>
           <a class="deng-home-nav__link" href="#statistic" data-nav-section="statistic">Statistic</a>
           <a class="deng-home-nav__link" href="#about" data-nav-section="about">About</a>
         </nav>
@@ -30,20 +33,37 @@
           <a class="deng-home-nav__signin" href="/login">Sign In</a>
         </div>
       </div>
-    </header>
-  </div>
+    </div>
+  </header>
 
   <main class="deng-home-main">
-    <section class="deng-home-hero" aria-labelledby="home-hero-title">
+    <section class="deng-home-hero deng-home-anchor" id="home" data-home-section="home" aria-labelledby="home-hero-title">
       <div class="deng-home-container">
-        <div class="deng-home-hero__pill" data-home-online-pill hidden>
+        <div class="deng-home-hero__pill" data-home-online-pill>
           <span class="deng-home-hero__dot" aria-hidden="true"></span>
-          <span data-home-online-text>Live network online</span>
+          <span class="js-count-up deng-home-hero__online-count" data-home-online-text data-count-format="integer" data-count-suffix=" online now" data-count-immediate data-count-duration="1200">0</span>
         </div>
-        <h1 id="home-hero-title" class="deng-home-hero__title">DENG Tool</h1>
+        <h1 id="home-hero-title" class="deng-home-hero__title" aria-label="DENG Tool">
+          <span class="hero-wordmark" data-hero-wordmark>
+            <span class="hero-word is-active" data-hero-word="deng" tabindex="0">
+              <span class="hero-corner hero-corner--tl" aria-hidden="true"></span>
+              <span class="hero-corner hero-corner--tr" aria-hidden="true"></span>
+              <span class="hero-corner hero-corner--bl" aria-hidden="true"></span>
+              <span class="hero-corner hero-corner--br" aria-hidden="true"></span>
+              <span class="hero-word__text">DENG</span>
+            </span>
+            <span class="hero-word" data-hero-word="tool" tabindex="0">
+              <span class="hero-corner hero-corner--tl" aria-hidden="true"></span>
+              <span class="hero-corner hero-corner--tr" aria-hidden="true"></span>
+              <span class="hero-corner hero-corner--bl" aria-hidden="true"></span>
+              <span class="hero-corner hero-corner--br" aria-hidden="true"></span>
+              <span class="hero-word__text">Tool</span>
+            </span>
+          </span>
+        </h1>
         <p class="deng-home-hero__subtitle">
-          A complete automation &amp; telemetry suite for Roblox. Track player stats, inventory,
-          rejoin sessions, and manage tools from one dashboard.
+          A complete automation &amp; telemetry suite for Roblox. Track stats, inventories,
+          sessions, and tools from one dashboard.
         </p>
         <div class="deng-home-hero__actions">
           <a class="deng-home-btn deng-home-btn--primary" href="/login">
@@ -60,76 +80,156 @@
       </div>
     </section>
 
-    <section class="deng-home-section" id="statistic" aria-labelledby="home-stats-title" data-home-section="statistic">
+    <section class="deng-home-section deng-home-section--stats deng-home-anchor" id="statistic" aria-labelledby="home-stats-title" data-home-section="statistic">
       <div class="deng-home-container">
         <p class="deng-home-eyebrow">Live Network</p>
-        <div class="deng-home-stat-grid" data-home-stats-grid>
-          <article class="deng-home-stat-card" data-home-stat-card="trackedPlayers" hidden>
+        <div class="deng-home-stat-grid deng-home-stat-grid--live" data-home-live-stats-grid>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="trackedPlayers">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">Tracked Players</span>
               <span class="deng-home-stat-card__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value" data-home-stat-value="trackedPlayers">—</strong>
-            <span class="deng-home-stat-card__meta">Across all tracked games</span>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="trackedPlayers" data-count-format="integer" data-count-duration="1200">0</strong>
+            <span class="deng-home-stat-card__meta">Across All Games</span>
           </article>
-          <article class="deng-home-stat-card deng-home-stat-card--accent" data-home-stat-card="onlineNow" hidden>
+          <article class="deng-home-stat-card deng-home-stat-card--compact deng-home-stat-card--accent" data-home-stat-card="onlineNow">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">Online Now</span>
               <span class="deng-home-stat-card__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent" data-home-stat-value="onlineNow">—</strong>
-            <span class="deng-home-stat-card__meta" data-home-stat-meta="onlineNow">Active devices online</span>
+            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent js-count-up" data-home-stat-value="onlineNow" data-count-format="integer" data-count-duration="1200">0</strong>
+            <span class="deng-home-stat-card__meta" data-home-stat-meta="onlineNow">Tracked usernames online</span>
           </article>
-          <article class="deng-home-stat-card deng-home-stat-card--accent" data-home-stat-card="activeAgents" hidden>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="rejoinActiveDevices">
             <div class="deng-home-stat-card__top">
-              <span class="deng-home-stat-card__label">Active Agents</span>
+              <span class="deng-home-stat-card__label">Active Devices</span>
               <span class="deng-home-stat-card__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect x="4" y="8" width="16" height="12" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent" data-home-stat-value="activeAgents">—</strong>
-            <span class="deng-home-stat-card__meta">Rejoin bots running</span>
-          </article>
-          <article class="deng-home-stat-card" data-home-stat-card="totalFish" hidden>
-            <div class="deng-home-stat-card__top">
-              <span class="deng-home-stat-card__label">Fish Tracked</span>
-              <span class="deng-home-stat-card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"></path><path d="M18 12v.5"></path><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"></path><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"></path></svg>
-              </span>
-            </div>
-            <strong class="deng-home-stat-card__value" data-home-stat-value="totalFish">—</strong>
-            <span class="deng-home-stat-card__meta">Fish It global catalog</span>
-          </article>
-          <article class="deng-home-stat-card" data-home-stat-card="uniqueUsers" hidden>
-            <div class="deng-home-stat-card__top">
-              <span class="deng-home-stat-card__label">Discord Users</span>
-              <span class="deng-home-stat-card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M3 3v18h18"></path><path d="M7 16V9"></path><path d="M12 16V5"></path><path d="M17 16v-6"></path></svg>
-              </span>
-            </div>
-            <strong class="deng-home-stat-card__value" data-home-stat-value="uniqueUsers">—</strong>
-            <span class="deng-home-stat-card__meta">Linked dashboard accounts</span>
-          </article>
-          <article class="deng-home-stat-card deng-home-stat-card--warn" data-home-stat-card="generatedKeys" hidden>
-            <div class="deng-home-stat-card__top">
-              <span class="deng-home-stat-card__label">License Keys</span>
-              <span class="deng-home-stat-card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="m9 12 2 2 4-4"></path><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"></path></svg>
-              </span>
-            </div>
-            <strong class="deng-home-stat-card__value deng-home-stat-card__value--warn" data-home-stat-value="generatedKeys">—</strong>
-            <span class="deng-home-stat-card__meta">Generated license keys</span>
+            <strong class="deng-home-stat-card__value deng-home-stat-card__value--split-ratio" aria-label="Active rejoin devices">
+              <span class="deng-home-stat-ratio-active js-count-up" data-home-stat-value="rejoinActiveDevices" data-count-format="integer" data-count-duration="1200">0</span><span class="deng-home-stat-ratio-sep"> / </span><span class="deng-home-stat-ratio-total js-count-up" data-home-stat-value="rejoinTotalDevices" data-count-format="integer" data-count-duration="1200">0</span>
+            </strong>
+            <span class="deng-home-stat-card__meta">Rejoin Tools Running</span>
           </article>
         </div>
-        <p class="deng-home-stats-empty" data-home-stats-empty hidden>No live stats available right now. The page will keep working — check back soon.</p>
+        <p class="deng-home-stats-empty" data-home-live-stats-empty hidden>No live tracker stats available right now.</p>
       </div>
     </section>
 
-    <section class="deng-home-section deng-home-section--network" aria-labelledby="home-network-title">
+    <section class="deng-home-section deng-home-section--stats deng-home-section--tight deng-home-anchor" id="platform" aria-labelledby="home-platform-title" data-home-section="platform">
+      <div class="deng-home-container">
+        <p class="deng-home-eyebrow">Platform Stats</p>
+        <div class="deng-home-stat-grid deng-home-stat-grid--platform" data-home-platform-stats-grid>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="discordUsers">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Tool Players</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M7.5 14.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M16.5 14.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M10.8 12.2 21 2"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="discordUsers" data-count-format="integer" data-count-duration="1200">0</strong>
+            <span class="deng-home-stat-card__meta">Linked dashboard accounts</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="generatedKeys">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">License Keys</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="generatedKeys" data-count-format="integer" data-count-duration="1200">0</strong>
+            <span class="deng-home-stat-card__meta">Generated license keys</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="redeemedKeys">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Redeemed Keys</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="redeemedKeys" data-count-format="integer" data-count-duration="1200">0</strong>
+            <span class="deng-home-stat-card__meta">Activated license keys</span>
+          </article>
+        </div>
+        <p class="deng-home-stats-empty" data-home-platform-stats-empty hidden>Platform stats unavailable.</p>
+      </div>
+    </section>
+
+    <section class="deng-home-section deng-home-section--stats deng-home-section--tight deng-home-anchor" id="fishit-stats" aria-labelledby="home-fishit-title" data-home-section="fishit">
+      <div class="deng-home-container">
+        <p class="deng-home-eyebrow">Fish It Stats</p>
+        <div class="deng-home-stat-grid deng-home-stat-grid--fishit" data-home-fishit-stats-grid>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="caught24Hours">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">24 Hours Caught</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"></path><path d="M18 12v.5"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="caught24Hours" data-count-format="integer" data-count-duration="1200">0</strong>
+            <span class="deng-home-stat-card__meta">Fish caught yesterday</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="totalSecret">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Total Secret</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5Z"></path><path d="m2 17 10 5 10-5"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="totalSecret" data-count-format="integer" data-count-duration="1200">0</strong>
+            <span class="deng-home-stat-card__meta">Secret fish caught</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="totalForgotten">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Total Forgotten</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="totalForgotten" data-count-format="integer" data-count-duration="1200">0</strong>
+            <span class="deng-home-stat-card__meta">Forgotten fish caught</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="ghostfinnRod">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Ghostfinn Rod</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M3 21 21 3"></path><path d="M6 18 18 6"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="ghostfinnRod" data-count-format="integer" data-count-duration="1200">0</strong>
+            <span class="deng-home-stat-card__meta">Ghostfinn Rod owners / records</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="elementRod">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Element Rod</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="elementRod" data-count-format="integer" data-count-duration="1200">0</strong>
+            <span class="deng-home-stat-card__meta">Element Rod owners / records</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="diamondRod">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Diamond Rod</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M6 3h12l4 7-10 13L2 10z"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="diamondRod" data-count-format="integer" data-count-duration="1200">0</strong>
+            <span class="deng-home-stat-card__meta">Diamond Rod owners / records</span>
+          </article>
+        </div>
+        <p class="deng-home-stats-empty" data-home-fishit-stats-empty hidden>Fish It stats unavailable.</p>
+      </div>
+    </section>
+
+    <section class="deng-home-section deng-home-section--network deng-home-anchor" id="tools" aria-labelledby="home-network-title">
       <div class="deng-home-container">
         <div class="deng-home-network-panel">
           <div class="deng-home-network-panel__head">
@@ -139,58 +239,42 @@
               </span>
               <div>
                 <p class="deng-home-eyebrow deng-home-eyebrow--inline">Tool Network</p>
-                <h2 id="home-network-title" class="deng-home-network-panel__title">Agent Network</h2>
+                <h2 id="home-network-title" class="deng-home-network-panel__title">DENG Tools</h2>
               </div>
             </div>
-            <p class="deng-home-network-panel__status" data-home-network-status>Services online</p>
           </div>
           <div class="deng-home-node-grid">
-            <article class="deng-home-node-card deng-home-node-card--online">
-              <div class="deng-home-node-card__head">
-                <span class="deng-home-node-card__dot" aria-hidden="true"></span>
-                <h3>FishTracker</h3>
-              </div>
+            <article class="deng-home-node-card">
+              <div class="deng-home-node-card__head"><h3>FishTracker</h3></div>
               <p>Live Fish It stats, inventory sync, and leaderboards.</p>
-              <a class="deng-home-node-link" href="/login">Open dashboard →</a>
+              <a class="deng-home-node-link" href="/login?return=/inventory">Open dashboard →</a>
             </article>
-            <article class="deng-home-node-card deng-home-node-card--online">
-              <div class="deng-home-node-card__head">
-                <span class="deng-home-node-card__dot" aria-hidden="true"></span>
-                <h3>Inventory Sync</h3>
-              </div>
+            <article class="deng-home-node-card">
+              <div class="deng-home-node-card__head"><h3>Inventory Sync</h3></div>
               <p>Upload and monitor backpacks with live poll refresh.</p>
-              <a class="deng-home-node-link" href="/login">Open inventory →</a>
+              <a class="deng-home-node-link" href="/login?return=/inventory">Open inventory →</a>
             </article>
-            <article class="deng-home-node-card deng-home-node-card--online">
-              <div class="deng-home-node-card__head">
-                <span class="deng-home-node-card__dot" aria-hidden="true"></span>
-                <h3>Auto Rejoin</h3>
-              </div>
+            <article class="deng-home-node-card">
+              <div class="deng-home-node-card__head"><h3>Auto Rejoin</h3></div>
               <p>Keep Roblox sessions alive with configured agents.</p>
-              <a class="deng-home-node-link" href="/download">Visit agent →</a>
+              <a class="deng-home-node-link" href="/login?return=/download">Visit agent →</a>
             </article>
-            <article class="deng-home-node-card deng-home-node-card--online">
-              <div class="deng-home-node-card__head">
-                <span class="deng-home-node-card__dot" aria-hidden="true"></span>
-                <h3>License Panel</h3>
-              </div>
+            <article class="deng-home-node-card">
+              <div class="deng-home-node-card__head"><h3>License Panel</h3></div>
               <p>Manage keys, access, and authorized devices.</p>
-              <a class="deng-home-node-link" href="/login">Manage license →</a>
+              <a class="deng-home-node-link" href="/login?return=/license">Manage license →</a>
             </article>
-            <article class="deng-home-node-card deng-home-node-card--online">
-              <div class="deng-home-node-card__head">
-                <span class="deng-home-node-card__dot" aria-hidden="true"></span>
-                <h3>Monitor</h3>
-              </div>
-              <p>Track connected devices, bridge status, and health.</p>
-              <a class="deng-home-node-link" href="/login">Open monitor →</a>
+            <article class="deng-home-node-card">
+              <div class="deng-home-node-card__head"><h3>Discord Tools</h3></div>
+              <p>Sign in once for dashboard, keys, and account tools.</p>
+              <a class="deng-home-node-link" href="/login?return=/dashboard">Open dashboard →</a>
             </article>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="deng-home-section" id="about" aria-labelledby="home-ecosystem-title" data-home-section="about">
+    <section class="deng-home-section deng-home-anchor" id="about" aria-labelledby="home-ecosystem-title" data-home-section="about">
       <div class="deng-home-container">
         <p class="deng-home-eyebrow">Ecosystem</p>
         <h2 id="home-ecosystem-title" class="deng-home-section__title">One platform. Multiple tools.</h2>
@@ -205,7 +289,7 @@
             </div>
             <h3>FishTracker &amp; Inventory</h3>
             <p>Real-time fish and inventory tracking, global catalog, leaderstats, and live dashboards.</p>
-            <a class="deng-home-eco-link" href="/login">Open tracker/dashboard →</a>
+            <a class="deng-home-eco-link" href="/login?return=/inventory">Open tracker/dashboard →</a>
           </article>
           <article class="deng-home-eco-card">
             <div class="deng-home-eco-card__head">
@@ -215,8 +299,7 @@
             </div>
             <h3>Auto Rejoin Agent</h3>
             <p>Keep Roblox sessions alive and reconnect automatically with your configured agents.</p>
-            <a class="deng-home-eco-link" href="/download">Visit agent →</a>
-            <a class="deng-home-eco-link deng-home-eco-link--muted" href="https://discord.gg/v74u5ZtuXf" target="_blank" rel="noopener noreferrer">Purchase via Discord →</a>
+            <a class="deng-home-eco-link" href="/login?return=/download">Visit agent →</a>
           </article>
           <article class="deng-home-eco-card">
             <div class="deng-home-eco-card__head">
@@ -226,7 +309,7 @@
             </div>
             <h3>License &amp; Discord Tools</h3>
             <p>Key management, Discord login, and your signed-in user dashboard.</p>
-            <a class="deng-home-eco-link" href="/login">Open dashboard →</a>
+            <a class="deng-home-eco-link" href="/login?return=/dashboard">Open dashboard →</a>
           </article>
         </div>
       </div>
@@ -237,7 +320,7 @@
     <div class="deng-home-container deng-home-footer__inner">
       <div class="deng-home-footer__brand">DENG Tool</div>
       <nav class="deng-home-footer__links" aria-label="Footer">
-        <a href="/">Home</a>
+        <a href="#home">Home</a>
         <a href="#statistic">Statistic</a>
         <a href="#about">About</a>
         <a href="/login">Sign In</a>
@@ -248,13 +331,24 @@
 </div>
 
 
+
+
 <script>(function initHomeLanding() {
   'use strict';
+
+  var NAV_OFFSET = (function readNavOffset() {
+    var root = document.querySelector('.deng-home');
+    if (!root || !window.getComputedStyle) return 108;
+    var raw = getComputedStyle(root).getPropertyValue('--deng-home-nav-offset').trim();
+    var n = parseFloat(raw);
+    return Number.isFinite(n) && n > 0 ? n : 108;
+  }());
+  var countUp = function() { return window.DengCountUpStats; };
 
   function fmt(value) {
     var n = Number(value);
     if (!Number.isFinite(n) || n < 0) return null;
-    return Math.round(n).toLocaleString('en-US');
+    return Math.round(n);
   }
 
   function showCard(key) {
@@ -262,14 +356,54 @@
     if (card) card.hidden = false;
   }
 
+  function statEl(key) {
+    return document.querySelector('[data-home-stat-value="' + key + '"]');
+  }
+
+  function metaEl(key) {
+    return document.querySelector('[data-home-stat-meta="' + key + '"]');
+  }
+
   function setStat(key, value) {
-    var formatted = fmt(value);
-    if (formatted == null) return false;
-    var el = document.querySelector('[data-home-stat-value="' + key + '"]');
+    var n = fmt(value);
+    if (n == null) return false;
+    var el = statEl(key);
     if (!el) return false;
-    el.textContent = formatted;
     showCard(key);
+    if (countUp()) countUp().set(el, { to: n, format: 'integer' });
+    else el.textContent = n.toLocaleString('en-US');
     return true;
+  }
+
+  function setSplitDevices(active, total) {
+    var activeN = fmt(active);
+    var totalN = fmt(total);
+    if (activeN == null || totalN == null) return false;
+    var activeEl = statEl('rejoinActiveDevices');
+    var totalEl = statEl('rejoinTotalDevices');
+    if (!activeEl || !totalEl) return false;
+    showCard('rejoinActiveDevices');
+    if (countUp()) {
+      countUp().set(activeEl, { to: activeN, format: 'integer' });
+      countUp().set(totalEl, { to: totalN, format: 'integer' });
+    } else {
+      activeEl.textContent = activeN.toLocaleString('en-US');
+      totalEl.textContent = totalN.toLocaleString('en-US');
+    }
+    return true;
+  }
+
+  function setOnlineMeta(online, total) {
+    var meta = metaEl('onlineNow');
+    if (!meta) return;
+    var onlineN = fmt(online);
+    var totalN = fmt(total);
+    if (onlineN == null || totalN == null) {
+      meta.textContent = 'Tracked usernames online';
+      return;
+    }
+    var offline = Math.max(0, totalN - onlineN);
+    meta.textContent = offline.toLocaleString('en-US') + ' Offline';
   }
 
   function updateOnlinePill(count) {
@@ -278,15 +412,20 @@
     if (!pill || !text) return;
     var formatted = fmt(count);
     if (formatted == null) {
+      text.classList.remove('js-count-up');
+      text.removeAttribute('data-count-to');
       text.textContent = 'Live network online';
+    } else if (countUp()) {
+      text.classList.add('js-count-up');
+      countUp().set(text, { to: formatted, format: 'integer', suffix: ' online now' });
     } else {
-      text.textContent = formatted + ' online now';
+      text.textContent = formatted.toLocaleString('en-US') + ' online now';
     }
     pill.hidden = false;
   }
 
-  function markEmptyIfNeeded(visibleCount) {
-    var empty = document.querySelector('[data-home-stats-empty]');
+  function markEmpty(selector, visibleCount) {
+    var empty = document.querySelector(selector);
     if (empty) empty.hidden = visibleCount > 0;
   }
 
@@ -297,6 +436,12 @@
     });
   }
 
+  function scrollToSection(target) {
+    if (!target) return;
+    var top = target.getBoundingClientRect().top + window.scrollY - NAV_OFFSET;
+    window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }
+
   function bindSmoothScroll() {
     document.querySelectorAll('.deng-home-nav__link[href^="#"], .deng-home-footer__links a[href^="#"]').forEach(function(link) {
       link.addEventListener('click', function(event) {
@@ -305,8 +450,8 @@
         var target = document.querySelector(id);
         if (!target) return;
         event.preventDefault();
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        var section = link.getAttribute('data-nav-section');
+        scrollToSection(target);
+        var section = link.getAttribute('data-nav-section') || id.replace('#', '');
         if (section) setActiveNav(section);
       });
     });
@@ -317,7 +462,7 @@
     if (!sections.length) return;
 
     function updateFromScroll() {
-      var marker = window.scrollY + 120;
+      var marker = window.scrollY + NAV_OFFSET + 8;
       var current = 'home';
       sections.forEach(function(section) {
         if (section.offsetTop <= marker) {
@@ -331,6 +476,31 @@
     updateFromScroll();
   }
 
+  function bindWordmark() {
+    var root = document.querySelector('[data-hero-wordmark]');
+    if (!root) return;
+    var words = Array.prototype.slice.call(root.querySelectorAll('[data-hero-word]'));
+
+    function activate(word) {
+      words.forEach(function(el) {
+        el.classList.toggle('is-active', el === word);
+      });
+    }
+
+    words.forEach(function(word) {
+      word.addEventListener('mouseenter', function() { activate(word); });
+      word.addEventListener('focus', function() { activate(word); });
+    });
+
+    root.addEventListener('mouseleave', function() {
+      activate(words[0]);
+    });
+
+    root.addEventListener('focusout', function(event) {
+      if (!root.contains(event.relatedTarget)) activate(words[0]);
+    });
+  }
+
   function loadPublicStats() {
     return fetch('/api/public-stats', {
       headers: { Accept: 'application/json' },
@@ -341,8 +511,8 @@
       .catch(function() { return null; });
   }
 
-  function loadFishitGlobal() {
-    return fetch('/api/fishit/global', {
+  function loadTrackerNetwork() {
+    return fetch('/api/fishit-tracker/public-network', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     })
@@ -350,39 +520,68 @@
       .catch(function() { return null; });
   }
 
-  function applyStats(publicStats, fishitGlobal) {
-    var visible = 0;
+  function loadFishitSummary() {
+    return fetch('/api/fishit/public-summary', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+      .then(function(res) { return res.ok ? res.json() : null; })
+      .catch(function() { return null; });
+  }
 
-    if (publicStats) {
-      if (setStat('generatedKeys', publicStats.generatedKeys)) visible += 1;
-      if (setStat('uniqueUsers', publicStats.uniqueUsers)) visible += 1;
-      if (setStat('redeemedKeys', publicStats.redeemedKeys)) visible += 1;
-      if (setStat('onlineNow', publicStats.activeDevices)) visible += 1;
-      updateOnlinePill(publicStats.activeDevices);
+  function applyStats(publicStats, trackerNetwork, fishitSummary) {
+    var liveVisible = 0;
+    var platformVisible = 0;
+    var fishitVisible = 0;
+    var trackedTotal = null;
+    var onlineTotal = null;
+
+    if (trackerNetwork && trackerNetwork.available) {
+      trackedTotal = trackerNetwork.trackedUsernames;
+      onlineTotal = trackerNetwork.onlineUsernames;
+      if (setStat('trackedPlayers', trackedTotal)) liveVisible += 1;
+      if (setStat('onlineNow', onlineTotal)) liveVisible += 1;
+      setOnlineMeta(onlineTotal, trackedTotal);
+      updateOnlinePill(onlineTotal);
     } else {
       updateOnlinePill(null);
+      setOnlineMeta(null, null);
     }
 
-    if (fishitGlobal && fishitGlobal.available) {
-      if (setStat('trackedPlayers', fishitGlobal.total_players)) visible += 1;
-      if (setStat('totalFish', fishitGlobal.total_fish)) visible += 1;
-      if (setStat('secretFish', fishitGlobal.secret_fish)) visible += 1;
-      if (setStat('forgottenFish', fishitGlobal.forgotten_fish)) visible += 1;
+    if (publicStats) {
+      if (setStat('discordUsers', publicStats.uniqueUsers)) platformVisible += 1;
+      if (setStat('generatedKeys', publicStats.generatedKeys)) platformVisible += 1;
+      if (setStat('redeemedKeys', publicStats.redeemedKeys)) platformVisible += 1;
+      if (setSplitDevices(publicStats.activeDevices, publicStats.totalDevices)) liveVisible += 1;
     }
 
-    markEmptyIfNeeded(visible);
+    if (fishitSummary && fishitSummary.available) {
+      if (setStat('caught24Hours', fishitSummary.caught24Hours)) fishitVisible += 1;
+      if (setStat('totalSecret', fishitSummary.totalSecret)) fishitVisible += 1;
+      if (setStat('totalForgotten', fishitSummary.totalForgotten)) fishitVisible += 1;
+      if (setStat('ghostfinnRod', fishitSummary.ghostfinnRod)) fishitVisible += 1;
+      if (setStat('elementRod', fishitSummary.elementRod)) fishitVisible += 1;
+      if (setStat('diamondRod', fishitSummary.diamondRod)) fishitVisible += 1;
+    }
+
+    markEmpty('[data-home-live-stats-empty]', liveVisible);
+    markEmpty('[data-home-platform-stats-empty]', platformVisible);
+    markEmpty('[data-home-fishit-stats-empty]', fishitVisible);
   }
 
   bindSmoothScroll();
   bindNavScrollSpy();
+  bindWordmark();
 
-  Promise.all([loadPublicStats(), loadFishitGlobal()])
+  Promise.all([loadPublicStats(), loadTrackerNetwork(), loadFishitSummary()])
     .then(function(results) {
-      applyStats(results[0], results[1]);
+      applyStats(results[0], results[1], results[2]);
     })
     .catch(function() {
       updateOnlinePill(null);
-      markEmptyIfNeeded(0);
+      markEmpty('[data-home-live-stats-empty]', 0);
+      markEmpty('[data-home-platform-stats-empty]', 0);
+      markEmpty('[data-home-fishit-stats-empty]', 0);
     });
 }());
 </script>

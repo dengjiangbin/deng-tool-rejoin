@@ -1166,11 +1166,13 @@ describe('theme and dashboard UI', () => {
     assert.doesNotMatch(dashboard.text, />DT</);
   });
 
-  test('home landing stat CSS uses responsive card grid layout', () => {
+  test('home landing stat CSS keeps 3-column card grid on mobile', () => {
     const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'home.css'), 'utf8');
     assert.match(css, /\.deng-home-stat-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/);
-    assert.match(css, /@media \(max-width: 960px\)[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
-    assert.match(css, /@media \(max-width: 640px\)[\s\S]*grid-template-columns:\s*1fr/);
+    assert.match(css, /@media \(max-width: 768px\)[\s\S]*\.deng-home-stat-grid[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)\s*!important/);
+    assert.match(css, /@media \(max-width: 430px\)[\s\S]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)\s*!important/);
+    assert.doesNotMatch(css, /@media \(max-width: 640px\)[\s\S]*\.deng-home-stat-grid[\s\S]*grid-template-columns:\s*1fr/);
+    assert.doesNotMatch(css, /@media \(max-width: 960px\)[\s\S]*\.deng-home-stat-grid[\s\S]*repeat\(2,/);
   });
 
   test('light mode global stats cards use bright glass + slate text (no washed-out muted label)', () => {
