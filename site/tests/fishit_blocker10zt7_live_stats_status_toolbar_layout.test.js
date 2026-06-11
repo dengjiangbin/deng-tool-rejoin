@@ -14,7 +14,7 @@ process.env.FISHIT_DB_PATH = process.env.FISHIT_DB_PATH || '/nonexistent/deng-fi
 
 const trackerRouter = require('../src/fishitTrackerRoutes');
 const {
-  BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_MARKER,
+  BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
 } = require('../src/fishitTrackerBuild');
 
@@ -29,10 +29,10 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZT7 live stats, status format, toolbar, layout', () => {
-  test('UI deploy marker points to BLOCKER10ZT8', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_MARKER);
+  test('UI deploy marker points to BLOCKER10ZT9', () => {
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_MARKER);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_2026_06_11/);
+    assert.match(tpl, /BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_2026_06_11/);
   });
 
   test('table status is circle plus duration only with normal duration color', () => {

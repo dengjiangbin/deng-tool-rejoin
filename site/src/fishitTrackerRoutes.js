@@ -2605,7 +2605,7 @@ function buildTrackerPageLocals(req) {
   const debugGlobal = debugInventory && req.query.debug === 'global';
   const locals = {
     layout: false,
-    title: 'Inventory — Fish It',
+    title: 'DENG Inventory Tracker — Fish It',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
     trackerUiDeployMarker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
@@ -3329,7 +3329,7 @@ function buildStatsPollingProof() {
   return {
     publicPollIntervalMs: 10000,
     syncTickMs: 1000,
-    sharedRefreshFunction: 'applyPollPayload',
+    sharedRefreshFunction: 'applyInventoryPollPayload',
     statsFromSamePayload: true,
     coinRefreshesOnInterval: true,
     totalCaughtRefreshesOnInterval: true,
@@ -3337,6 +3337,63 @@ function buildStatsPollingProof() {
     fishCardsRefreshesOnInterval: true,
     statusDurationUpdatesEverySecond: true,
     statusFormat: '[circle] <duration>',
+  };
+}
+
+function buildUnifiedPollPipelineProof(data) {
+  return {
+    sharedRefreshFunction: 'applyInventoryPollPayload',
+    liveSnapshotField: 'entry.liveSnapshot',
+    samePayloadForFishStonesStats: true,
+    pollIntervalMs: 10000,
+    lastPollPayloadAt: data?.lastInventoryAt || data?.playerStatsUpdatedAt || null,
+  };
+}
+
+function buildStatsHarmonyProof(data) {
+  const stats = resolvePlayerStatsForApi(data?.playerStats);
+  return {
+    coinTotalCaughtRarestFromSamePlayerStatsObject: true,
+    playerStatsUpdatedAt: data?.playerStatsUpdatedAt || null,
+    coinsText: stats?.coinsText || null,
+    totalCaughtText: stats?.totalCaughtText || null,
+    rarestFishChance: stats?.rarestFishChance || null,
+    numericTotalCaughtPreferred: stats?.totalCaught != null,
+  };
+}
+
+function buildTotalCaughtIntervalProof(data) {
+  const stats = resolvePlayerStatsForApi(data?.playerStats);
+  return {
+    totalCaughtRefreshesOnEveryPoll: true,
+    staleTextRegeneratedOnNumericMerge: true,
+    totalCaught: stats?.totalCaught ?? null,
+    totalCaughtText: stats?.totalCaughtText ?? null,
+  };
+}
+
+function buildCoinIntervalProof(data) {
+  const stats = resolvePlayerStatsForApi(data?.playerStats);
+  return {
+    coinRefreshesOnEveryPoll: true,
+    coins: stats?.coins ?? null,
+    coinsText: stats?.coinsText ?? null,
+  };
+}
+
+function buildRarestFishIntervalProof(data) {
+  const stats = resolvePlayerStatsForApi(data?.playerStats);
+  return {
+    rarestFishRefreshesOnEveryPoll: true,
+    rarestFishChance: stats?.rarestFishChance ?? null,
+  };
+}
+
+function buildFishStoneIntervalProof(data) {
+  return {
+    fishStoneFromSamePollPayload: true,
+    lastInventoryAt: data?.lastInventoryAt || data?.updatedAt || null,
+    playerStatsUpdatedAt: data?.playerStatsUpdatedAt || null,
   };
 }
 
@@ -3796,6 +3853,12 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     routeInventoryOnlyProof: buildRouteInventoryOnlyProof(),
     trackerLuaTouchProof: buildTrackerLuaTouchProof(),
     statsPollingProof: buildStatsPollingProof(),
+    unifiedPollPipelineProof: buildUnifiedPollPipelineProof(data),
+    statsHarmonyProof: buildStatsHarmonyProof(data),
+    totalCaughtIntervalProof: buildTotalCaughtIntervalProof(data),
+    coinIntervalProof: buildCoinIntervalProof(data),
+    rarestFishIntervalProof: buildRarestFishIntervalProof(data),
+    fishStoneIntervalProof: buildFishStoneIntervalProof(data),
     uploadIntervalProof: buildUploadIntervalProof(data),
     toolbarActionProof: buildToolbarActionProof(),
     gridModeProof: buildGridModeProof(),

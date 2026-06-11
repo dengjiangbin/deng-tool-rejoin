@@ -117,6 +117,23 @@ describe('fishitPlayerStats', () => {
     assert.deepEqual(withLeader.coinProbe.leaderstatsChildren, [{ name: 'Caught', value: '68,885' }]);
   });
 
+  test('mergePlayerStats regenerates totalCaughtText when numeric totalCaught updates', () => {
+    const existing = playerStats.sanitisePlayerStats({
+      totalCaught: 58810,
+      totalCaughtText: '58.810',
+      source: 'leaderstats',
+      build: 'BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10',
+    });
+    const merged = playerStats.mergePlayerStats(existing, {
+      totalCaught: 58811,
+      source: 'leaderstats',
+      build: 'BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10',
+    }, { isLiveRoblox: true });
+    assert.equal(merged.totalCaught, 58811);
+    assert.equal(merged.totalCaughtText, '58.811');
+    assert.equal(playerStats.displayTotalCaught(merged), '58.811');
+  });
+
   test('missing coin does not erase totalCaught and rarestFish on merge', () => {
     const existing = playerStats.sanitisePlayerStats({
       totalCaughtText: '54,313',

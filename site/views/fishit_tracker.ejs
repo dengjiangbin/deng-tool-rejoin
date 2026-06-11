@@ -1,15 +1,14 @@
 <!DOCTYPE html>
-<!-- BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_2026_06_11 -->
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_2026_06_11' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
+<!-- BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_2026_06_11 -->
+<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_2026_06_11' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_2026_06_11' %>">
+  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_2026_06_11' %>">
   <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/inventory' %>">
   <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
-  <title>Inventory &mdash; Fish It</title>
-  <style>
-    /* BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_2026_06_11 */
+  <title>DENG Inventory Tracker &mdash; Fish It</title>  <style>
+    /* BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_2026_06_11 */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
@@ -1097,7 +1096,7 @@
     }
   </style>
 </head>
-<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_2026_06_11') %>">
+<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_2026_06_11') %>">
 <div class="page">
   <div class="inner">
 
@@ -1109,7 +1108,7 @@
     </a>
 
     <header class="header">
-      <h1>Inventory</h1>
+      <h1>DENG Inventory Tracker</h1>
       <p class="header__lead">
         <span class="header__lead-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" focusable="false">
@@ -1119,7 +1118,7 @@
             <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
           </svg>
         </span>
-        <span>Track unlimited players simultaneously.</span>
+        <span>Track Your Fish It Accounts</span>
       </p>
     </header>
 
@@ -1276,7 +1275,7 @@
   const DEBUG_INVENTORY = <%= (typeof debugInventory !== 'undefined' && debugInventory) ? 'true' : 'false' %>;
   const APK_EMBED = <%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'true' : 'false' %>;
   const DEBUG_GLOBAL  = DEBUG_INVENTORY && /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
-  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_2026_06_11" %>';
+  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_2026_06_11" %>';
   const INITIAL_USERNAME = <%- JSON.stringify(typeof initialUsername !== 'undefined' ? initialUsername : '') %>;
   const RENDER_BUILD  = DEBUG_INVENTORY
     ? (document.documentElement.getAttribute('data-render-build') || '')
@@ -1530,16 +1529,8 @@
   }
   function resolveEntryPlayerStatsSource(entry) {
     if (!entry) return null;
-    const fromLast = entry.lastData;
-    const pairs = [
-      ['entry.playerStats', entry.playerStats],
-      ['lastData.playerStats', fromLast && fromLast.playerStats],
-      ['lastData.stats', fromLast && fromLast.stats],
-      ['lastData.session.playerStats', fromLast && fromLast.session && fromLast.session.playerStats],
-      ['entry.stats', entry.stats],
-    ];
-    for (const [source, stats] of pairs) {
-      if (stats && typeof stats === 'object' && Object.keys(stats).length) return { stats, source };
+    if (entry.liveSnapshot && entry.liveSnapshot.playerStats) {
+      return { stats: entry.liveSnapshot.playerStats, source: 'liveSnapshot.playerStats' };
     }
     return null;
   }
@@ -1559,12 +1550,34 @@
     return hasValues ? stats : null;
   }
   function getEntryPlayerStats(entry) {
-    if (!entry) return null;
-    const resolved = resolveEntryPlayerStatsSource(entry);
-    const stats = resolved ? displayableEntryPlayerStats(resolved.stats) : null;
-    if (stats) return stats;
-    if (!isTrackerOnline(entry)) return null;
-    return null;
+    if (!entry || !entry.liveSnapshot) return null;
+    return entry.liveSnapshot.playerStats || null;
+  }
+  function extractPlayerStatsFromPayload(data) {
+    const raw = data && data.playerStats;
+    if (!raw || typeof raw !== 'object') return null;
+    return displayableEntryPlayerStats(raw);
+  }
+  function buildLiveSnapshotFromPayload(entry, data, pollAt) {
+    const fishList = getPublicFishItems(data);
+    const stoneList = getPublicStoneItems(data);
+    const prevCount = entry && entry.liveSnapshot && entry.liveSnapshot.pollCount || 0;
+    return {
+      pollAt,
+      payloadAt: (data && (data.playerStatsUpdatedAt || data.lastInventoryAt || data.updatedAt)) || pollAt,
+      pollCount: prevCount + 1,
+      playerStats: extractPlayerStatsFromPayload(data),
+      fishList,
+      stoneList,
+      fishCount: fishList.length,
+      stoneCount: stoneList.length,
+    };
+  }
+  function syncEntryFromLiveSnapshot(entry) {
+    if (!entry || !entry.liveSnapshot) return;
+    entry.playerStats = entry.liveSnapshot.playerStats;
+    entry.lastFishList = entry.liveSnapshot.fishList;
+    entry.lastStoneList = entry.liveSnapshot.stoneList;
   }
   function refreshAllUsernameDisplays() {
     trackers.forEach((entry) => refreshEntrySyncDisplay(entry));
@@ -1608,71 +1621,12 @@
     }
     if (textEl) textEl.textContent = formatTableSyncStatusText(entry);
   }
-  function patchAccountStatsRow(entry, key) {
-    if (!entry || !key) return;
-    const stats = getEntryPlayerStats(entry);
-    const row = accountsTableBodyEl && accountsTableBodyEl.querySelector(`[data-account-row-key="${CSS.escape(key)}"]`);
-    if (row) {
-      const coinsEl = row.querySelector('.col-coins');
-      const caughtEl = row.querySelector('.col-caught');
-      const rareEl = row.querySelector('.col-rare');
-      const statusEl = row.querySelector('[data-table-status-dot]');
-      if (coinsEl) {
-        coinsEl.textContent = displayCoinsStat(stats);
-        coinsEl.classList.toggle('is-muted', displayCoinsStat(stats) === '—');
-      }
-      if (caughtEl) {
-        caughtEl.textContent = displayTotalCaughtStat(stats);
-        caughtEl.classList.toggle('is-muted', displayTotalCaughtStat(stats) === '—');
-      }
-      if (rareEl) {
-        rareEl.textContent = displayRarestFishStat(stats);
-        rareEl.classList.toggle('is-muted', displayRarestFishStat(stats) === '—');
-      }
-      if (statusEl) {
-        const fresh = entryConnectionFreshness(entry);
-        statusEl.classList.remove('live', 'stale', 'dead');
-        statusEl.classList.add(fresh === 'live' ? 'live' : 'dead');
-      }
-      refreshEntryTableSyncDisplay(entry, key);
-    }
-    const mobile = accountsMobileListEl && accountsMobileListEl.querySelector(`[data-account-mobile-key="${CSS.escape(key)}"]`);
-    if (mobile) {
-      const rows = mobile.querySelectorAll('.accounts-mobile-card__grid--stats .accounts-mobile-card__row-value');
-      if (rows[0]) {
-        rows[0].textContent = displayCoinsStat(stats);
-        rows[0].classList.toggle('is-muted', displayCoinsStat(stats) === '—');
-      }
-      if (rows[1]) {
-        rows[1].textContent = displayTotalCaughtStat(stats);
-        rows[1].classList.toggle('is-muted', displayTotalCaughtStat(stats) === '—');
-      }
-      if (rows[2]) {
-        rows[2].textContent = displayRarestFishStat(stats);
-        rows[2].classList.toggle('is-muted', displayRarestFishStat(stats) === '—');
-      }
-      const dot = mobile.querySelector('.status-dot');
-      if (dot) {
-        const fresh = entryConnectionFreshness(entry);
-        dot.classList.remove('live', 'stale', 'dead');
-        dot.classList.add(fresh === 'live' ? 'live' : 'dead');
-      }
-    }
-  }
-  function applyPollPayload(entry, key, data) {
-    entry.lastData = data;
-    const pollAt = new Date().toISOString();
-    entry.lastPollOkAt = pollAt;
-    entry.lastSyncAt = pollAt;
-    if (data && data.playerStats && typeof data.playerStats === 'object') {
-      entry.playerStats = data.playerStats;
-    }
-    entry.lastStatsPollAt = pollAt;
-    entry.lastServerSyncAt = data ? bestSyncTimestamp(data) : null;
+  function applyLiveSnapshotToPublicUi(entry, key, data) {
+    const snap = entry.liveSnapshot;
+    if (!snap) return;
+    const fishList = snap.fishList || [];
+    const stoneList = snap.stoneList || [];
     const live = isEntryConnectionLive(data, entry);
-    captureEntrySync(entry, data);
-    const fishList = getPublicFishItems(data);
-    const stoneList = getPublicStoneItems(data);
     const hasInventory = fishList.length > 0 || stoneList.length > 0;
     if (!live) {
       setCardOffline(entry.el, entry.displayName, data);
@@ -1681,23 +1635,43 @@
     } else {
       setCardRunning(entry.el, entry.displayName, data);
     }
-    patchAccountStatsRow(entry, key);
-    refreshEntrySyncDisplay(entry);
     renderAccountsTable();
     updateInventoryStats();
     if (accountViewMode === 'fish') renderBulkInventory('fish');
     else if (accountViewMode === 'stone') renderBulkInventory('stone');
+    else if (accountViewMode === 'account' && key === activeAccountKey && entry.el) {
+      const body = entry.el.querySelector('[data-card-body]');
+      if (body) patchCardInventory(body, fishList, stoneList);
+    }
+  }
+  function applyInventoryPollPayload(entry, key, data) {
+    entry.lastData = data;
+    const pollAt = new Date().toISOString();
+    entry.lastPollOkAt = pollAt;
+    entry.lastSyncAt = pollAt;
+    entry.lastStatsPollAt = pollAt;
+    entry.lastServerSyncAt = data ? bestSyncTimestamp(data) : null;
+    entry.liveSnapshot = buildLiveSnapshotFromPayload(entry, data, pollAt);
+    syncEntryFromLiveSnapshot(entry);
+    captureEntrySync(entry, data);
+    applyLiveSnapshotToPublicUi(entry, key, data);
     if (DEBUG_INVENTORY) {
-      entry._statsPollingProof = {
-        pollMs: POLL_MS,
-        polledAt: entry.lastPollOkAt,
-        playerStatsFromSamePayload: !!(data.playerStats),
-        fishCount: fishList.length,
-        coinsText: data.playerStats && data.playerStats.coinsText,
-        totalCaughtText: data.playerStats && data.playerStats.totalCaughtText,
-        rarestFishChance: data.playerStats && data.playerStats.rarestFishChance,
+      const snap = entry.liveSnapshot;
+      entry._unifiedPollProof = {
+        pollCount: snap.pollCount,
+        payloadAt: snap.payloadAt,
+        pollAt: snap.pollAt,
+        coinsText: snap.playerStats ? displayCoinsStat(snap.playerStats) : null,
+        totalCaughtText: snap.playerStats ? displayTotalCaughtStat(snap.playerStats) : null,
+        rarestFishChance: snap.playerStats ? displayRarestFishStat(snap.playerStats) : null,
+        fishCount: snap.fishCount,
+        stoneCount: snap.stoneCount,
+        samePayloadTimestamp: true,
       };
     }
+  }
+  function applyPollPayload(entry, key, data) {
+    applyInventoryPollPayload(entry, key, data);
   }
   function debugLogEntryPlayerStats(entry) {
     if (!DEBUG_INVENTORY || !entry) return;
@@ -1715,16 +1689,22 @@
   function displayCoinsStat(stats) {
     const s = displayableEntryPlayerStats(stats);
     if (!s || s.source === 'missing') return '—';
+    if (s.coins != null) {
+      const compact = formatCompactStatNumber(s.coins);
+      if (compact) return compact;
+    }
     if (s.coinsText) return s.coinsText;
-    const compact = formatCompactStatNumber(s.coins);
-    return compact || '—';
+    return '—';
   }
   function displayTotalCaughtStat(stats) {
     const s = displayableEntryPlayerStats(stats);
     if (!s || s.source === 'missing') return '—';
+    if (s.totalCaught != null) {
+      const grouped = formatGroupedCaughtNumber(s.totalCaught);
+      if (grouped) return grouped;
+    }
     if (s.totalCaughtText) return s.totalCaughtText;
-    const grouped = formatGroupedCaughtNumber(s.totalCaught);
-    return grouped || '—';
+    return '—';
   }
   function displayRarestFishStat(stats) {
     const s = displayableEntryPlayerStats(stats);
@@ -1863,8 +1843,8 @@
           if (body) {
             patchCardInventory(
               body,
-              entry.lastFishList || getPublicFishItems(entry.lastData),
-              entry.lastStoneList || getPublicStoneItems(entry.lastData),
+              entry.liveSnapshot.fishList || [],
+              entry.liveSnapshot.stoneList || [],
             );
           }
         }
@@ -2109,7 +2089,7 @@
   function tickAllCardSyncStatus() {
     trackers.forEach((entry, key) => {
       refreshEntrySyncDisplay(entry);
-      patchAccountStatsRow(entry, key);
+      refreshEntryTableSyncDisplay(entry, key);
     });
   }
   function setCardSyncDisplay(card, data) {
@@ -3057,7 +3037,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       if (!res.ok) { setCardRefreshFailed(entry); return; }
       const data = await res.json();
       debugLogEntryPlayerStats(entry);
-      applyPollPayload(entry, key, data);
+      applyInventoryPollPayload(entry, key, data);
     } catch { if (trackers.has(key)) setCardRefreshFailed(entry); }
   }
 
@@ -3179,7 +3159,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     const card  = createCard(raw);
     trackerListEl.appendChild(card);
     const timer = setInterval(() => pollUser(key), POLL_MS);
-    trackers.set(key, { timer, el: card, displayName: raw, lastData: null, lastSyncAt: null, lastPollOkAt: null, lastStatsPollAt: null, lastServerSyncAt: null, playerStats: null });
+    trackers.set(key, { timer, el: card, displayName: raw, lastData: null, liveSnapshot: null, lastSyncAt: null, lastPollOkAt: null, lastStatsPollAt: null, lastServerSyncAt: null, playerStats: null, lastFishList: null, lastStoneList: null });
     pollUser(key);
     updateSummary();
     saveCurrent();
@@ -3420,11 +3400,28 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
         statsPollingProof: {
           publicPollIntervalMs: POLL_MS,
           syncTickMs: SYNC_TICK_MS,
+          sharedRefreshFunction: 'applyInventoryPollPayload',
           statsFromSamePayload: true,
           coinRefreshesOnInterval: true,
           totalCaughtRefreshesOnInterval: true,
           rarestFishRefreshesOnInterval: true,
         },
+        unifiedPollPipelineProof: {
+          sharedRefreshFunction: 'applyInventoryPollPayload',
+          liveSnapshotField: 'entry.liveSnapshot',
+          samePayloadForFishStonesStats: true,
+        },
+        statsHarmonyProof: {
+          coinTotalCaughtRarestFromSamePlayerStatsObject: true,
+          numericTotalCaughtPreferred: true,
+        },
+        totalCaughtIntervalProof: {
+          totalCaughtRefreshesOnEveryPoll: true,
+          staleTextRegeneratedOnNumericMerge: true,
+        },
+        coinIntervalProof: { coinRefreshesOnEveryPoll: true },
+        rarestFishIntervalProof: { rarestFishRefreshesOnEveryPoll: true },
+        fishStoneIntervalProof: { fishStoneFromSamePollPayload: true },
         uploadIntervalProof: { trackerUploadIntervalSeconds: 10, publicRefreshIntervalMs: POLL_MS },
         connectionIndicatorProof: {
           staleThresholdSeconds: SYNC_LIVE_MAX_SEC,

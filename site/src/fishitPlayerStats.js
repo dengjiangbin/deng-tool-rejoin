@@ -174,23 +174,36 @@ function mergePlayerStats(existing, incoming, opts = {}) {
     return next;
   }
   if (!trustedExisting) return next;
-  return { ...trustedExisting, ...next };
+  const merged = { ...trustedExisting, ...next };
+  if (next.totalCaught != null) {
+    merged.totalCaughtText = formatGroupedStat(merged.totalCaught);
+  }
+  if (next.coins != null) {
+    merged.coinsText = formatCompactStat(merged.coins);
+  }
+  return merged;
 }
 
 function displayCoins(stats) {
   const s = displayablePlayerStats(stats);
   if (!s || s.source === 'missing') return '—';
+  if (s.coins != null) {
+    const compact = formatCompactStat(s.coins);
+    if (compact) return compact;
+  }
   if (s.coinsText) return s.coinsText;
-  const compact = formatCompactStat(s.coins);
-  return compact || '—';
+  return '—';
 }
 
 function displayTotalCaught(stats) {
   const s = displayablePlayerStats(stats);
   if (!s || s.source === 'missing') return '—';
+  if (s.totalCaught != null) {
+    const grouped = formatGroupedStat(s.totalCaught);
+    if (grouped) return grouped;
+  }
   if (s.totalCaughtText) return s.totalCaughtText;
-  const grouped = formatGroupedStat(s.totalCaught);
-  return grouped || '—';
+  return '—';
 }
 
 function displayRarestFish(stats) {

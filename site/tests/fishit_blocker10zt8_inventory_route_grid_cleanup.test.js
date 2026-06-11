@@ -14,7 +14,7 @@ process.env.FISHIT_DB_PATH = process.env.FISHIT_DB_PATH || '/nonexistent/deng-fi
 
 const trackerRouter = require('../src/fishitTrackerRoutes');
 const {
-  BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_MARKER,
+  BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
 } = require('../src/fishitTrackerBuild');
 const { PROTECTED_DIST_REL_PATH } = require('../src/fishitTrackerLoadstring');
@@ -31,19 +31,20 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZT8 inventory route and grid cleanup', () => {
-  test('UI deploy marker points to BLOCKER10ZT8', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_MARKER);
+  test('UI deploy marker points to BLOCKER10ZT9 unified poll pipeline', () => {
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_MARKER);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_2026_06_11/);
+    assert.match(tpl, /BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_2026_06_11/);
   });
 
   test('/inventory is the public page and uses Inventory title', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
-    assert.match(res.text, /<title>Inventory &mdash; Fish It<\/title>/);
-    assert.match(res.text, /<h1>Inventory<\/h1>/);
+    assert.match(res.text, /<title>DENG Inventory Tracker &mdash; Fish It<\/title>/);
+    assert.match(res.text, /<h1>DENG Inventory Tracker<\/h1>/);
     assert.match(res.text, /href="\/inventory"/);
-    assert.doesNotMatch(res.text, /href="\/tracker"/);
-    assert.equal(res.headers['x-tracker-ui-deploy'], BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_MARKER);
+    assert.match(res.text, /header__lead-icon[\s\S]*Track Your Fish It Accounts/);
+    assert.doesNotMatch(res.text, /Track unlimited players simultaneously\./);
+    assert.equal(res.headers['x-tracker-ui-deploy'], BLOCKER10ZT9_UNIFIED_POLL_PIPELINE_MARKER);
   });
 
   test('/tracker and /fishit-tracker redirect to /inventory without public links', async () => {
