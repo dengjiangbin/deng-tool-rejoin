@@ -2,6 +2,7 @@
 
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
 const request = require('supertest');
 
 process.env.NODE_ENV = 'test';
@@ -150,5 +151,13 @@ describe('landing stat sources and layout regression', () => {
     assert.doesNotMatch(res.text, /deng-home-node-grid/);
     assert.match(res.text, /id="about"/);
     assert.match(res.text, /One platform\. Multiple tools\./);
+  });
+
+  test('mobile homepage keeps Home Statistic About nav links in one row', () => {
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'home.css'), 'utf8');
+    assert.match(css, /@media \(max-width: 860px\)[\s\S]*\.deng-home-nav__inner[\s\S]*display:\s*flex[\s\S]*flex-wrap:\s*nowrap/);
+    assert.match(css, /@media \(max-width: 860px\)[\s\S]*\.deng-home-nav__links[\s\S]*flex-wrap:\s*nowrap/);
+    assert.doesNotMatch(css, /@media \(max-width: 860px\)[\s\S]*\.deng-home-nav__links[\s\S]*grid-column:\s*1\s*\/\s*-1/);
+    assert.doesNotMatch(css, /@media \(max-width: 860px\)[\s\S]*\.deng-home-nav__links[\s\S]*order:\s*3/);
   });
 });

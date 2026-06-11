@@ -685,18 +685,62 @@
 /* ── Responsive ── */
 @media (max-width: 860px) {
   .deng-home-nav__inner {
-    grid-template-columns: 1fr auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: nowrap;
     border-radius: 18px;
-    padding: 10px 12px;
+    padding: 8px 10px;
+    min-height: 52px;
+  }
+
+  .deng-home-brand {
+    flex: 0 1 auto;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .deng-home-brand__mark {
+    width: 30px;
+    height: 30px;
+  }
+
+  .deng-home-brand__text {
+    font-size: 0.82rem;
   }
 
   .deng-home-nav__links {
-    grid-column: 1 / -1;
-    order: 3;
-    justify-content: flex-start;
-    overflow-x: auto;
-    padding-bottom: 2px;
-    -webkit-overflow-scrolling: touch;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    min-width: 0;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+
+  .deng-home-nav__link {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .deng-home-nav__actions {
+    flex: 0 0 auto;
+  }
+
+  .deng-home-nav__signin {
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 0.78rem;
+    white-space: nowrap;
   }
 
   .deng-home-eco-grid {
@@ -710,7 +754,7 @@
 
 @media (max-width: 640px) {
   .deng-home {
-    --deng-home-nav-offset: 132px;
+    --deng-home-nav-offset: 92px;
   }
 
   .deng-home-nav-wrap.deng-home-nav-wrap--fixed {
@@ -802,6 +846,26 @@
 }
 
 @media (max-width: 430px) {
+  .deng-home-nav__inner {
+    gap: 6px;
+    padding: 7px 8px;
+  }
+
+  .deng-home-brand__text {
+    display: none;
+  }
+
+  .deng-home-nav__link {
+    padding: 0 8px;
+    font-size: 0.72rem;
+  }
+
+  .deng-home-nav__signin {
+    min-height: 34px;
+    padding: 0 10px;
+    font-size: 0.72rem;
+  }
+
   .deng-home-stat-grid--live,
   .deng-home-stat-grid--platform,
   .deng-home-stat-grid--fishit,
