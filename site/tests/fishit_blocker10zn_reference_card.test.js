@@ -107,7 +107,7 @@ describe('BLOCKER10ZN reference card UI', () => {
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
-    const res = await request(app).get('/tracker').expect(200);
+    const res = await request(app).get('/inventory').expect(200);
     assert.match(res.text, /BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_2026_06_10/);
     assert.match(res.text, /ft-card--fish/);
     assert.match(res.text, /dist\/tracker\.lua/);

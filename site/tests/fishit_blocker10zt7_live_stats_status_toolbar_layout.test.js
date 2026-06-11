@@ -14,7 +14,7 @@ process.env.FISHIT_DB_PATH = process.env.FISHIT_DB_PATH || '/nonexistent/deng-fi
 
 const trackerRouter = require('../src/fishitTrackerRoutes');
 const {
-  BLOCKER10ZT7_LIVE_STATS_STATUS_TOOLBAR_LAYOUT_MARKER,
+  BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
 } = require('../src/fishitTrackerBuild');
 
@@ -29,20 +29,20 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZT7 live stats, status format, toolbar, layout', () => {
-  test('UI deploy marker points to BLOCKER10ZT7', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT7_LIVE_STATS_STATUS_TOOLBAR_LAYOUT_MARKER);
+  test('UI deploy marker points to BLOCKER10ZT8', () => {
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_MARKER);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /BLOCKER10ZT7_LIVE_STATS_STATUS_TOOLBAR_LAYOUT_2026_06_11/);
+    assert.match(tpl, /BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_2026_06_11/);
   });
 
-  test('status format is circle duration username without Last sync label', () => {
+  test('table status is circle plus duration only with normal duration color', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /function formatEntrySyncStatusText/);
-    assert.match(tpl, /return `\$\{duration\} \$\{name\}`/);
-    assert.doesNotMatch(tpl, /Last sync:/i);
+    assert.match(tpl, /function formatTableSyncStatusText/);
+    assert.match(tpl, /buildAccountStatusHtml[\s\S]*formatTableSyncStatusText/);
     assert.match(tpl, /data-table-sync-text/);
-    assert.match(tpl, /entry\.lastSyncAt = pollAt/);
-    assert.doesNotMatch(tpl, /if \(ts\) entry\.lastSyncAt = ts/);
+    assert.match(tpl, /\.accounts-status__text[\s\S]*color:var\(--text\)/);
+    assert.doesNotMatch(tpl, /Last sync:/i);
+    assert.doesNotMatch(tpl, /\.accounts-status \.status-dot\.live \+ \.accounts-status__text/);
   });
 
   test('toolbar order is table, fish grid, stone grid, copy usernames, refresh', async () => {
@@ -97,7 +97,8 @@ describe('BLOCKER10ZT7 live stats, status format, toolbar, layout', () => {
       .expect(200);
 
     const debug = await request(app).get(`/api/fishit-tracker/debug/${username}`).expect(200);
-    assert.equal(debug.body.statusFormatProof.publicFormat, '[circle] <duration> <username>');
+    assert.equal(debug.body.statusFormatProof.tablePublicFormat, '[circle] <duration>');
+    assert.equal(debug.body.statusFormatProof.indicatorColorOnDotOnly, true);
     assert.equal(debug.body.statusFormatProof.literalLastSyncLabelPresent, false);
     assert.equal(debug.body.statsPollingProof.publicPollIntervalMs, 10000);
     assert.equal(debug.body.uploadIntervalProof.trackerUploadIntervalSeconds, 10);

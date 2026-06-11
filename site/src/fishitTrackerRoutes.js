@@ -3,7 +3,8 @@
  * Fish It Backpack Tracker – API routes + dashboard page.
  *
  * Public routes (no authentication required):
- *   GET  /tracker                        – serve the live dashboard UI
+ *   GET  /inventory                     – serve the live inventory dashboard UI
+ *   GET  /tracker, /fishit-tracker        – 301 redirect to /inventory (legacy, not public)
  *   POST /api/fishit-tracker/update-backpack – canonical inventory POST (Lua v10J2+)
  *   POST /api/tracker/update-backpack          – backward-compatible alias
  *   GET  /api/fishit-tracker/get-backpack/:user – canonical live query
@@ -52,7 +53,7 @@ const trackerRarityStyle = require('./fishitTrackerRarityStyle');
 const fishitStoneDisplayMap = require('./fishitStoneDisplayMap');
 const stoneImageAssets = require('./fishitStoneImageAssets');
 const inventorySort = require('./fishitInventorySort');
-const { CLEAN_TRACKER_LOADSTRING } = require('./fishitTrackerLoadstring');
+const { CLEAN_TRACKER_LOADSTRING, PROTECTED_DIST_REL_PATH, PROTECTED_DIST_RAW_URL_CACHE_BUST } = require('./fishitTrackerLoadstring');
 const itemUtilityPublic = require('./fishitItemUtilityPublic');
 const gameItemDbPublic = require('./fishitGameItemDbPublic');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
@@ -2587,7 +2588,7 @@ function mapDebugItemWithResolution(raw, enriched) {
   };
 }
 
-// ── GET /tracker – serve the dashboard page ───────────────────────
+// ── GET /inventory – serve the inventory dashboard page ───────────────────────
 function resolveInitialUsername(req) {
   if (!req || !req.query) return '';
   for (const key of ['username', 'u', 'user']) {
@@ -2650,9 +2651,15 @@ function renderTrackerPage(req, res) {
   }
 }
 
-router.get('/tracker', renderTrackerPage);
+function redirectLegacyInventoryRoute(req, res) {
+  const qIndex = req.url.indexOf('?');
+  const suffix = qIndex >= 0 ? req.url.slice(qIndex) : '';
+  return res.redirect(301, `/inventory${suffix}`);
+}
+
 router.get('/inventory', renderTrackerPage);
-router.get('/fishit-tracker', renderTrackerPage);
+router.get('/tracker', redirectLegacyInventoryRoute);
+router.get('/fishit-tracker', redirectLegacyInventoryRoute);
 
 // ── GET /api/fishit-tracker/assets/stones/:filename — manual stone image cache (BLOCKER10ZD) ──
 router.get('/api/fishit-tracker/assets/stones/:filename', (req, res) => {
@@ -3329,18 +3336,62 @@ function buildStatsPollingProof() {
     rarestFishRefreshesOnInterval: true,
     fishCardsRefreshesOnInterval: true,
     statusDurationUpdatesEverySecond: true,
-    statusFormat: '[circle] <duration> <username>',
+    statusFormat: '[circle] <duration>',
   };
 }
 
 function buildStatusFormatProof() {
   return {
-    publicFormat: '[circle] <duration> <username>',
+    tablePublicFormat: '[circle] <duration>',
+    cardPublicFormat: '[circle] <duration> <username>',
+    publicFormat: '[circle] <duration>',
     literalLastSyncLabelPresent: false,
+    durationTextUsesNormalColor: true,
+    indicatorColorOnDotOnly: true,
     durationUpdatesEverySecond: true,
     durationResetsAfterSuccessfulPoll: true,
     noLiveLabel: true,
     noClockTime: true,
+    noDuplicateUsernameInTableStatus: true,
+  };
+}
+
+function buildRouteInventoryOnlyProof() {
+  return {
+    publicInventoryPath: '/inventory',
+    legacyTrackerRedirect: '/tracker -> /inventory',
+    legacyFishitTrackerRedirect: '/fishit-tracker -> /inventory',
+    publicUiUsesInventoryLabel: true,
+  };
+}
+
+function buildTrackerLuaTouchProof() {
+  return {
+    touched: false,
+    reason: 'frontend_backend_route_ui_only',
+    liveDistRelativePath: PROTECTED_DIST_REL_PATH,
+    liveDistFetchUrl: PROTECTED_DIST_RAW_URL_CACHE_BUST,
+    localDistPath: path.join(__dirname, '..', '..', PROTECTED_DIST_REL_PATH),
+  };
+}
+
+function buildStatusNoZeroProof() {
+  return {
+    minimumDurationSeconds: 1,
+    neverRendersZeroSeconds: true,
+    tableStatusFormat: '[circle] <duration>',
+    noDuplicateUsernameInTableStatus: true,
+    indicatorColorOnDotOnly: true,
+  };
+}
+
+function buildGridModeProof() {
+  return {
+    fishGridShowsAllAccountsFish: true,
+    stoneGridShowsAllAccountsStones: true,
+    eachAccountAllAccountsTabsRemoved: true,
+    individualInventoryViaBackpackOnly: true,
+    bulkTabsRemoved: true,
   };
 }
 
@@ -3741,9 +3792,13 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     syncProof: buildSyncProof(data),
     connectionIndicatorProof: buildConnectionIndicatorProof(data),
     statusFormatProof: buildStatusFormatProof(),
+    statusNoZeroProof: buildStatusNoZeroProof(),
+    routeInventoryOnlyProof: buildRouteInventoryOnlyProof(),
+    trackerLuaTouchProof: buildTrackerLuaTouchProof(),
     statsPollingProof: buildStatsPollingProof(),
     uploadIntervalProof: buildUploadIntervalProof(data),
     toolbarActionProof: buildToolbarActionProof(),
+    gridModeProof: buildGridModeProof(),
     responsiveLayoutProof: buildResponsiveLayoutProof(),
     ...buildClientBuildProof(data),
     counts: countsEnriched,

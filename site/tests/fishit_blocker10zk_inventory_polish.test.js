@@ -25,7 +25,8 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
     assert.match(tpl, /No inventory data yet for this username/);
     assert.doesNotMatch(tpl, /Awaiting first data/);
     assert.match(tpl, /data-ui-marker="<%= \(typeof debugInventory/);
-    assert.match(tpl, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
+    assert.match(tpl, /id="loadstringCode"/);
+    assert.match(tpl, /trackerLoadstring/);
   });
 
   test('debug-only proof blocks stay gated behind DEBUG_INVENTORY', () => {
@@ -35,15 +36,16 @@ describe('BLOCKER10ZK inventory mobile, bulk, public cleanup, APK UX', () => {
     assert.match(tpl, /phaseMessage\(data\.phase\)/);
   });
 
-  test('Each Account and All Accounts tabs render', () => {
+  test('Each Account and All Accounts tabs removed; bulk grid via toolbar', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /data-inventory-mode="individual"/);
-    assert.match(tpl, /data-inventory-mode="bulk"/);
-    assert.match(tpl, />Each Account</);
-    assert.match(tpl, />All Accounts</);
-    assert.doesNotMatch(tpl, /Bulk \/ All/);
+    assert.doesNotMatch(tpl, /data-inventory-mode="individual"/);
+    assert.doesNotMatch(tpl, /data-inventory-mode="bulk"/);
+    assert.doesNotMatch(tpl, />Each Account</);
+    assert.doesNotMatch(tpl, />All Accounts</);
     assert.match(tpl, /function aggregateBulkInventory/);
-    assert.match(tpl, /function renderBulkInventory/);
+    assert.match(tpl, /function renderBulkInventory\(showCategory\)/);
+    assert.match(tpl, /id="viewFishGridBtn"/);
+    assert.match(tpl, /id="viewStoneGridBtn"/);
   });
 
   test('mobile CSS keeps ft-card horizontal layout in two-column inventory grid', () => {

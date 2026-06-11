@@ -3997,7 +3997,7 @@ describe('BLOCKER10O full catalog safe learning', () => {
     assert.equal(get.body.fishCounts.label, 'Fish');
     assert.equal(get.body.publicApiBuild, PUBLIC_API_BUILD);
 
-    const page = await request(app).get('/tracker').expect(200);
+    const page = await request(app).get('/inventory').expect(200);
     assert.match(page.text, new RegExp(PUBLIC_API_BUILD.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.ok(!tpl.match(/Items:\s*<strong>/));
   });

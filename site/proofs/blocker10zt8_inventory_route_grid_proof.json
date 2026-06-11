@@ -1,0 +1,16 @@
+{
+  "inventoryStatus": 200,
+  "legacyTrackerStatus": 301,
+  "legacyTrackerLocation": "/inventory",
+  "deploy": "BLOCKER10ZT8_INVENTORY_ROUTE_GRID_CLEANUP_2026_06_11",
+  "titleInventory": true,
+  "noPublicTrackerHref": true,
+  "marker": true,
+  "noZeroSecondsGuard": true,
+  "noEachAccountTabs": true,
+  "fishGridIcon": true,
+  "openAccountInventory": true,
+  "renderBulkInventory": true,
+  "pollMs10k": true,
+  "toolbarOrder": true
+}

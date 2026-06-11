@@ -30,12 +30,12 @@ function countMatches(text, re) {
 }
 
 describe('BLOCKER10ZS inventory UI polish — tabs, search, controls, stats', () => {
-  test('rendered inventory HTML uses Each Account and All Accounts tab labels', async () => {
+  test('rendered inventory HTML no longer uses Each Account or All Accounts tabs', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
-    assert.match(res.text, />Each Account</);
-    assert.match(res.text, />All Accounts</);
-    assert.doesNotMatch(res.text, />Individual</);
-    assert.doesNotMatch(res.text, /Bulk \/ All/);
+    assert.doesNotMatch(res.text, />Each Account</);
+    assert.doesNotMatch(res.text, />All Accounts</);
+    assert.match(res.text, /id="viewFishGridBtn"/);
+    assert.match(res.text, /id="viewStoneGridBtn"/);
   });
 
   test('session helper texts are removed from inventory page', async () => {
@@ -47,9 +47,9 @@ describe('BLOCKER10ZS inventory UI polish — tabs, search, controls, stats', ()
   test('shared search only — no per-account search row builder in template', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     assert.doesNotMatch(tpl, /function ensureInventorySearchRow/);
-    assert.match(tpl, /data-individual-search-input/);
+    assert.doesNotMatch(tpl, /data-individual-search-input/);
     assert.match(tpl, /data-bulk-search-input/);
-    assert.equal(countMatches(tpl, /placeholder="Search fish or stones\.\.\."/g), 2);
+    assert.equal(countMatches(tpl, /placeholder="Search fish or stones\.\.\."/g), 1);
     assert.doesNotMatch(tpl, /data-remove-btn/);
     assert.doesNotMatch(tpl, />x Remove</);
   });
@@ -78,13 +78,14 @@ describe('BLOCKER10ZS inventory UI polish — tabs, search, controls, stats', ()
     assert.match(res.text, /class="stat-card stat-card--forgotten"/);
   });
 
-  test('individual shared search aggregates ownership across accounts', () => {
+  test('bulk fish and stone grids aggregate ownership across accounts', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     const script = tpl.slice(tpl.indexOf('<script>') + 8, tpl.indexOf('</script>'));
-    assert.match(script, /function searchEachAccountInventory/);
+    assert.match(script, /function aggregateBulkInventory/);
+    assert.match(script, /function renderBulkInventory\(showCategory\)/);
     assert.match(script, /function buildOwnerBreakdownHtml/);
-    assert.match(script, /function renderIndividualSearchResults/);
-    assert.match(script, /ft-chip-owner/);
+    assert.doesNotMatch(script, /function searchEachAccountInventory/);
+    assert.doesNotMatch(script, /function renderIndividualSearchResults/);
   });
 });
 
@@ -96,8 +97,8 @@ function loadInventoryModalStatusFns() {
   for (let i = 0; i < names.length; i += 1) {
     assert.ok(fns[i], `tracker template helper must exist: ${names[i]}`);
   }
-  const constants = script.match(/const SYNC_LIVE_MAX_SEC = 30;\s*const SYNC_STALE_MAX_SEC = 120;/);
-  assert.ok(constants, 'sync freshness thresholds must exist');
+  const constants = script.match(/const SYNC_LIVE_MAX_SEC = 30;/);
+  assert.ok(constants, 'sync freshness threshold must exist');
   return new Function(`
     ${constants[0]}
     ${fns.map((h) => h[0]).join('\n')}
@@ -133,21 +134,21 @@ describe('BLOCKER10ZS inventory modal + sync status polish', () => {
     assert.doesNotMatch(tpl, /card-foot/);
   });
 
-  test('account header shows exact sync duration beside status dot', async () => {
+  test('account card header shows sync duration beside status dot', async () => {
     const res = await request(makeApp()).get('/inventory').expect(200);
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(res.text, /data-sync-age/);
-    assert.match(res.text, /class="sync-age"/);
+    assert.match(res.text, /data-card-sync-text/);
+    assert.match(res.text, /data-card-sync-line/);
     assert.match(res.text, /data-status-dot/);
     assert.match(res.text, /class="status-dot/);
-    assert.match(res.text, /class="account-name"/);
     assert.match(res.text, /function formatExactSyncAge/);
     assert.match(res.text, /function tickAllCardSyncStatus/);
-    assert.match(res.text, /setInterval\(tickAllCardSyncStatus, 1000\)/);
-    assert.match(tpl, /function formatExactSyncAge/);
+    assert.match(res.text, /safeBind\('sync age tick'/);
+    assert.match(res.text, /setInterval\(tickAllCardSyncStatus, SYNC_TICK_MS\)/);
+    assert.match(tpl, /function formatTableSyncStatusText/);
     assert.match(tpl, /function formatTableSyncAge/);
     assert.doesNotMatch(tpl, /data-sync-ago/);
-    assert.doesNotMatch(tpl, /card-head-status[\s\S]*·/);
+    assert.doesNotMatch(tpl, /class="account-name"/);
   });
 
   test('formatExactSyncAge returns exact duration labels without ago or just now', () => {
@@ -158,7 +159,7 @@ describe('BLOCKER10ZS inventory modal + sync status polish', () => {
     assert.equal(fns.formatExactSyncAge(new Date(now - 65000).toISOString()), '1m 05s');
     assert.equal(fns.formatExactSyncAge(new Date(now - 2678400000).toISOString()), '31D');
     assert.equal(fns.syncFreshnessFromTimestamp(new Date(now - 5000).toISOString()), 'live');
-    assert.equal(fns.syncFreshnessFromTimestamp(new Date(now - 90000).toISOString()), 'stale');
+    assert.equal(fns.syncFreshnessFromTimestamp(new Date(now - 90000).toISOString()), 'dead');
     assert.equal(fns.syncFreshnessFromTimestamp(new Date(now - 2678400000).toISOString()), 'dead');
   });
 

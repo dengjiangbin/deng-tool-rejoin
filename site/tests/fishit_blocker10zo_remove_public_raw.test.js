@@ -70,7 +70,7 @@ describe('BLOCKER10ZO remove public raw tracker.lua', () => {
   });
 
   test('/tracker page shows dist loader and BLOCKER10ZO marker', async () => {
-    const res = await request(makeApp()).get('/tracker').expect(200);
+    const res = await request(makeApp()).get('/inventory').expect(200);
     assert.match(res.text, /dist\/tracker\.lua/);
     assert.match(res.text, /BLOCKER10ZO_REMOVE_PUBLIC_RAW_TRACKER_SOURCE_2026_06_10/);
     assert.doesNotMatch(res.text, /main\/tracker\.lua"\)\)\(\)/);

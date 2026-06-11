@@ -48,7 +48,7 @@ describe('BLOCKER10ZG clean icons + loader script', () => {
   });
 
   test('/tracker renders clean executor label and unlimited players text', async () => {
-    const res = await request(makeTrackerApp()).get('/tracker').expect(200);
+    const res = await request(makeTrackerApp()).get('/inventory').expect(200);
     assert.doesNotMatch(res.text, new RegExp(MOJIBAKE));
     assert.match(res.text, /Executor Script &mdash; copy &amp; run in-game/);
     assert.match(res.text, /Track unlimited players simultaneously\./);
@@ -58,7 +58,7 @@ describe('BLOCKER10ZG clean icons + loader script', () => {
   });
 
   test('/tracker public loader script is clean without tostring or ?t=', async () => {
-    const res = await request(makeTrackerApp()).get('/tracker').expect(200);
+    const res = await request(makeTrackerApp()).get('/inventory').expect(200);
     assert.match(res.text, /id="loadstringCode"/);
     assert.match(res.text, new RegExp(CLEAN_TRACKER_LOADSTRING.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.doesNotMatch(res.text, /tostring\(os\.time\(\)\)/);
@@ -68,7 +68,7 @@ describe('BLOCKER10ZG clean icons + loader script', () => {
   });
 
   test('/tracker?debug=global still does not expose raw root loader', async () => {
-    const res = await request(makeTrackerApp()).get('/tracker?debug=global').expect(200);
+    const res = await request(makeTrackerApp()).get('/inventory?debug=global').expect(200);
     assert.match(res.text, /dist\/tracker\.lua/);
     assert.doesNotMatch(res.text, /main\/tracker\.lua\?t=/);
     assert.doesNotMatch(res.text, /loadstringDebugBox/);

@@ -43,8 +43,8 @@ describe('BLOCKER10ZF Inventory rename + rarity sorting', () => {
     assert.doesNotMatch(layout, /<span>Rejoin APK<\/span>/);
   });
 
-  test('/tracker page visible title/header says Inventory', async () => {
-    const res = await request(makeTrackerApp()).get('/tracker').expect(200);
+  test('/inventory page visible title/header says Inventory', async () => {
+    const res = await request(makeTrackerApp()).get('/inventory').expect(200);
     assert.match(res.text, /<title>[^<]*Inventory[^<]*<\/title>/i);
     assert.match(res.text, /<h1[^>]*>[^<]*Inventory[^<]*<\/h1>/i);
     assert.doesNotMatch(res.text, /Live Inventory Tracker/i);
@@ -59,12 +59,12 @@ describe('BLOCKER10ZF Inventory rename + rarity sorting', () => {
     assert.match(res.text, /id="copyBtn"/);
     assert.match(res.text, /id="loadstringCode"/);
     assert.doesNotMatch(res.text, /id="copyScriptTextarea"/);
-    assert.match(res.text, /BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10/);
+    assert.match(res.text, /dist\/tracker\.lua/);
   });
 
-  test('/tracker legacy route remains compatible', async () => {
-    const res = await request(makeTrackerApp()).get('/tracker').expect(200);
-    assert.match(res.text, /<h1[^>]*>[^<]*Inventory[^<]*<\/h1>/i);
+  test('/tracker legacy route redirects to /inventory', async () => {
+    const res = await request(makeTrackerApp()).get('/tracker').expect(301);
+    assert.equal(res.headers.location, '/inventory');
   });
 
   test('/inventory?username=denghub2 bootstraps initial username', async () => {

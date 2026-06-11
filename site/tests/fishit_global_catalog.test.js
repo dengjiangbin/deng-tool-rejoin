@@ -1383,7 +1383,7 @@ describe('BLOCKER10Z8 — hide fake 267 and cosmetic tags', { concurrency: 1 }, 
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
-    const res = await request(app).get('/tracker').expect(200);
+    const res = await request(app).get('/inventory').expect(200);
     assert.doesNotMatch(res.text, /Unknown Fish #267/i);
     assert.doesNotMatch(res.text, /ic-badges[\s\S]{0,120}>\s*Shiny\s*<\/span/i);
     assert.doesNotMatch(res.text, /ic-badges[\s\S]{0,120}>\s*Big\s*<\/span/i);
@@ -1397,7 +1397,7 @@ describe('BLOCKER10Z8 — hide fake 267 and cosmetic tags', { concurrency: 1 }, 
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
-    const res = await request(app).get('/tracker?debug=global').expect(200);
+    const res = await request(app).get('/inventory?debug=global').expect(200);
     assert.match(res.text, /hiddenPublicRows|hiddenUnresolved|quarantinedPublicNames/i);
   });
 });
@@ -1611,7 +1611,7 @@ describe('BLOCKER10Z10 — card contrast and Radiant Catfish name fix', { concur
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
-    const res = await request(app).get('/tracker').expect(200);
+    const res = await request(app).get('/inventory').expect(200);
     assert.match(res.text, /Radiant Catfish/);
     assert.match(res.text, /publicMutationBadges/);
     assert.doesNotMatch(res.text, /badge[^>]*>Radiant<\/span>[^<]*<\/div>\s*<div class="ic-meta">[^<]*Radiant Catfish/i);
@@ -1670,13 +1670,13 @@ describe('BLOCKER10Z7 hotfix — /tracker page render', () => {
   }
 
   test('GET /tracker returns HTTP 200 with no session data', async () => {
-    const res = await request(makeApp()).get('/tracker').expect(200);
+    const res = await request(makeApp()).get('/inventory').expect(200);
     assert.match(res.text, /Fish It Live Inventory Tracker/i);
     assert.match(res.text, /BLOCKER10Z18/);
   });
 
   test('GET /tracker?debug=global returns HTTP 200', async () => {
-    const res = await request(makeApp()).get('/tracker?debug=global').expect(200);
+    const res = await request(makeApp()).get('/inventory?debug=global').expect(200);
     assert.match(res.text, /DEBUG_GLOBAL|global-db-proof|fishit-tracker/i);
   });
 
@@ -1923,7 +1923,7 @@ describe('BLOCKER10Z11 — DENG Fish It bot rarity + safe global relearn', { con
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
-    const res = await request(app).get('/tracker?debug=global').expect(200);
+    const res = await request(app).get('/inventory?debug=global').expect(200);
     assert.match(res.text, /debug=global|global-db-proof/i);
   });
 
@@ -2500,7 +2500,7 @@ describe('BLOCKER10Z14 — public minimal card hide fake 285', { concurrency: 1 
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
-    const res = await request(app).get('/tracker').expect(200);
+    const res = await request(app).get('/inventory').expect(200);
     assert.match(res.text, /BLOCKER10Z18_RECOVERED_SPECIES_IMAGE_RESOLUTION_2026_06_09/);
   });
 });
@@ -2639,7 +2639,7 @@ describe('BLOCKER10Z15 — amount moved to middle section', { concurrency: 1 }, 
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
-    const res = await request(app).get('/tracker').expect(200);
+    const res = await request(app).get('/inventory').expect(200);
     assert.match(res.text, /amount-badge/);
     assert.match(res.text, /formatAmountLabel/);
   });
@@ -2851,7 +2851,7 @@ describe('BLOCKER10Z16 — live catch global evidence binding', { concurrency: 1
     app.set('view engine', 'ejs');
     app.set('views', path.join(__dirname, '..', 'views'));
     app.use(trackerRouter);
-    const res = await request(app).get('/tracker').expect(200);
+    const res = await request(app).get('/inventory').expect(200);
     assert.doesNotMatch(res.text, /ignoredDeltaProof/i);
     assert.doesNotMatch(res.text, /liveCatchAccepted/i);
   });
