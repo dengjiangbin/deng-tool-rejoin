@@ -1315,19 +1315,6 @@ async function handleLootLabsComplete(req, res) {
   }
 }
 
-router.get('/', (req, res) => {
-  if (req.session.user) return res.redirect('/dashboard');
-  return res.render('home', {
-    title: 'DENG Tool - Roblox Automation & Stat Tracker',
-    metaDescription: 'DENG Tool is a Roblox automation and stat-tracking suite with live Fish It inventory, Rejoin agents, licenses, and monitoring in one dashboard.',
-  });
-});
-
-router.get('/login', (req, res) => {
-  if (req.session.user) return res.redirect('/dashboard');
-  return res.render('login', { title: 'Sign In - DENG Tool' });
-});
-
 router.get('/health', (_req, res) => {
   res.json({
     status: 'ok',

@@ -76,6 +76,23 @@
   gap: 10px;
   color: inherit;
   text-decoration: none;
+  cursor: pointer;
+  border-radius: 12px;
+  padding: 4px 8px 4px 4px;
+  margin: -4px -8px -4px -4px;
+  transition: color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.deng-home-brand:hover,
+.deng-home-brand:focus-visible {
+  color: var(--public-text);
+  background: rgba(0, 230, 168, 0.06);
+  box-shadow: 0 0 0 1px rgba(0, 230, 168, 0.14);
+}
+
+.deng-home-brand:focus-visible {
+  outline: 2px solid var(--public-accent);
+  outline-offset: 2px;
 }
 
 .deng-home-brand__mark {
@@ -84,6 +101,13 @@
   border-radius: 10px;
   overflow: hidden;
   flex-shrink: 0;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.deng-home-brand:hover .deng-home-brand__mark,
+.deng-home-brand:focus-visible .deng-home-brand__mark {
+  box-shadow: 0 0 18px rgba(0, 230, 168, 0.35);
+  transform: scale(1.04);
 }
 
 .deng-home-brand__mark img {
@@ -660,6 +684,15 @@
 }
 
 @media (max-width: 640px) {
+  .deng-home-hero__bracket {
+    display: none;
+  }
+
+  .deng-home-hero__word--accent {
+    filter: none;
+    opacity: 1;
+  }
+
   .deng-home-container {
     width: calc(100% - 32px);
   }

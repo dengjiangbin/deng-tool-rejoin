@@ -8,6 +8,7 @@ const path         = require('path');
 const fs           = require('fs');
 
 const routes = require('./routes');
+const publicRoutes = require('./publicRoutes');
 const monitorRoutes = require('./monitorRoutes');
 const fishitRoutes = require('./fishitRoutes');
 const fishitTrackerRoutes = require('./fishitTrackerRoutes');
@@ -224,6 +225,11 @@ app.use('/', monitorRoutes);
 app.use('/', fishitRoutes);
 
 // (fishitTrackerRoutes already mounted before body parsers above)
+
+// ---------------------------------------------------------------
+// Public landing + login (after EJS layouts; before protected routes)
+// ---------------------------------------------------------------
+app.use('/', publicRoutes);
 
 // ---------------------------------------------------------------
 // Mount routes
