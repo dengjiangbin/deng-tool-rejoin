@@ -85,6 +85,15 @@ describe('BLOCKER10ZS inventory UI polish — tabs, search, controls, stats', ()
     assert.doesNotMatch(source, /@media \(max-width:560px\)[\s\S]*\.inventory-stats[\s\S]*grid-template-columns:1fr/);
   });
 
+  test('mobile and APK hide executor script panel and use compact account rows', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'inventory', 'fishit_tracker.source.ejs'), 'utf8');
+    assert.match(source, /@media \(max-width:768px\)[\s\S]*\.loadstring-box:not\(\.loadstring-box--debug\)[\s\S]*display:none\s*!important/);
+    assert.match(source, /\.inventory-apk-embed \.loadstring-box:not\(\.loadstring-box--debug\)[\s\S]*display:none\s*!important/);
+    assert.match(source, /@media \(max-width:768px\)[\s\S]*\.accounts-mobile-card[\s\S]*grid-template-columns:minmax\(72px/);
+    assert.match(source, /\.inventory-apk-embed \.accounts-mobile-card[\s\S]*grid-template-columns:minmax\(72px/);
+    assert.match(source, /@media \(max-width:768px\)[\s\S]*\.accounts-filter[\s\S]*height:40px/);
+  });
+
   test('bulk fish and stone grids aggregate ownership across accounts', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     const script = tpl.slice(tpl.indexOf('<script>') + 8, tpl.indexOf('</script>'));

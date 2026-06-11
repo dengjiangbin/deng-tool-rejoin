@@ -42,11 +42,11 @@ describe('BLOCKER10ZT2 APK v2 mobile inventory UX', () => {
     assert.match(kt, /\/inventory\?apk=1/);
   });
 
-  test('/inventory?apk=1 hides browser back link and uses compact loadstring', async () => {
+  test('/inventory?apk=1 hides browser back link and executor script card', async () => {
     const res = await request(makeApp()).get('/inventory?apk=1').expect(200);
     assert.match(res.text, /inventory-apk-embed/);
     assert.match(res.text, /data-apk-embed="1"/);
-    assert.match(res.text, /loadstring-box is-compact/);
+    assert.match(res.text, /id="sidebarScriptBtn"/);
     assert.doesNotMatch(res.text, />Back to DENG Tool</);
   });
 

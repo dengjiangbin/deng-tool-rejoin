@@ -59,12 +59,12 @@ describe('BLOCKER10ZTA inventory desktop setup sidebar', () => {
     assert.doesNotMatch(tpl, /theme-toggle-track/);
   });
 
-  test('desktop hides large loadstring panel while APK keeps compact script area', async () => {
+  test('desktop hides large loadstring panel while APK hides visible script card', async () => {
     const desktop = await request(makeApp()).get('/inventory').expect(200);
     assert.match(desktop.text, /loadstring-box--desktop-hidden/);
     const apk = await request(makeApp()).get('/inventory?apk=1').expect(200);
-    assert.match(apk.text, /loadstring-box is-compact/);
     assert.match(apk.text, /inventory-sidebar/);
+    assert.match(apk.text, /id="sidebarScriptBtn"/);
     assert.doesNotMatch(apk.text, />Back to DENG Tool</);
   });
 

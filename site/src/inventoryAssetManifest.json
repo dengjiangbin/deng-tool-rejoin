@@ -1,8 +1,8 @@
 {
-  "marker": "INVENTORY_STATS_MOBILE_2X2_2026_06_11",
-  "css": "inventory.ebe31c7110b8.css",
+  "marker": "INVENTORY_MOBILE_CONTROLS_2026_06_11",
+  "css": "inventory.da8fbe4f1a66.css",
   "js": "inventory.ebd73cd9b9b2.js",
-  "cssHash": "ebe31c7110b8",
+  "cssHash": "da8fbe4f1a66",
   "jsHash": "ebd73cd9b9b2",
-  "builtAt": "2026-06-11T11:22:09.026Z"
+  "builtAt": "2026-06-11T11:25:08.146Z"
 }

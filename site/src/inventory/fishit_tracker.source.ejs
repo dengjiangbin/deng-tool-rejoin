@@ -1223,32 +1223,10 @@
     }
     .inventory-apk-embed .accounts-overview:not(.is-inventory-only) .accounts-table-wrap { display:none !important; }
     .inventory-apk-embed .accounts-overview:not(.is-inventory-only) .accounts-mobile-list { display:flex; }
-    .inventory-apk-embed .loadstring-box { margin-top:10px; }
-    .inventory-apk-embed .loadstring-box .code-row { flex-wrap:wrap; }
+    .inventory-apk-embed .loadstring-box:not(.loadstring-box--debug) { display:none !important; }
     .inventory-apk-embed .page { padding-top:8px; padding-bottom:16px; }
     .inventory-apk-embed .header { margin-bottom:14px; }
     .inventory-apk-embed .header__lead { display:none; }
-    .loadstring-box.is-compact,
-    .inventory-apk-embed .loadstring-box {
-      padding:12px 14px;
-      margin-top:14px;
-    }
-    .loadstring-box.is-compact h3,
-    .inventory-apk-embed .loadstring-box h3 {
-      font-size:.88rem;
-      margin-bottom:8px;
-    }
-    .loadstring-box.is-compact .code-block--script,
-    .inventory-apk-embed .loadstring-box .code-block--script {
-      min-height:40px;
-      font-size:.74rem;
-      padding:8px 10px;
-    }
-    .loadstring-box.is-compact .btn-copy,
-    .inventory-apk-embed .loadstring-box .btn-copy {
-      padding:8px 12px;
-      font-size:.8rem;
-    }
     .inventory-apk-embed .inventory-stats {
       grid-template-columns:repeat(2,minmax(0,1fr));
       gap:8px;
@@ -1271,6 +1249,104 @@
     .inventory-apk-embed .stat-card__value {
       font-size:clamp(1.05rem,4.8vw,1.4rem);
       line-height:1.05;
+    }
+    .inventory-apk-embed .accounts-toolbar {
+      flex-direction:column;
+      align-items:stretch;
+      gap:8px;
+      padding:10px;
+    }
+    .inventory-apk-embed .accounts-search {
+      width:100%;
+      min-height:42px;
+      height:42px;
+      padding:0 12px;
+      box-sizing:border-box;
+    }
+    .inventory-apk-embed .accounts-filters {
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:8px;
+      width:100%;
+    }
+    .inventory-apk-embed .accounts-filter {
+      height:40px;
+      padding:0 10px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:.78rem;
+    }
+    .inventory-apk-embed .accounts-actions {
+      display:grid;
+      grid-template-columns:repeat(5,minmax(0,1fr));
+      gap:8px;
+      width:100%;
+      margin-left:0;
+    }
+    .inventory-apk-embed .accounts-icon-btn,
+    .inventory-apk-embed .accounts-view-group .accounts-view-btn {
+      height:40px;
+      min-width:0;
+      padding:0;
+    }
+    .inventory-apk-embed .accounts-overview:not(.is-inventory-only) .accounts-mobile-list {
+      gap:8px;
+      padding:8px 10px 10px;
+    }
+    .inventory-apk-embed .accounts-mobile-card {
+      display:grid;
+      grid-template-columns:minmax(72px,0.95fr) minmax(130px,1.8fr) auto;
+      align-items:center;
+      gap:8px;
+      padding:10px 12px;
+      min-height:unset;
+    }
+    .inventory-apk-embed .accounts-mobile-card__top { display:contents; }
+    .inventory-apk-embed .accounts-mobile-card__account {
+      grid-column:1;
+      display:flex;
+      align-items:center;
+      gap:6px;
+      min-width:0;
+    }
+    .inventory-apk-embed .accounts-mobile-card__username {
+      font-size:.82rem;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .inventory-apk-embed .accounts-mobile-card__actions {
+      grid-column:3;
+      gap:6px;
+    }
+    .inventory-apk-embed .accounts-mobile-card__grid { margin-top:0; }
+    .inventory-apk-embed .accounts-mobile-card__grid--stats {
+      grid-column:2;
+      display:flex;
+      flex-direction:row;
+      gap:6px;
+      align-items:center;
+      justify-content:space-between;
+      min-width:0;
+    }
+    .inventory-apk-embed .accounts-mobile-card__grid--stats .accounts-mobile-card__row {
+      flex:1 1 0;
+      min-width:0;
+      flex-direction:column;
+      align-items:center;
+      gap:2px;
+    }
+    .inventory-apk-embed .accounts-mobile-card__grid--stats .accounts-mobile-card__row-label {
+      font-size:.56rem;
+      line-height:1;
+      min-width:0;
+    }
+    .inventory-apk-embed .accounts-mobile-card__grid--stats .accounts-mobile-card__row-value {
+      font-size:.68rem;
+      line-height:1.1;
+      font-weight:700;
+      white-space:nowrap;
     }
     .copy-status { font-size:.78rem; color:var(--muted); margin-top:8px; min-height:1.1em; }
     .copy-status.is-error { color:var(--warn); }
@@ -1401,15 +1477,26 @@
       .accounts-overview:not(.is-inventory-only) .accounts-mobile-list { display:none !important; }
     }
     @media (max-width:768px) {
-      .page { padding:20px 12px 40px; overflow-x:hidden; }
+      .page { padding:16px 10px 32px; overflow-x:hidden; }
       .inner { max-width:100%; }
+      .accounts-overview { margin-bottom:14px; }
       .accounts-toolbar {
         flex-direction:column;
         align-items:stretch;
-        gap:10px;
-        padding:12px;
+        gap:8px;
+        padding:10px;
       }
-      .accounts-search { flex:1 1 auto; width:100%; }
+      .accounts-search {
+        flex:1 1 auto;
+        width:100%;
+        min-height:42px;
+        height:42px;
+        padding:0 12px;
+        box-sizing:border-box;
+        gap:8px;
+      }
+      .accounts-search svg { width:16px; height:16px; }
+      .accounts-search input { font-size:.88rem; }
       .accounts-filters {
         display:grid;
         grid-template-columns:repeat(3,minmax(0,1fr));
@@ -1418,8 +1505,13 @@
       }
       .accounts-filter {
         width:100%;
+        height:40px;
+        display:flex;
+        align-items:center;
+        justify-content:center;
         text-align:center;
-        padding:10px 8px;
+        padding:0 10px;
+        font-size:.78rem;
       }
       .accounts-actions {
         display:grid;
@@ -1430,7 +1522,9 @@
       }
       .accounts-icon-btn {
         width:100%;
-        height:42px;
+        height:40px;
+        min-width:0;
+        padding:0;
         border-radius:10px;
       }
       .accounts-view-group {
@@ -1442,16 +1536,62 @@
         flex:1 1 0;
         width:auto;
         min-width:0;
-        height:42px;
+        height:40px;
       }
       .accounts-overview:not(.is-inventory-only) .accounts-table-wrap { display:none !important; }
-      .accounts-overview:not(.is-inventory-only) .accounts-mobile-list { display:flex; }
+      .accounts-overview:not(.is-inventory-only) .accounts-mobile-list {
+        display:flex;
+        gap:8px;
+        padding:8px 10px 10px;
+      }
+      .accounts-mobile-card {
+        display:grid;
+        grid-template-columns:minmax(72px,0.95fr) minmax(130px,1.8fr) auto;
+        align-items:center;
+        gap:8px;
+        padding:10px 12px;
+        min-height:unset;
+      }
+      .accounts-mobile-card__top { display:contents; }
+      .accounts-mobile-card__account {
+        grid-column:1;
+        display:flex;
+        align-items:center;
+        gap:6px;
+        min-width:0;
+      }
+      .accounts-mobile-card__username {
+        font-size:.82rem;
+        line-height:1.2;
+        overflow-wrap:normal;
+        word-break:normal;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+      .accounts-mobile-card__actions {
+        grid-column:3;
+        display:flex;
+        gap:6px;
+        flex-shrink:0;
+      }
+      .accounts-mobile-card__actions .accounts-table__icon-btn {
+        width:34px;
+        height:34px;
+        padding:0;
+      }
+      .accounts-mobile-card__grid {
+        margin-top:0;
+      }
       .accounts-mobile-card__grid--stats {
+        grid-column:2;
         display:flex;
         flex-direction:row;
         flex-wrap:nowrap;
-        gap:10px;
-        align-items:flex-start;
+        gap:6px;
+        align-items:center;
+        justify-content:space-between;
+        min-width:0;
       }
       .accounts-mobile-card__grid--stats .accounts-mobile-card__row {
         flex:1 1 0;
@@ -1460,11 +1600,19 @@
         align-items:center;
         gap:2px;
       }
-      .accounts-mobile-card__username {
-        overflow-wrap:anywhere;
-        white-space:normal;
-        text-overflow:clip;
+      .accounts-mobile-card__grid--stats .accounts-mobile-card__row-label {
+        min-width:0;
+        font-size:.56rem;
+        line-height:1;
+        letter-spacing:.03em;
       }
+      .accounts-mobile-card__grid--stats .accounts-mobile-card__row-value {
+        font-size:.68rem;
+        line-height:1.1;
+        font-weight:700;
+        white-space:nowrap;
+      }
+      .loadstring-box:not(.loadstring-box--debug) { display:none !important; }
       .inventory-grid,
       .items-grid,
       .fish-grid {
@@ -1483,15 +1631,6 @@
       }
       .ft-card-name { font-size:12px; }
       .ft-chip { font-size:10px; padding:0 6px; }
-      .loadstring-box,
-      .loadstring-box.is-compact {
-        padding:12px;
-        margin-top:14px;
-      }
-      .loadstring-box h3,
-      .loadstring-box.is-compact h3 { font-size:.88rem; }
-      .loadstring-box .code-block--script { min-height:40px; font-size:.74rem; padding:8px 10px; }
-      .loadstring-box .btn-copy { padding:8px 12px; font-size:.8rem; }
       .header { margin-bottom:18px; }
       .header h1 { font-size:1.45rem; }
       .header__lead { font-size:.82rem; }
@@ -1532,6 +1671,16 @@
       .stat-card__value { font-size:clamp(1rem,4.6vw,1.3rem); }
       .inventory-apk-embed .stat-card { padding:9px 8px; }
       .inventory-apk-embed .stat-card__value { font-size:clamp(1rem,4.6vw,1.3rem); }
+      .accounts-mobile-card {
+        grid-template-columns:minmax(64px,0.85fr) minmax(118px,1.7fr) auto;
+        padding:9px 10px;
+        gap:6px;
+      }
+      .accounts-mobile-card__grid--stats .accounts-mobile-card__row-value { font-size:.64rem; }
+      .inventory-apk-embed .accounts-mobile-card {
+        grid-template-columns:minmax(64px,0.85fr) minmax(118px,1.7fr) auto;
+        padding:9px 10px;
+      }
     }
     @media (max-width:280px) {
       .inventory-grid,
