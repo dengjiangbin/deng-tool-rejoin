@@ -410,6 +410,33 @@ function getForgottenSpecies() {
   })).filter((f) => f.name);
 }
 
+/** Global catch count for a calendar period (WIB), aggregated across all real users. */
+function getGlobalPeriodCaught(period = 'yesterday') {
+  const fish = readBlob(KEY_FISH);
+  const win = periodWindow(period);
+  const meta = {
+    period,
+    periodLabel: win.label,
+    timezone: 'Asia/Jakarta',
+    windowFrom: new Date(win.from).toISOString(),
+    windowTo: new Date(win.to).toISOString(),
+  };
+  if (!fish || !fish.byUser) return { ...meta, count: 0 };
+
+  let total = 0;
+  for (const u of Object.values(fish.byUser)) {
+    if (!isRealUserId(String(u.userId))) continue;
+    let userTotal = sumByDateTotal(u.byDate, win);
+    if (!userTotal) {
+      const secret = (u.details && u.details.secret || []).filter((c) => inWindow(c.time, win));
+      const forgotten = (u.details && u.details.forgotten || []).filter((c) => inWindow(c.time, win));
+      userTotal = secret.length + forgotten.length;
+    }
+    total += userTotal;
+  }
+  return { ...meta, count: total };
+}
+
 /** Global headline stats for the public homepage. */
 function getGlobal() {
   const fish = readBlob(KEY_FISH);
@@ -697,6 +724,7 @@ module.exports = {
   DB_PATH,
   isAvailable,
   getGlobal,
+  getGlobalPeriodCaught,
   getForgottenSpecies,
   getUserProfile,
   getUserStats,

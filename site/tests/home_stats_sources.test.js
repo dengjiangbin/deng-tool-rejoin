@@ -21,8 +21,15 @@ describe('landing stat sources and layout regression', () => {
     const res = await request(app).get('/api/fishit/public-summary');
     assert.equal(res.status, 200);
     assert.ok(res.body.sources, 'expected sources proof object');
-    assert.match(String(res.body.sources.totalFish.service), /fishitDb/);
-    assert.match(String(res.body.sources.totalFish.store), /deng-fish-it-bot/);
+    assert.match(String(res.body.sources.caught24Hours.service), /fishitDb/);
+    assert.match(String(res.body.sources.caught24Hours.store), /deng-fish-it-bot/);
+    assert.equal(res.body.sources.caught24Hours.period, 'yesterday');
+    assert.match(String(res.body.sources.caught24Hours.windowFrom), /^\d{4}-\d{2}-\d{2}T/);
+    assert.match(String(res.body.sources.caught24Hours.windowTo), /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(res.body.sources.caught24Hours.timezone, 'Asia/Jakarta');
+    assert.ok(res.body.catchWindow, 'expected catchWindow proof object');
+    assert.equal(res.body.catchWindow.period, 'yesterday');
+    assert.equal(res.body.catchWindow.timezone, 'Asia/Jakarta');
     assert.match(String(res.body.sources.totalSecret.blob), /alltime_fish_cache/);
     assert.match(String(res.body.sources.totalForgotten.blob), /alltime_fish_cache/);
     assert.match(String(res.body.sources.ghostfinnRod.blob), /alltime_rod_cache/);
@@ -32,32 +39,45 @@ describe('landing stat sources and layout regression', () => {
       res.body.rejectedSources,
       ['fishit-tracker', 'liveTrackDB', 'fishitGlobalDb', 'quiz_bot'],
     );
-    for (const key of ['totalFish', 'totalSecret', 'totalForgotten', 'ghostfinnRod', 'elementRod', 'diamondRod']) {
+    for (const key of ['caught24Hours', 'totalSecret', 'totalForgotten', 'ghostfinnRod', 'elementRod', 'diamondRod']) {
       assert.ok(res.body.sources[key], 'missing source proof for ' + key);
       assert.match(String(res.body.sources[key].service), /fishitDb/);
       assert.doesNotMatch(String(res.body.sources[key].service), /fishit-tracker|liveTrackDB|fishitGlobalDb/i);
     }
+    assert.equal('totalFish' in res.body, false);
     assert.equal('trackedFishers' in res.body, false);
     assert.equal('onlineFishers' in res.body, false);
     assert.equal('globalSpecies' in res.body, false);
   });
 
-  test('Fish It public-summary reads bot getGlobal totals when DB is available', () => {
-    const original = fishitDb.getGlobal;
+  test('Fish It public-summary yesterday caught uses bot byDate window not lifetime total', () => {
+    const originalGetGlobal = fishitDb.getGlobal;
+    const originalGetPeriod = fishitDb.getGlobalPeriodCaught;
     fishitDb.getGlobal = () => ({
       available: true,
-      total_fish: 12345,
+      total_fish: 128823,
       secret_fish: 678,
       forgotten_fish: 90,
       last_updated: '2099-01-01T00:00:00.000Z',
       rods: { ghostfinn: 20, element: 15, diamond: 8 },
     });
+    fishitDb.getGlobalPeriodCaught = () => ({
+      period: 'yesterday',
+      periodLabel: 'Yesterday',
+      timezone: 'Asia/Jakarta',
+      windowFrom: '2099-06-10T17:00:00.000Z',
+      windowTo: '2099-06-11T17:00:00.000Z',
+      count: 4217,
+    });
     try {
       const g = fishitDb.getGlobal();
-      assert.equal(g.total_fish, 12345);
-      assert.equal(g.rods.ghostfinn, 20);
+      const caught = fishitDb.getGlobalPeriodCaught('yesterday');
+      assert.equal(g.total_fish, 128823);
+      assert.equal(caught.count, 4217);
+      assert.notEqual(caught.count, g.total_fish);
     } finally {
-      fishitDb.getGlobal = original;
+      fishitDb.getGlobal = originalGetGlobal;
+      fishitDb.getGlobalPeriodCaught = originalGetPeriod;
     }
   });
 
@@ -96,14 +116,16 @@ describe('landing stat sources and layout regression', () => {
   test('landing Fish It Stats shows bot catch/rod cards only', async () => {
     const res = await request(app).get('/');
     assert.equal(res.status, 200);
-    assert.match(res.text, /Total Fish/);
+    assert.match(res.text, /24 Hours Caught/);
+    assert.doesNotMatch(res.text, /Total Fish/);
     assert.match(res.text, /Total Secret/);
     assert.match(res.text, /Total Forgotten/);
     assert.match(res.text, /Ghostfinn Rod/);
     assert.match(res.text, /Element Rod/);
     assert.match(res.text, /Diamond Rod/);
-    assert.match(res.text, /Fish caught in DENG Fish It Bot/);
-    assert.match(res.text, /data-home-stat-card="totalFish"/);
+    assert.match(res.text, /Fish caught yesterday/);
+    assert.doesNotMatch(res.text, /Fish caught in DENG Fish It Bot/);
+    assert.match(res.text, /data-home-stat-card="caught24Hours"/);
     assert.match(res.text, /data-home-stat-card="ghostfinnRod"/);
     assert.doesNotMatch(res.text, /data-home-stat-card="trackedFishers"/);
     assert.doesNotMatch(res.text, /data-home-stat-card="onlineFishers"/);

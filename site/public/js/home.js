@@ -236,7 +236,7 @@
     }
 
     if (fishitSummary && fishitSummary.available) {
-      if (setStat('totalFish', fishitSummary.totalFish)) fishitVisible += 1;
+      if (setStat('caught24Hours', fishitSummary.caught24Hours)) fishitVisible += 1;
       if (setStat('totalSecret', fishitSummary.totalSecret)) fishitVisible += 1;
       if (setStat('totalForgotten', fishitSummary.totalForgotten)) fishitVisible += 1;
       if (setStat('ghostfinnRod', fishitSummary.ghostfinnRod)) fishitVisible += 1;

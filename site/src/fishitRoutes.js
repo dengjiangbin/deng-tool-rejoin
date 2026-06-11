@@ -105,6 +105,7 @@ router.get('/api/fishit/global', fishitLimiter, (req, res) => {
 router.get('/api/fishit/public-summary', fishitLimiter, (_req, res) => {
   try {
     const g = fishit.getGlobal();
+    const caughtWindow = fishit.getGlobalPeriodCaught('yesterday');
     const rods = (g && g.rods) || {};
     const available = !!(g && g.available);
     const botSource = {
@@ -115,15 +116,30 @@ router.get('/api/fishit/public-summary', fishitLimiter, (_req, res) => {
     res.set('Cache-Control', 'public, max-age=15');
     return ok(res, {
       available,
-      totalFish: available ? Number(g.total_fish) || 0 : null,
+      caught24Hours: available ? Number(caughtWindow.count) || 0 : null,
       totalSecret: available ? Number(g.secret_fish) || 0 : null,
       totalForgotten: available ? Number(g.forgotten_fish) || 0 : null,
       ghostfinnRod: available ? Number(rods.ghostfinn) || 0 : null,
       elementRod: available ? Number(rods.element) || 0 : null,
       diamondRod: available ? Number(rods.diamond) || 0 : null,
       lastUpdated: (g && g.last_updated) || null,
+      catchWindow: available ? {
+        period: caughtWindow.period,
+        label: caughtWindow.periodLabel,
+        timezone: caughtWindow.timezone,
+        from: caughtWindow.windowFrom,
+        to: caughtWindow.windowTo,
+      } : null,
       sources: {
-        totalFish: { ...botSource, blob: 'alltime_fish_cache', field: 'totals.totalFish' },
+        caught24Hours: {
+          ...botSource,
+          blob: 'alltime_fish_cache',
+          field: 'byUser[].byDate + byUser[].details fallback',
+          period: caughtWindow.period,
+          timezone: caughtWindow.timezone,
+          windowFrom: caughtWindow.windowFrom,
+          windowTo: caughtWindow.windowTo,
+        },
         totalSecret: { ...botSource, blob: 'alltime_fish_cache', field: 'totals.secretFish' },
         totalForgotten: { ...botSource, blob: 'alltime_fish_cache', field: 'totals.forgottenFish' },
         ghostfinnRod: { ...botSource, blob: 'alltime_rod_cache', field: 'totalGhostfinn' },
