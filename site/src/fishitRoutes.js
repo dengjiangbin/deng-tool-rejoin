@@ -21,6 +21,7 @@ const fs = require('fs');
 const rateLimit = require('express-rate-limit');
 const supabase = require('./db');
 const fishit = require('./fishitDb');
+const globalDb = require('./fishitGlobalDb');
 const manualStatsFishImages = require('./fishitManualStatsFishImages');
 
 const router = express.Router();
@@ -97,6 +98,39 @@ router.get('/api/fishit/global', fishitLimiter, (req, res) => {
     res.set('Cache-Control', 'public, max-age=15');
     return ok(res, g && g.available ? g : { available: false });
   } catch (err) {
+    return res.status(200).json({ available: false });
+  }
+});
+
+router.get('/api/fishit/public-summary', fishitLimiter, (_req, res) => {
+  try {
+    const g = fishit.getGlobal();
+    let globalSpecies = null;
+    let lastObservationAt = null;
+    try {
+      const stats = globalDb.getStats();
+      globalSpecies = Number(stats.speciesCount) || 0;
+      lastObservationAt = stats.lastObservationAt || null;
+    } catch (_) {
+      // Global DB optional in some environments.
+    }
+    if (!g || !g.available) {
+      return ok(res, {
+        available: globalSpecies != null,
+        trackedFishers: 0,
+        totalFish: 0,
+        globalSpecies: globalSpecies || 0,
+        lastUpdated: lastObservationAt,
+      });
+    }
+    return ok(res, {
+      available: true,
+      trackedFishers: Number(g.total_players) || 0,
+      totalFish: Number(g.total_fish) || 0,
+      globalSpecies: globalSpecies != null ? globalSpecies : 0,
+      lastUpdated: g.last_updated || lastObservationAt || null,
+    });
+  } catch (_) {
     return res.status(200).json({ available: false });
   }
 });

@@ -1,7 +1,7 @@
 (function initHomeLanding() {
   'use strict';
 
-  var NAV_OFFSET = 96;
+  var NAV_OFFSET = 108;
   var countUp = function() { return window.DengCountUpStats; };
 
   function fmt(value) {
@@ -19,6 +19,10 @@
     return document.querySelector('[data-home-stat-value="' + key + '"]');
   }
 
+  function metaEl(key) {
+    return document.querySelector('[data-home-stat-meta="' + key + '"]');
+  }
+
   function setStat(key, value) {
     var n = fmt(value);
     if (n == null) return false;
@@ -30,16 +34,29 @@
     return true;
   }
 
-  function setDevicePair(active, total) {
+  function setDevicePair(key, active, total) {
     var activeN = fmt(active);
     var totalN = fmt(total);
     if (activeN == null || totalN == null) return false;
-    var el = statEl('activeDevices');
+    var el = statEl(key);
     if (!el) return false;
-    showCard('activeDevices');
+    showCard(key);
     if (countUp()) countUp().set(el, { to: activeN, total: totalN, format: 'ratio', duration: 750 });
     else el.textContent = activeN.toLocaleString('en-US') + ' / ' + totalN.toLocaleString('en-US');
     return true;
+  }
+
+  function setOnlineMeta(online, total) {
+    var meta = metaEl('onlineNow');
+    if (!meta) return;
+    var onlineN = fmt(online);
+    var totalN = fmt(total);
+    if (onlineN == null || totalN == null) {
+      meta.textContent = 'Tracked usernames online';
+      return;
+    }
+    var offline = Math.max(0, totalN - onlineN);
+    meta.textContent = offline.toLocaleString('en-US') + ' Offline';
   }
 
   function updateOnlinePill(count) {
@@ -156,8 +173,8 @@
       .catch(function() { return null; });
   }
 
-  function loadFishitGlobal() {
-    return fetch('/api/fishit/global', {
+  function loadFishitSummary() {
+    return fetch('/api/fishit/public-summary', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     })
@@ -165,20 +182,29 @@
       .catch(function() { return null; });
   }
 
-  function applyStats(publicStats, trackerNetwork, fishitGlobal) {
+  function applyStats(publicStats, trackerNetwork, fishitSummary) {
     var liveVisible = 0;
     var platformVisible = 0;
+    var fishitVisible = 0;
+    var trackedTotal = null;
+    var onlineTotal = null;
 
     if (trackerNetwork && trackerNetwork.available) {
-      if (setStat('trackedUsernames', trackerNetwork.trackedUsernames)) liveVisible += 1;
-      if (setStat('onlineUsernames', trackerNetwork.onlineUsernames)) liveVisible += 1;
-      updateOnlinePill(trackerNetwork.onlineUsernames);
+      trackedTotal = trackerNetwork.trackedUsernames;
+      onlineTotal = trackerNetwork.onlineUsernames;
+      if (setStat('trackedPlayers', trackedTotal)) liveVisible += 1;
+      if (setStat('onlineNow', onlineTotal)) liveVisible += 1;
+      setOnlineMeta(onlineTotal, trackedTotal);
+      updateOnlinePill(onlineTotal);
+      if (setStat('onlineFishers', onlineTotal)) fishitVisible += 1;
+      if (setStat('inventoriesSynced', trackerNetwork.inventoriesSynced)) fishitVisible += 1;
     } else {
       updateOnlinePill(null);
+      setOnlineMeta(null, null);
     }
 
     if (publicStats) {
-      if (setDevicePair(publicStats.activeDevices, publicStats.totalDevices)) liveVisible += 1;
+      if (setDevicePair('activeAgents', publicStats.activeDevices, publicStats.totalDevices)) liveVisible += 1;
       if (setStat('discordUsers', publicStats.uniqueUsers)) platformVisible += 1;
       if (setStat('generatedKeys', publicStats.generatedKeys)) platformVisible += 1;
       if (setStat('redeemedKeys', publicStats.redeemedKeys)) platformVisible += 1;
@@ -186,19 +212,24 @@
       updateOnlinePill(null);
     }
 
-    if (fishitGlobal && fishitGlobal.available) {
-      if (setStat('totalFish', fishitGlobal.total_fish)) liveVisible += 1;
+    if (fishitSummary && fishitSummary.available) {
+      if (setStat('trackedFishers', fishitSummary.trackedFishers)) fishitVisible += 1;
+      if (setStat('fishTracked', fishitSummary.totalFish)) fishitVisible += 1;
+      if (setStat('globalSpecies', fishitSummary.globalSpecies)) fishitVisible += 1;
+    } else if (fishitSummary && fishitSummary.globalSpecies != null) {
+      if (setStat('globalSpecies', fishitSummary.globalSpecies)) fishitVisible += 1;
     }
 
     markEmpty('[data-home-live-stats-empty]', liveVisible);
     markEmpty('[data-home-platform-stats-empty]', platformVisible);
+    markEmpty('[data-home-fishit-stats-empty]', fishitVisible);
   }
 
   bindSmoothScroll();
   bindNavScrollSpy();
   bindWordmark();
 
-  Promise.all([loadPublicStats(), loadTrackerNetwork(), loadFishitGlobal()])
+  Promise.all([loadPublicStats(), loadTrackerNetwork(), loadFishitSummary()])
     .then(function(results) {
       applyStats(results[0], results[1], results[2]);
     })
@@ -206,5 +237,6 @@
       updateOnlinePill(null);
       markEmpty('[data-home-live-stats-empty]', 0);
       markEmpty('[data-home-platform-stats-empty]', 0);
+      markEmpty('[data-home-fishit-stats-empty]', 0);
     });
 }());

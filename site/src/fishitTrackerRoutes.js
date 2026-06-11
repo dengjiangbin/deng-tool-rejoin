@@ -3755,16 +3755,24 @@ router.post(
 function collectPublicTrackerNetworkStats() {
   const usernames = new Set();
   let onlineUsernames = 0;
+  let inventoriesSynced = 0;
   for (const [key, data] of Object.entries(liveTrackDB)) {
     if (key.startsWith('uid:')) continue;
     if (!data || typeof data !== 'object') continue;
     usernames.add(key.toLowerCase());
     if (isSessionLive(data)) onlineUsernames += 1;
+    if (Number(data.lastGoodPublicFishCount) > 0
+      || Number(data.visibleFishInstances) > 0
+      || data.lastSyncAt
+      || data.lastPollOkAt) {
+      inventoriesSynced += 1;
+    }
   }
   return {
     available: usernames.size > 0,
     trackedUsernames: usernames.size,
     onlineUsernames,
+    inventoriesSynced,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -4189,6 +4197,7 @@ router.post('/api/fishit-tracker/request-catalog-scan/:username', postLimiter, (
 });
 
 module.exports = router;
+module.exports.collectPublicTrackerNetworkStats = collectPublicTrackerNetworkStats;
 module.exports.mergeItemsNoDowngradeFromCatalog = mergeItemsNoDowngradeFromCatalog;
 module.exports.enrichItemsFromCatalog = enrichItemsFromCatalog;
 module.exports.inventoryCountsFromGroups = inventoryCountsFromGroups;

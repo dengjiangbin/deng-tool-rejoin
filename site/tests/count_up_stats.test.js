@@ -52,10 +52,10 @@ describe('count-up stat markup on routes', () => {
   test('landing stat cards use js-count-up markers', async () => {
     const res = await request(app).get('/');
     assert.equal(res.status, 200);
-    assert.match(res.text, /class="[^"]*js-count-up[^"]*"[^>]*data-home-stat-value="trackedUsernames"/);
-    assert.match(res.text, /data-home-stat-value="onlineUsernames"[^>]*data-count-format="integer"/);
-    assert.match(res.text, /data-home-stat-value="activeDevices"[^>]*data-count-format="ratio"/);
-    assert.match(res.text, /data-count-suffix=" online now"/);
+    assert.match(res.text, /class="[^"]*js-count-up[^"]*"[^>]*data-home-stat-value="trackedPlayers"/);
+    assert.match(res.text, /data-home-stat-value="onlineNow"[^>]*data-count-format="integer"/);
+    assert.match(res.text, /data-home-stat-value="activeAgents"[^>]*data-count-format="ratio"/);
+    assert.match(res.text, /data-home-stat-meta="onlineNow"/);
     assert.match(res.text, /count-up-stats\.js/);
   });
 

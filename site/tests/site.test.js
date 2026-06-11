@@ -3957,7 +3957,8 @@ describe('Fish It website integration', () => {
 
   test('home page loads Fish It stats via home.js and public APIs', async () => {
     const res = await request(app).get('/');
-    assert.match(res.text, /data-home-stat-value="trackedUsernames"/);
+    assert.match(res.text, /data-home-stat-value="trackedPlayers"/);
+    assert.match(res.text, /Fish It Stats/);
     assert.match(res.text, /js-count-up/);
     assert.match(res.text, /home\.js/);
     assert.doesNotMatch(res.text, /fishit-home\.js/);

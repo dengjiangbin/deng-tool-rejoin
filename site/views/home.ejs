@@ -68,82 +68,140 @@
       </div>
     </section>
 
-    <section class="deng-home-section deng-home-anchor" id="statistic" aria-labelledby="home-stats-title" data-home-section="statistic">
+    <section class="deng-home-section deng-home-section--stats deng-home-anchor" id="statistic" aria-labelledby="home-stats-title" data-home-section="statistic">
       <div class="deng-home-container">
         <p class="deng-home-eyebrow">Live Network</p>
-        <div class="deng-home-stat-grid" data-home-live-stats-grid>
-          <article class="deng-home-stat-card" data-home-stat-card="trackedUsernames">
+        <div class="deng-home-stat-grid deng-home-stat-grid--live" data-home-live-stats-grid>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="trackedPlayers">
             <div class="deng-home-stat-card__top">
-              <span class="deng-home-stat-card__label">Tracked Usernames</span>
+              <span class="deng-home-stat-card__label">Tracked Players</span>
               <span class="deng-home-stat-card__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="trackedUsernames" data-count-format="integer" data-count-duration="750">0</strong>
-            <span class="deng-home-stat-card__meta">Roblox usernames tracked by script</span>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="trackedPlayers" data-count-format="integer" data-count-duration="750">0</strong>
+            <span class="deng-home-stat-card__meta">Across All Games</span>
           </article>
-          <article class="deng-home-stat-card deng-home-stat-card--accent" data-home-stat-card="onlineUsernames">
+          <article class="deng-home-stat-card deng-home-stat-card--compact deng-home-stat-card--accent" data-home-stat-card="onlineNow">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">Online Now</span>
               <span class="deng-home-stat-card__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent js-count-up" data-home-stat-value="onlineUsernames" data-count-format="integer" data-count-duration="750">0</strong>
-            <span class="deng-home-stat-card__meta">Tracked usernames online</span>
+            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent js-count-up" data-home-stat-value="onlineNow" data-count-format="integer" data-count-duration="750">0</strong>
+            <span class="deng-home-stat-card__meta" data-home-stat-meta="onlineNow">Tracked usernames online</span>
           </article>
-          <article class="deng-home-stat-card deng-home-stat-card--accent" data-home-stat-card="activeDevices">
+          <article class="deng-home-stat-card deng-home-stat-card--compact deng-home-stat-card--accent" data-home-stat-card="activeAgents">
             <div class="deng-home-stat-card__top">
-              <span class="deng-home-stat-card__label">Active Devices</span>
+              <span class="deng-home-stat-card__label">Active Agents</span>
               <span class="deng-home-stat-card__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect x="4" y="8" width="16" height="12" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent js-count-up" data-home-stat-value="activeDevices" data-count-format="ratio" data-count-duration="750">0 / 0</strong>
-            <span class="deng-home-stat-card__meta">Tracker devices running</span>
-          </article>
-          <article class="deng-home-stat-card" data-home-stat-card="totalFish">
-            <div class="deng-home-stat-card__top">
-              <span class="deng-home-stat-card__label">Fish Tracked</span>
-              <span class="deng-home-stat-card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"></path><path d="M18 12v.5"></path><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"></path><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"></path></svg>
-              </span>
-            </div>
-            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="totalFish" data-count-format="integer" data-count-duration="750">0</strong>
-            <span class="deng-home-stat-card__meta">Fish It global catalog</span>
+            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent js-count-up" data-home-stat-value="activeAgents" data-count-format="ratio" data-count-duration="750">0 / 0</strong>
+            <span class="deng-home-stat-card__meta">Tracker Devices Running</span>
           </article>
         </div>
         <p class="deng-home-stats-empty" data-home-live-stats-empty hidden>No live tracker stats available right now.</p>
       </div>
     </section>
 
-    <section class="deng-home-section deng-home-anchor" id="platform" aria-labelledby="home-platform-title" data-home-section="platform">
+    <section class="deng-home-section deng-home-section--stats deng-home-section--tight deng-home-anchor" id="platform" aria-labelledby="home-platform-title" data-home-section="platform">
       <div class="deng-home-container">
         <p class="deng-home-eyebrow">Platform Stats</p>
-        <div class="deng-home-stat-grid" data-home-platform-stats-grid>
-          <article class="deng-home-stat-card" data-home-stat-card="discordUsers">
+        <div class="deng-home-stat-grid deng-home-stat-grid--platform" data-home-platform-stats-grid>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="discordUsers">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">Discord Users</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M7.5 14.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M16.5 14.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M10.8 12.2 21 2"></path></svg>
+              </span>
             </div>
             <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="discordUsers" data-count-format="integer" data-count-duration="750">0</strong>
             <span class="deng-home-stat-card__meta">Linked dashboard accounts</span>
           </article>
-          <article class="deng-home-stat-card" data-home-stat-card="generatedKeys">
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="generatedKeys">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">License Keys</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              </span>
             </div>
             <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="generatedKeys" data-count-format="integer" data-count-duration="750">0</strong>
             <span class="deng-home-stat-card__meta">Generated license keys</span>
           </article>
-          <article class="deng-home-stat-card" data-home-stat-card="redeemedKeys">
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="redeemedKeys">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">Redeemed Keys</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg>
+              </span>
             </div>
             <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="redeemedKeys" data-count-format="integer" data-count-duration="750">0</strong>
             <span class="deng-home-stat-card__meta">Activated license keys</span>
           </article>
         </div>
         <p class="deng-home-stats-empty" data-home-platform-stats-empty hidden>Platform stats unavailable.</p>
+      </div>
+    </section>
+
+    <section class="deng-home-section deng-home-section--stats deng-home-section--tight deng-home-anchor" id="fishit-stats" aria-labelledby="home-fishit-title" data-home-section="fishit">
+      <div class="deng-home-container">
+        <p class="deng-home-eyebrow">Fish It Stats</p>
+        <div class="deng-home-stat-grid deng-home-stat-grid--fishit" data-home-fishit-stats-grid>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="trackedFishers">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Tracked Fishers</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"></path><path d="M18 12v.5"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="trackedFishers" data-count-format="integer" data-count-duration="750">0</strong>
+            <span class="deng-home-stat-card__meta">Fish It participants tracked</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--compact deng-home-stat-card--accent" data-home-stat-card="onlineFishers">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Online Fishers</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent js-count-up" data-home-stat-value="onlineFishers" data-count-format="integer" data-count-duration="750">0</strong>
+            <span class="deng-home-stat-card__meta">Live tracker sessions online</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="inventoriesSynced">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Inventories Synced</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="inventoriesSynced" data-count-format="integer" data-count-duration="750">0</strong>
+            <span class="deng-home-stat-card__meta">Backpacks synced to tracker</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="fishTracked">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Fish Tracked</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 19V5"></path><path d="M4 19h16"></path><path d="M8 17V9"></path><path d="M12 17V6"></path><path d="M16 17v-4"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="fishTracked" data-count-format="integer" data-count-duration="750">0</strong>
+            <span class="deng-home-stat-card__meta">Global Fish It catch totals</span>
+          </article>
+          <article class="deng-home-stat-card deng-home-stat-card--compact" data-home-stat-card="globalSpecies">
+            <div class="deng-home-stat-card__top">
+              <span class="deng-home-stat-card__label">Global Species</span>
+              <span class="deng-home-stat-card__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 2 2 7l10 5 10-5-10-5Z"></path><path d="m2 17 10 5 10-5"></path><path d="m2 12 10 5 10-5"></path></svg>
+              </span>
+            </div>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="globalSpecies" data-count-format="integer" data-count-duration="750">0</strong>
+            <span class="deng-home-stat-card__meta">Catalog species indexed</span>
+          </article>
+        </div>
+        <p class="deng-home-stats-empty" data-home-fishit-stats-empty hidden>Fish It stats unavailable.</p>
       </div>
     </section>
 
@@ -248,4 +306,5 @@
   </footer>
 </div>
 
+<script src="/public/js/count-up-stats.js?v=<%= assetVersion %>" defer></script>
 <script src="/public/js/home.js?v=<%= assetVersion %>" defer></script>
