@@ -78,6 +78,13 @@ describe('BLOCKER10ZS inventory UI polish — tabs, search, controls, stats', ()
     assert.match(res.text, /class="stat-card stat-card--forgotten"/);
   });
 
+  test('mobile and APK inventory summary stats stay compact 2x2 grid', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'inventory', 'fishit_tracker.source.ejs'), 'utf8');
+    assert.match(source, /@media \(max-width:768px\)[\s\S]*\.inventory-stats[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+    assert.match(source, /\.inventory-apk-embed \.inventory-stats[\s\S]*grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+    assert.doesNotMatch(source, /@media \(max-width:560px\)[\s\S]*\.inventory-stats[\s\S]*grid-template-columns:1fr/);
+  });
+
   test('bulk fish and stone grids aggregate ownership across accounts', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     const script = tpl.slice(tpl.indexOf('<script>') + 8, tpl.indexOf('</script>'));

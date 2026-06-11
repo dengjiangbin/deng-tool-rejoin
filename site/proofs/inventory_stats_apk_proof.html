@@ -1,16 +1,12 @@
-﻿<!DOCTYPE html>
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'INVENTORY_STATS_MOBILE_2X2_2026_06_11' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'INVENTORY_STATS_MOBILE_2X2_2026_06_11' %>">
-  <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/inventory' %>">
-  <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
-  <title>DENG Inventory Tracker &mdash; Fish It</title>
-  <link rel="stylesheet" href="/public/css/logoutConfirm.css?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
-  <link rel="stylesheet" href="<%= inventoryAssetCssUrl %>">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inventory stats mobile proof</title>
+  <link rel="stylesheet" href="../public/assets/inventory.ebe31c7110b8.css">
 </head>
-<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11') %>">
+<body class="inventory-apk-embed">
 <div class="inventory-shell">
   <aside class="inventory-sidebar" aria-label="Inventory setup">
     <div class="inventory-sidebar__brand">
@@ -37,15 +33,13 @@
         <span class="hide-username-toggle" aria-hidden="true"></span>
       </button>
       <div class="inventory-profile-card">
-        <% if (viewer.hasDiscordAvatar) { %>
-          <img src="<%= viewer.avatarUrl %>" alt="" class="inventory-profile-card__avatar" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">
-          <div class="inventory-profile-card__avatar-placeholder" style="display:none"><%= viewer.initial %></div>
-        <% } else { %>
-          <div class="inventory-profile-card__avatar-placeholder"><%= viewer.initial %></div>
-        <% } %>
+        
+          <img src="https://cdn.discordapp.com/avatars/123456789012345678/testavatar.webp?size=64" alt="" class="inventory-profile-card__avatar" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">
+          <div class="inventory-profile-card__avatar-placeholder" style="display:none">T</div>
+        
         <div class="inventory-profile-card__meta">
-          <div class="inventory-profile-card__name"><%= viewer.name %></div>
-          <div class="inventory-profile-card__sub"><%= viewer.profileLabel %></div>
+          <div class="inventory-profile-card__name">TestUser</div>
+          <div class="inventory-profile-card__sub">Discord account</div>
         </div>
       </div>
       <div class="inventory-sidebar__actions">
@@ -58,8 +52,8 @@
           </svg>
           <span>Script</span>
         </button>
-        <form method="POST" action="<%= typeof logoutUrl !== 'undefined' ? logoutUrl : '/auth/logout' %>">
-          <input type="hidden" name="_csrf" value="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
+        <form method="POST" action="/auth/logout">
+          <input type="hidden" name="_csrf" value="test-csrf-token">
           <button type="button" class="inventory-action-btn inventory-action-btn--logout" data-logout-confirm title="Logout" aria-label="Logout">
             <svg viewBox="0 0 24 24" focusable="false">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
@@ -233,7 +227,7 @@
     <div id="trackerList"></div>
     </div>
 
-    <div class="loadstring-box<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? ' is-compact' : ' loadstring-box--desktop-hidden' %>">
+    <div class="loadstring-box loadstring-box--desktop-hidden">
       <h3>
         <span class="loadstring-box__icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" focusable="false">
@@ -244,34 +238,17 @@
         <span>Executor Script &mdash; copy &amp; run in-game</span>
       </h3>
       <div class="code-row">
-        <textarea class="code-block code-block--script" id="loadstringCode" readonly rows="1" spellcheck="false" aria-label="Tracker executor script"><%- typeof trackerLoadstring !== 'undefined' ? trackerLoadstring : '' %></textarea>
+        <textarea class="code-block code-block--script" id="loadstringCode" readonly rows="1" spellcheck="false" aria-label="Tracker executor script">loadstring(game:HttpGet("https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua"))()</textarea>
         <button class="btn-copy" id="copyBtn" type="button">Copy</button>
       </div>
       <div class="copy-status" id="copyStatus" aria-live="polite"></div>
     </div>
-<% if (typeof debugInventory !== 'undefined' && debugInventory && typeof debugTrackerLoadstring !== 'undefined' && debugTrackerLoadstring) { %>
-    <div class="loadstring-box loadstring-box--debug">
-      <h3>
-        <span class="loadstring-box__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <polyline points="16 18 22 12 16 6"></polyline>
-            <polyline points="8 6 2 12 8 18"></polyline>
-          </svg>
-        </span>
-        <span>Debug loader &mdash; admin only</span>
-      </h3>
-      <div class="code-row">
-        <textarea class="code-block code-block--script" id="loadstringDebugCode" readonly rows="3" spellcheck="false" aria-label="Debug tracker loader with build proof"><%- debugTrackerLoadstring %></textarea>
-      </div>
-    </div>
-<% } %>
+
 
   </div>
 </div>
   </div>
 </div>
-<script type="application/json" id="inventory-runtime"><%- JSON.stringify(inventoryRuntimeConfig).replace(/</g, '\u003c') %></script>
-<script src="/public/js/count-up-stats.js?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>" defer></script>
-<script src="/public/js/logoutConfirm.js?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>" defer></script>
-<script src="<%= inventoryAssetJsUrl %>" defer></script>
+
+</body>
 </html>

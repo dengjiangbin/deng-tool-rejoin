@@ -1249,6 +1249,29 @@
       padding:8px 12px;
       font-size:.8rem;
     }
+    .inventory-apk-embed .inventory-stats {
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:8px;
+      margin-bottom:12px;
+    }
+    .inventory-apk-embed .stat-card {
+      min-width:0;
+      min-height:0;
+      padding:10px 10px;
+      border-radius:12px;
+      gap:4px;
+      justify-content:flex-start;
+    }
+    .inventory-apk-embed .stat-card__label {
+      font-size:.62rem;
+      letter-spacing:.04em;
+      line-height:1.2;
+      white-space:normal;
+    }
+    .inventory-apk-embed .stat-card__value {
+      font-size:clamp(1.05rem,4.8vw,1.4rem);
+      line-height:1.05;
+    }
     .copy-status { font-size:.78rem; color:var(--muted); margin-top:8px; min-height:1.1em; }
     .copy-status.is-error { color:var(--warn); }
     .copy-status.is-success { color:var(--success); }
@@ -1472,9 +1495,43 @@
       .header { margin-bottom:18px; }
       .header h1 { font-size:1.45rem; }
       .header__lead { font-size:.82rem; }
-      .inventory-stats { gap:8px; }
-      .stat-card { padding:10px 12px; }
+      .inventory-stats {
+        grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+        grid-auto-rows:1fr;
+        gap:8px;
+        margin-bottom:14px;
+      }
+      .stat-card {
+        min-width:0;
+        min-height:0;
+        height:100%;
+        padding:10px 10px;
+        border-radius:12px;
+        gap:4px;
+        justify-content:flex-start;
+      }
+      .stat-card__label {
+        font-size:.62rem;
+        letter-spacing:.04em;
+        line-height:1.2;
+        white-space:normal;
+      }
+      .stat-card__value {
+        font-size:clamp(1.1rem,5vw,1.45rem);
+        line-height:1.05;
+      }
       .player-control-bar { gap:8px; }
+    }
+    @media (max-width:430px) {
+      .inventory-stats { gap:6px; }
+      .stat-card {
+        padding:9px 8px;
+        border-radius:11px;
+      }
+      .stat-card__label { font-size:.58rem; }
+      .stat-card__value { font-size:clamp(1rem,4.6vw,1.3rem); }
+      .inventory-apk-embed .stat-card { padding:9px 8px; }
+      .inventory-apk-embed .stat-card__value { font-size:clamp(1rem,4.6vw,1.3rem); }
     }
     @media (max-width:280px) {
       .inventory-grid,
@@ -1496,7 +1553,7 @@
       .player-control-bar .btn-multiple,
       .remove-dropdown { flex:1 1 calc(50% - 5px); }
       .player-control-bar input { flex:1 1 100%; }
-      .inventory-stats { grid-template-columns:1fr; }
+      .inventory-stats { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
       .code-row { flex-direction:column; }
       .btn-copy { padding:10px; }
     }
