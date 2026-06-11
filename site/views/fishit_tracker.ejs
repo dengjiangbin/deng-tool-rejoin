@@ -1407,15 +1407,15 @@
         <span>Hide Username</span>
       </button>
       <div class="inventory-profile-card">
-        <% if (user.discord_avatar && user.discord_user_id) { %>
-          <img src="https://cdn.discordapp.com/avatars/<%= user.discord_user_id %>/<%= user.discord_avatar %>.webp?size=64" alt="" class="inventory-profile-card__avatar" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">
-          <div class="inventory-profile-card__avatar-placeholder" style="display:none"><%= (user.username || '?')[0].toUpperCase() %></div>
+        <% if (viewer.hasDiscordAvatar) { %>
+          <img src="<%= viewer.avatarUrl %>" alt="" class="inventory-profile-card__avatar" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">
+          <div class="inventory-profile-card__avatar-placeholder" style="display:none"><%= viewer.initial %></div>
         <% } else { %>
-          <div class="inventory-profile-card__avatar-placeholder"><%= (user.username || '?')[0].toUpperCase() %></div>
+          <div class="inventory-profile-card__avatar-placeholder"><%= viewer.initial %></div>
         <% } %>
         <div class="inventory-profile-card__meta">
-          <div class="inventory-profile-card__name"><%= user.username || 'Account' %></div>
-          <div class="inventory-profile-card__sub">Discord account</div>
+          <div class="inventory-profile-card__name"><%= viewer.name %></div>
+          <div class="inventory-profile-card__sub"><%= viewer.profileLabel %></div>
         </div>
       </div>
       <div class="inventory-sidebar__actions">
@@ -1426,7 +1426,7 @@
           </svg>
           <span>Script</span>
         </button>
-        <form method="POST" action="/auth/logout">
+        <form method="POST" action="<%= typeof logoutUrl !== 'undefined' ? logoutUrl : '/auth/logout' %>">
           <input type="hidden" name="_csrf" value="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
           <button type="submit" class="inventory-action-btn inventory-action-btn--logout" title="Logout" aria-label="Logout">
             <svg viewBox="0 0 24 24" focusable="false">

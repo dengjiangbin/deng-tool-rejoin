@@ -15,7 +15,7 @@ process.env.FISHIT_DB_PATH = process.env.FISHIT_DB_PATH || '/nonexistent/deng-fi
 const playerStatsStore = require('../src/fishitPlayerStats');
 const trackerRouter = require('../src/fishitTrackerRoutes');
 const {
-  BLOCKER10ZTC_SIDE_CONTROLS_STAT_REFRESH_MARKER,
+  BLOCKER10ZTD_INVENTORY_ACCESS_SAFE_RENDER_MARKER,
   BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
 } = require('../src/fishitTrackerBuild');
 
@@ -30,8 +30,8 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZTC side controls + stat refresh contract', () => {
-  test('deploy marker points at side controls stat refresh build', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTC_SIDE_CONTROLS_STAT_REFRESH_MARKER);
+  test('deploy marker points at inventory access safe render build', () => {
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTD_INVENTORY_ACCESS_SAFE_RENDER_MARKER);
   });
 
   test('hide username uses single icon slot and no dual-eye markup', () => {

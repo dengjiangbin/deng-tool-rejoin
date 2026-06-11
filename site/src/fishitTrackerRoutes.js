@@ -243,37 +243,68 @@ function dbImageFor(name) {
 const router = express.Router();
 
 function requireInventorySession(req, res, next) {
-  if (req.session && req.session.user) return next();
   if (process.env.NODE_ENV === 'test') return next();
-  req.session.flash = { error: 'Please login with Discord first.' };
+  const sessionUser = req.session && req.session.user;
+  if (sessionUser) return next();
   const returnTo = encodeURIComponent(req.originalUrl || '/inventory');
-  return res.redirect(`/?return=${returnTo}`);
+  if (req.session) {
+    req.session.flash = { error: 'Please login with Discord first.' };
+  }
+  return res.redirect(302, `/?return=${returnTo}`);
 }
 
-if (process.env.NODE_ENV === 'test') {
-  router.use((req, _res, next) => {
-    if (!req.session) {
-      req.session = {
-        csrfToken: 'test-csrf-token',
-        user: {
-          id: 'test-user-id',
-          username: 'TestUser',
-          discord_user_id: '123456789012345678',
-          discord_avatar: 'testavatar',
-        },
-      };
-    } else if (!req.session.user) {
-      req.session.user = {
+function buildInventoryViewer(sessionUser) {
+  const raw = sessionUser && typeof sessionUser === 'object' ? sessionUser : {};
+  const discordUserId = raw.discord_user_id != null ? String(raw.discord_user_id) : '';
+  const name = (
+    raw.username
+    || raw.discord_username
+    || raw.global_name
+    || (discordUserId ? `user_${discordUserId.slice(-4)}` : 'Account')
+  );
+  const avatar = raw.discord_avatar || null;
+  const initialSource = String(name || '?').trim();
+  const initial = (initialSource.charAt(0) || '?').toUpperCase();
+  const hasDiscordAvatar = !!(avatar && discordUserId);
+  return {
+    name,
+    username: name,
+    avatar,
+    discordId: discordUserId,
+    discordUserId,
+    discordAvatar: avatar,
+    profileLabel: 'Discord account',
+    initial,
+    hasDiscordAvatar,
+    avatarUrl: hasDiscordAvatar
+      ? `https://cdn.discordapp.com/avatars/${discordUserId}/${avatar}.webp?size=64`
+      : '',
+  };
+}
+
+router.use((req, _res, next) => {
+  if (process.env.NODE_ENV !== 'test') return next();
+  if (!req.session) {
+    req.session = {
+      csrfToken: 'test-csrf-token',
+      user: {
         id: 'test-user-id',
         username: 'TestUser',
         discord_user_id: '123456789012345678',
         discord_avatar: 'testavatar',
-      };
-    }
-    if (!req.session.csrfToken) req.session.csrfToken = 'test-csrf-token';
-    next();
-  });
-}
+      },
+    };
+  } else if (!req.session.user) {
+    req.session.user = {
+      id: 'test-user-id',
+      username: 'TestUser',
+      discord_user_id: '123456789012345678',
+      discord_avatar: 'testavatar',
+    };
+  }
+  if (!req.session.csrfToken) req.session.csrfToken = 'test-csrf-token';
+  next();
+});
 
 const NO_STORE_HEADERS = {
   'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
@@ -2637,6 +2668,8 @@ function buildTrackerPageLocals(req) {
   const apkEmbed = !!(req && req.query && req.query.apk === '1');
   const debugGlobal = debugInventory && req.query.debug === 'global';
   const session = req && req.session ? req.session : null;
+  const sessionUser = session && session.user ? session.user : null;
+  const viewer = buildInventoryViewer(sessionUser);
   const locals = {
     layout: false,
     title: 'DENG Inventory Tracker — Fish It',
@@ -2652,7 +2685,10 @@ function buildTrackerPageLocals(req) {
     debugInventory,
     apkEmbed,
     trackerLoadstring: CLEAN_TRACKER_LOADSTRING,
-    user: session && session.user ? session.user : null,
+    user: sessionUser,
+    viewer,
+    scriptUrl: '/inventory',
+    logoutUrl: '/auth/logout',
     csrfToken: session && session.csrfToken ? session.csrfToken : '',
     inventorySidebarSetupProof: {
       marker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
@@ -2665,6 +2701,7 @@ function buildTrackerPageLocals(req) {
       hideUsernameSingleIcon: true,
       scriptControl: 'sidebarScriptBtn',
       logoutControl: 'inventory-sidebar__actions',
+      safeViewerLocals: true,
     },
     toolbarViewIconsProof: {
       marker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
@@ -2678,6 +2715,13 @@ function buildTrackerPageLocals(req) {
       sharedRefreshFunction: 'applyInventoryPollPayload',
       normalizePlayerStatsForApi: true,
       coinTotalCaughtRarestSamePoll: true,
+    },
+    inventoryAccessProof: {
+      marker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
+      safeViewerLocals: true,
+      inventoryPaths: ['/inventory', '/inventory/'],
+      unauthenticatedRedirect: '/?return=',
+      never500OnMissingProfileFields: true,
     },
     blocker10vBuild: build,
     blocker10u6Build: build,
@@ -2696,19 +2740,17 @@ function buildTrackerPageLocals(req) {
   return locals;
 }
 
-function renderTrackerPage(req, res) {
+function renderTrackerPage(req, res, next) {
   try {
+    const locals = buildTrackerPageLocals(req);
     res.set(NO_STORE_HEADERS);
     res.set('X-Tracker-Ui-Deploy', BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER);
     res.set('X-Tracker-Template-Version', trackerTemplateVersion());
-    return res.render('fishit_tracker', buildTrackerPageLocals(req));
+    return res.render('fishit_tracker', locals);
   } catch (err) {
-    console.error('[fishit-tracker] /tracker render failed:',
+    console.error('[fishit-tracker] /inventory render failed:',
       err && err.stack ? err.stack : err);
-    if (!res.headersSent) {
-      res.set(NO_STORE_HEADERS);
-      return res.status(200).render('fishit_tracker', buildTrackerPageLocals(req));
-    }
+    return next(err);
   }
 }
 
@@ -2719,6 +2761,7 @@ function redirectLegacyInventoryRoute(req, res) {
 }
 
 router.get('/inventory', requireInventorySession, renderTrackerPage);
+router.get('/inventory/', requireInventorySession, renderTrackerPage);
 router.get('/tracker', redirectLegacyInventoryRoute);
 router.get('/fishit-tracker', redirectLegacyInventoryRoute);
 
@@ -4154,6 +4197,8 @@ module.exports.isTrustedRadiantCatfishInCatalog = isTrustedRadiantCatfishInCatal
 module.exports.BLOCKER10Z7_BUILD = BLOCKER10Z13_BUILD;
 module.exports.renderTrackerPage = renderTrackerPage;
 module.exports.buildTrackerPageLocals = buildTrackerPageLocals;
+module.exports.buildInventoryViewer = buildInventoryViewer;
+module.exports.requireInventorySession = requireInventorySession;
 module.exports.BLOCKER10V_BUILD = PUBLIC_API_BUILD;
 module.exports.BLOCKER10U6_BUILD = PUBLIC_API_BUILD;
 module.exports.BLOCKER10U5_BUILD = PUBLIC_API_BUILD;
