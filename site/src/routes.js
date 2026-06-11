@@ -1335,13 +1335,22 @@ router.get('/health', (_req, res) => {
 });
 
 router.get('/auth/discord', (req, res) => {
+  let authUrl;
   try {
-    res.redirect(buildDiscordAuthUrl(req));
+    authUrl = buildDiscordAuthUrl(req);
   } catch (err) {
     console.error('[auth/discord]', err.message || err);
     safeFlash(req, 'error', 'Discord login is not configured.');
-    res.redirect(LOGIN_HOME);
+    return res.redirect(LOGIN_HOME);
   }
+  return req.session.save((saveErr) => {
+    if (saveErr) {
+      console.error('[auth/discord] category=session_save_failed error=%s', saveErr.message);
+      safeFlash(req, 'error', 'Session error. Please try again.');
+      return res.redirect(LOGIN_HOME);
+    }
+    return res.redirect(authUrl);
+  });
 });
 
 router.get('/auth/discord/callback', authLimiter, async (req, res) => {

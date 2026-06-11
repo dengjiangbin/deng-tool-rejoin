@@ -36,6 +36,33 @@ function isSchemaMissingError(err) {
   );
 }
 
+function isTransientDbError(err) {
+  const msg = `${(err && err.code) || ''} ${(err && err.message) || ''} ${(err && err.cause && err.cause.message) || ''}`.toLowerCase();
+  return (
+    msg.includes('fetch failed') ||
+    msg.includes('timeout') ||
+    msg.includes('network') ||
+    msg.includes('econnrefused') ||
+    msg.includes('enotfound') ||
+    msg.includes('upstream request timeout')
+  );
+}
+
+function isDuplicateDiscordUserError(err) {
+  const msg = `${(err && err.message) || ''} ${(err && err.details) || ''}`.toLowerCase();
+  return msg.includes('duplicate key') || msg.includes('site_users_discord_user_id_key') || err?.code === '23505';
+}
+
+function discordOnlySessionUser(discordUser) {
+  return {
+    id:               discordFallbackId(discordUser.id),
+    discord_user_id:  discordUser.id,
+    discord_username: discordUser.username || discordUser.global_name || `user_${discordUser.id.slice(-4)}`,
+    discord_avatar:   discordUser.avatar || null,
+    email:            discordUser.email || null,
+  };
+}
+
 function codedError(code, message) {
   const err = new Error(message || code);
   err.code = code;
@@ -216,24 +243,41 @@ async function upsertDiscordUser(discordUser, _tokens, options = {}) {
       })
       .select()
       .single();
-    if (error) throw new Error(`DB insert failed: ${error.message}`);
+    if (error) {
+      if (isDuplicateDiscordUserError(error)) {
+        const { data: raced } = await supabase
+          .from('site_users')
+          .select('*')
+          .eq('discord_user_id', discordUser.id)
+          .maybeSingle();
+        if (raced) {
+          const { data: updated, error: updateErr } = await supabase
+            .from('site_users')
+            .update({
+              discord_username:     discordUser.username,
+              discord_avatar:       discordUser.avatar || null,
+              discord_access_token: null,
+              discord_refresh_token:null,
+              last_login_at:        now,
+            })
+            .eq('id', raced.id)
+            .select()
+            .single();
+          if (updateErr) throw new Error(`DB update failed: ${updateErr.message}`);
+          return updated;
+        }
+      }
+      throw new Error(`DB insert failed: ${error.message}`);
+    }
     return data;
   } catch (err) {
-    if (isSchemaMissingError(err) && options.allowFallback !== false) {
+    if (options.allowFallback !== false && (isSchemaMissingError(err) || isTransientDbError(err))) {
       console.warn(
-        '[auth] category=site_users_schema_missing discord_id=%s – using Discord-only session.' +
-        ' Apply migration: supabase/migrations/005_site_portal.sql',
+        '[auth] category=site_users_unavailable discord_id=%s reason=%s – using Discord-only session.',
         discordUser.id,
+        err.message,
       );
-      // Return a synthetic user so login works even without the DB table.
-      // The ID is deterministic so the same Discord user always gets the same ID.
-      return {
-        id:               discordFallbackId(discordUser.id),
-        discord_user_id:  discordUser.id,
-        discord_username: discordUser.username || discordUser.global_name || `user_${discordUser.id.slice(-4)}`,
-        discord_avatar:   discordUser.avatar || null,
-        email:            null,
-      };
+      return discordOnlySessionUser(discordUser);
     }
     throw err;
   }
@@ -304,10 +348,13 @@ module.exports = {
   LOGIN_HOME,
   requireLogin,
   verifyCsrf,
+  saveSession,
   buildDiscordAuthUrl,
   exchangeDiscordCode,
   fetchDiscordUser,
   upsertDiscordUser,
   ensureRealSiteUser,
   toSessionUser,
+  isTransientDbError,
+  isDuplicateDiscordUserError,
 };

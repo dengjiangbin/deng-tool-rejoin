@@ -6,9 +6,21 @@
 //   4. ../env      (same root, alternate filename some setups use)
 const path   = require('path');
 const dotenv = require('dotenv');
-dotenv.config({ path: path.join(__dirname, '.env') });
-dotenv.config({ path: path.join(__dirname, '..', '.env') });
+const rootEnv = path.join(__dirname, '..', '.env');
+const siteEnv = path.join(__dirname, '.env');
+// Load env in priority order (dotenv never overrides already-set vars by default):
+//   1. process.env (PM2 / system env)
+//   2. site/.env
+//   3. ../.env
+dotenv.config({ path: siteEnv });
+dotenv.config({ path: rootEnv });
 dotenv.config({ path: path.join(__dirname, '..', 'env') });
+// In production, real portal credentials from .env must win over stale PM2/test shell vars
+// (e.g. SUPABASE_URL=https://placeholder.supabase.co left from prior test runs).
+if (process.env.NODE_ENV === 'production') {
+  dotenv.config({ path: rootEnv, override: true });
+  dotenv.config({ path: siteEnv, override: true });
+}
 
 const app = require('./src/app');
 const { isStateSecretConfigured } = require('./src/crypto');

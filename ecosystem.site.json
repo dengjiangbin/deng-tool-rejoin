@@ -13,6 +13,7 @@
         "NODE_ENV": "production",
         "TOOL_SITE_HOST": "127.0.0.1",
         "TOOL_SITE_PORT": "8791",
+        "TOOL_SITE_SESSION_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\site-sessions",
         "PUBLIC_TRACKER_GITHUB_REPO": "dengjiangbin/deng-fishtracker-dist",
         "GIT_COMMIT": "55ff2d979d702b8902a2ea512012bb33f3980461"
       }
