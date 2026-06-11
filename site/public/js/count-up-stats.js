@@ -1,7 +1,9 @@
 'use strict';
 
 function createCountUpStats() {
-  var DEFAULT_DURATION = 750;
+  var DEFAULT_DURATION = 1800;
+  var MIN_DURATION = 1400;
+  var MAX_DURATION = 2200;
   var observers = new WeakMap();
 
   function prefersReducedMotion() {
@@ -93,9 +95,26 @@ function createCountUpStats() {
   }
 
   function readDuration(el, override) {
-    if (Number.isFinite(override)) return Math.max(0, override);
+    if (Number.isFinite(override)) {
+      if (override === 0) return 0;
+      return Math.max(MIN_DURATION, Math.min(MAX_DURATION, override));
+    }
     var d = parseInt(el.getAttribute('data-count-duration') || '', 10);
-    return Number.isFinite(d) ? Math.max(0, d) : DEFAULT_DURATION;
+    if (Number.isFinite(d)) return Math.max(MIN_DURATION, Math.min(MAX_DURATION, d));
+    return DEFAULT_DURATION;
+  }
+
+  function durationForValue(value, total) {
+    var target = parseRawNumber(value);
+    var totalTarget = parseRawNumber(total);
+    var magnitude = Math.max(
+      target == null ? 0 : Math.abs(target),
+      totalTarget == null ? 0 : Math.abs(totalTarget),
+    );
+    if (magnitude <= 0) return MIN_DURATION;
+    if (magnitude < 25) return MIN_DURATION;
+    if (magnitude < 250) return DEFAULT_DURATION;
+    return MAX_DURATION;
   }
 
   function readFormat(el) {
@@ -180,7 +199,9 @@ function createCountUpStats() {
     opts = opts || {};
     var format = opts.format || readFormat(el);
     var decimals = Number.isFinite(opts.decimals) ? opts.decimals : readDecimals(el);
-    var duration = readDuration(el, opts.duration);
+    var duration = Number.isFinite(opts.duration)
+      ? readDuration(el, opts.duration)
+      : readDuration(el, durationForValue(target, totalTarget));
     var state = getState(el);
     cancelAnimation(el);
 
@@ -306,6 +327,7 @@ function createCountUpStats() {
     placeholder: placeholder,
     parseRawNumber: parseRawNumber,
     prefersReducedMotion: prefersReducedMotion,
+    durationForValue: durationForValue,
   };
 }
 

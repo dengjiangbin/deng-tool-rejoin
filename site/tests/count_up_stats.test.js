@@ -46,6 +46,14 @@ describe('count-up stats formatter', () => {
   test('reduced-motion helper is safe without window.matchMedia', () => {
     assert.equal(typeof countUp.prefersReducedMotion(), 'boolean');
   });
+
+  test('durationForValue uses slower visible animation window', () => {
+    assert.equal(countUp.durationForValue(0), 1400);
+    assert.equal(countUp.durationForValue(12), 1400);
+    assert.equal(countUp.durationForValue(120), 1800);
+    assert.equal(countUp.durationForValue(5000), 2200);
+    assert.equal(countUp.durationForValue(20, 5000), 2200);
+  });
 });
 
 describe('count-up stat markup on routes', () => {
@@ -54,8 +62,10 @@ describe('count-up stat markup on routes', () => {
     assert.equal(res.status, 200);
     assert.match(res.text, /class="[^"]*js-count-up[^"]*"[^>]*data-home-stat-value="trackedPlayers"/);
     assert.match(res.text, /data-home-stat-value="onlineNow"[^>]*data-count-format="integer"/);
-    assert.match(res.text, /data-home-stat-value="activeAgents"[^>]*data-count-format="ratio"/);
-    assert.match(res.text, /data-home-stat-meta="onlineNow"/);
+    assert.match(res.text, /data-home-stat-value="rejoinActiveDevices"/);
+    assert.match(res.text, /data-home-stat-value="rejoinTotalDevices"/);
+    assert.match(res.text, /data-count-duration="1800"/);
+    assert.doesNotMatch(res.text, /data-home-stat-value="activeAgents"/);
     assert.match(res.text, /count-up-stats\.js/);
   });
 

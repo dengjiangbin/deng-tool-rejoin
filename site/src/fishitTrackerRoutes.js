@@ -3752,6 +3752,70 @@ router.post(
   },
 );
 
+function hasSyncedInventory(data) {
+  return Number(data.lastGoodPublicFishCount) > 0
+    || Number(data.visibleFishInstances) > 0
+    || Boolean(data.lastSyncAt)
+    || Boolean(data.lastPollOkAt);
+}
+
+function publicFishCountForSession(data) {
+  if (!hasSyncedInventory(data)) return 0;
+  const good = Number(data.lastGoodPublicFishCount);
+  if (Number.isFinite(good) && good > 0) return Math.floor(good);
+  const visible = Number(data.visibleFishInstances);
+  if (Number.isFinite(visible) && visible > 0) return Math.floor(visible);
+  return 0;
+}
+
+function collectPublicFishItTrackerStats() {
+  let trackedFishers = 0;
+  let onlineFishers = 0;
+  let inventoriesSynced = 0;
+  let fishTracked = 0;
+  for (const [key, data] of Object.entries(liveTrackDB)) {
+    if (key.startsWith('uid:')) continue;
+    if (!data || typeof data !== 'object') continue;
+    trackedFishers += 1;
+    if (isSessionLive(data)) onlineFishers += 1;
+    if (hasSyncedInventory(data)) {
+      inventoriesSynced += 1;
+      fishTracked += publicFishCountForSession(data);
+    }
+  }
+  return {
+    available: trackedFishers > 0 || onlineFishers > 0 || inventoriesSynced > 0 || fishTracked > 0,
+    trackedFishers,
+    onlineFishers,
+    inventoriesSynced,
+    fishTracked,
+    updatedAt: new Date().toISOString(),
+    sources: {
+      trackedFishers: {
+        service: 'fishit-tracker',
+        store: 'liveTrackDB',
+        method: 'COUNT DISTINCT username keys excluding uid:* aliases',
+      },
+      onlineFishers: {
+        service: 'fishit-tracker',
+        store: 'liveTrackDB',
+        method: 'isSessionLive(session) within 45s sync window',
+      },
+      inventoriesSynced: {
+        service: 'fishit-tracker',
+        store: 'liveTrackDB',
+        method: 'sessions with lastGoodPublicFishCount|visibleFishInstances|lastSyncAt|lastPollOkAt',
+      },
+      fishTracked: {
+        service: 'fishit-tracker',
+        store: 'liveTrackDB',
+        method: 'SUM(lastGoodPublicFishCount OR visibleFishInstances) on synced fish-only public snapshots',
+      },
+    },
+    rejectedSources: ['fishitDb', 'deng_fish_it_bot', 'quiz_bot', '!d'],
+  };
+}
+
 function collectPublicTrackerNetworkStats() {
   const usernames = new Set();
   let onlineUsernames = 0;
@@ -4198,6 +4262,7 @@ router.post('/api/fishit-tracker/request-catalog-scan/:username', postLimiter, (
 
 module.exports = router;
 module.exports.collectPublicTrackerNetworkStats = collectPublicTrackerNetworkStats;
+module.exports.collectPublicFishItTrackerStats = collectPublicFishItTrackerStats;
 module.exports.mergeItemsNoDowngradeFromCatalog = mergeItemsNoDowngradeFromCatalog;
 module.exports.enrichItemsFromCatalog = enrichItemsFromCatalog;
 module.exports.inventoryCountsFromGroups = inventoryCountsFromGroups;

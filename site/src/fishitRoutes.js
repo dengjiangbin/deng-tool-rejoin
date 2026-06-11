@@ -104,34 +104,40 @@ router.get('/api/fishit/global', fishitLimiter, (req, res) => {
 
 router.get('/api/fishit/public-summary', fishitLimiter, (_req, res) => {
   try {
-    const g = fishit.getGlobal();
-    let globalSpecies = null;
-    let lastObservationAt = null;
+    const trackerStats = require('./fishitTrackerRoutes').collectPublicFishItTrackerStats();
+    let globalSpecies = 0;
+    let globalSpeciesSource = {
+      service: 'fishitGlobalDb',
+      store: 'fishit_global_species',
+      method: 'COUNT(*)',
+    };
     try {
       const stats = globalDb.getStats();
       globalSpecies = Number(stats.speciesCount) || 0;
-      lastObservationAt = stats.lastObservationAt || null;
+      globalSpeciesSource.dbPath = stats.dbPath || null;
     } catch (_) {
       // Global DB optional in some environments.
     }
-    if (!g || !g.available) {
-      return ok(res, {
-        available: globalSpecies != null,
-        trackedFishers: 0,
-        totalFish: 0,
-        globalSpecies: globalSpecies || 0,
-        lastUpdated: lastObservationAt,
-      });
-    }
+
+    const available = trackerStats.available || globalSpecies > 0;
+    res.set('Cache-Control', 'public, max-age=15');
     return ok(res, {
-      available: true,
-      trackedFishers: Number(g.total_players) || 0,
-      totalFish: Number(g.total_fish) || 0,
-      globalSpecies: globalSpecies != null ? globalSpecies : 0,
-      lastUpdated: g.last_updated || lastObservationAt || null,
+      available,
+      trackedFishers: trackerStats.trackedFishers,
+      onlineFishers: trackerStats.onlineFishers,
+      inventoriesSynced: trackerStats.inventoriesSynced,
+      fishTracked: trackerStats.fishTracked,
+      totalFish: trackerStats.fishTracked,
+      globalSpecies,
+      lastUpdated: trackerStats.updatedAt,
+      sources: {
+        ...trackerStats.sources,
+        globalSpecies: globalSpeciesSource,
+      },
+      rejectedSources: trackerStats.rejectedSources,
     });
   } catch (_) {
-    return res.status(200).json({ available: false });
+    return res.status(200).json({ available: false, rejectedSources: ['fishitDb', 'deng_fish_it_bot', 'quiz_bot', '!d'] });
   }
 });
 
