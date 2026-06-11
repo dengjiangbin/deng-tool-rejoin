@@ -25,10 +25,28 @@ process.env.TOOL_SITE_PUBLIC_URL = 'http://localhost:8791';
 process.env.DISCORD_CLIENT_ID = 'x';
 process.env.DISCORD_CLIENT_SECRET = 'x';
 process.env.DISCORD_REDIRECT_URI = 'http://localhost:8791/auth/discord/callback';
+process.env.TOOL_SITE_STATE_SECRET = 'monitor-test-state-secret-long-enough-yes';
+
+const fakeAxios = {
+  async post() {
+    return { data: { access_token: 'discord-access-token' } };
+  },
+  async get() {
+    return {
+      data: {
+        id: 'discord-user-1',
+        username: 'DiscordTester',
+        avatar: null,
+        email: null,
+      },
+    };
+  },
+};
 
 // ── Tiny Supabase mock with monitor-table support ───────────────────────────
 function makeMemoryDb() {
   return {
+    site_users: [],
     monitor_devices: [],
     monitor_package_states: [],
     monitor_snapshots: [],
@@ -133,6 +151,12 @@ const mockSupabase = { from(table) { return new Q(table); } };
 // Inject the mock for ./db BEFORE app code requires it.
 const dbPath = path.join(__dirname, '..', 'src', 'db.js');
 require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: mockSupabase };
+require.cache[require.resolve('axios')] = {
+  id: require.resolve('axios'),
+  filename: require.resolve('axios'),
+  loaded: true,
+  exports: fakeAxios,
+};
 
 // Now safe to load the app.
 const request = require('supertest');
@@ -147,6 +171,15 @@ beforeEach(() => {
 });
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+async function login(agent) {
+  const start = await agent.get('/auth/discord');
+  assert.equal(start.status, 302);
+  const state = new URL(start.headers.location).searchParams.get('state');
+  const res = await agent.get(`/auth/discord/callback?code=ok&state=${state}`);
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.location, '/dashboard');
+}
+
 function sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
 
 function seedDevice(owner = 'discord-user-1') {
@@ -554,8 +587,16 @@ describe('pairing flow', () => {
 });
 
 describe('APK download page', () => {
-  test('renders /download with new product name and primary CTA', async () => {
+  test('redirects logged-out visitors from /download to login with return path', async () => {
     const res = await request(app).get('/download');
+    assert.equal(res.status, 302);
+    assert.match(res.headers.location, /^\/login\?return=%2Fdownload$/);
+  });
+
+  test('renders /download with new product name and primary CTA when signed in', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/download');
     assert.equal(res.status, 200);
     assert.match(res.text, /DENG Tool: Rejoin APK/);
     assert.match(res.text, />Download APK</);
@@ -563,7 +604,9 @@ describe('APK download page', () => {
   });
 
   test('/download does NOT show legacy "DENG Monitor" naming', async () => {
-    const res = await request(app).get('/download');
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/download');
     assert.equal(res.status, 200);
     assert.doesNotMatch(res.text, /DENG Monitor/);
     // Must not imply the APK version equals the Rejoin package version.
@@ -671,7 +714,9 @@ describe('APK download page', () => {
   });
 
   test('/download shows the Pair Android App section', async () => {
-    const res = await request(app).get('/download');
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/download');
     assert.equal(res.status, 200);
     assert.match(res.text, /Pair Android App/);
     assert.match(res.text, /id="pair-android-app"/);
@@ -681,24 +726,19 @@ describe('APK download page', () => {
     );
   });
 
-  test('/download logged-out shows the Discord login prompt for pairing (not a broken form)', async () => {
-    const res = await request(app).get('/download');
+  test('/download logged-in shows the pair panel for authenticated users', async () => {
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/download');
     assert.equal(res.status, 200);
-    // Logged-out path: visible user-facing text + the Discord CTA.
-    assert.match(res.text, /Log in with Discord to generate a pairing code/);
-    // The Discord button appears inside the logged-out branch of the
-    // pair panel. (The href itself also exists in the global layout if
-    // logged out, so we anchor on the surrounding wrapper instead.)
-    assert.match(res.text, /data-pair-panel-loggedout/);
-    // The logged-in branch wrapper must NOT render when no session exists.
-    // We check for the wrapper attribute on the panel container, not for
-    // the inline JS selector string (which always appears in the always-
-    // rendered <script> block).
-    assert.doesNotMatch(res.text, /<div class="pair-panel"\s+data-pair-panel\b/);
+    assert.match(res.text, /Pair Android App/);
+    assert.doesNotMatch(res.text, /data-pair-panel-loggedout/);
   });
 
   test('/download does NOT instruct users to use the License page for pairing', async () => {
-    const res = await request(app).get('/download');
+    const agent = request.agent(app);
+    await login(agent);
+    const res = await agent.get('/download');
     assert.equal(res.status, 200);
     // The Pair Android App section must point at the Download page (this page),
     // not at /license or "My License".

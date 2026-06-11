@@ -3,7 +3,6 @@
   color: var(--public-text);
   background: var(--public-bg);
   position: relative;
-  overflow-x: hidden;
 }
 
 .deng-home::before {
@@ -37,18 +36,33 @@
 }
 
 .deng-home-main,
-.deng-home-footer,
-.deng-home-nav-wrap {
+.deng-home-footer {
   position: relative;
   z-index: 1;
 }
 
+.deng-home-main {
+  padding-top: 92px;
+}
+
+.deng-home-anchor {
+  scroll-margin-top: 96px;
+}
+
 /* ── Navbar ── */
-.deng-home-nav-wrap {
-  position: sticky;
+.deng-home-nav-wrap--fixed {
+  position: fixed;
   top: 0;
-  z-index: 40;
+  left: 0;
+  right: 0;
+  z-index: 100;
   padding: 16px 20px 0;
+  pointer-events: none;
+}
+
+.deng-home-nav-wrap {
+  position: relative;
+  z-index: 100;
 }
 
 .deng-home-nav {
@@ -65,9 +79,11 @@
   padding: 8px 10px 8px 16px;
   border-radius: 999px;
   border: 1px solid var(--public-border);
-  background: rgba(8, 10, 14, 0.82);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(8, 10, 14, 0.88);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  pointer-events: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28);
 }
 
 .deng-home-brand {
@@ -211,12 +227,85 @@
 
 .deng-home-hero__title {
   margin: 0 0 18px;
-  max-width: 12ch;
-  font-size: clamp(3.2rem, 9vw, 5.4rem);
-  line-height: 0.95;
+  font-size: clamp(3.2rem, 9vw, 5.6rem);
+  line-height: 1;
   font-weight: 900;
   letter-spacing: -0.04em;
   color: var(--public-text);
+}
+
+.hero-wordmark {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.14em;
+}
+
+.hero-word {
+  position: relative;
+  display: inline-block;
+  padding: 10px 14px;
+  cursor: default;
+  outline: none;
+  transition: filter 0.5s ease;
+}
+
+.hero-word__text {
+  display: inline-block;
+  transition: filter 0.5s ease, color 0.5s ease, text-shadow 0.5s ease;
+}
+
+.hero-word.is-active .hero-word__text {
+  filter: blur(0);
+  color: var(--public-text);
+  text-shadow: 0 0 24px rgba(248, 250, 252, 0.08);
+}
+
+.hero-word:not(.is-active) .hero-word__text {
+  filter: blur(5px);
+  color: var(--public-muted-2);
+}
+
+.hero-corner {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  opacity: 0;
+  transition: opacity 0.5s ease, box-shadow 0.5s ease;
+  pointer-events: none;
+}
+
+.hero-word.is-active .hero-corner {
+  opacity: 1;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.55);
+}
+
+.hero-corner--tl {
+  top: 0;
+  left: 0;
+  border-top: 2px solid rgb(99, 102, 241);
+  border-left: 2px solid rgb(99, 102, 241);
+}
+
+.hero-corner--tr {
+  top: 0;
+  right: 0;
+  border-top: 2px solid rgb(99, 102, 241);
+  border-right: 2px solid rgb(99, 102, 241);
+}
+
+.hero-corner--bl {
+  bottom: 0;
+  left: 0;
+  border-bottom: 2px solid rgb(99, 102, 241);
+  border-left: 2px solid rgb(99, 102, 241);
+}
+
+.hero-corner--br {
+  bottom: 0;
+  right: 0;
+  border-bottom: 2px solid rgb(99, 102, 241);
+  border-right: 2px solid rgb(99, 102, 241);
 }
 
 .deng-home-hero__subtitle {
@@ -684,13 +773,12 @@
 }
 
 @media (max-width: 640px) {
-  .deng-home-hero__bracket {
-    display: none;
+  .deng-home-main {
+    padding-top: 118px;
   }
 
-  .deng-home-hero__word--accent {
-    filter: none;
-    opacity: 1;
+  .hero-word:not(.is-active) .hero-word__text {
+    filter: blur(2px);
   }
 
   .deng-home-container {

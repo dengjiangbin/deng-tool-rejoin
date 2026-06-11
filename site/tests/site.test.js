@@ -4017,7 +4017,7 @@ describe('Fish It website integration', () => {
     assert.equal(res.status, 200);
     assert.doesNotMatch(res.text, /Download Rejoin APK|Download APK/);
     assert.doesNotMatch(res.text, /download count|data-apk-download-count/i);
-    assert.match(res.text, /data-home-stats-grid/);
+    assert.match(res.text, /data-home-live-stats-grid/);
   });
 
   test('download stats API is explicitly uncached by browsers and CDN', async () => {

@@ -4,6 +4,7 @@
  *
  * Public routes (no authentication required):
  *   GET  /inventory                     – serve the live inventory dashboard UI
+ *   GET  /tracker.lua                   – redirect to latest cache-busted dist/tracker.lua
  *   GET  /tracker, /fishit-tracker        – 301 redirect to /inventory (legacy, not public)
  *   POST /api/fishit-tracker/update-backpack – canonical inventory POST (Lua v10J2+)
  *   POST /api/tracker/update-backpack          – backward-compatible alias
@@ -54,7 +55,12 @@ const fishitStoneDisplayMap = require('./fishitStoneDisplayMap');
 const stoneImageAssets = require('./fishitStoneImageAssets');
 const inventorySort = require('./fishitInventorySort');
 const inventoryAssets = require('./inventoryAssets');
-const { CLEAN_TRACKER_LOADSTRING, PROTECTED_DIST_REL_PATH, PROTECTED_DIST_RAW_URL_CACHE_BUST } = require('./fishitTrackerLoadstring');
+const {
+  CLEAN_TRACKER_LOADSTRING,
+  DEBUG_TRACKER_LOADSTRING,
+  PROTECTED_DIST_REL_PATH,
+  PROTECTED_DIST_RAW_URL_CACHE_BUST,
+} = require('./fishitTrackerLoadstring');
 const itemUtilityPublic = require('./fishitItemUtilityPublic');
 const gameItemDbPublic = require('./fishitGameItemDbPublic');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
@@ -256,7 +262,7 @@ function requireInventorySession(req, res, next) {
   if (req.session) {
     req.session.flash = { error: 'Please login with Discord first.' };
   }
-  return res.redirect(302, `/?return=${returnTo}`);
+  return res.redirect(302, `/login?return=${returnTo}`);
 }
 
 function buildInventoryViewer(sessionUser) {
@@ -290,6 +296,11 @@ function buildInventoryViewer(sessionUser) {
 
 router.use((req, _res, next) => {
   if (process.env.NODE_ENV !== 'test') return next();
+  const path = String(req.path || '');
+  const inTrackerScope = path === '/inventory'
+    || path.startsWith('/inventory/')
+    || path.startsWith('/api/fishit-tracker/');
+  if (!inTrackerScope) return next();
   if (!req.session) {
     req.session = {
       csrfToken: 'test-csrf-token',
@@ -2691,6 +2702,7 @@ function buildTrackerPageLocals(req) {
       initialUsername: resolveInitialUsername(req),
       trackerUiDeployMarker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
       trackerLoadstring: CLEAN_TRACKER_LOADSTRING,
+      debugTrackerLoadstring: debugInventory ? DEBUG_TRACKER_LOADSTRING : '',
       renderBuild: debugInventory ? PUBLIC_RENDER_BUILD : '',
       publicApiBuild: debugInventory ? PUBLIC_API_BUILD : '',
     },
@@ -2703,6 +2715,7 @@ function buildTrackerPageLocals(req) {
     debugInventory,
     apkEmbed,
     trackerLoadstring: CLEAN_TRACKER_LOADSTRING,
+    debugTrackerLoadstring: debugInventory ? DEBUG_TRACKER_LOADSTRING : '',
     user: sessionUser,
     viewer,
     scriptUrl: '/inventory',
@@ -2753,7 +2766,7 @@ function buildTrackerPageLocals(req) {
     blocker10qBuild: build,
   };
   if (debugGlobal) {
-    locals.debugInventoryNote = 'Inventory debug mode — public loader still uses dist/tracker.lua only';
+    locals.debugInventoryNote = 'Inventory debug mode — public copy stays clean; debug loader shown separately';
   }
   return locals;
 }
@@ -2777,6 +2790,12 @@ function redirectLegacyInventoryRoute(req, res) {
   const suffix = qIndex >= 0 ? req.url.slice(qIndex) : '';
   return res.redirect(301, `/inventory${suffix}`);
 }
+
+router.get('/tracker.lua', (_req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  return res.redirect(302, PROTECTED_DIST_RAW_URL_CACHE_BUST);
+});
 
 router.get('/inventory', requireInventorySession, renderTrackerPage);
 router.get('/inventory/', requireInventorySession, renderTrackerPage);
@@ -3732,6 +3751,29 @@ router.post(
     return res.status(200).json({ status: 'success', ...summary });
   },
 );
+
+function collectPublicTrackerNetworkStats() {
+  const usernames = new Set();
+  let onlineUsernames = 0;
+  for (const [key, data] of Object.entries(liveTrackDB)) {
+    if (key.startsWith('uid:')) continue;
+    if (!data || typeof data !== 'object') continue;
+    usernames.add(key.toLowerCase());
+    if (isSessionLive(data)) onlineUsernames += 1;
+  }
+  return {
+    available: usernames.size > 0,
+    trackedUsernames: usernames.size,
+    onlineUsernames,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+// ── GET /api/fishit-tracker/public-network ───────────────────────
+router.get('/api/fishit-tracker/public-network', getLimiter, (_req, res) => {
+  res.set(NO_STORE_HEADERS);
+  return res.status(200).json(collectPublicTrackerNetworkStats());
+});
 
 // ── GET /api/fishit-tracker/catalog ──────────────────────────────
 // Expose the stored catalog (debugging / verification).

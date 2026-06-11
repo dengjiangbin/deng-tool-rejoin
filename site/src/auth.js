@@ -98,13 +98,33 @@ function discordFallbackId(discordId) {
 /** Public sign-in page (Discord OAuth entry). */
 const LOGIN_HOME = '/login';
 
+function safeReturnPath(raw) {
+  const path = String(raw || '').trim();
+  if (!path.startsWith('/') || path.startsWith('//')) return null;
+  if (path.startsWith('/login') || path.startsWith('/auth/')) return null;
+  return path;
+}
+
+function loginRedirectUrl(returnPath) {
+  const safe = safeReturnPath(returnPath);
+  return safe ? `${LOGIN_HOME}?return=${encodeURIComponent(safe)}` : LOGIN_HOME;
+}
+
+function consumeAuthReturnTo(req) {
+  const dest = safeReturnPath(req.session && req.session.authReturnTo) || '/dashboard';
+  if (req.session) delete req.session.authReturnTo;
+  return dest;
+}
+
 /**
- * Redirect unauthenticated users to the public home page.
+ * Redirect unauthenticated users to the login page.
  */
 function requireLogin(req, res, next) {
   if (req.session && req.session.user) return next();
   req.session.flash = { error: 'Please login with Discord first.' };
-  res.redirect(LOGIN_HOME);
+  const returnPath = safeReturnPath(req.originalUrl || req.path);
+  if (returnPath) req.session.authReturnTo = returnPath;
+  res.redirect(loginRedirectUrl(returnPath));
 }
 
 /**
@@ -346,6 +366,9 @@ async function ensureRealSiteUser(req) {
 
 module.exports = {
   LOGIN_HOME,
+  safeReturnPath,
+  loginRedirectUrl,
+  consumeAuthReturnTo,
   requireLogin,
   verifyCsrf,
   saveSession,

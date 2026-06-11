@@ -260,9 +260,15 @@ function buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers }) {
   }
 
   const activeDevices = new Set();
+  const totalDevices = new Set();
   for (const row of activeBindings) {
     const deviceKey = String(row.install_id_hash || row.key_id || '').trim();
     if (deviceKey) activeDevices.add(deviceKey);
+  }
+  for (const row of bindings || []) {
+    if (!eligibleKeyIds.has(row.key_id)) continue;
+    const deviceKey = String(row.install_id_hash || row.key_id || '').trim();
+    if (deviceKey) totalDevices.add(deviceKey);
   }
 
   return {
@@ -270,6 +276,7 @@ function buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers }) {
     uniqueUsers: uniqueUsers.size,
     redeemedKeys: eligibleKeys.filter((row) => Boolean(row.redeemed_at) || activeBindingKeyIds.has(row.id)).length,
     activeDevices: activeDevices.size,
+    totalDevices: totalDevices.size,
     updatedAt: new Date().toISOString(),
   };
 }

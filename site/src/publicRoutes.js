@@ -4,6 +4,7 @@
  * Mounted before protected routers so `/` and `/login` are never intercepted.
  */
 const express = require('express');
+const { safeReturnPath } = require('./auth');
 
 const router = express.Router();
 
@@ -27,8 +28,15 @@ router.get('/', (req, res) => {
 });
 
 router.get('/login', (req, res) => {
-  if (req.session.user) return res.redirect('/dashboard');
-  return sendPublicPage(res, 'login', { title: 'Sign In - DENG Tool' });
+  const returnPath = safeReturnPath(req.query.return || req.query.next);
+  if (req.session.user) {
+    return res.redirect(returnPath || '/dashboard');
+  }
+  if (returnPath) req.session.authReturnTo = returnPath;
+  return sendPublicPage(res, 'login', {
+    title: 'Sign In - DENG Tool',
+    authReturnTo: returnPath || '',
+  });
 });
 
 module.exports = router;

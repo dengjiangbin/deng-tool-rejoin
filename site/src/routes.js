@@ -10,6 +10,7 @@ const { execFileSync } = require('child_process');
 const auth = require('./auth');
 const {
   LOGIN_HOME,
+  consumeAuthReturnTo,
   requireLogin,
   verifyCsrf,
   buildDiscordAuthUrl,
@@ -1937,7 +1938,7 @@ function resolveIosDownloadMode(iosManifest) {
   return 'coming_soon';
 }
 
-router.get('/download', (_req, res) => {
+router.get('/download', requireLogin, (req, res) => {
   const manifest = loadApkManifest();
   const iosManifest = loadIosManifest();
   const iosMode = resolveIosDownloadMode(iosManifest);
