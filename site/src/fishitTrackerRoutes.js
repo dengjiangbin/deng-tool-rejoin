@@ -53,6 +53,7 @@ const trackerRarityStyle = require('./fishitTrackerRarityStyle');
 const fishitStoneDisplayMap = require('./fishitStoneDisplayMap');
 const stoneImageAssets = require('./fishitStoneImageAssets');
 const inventorySort = require('./fishitInventorySort');
+const inventoryAssets = require('./inventoryAssets');
 const { CLEAN_TRACKER_LOADSTRING, PROTECTED_DIST_REL_PATH, PROTECTED_DIST_RAW_URL_CACHE_BUST } = require('./fishitTrackerLoadstring');
 const itemUtilityPublic = require('./fishitItemUtilityPublic');
 const gameItemDbPublic = require('./fishitGameItemDbPublic');
@@ -177,7 +178,12 @@ function buildPlayerStatsProof(raw, data, nowFallback) {
 }
 
 function applyPlayerStatsFields(existing, body, now) {
-  const merged = playerStatsStore.mergePlayerStats(existing, body.playerStats, {
+  const incoming = playerStatsStore.enrichIncomingPlayerStats(body.playerStats, {
+    trackerBuild: body.trackerBuild,
+    playerStatsDebug: body.playerStatsDebug,
+    isLiveRoblox: isLiveRobloxUpload(body),
+  });
+  const merged = playerStatsStore.mergePlayerStats(existing, incoming, {
     isLiveRoblox: isLiveRobloxUpload(body),
   });
   const displayable = resolvePlayerStatsForApi(merged);
@@ -2670,12 +2676,24 @@ function buildTrackerPageLocals(req) {
   const session = req && req.session ? req.session : null;
   const sessionUser = session && session.user ? session.user : null;
   const viewer = buildInventoryViewer(sessionUser);
+  const assetUrls = inventoryAssets.inventoryAssetUrls();
   const locals = {
     layout: false,
     title: 'DENG Inventory Tracker — Fish It',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
     trackerUiDeployMarker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
+    inventoryAssetCssUrl: assetUrls.cssUrl,
+    inventoryAssetJsUrl: assetUrls.jsUrl,
+    inventoryRuntimeConfig: {
+      debugInventory,
+      apkEmbed,
+      initialUsername: resolveInitialUsername(req),
+      trackerUiDeployMarker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
+      trackerLoadstring: CLEAN_TRACKER_LOADSTRING,
+      renderBuild: debugInventory ? PUBLIC_RENDER_BUILD : '',
+      publicApiBuild: debugInventory ? PUBLIC_API_BUILD : '',
+    },
     canonicalInventoryPath: '/inventory',
     initialUsername: resolveInitialUsername(req),
     trackerRarityCardCss: trackerRarityStyle.buildFtCardRarityCss(),

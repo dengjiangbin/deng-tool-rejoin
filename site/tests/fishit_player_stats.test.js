@@ -146,7 +146,7 @@ describe('fishitPlayerStats', () => {
       observedAt: 1710000002,
       build: 'BLOCKER10ZW_COINS_REPLION_PATH_PROBE_2026_06_10',
     }, { isLiveRoblox: true });
-    assert.equal(merged.totalCaughtText, '54,313');
+    assert.equal(merged.totalCaughtText, '54.313');
     assert.equal(merged.rarestFishChance, '1/4M');
     assert.equal(merged.coinsText, undefined);
   });
@@ -198,7 +198,7 @@ describe('fishitPlayerStats', () => {
       build: 'BLOCKER10ZW_PLAYERSTATS_REAL_ONLY_2026_06_10',
     });
     assert.equal(playerStats.displayCoins(real), '33.44M');
-    assert.equal(playerStats.displayTotalCaught(real), '68,885');
+    assert.equal(playerStats.displayTotalCaught(real), '68.885');
     assert.equal(playerStats.displayRarestFish(real), '1/1.20M');
   });
 

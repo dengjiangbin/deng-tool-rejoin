@@ -24,17 +24,19 @@ function makeApp() {
 }
 
 describe('BLOCKER10ZTB toolbar view icons', () => {
-  test('deploy marker points at latest side controls stat refresh build', () => {
-    const { BLOCKER10ZTC_SIDE_CONTROLS_STAT_REFRESH_MARKER } = require('../src/fishitTrackerBuild');
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTC_SIDE_CONTROLS_STAT_REFRESH_MARKER);
+  test('deploy marker points at latest stat interval source hardening build', () => {
+    const { BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_MARKER } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_MARKER);
   });
 
   test('first 3 view buttons share normalized icon wrapper and sizing rules', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /\.accounts-view-icon \{/);
-    assert.match(tpl, /\.accounts-view-group \.accounts-view-icon svg \{/);
-    assert.match(tpl, /width:20px;/);
-    assert.match(tpl, /height:20px;/);
+    const manifest = require('../src/inventoryAssets').loadManifest();
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'assets', manifest.css), 'utf8');
+    assert.match(css, /\.accounts-view-icon\s*\{/);
+    assert.match(css, /\.accounts-view-group \.accounts-view-icon svg\s*\{/);
+    assert.match(css, /width:20px;/);
+    assert.match(css, /height:20px;/);
     assert.match(tpl, /class="accounts-icon-btn accounts-view-btn[^"]*" id="viewTableBtn"/);
     assert.match(tpl, /class="accounts-icon-btn accounts-view-btn[^"]*" id="viewFishGridBtn"/);
     assert.match(tpl, /class="accounts-icon-btn accounts-view-btn[^"]*" id="viewStoneGridBtn"/);
@@ -43,12 +45,12 @@ describe('BLOCKER10ZTB toolbar view icons', () => {
     });
   });
 
-  test('fish grid icon uses recognizable fish silhouette, not old lucide blob', () => {
+  test('fish grid icon uses exact Lucide fish SVG path', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     assert.match(tpl, /data-toolbar-icon="fish"/);
-    assert.match(tpl, /M6 12c-1-1-1-1\.8 0-2\.8/);
-    assert.match(tpl, /M6 12c2-3\.2 5\.6-4\.4 8\.4-4\.4/);
-    assert.doesNotMatch(tpl, /M6\.5 12c\.94-3\.01/);
+    assert.match(tpl, /M6\.5 12c\.94-3\.46 4\.94-6 8\.5-6/);
+    assert.match(tpl, /class="lucide lucide-fish"/);
+    assert.doesNotMatch(tpl, /M6 12c2-3\.2 5\.6-4\.4 8\.4-4\.4/);
   });
 
   test('toolbar order remains table, fish, stone, copy, refresh', async () => {

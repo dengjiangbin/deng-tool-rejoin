@@ -31,15 +31,18 @@ function makeApp() {
 
 describe('BLOCKER10ZTC side controls + stat refresh contract', () => {
   test('deploy marker points at inventory access safe render build', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTD_INVENTORY_ACCESS_SAFE_RENDER_MARKER);
+    const { BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_MARKER } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_MARKER);
   });
 
   test('hide username uses single icon slot and no dual-eye markup', () => {
+    const manifest = require('../src/inventoryAssets').loadManifest();
+    const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'assets', manifest.js), 'utf8');
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
     assert.match(tpl, /id="hideUsernameIcon"/);
-    assert.match(tpl, /hideUsernameIconEl\.innerHTML = hideUsernames \? HIDE_USERNAME_EYE_OFF_SVG : HIDE_USERNAME_EYE_SVG/);
+    assert.match(js, /hideUsernameIconEl\.innerHTML = hideUsernames \? HIDE_USERNAME_EYE_OFF_SVG : HIDE_USERNAME_EYE_SVG/);
     assert.doesNotMatch(tpl, /data-icon="eye-off"/);
-    assert.doesNotMatch(tpl, /theme-toggle-track/);
+    assert.doesNotMatch(js, /theme-toggle-track/);
   });
 
   test('inventory sidebar has no guest or sign-in UI', async () => {
@@ -51,6 +54,23 @@ describe('BLOCKER10ZTC side controls + stat refresh contract', () => {
     assert.match(res.text, /inventory-profile-card__name/);
     assert.match(res.text, />Logout</);
     assert.match(res.text, />Script</);
+  });
+
+  test('parseIntegerStat and leaderstats debug extraction refresh caught on coin-only uploads', () => {
+    const enriched = playerStatsStore.enrichIncomingPlayerStats({
+      coins: 200,
+      source: 'replion',
+      build: 'BLOCKER10ZT5_RUNTIME_LINE_FIX_2026_06_10',
+    }, {
+      isLiveRoblox: true,
+      playerStatsDebug: {
+        enabled: true,
+        coinProbe: {
+          leaderstatsChildren: [{ name: 'Caught', value: '68,885' }],
+        },
+      },
+    });
+    assert.equal(enriched.totalCaught, 68885);
   });
 
   test('normalizePlayerStatsForApi regenerates stale totalCaughtText from numeric field', () => {
@@ -138,11 +158,15 @@ describe('BLOCKER10ZTC side controls + stat refresh contract', () => {
     assert.deepEqual(seen.map((row) => row.rarestFishChance), ['1/100', '1/200', '1/300']);
   });
 
-  test('template normalizes poll player stats and keeps unified 10s pipeline', () => {
+  test('template uses compiled assets and keeps unified 10s pipeline in bundle', () => {
     const tpl = fs.readFileSync(TPL_PATH, 'utf8');
-    assert.match(tpl, /function normalizePollPlayerStats/);
-    assert.match(tpl, /const POLL_MS\s*=\s*10000/);
-    assert.match(tpl, /function applyInventoryPollPayload/);
-    assert.match(tpl, /entry\._statRefreshCycleProof/);
+    const manifest = require('../src/inventoryAssets').loadManifest();
+    assert.match(tpl, /inventoryAssetCssUrl/);
+    assert.match(tpl, /inventoryAssetJsUrl/);
+    assert.match(tpl, /id="inventory-runtime"/);
+    const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'assets', manifest.js), 'utf8');
+    assert.match(js, /const POLL_MS\s*=\s*10000/);
+    assert.match(js, /function applyInventoryPollPayload/);
+    assert.match(js, /patchAccountStatsRow\(entry, key\)/);
   });
 });

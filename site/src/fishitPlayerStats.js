@@ -14,6 +14,103 @@ function finiteNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function parseIntegerStat(value) {
+  if (value == null) return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
+  }
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/[,.]/.test(raw)) {
+    const digits = raw.replace(/[^\d]/g, '');
+    if (!digits) return null;
+    const grouped = Number(digits);
+    return Number.isFinite(grouped) ? Math.max(0, Math.floor(grouped)) : null;
+  }
+  const direct = finiteNumber(raw);
+  if (direct != null) return Math.max(0, Math.floor(direct));
+  const digits = raw.replace(/[^\d]/g, '');
+  if (!digits) return null;
+  const parsed = Number(digits);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : null;
+}
+
+function leaderstatNameMatches(name, patterns) {
+  const normalized = String(name || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return patterns.some((pattern) => {
+    const p = String(pattern || '').trim().toLowerCase();
+    return p && (normalized === p || normalized.includes(p));
+  });
+}
+
+function extractStatsFromLeaderstatsDebug(debug) {
+  const children = debug && debug.coinProbe && debug.coinProbe.leaderstatsChildren;
+  if (!Array.isArray(children) || !children.length) return null;
+  const out = {};
+  for (const row of children) {
+    if (!row || typeof row !== 'object') continue;
+    const name = row.name;
+    const value = row.value;
+    if (leaderstatNameMatches(name, ['coins', 'cash', 'gold', 'money'])) {
+      const coins = parseIntegerStat(value);
+      if (coins != null) out.coins = coins;
+      continue;
+    }
+    if (leaderstatNameMatches(name, ['caught', 'total caught', 'fish caught', 'totalcaught', 'totalfish', 'total caught fish'])) {
+      const totalCaught = parseIntegerStat(value);
+      if (totalCaught != null) out.totalCaught = totalCaught;
+      continue;
+    }
+    if (leaderstatNameMatches(name, ['rarest fish', 'rarestfish', 'luck', 'bestcatch', 'luckiestcatch'])) {
+      const rarestFishChance = clampText(value, 32);
+      if (rarestFishChance) out.rarestFishChance = rarestFishChance;
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+function enrichIncomingPlayerStats(raw, opts = {}) {
+  if (!raw || typeof raw !== 'object') return null;
+  const out = { ...raw };
+  const build = opts.trackerBuild || out.build;
+  if (build && !out.build) out.build = build;
+  if (!out.source && opts.isLiveRoblox) out.source = 'leaderstats';
+  if (out.coins != null) {
+    const coins = parseIntegerStat(out.coins);
+    if (coins != null) out.coins = coins;
+  }
+  if (out.totalCaught != null) {
+    const totalCaught = parseIntegerStat(out.totalCaught);
+    if (totalCaught != null) out.totalCaught = totalCaught;
+  } else if (out.totalCaughtText) {
+    const totalCaught = parseIntegerStat(out.totalCaughtText);
+    if (totalCaught != null) out.totalCaught = totalCaught;
+  }
+  const debug = opts.playerStatsDebug ? sanitisePlayerStatsDebug(opts.playerStatsDebug) : null;
+  const fromLeader = extractStatsFromLeaderstatsDebug(debug);
+  if (fromLeader) {
+    if (fromLeader.coins != null) out.coins = fromLeader.coins;
+    if (fromLeader.totalCaught != null) out.totalCaught = fromLeader.totalCaught;
+    if (fromLeader.rarestFishChance) out.rarestFishChance = fromLeader.rarestFishChance;
+  }
+  if (debug) {
+    if (out.totalCaught == null && debug.rawTotalCaughtValue) {
+      const totalCaught = parseIntegerStat(debug.rawTotalCaughtValue);
+      if (totalCaught != null) out.totalCaught = totalCaught;
+    }
+    if (!out.rarestFishChance && debug.rawRarestFishValue) {
+      const rarestFishChance = clampText(debug.rawRarestFishValue, 32);
+      if (rarestFishChance) out.rarestFishChance = rarestFishChance;
+    }
+    if (out.coins == null && debug.rawCoinsValue) {
+      const coins = parseIntegerStat(debug.rawCoinsValue);
+      if (coins != null) out.coins = coins;
+    }
+  }
+  return out;
+}
+
 function formatCompactStat(value) {
   const n = finiteNumber(value);
   if (n == null) return null;
@@ -47,10 +144,11 @@ function normaliseProgress(raw) {
 function sanitisePlayerStats(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const out = {};
-  const coins = finiteNumber(raw.coins);
-  if (coins != null) out.coins = Math.max(0, coins);
-  const totalCaught = finiteNumber(raw.totalCaught);
-  if (totalCaught != null) out.totalCaught = Math.max(0, totalCaught);
+  const coins = parseIntegerStat(raw.coins);
+  if (coins != null) out.coins = coins;
+  let totalCaught = parseIntegerStat(raw.totalCaught);
+  if (totalCaught == null && raw.totalCaughtText) totalCaught = parseIntegerStat(raw.totalCaughtText);
+  if (totalCaught != null) out.totalCaught = totalCaught;
   if (out.coins != null) out.coinsText = formatCompactStat(out.coins);
   else {
     const coinsText = clampText(raw.coinsText, 32);
@@ -182,9 +280,20 @@ function mergePlayerStats(existing, incoming, opts = {}) {
     if (next.totalCaught != null) next.totalCaughtText = formatGroupedStat(next.totalCaught);
     return next;
   }
-  const merged = { ...trustedExisting, ...next };
+  const merged = { ...trustedExisting };
+  if (next.coins != null) merged.coins = next.coins;
+  if (next.totalCaught != null) merged.totalCaught = next.totalCaught;
+  if (next.rarestFishChance) merged.rarestFishChance = next.rarestFishChance;
+  if (next.ruin) merged.ruin = next.ruin;
+  if (next.artifact) merged.artifact = next.artifact;
+  if (next.statsAt) merged.statsAt = next.statsAt;
+  if (next.source) merged.source = next.source;
+  if (next.build) merged.build = next.build;
+  if (next.observedAt != null) merged.observedAt = next.observedAt;
   if (merged.coins != null) merged.coinsText = formatCompactStat(merged.coins);
+  else if (next.coinsText) merged.coinsText = next.coinsText;
   if (merged.totalCaught != null) merged.totalCaughtText = formatGroupedStat(merged.totalCaught);
+  else if (next.totalCaughtText) merged.totalCaughtText = next.totalCaughtText;
   return merged;
 }
 
@@ -239,6 +348,9 @@ function isProgressComplete(stats, key) {
 module.exports = {
   TRUSTED_PLAYERSTATS_BUILD_MARKS,
   TRUSTED_PLAYERSTATS_BUILD_MARK: TRUSTED_PLAYERSTATS_BUILD_MARKS[0],
+  parseIntegerStat,
+  extractStatsFromLeaderstatsDebug,
+  enrichIncomingPlayerStats,
   sanitisePlayerStats,
   sanitisePlayerStatsDebug,
   mergePlayerStats,

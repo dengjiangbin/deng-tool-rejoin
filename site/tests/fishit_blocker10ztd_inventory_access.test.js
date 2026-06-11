@@ -64,7 +64,8 @@ function makeStaleDeployApp() {
 
 describe('BLOCKER10ZTD inventory access safe render', () => {
   test('deploy marker points at inventory access safe render build', () => {
-    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTD_INVENTORY_ACCESS_SAFE_RENDER_MARKER);
+    const { BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_MARKER } = require('../src/fishitTrackerBuild');
+    assert.equal(BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_MARKER);
   });
 
   test('buildInventoryViewer supports production-like session and missing optional fields', () => {
