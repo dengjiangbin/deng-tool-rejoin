@@ -223,6 +223,22 @@
   color: var(--public-accent);
   font-size: 0.84rem;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+.deng-home-hero__pill--offline {
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.08);
+  color: #f87171;
+}
+
+.deng-home-hero__pill--offline .deng-home-hero__dot {
+  background: #ef4444;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.55);
+}
+
+.deng-home-hero__online-count {
+  font-variant-numeric: tabular-nums;
 }
 
 .deng-home-hero__dot {

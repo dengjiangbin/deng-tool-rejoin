@@ -76,17 +76,34 @@
     var text = document.querySelector('[data-home-online-text]');
     if (!pill || !text) return;
     var formatted = fmt(count);
+    pill.hidden = false;
     if (formatted == null) {
       text.classList.remove('js-count-up');
       text.removeAttribute('data-count-to');
+      text.removeAttribute('data-count-suffix');
+      text.removeAttribute('data-count-format');
+      text.removeAttribute('data-count-duration');
       text.textContent = 'Live network online';
-    } else if (countUp()) {
-      text.classList.add('js-count-up');
-      countUp().set(text, { to: formatted, format: 'integer', suffix: ' online now' });
-    } else {
-      text.textContent = formatted.toLocaleString('en-US') + ' online now';
+      pill.classList.remove('deng-home-hero__pill--offline');
+      return;
     }
-    pill.hidden = false;
+    if (formatted === 0) {
+      text.classList.remove('js-count-up');
+      text.removeAttribute('data-count-to');
+      text.removeAttribute('data-count-suffix');
+      text.removeAttribute('data-count-format');
+      text.removeAttribute('data-count-duration');
+      text.textContent = 'No One Online';
+      pill.classList.add('deng-home-hero__pill--offline');
+      return;
+    }
+    pill.classList.remove('deng-home-hero__pill--offline');
+    text.classList.add('js-count-up');
+    if (countUp()) {
+      countUp().set(text, { to: formatted, format: 'integer', suffix: ' Online Now' });
+    } else {
+      text.textContent = formatted.toLocaleString('en-US') + ' Online Now';
+    }
   }
 
   function markEmpty(selector, visibleCount) {

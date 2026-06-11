@@ -160,4 +160,17 @@ describe('landing stat sources and layout regression', () => {
     assert.doesNotMatch(css, /@media \(max-width: 860px\)[\s\S]*\.deng-home-nav__links[\s\S]*grid-column:\s*1\s*\/\s*-1/);
     assert.doesNotMatch(css, /@media \(max-width: 860px\)[\s\S]*\.deng-home-nav__links[\s\S]*order:\s*3/);
   });
+
+  test('homepage online pill uses title-case online text and red zero state', () => {
+    const homeJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'home.js'), 'utf8');
+    const homeView = fs.readFileSync(path.join(__dirname, '..', 'views', 'home.ejs'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'css', 'home.css'), 'utf8');
+    assert.match(homeJs, /suffix: ' Online Now'/);
+    assert.match(homeJs, /textContent = 'No One Online'/);
+    assert.match(homeJs, /deng-home-hero__pill--offline/);
+    assert.match(homeView, /deng-home-hero__pill--offline/);
+    assert.match(homeView, />No One Online</);
+    assert.doesNotMatch(homeJs, /online now/);
+    assert.match(css, /\.deng-home-hero__pill--offline[\s\S]*#f87171/);
+  });
 });
