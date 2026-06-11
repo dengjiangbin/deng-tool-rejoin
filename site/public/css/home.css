@@ -461,6 +461,7 @@
   letter-spacing: -0.03em;
   color: var(--public-text);
   line-height: 1.1;
+  font-variant-numeric: tabular-nums;
 }
 
 .deng-home-stat-card__value--accent {

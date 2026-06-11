@@ -29,6 +29,9 @@ describe('public home landing page', () => {
     assert.match(res.text, /data-home-stat-card="activeDevices"/);
     assert.match(res.text, /Tracked usernames online/);
     assert.match(res.text, /Tracker devices running/);
+    assert.match(res.text, /class="[^"]*js-count-up[^"]*"[^>]*data-home-stat-value="trackedUsernames"/);
+    assert.match(res.text, /data-home-stat-value="activeDevices"[^>]*data-count-format="ratio"/);
+    assert.match(res.text, /count-up-stats\.js/);
     assert.match(res.text, /hero-wordmark/);
     assert.match(res.text, /aria-label="Go to home"/);
     assert.doesNotMatch(res.text, /Welcome back/);

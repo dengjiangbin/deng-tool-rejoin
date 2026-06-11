@@ -27,6 +27,7 @@ function latestAssetStamp() {
     path.join(publicDir, 'css', 'home.css'),
     path.join(publicDir, 'css', 'login-page.css'),
     path.join(publicDir, 'js', 'app.js'),
+    path.join(publicDir, 'js', 'count-up-stats.js'),
     path.join(publicDir, 'js', 'home.js'),
     path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'),
   ];

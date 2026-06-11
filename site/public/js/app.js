@@ -239,6 +239,10 @@
   function setValue(key, value) {
     var el = values[key];
     if (!el) return;
+    if (window.DengCountUpStats) {
+      window.DengCountUpStats.set(el, { to: value, format: 'integer', duration: 750 });
+      return;
+    }
     var next = formatNumber(value);
     if (el.textContent === next) return;
     el.classList.add('is-updating');

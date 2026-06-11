@@ -46,6 +46,18 @@
   }
   // Re-apply username masking after dynamic render (app.js owns the state).
   function remask() { if (window.DengPrivacy && window.DengPrivacy.apply) window.DengPrivacy.apply(); }
+  function countUpStatHtml(value, extraAttrs) {
+    return '<strong class="stat-card-value js-count-up"' + (extraAttrs || '') +
+      ' data-count-to="' + esc(String(value == null ? 0 : value)) +
+      '" data-count-format="integer" data-count-duration="750">0</strong>';
+  }
+  function countUpAmountHtml(value) {
+    return '<strong class="fishit-stat-amount js-count-up" data-count-to="' + esc(String(value == null ? 0 : value)) +
+      '" data-count-format="integer" data-count-duration="750">0</strong>';
+  }
+  function refreshCountUp(container) {
+    if (window.DengCountUpStats) window.DengCountUpStats.refresh(container);
+  }
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
   var loaded = { daily: false, stats: false, fish: false };
@@ -102,7 +114,7 @@
         ];
         var html = '<div class="stat-card-row">' + cards.map(function (c) {
           return '<article class="stat-card"><span class="stat-card-label">' + esc(c.label) +
-            '</span><strong class="stat-card-value">' + fmt(c.value) + '</strong></article>';
+            '</span>' + countUpStatHtml(c.value) + '</article>';
         }).join('') + '</div>';
         if (!d.cards || !d.cards.length) {
           html += emptyHtml(d.emptyMessage || 'No catches found for this period.');
@@ -111,6 +123,7 @@
         }
         if (d.lastUpdated) html += '<p class="fishit-updated">Updated ' + esc(relTime(d.lastUpdated)) + '</p>';
         dailyBody.innerHTML = html;
+        refreshCountUp(dailyBody);
       })
       .catch(function (e) { dailyBody.innerHTML = e.code === 401 ? emptyHtml('Sign in with Discord to view your Fish It stats.') : errorHtml('daily'); });
   }
@@ -122,7 +135,7 @@
     return '<article class="fishit-stat-card">' +
       '<div class="fishit-stat-img">' + img + '</div>' +
       '<span class="fishit-stat-label">' + esc(card.label) + '</span>' +
-      '<strong class="fishit-stat-amount">' + fmt(card.amount != null ? card.amount : card.count) + '</strong></article>';
+      countUpAmountHtml(card.amount != null ? card.amount : card.count) + '</article>';
   }
   function loadStats() {
     statsBody.innerHTML = '<div class="fishit-skeleton-grid"><div class="skeleton-fish"></div><div class="skeleton-fish"></div></div>';
@@ -131,11 +144,12 @@
         loaded.stats = true;
         if (!s.hasData) { statsBody.innerHTML = emptyHtml('You do not have Fish It stats yet.'); return; }
         var html = '<div class="stat-card-row"><article class="stat-card highlight"><span class="stat-card-label">Total Fish Caught</span>' +
-          '<strong class="stat-card-value">' + fmt(s.totalFish) + '</strong>' +
+          countUpStatHtml(s.totalFish) +
           (s.rank ? '<span class="stat-card-sub">Rank #' + s.rank.rank + ' of ' + s.rank.of + '</span>' : '') + '</article></div>';
         html += '<h2 class="fishit-section-title">Rarity</h2><div class="fishit-card-grid">' + (s.rarityCards || []).map(statCard).join('') + '</div>';
         html += '<h2 class="fishit-section-title">Rods</h2><div class="fishit-card-grid">' + (s.rodCards || []).map(statCard).join('') + '</div>';
         statsBody.innerHTML = html;
+        refreshCountUp(statsBody);
         remask();
       })
       .catch(function (e) { statsBody.innerHTML = e.code === 401 ? emptyHtml('Sign in with Discord to view your Fish It stats.') : errorHtml('stats'); });

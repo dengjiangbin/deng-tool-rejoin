@@ -1745,8 +1745,8 @@ describe('Luarmor-style key flow', () => {
     });
 
     const dashboard = await agent.get('/dashboard');
-    assert.match(dashboard.text, /Unbound Keys[\s\S]*?<p class="stat-value">1<\/p>[\s\S]*Ready to bind in Rejoin/);
-    assert.doesNotMatch(dashboard.text, /Unused Keys[\s\S]*?<p class="stat-value">1<\/p>[\s\S]*Ready to redeem in Rejoin/);
+    assert.match(dashboard.text, /Unbound Keys[\s\S]*?class="stat-value js-count-up"[\s\S]*?data-count-to="1"[\s\S]*Ready to bind in Rejoin/);
+    assert.doesNotMatch(dashboard.text, /Unused Keys[\s\S]*?class="stat-value js-count-up"[\s\S]*?data-count-to="1"[\s\S]*Ready to redeem in Rejoin/);
 
     const license = await agent.get('/license');
     assert.doesNotMatch(license.text, /You already have an unused key\./);
@@ -2288,7 +2288,7 @@ describe('Luarmor-style key flow', () => {
     assert.doesNotMatch(license.text, /pending_ad|provider_selected|lootlabs/i);
 
     const dashboard = await agent.get('/dashboard');
-    assert.match(dashboard.text, /Total Licenses[\s\S]*?<p class="stat-value">0<\/p>/);
+    assert.match(dashboard.text, /Total Licenses[\s\S]*?class="stat-value js-count-up"[\s\S]*?data-count-to="0"/);
     assert.doesNotMatch(dashboard.text, /pending_ad|provider_selected|lootlabs/i);
   });
 
@@ -2713,7 +2713,7 @@ describe('Luarmor-style key flow', () => {
 
     const dashboard = await agent.get('/dashboard');
     assert.equal(dashboard.status, 200);
-    assert.match(dashboard.text, /Total Licenses[\s\S]*?<p class="stat-value">1<\/p>/);
+    assert.match(dashboard.text, /Total Licenses[\s\S]*?class="stat-value js-count-up"[\s\S]*?data-count-to="1"/);
     assert.doesNotMatch(dashboard.text, /revoked-hidden|expired-hidden/);
   });
 
@@ -3957,7 +3957,8 @@ describe('Fish It website integration', () => {
 
   test('home page loads Fish It stats via home.js and public APIs', async () => {
     const res = await request(app).get('/');
-    assert.match(res.text, /data-home-stat-value="trackedPlayers"/);
+    assert.match(res.text, /data-home-stat-value="trackedUsernames"/);
+    assert.match(res.text, /js-count-up/);
     assert.match(res.text, /home\.js/);
     assert.doesNotMatch(res.text, /fishit-home\.js/);
   });

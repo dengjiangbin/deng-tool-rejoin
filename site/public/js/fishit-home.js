@@ -1,11 +1,6 @@
 (function () {
   'use strict';
 
-  function fmt(n) {
-    var v = Number(n);
-    if (!isFinite(v)) return '0';
-    return Math.round(v).toLocaleString('en-US');
-  }
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -27,11 +22,15 @@
   fetch('/api/fishit/global', { headers: { Accept: 'application/json' } })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (data) {
-      if (!data || !data.available) return; // stays hidden — clean empty state
+      if (!data || !data.available) return;
       section.hidden = false;
       section.querySelectorAll('[data-fishit-stat]').forEach(function (el) {
         var key = el.getAttribute('data-fishit-stat');
-        el.textContent = fmt(data[key]);
+        if (window.DengCountUpStats) {
+          window.DengCountUpStats.set(el, { to: data[key], format: 'integer', duration: 750 });
+        } else {
+          el.textContent = Math.round(Number(data[key]) || 0).toLocaleString('en-US');
+        }
       });
       var rodWrap = section.querySelector('[data-fishit-rods]');
       if (rodWrap) {
@@ -45,12 +44,15 @@
           ] : []);
         rodWrap.innerHTML = cards.map(function (rod) {
           var cls = rod.cls || ('rod-' + String(rod.key || rod.label || '').toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+          var amount = rod.amount != null ? rod.amount : rod.value;
           return '<article class="mini-stat-card ' + esc(cls) + '">' +
             rodImg(imageUrl(rod), rod.label) +
             '<span class="mini-stat-label">' + esc(rod.label) + '</span>' +
-            '<strong class="mini-stat-value">' + fmt(rod.amount != null ? rod.amount : rod.value) + '</strong>' +
+            '<strong class="mini-stat-value js-count-up" data-count-to="' + esc(String(amount == null ? 0 : amount)) +
+            '" data-count-format="integer" data-count-duration="750">0</strong>' +
             '</article>';
         }).join('');
+        if (window.DengCountUpStats) window.DengCountUpStats.refresh(rodWrap);
       }
     })
     .catch(function () { /* leave hidden */ });

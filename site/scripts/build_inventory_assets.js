@@ -103,10 +103,13 @@ function buildShellEjs(beforeStyle, bodyHtml, marker) {
     .trimEnd();
   const cleanedBody = bodyHtml.replace(/^\s*<\/head>\s*/i, '').trim();
   return `${cleanedBefore}
+  <link rel="stylesheet" href="/public/css/logoutConfirm.css?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
   <link rel="stylesheet" href="<%= inventoryAssetCssUrl %>">
 </head>
 ${cleanedBody}
 <script type="application/json" id="inventory-runtime"><%- JSON.stringify(inventoryRuntimeConfig).replace(/</g, '\\u003c') %></script>
+<script src="/public/js/count-up-stats.js?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>" defer></script>
+<script src="/public/js/logoutConfirm.js?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>" defer></script>
 <script src="<%= inventoryAssetJsUrl %>" defer></script>
 </html>
 `;

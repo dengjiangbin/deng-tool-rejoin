@@ -862,6 +862,16 @@ input {
   padding: 18px;
 }
 
+.stat-value,
+.js-count-up,
+.stat-card-value,
+.stat-card__value,
+.fishit-stat-amount,
+.mini-stat-value,
+.deng-home-stat-card__value {
+  font-variant-numeric: tabular-nums;
+}
+
 .stat-value {
   margin: 5px 0 0;
   color: var(--text);

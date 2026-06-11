@@ -7,9 +7,10 @@
   <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/inventory' %>">
   <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
   <title>DENG Inventory Tracker &mdash; Fish It</title>
+  <link rel="stylesheet" href="/public/css/logoutConfirm.css?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
   <link rel="stylesheet" href="<%= inventoryAssetCssUrl %>">
 </head>
-<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTF_STAT_INTERVAL_SOURCE_HARDENING_2026_06_11') %>">
+<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11') %>">
 <div class="inventory-shell">
   <aside class="inventory-sidebar" aria-label="Inventory setup">
     <div class="inventory-sidebar__brand">
@@ -24,13 +25,16 @@
     <div class="inventory-sidebar__spacer" aria-hidden="true"></div>
     <div class="inventory-sidebar__bottom">
       <button type="button" class="inventory-privacy-toggle" id="hideUsernamesBtn" title="Hide usernames" aria-label="Hide usernames" aria-pressed="false">
-        <span class="inventory-privacy-toggle__icon" id="hideUsernameIcon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path>
-            <circle cx="12" cy="12" r="3"></circle>
-          </svg>
+        <span class="inventory-privacy-toggle__label">
+          <span class="inventory-privacy-toggle__icon" id="hideUsernameIcon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </span>
+          <span>Hide Username</span>
         </span>
-        <span>Hide Username</span>
+        <span class="hide-username-toggle" aria-hidden="true"></span>
       </button>
       <div class="inventory-profile-card">
         <% if (viewer.hasDiscordAvatar) { %>
@@ -46,15 +50,17 @@
       </div>
       <div class="inventory-sidebar__actions">
         <button type="button" class="inventory-action-btn inventory-action-btn--script" id="sidebarScriptBtn" title="Copy tracker script" aria-label="Copy tracker script">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <polyline points="16 18 22 12 16 6"></polyline>
-            <polyline points="8 6 2 12 8 18"></polyline>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M15 12h-5"></path>
+            <path d="M15 8h-5"></path>
+            <path d="M19 17V5a2 2 0 0 0-2-2H8"></path>
+            <path d="M5 21h12a2 2 0 0 0 2-2v-1H7a2 2 0 0 1-2-2V5a2 2 0 0 1-2 2v14a2 2 0 0 0 2 2Z"></path>
           </svg>
           <span>Script</span>
         </button>
         <form method="POST" action="<%= typeof logoutUrl !== 'undefined' ? logoutUrl : '/auth/logout' %>">
           <input type="hidden" name="_csrf" value="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
-          <button type="submit" class="inventory-action-btn inventory-action-btn--logout" title="Logout" aria-label="Logout">
+          <button type="button" class="inventory-action-btn inventory-action-btn--logout" data-logout-confirm title="Logout" aria-label="Logout">
             <svg viewBox="0 0 24 24" focusable="false">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
               <path d="M16 17l5-5-5-5"></path>
@@ -88,19 +94,19 @@
     <div class="inventory-stats" id="inventoryStats" aria-label="Inventory summary">
       <div class="stat-card stat-card--online">
         <div class="stat-card__label">Online / Accounts</div>
-        <div class="stat-card__value" id="statOnlineAccounts">0 / 0</div>
+        <div class="stat-card__value js-count-up" id="statOnlineAccounts" data-count-format="ratio" data-count-duration="750">0 / 0</div>
       </div>
       <div class="stat-card stat-card--stones">
         <div class="stat-card__label">Evolved Enchant Stone</div>
-        <div class="stat-card__value" id="statEvolvedStones">0</div>
+        <div class="stat-card__value js-count-up" id="statEvolvedStones" data-count-format="integer" data-count-duration="750">0</div>
       </div>
       <div class="stat-card stat-card--secret">
         <div class="stat-card__label">Secret Fish</div>
-        <div class="stat-card__value" id="statSecretFish">0</div>
+        <div class="stat-card__value js-count-up" id="statSecretFish" data-count-format="integer" data-count-duration="750">0</div>
       </div>
       <div class="stat-card stat-card--forgotten">
         <div class="stat-card__label">Forgotten Fish</div>
-        <div class="stat-card__value" id="statForgottenFish">0</div>
+        <div class="stat-card__value js-count-up" id="statForgottenFish" data-count-format="integer" data-count-duration="750">0</div>
       </div>
     </div>
 
@@ -196,9 +202,9 @@
               <th scope="col" class="col-index">#</th>
               <th scope="col" class="col-status">Status</th>
               <th scope="col" class="col-username"><span class="th-full">Username</span><span class="th-short">User</span></th>
-              <th scope="col" class="col-coins"><span class="th-full">Coins</span><span class="th-short">Coin</span></th>
-              <th scope="col" class="col-caught"><span class="th-full">Total Caught</span><span class="th-short">Caught</span></th>
-              <th scope="col" class="col-rare"><span class="th-full">Rarest Fish</span><span class="th-short">Rare</span></th>
+              <th scope="col" class="col-coins col-coin" data-col="coin"><span class="th-full">Coins</span><span class="th-short">Coin</span></th>
+              <th scope="col" class="col-caught col-total-caught" data-col="total-caught"><span class="th-full">Total Caught</span><span class="th-short">Caught</span></th>
+              <th scope="col" class="col-rare col-rarest-fish" data-col="rarest-fish"><span class="th-full">Rarest Fish</span><span class="th-short">Rare</span></th>
               <th scope="col" class="col-backpack">Backpack</th>
               <th scope="col" class="col-actions">Actions</th>
             </tr>
@@ -238,16 +244,34 @@
         <span>Executor Script &mdash; copy &amp; run in-game</span>
       </h3>
       <div class="code-row">
-        <textarea class="code-block code-block--script" id="loadstringCode" readonly rows="3" spellcheck="false" aria-label="Tracker executor script"><%- typeof trackerLoadstring !== 'undefined' ? trackerLoadstring : '' %></textarea>
+        <textarea class="code-block code-block--script" id="loadstringCode" readonly rows="1" spellcheck="false" aria-label="Tracker executor script"><%- typeof trackerLoadstring !== 'undefined' ? trackerLoadstring : '' %></textarea>
         <button class="btn-copy" id="copyBtn" type="button">Copy</button>
       </div>
       <div class="copy-status" id="copyStatus" aria-live="polite"></div>
     </div>
+<% if (typeof debugInventory !== 'undefined' && debugInventory && typeof debugTrackerLoadstring !== 'undefined' && debugTrackerLoadstring) { %>
+    <div class="loadstring-box loadstring-box--debug">
+      <h3>
+        <span class="loadstring-box__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+        </span>
+        <span>Debug loader &mdash; admin only</span>
+      </h3>
+      <div class="code-row">
+        <textarea class="code-block code-block--script" id="loadstringDebugCode" readonly rows="3" spellcheck="false" aria-label="Debug tracker loader with build proof"><%- debugTrackerLoadstring %></textarea>
+      </div>
+    </div>
+<% } %>
 
   </div>
 </div>
   </div>
 </div>
 <script type="application/json" id="inventory-runtime"><%- JSON.stringify(inventoryRuntimeConfig).replace(/</g, '\u003c') %></script>
+<script src="/public/js/count-up-stats.js?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>" defer></script>
+<script src="/public/js/logoutConfirm.js?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>" defer></script>
 <script src="<%= inventoryAssetJsUrl %>" defer></script>
 </html>

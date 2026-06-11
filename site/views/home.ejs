@@ -27,9 +27,9 @@
   <main class="deng-home-main">
     <section class="deng-home-hero deng-home-anchor" id="home" data-home-section="home" aria-labelledby="home-hero-title">
       <div class="deng-home-container">
-        <div class="deng-home-hero__pill" data-home-online-pill hidden>
+        <div class="deng-home-hero__pill" data-home-online-pill>
           <span class="deng-home-hero__dot" aria-hidden="true"></span>
-          <span data-home-online-text>Live network online</span>
+          <span class="js-count-up deng-home-hero__online-count" data-home-online-text data-count-format="integer" data-count-suffix=" online now" data-count-immediate data-count-duration="700">0</span>
         </div>
         <h1 id="home-hero-title" class="deng-home-hero__title" aria-label="DENG Tool">
           <span class="hero-wordmark" data-hero-wordmark>
@@ -72,44 +72,44 @@
       <div class="deng-home-container">
         <p class="deng-home-eyebrow">Live Network</p>
         <div class="deng-home-stat-grid" data-home-live-stats-grid>
-          <article class="deng-home-stat-card" data-home-stat-card="trackedUsernames" hidden>
+          <article class="deng-home-stat-card" data-home-stat-card="trackedUsernames">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">Tracked Usernames</span>
               <span class="deng-home-stat-card__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value" data-home-stat-value="trackedUsernames">—</strong>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="trackedUsernames" data-count-format="integer" data-count-duration="750">0</strong>
             <span class="deng-home-stat-card__meta">Roblox usernames tracked by script</span>
           </article>
-          <article class="deng-home-stat-card deng-home-stat-card--accent" data-home-stat-card="onlineUsernames" hidden>
+          <article class="deng-home-stat-card deng-home-stat-card--accent" data-home-stat-card="onlineUsernames">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">Online Now</span>
               <span class="deng-home-stat-card__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent" data-home-stat-value="onlineUsernames">—</strong>
+            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent js-count-up" data-home-stat-value="onlineUsernames" data-count-format="integer" data-count-duration="750">0</strong>
             <span class="deng-home-stat-card__meta">Tracked usernames online</span>
           </article>
-          <article class="deng-home-stat-card deng-home-stat-card--accent" data-home-stat-card="activeDevices" hidden>
+          <article class="deng-home-stat-card deng-home-stat-card--accent" data-home-stat-card="activeDevices">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">Active Devices</span>
               <span class="deng-home-stat-card__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect x="4" y="8" width="16" height="12" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent" data-home-stat-value="activeDevices">—</strong>
+            <strong class="deng-home-stat-card__value deng-home-stat-card__value--accent js-count-up" data-home-stat-value="activeDevices" data-count-format="ratio" data-count-duration="750">0 / 0</strong>
             <span class="deng-home-stat-card__meta">Tracker devices running</span>
           </article>
-          <article class="deng-home-stat-card" data-home-stat-card="totalFish" hidden>
+          <article class="deng-home-stat-card" data-home-stat-card="totalFish">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">Fish Tracked</span>
               <span class="deng-home-stat-card__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"></path><path d="M18 12v.5"></path><path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"></path><path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"></path></svg>
               </span>
             </div>
-            <strong class="deng-home-stat-card__value" data-home-stat-value="totalFish">—</strong>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="totalFish" data-count-format="integer" data-count-duration="750">0</strong>
             <span class="deng-home-stat-card__meta">Fish It global catalog</span>
           </article>
         </div>
@@ -121,25 +121,25 @@
       <div class="deng-home-container">
         <p class="deng-home-eyebrow">Platform Stats</p>
         <div class="deng-home-stat-grid" data-home-platform-stats-grid>
-          <article class="deng-home-stat-card" data-home-stat-card="discordUsers" hidden>
+          <article class="deng-home-stat-card" data-home-stat-card="discordUsers">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">Discord Users</span>
             </div>
-            <strong class="deng-home-stat-card__value" data-home-stat-value="discordUsers">—</strong>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="discordUsers" data-count-format="integer" data-count-duration="750">0</strong>
             <span class="deng-home-stat-card__meta">Linked dashboard accounts</span>
           </article>
-          <article class="deng-home-stat-card" data-home-stat-card="generatedKeys" hidden>
+          <article class="deng-home-stat-card" data-home-stat-card="generatedKeys">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">License Keys</span>
             </div>
-            <strong class="deng-home-stat-card__value" data-home-stat-value="generatedKeys">—</strong>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="generatedKeys" data-count-format="integer" data-count-duration="750">0</strong>
             <span class="deng-home-stat-card__meta">Generated license keys</span>
           </article>
-          <article class="deng-home-stat-card" data-home-stat-card="redeemedKeys" hidden>
+          <article class="deng-home-stat-card" data-home-stat-card="redeemedKeys">
             <div class="deng-home-stat-card__top">
               <span class="deng-home-stat-card__label">Redeemed Keys</span>
             </div>
-            <strong class="deng-home-stat-card__value" data-home-stat-value="redeemedKeys">—</strong>
+            <strong class="deng-home-stat-card__value js-count-up" data-home-stat-value="redeemedKeys" data-count-format="integer" data-count-duration="750">0</strong>
             <span class="deng-home-stat-card__meta">Activated license keys</span>
           </article>
         </div>

@@ -2,11 +2,12 @@
   'use strict';
 
   var NAV_OFFSET = 96;
+  var countUp = function() { return window.DengCountUpStats; };
 
   function fmt(value) {
     var n = Number(value);
     if (!Number.isFinite(n) || n < 0) return null;
-    return Math.round(n).toLocaleString('en-US');
+    return Math.round(n);
   }
 
   function showCard(key) {
@@ -14,24 +15,30 @@
     if (card) card.hidden = false;
   }
 
+  function statEl(key) {
+    return document.querySelector('[data-home-stat-value="' + key + '"]');
+  }
+
   function setStat(key, value) {
-    var formatted = fmt(value);
-    if (formatted == null) return false;
-    var el = document.querySelector('[data-home-stat-value="' + key + '"]');
+    var n = fmt(value);
+    if (n == null) return false;
+    var el = statEl(key);
     if (!el) return false;
-    el.textContent = formatted;
     showCard(key);
+    if (countUp()) countUp().set(el, { to: n, format: 'integer', duration: 750 });
+    else el.textContent = n.toLocaleString('en-US');
     return true;
   }
 
   function setDevicePair(active, total) {
-    var activeFmt = fmt(active);
-    var totalFmt = fmt(total);
-    if (activeFmt == null || totalFmt == null) return false;
-    var el = document.querySelector('[data-home-stat-value="activeDevices"]');
+    var activeN = fmt(active);
+    var totalN = fmt(total);
+    if (activeN == null || totalN == null) return false;
+    var el = statEl('activeDevices');
     if (!el) return false;
-    el.textContent = activeFmt + ' / ' + totalFmt;
     showCard('activeDevices');
+    if (countUp()) countUp().set(el, { to: activeN, total: totalN, format: 'ratio', duration: 750 });
+    else el.textContent = activeN.toLocaleString('en-US') + ' / ' + totalN.toLocaleString('en-US');
     return true;
   }
 
@@ -41,9 +48,14 @@
     if (!pill || !text) return;
     var formatted = fmt(count);
     if (formatted == null) {
+      text.classList.remove('js-count-up');
+      text.removeAttribute('data-count-to');
       text.textContent = 'Live network online';
+    } else if (countUp()) {
+      text.classList.add('js-count-up');
+      countUp().set(text, { to: formatted, format: 'integer', suffix: ' online now', duration: 700 });
     } else {
-      text.textContent = formatted + ' online now';
+      text.textContent = formatted.toLocaleString('en-US') + ' online now';
     }
     pill.hidden = false;
   }

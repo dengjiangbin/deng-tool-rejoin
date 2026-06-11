@@ -479,7 +479,12 @@
     if (skel) skel.hidden = true;
     if (textEl) {
       textEl.hidden = false;
-      textEl.textContent = fmt(n) + ' downloads';
+      if (window.DengCountUpStats) {
+        textEl.classList.add('js-count-up');
+        window.DengCountUpStats.set(textEl, { to: n, format: 'integer', suffix: ' downloads', duration: 750 });
+      } else {
+        textEl.textContent = fmt(n) + ' downloads';
+      }
       wrap.classList.add('is-ready');
     }
   }
@@ -537,7 +542,12 @@
     if (skel) skel.hidden = true;
     if (textEl) {
       textEl.hidden = false;
-      textEl.textContent = fmt(n) + ' downloads';
+      if (window.DengCountUpStats) {
+        textEl.classList.add('js-count-up');
+        window.DengCountUpStats.set(textEl, { to: n, format: 'integer', suffix: ' downloads', duration: 750 });
+      } else {
+        textEl.textContent = fmt(n) + ' downloads';
+      }
       wrap.classList.add('is-ready');
     }
   }
