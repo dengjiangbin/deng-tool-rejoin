@@ -1,0 +1,44 @@
+{
+  "at": "2026-06-12T10:35:01.824Z",
+  "localBase": "http://127.0.0.1:8791",
+  "discordUserId": "915851106280681492",
+  "fishitDbPath": "C:\\Users\\Administrator\\Desktop\\DENG Fish It\\data\\deng-fish-it.sqlite",
+  "dbStatus": {
+    "dbPath": "C:\\Users\\Administrator\\Desktop\\DENG Fish It\\data\\deng-fish-it.sqlite",
+    "exists": true,
+    "readable": true,
+    "hasAppKv": true,
+    "hasFishCache": true,
+    "fishCacheBytes": 39908528,
+    "error": null
+  },
+  "direct": {
+    "available": true,
+    "statsState": "ok",
+    "emptyReason": null,
+    "secretCaught": 6962,
+    "forgottenCaught": 0,
+    "fishCardCount": 13,
+    "dailyWithData": 7,
+    "identityMatchMode": "discord_id_direct"
+  },
+  "api": {
+    "status": 200,
+    "ok": true,
+    "statsState": "ok",
+    "available": true,
+    "emptyReason": null,
+    "secretCaught": 6962,
+    "forgottenCaught": 0,
+    "fishCardCount": 13,
+    "dailyWithData": 7,
+    "debugDbPath": "C:\\Users\\Administrator\\Desktop\\DENG Fish It\\data\\deng-fish-it.sqlite"
+  },
+  "page": {
+    "status": 200,
+    "deployMarker": "TRACKER_DASHBOARD_CATCH_DB_2026_06_12",
+    "hasNewJs": true,
+    "hasDashboardStatusNotice": true
+  },
+  "pass": true
+}
