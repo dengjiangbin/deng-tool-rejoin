@@ -15,9 +15,9 @@ try { fishitDb = require('./fishitDb'); } catch (_) { fishitDb = null; }
 
 const SOURCE_ID = 'deng_fish_it_bot';
 const SOURCE_TYPE = 'deng_fish_it_bot_sqlite';
-const DEFAULT_DB_PATH = fishitDb?.DB_PATH || path.join(
-  __dirname, '..', '..', '..', 'DENG Fish It', 'data', 'deng-fish-it.sqlite',
-);
+const DEFAULT_DB_PATH = (fishitDb && typeof fishitDb.getDbPath === 'function')
+  ? fishitDb.getDbPath()
+  : path.join(__dirname, '..', '..', '..', 'DENG Fish It', 'data', 'deng-fish-it.sqlite');
 
 /** Authoritative Forgotten catalog key (admin-maintained in bot). */
 const KEY_FORGOTTEN = 'forgotten_fish';

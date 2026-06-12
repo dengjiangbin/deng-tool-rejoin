@@ -1,8 +1,8 @@
 'use strict';
 const express      = require('express');
+const compression  = require('compression');
 const helmet       = require('helmet');
 const session      = require('express-session');
-const rateLimit    = require('express-rate-limit');
 const ejsLayouts   = require('express-ejs-layouts');
 const path         = require('path');
 const fs           = require('fs');
@@ -14,10 +14,12 @@ const fishitRoutes = require('./fishitRoutes');
 const fishitTrackerRoutes = require('./fishitTrackerRoutes');
 const fishitGlobalAdminRoutes = require('./fishitGlobalAdminRoutes');
 const { FileSessionStore } = require('./sessionStore');
+const { resolveTrustProxySetting } = require('./rateLimitUtils');
 const packageJson = require('../package.json');
 
 const app = express();
 app.disable('x-powered-by');
+app.use(compression());
 
 function latestAssetStamp() {
   const publicDir = path.join(__dirname, '..', 'public');
@@ -105,24 +107,9 @@ app.use(helmet({
 }));
 
 // ---------------------------------------------------------------
-// Trust proxy (behind nginx/Caddy)
+// Trust proxy (Cloudflare / nginx / PM2 reverse proxy)
 // ---------------------------------------------------------------
-app.set('trust proxy', 1);
-
-// ---------------------------------------------------------------
-// Rate limiter (global – 200 req / 15 min per IP)
-// ---------------------------------------------------------------
-const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  skip: (req) => process.env.NODE_ENV === 'test'
-    || /^\/api\/monitor\/bridge\/(?:push|snapshot)\b/.test(req.path || '')
-    || /^\/api\/tracker\//.test(req.path || ''),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests, please try again later.' },
-});
-app.use(globalLimiter);
+app.set('trust proxy', resolveTrustProxySetting());
 
 // ---------------------------------------------------------------
 // Session (HttpOnly, Secure in prod, SameSite=Lax)
@@ -190,8 +177,10 @@ app.set('layout extractScripts', true);
 app.use('/public', express.static(path.join(__dirname, '..', 'public'), {
   maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
   setHeaders: (res, filePath) => {
-    if (/[\\/](css|js)[\\/][^\\/]+\.(css|js)$/.test(filePath)) {
-      res.setHeader('Cache-Control', 'no-store');
+    if (/[\\/]assets[\\/][^\\/]+\.[a-f0-9]{8,}\.(css|js)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else if (/[\\/](css|js|images)[\\/][^\\/]+\.(css|js|png|jpg|jpeg|webp|gif|svg|ico)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
     }
   },
 }));
@@ -199,7 +188,12 @@ app.use('/assets', express.static(path.join(__dirname, '..', 'public'), {
   maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
 }));
 app.use('/images', express.static(path.join(__dirname, '..', 'public', 'images'), {
-  maxAge: process.env.NODE_ENV === 'production' ? '1d' : 0,
+  maxAge: process.env.NODE_ENV === 'production' ? '7d' : 0,
+  setHeaders: (res, filePath) => {
+    if (/\.(png|jpg|jpeg|webp|gif|svg|ico)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=604800');
+    }
+  },
 }));
 
 // ---------------------------------------------------------------

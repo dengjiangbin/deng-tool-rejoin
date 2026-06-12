@@ -254,7 +254,7 @@ function displayablePlayerStats(stats) {
         observedAt: s.observedAt,
       };
     }
-    return null;
+    return s;
   }
   if (!hasPlayerStatValues(s)) return null;
   return s;

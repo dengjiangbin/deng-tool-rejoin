@@ -1,42 +1,38 @@
 ﻿<!DOCTYPE html>
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'INVENTORY_MOBILE_CONTROLS_2026_06_11' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
+<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'TRACKER_DASHBOARD_CATCH_DB_2026_06_12' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'INVENTORY_MOBILE_CONTROLS_2026_06_11' %>">
-  <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/inventory' %>">
+  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'TRACKER_DASHBOARD_CATCH_DB_2026_06_12' %>">
+  <link rel="icon" type="image/png" href="/public/img/deng-logo.png?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
+  <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/tracker' %>">
   <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
-  <title>DENG Inventory Tracker &mdash; Fish It</title>
+  <title>DENG Tracker &mdash; Fish It</title>
   <link rel="stylesheet" href="/public/css/logoutConfirm.css?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
   <link rel="stylesheet" href="<%= inventoryAssetCssUrl %>">
 </head>
 <body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11') %>">
 <div class="inventory-shell">
-  <aside class="inventory-sidebar" aria-label="Inventory setup">
+  <aside class="inventory-sidebar" aria-label="Tracker setup">
+    <div class="inventory-sidebar__top">
     <div class="inventory-sidebar__brand">
       <span class="inventory-sidebar__logo" aria-hidden="true">
         <img src="/public/img/deng-logo.png" alt="">
       </span>
       <div class="inventory-sidebar__titles">
-        <div class="inventory-sidebar__title">DENG Inventory</div>
+        <div class="inventory-sidebar__title">DENG Tracker</div>
         <div class="inventory-sidebar__subtitle">Fish It</div>
       </div>
     </div>
+    <nav class="inventory-main-nav" aria-label="Main sections">
+      <button type="button" class="inventory-main-nav__tab is-active" data-inventory-section="dashboard">Dashboard</button>
+      <button type="button" class="inventory-main-nav__tab" data-inventory-section="accounts">Live Tracker</button>
+    </nav>
+    </div>
     <div class="inventory-sidebar__spacer" aria-hidden="true"></div>
     <div class="inventory-sidebar__bottom">
-      <button type="button" class="inventory-privacy-toggle" id="hideUsernamesBtn" title="Hide usernames" aria-label="Hide usernames" aria-pressed="false">
-        <span class="inventory-privacy-toggle__label">
-          <span class="inventory-privacy-toggle__icon" id="hideUsernameIcon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path>
-              <circle cx="12" cy="12" r="3"></circle>
-            </svg>
-          </span>
-          <span>Hide Username</span>
-        </span>
-        <span class="hide-username-toggle" aria-hidden="true"></span>
-      </button>
-      <div class="inventory-profile-card">
+      <div class="inventory-sidebar__controls profile-control-row">
+      <div class="inventory-profile-card discord-profile-pill">
         <% if (viewer.hasDiscordAvatar) { %>
           <img src="<%= viewer.avatarUrl %>" alt="" class="inventory-profile-card__avatar" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">
           <div class="inventory-profile-card__avatar-placeholder" style="display:none"><%= viewer.initial %></div>
@@ -48,27 +44,39 @@
           <div class="inventory-profile-card__sub"><%= viewer.profileLabel %></div>
         </div>
       </div>
-      <div class="inventory-sidebar__actions">
-        <button type="button" class="inventory-action-btn inventory-action-btn--script" id="sidebarScriptBtn" title="Copy tracker script" aria-label="Copy tracker script">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M15 12h-5"></path>
-            <path d="M15 8h-5"></path>
-            <path d="M19 17V5a2 2 0 0 0-2-2H8"></path>
-            <path d="M5 21h12a2 2 0 0 0 2-2v-1H7a2 2 0 0 1-2-2V5a2 2 0 0 1-2 2v14a2 2 0 0 0 2 2Z"></path>
-          </svg>
-          <span>Script</span>
-        </button>
-        <form method="POST" action="<%= typeof logoutUrl !== 'undefined' ? logoutUrl : '/auth/logout' %>">
-          <input type="hidden" name="_csrf" value="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
-          <button type="button" class="inventory-action-btn inventory-action-btn--logout" data-logout-confirm title="Logout" aria-label="Logout">
+      <button type="button" class="inventory-privacy-toggle inventory-sidebar__privacy hide-username-toggle-btn" id="hideUsernamesBtn" title="Hide usernames" aria-label="Hide usernames" aria-pressed="false">
+        <span class="inventory-privacy-toggle__label">
+          <span class="inventory-privacy-toggle__icon" id="hideUsernameIcon" aria-hidden="true">
             <svg viewBox="0 0 24 24" focusable="false">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-              <path d="M16 17l5-5-5-5"></path>
-              <path d="M21 12H9"></path>
+              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
             </svg>
-            <span>Logout</span>
-          </button>
-        </form>
+          </span>
+          <span class="inventory-privacy-toggle__text inventory-privacy-toggle__text--full">Hide Username</span>
+          <span class="inventory-privacy-toggle__text inventory-privacy-toggle__text--short">Hide</span>
+        </span>
+        <span class="hide-username-toggle" aria-hidden="true"></span>
+      </button>
+      <button type="button" class="inventory-action-btn inventory-action-btn--script script-button" id="sidebarScriptBtn" title="Copy tracker script" aria-label="Copy tracker script">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M15 12h-5"></path>
+          <path d="M15 8h-5"></path>
+          <path d="M19 17V5a2 2 0 0 0-2-2H8"></path>
+          <path d="M5 21h12a2 2 0 0 0 2-2v-1H7a2 2 0 0 1-2-2V5a2 2 0 0 1-2 2v14a2 2 0 0 0 2 2Z"></path>
+        </svg>
+        <span>Script</span>
+      </button>
+      <form method="POST" action="<%= typeof logoutUrl !== 'undefined' ? logoutUrl : '/auth/logout' %>" class="profile-control-row__logout">
+        <input type="hidden" name="_csrf" value="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
+        <button type="button" class="inventory-action-btn inventory-action-btn--logout logout-button" data-logout-confirm title="Logout" aria-label="Logout">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <path d="M16 17l5-5-5-5"></path>
+            <path d="M21 12H9"></path>
+          </svg>
+          <span>Logout</span>
+        </button>
+      </form>
       </div>
     </div>
   </aside>
@@ -77,7 +85,7 @@
   <div class="inner">
 
     <header class="header">
-      <h1>DENG Inventory Tracker</h1>
+      <h1>DENG Tracker</h1>
       <p class="header__lead">
         <span class="header__lead-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" focusable="false">
@@ -90,6 +98,61 @@
         <span>Track Your Fish It Accounts</span>
       </p>
     </header>
+
+    <section id="inventoryDashboardPanel" class="inventory-panel inventory-panel--dashboard" aria-label="Dashboard">
+      <div class="dashboard-toolbar">
+        <div class="dashboard-period-filter" role="tablist" aria-label="Dashboard period">
+          <button type="button" class="dashboard-period-filter__btn is-active" data-dashboard-period="all">ALL TIME</button>
+          <button type="button" class="dashboard-period-filter__btn" data-dashboard-period="30d">30D</button>
+          <button type="button" class="dashboard-period-filter__btn" data-dashboard-period="7d">7D</button>
+          <button type="button" class="dashboard-period-filter__btn" data-dashboard-period="ytd">YTD</button>
+          <button type="button" class="dashboard-period-filter__btn" data-dashboard-period="tdy">TDY</button>
+        </div>
+        <div class="dashboard-period-custom">
+          <button type="button" class="dashboard-period-custom__toggle" id="dashboardCustomToggle" aria-expanded="false" aria-controls="dashboardCustomPanel">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>
+            <span>Custom Range</span>
+          </button>
+          <div class="dashboard-period-custom__panel" id="dashboardCustomPanel" hidden>
+            <div class="dashboard-period-custom__field">
+              <label for="dashboardCustomFrom">From</label>
+              <input type="date" id="dashboardCustomFrom" aria-label="Custom start date">
+            </div>
+            <div class="dashboard-period-custom__field">
+              <label for="dashboardCustomTo">To</label>
+              <input type="date" id="dashboardCustomTo" aria-label="Custom end date">
+            </div>
+            <button type="button" class="dashboard-period-custom__apply" id="dashboardCustomApply">Apply</button>
+          </div>
+        </div>
+      </div>
+      <p class="dashboard-status-notice" id="dashboardStatusNotice" hidden role="status"></p>
+      <div class="inventory-stats dashboard-stats" aria-label="Global catch summary">
+        <div class="stat-card stat-card--secret">
+          <div class="stat-card__label">Secret Fish</div>
+          <div class="stat-card__value js-count-up" id="dashboardSecretCaught" data-count-format="integer" data-count-duration="1200">0</div>
+        </div>
+        <div class="stat-card stat-card--forgotten">
+          <div class="stat-card__label">Forgotten Fish</div>
+          <div class="stat-card__value js-count-up" id="dashboardForgottenCaught" data-count-format="integer" data-count-duration="1200">0</div>
+        </div>
+      </div>
+      <div class="dashboard-chart-card">
+        <h2 class="dashboard-chart-card__title">Fish Caught Per Day</h2>
+        <div class="dashboard-chart-wrap" id="dashboardChartWrap">
+          <svg class="dashboard-chart" id="dashboardChart" viewBox="0 0 320 132" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div class="dashboard-chart-labels" id="dashboardChartLabels"></div>
+        </div>
+        <p class="dashboard-chart-empty" id="dashboardChartEmpty" hidden>No catch data for this period.</p>
+      </div>
+      <div class="dashboard-fish-section">
+        <h2 class="dashboard-fish-section__title">Caught Fish</h2>
+        <div id="dashboardFishGrid" class="dashboard-fish-grid" aria-label="Fish caught in selected period"></div>
+        <p class="dashboard-fish-empty" id="dashboardFishEmpty" hidden>No fish caught in this period.</p>
+      </div>
+    </section>
+
+    <section id="inventoryAccountsPanel" class="inventory-panel inventory-panel--accounts" hidden aria-label="Live Tracker">
 
     <div class="inventory-stats" id="inventoryStats" aria-label="Inventory summary">
       <div class="stat-card stat-card--online">
@@ -148,6 +211,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
           <input id="accountsSearchInput" type="search" placeholder="Search players..." autocomplete="off" spellcheck="false" aria-label="Search players">
         </label>
+        <div class="accounts-toolbar__controls">
         <div class="accounts-filters" role="group" aria-label="Account status filters">
           <button type="button" class="accounts-filter is-active" data-account-filter="all">All</button>
           <button type="button" class="accounts-filter" data-account-filter="online">Online</button>
@@ -194,9 +258,20 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
           </button>
         </div>
+        </div>
       </div>
       <div class="accounts-table-wrap" id="accountsTableWrap">
         <table class="accounts-table" aria-label="Account leaderboard">
+          <colgroup>
+            <col class="col-index">
+            <col class="col-status">
+            <col class="col-username">
+            <col class="col-coin">
+            <col class="col-caught">
+            <col class="col-rare">
+            <col class="col-backpack">
+            <col class="col-actions">
+          </colgroup>
           <thead>
             <tr>
               <th scope="col" class="col-index">#</th>
@@ -226,12 +301,18 @@
           <input class="inventory-search__input" type="search" placeholder="Search fish or stones..." autocomplete="off" spellcheck="false" aria-label="Search fish or stones" data-bulk-search-input>
           <button class="inventory-search__clear" type="button" aria-label="Clear search" data-bulk-search-clear>Clear</button>
         </div>
+        <div class="inventory-upload-indicator is-stale" data-inventory-upload-indicator aria-label="Fish and stone upload status">
+          <span class="status-dot dead" data-inventory-upload-dot aria-hidden="true"></span>
+          <span class="inventory-upload-indicator__text" data-inventory-upload-text></span>
+        </div>
       </div>
       <div id="bulkInventoryBody"></div>
     </div>
 
     <div id="trackerList"></div>
     </div>
+
+    </section>
 
     <div class="loadstring-box<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? ' is-compact' : ' loadstring-box--desktop-hidden' %>">
       <h3>

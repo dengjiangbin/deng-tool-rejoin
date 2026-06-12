@@ -18,7 +18,7 @@ const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
-const rateLimit = require('express-rate-limit');
+const { createUserRateLimit } = require('./rateLimitUtils');
 const supabase = require('./db');
 const fishit = require('./fishitDb');
 const globalDb = require('./fishitGlobalDb');
@@ -39,13 +39,10 @@ const FALLBACKS = {
   forgotten: '/public/img/fishit/fallback-forgotten.svg',
 };
 
-const fishitLimiter = rateLimit({
+const fishitLimiter = createUserRateLimit({
+  keyPrefix: 'fishit-read:',
   windowMs: 60 * 1000,
-  max: 120,
-  skip: () => process.env.NODE_ENV === 'test',
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'too_many_requests', message: 'Too many requests, please slow down.' },
+  max: 240,
 });
 
 function sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
@@ -111,7 +108,7 @@ router.get('/api/fishit/public-summary', fishitLimiter, (_req, res) => {
     const botSource = {
       service: 'fishitDb',
       store: 'deng-fish-it-bot',
-      dbPath: fishit.DB_PATH,
+      dbPath: typeof fishit.getDbPath === 'function' ? fishit.getDbPath() : fishit.DB_PATH,
     };
     res.set('Cache-Control', 'public, max-age=15');
     return ok(res, {

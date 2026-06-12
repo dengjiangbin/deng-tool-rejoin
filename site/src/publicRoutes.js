@@ -33,9 +33,11 @@ router.get('/login', (req, res) => {
     return res.redirect(returnPath || '/dashboard');
   }
   if (returnPath) req.session.authReturnTo = returnPath;
+  const apkEmbed = req.query.apk === '1' || req.query.apk === 'true';
   return sendPublicPage(res, 'login', {
     title: 'Sign In - DENG Tool',
     authReturnTo: returnPath || '',
+    apkEmbed,
   });
 });
 

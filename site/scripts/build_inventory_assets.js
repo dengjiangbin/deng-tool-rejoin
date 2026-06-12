@@ -9,7 +9,7 @@ const EJS_PATH = path.join(ROOT, 'views', 'fishit_tracker.ejs');
 const SOURCE_PATH = path.join(ROOT, 'src', 'inventory', 'fishit_tracker.source.ejs');
 const OUT_DIR = path.join(ROOT, 'public', 'assets');
 const MANIFEST_PATH = path.join(ROOT, 'src', 'inventoryAssetManifest.json');
-const MARKER = 'INVENTORY_MOBILE_CONTROLS_2026_06_11';
+const MARKER = 'TRACKER_DASHBOARD_CATCH_DB_2026_06_12';
 
 const trackerRarityStyle = require('../src/fishitTrackerRarityStyle');
 const fishitStoneDisplayMap = require('../src/fishitStoneDisplayMap');
@@ -64,6 +64,14 @@ function transformJs(rawJs) {
     'const INITIAL_USERNAME = __CFG__.initialUsername || \'\';',
   );
   js = js.replace(
+    /const CSRF_CFG = <%-[\s\S]*?%>;\s*function readRuntimeCsrfToken\(\) \{[\s\S]*?\}\s*const CSRF_TOKEN = readRuntimeCsrfToken\(\);/,
+    "const CSRF_CFG = __CFG__.csrfToken || '';\n  function readRuntimeCsrfToken(){if(CSRF_CFG)return CSRF_CFG;try{const hidden=document.querySelector('input[name=\\\"_csrf\\\"]');if(hidden&&hidden.value)return hidden.value;}catch(_){}return '';}\n  const CSRF_TOKEN = readRuntimeCsrfToken();",
+  );
+  js = js.replace(
+    /const CSRF_TOKEN = <%-[\s\S]*?%>;/,
+    "const CSRF_CFG = __CFG__.csrfToken || '';\n  function readRuntimeCsrfToken(){if(CSRF_CFG)return CSRF_CFG;try{const hidden=document.querySelector('input[name=\\\"_csrf\\\"]');if(hidden&&hidden.value)return hidden.value;}catch(_){}return '';}\n  const CSRF_TOKEN = readRuntimeCsrfToken();",
+  );
+  js = js.replace(
     /const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" \? trackerUiDeployMarker : "[^"]+" %>';/,
     'const TRACKER_UI_DEPLOY = __CFG__.trackerUiDeployMarker || \'\';',
   );
@@ -77,6 +85,9 @@ function transformJs(rawJs) {
     /const RENDER_BUILD  = DEBUG_INVENTORY[\s\S]*?const PUBLIC_API_BUILD = DEBUG_INVENTORY[\s\S]*?: '';/,
     'const RENDER_BUILD = DEBUG_INVENTORY ? (__CFG__.renderBuild || \'\') : \'\';\n  const PUBLIC_API_BUILD = DEBUG_INVENTORY ? (__CFG__.publicApiBuild || \'\') : \'\';',
   );
+  if (/<%|<%-|<%=/.test(js)) {
+    throw new Error('inventory asset build left unresolved EJS in JS output');
+  }
   return `(function(){'use strict';function readInventoryCfg(){const el=document.getElementById('inventory-runtime');if(!el)return{};try{return JSON.parse(el.textContent||'{}');}catch(_){return{};}}const __CFG__=readInventoryCfg();\n${js}\n}());`;
 }
 

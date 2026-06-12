@@ -3,9 +3,9 @@
  * Fish It Backpack Tracker – API routes + dashboard page.
  *
  * Public routes (no authentication required):
- *   GET  /inventory                     – serve the live inventory dashboard UI
+ *   GET  /tracker                     – serve the live tracker + inventory dashboard UI
  *   GET  /tracker.lua                   – redirect to latest cache-busted dist/tracker.lua
- *   GET  /tracker, /fishit-tracker        – 301 redirect to /inventory (legacy, not public)
+ *   GET  /inventory, /fishit-tracker    – 301 redirect to /tracker (legacy aliases)
  *   POST /api/fishit-tracker/update-backpack – canonical inventory POST (Lua v10J2+)
  *   POST /api/tracker/update-backpack          – backward-compatible alias
  *   GET  /api/fishit-tracker/get-backpack/:user – canonical live query
@@ -29,14 +29,15 @@
  */
 
 const express   = require('express');
-const rateLimit = require('express-rate-limit');
 const path      = require('path');
 const fs        = require('fs');
 const crypto    = require('crypto');
 const { execFileSync } = require('child_process');
+const { createUserRateLimit } = require('./rateLimitUtils');
 
 const catalogStore = require('./fishitCatalogStore');
 const playerStatsStore = require('./fishitPlayerStats');
+const liveTrackerSerializer = require('./fishitLiveTrackerSerializer');
 const fishImageAssets = require('./fishitFishImageAssets');
 const learnedFishCatalog = require('./fishitLearnedFishCatalog');
 const catchDelta = require('./fishitCatalogCatchDelta');
@@ -56,6 +57,10 @@ const fishitStoneDisplayMap = require('./fishitStoneDisplayMap');
 const stoneImageAssets = require('./fishitStoneImageAssets');
 const inventorySort = require('./fishitInventorySort');
 const inventoryAssets = require('./inventoryAssets');
+const inventoryTrackedAccounts = require('./inventoryTrackedAccounts');
+const inventorySession = require('./inventorySession');
+const supabase = require('./db');
+const { verifyCsrf } = require('./auth');
 const {
   CLEAN_TRACKER_LOADSTRING,
   DEBUG_TRACKER_LOADSTRING,
@@ -83,6 +88,10 @@ const catchNameParser = require('./fishitCatchNameParser');
 const canonicalCatalog = require('./fishitCanonicalCatalog');
 const manualVerifiedCatalog = require('./fishitManualVerifiedCatalog');
 const sessionStore = require('./fishitSessionStore');
+const { computeCanonicalTrackerUsers } = require('./fishitCanonicalTrackerUsers');
+const uploadAccountStatus = require('./fishitTrackerUploadStatus');
+const snapshotCompleteness = require('./fishitSnapshotCompleteness');
+const trackerPerf = require('./fishitTrackerPerformance');
 
 learnedFishCatalog.purgePoisonedMappings();
 for (const row of learnedFishCatalog.getBlockedMappings()) {
@@ -122,7 +131,7 @@ function isTrustedClientBuild(build) {
 }
 
 function buildPlayerStatsProof(raw, data, nowFallback) {
-  const connected = isSessionLive(data);
+  const connected = deriveAccountPresenceStatus(data).accountPresenceLive === true;
   const acceptedUploadFresh = connected && !!(data && data.lastUploadAcceptedAt);
   const displayable = resolvePlayerStatsForApi(raw);
   const trusted = playerStatsStore.isTrustedPlayerStats(raw);
@@ -206,11 +215,13 @@ function applyPlayerStatsFields(existing, body, now) {
     : (playerStatsStore.isTrustedPlayerStats(existing) ? existing : null);
   const out = {};
   if (stored) out.playerStats = stored;
+  const hasStatsPayload = !!(body.playerStats || body.playerStatsDebug);
   const hasFreshStats = !!(incoming && playerStatsStore.hasPlayerStatValues(incoming));
-  if (stored && (hasFreshStats
+  if (stored && (hasFreshStats || hasStatsPayload
     || (stored.source === 'missing' && isLiveRobloxUpload(body)))) {
     out.playerStatsUpdatedAt = now;
     out.lastStatsUploadAt = now;
+    out.playerStats = { ...stored, statsAt: now };
   }
   const debug = playerStatsStore.sanitisePlayerStatsDebug(body.playerStatsDebug);
   if (debug && stored && playerStatsStore.isTrustedPlayerStats(stored)) out.playerStatsDebug = debug;
@@ -220,7 +231,24 @@ function applyPlayerStatsFields(existing, body, now) {
 // Optional Fish It DB image resolver (real fish artwork). Loaded lazily and
 // defensively so the tracker keeps working even if the DB module is absent.
 let fishitDb = null;
-try { fishitDb = require('./fishitDb'); } catch (_) { fishitDb = null; }
+try {
+  fishitDb = require('./fishitDb');
+  if (fishitDb && typeof fishitDb.getDbConnectionInfo === 'function') {
+    const dbBoot = fishitDb.getDbConnectionInfo();
+    console.log('[fishit-tracker] catch DB startup', JSON.stringify({
+      dbPath: dbBoot.dbPath,
+      exists: dbBoot.exists,
+      readable: dbBoot.readable,
+      hasFishCache: dbBoot.hasFishCache,
+      fishCacheBytes: dbBoot.fishCacheBytes,
+      error: dbBoot.error,
+      marker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
+    }));
+  }
+} catch (err) {
+  console.error('[fishit-tracker] fishitDb load failed:', err && err.message ? err.message : err);
+  fishitDb = null;
+}
 
 function recordGlobalObservationsFromItems(items, ctx = {}) {
   if (!Array.isArray(items) || process.env.FISHIT_GLOBAL_OBSERVATIONS === '0') return { written: 0 };
@@ -267,17 +295,110 @@ function dbImageFor(name) {
 }
 
 const router = express.Router();
+const CANONICAL_TRACKER_PATH = '/tracker';
 
 function requireInventorySession(req, res, next) {
   if (process.env.NODE_ENV === 'test') return next();
-  const sessionUser = req.session && req.session.user;
-  if (sessionUser) return next();
-  const returnTo = encodeURIComponent(req.originalUrl || '/inventory');
+  if (inventorySession.hasInventorySession(req)) return next();
+  const returnTo = encodeURIComponent(req.originalUrl || CANONICAL_TRACKER_PATH);
   if (req.session) {
     req.session.flash = { error: 'Please login with Discord first.' };
   }
   return res.redirect(302, `/login?return=${returnTo}`);
 }
+
+async function resolveInventoryOwnerId(req) {
+  const discordId = inventorySession.getInventoryDiscordUserId(req);
+  if (discordId) return discordId;
+  const header = req.headers.authorization || '';
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  if (!match) return null;
+  try {
+    const tokenHash = crypto.createHash('sha256').update(String(match[1]).trim()).digest('hex');
+    const { data: row } = await supabase
+      .from('monitor_app_sessions')
+      .select('owner_discord_user_id, expires_at, revoked_at')
+      .eq('token_hash', tokenHash)
+      .maybeSingle();
+    if (row && !row.revoked_at && row.owner_discord_user_id
+        && new Date(row.expires_at).getTime() > Date.now()) {
+      return String(row.owner_discord_user_id);
+    }
+  } catch (_) { /* fall through */ }
+  return null;
+}
+
+async function repairInventorySessionMiddleware(req, _res, next) {
+  try {
+    await inventorySession.repairInventorySession(req);
+  } catch (_) { /* non-blocking */ }
+  return next();
+}
+
+async function requireInventoryApiAuth(req, res, next) {
+  const ownerId = inventorySession.getInventoryDiscordUserId(req);
+  if (!ownerId) {
+    inventorySession.logInventoryAccountsAction(req, 'auth_rejected', {
+      reason: 'missing_discord_user_id',
+      hasSessionUser: !!inventorySession.getSessionUser(req),
+      sessionKeys: req.session ? Object.keys(req.session) : [],
+    });
+    return res.status(401).json({
+      ok: false,
+      error: 'auth_required',
+      message: 'Login with Discord first.',
+    });
+  }
+  req.inventoryOwnerDiscordId = ownerId;
+  req.inventoryOwnerSiteUserId = inventorySession.getInventorySiteUserId(req);
+  return next();
+}
+
+function requireInventoryApiCsrf(req, res, next) {
+  if (process.env.NODE_ENV === 'test') return next();
+  if (!inventorySession.verifyInventoryCsrf(req)) {
+    inventorySession.logInventoryAccountsAction(req, 'csrf_rejected', {
+      headerToken: req.headers['x-csrf-token'] ? 'present' : 'missing',
+      sessionToken: inventorySession.getInventoryCsrfToken(req) ? 'present' : 'missing',
+      sessionKeys: req.session ? Object.keys(req.session) : [],
+      csrfMatch: false,
+    });
+    return res.status(403).json({
+      ok: false,
+      error: 'invalid_csrf',
+      message: 'Invalid request token. Refresh the page and try again.',
+    });
+  }
+  return next();
+}
+
+function inventoryAccountsErrorResponse(err, fallbackMessage) {
+  if (err && err.code === 'inventory_accounts_table_missing') {
+    return {
+      status: 503,
+      body: {
+        ok: false,
+        error: 'storage_unavailable',
+        message: 'Saved account storage is not ready yet. Please try again later.',
+      },
+    };
+  }
+  const errorCode = err && err.code ? String(err.code) : 'save_failed';
+  const detail = err && err.message ? String(err.message).slice(0, 240) : '';
+  return {
+    status: 500,
+    body: {
+      ok: false,
+      error: errorCode,
+      message: detail || fallbackMessage || 'Could not save tracked account.',
+      detail: detail || undefined,
+      storagePath: process.env.INVENTORY_TRACKED_ACCOUNTS_PATH
+        || path.join(__dirname, '..', '..', 'data', 'inventory_tracked_accounts.json'),
+    },
+  };
+}
+
+const inventoryAccountsJson = express.json({ limit: '32kb' });
 
 function buildInventoryViewer(sessionUser) {
   const raw = sessionUser && typeof sessionUser === 'object' ? sessionUser : {};
@@ -311,8 +432,12 @@ function buildInventoryViewer(sessionUser) {
 router.use((req, _res, next) => {
   if (process.env.NODE_ENV !== 'test') return next();
   const path = String(req.path || '');
-  const inTrackerScope = path === '/inventory'
+  const inTrackerScope = path === '/tracker'
+    || path.startsWith('/tracker/')
+    || path === '/inventory'
     || path.startsWith('/inventory/')
+    || path.startsWith('/api/inventory/')
+    || path.startsWith('/api/tracker/')
     || path.startsWith('/api/fishit-tracker/');
   if (!inTrackerScope) return next();
   if (!req.session) {
@@ -334,6 +459,15 @@ router.use((req, _res, next) => {
     };
   }
   if (!req.session.csrfToken) req.session.csrfToken = 'test-csrf-token';
+  next();
+});
+
+router.use(repairInventorySessionMiddleware);
+
+router.use('/api/inventory', (req, res, next) => {
+  const assetUrls = inventoryAssets.inventoryAssetUrls();
+  res.set('X-Inventory-Asset-Marker', assetUrls.marker || '');
+  res.set('X-Inventory-Asset-Js', assetUrls.jsUrl || '');
   next();
 });
 
@@ -490,6 +624,7 @@ router.use((req, res, next) => {
   const p = req.path || '';
   if (p === '/tracker' || p === '/inventory' || p === '/fishit-tracker'
       || p.startsWith('/api/fishit-tracker/')
+      || p.startsWith('/api/inventory/')
       || p.startsWith('/api/tracker/')) {
     res.set(NO_STORE_HEADERS);
   }
@@ -558,27 +693,26 @@ async function persistSessionState(key, baseUrl) {
 }
 
 // ── Rate limiters ─────────────────────────────────────────────────
-// POST: one live Roblox tracker per user — allow startup burst + periodic sync.
-const postLimiter = rateLimit({
+// Per-user keys (Discord ID / session / IP). No site-wide bucket.
+// POST: live Roblox tracker sync — allow startup burst + periodic sync.
+const postLimiter = createUserRateLimit({
+  keyPrefix: 'tracker-post:',
   windowMs: 60 * 1000,
   max: 30,
-  skip: () => process.env.NODE_ENV === 'test',
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => {
-    res.set('Cache-Control', 'no-store');
-    return res.status(429).json({ error: 'too_many_requests', message: 'Slow down.' });
-  },
 });
 
-// GET: frontend polls every 2500 ms = ~24 req/min, so 60/min is comfortable.
-const getLimiter = rateLimit({
-  windowMs: 60 * 1000,   // 1 minute
-  max: 60,
-  skip: () => process.env.NODE_ENV === 'test',
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'too_many_requests', message: 'Slow down.' },
+// GET: frontend polls every 2500 ms (~24 req/min/user) — generous headroom.
+const getLimiter = createUserRateLimit({
+  keyPrefix: 'tracker-get:',
+  windowMs: 60 * 1000,
+  max: 180,
+});
+
+// Inventory account mutations — protect add/delete/migrate only.
+const inventoryWriteLimiter = createUserRateLimit({
+  keyPrefix: 'inventory-write:',
+  windowMs: 60 * 1000,
+  max: 40,
 });
 
 // ── Input validation ──────────────────────────────────────────────
@@ -2704,7 +2838,7 @@ function buildTrackerPageLocals(req) {
   const assetUrls = inventoryAssets.inventoryAssetUrls();
   const locals = {
     layout: false,
-    title: 'DENG Inventory Tracker — Fish It',
+    title: 'DENG Tracker — Fish It',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
     trackerUiDeployMarker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
@@ -2714,13 +2848,17 @@ function buildTrackerPageLocals(req) {
       debugInventory,
       apkEmbed,
       initialUsername: resolveInitialUsername(req),
+      csrfToken: session && session.csrfToken ? session.csrfToken : '',
+      inventoryAssetMarker: assetUrls.marker || '',
       trackerUiDeployMarker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
-      trackerLoadstring: CLEAN_TRACKER_LOADSTRING,
-      debugTrackerLoadstring: debugInventory ? DEBUG_TRACKER_LOADSTRING : '',
-      renderBuild: debugInventory ? PUBLIC_RENDER_BUILD : '',
-      publicApiBuild: debugInventory ? PUBLIC_API_BUILD : '',
+      ...(debugInventory ? {
+        trackerLoadstring: CLEAN_TRACKER_LOADSTRING,
+        debugTrackerLoadstring: DEBUG_TRACKER_LOADSTRING,
+        renderBuild: PUBLIC_RENDER_BUILD,
+        publicApiBuild: PUBLIC_API_BUILD,
+      } : {}),
     },
-    canonicalInventoryPath: '/inventory',
+    canonicalInventoryPath: CANONICAL_TRACKER_PATH,
     initialUsername: resolveInitialUsername(req),
     trackerRarityCardCss: trackerRarityStyle.buildFtCardRarityCss(),
     trackerRarityJsBootstrap: trackerRarityStyle.buildTrackerRarityJsBootstrap(),
@@ -2732,7 +2870,7 @@ function buildTrackerPageLocals(req) {
     debugTrackerLoadstring: debugInventory ? DEBUG_TRACKER_LOADSTRING : '',
     user: sessionUser,
     viewer,
-    scriptUrl: '/inventory',
+    scriptUrl: CANONICAL_TRACKER_PATH,
     logoutUrl: '/auth/logout',
     csrfToken: session && session.csrfToken ? session.csrfToken : '',
     inventorySidebarSetupProof: {
@@ -2764,7 +2902,8 @@ function buildTrackerPageLocals(req) {
     inventoryAccessProof: {
       marker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
       safeViewerLocals: true,
-      inventoryPaths: ['/inventory', '/inventory/'],
+      inventoryPaths: [CANONICAL_TRACKER_PATH, `${CANONICAL_TRACKER_PATH}/`],
+      legacyInventoryRedirect: '/inventory -> /tracker',
       unauthenticatedRedirect: '/?return=',
       never500OnMissingProfileFields: true,
     },
@@ -2793,7 +2932,7 @@ function renderTrackerPage(req, res, next) {
     res.set('X-Tracker-Template-Version', trackerTemplateVersion());
     return res.render('fishit_tracker', locals);
   } catch (err) {
-    console.error('[fishit-tracker] /inventory render failed:',
+    console.error('[fishit-tracker] /tracker render failed:',
       err && err.stack ? err.stack : err);
     return next(err);
   }
@@ -2802,7 +2941,7 @@ function renderTrackerPage(req, res, next) {
 function redirectLegacyInventoryRoute(req, res) {
   const qIndex = req.url.indexOf('?');
   const suffix = qIndex >= 0 ? req.url.slice(qIndex) : '';
-  return res.redirect(301, `/inventory${suffix}`);
+  return res.redirect(301, `${CANONICAL_TRACKER_PATH}${suffix}`);
 }
 
 router.get('/tracker.lua', (_req, res) => {
@@ -2811,10 +2950,278 @@ router.get('/tracker.lua', (_req, res) => {
   return res.redirect(302, PROTECTED_TRACKER_RAW_URL_CACHE_BUST);
 });
 
-router.get('/inventory', requireInventorySession, renderTrackerPage);
-router.get('/inventory/', requireInventorySession, renderTrackerPage);
-router.get('/tracker', redirectLegacyInventoryRoute);
+router.get('/tracker', requireInventorySession, renderTrackerPage);
+router.get('/tracker/', requireInventorySession, renderTrackerPage);
+router.get('/inventory', redirectLegacyInventoryRoute);
+router.get('/inventory/', redirectLegacyInventoryRoute);
 router.get('/fishit-tracker', redirectLegacyInventoryRoute);
+
+async function handleTrackerDashboard(req, res) {
+  res.set(NO_STORE_HEADERS);
+  const queryStartedAt = Date.now();
+  const includeDebug = trackerPerf.isDebugRequest(req);
+  try {
+    if (!fishitDb || typeof fishitDb.getOwnerDashboard !== 'function') {
+      return res.status(503).json({
+        ok: false,
+        available: false,
+        statsState: 'error',
+        error: 'fishit_db_unavailable',
+        emptyReason: 'bot_db_not_connected',
+        message: 'DENG Fish It Bot database is not available.',
+      });
+    }
+    const period = fishitDb.normalizeDashboardPeriod(req.query.period);
+    const rangeFrom = req.query.from || '';
+    const rangeTo = req.query.to || '';
+    const cacheKey = trackerPerf.dashboardCacheKey(
+      req.inventoryOwnerDiscordId,
+      period,
+      rangeFrom,
+      rangeTo,
+    );
+    if (!includeDebug) {
+      const cached = trackerPerf.getCachedDashboard(cacheKey);
+      if (cached) {
+        if (includeDebug) res.set('X-Dashboard-Cache', 'hit');
+        return res.status(200).json(cached);
+      }
+    }
+    const trackedAccounts = await inventoryTrackedAccounts.listTrackedAccounts(req.inventoryOwnerDiscordId);
+    const sessionUser = req.session && req.session.user ? req.session.user : null;
+    const authDiscordUsername = sessionUser
+      ? (sessionUser.discord_username || sessionUser.username || null)
+      : null;
+    const payload = fishitDb.getOwnerDashboard(
+      req.inventoryOwnerDiscordId,
+      trackedAccounts,
+      period,
+      {
+        from: rangeFrom,
+        to: rangeTo,
+        queryStartedAt: queryStartedAt,
+        authDiscordUsername,
+      },
+    );
+    if (payload.error === 'invalid_custom_range') {
+      return res.status(400).json({
+        ok: false,
+        available: false,
+        error: 'invalid_custom_range',
+        message: 'Invalid custom date range.',
+      });
+    }
+    console.log('[tracker-dashboard]', JSON.stringify({
+      scope: payload.scope,
+      discordUserId: payload.discordUserId,
+      trackedAccountCount: payload.trackedAccountCount,
+      period: payload.period,
+      available: payload.available,
+      statsState: payload.statsState || null,
+      emptyReason: payload.emptyReason || null,
+      dbPath: fishitDb.getDbPath ? fishitDb.getDbPath() : null,
+      dbStatus: fishitDb.getDbConnectionInfo ? fishitDb.getDbConnectionInfo() : null,
+      dbSource: payload.debug && payload.debug.dbSource,
+      selectedRange: payload.debug && payload.debug.selectedRange,
+      identityMatchMode: payload.debug && payload.debug.identityMatchMode,
+      matchedBotUserId: payload.debug && payload.debug.matchedBotUserId,
+      matchedBotUsers: payload.debug && payload.debug.matchedBotUsers,
+      allTimeCatchRows: payload.debug && payload.debug.allTimeCatchRows,
+      totalCatchRows: payload.debug && payload.debug.totalCatchRows,
+      filteredCatchRows: payload.debug && payload.debug.filteredCatchRows,
+      secretCount: payload.debug && payload.debug.secretCount,
+      forgottenCount: payload.debug && payload.debug.forgottenCount,
+      caughtFishCount: payload.debug && payload.debug.caughtFishCount,
+      fishCardCount: payload.debug && payload.debug.fishCardCount,
+      firstCatchAt: payload.debug && payload.debug.firstCatchAt,
+      lastCatchAt: payload.debug && payload.debug.lastCatchAt,
+      dailyRows: payload.debug && payload.debug.dailyRows,
+      source: payload.source,
+      error: payload.error || null,
+      queryMs: Date.now() - queryStartedAt,
+      cached: false,
+    }));
+    const response = trackerPerf.buildDashboardResponse(payload, includeDebug);
+    if (!includeDebug && !payload.error && payload.statsState !== 'error') {
+      trackerPerf.setCachedDashboard(cacheKey, response);
+    }
+    if (includeDebug) {
+      res.set('X-Dashboard-Query-Ms', String(Date.now() - queryStartedAt));
+      res.set('X-Dashboard-Cache', 'miss');
+    }
+    return res.status(200).json(response);
+  } catch (err) {
+    console.error('[tracker-dashboard] failed:', err && err.message ? err.message : err);
+    return res.status(500).json({
+      ok: false,
+      available: false,
+      statsState: 'error',
+      error: 'dashboard_failed',
+      emptyReason: 'dashboard_unavailable',
+      message: 'Could not load dashboard stats.',
+    });
+  }
+}
+
+router.get('/api/tracker/dashboard', requireInventoryApiAuth, handleTrackerDashboard);
+router.get('/api/inventory/dashboard', requireInventoryApiAuth, handleTrackerDashboard);
+
+async function handleAccountStatus(req, res) {
+  try {
+    const serverNowMs = Date.now();
+    const serverNow = new Date(serverNowMs).toISOString();
+    const trackedAccounts = await inventoryTrackedAccounts.listTrackedAccounts(req.inventoryOwnerDiscordId);
+    const accounts = (Array.isArray(trackedAccounts) ? trackedAccounts : []).map((acct) => {
+      const usernameKey = acct.robloxUsernameKey
+        || acct.roblox_username_key
+        || String(acct.robloxUsername || acct.roblox_username || acct.displayName || acct.display_name || '')
+          .trim()
+          .toLowerCase();
+      const robloxUserId = acct.robloxUserId || acct.roblox_user_id || null;
+      const { session } = uploadAccountStatus.resolveLiveSession(liveTrackDB, {
+        robloxUserId,
+        usernameKey,
+      });
+      const sessionData = session
+        ? { ...session, discordOwnerId: req.inventoryOwnerDiscordId }
+        : {
+          username: acct.roblox_username || acct.display_name || usernameKey,
+          userId: robloxUserId,
+          discordOwnerId: req.inventoryOwnerDiscordId,
+        };
+      const proof = uploadAccountStatus.deriveTrackerUploadAccountStatus(sessionData, {
+        serverNowMs,
+        expectedTrackerBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+        isTrustedBuild: isTrustedClientBuild,
+      });
+      const sessionForStats = session || null;
+      const liveAccountStats = liveTrackerSerializer.serializeLiveTrackerAccountStats(
+        sessionForStats ? { ...sessionForStats, ...proof, statusColor: proof.statusColor } : null,
+        playerStatsStore,
+        resolvePlayerStatsForApi,
+      );
+      return {
+        ...proof,
+        ...liveAccountStats,
+        username: proof.username || acct.robloxUsername || acct.roblox_username || acct.displayName || acct.display_name || usernameKey,
+        robloxUserId: proof.robloxUserId || (robloxUserId ? String(robloxUserId) : null),
+        discordOwnerId: req.inventoryOwnerDiscordId,
+        canonicalKey: robloxUserId ? String(robloxUserId) : usernameKey,
+      };
+    });
+    return res.status(200).json({ serverNow, accounts });
+  } catch (err) {
+    console.error('[fishit-tracker] account-status failed:', err && err.message ? err.message : err);
+    return res.status(500).json({
+      ok: false,
+      error: 'account_status_failed',
+      message: 'Could not load account status.',
+    });
+  }
+}
+
+router.get('/api/tracker/account-status', requireInventoryApiAuth, handleAccountStatus);
+router.get('/api/inventory/account-status', requireInventoryApiAuth, handleAccountStatus);
+
+router.get('/api/inventory/accounts', requireInventoryApiAuth, async (req, res) => {
+  try {
+    const accounts = await inventoryTrackedAccounts.listTrackedAccounts(req.inventoryOwnerDiscordId);
+    return res.status(200).json({
+      ok: true,
+      accounts,
+      source: 'server',
+      discordUserId: req.inventoryOwnerDiscordId,
+    });
+  } catch (err) {
+    console.error('[inventory-accounts] list failed:', err && err.message ? err.message : err);
+    const fail = inventoryAccountsErrorResponse(err, 'Could not load saved accounts.');
+    return res.status(fail.status).json(fail.body);
+  }
+});
+
+router.post('/api/inventory/accounts/migrate', inventoryWriteLimiter, inventoryAccountsJson, requireInventoryApiAuth, requireInventoryApiCsrf, async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const usernames = Array.isArray(body.usernames) ? body.usernames : [];
+    const result = await inventoryTrackedAccounts.migrateTrackedAccounts(
+      req.inventoryOwnerDiscordId,
+      usernames,
+      { siteUserId: req.inventoryOwnerSiteUserId },
+    );
+    return res.status(200).json({ ok: true, ...result, migrated: result.added.length });
+  } catch (err) {
+    console.error('[inventory-accounts] migrate failed:', err && err.message ? err.message : err);
+    const fail = inventoryAccountsErrorResponse(err, 'Could not migrate saved accounts.');
+    return res.status(fail.status).json(fail.body);
+  }
+});
+
+router.post('/api/inventory/accounts', inventoryWriteLimiter, inventoryAccountsJson, requireInventoryApiAuth, requireInventoryApiCsrf, async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const usernames = Array.isArray(body.usernames)
+      ? body.usernames
+      : (body.username ? [body.username] : []);
+    if (!usernames.length) {
+      return res.status(400).json({ ok: false, error: 'invalid_username', message: 'Enter a valid Roblox username.' });
+    }
+    inventorySession.logInventoryAccountsAction(req, 'add_start', {
+      robloxUsernames: usernames.slice(0, 5),
+      count: usernames.length,
+    });
+    const result = await inventoryTrackedAccounts.addTrackedAccounts(
+      req.inventoryOwnerDiscordId,
+      usernames,
+    );
+    if (!result.added.length && result.skipped.length) {
+      inventorySession.logInventoryAccountsAction(req, 'add_duplicate', {
+        skipped: result.skipped.slice(0, 5),
+      });
+      return res.status(409).json({
+        ok: false,
+        error: 'duplicate',
+        message: 'That player is already being tracked.',
+        skipped: result.skipped,
+        accounts: result.accounts,
+      });
+    }
+    inventorySession.logInventoryAccountsAction(req, 'add_ok', {
+      added: result.added.length,
+      skipped: result.skipped.length,
+      total: result.accounts.length,
+      storage: result.storage || 'supabase',
+    });
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err) {
+    inventorySession.logInventoryAccountsAction(req, 'add_failed', {
+      error: err && err.message ? err.message : String(err),
+      code: err && err.code ? err.code : null,
+    });
+    console.error('[inventory-accounts] add failed:', err && err.message ? err.message : err);
+    const fail = inventoryAccountsErrorResponse(err, 'Could not save tracked account.');
+    return res.status(fail.status).json(fail.body);
+  }
+});
+
+router.delete('/api/inventory/accounts/:usernameKey', inventoryWriteLimiter, requireInventoryApiAuth, requireInventoryApiCsrf, async (req, res) => {
+  try {
+    const result = await inventoryTrackedAccounts.removeTrackedAccount(
+      req.inventoryOwnerDiscordId,
+      req.params.usernameKey,
+    );
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err) {
+    if (err && err.code === 'not_found') {
+      return res.status(404).json({ ok: false, error: 'not_found', message: 'Tracked account not found.' });
+    }
+    if (err && err.code === 'invalid_account') {
+      return res.status(400).json({ ok: false, error: 'invalid_account', message: 'Invalid account username.' });
+    }
+    console.error('[inventory-accounts] delete failed:', err && err.message ? err.message : err);
+    const fail = inventoryAccountsErrorResponse(err, 'Could not delete tracked account.');
+    return res.status(fail.status).json(fail.body);
+  }
+});
 
 // ── GET /api/fishit-tracker/assets/stones/:filename — manual stone image cache (BLOCKER10ZD) ──
 router.get('/api/fishit-tracker/assets/stones/:filename', (req, res) => {
@@ -2827,7 +3234,7 @@ router.get('/api/fishit-tracker/assets/stones/:filename', (req, res) => {
     return res.status(404).type('text/plain').send('stone_asset_not_found');
   }
   const stat = fs.statSync(full);
-  res.set('Cache-Control', 'public, max-age=300');
+  res.set('Cache-Control', 'public, max-age=86400, immutable');
   res.set('ETag', `"stone-${stat.size}-${Math.floor(stat.mtimeMs)}"`);
   return res.sendFile(full);
 });
@@ -3055,6 +3462,8 @@ function handleUpdateBackpack(req, res) {
     const now         = new Date().toISOString();
     const online      = isOnline === true;
     const existing    = liveTrackDB[key];
+    const nextUploadRequestCount = (Number(existing?.uploadRequestCount) || 0) + 1;
+    const withUploadCount = (session) => ({ ...(session || {}), uploadRequestCount: nextUploadRequestCount });
     const isStatusOnly = type === 'tracker_status';
     const cleanUserId = Number.isFinite(Number(userId)) ? Number(userId) : 0;
     const incomingBuild = sanitiseTrackerBuild(body.trackerBuild) || existing?.trackerBuild || null;
@@ -3076,7 +3485,7 @@ function handleUpdateBackpack(req, res) {
       const ps = sanitiseParseStats(body.parseStats) || base.parseStats || null;
       const phaseOut = effectivePhase(phase || base.phase, ps, (base.items || []).length > 0);
       const loaderErr = body.loaderError && typeof body.loaderError === 'object' ? body.loaderError : null;
-      liveTrackDB[key] = {
+      liveTrackDB[key] = withUploadCount({
         ...base,
         username:        cleanUser,
         userId:          cleanUserId || base.userId || 0,
@@ -3091,22 +3500,16 @@ function handleUpdateBackpack(req, res) {
         lastPayloadType: 'tracker_status',
         lastHeartbeatAt: now,
         lastSeenAt:      now,
+        lastAccountSeenAt: now,
+        ...(online ? {} : { lastOfflineAt: now }),
         lastInventoryAt: base.lastInventoryAt || base.updatedAt || null,
         updatedAt:       now,
         ...applyPlayerStatsFields(base.playerStats, body, now),
-      };
+      });
       if (loaderErr) {
         liveTrackDB[key].lastLoaderErrorAt = now;
         liveTrackDB[key].lastLoaderErrorMessage = String(loaderErr.errorMessage || '').slice(0, 500);
         liveTrackDB[key].lastLoaderErrorPhase = loaderErr.phase || null;
-        liveTrackDB[key] = applyUploadSyncFailure(liveTrackDB[key], now, loaderErr.errorMessage || 'loader_error');
-      }
-      if (body.uploadFailed === true || body.syncFailed === true) {
-        liveTrackDB[key] = applyUploadSyncFailure(
-          liveTrackDB[key],
-          now,
-          body.failureReason || body.failReason || body.lastFailureReason || 'upload_failed',
-        );
       }
       if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
         liveTrackDB[key].unresolvedDiagnostics = body.unresolvedDiagnostics.slice(0, 30);
@@ -3116,17 +3519,46 @@ function handleUpdateBackpack(req, res) {
       }
       // Store userId→key alias so GET can resolve by userId if needed.
       if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
-      liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
-        ...uploadDebugBase,
-        accepted: true,
-        statusCode: 200,
-      });
+      const uploadRejected = loaderErr
+        || body.uploadFailed === true
+        || body.syncFailed === true;
+      const rejectReason = loaderErr
+        ? (loaderErr.errorMessage || 'loader_error')
+        : (body.failureReason || body.failReason || body.lastFailureReason || 'upload_failed');
+      if (uploadRejected) {
+        liveTrackDB[key] = uploadAccountStatus.applyRejectedUploadMeta(
+          liveTrackDB[key],
+          body,
+          now,
+          rejectReason,
+        );
+        liveTrackDB[key] = applyUploadSyncFailure(liveTrackDB[key], now, rejectReason);
+        liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
+          ...uploadDebugBase,
+          rejected: true,
+          rejectReason,
+          statusCode: 200,
+        });
+      } else {
+        liveTrackDB[key] = uploadAccountStatus.applyAcceptedUploadMeta(liveTrackDB[key], body, now);
+        liveTrackDB[key] = snapshotCompleteness.applyHeartbeatUpdate(liveTrackDB[key], body, now);
+        liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
+          ...uploadDebugBase,
+          accepted: true,
+          statusCode: 200,
+        });
+      }
       // Server-side log.
       console.log(
         `[fishit-tracker] POST hit route=${req.path} user=${cleanUser} sessionKey=${key}` +
         ` userId=${cleanUserId} payloadType=tracker_status accepted=0 ok=true` +
         ` lastSeenAt=${now} lastInventoryAt=${liveTrackDB[key].lastInventoryAt || 'n/a'} online=${online}`
       );
+      const uploadStatus = uploadAccountStatus.deriveTrackerUploadAccountStatus(liveTrackDB[key], {
+        serverNowMs: Date.now(),
+        expectedTrackerBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+        isTrustedBuild: isTrustedClientBuild,
+      });
       const conn = deriveConnectionStatus(liveTrackDB[key]);
       return res.status(200).json({
         ok: true,
@@ -3136,11 +3568,16 @@ function handleUpdateBackpack(req, res) {
         phase: liveTrackDB[key].phase,
         lastSeenAt: now,
         lastInventoryAt: liveTrackDB[key].lastInventoryAt || null,
-        online: conn.currentStatus === 'green',
-        currentStatus: conn.currentStatus,
-        connectionStatus: conn.connectionStatus,
+        online: uploadStatus.statusColor !== 'red',
+        currentStatus: uploadStatus.statusColor,
+        accountOnlineStatus: uploadStatus.status,
+        inGameStatus: uploadStatus.statusColor !== 'red',
+        uploadSyncFresh: conn.currentStatus === 'green',
+        uploadSyncStatus: conn.connectionStatusReason || null,
+        connectionStatus: uploadStatus.status,
         serverTime: now,
         heartbeatAccepted: true,
+        ...uploadStatus,
       });
     }
 
@@ -3155,11 +3592,14 @@ function handleUpdateBackpack(req, res) {
       existing.isOnline = online;
       existing.source   = source !== 'unknown' ? source : existing.source;
       existing.updatedAt = now;
-      liveTrackDB[key] = applyUploadDebugFields(existing, {
+      existing.lastSeenAt = now;
+      existing.lastAccountSeenAt = now;
+      existing.lastOfflineAt = now;
+      liveTrackDB[key] = withUploadCount(applyUploadDebugFields(existing, {
         ...uploadDebugBase,
         accepted: true,
         statusCode: 200,
-      });
+      }));
       return res.status(200).json({ status: 'success', note: 'offline_keep' });
     }
 
@@ -3167,7 +3607,7 @@ function handleUpdateBackpack(req, res) {
     const expectsPlayerDataGameItemDb = /BLOCKER10ZL_|BLOCKER10Z[ABC]|PLAYERDATA_GAMEITEMDB/i.test(incomingBuild);
     const isPlayerDataPayload = gameItemDbPublic.detectGameItemDbUpload(body);
     if (expectsPlayerDataGameItemDb && payloadType === 'inventory_snapshot' && !isPlayerDataPayload) {
-      liveTrackDB[key] = {
+      liveTrackDB[key] = withUploadCount({
         ...(existing || { username: cleanUser, userId: cleanUserId, items: [], inventory: null }),
         username: cleanUser,
         userId: cleanUserId || existing?.userId || 0,
@@ -3188,7 +3628,7 @@ function handleUpdateBackpack(req, res) {
         playerDataStoneItems: existing?.playerDataStoneItems || null,
         sourceTruth: existing?.sourceTruth || null,
         playerDataGameItemDbProof: existing?.playerDataGameItemDbProof || null,
-      };
+      });
       if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
       liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
         ...uploadDebugBase,
@@ -3333,30 +3773,80 @@ function handleUpdateBackpack(req, res) {
     const sessionPhase = partialInfo.lastGoodFishPreserved
       ? 'live'
       : effectivePhase(phase, ps, hasDisplayItems);
+    const completenessEval = snapshotCompleteness.evaluateSnapshotCompleteness({
+      body,
+      existing,
+      cleanItems,
+      playerDataFishItems,
+      playerDataStoneItems,
+      parseStats: ps,
+      partialInfo,
+      isHeartbeat: false,
+      now,
+    });
+
+    let nextFishItems = (usesGameItemDb || usesItemUtility) ? playerDataFishItems : null;
+    let nextStoneItems = (usesGameItemDb || usesItemUtility) ? playerDataStoneItems : null;
+    let nextItems = cleanItems.length ? cleanItems : (existing ? existing.items : []);
+    let nextRawItems = rawItems.length ? rawItems : (existing ? existing.rawItems : []);
+    let nextInventory = cleanItems.length ? inventory : (existing ? existing.inventory : null);
+    let nextPlayerStatsFields = applyPlayerStatsFields(existing?.playerStats, body, now);
+
+    if (completenessEval.preserveExistingInventory && existing) {
+      if (!nextItems.length && existing.items?.length) nextItems = existing.items;
+      if (!nextRawItems.length && existing.rawItems?.length) nextRawItems = existing.rawItems;
+      if (!nextInventory && existing.inventory) nextInventory = existing.inventory;
+      if ((!nextFishItems || !nextFishItems.length) && existing.playerDataFishItems?.length) {
+        nextFishItems = existing.playerDataFishItems;
+      }
+      if ((!nextStoneItems || !nextStoneItems.length) && existing.playerDataStoneItems?.length) {
+        nextStoneItems = existing.playerDataStoneItems;
+      }
+      if (completenessEval.leaderstatsPreserved && existing.playerStats) {
+        nextPlayerStatsFields = {
+          playerStats: existing.playerStats,
+          playerStatsUpdatedAt: existing.playerStatsUpdatedAt || null,
+          lastStatsUploadAt: existing.lastStatsUploadAt || null,
+        };
+      }
+    }
+
+    const inventoryTimestamps = completenessEval.snapshotComplete
+      ? {
+        lastInventoryAt: now,
+        lastSnapshotUploadAt: now,
+        lastSuccessfulUploadAt: now,
+      }
+      : {
+        lastInventoryAt: existing?.lastInventoryAt || existing?.updatedAt || null,
+        lastSnapshotUploadAt: existing?.lastSnapshotUploadAt || existing?.lastInventoryAt || null,
+        lastSuccessfulUploadAt: existing?.lastSuccessfulUploadAt || null,
+      };
 
     // Store under username key + userId alias.
-    liveTrackDB[key] = {
+    liveTrackDB[key] = withUploadCount(snapshotCompleteness.applyCompletenessFields({
       username:        cleanUser,
       userId:          cleanUserId,
       source,
-      rawItems:        rawItems.length ? rawItems : (existing ? existing.rawItems : []),
-      items:           cleanItems.length ? cleanItems : (existing ? existing.items     : []),
-      inventory:       cleanItems.length ? inventory  : (existing ? existing.inventory : null),
+      rawItems:        nextRawItems,
+      items:           nextItems,
+      inventory:       nextInventory,
       isOnline:        online,
-      phase:           sessionPhase,
+      phase:           completenessEval.snapshotComplete ? sessionPhase : (existing?.phase || sessionPhase),
       parseStats:      ps || (existing && existing.parseStats) || null,
       fishPathDiscovery: fishPathDiscovery || (existing && existing.fishPathDiscovery) || null,
       trackerBuild:    sanitiseTrackerBuild(body.trackerBuild) || (existing && existing.trackerBuild) || null,
       expectedLoaderBuild: EXPECTED_CLIENT_TRACKER_BUILD,
-      lastPayloadType: cleanItems.length ? 'inventory_snapshot' : (type || 'inventory_snapshot'),
+      lastPayloadType: completenessEval.payloadType || (cleanItems.length ? 'inventory_snapshot' : (type || 'inventory_snapshot')),
       lastSeenAt:      now,
-      lastInventoryAt: now,
-      lastSnapshotUploadAt: now,
-      lastSuccessfulUploadAt: now,
+      lastAccountSeenAt: now,
+      ...inventoryTimestamps,
+      ...(online ? { lastHeartbeatAt: now, lastSuccessfulHeartbeatAt: now } : { lastOfflineAt: now }),
       updatedAt:       now,
-      partialSnapshotDetected: partialInfo.partialSnapshotDetected || false,
-      partialSnapshotReason: partialInfo.partialSnapshotReason || null,
-      lastGoodFishPreserved: partialInfo.lastGoodFishPreserved || false,
+      partialSnapshotDetected: partialInfo.partialSnapshotDetected || completenessEval.quarantineBlankInventory || false,
+      partialSnapshotReason: partialInfo.partialSnapshotReason
+        || (completenessEval.quarantineBlankInventory ? completenessEval.snapshotCompletenessReason : null),
+      lastGoodFishPreserved: partialInfo.lastGoodFishPreserved || completenessEval.preserveExistingInventory || false,
       partialSnapshotMeta: partialInfo.isPartial ? {
         currentRawAccepted: partialInfo.currentRawAccepted,
         previousGoodFishCount: partialInfo.previousGoodFishCount,
@@ -3373,12 +3863,8 @@ function handleUpdateBackpack(req, res) {
         : (usesItemUtility
           ? itemUtilityPublic.PLAYERDATA_ITEMUTILITY_SOURCE
           : (existing?.inventorySource || null)),
-      playerDataFishItems: (usesGameItemDb || usesItemUtility)
-        ? playerDataFishItems
-        : (existing?.playerDataFishItems || null),
-      playerDataStoneItems: (usesGameItemDb || usesItemUtility)
-        ? playerDataStoneItems
-        : (existing?.playerDataStoneItems || null),
+      playerDataFishItems: nextFishItems,
+      playerDataStoneItems: nextStoneItems,
       sourceTruth: usesGameItemDb
         ? (body.sourceTruth || gameItemDbPublic.defaultSourceTruth())
         : (usesItemUtility
@@ -3408,8 +3894,8 @@ function handleUpdateBackpack(req, res) {
           replionSourceOfTruth: true,
         }
         : (existing?.trackerClientProof || null),
-      ...applyPlayerStatsFields(existing?.playerStats, body, now),
-    };
+      ...nextPlayerStatsFields,
+    }, completenessEval, now));
 
     const enrichedForGood = enrichItemsFromCatalog(liveTrackDB[key].items);
     recordGlobalObservationsFromItems(enrichedForGood, {
@@ -3457,26 +3943,30 @@ function handleUpdateBackpack(req, res) {
     }
     liveTrackDB[key].lastItemCounts = catchDelta.buildItemCountsFromItems(rawItems);
     if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
+    liveTrackDB[key] = uploadAccountStatus.applyAcceptedUploadMeta(liveTrackDB[key], body, now);
     liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
       ...uploadDebugBase,
-      accepted: true,
+      accepted: completenessEval.snapshotComplete,
       statusCode: 200,
     });
-    liveTrackDB[key] = applyUploadSyncSuccess(liveTrackDB[key], now, {
-      lastStatsUpdatedAt: liveTrackDB[key].lastStatsUploadAt
-        || liveTrackDB[key].playerStatsUpdatedAt
-        || now,
-      payloadHash: computeUploadPayloadHash(body, acceptedCount),
-      intervalSeconds: body.intervalSeconds || body.syncIntervalSeconds,
-      loaderOutdated: !!(incomingBuild && incomingBuild !== EXPECTED_CLIENT_TRACKER_BUILD),
-    });
+    if (completenessEval.snapshotComplete) {
+      liveTrackDB[key] = applyUploadSyncSuccess(liveTrackDB[key], now, {
+        lastStatsUpdatedAt: liveTrackDB[key].lastStatsUploadAt
+          || liveTrackDB[key].playerStatsUpdatedAt
+          || now,
+        payloadHash: computeUploadPayloadHash(body, acceptedCount),
+        intervalSeconds: body.intervalSeconds || body.syncIntervalSeconds,
+        loaderOutdated: !!(incomingBuild && incomingBuild !== EXPECTED_CLIENT_TRACKER_BUILD),
+      });
+    }
 
     const persistBase = `${req.protocol}://${req.get('host')}`;
     persistSessionState(key, persistBase).catch(() => {});
 
     console.log(
       `[fishit-tracker] POST ok=true user=${cleanUser} sessionKey=${key}` +
-      ` accepted=${acceptedCount} lastSeenAt=${now} lastInventoryAt=${now} online=true` +
+      ` accepted=${acceptedCount} snapshotComplete=${completenessEval.snapshotComplete === true}` +
+      ` lastSeenAt=${now} lastInventoryAt=${liveTrackDB[key].lastInventoryAt || 'n/a'} online=true` +
       (nameCatalogDiscovery && nameCatalogDiscovery.learnedMappings?.length
         ? ` catchDeltaLearned=${nameCatalogDiscovery.learnedMappings.length}` : '')
     );
@@ -3484,9 +3974,13 @@ function handleUpdateBackpack(req, res) {
     return res.status(200).json({
       ok: true,
       status: 'success',
-      accepted: true,
+      accepted: completenessEval.snapshotComplete,
       acceptedCount,
-      lastInventoryAt: now,
+      snapshotComplete: completenessEval.snapshotComplete === true,
+      inventoryReady: completenessEval.inventoryReady === true,
+      snapshotCompletenessReason: completenessEval.snapshotCompletenessReason,
+      blankPayloadRejected: completenessEval.blankPayloadRejected === true,
+      lastInventoryAt: liveTrackDB[key].lastInventoryAt || null,
       lastSeenAt: now,
       online: true,
       serverTime: now,
@@ -3572,8 +4066,8 @@ function buildStatsHarmonyProof(data) {
 function buildTotalCaughtIntervalProof(data) {
   const stats = resolvePlayerStatsForApi(data?.playerStats);
   return {
-    totalCaughtRefreshesOnEveryPoll: true,
-    staleTextRegeneratedOnNumericMerge: true,
+    caughtActivityResetsOnValueIncrease: true,
+    caughtActivityContinuesWhenValueUnchanged: true,
     totalCaught: stats?.totalCaught ?? null,
     totalCaughtText: stats?.totalCaughtText ?? null,
   };
@@ -3622,10 +4116,10 @@ function buildStatusFormatProof() {
 
 function buildRouteInventoryOnlyProof() {
   return {
-    publicInventoryPath: '/inventory',
-    legacyTrackerRedirect: '/tracker -> /inventory',
-    legacyFishitTrackerRedirect: '/fishit-tracker -> /inventory',
-    publicUiUsesInventoryLabel: true,
+    publicInventoryPath: CANONICAL_TRACKER_PATH,
+    legacyInventoryRedirect: '/inventory -> /tracker',
+    legacyFishitTrackerRedirect: '/fishit-tracker -> /tracker',
+    publicUiUsesLiveTrackerLabel: true,
   };
 }
 
@@ -3687,28 +4181,18 @@ function buildResponsiveLayoutProof() {
   };
 }
 
-function buildConnectionIndicatorProof(data, maxAgeMs = 45000) {
-  const heartbeatTs = data?.lastSeenAt || null;
-  const inventoryTs = data?.lastInventoryAt || data?.updatedAt || null;
-  const chosen = freshestSessionTimestamp(data);
-  const ageSeconds = syncAgeSecondsFromTimestamp(chosen);
-  const heartbeatAge = syncAgeSecondsFromTimestamp(heartbeatTs);
-  const inventoryAge = syncAgeSecondsFromTimestamp(inventoryTs);
-  const connected = ageSeconds != null && ageSeconds * 1000 < maxAgeMs;
-  let chosenReason = 'none';
-  if (connected && chosen) {
-    if (inventoryTs && chosen === inventoryTs) chosenReason = 'freshest_inventory';
-    else if (heartbeatTs && chosen === heartbeatTs) chosenReason = 'freshest_heartbeat';
-    else if (data?.lastUploadAcceptedAt && chosen === data.lastUploadAcceptedAt) chosenReason = 'freshest_upload';
-    else chosenReason = 'freshest_session_timestamp';
-  }
+function buildConnectionIndicatorProof(data, maxAgeMs = HEARTBEAT_FRESH_MAX_MS) {
+  const presence = deriveAccountPresenceStatus(data, maxAgeMs);
+  const inventoryTs = data?.lastSnapshotUploadAt || data?.lastInventoryAt || data?.updatedAt || null;
   return {
-    connected,
-    indicatorColor: connected ? 'green' : 'red',
-    timestampUsed: chosen,
-    heartbeatAgeSeconds: heartbeatAge,
-    inventoryAgeSeconds: inventoryAge,
-    chosenReason,
+    connected: presence.accountPresenceLive === true,
+    indicatorColor: presence.accountPresenceLive ? 'green' : 'red',
+    timestampUsed: presence.lastHeartbeatAt,
+    heartbeatAgeSeconds: presence.heartbeatAgeSeconds,
+    inventoryAgeSeconds: syncAgeSecondsFromTimestamp(inventoryTs),
+    chosenReason: presence.accountPresenceReason,
+    accountOnlineStatus: presence.accountPresenceStatus,
+    inGameStatus: presence.accountPresenceLive,
   };
 }
 
@@ -3719,35 +4203,55 @@ function syncAgeSecondsFromTimestamp(ts) {
 }
 
 function buildSyncProof(data, maxAgeMs = STATS_FRESH_MAX_MS) {
-  const status = deriveConnectionStatus(data);
-  const statusTimestampUsed = data?.lastSuccessfulUploadAt || statsUploadTimestamp(data) || statusTimestampForSession(data);
+  const uploadSync = deriveConnectionStatus(data);
+  const presence = deriveAccountPresenceStatus(data);
+  const statsUpload = deriveStatsUploadStatus(data);
+  const inventoryUpload = deriveInventoryUploadStatus(data);
+  const statusTimestampUsed = statsUpload.lastStatsUploadAt || statusTimestampForSession(data);
   const ageSeconds = syncAgeSecondsFromTimestamp(statusTimestampUsed);
+  const accountOnline = presence.accountPresenceLive === true;
   return {
     isReceivingLua: !!(data && data.lastUploadReceivedAt),
     statusTimestampUsed,
-    statsUploadTimestampUsed: data?.lastSuccessfulUploadAt || statsUploadTimestamp(data),
+    statsUploadTimestampUsed: statsUpload.lastStatsUploadAt,
     lastSeenAt: data?.lastSeenAt || null,
     lastHeartbeatAt: data?.lastHeartbeatAt || null,
     updatedAt: data?.updatedAt || null,
     inventoryUpdatedAt: data?.lastInventoryAt || null,
-    lastSnapshotUploadAt: data?.lastSnapshotUploadAt || null,
-    lastStatsUploadAt: data?.lastStatsUploadAt || null,
+    lastSnapshotUploadAt: inventoryUpload.lastSnapshotUploadAt || null,
+    lastStatsUploadAt: statsUpload.lastStatsUploadAt || null,
     playerStatsUpdatedAt: data?.playerStatsUpdatedAt || null,
     lastSuccessfulUploadAt: data?.lastSuccessfulUploadAt || null,
     lastUploadAttemptAt: data?.lastUploadAttemptAt || null,
     lastUploadFailedAt: data?.lastUploadFailedAt || null,
     lastFailureReason: data?.lastFailureReason || null,
-    redSince: status.redSince || null,
-    redDurationSeconds: status.redDurationSeconds != null ? status.redDurationSeconds : null,
-    currentStatus: status.currentStatus,
+    uploadSyncRedSince: uploadSync.redSince || null,
+    uploadSyncRedDurationSeconds: uploadSync.redDurationSeconds != null ? uploadSync.redDurationSeconds : null,
+    uploadSyncFresh: uploadSync.currentStatus === 'green',
+    uploadSyncStatus: uploadSync.connectionStatusReason || null,
+    currentStatus: accountOnline ? 'green' : 'red',
     ageSeconds,
-    isOnline: status.currentStatus === 'green',
-    statusColor: status.connectionStatusColor,
-    connectionStatus: status.connectionStatus,
-    connectionStatusReason: status.connectionStatusReason,
+    isOnline: accountOnline,
+    accountPresenceLive: presence.accountPresenceLive,
+    accountPresenceStatus: presence.accountPresenceStatus,
+    accountPresenceReason: presence.accountPresenceReason,
+    accountOnlineStatus: presence.accountPresenceStatus,
+    inGameStatus: presence.accountPresenceLive,
+    statsUploadFresh: statsUpload.statsUploadFresh,
+    statsUploadStatus: statsUpload.statsUploadStatus,
+    statsRedSince: statsUpload.statsRedSince || null,
+    inventoryUploadFresh: inventoryUpload.inventoryUploadFresh,
+    inventoryUploadStatus: inventoryUpload.inventoryUploadStatus,
+    inventorySyncStatus: inventoryUpload.inventoryUploadStatus,
+    fishStoneSyncStatus: inventoryUpload.inventoryUploadStatus,
+    inventoryRedSince: inventoryUpload.inventoryRedSince || null,
+    inventoryStaleAfterSeconds: inventoryUpload.inventoryStaleAfterSeconds,
+    statusColor: accountOnline ? 'green' : 'red',
+    connectionStatus: presence.accountPresenceStatus,
+    connectionStatusReason: presence.accountPresenceReason,
     statsFreshMaxMs: maxAgeMs,
-    intervalSeconds: status.intervalSeconds,
-    graceSeconds: status.graceSeconds,
+    intervalSeconds: uploadSync.intervalSeconds,
+    graceSeconds: uploadSync.graceSeconds,
   };
 }
 
@@ -3793,9 +4297,7 @@ function statsUploadTimestamp(data) {
   const fields = [
     data.lastStatsUploadAt,
     data.playerStatsUpdatedAt,
-    data.lastSnapshotUploadAt,
-    data.lastInventoryAt,
-    data.lastSuccessfulUploadAt,
+    data.playerStats && data.playerStats.statsAt,
   ];
   let best = null;
   let bestMs = -1;
@@ -3813,6 +4315,16 @@ function statsUploadTimestamp(data) {
 const UPLOAD_INTERVAL_SECONDS = 10;
 const UPLOAD_GRACE_SECONDS = 5;
 const LOADER_ERROR_FRESH_MAX_MS = 120000;
+
+function inventoryUploadGraceSeconds(intervalSeconds) {
+  const interval = Number(intervalSeconds) > 0 ? Number(intervalSeconds) : UPLOAD_INTERVAL_SECONDS;
+  return Math.max(20, Math.ceil(interval * 1.5));
+}
+
+function inventoryUploadStaleAfterSeconds(intervalSeconds) {
+  const interval = Number(intervalSeconds) > 0 ? Number(intervalSeconds) : UPLOAD_INTERVAL_SECONDS;
+  return Math.max(interval + inventoryUploadGraceSeconds(interval), interval * 2.5);
+}
 
 function computeUploadPayloadHash(body, itemCount) {
   try {
@@ -3839,12 +4351,10 @@ function applyUploadSyncSuccess(session, now, opts = {}) {
     : (Number(session?.graceSeconds) >= 0 ? Number(session.graceSeconds) : UPLOAD_GRACE_SECONDS);
   return {
     ...(session || {}),
-    currentStatus: 'green',
     lastSuccessfulUploadAt: now,
     lastStatsUpdatedAt: opts.lastStatsUpdatedAt || session?.lastStatsUpdatedAt || now,
     lastUploadAttemptAt: now,
     lastStatusChangeAt: now,
-    redSince: null,
     lastFailureReason: null,
     lastUploadFailedAt: null,
     intervalSeconds,
@@ -3856,21 +4366,44 @@ function applyUploadSyncSuccess(session, now, opts = {}) {
 }
 
 function applyUploadSyncFailure(session, now, reason) {
-  const patch = {
-    currentStatus: 'red',
+  return {
+    ...(session || {}),
     lastUploadAttemptAt: now,
     lastUploadFailedAt: now,
     lastFailureReason: String(reason || 'upload_failed').slice(0, 240),
     lastStatusChangeAt: now,
   };
-  if (!session?.redSince) patch.redSince = now;
-  return { ...(session || {}), ...patch };
 }
 
 const STATS_FRESH_MAX_MS = (UPLOAD_INTERVAL_SECONDS + UPLOAD_GRACE_SECONDS) * 1000;
-const HEARTBEAT_FRESH_MAX_MS = 45000;
+/** Grace before account presence turns offline (loader heartbeat / any alive contact). */
+const ACCOUNT_PRESENCE_GRACE_MS = 120000;
+const HEARTBEAT_FRESH_MAX_MS = ACCOUNT_PRESENCE_GRACE_MS;
+
+function resolveLastAccountSeenAt(data) {
+  if (!data) return null;
+  if (data.lastAccountSeenAt) return data.lastAccountSeenAt;
+  const candidates = [
+    data.lastHeartbeatAt,
+    data.lastSeenAt,
+    data.lastSnapshotUploadAt,
+    data.lastInventoryAt,
+  ].filter(Boolean);
+  if (!candidates.length) return null;
+  let best = candidates[0];
+  let bestMs = new Date(best).getTime();
+  for (let i = 1; i < candidates.length; i += 1) {
+    const ms = new Date(candidates[i]).getTime();
+    if (Number.isFinite(ms) && ms > bestMs) {
+      best = candidates[i];
+      bestMs = ms;
+    }
+  }
+  return best;
+}
 
 function deriveConnectionStatus(data) {
+  /** Upload/stats sync freshness only — never use for main account online/offline indicator. */
   const intervalSeconds = Number(data?.intervalSeconds) > 0
     ? Number(data.intervalSeconds)
     : UPLOAD_INTERVAL_SECONDS;
@@ -3971,14 +4504,160 @@ function deriveConnectionStatus(data) {
   );
 }
 
-/** Session is live (green) only when a recent successful item/stats upload is within interval+grace. */
+/** Account is live when the server has a recent accepted tracker upload (green or yellow). */
 function isSessionLive(data) {
-  return deriveConnectionStatus(data).currentStatus === 'green';
+  const uploadStatus = uploadAccountStatus.deriveTrackerUploadAccountStatus(data, {
+    expectedTrackerBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+    isTrustedBuild: isTrustedClientBuild,
+  });
+  return uploadStatus.statusColor === 'green' || uploadStatus.statusColor === 'yellow';
 }
 
-function isSessionHeartbeatRecent(data, maxAgeMs = HEARTBEAT_FRESH_MAX_MS) {
+function deriveUploadAccountStatus(data, serverNowMs) {
+  return uploadAccountStatus.deriveTrackerUploadAccountStatus(data, {
+    serverNowMs: serverNowMs != null ? serverNowMs : Date.now(),
+    expectedTrackerBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+    isTrustedBuild: isTrustedClientBuild,
+  });
+}
+
+function deriveUploadSyncStatus(data) {
+  return deriveConnectionStatus(data);
+}
+
+function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS) {
+  const lastAccountSeenAt = resolveLastAccountSeenAt(data);
+  const seenAgeSeconds = syncAgeSecondsFromTimestamp(lastAccountSeenAt);
+  const loaderBuild = data?.trackerBuild || data?.lastUploadTrackerBuild || null;
+  const base = {
+    lastAccountSeenAt,
+    lastHeartbeatAt: data?.lastHeartbeatAt || null,
+    heartbeatAgeSeconds: seenAgeSeconds,
+    isOnlineFlag: data?.isOnline === true,
+    loaderOutdated: !!(loaderBuild && !isTrustedClientBuild(loaderBuild)),
+    accountPresenceGraceSeconds: Math.floor(maxAgeMs / 1000),
+  };
+  if (!data) {
+    return {
+      ...base,
+      accountPresenceLive: false,
+      accountOnline: false,
+      accountPresenceStatus: 'offline',
+      accountPresenceReason: 'no_session',
+      accountStatusReason: 'no_session',
+    };
+  }
+  if (base.loaderOutdated) {
+    return {
+      ...base,
+      accountPresenceLive: false,
+      accountOnline: false,
+      accountPresenceStatus: 'error',
+      accountPresenceReason: 'outdated_loader',
+      accountStatusReason: 'outdated_loader',
+    };
+  }
+  if (!lastAccountSeenAt) {
+    return {
+      ...base,
+      accountPresenceLive: false,
+      accountOnline: false,
+      accountPresenceStatus: 'offline',
+      accountPresenceReason: 'no_session',
+      accountStatusReason: 'no_session',
+    };
+  }
+  const recentSeen = seenAgeSeconds != null && seenAgeSeconds * 1000 < maxAgeMs;
+  const loaderOnline = data.isOnline === true;
+  const loaderOffline = data.isOnline === false;
+  if (recentSeen) {
+    if (loaderOffline) {
+      return {
+        ...base,
+        accountPresenceLive: false,
+        accountOnline: false,
+        accountPresenceStatus: 'offline',
+        accountPresenceReason: 'client_offline',
+        accountStatusReason: 'client_offline',
+      };
+    }
+    return {
+      ...base,
+      accountPresenceLive: true,
+      accountOnline: true,
+      accountPresenceStatus: 'online',
+      accountPresenceReason: loaderOnline ? 'heartbeat' : 'loader_contact',
+      accountStatusReason: loaderOnline ? 'heartbeat' : 'loader_contact',
+    };
+  }
+  if (loaderOffline) {
+    return {
+      ...base,
+      accountPresenceLive: false,
+      accountOnline: false,
+      accountPresenceStatus: 'offline',
+      accountPresenceReason: 'client_offline',
+      accountStatusReason: 'client_offline',
+    };
+  }
+  return {
+    ...base,
+    accountPresenceLive: false,
+    accountOnline: false,
+    accountPresenceStatus: 'offline',
+    accountPresenceReason: 'stale_heartbeat',
+    accountStatusReason: 'stale_heartbeat',
+  };
+}
+
+function deriveStatsUploadStatus(data) {
+  const intervalSeconds = Number(data?.intervalSeconds) > 0
+    ? Number(data.intervalSeconds)
+    : UPLOAD_INTERVAL_SECONDS;
+  const graceSeconds = Number(data?.graceSeconds) >= 0
+    ? Number(data.graceSeconds)
+    : UPLOAD_GRACE_SECONDS;
+  const ts = statsUploadTimestamp(data);
+  const ageSeconds = syncAgeSecondsFromTimestamp(ts);
+  const deadlineMs = ts ? new Date(ts).getTime() + (intervalSeconds + graceSeconds) * 1000 : null;
+  const fresh = !!(ts && Date.now() <= deadlineMs);
+  return {
+    lastStatsUploadAt: ts,
+    statsUploadAgeSeconds: ageSeconds,
+    statsUploadFresh: fresh,
+    statsUploadStatus: fresh ? 'fresh' : (ts ? 'stale' : 'never'),
+    statsRedSince: fresh ? null : (data?.statsRedSince || (deadlineMs ? new Date(deadlineMs).toISOString() : null)),
+    intervalSeconds,
+    graceSeconds,
+  };
+}
+
+function deriveInventoryUploadStatus(data) {
+  const intervalSeconds = Number(data?.intervalSeconds) > 0
+    ? Number(data.intervalSeconds)
+    : UPLOAD_INTERVAL_SECONDS;
+  const graceSeconds = inventoryUploadGraceSeconds(intervalSeconds);
+  const staleAfterSeconds = inventoryUploadStaleAfterSeconds(intervalSeconds);
+  const ts = data?.lastSnapshotUploadAt || data?.lastInventoryAt || null;
+  const ageSeconds = syncAgeSecondsFromTimestamp(ts);
+  const deadlineMs = ts ? new Date(ts).getTime() + staleAfterSeconds * 1000 : null;
+  const fresh = !!(ts && Date.now() <= deadlineMs);
+  return {
+    lastSnapshotUploadAt: ts,
+    inventoryUploadAgeSeconds: ageSeconds,
+    inventoryUploadFresh: fresh,
+    inventoryUploadStatus: fresh ? 'fresh' : (ts ? 'stale' : 'never'),
+    inventoryUploadReason: fresh ? 'fresh' : (ts ? 'upload_stale' : 'never_uploaded'),
+    inventoryRedSince: fresh ? null : (data?.inventoryRedSince || (deadlineMs ? new Date(deadlineMs).toISOString() : null)),
+    intervalSeconds,
+    graceSeconds,
+    inventoryStaleAfterSeconds: staleAfterSeconds,
+  };
+}
+
+function isSessionHeartbeatRecent(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS) {
   if (!data) return false;
-  const ts = data.lastHeartbeatAt || data.lastSeenAt;
+  const ts = resolveLastAccountSeenAt(data);
   if (!ts) return false;
   const age = Date.now() - new Date(ts).getTime();
   return Number.isFinite(age) && age >= 0 && age < maxAgeMs;
@@ -4086,14 +4765,11 @@ function collectPublicFishItTrackerStats() {
 }
 
 function collectPublicTrackerNetworkStats() {
-  const usernames = new Set();
-  let onlineUsernames = 0;
+  const canonical = computeCanonicalTrackerUsers(liveTrackDB);
   let inventoriesSynced = 0;
   for (const [key, data] of Object.entries(liveTrackDB)) {
     if (key.startsWith('uid:')) continue;
     if (!data || typeof data !== 'object') continue;
-    usernames.add(key.toLowerCase());
-    if (isSessionLive(data)) onlineUsernames += 1;
     if (Number(data.lastGoodPublicFishCount) > 0
       || Number(data.visibleFishInstances) > 0
       || data.lastSyncAt
@@ -4102,11 +4778,35 @@ function collectPublicTrackerNetworkStats() {
     }
   }
   return {
-    available: usernames.size > 0,
-    trackedUsernames: usernames.size,
-    onlineUsernames,
+    available: canonical.available,
+    rawUploadRows: canonical.rawUploadRows,
+    rawSessionRows: canonical.rawSessionRows,
+    uniqueKeysSeen: canonical.uniqueKeysSeen,
+    duplicatesRemoved: canonical.duplicatesRemoved,
+    currentBuildUniqueUsers: canonical.currentBuildUniqueUsers,
+    onlineUniqueUsers: canonical.onlineUniqueUsers,
+    oldBuildIgnored: canonical.oldBuildIgnored,
+    invalidPayloadIgnored: canonical.invalidPayloadIgnored,
+    staleIgnored: canonical.staleIgnored,
+    expectedBuild: canonical.expectedBuild,
+    summary: canonical.summary,
+    trackedUsernames: canonical.currentBuildUniqueUsers,
+    onlineUsernames: canonical.onlineUniqueUsers,
     inventoriesSynced,
-    updatedAt: new Date().toISOString(),
+    updatedAt: canonical.updatedAt,
+  };
+}
+
+function collectPublicTrackerNetworkProof() {
+  const canonical = computeCanonicalTrackerUsers(liveTrackDB);
+  return {
+    pass: true,
+    marker: 'CANONICAL_TRACKER_USER_COUNT_2026_06_12',
+    ...canonical,
+    summary: {
+      ...canonical.summary,
+      note: 'Unique tracker users dedupe by robloxUserId, else lower(username). Online uses same presence grace as inventory.',
+    },
   };
 }
 
@@ -4114,6 +4814,12 @@ function collectPublicTrackerNetworkStats() {
 router.get('/api/fishit-tracker/public-network', getLimiter, (_req, res) => {
   res.set(NO_STORE_HEADERS);
   return res.status(200).json(collectPublicTrackerNetworkStats());
+});
+
+// ── GET /api/fishit-tracker/public-network-proof ─────────────────
+router.get('/api/fishit-tracker/public-network-proof', getLimiter, (_req, res) => {
+  res.set(NO_STORE_HEADERS);
+  return res.status(200).json(collectPublicTrackerNetworkProof());
 });
 
 // ── GET /api/fishit-tracker/catalog ──────────────────────────────
@@ -4125,6 +4831,9 @@ router.get('/api/fishit-tracker/catalog', getLimiter, (_req, res) => {
 // ── GET get-backpack (canonical + legacy alias) ───────────────────
 // Also resolves userId aliases (uid:<number> keys created on POST).
 async function handleGetBackpack(req, res) {
+  const queryStartedAt = Date.now();
+  const wantLite = trackerPerf.isLiteBackpackRequest(req);
+  const includeDebug = trackerPerf.isDebugRequest(req);
   const cleanUser = sanitiseUsername(req.params.username);
   if (!cleanUser) {
     return res.status(400).json({ error: 'Invalid username.' });
@@ -4164,15 +4873,28 @@ async function handleGetBackpack(req, res) {
       lastGoodFishPreserved: true,
     };
   }
-  const imageResolutionProof = fishImageAssets.buildImageResolutionProof(publicFish.fishItems);
-  const recoveredSpeciesImageResolutionProof = publicFish.recoveredSpeciesImageResolutionProof
-    || snapshotRecovery.buildRecoveredSpeciesImageResolutionProof(publicFish.fishItems);
+  const imageResolutionProof = wantLite
+    ? null
+    : fishImageAssets.buildImageResolutionProof(publicFish.fishItems);
+  if (!wantLite && !publicFish.recoveredSpeciesImageResolutionProof) {
+    snapshotRecovery.buildRecoveredSpeciesImageResolutionProof(publicFish.fishItems);
+  }
 
-  const fishCatalogStats = fishCatalog.getStats();
+  const fishCatalogStats = wantLite ? null : fishCatalog.getStats();
 
   const connection = deriveConnectionStatus(data);
-  const enriched = {
-    ...data,
+  const presence = deriveAccountPresenceStatus(data);
+  const uploadStatus = deriveUploadAccountStatus(data);
+  const statsUpload = deriveStatsUploadStatus(data);
+  const inventoryUpload = deriveInventoryUploadStatus(data);
+  const liveAccountStats = liveTrackerSerializer.serializeLiveTrackerAccountStats(
+    { ...data, ...uploadStatus, statusColor: uploadStatus.statusColor },
+    playerStatsStore,
+    resolvePlayerStatsForApi,
+  );
+  const enrichedBase = {
+    username: data.username || cleanUser,
+    userId: data.userId || null,
     renderBuild:     PUBLIC_RENDER_BUILD,
     publicApiBuild:  PUBLIC_API_BUILD,
     trackerBuild:    data.trackerBuild || null,
@@ -4190,6 +4912,103 @@ async function handleGetBackpack(req, res) {
     stoneInventory:  publicFish.stoneInventory || publicFish.stoneItems || [],
     fishCounts:      publicFish.fishCounts,
     publicCounts:    publicFish.publicCounts,
+    lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
+    lastSeenAt:      data.lastSeenAt || null,
+    lastHeartbeatAt: data.lastHeartbeatAt || data.lastSeenAt || null,
+    lastAccountSeenAt: resolveLastAccountSeenAt(data),
+    lastSnapshotUploadAt: data.lastSnapshotUploadAt || data.lastInventoryAt || null,
+    lastStatsUploadAt: data.lastStatsUploadAt || data.playerStatsUpdatedAt || null,
+    lastSuccessfulUploadAt: data.lastSuccessfulUploadAt || null,
+    lastLoaderErrorAt: data.lastLoaderErrorAt || null,
+    lastLoaderErrorMessage: data.lastLoaderErrorMessage || null,
+    expectedLoaderBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+    lastLoaderBuild: data.trackerBuild || data.lastUploadTrackerBuild || null,
+    isOnline:        data.isOnline === true,
+    loaderOnline:    data.isOnline === true,
+    connectionLive:  presence.accountPresenceLive,
+    accountPresenceLive: presence.accountPresenceLive,
+    accountPresenceStatus: presence.accountPresenceStatus,
+    accountPresenceReason: presence.accountPresenceReason,
+    accountOnline: uploadStatus.statusColor !== 'red',
+    accountOnlineStatus: uploadStatus.status,
+    accountStatusReason: uploadStatus.statusDecisionReason,
+    accountPresenceGraceSeconds: presence.accountPresenceGraceSeconds,
+    inGameStatus: uploadStatus.statusColor !== 'red',
+    currentStatus: uploadStatus.statusColor,
+    status: uploadStatus.status,
+    statusColor: uploadStatus.statusColor,
+    statusDecisionReason: uploadStatus.statusDecisionReason,
+    secondsSinceLastSuccess: uploadStatus.secondsSinceLastSuccess,
+    onlineThresholdSeconds: uploadStatus.onlineThresholdSeconds,
+    offlineThresholdSeconds: uploadStatus.offlineThresholdSeconds,
+    uploadIntervalSeconds: uploadStatus.uploadIntervalSeconds,
+    runId: uploadStatus.runId,
+    uploadSeq: uploadStatus.uploadSeq,
+    loaderBuild: uploadStatus.loaderBuild,
+    serverReceivedAt: uploadStatus.serverReceivedAt,
+    latestPayloadAccepted: uploadStatus.latestPayloadAccepted,
+    rejectReason: uploadStatus.rejectReason,
+    isCurrentBuild: uploadStatus.isCurrentBuild,
+    isOldBuild: uploadStatus.isOldBuild,
+    provenEmptyInventory: uploadStatus.provenEmptyInventory,
+    snapshotComplete: uploadStatus.snapshotComplete === true,
+    inventoryReady: uploadStatus.inventoryReady === true,
+    snapshotCompletenessReason: uploadStatus.snapshotCompletenessReason || data?.snapshotCompletenessReason || null,
+    hasLeaderstatsSnapshot: uploadStatus.hasLeaderstatsSnapshot === true,
+    hasFishSnapshot: uploadStatus.hasFishSnapshot === true,
+    hasStoneSnapshot: uploadStatus.hasStoneSnapshot === true,
+    firstFullSnapshotAt: uploadStatus.firstFullSnapshotAt || data?.firstFullSnapshotAt || null,
+    lastFullSnapshotAt: uploadStatus.lastFullSnapshotAt || data?.lastFullSnapshotAt || null,
+    blankPayloadRejected: uploadStatus.blankPayloadRejected === true,
+    payloadType: uploadStatus.payloadType,
+    inventoryDisplayState: data?.snapshotComplete
+      ? (data?.provenEmptyInventory ? 'empty' : 'ready')
+      : (data?.lastSuccessfulHeartbeatAt || data?.lastHeartbeatAt ? 'syncing' : 'waiting'),
+    connectionStatus: uploadStatus.status,
+    connectionStatusColor: uploadStatus.statusColor,
+    connectionStatusReason: uploadStatus.statusDecisionReason,
+    uploadSyncFresh: connection.currentStatus === 'green',
+    uploadSyncStatus: connection.connectionStatusReason || null,
+    uploadSyncRedSince: connection.redSince || null,
+    uploadSyncRedDurationSeconds: connection.redDurationSeconds != null ? connection.redDurationSeconds : null,
+    lastStatsUpdatedAt: statsUpload.lastStatsUploadAt || connection.lastStatsUpdatedAt || null,
+    statsUploadFresh: statsUpload.statsUploadFresh === true,
+    statsUploadStatus: statsUpload.statsUploadStatus,
+    statsRedSince: statsUpload.statsRedSince || null,
+    inventoryUploadFresh: inventoryUpload.inventoryUploadFresh === true,
+    inventoryUploadStatus: inventoryUpload.inventoryUploadStatus,
+    inventorySyncStatus: inventoryUpload.inventoryUploadStatus,
+    inventorySyncReason: inventoryUpload.inventoryUploadReason || null,
+    lastInventorySyncAt: inventoryUpload.lastSnapshotUploadAt || null,
+    lastFishStoneSyncAt: inventoryUpload.lastSnapshotUploadAt || null,
+    fishStoneSyncStatus: inventoryUpload.inventoryUploadStatus,
+    inventoryRedSince: inventoryUpload.inventoryRedSince || null,
+    inventoryStaleAfterSeconds: inventoryUpload.inventoryStaleAfterSeconds,
+    statsFresh: statsUpload.statsUploadFresh === true,
+    redSince: inventoryUpload.inventoryRedSince || connection.redSince || null,
+    redDurationSeconds: connection.redDurationSeconds != null ? connection.redDurationSeconds : null,
+    intervalSeconds: connection.intervalSeconds,
+    graceSeconds: connection.graceSeconds,
+    lastUploadAttemptAt: data.lastUploadAttemptAt || null,
+    lastUploadFailedAt: data.lastUploadFailedAt || null,
+    lastFailureReason: data.lastFailureReason || null,
+    lastStatusChangeAt: data.lastStatusChangeAt || null,
+    lastPayloadHash: data.lastPayloadHash || null,
+    dataStale:       (!statsUpload.statsUploadFresh || !inventoryUpload.inventoryUploadFresh)
+      || !!(publicFish.dataStale || publicFish.lastGoodFishPreserved),
+    lastGoodFishPreserved: !!(publicFish.lastGoodFishPreserved || data.lastGoodFishPreserved),
+    lastGoodPublicFishCount: data.lastGoodPublicFishCount || publicFish.fishItems.length || 0,
+    playerStats:     resolvePlayerStatsForApi(data.playerStats),
+    playerStatsProven: !!(resolvePlayerStatsForApi(data.playerStats)
+      && buildPlayerStatsProof(data.playerStats, data).proven),
+    playerStatsUpdatedAt: data.playerStatsUpdatedAt || null,
+    liveAccountStats,
+    statsSource: liveAccountStats.statsSource,
+    statsEmptyReason: liveAccountStats.emptyReason,
+    updatedAt: data.updatedAt || null,
+  };
+  const enrichedFullOnly = wantLite ? {} : {
+    ...data,
     playerDataGameItemDbProof: publicFish.playerDataGameItemDbProof || null,
     playerDataItemUtilityProof: publicFish.playerDataItemUtilityProof || null,
     hiddenPublicRows: publicFish.hiddenPublicRows,
@@ -4224,45 +5043,19 @@ async function handleGetBackpack(req, res) {
     countsRaw,
     countsEnriched,
     countsInternal:  countsEnriched,
-    lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
-    lastSeenAt:      data.lastSeenAt || null,
-    lastHeartbeatAt: data.lastHeartbeatAt || data.lastSeenAt || null,
-    lastSnapshotUploadAt: data.lastSnapshotUploadAt || data.lastInventoryAt || null,
-    lastStatsUploadAt: data.lastStatsUploadAt || data.playerStatsUpdatedAt || null,
-    lastSuccessfulUploadAt: data.lastSuccessfulUploadAt || null,
-    lastLoaderErrorAt: data.lastLoaderErrorAt || null,
-    lastLoaderErrorMessage: data.lastLoaderErrorMessage || null,
-    expectedLoaderBuild: EXPECTED_CLIENT_TRACKER_BUILD,
-    lastLoaderBuild: data.trackerBuild || data.lastUploadTrackerBuild || null,
-    isOnline:        connection.currentStatus === 'green',
-    connectionLive:  connection.currentStatus === 'green',
-    currentStatus:   connection.currentStatus,
-    connectionStatus: connection.connectionStatus,
-    connectionStatusColor: connection.connectionStatusColor,
-    connectionStatusReason: connection.connectionStatusReason,
-    lastStatsUpdatedAt: connection.lastStatsUpdatedAt || statsUploadTimestamp(data),
-    statsFresh: connection.statsFresh === true,
-    redSince: connection.redSince || null,
-    redDurationSeconds: connection.redDurationSeconds != null ? connection.redDurationSeconds : null,
-    intervalSeconds: connection.intervalSeconds,
-    graceSeconds: connection.graceSeconds,
-    lastUploadAttemptAt: data.lastUploadAttemptAt || null,
-    lastUploadFailedAt: data.lastUploadFailedAt || null,
-    lastFailureReason: data.lastFailureReason || null,
-    lastStatusChangeAt: data.lastStatusChangeAt || null,
-    lastPayloadHash: data.lastPayloadHash || null,
-    dataStale:       connection.currentStatus !== 'green'
-      || !!(publicFish.dataStale || !connection.statsFresh),
-    lastGoodFishPreserved: !!(publicFish.lastGoodFishPreserved || data.lastGoodFishPreserved),
-    lastGoodPublicFishCount: data.lastGoodPublicFishCount || publicFish.fishItems.length || 0,
-    playerStats:     resolvePlayerStatsForApi(data.playerStats),
-    playerStatsProven: !!(resolvePlayerStatsForApi(data.playerStats)
-      && buildPlayerStatsProof(data.playerStats, data).proven),
-    playerStatsUpdatedAt: data.playerStatsUpdatedAt || null,
+    snapshotCompleteness: snapshotCompleteness.buildSnapshotCompletenessProof(data),
     syncProof:       buildSyncProof(data),
   };
+  const enriched = { ...enrichedBase, ...enrichedFullOnly };
 
-  return res.status(200).json(enriched);
+  const body = wantLite
+    ? trackerPerf.buildLiteBackpackResponse(enriched)
+    : { ...enriched, lite: false, responseMode: 'full' };
+  if (includeDebug) {
+    res.set('X-Backpack-Mode', body.responseMode || 'full');
+    res.set('X-Tracker-Query-Ms', String(Date.now() - queryStartedAt));
+  }
+  return res.status(200).json(body);
 }
 
 router.get('/api/fishit-tracker/get-backpack/:username', getLimiter, handleGetBackpack);
@@ -4504,15 +5297,30 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     lastGoodFishPreserved: !!data.lastGoodFishPreserved,
     partialSnapshotReason: data.partialSnapshotReason || null,
     partialSnapshotMeta: data.partialSnapshotMeta || null,
+    snapshotCompleteness: snapshotCompleteness.buildSnapshotCompletenessProof(data),
+    snapshotComplete: data.snapshotComplete === true,
+    inventoryReady: data.inventoryReady === true,
+    inventoryDisplayState: data.snapshotComplete
+      ? (data.provenEmptyInventory ? 'empty' : 'ready')
+      : (data.lastSuccessfulHeartbeatAt || data.lastHeartbeatAt ? 'syncing' : 'waiting'),
+    snapshotCompletenessReason: data.snapshotCompletenessReason || null,
+    blankPayloadRejected: data.blankPayloadRejected === true,
+    uploadAccountStatus: uploadAccountStatus.deriveTrackerUploadAccountStatus(data, {
+      expectedTrackerBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+      isTrustedBuild: (build) => build === EXPECTED_CLIENT_TRACKER_BUILD
+        || String(build).includes('LOADER_REGISTER_LIMIT_FIX'),
+    }),
     selectedGeneralInventoryPath: data.parseStats?.selectedGeneralPath
       || data.parseStats?.selectedPath || null,
     selectedFishInventoryPath: data.parseStats?.selectedFishPath
       || data.fishPathDiscovery?.selectedFishPath || null,
     fishPathDiscovery: data.fishPathDiscovery || data.parseStats?.fishPathDiscovery || null,
     emptyPublicFishReason: publicFishDbg.publicItems.length === 0
-      ? (data.partialSnapshotDetected
-        ? data.partialSnapshotReason
-        : (data.parseStats?.fish === 0 ? 'parse_stats_fish_zero' : 'no_public_fish_items'))
+      ? (data.snapshotComplete === false
+        ? (data.snapshotCompletenessReason || 'awaiting_full_snapshot')
+        : (data.partialSnapshotDetected
+          ? data.partialSnapshotReason
+          : (data.provenEmptyInventory ? 'verified_empty_inventory' : (data.parseStats?.fish === 0 ? 'parse_stats_fish_zero' : 'no_public_fish_items'))))
       : null,
     catchWatcherStatus: data.catchWatcherStatus || null,
     lastGoodPublicFishCount: data.lastGoodPublicFishCount || 0,
@@ -4537,6 +5345,11 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
   });
 });
 
+router.get('/api/tracker/debug/:username', getLimiter, (req, res, next) => {
+  req.url = `/api/fishit-tracker/debug/${encodeURIComponent(req.params.username)}`;
+  router.handle(req, res, next);
+});
+
 // Optional manual catalog probe request (BLOCKER10M-G) — off by default on client.
 router.post('/api/fishit-tracker/request-catalog-scan/:username', postLimiter, (req, res) => {
   const cleanUser = sanitiseUsername(req.params.username);
@@ -4555,6 +5368,7 @@ router.post('/api/fishit-tracker/request-catalog-scan/:username', postLimiter, (
 
 module.exports = router;
 module.exports.collectPublicTrackerNetworkStats = collectPublicTrackerNetworkStats;
+module.exports.collectPublicTrackerNetworkProof = collectPublicTrackerNetworkProof;
 module.exports.collectPublicFishItTrackerStats = collectPublicFishItTrackerStats;
 module.exports.mergeItemsNoDowngradeFromCatalog = mergeItemsNoDowngradeFromCatalog;
 module.exports.enrichItemsFromCatalog = enrichItemsFromCatalog;
@@ -4565,10 +5379,21 @@ module.exports.resolveServerCommit = resolveServerCommit;
 module.exports.isSessionLive = isSessionLive;
 module.exports.isSessionHeartbeatRecent = isSessionHeartbeatRecent;
 module.exports.deriveConnectionStatus = deriveConnectionStatus;
+module.exports.deriveUploadSyncStatus = deriveUploadSyncStatus;
+module.exports.deriveAccountPresenceStatus = deriveAccountPresenceStatus;
+module.exports.resolveLastAccountSeenAt = resolveLastAccountSeenAt;
+module.exports.ACCOUNT_PRESENCE_GRACE_MS = ACCOUNT_PRESENCE_GRACE_MS;
+module.exports.deriveStatsUploadStatus = deriveStatsUploadStatus;
+module.exports.deriveInventoryUploadStatus = deriveInventoryUploadStatus;
 module.exports.applyUploadSyncSuccess = applyUploadSyncSuccess;
 module.exports.applyUploadSyncFailure = applyUploadSyncFailure;
+module.exports.deriveUploadAccountStatus = deriveUploadAccountStatus;
+module.exports.uploadAccountStatus = uploadAccountStatus;
+module.exports.snapshotCompleteness = snapshotCompleteness;
 module.exports.UPLOAD_INTERVAL_SECONDS = UPLOAD_INTERVAL_SECONDS;
 module.exports.UPLOAD_GRACE_SECONDS = UPLOAD_GRACE_SECONDS;
+module.exports.inventoryUploadGraceSeconds = inventoryUploadGraceSeconds;
+module.exports.inventoryUploadStaleAfterSeconds = inventoryUploadStaleAfterSeconds;
 module.exports.buildPlayerStatsProof = buildPlayerStatsProof;
 module.exports.buildPublicFishFields = buildPublicFishFields;
 module.exports.buildPublicLegacyCounts = buildPublicLegacyCounts;

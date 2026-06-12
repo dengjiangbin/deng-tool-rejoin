@@ -3,7 +3,7 @@
  * HTTP routes for the DENG Tool portal.
  */
 const express = require('express');
-const rateLimit = require('express-rate-limit');
+const { createUserRateLimit, createRateLimitHandler, isRateLimitTestSkipped, wantsJson } = require('./rateLimitUtils');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
@@ -303,47 +303,49 @@ function logSafeError(scope, code, err) {
   else console.error(line);
 }
 
-const authLimiter = rateLimit({
+const authLimiter = createUserRateLimit({
+  keyPrefix: 'auth-callback:',
   windowMs: 15 * 60 * 1000,
-  max: 20,
-  skip: () => process.env.NODE_ENV === 'test',
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many login attempts, please wait.' },
-});
-
-function wantsJson(req) {
-  return (req.headers.accept || '').includes('application/json') ||
-    (req.headers['content-type'] || '').includes('application/json');
-}
-
-function rateLimitsDisabled() {
-  return process.env.NODE_ENV === 'test' && process.env.ENABLE_RATE_LIMIT_TEST !== '1';
-}
-
-const generateLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 5,
-  skip: rateLimitsDisabled,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: (req, res) => {
-    const code = 'TOO_MANY_ATTEMPTS';
-    if (wantsJson(req)) {
-      return res.status(429).json({ error: code, message: messageFor(code) });
-    }
-    safeFlash(req, 'error', messageFor(code));
-    return res.redirect(303, '/license');
+  max: 40,
+  handlerOptions: {
+    jsonError: 'too_many_login_attempts',
+    jsonMessage: 'Too many login attempts. Please wait before trying again.',
+    htmlMessage: 'Too many login attempts. Please wait before trying again.',
+    redirectTo: '/login',
   },
 });
 
-const licenseActionLimiter = rateLimit({
+function rateLimitsDisabled() {
+  return isRateLimitTestSkipped();
+}
+
+const generateLimiter = createUserRateLimit({
+  keyPrefix: 'license-generate:',
+  windowMs: 60 * 1000,
+  max: 5,
+  skip: rateLimitsDisabled,
+  handler: (req, res, _next, limiterOptions) => {
+    const code = 'TOO_MANY_ATTEMPTS';
+    const handler = createRateLimitHandler({
+      keyPrefix: 'license-generate:',
+      jsonError: code,
+      jsonMessage: messageFor(code),
+      htmlMessage: messageFor(code),
+      redirectTo: '/license',
+    });
+    return handler(req, res, _next, limiterOptions);
+  },
+});
+
+const licenseActionLimiter = createUserRateLimit({
+  keyPrefix: 'license-action:',
   windowMs: 60 * 1000,
   max: 20,
   skip: rateLimitsDisabled,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'too_many_license_actions', message: 'Too many license actions. Please wait before trying again.' },
+  handlerOptions: {
+    jsonError: 'too_many_license_actions',
+    jsonMessage: 'Too many license actions. Please wait before trying again.',
+  },
 });
 
 function safeFlash(req, key, value) {
@@ -1412,7 +1414,12 @@ router.get('/auth/discord/callback', authLimiter, async (req, res) => {
         res.redirect(LOGIN_HOME);
         return resolve();
       }
-      req.session.user  = toSessionUser(siteUser);
+      req.session.user = toSessionUser(siteUser);
+      req.session.site_user_id = siteUser && siteUser.id ? siteUser.id : null;
+      req.session.discord_user_id = req.session.user && req.session.user.discord_user_id
+        ? String(req.session.user.discord_user_id)
+        : null;
+      req.session.csrfToken = require('crypto').randomBytes(32).toString('hex');
       req.session.flash = { success: `Welcome, ${req.session.user.username}!` };
       req.session.save((saveErr) => {
         if (saveErr) {

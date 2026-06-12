@@ -22,15 +22,21 @@
 
 const path = require('path');
 const fs = require('fs');
+const fishitDbPath = require('./fishitDbPath');
 const manualStatsFishImages = require('./fishitManualStatsFishImages');
 const rodAssets = require('./fishitRodAssets');
 
 // Default path resolves to the sibling "DENG Fish It" project on this host.
-// site/src/fishitDb.js -> ../../.. = Desktop -> DENG Fish It\data\...
 const DEFAULT_DB_PATH = path.join(
   __dirname, '..', '..', '..', 'DENG Fish It', 'data', 'deng-fish-it.sqlite',
 );
-const DB_PATH = process.env.FISHIT_DB_PATH || DEFAULT_DB_PATH;
+
+function getDbPath() {
+  return fishitDbPath.resolveFishitDbPath(false);
+}
+
+/** @deprecated use getDbPath() — kept for tests/logs */
+const DB_PATH = DEFAULT_DB_PATH;
 
 const CACHE_TTL_MS = Number(process.env.FISHIT_CACHE_TTL_MS || 15_000);
 const WIB_OFFSET_MS = 7 * 60 * 60 * 1000; // UTC+7, matches the bot's day boundaries
@@ -47,21 +53,21 @@ const _blobCache = new Map(); // key -> { at, value }
 // ── Low-level DB access ──────────────────────────────────────────────────────
 
 function openDb() {
-  // Re-try a failed open at most once per TTL window so a transiently missing
-  // file (e.g. bot mid-deploy) doesn't hammer the disk.
   if (_db) return _db;
   const now = Date.now();
-  if (now - _dbTriedAt < CACHE_TTL_MS) return null;
+  if (now - _dbTriedAt < CACHE_TTL_MS && _dbTriedAt > 0) return null;
   _dbTriedAt = now;
+  const dbPath = getDbPath();
   try {
-    if (!fs.existsSync(DB_PATH)) return null;
-    // node:sqlite is built-in on Node 22+. Open read-only so we can never
-    // corrupt the bot's WAL database.
+    if (!fs.existsSync(dbPath)) {
+      console.warn('[fishit] open skipped — DB file not found', { dbPath });
+      return null;
+    }
     const { DatabaseSync } = require('node:sqlite');
-    _db = new DatabaseSync(DB_PATH, { readOnly: true });
+    _db = new DatabaseSync(dbPath, { readOnly: true });
     return _db;
   } catch (err) {
-    console.warn('[fishit] open failed:', err && err.message ? err.message : err);
+    console.error('[fishit] open failed:', err && err.message ? err.message : err, { dbPath });
     _db = null;
     return null;
   }
@@ -132,11 +138,15 @@ function exportRarityHints() {
 
 /** Test seam: drop the in-process caches + handle. */
 function _resetCache() {
+  try {
+    if (_db && typeof _db.close === 'function') _db.close();
+  } catch (_) { /* ignore */ }
   _blobCache.clear();
   _db = null;
   _dbTriedAt = 0;
   _imgIndex = null;
   _imgIndexAt = 0;
+  fishitDbPath.invalidateResolvedPath();
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -152,13 +162,659 @@ function periodWindow(period) {
   const wib = new Date(now + WIB_OFFSET_MS);
   const startOfTodayWib = Date.UTC(wib.getUTCFullYear(), wib.getUTCMonth(), wib.getUTCDate()) - WIB_OFFSET_MS;
   switch (period) {
+    case '24h': return { from: now - 86_400_000, to: now, label: '24 Hours' };
+    case 'tdy':
     case 'today': return { from: startOfTodayWib, to: now, label: 'Today' };
     case 'yesterday': return { from: startOfTodayWib - 86_400_000, to: startOfTodayWib, label: 'Yesterday' };
     case '7d': return { from: now - 7 * 86_400_000, to: now, label: '7 Days' };
     case '30d': return { from: now - 30 * 86_400_000, to: now, label: '30 Days' };
+    case 'ytd': {
+      const yearStart = Date.UTC(wib.getUTCFullYear(), 0, 1) - WIB_OFFSET_MS;
+      return { from: yearStart, to: now, label: 'Year to Date' };
+    }
     case 'all':
     default: return { from: 0, to: now + 1, label: 'All Time' };
   }
+}
+
+function normalizeDashboardPeriod(raw) {
+  const p = String(raw || 'all').trim().toLowerCase().replace(/\s+/g, '_');
+  if (p === 'all' || p === 'alltime' || p === 'all_time') return 'all';
+  if (p === 'tdy' || p === 'today' || p === '1d' || p === 'day' || p === '24h') return 'tdy';
+  if (p === '7d' || p === '7days' || p === 'week') return '7d';
+  if (p === '30d' || p === '1m' || p === 'month' || p === '30days') return '30d';
+  if (p === 'ytd' || p === 'year' || p === 'year_to_date') return 'ytd';
+  if (p === 'custom') return 'custom';
+  return 'all';
+}
+
+function parseDashboardDateInput(raw, endOfDay) {
+  if (!raw) return NaN;
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return Date.parse(s + (endOfDay ? 'T23:59:59.999+07:00' : 'T00:00:00+07:00'));
+  }
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : NaN;
+}
+
+function customPeriodWindow(fromRaw, toRaw) {
+  const from = parseDashboardDateInput(fromRaw, false);
+  const to = parseDashboardDateInput(toRaw, true);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return null;
+  return { from, to: to + 1, label: 'Custom Range' };
+}
+
+function resolveDashboardWindow(period, opts = {}) {
+  if (period === 'custom') return customPeriodWindow(opts.from, opts.to);
+  const key = period === 'tdy' ? 'today' : period;
+  return periodWindow(key);
+}
+
+function wibDateKeyFromMs(ms) {
+  const wib = new Date(ms + WIB_OFFSET_MS);
+  return `${wib.getUTCFullYear()}-${String(wib.getUTCMonth() + 1).padStart(2, '0')}-${String(wib.getUTCDate()).padStart(2, '0')}`;
+}
+
+function enumerateWibDateKeys(win) {
+  const keys = [];
+  const start = new Date(win.from + WIB_OFFSET_MS);
+  let cursor = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+  while (cursor < win.to) {
+    keys.push(wibDateKeyFromMs(cursor - WIB_OFFSET_MS));
+    cursor += 86_400_000;
+  }
+  if (!keys.length) keys.push(wibDateKeyFromMs(win.from));
+  return keys;
+}
+
+function wibWeekKeyFromMs(ms) {
+  const wib = new Date(ms + WIB_OFFSET_MS);
+  const day = wib.getUTCDay();
+  const diff = (day + 6) % 7;
+  const monday = Date.UTC(wib.getUTCFullYear(), wib.getUTCMonth(), wib.getUTCDate() - diff);
+  return wibDateKeyFromMs(monday - WIB_OFFSET_MS);
+}
+
+function enumerateChartBuckets(win) {
+  const spanMs = Math.max(0, win.to - win.from);
+  const MAX_BUCKETS = 60;
+  let useWeekly = spanMs > 45 * 86_400_000;
+  if (useWeekly) {
+    const estWeeks = Math.ceil(spanMs / (7 * 86_400_000));
+    if (estWeeks > MAX_BUCKETS) {
+      const trimmedFrom = win.to - MAX_BUCKETS * 7 * 86_400_000;
+      win = { ...win, from: Math.max(win.from, trimmedFrom) };
+    }
+  } else {
+    const estDays = Math.ceil(spanMs / 86_400_000);
+    if (estDays > MAX_BUCKETS) {
+      const trimmedFrom = win.to - MAX_BUCKETS * 86_400_000;
+      win = { ...win, from: Math.max(win.from, trimmedFrom) };
+    }
+  }
+  if (!useWeekly) {
+    return {
+      bucket: 'day',
+      keys: enumerateWibDateKeys(win),
+      keyForMs: wibDateKeyFromMs,
+      chartFrom: win.from,
+    };
+  }
+  const keys = [];
+  const start = new Date(win.from + WIB_OFFSET_MS);
+  let cursor = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+  cursor -= ((new Date(cursor + WIB_OFFSET_MS).getUTCDay() + 6) % 7) * 86_400_000;
+  while (cursor < win.to) {
+    keys.push(wibDateKeyFromMs(cursor - WIB_OFFSET_MS));
+    cursor += 7 * 86_400_000;
+  }
+  if (!keys.length) keys.push(wibWeekKeyFromMs(win.from));
+  return { bucket: 'week', keys, keyForMs: wibWeekKeyFromMs, chartFrom: win.from };
+}
+
+function listRealBotUsers(fish) {
+  if (!fish || !fish.byUser) return [];
+  return Object.values(fish.byUser).filter((u) => u && isRealUserId(String(u.userId)));
+}
+
+function buildTrackedAccountFilters(trackedAccounts) {
+  const allowedUsernameKeys = new Set();
+  const allowedRobloxIds = new Set();
+  for (const acct of trackedAccounts || []) {
+    if (!acct || typeof acct !== 'object') continue;
+    const key = String(
+      acct.roblox_username_key || acct.robloxUsernameKey || acct.key || acct.username || '',
+    ).trim().toLowerCase();
+    if (key) allowedUsernameKeys.add(key);
+    const rid = acct.roblox_user_id != null ? acct.roblox_user_id : acct.robloxUserId;
+    if (rid != null && rid !== '') allowedRobloxIds.add(String(rid));
+  }
+  return { allowedUsernameKeys, allowedRobloxIds };
+}
+
+function botUserMatchesTrackedAccount(u, mapKey, filters) {
+  if (!u || !filters) return false;
+  const usernameKey = String(u.username || '').trim().toLowerCase();
+  const userId = String(u.userId || mapKey || '');
+  const mapKeyStr = String(mapKey || '');
+  return (usernameKey && filters.allowedUsernameKeys.has(usernameKey))
+    || filters.allowedRobloxIds.has(userId)
+    || filters.allowedRobloxIds.has(mapKeyStr)
+    || (mapKeyStr && filters.allowedUsernameKeys.has(mapKeyStr.toLowerCase()));
+}
+
+/**
+ * Resolve bot cache users for owner dashboard — same identity path as !d / !s.
+ * Primary: fish.byUser[discordUserId] (Discord snowflake, never display name).
+ * Secondary: tracked Roblox accounts in bot cache (only when Discord ID miss).
+ */
+function resolveDashboardBotUsers(fish, discordUserId, trackedAccounts) {
+  if (!fish || !fish.byUser) return { users: [], match: null };
+  const ownerId = String(discordUserId || '').trim();
+  const seen = new Set();
+  const users = [];
+  let match = null;
+
+  if (ownerId && isRealUserId(ownerId)) {
+    const direct = fish.byUser[ownerId];
+    if (direct) {
+      const key = String(direct.userId || ownerId);
+      seen.add(key);
+      users.push(direct);
+      match = {
+        identityMatchMode: 'discord_id_direct',
+        matchedBotUserId: key,
+        matchedRobloxUsername: direct.username || null,
+        mapKey: ownerId,
+      };
+      return { users, match };
+    }
+  }
+
+  const filters = buildTrackedAccountFilters(trackedAccounts);
+  if (filters.allowedUsernameKeys.size || filters.allowedRobloxIds.size) {
+    for (const [mapKey, u] of Object.entries(fish.byUser)) {
+      if (!botUserMatchesTrackedAccount(u, mapKey, filters)) continue;
+      const id = String(u.userId || mapKey);
+      if (!isRealUserId(id) || seen.has(id)) continue;
+      seen.add(id);
+      users.push(u);
+      if (!match) {
+        match = {
+          identityMatchMode: 'tracked_roblox_account',
+          matchedBotUserId: id,
+          matchedRobloxUsername: u.username || null,
+          mapKey,
+        };
+      }
+    }
+  }
+
+  return { users, match };
+}
+
+/** @deprecated Use resolveDashboardBotUsers — kept for tests/back-compat. */
+function resolveTrackedBotUsers(fish, trackedAccounts, discordOwnerId) {
+  return resolveDashboardBotUsers(fish, discordOwnerId, trackedAccounts).users;
+}
+
+function collectAllTimeCatchRowStats(users) {
+  let allTimeCatchRows = 0;
+  let firstCatchAt = null;
+  let lastCatchAt = null;
+  for (const u of users) {
+    const rows = [
+      ...(u.details && u.details.secret || []),
+      ...(u.details && u.details.forgotten || []),
+    ];
+    allTimeCatchRows += rows.length;
+    for (const c of rows) {
+      if (!c || !c.time) continue;
+      if (!firstCatchAt || c.time < firstCatchAt) firstCatchAt = c.time;
+      if (!lastCatchAt || c.time > lastCatchAt) lastCatchAt = c.time;
+    }
+  }
+  return { allTimeCatchRows, firstCatchAt, lastCatchAt };
+}
+
+function deriveOwnerDashboardEmptyReason(ctx) {
+  if (!ctx.authDiscordId) return 'missing_auth_discord_id';
+  if (!ctx.botDbConnected) return 'bot_db_not_connected';
+  if (!ctx.fishCacheLoaded) return 'fish_cache_missing_or_empty';
+  if (!ctx.matchedUsers.length) return 'no_bot_user_for_discord_id';
+  if (ctx.allTimeCatchRows === 0) return 'no_catch_records_in_bot_db';
+  if (ctx.filteredCatchRows === 0) return 'date_range_filtered_all_rows';
+  return null;
+}
+
+function buildOwnerDashboardDebug(ctx) {
+  return {
+    authDiscordId: ctx.authDiscordId,
+    authDiscordUsername: ctx.authDiscordUsername,
+    dbSource: 'deng_fish_it_bot_db_d_command',
+    botDbPath: getDbPath(),
+    botDbConnected: ctx.botDbConnected,
+    identityMatchMode: ctx.match && ctx.match.identityMatchMode ? ctx.match.identityMatchMode : null,
+    matchedBotUserId: ctx.match && ctx.match.matchedBotUserId ? ctx.match.matchedBotUserId : null,
+    matchedRobloxUsername: ctx.match && ctx.match.matchedRobloxUsername ? ctx.match.matchedRobloxUsername : null,
+    selectedRange: ctx.period,
+    allTimeCatchRows: ctx.allTimeCatchRows,
+    filteredCatchRows: ctx.filteredCatchRows,
+    secretCount: ctx.secretCaught,
+    forgottenCount: ctx.forgottenCaught,
+    firstCatchAt: ctx.firstCatchAt,
+    lastCatchAt: ctx.lastCatchAt,
+    queryMs: ctx.queryMs,
+    emptyReason: ctx.emptyReason,
+    store: 'app_kv',
+    key: KEY_FISH,
+    dbPath: getDbPath(),
+    dbAvailable: ctx.botDbConnected,
+    period: ctx.period,
+    scope: 'owner',
+    discordUserId: ctx.authDiscordId,
+    trackedAccountCount: ctx.trackedCount,
+    matchedBotUsers: ctx.matchedUsers.length,
+    dateRange: ctx.dateRange,
+    usersScanned: ctx.matchedUsers.length,
+    totalCatchRows: ctx.allTimeCatchRows,
+    detailRowsMatched: ctx.filteredCatchRows,
+    caughtFishCount: ctx.caughtFishCount,
+    fishCardCount: ctx.fishCardCount,
+    dailyRows: ctx.dailyRows,
+    chartBucket: ctx.chartBucket,
+    method: 'discord_id_direct — byUser.details window filter (same as !d / !s)',
+  };
+}
+
+function collectCatchRowStats(users, win) {
+  let totalCatchRows = 0;
+  let filteredCatchRows = 0;
+  let firstCatchAt = null;
+  let lastCatchAt = null;
+  for (const u of users) {
+    const rows = [
+      ...(u.details && u.details.secret || []),
+      ...(u.details && u.details.forgotten || []),
+    ];
+    totalCatchRows += rows.length;
+    for (const c of rows) {
+      if (!c || !c.time) continue;
+      if (!inWindow(c.time, win)) continue;
+      filteredCatchRows += 1;
+      if (!firstCatchAt || c.time < firstCatchAt) firstCatchAt = c.time;
+      if (!lastCatchAt || c.time > lastCatchAt) lastCatchAt = c.time;
+    }
+  }
+  return { totalCatchRows, filteredCatchRows, firstCatchAt, lastCatchAt };
+}
+
+function aggregateDailyCaughtForUsers(users, win) {
+  const { bucket, keys, keyForMs } = enumerateChartBuckets(win);
+  const daily = Object.fromEntries(keys.map((k) => [k, 0]));
+  let usedByDate = false;
+  if (bucket === 'day') {
+    for (const u of users) {
+      for (const [date, agg] of Object.entries(u.byDate || {})) {
+        if (!Object.prototype.hasOwnProperty.call(daily, date)) continue;
+        const t = Date.parse(`${date}T00:00:00+07:00`);
+        if (Number.isFinite(t) && t >= win.from && t < win.to) {
+          daily[date] += num(agg && agg.total);
+          if (daily[date] > 0) usedByDate = true;
+        }
+      }
+    }
+  }
+  if (!usedByDate) {
+    for (const u of users) {
+      const rows = [
+        ...(u.details && u.details.secret || []),
+        ...(u.details && u.details.forgotten || []),
+      ];
+      for (const c of rows) {
+        if (!c || !inWindow(c.time, win)) continue;
+        const dk = keyForMs(Date.parse(c.time));
+        if (Object.prototype.hasOwnProperty.call(daily, dk)) daily[dk] += 1;
+      }
+    }
+  }
+  return keys.map((date) => ({ date, totalCaught: num(daily[date]), bucket }));
+}
+
+function aggregateFishCardsForUsers(users, win) {
+  const groups = new Map();
+  const add = (c, rarity) => {
+    const name = c.name || c.fishType;
+    if (!name) return;
+    const g = groups.get(name) || { name, rarity, count: 0, maxWeight: 0, latest: null, thumb: null };
+    g.count += 1;
+    const w = num(c.weight);
+    if (w > g.maxWeight) g.maxWeight = w;
+    if (c.time && (!g.latest || c.time > g.latest)) g.latest = c.time;
+    if (!g.thumb && isValidImg(c.thumbnail)) g.thumb = c.thumbnail;
+    groups.set(name, g);
+  };
+  for (const u of users) {
+    const secret = (u.details && u.details.secret || []).filter((c) => inWindow(c.time, win));
+    const forgotten = (u.details && u.details.forgotten || []).filter((c) => inWindow(c.time, win));
+    secret.forEach((c) => add(c, 'Secret'));
+    forgotten.forEach((c) => add(c, 'Forgotten'));
+  }
+  return sortFishCardsByRarity([...groups.values()].map((g) => ({
+    speciesKey: speciesKey(g.name),
+    name: g.name,
+    rarity: g.rarity,
+    count: g.count,
+    amount: g.count,
+    imageUrl: resolveSpeciesImage(g.name, g.thumb),
+    maxWeight: formatWeight(g.maxWeight),
+    latestCaughtAt: g.latest,
+    fallback: g.rarity === 'Forgotten' ? 'forgotten' : 'secret',
+  })));
+}
+
+function sortFishCardsByRarity(cards) {
+  return [...cards].sort((a, b) =>
+    rarityRank(a.rarity) - rarityRank(b.rarity)
+    || (Number(b.count) || 0) - (Number(a.count) || 0)
+    || String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+function countRarityForUsers(users, win) {
+  let secretCaught = 0;
+  let forgottenCaught = 0;
+  for (const u of users) {
+    secretCaught += (u.details && u.details.secret || []).filter((c) => inWindow(c.time, win)).length;
+    forgottenCaught += (u.details && u.details.forgotten || []).filter((c) => inWindow(c.time, win)).length;
+  }
+  return { secretCaught, forgottenCaught };
+}
+
+function aggregateGlobalDailyCaught(fish, win) {
+  return aggregateDailyCaughtForUsers(listRealBotUsers(fish), win);
+}
+
+function aggregateGlobalFishCards(fish, win) {
+  return aggregateFishCardsForUsers(listRealBotUsers(fish), win);
+}
+
+/**
+ * Global dashboard stats for /inventory (same bot DB source as !d / public-summary).
+ * Period: all | 30d | 7d | ytd | tdy | custom (default all).
+ */
+function getGlobalDashboard(periodInput = 'all', opts = {}) {
+  const period = normalizeDashboardPeriod(periodInput);
+  const win = resolveDashboardWindow(period, opts);
+  if (!win) {
+    return {
+      available: false,
+      period: 'custom',
+      from: null,
+      to: null,
+      cards: { secretCaught: 0, forgottenCaught: 0 },
+      fishCards: [],
+      dailyCaught: [],
+      source: 'deng_fish_it_bot_db_d_command',
+      error: 'invalid_custom_range',
+      debug: { period, invalidCustomRange: true },
+    };
+  }
+  const fish = readBlob(KEY_FISH);
+  const fromIso = new Date(win.from).toISOString();
+  const toIso = new Date(win.to).toISOString();
+  const chartBuckets = enumerateChartBuckets(win);
+  const emptyDaily = chartBuckets.keys.map((date) => ({ date, totalCaught: 0, bucket: chartBuckets.bucket }));
+  const empty = {
+    available: false,
+    period,
+    periodLabel: win.label,
+    from: fromIso,
+    to: toIso,
+    cards: { secretCaught: 0, forgottenCaught: 0 },
+    fishCards: [],
+    dailyCaught: emptyDaily,
+    source: 'deng_fish_it_bot_db_d_command',
+    debug: {
+      source: 'deng_fish_it_bot_db_d_command',
+      store: 'app_kv',
+      key: KEY_FISH,
+      dbPath: getDbPath(),
+      dbAvailable: isAvailable(),
+      period,
+      dateRange: { from: fromIso, to: toIso },
+      usersScanned: 0,
+      detailRowsMatched: 0,
+      dailyRows: emptyDaily.length,
+    },
+  };
+  if (!fish || !fish.byUser) {
+    console.warn('[fishit] getGlobalDashboard: bot DB fish cache missing or empty', { dbPath: getDbPath(), dbAvailable: isAvailable() });
+    return empty;
+  }
+
+  const allUsers = listRealBotUsers(fish);
+  const catchStats = collectCatchRowStats(allUsers, win);
+  const { secretCaught, forgottenCaught } = countRarityForUsers(allUsers, win);
+  const dailyCaught = aggregateDailyCaughtForUsers(allUsers, win);
+  const fishCards = aggregateFishCardsForUsers(allUsers, win);
+
+  return {
+    available: true,
+    period,
+    periodLabel: win.label,
+    from: fromIso,
+    to: toIso,
+    cards: {
+      secretCaught,
+      forgottenCaught,
+    },
+    fishCards,
+    dailyCaught,
+    source: 'deng_fish_it_bot_db_d_command',
+    debug: {
+      dbSource: 'deng_fish_it_bot_db_d_command',
+      source: 'deng_fish_it_bot_db_d_command',
+      store: 'app_kv',
+      key: KEY_FISH,
+      dbPath: getDbPath(),
+      dbAvailable: true,
+      selectedRange: period,
+      period,
+      dateRange: { from: fromIso, to: toIso },
+      usersScanned: allUsers.length,
+      totalCatchRows: catchStats.totalCatchRows,
+      filteredCatchRows: catchStats.filteredCatchRows,
+      detailRowsMatched: catchStats.filteredCatchRows,
+      secretCount: secretCaught,
+      forgottenCount: forgottenCaught,
+      caughtFishCount: fishCards.reduce((sum, card) => sum + num(card.count), 0),
+      fishCardCount: fishCards.length,
+      firstCatchAt: catchStats.firstCatchAt,
+      lastCatchAt: catchStats.lastCatchAt,
+      dailyRows: dailyCaught.length,
+      chartBucket: chartBuckets.bucket,
+      method: 'byUser.details window filter + byDate daily buckets',
+    },
+  };
+}
+
+/**
+ * Owner-scoped dashboard for /tracker — same bot DB identity path as !d / !s.
+ * Primary lookup: fish.byUser[discordUserId]. Tracked Roblox accounts are fallback only.
+ */
+function getOwnerDashboard(discordUserId, trackedAccounts, periodInput = 'all', opts = {}) {
+  const queryStartedAt = opts.queryStartedAt || Date.now();
+  const authDiscordUsername = opts.authDiscordUsername != null
+    ? String(opts.authDiscordUsername)
+    : null;
+  const authDiscordId = String(discordUserId || '').trim();
+  const period = normalizeDashboardPeriod(periodInput);
+  const win = resolveDashboardWindow(period, opts);
+  const trackedCount = Array.isArray(trackedAccounts) ? trackedAccounts.length : 0;
+  const queryMs = () => Date.now() - queryStartedAt;
+
+  if (!win) {
+    return {
+      available: false,
+      emptyReason: 'invalid_custom_range',
+      period: 'custom',
+      from: null,
+      to: null,
+      cards: { secretCaught: 0, forgottenCaught: 0 },
+      fishCards: [],
+      dailyCaught: [],
+      scope: 'owner',
+      discordUserId: authDiscordId,
+      trackedAccountCount: trackedCount,
+      source: 'deng_fish_it_bot_db_d_command',
+      error: 'invalid_custom_range',
+      debug: buildOwnerDashboardDebug({
+        authDiscordId,
+        authDiscordUsername,
+        botDbConnected: isAvailable(),
+        fishCacheLoaded: false,
+        period,
+        matchedUsers: [],
+        match: null,
+        allTimeCatchRows: 0,
+        filteredCatchRows: 0,
+        secretCaught: 0,
+        forgottenCaught: 0,
+        firstCatchAt: null,
+        lastCatchAt: null,
+        trackedCount,
+        dateRange: { from: null, to: null },
+        caughtFishCount: 0,
+        fishCardCount: 0,
+        dailyRows: 0,
+        chartBucket: null,
+        queryMs: queryMs(),
+        emptyReason: 'invalid_custom_range',
+      }),
+    };
+  }
+
+  const botDbConnected = isAvailable();
+  const fish = readBlob(KEY_FISH);
+  const fishCacheLoaded = !!(fish && fish.byUser);
+  const fromIso = new Date(win.from).toISOString();
+  const toIso = new Date(win.to).toISOString();
+  const chartBuckets = enumerateChartBuckets(win);
+  const emptyDaily = chartBuckets.keys.map((date) => ({ date, totalCaught: 0, bucket: chartBuckets.bucket }));
+  const base = {
+    period,
+    periodLabel: win.label,
+    from: fromIso,
+    to: toIso,
+    scope: 'owner',
+    discordUserId: authDiscordId,
+    trackedAccountCount: trackedCount,
+    source: 'deng_fish_it_bot_db_d_command',
+  };
+
+  const { users: matchedUsers, match } = resolveDashboardBotUsers(fish, authDiscordId, trackedAccounts);
+  const allTimeStats = collectAllTimeCatchRowStats(matchedUsers);
+  const catchStats = collectCatchRowStats(matchedUsers, win);
+  const { secretCaught, forgottenCaught } = countRarityForUsers(matchedUsers, win);
+  const dailyCaught = aggregateDailyCaughtForUsers(matchedUsers, win);
+  const fishCards = aggregateFishCardsForUsers(matchedUsers, win);
+  const caughtFishCount = fishCards.reduce((sum, card) => sum + num(card.count), 0);
+
+  const ctx = {
+    authDiscordId,
+    authDiscordUsername,
+    botDbConnected,
+    fishCacheLoaded,
+    period,
+    matchedUsers,
+    match,
+    allTimeCatchRows: allTimeStats.allTimeCatchRows,
+    filteredCatchRows: catchStats.filteredCatchRows,
+    secretCaught,
+    forgottenCaught,
+    firstCatchAt: catchStats.firstCatchAt || allTimeStats.firstCatchAt,
+    lastCatchAt: catchStats.lastCatchAt || allTimeStats.lastCatchAt,
+    trackedCount,
+    dateRange: { from: fromIso, to: toIso },
+    caughtFishCount,
+    fishCardCount: fishCards.length,
+    dailyRows: dailyCaught.length,
+    chartBucket: chartBuckets.bucket,
+    queryMs: queryMs(),
+  };
+  ctx.emptyReason = deriveOwnerDashboardEmptyReason(ctx);
+  const debug = buildOwnerDashboardDebug(ctx);
+
+  const fatalReasons = new Set([
+    'missing_auth_discord_id',
+    'bot_db_not_connected',
+    'fish_cache_missing_or_empty',
+  ]);
+  const available = !fatalReasons.has(ctx.emptyReason);
+  const statsState = available
+    ? ((ctx.filteredCatchRows === 0 && ctx.allTimeCatchRows === 0) ? 'empty' : 'ok')
+    : 'error';
+
+  if (!available) {
+    const emptyReason = ctx.emptyReason || 'dashboard_unavailable';
+    const dbStatus = fishitDbPath.getDbStatus(true);
+    if (ctx.emptyReason === 'bot_db_not_connected') {
+      console.error('[fishit] getOwnerDashboard: bot DB not connected', {
+        dbPath: getDbPath(),
+        dbStatus,
+        authDiscordId,
+        candidates: fishitDbPath.candidateDbPaths(),
+      });
+    } else if (ctx.emptyReason === 'fish_cache_missing_or_empty') {
+      console.error('[fishit] getOwnerDashboard: bot DB fish cache missing or empty', {
+        dbPath: getDbPath(),
+        dbStatus,
+        authDiscordId,
+        trackedAccountCount: trackedCount,
+      });
+    }
+
+    return {
+      ...base,
+      available: false,
+      statsState: 'error',
+      emptyReason,
+      cards: { secretCaught: 0, forgottenCaught: 0 },
+      fishCards: [],
+      dailyCaught: emptyDaily,
+      debug,
+    };
+  }
+
+  const userEmptyReasons = new Set([
+    'no_bot_user_for_discord_id',
+    'no_catch_records_in_bot_db',
+    'date_range_filtered_all_rows',
+  ]);
+  if (ctx.emptyReason === 'no_bot_user_for_discord_id') {
+    console.warn('[fishit] getOwnerDashboard: no bot DB user for Discord ID (returning zero stats)', {
+      authDiscordId,
+      authDiscordUsername,
+      trackedAccountCount: trackedCount,
+      dbPath: getDbPath(),
+      selectedRange: period,
+      identityMatchMode: match && match.identityMatchMode,
+    });
+  }
+
+  const showEmptyReason = userEmptyReasons.has(ctx.emptyReason) ? ctx.emptyReason : null;
+
+  return {
+    ...base,
+    available: true,
+    statsState,
+    emptyReason: showEmptyReason,
+    cards: { secretCaught, forgottenCaught },
+    fishCards,
+    dailyCaught,
+    debug,
+  };
 }
 
 function inWindow(iso, win) {
@@ -394,9 +1050,14 @@ function sumByDateTotal(byDate, win) {
 
 // ── Public accessors ─────────────────────────────────────────────────────────
 
-/** Is the Fish It database reachable at all? */
+/** Is the Fish It database file reachable (readable app_kv)? Fish cache presence is checked separately. */
 function isAvailable() {
-  return readBlob(KEY_FISH) != null || fs.existsSync(DB_PATH);
+  const status = fishitDbPath.getDbStatus(false);
+  return !!(status.exists && status.readable && status.hasAppKv);
+}
+
+function getDbConnectionInfo() {
+  return fishitDbPath.getDbStatus(true);
 }
 
 function getForgottenSpecies() {
@@ -533,10 +1194,16 @@ function getUserProfile(discordId) {
 }
 
 function rarityRank(r) {
-  const s = String(r || '').toLowerCase();
-  if (s === 'forgotten') return 0;
-  if (s === 'secret') return 1;
-  return 2;
+  const s = String(r || '').trim().toLowerCase();
+  if (s === 'secret') return 0;
+  if (s === 'forgotten') return 1;
+  if (s === 'mythic') return 2;
+  if (s === 'legendary' || s === 'legend') return 3;
+  if (s === 'epic') return 4;
+  if (s === 'rare') return 5;
+  if (s === 'uncommon') return 6;
+  if (s === 'common') return 7;
+  return 99;
 }
 
 /** A standardized rod card with a real channel-derived image (Part 8). */
@@ -690,7 +1357,7 @@ function getUserDaily(discordId, period = 'today') {
   secret.forEach((c) => add(c, 'Secret'));
   forgotten.forEach((c) => add(c, 'Forgotten'));
 
-  const cards = [...groups.values()].map((g) => ({
+  const cards = sortFishCardsByRarity([...groups.values()].map((g) => ({
     speciesKey: speciesKey(g.name),
     name: g.name,
     rarity: g.rarity,
@@ -699,10 +1366,7 @@ function getUserDaily(discordId, period = 'today') {
     maxWeight: formatWeight(g.maxWeight),
     latestCaughtAt: g.latest,
     fallback: g.rarity === 'Forgotten' ? 'forgotten' : 'secret',
-  })).sort((a, b) =>
-    b.count - a.count
-    || rarityRank(a.rarity) - rarityRank(b.rarity)
-    || a.name.localeCompare(b.name));
+  })));
 
   const totalFish = sumByDateTotal(u.byDate, win) || (secret.length + forgotten.length);
   return {
@@ -721,10 +1385,23 @@ function getUserDaily(discordId, period = 'today') {
 }
 
 module.exports = {
-  DB_PATH,
+  DB_PATH: getDbPath,
+  getDbPath,
+  getDbConnectionInfo,
   isAvailable,
   getGlobal,
   getGlobalPeriodCaught,
+  getGlobalDashboard,
+  getOwnerDashboard,
+  normalizeDashboardPeriod,
+  customPeriodWindow,
+  resolveDashboardWindow,
+  resolveDashboardBotUsers,
+  resolveTrackedBotUsers,
+  collectAllTimeCatchRowStats,
+  countRarityForUsers,
+  sortFishCardsByRarity,
+  collectCatchRowStats,
   getForgottenSpecies,
   getUserProfile,
   getUserStats,
