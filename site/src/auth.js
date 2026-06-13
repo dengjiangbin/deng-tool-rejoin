@@ -9,6 +9,9 @@ const crypto  = require('crypto');
 const axios   = require('axios');
 const supabase = require('./db');
 const { resolveDiscordRedirectUri, oauthReturnPublicBase } = require('./publicDomain');
+const oauthStateStore = require('./oauthStateStore');
+
+const DISCORD_HTTP_TIMEOUT_MS = Number(process.env.DISCORD_OAUTH_HTTP_TIMEOUT_MS || 12000);
 
 const DISCORD_CLIENT_ID     = process.env.DISCORD_CLIENT_ID     || '';
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
@@ -154,7 +157,7 @@ function verifyCsrf(req) {
  * Build the Discord authorization URL with a random state nonce.
  * Stores the state in session for later validation.
  */
-function buildDiscordAuthUrl(req) {
+function buildDiscordAuthUrl(req, options = {}) {
   const redirectUri = resolveDiscordRedirectUri(req);
   const missing = [];
   if (!DISCORD_CLIENT_ID) missing.push('DISCORD_CLIENT_ID');
@@ -164,10 +167,19 @@ function buildDiscordAuthUrl(req) {
     console.error('[auth] Discord OAuth not configured, missing env:', missing.join(', '));
     throw new Error('Discord OAuth is not configured');
   }
-  const state = crypto.randomBytes(24).toString('hex');
-  req.session.oauthState = state;
-  req.session.oauthRedirectUri = redirectUri;
-  req.session.oauthReturnPublicUrl = oauthReturnPublicBase(req);
+
+  const returnPublicUrl = options.returnPublicUrl != null
+    ? String(options.returnPublicUrl || '').replace(/\/+$/, '')
+    : oauthReturnPublicBase(req);
+  const authReturnTo = options.authReturnTo || '/dashboard';
+  const oauthApkReturn = options.oauthApkReturn === true;
+
+  const state = oauthStateStore.createOAuthState({
+    redirectUri,
+    returnPublicUrl,
+    oauthApkReturn,
+    authReturnTo,
+  });
 
   const params = new URLSearchParams({
     client_id:     DISCORD_CLIENT_ID,
@@ -175,7 +187,6 @@ function buildDiscordAuthUrl(req) {
     response_type: 'code',
     scope:         SCOPES,
     state,
-    prompt:        'consent',
   });
   return `${DISCORD_API}/oauth2/authorize?${params}`;
 }
@@ -198,7 +209,10 @@ async function exchangeDiscordCode(code, redirectUri) {
     const { data } = await axios.post(
       `${DISCORD_API}/oauth2/token`,
       params.toString(),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: DISCORD_HTTP_TIMEOUT_MS,
+      },
     );
     return data; // { access_token, token_type, scope, expires_in }
   } catch (err) {
@@ -218,6 +232,7 @@ async function exchangeDiscordCode(code, redirectUri) {
 async function fetchDiscordUser(accessToken) {
   const { data } = await axios.get(`${DISCORD_API}/users/@me`, {
     headers: { Authorization: `Bearer ${accessToken}` },
+    timeout: DISCORD_HTTP_TIMEOUT_MS,
   });
   return data; // { id, username, discriminator, avatar, email, ... }
 }

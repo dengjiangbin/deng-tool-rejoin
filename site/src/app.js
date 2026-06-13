@@ -13,8 +13,15 @@ const monitorRoutes = require('./monitorRoutes');
 const fishitRoutes = require('./fishitRoutes');
 const fishitTrackerRoutes = require('./fishitTrackerRoutes');
 const fishitGlobalAdminRoutes = require('./fishitGlobalAdminRoutes');
+const aioRoutes = require('./aioRoutes');
 const { FileSessionStore } = require('./sessionStore');
 const { resolveTrustProxySetting } = require('./rateLimitUtils');
+const {
+  canonicalPublicUrl,
+  legacyPublicPageRedirectMiddleware,
+  buildCanonicalPageUrl,
+  isSessionlessPath,
+} = require('./publicDomain');
 const packageJson = require('../package.json');
 
 const app = express();
@@ -31,6 +38,7 @@ function latestAssetStamp() {
     path.join(publicDir, 'js', 'app.js'),
     path.join(publicDir, 'js', 'count-up-stats.js'),
     path.join(publicDir, 'js', 'home.js'),
+    path.join(publicDir, 'js', 'login-page.js'),
     path.join(__dirname, '..', 'views', 'fishit_tracker.ejs'),
   ];
   let newest = 0;
@@ -55,7 +63,7 @@ app.locals.assetVersion = assetVersion;
 app.locals.flash = {};
 app.locals.csrfToken = '';
 app.locals.user = null;
-app.locals.publicUrl = process.env.TOOL_SITE_PUBLIC_URL || 'https://tool.deng.my.id';
+app.locals.publicUrl = canonicalPublicUrl();
 
 // ---------------------------------------------------------------
 // Security headers (helmet)
@@ -111,16 +119,31 @@ app.use(helmet({
 // ---------------------------------------------------------------
 app.set('trust proxy', resolveTrustProxySetting());
 
+// Redirect safe public website pages from legacy tool host to canonical aio host.
+app.use(legacyPublicPageRedirectMiddleware);
+
+// Fast health probe — before session/tracker routers so proxies never queue behind uploads.
+app.get('/health', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    status: 'ok',
+    service: 'deng-tool-site',
+    port: parseInt(process.env.TOOL_SITE_PORT || '8791', 10),
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // ---------------------------------------------------------------
 // Session (HttpOnly, Secure in prod, SameSite=Lax)
 // Mounted before Fish It tracker routes so /inventory can read user profile.
+// Skipped for high-volume tracker upload APIs (no session file I/O per POST).
 // ---------------------------------------------------------------
 const sessionSecret = process.env.TOOL_SITE_COOKIE_SECRET;
 if (!sessionSecret || sessionSecret.length < 32) {
   throw new Error('TOOL_SITE_COOKIE_SECRET must be at least 32 characters');
 }
 
-app.use(session({
+const sessionMiddleware = session({
   name: 'deng_sid',
   store: new FileSessionStore({
     dir: process.env.TOOL_SITE_SESSION_DIR,
@@ -134,10 +157,20 @@ app.use(session({
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    ...(process.env.NODE_ENV === 'production' ? { domain: '.deng.my.id' } : {}),
   },
-}));
+});
+
+app.use((req, res, next) => {
+  if (isSessionlessPath(req.path)) return next();
+  return sessionMiddleware(req, res, next);
+});
+
+// Discord OAuth — after session, before tracker routers (avoids upload congestion).
+app.use('/', require('./oauthRoutes'));
 
 app.use((req, _res, next) => {
+  if (isSessionlessPath(req.path) || !req.session) return next();
   if (!req.session.csrfToken) {
     req.session.csrfToken = require('crypto').randomBytes(32).toString('hex');
   }
@@ -153,6 +186,8 @@ app.use((req, _res, next) => {
 // ---------------------------------------------------------------
 app.use('/', fishitTrackerRoutes);
 app.use('/', fishitGlobalAdminRoutes);
+const fishitInventoryManualImageAdminRoutes = require('./fishitInventoryManualImageAdminRoutes');
+app.use('/', fishitInventoryManualImageAdminRoutes);
 
 // ---------------------------------------------------------------
 // Body parsers
@@ -179,6 +214,11 @@ app.use('/public', express.static(path.join(__dirname, '..', 'public'), {
   setHeaders: (res, filePath) => {
     if (/[\\/]assets[\\/][^\\/]+\.[a-f0-9]{8,}\.(css|js)$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    } else if (/[\\/]css[\\/]home\.css$/i.test(filePath)) {
+      // Homepage skin changes often; avoid long CDN/browser retention of stale ?v= URLs.
+      res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+    } else if (/[\\/]css[\\/]login-page\.css$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
     } else if (/[\\/](css|js|images)[\\/][^\\/]+\.(css|js|png|jpg|jpeg|webp|gif|svg|ico)$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'public, max-age=86400');
     }
@@ -200,12 +240,14 @@ app.use('/images', express.static(path.join(__dirname, '..', 'public', 'images')
 // Flash-message helper (lightweight, no extra dep)
 // ---------------------------------------------------------------
 app.use((req, res, next) => {
-  res.locals.flash = req.session.flash || {};
-  res.locals.csrfToken = req.session.csrfToken;
-  res.locals.user = req.session.user || null;
-  res.locals.publicUrl = process.env.TOOL_SITE_PUBLIC_URL || 'https://tool.deng.my.id';
+  const sess = req.session || {};
+  res.locals.flash = sess.flash || {};
+  res.locals.csrfToken = sess.csrfToken || '';
+  res.locals.user = sess.user || null;
+  res.locals.publicUrl = canonicalPublicUrl();
+  res.locals.canonicalUrl = buildCanonicalPageUrl(req);
   res.locals.assetVersion = assetVersion;
-  delete req.session.flash;
+  if (req.session) delete req.session.flash;
   next();
 });
 
@@ -215,6 +257,9 @@ app.use((req, res, next) => {
 // 16KB global parsers configured above.
 // ---------------------------------------------------------------
 app.use('/', monitorRoutes);
+
+// DENG AIO APK API (update manifest, optional OAuth/sync for future native paths).
+app.use('/', aioRoutes);
 
 // Fish It stats API (public global + authenticated /me/* routes).
 app.use('/', fishitRoutes);
@@ -243,6 +288,13 @@ app.use((_req, res) => {
 // ---------------------------------------------------------------
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, _next) => {
+  if (err && (err.code === 'EBUSY' || err.code === 'EPERM' || err.code === 'EACCES')) {
+    console.warn('[deng-tool-site] Recoverable filesystem error:', err.code, req.path);
+    if (req.path.startsWith('/api/')) {
+      return res.status(503).json({ ok: false, error: 'temporarily_busy' });
+    }
+    return res.status(503).render('error', { code: 503, message: 'Server is busy. Please retry.' });
+  }
   console.error('[deng-tool-site] Unhandled error:', err);
   // Return JSON for API routes (e.g. PayloadTooLargeError from body parsers)
   // so Lua clients receive a parseable error body, not an HTML page.

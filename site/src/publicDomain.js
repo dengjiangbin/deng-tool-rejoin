@@ -86,6 +86,15 @@ function isApiOrInternalPath(pathname) {
   return false;
 }
 
+/** High-volume tracker upload APIs — skip express-session to avoid file-store churn. */
+function isSessionlessPath(pathname) {
+  const path = String(pathname || '');
+  if (path === '/health') return true;
+  if (path.startsWith('/api/fishit-tracker/')) return true;
+  if (path.startsWith('/api/tracker/')) return true;
+  return false;
+}
+
 function legacyPublicPageRedirectTarget(req) {
   const canonical = canonicalPublicUrl();
   const path = req.path || '/';
@@ -151,6 +160,7 @@ module.exports = {
   isCanonicalPublicRequest,
   isLegacyPublicRedirectPath,
   isApiOrInternalPath,
+  isSessionlessPath,
   legacyPublicPageRedirectMiddleware,
   resolveDiscordRedirectUri,
   oauthReturnPublicBase,

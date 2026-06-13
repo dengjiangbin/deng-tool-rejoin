@@ -36,27 +36,70 @@ if (!isStateSecretConfigured()) {
 const HOST = process.env.TOOL_SITE_HOST || '127.0.0.1';
 const PORT = parseInt(process.env.TOOL_SITE_PORT || '8791', 10);
 
-const server = app.listen(PORT, HOST, () => {
+function healthPayload() {
+  return JSON.stringify({
+    status: 'ok',
+    service: 'deng-tool-site',
+    port: PORT,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+function isRecoverableFsError(err) {
+  const code = err && (err.code || err.errno);
+  return code === 'EBUSY' || code === 'EPERM' || code === 'EACCES';
+}
+
+const server = require('http').createServer((req, res) => {
+  const pathOnly = String(req.url || '').split('?')[0];
+  if (req.method === 'GET' && pathOnly === '/health') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    });
+    res.end(healthPayload());
+    return;
+  }
+  app(req, res);
+});
+
+server.listen(PORT, HOST, () => {
   console.log(`[deng-tool-site] Listening on http://${HOST}:${PORT}`);
 });
 
-// Graceful shutdown
+server.on('error', (err) => {
+  console.error('[deng-tool-site] Listen error:', err);
+  if (err && err.code === 'EADDRINUSE') {
+    console.error(`[deng-tool-site] Port ${PORT} already in use — PM2 should retry after kill_timeout`);
+  }
+  process.exit(1);
+});
+
+// Graceful shutdown — allow in-flight tracker uploads to finish before PM2 force-kills.
 function shutdown(signal) {
   console.log(`[deng-tool-site] ${signal} received – shutting down`);
   server.close(() => {
     console.log('[deng-tool-site] HTTP server closed');
     process.exit(0);
   });
-  setTimeout(() => process.exit(1), 10_000);
+  setTimeout(() => process.exit(1), 15_000);
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
 process.on('uncaughtException', (err) => {
   console.error('[deng-tool-site] Uncaught exception:', err);
+  if (isRecoverableFsError(err)) {
+    console.warn('[deng-tool-site] Recoverable filesystem error — continuing');
+    return;
+  }
   process.exit(1);
 });
 process.on('unhandledRejection', (reason) => {
   console.error('[deng-tool-site] Unhandled rejection:', reason);
+  if (isRecoverableFsError(reason)) {
+    console.warn('[deng-tool-site] Recoverable filesystem rejection — continuing');
+    return;
+  }
   process.exit(1);
 });
