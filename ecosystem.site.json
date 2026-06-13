@@ -34,7 +34,7 @@
         "DISCORD_AIO_WEB_REDIRECT_URI": "https://aio.deng.my.id/auth/discord/callback",
         "DISCORD_REDIRECT_URI": "https://tool.deng.my.id/auth/discord/callback",
         "DISCORD_AIO_REDIRECT_URI": "https://tool.deng.my.id/api/aio/auth/callback",
-        "GIT_COMMIT": "fa4d59a"
+        "GIT_COMMIT": "a2555ec"
       }
     },
     {
