@@ -3589,6 +3589,24 @@ function runCatchDeltaOnUpload(body, rawItems, existing, sessionKey) {
   });
 }
 
+function applyLitePublicSnapshotFields(session, usesGameItemDb, usesItemUtility, playerDataFishItems, playerDataStoneItems) {
+  if (!session) return session;
+  if ((usesGameItemDb || usesItemUtility) && Array.isArray(playerDataFishItems) && playerDataFishItems.length) {
+    const grouped = gameItemDbPublic.groupFishRows(playerDataFishItems);
+    const cards = grouped.map((row) => gameItemDbPublic.mapToPublicFishCardItem(row));
+    session.lastGoodPublicFishItems = cards;
+    session.lastGoodPublicFishCount = cards.length;
+    session.publicFishItems = cards;
+  }
+  if ((usesGameItemDb || usesItemUtility) && Array.isArray(playerDataStoneItems) && playerDataStoneItems.length) {
+    const grouped = gameItemDbPublic.groupStoneRows(playerDataStoneItems);
+    const cards = grouped.map((row) => gameItemDbPublic.mapToPublicStoneCardItem(row));
+    session.lastGoodPublicStoneItems = cards;
+    session.lastGoodPublicStoneCount = cards.length;
+  }
+  return session;
+}
+
 // ── POST update-backpack (canonical + legacy alias) ───────────────
 // Accepts both:
 //   • inventory_snapshot  – the Replion source-of-truth inventory. The items
@@ -3844,54 +3862,17 @@ function handleUpdateBackpack(req, res) {
     }
 
     let rawItems = normaliseInventoryItems(body);
-    const learnedIngest = ingestLearnedFishCatalogFromBody(body);
-    const evidenceSourceMode = liveCatchProof.resolveEvidenceSourceMode(body);
-    const globalContext = {
-      enabled: true,
-      userId: cleanUserId,
-      userIdHash: globalFishCatalog.hashContributorId(cleanUserId),
-      gameId: body.gameId || body.game_id || null,
-      placeId: body.placeId || body.place_id || null,
-      gameVersion: body.gameVersion || body.game_version || null,
-      evidenceSourceMode,
-      sessionKey: key,
-    };
-    let nameCatalogDiscovery = runCatchDeltaOnUpload(body, rawItems, existing, key);
-    const pendingCatchPayload = body.pendingCatchName || body.pendingCatch;
-    if (pendingCatchPayload) {
-      const bindingProof = catchDelta.attemptCatchSnapshotBinding({
-        pendingCatch: pendingCatchPayload,
-        previousItems: existing?.items || [],
-        currentItems: rawItems,
-        mainCatalogLookup: (id) => catalogStore.lookupById(id),
-        ingestLearned: ingestLearnedFishEntry,
-        globalContext,
-        existingDiscovery: nameCatalogDiscovery,
-      });
-      if (nameCatalogDiscovery) {
-        if (!nameCatalogDiscovery.catchToSnapshotBindingProof) {
-          nameCatalogDiscovery.catchToSnapshotBindingProof = bindingProof;
-        }
-        if (!nameCatalogDiscovery.nextExpectedAction && bindingProof.nextExpectedAction) {
-          nameCatalogDiscovery.nextExpectedAction = bindingProof.nextExpectedAction;
-        }
-      } else if (bindingProof.attempted) {
-        nameCatalogDiscovery = {
-          catchToSnapshotBindingProof: bindingProof,
-          lastCatchParsed: catchDelta.sanitisePendingCatch(pendingCatchPayload),
-          nextExpectedAction: bindingProof.nextExpectedAction,
-        };
-      }
-    }
-    catalogStore.learnFromTrackerItems(rawItems);
+    const uploadArrivalAt = Date.now();
+    const gateWaitMs = 0;
+    const rawPersistStart = Date.now();
+    const ps         = sanitiseParseStats(body.parseStats);
+    const fishPathDiscovery = partialSnapshot.sanitiseFishPathDiscovery(body.fishPathDiscovery
+      || body.parseStats?.fishPathDiscovery);
     let cleanItems = mergeItemsNoDowngradeFromCatalog(rawItems);
     if (existing && existing.items && cleanItems.length) {
       cleanItems = mergeItemsNoDowngrade(cleanItems, existing.items);
     }
     let inventory  = buildInventoryGroups(cleanItems);
-    const ps         = sanitiseParseStats(body.parseStats);
-    const fishPathDiscovery = partialSnapshot.sanitiseFishPathDiscovery(body.fishPathDiscovery
-      || body.parseStats?.fishPathDiscovery);
 
     const priorPublicFishCount = existing?.lastGoodPublicFishCount || 0;
     let partialInfo = partialSnapshot.detectPartialZeroFishSnapshot({
@@ -4005,6 +3986,10 @@ function handleUpdateBackpack(req, res) {
       }
     }
 
+    if (hadPlayerStats && playerStatsStore.isTrustedPlayerStats(body.playerStats)) {
+      nextPlayerStatsFields = applyPlayerStatsFields(existing?.playerStats, body, now);
+    }
+
     const syncEval = uploadAccountStatus.evaluateAcceptedSnapshotSync({
       completenessEval,
       acceptedCount,
@@ -4102,25 +4087,15 @@ function handleUpdateBackpack(req, res) {
       ...nextPlayerStatsFields,
     }, completenessEval, now));
 
-    const enrichedForGood = enrichItemsFromCatalog(liveTrackDB[key].items);
-    let publicFishCount = enrichedForGood.filter(isPublicFishItem).length;
-    if (usesGameItemDb && playerDataFishItems) {
-      publicFishCount = gameItemDbPublic.groupFishRows(playerDataFishItems).length;
-    } else if (usesItemUtility && playerDataFishItems) {
-      publicFishCount = itemUtilityPublic.groupFishRows(playerDataFishItems).length;
-    }
-    partialSnapshot.updateLastGoodFishOnSession(
+    applyLitePublicSnapshotFields(
       liveTrackDB[key],
-      cleanItems,
-      publicFishCount,
-      partialInfo,
+      usesGameItemDb,
+      usesItemUtility,
+      playerDataFishItems,
+      playerDataStoneItems,
     );
     if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
       liveTrackDB[key].unresolvedDiagnostics = body.unresolvedDiagnostics.slice(0, 20);
-    }
-    const recoveryMeta = snapshotRecovery.getSessionRecoveryMeta(key, existing);
-    if (recoveryMeta) {
-      liveTrackDB[key].userSnapshotRecovery = recoveryMeta;
     }
     liveTrackDB[key].lastItemCounts = catchDelta.buildItemCountsFromItems(rawItems);
     if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
@@ -4147,17 +4122,24 @@ function handleUpdateBackpack(req, res) {
       liveTrackDB[key] = uploadAccountStatus.markTrackerSyncMissed(liveTrackDB[key], now);
     }
 
+    const rawPersistMs = Date.now() - rawPersistStart;
     const persistBase = `${req.protocol}://${req.get('host')}`;
+    const cacheRefreshStart = Date.now();
     scheduleAioTrackerCacheRefresh(key);
+    const cacheRefreshMs = Date.now() - cacheRefreshStart;
+    const deferredSnapshotSeq = (Number(liveTrackDB[key].deferredSnapshotSeq) || 0) + 1;
+    liveTrackDB[key].deferredSnapshotSeq = deferredSnapshotSeq;
+
     console.log(
       '[fishit-tracker] upload_persist user=%s sessionKey=%s accepted=%d snapshotComplete=%s' +
-      ' serverReceivedAt=%s cacheRefresh=scheduled gate=%j',
+      ' serverReceivedAt=%s cacheRefresh=scheduled gate=%j rawPersistMs=%d',
       cleanUser,
       key,
       acceptedCount,
       completenessEval.snapshotComplete === true,
       now,
       trackerConcurrencyGate.stats(),
+      rawPersistMs,
     );
     const responsePayload = {
       ok: true,
@@ -4173,48 +4155,149 @@ function handleUpdateBackpack(req, res) {
       online: true,
       serverTime: now,
       heartbeatAccepted: true,
-      nameCatalogDiscovery: nameCatalogDiscovery || undefined,
-      liveCatchEvidence: catchDelta.buildLiveCatchEvidenceResponse(nameCatalogDiscovery) || undefined,
     };
-    res.once('finish', () => {
-      setImmediate(() => {
-        try {
-          recordGlobalObservationsFromItems(enrichedForGood, {
-            userId: cleanUserId,
-            sessionKey: key,
-            gameId: body.gameId || null,
-            placeId: body.placeId || null,
-          });
-          if (Array.isArray(body.discoveredCatalog) && body.discoveredCatalog.length) {
-            liveTrackDB[key].discoveredCatalogIngest = ingestDiscoveredCatalog(body.discoveredCatalog);
-          }
-          if (learnedIngest.length) {
-            liveTrackDB[key].learnedFishCatalogIngest = learnedIngest;
-          }
-          if (nameCatalogDiscovery) {
-            liveTrackDB[key].nameCatalogDiscovery = nameCatalogDiscovery;
-            if (nameCatalogDiscovery.globalEvidence?.accepted
-                && nameCatalogDiscovery.lastCatchParsed?.baseFishName) {
-              snapshotRecovery.registerLiveCatchSpeciesEvidence(
-                key,
-                nameCatalogDiscovery.lastCatchParsed.baseFishName,
-                nameCatalogDiscovery.globalEvidence.observationId
-                  || nameCatalogDiscovery.liveCatchPendingObservationId,
-              );
-            }
-          }
-        } catch (bgErr) {
-          console.warn('[fishit-tracker] deferred upload work failed:', bgErr?.message || bgErr);
-        }
-        persistSessionState(key, persistBase).catch(() => {});
-      });
+    const totalResponseMs = Date.now() - uploadArrivalAt;
+    trackerConcurrencyGate.logUploadTiming({
+      upload_arrival_at: new Date(uploadArrivalAt).toISOString(),
+      username: cleanUser,
+      sessionKey: key,
+      userId: cleanUserId,
+      gate_wait_ms: gateWaitMs,
+      raw_persist_ms: rawPersistMs,
+      cache_refresh_ms: cacheRefreshMs,
+      enrichment_queue_ms: 0,
+      enrichment_ms: 0,
+      total_response_ms: totalResponseMs,
+      pending_queue: trackerConcurrencyGate.stats().queued,
+      per_account_pending: trackerConcurrencyGate.perAccountPendingCount(key),
     });
+
+    const deferredBody = body;
+    const deferredRawItems = rawItems;
+    const deferredCleanItems = cleanItems;
+    const deferredPartialInfo = partialInfo;
+    const deferredAcceptedCount = acceptedCount;
+    trackerConcurrencyGate.scheduleDeferredUploadWork(key, (queueMeta = {}) => {
+      const enrichStart = Date.now();
+      const learnedIngest = ingestLearnedFishCatalogFromBody(deferredBody);
+      const evidenceSourceMode = liveCatchProof.resolveEvidenceSourceMode(deferredBody);
+      const globalContext = {
+        enabled: true,
+        userId: cleanUserId,
+        userIdHash: globalFishCatalog.hashContributorId(cleanUserId),
+        gameId: deferredBody.gameId || deferredBody.game_id || null,
+        placeId: deferredBody.placeId || deferredBody.place_id || null,
+        gameVersion: deferredBody.gameVersion || deferredBody.game_version || null,
+        evidenceSourceMode,
+        sessionKey: key,
+      };
+      if (deferredSnapshotSeq !== liveTrackDB[key]?.deferredSnapshotSeq) {
+        return { skipped: true, reason: 'superseded_before_start' };
+      }
+      catalogStore.learnFromTrackerItems(deferredRawItems);
+      let nameCatalogDiscovery = runCatchDeltaOnUpload(
+        deferredBody,
+        deferredRawItems,
+        liveTrackDB[key],
+        key,
+      );
+      const pendingCatchPayload = deferredBody.pendingCatchName || deferredBody.pendingCatch;
+      if (pendingCatchPayload) {
+        const bindingProof = catchDelta.attemptCatchSnapshotBinding({
+          pendingCatch: pendingCatchPayload,
+          previousItems: existing?.items || [],
+          currentItems: deferredRawItems,
+          mainCatalogLookup: (id) => catalogStore.lookupById(id),
+          ingestLearned: ingestLearnedFishEntry,
+          globalContext,
+          existingDiscovery: nameCatalogDiscovery,
+        });
+        if (nameCatalogDiscovery) {
+          if (!nameCatalogDiscovery.catchToSnapshotBindingProof) {
+            nameCatalogDiscovery.catchToSnapshotBindingProof = bindingProof;
+          }
+          if (!nameCatalogDiscovery.nextExpectedAction && bindingProof.nextExpectedAction) {
+            nameCatalogDiscovery.nextExpectedAction = bindingProof.nextExpectedAction;
+          }
+        } else if (bindingProof.attempted) {
+          nameCatalogDiscovery = {
+            catchToSnapshotBindingProof: bindingProof,
+            lastCatchParsed: catchDelta.sanitisePendingCatch(pendingCatchPayload),
+            nextExpectedAction: bindingProof.nextExpectedAction,
+          };
+        }
+      }
+      if (deferredSnapshotSeq !== liveTrackDB[key]?.deferredSnapshotSeq) {
+        return { skipped: true, reason: 'superseded_mid_enrichment' };
+      }
+      const session = liveTrackDB[key];
+      if (!session) return { skipped: true, reason: 'session_missing' };
+      const enrichedForGood = enrichItemsFromCatalog(session.items || deferredCleanItems);
+      let publicFishCount = enrichedForGood.filter(isPublicFishItem).length;
+      if (usesGameItemDb && playerDataFishItems) {
+        publicFishCount = gameItemDbPublic.groupFishRows(playerDataFishItems).length;
+      } else if (usesItemUtility && playerDataFishItems) {
+        publicFishCount = itemUtilityPublic.groupFishRows(playerDataFishItems).length;
+      }
+      partialSnapshot.updateLastGoodFishOnSession(
+        session,
+        deferredCleanItems,
+        publicFishCount,
+        deferredPartialInfo,
+      );
+      const recoveryMeta = snapshotRecovery.getSessionRecoveryMeta(key, existing);
+      if (recoveryMeta) session.userSnapshotRecovery = recoveryMeta;
+      try {
+        recordGlobalObservationsFromItems(enrichedForGood, {
+          userId: cleanUserId,
+          sessionKey: key,
+          gameId: deferredBody.gameId || null,
+          placeId: deferredBody.placeId || null,
+        });
+        if (Array.isArray(deferredBody.discoveredCatalog) && deferredBody.discoveredCatalog.length) {
+          session.discoveredCatalogIngest = ingestDiscoveredCatalog(deferredBody.discoveredCatalog);
+        }
+        if (learnedIngest.length) {
+          session.learnedFishCatalogIngest = learnedIngest;
+        }
+        if (nameCatalogDiscovery) {
+          session.nameCatalogDiscovery = nameCatalogDiscovery;
+          if (nameCatalogDiscovery.globalEvidence?.accepted
+              && nameCatalogDiscovery.lastCatchParsed?.baseFishName) {
+            snapshotRecovery.registerLiveCatchSpeciesEvidence(
+              key,
+              nameCatalogDiscovery.lastCatchParsed.baseFishName,
+              nameCatalogDiscovery.globalEvidence.observationId
+                || nameCatalogDiscovery.liveCatchPendingObservationId,
+            );
+          }
+        }
+      } catch (bgErr) {
+        console.warn('[fishit-tracker] deferred upload work failed:', bgErr?.message || bgErr);
+      }
+      const enrichmentMs = Date.now() - enrichStart;
+      trackerConcurrencyGate.logUploadTiming({
+        upload_arrival_at: new Date(uploadArrivalAt).toISOString(),
+        username: cleanUser,
+        sessionKey: key,
+        userId: cleanUserId,
+        gate_wait_ms: gateWaitMs,
+        raw_persist_ms: rawPersistMs,
+        cache_refresh_ms: cacheRefreshMs,
+        enrichment_queue_ms: queueMeta.enrichmentQueueMs || 0,
+        enrichment_ms: enrichmentMs,
+        total_response_ms: totalResponseMs,
+        pending_queue: trackerConcurrencyGate.stats().queued,
+        per_account_pending: trackerConcurrencyGate.perAccountPendingCount(key),
+      });
+      return persistSessionState(key, persistBase).catch(() => {});
+    });
+
     console.log(
       `[fishit-tracker] POST ok=true user=${cleanUser} sessionKey=${key}` +
-      ` accepted=${acceptedCount} snapshotComplete=${completenessEval.snapshotComplete === true}` +
+      ` accepted=${deferredAcceptedCount} snapshotComplete=${completenessEval.snapshotComplete === true}` +
       ` lastSeenAt=${now} lastInventoryAt=${liveTrackDB[key].lastInventoryAt || 'n/a'} online=true` +
-      (nameCatalogDiscovery && nameCatalogDiscovery.learnedMappings?.length
-        ? ` catchDeltaLearned=${nameCatalogDiscovery.learnedMappings.length}` : '')
+      ` fastPathMs=${totalResponseMs}`
     );
     return res.status(200).json(responsePayload);
 }
