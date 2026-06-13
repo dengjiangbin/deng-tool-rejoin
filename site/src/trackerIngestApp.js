@@ -5,12 +5,23 @@ const fishitTrackerRoutes = require('./fishitTrackerRoutes');
 const trackerConcurrencyGate = require('./trackerConcurrencyGate');
 const { getMetrics: getEventLoopMetrics } = require('./trackerEventLoopMonitor');
 const { resolveTrustProxySetting } = require('./rateLimitUtils');
+const { recordIngestRequest } = require('./trackerRouteMetrics');
+const stabilityRoutes = require('./stabilityRoutes');
 
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', resolveTrustProxySetting());
 
 const PORT = parseInt(process.env.TRACKER_INGEST_PORT || '8792', 10);
+
+app.use((req, res, next) => {
+  res.set('X-DENG-Served-By', 'deng-tracker-ingest');
+  const viaProxy = String(req.headers['x-deng-via-web-proxy'] || '') === '1';
+  recordIngestRequest(viaProxy);
+  if (viaProxy) res.set('X-DENG-Tracker-Route', 'web-proxy-fallback');
+  else res.set('X-DENG-Tracker-Route', 'direct-ingest');
+  next();
+});
 
 app.get('/health', (_req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -40,6 +51,7 @@ app.get('/metrics', (_req, res) => {
   });
 });
 
+app.use('/', stabilityRoutes);
 app.use('/', fishitTrackerRoutes.uploadRouter);
 
 // eslint-disable-next-line no-unused-vars

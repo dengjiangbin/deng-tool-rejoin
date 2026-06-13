@@ -25,7 +25,10 @@
         "FISHIT_DB_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Fish It\\data\\deng-fish-it.sqlite",
         "FISHIT_LIVE_SESSIONS_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_live_sessions.json",
         "PUBLIC_TRACKER_GITHUB_REPO": "dengjiangbin/fish-it",
-        "TOOL_SITE_ASSET_VERSION": "TRACKER_ISOLATION_2026_06_13",
+        "TOOL_SITE_ASSET_VERSION": "STABILITY_FOLLOWUP_2026_06_13",
+        "SESSION_ANONYMOUS_TTL_MS": "86400000",
+        "SESSION_MAINTENANCE_INTERVAL_MS": "900000",
+        "TRACKER_UPLOAD_RATE_MAX_PER_MIN": "12",
         "TOOL_SITE_PUBLIC_URL": "https://aio.deng.my.id",
         "TOOL_SITE_INTERNAL_URL": "https://tool.deng.my.id",
         "DISCORD_AIO_WEB_REDIRECT_URI": "https://aio.deng.my.id/auth/discord/callback",
@@ -61,7 +64,8 @@
         "TRACKER_UPLOAD_BODY_LIMIT": "512kb",
         "TRACKER_EVENT_LOOP_LAG_WARN_MS": "250",
         "TRACKER_EVENT_LOOP_LAG_SHED_MS": "1000",
-        "TOOL_SITE_ASSET_VERSION": "TRACKER_ISOLATION_2026_06_13"
+        "TOOL_SITE_ASSET_VERSION": "STABILITY_FOLLOWUP_2026_06_13",
+        "TRACKER_UPLOAD_RATE_MAX_PER_MIN": "12"
       }
     }
   ]

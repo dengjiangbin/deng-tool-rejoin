@@ -34,6 +34,8 @@ const fs        = require('fs');
 const crypto    = require('crypto');
 const { execFileSync } = require('child_process');
 const { createUserRateLimit } = require('./rateLimitUtils');
+const { uploadLimiter } = require('./trackerUploadRateLimit');
+const { recordQueue503 } = require('./trackerRouteMetrics');
 const trackerConcurrencyGate = require('./trackerConcurrencyGate');
 
 const catalogStore = require('./fishitCatalogStore');
@@ -4622,6 +4624,7 @@ function handleUpdateBackpack(req, res) {
 const updateBackpackMiddleware = [
   postLimiter,
   express.json({ limit: process.env.TRACKER_UPLOAD_BODY_LIMIT || '512kb' }),
+  uploadLimiter,
   trackerConcurrencyGate.wrapTrackerUpload('update-backpack', handleUpdateBackpack),
 ];
 
@@ -4649,6 +4652,7 @@ function handleUpdateCatalog(req, res) {
 const updateCatalogMiddleware = [
   postLimiter,
   express.json({ limit: process.env.TRACKER_UPLOAD_BODY_LIMIT || '512kb' }),
+  uploadLimiter,
   handleUpdateCatalog,
 ];
 

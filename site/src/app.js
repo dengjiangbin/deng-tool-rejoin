@@ -122,6 +122,8 @@ app.set('trust proxy', resolveTrustProxySetting());
 // Redirect safe public website pages from legacy tool host to canonical aio host.
 app.use(legacyPublicPageRedirectMiddleware);
 
+app.use('/', require('./stabilityRoutes'));
+
 // Fast health probe — before session/tracker routers so proxies never queue behind uploads.
 app.get('/health', (_req, res) => {
   res.set('Cache-Control', 'no-store');

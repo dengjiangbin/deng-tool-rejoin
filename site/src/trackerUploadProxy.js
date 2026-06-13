@@ -2,6 +2,7 @@
 
 const http = require('http');
 const { isTrackerUploadPath } = require('./trackerUploadPaths');
+const { recordWebProxyForward } = require('./trackerRouteMetrics');
 
 function createTrackerUploadProxy(options = {}) {
   const host = options.host || process.env.TRACKER_INGEST_HOST || '127.0.0.1';
@@ -10,6 +11,7 @@ function createTrackerUploadProxy(options = {}) {
 
   return function proxyTrackerUpload(req, res) {
     const started = Date.now();
+    recordWebProxyForward();
     const proxyReq = http.request({
       host,
       port,
@@ -18,10 +20,13 @@ function createTrackerUploadProxy(options = {}) {
       headers: {
         ...req.headers,
         connection: 'close',
+        'x-deng-via-web-proxy': '1',
+        'x-deng-tracker-route': 'web-proxy-fallback',
       },
       timeout: timeoutMs,
     }, (proxyRes) => {
-      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+      const headers = { ...proxyRes.headers, 'x-deng-tracker-route': 'web-proxy-fallback' };
+      res.writeHead(proxyRes.statusCode || 502, headers);
       proxyRes.pipe(res);
       proxyRes.on('end', () => {
         const ms = Date.now() - started;

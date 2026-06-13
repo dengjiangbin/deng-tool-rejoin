@@ -7,6 +7,7 @@
  */
 
 const { getLagMs } = require('./trackerEventLoopMonitor');
+const { recordQueue503 } = require('./trackerRouteMetrics');
 
 const ENRICHMENT_MAX = Number(process.env.TRACKER_ENRICHMENT_MAX_CONCURRENT || 4);
 const QUEUE_MAX = Number(process.env.TRACKER_QUEUE_MAX || 1000);
@@ -190,10 +191,12 @@ function wrapTrackerUpload(label, handler) {
     const key = sessionKeyFromRequest(req);
     const pending = deferredPendingByKey.size + deferredWaitQueue.length;
     if (pending >= QUEUE_MAX) {
+      recordQueue503();
       return res.status(503).json({ ok: false, error: 'tracker_queue_full' });
     }
     if (shouldShedWork()) {
       shedEvents += 1;
+      recordQueue503();
       return res.status(503).json({ ok: false, error: 'tracker_backpressure' });
     }
     if (pending >= ENRICHMENT_MAX * 4) {

@@ -22,7 +22,28 @@ class FileSessionStore extends session.Store {
     this.dir = options.dir || path.join(os.tmpdir(), 'deng-tool-site-sessions');
     this.ttlMs = options.ttlMs || 7 * 24 * 60 * 60 * 1000;
     fs.mkdirSync(this.dir, { recursive: true });
+    this.anonymousTtlMs = Number(process.env.SESSION_ANONYMOUS_TTL_MS || 24 * 60 * 60 * 1000);
     this._startMaintenance();
+    if (process.env.NODE_ENV !== 'test') {
+      const intervalMs = Number(process.env.SESSION_MAINTENANCE_INTERVAL_MS || 15 * 60 * 1000);
+      setInterval(() => {
+        this._runMaintenanceBatched().catch((err) => {
+          console.warn('[sessionStore] scheduled maintenance failed:', err.message);
+        });
+      }, intervalMs).unref();
+    }
+  }
+
+  _isAuthenticatedSessionData(sess) {
+    if (!sess || typeof sess !== 'object') return false;
+    if (sess.user && typeof sess.user === 'object') return true;
+    if (sess.site_user_id) return true;
+    if (sess.discord_user_id) return true;
+    return false;
+  }
+
+  _isAnonymousWrapped(wrapped) {
+    return !this._isAuthenticatedSessionData(wrapped?.session);
   }
 
   _file(sid) {
@@ -46,10 +67,13 @@ class FileSessionStore extends session.Store {
   }
 
   async _runMaintenanceBatched() {
+    const started = Date.now();
     const batchSize = 200;
     let tmpRemoved = 0;
     let pruned = 0;
+    let anonymousPruned = 0;
     const cutoff = Date.now() - this.ttlMs;
+    const anonymousCutoff = Date.now() - this.anonymousTtlMs;
     let entries;
     try {
       entries = await fs.promises.readdir(this.dir);
@@ -77,6 +101,19 @@ class FileSessionStore extends session.Store {
             if (st.mtimeMs < cutoff) {
               await fs.promises.unlink(full);
               pruned++;
+              continue;
+            }
+            if (st.mtimeMs < anonymousCutoff) {
+              try {
+                const text = await fs.promises.readFile(full, 'utf8');
+                const wrapped = JSON.parse(text);
+                if (this._isAnonymousWrapped(wrapped)) {
+                  await fs.promises.unlink(full);
+                  anonymousPruned++;
+                }
+              } catch {
+                // Ignore unreadable session files during cleanup.
+              }
             }
           }
         } catch {
@@ -92,9 +129,14 @@ class FileSessionStore extends session.Store {
     if (pruned > 0) {
       console.log(`[sessionStore] pruned ${pruned} expired session files`);
     }
+    if (anonymousPruned > 0) {
+      console.log(`[sessionStore] pruned ${anonymousPruned} anonymous session files`);
+    }
     lastMaintenanceStats = {
       tmpRemoved,
       pruned,
+      anonymousPruned,
+      durationMs: Date.now() - started,
       finishedAt: new Date().toISOString(),
     };
   }
