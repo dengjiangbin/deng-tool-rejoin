@@ -186,6 +186,89 @@ function patch(src) {
     (m) => m.replace('\n(function()', '\n;(function()'),
   );
 
+  if (src.includes('LiveSafe.uploadSeq = 0\nLiveSafe.firstFullSnapshotAccepted = false')) {
+    src = src.replace(
+      `LiveSafe.uploadSeq = 0
+LiveSafe.firstFullSnapshotAccepted = false
+
+function attachSnapshotExecutionProof(payload, scanMeta)
+    if type(payload) ~= "table" then return payload end
+    LiveSafe.uploadSeq = (LiveSafe.uploadSeq or 0) + 1
+    payload.runId = thisRunId
+    payload.executionSessionId = thisRunId
+    payload.uploadSeq = LiveSafe.uploadSeq
+    payload.firstExecution = LiveSafe.firstFullSnapshotAccepted ~= true`,
+      `function ensureUploadRuntimeState()
+    local rt = _G.__DENG_TRACKER_UPLOAD_RUNTIME
+    if type(rt) ~= "table" then
+        rt = { uploadSeq = 0, firstFullSnapshotAccepted = false }
+        _G.__DENG_TRACKER_UPLOAD_RUNTIME = rt
+    end
+    rt.uploadSeq = tonumber(rt.uploadSeq) or 0
+    rt.firstFullSnapshotAccepted = rt.firstFullSnapshotAccepted == true
+    if type(LiveSafe) == "table" then
+        LiveSafe.uploadSeq = tonumber(LiveSafe.uploadSeq) or rt.uploadSeq
+        if LiveSafe.firstFullSnapshotAccepted == true then
+            rt.firstFullSnapshotAccepted = true
+        end
+    end
+    return rt
+end
+
+function attachSnapshotExecutionProof(payload, scanMeta)
+    if type(payload) ~= "table" then return payload end
+    local rt = ensureUploadRuntimeState()
+    local nextSeq = rt.uploadSeq + 1
+    rt.uploadSeq = nextSeq
+    if type(LiveSafe) == "table" then
+        LiveSafe.uploadSeq = nextSeq
+    end
+    payload.runId = thisRunId
+    payload.executionSessionId = thisRunId
+    payload.uploadSeq = nextSeq
+    local accepted = rt.firstFullSnapshotAccepted
+    if type(LiveSafe) == "table" and LiveSafe.firstFullSnapshotAccepted == true then
+        accepted = true
+    end
+    payload.firstExecution = accepted ~= true`,
+    );
+  }
+
+  if (!src.includes('uploadSeq = 0,')) {
+    src = src.replace(
+      '    lightSyncLoopStarted = false,\n    syncBeat = 0,',
+      '    lightSyncLoopStarted = false,\n    uploadSeq = 0,\n    firstFullSnapshotAccepted = false,\n    syncBeat = 0,',
+    );
+  }
+
+  if (!src.includes('UPLOAD_RUNTIME_ERROR stage=inventory_snapshot')) {
+    src = src.replace(
+      `function syncToDashboard()
+    if LiveSafe.playerDataDirectMode then
+        return LiveSafe.syncPlayerDataDashboard()
+    end`,
+      `function syncToDashboard()
+    if LiveSafe.playerDataDirectMode then
+        local ok, result = xpcall(LiveSafe.syncPlayerDataDashboard, debug.traceback)
+        if not ok then
+            warn(LOG, ("UPLOAD_RUNTIME_ERROR stage=inventory_snapshot err=%s"):format(tostring(result):sub(1, 500)))
+            return false
+        end
+        return result
+    end`,
+    );
+  }
+
+  if (!src.includes('_G.__DENG_TRACKER_UPLOAD_RUNTIME')) {
+    src = src.replace(
+      '        LiveSafe.firstFullSnapshotAccepted = true\n    end',
+      `        LiveSafe.firstFullSnapshotAccepted = true
+        local rt = _G.__DENG_TRACKER_UPLOAD_RUNTIME
+        if type(rt) == "table" then rt.firstFullSnapshotAccepted = true end
+    end`,
+    );
+  }
+
   src = src.replace(/^local function /gm, 'function ');
   return src;
 }
@@ -203,3 +286,4 @@ console.log('  top-level local count:', topLocal);
 console.log('  iife:', patched.includes(';(function()') && patched.includes('end)()'));
 console.log('  upload ok proof:', patched.includes('totems=%d totemQty=%d'));
 console.log('  classify helper:', patched.includes('LiveSafe.classifyNonStoneInventoryItem'));
+console.log('  upload runtime:', patched.includes('ensureUploadRuntimeState') && !patched.includes('LiveSafe.uploadSeq = 0\nLiveSafe.firstFullSnapshotAccepted'));

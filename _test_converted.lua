@@ -102,16 +102,39 @@ function attachTrackerProof(payload)
     return payload
 end
 
-LiveSafe.uploadSeq = 0
-LiveSafe.firstFullSnapshotAccepted = false
+function ensureUploadRuntimeState()
+    local rt = _G.__DENG_TRACKER_UPLOAD_RUNTIME
+    if type(rt) ~= "table" then
+        rt = { uploadSeq = 0, firstFullSnapshotAccepted = false }
+        _G.__DENG_TRACKER_UPLOAD_RUNTIME = rt
+    end
+    rt.uploadSeq = tonumber(rt.uploadSeq) or 0
+    rt.firstFullSnapshotAccepted = rt.firstFullSnapshotAccepted == true
+    if type(LiveSafe) == "table" then
+        LiveSafe.uploadSeq = tonumber(LiveSafe.uploadSeq) or rt.uploadSeq
+        if LiveSafe.firstFullSnapshotAccepted == true then
+            rt.firstFullSnapshotAccepted = true
+        end
+    end
+    return rt
+end
 
 function attachSnapshotExecutionProof(payload, scanMeta)
     if type(payload) ~= "table" then return payload end
-    LiveSafe.uploadSeq = (LiveSafe.uploadSeq or 0) + 1
+    local rt = ensureUploadRuntimeState()
+    local nextSeq = rt.uploadSeq + 1
+    rt.uploadSeq = nextSeq
+    if type(LiveSafe) == "table" then
+        LiveSafe.uploadSeq = nextSeq
+    end
     payload.runId = thisRunId
     payload.executionSessionId = thisRunId
-    payload.uploadSeq = LiveSafe.uploadSeq
-    payload.firstExecution = LiveSafe.firstFullSnapshotAccepted ~= true
+    payload.uploadSeq = nextSeq
+    local accepted = rt.firstFullSnapshotAccepted
+    if type(LiveSafe) == "table" and LiveSafe.firstFullSnapshotAccepted == true then
+        accepted = true
+    end
+    payload.firstExecution = accepted ~= true
     if payload.type == "tracker_status" then
         payload.payloadType = "heartbeat"
     elseif payload.type == "inventory_snapshot" then
@@ -5184,7 +5207,12 @@ end
 -- Send the PlayerData/GameItemDB inventory_snapshot (direct mode) or legacy Replion snapshot.
 function syncToDashboard()
     if LiveSafe.playerDataDirectMode then
-        return LiveSafe.syncPlayerDataDashboard()
+        local ok, result = xpcall(LiveSafe.syncPlayerDataDashboard, debug.traceback)
+        if not ok then
+            warn(LOG, ("UPLOAD_RUNTIME_ERROR stage=inventory_snapshot err=%s"):format(tostring(result):sub(1, 500)))
+            return false
+        end
+        return result
     end
     if LiveSafe.oneShot then stepBegin("payload_build") end
     local owned, flat = buildOwnedGroups()

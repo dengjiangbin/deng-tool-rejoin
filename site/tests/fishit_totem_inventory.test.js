@@ -118,6 +118,10 @@ describe('FishIt totem inventory support', () => {
     assert.match(lua, /PLAYERDATA_GAMEITEMDB_UPLOAD_OK %s status=%s fish=%d stones=%d totems=%d totemQty=%d/);
     assert.match(lua, /TOTEM_SCAN_FOUND count=%d names=%s/);
     assert.match(lua, /;\(function\(\)/);
+    assert.match(lua, /function ensureUploadRuntimeState/);
+    assert.match(lua, /__DENG_TRACKER_UPLOAD_RUNTIME/);
+    assert.match(lua, /UPLOAD_RUNTIME_ERROR stage=inventory_snapshot/);
+    assert.doesNotMatch(lua, /LiveSafe\.uploadSeq = 0\nLiveSafe\.firstFullSnapshotAccepted = false/);
     assert.match(lua, /^end\)\(\)\s*$/m);
   });
 

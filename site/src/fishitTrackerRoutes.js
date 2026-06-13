@@ -5808,8 +5808,10 @@ router.post('/api/fishit-tracker/request-catalog-scan/:username', postLimiter, (
 function scheduleAioTrackerCacheRefresh(usernameKey) {
   const key = String(usernameKey || '').trim().toLowerCase();
   if (!key) return;
+  const listOwners = inventoryTrackedAccounts.listDiscordOwnersForUsernameKey;
+  if (typeof listOwners !== 'function') return;
   const baseUrl = (process.env.TOOL_SITE_PUBLIC_URL || 'https://tool.deng.my.id').replace(/\/+$/, '');
-  inventoryTrackedAccounts.listDiscordOwnersForUsernameKey(key)
+  listOwners(key)
     .then((owners) => {
       if (!owners || !owners.length) return;
       for (const ownerId of owners) {

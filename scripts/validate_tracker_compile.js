@@ -107,6 +107,15 @@ if (!src.includes('LiveSafe.isTotemName')) {
 if (!/;\(function\(\)/m.test(src)) {
   errors.push('IIFE wrapper missing semicolon — main chunk register isolation required');
 }
+if (src.includes('LiveSafe.uploadSeq = 0\nLiveSafe.firstFullSnapshotAccepted = false')) {
+  errors.push('uploadSeq initialized before LiveSafe table exists');
+}
+if (!src.includes('function ensureUploadRuntimeState')) {
+  errors.push('ensureUploadRuntimeState missing — upload sequence runtime guard required');
+}
+if (!src.includes('UPLOAD_RUNTIME_ERROR stage=inventory_snapshot')) {
+  errors.push('UPLOAD_RUNTIME_ERROR guard missing on inventory upload path');
+}
 if (!src.includes('LiveSafe.runDirectStartup')) {
   errors.push('LiveSafe.runDirectStartup missing');
 }
