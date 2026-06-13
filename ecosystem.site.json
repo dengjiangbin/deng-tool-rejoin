@@ -32,8 +32,9 @@
         "TOOL_SITE_PUBLIC_URL": "https://aio.deng.my.id",
         "TOOL_SITE_INTERNAL_URL": "https://tool.deng.my.id",
         "DISCORD_AIO_WEB_REDIRECT_URI": "https://aio.deng.my.id/auth/discord/callback",
-        "DISCORD_REDIRECT_URI": "https://tool.deng.my.id/auth/discord/callback",
-        "DISCORD_AIO_REDIRECT_URI": "https://tool.deng.my.id/api/aio/auth/callback",
+        "DISCORD_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
+        "DISCORD_AIO_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
+        "TOOL_SITE_ASSET_VERSION": "OAUTH_AIO_DOMAIN_2026_06_13",
         "GIT_COMMIT": "a2555ec"
       }
     },

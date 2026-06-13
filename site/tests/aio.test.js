@@ -105,17 +105,19 @@ describe('AIO auth flow', () => {
   test('auth start uses DISCORD_AIO_REDIRECT_URI when configured (production smoke)', async () => {
     const prev = process.env.DISCORD_AIO_REDIRECT_URI;
     const prevScheme = process.env.DENG_AIO_APP_SCHEME;
-    process.env.DISCORD_AIO_REDIRECT_URI = 'https://tool.deng.my.id/api/aio/auth/callback';
+    process.env.DISCORD_AIO_REDIRECT_URI = 'https://aio.deng.my.id/api/aio/auth/callback';
     process.env.DENG_AIO_APP_SCHEME = 'deng-aio';
     try {
       delete require.cache[require.resolve('../src/aioRoutes')];
+      delete require.cache[require.resolve('../src/publicDomain')];
+      delete require.cache[require.resolve('../src/auth')];
       const freshApp = require('../src/app');
       const res = await request(freshApp).get('/api/aio/auth/start');
       assert.equal(res.status, 302);
       const url = new URL(res.headers.location);
       assert.equal(
         url.searchParams.get('redirect_uri'),
-        'https://tool.deng.my.id/api/aio/auth/callback',
+        'https://aio.deng.my.id/api/aio/auth/callback',
         'redirect_uri must match DISCORD_AIO_REDIRECT_URI exactly',
       );
       assert.doesNotMatch(res.text || '', /client_secret|DISCORD_CLIENT_SECRET/i);
@@ -125,6 +127,8 @@ describe('AIO auth flow', () => {
       if (prevScheme == null) delete process.env.DENG_AIO_APP_SCHEME;
       else process.env.DENG_AIO_APP_SCHEME = prevScheme;
       delete require.cache[require.resolve('../src/aioRoutes')];
+      delete require.cache[require.resolve('../src/publicDomain')];
+      delete require.cache[require.resolve('../src/auth')];
       delete require.cache[require.resolve('../src/app')];
     }
   });
@@ -153,7 +157,7 @@ describe('AIO auth flow', () => {
   test('callback rejects mismatched state', async () => {
     const res = await request(app).get('/api/aio/auth/callback?code=ok&state=bogus');
     assert.equal(res.status, 302);
-    assert.match(res.headers.location, /^deng-aio:\/\/auth\/callback\?error=/);
+    assert.match(res.headers.location, /\/login/);
   });
 
   test('exchange rejects missing code', async () => {

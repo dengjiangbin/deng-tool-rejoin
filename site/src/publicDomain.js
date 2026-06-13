@@ -39,16 +39,38 @@ function internalApiBaseUrl() {
   return cleanEnv('TOOL_SITE_INTERNAL_URL', `https://${LEGACY_PUBLIC_HOST}`).replace(/\/+$/, '');
 }
 
-/** Discord OAuth callback base — always the internal backend host unless overridden. */
 function oauthCallbackBaseUrl() {
-  return cleanEnv('OAUTH_CALLBACK_BASE', internalApiBaseUrl()).replace(/\/+$/, '');
+  return cleanEnv('OAUTH_CALLBACK_BASE', canonicalPublicUrl()).replace(/\/+$/, '');
+}
+
+/** Preferred web OAuth callback — aio public domain. */
+function preferredOAuthCallbackUri() {
+  return cleanEnv(
+    'DISCORD_REDIRECT_URI',
+    `${oauthCallbackBaseUrl()}/api/aio/auth/callback`,
+  );
+}
+
+/** Alternate web OAuth callback alias registered in Discord Developer Portal. */
+function alternateOAuthCallbackUri() {
+  return cleanEnv(
+    'DISCORD_AIO_WEB_REDIRECT_URI',
+    `${oauthCallbackBaseUrl()}/auth/discord/callback`,
+  );
+}
+
+/** APK OAuth callback (defaults to preferred public callback). */
+function aioApkOAuthCallbackUri() {
+  return cleanEnv('DISCORD_AIO_REDIRECT_URI', preferredOAuthCallbackUri());
 }
 
 function oauthDiscordCallbackUri() {
-  return cleanEnv(
-    'DISCORD_REDIRECT_URI',
-    `${oauthCallbackBaseUrl()}/auth/discord/callback`,
-  );
+  return alternateOAuthCallbackUri();
+}
+
+function isOAuthCallbackPath(pathname) {
+  const path = String(pathname || '');
+  return path === '/auth/discord/callback' || path === '/api/aio/auth/callback';
 }
 
 function requestHost(req) {
@@ -113,18 +135,10 @@ function legacyPublicPageRedirectMiddleware(req, res, next) {
   return res.redirect(301, legacyPublicPageRedirectTarget(req));
 }
 
-function resolveDiscordRedirectUri(req) {
-  const host = requestHost(req);
-  const internalCallback = oauthDiscordCallbackUri();
-  // Canonical public pages (aio) still complete OAuth on the internal backend
-  // callback registered in Discord Developer Portal (tool.deng.my.id).
-  if (host === CANONICAL_PUBLIC_HOST) {
-    return internalCallback;
-  }
-  if (host === LEGACY_PUBLIC_HOST) {
-    return internalCallback;
-  }
-  return internalCallback || cleanEnv('DISCORD_REDIRECT_URI', '');
+function resolveDiscordRedirectUri(req, options = {}) {
+  if (options.callbackUri) return String(options.callbackUri).trim();
+  if (options.variant === 'alternate') return alternateOAuthCallbackUri();
+  return preferredOAuthCallbackUri();
 }
 
 function isCanonicalPublicRequest(req) {
@@ -153,7 +167,11 @@ module.exports = {
   canonicalPublicUrl,
   internalApiBaseUrl,
   oauthCallbackBaseUrl,
+  preferredOAuthCallbackUri,
+  alternateOAuthCallbackUri,
+  aioApkOAuthCallbackUri,
   oauthDiscordCallbackUri,
+  isOAuthCallbackPath,
   requestHost,
   isLegacyPublicHost,
   isCanonicalPublicHost,

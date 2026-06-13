@@ -8,7 +8,7 @@
 const crypto  = require('crypto');
 const axios   = require('axios');
 const supabase = require('./db');
-const { resolveDiscordRedirectUri, oauthReturnPublicBase } = require('./publicDomain');
+const { resolveDiscordRedirectUri, oauthReturnPublicBase, canonicalPublicUrl, LEGACY_PUBLIC_HOST, CANONICAL_PUBLIC_HOST } = require('./publicDomain');
 const oauthStateStore = require('./oauthStateStore');
 
 const DISCORD_HTTP_TIMEOUT_MS = Number(process.env.DISCORD_OAUTH_HTTP_TIMEOUT_MS || 12000);
@@ -104,9 +104,26 @@ const LOGIN_HOME = '/login';
 
 function safeReturnPath(raw) {
   const path = String(raw || '').trim();
-  if (!path.startsWith('/') || path.startsWith('//')) return null;
-  if (path.startsWith('/login') || path.startsWith('/auth/')) return null;
-  return path;
+  if (!path) return null;
+
+  if (path.startsWith('/') && !path.startsWith('//')) {
+    if (path.startsWith('/login') || path.startsWith('/auth/')) return null;
+    return path;
+  }
+
+  try {
+    const url = new URL(path);
+    const publicHost = CANONICAL_PUBLIC_HOST;
+    const allowedHosts = new Set([publicHost, LEGACY_PUBLIC_HOST]);
+    if (!allowedHosts.has(url.hostname.toLowerCase()) || url.protocol !== 'https:') {
+      return null;
+    }
+    const relative = `${url.pathname}${url.search}${url.hash}`;
+    if (relative.startsWith('/login') || relative.startsWith('/auth/')) return null;
+    return relative || '/dashboard';
+  } catch {
+    return null;
+  }
 }
 
 function loginRedirectUrl(returnPath) {
@@ -158,7 +175,7 @@ function verifyCsrf(req) {
  * Stores the state in session for later validation.
  */
 function buildDiscordAuthUrl(req, options = {}) {
-  const redirectUri = resolveDiscordRedirectUri(req);
+  const redirectUri = options.callbackUri || resolveDiscordRedirectUri(req, options);
   const missing = [];
   if (!DISCORD_CLIENT_ID) missing.push('DISCORD_CLIENT_ID');
   if (!DISCORD_CLIENT_SECRET) missing.push('DISCORD_CLIENT_SECRET');

@@ -4,30 +4,24 @@
  */
 
 const express = require('express');
-const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
 
 const aioSessionStore = require('./aioSessionStore');
 const aioDatasetCache = require('./aioDatasetCache');
 const { aioTimingMiddleware } = require('./aioRequestTiming');
-const { fetchDiscordUser, upsertDiscordUser, toSessionUser } = require('./auth');
+const { buildDiscordAuthUrl } = require('./auth');
+const { aioApkOAuthCallbackUri, internalApiBaseUrl } = require('./publicDomain');
 const inventoryTrackedAccounts = require('./inventoryTrackedAccounts');
 const fishitDb = require('./fishitDb');
 const fishitTrackerRoutes = require('./fishitTrackerRoutes');
 const { createUserRateLimit } = require('./rateLimitUtils');
-
-const DISCORD_API = 'https://discord.com/api/v10';
-const SCOPES = 'identify';
 
 const DATASETS = ['profile', 'dashboard', 'accounts', 'tracker', 'app'];
 
 let cachedAppPayload = null;
 let cachedAppPayloadAt = 0;
 const APP_PAYLOAD_TTL_MS = 60 * 1000;
-
-const { internalApiBaseUrl } = require('./publicDomain');
 
 function publicBaseUrl() {
   return (process.env.TOOL_SITE_PUBLIC_URL || 'https://aio.deng.my.id').replace(/\/+$/, '');
@@ -181,52 +175,17 @@ function requireAioAuth(req, res, next) {
   return next();
 }
 
+function aioRedirectUri() {
+  return aioApkOAuthCallbackUri();
+}
+
 function buildAioAuthUrl(req) {
-  const clientId = process.env.DISCORD_CLIENT_ID || '';
-  if (!clientId || !process.env.DISCORD_CLIENT_SECRET) {
-    throw new Error('Discord OAuth is not configured');
-  }
-  const state = crypto.randomBytes(24).toString('hex');
-  req.session.aioOauthState = state;
-  const params = new URLSearchParams({
-    client_id: clientId,
-    redirect_uri: aioRedirectUri(),
-    response_type: 'code',
-    scope: SCOPES,
-    state,
-    prompt: 'consent',
+  return buildDiscordAuthUrl(req, {
+    authReturnTo: '/tracker',
+    returnPublicUrl: publicBaseUrl(),
+    oauthApkReturn: true,
+    callbackUri: aioRedirectUri(),
   });
-  return `${DISCORD_API}/oauth2/authorize?${params}`;
-}
-
-async function exchangeAioCode(code) {
-  const params = new URLSearchParams({
-    client_id: process.env.DISCORD_CLIENT_ID || '',
-    client_secret: process.env.DISCORD_CLIENT_SECRET || '',
-    grant_type: 'authorization_code',
-    code,
-    redirect_uri: aioRedirectUri(),
-  });
-  const { data } = await axios.post(
-    `${DISCORD_API}/oauth2/token`,
-    params.toString(),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 8000 },
-  );
-  return data;
-}
-
-function renderDeepLinkHtml(deepLink) {
-  const safe = String(deepLink).replace(/"/g, '&quot;');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="0; url=${safe}">
-<title>Returning to DENG AIO…</title>
-<style>body{font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#050816;color:#e8ecf8;
-display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;text-align:center;padding:24px}
-a{color:#7aa2ff;font-weight:600}</style></head>
-<body><div><h2>Signing you in…</h2>
-<p>If DENG AIO does not open automatically, <a href="${safe}">tap here to return to the app</a>.</p>
-</div><script>location.replace(${JSON.stringify(deepLink)});</script></body></html>`;
 }
 
 const router = express.Router();
@@ -254,36 +213,7 @@ router.get('/api/aio/auth/start', aioAuthLimiter, (req, res) => {
   }
 });
 
-router.get('/api/aio/auth/callback', aioAuthLimiter, async (req, res) => {
-  const { code, state, error } = req.query;
-  const scheme = appScheme();
-  if (error) {
-    return res.redirect(`${scheme}://auth/callback?error=${encodeURIComponent(String(error))}`);
-  }
-  const expected = req.session && req.session.aioOauthState;
-  if (req.session) delete req.session.aioOauthState;
-  if (!code || !state || !expected || String(state) !== String(expected)) {
-    return res.redirect(`${scheme}://auth/callback?error=invalid_state`);
-  }
-  try {
-    const tokens = await exchangeAioCode(String(code));
-    const discordUser = await fetchDiscordUser(tokens.access_token);
-    // Portal DB upsert must not block the deep-link redirect.
-    upsertDiscordUser(discordUser, tokens).catch(() => null);
-    const { code: loginCode } = aioSessionStore.createLoginCode({
-      discordUserId: discordUser.id,
-      siteUserId: null,
-      username: discordUser.username || null,
-      avatar: discordUser.avatar || null,
-    });
-    const deepLink = `${scheme}://auth/callback?code=${encodeURIComponent(loginCode)}`;
-    res.set('Content-Type', 'text/html; charset=utf-8');
-    return res.status(200).send(renderDeepLinkHtml(deepLink));
-  } catch (err) {
-    console.error('[aio] auth callback failed:', err && err.message ? err.message : err);
-    return res.redirect(`${scheme}://auth/callback?error=auth_failed`);
-  }
-});
+// OAuth callback is handled by oauthRoutes (shared handler at /api/aio/auth/callback).
 
 router.post('/api/aio/auth/exchange', aioAuthLimiter, (req, res) => {
   const body = req.body || {};

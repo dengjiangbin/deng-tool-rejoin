@@ -11,7 +11,7 @@ process.env.SUPABASE_URL = 'https://placeholder.supabase.co';
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
 process.env.DISCORD_CLIENT_ID = 'test-discord-client-id';
 process.env.DISCORD_CLIENT_SECRET = 'test-discord-client-secret';
-process.env.DISCORD_REDIRECT_URI = 'https://tool.deng.my.id/auth/discord/callback';
+process.env.DISCORD_REDIRECT_URI = 'https://aio.deng.my.id/api/aio/auth/callback';
 process.env.DISCORD_AIO_WEB_REDIRECT_URI = 'https://aio.deng.my.id/auth/discord/callback';
 process.env.TOOL_SITE_PUBLIC_URL = 'https://aio.deng.my.id';
 process.env.TOOL_SITE_INTERNAL_URL = 'https://tool.deng.my.id';
@@ -125,11 +125,11 @@ describe('public domain migration', () => {
     assert.equal(internalApiBaseUrl(), 'https://tool.deng.my.id');
   });
 
-  test('resolveDiscordRedirectUri uses internal tool callback for all hosts', () => {
+  test('resolveDiscordRedirectUri uses aio public callback for all hosts', () => {
     const aioReq = { headers: { host: 'aio.deng.my.id' } };
     const toolReq = { headers: { host: 'tool.deng.my.id' } };
-    assert.equal(resolveDiscordRedirectUri(aioReq), 'https://tool.deng.my.id/auth/discord/callback');
-    assert.equal(resolveDiscordRedirectUri(toolReq), 'https://tool.deng.my.id/auth/discord/callback');
+    assert.equal(resolveDiscordRedirectUri(aioReq), 'https://aio.deng.my.id/api/aio/auth/callback');
+    assert.equal(resolveDiscordRedirectUri(toolReq), 'https://aio.deng.my.id/api/aio/auth/callback');
   });
 
   test('legacy public paths are redirectable; API paths are not', () => {
@@ -174,33 +174,38 @@ describe('public domain migration', () => {
     const app = require('../src/app');
     const agent = request.agent(app);
     const start = await agent
-      .get('/auth/discord?public_return=1')
-      .set('Host', 'tool.deng.my.id');
+      .get('/auth/discord')
+      .set('Host', 'aio.deng.my.id');
     const state = new URL(start.headers.location).searchParams.get('state');
-    assert.match(start.headers.location, /redirect_uri=https%3A%2F%2Ftool\.deng\.my\.id%2Fauth%2Fdiscord%2Fcallback/);
-    await agent.get(`/auth/discord/callback?code=ok&state=${state}`).set('Host', 'tool.deng.my.id');
+    assert.match(start.headers.location, /redirect_uri=https%3A%2F%2Faio\.deng\.my\.id%2Fapi%2Faio%2Fauth%2Fcallback/);
+    const callback = await agent
+      .get(`/api/aio/auth/callback?code=ok&state=${state}`)
+      .set('Host', 'aio.deng.my.id');
+    assert.equal(callback.status, 302);
+    assert.match(callback.headers.location, /\/dashboard/);
     const download = await agent.get('/download').set('Host', 'aio.deng.my.id');
     assert.equal(download.status, 200);
     assert.match(download.text, /Only download from https:\/\/aio\.deng\.my\.id\/download/);
     assert.match(download.text, /DENG All In One/);
   });
 
-  test('aio /auth/discord redirects OAuth start to internal tool host', async () => {
+  test('aio /auth/discord starts OAuth directly with aio callback', async () => {
     const app = require('../src/app');
     const res = await request(app)
       .get('/auth/discord')
       .set('Host', 'aio.deng.my.id');
     assert.equal(res.status, 302);
-    assert.match(res.headers.location, /^https:\/\/tool\.deng\.my\.id\/auth\/discord\?/);
-    assert.match(res.headers.location, /public_return=1/);
+    assert.match(res.headers.location, /^https:\/\/discord\.com\/api\/v10\/oauth2\/authorize\?/);
+    assert.match(res.headers.location, /redirect_uri=https%3A%2F%2Faio\.deng\.my\.id%2Fapi%2Faio%2Fauth%2Fcallback/);
+    assert.doesNotMatch(res.headers.location, /tool\.deng\.my\.id/);
   });
 
-  test('tool OAuth start uses internal callback redirect_uri', async () => {
+  test('tool OAuth start uses aio callback redirect_uri', async () => {
     const app = require('../src/app');
     const res = await request(app)
       .get('/auth/discord?public_return=1')
       .set('Host', 'tool.deng.my.id');
     assert.equal(res.status, 302);
-    assert.match(res.headers.location, /redirect_uri=https%3A%2F%2Ftool\.deng\.my\.id%2Fauth%2Fdiscord%2Fcallback/);
+    assert.match(res.headers.location, /redirect_uri=https%3A%2F%2Faio\.deng\.my\.id%2Fapi%2Faio%2Fauth%2Fcallback/);
   });
 });
