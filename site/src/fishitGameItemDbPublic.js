@@ -2,10 +2,13 @@
 
 const manualRarity = require('./fishitManualRarityOverrides');
 const stoneImageAssets = require('./fishitStoneImageAssets');
+const totemImageAssets = require('./fishitTotemImageAssets');
 const trackerLuaIcon = require('./fishitTrackerLuaIcon');
 const GAMEITEMDB_ICON_SOURCE = 'gameitemdb_icon';
 const PLAYERDATA_GAMEITEMDB_SOURCE = 'playerdata_gameitemdb';
 const STONE_MANUAL_ASSET_SOURCE = stoneImageAssets.STONE_MANUAL_ASSET_SOURCE;
+const TOTEM_MANUAL_ASSET_SOURCE = totemImageAssets.TOTEM_MANUAL_ASSET_SOURCE;
+const TOTEM_GAMEITEMDB_PROXY_SOURCE = totemImageAssets.TOTEM_GAMEITEMDB_PROXY_SOURCE;
 const QUIZ_BOT_FALLBACK_SOURCE = 'quiz_bot_fishit_bank';
 const FINAL_BUILD = 'BLOCKER10ZK_INVENTORY_MOBILE_BULK_APK_2026_06_09';
 const WAITING_ACTIVATION = 'waiting_for_playerdata_gameitemdb_payload';
@@ -257,16 +260,18 @@ function groupTotemRows(rows) {
   for (const row of rows) {
     const norm = normaliseUploadRow(row);
     if (!norm || norm.kind !== 'totem') continue;
-    const key = norm.uuid || `${norm.itemId}|${norm.name}`;
+    const key = `${String(norm.name || 'Totem').toLowerCase()}|${norm.itemId || ''}`;
+    const rowQty = Number(norm.quantity) > 0 ? Math.floor(Number(norm.quantity)) : 1;
     const prev = map.get(key);
     if (prev) {
-      prev.quantity += norm.quantity;
+      prev.quantity += rowQty;
       prev.amount = prev.quantity;
       prev.count = prev.quantity;
+      prev.rowCount = (Number(prev.rowCount) || 1) + 1;
       if (!prev.icon && norm.icon) prev.icon = norm.icon;
       if (!prev.imageUrl && norm.imageUrl) prev.imageUrl = norm.imageUrl;
     } else {
-      map.set(key, { ...norm });
+      map.set(key, { ...norm, quantity: rowQty, amount: rowQty, count: rowQty, rowCount: 1 });
     }
   }
   return [...map.values()];
@@ -376,10 +381,14 @@ function mapToPublicFishCardItem(item) {
 
 function mapToPublicTotemCardItem(item) {
   const amount = Number(item.quantity) > 0 ? Math.floor(Number(item.quantity)) : 1;
-  const iconParsed = parseGameItemIcon(item.icon || item.iconRaw);
-  const imageSource = iconParsed
-    ? GAMEITEMDB_ICON_SOURCE
-    : (item.imageSource === QUIZ_BOT_FALLBACK_SOURCE ? QUIZ_BOT_FALLBACK_SOURCE : null);
+  const manualAsset = item.imageSource === TOTEM_MANUAL_ASSET_SOURCE && item.imageUrl;
+  const proxyAsset = item.imageSource === TOTEM_GAMEITEMDB_PROXY_SOURCE && item.imageUrl;
+  const iconParsed = (manualAsset || proxyAsset) ? null : parseGameItemIcon(item.icon || item.iconRaw);
+  const imageSource = manualAsset
+    ? TOTEM_MANUAL_ASSET_SOURCE
+    : (proxyAsset
+      ? TOTEM_GAMEITEMDB_PROXY_SOURCE
+      : (iconParsed ? GAMEITEMDB_ICON_SOURCE : null));
   return {
     kind: 'totem',
     category: 'totem',
@@ -396,6 +405,7 @@ function mapToPublicTotemCardItem(item) {
     imageUrl: item.imageUrl || null,
     imageUrlPresent: Boolean(item.imageUrl),
     imageSource,
+    imageResolver: item.imageResolver || null,
     dataSource: PLAYERDATA_GAMEITEMDB_SOURCE,
     source: PLAYERDATA_GAMEITEMDB_SOURCE,
     identityVerified: true,
@@ -664,14 +674,12 @@ async function buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, deps = 
 
   const fishItems = withImages.map((item) => mapToPublicFishCardItem(item));
   const stoneItems = stonesWithImages.map((item) => mapToPublicStoneCardItem(item));
-  let totemsWithImages = groupedTotems;
-  if (fishImageCache && typeof fishImageCache.attachItemUtilityGameIcons === 'function') {
-    totemsWithImages = await fishImageCache.attachItemUtilityGameIcons(groupedTotems, baseUrl);
-  }
+  const totemsWithImages = totemImageAssets.attachTotemImagesToItems(groupedTotems, baseUrl);
   const totemItems = totemsWithImages.map((item) => mapToPublicTotemCardItem(item));
   const missingPublicRarityCount = manualRarity.countMissingPublicRarity(fishItems);
   const manualRarityProof = manualRarity.buildManualRarityProof(fishItems);
   const stoneAssetProof = stoneImageAssets.buildStoneAssetProof(stoneItems);
+  const totemAssetProof = totemImageAssets.buildTotemAssetProof(totemItems);
   const fishCounts = buildFishCounts(fishItems, stoneItems, unresolvedItems.length, totemItems);
   const publicCounts = buildPublicCounts(fishItems, stoneItems, totemItems);
   const storedProof = sessionData?.playerDataGameItemDbProof || {};
@@ -706,6 +714,7 @@ async function buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, deps = 
     missingPublicRarityCount,
     manualRarityProof,
     stoneAssetProof,
+    totemAssetProof,
   };
 }
 

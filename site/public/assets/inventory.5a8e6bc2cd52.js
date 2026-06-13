@@ -1,3479 +1,5 @@
-﻿<!DOCTYPE html>
-<!-- BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11 -->
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11' %>">
-  <link rel="icon" type="image/png" href="/public/img/deng-logo.png?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
-  <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/tracker' %>">
-  <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
-  <title>DENG Tracker &mdash; Fish It</title>
-  <style>
-    /* BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11 */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg:        #0d0f14;
-      --surface:   #161a22;
-      --surface2:  #1e2430;
-      --border:    #2a3040;
-      --accent:    #3b82f6;
-      --accent2:   #60a5fa;
-      --text:      #e2e8f0;
-      --muted:     #8a94a6;
-      --danger:    #ef4444;
-      --success:   #22c55e;
-      --warn:      #f59e0b;
-      --shine:     #fbbf24;
-      --radius:    10px;
-      --radius-lg: 16px;
-      --font:      'Segoe UI', system-ui, -apple-system, sans-serif;
-    }
-
-    html, body {
-      min-height: 100vh;
-      background: var(--bg);
-      color: var(--text);
-      font-family: var(--font);
-      font-size: 15px;
-      line-height: 1.5;
-    }
-
-    .inventory-shell {
-      display:flex;
-      flex-direction:column;
-      min-height:100vh;
-      width:100%;
-      overflow-x:hidden;
-    }
-    .inventory-main {
-      flex:1;
-      min-width:0;
-      width:100%;
-    }
-    .page { min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:32px 16px 64px; }
-    .inner { width:100%; max-width:1040px; }
-
-    .inventory-sidebar {
-      display:flex;
-      flex-direction:column;
-      gap:12px;
-      width:100%;
-      padding:14px 12px;
-      background:linear-gradient(180deg,rgba(18,22,32,.98) 0%,rgba(13,15,20,.98) 100%);
-      border-bottom:1px solid var(--border);
-    }
-    .inventory-sidebar__brand {
-      display:flex;
-      align-items:center;
-      gap:12px;
-      padding:8px 10px;
-      border-radius:14px;
-      background:linear-gradient(145deg,rgba(30,36,48,.92) 0%,rgba(22,26,34,.92) 100%);
-      border:1px solid rgba(96,165,250,.18);
-      box-shadow:0 10px 28px rgba(0,0,0,.22);
-    }
-    .inventory-sidebar__top {
-      display:flex;
-      flex-direction:column;
-      gap:10px;
-      width:100%;
-      min-width:0;
-    }
-    .inventory-sidebar__logo {
-      width:46px;
-      height:46px;
-      border-radius:12px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      flex-shrink:0;
-      overflow:hidden;
-      background:rgba(15,23,42,.65);
-      border:1px solid rgba(96,165,250,.22);
-    }
-    .inventory-sidebar__logo img {
-      width:38px;
-      height:38px;
-      object-fit:contain;
-    }
-    .inventory-sidebar__titles {
-      display:flex;
-      flex-direction:column;
-      gap:2px;
-      min-width:0;
-    }
-    .inventory-sidebar__title {
-      font-size:.98rem;
-      font-weight:800;
-      letter-spacing:-.02em;
-      background:linear-gradient(100deg,#22d3ee 0%,#3b82f6 45%,#ec4899 100%);
-      -webkit-background-clip:text;
-      background-clip:text;
-      color:transparent;
-      -webkit-text-fill-color:transparent;
-    }
-    .inventory-sidebar__subtitle {
-      font-size:.78rem;
-      font-weight:700;
-      color:var(--muted);
-      letter-spacing:.04em;
-      text-transform:uppercase;
-    }
-    .inventory-sidebar__spacer {
-      display:none;
-      pointer-events:none;
-      flex:1;
-      min-height:0;
-    }
-    .inventory-sidebar__bottom {
-      display:grid;
-      gap:10px;
-      min-width:0;
-      position:relative;
-      z-index:2;
-    }
-    .inventory-sidebar__controls,
-    .profile-control-row {
-      display:grid;
-      gap:10px;
-      min-width:0;
-      position:relative;
-      z-index:2;
-    }
-    .inventory-privacy-toggle {
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:12px;
-      width:100%;
-      padding:9px 12px;
-      border-radius:12px;
-      border:1px solid var(--border);
-      background:var(--surface2);
-      color:var(--muted);
-      font-size:.78rem;
-      font-weight:700;
-      font-family:var(--font);
-      cursor:pointer;
-      position:relative;
-      z-index:1;
-      pointer-events:auto;
-      transition:color .15s,border-color .15s,background .15s;
-    }
-    .inventory-privacy-toggle:hover { color:var(--text); border-color:#475569; }
-    .inventory-privacy-toggle.is-active {
-      color:var(--text);
-      border-color:rgba(96,165,250,.35);
-      background:rgba(59,130,246,.08);
-    }
-    .inventory-privacy-toggle__label {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      min-width:0;
-      flex:1 1 auto;
-    }
-    .inventory-privacy-toggle__icon {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      width:18px;
-      height:18px;
-      flex-shrink:0;
-    }
-    .inventory-privacy-toggle__icon svg {
-      width:16px;
-      height:16px;
-      stroke:currentColor;
-      stroke-width:2;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-      fill:none;
-    }
-    .inventory-privacy-toggle__text--short { display:none; }
-    .hide-username-toggle {
-      width:28px;
-      height:16px;
-      border-radius:999px;
-      padding:2px;
-      background:rgba(148,163,184,.32);
-      flex:0 0 auto;
-      box-sizing:border-box;
-      pointer-events:none;
-    }
-    .hide-username-toggle::before {
-      content:"";
-      display:block;
-      width:12px;
-      height:12px;
-      border-radius:999px;
-      background:rgba(229,231,235,.85);
-      transition:transform .15s ease,background .15s ease;
-    }
-    .inventory-privacy-toggle.is-active .hide-username-toggle {
-      background:rgba(59,130,246,.45);
-    }
-    .inventory-privacy-toggle.is-active .hide-username-toggle::before {
-      transform:translateX(12px);
-      background:rgba(241,245,249,.95);
-    }
-    .inventory-profile-card {
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding:10px 12px;
-      border-radius:12px;
-      background:var(--surface);
-      border:1px solid var(--border);
-      min-height:56px;
-    }
-    .inventory-profile-card__avatar,
-    .inventory-profile-card__avatar-placeholder {
-      width:36px;
-      height:36px;
-      border-radius:10px;
-      flex-shrink:0;
-      object-fit:cover;
-    }
-    .inventory-profile-card__avatar-placeholder {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      background:linear-gradient(135deg,#1d4ed8,#7c3aed);
-      color:#fff;
-      font-size:.82rem;
-      font-weight:800;
-    }
-    .inventory-profile-card__meta {
-      min-width:0;
-      display:flex;
-      flex-direction:column;
-      gap:2px;
-    }
-    .inventory-profile-card__name {
-      font-size:.86rem;
-      font-weight:700;
-      color:var(--text);
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .inventory-profile-card__sub {
-      font-size:.72rem;
-      color:var(--muted);
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .profile-control-row > .inventory-action-btn,
-    .profile-control-row > form {
-      margin:0;
-      min-width:0;
-    }
-    .profile-control-row > form {
-      display:block;
-    }
-    .profile-control-row > .inventory-action-btn,
-    .profile-control-row > form .inventory-action-btn {
-      width:100%;
-    }
-    .inventory-action-btn {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap:6px;
-      min-height:40px;
-      padding:8px 10px;
-      border-radius:12px;
-      border:1px solid var(--border);
-      background:var(--surface2);
-      color:var(--text);
-      font-size:.78rem;
-      font-weight:700;
-      font-family:var(--font);
-      text-decoration:none;
-      cursor:pointer;
-      position:relative;
-      z-index:1;
-      pointer-events:auto;
-      transition:background .15s,border-color .15s,color .15s,transform .1s;
-    }
-    .inventory-action-btn svg {
-      width:16px;
-      height:16px;
-      stroke:currentColor;
-      stroke-width:1.8;
-      fill:none;
-      flex-shrink:0;
-    }
-    .inventory-action-btn:active { transform:scale(.97); }
-    .inventory-action-btn--script {
-      color:var(--muted);
-    }
-    .inventory-action-btn--script svg {
-      opacity:.92;
-    }
-    .inventory-action-btn--script:hover {
-      color:var(--text);
-      border-color:rgba(96,165,250,.45);
-      background:rgba(59,130,246,.12);
-    }
-    .inventory-action-btn--logout {
-      border-color:rgba(239,68,68,.28);
-      color:#fca5a5;
-      background:rgba(127,29,29,.18);
-    }
-    .inventory-action-btn--logout:hover {
-      border-color:rgba(239,68,68,.55);
-      background:rgba(127,29,29,.28);
-      color:#fecaca;
-    }
-    .inventory-action-btn.is-copied {
-      border-color:rgba(34,197,94,.45);
-      color:#86efac;
-      background:rgba(22,101,52,.22);
-    }
-
-    .header { text-align:center; margin-bottom:28px; }
-    .header h1 { font-size:clamp(1.5rem,4vw,2.2rem); font-weight:700; background:linear-gradient(135deg,#3b82f6,#60a5fa,#93c5fd); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; letter-spacing:-.5px; margin-bottom:6px; }
-    .header p { color:var(--muted); font-size:.9rem; }
-
-    .inventory-stats {
-      display:grid;
-      grid-template-columns:repeat(4,minmax(0,1fr));
-      gap:12px;
-      margin-bottom:18px;
-      align-items:stretch;
-    }
-    .stat-card {
-      background:linear-gradient(160deg,var(--surface2) 0%,var(--surface) 100%);
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      padding:18px 16px;
-      min-height:96px;
-      height:100%;
-      display:flex;
-      flex-direction:column;
-      justify-content:flex-start;
-      box-shadow:0 8px 24px rgba(0,0,0,.18);
-    }
-    .stat-card__label {
-      font-size:.78rem;
-      font-weight:600;
-      letter-spacing:.02em;
-      color:var(--muted);
-      text-transform:uppercase;
-      min-height:2.2em;
-      line-height:1.05;
-      display:flex;
-      align-items:flex-start;
-    }
-    .stat-card__value {
-      margin-top:auto;
-      font-size:clamp(1.35rem,3vw,1.85rem);
-      font-weight:800;
-      color:var(--text);
-      line-height:1;
-      letter-spacing:-.02em;
-      white-space:nowrap;
-      display:flex;
-      align-items:flex-end;
-    }
-    .stat-card--online .stat-card__value { color:#4ade80; }
-    .stat-card--stones .stat-card__value { color:#fbbf24; }
-    .stat-card--secret .stat-card__value { color:#00ff7f; }
-    .stat-card--forgotten .stat-card__value { color:#e5e7eb; }
-
-    .inventory-main-nav {
-      display:flex;
-      align-items:center;
-      gap:4px;
-      padding:3px;
-      border:1px solid var(--border);
-      border-radius:999px;
-      background:rgba(15,23,42,.55);
-      width:100%;
-      max-width:100%;
-      min-width:0;
-      flex:1 1 auto;
-    }
-    .inventory-main-nav__tab {
-      appearance:none;
-      border:0;
-      background:transparent;
-      color:var(--muted);
-      font-family:var(--font);
-      font-size:.72rem;
-      font-weight:700;
-      line-height:1;
-      padding:8px 10px;
-      border-radius:999px;
-      cursor:pointer;
-      white-space:nowrap;
-      transition:color .15s,background .15s;
-      flex:1 1 0;
-      text-align:center;
-      min-width:0;
-    }
-    .inventory-main-nav__tab:hover { color:var(--text); }
-    .inventory-main-nav__tab.is-active {
-      color:#fff;
-      background:linear-gradient(135deg,#2563eb,#3b82f6);
-      box-shadow:0 6px 18px rgba(37,99,235,.28);
-    }
-    .inventory-panel[hidden] { display:none !important; }
-    .dashboard-toolbar {
-      display:flex;
-      flex-direction:column;
-      align-items:stretch;
-      gap:10px;
-      margin-bottom:14px;
-      position:relative;
-    }
-    .dashboard-toolbar.is-loading .dashboard-period-filter {
-      opacity:0.94;
-    }
-    .dashboard-toolbar.is-loading::after {
-      content:'';
-      position:absolute;
-      top:0;
-      right:0;
-      width:14px;
-      height:14px;
-      margin:6px;
-      border:2px solid rgba(96,165,250,.25);
-      border-top-color:rgba(96,165,250,.85);
-      border-radius:50%;
-      animation:dashboardToolbarSpin .65s linear infinite;
-      pointer-events:none;
-    }
-    @keyframes dashboardToolbarSpin {
-      to { transform:rotate(360deg); }
-    }
-    .dashboard-period-filter {
-      display:flex;
-      align-items:center;
-      gap:4px;
-      padding:3px;
-      border:1px solid var(--border);
-      border-radius:999px;
-      background:var(--surface);
-      overflow-x:auto;
-      -webkit-overflow-scrolling:touch;
-      scrollbar-width:none;
-    }
-    .dashboard-period-filter::-webkit-scrollbar { display:none; }
-    .dashboard-period-filter__btn {
-      appearance:none;
-      border:0;
-      background:transparent;
-      color:var(--muted);
-      font-family:var(--font);
-      font-size:.68rem;
-      font-weight:700;
-      line-height:1;
-      padding:8px 10px;
-      border-radius:999px;
-      cursor:pointer;
-      white-space:nowrap;
-      flex:0 0 auto;
-    }
-    .dashboard-period-filter__btn.is-active {
-      color:#fff;
-      background:var(--accent);
-    }
-    .dashboard-period-custom {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      flex-wrap:wrap;
-    }
-    .dashboard-period-custom__toggle {
-      appearance:none;
-      border:1px solid var(--border);
-      background:var(--surface);
-      color:var(--muted);
-      font-family:var(--font);
-      font-size:.72rem;
-      font-weight:700;
-      line-height:1;
-      padding:8px 12px;
-      border-radius:999px;
-      cursor:pointer;
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      white-space:nowrap;
-    }
-    .dashboard-period-custom__toggle svg {
-      width:14px;
-      height:14px;
-      stroke:currentColor;
-      fill:none;
-      stroke-width:2;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-    }
-    .dashboard-period-custom__toggle.is-active,
-    .dashboard-period-custom__toggle:hover {
-      color:var(--text);
-      border-color:rgba(96,165,250,.35);
-    }
-    .dashboard-period-custom__panel {
-      display:none;
-      align-items:center;
-      gap:8px;
-      flex-wrap:wrap;
-      padding:10px 12px;
-      border:1px solid var(--border);
-      border-radius:var(--radius-lg);
-      background:var(--surface2);
-    }
-    .dashboard-period-custom__panel.is-open { display:flex; }
-    .dashboard-period-custom__field {
-      display:flex;
-      flex-direction:column;
-      gap:4px;
-      min-width:0;
-      flex:1 1 120px;
-    }
-    .dashboard-period-custom__field label {
-      font-size:.62rem;
-      font-weight:700;
-      color:var(--muted);
-      letter-spacing:.04em;
-      text-transform:uppercase;
-    }
-    .dashboard-period-custom__field input[type="date"] {
-      appearance:none;
-      border:1px solid var(--border);
-      background:#0a0c10;
-      color:var(--text);
-      font-family:var(--font);
-      font-size:.78rem;
-      font-weight:600;
-      padding:8px 10px;
-      border-radius:var(--radius);
-      min-width:0;
-      width:100%;
-      color-scheme:dark;
-    }
-    .dashboard-period-custom__apply {
-      appearance:none;
-      border:0;
-      background:var(--accent);
-      color:#fff;
-      font-family:var(--font);
-      font-size:.72rem;
-      font-weight:700;
-      padding:9px 14px;
-      border-radius:999px;
-      cursor:pointer;
-      white-space:nowrap;
-    }
-    .dashboard-stats {
-      grid-template-columns:repeat(2,minmax(0,1fr));
-    }
-    .dashboard-chart-card {
-      margin-top:16px;
-      padding:14px 12px 10px;
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      background:linear-gradient(160deg,var(--surface2) 0%,var(--surface) 100%);
-    }
-    .dashboard-chart-card__title {
-      font-size:.84rem;
-      font-weight:700;
-      color:var(--text);
-      margin-bottom:10px;
-    }
-    .dashboard-chart-wrap {
-      width:100%;
-      overflow:hidden;
-    }
-    .dashboard-chart {
-      display:block;
-      width:100%;
-      height:132px;
-      overflow:visible;
-    }
-    .dashboard-chart-line {
-      fill:none;
-      stroke:url(#dashboardLineGrad);
-      stroke-width:2.4;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-    }
-    .dashboard-chart-area {
-      fill:url(#dashboardAreaGrad);
-      opacity:.85;
-    }
-    .dashboard-chart-grid {
-      stroke:rgba(148,163,184,.12);
-      stroke-width:1;
-    }
-    .dashboard-chart-point {
-      fill:#60a5fa;
-      stroke:#0d0f14;
-      stroke-width:1.5;
-    }
-    .dashboard-chart-value {
-      fill:#e2e8f0;
-      font-family:var(--font);
-      font-size:8px;
-      font-weight:700;
-      text-anchor:middle;
-    }
-    .dashboard-chart-zero {
-      fill:#64748b;
-      font-family:var(--font);
-      font-size:8px;
-      font-weight:600;
-      text-anchor:middle;
-    }
-    .dashboard-chart-labels {
-      display:flex;
-      justify-content:space-between;
-      gap:4px;
-      margin-top:6px;
-      font-size:.62rem;
-      color:var(--muted);
-      line-height:1;
-    }
-    .dashboard-chart-labels span {
-      flex:1 1 0;
-      text-align:center;
-      min-width:0;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .dashboard-chart-empty {
-      margin-top:8px;
-      font-size:.78rem;
-      color:var(--muted);
-      text-align:center;
-    }
-    .dashboard-fish-section {
-      margin-top:16px;
-    }
-    .dashboard-fish-section__title {
-      font-size:.84rem;
-      font-weight:700;
-      color:var(--text);
-      margin-bottom:10px;
-    }
-    .dashboard-fish-grid .items-grid {
-      margin-top:0;
-    }
-    .dashboard-fish-empty {
-      font-size:.78rem;
-      color:var(--muted);
-      text-align:center;
-      padding:20px 12px;
-      border:1px dashed var(--border);
-      border-radius:var(--radius-lg);
-      background:rgba(15,23,42,.35);
-    }
-    .dashboard-status-notice {
-      font-size:.78rem;
-      line-height:1.45;
-      padding:10px 12px;
-      border-radius:var(--radius-lg);
-      margin:0 0 12px;
-      border:1px solid var(--border);
-      background:rgba(15,23,42,.45);
-      color:var(--muted);
-    }
-    .dashboard-status-notice.is-error {
-      border-color:rgba(248,113,113,.45);
-      background:rgba(127,29,29,.22);
-      color:#fecaca;
-    }
-    .dashboard-status-notice.is-debug {
-      font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size:.68rem;
-      white-space:pre-wrap;
-      word-break:break-word;
-    }
-
-    .player-control-bar {
-      display:flex;
-      align-items:center;
-      gap:10px;
-      flex-wrap:wrap;
-      margin-bottom:10px;
-      padding:12px;
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      background:var(--surface);
-    }
-    .player-control-bar input {
-      flex:1 1 220px;
-      min-width:0;
-      padding:12px 16px;
-      background:var(--surface2);
-      border:1.5px solid var(--border);
-      border-radius:var(--radius);
-      color:var(--text);
-      font-size:.95rem;
-      font-family:var(--font);
-      outline:none;
-      transition:border-color .15s;
-    }
-    .player-control-bar input:focus { border-color:var(--accent); }
-    .player-control-bar input.is-invalid { border-color:var(--danger); }
-    .player-control-bar input::placeholder { color:var(--muted); }
-    .username-error { flex:1 1 100%; font-size:.82rem; color:var(--danger); min-height:1.1em; }
-
-    .btn { padding:12px 18px; border-radius:var(--radius); border:none; cursor:pointer; font-size:.9rem; font-weight:650; font-family:var(--font); transition:opacity .15s,transform .1s,background .15s,border-color .15s; white-space:nowrap; }
-    .btn:active { transform:scale(.97); }
-    .btn-add {
-      background:#f8fafc;
-      color:#0f172a;
-      border:1.5px solid #e2e8f0;
-    }
-    .btn-add:hover { background:#fff; }
-    .btn-multiple {
-      background:var(--surface2);
-      color:var(--text);
-      border:1.5px solid var(--border);
-    }
-    .btn-multiple:hover { border-color:#475569; }
-    .btn-remove-menu {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap:4px;
-      min-width:46px;
-      padding:10px 12px;
-      background:linear-gradient(180deg,#7f1d1d 0%,#991b1b 100%);
-      border:1.5px solid #ef4444;
-      border-radius:var(--radius);
-      color:#fecaca;
-      box-shadow:0 0 0 1px rgba(239,68,68,.25),0 8px 20px rgba(127,29,29,.35);
-    }
-    .btn-remove-menu:hover { background:linear-gradient(180deg,#991b1b 0%,#b91c1c 100%); color:#fff; }
-    .btn-remove-menu svg { width:18px; height:18px; flex-shrink:0; }
-    .btn-remove-menu__caret { width:14px; height:14px; opacity:.9; }
-    .remove-dropdown { position:relative; flex-shrink:0; }
-    .remove-dropdown__menu {
-      position:absolute;
-      top:calc(100% + 8px);
-      right:0;
-      min-width:220px;
-      max-width:min(320px,90vw);
-      max-height:280px;
-      overflow:auto;
-      background:var(--surface2);
-      border:1.5px solid var(--border);
-      border-radius:var(--radius);
-      box-shadow:0 16px 40px rgba(0,0,0,.35);
-      z-index:30;
-      padding:6px;
-    }
-    .remove-dropdown__item {
-      width:100%;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:8px;
-      border:none;
-      background:transparent;
-      color:var(--text);
-      padding:10px 12px;
-      border-radius:8px;
-      font-family:var(--font);
-      font-size:.88rem;
-      cursor:pointer;
-      text-align:left;
-    }
-    .remove-dropdown__item:hover { background:rgba(239,68,68,.12); color:#fecaca; }
-    .remove-dropdown__empty {
-      padding:12px 14px;
-      color:var(--muted);
-      font-size:.84rem;
-      text-align:center;
-    }
-    .remove-dropdown__empty {
-      padding:12px;
-      color:var(--muted);
-      font-size:.82rem;
-      text-align:center;
-    }
-
-    .ft-chip-owner {
-      background:rgba(59,130,246,.18);
-      border:1px solid rgba(96,165,250,.35);
-      color:#dbeafe;
-      font-size:.72rem;
-      font-weight:700;
-      max-width:100%;
-    }
-    .ft-chip-owner-qty { color:#93c5fd; margin-left:2px; }
-    .ft-card-stats--owners { flex-wrap:wrap; gap:5px; margin-top:6px; }
-
-    .summary-bar { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; font-size:.85rem; color:var(--muted); }
-    .summary-bar strong { color:var(--text); }
-
-    .no-trackers { text-align:center; padding:60px 20px; color:var(--muted); border:1.5px dashed var(--border); border-radius:var(--radius-lg); margin-bottom:24px; }
-    .no-trackers .icon { font-size:2.5rem; margin-bottom:10px; }
-    .no-trackers p { font-size:.9rem; }
-
-    .tracker-card { background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius-lg); margin-bottom:14px; overflow:hidden; animation:slideIn .2s ease; transition:border-color .25s; }
-    .tracker-card.state-live    { border-color:var(--success); }
-    .tracker-card.state-waiting { border-color:var(--warn); }
-    .tracker-card.state-error   { border-color:var(--danger); }
-    .tracker-card.is-highlighted { box-shadow:0 0 0 1px rgba(59,130,246,.45), 0 10px 28px rgba(59,130,246,.12); }
-    .tracker-card--account-inventory {
-      background:transparent;
-      border:none;
-      border-radius:0;
-      margin-bottom:0;
-      overflow:visible;
-      box-shadow:none;
-      animation:none;
-    }
-    .tracker-card--account-inventory.state-live,
-    .tracker-card--account-inventory.state-waiting,
-    .tracker-card--account-inventory.state-error {
-      border-color:transparent;
-    }
-    .tracker-card--account-inventory.is-highlighted { box-shadow:none; }
-    .tracker-card--account-inventory .card-head,
-    .tracker-card--account-inventory .chevron,
-    .tracker-card--account-inventory .card-status-line {
-      display:none !important;
-    }
-    .tracker-card--account-inventory .card-body {
-      display:block !important;
-      padding:0;
-    }
-
-    @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-
-    .card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px 10px; cursor:pointer; user-select:none; }
-    .card-head:hover { background:var(--surface2); }
-    .card-head-main { display:flex; align-items:center; gap:8px; min-width:0; flex:1; }
-
-    .status-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; background:var(--muted); transition:background .2s; }
-    .status-dot.live { background:var(--success); animation:pulse 1.4s ease-in-out infinite; }
-    .status-dot.stale { background:var(--warn); animation:pulse 2s ease-in-out infinite; }
-    .status-dot.dead { background:var(--danger); }
-    .accounts-status .status-dot.dead { background:var(--danger); box-shadow:0 0 0 1px rgba(239,68,68,.35); }
-    .accounts-status .status-dot.live { color:rgba(74,222,128,.88); }
-
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
-
-    .accounts-status__text { font-size:.8rem; font-weight:600; white-space:nowrap; color:var(--text); }
-    .accounts-table__stat-sub {
-      font-size:.62rem;
-      font-weight:500;
-      color:var(--muted);
-      white-space:nowrap;
-    }
-    .accounts-table__stat-sub.is-stale { color:var(--warn); }
-    .accounts-mobile-card__row-value-stack { display:flex; flex-direction:column; align-items:center; gap:1px; }
-    .accounts-mobile-card__stat-sub {
-      font-size:.62rem;
-      font-weight:500;
-      color:var(--muted);
-      white-space:nowrap;
-    }
-    .accounts-mobile-card__stat-sub.is-stale { color:var(--warn); }
-    .inventory-upload-indicator {
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-      flex-shrink:0;
-      padding:6px 8px;
-      border:1px solid var(--border);
-      border-radius:999px;
-      background:var(--surface2);
-      font-size:.68rem;
-      font-weight:600;
-      color:var(--muted);
-      white-space:nowrap;
-    }
-    .inventory-upload-indicator__text { min-width:0; }
-    .inventory-upload-indicator.is-live { color:rgba(74,222,128,.92); border-color:rgba(74,222,128,.28); }
-    .inventory-upload-indicator.is-stale { color:var(--warn); border-color:rgba(251,191,36,.28); }
-    .inventory-grid-upload-bar {
-      display:flex;
-      justify-content:flex-end;
-      margin:0 0 8px;
-    }
-    .card-head-main:empty { display:none; }
-    .card-head:has(.card-head-main:empty) { justify-content:flex-end; }
-
-    .state-live    .status-dot.live { background:var(--success); }
-    .state-waiting .status-dot.dead { background:var(--muted); }
-    .state-error   .status-dot.dead { background:var(--danger); }
-
-    .chevron { width:16px; height:16px; color:var(--muted); transition:transform .2s; flex-shrink:0; margin-top:4px; }
-    .tracker-card.expanded .chevron { transform:rotate(180deg); }
-
-    .btn-remove { background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:999px; color:var(--muted); cursor:pointer; padding:3px 10px; font-size:.72rem; font-family:var(--font); transition:color .15s,border-color .15s,background .15s; flex-shrink:0; line-height:1.2; }
-    .btn-remove:hover { color:var(--danger); border-color:var(--danger); background:#1a0808; }
-
-    .card-status-line { padding:0 16px 8px; font-size:.8rem; color:var(--muted); }
-    .card-status-line:empty { display:none; }
-
-    .card-body { padding:0 16px 12px; display:none; }
-    .tracker-card.expanded .card-body { display:block; }
-
-    .modal-overlay {
-      position:fixed;
-      inset:0;
-      z-index:120;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      padding:16px;
-      background:rgba(0,0,0,.68);
-      backdrop-filter:blur(2px);
-    }
-    .modal-overlay[hidden] { display:none !important; }
-    .modal-dialog {
-      width:min(500px,100%);
-      max-height:calc(100vh - 32px);
-      overflow:auto;
-      background:linear-gradient(160deg,var(--surface2) 0%,var(--surface) 100%);
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      padding:24px;
-      box-shadow:0 24px 56px rgba(0,0,0,.45);
-    }
-    .modal-title { font-size:1.2rem; font-weight:700; margin-bottom:8px; letter-spacing:-.02em; }
-    .modal-helper { color:var(--muted); font-size:.92rem; margin-bottom:4px; }
-    .modal-example { color:var(--muted); font-size:.84rem; margin-bottom:14px; opacity:.92; }
-    .modal-textarea {
-      width:100%;
-      min-height:140px;
-      resize:vertical;
-      padding:14px 16px;
-      background:var(--surface);
-      border:1.5px solid var(--border);
-      border-radius:var(--radius);
-      color:var(--text);
-      font-family:var(--font);
-      font-size:17px;
-      line-height:1.45;
-      outline:none;
-      transition:border-color .15s;
-    }
-    .modal-textarea:focus { border-color:var(--accent); }
-    .modal-textarea::placeholder { color:var(--muted); font-size:17px; opacity:.78; }
-    .modal-error {
-      margin-top:10px;
-      font-size:.86rem;
-      color:var(--danger);
-      min-height:1.1em;
-    }
-    .modal-error[hidden] { display:none; }
-    .modal-actions {
-      display:flex;
-      justify-content:flex-end;
-      gap:10px;
-      margin-top:18px;
-      flex-wrap:wrap;
-    }
-    .btn-modal-cancel {
-      background:var(--surface2);
-      color:var(--text);
-      border:1.5px solid var(--border);
-      padding:11px 18px;
-      border-radius:var(--radius);
-      font-weight:600;
-      cursor:pointer;
-      font-family:var(--font);
-    }
-    .btn-modal-cancel:hover { border-color:#475569; }
-    .btn-modal-submit {
-      background:#f8fafc;
-      color:#0f172a;
-      border:1.5px solid #e2e8f0;
-      padding:11px 20px;
-      border-radius:var(--radius);
-      font-weight:700;
-      cursor:pointer;
-      font-family:var(--font);
-    }
-    .btn-modal-submit:hover { background:#fff; }
-
-    .accounts-overview {
-      margin-bottom:18px;
-      background:var(--surface);
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      overflow:hidden;
-    }
-    .accounts-toolbar {
-      display:flex;
-      align-items:center;
-      gap:12px;
-      flex-wrap:wrap;
-      padding:14px 16px;
-      border-bottom:1px solid var(--border);
-      background:linear-gradient(180deg,var(--surface2) 0%,var(--surface) 100%);
-    }
-    .accounts-toolbar__controls {
-      display:contents;
-    }
-    .accounts-search {
-      flex:1 1 240px;
-      min-width:0;
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding:10px 14px;
-      background:var(--surface);
-      border:1.5px solid var(--border);
-      border-radius:999px;
-    }
-    .accounts-search svg { width:18px; height:18px; color:var(--muted); flex-shrink:0; }
-    .accounts-search input {
-      flex:1;
-      min-width:0;
-      border:none;
-      background:transparent;
-      color:var(--text);
-      font-size:.95rem;
-      font-family:var(--font);
-      outline:none;
-    }
-    .accounts-search input::placeholder { color:var(--muted); }
-    .accounts-filters { display:flex; gap:8px; flex-wrap:wrap; }
-    .accounts-filter {
-      border:1.5px solid var(--border);
-      background:var(--surface);
-      color:var(--muted);
-      border-radius:999px;
-      padding:8px 14px;
-      font-size:.84rem;
-      font-weight:600;
-      cursor:pointer;
-      font-family:var(--font);
-    }
-    .accounts-filter.is-active {
-      background:var(--surface2);
-      color:var(--text);
-      border-color:#475569;
-    }
-    .accounts-actions {
-      display:flex;
-      gap:8px;
-      margin-left:auto;
-      flex-wrap:wrap;
-    }
-    .accounts-icon-btn {
-      width:38px;
-      height:38px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      border:1.5px solid var(--border);
-      background:var(--surface);
-      color:var(--text);
-      border-radius:10px;
-      cursor:pointer;
-      padding:0;
-    }
-    .accounts-icon-btn:hover { border-color:#475569; background:var(--surface2); }
-    .accounts-icon-btn.is-active { border-color:var(--accent); color:var(--accent2); }
-    .accounts-icon-btn svg { width:18px; height:18px; }
-    .accounts-view-group {
-      display:inline-flex;
-      align-items:stretch;
-      border:1.5px solid var(--border);
-      border-radius:10px;
-      overflow:hidden;
-      background:var(--surface);
-    }
-    .accounts-view-group .accounts-icon-btn {
-      border:none;
-      border-radius:0;
-      border-right:1px solid var(--border);
-      width:38px;
-    }
-    .accounts-view-group .accounts-icon-btn:last-child { border-right:none; }
-    .accounts-view-group .accounts-icon-btn.is-active { background:var(--surface2); }
-    .accounts-view-group .accounts-view-btn {
-      width:40px;
-      height:40px;
-      flex-shrink:0;
-    }
-    .accounts-view-icon {
-      width:20px;
-      height:20px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      flex-shrink:0;
-      pointer-events:none;
-    }
-    .accounts-view-group .accounts-view-icon svg {
-      width:20px;
-      height:20px;
-      display:block;
-      stroke:currentColor;
-      stroke-width:2;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-      fill:none;
-    }
-    .accounts-view-group .accounts-view-icon svg .accounts-view-icon__fill {
-      fill:currentColor;
-      stroke:none;
-    }
-    .accounts-table-wrap {
-      overflow:auto;
-      -webkit-overflow-scrolling:touch;
-    }
-    .accounts-table {
-      width:100%;
-      border-collapse:collapse;
-    }
-    .accounts-table col.col-index { width:var(--acct-col-index); }
-    .accounts-table col.col-status { width:var(--acct-col-status); }
-    .accounts-table col.col-username { width:var(--acct-col-username); }
-    .accounts-table col.col-coin { width:var(--acct-col-coin); }
-    .accounts-table col.col-caught { width:var(--acct-col-caught); }
-    .accounts-table col.col-rare { width:var(--acct-col-rare); }
-    .accounts-table col.col-backpack { width:var(--acct-col-backpack); }
-    .accounts-table col.col-actions { width:var(--acct-col-actions); }
-    .accounts-table thead th,
-    .accounts-table tbody td {
-      padding:var(--acct-cell-py) var(--acct-cell-px);
-      border-bottom:1px solid rgba(42,48,64,.65);
-      vertical-align:middle;
-      box-sizing:border-box;
-    }
-    .accounts-table thead th {
-      text-align:left;
-      color:var(--muted);
-      font-size:.76rem;
-      font-weight:700;
-      letter-spacing:.04em;
-      text-transform:uppercase;
-      border-bottom:1px solid var(--border);
-      background:rgba(255,255,255,.02);
-      white-space:nowrap;
-    }
-    .accounts-table tbody td { white-space:nowrap; }
-    .accounts-table tbody tr:hover { background:rgba(255,255,255,.02); }
-    .accounts-table tbody tr.is-highlighted { background:rgba(59,130,246,.08); }
-    .accounts-table .col-index,
-    .accounts-table thead th.col-index,
-    .accounts-table tbody td.col-index {
-      text-align:center;
-    }
-    .accounts-table .col-status,
-    .accounts-table thead th.col-status,
-    .accounts-table tbody td.col-status {
-      text-align:center;
-    }
-    .accounts-table .col-username,
-    .accounts-table thead th.col-username,
-    .accounts-table tbody td.col-username {
-      text-align:left;
-      white-space:nowrap;
-    }
-    .accounts-table .col-coin,
-    .accounts-table .col-coins,
-    .accounts-table .col-caught,
-    .accounts-table .col-total-caught,
-    .accounts-table .col-rare,
-    .accounts-table .col-rarest-fish,
-    .accounts-table thead th.col-coin,
-    .accounts-table thead th.col-coins,
-    .accounts-table thead th.col-caught,
-    .accounts-table thead th.col-total-caught,
-    .accounts-table thead th.col-rare,
-    .accounts-table thead th.col-rarest-fish,
-    .accounts-table tbody td.col-coin,
-    .accounts-table tbody td.col-coins,
-    .accounts-table tbody td.col-caught,
-    .accounts-table tbody td.col-total-caught,
-    .accounts-table tbody td.col-rare,
-    .accounts-table tbody td.col-rarest-fish,
-    .accounts-table [data-col="coin"],
-    .accounts-table [data-col="total-caught"],
-    .accounts-table [data-col="rarest-fish"] {
-      text-align:center;
-    }
-    .accounts-table .col-backpack,
-    .accounts-table .col-actions,
-    .accounts-table thead th.col-backpack,
-    .accounts-table thead th.col-actions,
-    .accounts-table tbody td.col-backpack,
-    .accounts-table tbody td.col-actions {
-      text-align:center;
-    }
-    .accounts-table__index { color:var(--muted); }
-    .accounts-status {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap:7px;
-      color:var(--muted);
-      font-size:.8rem;
-    }
-    .accounts-table__username { font-weight:700; }
-    .accounts-table__stat { font-weight:600; }
-    .accounts-table__stat.is-muted { color:var(--muted); font-weight:500; }
-    .accounts-table__stat.is-complete { color:#4ade80; font-weight:700; }
-    .accounts-table__stat-stack {
-      display:inline-flex;
-      flex-direction:column;
-      align-items:center;
-      justify-content:center;
-      gap:1px;
-      line-height:1.15;
-      max-width:100%;
-    }
-    .coin-value,
-    .total-caught-value,
-    .rarest-fish-value {
-      text-align:center;
-    }
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="coin"],
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="total-caught"],
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="rarest-fish"],
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-coin,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-total-caught,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-rarest-fish {
-      text-align:center;
-      justify-content:center;
-      align-items:center;
-      flex-direction:column;
-    }
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="coin"] .accounts-mobile-card__row-label,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="total-caught"] .accounts-mobile-card__row-label,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="rarest-fish"] .accounts-mobile-card__row-label,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="coin"] .accounts-mobile-card__row-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="total-caught"] .accounts-mobile-card__row-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row[data-col="rarest-fish"] .accounts-mobile-card__row-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-coin .accounts-mobile-card__row-label,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-total-caught .accounts-mobile-card__row-label,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-rarest-fish .accounts-mobile-card__row-label,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-coin .accounts-mobile-card__row-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-total-caught .accounts-mobile-card__row-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row.col-rarest-fish .accounts-mobile-card__row-value {
-      min-width:0;
-      width:100%;
-      flex:0 0 auto;
-      text-align:center;
-      margin-left:auto;
-      margin-right:auto;
-    }
-    .accounts-table__sub { display:block; margin-top:2px; font-size:.72rem; color:var(--muted); }
-    .accounts-table__icon-btn {
-      width:34px;
-      height:34px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      border:1.5px solid var(--border);
-      background:var(--surface2);
-      color:var(--text);
-      border-radius:10px;
-      cursor:pointer;
-      padding:0;
-    }
-    .accounts-table__icon-btn:hover { border-color:#475569; }
-    .accounts-table__icon-btn .nav-icon,
-    .accounts-icon-btn .nav-icon {
-      width:18px;
-      height:18px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      background:transparent;
-      box-shadow:none;
-    }
-    .accounts-table__icon-btn .nav-icon svg,
-    .accounts-icon-btn .nav-icon svg {
-      width:16px;
-      height:16px;
-      stroke:currentColor;
-      stroke-width:2.2;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-      fill:none;
-    }
-    .accounts-table__icon-btn--danger {
-      border-color:rgba(239,68,68,.45);
-      color:#fca5a5;
-      background:rgba(127,29,29,.18);
-    }
-    .accounts-table__icon-btn--danger:hover { background:rgba(153,27,27,.28); color:#fff; }
-    .accounts-table__empty {
-      padding:28px 16px;
-      text-align:center;
-      color:var(--muted);
-      font-size:.9rem;
-    }
-    .accounts-overview.is-inventory-only .accounts-table-wrap { display:none; }
-    .accounts-overview.is-inventory-only .accounts-mobile-list { display:none; }
-    .accounts-table .th-short { display:none; }
-    .accounts-mobile-list {
-      display:none;
-      flex-direction:column;
-      gap:10px;
-    }
-    .accounts-mobile-card {
-      border:1.5px solid var(--border);
-      border-radius:var(--radius-lg);
-      padding:12px;
-      background:var(--surface);
-      display:flex;
-      flex-direction:column;
-      gap:8px;
-    }
-    .accounts-mobile-card.is-highlighted {
-      border-color:var(--accent);
-      box-shadow:0 0 0 1px rgba(59,130,246,.25);
-    }
-    .accounts-mobile-card__top {
-      display:flex;
-      flex-wrap:wrap;
-      align-items:flex-start;
-      justify-content:flex-start;
-      gap:8px;
-    }
-    .accounts-mobile-card__account {
-      flex:1 1 auto;
-      min-width:0;
-      display:flex;
-      align-items:center;
-      gap:8px;
-    }
-    .accounts-mobile-card__label {
-      display:block;
-      font-size:.7rem;
-      color:var(--muted);
-      text-transform:uppercase;
-      letter-spacing:.04em;
-      font-weight:700;
-      margin-bottom:2px;
-    }
-    .accounts-mobile-card__username {
-      font-weight:700;
-      font-size:.95rem;
-      min-width:0;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      white-space:nowrap;
-      line-height:1.35;
-    }
-    .accounts-mobile-card__actions {
-      display:flex;
-      gap:8px;
-      flex-shrink:0;
-    }
-    .accounts-mobile-card__grid {
-      display:grid;
-      gap:8px;
-      margin-top:0;
-      align-items:stretch;
-      text-align:left;
-    }
-    .accounts-mobile-card__grid--stats {
-      grid-template-columns:repeat(3,minmax(0,1fr));
-      gap:8px;
-      align-items:stretch;
-    }
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row {
-      flex-direction:column;
-      align-items:center;
-      justify-content:flex-start;
-      gap:4px;
-      text-align:center;
-    }
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row-label {
-      min-width:0;
-      width:100%;
-      text-align:center;
-    }
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row-value,
-    .accounts-mobile-card__grid--stats .accounts-mobile-card__row-value-stack {
-      width:100%;
-      justify-content:center;
-    }
-    .accounts-mobile-card__row {
-      display:flex;
-      flex-wrap:wrap;
-      align-items:baseline;
-      gap:6px;
-      font-size:.82rem;
-      min-width:0;
-    }
-    .accounts-mobile-card__row-label {
-      color:var(--muted);
-      min-width:72px;
-      flex-shrink:0;
-    }
-    .accounts-mobile-card__row-value {
-      font-weight:600;
-      overflow-wrap:anywhere;
-      min-width:0;
-      flex:1 1 auto;
-    }
-    .accounts-mobile-card__row-value.is-muted { color:var(--muted); font-weight:500; }
-    .accounts-mobile-card__empty {
-      padding:28px 16px;
-      text-align:center;
-      color:var(--muted);
-      font-size:.9rem;
-    }
-    .inventory-view-section[hidden] { display:none !important; }
-    #trackerList .tracker-card { scroll-margin-top:84px; }
-
-    .inventory-grid,
-    .items-grid,
-    .fish-grid {
-      display:grid;
-      grid-template-columns:repeat(auto-fill,minmax(230px,240px));
-      gap:11px;
-      align-items:start;
-      justify-content:start;
-      margin-top:4px;
-    }
-    .stones-grid,
-    .stone-grid {
-      display:grid;
-      grid-template-columns:repeat(auto-fill,minmax(196px,1fr));
-      gap:10px;
-      align-items:start;
-      justify-content:start;
-      margin-top:4px;
-    }
-
-    /* BLOCKER10ZP - flex-only fish cards + canonical rarity backgrounds */
-    <%= typeof trackerRarityCardCss !== 'undefined' ? trackerRarityCardCss : '' %>
-    .ft-card {
-      width:100%;
-      min-height:84px;
-      height:84px;
-      border-radius:10px;
-      padding:10px 12px;
-      display:flex;
-      align-items:center;
-      gap:10px;
-      overflow:hidden;
-      box-sizing:border-box;
-      position:relative;
-      border:1px solid rgba(255,255,255,.08);
-      color:#fff;
-      box-shadow:0 4px 14px rgba(0,0,0,.18);
-      transition:transform .15s,box-shadow .2s;
-    }
-    .ft-card.ft-card--enter { animation:fadeIn .2s ease; }
-    .ft-card:hover { transform:translateY(-1px); box-shadow:0 6px 18px rgba(0,0,0,.24); }
-    .ft-card--fish { max-width:240px; }
-    .ft-card-icon {
-      flex:0 0 54px;
-      width:54px;
-      height:54px;
-      border-radius:8px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      overflow:hidden;
-      background:rgba(255,255,255,.14);
-    }
-    .ft-card-icon img {
-      width:100%;
-      height:100%;
-      object-fit:contain;
-      display:block;
-      background:transparent!important;
-    }
-    .ft-card-icon img[data-placeholder="true"] { opacity:.55; }
-    .ft-card-main {
-      min-width:0;
-      flex:1;
-      display:flex;
-      flex-direction:column;
-      justify-content:center;
-      align-items:flex-start;
-    }
-    .ft-card-name {
-      max-width:100%;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-      font-size:13px;
-      font-weight:800;
-      line-height:16px;
-      color:#fff;
-      text-shadow:0 1px 2px rgba(0,0,0,.45);
-    }
-    .ft-card-stats {
-      display:flex;
-      align-items:center;
-      gap:6px;
-      margin-top:6px;
-      flex-wrap:nowrap;
-      max-width:100%;
-    }
-    .ft-chip {
-      height:20px;
-      padding:0 7px;
-      border-radius:6px;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap:4px;
-      font-size:11px;
-      font-weight:700;
-      line-height:20px;
-      color:#fff;
-      background:rgba(0,0,0,.16);
-      white-space:nowrap;
-      flex-shrink:0;
-    }
-    .ft-chip-icon { width:12px; height:12px; color:#fff; flex-shrink:0; }
-    .ft-card-weight {
-      margin-top:5px;
-      font-size:11px;
-      line-height:14px;
-      color:rgba(255,255,255,.9);
-      white-space:nowrap;
-    }
-
-    .stones-section { margin-top:14px; padding-top:12px; border-top:1px solid var(--border); }
-    .items-section { margin-top:14px; padding-top:12px; border-top:1px solid var(--border); }
-    .stones-section__title {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:.88rem;
-      color:#fff;
-      margin-bottom:10px;
-      font-weight:700;
-      letter-spacing:.01em;
-    }
-    .stones-section__title::before {
-      content:'';
-      width:8px;
-      height:8px;
-      border-radius:50%;
-      background:#a855f7;
-      flex-shrink:0;
-    }
-    .totems-section__title {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:.88rem;
-      color:#fff;
-      margin-bottom:10px;
-      font-weight:700;
-      letter-spacing:.01em;
-    }
-    .totems-section__title::before {
-      content:'';
-      width:8px;
-      height:8px;
-      border-radius:50%;
-      background:#a855f7;
-      flex-shrink:0;
-    }
-    .items-subsection { margin-top:10px; }
-    .items-subsection:first-of-type { margin-top:0; }
-    .items-subsection__title {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:.82rem;
-      color:#d8b4fe;
-      margin-bottom:8px;
-      font-weight:600;
-      letter-spacing:.01em;
-    }
-    .fish-section__title {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:.88rem;
-      color:#fff;
-      margin-bottom:10px;
-      font-weight:700;
-      letter-spacing:.01em;
-    }
-    .fish-section__title::before {
-      content:'';
-      width:8px;
-      height:8px;
-      border-radius:50%;
-      background:#38bdf8;
-      flex-shrink:0;
-    }
-    .ft-card--stone {
-      min-height:72px;
-      height:72px;
-      background:#232833;
-      border:1px solid rgba(255,255,255,.06);
-    }
-    .ft-card--stone .ft-card-icon {
-      flex-basis:48px;
-      width:48px;
-      height:48px;
-      background:rgba(255,255,255,.08);
-    }
-    .ft-card--stone .ft-card-name { font-size:12px; font-weight:700; }
-    .ft-card--stone .ft-card-stats { margin-top:4px; }
-    .ft-card--totem {
-      min-height:72px;
-      height:72px;
-      background:#232833;
-      border:1px solid rgba(255,255,255,.06);
-    }
-    .ft-card--totem .ft-card-icon {
-      flex-basis:48px;
-      width:48px;
-      height:48px;
-      background:rgba(255,255,255,.08);
-    }
-    .ft-card--totem .ft-card-name { font-size:12px; font-weight:700; }
-    .ft-card--totem .ft-card-stats { margin-top:4px; }
-
-    .global-db-proof { margin-top:8px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface2); }
-    .global-db-proof summary { cursor:pointer; padding:8px 10px; font-size:.78rem; color:#93c5fd; user-select:none; }
-    .global-db-proof .gdb-body { padding:8px 10px 10px; font-size:.74rem; color:var(--muted); line-height:1.45; }
-    .global-db-proof .gdb-row { display:flex; justify-content:space-between; gap:8px; }
-    .global-db-proof .gdb-on { color:#4ade80; font-weight:600; }
-    .global-db-debug { margin-top:6px; font-size:.68rem; color:#8a94a6; max-height:120px; overflow:auto; }
-    @keyframes fadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
-
-    .badge { font-size:.72rem; padding:2px 9px; border-radius:99px; border:1px solid var(--border); background:var(--surface); color:var(--muted); }
-    .badge-weight  { color:var(--accent2); border-color:#1d3a5c; background:#0d1f30; }
-    .rarity-common    { color:#f8fafc; }
-    .rarity-uncommon  { color:#84cc16; border-color:#3f6212; background:#1a2e05; }
-    .rarity-rare      { color:#93c5fd; border-color:#1e3a8a; background:#0f172a; }
-    .rarity-epic      { color:#d8b4fe; border-color:#6b21a8; background:#3b0764; }
-    .rarity-legendary { color:#fb923c; border-color:#9a3412; background:#431407; }
-    .rarity-mythic    { color:#fca5a5; border-color:#991b1b; background:#450a0a; }
-    .rarity-secret, .badge-rarity-secret { color:#00ff7f; border-color:#047857; background:#022c22; }
-    .rarity-forgotten { color:#e5e7eb; border-color:#6b7280; background:#374151; }
-
-    .card-empty { text-align:center; padding:24px; color:var(--muted); font-size:.85rem; }
-
-    .inventory-search-row {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      margin:0 0 12px;
-    }
-    .inventory-search {
-      flex:1;
-      min-width:0;
-      display:flex;
-      align-items:center;
-      gap:8px;
-      padding:10px 12px;
-      border:1.5px solid var(--border);
-      border-radius:var(--radius);
-      background:var(--surface2);
-    }
-    .inventory-search__icon {
-      width:16px;
-      height:16px;
-      color:var(--muted);
-      flex-shrink:0;
-    }
-    .inventory-search__input {
-      flex:1;
-      min-width:0;
-      border:none;
-      background:transparent;
-      color:var(--text);
-      font-size:.9rem;
-      font-family:var(--font);
-      outline:none;
-    }
-    .inventory-search__input::placeholder { color:var(--muted); }
-    .inventory-search__clear {
-      border:none;
-      background:var(--surface);
-      color:var(--muted);
-      border-radius:8px;
-      padding:4px 10px;
-      font-size:.78rem;
-      font-family:var(--font);
-      cursor:pointer;
-      display:none;
-    }
-    .inventory-search__clear.is-visible { display:inline-flex; }
-    .inventory-search-empty {
-      text-align:center;
-      padding:18px 12px;
-      color:var(--muted);
-      font-size:.85rem;
-    }
-
-    .inventory-mode-tabs {
-      display:flex;
-      gap:8px;
-      margin-bottom:14px;
-      padding:4px;
-      border-radius:12px;
-      background:var(--surface);
-      border:1px solid var(--border);
-    }
-    .inventory-mode-tab {
-      flex:1;
-      border:none;
-      background:transparent;
-      color:var(--muted);
-      padding:10px 12px;
-      border-radius:9px;
-      font-weight:650;
-      font-family:var(--font);
-      cursor:pointer;
-      transition:background .15s,color .15s;
-    }
-    .inventory-mode-tab.is-active {
-      background:var(--surface2);
-      color:var(--text);
-      box-shadow:inset 0 0 0 1px var(--border);
-    }
-    .bulk-inventory-panel { margin-bottom:14px; }
-    .bulk-inventory-header {
-      font-size:.85rem;
-      color:var(--muted);
-      margin-bottom:10px;
-    }
-    .bulk-inventory-header strong { color:var(--text); }
-    .card-empty-sub {
-      display:block;
-      margin-top:6px;
-      font-size:.82rem;
-      color:var(--muted);
-    }
-    .inventory-apk-embed .accounts-overview:not(.is-inventory-only) .accounts-table-wrap { display:block !important; overflow-x:auto; }
-    .inventory-apk-embed .accounts-overview:not(.is-inventory-only) .accounts-mobile-list { display:none !important; }
-    .inventory-apk-embed .loadstring-box:not(.loadstring-box--debug) { display:none !important; }
-    .inventory-apk-embed .page { padding-top:8px; padding-bottom:16px; }
-    .inventory-apk-embed .header {
-      display:flex;
-      flex-direction:row;
-      align-items:center;
-      justify-content:center;
-      gap:10px;
-      flex-wrap:nowrap;
-      min-width:0;
-      padding:8px 10px;
-      margin-bottom:12px;
-      text-align:left;
-      overflow:hidden;
-    }
-    .inventory-apk-embed .header h1 {
-      font-size:clamp(16px,4vw,22px);
-      line-height:1;
-      white-space:nowrap;
-      margin:0;
-      flex-shrink:0;
-    }
-    .inventory-apk-embed .header__lead {
-      display:flex;
-      align-items:center;
-      justify-content:flex-start;
-      gap:5px;
-      max-width:none;
-      margin:0;
-      min-width:0;
-      font-size:clamp(11px,3vw,14px);
-      line-height:1;
-      white-space:nowrap;
-    }
-    .inventory-apk-embed .header__lead > span:last-of-type {
-      overflow:hidden;
-      text-overflow:ellipsis;
-      min-width:0;
-    }
-    .inventory-apk-embed .header__lead-icon {
-      width:14px;
-      height:14px;
-      margin-top:0;
-      flex-shrink:0;
-    }
-    .inventory-apk-embed .header__lead-icon svg {
-      width:14px;
-      height:14px;
-    }
-    .inventory-apk-embed .inventory-stats {
-      grid-template-columns:repeat(4,minmax(0,1fr));
-      gap:8px;
-      margin-bottom:12px;
-    }
-    .inventory-apk-embed .stat-card {
-      min-width:0;
-      min-height:64px;
-      height:100%;
-      padding:10px 8px;
-      border-radius:14px;
-      justify-content:flex-start;
-    }
-    .inventory-apk-embed .stat-card__label {
-      font-size:9px;
-      letter-spacing:.03em;
-      line-height:1.05;
-      min-height:28px;
-      display:flex;
-      align-items:flex-start;
-      white-space:normal;
-    }
-    .inventory-apk-embed .stat-card__value {
-      margin-top:auto;
-      font-size:14px;
-      font-weight:700;
-      line-height:1;
-      white-space:nowrap;
-      display:flex;
-      align-items:flex-end;
-    }
-    .inventory-apk-embed .player-control-bar {
-      display:grid;
-      grid-template-columns:minmax(0,1fr) auto auto auto;
-      gap:8px;
-      align-items:center;
-      padding:10px;
-      overflow:hidden;
-      min-width:0;
-      margin-bottom:10px;
-    }
-    .inventory-apk-embed .player-control-bar input {
-      min-width:0;
-      width:100%;
-      height:40px;
-      min-height:40px;
-      padding:0 12px;
-      font-size:13px;
-      box-sizing:border-box;
-    }
-    .inventory-apk-embed .player-control-bar .btn-add,
-    .inventory-apk-embed .player-control-bar .btn-multiple {
-      height:40px;
-      min-height:40px;
-      padding:0 10px;
-      font-size:13px;
-      line-height:1;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      white-space:nowrap;
-    }
-    .inventory-apk-embed .player-control-bar .remove-dropdown {
-      min-width:0;
-    }
-    .inventory-apk-embed .player-control-bar .btn-remove-menu {
-      height:40px;
-      min-height:40px;
-      min-width:44px;
-      width:44px;
-      padding:0 6px;
-      box-sizing:border-box;
-    }
-    .inventory-apk-embed .player-control-bar .btn-remove-menu svg {
-      width:16px;
-      height:16px;
-    }
-    .inventory-apk-embed .player-control-bar .btn-remove-menu__caret {
-      width:12px;
-      height:12px;
-    }
-    .inventory-apk-embed .player-control-bar .username-error {
-      grid-column:1 / -1;
-      min-height:0;
-    }
-    .inventory-apk-embed .inventory-grid,
-    .inventory-apk-embed .items-grid,
-    .inventory-apk-embed .fish-grid,
-    .inventory-apk-embed .stones-grid,
-    .inventory-apk-embed .stone-grid {
-      grid-template-columns:repeat(3,minmax(0,1fr));
-      gap:8px;
-    }
-    .inventory-apk-embed .ft-card {
-      min-width:0;
-      padding:8px;
-      gap:8px;
-    }
-    .inventory-apk-embed .ft-card--fish {
-      height:72px;
-      min-height:72px;
-    }
-    .inventory-apk-embed .ft-card--stone {
-      height:68px;
-      min-height:68px;
-    }
-    .inventory-apk-embed .ft-card-icon {
-      flex:0 0 44px;
-      width:44px;
-      height:44px;
-    }
-    .inventory-apk-embed .ft-card--stone .ft-card-icon {
-      flex-basis:40px;
-      width:40px;
-      height:40px;
-    }
-    .inventory-apk-embed .ft-card-name {
-      font-size:12px;
-      line-height:1.2;
-    }
-    .inventory-apk-embed .ft-card-stats {
-      margin-top:4px;
-      gap:4px;
-    }
-    .inventory-apk-embed .ft-chip {
-      font-size:10px;
-      height:18px;
-      line-height:18px;
-      padding:0 5px;
-    }
-    .inventory-apk-embed .ft-card-weight {
-      margin-top:3px;
-      font-size:10px;
-      line-height:1.1;
-    }
-    .inventory-apk-embed .inventory-sidebar {
-      display:grid;
-      grid-template-columns:minmax(0,1fr);
-      grid-template-rows:auto auto;
-      align-items:center;
-      gap:6px;
-      padding:8px 10px;
-      overflow:hidden;
-      min-width:0;
-    }
-    .inventory-apk-embed .inventory-sidebar__top {
-      grid-column:1 / -1;
-      display:flex;
-      align-items:center;
-      gap:6px;
-      min-width:0;
-    }
-    .inventory-apk-embed .inventory-sidebar__spacer { display:none !important; }
-    .inventory-apk-embed .inventory-sidebar__bottom {
-      grid-column:1 / -1;
-      display:block;
-      min-width:0;
-    }
-    .inventory-apk-embed .profile-control-row {
-      display:flex;
-      align-items:center;
-      gap:6px;
-      min-width:0;
-      width:100%;
-    }
-    .inventory-apk-embed .profile-control-row > form {
-      display:flex;
-      margin:0;
-      min-width:0;
-      width:auto;
-      flex:0 0 auto;
-    }
-    .inventory-apk-embed .profile-control-row > .inventory-action-btn,
-    .inventory-apk-embed .profile-control-row > form .inventory-action-btn {
-      flex:0 0 auto;
-      min-width:0;
-      width:auto;
-      height:36px;
-      min-height:36px;
-      max-height:36px;
-      margin:0;
-      box-sizing:border-box;
-      padding:0 8px;
-      border-radius:11px;
-      font-size:.62rem;
-      gap:4px;
-      white-space:nowrap;
-    }
-    .inventory-apk-embed .inventory-profile-card {
-      flex:1 1 auto;
-      min-width:0;
-      height:36px;
-      min-height:36px;
-      max-height:36px;
-      margin:0;
-      box-sizing:border-box;
-      padding:0 8px;
-      gap:6px;
-      border-radius:11px;
-    }
-    .inventory-apk-embed .inventory-profile-card__meta {
-      min-width:0;
-      flex:1 1 auto;
-    }
-    .inventory-apk-embed .inventory-sidebar__top .inventory-sidebar__brand {
-      flex:0 0 auto;
-      width:auto;
-      max-width:42%;
-      height:36px;
-      min-height:36px;
-      max-height:36px;
-      padding:0 8px;
-      box-shadow:none;
-    }
-    .inventory-apk-embed .inventory-sidebar__top .inventory-sidebar__subtitle { display:none; }
-    .inventory-apk-embed .inventory-sidebar__top .inventory-main-nav {
-      flex:1 1 auto;
-      min-width:0;
-      margin:0;
-      height:36px;
-      min-height:36px;
-      max-height:36px;
-      align-self:stretch;
-    }
-    .inventory-apk-embed .inventory-sidebar__top .inventory-main-nav__tab {
-      padding:7px 6px;
-      font-size:.62rem;
-    }
-    .inventory-apk-embed .inventory-sidebar__privacy {
-      flex:0 0 auto;
-      width:auto;
-      min-width:0;
-      height:36px;
-      min-height:36px;
-      max-height:36px;
-      margin:0;
-      padding:0 8px;
-      gap:6px;
-      border-radius:11px;
-    }
-    .inventory-apk-embed .inventory-privacy-toggle__text--full { display:none; }
-    .inventory-apk-embed .inventory-privacy-toggle__text--short { display:inline; }
-    .inventory-apk-embed .hide-username-toggle {
-      width:24px;
-      height:14px;
-      flex:0 0 auto;
-    }
-    .inventory-apk-embed .hide-username-toggle::before {
-      width:10px;
-      height:10px;
-    }
-    .inventory-apk-embed .inventory-privacy-toggle.is-active .hide-username-toggle::before {
-      transform:translateX(10px);
-    }
-    .inventory-apk-embed .inventory-sidebar__logo {
-      width:30px;
-      height:30px;
-      border-radius:8px;
-    }
-    .inventory-apk-embed .inventory-sidebar__logo img {
-      width:24px;
-      height:24px;
-    }
-    .inventory-apk-embed .inventory-sidebar__title {
-      font-size:.72rem;
-      line-height:1.05;
-    }
-    .inventory-apk-embed .inventory-sidebar__subtitle {
-      font-size:.58rem;
-      line-height:1;
-    }
-    .inventory-apk-embed .inventory-privacy-toggle {
-      padding:0 6px;
-      gap:4px;
-      border-radius:11px;
-      font-size:.62rem;
-    }
-    .inventory-apk-embed .inventory-privacy-toggle__label {
-      min-width:0;
-      gap:5px;
-    }
-    .inventory-apk-embed .inventory-privacy-toggle__label > span:last-of-type {
-      overflow:hidden;
-      text-overflow:ellipsis;
-      white-space:nowrap;
-    }
-    .inventory-apk-embed .inventory-privacy-toggle__icon svg {
-      width:14px;
-      height:14px;
-    }
-    .inventory-apk-embed .inventory-profile-card {
-      padding:0 6px;
-      gap:5px;
-      border-radius:11px;
-    }
-    .inventory-apk-embed .inventory-profile-card__avatar,
-    .inventory-apk-embed .inventory-profile-card__avatar-placeholder {
-      width:24px;
-      height:24px;
-      border-radius:6px;
-    }
-    .inventory-apk-embed .inventory-profile-card__avatar-placeholder {
-      font-size:.68rem;
-    }
-    .inventory-apk-embed .inventory-profile-card__sub { display:none; }
-    .inventory-apk-embed .inventory-profile-card__name {
-      font-size:.72rem;
-      line-height:1.1;
-    }
-    .inventory-apk-embed .profile-control-row > .inventory-action-btn svg,
-    .inventory-apk-embed .profile-control-row > form .inventory-action-btn svg {
-      width:14px;
-      height:14px;
-      flex-shrink:0;
-    }
-    .inventory-apk-embed .accounts-toolbar {
-      display:flex;
-      flex-direction:row;
-      align-items:center;
-      flex-wrap:wrap;
-      gap:8px 6px;
-      padding:8px 10px;
-      overflow:visible;
-    }
-    .inventory-apk-embed .accounts-toolbar__controls {
-      display:contents;
-    }
-    .inventory-apk-embed .accounts-search {
-      flex:1 1 140px;
-      min-width:0;
-      width:auto;
-      min-height:38px;
-      height:38px;
-      padding:0 10px;
-      box-sizing:border-box;
-      gap:6px;
-    }
-    .inventory-apk-embed .accounts-search svg {
-      width:15px;
-      height:15px;
-    }
-    .inventory-apk-embed .accounts-search input {
-      font-size:13px;
-    }
-    .inventory-apk-embed .accounts-filters {
-      display:flex;
-      flex:0 0 auto;
-      min-width:0;
-      gap:4px;
-      flex-wrap:nowrap;
-      width:auto;
-    }
-    .inventory-apk-embed .accounts-filter {
-      flex:0 0 auto;
-      min-width:0;
-      height:38px;
-      min-height:38px;
-      padding:0 8px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      font-size:12px;
-      line-height:1;
-      white-space:nowrap;
-    }
-    .inventory-apk-embed .accounts-actions {
-      display:flex;
-      flex:1 1 100%;
-      width:100%;
-      min-width:0;
-      flex-wrap:nowrap;
-      gap:6px;
-      margin-left:0;
-      padding:6px;
-      box-sizing:border-box;
-      border:1.5px solid var(--border);
-      border-radius:12px;
-      background:var(--surface2);
-      align-items:center;
-      justify-content:flex-start;
-    }
-    .inventory-apk-embed .accounts-icon-btn {
-      width:38px;
-      height:38px;
-      min-width:38px;
-      min-height:38px;
-      padding:0;
-      border-radius:12px;
-      flex:0 0 38px;
-    }
-    .inventory-apk-embed .accounts-view-group {
-      display:inline-flex;
-      flex:0 0 auto;
-      width:auto;
-      min-width:0;
-      border-radius:12px;
-    }
-    .inventory-apk-embed .accounts-view-group .accounts-view-btn {
-      width:38px;
-      height:38px;
-      min-width:38px;
-      min-height:38px;
-      flex:0 0 38px;
-      padding:0;
-    }
-    .inventory-apk-embed .accounts-overview:not(.is-inventory-only) .accounts-table-wrap {
-      overflow-x:auto;
-    }
-    .inventory-apk-embed .accounts-table {
-      table-layout:fixed;
-      --acct-cell-py:6px;
-      --acct-cell-px:5px;
-      --acct-col-index:5%;
-      --acct-col-status:13%;
-      --acct-col-username:16%;
-      --acct-col-coin:12%;
-      --acct-col-caught:14%;
-      --acct-col-rare:12%;
-      --acct-col-backpack:13%;
-      --acct-col-actions:13%;
-      min-width:0;
-      font-size:11px;
-    }
-    .inventory-apk-embed .accounts-table .col-username,
-    .inventory-apk-embed .accounts-table thead th.col-username,
-    .inventory-apk-embed .accounts-table tbody td.col-username {
-      min-width:0;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-    .inventory-apk-embed .accounts-table thead th {
-      font-size:8px;
-      letter-spacing:.03em;
-      line-height:1.1;
-    }
-    .inventory-apk-embed .accounts-table tbody td {
-      font-size:11px;
-      line-height:1.1;
-    }
-    .inventory-apk-embed .accounts-table .th-full { display:none; }
-    .inventory-apk-embed .accounts-table .th-short { display:inline; }
-    .inventory-apk-embed .accounts-table__index { font-size:10px; }
-    .inventory-apk-embed .accounts-table__username { font-size:11px; font-weight:700; }
-    .inventory-apk-embed .accounts-status { gap:4px; max-width:100%; }
-    .inventory-apk-embed .accounts-status .status-dot {
-      width:7px;
-      height:7px;
-    }
-    .inventory-apk-embed .accounts-status__text {
-      font-size:10px;
-      line-height:1;
-    }
-    .inventory-apk-embed .accounts-table__stat { font-size:11px; font-weight:700; }
-    .inventory-apk-embed .accounts-table thead th.col-backpack,
-    .inventory-apk-embed .accounts-table thead th.col-actions {
-      font-size:7px;
-      line-height:1;
-    }
-    .inventory-apk-embed .accounts-table__icon-btn {
-      width:30px;
-      height:30px;
-      min-width:30px;
-      min-height:30px;
-      border-radius:8px;
-    }
-    .inventory-apk-embed .accounts-table__icon-btn svg,
-    .inventory-apk-embed .accounts-table__icon-btn .nav-icon svg {
-      width:14px;
-      height:14px;
-    }
-    .copy-status { font-size:.78rem; color:var(--muted); margin-top:8px; min-height:1.1em; }
-    .copy-status.is-error { color:var(--warn); }
-    .copy-status.is-success { color:var(--success); }
-    .inventory-skeleton-grid {
-      display:grid;
-      grid-template-columns:repeat(2,minmax(0,1fr));
-      gap:8px;
-      margin-top:8px;
-    }
-    .inventory-skeleton-card {
-      height:104px;
-      border-radius:10px;
-      background:linear-gradient(90deg,var(--surface2) 25%,var(--surface) 50%,var(--surface2) 75%);
-      background-size:200% 100%;
-      animation:inventoryShimmer 1.2s ease-in-out infinite;
-    }
-    @keyframes inventoryShimmer {
-      0% { background-position:100% 0; }
-      100% { background-position:-100% 0; }
-    }
-    .inventory-offline-notice {
-      margin:8px 0 12px;
-      padding:8px 12px;
-      border-radius:9px;
-      border:1px solid rgba(245,158,11,.35);
-      background:rgba(245,158,11,.08);
-      color:#fbbf24;
-      font-size:.82rem;
-    }
-
-    .loadstring-box { margin-top:36px; background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius-lg); padding:20px; }
-    .header__lead {
-      display:flex;
-      align-items:flex-start;
-      justify-content:center;
-      gap:8px;
-      max-width:640px;
-      margin:0 auto;
-      color:var(--muted);
-      font-size:.9rem;
-      line-height:1.55;
-    }
-    .header__lead-icon,
-    .loadstring-box__icon {
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      flex-shrink:0;
-      width:18px;
-      height:18px;
-      color:var(--accent2);
-      margin-top:1px;
-    }
-    .header__lead-icon svg,
-    .loadstring-box__icon svg {
-      width:18px;
-      height:18px;
-      stroke:currentColor;
-      fill:none;
-      stroke-width:2;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-    }
-    .loadstring-box h3 {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      font-size:.8rem;
-      color:var(--muted);
-      text-transform:uppercase;
-      letter-spacing:.06em;
-      margin-bottom:12px;
-    }
-    .loadstring-debug {
-      display:none;
-      margin-top:10px;
-      font-size:.72rem;
-      color:var(--muted);
-    }
-    .loadstring-debug.is-visible { display:block; }
-    .loadstring-debug .code-block { margin-top:6px; white-space:pre-wrap; }
-    .code-row { display:flex; gap:8px; align-items:stretch; }
-    .code-block { flex:1; font-family:'Consolas','Fira Code',monospace; font-size:.82rem; background:#0a0c10; border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; color:#93c5fd; overflow-x:auto; white-space:nowrap; }
-    textarea.code-block.code-block--script { width:100%; min-height:52px; resize:none; white-space:pre; overflow-x:auto; line-height:1.45; }
-    .btn-copy { padding:0 16px; background:var(--surface2); border:1.5px solid var(--border); border-radius:var(--radius); color:var(--text); cursor:pointer; font-size:.85rem; font-family:var(--font); font-weight:600; white-space:nowrap; transition:background .15s,border-color .15s,color .15s; }
-    .btn-copy:hover  { background:var(--accent); border-color:var(--accent); color:#fff; }
-    .btn-copy.copied { background:var(--success); border-color:var(--success); color:#fff; }
-
-    @media (min-width:769px) {
-      .inventory-shell { flex-direction:row; }
-      .inventory-sidebar.deng-app-sidebar {
-        display:flex;
-        flex-direction:column;
-      }
-      .inventory-sidebar {
-        width:var(--sidebar-w, 268px);
-        flex-shrink:0;
-        position:sticky;
-        top:0;
-        height:100vh;
-        padding:16px 12px;
-        border-bottom:none;
-        border-right:1px solid var(--border);
-      }
-      .inventory-sidebar__spacer { display:block; flex:1; }
-      .inventory-sidebar__bottom {
-        margin-top:auto;
-        padding-top:14px;
-        border-top:1px solid rgba(148,163,184,.22);
-      }
-      .inventory-sidebar__top {
-        flex-direction:column;
-        gap:10px;
-        margin-bottom:12px;
-      }
-      .inventory-sidebar__top .inventory-sidebar__brand {
-        width:100%;
-        max-width:none;
-        height:auto;
-        min-height:0;
-        max-height:none;
-        padding:8px 10px;
-        box-shadow:0 10px 28px rgba(0,0,0,.22);
-      }
-      .inventory-sidebar__top .inventory-sidebar__subtitle { display:block; }
-      .inventory-sidebar__top .inventory-main-nav {
-        width:100%;
-        height:auto;
-        min-height:0;
-        max-height:none;
-      }
-      .inventory-main-nav__tab {
-        flex:1 1 0;
-        font-size:.76rem;
-        padding:9px 10px;
-      }
-      .inventory-sidebar__controls,
-      .profile-control-row {
-        display:grid;
-        gap:10px;
-        grid-template-columns:minmax(0,1fr) minmax(0,1fr);
-        grid-template-areas:
-          "profile profile"
-          "hide hide"
-          "script logout";
-      }
-      .profile-control-row > .inventory-profile-card { grid-area:profile; }
-      .profile-control-row > .inventory-sidebar__privacy { grid-area:hide; }
-      .profile-control-row > .inventory-action-btn--script { grid-area:script; }
-      .profile-control-row > form { grid-area:logout; }
-      .profile-control-row > .inventory-action-btn,
-      .profile-control-row > form .inventory-action-btn {
-        width:100%;
-        min-height:40px;
-        height:auto;
-        max-height:none;
-      }
-      .inventory-profile-card {
-        flex:none;
-        height:auto;
-        min-height:56px;
-        max-height:none;
-        padding:10px 12px;
-      }
-      .inventory-sidebar__privacy {
-        width:100%;
-        height:auto;
-        min-height:0;
-        max-height:none;
-        padding:9px 12px;
-      }
-      .inventory-main .page {
-        align-items:stretch;
-        padding:32px 24px 64px;
-      }
-      .inventory-main .inner {
-        max-width:1040px;
-        margin:0 auto;
-      }
-      .loadstring-box.loadstring-box--desktop-hidden {
-        position:absolute;
-        width:1px;
-        height:1px;
-        padding:0;
-        margin:-1px;
-        overflow:hidden;
-        clip:rect(0,0,0,0);
-        white-space:nowrap;
-        border:0;
-      }
-      .accounts-overview:not(.is-inventory-only) .accounts-table-wrap { display:block !important; }
-      .accounts-overview:not(.is-inventory-only) .accounts-mobile-list { display:none !important; }
-      .accounts-table {
-        table-layout:fixed;
-        min-width:980px;
-        font-size:.88rem;
-        --acct-cell-py:12px;
-        --acct-cell-px:14px;
-        --acct-col-index:4%;
-        --acct-col-status:10%;
-        --acct-col-username:14%;
-        --acct-col-coin:13%;
-        --acct-col-caught:14%;
-        --acct-col-rare:13%;
-        --acct-col-backpack:11%;
-        --acct-col-actions:11%;
-      }
-      .accounts-table thead th,
-      .accounts-table tbody td {
-        padding:12px 14px;
-      }
-      .accounts-table thead th {
-        font-size:.76rem;
-        letter-spacing:.04em;
-        line-height:normal;
-      }
-      .accounts-table tbody td {
-        font-size:inherit;
-        line-height:normal;
-      }
-      .accounts-table .th-full { display:inline; }
-      .accounts-table .th-short { display:none !important; }
-      .accounts-table thead th.col-index,
-      .accounts-table tbody td.col-index,
-      .accounts-table__index { font-size:inherit; }
-      .accounts-table thead th.col-username,
-      .accounts-table tbody td.col-username {
-        overflow:visible;
-        text-overflow:clip;
-      }
-      .accounts-table__username { font-size:inherit; font-weight:700; }
-      .accounts-status { gap:7px; max-width:none; }
-      .accounts-status .status-dot {
-        width:10px;
-        height:10px;
-      }
-      .accounts-status__text {
-        font-size:.8rem;
-        line-height:normal;
-      }
-      .accounts-table__stat { font-size:inherit; font-weight:600; }
-      .accounts-table thead th.col-backpack,
-      .accounts-table thead th.col-actions {
-        font-size:.76rem;
-        line-height:normal;
-      }
-      .accounts-table__icon-btn {
-        width:34px;
-        height:34px;
-        min-width:34px;
-        min-height:34px;
-        border-radius:10px;
-      }
-      .accounts-table__icon-btn svg,
-      .accounts-table__icon-btn .nav-icon svg {
-        width:16px;
-        height:16px;
-      }
-    }
-    @media (max-width:768px) {
-      .page { padding:16px 10px 32px; overflow-x:hidden; }
-      .inner { max-width:100%; }
-      .accounts-overview:not(.is-inventory-only) { --accounts-mobile-inline-gap:8px; }
-      .accounts-overview { margin-bottom:14px; }
-      .accounts-toolbar {
-        display:flex;
-        flex-direction:row;
-        align-items:center;
-        flex-wrap:wrap;
-        gap:8px 6px;
-        padding:8px 10px;
-        overflow:visible;
-      }
-      .accounts-toolbar__controls {
-        display:contents;
-      }
-      .accounts-search {
-        flex:1 1 140px;
-        min-width:0;
-        width:auto;
-        min-height:38px;
-        height:38px;
-        padding:0 10px;
-        box-sizing:border-box;
-        gap:6px;
-      }
-      .accounts-search svg { width:15px; height:15px; }
-      .accounts-search input { font-size:13px; }
-      .accounts-filters {
-        display:flex;
-        flex:0 0 auto;
-        min-width:0;
-        gap:4px;
-        flex-wrap:nowrap;
-        width:auto;
-      }
-      .accounts-filter {
-        flex:0 0 auto;
-        min-width:0;
-        width:auto;
-        height:38px;
-        min-height:38px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        text-align:center;
-        padding:0 8px;
-        font-size:12px;
-        line-height:1;
-        white-space:nowrap;
-      }
-      .accounts-actions {
-        display:flex;
-        flex:1 1 100%;
-        width:100%;
-        min-width:0;
-        flex-wrap:nowrap;
-        gap:6px;
-        margin-left:0;
-        padding:6px;
-        box-sizing:border-box;
-        border:1.5px solid var(--border);
-        border-radius:12px;
-        background:var(--surface2);
-        align-items:center;
-        justify-content:flex-start;
-      }
-      .accounts-icon-btn {
-        width:38px;
-        height:38px;
-        min-width:38px;
-        min-height:38px;
-        padding:0;
-        border-radius:12px;
-        flex:0 0 38px;
-      }
-      .accounts-view-group {
-        display:inline-flex;
-        flex:0 0 auto;
-        width:auto;
-        min-width:0;
-        border-radius:12px;
-      }
-      .accounts-view-group .accounts-view-btn {
-        flex:0 0 38px;
-        width:38px;
-        min-width:38px;
-        height:38px;
-        min-height:38px;
-      }
-      .accounts-overview:not(.is-inventory-only) .accounts-table-wrap {
-        display:block !important;
-        overflow-x:auto;
-      }
-      .accounts-overview:not(.is-inventory-only) .accounts-mobile-list {
-        display:none !important;
-      }
-      .accounts-table {
-        table-layout:fixed;
-        --acct-cell-py:6px;
-        --acct-cell-px:5px;
-        --acct-col-index:5%;
-        --acct-col-status:13%;
-        --acct-col-username:16%;
-        --acct-col-coin:12%;
-        --acct-col-caught:14%;
-        --acct-col-rare:12%;
-        --acct-col-backpack:13%;
-        --acct-col-actions:13%;
-        min-width:0;
-        font-size:11px;
-      }
-      .accounts-table .col-username,
-      .accounts-table thead th.col-username,
-      .accounts-table tbody td.col-username {
-        min-width:0;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      }
-      .accounts-table thead th {
-        font-size:8px;
-        letter-spacing:.03em;
-        line-height:1.1;
-      }
-      .accounts-table tbody td {
-        font-size:11px;
-        line-height:1.1;
-      }
-      .accounts-table .th-full { display:none; }
-      .accounts-table .th-short { display:inline; }
-      .accounts-table__index { font-size:10px; }
-      .accounts-table__username { font-size:11px; font-weight:700; }
-      .accounts-status { gap:4px; max-width:100%; }
-      .accounts-status .status-dot {
-        width:7px;
-        height:7px;
-      }
-      .accounts-status__text {
-        font-size:10px;
-        line-height:1;
-      }
-      .accounts-table__stat {
-        font-size:11px;
-        font-weight:700;
-      }
-      .accounts-table thead th.col-backpack,
-      .accounts-table thead th.col-actions {
-        font-size:7px;
-        line-height:1;
-      }
-      .accounts-table__icon-btn {
-        width:30px;
-        height:30px;
-        min-width:30px;
-        min-height:30px;
-        border-radius:8px;
-      }
-      .accounts-table__icon-btn svg,
-      .accounts-table__icon-btn .nav-icon svg {
-        width:14px;
-        height:14px;
-      }
-      .loadstring-box:not(.loadstring-box--debug) { display:none !important; }
-      .inventory-grid,
-      .items-grid,
-      .fish-grid {
-        grid-template-columns:repeat(3,minmax(0,1fr)) !important;
-        gap:8px;
-      }
-      .stones-grid,
-      .stone-grid {
-        grid-template-columns:repeat(3,minmax(0,1fr)) !important;
-        gap:8px;
-      }
-      .ft-card {
-        min-width:0;
-        padding:8px;
-        gap:8px;
-      }
-      .ft-card--fish {
-        max-width:none;
-        width:100%;
-        height:72px;
-        min-height:72px;
-      }
-      .ft-card--stone {
-        max-width:none;
-        width:100%;
-        height:68px;
-        min-height:68px;
-      }
-      .ft-card-icon {
-        flex:0 0 44px;
-        width:44px;
-        height:44px;
-      }
-      .ft-card--stone .ft-card-icon {
-        flex-basis:40px;
-        width:40px;
-        height:40px;
-      }
-      .ft-card-name {
-        font-size:12px;
-        line-height:1.2;
-      }
-      .ft-card-stats {
-        margin-top:4px;
-        gap:4px;
-      }
-      .ft-chip {
-        font-size:10px;
-        height:18px;
-        line-height:18px;
-        padding:0 5px;
-      }
-      .ft-card-weight {
-        margin-top:3px;
-        font-size:10px;
-        line-height:1.1;
-      }
-      .header {
-        display:flex;
-        flex-direction:row;
-        align-items:center;
-        justify-content:center;
-        gap:10px;
-        flex-wrap:nowrap;
-        min-width:0;
-        padding:8px 10px;
-        margin-bottom:14px;
-        text-align:left;
-        overflow:hidden;
-      }
-      .header h1 {
-        font-size:clamp(16px,4vw,22px);
-        line-height:1;
-        white-space:nowrap;
-        margin:0;
-        flex-shrink:0;
-      }
-      .header__lead {
-        display:flex;
-        align-items:center;
-        justify-content:flex-start;
-        gap:5px;
-        max-width:none;
-        margin:0;
-        min-width:0;
-        font-size:clamp(11px,3vw,14px);
-        line-height:1;
-        white-space:nowrap;
-      }
-      .header__lead > span:last-of-type {
-        overflow:hidden;
-        text-overflow:ellipsis;
-        min-width:0;
-      }
-      .header__lead-icon {
-        width:14px;
-        height:14px;
-        margin-top:0;
-        flex-shrink:0;
-      }
-      .header__lead-icon svg {
-        width:14px;
-        height:14px;
-      }
-      .inventory-stats {
-        grid-template-columns:repeat(4,minmax(0,1fr)) !important;
-        gap:8px;
-        margin-bottom:14px;
-      }
-      .stat-card {
-        min-width:0;
-        min-height:64px;
-        height:100%;
-        padding:10px 8px;
-        border-radius:14px;
-        justify-content:flex-start;
-      }
-      .stat-card__label {
-        font-size:9px;
-        letter-spacing:.03em;
-        line-height:1.05;
-        min-height:28px;
-        display:flex;
-        align-items:flex-start;
-        white-space:normal;
-      }
-      .stat-card__value {
-        margin-top:auto;
-        font-size:14px;
-        font-weight:700;
-        line-height:1;
-        white-space:nowrap;
-        display:flex;
-        align-items:flex-end;
-      }
-      .player-control-bar {
-        display:grid;
-        grid-template-columns:minmax(0,1fr) auto auto auto;
-        gap:8px;
-        align-items:center;
-        padding:10px;
-        overflow:hidden;
-        min-width:0;
-      }
-      .player-control-bar input {
-        min-width:0;
-        width:100%;
-        height:40px;
-        min-height:40px;
-        padding:0 12px;
-        font-size:13px;
-        box-sizing:border-box;
-      }
-      .player-control-bar .btn-add,
-      .player-control-bar .btn-multiple {
-        height:40px;
-        min-height:40px;
-        padding:0 10px;
-        font-size:13px;
-        line-height:1;
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        white-space:nowrap;
-      }
-      .player-control-bar .remove-dropdown {
-        min-width:0;
-      }
-      .player-control-bar .btn-remove-menu {
-        height:40px;
-        min-height:40px;
-        min-width:44px;
-        width:44px;
-        padding:0 6px;
-        box-sizing:border-box;
-      }
-      .player-control-bar .btn-remove-menu svg {
-        width:16px;
-        height:16px;
-      }
-      .player-control-bar .btn-remove-menu__caret {
-        width:12px;
-        height:12px;
-      }
-      .player-control-bar .username-error {
-        grid-column:1 / -1;
-        min-height:0;
-      }
-      .inventory-sidebar {
-        display:grid;
-        grid-template-columns:minmax(0,1fr);
-        grid-template-rows:auto auto;
-        align-items:center;
-        gap:6px;
-        padding:8px 10px;
-        overflow:hidden;
-        min-width:0;
-      }
-      .inventory-sidebar__top {
-        grid-column:1 / -1;
-        display:flex;
-        flex-direction:row;
-        align-items:center;
-        gap:6px;
-        min-width:0;
-      }
-      .inventory-sidebar__top .inventory-sidebar__brand {
-        flex:0 0 auto;
-        width:auto;
-        max-width:42%;
-        height:36px;
-        min-height:36px;
-        max-height:36px;
-        padding:0 8px;
-        box-shadow:none;
-      }
-      .inventory-sidebar__top .inventory-sidebar__subtitle { display:none; }
-      .inventory-sidebar__top .inventory-main-nav {
-        flex:1 1 auto;
-        min-width:0;
-        margin:0;
-        height:36px;
-        min-height:36px;
-        max-height:36px;
-      }
-      .inventory-sidebar__top .inventory-main-nav__tab {
-        padding:7px 6px;
-        font-size:.62rem;
-      }
-      .inventory-sidebar__spacer { display:none !important; }
-      .inventory-sidebar__bottom {
-        grid-column:1 / -1;
-        display:block;
-        min-width:0;
-      }
-      .inventory-sidebar__controls,
-      .profile-control-row {
-        display:flex;
-        align-items:center;
-        gap:6px;
-        min-width:0;
-        width:100%;
-      }
-      .profile-control-row > form {
-        display:flex;
-        margin:0;
-        min-width:0;
-        width:auto;
-        flex:0 0 auto;
-      }
-      .profile-control-row > .inventory-action-btn,
-      .profile-control-row > form .inventory-action-btn {
-        flex:0 0 auto;
-        width:auto;
-        height:36px;
-        min-height:36px;
-        max-height:36px;
-        margin:0;
-        box-sizing:border-box;
-        padding:0 8px;
-        border-radius:11px;
-        font-size:.62rem;
-        gap:4px;
-        white-space:nowrap;
-      }
-      .profile-control-row > .inventory-profile-card {
-        flex:1 1 auto;
-        min-width:0;
-        height:36px;
-        min-height:36px;
-        max-height:36px;
-        margin:0;
-        box-sizing:border-box;
-        padding:0 8px;
-        gap:6px;
-        border-radius:11px;
-      }
-      .profile-control-row > .inventory-profile-card .inventory-profile-card__meta {
-        min-width:0;
-        flex:1 1 auto;
-      }
-      .inventory-sidebar__privacy {
-        flex:0 0 auto;
-        width:auto;
-        min-width:0;
-        height:36px;
-        min-height:36px;
-        max-height:36px;
-        margin:0;
-        padding:0 8px;
-        gap:6px;
-        border-radius:11px;
-      }
-      .inventory-privacy-toggle__text--full { display:none; }
-      .inventory-privacy-toggle__text--short { display:inline; }
-      .hide-username-toggle {
-        width:24px;
-        height:14px;
-        flex:0 0 auto;
-      }
-      .hide-username-toggle::before {
-        width:10px;
-        height:10px;
-      }
-      .inventory-privacy-toggle.is-active .hide-username-toggle::before {
-        transform:translateX(10px);
-      }
-      .inventory-sidebar__logo {
-        width:30px;
-        height:30px;
-        border-radius:8px;
-      }
-      .inventory-sidebar__logo img {
-        width:24px;
-        height:24px;
-      }
-      .inventory-sidebar__title {
-        font-size:.72rem;
-        line-height:1.05;
-      }
-      .inventory-sidebar__subtitle {
-        font-size:.58rem;
-        line-height:1;
-      }
-      .inventory-privacy-toggle {
-        padding:0 6px;
-        gap:4px;
-        border-radius:11px;
-        font-size:.62rem;
-      }
-      .inventory-privacy-toggle__label {
-        min-width:0;
-        gap:5px;
-      }
-      .inventory-privacy-toggle__label > span:last-of-type {
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
-      }
-      .inventory-privacy-toggle__icon svg {
-        width:14px;
-        height:14px;
-      }
-      .inventory-profile-card {
-        padding:0 8px;
-        gap:6px;
-        border-radius:11px;
-      }
-      .inventory-profile-card__avatar,
-      .inventory-profile-card__avatar-placeholder {
-        width:24px;
-        height:24px;
-        border-radius:6px;
-      }
-      .inventory-profile-card__avatar-placeholder {
-        font-size:.68rem;
-      }
-      .inventory-profile-card__sub { display:none; }
-      .inventory-profile-card__name {
-        font-size:.72rem;
-        line-height:1.1;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
-      }
-      .profile-control-row > .inventory-action-btn svg,
-      .profile-control-row > form .inventory-action-btn svg {
-        width:14px;
-        height:14px;
-        flex-shrink:0;
-      }
-      .dashboard-stats { gap:8px; }
-      .dashboard-stats .stat-card { padding:10px 8px; min-height:64px; }
-      .dashboard-stats .stat-card__label { font-size:8px; min-height:26px; }
-      .dashboard-stats .stat-card__value { font-size:14px; }
-      .inventory-main-nav { width:100%; }
-      .inventory-main-nav__tab { padding:8px 10px; font-size:.68rem; }
-      .dashboard-toolbar { margin-bottom:10px; }
-      .dashboard-chart { height:110px; }
-      .dashboard-period-filter__btn { padding:7px 9px; font-size:.64rem; }
-    }
-    @media (max-width:430px) {
-      .inventory-stats { gap:6px; }
-      .stat-card {
-        padding:9px 6px;
-        border-radius:12px;
-        min-height:60px;
-      }
-      .stat-card__label { font-size:8px; line-height:1.05; min-height:26px; }
-      .stat-card__value { font-size:13px; line-height:1; white-space:nowrap; }
-      .inventory-apk-embed .stat-card { padding:9px 6px; min-height:60px; }
-      .inventory-apk-embed .stat-card__label { font-size:8px; line-height:1.05; min-height:26px; }
-      .inventory-apk-embed .stat-card__value { font-size:13px; line-height:1; white-space:nowrap; }
-    }
-    @media (max-width:280px) {
-      .inventory-grid,
-      .items-grid,
-      .fish-grid,
-      .stones-grid,
-      .stone-grid {
-        grid-template-columns:repeat(3,minmax(0,1fr)) !important;
-        gap:6px;
-      }
-      .inventory-skeleton-grid {
-        grid-template-columns:1fr;
-      }
-      .accounts-actions { gap:4px; padding:4px; }
-      .accounts-filters { gap:4px; }
-      .accounts-filter { padding:0 7px; font-size:11px; }
-      .accounts-icon-btn,
-      .accounts-view-group .accounts-view-btn {
-        width:36px;
-        height:36px;
-        min-width:36px;
-        min-height:36px;
-        flex-basis:36px;
-      }
-    }
-    @media (max-width:900px) {
-      .inventory-stats { grid-template-columns:repeat(4,minmax(0,1fr)); }
-    }
-    @media (max-width:560px) {
-      .inventory-stats { grid-template-columns:repeat(4,minmax(0,1fr)) !important; }
-      .code-row { flex-direction:column; }
-      .btn-copy { padding:10px; }
-    }
-  </style>
-</head>
-<body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11') %>">
-<div class="inventory-shell">
-  <aside class="inventory-sidebar sidebar deng-app-sidebar" aria-label="Main navigation">
-    <div class="inventory-sidebar__top">
-    <div class="sidebar-brand-block">
-      <span class="sidebar-brand-block__logo" aria-hidden="true">
-        <img src="/public/img/deng-logo.png" alt="">
-      </span>
-      <div class="sidebar-brand-block__text">
-        <div class="sidebar-brand-block__title">DENG Tracker</div>
-        <div class="sidebar-brand-block__subtitle">Fish It</div>
-      </div>
-    </div>
-    <div class="sidebar-divider" aria-hidden="true"></div>
-    <%- include('partials/deng-sidebar-nav', { sidebarNavMode: 'tracker' }) %>
-    <nav class="inventory-main-nav inventory-main-nav--mobile" aria-label="Main sections">
-      <button type="button" class="inventory-main-nav__tab" data-inventory-section="dashboard">Dashboard</button>
-      <button type="button" class="inventory-main-nav__tab is-active" data-inventory-section="accounts">Live Tracker</button>
-    </nav>
-    </div>
-    <div class="inventory-sidebar__spacer" aria-hidden="true"></div>
-    <div class="inventory-sidebar__bottom">
-      <div class="inventory-sidebar__controls profile-control-row">
-      <div class="inventory-profile-card discord-profile-pill">
-        <% if (viewer.hasDiscordAvatar) { %>
-          <img src="<%= viewer.avatarUrl %>" alt="" class="inventory-profile-card__avatar" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'">
-          <div class="inventory-profile-card__avatar-placeholder" style="display:none"><%= viewer.initial %></div>
-        <% } else { %>
-          <div class="inventory-profile-card__avatar-placeholder"><%= viewer.initial %></div>
-        <% } %>
-        <div class="inventory-profile-card__meta">
-          <div class="inventory-profile-card__name"><%= viewer.name %></div>
-          <div class="inventory-profile-card__sub"><%= viewer.profileLabel %></div>
-        </div>
-      </div>
-      <button type="button" class="inventory-privacy-toggle inventory-sidebar__privacy hide-username-toggle-btn" id="hideUsernamesBtn" title="Hide usernames" aria-label="Hide usernames" aria-pressed="false">
-        <span class="inventory-privacy-toggle__label">
-          <span class="inventory-privacy-toggle__icon" id="hideUsernameIcon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path>
-              <circle cx="12" cy="12" r="3"></circle>
-            </svg>
-          </span>
-          <span class="inventory-privacy-toggle__text inventory-privacy-toggle__text--full">Hide Username</span>
-          <span class="inventory-privacy-toggle__text inventory-privacy-toggle__text--short">Hide</span>
-        </span>
-        <span class="hide-username-toggle" aria-hidden="true"></span>
-      </button>
-      <button type="button" class="inventory-action-btn inventory-action-btn--script script-button" id="sidebarScriptBtn" title="Copy tracker script" aria-label="Copy tracker script">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M15 12h-5"></path>
-          <path d="M15 8h-5"></path>
-          <path d="M19 17V5a2 2 0 0 0-2-2H8"></path>
-          <path d="M5 21h12a2 2 0 0 0 2-2v-1H7a2 2 0 0 1-2-2V5a2 2 0 0 1-2 2v14a2 2 0 0 0 2 2Z"></path>
-        </svg>
-        <span>Script</span>
-      </button>
-      <form method="POST" action="<%= typeof logoutUrl !== 'undefined' ? logoutUrl : '/auth/logout' %>" class="profile-control-row__logout">
-        <input type="hidden" name="_csrf" value="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
-        <button type="button" class="inventory-action-btn inventory-action-btn--logout logout-button" data-logout-confirm title="Logout" aria-label="Logout">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-            <path d="M16 17l5-5-5-5"></path>
-            <path d="M21 12H9"></path>
-          </svg>
-          <span>Logout</span>
-        </button>
-      </form>
-      </div>
-    </div>
-  </aside>
-  <div class="inventory-main">
-<div class="page">
-  <div class="inner">
-
-    <header class="header">
-      <h1>DENG Tracker</h1>
-      <p class="header__lead">
-        <span class="header__lead-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
-            <circle cx="9" cy="7" r="4"></circle>
-            <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-          </svg>
-        </span>
-        <span>Track Your Fish It Accounts</span>
-      </p>
-    </header>
-
-    <section id="inventoryDashboardPanel" class="inventory-panel inventory-panel--dashboard" hidden aria-label="Dashboard">
-      <div class="dashboard-toolbar">
-        <div class="dashboard-period-filter" role="tablist" aria-label="Dashboard period">
-          <button type="button" class="dashboard-period-filter__btn is-active" data-dashboard-period="all">ALL TIME</button>
-          <button type="button" class="dashboard-period-filter__btn" data-dashboard-period="30d">30D</button>
-          <button type="button" class="dashboard-period-filter__btn" data-dashboard-period="7d">7D</button>
-          <button type="button" class="dashboard-period-filter__btn" data-dashboard-period="ytd">YTD</button>
-          <button type="button" class="dashboard-period-filter__btn" data-dashboard-period="tdy">TDY</button>
-        </div>
-        <div class="dashboard-period-custom">
-          <button type="button" class="dashboard-period-custom__toggle" id="dashboardCustomToggle" aria-expanded="false" aria-controls="dashboardCustomPanel">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>
-            <span>Custom Range</span>
-          </button>
-          <div class="dashboard-period-custom__panel" id="dashboardCustomPanel" hidden>
-            <div class="dashboard-period-custom__field">
-              <label for="dashboardCustomFrom">From</label>
-              <input type="date" id="dashboardCustomFrom" aria-label="Custom start date">
-            </div>
-            <div class="dashboard-period-custom__field">
-              <label for="dashboardCustomTo">To</label>
-              <input type="date" id="dashboardCustomTo" aria-label="Custom end date">
-            </div>
-            <button type="button" class="dashboard-period-custom__apply" id="dashboardCustomApply">Apply</button>
-          </div>
-        </div>
-      </div>
-      <p class="dashboard-status-notice" id="dashboardStatusNotice" hidden role="status"></p>
-      <div class="inventory-stats dashboard-stats" aria-label="Global catch summary">
-        <div class="stat-card stat-card--secret">
-          <div class="stat-card__label">Secret Fish</div>
-          <div class="stat-card__value js-count-up" id="dashboardSecretCaught" data-count-format="integer" data-count-duration="1200">0</div>
-        </div>
-        <div class="stat-card stat-card--forgotten">
-          <div class="stat-card__label">Forgotten Fish</div>
-          <div class="stat-card__value js-count-up" id="dashboardForgottenCaught" data-count-format="integer" data-count-duration="1200">0</div>
-        </div>
-      </div>
-      <div class="dashboard-chart-card">
-        <h2 class="dashboard-chart-card__title">Fish Caught Per Day</h2>
-        <div class="dashboard-chart-wrap" id="dashboardChartWrap">
-          <svg class="dashboard-chart" id="dashboardChart" viewBox="0 0 320 132" preserveAspectRatio="none" aria-hidden="true"></svg>
-          <div class="dashboard-chart-labels" id="dashboardChartLabels"></div>
-        </div>
-        <p class="dashboard-chart-empty" id="dashboardChartEmpty" hidden>No catch data for this period.</p>
-      </div>
-      <div class="dashboard-fish-section">
-        <h2 class="dashboard-fish-section__title">Caught Fish</h2>
-        <div id="dashboardFishGrid" class="dashboard-fish-grid" aria-label="Fish caught in selected period"></div>
-        <p class="dashboard-fish-empty" id="dashboardFishEmpty" hidden>No fish caught in this period.</p>
-      </div>
-    </section>
-
-    <section id="inventoryAccountsPanel" class="inventory-panel inventory-panel--accounts" aria-label="Live Tracker">
-
-    <div class="inventory-stats" id="inventoryStats" aria-label="Inventory summary">
-      <div class="stat-card stat-card--online">
-        <div class="stat-card__label">Online / Accounts</div>
-        <div class="stat-card__value js-count-up" id="statOnlineAccounts" data-count-format="ratio" data-count-duration="1200">0 / 0</div>
-      </div>
-      <div class="stat-card stat-card--stones">
-        <div class="stat-card__label">Evolved Enchant Stone</div>
-        <div class="stat-card__value js-count-up" id="statEvolvedStones" data-count-format="integer" data-count-duration="1200">0</div>
-      </div>
-      <div class="stat-card stat-card--secret">
-        <div class="stat-card__label">Secret Fish</div>
-        <div class="stat-card__value js-count-up" id="statSecretFish" data-count-format="integer" data-count-duration="1200">0</div>
-      </div>
-      <div class="stat-card stat-card--forgotten">
-        <div class="stat-card__label">Forgotten Fish</div>
-        <div class="stat-card__value js-count-up" id="statForgottenFish" data-count-format="integer" data-count-duration="1200">0</div>
-      </div>
-    </div>
-
-    <div class="player-control-bar">
-      <input type="text" id="usernameInput" name="username" placeholder="Enter nickname..." maxlength="20" autocomplete="username" spellcheck="false" aria-label="Roblox nickname" aria-describedby="usernameError" inputmode="text">
-      <button class="btn btn-add" id="addBtn" type="button">+ Add</button>
-      <button class="btn btn-multiple" id="multipleBtn" type="button">+ Multiple</button>
-      <div class="remove-dropdown">
-        <button class="btn-remove-menu" id="removeMenuBtn" type="button" aria-label="Remove account" aria-haspopup="menu" aria-expanded="false" aria-controls="removeMenu">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
-          <svg class="btn-remove-menu__caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
-        </button>
-        <div class="remove-dropdown__menu" id="removeMenu" role="menu" hidden></div>
-      </div>
-      <div class="username-error" id="usernameError" role="status" aria-live="polite"></div>
-    </div>
-
-    <div class="summary-bar" id="summaryBar">
-      <span id="summaryText">No players added yet</span>
-    </div>
-
-    <div id="multipleAddModal" class="modal-overlay" hidden aria-hidden="true">
-      <div class="modal-dialog" role="dialog" aria-labelledby="multipleAddModalTitle" aria-modal="true">
-        <h2 id="multipleAddModalTitle" class="modal-title">Add Multiple Accounts</h2>
-        <p class="modal-helper">Enter usernames separated by comma or new line.</p>
-        <p class="modal-example">Example: denghub2, player123, testaccount</p>
-        <textarea id="multipleAddTextarea" class="modal-textarea" rows="5" placeholder="denghub2, player123&#10;testaccount" spellcheck="false" autocomplete="off"></textarea>
-        <p class="modal-error" id="multipleAddError" role="alert" hidden></p>
-        <div class="modal-actions">
-          <button type="button" class="btn-modal-cancel" id="multipleAddCancel">Cancel</button>
-          <button type="button" class="btn-modal-submit" id="multipleAddSubmit">Add Accounts</button>
-        </div>
-      </div>
-    </div>
-
-    <section class="accounts-overview" id="accountsOverview" aria-label="Tracked accounts">
-      <div class="accounts-toolbar">
-        <label class="accounts-search" for="accountsSearchInput">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
-          <input id="accountsSearchInput" type="search" placeholder="Search players..." autocomplete="off" spellcheck="false" aria-label="Search players">
-        </label>
-        <div class="accounts-toolbar__controls">
-        <div class="accounts-filters" role="group" aria-label="Account status filters">
-          <button type="button" class="accounts-filter is-active" data-account-filter="all">All</button>
-          <button type="button" class="accounts-filter" data-account-filter="online">Online</button>
-          <button type="button" class="accounts-filter" data-account-filter="offline">Offline</button>
-        </div>
-        <div class="accounts-actions">
-          <div class="accounts-view-group" role="group" aria-label="View mode">
-            <button type="button" class="accounts-icon-btn accounts-view-btn is-active" id="viewTableBtn" title="Table view" aria-label="Table view">
-              <span class="accounts-view-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                  <path d="M12 3v18"></path>
-                  <path d="M3 12h18"></path>
-                  <path d="M3 3h18v18H3z"></path>
-                </svg>
-              </span>
-            </button>
-            <button type="button" class="accounts-icon-btn accounts-view-btn" id="viewFishGridBtn" title="Fish grid" aria-label="Fish grid">
-              <span class="accounts-view-icon" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-fish" focusable="false" data-toolbar-icon="fish">
-                  <path d="M6.5 12c.94-3.46 4.94-6 8.5-6 3.56 0 6.06 2.54 7 6-.94 3.47-3.44 6-7 6s-7.56-2.53-8.5-6Z"></path>
-                  <path d="M18 12v.5"></path>
-                  <path d="M16 17.93a9.77 9.77 0 0 1 0-11.86"></path>
-                  <path d="M7 10.67C7 8 5.58 5.97 2.73 5.5c-1 1.5-1 5 .23 6.5-1.24 1.5-1.24 5-.23 6.5C5.58 18.03 7 16 7 13.33"></path>
-                  <path d="M10.46 7.26C10.2 5.88 9.17 4.24 8 3h5.8a2 2 0 0 1 1.98 1.67l.23 1.4"></path>
-                  <path d="m16.01 17.93-.23 1.4A2 2 0 0 1 13.8 21H9.5a5.96 5.96 0 0 0 1.49-3.98"></path>
-                </svg>
-              </span>
-            </button>
-            <button type="button" class="accounts-icon-btn accounts-view-btn" id="viewStoneGridBtn" title="Item grid" aria-label="Item grid">
-              <span class="accounts-view-icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" focusable="false">
-                  <path d="M12 3 20 8v8l-8 5-8-5V8l8-5Z"></path>
-                  <path d="M12 12 20 8"></path>
-                  <path d="M12 12v9"></path>
-                  <path d="M12 12 4 8"></path>
-                </svg>
-              </span>
-            </button>
-          </div>
-          <button type="button" class="accounts-icon-btn" id="copyUsernamesBtn" title="Copy all usernames" aria-label="Copy all usernames">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-          </button>
-          <button type="button" class="accounts-icon-btn" id="refreshAccountsBtn" title="Refresh accounts" aria-label="Refresh accounts">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
-          </button>
-        </div>
-        </div>
-      </div>
-      <div class="accounts-table-wrap" id="accountsTableWrap">
-        <table class="accounts-table" aria-label="Account leaderboard">
-          <colgroup>
-            <col class="col-index">
-            <col class="col-status">
-            <col class="col-username">
-            <col class="col-coin">
-            <col class="col-caught">
-            <col class="col-rare">
-            <col class="col-backpack">
-            <col class="col-actions">
-          </colgroup>
-          <thead>
-            <tr>
-              <th scope="col" class="col-index">#</th>
-              <th scope="col" class="col-status">Status</th>
-              <th scope="col" class="col-username"><span class="th-full">Username</span><span class="th-short">User</span></th>
-              <th scope="col" class="col-coins col-coin" data-col="coin"><span class="th-full">Coins</span><span class="th-short">Coin</span></th>
-              <th scope="col" class="col-caught col-total-caught" data-col="total-caught"><span class="th-full">Total Caught</span><span class="th-short">Caught</span></th>
-              <th scope="col" class="col-rare col-rarest-fish" data-col="rarest-fish"><span class="th-full">Rarest Fish</span><span class="th-short">Rare</span></th>
-              <th scope="col" class="col-backpack">Backpack</th>
-              <th scope="col" class="col-actions">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="accountsTableBody"></tbody>
-        </table>
-      </div>
-      <div class="accounts-mobile-list" id="accountsMobileList" aria-label="Account cards"></div>
-    </section>
-
-    <div id="inventoryViewSection" class="inventory-view-section" hidden>
-    <div id="bulkInventoryPanel" class="bulk-inventory-panel" hidden>
-      <div class="inventory-search-row" data-bulk-search-row>
-        <div class="inventory-search" role="search">
-          <svg class="inventory-search__icon" viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-            <circle cx="11" cy="11" r="7"></circle>
-            <path d="m20 20-3.5-3.5"></path>
-          </svg>
-          <input class="inventory-search__input" type="search" placeholder="Search fish or stones..." autocomplete="off" spellcheck="false" aria-label="Search fish or stones" data-bulk-search-input>
-          <button class="inventory-search__clear" type="button" aria-label="Clear search" data-bulk-search-clear>Clear</button>
-        </div>
-        <div class="inventory-upload-indicator is-stale" data-inventory-upload-indicator aria-label="Fish and stone upload status">
-          <span class="status-dot dead" data-inventory-upload-dot aria-hidden="true"></span>
-          <span class="inventory-upload-indicator__text" data-inventory-upload-text></span>
-        </div>
-      </div>
-      <div id="bulkInventoryBody"></div>
-    </div>
-
-    <div id="trackerList"></div>
-    </div>
-
-    </section>
-
-    <div class="loadstring-box<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? ' is-compact' : ' loadstring-box--desktop-hidden' %>">
-      <h3>
-        <span class="loadstring-box__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <polyline points="16 18 22 12 16 6"></polyline>
-            <polyline points="8 6 2 12 8 18"></polyline>
-          </svg>
-        </span>
-        <span>Executor Script &mdash; copy &amp; run in-game</span>
-      </h3>
-      <div class="code-row">
-        <textarea class="code-block code-block--script" id="loadstringCode" readonly rows="1" spellcheck="false" aria-label="Tracker executor script"><%- typeof trackerLoadstring !== 'undefined' ? trackerLoadstring : '' %></textarea>
-        <button class="btn-copy" id="copyBtn" type="button">Copy</button>
-      </div>
-      <div class="copy-status" id="copyStatus" aria-live="polite"></div>
-    </div>
-<% if (typeof debugInventory !== 'undefined' && debugInventory && typeof debugTrackerLoadstring !== 'undefined' && debugTrackerLoadstring) { %>
-    <div class="loadstring-box loadstring-box--debug">
-      <h3>
-        <span class="loadstring-box__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" focusable="false">
-            <polyline points="16 18 22 12 16 6"></polyline>
-            <polyline points="8 6 2 12 8 18"></polyline>
-          </svg>
-        </span>
-        <span>Debug loader &mdash; admin only</span>
-      </h3>
-      <div class="code-row">
-        <textarea class="code-block code-block--script" id="loadstringDebugCode" readonly rows="3" spellcheck="false" aria-label="Debug tracker loader with build proof"><%- debugTrackerLoadstring %></textarea>
-      </div>
-    </div>
-<% } %>
-
-  </div>
-</div>
-  </div>
-</div>
-<script>
-(function () {
-  'use strict';
-
-  const LS_KEY        = 'fishit_tracked_users';
+(function(){'use strict';function readInventoryCfg(){const el=document.getElementById('inventory-runtime');if(!el)return{};try{return JSON.parse(el.textContent||'{}');}catch(_){return{};}}const __CFG__=readInventoryCfg();
+const LS_KEY        = 'fishit_tracked_users';
   const LS_BULK_CACHE = 'fishit_bulk_inventory_cache_v1';
   const POLL_MS       = 10000;
   const SYNC_TICK_MS  = 1000;
@@ -3481,47 +7,36 @@
   let perfFirstApiMs = null;
   let perfApiPayloadBytes = 0;
   let perfInitialRequests = 0;
-  const DEBUG_INVENTORY = <%= (typeof debugInventory !== 'undefined' && debugInventory) ? 'true' : 'false' %>;
-  const APK_EMBED = <%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'true' : 'false' %>;
+  const DEBUG_INVENTORY = !!__CFG__.debugInventory;
+  const APK_EMBED = !!__CFG__.apkEmbed;
   const DEBUG_GLOBAL  = DEBUG_INVENTORY && /(?:^|[?&])debug=global(?:&|$)/.test(window.location.search);
-  const TRACKER_UI_DEPLOY = '<%= typeof trackerUiDeployMarker !== "undefined" ? trackerUiDeployMarker : "BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11" %>';
-  const INITIAL_USERNAME = <%- JSON.stringify(typeof initialUsername !== 'undefined' ? initialUsername : '') %>;
-  const CSRF_CFG = <%- JSON.stringify(typeof csrfToken !== 'undefined' ? csrfToken : '') %>;
-  function readRuntimeCsrfToken() {
-    if (CSRF_CFG) return CSRF_CFG;
-    try {
-      const hidden = document.querySelector('input[name="_csrf"]');
-      if (hidden && hidden.value) return hidden.value;
-    } catch (_) { /* ignore */ }
-    return '';
-  }
+  const TRACKER_UI_DEPLOY = __CFG__.trackerUiDeployMarker || '';
+  const INITIAL_USERNAME = __CFG__.initialUsername || '';
+  const CSRF_CFG = __CFG__.csrfToken || '';
+  function readRuntimeCsrfToken(){if(CSRF_CFG)return CSRF_CFG;try{const hidden=document.querySelector('input[name=\"_csrf\"]');if(hidden&&hidden.value)return hidden.value;}catch(_){}return '';}
   const CSRF_TOKEN = readRuntimeCsrfToken();
   const LS_MIGRATED_KEY = 'fishit_tracked_users_migrated_v1';
-  const RENDER_BUILD  = DEBUG_INVENTORY
-    ? (document.documentElement.getAttribute('data-render-build') || '')
-    : '';
-  const PUBLIC_API_BUILD = DEBUG_INVENTORY
-    ? (document.documentElement.getAttribute('data-public-api-build') || '')
-    : '';
+  const RENDER_BUILD = DEBUG_INVENTORY ? (__CFG__.renderBuild || '') : '';
+  const PUBLIC_API_BUILD = DEBUG_INVENTORY ? (__CFG__.publicApiBuild || '') : '';
   const RARITY_NAME_COLORS = {
     common:'#f8fafc', uncommon:'#84cc16', rare:'#1e3a8a', epic:'#a855f7',
     legendary:'#ff8c00', legend:'#ff8c00', mythic:'#ef4444', secret:'#00ff7f', forgotten:'#e5e7eb',
   };
   const RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret badge-rarity-secret', forgotten:'rarity-forgotten' };
   const CARD_RARITY_MAP = { common:'rarity-common', uncommon:'rarity-uncommon', rare:'rarity-rare', epic:'rarity-epic', legendary:'rarity-legendary', legend:'rarity-legendary', mythic:'rarity-mythic', secret:'rarity-secret', forgotten:'rarity-forgotten' };
-  <%- typeof trackerRarityJsBootstrap !== 'undefined' ? trackerRarityJsBootstrap : 'const FT_RARITY_CLASS = { common:\'ft-rarity-COMMON\', uncommon:\'ft-rarity-UNCOMMON\', rare:\'ft-rarity-RARE\', epic:\'ft-rarity-EPIC\', legendary:\'ft-rarity-LEGENDARY\', legend:\'ft-rarity-LEGENDARY\', mythic:\'ft-rarity-MYTHIC\', secret:\'ft-rarity-SECRET\', forgotten:\'ft-rarity-FORGOTTEN\' }; function ftRarityClass(r) { return r ? (FT_RARITY_CLASS[String(r).toLowerCase()] || \'ft-rarity-COMMON\') : \'ft-rarity-COMMON\'; }' %>
+const FT_RARITY_CLASS = {"common":"ft-rarity-COMMON","uncommon":"ft-rarity-UNCOMMON","rare":"ft-rarity-RARE","epic":"ft-rarity-EPIC","legendary":"ft-rarity-LEGENDARY","legend":"ft-rarity-LEGENDARY","mythic":"ft-rarity-MYTHIC","secret":"ft-rarity-SECRET","forgotten":"ft-rarity-FORGOTTEN"};
+  function ftRarityClass(r) { return r ? (FT_RARITY_CLASS[String(r).toLowerCase()] || 'ft-rarity-COMMON') : 'ft-rarity-COMMON'; }
   const RARITY_ORDER = {
     Forgotten: 800, Secret: 700, Mythic: 600, Legendary: 500, Epic: 400,
     Rare: 300, Uncommon: 200, Common: 100, Unknown: 0,
   };
   const STONE_TYPE_ORDER = { Normal: 10, Double: 20, Evolved: 30, Eggy: 40, Runic: 50 };
-  <%- typeof trackerStoneJsBootstrap !== 'undefined' ? trackerStoneJsBootstrap : 'const STONE_DISPLAY_NAMES = { Double: \'Transcended Stone\' };' %>
+const STONE_DISPLAY_NAMES = {"Normal":"Normal Enchant Stone","Double":"Transcended Stone","Evolved":"Evolved Enchant Stone","Eggy":"Eggy Enchant Stone","Runic":"Runic Enchant Stone"};
   const PEOPLE_ICON_SVG = '<svg class="card-chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>';
   const TIER_TO_RARITY = {
     1: 'Common', 2: 'Uncommon', 3: 'Rare', 4: 'Epic',
     5: 'Legendary', 6: 'Mythic', 7: 'Secret', 8: 'Forgotten',
   };
-
   const trackers       = new Map();
   let bulkSearchQuery  = '';
   let accountSearchQuery = '';
@@ -3568,8 +83,7 @@
   const loadstringCodeEl = document.getElementById('loadstringCode');
   const usernameErrorEl = document.getElementById('usernameError');
   const CLEAN_LOADSTRING = (loadstringCodeEl && loadstringCodeEl.value)
-    || '<%- typeof trackerLoadstring !== "undefined" ? trackerLoadstring.replace(/'/g, "\\'").replace(/\\/g, "\\\\") : "" %>';
-
+    || (__CFG__.trackerLoadstring || '');
   function loadLegacyLocalUsernames() {
     try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); } catch { return []; }
   }
@@ -3708,15 +222,12 @@
     }
     return true;
   }
-
   const EMPTY_STAT = '\u2014';
   const EN_DASH = '\u2013';
   const EM_DASH = '\u2014';
-
   function isEmptyStatValue(value) {
     return value === EMPTY_STAT || value === '-' || value === '\u2014';
   }
-
   function markCardEnterAnimation(card) {
     if (!card || card.dataset.enterBound === '1') return;
     card.dataset.enterBound = '1';
@@ -3725,13 +236,11 @@
       card.classList.remove('ft-card--enter');
     }, { once: true });
   }
-
   function placeGridCardAtIndex(grid, card, idx) {
     if (!grid || !card) return;
     if (grid.children[idx] === card) return;
     grid.insertBefore(card, grid.children[idx] || null);
   }
-
   function setElementTextIfChanged(el, text, title) {
     if (!el) return;
     const next = String(text == null ? '' : text);
@@ -3741,7 +250,6 @@
       if (el.title !== t) el.title = t;
     }
   }
-
   function patchHtmlIfChanged(el, html) {
     if (!el) return;
     const next = String(html || '');
@@ -3749,7 +257,6 @@
     el.innerHTML = next;
     el.setAttribute('data-render-sig', next);
   }
-
   function patchCardImage(img, item, imgSrc, isFish, eagerLoad) {
     if (!img) return;
     const src = imgSrc || ITEM_IMAGES.Default;
@@ -3776,7 +283,6 @@
     if (assetId) img.setAttribute('data-asset-id', assetId);
     else img.removeAttribute('data-asset-id');
   }
-
   function patchFishCardDom(card, item, opts) {
     opts = opts || {};
     const cardKeyVal = card && card.getAttribute('data-card-key');
@@ -3816,7 +322,6 @@
       weightEl.remove();
     }
   }
-
   function patchStoneCardDom(card, item, opts) {
     opts = opts || {};
     const title = stoneDisplayName(item);
@@ -3836,7 +341,6 @@
     setElementTextIfChanged(card.querySelector('.ft-card-name'), title, title);
     patchHtmlIfChanged(card.querySelector('.ft-card-stats'), buildStoneStatsHtml(item, opts));
   }
-
   function escHtml(s) {
     return String(s)
       .replace(/&/g, '\u0026amp;')
@@ -3844,7 +348,6 @@
       .replace(/>/g, '\u0026gt;')
       .replace(/"/g, '\u0026quot;');
   }
-
   function formatQuantity(value) {
     const n = Number(value || 0);
     if (!Number.isFinite(n)) return '0';
@@ -3994,9 +497,6 @@
     return Math.max(interval + inventoryUploadGraceSeconds(interval), interval * 2.5);
   }
   function isAccountPresent(entry) {
-    // Indicator 1: account is GREEN only when online and in game (binary
-    // presence), RED otherwise. No orange/stale state, never derived from
-    // fish/stone upload or stats freshness.
     const st = entryUploadStatus(entry);
     if (st && typeof st.accountPresenceLive === 'boolean') return st.accountPresenceLive;
     const data = entry && entry.lastData;
@@ -4022,8 +522,6 @@
     return data.lastSnapshotUploadAt || data.lastInventoryAt || null;
   }
   function entryInventoryRedSince(entry) {
-    // Indicator 3 red duration: tied only to the fish/stone upload window,
-    // never to account online/offline status.
     const st = entryUploadStatus(entry);
     if (st && typeof st.inventoryUploadFresh === 'boolean') {
       if (st.inventoryUploadFresh) return null;
@@ -4041,8 +539,6 @@
     return syncFreshnessFromTimestamp(entryStatsUploadTimestamp(entry)) === 'live';
   }
   function isInventoryUploadFresh(entry) {
-    // Indicator 3: GREEN only when the fish/stone snapshot upload succeeded
-    // this interval. Decoupled from account presence and stats freshness.
     const st = entryUploadStatus(entry);
     if (st && typeof st.inventoryUploadFresh === 'boolean') return st.inventoryUploadFresh;
     const data = entry && entry.lastData;
@@ -4292,9 +788,6 @@
     return `${caught}|${coins}|${rare}`;
   }
   function touchCaughtActivityState(entry, stats, nowIso) {
-    // Indicator 2 timer: reset to 1s only when a tracked stat value
-    // (Total Caught / Coin / Rarest Fish) actually changes; otherwise keep
-    // counting up from the last change.
     if (!entry) return;
     const sig = statsActivitySignature(stats);
     if (sig == null) return;
@@ -4310,8 +803,6 @@
     }
   }
   function entryStatsChangeAt(entry) {
-    // Prefer the backend-saved change timestamp so a browser refresh keeps the
-    // real elapsed time instead of resetting the timer.
     const data = entry && entry.lastData;
     if (data && data.lastStatsChangeAt) return data.lastStatsChangeAt;
     const st = entryUploadStatus(entry);
@@ -4334,8 +825,6 @@
     return `${Math.floor(secs / 86400)}D`;
   }
   function formatPresenceStatusText(entry) {
-    // Indicator 1 duration/sync text: time since the last interval contact.
-    // Stays visible whether the account is online (green) or offline (red).
     const secs = liveSecondsSinceLastSuccess(entry);
     if (secs != null) return formatPresenceDurationLabel(secs);
     const data = entry && entry.lastData;
@@ -4364,8 +853,6 @@
   }
   function formatEntrySyncStatusText(entry) {
     if (!entry) return '';
-    // Indicator 3 duration text: time since the last successful fish/stone
-    // upload (green) or since it went stale (red).
     const fresh = isInventoryUploadFresh(entry);
     const ts = fresh ? entryInventoryUploadTimestamp(entry) : entryInventoryRedSince(entry);
     return formatMinimalSyncDuration(ts);
@@ -4374,8 +861,6 @@
     return formatEntrySyncStatusText(entry);
   }
   function entryConnectionFreshness(entry) {
-    // Binary account-state freshness: live (online & in game) or dead. The
-    // entryUploadStatus row carries the authoritative presence flag.
     const st = entryUploadStatus(entry);
     const present = (st && typeof st.accountPresenceLive === 'boolean')
       ? st.accountPresenceLive
@@ -5459,7 +1944,7 @@
     const color = data.statusColor || data.currentStatus;
     return color === 'green' || color === 'yellow';
   }
-  /** Public fish-only list (BLOCKER10K1). Never reads mixed enrichedItems or full inventory groups. */
+  
   function getPublicFishItems(data) {
     let items = [];
     if (!data) return items;
@@ -6002,7 +2487,6 @@
     const incomingUrlOk = isUsableImageUrl(incoming && incoming.imageUrl);
     const incomingTracker = isTrackerBackedImageItem(incoming);
     const existingTracker = isTrackerBackedImageItem(existing);
-    // Never keep a stale placeholder when the server sent a real inventory image.
     if (incomingUrlOk && (incomingTracker || !existingUrlOk || isPlaceholderImageUrl(existing && existing.imageUrl))) {
       return base;
     }
@@ -6041,10 +2525,7 @@
     if (item.shiny === true && rarityLow !== 'secret') cls.push('shiny');
     return cls;
   }
-
   const ITEM_IMAGES = {
-    // Add real hosted/local URLs here as they become available, e.g.
-    // 'Cactus Pufferfish': '/assets/img/fishit/cactus-pufferfish.png',
     fish: '/assets/img/fishit/fallback-fish.svg',
     rod: '/assets/img/fishit/fallback-rod.svg',
     rods: '/assets/img/fishit/fallback-rod.svg',
@@ -6056,7 +2537,6 @@
     forgotten: '/assets/img/fishit/fallback-forgotten.svg',
     Default: '/assets/img/fishit/fallback-fish.svg'
   };
-
   function isPlaceholderImageUrl(url) {
     if (!url || typeof url !== 'string') return true;
     const u = url.trim().toLowerCase();
@@ -6077,8 +2557,6 @@
     if (u.startsWith('/api/fishit-tracker/assets/stones/')) return true;
     if (u.startsWith('/api/fishit-tracker/assets/totems/')) return true;
     if (u.startsWith('/api/fishit-tracker/assets/')) return true;
-    // Dashboard stats-fish images share the inventory resolver/cache and must
-    // render the same as inventory cards.
     if (u.startsWith('/api/fishit/assets/stats-fish/')) return true;
     if (u.startsWith('http')) return true;
     if (u.startsWith('/assets/')) return true;
@@ -6110,7 +2588,6 @@
     img.src = ITEM_IMAGES.Default;
     img.setAttribute('data-placeholder', 'true');
   }
-
   function updateSummary() {
     const n = trackers.size;
     if (n === 0) {
@@ -6125,7 +2602,6 @@
     renderAccountsTable();
     syncViewModeUi();
   }
-
   function cardTitle(item) {
     return item.cardName || item.baseFishName || item.name || 'Unknown';
   }
@@ -6263,7 +2739,6 @@
       img.onerror = () => onFishImageError(img, item);
     });
   }
-
   function createCard(username) {
     const el = document.createElement('div');
     el.className = 'tracker-card tracker-card--account-inventory';
@@ -6271,11 +2746,9 @@
     el.innerHTML = `
 ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
 <div class="card-body" data-card-body></div>`;
-
     el.style.display = 'none';
     return el;
   }
-
   function updateCard(card, data) {
     card.classList.remove('state-waiting','state-error');
     card.classList.add('state-live');
@@ -6295,7 +2768,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     if (accountViewMode === 'fish') renderBulkInventory('fish');
     else if (accountViewMode === 'stone') renderBulkInventory('stone');
   }
-
   function setCardWaiting(card, name) {
     card.classList.remove('state-live','state-error');
     card.classList.add('state-waiting');
@@ -6308,8 +2780,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       ? `<div class="card-empty">Waiting for ${escHtml(name)} to execute the script in-game...</div>`
       : publicWaitingHtml();
   }
-
-  // Map a tracker_status discovery phase to a human-readable message.
   function phaseMessage(phase) {
     switch (phase) {
       case 'replion_client_found':
@@ -6332,7 +2802,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
         return `Script running ${EM_DASH} locating Replion data...`;
     }
   }
-
   function setCardRunning(card, name, data) {
     const fishList = getPublicFishItems(data);
     const stoneList = getPublicStoneItems(data);
@@ -6372,7 +2841,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     setCardSyncDisplay(card, data);
     if (b) b.innerHTML = publicLiveEmptyHtml(data);
   }
-
   function setCardOffline(card, name, lastData) {
     card.classList.remove('state-live','state-waiting');
     card.classList.add('state-error');
@@ -6390,7 +2858,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     if (accountViewMode === 'fish') renderBulkInventory('fish');
     else if (accountViewMode === 'stone') renderBulkInventory('stone');
   }
-
   function setCardError(card) {
     card.classList.remove('state-live','state-waiting');
     card.classList.add('state-error');
@@ -6401,7 +2868,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     if (!entry || !entry.el) return;
     if (!entry.lastData) setCardError(entry.el);
   }
-
   function backpackQuerySuffix(forceFresh) {
     const useLite = !(DEBUG_INVENTORY && DEBUG_GLOBAL);
     const params = new URLSearchParams();
@@ -6410,7 +2876,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     const qs = params.toString();
     return qs ? `?${qs}` : '';
   }
-
   function notePerfFetch(responseText) {
     perfInitialRequests += 1;
     if (responseText) perfApiPayloadBytes += responseText.length;
@@ -6420,7 +2885,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
         : Date.now()) - PERF_STARTED_AT);
     }
   }
-
   async function pollUser(key, opts) {
     const entry = trackers.get(key);
     if (!entry) return;
@@ -6447,32 +2911,26 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       applyInventoryPollPayload(entry, key, data);
     } catch { if (trackers.has(key)) setCardRefreshFailed(entry); }
   }
-
   function normalizeUsername(raw) {
     return String(raw || '').trim().replace(/\s+/g, '');
   }
-
   function isValidUsername(raw) {
     const key = normalizeUsername(raw).toLowerCase();
     return /^[a-z0-9_]{3,20}$/.test(key);
   }
-
   function showUsernameError(message) {
     if (!usernameErrorEl) return;
     usernameErrorEl.textContent = message || '';
     if (inputEl) inputEl.classList.toggle('is-invalid', !!message);
   }
-
   function clearUsernameError() {
     showUsernameError('');
   }
-
   function selectLoadstringField() {
     if (!loadstringCodeEl) return;
     loadstringCodeEl.focus();
     loadstringCodeEl.select();
   }
-
   function fallbackCopyText(text) {
     return new Promise((resolve, reject) => {
       if (loadstringCodeEl) {
@@ -6508,7 +2966,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       }
     });
   }
-
   function copyTrackerScript() {
     const text = CLEAN_LOADSTRING;
     if (!text) {
@@ -6532,33 +2989,28 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       return false;
     });
   }
-
   function setCopyStatus(message, isError, isSuccess) {
     if (!copyStatusEl) return;
     copyStatusEl.textContent = message || '';
     copyStatusEl.classList.toggle('is-error', !!isError);
     copyStatusEl.classList.toggle('is-success', !!isSuccess);
   }
-
   let liveTrackerPollingActive = false;
   let globalStatusPollTimer = null;
   let dashboardPollTimer = null;
   let syncTickTimer = null;
-
   function startTrackerPollForKey(key) {
     const entry = trackers.get(key);
     if (!entry || entry.timer) return;
     entry.timer = setInterval(() => pollUser(key), POLL_MS);
     pollUser(key);
   }
-
   function stopTrackerPollForKey(key) {
     const entry = trackers.get(key);
     if (!entry || !entry.timer) return;
     clearInterval(entry.timer);
     entry.timer = null;
   }
-
   function startLiveTrackerPolling() {
     if (liveTrackerPollingActive) return;
     liveTrackerPollingActive = true;
@@ -6568,7 +3020,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     requestAnimationFrame(() => pollAccountStatuses(true));
   }
-
   function stopLiveTrackerPolling() {
     liveTrackerPollingActive = false;
     trackers.forEach((_, key) => stopTrackerPollForKey(key));
@@ -6577,19 +3028,16 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       globalStatusPollTimer = null;
     }
   }
-
   function startDashboardPolling() {
     if (dashboardPollTimer) return;
     dashboardPollTimer = setInterval(() => {
       if (activeInventorySection === 'dashboard') loadDashboardRange(false);
     }, POLL_MS);
   }
-
   function ensureBackgroundPolling() {
     if (trackers.size > 0) startLiveTrackerPolling();
     startDashboardPolling();
   }
-
   function addTrackerLocal(username) {
     clearUsernameError();
     const raw = normalizeUsername(username);
@@ -6602,7 +3050,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     startTrackerPollForKey(key);
     return true;
   }
-
   async function addTracker(username) {
     clearUsernameError();
     const raw = normalizeUsername(username);
@@ -6632,7 +3079,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     if (inputEl) inputEl.value = '';
     return true;
   }
-
   async function removeTracker(key) {
     if (!trackers.has(key)) return;
     const removed = await persistTrackerRemove(key);
@@ -6640,7 +3086,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       showUsernameError('Could not remove tracked account.');
     }
   }
-
   function safeBind(name, fn) {
     try {
       fn();
@@ -6648,12 +3093,10 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       console.error('[inventory] failed to bind ' + name, error);
     }
   }
-
   function bindCopyScript() {
     if (!copyBtn) return;
     copyBtn.addEventListener('click', () => { copyTrackerScript(); });
   }
-
   function bindSidebarProfileControls() {
     if (hideUsernamesBtn) {
       hideUsernamesBtn.addEventListener('click', () => {
@@ -6669,7 +3112,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     } catch {}
     updateHideUsernamesUi();
   }
-
   function bindSidebarScript() {
     if (!sidebarScriptBtn) return;
     sidebarScriptBtn.addEventListener('click', () => {
@@ -6686,7 +3128,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       }).catch(() => {});
     });
   }
-
   function bindAddPlayer() {
     if (!addBtn || !inputEl) return;
     addBtn.addEventListener('click', (e) => {
@@ -6708,7 +3149,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     });
     inputEl.addEventListener('input', () => { if (inputEl.value.trim()) clearUsernameError(); });
   }
-
   function parseMultipleUsernames(raw) {
     const seen = new Set();
     const names = [];
@@ -6799,7 +3239,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       }
     });
   }
-
   function bindRemoveMenu() {
     if (!removeMenuBtn || !removeMenuEl) return;
     removeMenuBtn.addEventListener('click', (e) => {
@@ -6820,7 +3259,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       if (e.key === 'Escape') closeRemoveMenu();
     });
   }
-
   const dashboardPanelEl = document.getElementById('inventoryDashboardPanel');
   const accountsPanelEl = document.getElementById('inventoryAccountsPanel');
   const dashboardToolbarEl = document.querySelector('.dashboard-toolbar');
@@ -6843,11 +3281,9 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
   let dashboardFetchGen = 0;
   let dashboardRangeDebounceTimer = null;
   let dashboardInitialLoaded = false;
-
   function dashboardCountUp() {
     return window.DengCountUpStats || null;
   }
-
   function setInventorySection(section) {
     activeInventorySection = section === 'dashboard' ? 'dashboard' : 'accounts';
     mainSectionNavTabs.forEach((tab) => {
@@ -6860,7 +3296,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     ensureBackgroundPolling();
   }
-
   function dashboardPeriodQuery() {
     const params = new URLSearchParams();
     if (dashboardPeriod === 'custom') {
@@ -6873,13 +3308,11 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     if (DEBUG_INVENTORY) params.set('debug', '1');
     return params.toString();
   }
-
   function dashboardStatsState(data) {
     if (!data || data.ok === false) return 'error';
     if (data.statsState === 'error' || data.available === false) return 'error';
     return data.statsState || 'ok';
   }
-
   const DASHBOARD_EMPTY_REASON_LABELS = {
     bot_db_not_connected: 'Catch stats unavailable — bot database is not connected.',
     fish_cache_missing_or_empty: 'Catch stats unavailable — bot fish cache is empty.',
@@ -6889,7 +3322,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     missing_auth_discord_id: 'Could not resolve your Discord account for catch stats.',
     dashboard_unavailable: 'Catch stats are temporarily unavailable.',
   };
-
   function dashboardEmptyReasonMessage(reason, debug) {
     if (!reason) return '';
     if (DEBUG_INVENTORY && debug) {
@@ -6906,7 +3338,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     return DASHBOARD_EMPTY_REASON_LABELS[reason] || DASHBOARD_EMPTY_REASON_LABELS.dashboard_unavailable;
   }
-
   function renderDashboardStatusNotice(data) {
     const notice = document.getElementById('dashboardStatusNotice');
     if (!notice) return;
@@ -6914,44 +3345,35 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     notice.textContent = '';
     notice.classList.remove('is-error', 'is-debug');
     if (!data) return;
-
     const state = dashboardStatsState(data);
     if (state !== 'error') return;
-
     const reason = data.emptyReason || 'dashboard_unavailable';
     notice.textContent = dashboardEmptyReasonMessage(reason, data.debug);
     notice.classList.add('is-error');
     notice.classList.toggle('is-debug', !!(DEBUG_INVENTORY && data.debug));
     notice.hidden = false;
   }
-
   function dashboardRangeKey() {
     if (dashboardPeriod === 'custom') {
       return `custom|${dashboardCustomFrom}|${dashboardCustomTo}`;
     }
     return dashboardPeriod || 'all';
   }
-
   function setDashboardToolbarLoading(loading) {
     if (dashboardToolbarEl) dashboardToolbarEl.classList.toggle('is-loading', !!loading);
   }
-
   function getDashboardMemEntry(key) {
     return dashboardMemCache.get(key) || null;
   }
-
   function isDashboardMemFresh(entry) {
     return !!(entry && (Date.now() - entry.at) < DASHBOARD_MEM_TTL_MS);
   }
-
   function isDashboardMemStale(entry) {
     return !entry || (Date.now() - entry.at) > DASHBOARD_SWR_STALE_MS;
   }
-
   function storeDashboardMemCache(key, data) {
     dashboardMemCache.set(key, { data, at: Date.now() });
   }
-
   function applyDashboardPresetActiveUI(period, btn) {
     clearDashboardPresetActive();
     if (period === 'custom') {
@@ -6964,11 +3386,9 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       if (match) match.classList.add('is-active');
     }
   }
-
   function clearDashboardPresetActive() {
     dashboardPeriodBtns.forEach((item) => item.classList.remove('is-active'));
   }
-
   function scheduleDashboardRangeFetch(immediate) {
     if (dashboardRangeDebounceTimer) {
       clearTimeout(dashboardRangeDebounceTimer);
@@ -6996,7 +3416,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     if (dashboardCustomToggleEl) dashboardCustomToggleEl.setAttribute('aria-expanded', 'false');
   }
-
   function setDashboardPresetPeriod(period, btn) {
     dashboardPeriod = period || 'all';
     if (dashboardCustomToggleEl) dashboardCustomToggleEl.classList.remove('is-active');
@@ -7008,7 +3427,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     applyDashboardPresetActiveUI(period, btn);
     scheduleDashboardRangeFetch(true);
   }
-
   function setDashboardCustomPeriod(from, to) {
     dashboardPeriod = 'custom';
     dashboardCustomFrom = from || '';
@@ -7016,7 +3434,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     applyDashboardPresetActiveUI('custom');
     scheduleDashboardRangeFetch(true);
   }
-
   function renderDashboardChart(dailyCaught, opts) {
     opts = opts || {};
     const svg = document.getElementById('dashboardChart');
@@ -7136,11 +3553,9 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       return `<span>${short}</span>`;
     }).join('');
   }
-
   function sortDashboardFishCards(cards) {
     return sortInventoryFish(Array.isArray(cards) ? cards : []);
   }
-
   function renderDashboardFishGrid(fishCards, opts) {
     opts = opts || {};
     const host = document.getElementById('dashboardFishGrid');
@@ -7162,7 +3577,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       rarity: card.rarity,
       amount: card.count || card.amount || 0,
       imageUrl: card.imageUrl,
-      // Reuse inventory's proxy fallback when the direct URL is unusable.
       imageAssetId: card.imageAssetId || null,
       dataSource: 'dashboard_owner',
     }));
@@ -7171,7 +3585,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       buildOpts: () => ({ includeOwnerChip: false, includeRarity: true }),
     });
   }
-
   function applyDashboardData(data, opts) {
     opts = opts || {};
     renderDashboardStatusNotice(data);
@@ -7200,14 +3613,12 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     renderDashboardChart((data && data.dailyCaught) || [], { failed, patchChart: opts.patchChart });
     renderDashboardFishGrid((data && data.fishCards) || [], { failed });
   }
-
   async function loadDashboardRange(forceRefresh) {
     if (activeInventorySection !== 'dashboard') return;
     const rangeKey = dashboardRangeKey();
     const cachedEntry = getDashboardMemEntry(rangeKey);
     const hasFreshCache = isDashboardMemFresh(cachedEntry);
     const requestKey = rangeKey;
-
     if (cachedEntry && !forceRefresh) {
       applyDashboardData(cachedEntry.data, { animate: false, patchChart: true });
       if (!isDashboardMemStale(cachedEntry)) {
@@ -7215,7 +3626,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
         return;
       }
     }
-
     if (dashboardFetchAbort) {
       dashboardFetchAbort.abort();
       dashboardFetchAbort = null;
@@ -7224,7 +3634,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     const ac = new AbortController();
     dashboardFetchAbort = ac;
     setDashboardToolbarLoading(!cachedEntry);
-
     try {
       const res = await fetch(`/api/tracker/dashboard?${dashboardPeriodQuery()}`, {
         headers: { Accept: 'application/json' },
@@ -7270,13 +3679,11 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       }
     }
   }
-
   async function loadDashboardData(force) {
     if (dashboardInitialLoaded && !force) return;
     await new Promise((resolve) => requestAnimationFrame(resolve));
     await loadDashboardRange(!!force);
   }
-
   function bindMainSectionNav() {
     mainSectionNavTabs.forEach((tab) => {
       tab.addEventListener('click', () => {
@@ -7311,7 +3718,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       });
     }
   }
-
   function initDashboardSectionFromQuery() {
     initDashboardDefaultPeriod();
     const params = new URLSearchParams(window.location.search);
@@ -7322,7 +3728,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     setInventorySection('accounts');
   }
-
   function bindInventoryTabs() {
     const bulkSearchInput = document.querySelector('[data-bulk-search-input]');
     const bulkSearchClear = document.querySelector('[data-bulk-search-clear]');
@@ -7345,7 +3750,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       });
     }
   }
-
   function initFromQueryUsername() {
     const params = new URLSearchParams(window.location.search);
     const fromQuery = INITIAL_USERNAME
@@ -7364,7 +3768,6 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
       if (inputEl) inputEl.value = fromQuery;
     }
   }
-
   function initInventoryUi() {
     safeBind('main section nav', bindMainSectionNav);
     safeBind('dashboard section init', initDashboardSectionFromQuery);
@@ -7519,13 +3922,9 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     }
     console.log('[inventory] UI initialized');
   }
-
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initInventoryUi);
   } else {
     initInventoryUi();
   }
 }());
-</script>
-</body>
-</html>

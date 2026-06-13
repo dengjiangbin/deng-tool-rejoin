@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "updatedAt": "2026-06-13T08:00:00.000Z",
+  "source": "totem_manual_asset",
+  "totems": {
+    "2": {
+      "itemId": "2",
+      "canonicalName": "Mutation Totem",
+      "name": "Mutation Totem",
+      "filename": "totem_mutation_totem.webp",
+      "imageSource": "totem_manual_asset"
+    },
+    "501": {
+      "itemId": "501",
+      "canonicalName": "Mutation Totem",
+      "name": "Mutation Totem",
+      "filename": "totem_mutation_totem.webp",
+      "imageSource": "totem_manual_asset"
+    },
+    "502": {
+      "itemId": "502",
+      "canonicalName": "Shiny Totem",
+      "name": "Shiny Totem",
+      "filename": "totem_shiny_totem.png",
+      "imageSource": "totem_manual_asset"
+    },
+    "503": {
+      "itemId": "503",
+      "canonicalName": "Ancient Totem",
+      "name": "Ancient Totem",
+      "filename": "totem_ancient_totem.webp",
+      "imageSource": "totem_manual_asset"
+    },
+    "777": {
+      "itemId": "777",
+      "canonicalName": "Future Lucky Totem",
+      "name": "Future Lucky Totem",
+      "filename": "totem_future_lucky_totem.webp",
+      "imageSource": "totem_manual_asset"
+    },
+    "mutation totem": {
+      "canonicalName": "Mutation Totem",
+      "name": "Mutation Totem",
+      "filename": "totem_mutation_totem.webp",
+      "imageSource": "totem_manual_asset"
+    },
+    "shiny totem": {
+      "canonicalName": "Shiny Totem",
+      "name": "Shiny Totem",
+      "filename": "totem_shiny_totem.png",
+      "imageSource": "totem_manual_asset"
+    },
+    "ancient totem": {
+      "canonicalName": "Ancient Totem",
+      "name": "Ancient Totem",
+      "filename": "totem_ancient_totem.webp",
+      "imageSource": "totem_manual_asset"
+    },
+    "future lucky totem": {
+      "canonicalName": "Future Lucky Totem",
+      "name": "Future Lucky Totem",
+      "filename": "totem_future_lucky_totem.webp",
+      "imageSource": "totem_manual_asset"
+    }
+  }
+}

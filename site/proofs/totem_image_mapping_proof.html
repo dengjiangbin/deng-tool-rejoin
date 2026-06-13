@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Totem image mapping before/after proof</title>
+  <link rel="stylesheet" href="../public/assets/inventory.9d5a9197c0b9.css">
+  <style>
+    body { background:#0d0f14; color:#e2e8f0; font:14px/1.5 Segoe UI,sans-serif; padding:16px; }
+    h1 { font-size:18px; margin:0 0 12px; }
+    .compare { display:grid; grid-template-columns:1fr 1fr; gap:16px; max-width:720px; }
+    .panel { background:#161a22; border:1px solid #2a3040; border-radius:12px; padding:12px; }
+    .panel h2 { margin:0 0 8px; font-size:13px; color:#8a94a6; text-transform:uppercase; letter-spacing:.08em; }
+    .card { display:flex; gap:10px; align-items:center; background:#232833; border-radius:10px; padding:10px; }
+    .card img { width:48px; height:48px; object-fit:contain; background:rgba(255,255,255,.08); border-radius:8px; }
+    .meta { font-size:12px; color:#8a94a6; word-break:break-all; margin-top:8px; }
+    .bad { color:#f87171; }
+    .good { color:#4ade80; }
+  </style>
+</head>
+<body>
+  <h1>Mutation Totem image mapping proof</h1>
+  <div class="compare">
+    <div class="panel">
+      <h2>Before (fish resolver)</h2>
+      <div class="card ft-card ft-card--totem">
+        <div class="ft-card-icon"><img src="../../site/data/fish_image_cache/31762b3eb03df2bf.png" alt="Mutation Totem before"></div>
+        <div class="ft-card-main">
+          <div class="ft-card-name">Mutation Totem</div>
+          <div class="ft-card-stats"><span class="ft-chip ft-chip-qty">60</span></div>
+        </div>
+      </div>
+      <div class="meta bad">/api/fishit-tracker/assets/fish/31762b3eb03df2bf.png<br>imageSource=gameitemdb_icon via fish cache</div>
+    </div>
+    <div class="panel">
+      <h2>After (totem resolver)</h2>
+      <div class="card ft-card ft-card--totem">
+        <div class="ft-card-icon"><img src="../data/totem_image_cache/totem_mutation_totem.webp" alt="Mutation Totem after"></div>
+        <div class="ft-card-main">
+          <div class="ft-card-name">Mutation Totem</div>
+          <div class="ft-card-stats"><span class="ft-chip ft-chip-qty">60</span></div>
+        </div>
+      </div>
+      <div class="meta good">/api/fishit-tracker/assets/totems/totem_mutation_totem.webp<br>imageSource=totem_manual_asset, imageResolver=totem_catalog</div>
+    </div>
+  </div>
+</body>
+</html>

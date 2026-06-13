@@ -52,10 +52,11 @@ const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
 const snapshotRecovery = require('./fishitSnapshotRecovery');
-const { BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_MARKER, BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, EXPECTED_CLIENT_TRACKER_BUILD, BLOCKER10ZK_BUILD, BLOCKER10ZK_UI_MARKER, BLOCKER10ZJ_BUILD, BLOCKER10ZJ_UI_MARKER, BLOCKER10ZI_BUILD, BLOCKER10ZI_UI_MARKER, BLOCKER10ZH_BUILD, BLOCKER10ZH_UI_MARKER, BLOCKER10ZG_BUILD, BLOCKER10ZG_UI_MARKER, BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_MARKER, BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, EXPECTED_CLIENT_TRACKER_BUILD, ALLOWED_TRACKER_BUILD_EXACT, BLOCKER10ZK_BUILD, BLOCKER10ZK_UI_MARKER, BLOCKER10ZJ_BUILD, BLOCKER10ZJ_UI_MARKER, BLOCKER10ZI_BUILD, BLOCKER10ZI_UI_MARKER, BLOCKER10ZH_BUILD, BLOCKER10ZH_UI_MARKER, BLOCKER10ZG_BUILD, BLOCKER10ZG_UI_MARKER, BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const trackerRarityStyle = require('./fishitTrackerRarityStyle');
 const fishitStoneDisplayMap = require('./fishitStoneDisplayMap');
 const stoneImageAssets = require('./fishitStoneImageAssets');
+const totemImageAssets = require('./fishitTotemImageAssets');
 const inventorySort = require('./fishitInventorySort');
 const inventoryAssets = require('./inventoryAssets');
 const inventoryTrackedAccounts = require('./inventoryTrackedAccounts');
@@ -75,6 +76,7 @@ const {
   validateTrackerClientProof,
   prepareTrackerRequestBody,
   MINIMUM_TRACKER_BUILD,
+  isAllowedTrackerBuild,
   ALLOWED_TRACKER_CHANNEL,
   ALLOWED_TRACKER_RAW_URL,
 } = require('./fishitTrackerChannelEnforcement');
@@ -95,6 +97,7 @@ const { computeCanonicalTrackerUsers } = require('./fishitCanonicalTrackerUsers'
 const uploadAccountStatus = require('./fishitTrackerUploadStatus');
 const snapshotCompleteness = require('./fishitSnapshotCompleteness');
 const trackerPerf = require('./fishitTrackerPerformance');
+const compactUpload = require('./fishitTrackerCompactUpload');
 
 learnedFishCatalog.purgePoisonedMappings();
 for (const row of learnedFishCatalog.getBlockedMappings()) {
@@ -128,9 +131,7 @@ function resolvePlayerStatsForApi(raw) {
 }
 
 function isTrustedClientBuild(build) {
-  if (!build) return false;
-  const s = String(build);
-  return s === MINIMUM_TRACKER_BUILD || s.includes('LOADER_REGISTER_LIMIT_FIX');
+  return isAllowedTrackerBuild(build);
 }
 
 function buildPlayerStatsProof(raw, data, nowFallback) {
@@ -3399,6 +3400,22 @@ router.delete('/api/inventory/accounts/:usernameKey', inventoryWriteLimiter, req
   }
 });
 
+// ── GET /api/fishit-tracker/assets/totems/:filename — manual totem image cache ──
+router.get('/api/fishit-tracker/assets/totems/:filename', (req, res) => {
+  const file = path.basename(String(req.params.filename || ''));
+  if (!file || !/^[a-zA-Z0-9._-]+$/.test(file)) {
+    return res.status(400).type('text/plain').send('invalid_filename');
+  }
+  const full = totemImageAssets.getTotemAssetFilePath(file);
+  if (!full || !fs.existsSync(full)) {
+    return res.status(404).type('text/plain').send('totem_asset_not_found');
+  }
+  const stat = fs.statSync(full);
+  res.set('Cache-Control', 'public, max-age=86400, immutable');
+  res.set('ETag', `"totem-${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+  return res.sendFile(full);
+});
+
 // ── GET /api/fishit-tracker/assets/stones/:filename — manual stone image cache (BLOCKER10ZD) ──
 router.get('/api/fishit-tracker/assets/stones/:filename', (req, res) => {
   const file = path.basename(String(req.params.filename || ''));
@@ -3616,6 +3633,7 @@ function buildTotemScanProof(rows, extra = {}) {
     source: extra.source || 'playerdata_gameitemdb',
     uploadedTotemCount: extra.uploadedTotemCount != null ? extra.uploadedTotemCount : names.length,
     uploadedTotemQuantity: extra.uploadedTotemQuantity != null ? extra.uploadedTotemQuantity : quantity,
+    evidenceMatch: extra.evidenceMatch || null,
   };
 }
 
@@ -3643,6 +3661,44 @@ function applyLitePublicSnapshotFields(session, usesGameItemDb, usesItemUtility,
   return session;
 }
 
+function clearStaleAuditProofFields(session) {
+  if (!session || typeof session !== 'object') return session;
+  return {
+    ...session,
+    inventoryItemClassificationDebug: null,
+    totemPathAudit: null,
+    totemInventoryPathProof: null,
+    gameItemDbTotemAudit: null,
+    nonFishNonStoneItemGroups: [],
+    lastInventorySnapshotDiagnostics: null,
+  };
+}
+
+function markOutdatedBuildSession(session, gate, now) {
+  const base = clearStaleAuditProofFields(session || {});
+  const rejected = uploadAccountStatus.markTrackerSyncMissed({
+    ...base,
+    loaderOutdated: true,
+    expectedLoaderBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+    lastUploadRejectReason: 'OUTDATED_TRACKER_BUILD',
+    lastUploadError: 'OUTDATED_TRACKER_BUILD',
+    lastUploadRejectedAt: now,
+    lastUploadReceivedAt: now,
+    trackerBuild: gate?.proof?.trackerBuild || base.trackerBuild || null,
+    lastUploadTrackerBuild: gate?.proof?.trackerBuild || base.lastUploadTrackerBuild || null,
+  }, now);
+  rejected.latestPayloadAccepted = false;
+  return rejected;
+}
+
+function ensureSessionBuildCurrent(session) {
+  if (!session) return session;
+  const build = session.trackerBuild || session.lastUploadTrackerBuild;
+  if (!build || isTrustedClientBuild(build)) return session;
+  const now = new Date().toISOString();
+  return markOutdatedBuildSession(session, { proof: { trackerBuild: build } }, now);
+}
+
 // ── POST update-backpack (canonical + legacy alias) ───────────────
 // Accepts both:
 //   • inventory_snapshot  – the Replion source-of-truth inventory. The items
@@ -3650,18 +3706,40 @@ function applyLitePublicSnapshotFields(session, usesGameItemDb, usesItemUtility,
 //   • tracker_status      – a lightweight online/offline + source ping with no
 //     items; keeps the last known inventory and only flips flags.
 function handleUpdateBackpack(req, res) {
-    const body = prepareTrackerRequestBody(req.body || {}, {
+    const uploadArrivalAt = Date.now();
+    const rawIncomingBody = prepareTrackerRequestBody(req.body || {}, {
       testMode: process.env.NODE_ENV === 'test',
     });
+    const isDebugUpload = compactUpload.isDebugUploadBody(rawIncomingBody);
+    const parseStart = Date.now();
+    const body = isDebugUpload
+      ? rawIncomingBody
+      : compactUpload.stripHeavyUploadFields(rawIncomingBody);
+    const parseMs = Date.now() - parseStart;
+    const requestBytes = Number(req.headers['content-length'])
+      || Buffer.byteLength(JSON.stringify(req.body || {}), 'utf8');
     const arrivalType = body.type || 'inventory_snapshot';
     if (arrivalType !== 'tracker_status') {
+      const auditArrival = extractTotemAuditArrivalMeta(rawIncomingBody);
       console.log(
-        '[fishit-tracker] upload_arrival route=%s type=%s user=%s sessionKey=%s build=%s gate=%j',
+        '[fishit-tracker] upload_arrival route=%s type=%s user=%s sessionKey=%s build=%s' +
+        ' debugUpload=%s compact=%s hasTotemPathAudit=%s hasTotemInventoryPathProof=%s hasClassificationDebug=%s hasGameItemDbTotemAudit=%s' +
+        ' nonFishGroups=%d totemCount=%d unresolvedCount=%s requestBytes=%d gate=%j',
         req.path,
         arrivalType,
         body.username || '?',
         body.username ? String(body.username).toLowerCase() : '?',
         body.trackerBuild || body.trackerClientProof?.trackerBuild || 'n/a',
+        isDebugUpload,
+        !isDebugUpload,
+        auditArrival.hasTotemPathAudit,
+        auditArrival.hasTotemInventoryPathProof,
+        auditArrival.hasClassificationDebug,
+        auditArrival.hasGameItemDbTotemAudit,
+        auditArrival.nonFishGroups,
+        auditArrival.totemCount,
+        auditArrival.unresolvedCount == null ? 'n/a' : String(auditArrival.unresolvedCount),
+        requestBytes,
         trackerConcurrencyGate.stats(),
       );
     }
@@ -3676,13 +3754,24 @@ function handleUpdateBackpack(req, res) {
         clientGate.proof?.scriptSource || 'n/a',
       );
       const rejectKey = body.username ? String(body.username).toLowerCase() : null;
-      if (rejectKey && liveTrackDB[rejectKey]) {
-        liveTrackDB[rejectKey] = {
-          ...liveTrackDB[rejectKey],
-          lastUploadError: (clientGate.reasons || []).join(',') || clientGate.error,
-          lastUploadReceivedAt: new Date().toISOString(),
-          lastUploadStatusCodeReturned: clientGate.status || 403,
+      const nowRejected = new Date().toISOString();
+      if (rejectKey) {
+        const existingRejected = liveTrackDB[rejectKey] || {
+          username: sanitiseUsername(body.username),
+          userId: Number.isFinite(Number(body.userId)) ? Number(body.userId) : 0,
+          items: [],
+          inventory: null,
         };
+        liveTrackDB[rejectKey] = clientGate.error === 'OUTDATED_TRACKER_BUILD'
+          ? markOutdatedBuildSession(existingRejected, clientGate, nowRejected)
+          : {
+            ...existingRejected,
+            lastUploadError: (clientGate.reasons || []).join(',') || clientGate.error,
+            lastUploadReceivedAt: nowRejected,
+            lastUploadStatusCodeReturned: clientGate.status || 403,
+            lastUploadRejectReason: (clientGate.reasons || [])[0] || clientGate.error,
+            lastUploadRejectedAt: nowRejected,
+          };
       }
       return res.status(clientGate.status || 403).json({
         error: clientGate.error,
@@ -3793,6 +3882,7 @@ function handleUpdateBackpack(req, res) {
           accepted: true,
           statusCode: 200,
         });
+        liveTrackDB[key].lastHeartbeatDiagnostics = buildHeartbeatDiagnostics(body, liveTrackDB[key], now);
       }
       // Server-side log.
       console.log(
@@ -3852,7 +3942,7 @@ function handleUpdateBackpack(req, res) {
     }
 
     // ── Inventory snapshot ────────────────────────────────────────
-    const expectsPlayerDataGameItemDb = /BLOCKER10ZL_|BLOCKER10Z[ABC]|PLAYERDATA_GAMEITEMDB/i.test(incomingBuild);
+    const expectsPlayerDataGameItemDb = /BLOCKER10ZL_|BLOCKER10Z[ABC]|PLAYERDATA_GAMEITEMDB|TOTEM_|UPLOAD_COMPACT/i.test(incomingBuild);
     const isPlayerDataPayload = gameItemDbPublic.detectGameItemDbUpload(body);
     if (expectsPlayerDataGameItemDb && payloadType === 'inventory_snapshot' && !isPlayerDataPayload) {
       liveTrackDB[key] = withUploadCount({
@@ -3898,7 +3988,6 @@ function handleUpdateBackpack(req, res) {
     }
 
     let rawItems = normaliseInventoryItems(body);
-    const uploadArrivalAt = Date.now();
     const gateWaitMs = 0;
     const rawPersistStart = Date.now();
     const ps         = sanitiseParseStats(body.parseStats);
@@ -4060,6 +4149,40 @@ function handleUpdateBackpack(req, res) {
         lastSuccessfulUploadAt: existing?.lastSuccessfulUploadAt || null,
       };
 
+    const shouldProcessAudit = isDebugUpload
+      && (usesGameItemDb || isTotemAuditTrackerBuild(incomingBuild));
+    const totemAuditFields = shouldProcessAudit
+      ? resolveTotemAuditFields(rawIncomingBody, existing, incomingBuild)
+      : {
+        inventoryItemClassificationDebug: existing?.inventoryItemClassificationDebug || null,
+        totemPathAudit: existing?.totemPathAudit || null,
+        totemInventoryPathProof: existing?.totemInventoryPathProof || null,
+        gameItemDbTotemAudit: existing?.gameItemDbTotemAudit || null,
+        nonFishNonStoneItemGroups: existing?.nonFishNonStoneItemGroups || [],
+      };
+    const snapshotDiagnosticsBody = shouldProcessAudit
+      ? {
+        ...rawIncomingBody,
+        inventoryItemClassificationDebug: totemAuditFields.inventoryItemClassificationDebug,
+        totemPathAudit: totemAuditFields.totemPathAudit,
+        totemInventoryPathProof: totemAuditFields.totemInventoryPathProof,
+        gameItemDbTotemAudit: totemAuditFields.gameItemDbTotemAudit,
+        nonFishNonStoneItemGroups: totemAuditFields.nonFishNonStoneItemGroups,
+      }
+      : null;
+    const mergedGameItemDbProof = usesGameItemDb
+      ? (shouldProcessAudit
+        ? {
+          ...(rawIncomingBody.playerDataGameItemDbProof || existing?.playerDataGameItemDbProof || {}),
+          inventoryItemClassificationDebug: totemAuditFields.inventoryItemClassificationDebug,
+          totemPathAudit: totemAuditFields.totemPathAudit,
+          totemInventoryPathProof: totemAuditFields.totemInventoryPathProof,
+          gameItemDbTotemAudit: totemAuditFields.gameItemDbTotemAudit,
+          nonFishNonStoneItemGroups: totemAuditFields.nonFishNonStoneItemGroups,
+        }
+        : compactUpload.buildCompactGameItemDbProof(body, existing?.playerDataGameItemDbProof))
+      : (existing?.playerDataGameItemDbProof || null);
+
     // Store under username key + userId alias.
     liveTrackDB[key] = withUploadCount(snapshotCompleteness.applyCompletenessFields({
       username:        cleanUser,
@@ -4111,17 +4234,34 @@ function handleUpdateBackpack(req, res) {
           0,
         ),
       }),
-      sourceTruth: usesGameItemDb
-        ? (body.sourceTruth || gameItemDbPublic.defaultSourceTruth())
-        : (usesItemUtility
-          ? (body.sourceTruth || itemUtilityPublic.defaultSourceTruth())
-          : (existing?.sourceTruth || null)),
-      playerDataUnresolvedItems: usesGameItemDb
-        ? (Array.isArray(body.unresolvedItems) ? body.unresolvedItems.slice(0, 50) : [])
-        : (existing?.playerDataUnresolvedItems || []),
-      playerDataGameItemDbProof: usesGameItemDb
-        ? (body.playerDataGameItemDbProof || existing?.playerDataGameItemDbProof || null)
-        : (existing?.playerDataGameItemDbProof || null),
+      inventoryItemClassificationDebug: shouldProcessAudit
+        ? totemAuditFields.inventoryItemClassificationDebug
+        : (existing?.inventoryItemClassificationDebug || null),
+      totemPathAudit: shouldProcessAudit
+        ? totemAuditFields.totemPathAudit
+        : (existing?.totemPathAudit || null),
+      totemInventoryPathProof: shouldProcessAudit
+        ? totemAuditFields.totemInventoryPathProof
+        : (existing?.totemInventoryPathProof || null),
+      gameItemDbTotemAudit: shouldProcessAudit
+        ? totemAuditFields.gameItemDbTotemAudit
+        : (existing?.gameItemDbTotemAudit || null),
+      nonFishNonStoneItemGroups: shouldProcessAudit
+        ? totemAuditFields.nonFishNonStoneItemGroups
+        : (existing?.nonFishNonStoneItemGroups || []),
+      lastInventorySnapshotDiagnostics: shouldProcessAudit
+        ? buildInventorySnapshotDiagnostics(snapshotDiagnosticsBody, existing)
+        : (existing?.lastInventorySnapshotDiagnostics || null),
+      lastInventorySnapshotAt: shouldProcessAudit
+        ? now
+        : (existing?.lastInventorySnapshotAt || null),
+      lastInventorySnapshotBuild: shouldProcessAudit
+        ? (incomingBuild || existing?.lastInventorySnapshotBuild || null)
+        : (existing?.lastInventorySnapshotBuild || null),
+      lastInventorySnapshotPayloadType: shouldProcessAudit
+        ? (payloadType || 'inventory_snapshot')
+        : (existing?.lastInventorySnapshotPayloadType || null),
+      playerDataGameItemDbProof: mergedGameItemDbProof,
       playerDataHiddenUnresolved: usesItemUtility
         ? (Array.isArray(body.hiddenUnresolvedRows) ? body.hiddenUnresolvedRows.slice(0, 50) : [])
         : (existing?.playerDataHiddenUnresolved || []),
@@ -4161,6 +4301,10 @@ function handleUpdateBackpack(req, res) {
       ...uploadDebugBase,
       accepted: syncEval.accepted,
       statusCode: 200,
+      requestBytes,
+      responseMs: Date.now() - uploadArrivalAt,
+      compact: !isDebugUpload,
+      debugUpload: isDebugUpload,
     });
     if (syncEval.accepted) {
       liveTrackDB[key] = uploadAccountStatus.markTrackerSyncSuccess(liveTrackDB[key], now, {
@@ -4189,7 +4333,9 @@ function handleUpdateBackpack(req, res) {
 
     console.log(
       '[fishit-tracker] upload_persist user=%s sessionKey=%s accepted=%d snapshotComplete=%s' +
-      ' fishCount=%d stoneCount=%d totemCount=%d totemQuantity=%d serverReceivedAt=%s cacheRefresh=scheduled gate=%j rawPersistMs=%d',
+      ' fishCount=%d stoneCount=%d totemCount=%d totemQuantity=%d' +
+      ' persistedTotemPathAudit=%s persistedClassificationDebug=%s persistedNonFishGroups=%d' +
+      ' serverReceivedAt=%s cacheRefresh=scheduled gate=%j rawPersistMs=%d',
       cleanUser,
       key,
       acceptedCount,
@@ -4201,6 +4347,11 @@ function handleUpdateBackpack(req, res) {
         (s, row) => s + (Number(row?.quantity) > 0 ? Math.floor(Number(row.quantity)) : 1),
         0,
       ),
+      !!liveTrackDB[key]?.totemPathAudit,
+      !!liveTrackDB[key]?.inventoryItemClassificationDebug,
+      Array.isArray(liveTrackDB[key]?.nonFishNonStoneItemGroups)
+        ? liveTrackDB[key].nonFishNonStoneItemGroups.length
+        : 0,
       now,
       trackerConcurrencyGate.stats(),
       rawPersistMs,
@@ -4235,6 +4386,16 @@ function handleUpdateBackpack(req, res) {
       pending_queue: trackerConcurrencyGate.stats().queued,
       per_account_pending: trackerConcurrencyGate.perAccountPendingCount(key),
     });
+    console.log(
+      '[fishit-tracker] upload_fast_path username=%s requestBytes=%d parseMs=%d persistMs=%d responseMs=%d debugUpload=%s',
+      cleanUser,
+      requestBytes,
+      parseMs,
+      rawPersistMs,
+      totalResponseMs,
+      isDebugUpload,
+    );
+    trackerConcurrencyGate.logQueueStatus();
 
     const deferredBody = body;
     const deferredRawItems = rawItems;
@@ -4338,6 +4499,21 @@ function handleUpdateBackpack(req, res) {
         }
       } catch (bgErr) {
         console.warn('[fishit-tracker] deferred upload work failed:', bgErr?.message || bgErr);
+      }
+      if (isDebugUpload && deferredSnapshotSeq === liveTrackDB[key]?.deferredSnapshotSeq) {
+        const auditFields = resolveTotemAuditFields(deferredBody, session, incomingBuild);
+        session.inventoryItemClassificationDebug = auditFields.inventoryItemClassificationDebug;
+        session.totemPathAudit = auditFields.totemPathAudit;
+        session.totemInventoryPathProof = auditFields.totemInventoryPathProof;
+        session.gameItemDbTotemAudit = auditFields.gameItemDbTotemAudit;
+        session.nonFishNonStoneItemGroups = auditFields.nonFishNonStoneItemGroups;
+        session.lastInventorySnapshotDiagnostics = buildInventorySnapshotDiagnostics({
+          ...deferredBody,
+          ...auditFields,
+        }, session);
+        session.lastInventorySnapshotAt = new Date().toISOString();
+        session.lastInventorySnapshotBuild = incomingBuild || session.trackerBuild || null;
+        session.lastInventorySnapshotPayloadType = payloadType || 'inventory_snapshot';
       }
       const enrichmentMs = Date.now() - enrichStart;
       trackerConcurrencyGate.logUploadTiming({
@@ -4646,16 +4822,22 @@ function buildClientBuildProof(data) {
 function applyUploadDebugFields(session, opts = {}) {
   const now = new Date().toISOString();
   const base = session && typeof session === 'object' ? session : {};
+  const isHeartbeat = opts.payloadType === 'tracker_status';
   const patch = {
     lastUploadReceivedAt: now,
     lastUploadEndpoint: opts.endpoint || null,
-    lastUploadPayloadType: opts.payloadType || null,
     lastUploadUsername: opts.username || base.username || null,
     lastUploadSessionKey: opts.sessionKey || null,
     lastUploadTrackerBuild: opts.trackerBuild || base.trackerBuild || null,
     lastUploadHadPlayerStats: !!opts.hadPlayerStats,
     lastUploadStatusCodeReturned: opts.statusCode != null ? opts.statusCode : null,
   };
+  if (!isHeartbeat) {
+    patch.lastUploadPayloadType = opts.payloadType || null;
+  } else {
+    patch.lastHeartbeatPayloadType = 'tracker_status';
+    patch.lastHeartbeatAt = now;
+  }
   if (opts.accepted) {
     patch.lastUploadAcceptedAt = now;
     patch.lastUploadRejectedAt = null;
@@ -4667,7 +4849,198 @@ function applyUploadDebugFields(session, opts = {}) {
     patch.lastUploadRejectReason = opts.rejectReason || 'rejected';
     patch.lastUploadError = opts.rejectReason || 'rejected';
   }
+  if (opts.requestBytes != null) patch.lastRequestBytes = opts.requestBytes;
+  if (opts.responseMs != null) patch.lastUploadResponseMs = opts.responseMs;
+  if (opts.compact != null) patch.lastUploadCompact = opts.compact === true;
+  if (opts.debugUpload != null) patch.lastUploadDebug = opts.debugUpload === true;
   return { ...base, ...patch };
+}
+
+function buildInventorySnapshotDiagnostics(body, session) {
+  const proof = body?.playerDataGameItemDbProof && typeof body.playerDataGameItemDbProof === 'object'
+    ? body.playerDataGameItemDbProof
+    : {};
+  const classification = body?.inventoryItemClassificationDebug
+    || proof.inventoryItemClassificationDebug
+    || session?.inventoryItemClassificationDebug
+    || null;
+  const uploadedUnresolvedCount = Array.isArray(body?.unresolvedItems)
+    ? body.unresolvedItems.length
+    : null;
+  const persistedUnresolvedCount = Number.isFinite(Number(proof.unresolvedCount))
+    ? Number(proof.unresolvedCount)
+    : (Array.isArray(proof.unresolvedItems) ? proof.unresolvedItems.length : null);
+  const classificationUnresolvedCount = Number.isFinite(Number(classification?.unresolvedRows))
+    ? Number(classification.unresolvedRows)
+    : null;
+  const publicHiddenUnresolvedCount = Array.isArray(session?.playerDataHiddenUnresolved)
+    ? session.playerDataHiddenUnresolved.length
+    : null;
+  const alignedUnresolvedCount = persistedUnresolvedCount ?? uploadedUnresolvedCount
+    ?? classificationUnresolvedCount ?? null;
+  return {
+    payloadType: body?.type || 'inventory_snapshot',
+    trackerBuild: sanitiseTrackerBuild(body?.trackerBuild) || session?.trackerBuild || null,
+    at: new Date().toISOString(),
+    fishCount: Array.isArray(body?.fishItems) ? body.fishItems.length : (proof.fishCount ?? null),
+    stoneCount: Array.isArray(body?.stoneItems) ? body.stoneItems.length : (proof.stoneCount ?? null),
+    totemCount: Array.isArray(body?.totemItems) ? body.totemItems.length : (proof.totemCount ?? null),
+    totemQuantity: (Array.isArray(body?.totemItems) ? body.totemItems : []).reduce(
+      (s, row) => s + (Number(row?.quantity) > 0 ? Math.floor(Number(row.quantity)) : 1),
+      0,
+    ),
+    unresolvedCount: alignedUnresolvedCount,
+    uploadedUnresolvedCount,
+    persistedUnresolvedCount,
+    publicHiddenUnresolvedCount,
+    classificationUnresolvedCount,
+    playerDataInventoryCount: proof.playerDataInventoryCount ?? classification?.totalRows ?? null,
+    scannedRows: proof.scannedRows ?? classification?.scannedRows ?? null,
+    skippedNoIdRows: proof.skippedNoIdRows ?? classification?.skippedNoIdRows ?? null,
+    inventoryItemClassificationDebug: classification,
+    totemPathAudit: body?.totemPathAudit || proof.totemPathAudit || session?.totemPathAudit || null,
+    totemInventoryPathProof: body?.totemInventoryPathProof
+      || proof.totemInventoryPathProof
+      || session?.totemInventoryPathProof
+      || null,
+    gameItemDbTotemAudit: body?.gameItemDbTotemAudit || proof.gameItemDbTotemAudit || session?.gameItemDbTotemAudit || null,
+    nonFishNonStoneItemGroups: body?.nonFishNonStoneItemGroups
+      || proof.nonFishNonStoneItemGroups
+      || classification?.nonFishNonStoneItemGroups
+      || session?.nonFishNonStoneItemGroups
+      || [],
+    totemScanProof: buildTotemScanProof(
+      Array.isArray(body?.totemItems) ? body.totemItems : (session?.playerDataTotemItems || []),
+      {
+        uploadedTotemCount: Array.isArray(body?.totemItems) ? body.totemItems.length : 0,
+        uploadedTotemQuantity: (Array.isArray(body?.totemItems) ? body.totemItems : []).reduce(
+          (s, row) => s + (Number(row?.quantity) > 0 ? Math.floor(Number(row.quantity)) : 1),
+          0,
+        ),
+      },
+    ),
+  };
+}
+
+function isTotemAuditTrackerBuild(build) {
+  return /^TOTEM_/i.test(String(build || ''));
+}
+
+function emptyTotemAuditSkeleton(build, reason = 'audit_missing_from_upload') {
+  return {
+    inventoryItemClassificationDebug: {
+      enabled: true,
+      build: build || null,
+      scannedRows: null,
+      scannedPaths: [],
+      totemNotFoundReason: reason,
+      unresolvedGroups: [],
+      ignoredGroups: [],
+      totemCandidateGroups: [],
+    },
+    totemPathAudit: {
+      searchedTerms: ['Totem', 'Mutation', 'Artifact', 'Gear', 'Trophy'],
+      inventoryPathCounts: {},
+      matches: [],
+    },
+    gameItemDbTotemAudit: {
+      totemNameMatches: [],
+      gearSamples: [],
+      trophySamples: [],
+      artifactMatches: [],
+      mutationMatches: [],
+    },
+    nonFishNonStoneItemGroups: [],
+  };
+}
+
+function resolveTotemAuditFields(body, existing, incomingBuild) {
+  const proof = body?.playerDataGameItemDbProof && typeof body.playerDataGameItemDbProof === 'object'
+    ? body.playerDataGameItemDbProof
+    : {};
+  const pick = (top, nested, prev) => top || nested || prev || null;
+  let inventoryItemClassificationDebug = pick(
+    body.inventoryItemClassificationDebug,
+    proof.inventoryItemClassificationDebug,
+    existing?.inventoryItemClassificationDebug,
+  );
+  let totemPathAudit = pick(body.totemPathAudit, proof.totemPathAudit, existing?.totemPathAudit);
+  let totemInventoryPathProof = pick(
+    body.totemInventoryPathProof,
+    proof.totemInventoryPathProof,
+    existing?.totemInventoryPathProof,
+  );
+  let gameItemDbTotemAudit = pick(
+    body.gameItemDbTotemAudit,
+    proof.gameItemDbTotemAudit,
+    existing?.gameItemDbTotemAudit,
+  );
+  let nonFishNonStoneItemGroups = Array.isArray(body.nonFishNonStoneItemGroups)
+    ? body.nonFishNonStoneItemGroups.slice(0, 80)
+    : (Array.isArray(proof.nonFishNonStoneItemGroups)
+      ? proof.nonFishNonStoneItemGroups.slice(0, 80)
+      : (existing?.nonFishNonStoneItemGroups || []));
+
+  if (isTotemAuditTrackerBuild(incomingBuild)) {
+    const skeleton = emptyTotemAuditSkeleton(incomingBuild);
+    if (!inventoryItemClassificationDebug) {
+      inventoryItemClassificationDebug = skeleton.inventoryItemClassificationDebug;
+    }
+    totemPathAudit = totemPathAudit || skeleton.totemPathAudit;
+    gameItemDbTotemAudit = gameItemDbTotemAudit || skeleton.gameItemDbTotemAudit;
+    if (!nonFishNonStoneItemGroups.length) {
+      nonFishNonStoneItemGroups = skeleton.nonFishNonStoneItemGroups;
+    }
+  }
+
+  return {
+    inventoryItemClassificationDebug,
+    totemPathAudit,
+    totemInventoryPathProof,
+    gameItemDbTotemAudit,
+    nonFishNonStoneItemGroups,
+  };
+}
+
+function extractTotemAuditArrivalMeta(body) {
+  const proof = body?.playerDataGameItemDbProof && typeof body.playerDataGameItemDbProof === 'object'
+    ? body.playerDataGameItemDbProof
+    : {};
+  const hasTotemPathAudit = !!(body.totemPathAudit || proof.totemPathAudit);
+  const hasTotemInventoryPathProof = !!(body.totemInventoryPathProof || proof.totemInventoryPathProof);
+  const hasClassificationDebug = !!(body.inventoryItemClassificationDebug || proof.inventoryItemClassificationDebug);
+  const hasGameItemDbTotemAudit = !!(body.gameItemDbTotemAudit || proof.gameItemDbTotemAudit);
+  const nonFishGroups = Array.isArray(body.nonFishNonStoneItemGroups)
+    ? body.nonFishNonStoneItemGroups.length
+    : (Array.isArray(proof.nonFishNonStoneItemGroups) ? proof.nonFishNonStoneItemGroups.length : 0);
+  const totemCount = Array.isArray(body.totemItems) ? body.totemItems.length : 0;
+  const unresolvedCount = Array.isArray(body.unresolvedItems)
+    ? body.unresolvedItems.length
+    : (Number.isFinite(Number(proof.unresolvedCount)) ? Number(proof.unresolvedCount) : null);
+  return {
+    hasTotemPathAudit,
+    hasTotemInventoryPathProof,
+    hasClassificationDebug,
+    hasGameItemDbTotemAudit,
+    nonFishGroups,
+    totemCount,
+    unresolvedCount,
+  };
+}
+
+function buildHeartbeatDiagnostics(body, session, now) {
+  return {
+    payloadType: 'tracker_status',
+    trackerBuild: sanitiseTrackerBuild(body?.trackerBuild) || session?.trackerBuild || null,
+    at: now || new Date().toISOString(),
+    phase: body?.phase || session?.phase || null,
+    hadPlayerStats: !!(body?.playerStats || body?.playerStatsDebug),
+    preservedInventorySnapshotAt: session?.lastInventorySnapshotAt || session?.lastInventoryAt || null,
+    preservedFishCount: Array.isArray(session?.playerDataFishItems) ? session.playerDataFishItems.length : null,
+    preservedStoneCount: Array.isArray(session?.playerDataStoneItems) ? session.playerDataStoneItems.length : null,
+    preservedTotemCount: Array.isArray(session?.playerDataTotemItems) ? session.playerDataTotemItems.length : null,
+    preservedClassificationDebugPresent: !!session?.inventoryItemClassificationDebug,
+  };
 }
 
 function statsUploadTimestamp(data) {
@@ -5225,6 +5598,8 @@ async function handleGetBackpack(req, res) {
   if (!data) {
     return res.status(404).json({ error: 'No tracking session active for this user.' });
   }
+  data = ensureSessionBuildCurrent(data);
+  liveTrackDB[key] = data;
 
   // Enrich from raw tracker payload when available (BLOCKER10I/10S).
   const sourceItems = partialSnapshot.itemsForSessionDisplay(data);
@@ -5485,7 +5860,8 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
   if (!cleanUser) return res.status(400).json({ ok: false, error: 'Invalid username.' });
 
   const key   = cleanUser.toLowerCase();
-  const data  = liveTrackDB[key];
+  let data  = liveTrackDB[key];
+  const refreshAudit = req.query.refreshAudit === '1' || req.query.refreshAudit === 'true';
 
   if (!data) {
     // Enumerate known keys (usernames only, strip uid: aliases and limit count).
@@ -5493,6 +5869,50 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
       .filter((k) => !k.startsWith('uid:'))
       .slice(0, 100);
     return res.status(404).json({ ok: false, error: 'not_found', key, knownKeys, serverCommit: resolveServerCommit() });
+  }
+  data = ensureSessionBuildCurrent(data);
+  liveTrackDB[key] = data;
+
+  const wantFullDebug = trackerPerf.isFullDebugRequest(req);
+  if (!wantFullDebug) {
+    return res.status(200).json(trackerPerf.buildLiteTrackerDebugResponse(data, key, {
+      serverCommit: resolveServerCommit(),
+      expectedClientBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+      uploadGate: trackerConcurrencyGate.stats(),
+      isTrustedBuild: isTrustedClientBuild,
+    }));
+  }
+  if (!trackerPerf.isAdminDebugRequest(req)) {
+    return res.status(401).json({
+      ok: false,
+      error: 'unauthorized',
+      message: 'Admin token required for full debug (?full=1).',
+    });
+  }
+
+  if (refreshAudit) {
+    data.pendingAuditRefresh = true;
+    const persistBase = `${req.protocol}://${req.get('host')}`;
+    trackerConcurrencyGate.scheduleDeferredUploadWork(key, () => {
+      const session = liveTrackDB[key];
+      if (!session) return { skipped: true, reason: 'session_missing' };
+      const auditBody = {
+        type: 'inventory_snapshot',
+        trackerBuild: session.trackerBuild,
+        fishItems: session.playerDataFishItems,
+        stoneItems: session.playerDataStoneItems,
+        totemItems: session.playerDataTotemItems,
+        inventoryItemClassificationDebug: session.inventoryItemClassificationDebug,
+        totemPathAudit: session.totemPathAudit,
+        totemInventoryPathProof: session.totemInventoryPathProof,
+        gameItemDbTotemAudit: session.gameItemDbTotemAudit,
+        nonFishNonStoneItemGroups: session.nonFishNonStoneItemGroups,
+      };
+      session.lastInventorySnapshotDiagnostics = buildInventorySnapshotDiagnostics(auditBody, session);
+      session.lastInventorySnapshotAt = new Date().toISOString();
+      session.pendingAuditRefresh = false;
+      return persistSessionState(key, persistBase).catch(() => {});
+    });
   }
 
   const rawItemsArr = partialSnapshot.itemsForSessionDisplay(data);
@@ -5550,10 +5970,14 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
 
   return res.status(200).json({
     ok:              true,
+    responseMode:    'full',
     serverCommit:    resolveServerCommit(),
     publicApiBuild:  PUBLIC_API_BUILD,
     renderBuild:     PUBLIC_RENDER_BUILD,
     trackerBuild:    data.trackerBuild || null,
+    expectedClientTrackerBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+    minimumTrackerBuild: MINIMUM_TRACKER_BUILD,
+    allowedTrackerBuilds: ALLOWED_TRACKER_BUILD_EXACT,
     playerStats:     resolvePlayerStatsForApi(data.playerStats),
     playerStatsDebug: playerStatsStore.isTrustedPlayerStats(data.playerStats) ? (data.playerStatsDebug || null) : null,
     playerStatsUpdatedAt: data.playerStatsUpdatedAt || null,
@@ -5584,26 +6008,47 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
       : null,
     lastUploadError: data.lastUploadError || data.lastUploadRejectReason || data.lastFailureReason || null,
     latestSuccessfulUploadAt: data.lastSuccessfulUploadAt || data.lastInventoryAt || null,
-    uploadPipelineDiagnostics: {
-      lastUploadError: data.lastUploadError || data.lastUploadRejectReason || data.lastFailureReason || null,
-      lastUploadReceivedAt: data.lastUploadReceivedAt || null,
-      latestSuccessfulUploadAt: data.lastSuccessfulUploadAt || data.lastInventoryAt || null,
-      lastUploadStatusCodeReturned: data.lastUploadStatusCodeReturned != null
-        ? data.lastUploadStatusCodeReturned
-        : null,
-      fishCount: Array.isArray(publicFishDbg.fishItems) ? publicFishDbg.fishItems.length : 0,
-      stoneCount: Array.isArray(publicFishDbg.stoneItems) ? publicFishDbg.stoneItems.length : 0,
-      totemCount: Array.isArray(publicFishDbg.totemItems) ? publicFishDbg.totemItems.length : 0,
-      totemQuantity: (Array.isArray(publicFishDbg.totemItems) ? publicFishDbg.totemItems : []).reduce(
-        (s, row) => s + (Number(row?.amount || row?.quantity) > 0 ? Math.floor(Number(row.amount || row.quantity)) : 1),
-        0,
-      ),
-      totemScanProof: data.totemScanProof
-        || buildTotemScanProof(publicFishDbg.totemItems || data.playerDataTotemItems),
-      rawUploadTotemCount: Array.isArray(data.playerDataTotemItems) ? data.playerDataTotemItems.length : 0,
-      uploadGate: trackerConcurrencyGate.stats(),
-      aioCacheRefresh: 'scheduled_on_accept',
-    },
+    uploadPipelineDiagnostics: (() => {
+      const snapDiag = data.lastInventorySnapshotDiagnostics || {};
+      const fishItems = Array.isArray(publicFishDbg.fishItems) && publicFishDbg.fishItems.length
+        ? publicFishDbg.fishItems
+        : (Array.isArray(data.playerDataFishItems) ? data.playerDataFishItems : []);
+      const stoneItems = Array.isArray(publicFishDbg.stoneItems) && publicFishDbg.stoneItems.length
+        ? publicFishDbg.stoneItems
+        : (Array.isArray(data.playerDataStoneItems) ? data.playerDataStoneItems : []);
+      const totemItems = Array.isArray(publicFishDbg.totemItems) && publicFishDbg.totemItems.length
+        ? publicFishDbg.totemItems
+        : (Array.isArray(data.playerDataTotemItems) ? data.playerDataTotemItems : []);
+      return {
+        lastUploadError: data.lastUploadError || data.lastUploadRejectReason || data.lastFailureReason || null,
+        lastUploadReceivedAt: data.lastUploadReceivedAt || null,
+        latestSuccessfulUploadAt: data.lastSuccessfulUploadAt || data.lastInventoryAt || null,
+        lastUploadStatusCodeReturned: data.lastUploadStatusCodeReturned != null
+          ? data.lastUploadStatusCodeReturned
+          : null,
+        lastUploadPayloadType: data.lastUploadPayloadType || null,
+        lastHeartbeatPayloadType: data.lastHeartbeatPayloadType || null,
+        lastInventorySnapshotAt: data.lastInventorySnapshotAt || data.lastInventoryAt || null,
+        lastInventorySnapshotPayloadType: data.lastInventorySnapshotPayloadType || null,
+        fishCount: fishItems.length || snapDiag.fishCount || 0,
+        stoneCount: stoneItems.length || snapDiag.stoneCount || 0,
+        totemCount: totemItems.length || snapDiag.totemCount || 0,
+        totemQuantity: totemItems.reduce(
+          (s, row) => s + (Number(row?.amount || row?.quantity) > 0 ? Math.floor(Number(row.amount || row.quantity)) : 1),
+          0,
+        ) || snapDiag.totemQuantity || 0,
+        totemScanProof: data.totemScanProof
+          || snapDiag.totemScanProof
+          || buildTotemScanProof(totemItems),
+        rawUploadTotemCount: totemItems.length || snapDiag.totemCount || 0,
+        hasInventoryClassificationDebug: !!(
+          data.inventoryItemClassificationDebug
+          || snapDiag.inventoryItemClassificationDebug
+        ),
+        uploadGate: trackerConcurrencyGate.stats(),
+        aioCacheRefresh: 'scheduled_on_accept',
+      };
+    })(),
     syncProof: buildSyncProof(data),
     connectionIndicatorProof: buildConnectionIndicatorProof(data),
     statusFormatProof: buildStatusFormatProof(),
@@ -5687,6 +6132,27 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     totemItems: publicFishDbg.totemItems || [],
     totemScanProof: data.totemScanProof
       || buildTotemScanProof(publicFishDbg.totemItems || data.playerDataTotemItems),
+    inventoryItemClassificationDebug: data.inventoryItemClassificationDebug
+      || data.lastInventorySnapshotDiagnostics?.inventoryItemClassificationDebug
+      || null,
+    totemPathAudit: data.totemPathAudit
+      || data.lastInventorySnapshotDiagnostics?.totemPathAudit
+      || null,
+    totemInventoryPathProof: data.totemInventoryPathProof
+      || data.lastInventorySnapshotDiagnostics?.totemInventoryPathProof
+      || null,
+    gameItemDbTotemAudit: data.gameItemDbTotemAudit
+      || data.lastInventorySnapshotDiagnostics?.gameItemDbTotemAudit
+      || null,
+    nonFishNonStoneItemGroups: Array.isArray(data.nonFishNonStoneItemGroups) && data.nonFishNonStoneItemGroups.length
+      ? data.nonFishNonStoneItemGroups
+      : (data.lastInventorySnapshotDiagnostics?.nonFishNonStoneItemGroups || []),
+    lastHeartbeatDiagnostics: data.lastHeartbeatDiagnostics || null,
+    lastInventorySnapshotDiagnostics: data.lastInventorySnapshotDiagnostics || null,
+    lastInventorySnapshotAt: data.lastInventorySnapshotAt || data.lastInventoryAt || null,
+    lastInventorySnapshotBuild: data.lastInventorySnapshotBuild || null,
+    lastInventorySnapshotPayloadType: data.lastInventorySnapshotPayloadType || null,
+    lastHeartbeatPayloadType: data.lastHeartbeatPayloadType || null,
     fishItems: publicFishDbg.fishItems || [],
     inventoryParityProof: buildInventoryParityProof(
       rawItemsArr,
@@ -5746,8 +6212,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     blankPayloadRejected: data.blankPayloadRejected === true,
     uploadAccountStatus: uploadAccountStatus.deriveTrackerUploadAccountStatus(data, {
       expectedTrackerBuild: EXPECTED_CLIENT_TRACKER_BUILD,
-      isTrustedBuild: (build) => build === EXPECTED_CLIENT_TRACKER_BUILD
-        || String(build).includes('LOADER_REGISTER_LIMIT_FIX'),
+      isTrustedBuild: isTrustedClientBuild,
     }),
     selectedGeneralInventoryPath: data.parseStats?.selectedGeneralPath
       || data.parseStats?.selectedPath || null,

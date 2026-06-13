@@ -1,0 +1,27 @@
+{
+  "proof": "totem_image_mapping",
+  "before": {
+    "name": "Mutation Totem",
+    "itemId": "2",
+    "gameIcon": "rbxassetid://75593774049916",
+    "imageUrl": "/api/fishit-tracker/assets/fish/31762b3eb03df2bf.png",
+    "imageSource": "gameitemdb_icon",
+    "imageResolver": "fish_image_cache",
+    "issue": "gameitemdb_icon_asset_is_fishing_rod_not_totem"
+  },
+  "after": {
+    "name": "Mutation Totem",
+    "itemId": "2",
+    "imageUrl": "/api/fishit-tracker/assets/totems/totem_mutation_totem.webp",
+    "imageSource": "totem_manual_asset",
+    "imageResolver": "totem_catalog",
+    "catalogPath": "site/data/fishit_totem_image_assets.json",
+    "cacheDir": "site/data/totem_image_cache"
+  },
+  "resolverRules": {
+    "fish": "fishImageCache.attachItemUtilityGameIcons",
+    "stones": "stoneImageAssets.attachStoneImagesToItems",
+    "totems": "totemImageAssets.attachTotemImagesToItems",
+    "crossCategoryFallback": false
+  }
+}

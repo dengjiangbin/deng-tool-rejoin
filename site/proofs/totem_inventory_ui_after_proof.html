@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Totem inventory UI after proof</title>
+  <link rel="stylesheet" href="../public/assets/inventory.9d5a9197c0b9.css">
+  <style>
+    body { background:#0d0f14; padding:12px; }
+    .items-section { margin-top:14px; padding-top:12px; border-top:1px solid #2a3040; max-width:420px; }
+    .items-subsection { margin-top:10px; }
+    .items-subsection:first-of-type { margin-top:0; }
+  </style>
+</head>
+<body>
+  <div class="items-section" id="itemGridProof">
+    <div class="items-subsection" data-stones-subsection>
+      <div class="items-subsection__title stones-section__title">Enchant Stones (1,100)</div>
+      <div class="items-grid inventory-grid stones-grid stone-grid">
+        <div class="ft-card ft-card--stone">
+          <div class="ft-card-icon"><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="Normal Enchant Stone"></div>
+          <div class="ft-card-main">
+            <div class="ft-card-name">Normal Enchant Stone</div>
+            <div class="ft-card-stats"><span class="ft-chip ft-chip-qty">1,100</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="items-subsection" data-totems-subsection>
+      <div class="items-subsection__title totems-section__title">Totems (60)</div>
+      <div class="items-grid inventory-grid totems-grid">
+        <div class="ft-card ft-card--totem">
+          <div class="ft-card-icon"><img src="../data/totem_image_cache/totem_mutation_totem.webp" alt="Mutation Totem"></div>
+          <div class="ft-card-main">
+            <div class="ft-card-name">Mutation Totem</div>
+            <div class="ft-card-stats"><span class="ft-chip ft-chip-qty">60</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
