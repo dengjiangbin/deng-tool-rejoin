@@ -112,8 +112,27 @@ describe('FishIt totem inventory support', () => {
   test('loader scan source detects totem name match', () => {
     const lua = fs.readFileSync(path.join(__dirname, '..', '..', '_test_converted.lua'), 'utf8');
     assert.match(lua, /totemItems/);
-    assert.match(lua, /string\.find\(string\.lower\(tostring\(data\.Name\)\), "totem"/);
-    assert.match(lua, /Mutation Totem|Shiny Totem|totemItems = gameItemScan\.totemItems/);
+    assert.match(lua, /LiveSafe\.isTotemName/);
+    assert.match(lua, /LiveSafe\.classifyNonStoneInventoryItem/);
+    assert.match(lua, /string\.find\(string\.lower\(s\), "totem", 1, true\)/);
+    assert.match(lua, /PLAYERDATA_GAMEITEMDB_UPLOAD_OK %s status=%s fish=%d stones=%d totems=%d totemQty=%d/);
+    assert.match(lua, /TOTEM_SCAN_FOUND count=%d names=%s/);
+    assert.match(lua, /;\(function\(\)/);
+    assert.match(lua, /^end\)\(\)\s*$/m);
+  });
+
+  test('public dist build is protected wrapper not raw source', () => {
+    const distPath = path.join(__dirname, '..', '..', 'dist', 'tracker.lua');
+    assert.ok(fs.existsSync(distPath), 'dist/tracker.lua must exist after build');
+    const dist = fs.readFileSync(distPath, 'utf8');
+    assert.match(dist, /LOADER_REGISTER_LIMIT_FIX/);
+    assert.match(dist, /local __B=\[\[/);
+    assert.doesNotMatch(dist, /^\(function\(\)/m);
+    const m = dist.match(/local __B=\[\[([\s\S]*?)\]\]\nlocal __A=/);
+    assert.ok(m, 'dist payload must be base64 wrapped');
+    const decoded = Buffer.from(m[1], 'base64').toString('utf8');
+    assert.match(decoded, /;\(function\(\)/);
+    assert.match(decoded, /totems=%d totemQty=%d/);
   });
 
   test('frontend source exposes Item Grid and Totem titles', () => {
@@ -166,6 +185,10 @@ describe('FishIt totem upload API integration', () => {
     assert.equal(dbg.body.totemItems.length, 2);
     assert.equal(dbg.body.uploadPipelineDiagnostics.totemCount, 2);
     assert.equal(dbg.body.uploadPipelineDiagnostics.totemQuantity, 4);
+    assert.ok(dbg.body.totemScanProof);
+    assert.equal(dbg.body.totemScanProof.count, 2);
+    assert.deepEqual(dbg.body.totemScanProof.names.sort(), ['Mutation Totem', 'Shiny Totem']);
+    assert.equal(dbg.body.uploadPipelineDiagnostics.rawUploadTotemCount, 2);
 
     const latest = await request(app).get(`/api/fishit-tracker/get-backpack/${username}`).expect(200);
     assert.ok(Array.isArray(latest.body.totemItems));
@@ -178,6 +201,33 @@ describe('FishIt totem upload API integration', () => {
     assert.equal(latest.body.stoneItems.length, 1);
     assert.ok(Array.isArray(latest.body.fishItems));
     assert.equal(latest.body.fishItems.length, 1);
+  });
+
+  test('get-backpack API returns totemItems for AIO/tracker consumers', async () => {
+    const app = makeTrackerApp();
+    const username = 'TotemBackpackUser';
+    await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send(buildUploadBody(username, {
+        totemItems: [totemRow('Ancient Totem', '503', 2)],
+      }))
+      .expect(200);
+
+    const latest = await request(app).get(`/api/fishit-tracker/get-backpack/${username}`).expect(200);
+    assert.ok(Array.isArray(latest.body.totemItems));
+    assert.equal(latest.body.totemItems.length, 1);
+    assert.equal(latest.body.totemItems[0].name, 'Ancient Totem');
+  });
+
+  test('backend upload_persist log uses fishCount stoneCount totemCount totemQuantity', () => {
+    const routesSrc = fs.readFileSync(
+      path.join(__dirname, '..', 'src', 'fishitTrackerRoutes.js'),
+      'utf8',
+    );
+    assert.match(routesSrc, /upload_persist[\s\S]*fishCount=%d stoneCount=%d totemCount=%d totemQuantity=%d/);
+    assert.match(routesSrc, /function buildTotemScanProof/);
+    assert.match(routesSrc, /totemScanProof/);
+    assert.match(routesSrc, /totemItems: lite\.totemItems/);
   });
 
   test('backward compatible when totemItems omitted', async () => {

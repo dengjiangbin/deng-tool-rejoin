@@ -25,6 +25,9 @@
 -- BLOCKER10S: first executable line — confirms loadstring compiled and ran.
 print("[FishTracker] TRACKER_BOOT_BEGIN BLOCKER10Z7_METADATA_SPECIES_EXTRACTION_2026_06_08 BLOCKER10ZT3_SYNC_STATUS_COIN_MOBILE_TABLE_2026_06_10")
 
+-- LOADER_FIX_REGISTER_LIMIT_2026_06_11: isolate locals in IIFE
+;(function()
+
 -- Kill switch
 _G.StopAutoFish = _G.StopAutoFish or false
 
@@ -736,6 +739,76 @@ function LiveSafe.getDataReplion()
     end
     return replion
 end
+
+function LiveSafe.isTotemName(name)
+    local s = tostring(name or "")
+    return s ~= "" and string.find(string.lower(s), "totem", 1, true) ~= nil
+end
+
+function LiveSafe.sumTotemQuantity(totemItems)
+    local total = 0
+    for i = 1, #(totemItems or {}) do
+        local q = tonumber(totemItems[i].quantity) or 1
+        if q < 1 then q = 1 end
+        total = total + math.floor(q)
+    end
+    return total
+end
+
+function LiveSafe.formatTotemScanProof(totemItems)
+    local names, seen = {}, {}
+    for i = 1, #(totemItems or {}) do
+        local n = tostring((totemItems[i] or {}).name or "")
+        if n ~= "" and not seen[n] then
+            seen[n] = true
+            names[#names + 1] = n
+        end
+    end
+    return #names, table.concat(names, ", ")
+end
+
+function LiveSafe.logTotemScanProof(totemItems)
+    local count, joined = LiveSafe.formatTotemScanProof(totemItems)
+    if count < 1 then return end
+    print(LOG, ("TOTEM_SCAN_FOUND count=%d names=%s"):format(count, joined))
+end
+
+function LiveSafe.printGameItemDbUploadOk(ok200, statusCode, fishCount, stoneCount, totemItems)
+    local totemCount = #(totemItems or {})
+    local totemQty = LiveSafe.sumTotemQuantity(totemItems)
+    print(LOG, ("PLAYERDATA_GAMEITEMDB_UPLOAD_OK %s status=%s fish=%d stones=%d totems=%d totemQty=%d"):format(
+        tostring(ok200), tostring(statusCode or "?"), fishCount, stoneCount, totemCount, totemQty))
+    LiveSafe.logTotemScanProof(totemItems)
+end
+
+function LiveSafe.classifyNonStoneInventoryItem(ItemUtility, item, itemId, qty, mutation, icon)
+    local okData, itemData = pcall(ItemUtility.GetItemDataFromItemType, "Items", itemId)
+    local data = itemData and (itemData.Data or itemData)
+    if not okData or type(data) ~= "table" then
+        return nil, { itemId = itemId, reason = "itemutility_unresolved" }
+    end
+    if data.Type == "Fish" and data.Name and tostring(data.Name) ~= "" then
+        local tierNum = tonumber(data.Tier) or 1
+        return "fish", {
+            kind = "fish", itemId = itemId, name = data.Name, baseName = data.Name,
+            quantity = qty, uuid = item.UUID, tier = tierNum, rarity = LiveSafe.TierNames[tierNum] or "Unknown",
+            mutation = mutation, icon = icon, type = "Fish",
+            imageSource = "gameitemdb_icon", source = "playerdata_gameitemdb", identityVerified = true,
+        }
+    end
+    if LiveSafe.isTotemName(data.Name) then
+        local tierNum = tonumber(data.Tier) or nil
+        return "totem", {
+            kind = "totem", itemId = itemId, name = tostring(data.Name),
+            quantity = qty, uuid = item.UUID, tier = tierNum,
+            rarity = tierNum and (LiveSafe.TierNames[tierNum] or "Unknown") or nil,
+            mutation = mutation, icon = icon, type = "Totem", category = "totem",
+            imageSource = "gameitemdb_icon", source = "playerdata_gameitemdb", identityVerified = true,
+        }
+    end
+    return nil, { itemId = itemId, reason = "itemutility_unresolved" }
+end
+
 function LiveSafe.scanPlayerDataGameItemDbInventory()
     local fishItems, stoneItems, totemItems, unresolvedItems = {}, {}, {}, {}
     local stats = {
@@ -791,40 +864,20 @@ function LiveSafe.scanPlayerDataGameItemDbInventory()
                     imageSource = "gameitemdb_icon",
                     source = "playerdata_gameitemdb", identityVerified = true,
                 }
-            else
-                local okData, itemData = pcall(ItemUtility.GetItemDataFromItemType, "Items", itemId)
-                local data = itemData and (itemData.Data or itemData)
-                if not okData or type(data) ~= "table" then
-                    stats.unresolved = stats.unresolved + 1
-                    unresolvedItems[#unresolvedItems + 1] = { itemId = itemId, reason = "itemutility_unresolved" }
-                elseif data.Type == "Fish" and data.Name and tostring(data.Name) ~= "" then
+                        else
+                local kind, row = LiveSafe.classifyNonStoneInventoryItem(ItemUtility, item, itemId, qty, mutation, icon)
+                if kind == "fish" then
                     stats.resolvedFish = stats.resolvedFish + 1
                     if icon and icon ~= "rbxassetid://0" then stats.fishIconResolved = stats.fishIconResolved + 1
                     else stats.fishIconMissing = stats.fishIconMissing + 1 end
-                    local tierNum = tonumber(data.Tier) or 1
-                    local rarity = LiveSafe.TierNames[tierNum] or "Unknown"
-                    fishItems[#fishItems + 1] = {
-                        kind = "fish", itemId = itemId, name = data.Name, baseName = data.Name,
-                        quantity = qty, uuid = item.UUID, tier = tierNum, rarity = rarity,
-                        mutation = mutation, icon = icon, type = "Fish",
-                        imageSource = "gameitemdb_icon",
-                        source = "playerdata_gameitemdb", identityVerified = true,
-                    }
-                elseif data.Name and string.find(string.lower(tostring(data.Name)), "totem", 1, true) then
+                    fishItems[#fishItems + 1] = row
+                elseif kind == "totem" then
                     stats.resolvedTotem = stats.resolvedTotem + 1
                     if icon and icon ~= "rbxassetid://0" then stats.totemIconResolved = stats.totemIconResolved + 1 end
-                    local tierNum = tonumber(data.Tier) or nil
-                    local rarity = tierNum and (LiveSafe.TierNames[tierNum] or "Unknown") or nil
-                    totemItems[#totemItems + 1] = {
-                        kind = "totem", itemId = itemId, name = tostring(data.Name),
-                        quantity = qty, uuid = item.UUID, tier = tierNum, rarity = rarity,
-                        mutation = mutation, icon = icon, type = "Totem",
-                        category = "totem", imageSource = "gameitemdb_icon",
-                        source = "playerdata_gameitemdb", identityVerified = true,
-                    }
+                    totemItems[#totemItems + 1] = row
                 else
                     stats.unresolved = stats.unresolved + 1
-                    unresolvedItems[#unresolvedItems + 1] = { itemId = itemId, reason = "itemutility_unresolved" }
+                    unresolvedItems[#unresolvedItems + 1] = row or { itemId = itemId, reason = "itemutility_unresolved" }
                 end
             end
         end
@@ -1484,6 +1537,7 @@ function LiveSafe.syncPlayerDataDashboard()
         #(gameItemScan.stoneItems or {}),
         #(gameItemScan.totemItems or {}),
         #(gameItemScan.unresolvedItems or {})))
+    LiveSafe.logTotemScanProof(gameItemScan.totemItems)
     LiveSafe.syncBeat = (LiveSafe.syncBeat or 0) + 1
     local proof = {
         enabled = true,
@@ -1558,8 +1612,9 @@ function LiveSafe.syncPlayerDataDashboard()
     }
     local uploadFishCount = #(gameItemScan.fishItems or {})
     local uploadStoneCount = #(gameItemScan.stoneItems or {})
+    local uploadTotemCount = #(gameItemScan.totemItems or {})
     local inventoryCount = gameItemScan.inventoryCount or 0
-    if inventoryCount > 0 and uploadFishCount == 0 and uploadStoneCount == 0 then
+    if inventoryCount > 0 and uploadFishCount == 0 and uploadStoneCount == 0 and uploadTotemCount == 0 then
         warn(LOG, ("PLAYERDATA_GAMEITEMDB_UPLOAD deferred invCount=%d fish=0 stones=0"):format(inventoryCount))
         return false
     end
@@ -1605,9 +1660,7 @@ function LiveSafe.syncPlayerDataDashboard()
     if pcallOk and type(result) == "table" then
         ok200 = tostring(result.StatusCode or "") == "200"
     end
-    print(LOG, ("PLAYERDATA_GAMEITEMDB_UPLOAD_OK %s status=%s fish=%d stones=%d"):format(
-        tostring(ok200), pcallOk and type(result) == "table" and tostring(result.StatusCode or "?") or "?",
-        uploadFishCount, uploadStoneCount))
+    LiveSafe.printGameItemDbUploadOk(ok200, pcallOk and type(result) == "table" and tostring(result.StatusCode or "?") or "?", uploadFishCount, uploadStoneCount, gameItemScan.totemItems)
     if not uploadOk then
         HttpDash.logSyncUploadDebug(LiveSafe.currentSyncReason, uploadFishCount, pcallOk, result, uploadWhy, #encoded)
     elseif pcallOk and type(result) == "table" and parseSnapshotCompleteFromResult(result) then
@@ -5419,8 +5472,7 @@ function syncToDashboard()
             print(LOG, ("DASHBOARD_RESPONSE inventory_snapshot success=%s status=%s bodyPreview=%s"):format(
                 tostring(ok200), tostring(code), body))
             if hadGameItemDbUpload then
-                print(LOG, ("PLAYERDATA_GAMEITEMDB_UPLOAD_OK %s status=%s fish=%d stones=%d"):format(
-                    tostring(ok200), tostring(code), uploadFishCount, uploadStoneCount))
+                LiveSafe.printGameItemDbUploadOk(ok200, code, uploadFishCount, uploadStoneCount, payload.totemItems)
             end
             HttpDash.logLiveCatchEvidenceFromResponse(true, result, LiveSafe._lastPendingCatchForEvidence == true)
             LiveSafe._lastPendingCatchForEvidence = false
@@ -6720,3 +6772,4 @@ xpcall(main, function(err)
         end
     end)
 end)
+end)()

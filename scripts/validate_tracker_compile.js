@@ -92,6 +92,21 @@ if (!src.includes('PLAYERDATA_INVENTORY_READ')) {
 if (!src.includes('PLAYERDATA_GAMEITEMDB_UPLOAD_OK')) {
   errors.push('PLAYERDATA_GAMEITEMDB_UPLOAD_OK log missing');
 }
+if (!src.includes('totems=%d totemQty=%d')) {
+  errors.push('PLAYERDATA_GAMEITEMDB_UPLOAD_OK totem proof fields missing');
+}
+if (!src.includes('TOTEM_SCAN_FOUND count=%d names=%s')) {
+  errors.push('TOTEM_SCAN_FOUND debug proof log missing');
+}
+if (!src.includes('LiveSafe.classifyNonStoneInventoryItem')) {
+  errors.push('LiveSafe.classifyNonStoneInventoryItem missing — totem scan classifier required');
+}
+if (!src.includes('LiveSafe.isTotemName')) {
+  errors.push('LiveSafe.isTotemName missing — totem name matcher required');
+}
+if (!/;\(function\(\)/m.test(src)) {
+  errors.push('IIFE wrapper missing semicolon — main chunk register isolation required');
+}
 if (!src.includes('LiveSafe.runDirectStartup')) {
   errors.push('LiveSafe.runDirectStartup missing');
 }

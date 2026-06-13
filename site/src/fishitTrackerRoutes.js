@@ -3594,6 +3594,31 @@ function runCatchDeltaOnUpload(body, rawItems, existing, sessionKey) {
   });
 }
 
+function buildTotemScanProof(rows, extra = {}) {
+  const names = [];
+  const seen = new Set();
+  for (const row of (Array.isArray(rows) ? rows : [])) {
+    const name = String(row?.name || row?.displayName || '').trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  const quantity = (Array.isArray(rows) ? rows : []).reduce(
+    (sum, row) => sum + (Number(row?.quantity || row?.amount) > 0
+      ? Math.floor(Number(row.quantity || row.amount))
+      : 1),
+    0,
+  );
+  return {
+    count: names.length,
+    names,
+    quantity,
+    source: extra.source || 'playerdata_gameitemdb',
+    uploadedTotemCount: extra.uploadedTotemCount != null ? extra.uploadedTotemCount : names.length,
+    uploadedTotemQuantity: extra.uploadedTotemQuantity != null ? extra.uploadedTotemQuantity : quantity,
+  };
+}
+
 function applyLitePublicSnapshotFields(session, usesGameItemDb, usesItemUtility, playerDataFishItems, playerDataStoneItems, playerDataTotemItems) {
   if (!session) return session;
   if ((usesGameItemDb || usesItemUtility) && Array.isArray(playerDataFishItems) && playerDataFishItems.length) {
@@ -4079,6 +4104,13 @@ function handleUpdateBackpack(req, res) {
       playerDataFishItems: nextFishItems,
       playerDataStoneItems: nextStoneItems,
       playerDataTotemItems: nextTotemItems,
+      totemScanProof: buildTotemScanProof(nextTotemItems, {
+        uploadedTotemCount: Array.isArray(body.totemItems) ? body.totemItems.length : 0,
+        uploadedTotemQuantity: (Array.isArray(body.totemItems) ? body.totemItems : []).reduce(
+          (s, row) => s + (Number(row?.quantity) > 0 ? Math.floor(Number(row.quantity)) : 1),
+          0,
+        ),
+      }),
       sourceTruth: usesGameItemDb
         ? (body.sourceTruth || gameItemDbPublic.defaultSourceTruth())
         : (usesItemUtility
@@ -4157,7 +4189,7 @@ function handleUpdateBackpack(req, res) {
 
     console.log(
       '[fishit-tracker] upload_persist user=%s sessionKey=%s accepted=%d snapshotComplete=%s' +
-      ' fish=%d stone=%d totem=%d totemQty=%d serverReceivedAt=%s cacheRefresh=scheduled gate=%j rawPersistMs=%d',
+      ' fishCount=%d stoneCount=%d totemCount=%d totemQuantity=%d serverReceivedAt=%s cacheRefresh=scheduled gate=%j rawPersistMs=%d',
       cleanUser,
       key,
       acceptedCount,
@@ -5566,6 +5598,9 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
         (s, row) => s + (Number(row?.amount || row?.quantity) > 0 ? Math.floor(Number(row.amount || row.quantity)) : 1),
         0,
       ),
+      totemScanProof: data.totemScanProof
+        || buildTotemScanProof(publicFishDbg.totemItems || data.playerDataTotemItems),
+      rawUploadTotemCount: Array.isArray(data.playerDataTotemItems) ? data.playerDataTotemItems.length : 0,
       uploadGate: trackerConcurrencyGate.stats(),
       aioCacheRefresh: 'scheduled_on_accept',
     },
@@ -5650,6 +5685,8 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     sourceTruth: publicFishDbg.sourceTruth || data.sourceTruth || null,
     stoneItems: publicFishDbg.stoneItems || [],
     totemItems: publicFishDbg.totemItems || [],
+    totemScanProof: data.totemScanProof
+      || buildTotemScanProof(publicFishDbg.totemItems || data.playerDataTotemItems),
     fishItems: publicFishDbg.fishItems || [],
     inventoryParityProof: buildInventoryParityProof(
       rawItemsArr,
