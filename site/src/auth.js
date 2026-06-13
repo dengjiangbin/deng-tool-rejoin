@@ -8,7 +8,7 @@
 const crypto  = require('crypto');
 const axios   = require('axios');
 const supabase = require('./db');
-const { resolveDiscordRedirectUri, oauthReturnPublicBase, canonicalPublicUrl, LEGACY_PUBLIC_HOST, CANONICAL_PUBLIC_HOST } = require('./publicDomain');
+const { resolveDiscordRedirectUri, oauthReturnPublicBase, LEGACY_PUBLIC_HOST, CANONICAL_PUBLIC_HOST } = require('./publicDomain');
 const oauthStateStore = require('./oauthStateStore');
 
 const DISCORD_HTTP_TIMEOUT_MS = Number(process.env.DISCORD_OAUTH_HTTP_TIMEOUT_MS || 12000);

@@ -35,7 +35,7 @@
         "DISCORD_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "DISCORD_AIO_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "TOOL_SITE_ASSET_VERSION": "OAUTH_AIO_DOMAIN_2026_06_13",
-        "GIT_COMMIT": "a2555ec"
+        "GIT_COMMIT": "ade8556"
       }
     },
     {
