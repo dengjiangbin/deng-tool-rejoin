@@ -18,6 +18,37 @@ function _defaultFile() {
   return { updatedAt: null, sessions: {}, uidAliases: {} };
 }
 
+function _trimPlayerDataRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.slice(0, MAX_ITEMS_PER_SESSION).map((row) => {
+    if (!row || typeof row !== 'object') return row;
+    return {
+      kind: row.kind || null,
+      itemId: row.itemId != null ? String(row.itemId) : null,
+      name: row.name || null,
+      baseName: row.baseName || row.baseFishName || null,
+      baseFishName: row.baseFishName || row.baseName || null,
+      quantity: row.quantity != null ? row.quantity : row.amount,
+      tier: row.tier != null ? row.tier : null,
+      rarity: row.rarity || null,
+      uuid: row.uuid || null,
+      mutation: row.mutation || null,
+      icon: row.icon || null,
+      iconRaw: row.iconRaw || row.icon || null,
+      iconAssetId: row.iconAssetId != null ? String(row.iconAssetId) : null,
+      iconSource: row.iconSource || null,
+      imageAssetId: row.imageAssetId != null ? String(row.imageAssetId) : null,
+      imageSource: row.imageSource || null,
+      imageUrl: row.imageUrl || null,
+      source: row.source || null,
+      identityVerified: row.identityVerified === true,
+      type: row.type || null,
+      stoneType: row.stoneType || null,
+      category: row.category || null,
+    };
+  });
+}
+
 function _trimItems(items) {
   if (!Array.isArray(items)) return [];
   return items.slice(0, MAX_ITEMS_PER_SESSION).map((it) => {
@@ -61,6 +92,9 @@ function sanitiseSession(key, data) {
   const pub = Array.isArray(data.lastGoodPublicFishItems)
     ? data.lastGoodPublicFishItems.slice(0, MAX_PUBLIC_FISH)
     : null;
+  const pubStone = Array.isArray(data.lastGoodPublicStoneItems)
+    ? data.lastGoodPublicStoneItems.slice(0, MAX_PUBLIC_FISH)
+    : null;
   return {
     username: data.username || key,
     userId: data.userId || 0,
@@ -87,6 +121,12 @@ function sanitiseSession(key, data) {
     lastGoodPublicFishCount: data.lastGoodPublicFishCount || 0,
     lastGoodFishAt: data.lastGoodFishAt || null,
     lastGoodPublicFishItems: pub,
+    lastGoodPublicStoneItems: pubStone,
+    lastGoodPublicStoneCount: data.lastGoodPublicStoneCount || 0,
+    lastGoodPublicTotemItems: Array.isArray(data.lastGoodPublicTotemItems)
+      ? data.lastGoodPublicTotemItems.slice(0, MAX_PUBLIC_FISH)
+      : null,
+    lastGoodPublicTotemCount: data.lastGoodPublicTotemCount || 0,
     lastCatchParsed: data.lastCatchParsed
       || data.nameCatalogDiscovery?.lastCatchParsed
       || null,
@@ -115,6 +155,11 @@ function sanitiseSession(key, data) {
       if (!raw || !playerStatsStore.isTrustedPlayerStats(raw)) return null;
       return data.playerStatsUpdatedAt || null;
     })(),
+    inventorySource: data.inventorySource || null,
+    sourceTruth: data.sourceTruth || null,
+    playerDataFishItems: _trimPlayerDataRows(data.playerDataFishItems),
+    playerDataStoneItems: _trimPlayerDataRows(data.playerDataStoneItems),
+    playerDataTotemItems: _trimPlayerDataRows(data.playerDataTotemItems),
     lastUploadReceivedAt: data.lastUploadReceivedAt || null,
     lastUploadAcceptedAt: data.lastUploadAcceptedAt || null,
     lastUploadRejectedAt: data.lastUploadRejectedAt || null,

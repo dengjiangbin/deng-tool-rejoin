@@ -722,6 +722,7 @@ async function persistSessionState(key, baseUrl) {
     const publicFish = await buildPublicFishFields(enriched, baseUrl || 'http://127.0.0.1:8791', { sessionData: data, sessionKey: key });
     const nextFish = Array.isArray(publicFish.fishItems) ? publicFish.fishItems : [];
     const nextStone = Array.isArray(publicFish.stoneItems) ? publicFish.stoneItems : [];
+    const nextTotem = Array.isArray(publicFish.totemItems) ? publicFish.totemItems : [];
     // Permanent last-valid snapshot: never blank a previously-good public list
     // with a transient/partial empty build. Only replace last-good when we
     // actually have items, when the inventory is a proven (verified) empty, or
@@ -734,6 +735,10 @@ async function persistSessionState(key, baseUrl) {
     if (nextStone.length || allowEmptyReplace || !Array.isArray(data.lastGoodPublicStoneItems)) {
       data.lastGoodPublicStoneItems = nextStone;
       data.lastGoodPublicStoneCount = nextStone.length;
+    }
+    if (nextTotem.length || allowEmptyReplace || !Array.isArray(data.lastGoodPublicTotemItems)) {
+      data.lastGoodPublicTotemItems = nextTotem;
+      data.lastGoodPublicTotemCount = nextTotem.length;
     }
     data.lastCatchParsed = data.nameCatalogDiscovery?.lastCatchParsed
       || data.lastCatchParsed || null;
@@ -3589,7 +3594,7 @@ function runCatchDeltaOnUpload(body, rawItems, existing, sessionKey) {
   });
 }
 
-function applyLitePublicSnapshotFields(session, usesGameItemDb, usesItemUtility, playerDataFishItems, playerDataStoneItems) {
+function applyLitePublicSnapshotFields(session, usesGameItemDb, usesItemUtility, playerDataFishItems, playerDataStoneItems, playerDataTotemItems) {
   if (!session) return session;
   if ((usesGameItemDb || usesItemUtility) && Array.isArray(playerDataFishItems) && playerDataFishItems.length) {
     const grouped = gameItemDbPublic.groupFishRows(playerDataFishItems);
@@ -3603,6 +3608,12 @@ function applyLitePublicSnapshotFields(session, usesGameItemDb, usesItemUtility,
     const cards = grouped.map((row) => gameItemDbPublic.mapToPublicStoneCardItem(row));
     session.lastGoodPublicStoneItems = cards;
     session.lastGoodPublicStoneCount = cards.length;
+  }
+  if ((usesGameItemDb || usesItemUtility) && Array.isArray(playerDataTotemItems) && playerDataTotemItems.length) {
+    const grouped = gameItemDbPublic.groupTotemRows(playerDataTotemItems);
+    const cards = grouped.map((row) => gameItemDbPublic.mapToPublicTotemCardItem(row));
+    session.lastGoodPublicTotemItems = cards;
+    session.lastGoodPublicTotemCount = cards.length;
   }
   return session;
 }
@@ -3925,7 +3936,7 @@ function handleUpdateBackpack(req, res) {
     const acceptedCount = cleanItems.length || (ps && ps.accepted) || 0;
 
     const usesGameItemDb = gameItemDbPublic.detectGameItemDbUpload(body)
-      && (Array.isArray(body.fishItems) || Array.isArray(body.stoneItems));
+      && (Array.isArray(body.fishItems) || Array.isArray(body.stoneItems) || Array.isArray(body.totemItems));
     const usesItemUtility = !usesGameItemDb
       && body.inventorySource === itemUtilityPublic.PLAYERDATA_ITEMUTILITY_SOURCE
       && Array.isArray(body.fishItems);
@@ -3933,9 +3944,14 @@ function handleUpdateBackpack(req, res) {
       ? gameItemDbPublic.normaliseUploadRows(body.fishItems || [])
       : (usesItemUtility ? body.fishItems.filter(itemUtilityPublic.isPlayerDataItemUtilityRow) : null);
     const playerDataStoneItems = usesGameItemDb
-      ? gameItemDbPublic.normaliseUploadRows(body.stoneItems || [])
+      ? gameItemDbPublic.normaliseUploadRows(body.stoneItems || []).filter((row) => row && row.kind === 'stone')
       : ((usesItemUtility && Array.isArray(body.stoneItems))
         ? body.stoneItems.filter(itemUtilityPublic.isPlayerDataItemUtilityRow)
+        : []);
+    const playerDataTotemItems = usesGameItemDb
+      ? gameItemDbPublic.normaliseUploadRows(body.totemItems || []).filter((row) => row && row.kind === 'totem')
+      : ((usesItemUtility && Array.isArray(body.totemItems))
+        ? body.totemItems.filter((row) => gameItemDbPublic.isTotemRow(row))
         : []);
 
     const hasDisplayItems = cleanItems.length > 0
@@ -3943,6 +3959,7 @@ function handleUpdateBackpack(req, res) {
       || (usesGameItemDb && (
         (playerDataFishItems && playerDataFishItems.length > 0)
         || (playerDataStoneItems && playerDataStoneItems.length > 0)
+        || (playerDataTotemItems && playerDataTotemItems.length > 0)
       ))
       || ((usesItemUtility) && playerDataFishItems && playerDataFishItems.length > 0);
     const sessionPhase = partialInfo.lastGoodFishPreserved
@@ -3954,6 +3971,7 @@ function handleUpdateBackpack(req, res) {
       cleanItems,
       playerDataFishItems,
       playerDataStoneItems,
+      playerDataTotemItems,
       parseStats: ps,
       partialInfo,
       isHeartbeat: false,
@@ -3962,6 +3980,7 @@ function handleUpdateBackpack(req, res) {
 
     let nextFishItems = (usesGameItemDb || usesItemUtility) ? playerDataFishItems : null;
     let nextStoneItems = (usesGameItemDb || usesItemUtility) ? playerDataStoneItems : null;
+    let nextTotemItems = (usesGameItemDb || usesItemUtility) ? playerDataTotemItems : null;
     let nextItems = cleanItems.length ? cleanItems : (existing ? existing.items : []);
     let nextRawItems = rawItems.length ? rawItems : (existing ? existing.rawItems : []);
     let nextInventory = cleanItems.length ? inventory : (existing ? existing.inventory : null);
@@ -3976,6 +3995,9 @@ function handleUpdateBackpack(req, res) {
       }
       if ((!nextStoneItems || !nextStoneItems.length) && existing.playerDataStoneItems?.length) {
         nextStoneItems = existing.playerDataStoneItems;
+      }
+      if ((!nextTotemItems || !nextTotemItems.length) && existing.playerDataTotemItems?.length) {
+        nextTotemItems = existing.playerDataTotemItems;
       }
       if (completenessEval.leaderstatsPreserved && existing.playerStats) {
         nextPlayerStatsFields = {
@@ -3996,6 +4018,7 @@ function handleUpdateBackpack(req, res) {
       body,
       playerDataFishItems,
       playerDataStoneItems,
+      playerDataTotemItems,
       nextPlayerStatsFields,
       uploadRejected: false,
       now,
@@ -4055,6 +4078,7 @@ function handleUpdateBackpack(req, res) {
           : (existing?.inventorySource || null)),
       playerDataFishItems: nextFishItems,
       playerDataStoneItems: nextStoneItems,
+      playerDataTotemItems: nextTotemItems,
       sourceTruth: usesGameItemDb
         ? (body.sourceTruth || gameItemDbPublic.defaultSourceTruth())
         : (usesItemUtility
@@ -4093,6 +4117,7 @@ function handleUpdateBackpack(req, res) {
       usesItemUtility,
       playerDataFishItems,
       playerDataStoneItems,
+      playerDataTotemItems,
     );
     if (Array.isArray(body.unresolvedDiagnostics) && body.unresolvedDiagnostics.length) {
       liveTrackDB[key].unresolvedDiagnostics = body.unresolvedDiagnostics.slice(0, 20);
@@ -4132,11 +4157,18 @@ function handleUpdateBackpack(req, res) {
 
     console.log(
       '[fishit-tracker] upload_persist user=%s sessionKey=%s accepted=%d snapshotComplete=%s' +
-      ' serverReceivedAt=%s cacheRefresh=scheduled gate=%j rawPersistMs=%d',
+      ' fish=%d stone=%d totem=%d totemQty=%d serverReceivedAt=%s cacheRefresh=scheduled gate=%j rawPersistMs=%d',
       cleanUser,
       key,
       acceptedCount,
       completenessEval.snapshotComplete === true,
+      Array.isArray(playerDataFishItems) ? playerDataFishItems.length : 0,
+      Array.isArray(playerDataStoneItems) ? playerDataStoneItems.length : 0,
+      Array.isArray(playerDataTotemItems) ? playerDataTotemItems.length : 0,
+      (Array.isArray(playerDataTotemItems) ? playerDataTotemItems : []).reduce(
+        (s, row) => s + (Number(row?.quantity) > 0 ? Math.floor(Number(row.quantity)) : 1),
+        0,
+      ),
       now,
       trackerConcurrencyGate.stats(),
       rawPersistMs,
@@ -5206,6 +5238,16 @@ async function handleGetBackpack(req, res) {
       lastGoodStonePreserved: true,
     };
   }
+  const liveTotemCount = Array.isArray(publicFish.totemItems) ? publicFish.totemItems.length : 0;
+  if (liveTotemCount === 0 && Array.isArray(data.lastGoodPublicTotemItems) && data.lastGoodPublicTotemItems.length) {
+    publicFish = {
+      ...publicFish,
+      totemItems: data.lastGoodPublicTotemItems,
+      totemInventory: data.lastGoodPublicTotemItems,
+      totemDataStale: true,
+      lastGoodTotemPreserved: true,
+    };
+  }
   const imageResolutionProof = wantLite
     ? null
     : fishImageAssets.buildImageResolutionProof(publicFish.fishItems);
@@ -5238,11 +5280,13 @@ async function handleGetBackpack(req, res) {
     counts:          buildPublicLegacyCounts(publicFish.fishCounts),
     fishItems:       publicFish.fishItems,
     stoneItems:      publicFish.stoneItems || [],
+    totemItems:      publicFish.totemItems || [],
     activationState: publicFish.activationState || null,
     publicItems:     publicFish.publicItems,
     publicFishItems: publicFish.publicFishItems,
     fishInventory:   publicFish.fishInventory,
     stoneInventory:  publicFish.stoneInventory || publicFish.stoneItems || [],
+    totemInventory:  publicFish.totemInventory || publicFish.totemItems || [],
     fishCounts:      publicFish.fishCounts,
     publicCounts:    publicFish.publicCounts,
     lastInventoryAt: data.lastInventoryAt || data.updatedAt || null,
@@ -5515,6 +5559,13 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
       lastUploadStatusCodeReturned: data.lastUploadStatusCodeReturned != null
         ? data.lastUploadStatusCodeReturned
         : null,
+      fishCount: Array.isArray(publicFishDbg.fishItems) ? publicFishDbg.fishItems.length : 0,
+      stoneCount: Array.isArray(publicFishDbg.stoneItems) ? publicFishDbg.stoneItems.length : 0,
+      totemCount: Array.isArray(publicFishDbg.totemItems) ? publicFishDbg.totemItems.length : 0,
+      totemQuantity: (Array.isArray(publicFishDbg.totemItems) ? publicFishDbg.totemItems : []).reduce(
+        (s, row) => s + (Number(row?.amount || row?.quantity) > 0 ? Math.floor(Number(row.amount || row.quantity)) : 1),
+        0,
+      ),
       uploadGate: trackerConcurrencyGate.stats(),
       aioCacheRefresh: 'scheduled_on_accept',
     },
@@ -5598,6 +5649,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     inventorySource: publicFishDbg.inventorySource || data.inventorySource || null,
     sourceTruth: publicFishDbg.sourceTruth || data.sourceTruth || null,
     stoneItems: publicFishDbg.stoneItems || [],
+    totemItems: publicFishDbg.totemItems || [],
     fishItems: publicFishDbg.fishItems || [],
     inventoryParityProof: buildInventoryParityProof(
       rawItemsArr,
@@ -5752,11 +5804,18 @@ function buildAioLiteAccountSnapshotFast(session) {
     : [];
   if (!stoneSource.length && Array.isArray(session.stoneItems)) stoneSource = session.stoneItems;
   const stoneItems = stoneSource.map(stripLiteStoneItem).filter(Boolean).slice(0, 24);
+  let totemSource = Array.isArray(session.lastGoodPublicTotemItems) && session.lastGoodPublicTotemItems.length
+    ? session.lastGoodPublicTotemItems
+    : [];
+  if (!totemSource.length && Array.isArray(session.totemItems)) totemSource = session.totemItems;
+  const totemItems = totemSource.map(stripLiteTotemItem).filter(Boolean).slice(0, 24);
   return {
     fishItems,
     stoneItems,
+    totemItems,
     hasFish: fishItems.length > 0,
     hasStone: stoneItems.length > 0,
+    hasTotem: totemItems.length > 0,
   };
 }
 
@@ -5769,6 +5828,19 @@ function stripLiteFishItem(item) {
     rarity: item.rarity || item.rarityLabel || null,
     imageUrl: item.imageUrl || item.resolvedImageUrl || item.cardImageUrl || item.thumb || null,
     count: Number(item.count || item.amount || 1) || 1,
+  };
+}
+
+function stripLiteTotemItem(item) {
+  if (!item || typeof item !== 'object') return null;
+  const name = item.name || item.displayName || item.totemName || null;
+  if (!name) return null;
+  return {
+    name,
+    imageUrl: item.imageUrl || item.resolvedImageUrl || item.cardImageUrl || null,
+    count: Number(item.count || item.amount || 1) || 1,
+    uuid: item.uuid || null,
+    itemId: item.itemId || null,
   };
 }
 
@@ -5818,6 +5890,15 @@ async function buildAioLiteAccountSnapshot(session, sessionKey, baseUrl) {
       lastGoodStonePreserved: true,
     };
   }
+  const liveTotemCount = Array.isArray(publicFish.totemItems) ? publicFish.totemItems.length : 0;
+  if (liveTotemCount === 0 && Array.isArray(session.lastGoodPublicTotemItems) && session.lastGoodPublicTotemItems.length) {
+    publicFish = {
+      ...publicFish,
+      totemItems: session.lastGoodPublicTotemItems,
+      totemDataStale: true,
+      lastGoodTotemPreserved: true,
+    };
+  }
   const fishItems = (publicFish.fishItems || [])
     .map(stripLiteFishItem)
     .filter(Boolean)
@@ -5826,11 +5907,17 @@ async function buildAioLiteAccountSnapshot(session, sessionKey, baseUrl) {
     .map(stripLiteStoneItem)
     .filter(Boolean)
     .slice(0, 24);
+  const totemItems = (publicFish.totemItems || [])
+    .map(stripLiteTotemItem)
+    .filter(Boolean)
+    .slice(0, 24);
   return {
     fishItems,
     stoneItems,
+    totemItems,
     hasFish: fishItems.length > 0,
     hasStone: stoneItems.length > 0,
+    hasTotem: totemItems.length > 0,
   };
 }
 
@@ -5888,11 +5975,12 @@ async function buildAioTrackerDataset(discordOwnerId, opts = {}) {
       const lite = opts.fast
         ? buildAioLiteAccountSnapshotFast(session)
         : await buildAioLiteAccountSnapshot(session, sessionKey, baseUrl);
-      if (lite && (lite.hasFish || lite.hasStone || statsSnapshot.statsProven)) {
+      if (lite && (lite.hasFish || lite.hasStone || lite.hasTotem || statsSnapshot.statsProven)) {
         snapshot = {
           stats: statsSnapshot,
           fishItems: lite.fishItems,
           stoneItems: lite.stoneItems,
+          totemItems: lite.totemItems,
         };
       }
     } else if (statsSnapshot.statsProven) {
@@ -5900,6 +5988,7 @@ async function buildAioTrackerDataset(discordOwnerId, opts = {}) {
         stats: statsSnapshot,
         fishItems: [],
         stoneItems: [],
+        totemItems: [],
       };
     }
     accounts.push({

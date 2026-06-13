@@ -26,6 +26,129 @@ function resolveHeartbeatTimestamp(data) {
   return data?.lastSuccessfulHeartbeatAt || data?.lastHeartbeatAt || null;
 }
 
+function maxIsoTimestamp(candidates) {
+  let best = null;
+  let bestMs = -1;
+  for (const ts of candidates) {
+    if (!ts) continue;
+    const ms = new Date(ts).getTime();
+    if (Number.isFinite(ms) && ms > bestMs) {
+      bestMs = ms;
+      best = ts;
+    }
+  }
+  return best;
+}
+
+function resolveFreshnessTimestamp(data) {
+  return maxIsoTimestamp([
+    data?.lastSuccessfulUploadAt,
+    data?.lastSuccessfulHeartbeatAt,
+    data?.lastHeartbeatAt,
+    data?.lastStatsUploadAt,
+    data?.lastSnapshotUploadAt,
+    data?.lastInventoryAt,
+    data?.lastStatusAt,
+    data?.lastUploadAcceptedAt,
+  ]);
+}
+
+function countRows(rows) {
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+function evaluateAcceptedSnapshotSync(ctx = {}) {
+  const {
+    completenessEval,
+    acceptedCount,
+    body,
+    playerDataFishItems,
+    playerDataStoneItems,
+    playerDataTotemItems,
+    nextPlayerStatsFields,
+    uploadRejected,
+    now,
+  } = ctx;
+
+  if (uploadRejected) return { accepted: false, reason: 'rejected' };
+  if (completenessEval?.rejectBlankInventory || completenessEval?.blankPayloadRejected) {
+    return { accepted: false, reason: 'blank_rejected' };
+  }
+  if (completenessEval?.snapshotComplete) return { accepted: true, reason: 'full_snapshot' };
+  if (Number(acceptedCount) > 0) return { accepted: true, reason: 'inventory_items' };
+
+  const incomingFish = countRows(body?.fishItems);
+  const incomingStone = countRows(body?.stoneItems);
+  const incomingTotem = countRows(body?.totemItems);
+  const parsedFish = countRows(playerDataFishItems);
+  const parsedStone = countRows(playerDataStoneItems);
+  const parsedTotem = countRows(playerDataTotemItems);
+
+  if (incomingFish > 0 || (parsedFish > 0 && !completenessEval?.preserveExistingInventory)) {
+    return { accepted: true, reason: 'fish_snapshot' };
+  }
+  if (incomingStone > 0 || (parsedStone > 0 && !completenessEval?.preserveExistingInventory)) {
+    return { accepted: true, reason: 'stone_snapshot' };
+  }
+  if (incomingTotem > 0 || (parsedTotem > 0 && !completenessEval?.preserveExistingInventory)) {
+    return { accepted: true, reason: 'totem_snapshot' };
+  }
+  if (nextPlayerStatsFields?.lastStatsUploadAt === now && nextPlayerStatsFields?.playerStats) {
+    return { accepted: true, reason: 'leaderstats_snapshot' };
+  }
+  if (completenessEval?.hasLeaderstatsSnapshot && nextPlayerStatsFields?.lastStatsUploadAt === now) {
+    return { accepted: true, reason: 'leaderstats_snapshot' };
+  }
+
+  return { accepted: false, reason: 'no_accepted_content' };
+}
+
+function markTrackerSyncSuccess(session, serverReceivedAt, snapshot = {}) {
+  const now = serverReceivedAt || new Date().toISOString();
+  const intervalSeconds = Number(snapshot.intervalSeconds) > 0
+    ? Number(snapshot.intervalSeconds)
+    : resolveIntervalSeconds(session);
+  const wasGreen = session?.lastStatus === 'green';
+  return {
+    ...(session || {}),
+    lastStatus: 'green',
+    lastStatusAt: now,
+    lastSuccessfulUploadAt: now,
+    redSince: null,
+    inventoryRedSince: null,
+    statsRedSince: null,
+    lastSyncReason: snapshot.syncReason || 'accepted_snapshot',
+    lastUploadAttemptAt: now,
+    lastStatusChangeAt: wasGreen ? (session?.lastStatusChangeAt || now) : now,
+    lastFailureReason: null,
+    lastUploadFailedAt: null,
+    lastStatsUpdatedAt: snapshot.lastStatsUpdatedAt || session?.lastStatsUpdatedAt || now,
+    lastInventoryAt: snapshot.lastInventoryAt || now,
+    lastSnapshotUploadAt: snapshot.lastSnapshotUploadAt || now,
+    intervalSeconds,
+    graceSeconds: Number(snapshot.graceSeconds) >= 0
+      ? Number(snapshot.graceSeconds)
+      : (Number(session?.graceSeconds) >= 0 ? Number(session.graceSeconds) : undefined),
+    lastPayloadHash: snapshot.payloadHash || session?.lastPayloadHash || null,
+    expectedLoaderBuild: snapshot.expectedLoaderBuild || session?.expectedLoaderBuild || null,
+    loaderOutdated: snapshot.loaderOutdated === true,
+  };
+}
+
+function markTrackerSyncMissed(session, checkedAt) {
+  const now = checkedAt || new Date().toISOString();
+  const wasGreen = session?.lastStatus === 'green';
+  return {
+    ...(session || {}),
+    lastStatus: 'red',
+    lastStatusAt: now,
+    redSince: session?.redSince || now,
+    lastSyncReason: 'upload_interval_missed',
+    lastUploadFailedAt: session?.lastUploadFailedAt || now,
+    lastStatusChangeAt: wasGreen ? now : (session?.lastStatusChangeAt || now),
+  };
+}
+
 function deriveTrackerUploadAccountStatus(data, opts = {}) {
   const serverNowMs = opts.serverNowMs != null ? opts.serverNowMs : Date.now();
   const serverNow = new Date(serverNowMs).toISOString();
@@ -35,14 +158,16 @@ function deriveTrackerUploadAccountStatus(data, opts = {}) {
   const intervalSeconds = resolveIntervalSeconds(data);
   const thresholds = uploadStatusThresholds(intervalSeconds);
 
-  const lastSuccessfulUploadAt = data?.lastSuccessfulUploadAt || null;
+  const freshnessTimestamp = resolveFreshnessTimestamp(data);
   const lastSuccessfulHeartbeatAt = resolveHeartbeatTimestamp(data);
-  const freshnessTimestamp = lastSuccessfulHeartbeatAt || lastSuccessfulUploadAt;
   const lastFailedUploadAt = data?.lastFailedUploadAt || data?.lastUploadFailedAt || null;
   const trackerBuild = data?.trackerBuild || data?.lastUploadTrackerBuild || null;
   const loaderBuild = data?.loaderBuild || trackerBuild || null;
   const snapshotComplete = data?.snapshotComplete === true;
   const inventoryReady = data?.inventoryReady === true || snapshotComplete;
+  const lastStatus = data?.lastStatus || null;
+  const lastStatusAt = data?.lastStatusAt || null;
+  const redSince = data?.redSince || null;
   const latestPayloadAccepted = data?.latestPayloadAccepted !== false
     && !!(freshnessTimestamp || data?.lastUploadAcceptedAt);
 
@@ -58,40 +183,64 @@ function deriveTrackerUploadAccountStatus(data, opts = {}) {
   const buildUntrusted = !!(trackerBuild && isTrustedBuild && !isTrustedBuild(trackerBuild));
   const isCurrentBuild = !buildMismatch && !buildUntrusted;
 
+  const neverUploaded = !freshnessTimestamp && !lastStatus && !data?.lastUploadAcceptedAt;
+
   let status = 'offline';
   let statusColor = 'red';
-  let statusDecisionReason = 'no_successful_heartbeat';
+  let statusDecisionReason = 'no_successful_upload';
 
-  if (buildMismatch || buildUntrusted) {
+  if (neverUploaded) {
+    status = 'unknown';
+    statusColor = 'unknown';
+    statusDecisionReason = 'never_uploaded';
+  } else if (buildMismatch || buildUntrusted) {
     statusDecisionReason = buildMismatch ? 'outdated_tracker_build' : 'untrusted_tracker_build';
   } else if (!freshnessTimestamp) {
-    statusDecisionReason = 'no_successful_heartbeat';
+    statusDecisionReason = lastStatus === 'red' ? 'sync_missed' : 'no_successful_upload';
+    if (lastStatus === 'red') statusDecisionReason = 'sync_missed';
+  } else if (
+    secondsSinceLastSuccess != null
+    && secondsSinceLastSuccess > thresholds.offlineThresholdSeconds
+  ) {
+    statusDecisionReason = 'upload_interval_missed';
+  } else if (
+    secondsSinceLastSuccess != null
+    && secondsSinceLastSuccess > thresholds.offlineThresholdSeconds
+  ) {
+    statusDecisionReason = 'upload_interval_missed';
   } else if (
     secondsSinceLastSuccess != null
     && secondsSinceLastSuccess <= thresholds.offlineThresholdSeconds
   ) {
-    if (
-      secondsSinceLastSuccess != null
-      && secondsSinceLastSuccess <= thresholds.onlineThresholdSeconds
-    ) {
-      if (inventoryReady) {
+    const withinOnline = secondsSinceLastSuccess <= thresholds.onlineThresholdSeconds;
+    if (lastStatus === 'green') {
+      status = withinOnline ? 'online' : 'syncing';
+      statusColor = withinOnline ? 'green' : 'yellow';
+      statusDecisionReason = data?.lastSyncReason || (withinOnline
+        ? 'fresh_accepted_snapshot'
+        : 'accepted_snapshot_late_within_grace');
+    } else if (lastStatus === 'red') {
+      statusDecisionReason = data?.lastSyncReason || 'sync_missed';
+    } else {
+      const hasAcceptedSnapshot = latestPayloadAccepted && (
+        data?.hasFishSnapshot || data?.hasStoneSnapshot || data?.hasLeaderstatsSnapshot || inventoryReady
+      );
+      if (withinOnline && hasAcceptedSnapshot) {
         status = 'online';
         statusColor = 'green';
-        statusDecisionReason = 'fresh_heartbeat_full_snapshot_ready';
+        statusDecisionReason = 'fresh_accepted_snapshot';
+      } else if (withinOnline) {
+        status = 'syncing';
+        statusColor = 'yellow';
+        statusDecisionReason = 'fresh_contact_awaiting_snapshot';
       } else {
         status = 'syncing';
         statusColor = 'yellow';
-        statusDecisionReason = 'fresh_heartbeat_awaiting_full_snapshot';
+        statusDecisionReason = hasAcceptedSnapshot
+          ? 'accepted_snapshot_late_within_grace'
+          : 'contact_late_awaiting_snapshot';
       }
-    } else {
-      status = 'syncing';
-      statusColor = 'yellow';
-      statusDecisionReason = inventoryReady
-        ? 'heartbeat_late_within_grace'
-        : 'heartbeat_late_awaiting_full_snapshot';
     }
-  } else {
-    statusDecisionReason = 'no_fresh_heartbeat_after_grace';
   }
 
   return {
@@ -101,6 +250,9 @@ function deriveTrackerUploadAccountStatus(data, opts = {}) {
     discordOwnerId: data?.discordOwnerId || null,
     status,
     statusColor,
+    lastStatus,
+    lastStatusAt,
+    redSince: statusColor === 'green' ? null : redSince,
     lastSuccessfulUploadAt: freshnessTimestamp,
     lastSuccessfulHeartbeatAt,
     lastFailedUploadAt,
@@ -133,6 +285,16 @@ function deriveTrackerUploadAccountStatus(data, opts = {}) {
     isCurrentBuild,
     isOldBuild: !isCurrentBuild,
   };
+}
+
+function resolveSyncContentTimestamp(data) {
+  return maxIsoTimestamp([
+    data?.lastSuccessfulUploadAt,
+    data?.lastStatsUploadAt,
+    data?.lastSnapshotUploadAt,
+    data?.lastInventoryAt,
+    data?.lastStatusAt,
+  ]);
 }
 
 function resolveLiveSession(liveTrackDB, { robloxUserId, usernameKey } = {}) {
@@ -199,6 +361,11 @@ module.exports = {
   uploadStatusThresholds,
   resolveIntervalSeconds,
   resolveHeartbeatTimestamp,
+  resolveFreshnessTimestamp,
+  resolveSyncContentTimestamp,
+  evaluateAcceptedSnapshotSync,
+  markTrackerSyncSuccess,
+  markTrackerSyncMissed,
   deriveTrackerUploadAccountStatus,
   resolveLiveSession,
   extractUploadMeta,

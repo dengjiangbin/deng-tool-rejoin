@@ -737,10 +737,10 @@ function LiveSafe.getDataReplion()
     return replion
 end
 function LiveSafe.scanPlayerDataGameItemDbInventory()
-    local fishItems, stoneItems, unresolvedItems = {}, {}, {}
+    local fishItems, stoneItems, totemItems, unresolvedItems = {}, {}, {}, {}
     local stats = {
-        scanned = 0, resolvedFish = 0, resolvedStone = 0, unresolved = 0,
-        fishIconResolved = 0, fishIconMissing = 0, stoneIconResolved = 0,
+        scanned = 0, resolvedFish = 0, resolvedStone = 0, resolvedTotem = 0, unresolved = 0,
+        fishIconResolved = 0, fishIconMissing = 0, stoneIconResolved = 0, totemIconResolved = 0,
     }
     if not LiveSafe.gameItemDbBuilt or (LiveSafe.gameItemDbCount or 0) == 0 then
         LiveSafe.bootstrapGameItemDb()
@@ -810,14 +810,30 @@ function LiveSafe.scanPlayerDataGameItemDbInventory()
                         imageSource = "gameitemdb_icon",
                         source = "playerdata_gameitemdb", identityVerified = true,
                     }
+                elseif data.Name and string.find(string.lower(tostring(data.Name)), "totem", 1, true) then
+                    stats.resolvedTotem = stats.resolvedTotem + 1
+                    if icon and icon ~= "rbxassetid://0" then stats.totemIconResolved = stats.totemIconResolved + 1 end
+                    local tierNum = tonumber(data.Tier) or nil
+                    local rarity = tierNum and (LiveSafe.TierNames[tierNum] or "Unknown") or nil
+                    totemItems[#totemItems + 1] = {
+                        kind = "totem", itemId = itemId, name = tostring(data.Name),
+                        quantity = qty, uuid = item.UUID, tier = tierNum, rarity = rarity,
+                        mutation = mutation, icon = icon, type = "Totem",
+                        category = "totem", imageSource = "gameitemdb_icon",
+                        source = "playerdata_gameitemdb", identityVerified = true,
+                    }
+                else
+                    stats.unresolved = stats.unresolved + 1
+                    unresolvedItems[#unresolvedItems + 1] = { itemId = itemId, reason = "itemutility_unresolved" }
                 end
             end
         end
     end
-    print(LOG, ("PLAYERDATA_GAMEITEMDB_UPLOAD fish=%d stones=%d unresolved=%d"):format(
-        #fishItems, #stoneItems, #unresolvedItems))
+    print(LOG, ("PLAYERDATA_GAMEITEMDB_UPLOAD fish=%d stones=%d totems=%d unresolved=%d"):format(
+        #fishItems, #stoneItems, #totemItems, #unresolvedItems))
     local result = {
-        fishItems = fishItems, stoneItems = stoneItems, unresolvedItems = unresolvedItems,
+        fishItems = fishItems, stoneItems = stoneItems, totemItems = totemItems,
+        unresolvedItems = unresolvedItems,
         stats = stats, inventorySource = "playerdata_gameitemdb",
         inventoryCount = inventoryCount,
         gameItemDbBuilt = LiveSafe.gameItemDbBuilt,
@@ -1463,9 +1479,10 @@ function LiveSafe.syncPlayerDataDashboard()
         warn(LOG, ("PLAYERDATA_GAMEITEMDB_UPLOAD skipped reason=%s"):format(tostring(scanErr or "scan_failed")))
         return false
     end
-    print(LOG, ("PLAYERDATA_GAMEITEMDB_UPLOAD fish=%d stones=%d unresolved=%d"):format(
+    print(LOG, ("PLAYERDATA_GAMEITEMDB_UPLOAD fish=%d stones=%d totems=%d unresolved=%d"):format(
         #(gameItemScan.fishItems or {}),
         #(gameItemScan.stoneItems or {}),
+        #(gameItemScan.totemItems or {}),
         #(gameItemScan.unresolvedItems or {})))
     LiveSafe.syncBeat = (LiveSafe.syncBeat or 0) + 1
     local proof = {
@@ -1479,10 +1496,12 @@ function LiveSafe.syncPlayerDataDashboard()
         playerDataInventoryCount = gameItemScan.inventoryCount or 0,
         fishCount = #(gameItemScan.fishItems or {}),
         stoneCount = #(gameItemScan.stoneItems or {}),
+        totemCount = #(gameItemScan.totemItems or {}),
         unresolvedCount = #(gameItemScan.unresolvedItems or {}),
         itemUtilityResolvedFishCount = gameItemScan.stats and gameItemScan.stats.resolvedFish or 0,
         uploadedFishCount = #(gameItemScan.fishItems or {}),
         uploadedStoneCount = #(gameItemScan.stoneItems or {}),
+        uploadedTotemCount = #(gameItemScan.totemItems or {}),
         fishIconResolvedCount = gameItemScan.stats and gameItemScan.stats.fishIconResolved or 0,
         stoneIconResolvedCount = gameItemScan.stats and gameItemScan.stats.stoneIconResolved or 0,
         globalDbUsedForPublicIdentity = false,
@@ -1524,6 +1543,7 @@ function LiveSafe.syncPlayerDataDashboard()
         items = {},
         fishItems = gameItemScan.fishItems,
         stoneItems = gameItemScan.stoneItems,
+        totemItems = gameItemScan.totemItems,
         unresolvedItems = gameItemScan.unresolvedItems,
         sourceTruth = gameItemScan.sourceTruth,
         playerDataGameItemDbProof = proof,
@@ -5178,6 +5198,7 @@ function syncToDashboard()
         payload.inventorySource = "playerdata_gameitemdb"
         payload.fishItems = gameItemScan.fishItems
         payload.stoneItems = gameItemScan.stoneItems
+        payload.totemItems = gameItemScan.totemItems
         payload.sourceTruth = gameItemScan.sourceTruth
         payload.unresolvedItems = gameItemScan.unresolvedItems
         payload.playerDataGameItemDbProof = {
@@ -5191,10 +5212,12 @@ function syncToDashboard()
             playerDataInventoryCount = gameItemScan.inventoryCount or 0,
             fishCount = #(gameItemScan.fishItems or {}),
             stoneCount = #(gameItemScan.stoneItems or {}),
+            totemCount = #(gameItemScan.totemItems or {}),
             unresolvedCount = #(gameItemScan.unresolvedItems or {}),
             itemUtilityResolvedFishCount = gameItemScan.stats and gameItemScan.stats.resolvedFish or 0,
             uploadedFishCount = #(gameItemScan.fishItems or {}),
             uploadedStoneCount = #(gameItemScan.stoneItems or {}),
+            uploadedTotemCount = #(gameItemScan.totemItems or {}),
             fishIconResolvedCount = gameItemScan.stats and gameItemScan.stats.fishIconResolved or 0,
             stoneIconResolvedCount = gameItemScan.stats and gameItemScan.stats.stoneIconResolved or 0,
             globalDbUsedForPublicIdentity = false,
@@ -5216,10 +5239,19 @@ function syncToDashboard()
                 quantity = s.quantity, icon = s.icon, source = s.source,
             }
         end
-        print(LOG, ("GAMEITEMDB_BUILT count=%d fish=%d stones=%d"):format(
+        for i = 1, math.min(5, #(gameItemScan.totemItems or {})) do
+            local t = gameItemScan.totemItems[i]
+            payload.playerDataGameItemDbProof.sampleTotems = payload.playerDataGameItemDbProof.sampleTotems or {}
+            payload.playerDataGameItemDbProof.sampleTotems[i] = {
+                itemId = t.itemId, name = t.name, quantity = t.quantity,
+                icon = t.icon, source = t.source,
+            }
+        end
+        print(LOG, ("GAMEITEMDB_BUILT count=%d fish=%d stones=%d totems=%d"):format(
             gameItemScan.gameItemDbCount or 0,
             #(gameItemScan.fishItems or {}),
-            #(gameItemScan.stoneItems or {})))
+            #(gameItemScan.stoneItems or {}),
+            #(gameItemScan.totemItems or {})))
     else
         warn(LOG, ("PLAYERDATA_GAMEITEMDB_UPLOAD skipped reason=%s"):format(tostring(scanErr or "scan_failed")))
     end

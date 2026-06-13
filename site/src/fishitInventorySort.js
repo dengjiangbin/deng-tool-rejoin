@@ -58,11 +58,18 @@ function itemStableId(item) {
   return String(item?.itemId ?? item?.ItemId ?? item?.speciesId ?? '').trim();
 }
 
+function itemQuantity(item) {
+  return Number(item?.count ?? item?.amount ?? item?.quantity ?? 0) || 0;
+}
+
 function sortInventoryFish(items) {
   if (!Array.isArray(items)) return [];
   return [...items].sort((a, b) => {
     const rarityDiff = rarityRank(b) - rarityRank(a);
     if (rarityDiff) return rarityDiff;
+
+    const qtyDiff = itemQuantity(b) - itemQuantity(a);
+    if (qtyDiff) return qtyDiff;
 
     const nameA = itemDisplayName(a).toLowerCase();
     const nameB = itemDisplayName(b).toLowerCase();
@@ -70,6 +77,10 @@ function sortInventoryFish(items) {
 
     return itemStableId(a).localeCompare(itemStableId(b));
   });
+}
+
+function sortFishCardsByRarity(cards) {
+  return sortInventoryFish(cards);
 }
 
 function stoneTypeRank(item) {
@@ -90,10 +101,21 @@ function sortInventoryStones(items) {
   });
 }
 
+function sortInventoryTotems(items) {
+  if (!Array.isArray(items)) return [];
+  return [...items].sort((a, b) => {
+    const nameA = itemDisplayName(a).toLowerCase();
+    const nameB = itemDisplayName(b).toLowerCase();
+    if (nameA !== nameB) return nameA.localeCompare(nameB);
+    return itemStableId(a).localeCompare(itemStableId(b));
+  });
+}
+
 function applyPublicInventorySort(result) {
   if (!result || typeof result !== 'object') return result;
   const sortedFish = sortInventoryFish(result.fishItems || []);
   const sortedStones = sortInventoryStones(result.stoneItems || result.stoneInventory || []);
+  const sortedTotems = sortInventoryTotems(result.totemItems || result.totemInventory || []);
   const fishInventory = result.fishInventory && typeof result.fishInventory === 'object'
     ? { ...result.fishInventory, fish: sortedFish }
     : result.fishInventory;
@@ -105,6 +127,8 @@ function applyPublicInventorySort(result) {
     publicFishItems: sortedFish,
     stoneItems: sortedStones,
     stoneInventory: sortedStones,
+    totemItems: sortedTotems,
+    totemInventory: sortedTotems,
     fishInventory,
     inventorySortProof: {
       fishOrder: sortedFish.slice(0, 15).map((f) => ({
@@ -118,6 +142,10 @@ function applyPublicInventorySort(result) {
         stoneType: s.stoneType || null,
         itemId: itemStableId(s) || null,
       })),
+      totemOrder: sortedTotems.slice(0, 10).map((t) => ({
+        name: itemDisplayName(t),
+        itemId: itemStableId(t) || null,
+      })),
     },
   };
 }
@@ -129,7 +157,10 @@ module.exports = {
   rarityRank,
   itemDisplayName,
   itemStableId,
+  itemQuantity,
   sortInventoryFish,
+  sortFishCardsByRarity,
   sortInventoryStones,
+  sortInventoryTotems,
   applyPublicInventorySort,
 };

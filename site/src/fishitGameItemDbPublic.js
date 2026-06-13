@@ -2,6 +2,7 @@
 
 const manualRarity = require('./fishitManualRarityOverrides');
 const stoneImageAssets = require('./fishitStoneImageAssets');
+const trackerLuaIcon = require('./fishitTrackerLuaIcon');
 const GAMEITEMDB_ICON_SOURCE = 'gameitemdb_icon';
 const PLAYERDATA_GAMEITEMDB_SOURCE = 'playerdata_gameitemdb';
 const STONE_MANUAL_ASSET_SOURCE = stoneImageAssets.STONE_MANUAL_ASSET_SOURCE;
@@ -10,6 +11,21 @@ const FINAL_BUILD = 'BLOCKER10ZK_INVENTORY_MOBILE_BULK_APK_2026_06_09';
 const WAITING_ACTIVATION = 'waiting_for_playerdata_gameitemdb_payload';
 
 const ENCHANT_STONE_IDS = new Set(['10', '246', '558', '873', '929']);
+const TOTEM_NAME_RE = /totem/i;
+
+function rowName(row) {
+  if (!row || typeof row !== 'object') return '';
+  return String(row.name || row.Name || row.displayName || row.DisplayName || '').trim();
+}
+
+function isTotemRow(row) {
+  if (!row || typeof row !== 'object') return false;
+  if (isEnchantStoneRow(row)) return false;
+  const kind = String(row.kind || row.Kind || '').toLowerCase();
+  const type = String(row.type || row.Type || '').toLowerCase();
+  if (kind === 'totem' || type === 'totem') return true;
+  return TOTEM_NAME_RE.test(rowName(row));
+}
 
 const TIER_NAMES = {
   1: 'Common',
@@ -88,7 +104,7 @@ function isEnchantStoneRow(row) {
 function isPlayerDataGameItemDbRow(item) {
   if (!item || typeof item !== 'object') return false;
   if (rowSource(item) === PLAYERDATA_GAMEITEMDB_SOURCE) return true;
-  if (item.identityVerified === true && (isEnchantStoneRow(item) || item.kind === 'fish' || item.type === 'Fish')) {
+  if (item.identityVerified === true && (isEnchantStoneRow(item) || isTotemRow(item) || item.kind === 'fish' || item.type === 'Fish')) {
     return true;
   }
   return false;
@@ -132,8 +148,14 @@ function normaliseUploadRow(row) {
     1,
     Math.floor(Number(row.quantity ?? row.Quantity ?? row.amount ?? row.count ?? 1)),
   );
-  const iconRaw = row.icon ?? row.Icon ?? null;
-  const iconParsed = parseGameItemIcon(iconRaw);
+  const iconFields = trackerLuaIcon.normaliseTrackerLuaIconFields({
+    icon: row.icon ?? row.Icon ?? null,
+    iconRaw: row.iconRaw ?? row.icon ?? row.Icon ?? null,
+    iconAssetId: row.iconAssetId ?? row.IconAssetId ?? null,
+    iconSource: row.iconSource ?? null,
+    imageAssetId: row.imageAssetId ?? null,
+    imageSource: row.imageSource ?? null,
+  });
   const base = {
     itemId,
     quantity,
@@ -144,10 +166,12 @@ function normaliseUploadRow(row) {
       || (row.Metadata && row.Metadata.VariantId) || 'None',
     source: PLAYERDATA_GAMEITEMDB_SOURCE,
     identityVerified: true,
-    icon: iconParsed?.icon || null,
-    iconRaw,
-    imageAssetId: iconParsed?.assetId || null,
-    imageSource: iconParsed ? GAMEITEMDB_ICON_SOURCE : null,
+    icon: iconFields.icon,
+    iconRaw: iconFields.iconRaw,
+    iconAssetId: iconFields.iconAssetId,
+    iconSource: iconFields.iconSource,
+    imageAssetId: iconFields.imageAssetId,
+    imageSource: iconFields.imageSource,
   };
   if (isEnchantStoneRow(row)) {
     const stoneType = row.stoneType || row.StoneType || row.stone_type || null;
@@ -159,6 +183,21 @@ function normaliseUploadRow(row) {
       stoneType: typeName,
       name: row.name || row.Name || `${typeName} Enchant Stone`,
       type: 'EnchantStone',
+    };
+  }
+  if (isTotemRow(row)) {
+    const name = rowName(row) || 'Totem';
+    const tier = row.tier != null ? row.tier : (row.Tier != null ? row.Tier : null);
+    const rarity = row.rarity || row.Rarity || (tier != null ? tierToRarity(tier) : null);
+    return {
+      ...base,
+      kind: 'totem',
+      category: 'totem',
+      name,
+      displayName: name,
+      type: 'Totem',
+      tier,
+      rarity,
     };
   }
   const rowType = row.type || row.Type;
@@ -199,6 +238,33 @@ function groupFishRows(rows) {
       prev.quantity += norm.quantity;
       prev.amount = prev.quantity;
       prev.count = prev.quantity;
+      if (!prev.icon && norm.icon) prev.icon = norm.icon;
+      if (!prev.iconRaw && norm.iconRaw) prev.iconRaw = norm.iconRaw;
+      if (!prev.iconAssetId && norm.iconAssetId) prev.iconAssetId = norm.iconAssetId;
+      if (!prev.imageAssetId && norm.imageAssetId) prev.imageAssetId = norm.imageAssetId;
+      if (!prev.iconSource && norm.iconSource) prev.iconSource = norm.iconSource;
+      if (!prev.imageSource && norm.imageSource) prev.imageSource = norm.imageSource;
+      if (!prev.imageUrl && norm.imageUrl) prev.imageUrl = norm.imageUrl;
+    } else {
+      map.set(key, { ...norm });
+    }
+  }
+  return [...map.values()];
+}
+
+function groupTotemRows(rows) {
+  const map = new Map();
+  for (const row of rows) {
+    const norm = normaliseUploadRow(row);
+    if (!norm || norm.kind !== 'totem') continue;
+    const key = norm.uuid || `${norm.itemId}|${norm.name}`;
+    const prev = map.get(key);
+    if (prev) {
+      prev.quantity += norm.quantity;
+      prev.amount = prev.quantity;
+      prev.count = prev.quantity;
+      if (!prev.icon && norm.icon) prev.icon = norm.icon;
+      if (!prev.imageUrl && norm.imageUrl) prev.imageUrl = norm.imageUrl;
     } else {
       map.set(key, { ...norm });
     }
@@ -250,11 +316,13 @@ function mapToPublicFishCardItem(item) {
   const rarityResolved = manualRarity.resolvePublicFishRarity(cleaned, tierToRarity);
   const rarity = rarityResolved.rarity;
   const tier = rarityResolved.tier;
-  const imageSource = cleaned.imageSource === GAMEITEMDB_ICON_SOURCE
-    ? GAMEITEMDB_ICON_SOURCE
-    : (cleaned.imageSource === QUIZ_BOT_FALLBACK_SOURCE
-      ? QUIZ_BOT_FALLBACK_SOURCE
-      : (cleaned.imageSource || null));
+  const imageSource = cleaned.imageSource === trackerLuaIcon.TRACKER_LUA_ICON_SOURCE
+    ? trackerLuaIcon.TRACKER_LUA_ICON_SOURCE
+    : (cleaned.imageSource === GAMEITEMDB_ICON_SOURCE
+      ? GAMEITEMDB_ICON_SOURCE
+      : (cleaned.imageSource === QUIZ_BOT_FALLBACK_SOURCE
+        ? QUIZ_BOT_FALLBACK_SOURCE
+        : (cleaned.imageSource || null)));
   return {
     speciesId: cleaned.itemId || null,
     canonicalName: cleaned.baseFishName,
@@ -291,13 +359,49 @@ function mapToPublicFishCardItem(item) {
     },
     imageUrl: cleaned.imageUrl || null,
     imageUrlPresent: Boolean(cleaned.imageUrl),
+    imageAssetId: cleaned.imageAssetId || cleaned.iconAssetId || null,
+    iconAssetId: cleaned.iconAssetId || cleaned.imageAssetId || null,
+    imageResolved: cleaned.imageResolved === true,
+    imageStatus: cleaned.imageStatus || null,
     imageSource,
     dataImageSource: imageSource,
+    iconSource: cleaned.iconSource || null,
     dataRaritySource: rarityResolved.raritySource,
     icon: cleaned.iconRaw || cleaned.icon || null,
     debugIcon: cleaned.iconRaw || cleaned.icon || null,
     publicWeightHidden: true,
     publicRarityHidden: true,
+  };
+}
+
+function mapToPublicTotemCardItem(item) {
+  const amount = Number(item.quantity) > 0 ? Math.floor(Number(item.quantity)) : 1;
+  const iconParsed = parseGameItemIcon(item.icon || item.iconRaw);
+  const imageSource = iconParsed
+    ? GAMEITEMDB_ICON_SOURCE
+    : (item.imageSource === QUIZ_BOT_FALLBACK_SOURCE ? QUIZ_BOT_FALLBACK_SOURCE : null);
+  return {
+    kind: 'totem',
+    category: 'totem',
+    itemId: item.itemId || null,
+    name: item.name,
+    displayName: item.name,
+    amount,
+    quantity: amount,
+    count: amount,
+    uuid: item.uuid || null,
+    tier: item.tier != null ? item.tier : null,
+    rarity: item.rarity || null,
+    icon: iconParsed?.icon || item.icon || null,
+    imageUrl: item.imageUrl || null,
+    imageUrlPresent: Boolean(item.imageUrl),
+    imageSource,
+    dataSource: PLAYERDATA_GAMEITEMDB_SOURCE,
+    source: PLAYERDATA_GAMEITEMDB_SOURCE,
+    identityVerified: true,
+    identitySource: PLAYERDATA_GAMEITEMDB_SOURCE,
+    globalDbUsedForPublicIdentity: false,
+    type: 'Totem',
   };
 }
 
@@ -335,6 +439,7 @@ function mapToPublicStoneCardItem(item) {
 }
 
 function buildPlayerDataGameItemDbProof(fishItems, stoneItems, unresolvedItems = [], extra = {}) {
+  const totemItems = Array.isArray(extra.totemItems) ? extra.totemItems : [];
   const fishIconResolvedCount = fishItems.filter(
     (f) => f.imageSource === GAMEITEMDB_ICON_SOURCE && f.imageUrlPresent,
   ).length;
@@ -355,12 +460,18 @@ function buildPlayerDataGameItemDbProof(fishItems, stoneItems, unresolvedItems =
       : null,
     fishCount: fishItems.length,
     stoneCount: stoneItems.length,
+    totemCount: totemItems.length,
+    totemQuantity: totemItems.reduce(
+      (s, t) => s + (Number(t.amount || t.quantity) > 0 ? Math.floor(Number(t.amount || t.quantity)) : 1),
+      0,
+    ),
     unresolvedCount: (unresolvedItems || []).length,
     itemUtilityResolvedFishCount: extra.itemUtilityResolvedFishCount != null
       ? extra.itemUtilityResolvedFishCount
       : fishItems.length,
     uploadedFishCount: fishItems.length,
     uploadedStoneCount: stoneItems.length,
+    uploadedTotemCount: totemItems.length,
     fishIconResolvedCount: extra.fishIconResolvedCount != null
       ? extra.fishIconResolvedCount
       : fishIconResolvedCount,
@@ -385,6 +496,13 @@ function buildPlayerDataGameItemDbProof(fishItems, stoneItems, unresolvedItems =
       icon: s.icon || null,
       source: PLAYERDATA_GAMEITEMDB_SOURCE,
     })),
+    sampleTotems: totemItems.slice(0, 5).map((t) => ({
+      itemId: t.itemId,
+      name: t.name,
+      quantity: t.amount,
+      icon: t.icon || null,
+      source: PLAYERDATA_GAMEITEMDB_SOURCE,
+    })),
     unresolvedItems: (unresolvedItems || []).slice(0, 20),
   };
 }
@@ -393,7 +511,7 @@ function buildInventoryGroups(fishItems) {
   return { fish: fishItems, rods: [], items: [], stones: [] };
 }
 
-function buildPublicCounts(fishItems, stoneItems) {
+function buildPublicCounts(fishItems, stoneItems, totemItems = []) {
   const visibleFishInstances = fishItems.reduce(
     (s, f) => s + (Number(f.amount) > 0 ? Math.floor(Number(f.amount)) : 1),
     0,
@@ -402,17 +520,23 @@ function buildPublicCounts(fishItems, stoneItems) {
     (s, st) => s + (Number(st.amount) > 0 ? Math.floor(Number(st.amount)) : 1),
     0,
   );
+  const visibleTotemInstances = totemItems.reduce(
+    (s, t) => s + (Number(t.amount) > 0 ? Math.floor(Number(t.amount)) : 1),
+    0,
+  );
   return {
     visibleFishInstances,
     visibleFishTypes: fishItems.length,
     visibleStoneInstances,
     visibleStoneTypes: stoneItems.length,
+    visibleTotemInstances,
+    visibleTotemTypes: totemItems.length,
     hiddenUnresolvedFishRows: 0,
     hiddenAmbiguousContainerRows: 0,
   };
 }
 
-function buildFishCounts(fishItems, stoneItems, hiddenUnresolved = 0) {
+function buildFishCounts(fishItems, stoneItems, hiddenUnresolved = 0, totemItems = []) {
   const fishInstances = fishItems.reduce(
     (s, f) => s + (Number(f.amount) > 0 ? Math.floor(Number(f.amount)) : 1),
     0,
@@ -421,12 +545,18 @@ function buildFishCounts(fishItems, stoneItems, hiddenUnresolved = 0) {
     (s, st) => s + (Number(st.amount) > 0 ? Math.floor(Number(st.amount)) : 1),
     0,
   );
+  const totemInstances = totemItems.reduce(
+    (s, t) => s + (Number(t.amount) > 0 ? Math.floor(Number(t.amount)) : 1),
+    0,
+  );
   return {
     label: 'Fish',
     fishTypes: fishItems.length,
     fishInstances,
     stoneTypes: stoneItems.length,
     stoneInstances,
+    totemTypes: totemItems.length,
+    totemInstances,
     hiddenUnresolvedFishRows: hiddenUnresolved,
     hiddenNonFishTypes: 0,
     hiddenNonFishInstances: 0,
@@ -442,6 +572,10 @@ function extractSessionRows(sessionData, body = null) {
     || sessionData?.stoneItemsRaw
     || body?.stoneItems
     || [];
+  const rawTotems = sessionData?.playerDataTotemItems
+    || sessionData?.totemItemsRaw
+    || body?.totemItems
+    || [];
   const unresolved = sessionData?.playerDataUnresolvedItems
     || sessionData?.unresolvedItems
     || body?.unresolvedItems
@@ -449,6 +583,7 @@ function extractSessionRows(sessionData, body = null) {
   return {
     rawFish: normaliseUploadRows(Array.isArray(rawFish) ? rawFish : []),
     rawStones: normaliseUploadRows(Array.isArray(rawStones) ? rawStones : []),
+    rawTotems: normaliseUploadRows(Array.isArray(rawTotems) ? rawTotems : []),
     unresolvedItems: Array.isArray(unresolved) ? unresolved : [],
   };
 }
@@ -462,6 +597,7 @@ function usesPlayerDataGameItemDbPublicIdentity(sessionData) {
     return Boolean(
       (Array.isArray(sessionData.playerDataFishItems) && sessionData.playerDataFishItems.length)
       || (Array.isArray(sessionData.playerDataStoneItems) && sessionData.playerDataStoneItems.length)
+      || (Array.isArray(sessionData.playerDataTotemItems) && sessionData.playerDataTotemItems.length)
       || sessionData.playerDataGameItemDbProof?.gameItemDbBuilt === true,
     );
   }
@@ -474,6 +610,7 @@ function buildWaitingForPlayerDataGameItemDbResponse(sessionData = {}) {
     activationState: WAITING_ACTIVATION,
     fishItems: [],
     stoneItems: [],
+    totemItems: [],
     publicItems: [],
     publicFishItems: [],
     fishInventory: buildInventoryGroups([]),
@@ -496,9 +633,10 @@ function buildWaitingForPlayerDataGameItemDbResponse(sessionData = {}) {
 
 async function buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, deps = {}) {
   const fishImageCache = deps.fishImageCache;
-  const { rawFish, rawStones, unresolvedItems } = extractSessionRows(sessionData);
+  const { rawFish, rawStones, rawTotems, unresolvedItems } = extractSessionRows(sessionData);
   const groupedFish = groupFishRows(rawFish);
   const groupedStones = groupStoneRows(rawStones);
+  const groupedTotems = groupTotemRows(rawTotems);
 
   let withImages = groupedFish;
   if (fishImageCache && typeof fishImageCache.attachItemUtilityGameIcons === 'function') {
@@ -526,23 +664,29 @@ async function buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, deps = 
 
   const fishItems = withImages.map((item) => mapToPublicFishCardItem(item));
   const stoneItems = stonesWithImages.map((item) => mapToPublicStoneCardItem(item));
+  let totemsWithImages = groupedTotems;
+  if (fishImageCache && typeof fishImageCache.attachItemUtilityGameIcons === 'function') {
+    totemsWithImages = await fishImageCache.attachItemUtilityGameIcons(groupedTotems, baseUrl);
+  }
+  const totemItems = totemsWithImages.map((item) => mapToPublicTotemCardItem(item));
   const missingPublicRarityCount = manualRarity.countMissingPublicRarity(fishItems);
   const manualRarityProof = manualRarity.buildManualRarityProof(fishItems);
   const stoneAssetProof = stoneImageAssets.buildStoneAssetProof(stoneItems);
-  const fishCounts = buildFishCounts(fishItems, stoneItems, unresolvedItems.length);
-  const publicCounts = buildPublicCounts(fishItems, stoneItems);
+  const fishCounts = buildFishCounts(fishItems, stoneItems, unresolvedItems.length, totemItems);
+  const publicCounts = buildPublicCounts(fishItems, stoneItems, totemItems);
   const storedProof = sessionData?.playerDataGameItemDbProof || {};
   const playerDataGameItemDbProof = buildPlayerDataGameItemDbProof(
     fishItems,
     stoneItems,
     unresolvedItems,
-    storedProof,
+    { ...storedProof, totemItems },
   );
 
   return {
     activationState: 'playerdata_gameitemdb_active',
     fishItems,
     stoneItems,
+    totemItems,
     publicItems: fishItems,
     publicFishItems: fishItems,
     fishInventory: buildInventoryGroups(fishItems),
@@ -578,12 +722,14 @@ module.exports = {
   isValidPublicGameIcon,
   isPlayerDataGameItemDbRow,
   isEnchantStoneRow,
+  isTotemRow,
   detectGameItemDbUpload,
   expectsPlayerDataGameItemDbPayload,
   normaliseUploadRow,
   normaliseUploadRows,
   groupFishRows,
   groupStoneRows,
+  groupTotemRows,
   buildPublicFromPlayerDataGameItemDb,
   buildWaitingForPlayerDataGameItemDbResponse,
   buildPlayerDataGameItemDbProof,
@@ -592,4 +738,5 @@ module.exports = {
   extractSessionRows,
   mapToPublicFishCardItem,
   mapToPublicStoneCardItem,
+  mapToPublicTotemCardItem,
 };
