@@ -16,7 +16,13 @@
         "TOOL_SITE_SESSION_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\site-sessions",
         "FISHIT_DB_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Fish It\\data\\deng-fish-it.sqlite",
         "PUBLIC_TRACKER_GITHUB_REPO": "dengjiangbin/fish-it",
-        "GIT_COMMIT": "5e8698f2b0ce2d109261c274df92ca8f724144e6"
+        "TOOL_SITE_ASSET_VERSION": "PROD_FIX_OAUTH_UNIQUE_USERS_2026_06_13",
+        "TOOL_SITE_PUBLIC_URL": "https://aio.deng.my.id",
+        "TOOL_SITE_INTERNAL_URL": "https://tool.deng.my.id",
+        "DISCORD_AIO_WEB_REDIRECT_URI": "https://aio.deng.my.id/auth/discord/callback",
+        "DISCORD_REDIRECT_URI": "https://tool.deng.my.id/auth/discord/callback",
+        "DISCORD_AIO_REDIRECT_URI": "https://tool.deng.my.id/api/aio/auth/callback",
+        "GIT_COMMIT": "23b77b1972b303db8ea186f25549da8e1ebac402"
       }
     }
   ]

@@ -1,0 +1,47 @@
+{
+  "marker": "PROD_FIX_OAUTH_UNIQUE_USERS_2026_06_13",
+  "generatedAt": "2026-06-13T14:36:32.967Z",
+  "uniqueUsers": {
+    "rootCause": "Platform Players (uniqueUsers) was confused with Tracked Players (trackedUsernames=8). Tracker canonical count filters to current build only; portal uniqueUsers comes from site_users+license_users.",
+    "db": {
+      "siteUsersRows": 77,
+      "siteUsersWithDiscord": 77,
+      "licenseUsersRows": 73
+    },
+    "apiPublicStats": {
+      "uniqueUsers": 102,
+      "generatedKeys": 37,
+      "redeemedKeys": 24,
+      "activeDevices": 20
+    },
+    "trackerPublicNetwork": {
+      "trackedUsernames": 8,
+      "currentBuildUniqueUsers": 8,
+      "rawSessionRows": 259,
+      "uniqueKeysSeen": 252,
+      "note": "8 is tracker online/current-build count, NOT registered portal users"
+    },
+    "uiMapping": {
+      "platformPlayers": "publicStats.uniqueUsers",
+      "trackedPlayers": "trackerNetwork.trackedUsernames"
+    }
+  },
+  "oauth": {
+    "rootCause": "aio.deng.my.id web OAuth used aio callback URI not registered in Discord Developer Portal; OAuth state was host-split.",
+    "aioAuthDiscordRedirect": "https://tool.deng.my.id/auth/discord?public_return=1",
+    "discordCallbackUri": "https://tool.deng.my.id/auth/discord/callback",
+    "apkOAuthStart": "https://tool.deng.my.id/auth/discord?apk=1&public_return=1",
+    "webBridgeRoute": "/auth/web-bridge",
+    "apkDeepLink": "deng-aio://auth/callback"
+  },
+  "pm2": {
+    "deng-tool-site": "online",
+    "deng-rejoin-panel": "online",
+    "port8791Pid": 13176
+  },
+  "tests": {
+    "public_domain": 10,
+    "public_stats_unique_users": 2,
+    "pass": 12
+  }
+}

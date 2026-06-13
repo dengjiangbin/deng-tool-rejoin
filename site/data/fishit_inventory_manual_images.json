@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "updatedAt": "2026-06-13T10:47:14.465Z",
+  "overrides": {
+    "totems|2|mutation totem": {
+      "category": "totems",
+      "itemId": "2",
+      "normalizedName": "mutation totem",
+      "originalName": "Mutation Totem",
+      "uploadedFile": "eef3af93dcccc72d7ac2bbf24eea71a2.png",
+      "imageUrl": "/api/fishit-tracker/assets/manual/totems/eef3af93dcccc72d7ac2bbf24eea71a2.png",
+      "sha256": "eef3af93dcccc72d7ac2bbf24eea71a289c6dc8568f8cebcb50dbceb11c3e1d9",
+      "uploadedAt": "2026-06-13T09:34:01.206Z",
+      "updatedAt": "2026-06-13T10:47:14.446Z"
+    },
+    "totems|1|luck totem": {
+      "category": "totems",
+      "itemId": "1",
+      "normalizedName": "luck totem",
+      "originalName": "Luck Totem",
+      "uploadedFile": "7f0b523ba05304fa95cc34a5e25ff331.png",
+      "imageUrl": "/api/fishit-tracker/assets/manual/totems/7f0b523ba05304fa95cc34a5e25ff331.png",
+      "sha256": "7f0b523ba05304fa95cc34a5e25ff331a9a116077a07d8328a13940b34c82e03",
+      "uploadedAt": "2026-06-13T09:34:01.225Z",
+      "updatedAt": "2026-06-13T10:47:14.465Z"
+    }
+  }
+}

@@ -244,19 +244,42 @@ function buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers }) {
   ));
   const activeBindingKeyIds = new Set(activeBindings.map((row) => row.key_id).filter(Boolean));
 
+  // Registered/authenticated portal users: all active site_users with Discord,
+  // plus license_users and eligible key owners (deduped). Never filtered by
+  // host/domain, session recency, or tracker build.
   const uniqueUsers = new Set();
+  let siteUsersCounted = 0;
+  let licenseUsersCounted = 0;
+  let keyOwnersCounted = 0;
   for (const row of siteUsers || []) {
+    if (row && row.is_active === false) continue;
     if (!publicStatsUserAllowed(row)) continue;
-    if (row.discord_user_id) uniqueUsers.add(`discord:${row.discord_user_id}`);
-    else if (row.id) uniqueUsers.add(`site:${row.id}`);
+    if (row.discord_user_id) {
+      uniqueUsers.add(`discord:${row.discord_user_id}`);
+      siteUsersCounted += 1;
+    } else if (row.id) {
+      uniqueUsers.add(`site:${row.id}`);
+      siteUsersCounted += 1;
+    }
   }
   for (const row of licenseUsers || []) {
     if (!publicStatsUserAllowed(row)) continue;
-    if (row.discord_user_id) uniqueUsers.add(`discord:${row.discord_user_id}`);
+    if (row.discord_user_id) {
+      const key = `discord:${row.discord_user_id}`;
+      if (!uniqueUsers.has(key)) licenseUsersCounted += 1;
+      uniqueUsers.add(key);
+    }
   }
   for (const row of eligibleKeys) {
-    if (row.owner_discord_id) uniqueUsers.add(`discord:${row.owner_discord_id}`);
-    else if (row.site_user_id) uniqueUsers.add(`site:${row.site_user_id}`);
+    if (row.owner_discord_id) {
+      const key = `discord:${row.owner_discord_id}`;
+      if (!uniqueUsers.has(key)) keyOwnersCounted += 1;
+      uniqueUsers.add(key);
+    } else if (row.site_user_id) {
+      const key = `site:${row.site_user_id}`;
+      if (!uniqueUsers.has(key)) keyOwnersCounted += 1;
+      uniqueUsers.add(key);
+    }
   }
 
   const activeDevices = new Set();
@@ -278,6 +301,18 @@ function buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers }) {
     activeDevices: activeDevices.size,
     totalDevices: totalDevices.size,
     updatedAt: new Date().toISOString(),
+    _internalSources: {
+      uniqueUsers: {
+        service: 'licenseService',
+        method: 'COUNT DISTINCT discord/site ids from site_users + license_users + eligible key owners',
+        siteUsersRows: (siteUsers || []).length,
+        siteUsersCounted,
+        licenseUsersRows: (licenseUsers || []).length,
+        licenseUsersCounted,
+        keyOwnersCounted,
+        excludes: ['tracker sessions', 'online presence', 'host/domain', 'recent login window'],
+      },
+    },
   };
 }
 
@@ -291,13 +326,18 @@ async function getPublicStats({ now = Date.now(), forceRefresh = false } = {}) {
     selectPublicStatsRows('license_users'),
     selectPublicStatsRows('site_users'),
   ]);
-  const payload = buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers });
-  publicStatsCache = { cachedAt: now, payload };
+  const built = buildPublicStatsPayload({ keys, bindings, licenseUsers, siteUsers });
+  const { _internalSources, ...payload } = built;
+  publicStatsCache = { cachedAt: now, payload, sources: _internalSources };
   return payload;
 }
 
 function clearPublicStatsCache() {
   publicStatsCache = null;
+}
+
+function peekPublicStatsCache() {
+  return publicStatsCache;
 }
 
 function serviceError(code, message, status = 400, extra = {}) {
@@ -750,7 +790,7 @@ async function resetLicenseHwid(discordUserId, keyIdOrKey) {
 function downloadUserKeys(discordUserId, rows, username = '') {
   const activeRows = filterActiveLicenses(rows || []);
   const lines = [
-    'DENG Tool: Rejoin Keys',
+    'DENG All In One License Keys',
     `User: ${username || discordUserId}`,
     `Generated: ${formatWibTimestamp(new Date())}`,
     '',
@@ -1017,5 +1057,6 @@ module.exports = {
   HWID_RESET_LIMIT_MESSAGE,
   _buildPublicStatsPayload: buildPublicStatsPayload,
   _clearPublicStatsCache: clearPublicStatsCache,
+  _peekPublicStatsCache: peekPublicStatsCache,
   _clearKeyLimitCache,
 };

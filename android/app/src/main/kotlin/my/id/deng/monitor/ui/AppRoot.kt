@@ -7,7 +7,7 @@ import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Backpack
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Waves
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -34,11 +34,11 @@ private data class NavItem(
 )
 
 private val NAV_ITEMS = listOf(
-    NavItem("dashboard",  "Dashboard")  { Icon(Icons.Outlined.Dashboard, contentDescription = null) },
-    NavItem("fishit",     "Stats")      { Icon(Icons.Outlined.Waves, contentDescription = null) },
-    NavItem("packages",   "Packages")    { Icon(Icons.Outlined.Apps, contentDescription = null) },
-    NavItem("inventory",  "Inventory")  { Icon(Icons.Outlined.Backpack, contentDescription = null) },
-    NavItem("settings",   "Settings")   { Icon(Icons.Outlined.Settings, contentDescription = null) },
+    NavItem("live_tracker", "Live Tracker") { Icon(Icons.Outlined.Visibility, contentDescription = null) },
+    NavItem("dashboard",    "Dashboard")   { Icon(Icons.Outlined.Dashboard, contentDescription = null) },
+    NavItem("packages",     "Packages")    { Icon(Icons.Outlined.Apps, contentDescription = null) },
+    NavItem("inventory",    "Inventory")   { Icon(Icons.Outlined.Backpack, contentDescription = null) },
+    NavItem("settings",     "Settings")    { Icon(Icons.Outlined.Settings, contentDescription = null) },
 )
 
 @Composable
@@ -46,16 +46,20 @@ fun AppRoot(
     api: MonitorApi,
     sessionStore: SessionStore,
     appPreferences: AppPreferences,
-    isPaired: Boolean,
+    isLoggedIn: Boolean,
 ) {
-    if (!isPaired) {
-        PairScreen(api = api, sessionStore = sessionStore)
+    if (!isLoggedIn) {
+        LoginWebViewScreen(
+            api = api,
+            sessionStore = sessionStore,
+            onLoggedIn = { /* state flow recomposition handles navigation */ },
+        )
         return
     }
 
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
-    val currentRoute = backStack?.destination?.route ?: "dashboard"
+    val currentRoute = backStack?.destination?.route ?: "live_tracker"
 
     Scaffold(
         containerColor = Color.Transparent,
@@ -85,15 +89,20 @@ fun AppRoot(
     ) { inner ->
         NavHost(
             navController = nav,
-            startDestination = "dashboard",
+            startDestination = "live_tracker",
             modifier = Modifier.fillMaxSize().padding(inner),
         ) {
-            composable("dashboard") { DashboardScreen(api = api, sessionStore = sessionStore) }
-            composable("fishit")    { FishItScreen(api = api) }
-            composable("packages")  { PackagesScreen(api = api, sessionStore = sessionStore) }
-            composable("inventory") { InventoryScreen(api = api) }
-            composable("settings")  { SettingsScreen(api = api, sessionStore = sessionStore, appPreferences = appPreferences) }
+            composable("live_tracker") { LiveTrackerWebViewScreen(sessionStore = sessionStore) }
+            composable("dashboard")    { DashboardWebViewScreen() }
+            composable("packages")     { PackagesScreen(api = api, sessionStore = sessionStore) }
+            composable("inventory")      { InventoryScreen(api = api) }
+            composable("settings")     {
+                SettingsScreen(
+                    api = api,
+                    sessionStore = sessionStore,
+                    appPreferences = appPreferences,
+                )
+            }
         }
     }
 }
-

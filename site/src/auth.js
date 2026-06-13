@@ -8,6 +8,7 @@
 const crypto  = require('crypto');
 const axios   = require('axios');
 const supabase = require('./db');
+const { resolveDiscordRedirectUri, oauthReturnPublicBase } = require('./publicDomain');
 
 const DISCORD_CLIENT_ID     = process.env.DISCORD_CLIENT_ID     || '';
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
@@ -154,20 +155,23 @@ function verifyCsrf(req) {
  * Stores the state in session for later validation.
  */
 function buildDiscordAuthUrl(req) {
+  const redirectUri = resolveDiscordRedirectUri(req);
   const missing = [];
   if (!DISCORD_CLIENT_ID) missing.push('DISCORD_CLIENT_ID');
   if (!DISCORD_CLIENT_SECRET) missing.push('DISCORD_CLIENT_SECRET');
-  if (!DISCORD_REDIRECT_URI) missing.push('DISCORD_REDIRECT_URI');
+  if (!redirectUri) missing.push('DISCORD_REDIRECT_URI');
   if (missing.length) {
     console.error('[auth] Discord OAuth not configured, missing env:', missing.join(', '));
     throw new Error('Discord OAuth is not configured');
   }
   const state = crypto.randomBytes(24).toString('hex');
   req.session.oauthState = state;
+  req.session.oauthRedirectUri = redirectUri;
+  req.session.oauthReturnPublicUrl = oauthReturnPublicBase(req);
 
   const params = new URLSearchParams({
     client_id:     DISCORD_CLIENT_ID,
-    redirect_uri:  DISCORD_REDIRECT_URI,
+    redirect_uri:  redirectUri,
     response_type: 'code',
     scope:         SCOPES,
     state,
@@ -180,13 +184,14 @@ function buildDiscordAuthUrl(req) {
  * Exchange authorization code for Discord access token.
  * Throws on failure.
  */
-async function exchangeDiscordCode(code) {
+async function exchangeDiscordCode(code, redirectUri) {
+  const uri = redirectUri || DISCORD_REDIRECT_URI;
   const params = new URLSearchParams({
     client_id:     DISCORD_CLIENT_ID,
     client_secret: DISCORD_CLIENT_SECRET,
     grant_type:    'authorization_code',
     code,
-    redirect_uri:  DISCORD_REDIRECT_URI,
+    redirect_uri:  uri,
   });
 
   try {
@@ -201,7 +206,7 @@ async function exchangeDiscordCode(code) {
     const errName  = (err.response && err.response.data && err.response.data.error) || err.message;
     console.error(
       '[auth] category=token_exchange_failed http_status=%s discord_error=%s redirect_uri=%s client_id=%s client_secret_set=%s',
-      status, errName, DISCORD_REDIRECT_URI, DISCORD_CLIENT_ID, !!DISCORD_CLIENT_SECRET,
+      status, errName, uri, DISCORD_CLIENT_ID, !!DISCORD_CLIENT_SECRET,
     );
     throw err;
   }

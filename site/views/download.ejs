@@ -2,9 +2,9 @@
 
 <div class="page-header">
   <div>
-    <p class="eyebrow">DENG Tool Portal</p>
+    <p class="eyebrow">DENG All In One</p>
     <h1 class="page-title">
-      <span class="gradient-brand-text">DENG Tool Monitor</span>
+      <span class="gradient-brand-text">DENG All In One Monitor</span>
     </h1>
     <p class="page-subtitle">
       Monitor your Rejoin packages from Android or iOS. View RAM, package state,
@@ -15,8 +15,8 @@
     <div class="download-cta-col">
       <p class="download-platform-label">Android</p>
       <% if (manifest && manifest.file_name) { %>
-        <a href="/downloads/deng-tool-rejoin-apk-latest.apk" class="btn btn-primary" data-apk-download rel="nofollow">
-          Download Android APK
+        <a href="/downloads/deng-all-in-one-apk-latest.apk" class="btn btn-primary" data-apk-download rel="nofollow">
+          Download DENG All In One APK
         </a>
         <p class="apk-download-count" data-apk-download-count hidden aria-live="polite">
           <span class="apk-download-count-skel" data-apk-count-skel></span>
@@ -72,13 +72,7 @@
     <div class="stat-body">
       <p class="stat-label">Backend</p>
       <p class="stat-value" style="font-size: 1.05rem;">tool.deng.my.id</p>
-      <p class="stat-note">
-        <% if (manifest && manifest.size_bytes) { %>
-          <%= (manifest.size_bytes / (1024 * 1024)).toFixed(1) %> MB · Min Android <%= manifest ? manifest.min_sdk : 26 %>+
-        <% } else { %>
-          Min Android <%= manifest ? manifest.min_sdk : 26 %>+
-        <% } %>
-      </p>
+      <p class="stat-note">Internal API / monitor bridge (not the public website host).</p>
     </div>
   </div>
 </div>
@@ -88,8 +82,7 @@
     <div>
       <h2 class="section-title">Pair Android App</h2>
       <p class="section-desc">
-        After installing DENG Tool: Rejoin APK, open the app and enter this
-        pairing code to connect it to your account.
+        After installing DENG All In One, open the app and sign in with Discord.
       </p>
     </div>
   </div>
@@ -122,7 +115,7 @@
         </div>
         <p class="pair-meta">
           <span data-pair-expiry>Expires in 5 minutes.</span><br>
-          Open <strong>DENG Tool: Rejoin APK</strong> → <em>Pair Device</em> →
+          Open <strong>DENG All In One APK</strong> → <em>Pair Device</em> →
           paste this code.
         </p>
         <p class="pair-error" data-pair-error hidden role="alert"></p>
@@ -151,9 +144,9 @@
     <li>Tap <strong>Download APK</strong> above.</li>
     <li>If asked, allow installs from this browser in Android Settings.</li>
     <li>Open the downloaded <code>.apk</code> and tap <strong>Install</strong>.</li>
-    <li>Open <strong>DENG Tool: Rejoin APK</strong>, then enter the pairing
+    <li>Open <strong>DENG All In One APK</strong>, then enter the pairing
       code generated above in <strong>Pair Android App</strong>.</li>
-    <li>In Termux on your cloud phone, run <code>deng-rejoin</code>. The tool
+    <li>In Termux on your cloud phone, run <code>deng-rejoin</code>. The Rejoin agent
       will auto-start the monitor bridge after license verification.</li>
   </ol>
 
@@ -438,7 +431,7 @@
         if (!code) throw new Error('Server did not return a pairing code.');
         codeEl.value = code;
         result.hidden = false;
-        if (hint) hint.textContent = 'Code generated. Enter it in DENG Tool: Rejoin APK within 5 minutes.';
+        if (hint) hint.textContent = 'Code generated. Enter it in DENG All In One APK within 5 minutes.';
         btnGen.textContent = 'Generate New Code';
         startCountdown(data.expires_at);
       })

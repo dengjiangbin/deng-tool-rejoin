@@ -98,3 +98,25 @@ data class TrackerTotemItem(
     val uuid: String? = null,
     @SerialName("itemId") val itemId: String? = null,
 )
+
+@Serializable
+data class AioAuthExchangeResponse(
+    val ok: Boolean = false,
+    @SerialName("appSessionToken") val appSessionToken: String = "",
+    @SerialName("expiresAt") val expiresAt: String? = null,
+    val user: AioAuthUser = AioAuthUser(),
+)
+
+@Serializable
+data class AioAuthUser(
+    @SerialName("discordUserId") val discordUserId: String = "",
+    val username: String? = null,
+    val avatar: String? = null,
+)
+
+@Serializable
+data class AioWebBootstrapResponse(
+    val ok: Boolean = false,
+    @SerialName("bridgeUrl") val bridgeUrl: String = "",
+    @SerialName("expiresInSeconds") val expiresInSeconds: Int = 0,
+)

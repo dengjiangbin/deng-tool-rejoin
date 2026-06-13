@@ -1,12 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!--
-        DENG Tool: Rejoin APK — public read-only monitoring companion for
-        DENG Tool: Rejoin. Network is the only required permission.
-        POST_NOTIFICATIONS is optional and only requested when notifications
-        are enabled in-app.
-    -->
+    <!-- DENG All In One — mobile companion for aio.deng.my.id -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -29,12 +24,29 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_launcher_label"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.DengMonitor"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="deng-aio" android:host="auth" android:pathPrefix="/callback" />
+            </intent-filter>
         </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

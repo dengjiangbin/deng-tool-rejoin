@@ -19,6 +19,7 @@ const {
   upsertDiscordUser,
   ensureRealSiteUser,
   toSessionUser,
+  safeReturnPath,
 } = auth;
 const challenge = require('./challenge');
 const supabase = require('./db');
@@ -28,8 +29,20 @@ const { formatWibTimestamp, licenseExportFilename } = require('./licenseFormat')
 const linkvertise = require('./providers/linkvertise');
 const lootlabs = require('./providers/lootlabs');
 const { signChallenge, verifyChallenge, isStateSecretConfigured } = require('./crypto');
+const { canonicalPublicUrl, internalApiBaseUrl, requestHost, isCanonicalPublicHost, oauthDiscordCallbackUri } = require('./publicDomain');
+const aioSessionStore = require('./aioSessionStore');
 
 const router = express.Router();
+
+function renderOAuthDeepLinkHtml(deepLink) {
+  const safe = String(deepLink).replace(/"/g, '&quot;');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="0; url=${safe}">
+<title>Returning to DENG AIO…</title></head>
+<body><p>Signing you in… <a href="${safe}">Tap here if the app does not open</a>.</p>
+<script>location.replace(${JSON.stringify(deepLink)});</script></body></html>`;
+}
 
 const DEFAULT_PROVIDER_CONFIG = {
   linkvertise: {
@@ -93,7 +106,7 @@ function envEnabled(name, fallback = 'false') {
 }
 
 function publicUrl() {
-  return cleanEnv('TOOL_SITE_PUBLIC_URL', 'https://tool.deng.my.id').replace(/\/+$/, '');
+  return canonicalPublicUrl();
 }
 
 function getProviderConfig(provider) {
@@ -354,7 +367,7 @@ function safeFlash(req, key, value) {
 
 function tokenizedCompleteUrl(provider, returnToken) {
   const cfg = getProviderConfig(provider);
-  const base = cfg?.completeUrl || `${publicUrl()}/unlock/${provider}/complete`;
+  const base = cfg?.completeUrl || `${internalApiBaseUrl()}/unlock/${provider}/complete`;
   const url = new URL(base);
   url.searchParams.set('t', returnToken);
   return url.toString();
@@ -814,7 +827,7 @@ async function handleKeyStart(req, res) {
 
     if (wantsJson(req)) return res.json({ challenge_id: row.row.id, status: row.row.status, resumed: row.resumed });
     return res.render('choose_provider', {
-      title: 'Choose Unlock Method - DENG Tool',
+      title: 'Choose Unlock Method - DENG All In One',
       challengeId: row.row.id,
       providers: enabledProviders(),
       providerLabel,
@@ -953,7 +966,7 @@ async function handleProvider(req, res) {
       const signedState = signChallenge(workingRow.id, 'lootlabs', Date.now() + ttlMs);
       const callbackUrl = lootlabs.buildLootLabsCallbackUrl({
         signedState,
-        publicUrl: publicUrl(),
+        publicUrl: internalApiBaseUrl(),
       });
 
       const requestId = require('crypto').randomBytes(6).toString('hex');
@@ -1328,6 +1341,26 @@ router.get('/health', (_req, res) => {
 });
 
 router.get('/auth/discord', (req, res) => {
+  const host = requestHost(req);
+  if (isCanonicalPublicHost(host)) {
+    const toolBase = internalApiBaseUrl();
+    const qs = new URLSearchParams();
+    qs.set('public_return', '1');
+    const ret = safeReturnPath(req.query.return || req.query.next);
+    if (ret) qs.set('return', ret);
+    if (req.query.apk === '1' || req.query.apk === 'true') qs.set('apk', '1');
+    return res.redirect(`${toolBase}/auth/discord?${qs.toString()}`);
+  }
+
+  const ret = safeReturnPath(req.query.return || req.query.next);
+  if (ret) req.session.authReturnTo = ret;
+  if (req.query.public_return === '1' || req.query.public_return === 'true') {
+    req.session.oauthReturnPublicUrl = canonicalPublicUrl();
+  }
+  if (req.query.apk === '1' || req.query.apk === 'true') {
+    req.session.oauthApkReturn = true;
+  }
+
   let authUrl;
   try {
     authUrl = buildDiscordAuthUrl(req);
@@ -1376,8 +1409,10 @@ router.get('/auth/discord/callback', authLimiter, async (req, res) => {
 
   // Step 1: Exchange code for access token
   let tokens;
+  const storedRedirectUri = req.session.oauthRedirectUri;
+  delete req.session.oauthRedirectUri;
   try {
-    tokens = await exchangeDiscordCode(String(code));
+    tokens = await exchangeDiscordCode(String(code), storedRedirectUri);
   } catch (_err) {
     // Structured error details are already logged inside exchangeDiscordCode.
     safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
@@ -1405,7 +1440,59 @@ router.get('/auth/discord/callback', authLimiter, async (req, res) => {
     return res.redirect(LOGIN_HOME);
   }
 
-  // Step 4: Regenerate session and redirect
+  const returnPublicUrl = String(req.session.oauthReturnPublicUrl || '').replace(/\/+$/, '');
+  const oauthApkReturn = req.session.oauthApkReturn === true;
+  delete req.session.oauthReturnPublicUrl;
+  delete req.session.oauthApkReturn;
+  const authReturnTo = safeReturnPath(req.session.authReturnTo) || '/dashboard';
+  delete req.session.authReturnTo;
+
+  const sessionUser = toSessionUser(siteUser);
+  const canonicalBase = canonicalPublicUrl();
+  const needsPublicBridge = Boolean(
+    returnPublicUrl
+    && returnPublicUrl.startsWith(canonicalBase)
+    && !isCanonicalPublicHost(requestHost(req)),
+  );
+
+  // APK native OAuth uses deep-link exchange, not cookie bridge.
+  if (oauthApkReturn) {
+    try {
+      const { code: loginCode } = aioSessionStore.createLoginCode({
+        discordUserId: discordUser.id,
+        siteUserId: siteUser && siteUser.id ? siteUser.id : null,
+        username: sessionUser.username || discordUser.username || null,
+        avatar: discordUser.avatar || null,
+      });
+      const scheme = (process.env.DENG_AIO_APP_SCHEME || 'deng-aio').trim();
+      const deepLink = `${scheme}://auth/callback?code=${encodeURIComponent(loginCode)}`;
+      res.set('Content-Type', 'text/html; charset=utf-8');
+      return res.status(200).send(renderOAuthDeepLinkHtml(deepLink));
+    } catch (bridgeErr) {
+      console.error('[auth/discord/callback] category=apk_bridge_failed error=%s', bridgeErr.message);
+      safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
+      return res.redirect(LOGIN_HOME);
+    }
+  }
+
+  if (needsPublicBridge) {
+    try {
+      const { code: bridgeCode } = aioSessionStore.createLoginCode({
+        discordUserId: discordUser.id,
+        siteUserId: siteUser && siteUser.id ? siteUser.id : null,
+        username: sessionUser.username || discordUser.username || null,
+        avatar: discordUser.avatar || null,
+      });
+      const dest = `${returnPublicUrl}/auth/web-bridge?code=${encodeURIComponent(bridgeCode)}&return=${encodeURIComponent(authReturnTo)}`;
+      return res.redirect(dest);
+    } catch (bridgeErr) {
+      console.error('[auth/discord/callback] category=web_bridge_failed error=%s', bridgeErr.message);
+      safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
+      return res.redirect(LOGIN_HOME);
+    }
+  }
+
+  // Step 4: Regenerate session and redirect (same-host browser login)
   return new Promise((resolve) => {
     req.session.regenerate((regenErr) => {
       if (regenErr) {
@@ -1414,7 +1501,7 @@ router.get('/auth/discord/callback', authLimiter, async (req, res) => {
         res.redirect(LOGIN_HOME);
         return resolve();
       }
-      req.session.user = toSessionUser(siteUser);
+      req.session.user = sessionUser;
       req.session.site_user_id = siteUser && siteUser.id ? siteUser.id : null;
       req.session.discord_user_id = req.session.user && req.session.user.discord_user_id
         ? String(req.session.user.discord_user_id)
@@ -1425,7 +1512,64 @@ router.get('/auth/discord/callback', authLimiter, async (req, res) => {
         if (saveErr) {
           console.error('[auth/discord/callback] category=session_save_failed error=%s', saveErr.message);
         }
-        res.redirect('/dashboard');
+        res.redirect(authReturnTo);
+        resolve();
+      });
+    });
+  });
+});
+
+router.get('/auth/web-bridge', authLimiter, async (req, res) => {
+  const bridgeCode = typeof req.query.code === 'string' ? req.query.code.trim() : '';
+  const authReturnTo = safeReturnPath(req.query.return) || '/dashboard';
+  if (!bridgeCode) {
+    safeFlash(req, 'error', 'Invalid sign-in link. Please try again.');
+    return res.redirect(LOGIN_HOME);
+  }
+  const bridged = aioSessionStore.consumeLoginCode(bridgeCode);
+  if (!bridged || !bridged.discordUserId) {
+    safeFlash(req, 'error', 'Sign-in link expired. Please try Discord login again.');
+    return res.redirect(LOGIN_HOME);
+  }
+  let siteUser = null;
+  try {
+    const discordUser = {
+      id: bridged.discordUserId,
+      username: bridged.username || `user_${String(bridged.discordUserId).slice(-4)}`,
+      global_name: bridged.username || null,
+      avatar: bridged.avatar || null,
+    };
+    siteUser = await upsertDiscordUser(discordUser, {}, { allowFallback: false });
+  } catch (err) {
+    console.error('[auth/web-bridge] category=site_user_resolve_failed error=%s', err.message);
+    safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
+    return res.redirect(LOGIN_HOME);
+  }
+  const sessionUser = toSessionUser(siteUser || {
+    id: bridged.siteUserId,
+    discord_user_id: bridged.discordUserId,
+    discord_username: bridged.username,
+    discord_avatar: bridged.avatar,
+    username: bridged.username,
+  });
+  return new Promise((resolve) => {
+    req.session.regenerate((regenErr) => {
+      if (regenErr) {
+        console.error('[auth/web-bridge] category=session_regenerate_failed error=%s', regenErr.message);
+        safeFlash(req, 'error', 'Session error. Please try again.');
+        res.redirect(LOGIN_HOME);
+        return resolve();
+      }
+      req.session.user = sessionUser;
+      req.session.site_user_id = siteUser && siteUser.id ? siteUser.id : (bridged.siteUserId || null);
+      req.session.discord_user_id = bridged.discordUserId;
+      req.session.csrfToken = require('crypto').randomBytes(32).toString('hex');
+      req.session.flash = { success: `Welcome, ${sessionUser.username}!` };
+      req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error('[auth/web-bridge] category=session_save_failed error=%s', saveErr.message);
+        }
+        res.redirect(authReturnTo);
         resolve();
       });
     });
@@ -1444,7 +1588,7 @@ router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
   try {
     const history = await loadHistory(req.session.user.id, 8, discordOwnerId(req));
     res.render('dashboard', {
-      title: 'Dashboard - DENG Tool',
+      title: 'Dashboard - DENG All In One',
       history,
       stats: summarizeHistory(history),
       maskKeyRow,
@@ -1456,7 +1600,7 @@ router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
   } catch (err) {
     console.error('[dashboard]', err.message || err);
     res.render('dashboard', {
-      title: 'Dashboard - DENG Tool',
+      title: 'Dashboard - DENG All In One',
       history: [],
       stats: summarizeHistory([]),
       maskKeyRow,
@@ -1470,7 +1614,7 @@ router.get('/dashboard', requireLogin, repairSiteUser, async (req, res) => {
 
 router.get('/fishit', requireLogin, repairSiteUser, (req, res) => {
   res.render('fishit', {
-    title: 'Stats — DENG Tool',
+    title: 'Stats — DENG All In One',
     activePage: 'fishit',
   });
 });
@@ -1570,7 +1714,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
     const recoveredExistingKey = req.session.recoveredExistingKey || null;
     delete req.session.recoveredExistingKey;
     res.render('license', {
-      title: 'My License - DENG Tool',
+      title: 'My License - DENG All In One',
       history,
       stats: summarizeHistory(activeHistory),
       cooldown,
@@ -1585,7 +1729,7 @@ router.get('/license', requireLogin, repairSiteUser, async (req, res) => {
   } catch (err) {
     console.error('[license]', err.message || err);
     res.render('license', {
-      title: 'My License - DENG Tool',
+      title: 'My License - DENG All In One',
       history: [],
       stats: summarizeHistory([]),
       cooldown: { allowed: true, secondsLeft: 0 },
@@ -1627,7 +1771,7 @@ router.get('/key/provider', requireLogin, repairSiteUser, async (req, res) => {
     return res.redirect('/license');
   }
   return res.render('choose_provider', {
-    title: 'Choose Unlock Method - DENG Tool',
+    title: 'Choose Unlock Method - DENG All In One',
     challengeId,
     providers: enabledProviders(),
     providerLabel,
@@ -1683,7 +1827,7 @@ router.get('/key/result', requireLogin, repairSiteUser, async (req, res) => {
   }
   const recoveredExisting = Boolean(req.session.generatedKeyRecovery);
   delete req.session.generatedKeyRecovery;
-  res.render('key_result', { title: 'Your Key - DENG Tool', key, recoveredExisting });
+  res.render('key_result', { title: 'Your Key - DENG All In One', key, recoveredExisting });
 });
 
 router.get('/api/key/attempt/status', requireLogin, repairSiteUser, async (req, res) => {
@@ -1740,6 +1884,39 @@ async function handlePublicStats(_req, res) {
 
 router.get('/api/public-stats', handlePublicStats);
 router.get('/api/stats/public', handlePublicStats);
+
+router.get('/api/public-stats-proof', async (_req, res) => {
+  try {
+    licenseService._clearPublicStatsCache?.();
+    await licenseService.getPublicStats({ forceRefresh: true });
+    const cached = licenseService._peekPublicStatsCache?.() || {};
+    const payload = cached.payload || await licenseService.getPublicStats({ forceRefresh: true });
+    const sources = cached.sources || {};
+    const [siteUsers, licenseUsers] = await Promise.all([
+      supabase.from('site_users').select('id,discord_user_id,is_active', { count: 'exact' }),
+      supabase.from('license_users').select('discord_user_id,is_owner,is_blocked', { count: 'exact' }),
+    ]);
+    return res.json({
+      ok: true,
+      api: payload,
+      sources,
+      db: {
+        siteUsersRows: siteUsers.count ?? (siteUsers.data || []).length,
+        siteUsersWithDiscord: (siteUsers.data || []).filter((r) => r.discord_user_id).length,
+        licenseUsersRows: licenseUsers.count ?? (licenseUsers.data || []).length,
+      },
+      ui: {
+        platformPlayersField: 'uniqueUsers',
+        trackedPlayersField: 'trackedUsernames',
+        note: 'Platform Players must use uniqueUsers from /api/public-stats, not tracker trackedUsernames.',
+      },
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[api/public-stats-proof] failed:', err.message || err);
+    return res.status(503).json({ ok: false, error: 'public_stats_proof_unavailable' });
+  }
+});
 
 router.get('/api/license/me', requireLogin, repairSiteUser, async (req, res) => {
   try {
@@ -1885,8 +2062,13 @@ const IOS_FILENAME_RE = /^deng-tool-monitor-ios-v?[A-Za-z0-9._-]+\.ipa$/;
 // `deng-monitor-*.apk` for any old assets that may already be hosted, so
 // existing bookmarks/links continue to work. Both still pass through the
 // per-file basename + path-prefix traversal defense below.
+const APK_FILENAME_AIO_RE     = /^deng-all-in-one(?:-apk)?-v?[A-Za-z0-9._-]+\.apk$/;
 const APK_FILENAME_NEW_RE    = /^deng-tool-rejoin-apk-v?[A-Za-z0-9._-]+\.apk$/;
 const APK_FILENAME_LEGACY_RE = /^deng-monitor-v?[A-Za-z0-9._-]+\.apk$/;
+
+function isApkFilename(raw) {
+  return APK_FILENAME_AIO_RE.test(raw) || APK_FILENAME_NEW_RE.test(raw) || APK_FILENAME_LEGACY_RE.test(raw);
+}
 
 function loadApkManifest() {
   try {
@@ -1950,7 +2132,7 @@ router.get('/download', requireLogin, (req, res) => {
   const iosManifest = loadIosManifest();
   const iosMode = resolveIosDownloadMode(iosManifest);
   res.render('download', {
-    title: 'DENG Tool Monitor — Download',
+    title: 'DENG All In One Monitor — Download',
     manifest,
     iosManifest,
     iosMode,
@@ -2002,9 +2184,8 @@ router.get('/api/downloads/stats', (_req, res) => {
   }
 });
 
-// Canonical "latest" alias — reads manifest and redirects to the versioned
-// file. Returns a friendly 404 if no APK has been published yet.
-router.head('/downloads/deng-tool-rejoin-apk-latest.apk', (_req, res) => {
+// Canonical "latest" alias — reads manifest and redirects to the versioned file.
+router.head('/downloads/deng-all-in-one-apk-latest.apk', (_req, res) => {
   setDownloadStatsNoStore(res);
   const manifest = loadApkManifest();
   if (!manifest || !manifest.file_name) {
@@ -2014,7 +2195,7 @@ router.head('/downloads/deng-tool-rejoin-apk-latest.apk', (_req, res) => {
   return res.redirect(302, `/downloads/${encodeURIComponent(safeName)}`);
 });
 
-router.get('/downloads/deng-tool-rejoin-apk-latest.apk', (_req, res) => {
+router.get('/downloads/deng-all-in-one-apk-latest.apk', (_req, res) => {
   setDownloadStatsNoStore(res);
   const manifest = loadApkManifest();
   if (!manifest || !manifest.file_name) {
@@ -2024,16 +2205,37 @@ router.get('/downloads/deng-tool-rejoin-apk-latest.apk', (_req, res) => {
   return res.redirect(302, `/downloads/${encodeURIComponent(safeName)}`);
 });
 
+router.head('/downloads/deng-all-in-one-latest.apk', (_req, res) => {
+  setDownloadStatsNoStore(res);
+  return res.redirect(302, '/downloads/deng-all-in-one-apk-latest.apk');
+});
+
+router.get('/downloads/deng-all-in-one-latest.apk', (_req, res) => {
+  setDownloadStatsNoStore(res);
+  return res.redirect(302, '/downloads/deng-all-in-one-apk-latest.apk');
+});
+
+// Backward-compatible aliases for older bookmarks.
+router.head('/downloads/deng-tool-rejoin-apk-latest.apk', (_req, res) => {
+  setDownloadStatsNoStore(res);
+  return res.redirect(301, '/downloads/deng-all-in-one-apk-latest.apk');
+});
+
+router.get('/downloads/deng-tool-rejoin-apk-latest.apk', (_req, res) => {
+  setDownloadStatsNoStore(res);
+  return res.redirect(301, '/downloads/deng-all-in-one-apk-latest.apk');
+});
+
 // Legacy alias — permanent redirect to the new canonical "latest" URL so
 // existing bookmarks keep working.
 router.head('/downloads/deng-monitor-latest.apk', (_req, res) => {
   setDownloadStatsNoStore(res);
-  return res.redirect(301, '/downloads/deng-tool-rejoin-apk-latest.apk');
+  return res.redirect(301, '/downloads/deng-all-in-one-apk-latest.apk');
 });
 
 router.get('/downloads/deng-monitor-latest.apk', (_req, res) => {
   setDownloadStatsNoStore(res);
-  return res.redirect(301, '/downloads/deng-tool-rejoin-apk-latest.apk');
+  return res.redirect(301, '/downloads/deng-all-in-one-apk-latest.apk');
 });
 
 // ── iOS IPA (private test builds only — no public install without signing) ───
@@ -2065,9 +2267,9 @@ router.head('/downloads/:file', (req, res, next) => {
     return res.status(404).type('text/plain').end();
   }
 
-  const isNew = APK_FILENAME_NEW_RE.test(raw);
+  const isNew = isApkFilename(raw);
   const isLegacy = APK_FILENAME_LEGACY_RE.test(raw);
-  if (!isNew && !isLegacy) return next();
+  if (!isNew) return next();
 
   const target = path.resolve(APK_RELEASES_DIR, raw);
   if (!target.startsWith(path.resolve(APK_RELEASES_DIR) + path.sep)
@@ -2085,7 +2287,12 @@ router.head('/downloads/:file', (req, res, next) => {
 
   if (isLegacy) {
     const suffix = raw.replace(/^deng-monitor-/, '');
-    return res.redirect(301, `/downloads/deng-tool-rejoin-apk-${suffix}`);
+    return res.redirect(301, `/downloads/deng-all-in-one-apk-${suffix}`);
+  }
+
+  if (APK_FILENAME_NEW_RE.test(raw)) {
+    const suffix = raw.replace(/^deng-tool-rejoin-apk-/, '');
+    return res.redirect(301, `/downloads/deng-all-in-one-apk-${suffix}`);
   }
 
   return res.status(404).type('text/plain').end();
@@ -2112,9 +2319,9 @@ router.get('/downloads/:file', (req, res, next) => {
     return res.status(404).type('text/plain').send('iOS build not found.\n');
   }
 
-  const isNew = APK_FILENAME_NEW_RE.test(raw);
+  const isNew = isApkFilename(raw);
   const isLegacy = APK_FILENAME_LEGACY_RE.test(raw);
-  if (!isNew && !isLegacy) return next();
+  if (!isNew) return next();
 
   const target = path.resolve(APK_RELEASES_DIR, raw);
   if (!target.startsWith(path.resolve(APK_RELEASES_DIR) + path.sep)
@@ -2134,7 +2341,12 @@ router.get('/downloads/:file', (req, res, next) => {
 
   if (isLegacy) {
     const suffix = raw.replace(/^deng-monitor-/, '');
-    return res.redirect(301, `/downloads/deng-tool-rejoin-apk-${suffix}`);
+    return res.redirect(301, `/downloads/deng-all-in-one-apk-${suffix}`);
+  }
+
+  if (APK_FILENAME_NEW_RE.test(raw)) {
+    const suffix = raw.replace(/^deng-tool-rejoin-apk-/, '');
+    return res.redirect(301, `/downloads/deng-all-in-one-apk-${suffix}`);
   }
 
   return res.status(404).type('text/plain').send('APK not found.\n');

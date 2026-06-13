@@ -101,6 +101,52 @@ class MonitorApi(
         execRaw("/api/monitor/devices/$deviceId/settings", method = "PATCH", body = body, auth = true)
     }
 
+    // ── APK update manifest (public, no auth) ───────────────────────────────
+    suspend fun fetchApkLatest(): ApkLatestInfo =
+        execJson("/api/aio/app/latest", auth = false)
+
+    suspend fun aioAuthExchange(code: String): AioAuthExchangeResponse {
+        val body = """{"code":${json.encodeToString(code)}}"""
+        return execJson("/api/aio/auth/exchange", method = "POST", body = body, auth = false)
+    }
+
+    suspend fun aioWebBootstrap(appSessionToken: String): AioWebBootstrapResponse {
+        val saved = tokenProvider()
+        return try {
+            execJsonWithToken("/api/aio/auth/web-bootstrap", method = "POST", body = "{}", token = appSessionToken)
+        } finally {
+            // tokenProvider reads SessionStore; caller persists token before bootstrap.
+            saved
+        }
+    }
+
+    private suspend inline fun <reified T> execJsonWithToken(
+        path: String,
+        method: String = "GET",
+        body: String? = null,
+        token: String,
+    ): T {
+        val raw = execRawWithToken(path, method, body, token)
+        return json.decodeFromString(raw)
+    }
+
+    private suspend fun execRawWithToken(
+        path: String,
+        method: String,
+        body: String?,
+        token: String,
+    ): String = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url(baseUrl.trimEnd('/') + path)
+            .header("Authorization", "Bearer $token")
+            .method(method, body?.toRequestBody("application/json".toMediaType()))
+        client.newCall(req.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ApiException(resp.code, text.ifBlank { "request_failed" })
+            text
+        }
+    }
+
     // ── Internal helpers ───────────────────────────────────────────────────
     // v1.0.3 — every code path (execRaw, execJson, snapshotBytes) goes
     // through `withContext(Dispatchers.IO)`. Previously `execRaw` was a

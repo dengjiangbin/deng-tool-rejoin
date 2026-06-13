@@ -17,14 +17,17 @@ android {
         // Termux / package version. Bump versionCode whenever the
         // APK is rebuilt and republished, even for branding-only
         // changes, so Android sees it as a real upgrade.
-        versionCode = 14
-        versionName = "2.0"
+        versionCode = 16
+        versionName = "2.1.1"
 
-        // Default backend URL. Can be overridden at build time:
-        //   ./gradlew assembleRelease -PbridgeUrl=https://staging.example.com
         val bridgeUrl = (project.findProperty("bridgeUrl") as String?)
             ?: "https://tool.deng.my.id"
         buildConfigField("String", "BRIDGE_URL", "\"$bridgeUrl\"")
+
+        val publicWebUrl = (project.findProperty("publicWebUrl") as String?)
+            ?: "https://aio.deng.my.id"
+        buildConfigField("String", "PUBLIC_WEB_URL", "\"$publicWebUrl\"")
+        buildConfigField("String", "DENG_AIO_APP_SCHEME", "\"deng-aio\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -130,6 +133,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.coil.compose)
+    implementation("androidx.browser:browser:1.8.0")
 
     testImplementation(libs.junit)
 }
@@ -193,7 +197,7 @@ gradle.taskGraph.whenReady {
         throw GradleException(
             """
 
-            Missing DENG Tool: Rejoin APK release signing config.
+            Missing DENG All In One APK release signing config.
 
             A release-producing task was requested (assembleRelease /
             bundleRelease / packageRelease) but the release keystore

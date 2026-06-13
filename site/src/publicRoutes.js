@@ -22,20 +22,21 @@ function sendPublicPage(res, view, locals) {
 router.get('/', (req, res) => {
   if (req.session.user) return res.redirect('/dashboard');
   return sendPublicPage(res, 'home', {
-    title: 'DENG Tool - Roblox Automation & Stat Tracker',
-    metaDescription: 'DENG Tool is a Roblox automation and stat-tracking suite with live Fish It inventory, Rejoin agents, licenses, and monitoring in one dashboard.',
+    title: 'DENG All In One - Roblox Automation & Stat Tracker',
+    metaDescription: 'DENG All In One is a Roblox automation and stat-tracking suite with live Fish It inventory, Rejoin agents, licenses, and monitoring in one dashboard.',
   });
 });
 
 router.get('/login', (req, res) => {
   const returnPath = safeReturnPath(req.query.return || req.query.next);
+  const apkEmbed = req.query.apk === '1' || req.query.apk === 'true';
   if (req.session.user) {
-    return res.redirect(returnPath || '/dashboard');
+    const dest = apkEmbed ? '/tracker?apk=1' : (returnPath || '/dashboard');
+    return res.redirect(dest);
   }
   if (returnPath) req.session.authReturnTo = returnPath;
-  const apkEmbed = req.query.apk === '1' || req.query.apk === 'true';
   return sendPublicPage(res, 'login', {
-    title: 'Sign In - DENG Tool',
+    title: 'Sign In - DENG All In One',
     authReturnTo: returnPath || '',
     apkEmbed,
   });

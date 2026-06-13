@@ -14,6 +14,10 @@ htmlcov/
 config.json
 data/
 !data/rejoin_versions.json
+# Manual inventory image overrides (user-uploaded totem/stone art) must ship with deploys.
+!site/data/fishit_inventory_manual_images.json
+!site/data/manual_image_seed/
+!site/data/manual_image_seed/**
 # The bare `data/` ignore above also (incorrectly) matched the Kotlin
 # `data` PACKAGE used by the Android app — Models.kt, MonitorApi.kt,
 # SessionStore.kt, etc. Re-include them so the APK's networking layer
