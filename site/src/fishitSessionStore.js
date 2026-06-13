@@ -177,6 +177,62 @@ function sanitiseSession(key, data) {
   };
 }
 
+let _lastStoreMtimeMs = 0;
+let _lastStoreUpdatedAt = null;
+
+function reloadIfChanged(liveTrackDB) {
+  if (!liveTrackDB || typeof liveTrackDB !== 'object') return { reloaded: false };
+  try {
+    if (!fs.existsSync(STORE_PATH)) return { reloaded: false, path: STORE_PATH };
+    const st = fs.statSync(STORE_PATH);
+    if (st.mtimeMs <= _lastStoreMtimeMs) return { reloaded: false };
+    const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
+    if (raw.updatedAt === _lastStoreUpdatedAt && st.mtimeMs <= _lastStoreMtimeMs) {
+      return { reloaded: false };
+    }
+    const sessions = raw.sessions && typeof raw.sessions === 'object' ? raw.sessions : {};
+    const uidAliases = raw.uidAliases && typeof raw.uidAliases === 'object' ? raw.uidAliases : {};
+    let merged = 0;
+    for (const [key, data] of Object.entries(sessions)) {
+      if (key.startsWith('uid:')) continue;
+      const row = sanitiseSession(key, data);
+      if (!row) continue;
+      row.restoredFromDisk = true;
+      liveTrackDB[key] = { ...(liveTrackDB[key] || {}), ...row };
+      merged += 1;
+    }
+    for (const [alias, usernameKey] of Object.entries(uidAliases)) {
+      liveTrackDB[alias] = usernameKey;
+    }
+    _lastStoreMtimeMs = st.mtimeMs;
+    _lastStoreUpdatedAt = raw.updatedAt || null;
+    return { reloaded: true, merged, path: STORE_PATH, updatedAt: raw.updatedAt || null };
+  } catch (err) {
+    return { reloaded: false, error: err.message };
+  }
+}
+
+function getSessionFileMetrics() {
+  try {
+    if (!fs.existsSync(STORE_PATH)) {
+      return { path: STORE_PATH, exists: false, sessionCount: 0 };
+    }
+    const st = fs.statSync(STORE_PATH);
+    const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
+    const keys = Object.keys(raw.sessions || {}).filter((k) => !k.startsWith('uid:'));
+    return {
+      path: STORE_PATH,
+      exists: true,
+      sessionCount: keys.length,
+      updatedAt: raw.updatedAt || null,
+      mtimeMs: st.mtimeMs,
+      oldestMtimeMs: st.mtimeMs,
+    };
+  } catch (err) {
+    return { path: STORE_PATH, exists: false, error: err.message };
+  }
+}
+
 function loadIntoLiveTrackDB(liveTrackDB) {
   if (!liveTrackDB || typeof liveTrackDB !== 'object') return { loaded: 0 };
   let loaded = 0;
@@ -196,6 +252,8 @@ function loadIntoLiveTrackDB(liveTrackDB) {
     for (const [alias, usernameKey] of Object.entries(uidAliases)) {
       liveTrackDB[alias] = usernameKey;
     }
+    _lastStoreMtimeMs = fs.existsSync(STORE_PATH) ? fs.statSync(STORE_PATH).mtimeMs : 0;
+    _lastStoreUpdatedAt = raw.updatedAt || null;
     return { loaded, path: STORE_PATH, updatedAt: raw.updatedAt || null };
   } catch (err) {
     console.warn('[fishit] session store load failed:', err && err.message ? err.message : err);
@@ -262,13 +320,17 @@ function _reset() {
   try {
     if (fs.existsSync(STORE_PATH)) fs.unlinkSync(STORE_PATH);
   } catch (_) { /* test seam */ }
+  _lastStoreMtimeMs = 0;
+  _lastStoreUpdatedAt = null;
 }
 
 module.exports = {
   STORE_PATH,
   loadIntoLiveTrackDB,
+  reloadIfChanged,
   saveSession,
   sanitiseSession,
   getStoreMeta,
+  getSessionFileMetrics,
   _reset,
 };

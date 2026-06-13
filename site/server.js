@@ -24,6 +24,7 @@ if (process.env.NODE_ENV === 'production') {
 
 const app = require('./src/app');
 const { isStateSecretConfigured } = require('./src/crypto');
+const { createTrackerUploadProxy, shouldProxyTrackerUpload } = require('./src/trackerUploadProxy');
 
 if (!isStateSecretConfigured()) {
   console.error(
@@ -59,6 +60,9 @@ const server = require('http').createServer((req, res) => {
     });
     res.end(healthPayload());
     return;
+  }
+  if (process.env.TRACKER_UPLOAD_PROXY !== '0' && shouldProxyTrackerUpload(req)) {
+    return createTrackerUploadProxy()(req, res);
   }
   app(req, res);
 });

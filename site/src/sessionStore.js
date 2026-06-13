@@ -8,6 +8,10 @@ const session = require('express-session');
 
 const RETRYABLE_FS_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT']);
 
+let ebusyRetryCount = 0;
+let ebusySwallowCount = 0;
+let lastMaintenanceStats = null;
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -88,6 +92,11 @@ class FileSessionStore extends session.Store {
     if (pruned > 0) {
       console.log(`[sessionStore] pruned ${pruned} expired session files`);
     }
+    lastMaintenanceStats = {
+      tmpRemoved,
+      pruned,
+      finishedAt: new Date().toISOString(),
+    };
   }
 
   _cleanTmpFiles() {
@@ -148,6 +157,7 @@ class FileSessionStore extends session.Store {
       return;
     } catch (renameErr) {
       if (RETRYABLE_FS_CODES.has(renameErr.code) && attempt < maxAttempts) {
+        ebusyRetryCount += 1;
         await sleep(Math.min(40 * (attempt + 1), 300));
         return this._renameOrCopyWithRetry(tmp, file, attempt + 1);
       }
@@ -202,6 +212,7 @@ class FileSessionStore extends session.Store {
         .then(() => callback(null))
         .catch((err) => {
           if (RETRYABLE_FS_CODES.has(err?.code)) {
+            ebusySwallowCount += 1;
             console.warn('[sessionStore] set skipped after retries:', err.code);
             return callback(null);
           }
@@ -226,4 +237,31 @@ class FileSessionStore extends session.Store {
   }
 }
 
-module.exports = { FileSessionStore };
+function getSessionStoreMetrics(dir) {
+  const target = dir || path.join(os.tmpdir(), 'deng-tool-site-sessions');
+  let jsonCount = 0;
+  let tmpCount = 0;
+  let oldestMtime = null;
+  try {
+    for (const name of fs.readdirSync(target)) {
+      const full = path.join(target, name);
+      const st = fs.statSync(full);
+      if (name.endsWith('.tmp')) tmpCount += 1;
+      if (name.endsWith('.json')) jsonCount += 1;
+      if (oldestMtime == null || st.mtimeMs < oldestMtime) oldestMtime = st.mtimeMs;
+    }
+  } catch {
+    // ignore
+  }
+  return {
+    dir: target,
+    jsonCount,
+    tmpCount,
+    oldestMtime,
+    ebusyRetryCount,
+    ebusySwallowCount,
+    lastMaintenanceStats,
+  };
+}
+
+module.exports = { FileSessionStore, getSessionStoreMetrics };

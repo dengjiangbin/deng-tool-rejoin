@@ -38,6 +38,7 @@ const trackerConcurrencyGate = require('./trackerConcurrencyGate');
 
 const catalogStore = require('./fishitCatalogStore');
 const playerStatsStore = require('./fishitPlayerStats');
+const leaderstatsUpload = require('./fishitLeaderstatsUpload');
 const liveTrackerSerializer = require('./fishitLiveTrackerSerializer');
 const fishImageAssets = require('./fishitFishImageAssets');
 const learnedFishCatalog = require('./fishitLearnedFishCatalog');
@@ -57,6 +58,7 @@ const trackerRarityStyle = require('./fishitTrackerRarityStyle');
 const fishitStoneDisplayMap = require('./fishitStoneDisplayMap');
 const stoneImageAssets = require('./fishitStoneImageAssets');
 const totemImageAssets = require('./fishitTotemImageAssets');
+const manualInventoryImages = require('./fishitInventoryManualImages');
 const inventorySort = require('./fishitInventorySort');
 const inventoryAssets = require('./inventoryAssets');
 const inventoryTrackedAccounts = require('./inventoryTrackedAccounts');
@@ -64,7 +66,7 @@ const aioDatasetCache = require('./aioDatasetCache');
 const inventorySession = require('./inventorySession');
 const aioSessionStore = require('./aioSessionStore');
 const supabase = require('./db');
-const { verifyCsrf } = require('./auth');
+const { internalApiBaseUrl } = require('./publicDomain');
 const {
   CLEAN_TRACKER_LOADSTRING,
   DEBUG_TRACKER_LOADSTRING,
@@ -223,35 +225,11 @@ function statsValuesChanged(prevStats, nextStats) {
     || a.rarestFishChance !== b.rarestFishChance;
 }
 
-function applyPlayerStatsFields(existing, body, now) {
-  const incoming = playerStatsStore.enrichIncomingPlayerStats(body.playerStats, {
-    trackerBuild: body.trackerBuild,
-    playerStatsDebug: body.playerStatsDebug,
-    isLiveRoblox: isLiveRobloxUpload(body),
-  });
-  const merged = playerStatsStore.mergePlayerStats(existing, incoming, {
-    isLiveRoblox: isLiveRobloxUpload(body),
-  });
-  const stored = playerStatsStore.isTrustedPlayerStats(merged)
-    ? merged
-    : (playerStatsStore.isTrustedPlayerStats(existing) ? existing : null);
-  const out = {};
-  if (stored) out.playerStats = stored;
-  const hasStatsPayload = !!(body.playerStats || body.playerStatsDebug);
-  const hasFreshStats = !!(incoming && playerStatsStore.hasPlayerStatValues(incoming));
-  if (stored && (hasFreshStats || hasStatsPayload
-    || (stored.source === 'missing' && isLiveRobloxUpload(body)))) {
-    out.playerStatsUpdatedAt = now;
-    out.lastStatsUploadAt = now;
-    out.playerStats = { ...stored, statsAt: now };
-    // Reset the stats timer only when a tracked value actually changed.
-    if (statsValuesChanged(existing, stored)) {
-      out.lastStatsChangeAt = now;
-    }
+function applyPlayerStatsFields(existing, body, now, opts = {}) {
+  if (opts.isHeartbeat === true) {
+    return leaderstatsUpload.applyLeaderstatsUploadFields(existing, body, now, { isHeartbeat: true });
   }
-  const debug = playerStatsStore.sanitisePlayerStatsDebug(body.playerStatsDebug);
-  if (debug && stored && playerStatsStore.isTrustedPlayerStats(stored)) out.playerStatsDebug = debug;
-  return out;
+  return leaderstatsUpload.applyLeaderstatsUploadFields(existing, body, now);
 }
 
 // Optional Fish It DB image resolver (real fish artwork). Loaded lazily and
@@ -274,6 +252,15 @@ try {
 } catch (err) {
   console.error('[fishit-tracker] fishitDb load failed:', err && err.message ? err.message : err);
   fishitDb = null;
+}
+
+try {
+  const restoredManual = manualInventoryImages.ensureOverrideFilesFromSeed();
+  if (restoredManual > 0) {
+    console.log('[fishit-tracker] manual_image_seed_restored count=%d', restoredManual);
+  }
+} catch (err) {
+  console.error('[fishit-tracker] manual image seed restore failed:', err && err.message ? err.message : err);
 }
 
 function recordGlobalObservationsFromItems(items, ctx = {}) {
@@ -714,6 +701,17 @@ if (process.env.FISHIT_TEST_FIXTURE !== '1') {
   hydrateRecoverySessionsFromRegistry();
 }
 
+function syncLiveTrackFromDisk() {
+  if (process.env.TRACKER_WEB_MODE !== '1') return null;
+  return sessionStore.reloadIfChanged(liveTrackDB);
+}
+
+if (process.env.TRACKER_WEB_MODE === '1' && process.env.NODE_ENV !== 'test') {
+  setInterval(() => {
+    try { syncLiveTrackFromDisk(); } catch (_) { /* non-blocking */ }
+  }, 2000).unref();
+}
+
 async function persistSessionState(key, baseUrl) {
   const data = liveTrackDB[key];
   if (!data || key.startsWith('uid:')) return;
@@ -738,8 +736,8 @@ async function persistSessionState(key, baseUrl) {
       data.lastGoodPublicStoneCount = nextStone.length;
     }
     if (nextTotem.length || allowEmptyReplace || !Array.isArray(data.lastGoodPublicTotemItems)) {
-      data.lastGoodPublicTotemItems = nextTotem;
-      data.lastGoodPublicTotemCount = nextTotem.length;
+      data.lastGoodPublicTotemItems = reEnrichPublicTotemItems(nextTotem, baseUrl || '');
+      data.lastGoodPublicTotemCount = data.lastGoodPublicTotemItems.length;
     }
     data.lastCatchParsed = data.nameCatalogDiscovery?.lastCatchParsed
       || data.lastCatchParsed || null;
@@ -2887,7 +2885,7 @@ function buildTrackerPageLocals(req) {
   const assetUrls = inventoryAssets.inventoryAssetUrls();
   const locals = {
     layout: false,
-    title: 'DENG Tracker — Fish It',
+    title: 'Live Tracker — DENG All In One',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
     trackerUiDeployMarker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
@@ -3039,6 +3037,16 @@ async function reEnrichPublicFishItems(items, baseUrl) {
   return enriched.map((item) => mapToPublicFishCardItem(applyPublicCosmeticCleanup(item)));
 }
 
+/** Re-apply uploaded manual totem images on every public response (never serve stale auto icons). */
+function reEnrichPublicTotemItems(items, baseUrl) {
+  if (!Array.isArray(items) || !items.length) return items;
+  const refreshed = manualInventoryImages.refreshManualImagesOnPublicItems(items, 'totems', baseUrl);
+  return refreshed.map((item) => gameItemDbPublic.mapToPublicTotemCardItem({
+    ...item,
+    quantity: item.quantity != null ? item.quantity : (item.amount != null ? item.amount : 1),
+  }));
+}
+
 async function enrichDashboardFishCardImages(cards, baseUrl) {
   if (!Array.isArray(cards) || !cards.length) return;
   const pseudoItems = cards.map((card) => ({
@@ -3075,6 +3083,7 @@ async function enrichDashboardFishCardImages(cards, baseUrl) {
 
 async function handleTrackerDashboard(req, res) {
   res.set(NO_STORE_HEADERS);
+  syncLiveTrackFromDisk();
   const queryStartedAt = Date.now();
   const includeDebug = trackerPerf.isDebugRequest(req);
   try {
@@ -3230,6 +3239,7 @@ router.get('/api/tracker/dashboard', requireInventoryApiAuth, handleTrackerDashb
 router.get('/api/inventory/dashboard', requireInventoryApiAuth, handleTrackerDashboard);
 
 async function handleAccountStatus(req, res) {
+  syncLiveTrackFromDisk();
   try {
     const serverNowMs = Date.now();
     const serverNow = new Date(serverNowMs).toISOString();
@@ -3261,6 +3271,7 @@ async function handleAccountStatus(req, res) {
       // Indicator 3 (fish/stone upload) is its own freshness window.
       const presence = deriveAccountPresenceStatus(sessionData);
       const inventoryUpload = deriveInventoryUploadStatus(sessionData);
+      const statsUpload = deriveStatsUploadStatus(sessionData);
       const sessionForStats = session || null;
       const liveAccountStats = liveTrackerSerializer.serializeLiveTrackerAccountStats(
         sessionForStats ? { ...sessionForStats, ...proof, statusColor: proof.statusColor } : null,
@@ -3270,6 +3281,7 @@ async function handleAccountStatus(req, res) {
       return {
         ...proof,
         ...liveAccountStats,
+        ...leaderstatsUpload.publicLeaderstatsFields(sessionForStats),
         accountPresenceLive: presence.accountPresenceLive,
         accountOnline: presence.accountPresenceLive,
         accountPresenceStatus: presence.accountPresenceStatus,
@@ -3279,6 +3291,10 @@ async function handleAccountStatus(req, res) {
         inventoryUploadStatus: inventoryUpload.inventoryUploadStatus,
         inventoryRedSince: inventoryUpload.inventoryRedSince || null,
         lastSnapshotUploadAt: inventoryUpload.lastSnapshotUploadAt || null,
+        statsUploadFresh: statsUpload.statsUploadFresh === true,
+        statsUploadStatus: statsUpload.statsUploadStatus,
+        statsRedSince: statsUpload.statsRedSince || null,
+        lastStatsUploadAt: statsUpload.lastStatsUploadAt || null,
         lastStatsChangeAt: (session && session.lastStatsChangeAt) || null,
         username: proof.username || acct.robloxUsername || acct.roblox_username || acct.displayName || acct.display_name || usernameKey,
         robloxUserId: proof.robloxUserId || (robloxUserId ? String(robloxUserId) : null),
@@ -3400,20 +3416,44 @@ router.delete('/api/inventory/accounts/:usernameKey', inventoryWriteLimiter, req
   }
 });
 
+// ── GET /api/fishit-tracker/assets/manual/:category/:filename — admin manual image overrides ──
+router.get('/api/fishit-tracker/assets/manual/:category/:filename', (req, res) => {
+  const category = String(req.params.category || '').trim().toLowerCase();
+  const file = path.basename(String(req.params.filename || ''));
+  if (!file || !/^[a-zA-Z0-9._-]+$/.test(file)) {
+    return res.status(400).type('text/plain').send('invalid_filename');
+  }
+  const full = manualInventoryImages.getManualAssetFilePath(category, file);
+  if (!full || !fs.existsSync(full)) {
+    return res.status(404).type('application/json').send({ error: 'manual_asset_not_found', category, filename: file });
+  }
+  const stat = fs.statSync(full);
+  res.set('Cache-Control', 'public, max-age=86400, immutable');
+  res.set('ETag', `"manual-${category}-${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+  return res.sendFile(full);
+});
+
 // ── GET /api/fishit-tracker/assets/totems/:filename — manual totem image cache ──
 router.get('/api/fishit-tracker/assets/totems/:filename', (req, res) => {
   const file = path.basename(String(req.params.filename || ''));
   if (!file || !/^[a-zA-Z0-9._-]+$/.test(file)) {
     return res.status(400).type('text/plain').send('invalid_filename');
   }
-  const full = totemImageAssets.getTotemAssetFilePath(file);
-  if (!full || !fs.existsSync(full)) {
-    return res.status(404).type('text/plain').send('totem_asset_not_found');
+  const totemFull = totemImageAssets.getTotemAssetFilePath(file);
+  if (totemFull && fs.existsSync(totemFull)) {
+    const stat = fs.statSync(totemFull);
+    res.set('Cache-Control', 'public, max-age=86400, immutable');
+    res.set('ETag', `"totem-${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+    return res.sendFile(totemFull);
   }
-  const stat = fs.statSync(full);
-  res.set('Cache-Control', 'public, max-age=86400, immutable');
-  res.set('ETag', `"totem-${stat.size}-${Math.floor(stat.mtimeMs)}"`);
-  return res.sendFile(full);
+  const fishFull = path.join(fishImageCache.getCacheDir(), file);
+  if (fs.existsSync(fishFull)) {
+    const stat = fs.statSync(fishFull);
+    res.set('Cache-Control', 'public, max-age=86400, immutable');
+    res.set('ETag', `"totem-fishcache-${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+    return res.sendFile(fishFull);
+  }
+  return res.status(404).type('application/json').send({ error: 'totem_asset_not_found', filename: file });
 });
 
 // ── GET /api/fishit-tracker/assets/stones/:filename — manual stone image cache (BLOCKER10ZD) ──
@@ -3422,13 +3462,43 @@ router.get('/api/fishit-tracker/assets/stones/:filename', (req, res) => {
   if (!file || !/^[a-zA-Z0-9._-]+$/.test(file)) {
     return res.status(400).type('text/plain').send('invalid_filename');
   }
-  const full = stoneImageAssets.getStoneAssetFilePath(file);
-  if (!full || !fs.existsSync(full)) {
-    return res.status(404).type('text/plain').send('stone_asset_not_found');
+  const stoneFull = stoneImageAssets.getStoneAssetFilePath(file);
+  if (stoneFull && fs.existsSync(stoneFull)) {
+    const stat = fs.statSync(stoneFull);
+    res.set('Cache-Control', 'public, max-age=86400, immutable');
+    res.set('ETag', `"stone-${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+    return res.sendFile(stoneFull);
+  }
+  const fishFull = path.join(fishImageCache.getCacheDir(), file);
+  if (fs.existsSync(fishFull)) {
+    const stat = fs.statSync(fishFull);
+    res.set('Cache-Control', 'public, max-age=86400, immutable');
+    res.set('ETag', `"stone-fishcache-${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+    return res.sendFile(fishFull);
+  }
+  return res.status(404).type('application/json').send({ error: 'stone_asset_not_found', filename: file });
+});
+
+// ── GET /api/fishit-tracker/assets/item/:filename — category-neutral inventory asset cache ──
+router.get('/api/fishit-tracker/assets/item/:filename', async (req, res) => {
+  const file = path.basename(String(req.params.filename || ''));
+  if (!file || !/^[a-zA-Z0-9._-]+$/.test(file)) {
+    return res.status(400).type('text/plain').send('invalid_filename');
+  }
+  const full = path.join(fishImageCache.getCacheDir(), file);
+  if (!fs.existsSync(full)) {
+    try {
+      const repaired = await fishImageCache.repairMissingAssetFile(file);
+      if (repaired && fs.existsSync(full)) {
+        res.set('Cache-Control', 'public, max-age=86400, immutable');
+        return res.sendFile(full);
+      }
+    } catch (_) { /* fall through */ }
+    return res.status(404).type('application/json').send({ error: 'inventory_asset_not_found', filename: file });
   }
   const stat = fs.statSync(full);
   res.set('Cache-Control', 'public, max-age=86400, immutable');
-  res.set('ETag', `"stone-${stat.size}-${Math.floor(stat.mtimeMs)}"`);
+  res.set('ETag', `"item-${stat.size}-${Math.floor(stat.mtimeMs)}"`);
   return res.sendFile(full);
 });
 
@@ -3653,7 +3723,11 @@ function applyLitePublicSnapshotFields(session, usesGameItemDb, usesItemUtility,
     session.lastGoodPublicStoneCount = cards.length;
   }
   if ((usesGameItemDb || usesItemUtility) && Array.isArray(playerDataTotemItems) && playerDataTotemItems.length) {
-    const grouped = gameItemDbPublic.groupTotemRows(playerDataTotemItems);
+    const grouped = manualInventoryImages.attachManualImagesToItems(
+      gameItemDbPublic.groupTotemRows(playerDataTotemItems),
+      'totems',
+      '',
+    );
     const cards = grouped.map((row) => gameItemDbPublic.mapToPublicTotemCardItem(row));
     session.lastGoodPublicTotemItems = cards;
     session.lastGoodPublicTotemCount = cards.length;
@@ -3839,7 +3913,7 @@ function handleUpdateBackpack(req, res) {
         ...(online ? {} : { lastOfflineAt: now }),
         lastInventoryAt: base.lastInventoryAt || base.updatedAt || null,
         updatedAt:       now,
-        ...applyPlayerStatsFields(base.playerStats, body, now),
+        ...applyPlayerStatsFields(base.playerStats ? { playerStats: base.playerStats, ...base } : base, body, now, { isHeartbeat: true }),
       });
       if (loaderErr) {
         liveTrackDB[key].lastLoaderErrorAt = now;
@@ -3875,7 +3949,9 @@ function handleUpdateBackpack(req, res) {
           statusCode: 200,
         });
       } else {
-        liveTrackDB[key] = uploadAccountStatus.applyAcceptedUploadMeta(liveTrackDB[key], body, now);
+        liveTrackDB[key] = uploadAccountStatus.applyAcceptedUploadMeta(liveTrackDB[key], body, now, {
+          heartbeatOnly: true,
+        });
         liveTrackDB[key] = snapshotCompleteness.applyHeartbeatUpdate(liveTrackDB[key], body, now);
         liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
           ...uploadDebugBase,
@@ -4098,7 +4174,8 @@ function handleUpdateBackpack(req, res) {
     let nextItems = cleanItems.length ? cleanItems : (existing ? existing.items : []);
     let nextRawItems = rawItems.length ? rawItems : (existing ? existing.rawItems : []);
     let nextInventory = cleanItems.length ? inventory : (existing ? existing.inventory : null);
-    let nextPlayerStatsFields = applyPlayerStatsFields(existing?.playerStats, body, now);
+    let nextPlayerStatsFields = applyPlayerStatsFields(existing, body, now);
+    const leaderstatsEval = leaderstatsUpload.evaluateIncomingLeaderstats(body, existing, now);
 
     if (completenessEval.preserveExistingInventory && existing) {
       if (!nextItems.length && existing.items?.length) nextItems = existing.items;
@@ -4113,17 +4190,6 @@ function handleUpdateBackpack(req, res) {
       if ((!nextTotemItems || !nextTotemItems.length) && existing.playerDataTotemItems?.length) {
         nextTotemItems = existing.playerDataTotemItems;
       }
-      if (completenessEval.leaderstatsPreserved && existing.playerStats) {
-        nextPlayerStatsFields = {
-          playerStats: existing.playerStats,
-          playerStatsUpdatedAt: existing.playerStatsUpdatedAt || null,
-          lastStatsUploadAt: existing.lastStatsUploadAt || null,
-        };
-      }
-    }
-
-    if (hadPlayerStats && playerStatsStore.isTrustedPlayerStats(body.playerStats)) {
-      nextPlayerStatsFields = applyPlayerStatsFields(existing?.playerStats, body, now);
     }
 
     const syncEval = uploadAccountStatus.evaluateAcceptedSnapshotSync({
@@ -4134,20 +4200,22 @@ function handleUpdateBackpack(req, res) {
       playerDataStoneItems,
       playerDataTotemItems,
       nextPlayerStatsFields,
+      leaderstatsEval,
       uploadRejected: false,
       now,
     });
-    const inventoryTimestamps = syncEval.accepted
+    const inventoryTimestamps = syncEval.hasInventory
       ? {
         lastInventoryAt: now,
         lastSnapshotUploadAt: now,
-        lastSuccessfulUploadAt: now,
       }
       : {
         lastInventoryAt: existing?.lastInventoryAt || existing?.updatedAt || null,
         lastSnapshotUploadAt: existing?.lastSnapshotUploadAt || existing?.lastInventoryAt || null,
-        lastSuccessfulUploadAt: existing?.lastSuccessfulUploadAt || null,
       };
+    const leaderstatsTimestamps = syncEval.accepted
+      ? { lastSuccessfulUploadAt: now }
+      : { lastSuccessfulUploadAt: existing?.lastSuccessfulUploadAt || null };
 
     const shouldProcessAudit = isDebugUpload
       && (usesGameItemDb || isTotemAuditTrackerBuild(incomingBuild));
@@ -4201,6 +4269,7 @@ function handleUpdateBackpack(req, res) {
       lastSeenAt:      now,
       lastAccountSeenAt: now,
       ...inventoryTimestamps,
+      ...leaderstatsTimestamps,
       ...(online ? { lastHeartbeatAt: now, lastSuccessfulHeartbeatAt: now } : { lastOfflineAt: now }),
       lastStatsChangeAt: existing?.lastStatsChangeAt || null,
       updatedAt:       now,
@@ -4307,20 +4376,28 @@ function handleUpdateBackpack(req, res) {
       debugUpload: isDebugUpload,
     });
     if (syncEval.accepted) {
+      const payloadHash = computeUploadPayloadHash(body, acceptedCount);
+      liveTrackDB[key].inventoryChanged = payloadHash !== (existing?.lastPayloadHash || null);
       liveTrackDB[key] = uploadAccountStatus.markTrackerSyncSuccess(liveTrackDB[key], now, {
         syncReason: syncEval.reason,
         lastStatsUpdatedAt: liveTrackDB[key].lastStatsUploadAt
           || liveTrackDB[key].playerStatsUpdatedAt
           || now,
-        payloadHash: computeUploadPayloadHash(body, acceptedCount),
+        payloadHash,
         intervalSeconds: body.intervalSeconds || body.syncIntervalSeconds,
         loaderOutdated: !!(incomingBuild && incomingBuild !== EXPECTED_CLIENT_TRACKER_BUILD),
-        lastInventoryAt: now,
-        lastSnapshotUploadAt: now,
+        lastInventoryAt: inventoryTimestamps.lastInventoryAt || now,
+        lastSnapshotUploadAt: inventoryTimestamps.lastSnapshotUploadAt || now,
         expectedLoaderBuild: EXPECTED_CLIENT_TRACKER_BUILD,
       });
-    } else if (completenessEval.rejectBlankInventory || completenessEval.blankPayloadRejected) {
+      leaderstatsUpload.logLeaderstatsUploadProof(cleanUser, leaderstatsEval, now);
+    } else if (
+      syncEval.reason === 'inventory_without_leaderstats'
+      || completenessEval.rejectBlankInventory
+      || completenessEval.blankPayloadRejected
+    ) {
       liveTrackDB[key] = uploadAccountStatus.markTrackerSyncMissed(liveTrackDB[key], now);
+      leaderstatsUpload.logLeaderstatsUploadProof(cleanUser, leaderstatsEval, now);
     }
 
     const rawPersistMs = Date.now() - rawPersistStart;
@@ -4544,12 +4621,53 @@ function handleUpdateBackpack(req, res) {
 
 const updateBackpackMiddleware = [
   postLimiter,
-  express.json({ limit: '512kb' }),
+  express.json({ limit: process.env.TRACKER_UPLOAD_BODY_LIMIT || '512kb' }),
   trackerConcurrencyGate.wrapTrackerUpload('update-backpack', handleUpdateBackpack),
 ];
 
-router.post('/api/fishit-tracker/update-backpack', updateBackpackMiddleware);
-router.post('/api/tracker/update-backpack', updateBackpackMiddleware);
+function handleUpdateCatalog(req, res) {
+  const body = req.body || {};
+  const { type } = body;
+
+  if (type === 'catalog_summary') {
+    const stats = body.catalogStats || {};
+    console.log(
+      `[fishit-tracker] recv catalog_summary user=${body.playerName || '?'}` +
+      ` fish=${stats.fish || 0} rods=${stats.rods || 0} items=${stats.items || 0}` +
+      ` images=${stats.images || 0} metadataByIdKeys=${stats.metadataByIdKeys || 0}`
+    );
+    return res.status(200).json({ status: 'success', type: 'catalog_summary', stats });
+  }
+
+  if (type !== 'fish_catalog_snapshot' || !body.catalog || typeof body.catalog !== 'object') {
+    return res.status(400).json({ error: 'Invalid catalog payload. Expected type=catalog_summary or fish_catalog_snapshot.' });
+  }
+  const summary = catalogStore.ingestSnapshot(body);
+  return res.status(200).json({ status: 'success', ...summary });
+}
+
+const updateCatalogMiddleware = [
+  postLimiter,
+  express.json({ limit: process.env.TRACKER_UPLOAD_BODY_LIMIT || '512kb' }),
+  handleUpdateCatalog,
+];
+
+const uploadRouter = express.Router();
+
+function registerTrackerUploadRoutes(target) {
+  target.post('/api/fishit-tracker/update-backpack', updateBackpackMiddleware);
+  target.post('/api/fish-it-tracker/update-backpack', updateBackpackMiddleware);
+  target.post('/api/tracker/update-backpack', updateBackpackMiddleware);
+  target.post('/api/tracker/update-catalog', updateCatalogMiddleware);
+}
+
+const skipUploadOnWeb = process.env.SKIP_TRACKER_UPLOAD_ROUTES === '1'
+  || process.env.TRACKER_WEB_MODE === '1';
+
+if (!skipUploadOnWeb) {
+  registerTrackerUploadRoutes(router);
+}
+registerTrackerUploadRoutes(uploadRouter);
 
 /** Use the freshest sync signal — inventory/heartbeat/upload timestamps compete by age. */
 function freshestSessionTimestamp(data) {
@@ -4618,10 +4736,14 @@ function buildStatsHarmonyProof(data) {
 function buildTotalCaughtIntervalProof(data) {
   const stats = resolvePlayerStatsForApi(data?.playerStats);
   return {
-    caughtActivityResetsOnValueIncrease: true,
-    caughtActivityContinuesWhenValueUnchanged: true,
+    totalCaughtSubtextUsesUploadSyncTimerOnly: true,
+    totalCaughtSubtextNeverUsesStatDelta: true,
+    totalCaughtSubtextSource: 'lastSuccessfulUploadAt',
+    totalCaughtRefreshesOnInterval: true,
     totalCaught: stats?.totalCaught ?? null,
     totalCaughtText: stats?.totalCaughtText ?? null,
+    lastRequiredUploadAt: data?.lastRequiredUploadAt || data?.leaderstatsUploadedAt || null,
+    lastSuccessfulUploadAt: data?.lastSuccessfulUploadAt || null,
   };
 }
 
@@ -5044,23 +5166,11 @@ function buildHeartbeatDiagnostics(body, session, now) {
 }
 
 function statsUploadTimestamp(data) {
-  if (!data) return null;
-  const fields = [
-    data.lastStatsUploadAt,
-    data.playerStatsUpdatedAt,
-    data.playerStats && data.playerStats.statsAt,
-  ];
-  let best = null;
-  let bestMs = -1;
-  for (const ts of fields) {
-    if (!ts) continue;
-    const ms = new Date(ts).getTime();
-    if (Number.isFinite(ms) && ms > bestMs) {
-      bestMs = ms;
-      best = ts;
-    }
-  }
-  return best;
+  return leaderstatsUpload.leaderstatsUploadTimestamp(data);
+}
+
+function deriveStatsUploadStatus(data) {
+  return leaderstatsUpload.deriveLeaderstatsUploadStatus(data);
 }
 
 const UPLOAD_INTERVAL_SECONDS = 10;
@@ -5153,7 +5263,9 @@ function deriveConnectionStatus(data) {
     : UPLOAD_GRACE_SECONDS;
   const expectedLoaderBuild = EXPECTED_CLIENT_TRACKER_BUILD;
   const loaderBuild = data?.trackerBuild || data?.lastUploadTrackerBuild || null;
-  const lastSuccessfulUploadAt = data?.lastSuccessfulUploadAt || null;
+  const lastSuccessfulUploadAt = data?.leaderstatsUploadOk === true
+    ? (data?.leaderstatsUploadedAt || data?.lastSuccessfulUploadAt || null)
+    : null;
   const redSinceStored = data?.lastStatus === 'green' ? null : (data?.redSince || null);
 
   const base = {
@@ -5351,28 +5463,6 @@ function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS)
   };
 }
 
-function deriveStatsUploadStatus(data) {
-  const intervalSeconds = Number(data?.intervalSeconds) > 0
-    ? Number(data.intervalSeconds)
-    : UPLOAD_INTERVAL_SECONDS;
-  const graceSeconds = Number(data?.graceSeconds) >= 0
-    ? Number(data.graceSeconds)
-    : UPLOAD_GRACE_SECONDS;
-  const ts = statsUploadTimestamp(data);
-  const ageSeconds = syncAgeSecondsFromTimestamp(ts);
-  const deadlineMs = ts ? new Date(ts).getTime() + (intervalSeconds + graceSeconds) * 1000 : null;
-  const fresh = !!(ts && Date.now() <= deadlineMs);
-  return {
-    lastStatsUploadAt: ts,
-    statsUploadAgeSeconds: ageSeconds,
-    statsUploadFresh: fresh,
-    statsUploadStatus: fresh ? 'fresh' : (ts ? 'stale' : 'never'),
-    statsRedSince: fresh ? null : (data?.statsRedSince || (deadlineMs ? new Date(deadlineMs).toISOString() : null)),
-    intervalSeconds,
-    graceSeconds,
-  };
-}
-
 function deriveInventoryUploadStatus(data) {
   const intervalSeconds = Number(data?.intervalSeconds) > 0
     ? Number(data.intervalSeconds)
@@ -5410,42 +5500,7 @@ function isSessionHeartbeatRecent(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS) {
   return Number.isFinite(age) && age >= 0 && age < maxAgeMs;
 }
 
-// ── POST /api/tracker/update-catalog ─────────────────────────────
-// Accepts both:
-//   • catalog_summary  (preferred, small payload) — Lua v8+ sends only counts
-//     and up to 3 sample entries; imageUrls are NOT included, so the payload
-//     stays well under 5 KB regardless of catalog size.
-//   • fish_catalog_snapshot  (legacy, full catalog) — accepted for backward
-//     compatibility but the Lua client should never send this any more since
-//     it caused HTTP 413 (body exceeded the global 16 KB JSON limit in older
-//     deployments).
-router.post(
-  '/api/tracker/update-catalog',
-  postLimiter,
-  express.json({ limit: '512kb' }),
-  (req, res) => {
-    const body = req.body || {};
-    const { type } = body;
-
-    // ── catalog_summary (preferred small payload) ─────────────────
-    if (type === 'catalog_summary') {
-      const stats = body.catalogStats || {};
-      console.log(
-        `[fishit-tracker] recv catalog_summary user=${body.playerName || '?'}` +
-        ` fish=${stats.fish || 0} rods=${stats.rods || 0} items=${stats.items || 0}` +
-        ` images=${stats.images || 0} metadataByIdKeys=${stats.metadataByIdKeys || 0}`
-      );
-      return res.status(200).json({ status: 'success', type: 'catalog_summary', stats });
-    }
-
-    // ── fish_catalog_snapshot (legacy full catalog) ───────────────
-    if (type !== 'fish_catalog_snapshot' || !body.catalog || typeof body.catalog !== 'object') {
-      return res.status(400).json({ error: 'Invalid catalog payload. Expected type=catalog_summary or fish_catalog_snapshot.' });
-    }
-    const summary = catalogStore.ingestSnapshot(body);
-    return res.status(200).json({ status: 'success', ...summary });
-  },
-);
+// Catalog upload routes are registered via registerTrackerUploadRoutes().
 
 function hasSyncedInventory(data) {
   return Number(data.lastGoodPublicFishCount) > 0
@@ -5578,6 +5633,7 @@ router.get('/api/fishit-tracker/catalog', getLimiter, (_req, res) => {
 // ── GET get-backpack (canonical + legacy alias) ───────────────────
 // Also resolves userId aliases (uid:<number> keys created on POST).
 async function handleGetBackpack(req, res) {
+  syncLiveTrackFromDisk();
   const queryStartedAt = Date.now();
   const wantLite = trackerPerf.isLiteBackpackRequest(req);
   const includeDebug = trackerPerf.isDebugRequest(req);
@@ -5647,12 +5703,20 @@ async function handleGetBackpack(req, res) {
   }
   const liveTotemCount = Array.isArray(publicFish.totemItems) ? publicFish.totemItems.length : 0;
   if (liveTotemCount === 0 && Array.isArray(data.lastGoodPublicTotemItems) && data.lastGoodPublicTotemItems.length) {
+    const preservedTotems = reEnrichPublicTotemItems(data.lastGoodPublicTotemItems, baseUrl);
     publicFish = {
       ...publicFish,
-      totemItems: data.lastGoodPublicTotemItems,
-      totemInventory: data.lastGoodPublicTotemItems,
+      totemItems: preservedTotems,
+      totemInventory: preservedTotems,
       totemDataStale: true,
       lastGoodTotemPreserved: true,
+    };
+  } else if (Array.isArray(publicFish.totemItems) && publicFish.totemItems.length) {
+    const refreshedTotems = reEnrichPublicTotemItems(publicFish.totemItems, baseUrl);
+    publicFish = {
+      ...publicFish,
+      totemItems: refreshedTotems,
+      totemInventory: refreshedTotems,
     };
   }
   const imageResolutionProof = wantLite
@@ -5762,6 +5826,7 @@ async function handleGetBackpack(req, res) {
     statsUploadFresh: statsUpload.statsUploadFresh === true,
     statsUploadStatus: statsUpload.statsUploadStatus,
     statsRedSince: statsUpload.statsRedSince || null,
+    ...leaderstatsUpload.publicLeaderstatsFields(data),
     inventoryUploadFresh: inventoryUpload.inventoryUploadFresh === true,
     inventoryUploadStatus: inventoryUpload.inventoryUploadStatus,
     inventorySyncStatus: inventoryUpload.inventoryUploadStatus,
@@ -5787,9 +5852,10 @@ async function handleGetBackpack(req, res) {
       || !!(publicFish.dataStale || publicFish.lastGoodFishPreserved),
     lastGoodFishPreserved: !!(publicFish.lastGoodFishPreserved || data.lastGoodFishPreserved),
     lastGoodPublicFishCount: data.lastGoodPublicFishCount || publicFish.fishItems.length || 0,
-    playerStats:     resolvePlayerStatsForApi(data.playerStats),
-    playerStatsProven: !!(resolvePlayerStatsForApi(data.playerStats)
-      && buildPlayerStatsProof(data.playerStats, data).proven),
+    playerStats:     leaderstatsUpload.resolvePlayerStatsForLiveDisplay(data, resolvePlayerStatsForApi),
+    playerStatsProven: !!(leaderstatsUpload.resolvePlayerStatsForLiveDisplay(data, resolvePlayerStatsForApi)
+      && (data.leaderstatsUploadOk === true || data.lastValidLeaderstats)
+      && buildPlayerStatsProof(data.playerStats || data.lastValidLeaderstats, data).proven),
     playerStatsUpdatedAt: data.playerStatsUpdatedAt || null,
     liveAccountStats,
     statsSource: liveAccountStats.statsSource,
@@ -6275,7 +6341,7 @@ function scheduleAioTrackerCacheRefresh(usernameKey) {
   if (!key) return;
   const listOwners = inventoryTrackedAccounts.listDiscordOwnersForUsernameKey;
   if (typeof listOwners !== 'function') return;
-  const baseUrl = (process.env.TOOL_SITE_PUBLIC_URL || 'https://tool.deng.my.id').replace(/\/+$/, '');
+  const baseUrl = internalApiBaseUrl();
   listOwners(key)
     .then((owners) => {
       if (!owners || !owners.length) return;
@@ -6432,8 +6498,7 @@ async function buildAioLiteAccountSnapshot(session, sessionKey, baseUrl) {
 async function buildAioTrackerDataset(discordOwnerId, opts = {}) {
   const serverNowMs = Date.now();
   const serverNow = new Date(serverNowMs).toISOString();
-  const baseUrl = (opts.baseUrl || process.env.TOOL_SITE_PUBLIC_URL || 'https://tool.deng.my.id')
-    .replace(/\/+$/, '');
+  const baseUrl = (opts.baseUrl || internalApiBaseUrl()).replace(/\/+$/, '');
   const trackedAccounts = await inventoryTrackedAccounts.listTrackedAccounts(discordOwnerId);
   const accounts = [];
   for (const acct of (Array.isArray(trackedAccounts) ? trackedAccounts : [])) {
@@ -6530,6 +6595,9 @@ async function buildAioTrackerDataset(discordOwnerId, opts = {}) {
 }
 
 module.exports = router;
+module.exports.uploadRouter = uploadRouter;
+module.exports.liveTrackDB = liveTrackDB;
+module.exports.syncLiveTrackFromDisk = syncLiveTrackFromDisk;
 module.exports.collectPublicTrackerNetworkStats = collectPublicTrackerNetworkStats;
 module.exports.collectPublicTrackerNetworkProof = collectPublicTrackerNetworkProof;
 module.exports.collectPublicFishItTrackerStats = collectPublicFishItTrackerStats;
