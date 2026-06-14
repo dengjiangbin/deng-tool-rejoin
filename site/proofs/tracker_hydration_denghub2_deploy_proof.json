@@ -22,7 +22,20 @@
     "totalCaught": 123387,
     "rarestFishChance": "1/4M",
     "completenessRehydrated": true,
-    "tableCellBehavior": "Numbers or em dash only; waiting copy reserved for card detail"
+    "tableCellBehavior": "Numbers or em dash only; waiting copy reserved for card detail",
+    "liveGetBackpackProof": {
+      "endpoint": "GET /api/fishit-tracker/get-backpack/denghub2?lite=1",
+      "http": 200,
+      "snapshotComplete": true,
+      "inventoryReady": true,
+      "inventoryDisplayState": "ready",
+      "statsProven": true,
+      "coins": 31766956,
+      "totalCaught": 123464,
+      "rarestFishChance": "1/4M",
+      "fishCount": 12,
+      "stoneCount": 1
+    }
   },
   "bundle": {
     "marker": "TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14",
