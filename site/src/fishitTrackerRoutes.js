@@ -832,6 +832,9 @@ function persistSessionHeartbeat(key) {
   if (!data) return;
   try {
     sessionStore.saveSession(key, data, liveTrackDB);
+    if (process.env.TRACKER_INGEST_MODE === '1') {
+      sessionStore.flushToDiskSync();
+    }
   } catch (err) {
     console.warn(
       '[fishit-tracker] heartbeat persist failed:',

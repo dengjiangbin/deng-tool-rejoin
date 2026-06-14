@@ -175,8 +175,14 @@ function applyLeaderstatsUploadFields(existing, body, now, opts = {}) {
 }
 
 function leaderstatsUploadTimestamp(data) {
-  if (!data || data.leaderstatsUploadOk !== true) return null;
-  return data.leaderstatsUploadedAt || data.lastStatsUploadAt || data.playerStatsUpdatedAt || null;
+  if (!data) return null;
+  if (data.leaderstatsUploadOk === true) {
+    return data.leaderstatsUploadedAt || data.lastStatsUploadAt || data.playerStatsUpdatedAt || null;
+  }
+  if (data.lastStatsUploadAt && data.playerStats && playerStatsStore.isTrustedPlayerStats(data.playerStats)) {
+    return data.lastStatsUploadAt;
+  }
+  return null;
 }
 
 function deriveLeaderstatsUploadStatus(data, opts = {}) {
@@ -194,7 +200,11 @@ function deriveLeaderstatsUploadStatus(data, opts = {}) {
     ? Math.floor((serverNowMs - new Date(ts).getTime()) / 1000)
     : null;
   const deadlineMs = ts ? new Date(ts).getTime() + (intervalSeconds + graceSeconds) * 1000 : null;
-  const fresh = !!(data?.leaderstatsUploadOk === true && ts && serverNowMs <= deadlineMs);
+  const fresh = !!(
+    (data?.leaderstatsUploadOk === true || (ts && data?.playerStats && playerStatsStore.isTrustedPlayerStats(data.playerStats)))
+    && ts
+    && serverNowMs <= deadlineMs
+  );
 
   return {
     leaderstatsUploadedAt: data?.leaderstatsUploadedAt || null,
