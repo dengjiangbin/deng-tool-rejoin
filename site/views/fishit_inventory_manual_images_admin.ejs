@@ -1,0 +1,147 @@
+﻿<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0; margin: 0; padding: 24px; max-width: 1100px; }
+    h1, h2 { margin: 0 0 12px; }
+    label { display: block; margin: 8px 0 4px; font-size: .85rem; color: #94a3b8; }
+    input, select, button { font: inherit; }
+    input, select { width: 100%; box-sizing: border-box; background: #141824; color: #e2e8f0; border: 1px solid #2a3040; border-radius: 6px; padding: 8px 10px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .btn { background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 10px 16px; cursor: pointer; margin-top: 12px; }
+    .btn-secondary { background: #334155; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: .85rem; }
+    th, td { border: 1px solid #2a3040; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #141824; }
+    .muted { color: #8a94a6; font-size: .8rem; }
+    .preview { width: 72px; height: 72px; object-fit: contain; background: #0b0d12; border: 1px solid #2a3040; border-radius: 6px; }
+    .ok { color: #4ade80; }
+    .warn { color: #fbbf24; }
+    #status { margin-top: 10px; min-height: 1.2em; }
+    .panel { background: #1a1f2e; border: 1px solid #2a3040; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Inventory Manual Image Overrides</h1>
+  <p class="muted">Manual uploaded images always win over auto-resolved Roblox icons. Supports Totems, Stones, Fish, and generic items by category + itemId + name.</p>
+
+  <div class="panel">
+    <h2>Upload Override</h2>
+    <div class="row">
+      <div>
+        <label for="category">Category</label>
+        <select id="category">
+          <% for (const c of categories) { %>
+            <option value="<%= c %>" <%= category === c ? 'selected' : '' %>><%= c %></option>
+          <% } %>
+        </select>
+      </div>
+      <div>
+        <label for="itemId">Item ID</label>
+        <input id="itemId" placeholder="e.g. 2 for Mutation Totem">
+      </div>
+    </div>
+    <label for="name">Item name</label>
+    <input id="name" placeholder="e.g. Mutation Totem">
+    <label for="imageFile">Image file (png/webp/jpg)</label>
+    <input id="imageFile" type="file" accept="image/png,image/jpeg,image/webp">
+    <div id="previewWrap" style="margin-top:12px;display:none">
+      <img id="previewImg" class="preview" alt="preview">
+    </div>
+    <button class="btn" type="button" onclick="uploadOverride()">Save manual override</button>
+    <div id="status" class="muted"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Missing images debug</h2>
+    <label for="username">Tracker username</label>
+    <div class="row">
+      <input id="username" placeholder="denghub2">
+      <button class="btn btn-secondary" type="button" onclick="loadMissing()">Load missing image list</button>
+    </div>
+    <pre id="missingOut" class="muted" style="white-space:pre-wrap;margin-top:12px"></pre>
+  </div>
+
+  <h2>Existing overrides (<%= overrides.length %>)</h2>
+  <% if (!overrides.length) { %>
+    <p class="warn">No manual overrides yet.</p>
+  <% } else { %>
+    <table>
+      <tr><th>Preview</th><th>Category</th><th>Item ID</th><th>Name</th><th>Image URL</th><th>Updated</th></tr>
+      <% for (const row of overrides) { %>
+        <tr>
+          <td><img class="preview" src="<%= row.imageUrl %>" alt="<%= row.originalName %>"></td>
+          <td><%= row.category %></td>
+          <td><%= row.itemId || '-' %></td>
+          <td><%= row.originalName %></td>
+          <td><code><%= row.imageUrl %></code></td>
+          <td><%= row.updatedAt || '-' %></td>
+        </tr>
+      <% } %>
+    </table>
+  <% } %>
+
+  <script>
+    const ADMIN_TOKEN = '<%= adminToken %>';
+    const headers = ADMIN_TOKEN ? { 'x-admin-token': ADMIN_TOKEN, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+
+    document.getElementById('imageFile').addEventListener('change', (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      const wrap = document.getElementById('previewWrap');
+      const img = document.getElementById('previewImg');
+      if (!file) { wrap.style.display = 'none'; return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        img.src = reader.result;
+        wrap.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    });
+
+    async function uploadOverride() {
+      const file = document.getElementById('imageFile').files[0];
+      const status = document.getElementById('status');
+      if (!file) { status.textContent = 'Choose an image file first.'; status.className = 'warn'; return; }
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const res = await fetch('/api/fishit-tracker/admin/inventory-image-upload', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              category: document.getElementById('category').value,
+              itemId: document.getElementById('itemId').value,
+              name: document.getElementById('name').value,
+              imageBase64: reader.result,
+              mimeType: file.type,
+              admin_token: ADMIN_TOKEN || undefined,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) throw new Error(data.error || 'upload_failed');
+          status.textContent = 'Saved: ' + data.entry.imageUrl + ' (imageSource=manual_override)';
+          status.className = 'ok';
+          setTimeout(() => location.reload(), 800);
+        } catch (err) {
+          status.textContent = 'Upload failed: ' + err.message;
+          status.className = 'warn';
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function loadMissing() {
+      const username = document.getElementById('username').value.trim();
+      const out = document.getElementById('missingOut');
+      if (!username) { out.textContent = 'Enter a username.'; return; }
+      const q = ADMIN_TOKEN ? '?admin_token=' + encodeURIComponent(ADMIN_TOKEN) : '';
+      const res = await fetch('/api/fishit-tracker/admin/inventory-missing-images/' + encodeURIComponent(username) + q, { headers });
+      const data = await res.json();
+      out.textContent = JSON.stringify(data, null, 2);
+    }
+  </script>
+</body>
+</html>
