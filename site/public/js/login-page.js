@@ -28,14 +28,19 @@
     text.textContent = formatted.toLocaleString('en-US') + ' Online Now';
   }
 
-  fetch('/api/fishit-tracker/public-network', {
-    headers: { Accept: 'application/json' },
-    cache: 'no-store',
-  })
-    .then(function(res) { return res.ok ? res.json() : null; })
-    .then(function(data) {
-      if (data && data.available) updatePill(data.onlineUsernames);
-      else updatePill(null);
+  function refreshPill() {
+    fetch('/api/public/tracker-stats', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
     })
-    .catch(function() { updatePill(null); });
+      .then(function(res) { return res.ok ? res.json() : null; })
+      .then(function(data) {
+        if (data && Number.isFinite(Number(data.onlineCount))) updatePill(data.onlineCount);
+        else updatePill(null);
+      })
+      .catch(function() { updatePill(null); });
+  }
+
+  refreshPill();
+  window.setInterval(refreshPill, 10000);
 }());

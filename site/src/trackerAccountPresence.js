@@ -1,6 +1,6 @@
 'use strict';
 
-const { EXPECTED_CLIENT_TRACKER_BUILD } = require('./fishitTrackerBuild');
+const { EXPECTED_CLIENT_TRACKER_BUILD, isAllowedTrackerBuild } = require('./fishitTrackerBuild');
 
 /** Live account presence grace — 45s matches ~10s upload interval + network slack. */
 const ACCOUNT_PRESENCE_GRACE_MS = 45_000;
@@ -18,6 +18,7 @@ function syncAgeSecondsFromTimestamp(ts, nowMs = Date.now()) {
 }
 
 function isTrustedClientBuild(build, expectedBuild = EXPECTED_CLIENT_TRACKER_BUILD) {
+  if (isAllowedTrackerBuild(build)) return true;
   if (!build) return false;
   const s = String(build);
   return s === expectedBuild || s.includes('LOADER_REGISTER_LIMIT_FIX');

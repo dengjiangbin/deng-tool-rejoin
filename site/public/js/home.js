@@ -194,12 +194,29 @@
   }
 
   function loadTrackerNetwork() {
-    return fetch('/api/fishit-tracker/public-network', {
+    return fetch('/api/public/tracker-stats', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     })
-      .then(function(res) { return res.ok ? res.json() : null; })
-      .catch(function() { return null; });
+      .then(function(res) {
+        if (!res.ok) {
+          console.warn('[home] tracker stats fetch failed status=' + res.status);
+          return null;
+        }
+        return res.json();
+      })
+      .then(function(data) {
+        if (!data || !Number.isFinite(Number(data.trackedCount))) return null;
+        return {
+          available: true,
+          trackedUsernames: Number(data.trackedCount),
+          onlineUsernames: Number(data.onlineCount) || 0,
+        };
+      })
+      .catch(function(err) {
+        console.warn('[home] tracker stats fetch error', err && err.message ? err.message : err);
+        return null;
+      });
   }
 
   function loadFishitSummary() {
@@ -255,14 +272,19 @@
   bindNavScrollSpy();
   bindWordmark();
 
-  Promise.all([loadPublicStats(), loadTrackerNetwork(), loadFishitSummary()])
-    .then(function(results) {
-      applyStats(results[0], results[1], results[2]);
-    })
-    .catch(function() {
-      updateOnlinePill(null);
-      markEmpty('[data-home-live-stats-empty]', 0);
-      markEmpty('[data-home-platform-stats-empty]', 0);
-      markEmpty('[data-home-fishit-stats-empty]', 0);
-    });
+  function refreshHomeStats() {
+    Promise.all([loadPublicStats(), loadTrackerNetwork(), loadFishitSummary()])
+      .then(function(results) {
+        applyStats(results[0], results[1], results[2]);
+      })
+      .catch(function() {
+        updateOnlinePill(null);
+        markEmpty('[data-home-live-stats-empty]', 0);
+        markEmpty('[data-home-platform-stats-empty]', 0);
+        markEmpty('[data-home-fishit-stats-empty]', 0);
+      });
+  }
+
+  refreshHomeStats();
+  window.setInterval(refreshHomeStats, 10000);
 }());

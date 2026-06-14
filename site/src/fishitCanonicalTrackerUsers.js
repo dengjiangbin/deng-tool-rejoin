@@ -1,6 +1,6 @@
 'use strict';
 
-const { EXPECTED_CLIENT_TRACKER_BUILD } = require('./fishitTrackerBuild');
+const { EXPECTED_CLIENT_TRACKER_BUILD, isAllowedTrackerBuild } = require('./fishitTrackerBuild');
 
 const USERNAME_KEY_RE = /^[a-z0-9_]{3,20}$/;
 const { ACCOUNT_PRESENCE_GRACE_MS } = require('./trackerAccountPresence');
@@ -57,9 +57,29 @@ function resolveLastAccountSeenAt(data) {
 }
 
 function isTrustedClientBuild(build, expectedBuild = EXPECTED_CLIENT_TRACKER_BUILD) {
+  if (isAllowedTrackerBuild(build)) return true;
   if (!build) return false;
   const s = String(build);
   return s === expectedBuild || s.includes('LOADER_REGISTER_LIMIT_FIX');
+}
+
+/** Heartbeat-only and full snapshots — startup/discovery phases still count for presence. */
+function isAllowedPresencePhase(phase) {
+  const p = String(phase || '').trim().toLowerCase();
+  if (!p) return true;
+  return p === 'live' || p === 'startup' || p === 'discovery' || p === 'syncing';
+}
+
+/** Accept heartbeat uploads without replion proof; full snapshots may carry replion proof. */
+function hasCanonicalTrackerProof(data, proof) {
+  if (proof.replionSourceOfTruth === true) return true;
+  if (data?.replionSourceOfTruth === true) return true;
+  if (data?.trackerClientProof?.replionSourceOfTruth === true) return true;
+  if (data?.lastPayloadType === 'tracker_status') return true;
+  if (data?.lastHeartbeatAt || data?.lastSuccessfulHeartbeatAt) return true;
+  if (data?.sourceTruth === 'replion' || data?.inventorySource === 'replion') return true;
+  if (data?.lastSuccessfulUploadAt || data?.lastAccountSeenAt) return true;
+  return false;
 }
 
 function deriveAccountPresenceLive(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS, nowMs = Date.now()) {
@@ -151,14 +171,14 @@ function evaluateCanonicalUser(data, opts = {}) {
   if (!latestSuccessfulUploadAt) {
     return { ...base, rejectReason: 'no_successful_upload' };
   }
-  if (!proof.trackerBuild || !isTrustedClientBuild(proof.trackerBuild, expectedBuild)) {
+  if (!proof.trackerBuild || !isAllowedTrackerBuild(proof.trackerBuild)) {
     return { ...base, rejectReason: 'old_build' };
   }
   const phase = proof.phase || String(data?.phase || '').trim().toLowerCase();
-  if (phase && phase !== 'live') {
+  if (!isAllowedPresencePhase(phase)) {
     return { ...base, rejectReason: 'phase_not_live' };
   }
-  if (!proof.replionSourceOfTruth) {
+  if (!hasCanonicalTrackerProof(data, proof)) {
     return { ...base, rejectReason: 'invalid_tracker_proof' };
   }
   if (data?.isOnline === false) {

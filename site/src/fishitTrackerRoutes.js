@@ -61,7 +61,7 @@ const globalFishCatalog = require('./fishitGlobalFishItemCatalog');
 const liveCatchProof = require('./fishitLiveCatchProof');
 const partialSnapshot = require('./fishitPartialSnapshot');
 const snapshotRecovery = require('./fishitSnapshotRecovery');
-const { BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_MARKER, BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, EXPECTED_CLIENT_TRACKER_BUILD, ALLOWED_TRACKER_BUILD_EXACT, BLOCKER10ZK_BUILD, BLOCKER10ZK_UI_MARKER, BLOCKER10ZJ_BUILD, BLOCKER10ZJ_UI_MARKER, BLOCKER10ZI_BUILD, BLOCKER10ZI_UI_MARKER, BLOCKER10ZH_BUILD, BLOCKER10ZH_UI_MARKER, BLOCKER10ZG_BUILD, BLOCKER10ZG_UI_MARKER, BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
+const { BLOCKER10ZP_RARITY_MAPPING_AND_TRANSCENDED_STONE_IMAGE_FIX_MARKER, BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER, EXPECTED_CLIENT_TRACKER_BUILD, ALLOWED_TRACKER_BUILD_EXACT, isAllowedTrackerBuild, BLOCKER10ZK_BUILD, BLOCKER10ZK_UI_MARKER, BLOCKER10ZJ_BUILD, BLOCKER10ZJ_UI_MARKER, BLOCKER10ZI_BUILD, BLOCKER10ZI_UI_MARKER, BLOCKER10ZH_BUILD, BLOCKER10ZH_UI_MARKER, BLOCKER10ZG_BUILD, BLOCKER10ZG_UI_MARKER, BLOCKER10ZF_BUILD, BLOCKER10ZF_UI_MARKER, BLOCKER10ZE_BUILD, BLOCKER10ZE_UI_MARKER, BLOCKER10ZD_BUILD, BLOCKER10ZD_UI_MARKER, BLOCKER10ZA_BUILD, BLOCKER10ZA_UI_MARKER, BLOCKER10Z18_BUILD, BLOCKER10Z18_UI_MARKER, BLOCKER10Z17_BUILD, BLOCKER10Z17_UI_MARKER, BLOCKER10Z16_BUILD, BLOCKER10Z16_UI_MARKER, BLOCKER10Z15_BUILD, BLOCKER10Z15_UI_MARKER, BLOCKER10Z14_BUILD, BLOCKER10Z14_UI_MARKER, BLOCKER10Z13_BUILD, BLOCKER10Z13_UI_MARKER } = require('./fishitTrackerBuild');
 const trackerRarityStyle = require('./fishitTrackerRarityStyle');
 const fishitStoneDisplayMap = require('./fishitStoneDisplayMap');
 const stoneImageAssets = require('./fishitStoneImageAssets');
@@ -140,11 +140,14 @@ function resolvePlayerStatsForApi(raw) {
 }
 
 function isTrustedClientBuild(build) {
-  if (!build) return false;
-  const s = String(build);
-  return s === EXPECTED_CLIENT_TRACKER_BUILD
-    || s === MINIMUM_TRACKER_BUILD
-    || s.includes('LOADER_REGISTER_LIMIT_FIX');
+  return isAllowedTrackerBuild(build);
+}
+
+function applySessionOwnerMapping(key) {
+  const ownerId = inventoryTrackedAccounts.resolveOwnerDiscordIdForUsernameSync(key);
+  if (!ownerId || !liveTrackDB[key]) return ownerId || null;
+  liveTrackDB[key].discordOwnerId = ownerId;
+  return ownerId;
 }
 
 function buildPlayerStatsProof(raw, data, nowFallback) {
@@ -3988,6 +3991,7 @@ function handleUpdateBackpack(req, res) {
       }
       // Store userId→key alias so GET can resolve by userId if needed.
       if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
+      applySessionOwnerMapping(key);
       const uploadRejected = loaderErr
         || body.uploadFailed === true
         || body.syncFailed === true;
@@ -5530,7 +5534,10 @@ function collectPublicFishItTrackerStats() {
 }
 
 function collectPublicTrackerNetworkStats() {
+  syncLiveTrackFromDisk();
   const canonical = computeCanonicalTrackerUsers(liveTrackDB);
+  const registeredTrackedCount = inventoryTrackedAccounts.countRegisteredTrackedUsernamesSync();
+  const trackedUsernames = Math.max(registeredTrackedCount, canonical.currentBuildUniqueUsers);
   let inventoriesSynced = 0;
   for (const [key, data] of Object.entries(liveTrackDB)) {
     if (key.startsWith('uid:')) continue;
@@ -5555,8 +5562,9 @@ function collectPublicTrackerNetworkStats() {
     staleIgnored: canonical.staleIgnored,
     expectedBuild: canonical.expectedBuild,
     summary: canonical.summary,
-    trackedUsernames: canonical.currentBuildUniqueUsers,
+    trackedUsernames,
     onlineUsernames: canonical.onlineUniqueUsers,
+    registeredTrackedCount,
     inventoriesSynced,
     updatedAt: canonical.updatedAt,
   };
@@ -5575,10 +5583,35 @@ function collectPublicTrackerNetworkProof() {
   };
 }
 
+function buildPublicTrackerStatsPayload() {
+  const stats = collectPublicTrackerNetworkStats();
+  return {
+    ok: true,
+    trackedCount: stats.trackedUsernames,
+    onlineCount: stats.onlineUsernames,
+    registeredTrackedCount: stats.registeredTrackedCount || 0,
+    serverTime: stats.updatedAt || new Date().toISOString(),
+    source: 'canonical_tracker_summary',
+    cache: 'no-store',
+    rawSessionRows: stats.rawSessionRows,
+    currentBuildUniqueUsers: stats.currentBuildUniqueUsers,
+  };
+}
+
 // ── GET /api/fishit-tracker/public-network ───────────────────────
 router.get('/api/fishit-tracker/public-network', getLimiter, (_req, res) => {
   res.set(NO_STORE_HEADERS);
   return res.status(200).json(collectPublicTrackerNetworkStats());
+});
+
+router.get('/api/public/tracker-stats', getLimiter, (_req, res) => {
+  res.set(NO_STORE_HEADERS);
+  return res.status(200).json(buildPublicTrackerStatsPayload());
+});
+
+router.get('/api/home/network-stats', getLimiter, (_req, res) => {
+  res.set(NO_STORE_HEADERS);
+  return res.status(200).json(buildPublicTrackerStatsPayload());
 });
 
 // ── GET /api/fishit-tracker/public-network-proof ─────────────────

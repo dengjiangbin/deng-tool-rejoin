@@ -98,6 +98,7 @@ function sanitiseSession(key, data) {
   return {
     username: data.username || key,
     userId: data.userId || 0,
+    discordOwnerId: data.discordOwnerId || null,
     source: data.source || 'unknown',
     items: _trimItems(data.items),
     rawItems: _trimItems(data.rawItems),

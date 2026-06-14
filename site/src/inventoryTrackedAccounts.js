@@ -346,6 +346,51 @@ function resetStorageModeForTests() {
   storageMode = null;
 }
 
+/** Count unique Roblox usernames registered across all Discord owners (file/memory store). */
+function countRegisteredTrackedUsernamesSync() {
+  const seen = new Set();
+  if (useMemoryStore()) {
+    for (const bucket of memoryStore.values()) {
+      for (const key of bucket.keys()) seen.add(key);
+    }
+    return seen.size;
+  }
+  const store = loadFileStoreRaw();
+  for (const bucket of Object.values(store)) {
+    if (!bucket || typeof bucket !== 'object') continue;
+    for (const key of Object.keys(bucket)) {
+      if (USERNAME_KEY_RE.test(key)) seen.add(key);
+    }
+  }
+  return seen.size;
+}
+
+/** Resolve Discord owner for a Roblox username key (case-insensitive). */
+function resolveOwnerDiscordIdForUsernameSync(usernameKey) {
+  const key = String(usernameKey || '').trim().toLowerCase();
+  if (!USERNAME_KEY_RE.test(key)) return null;
+  if (useMemoryStore()) {
+    for (const [ownerId, bucket] of memoryStore.entries()) {
+      if (bucket.has(key)) return ownerId;
+    }
+    return null;
+  }
+  const store = loadFileStoreRaw();
+  for (const [ownerId, bucket] of Object.entries(store)) {
+    if (!bucket || typeof bucket !== 'object') continue;
+    if (Object.prototype.hasOwnProperty.call(bucket, key)) {
+      const normalized = normalizeDiscordUserId(ownerId);
+      if (normalized) return normalized;
+    }
+  }
+  return null;
+}
+
+async function listDiscordOwnersForUsernameKey(usernameKey) {
+  const ownerId = resolveOwnerDiscordIdForUsernameSync(usernameKey);
+  return ownerId ? [ownerId] : [];
+}
+
 module.exports = {
   normalizeDiscordUserId,
   normalizeRobloxUsername,
@@ -354,6 +399,9 @@ module.exports = {
   addTrackedAccounts,
   removeTrackedAccount,
   migrateTrackedAccounts,
+  countRegisteredTrackedUsernamesSync,
+  resolveOwnerDiscordIdForUsernameSync,
+  listDiscordOwnersForUsernameKey,
   resetMemoryStoreForTests,
   resetStorageModeForTests,
 };
