@@ -810,8 +810,14 @@ async function persistSessionState(key, baseUrl) {
       data.lastGoodPublicFishCount = nextFish.length;
     }
     if (nextStone.length || allowEmptyReplace || !Array.isArray(data.lastGoodPublicStoneItems)) {
-      data.lastGoodPublicStoneItems = nextStone;
-      data.lastGoodPublicStoneCount = nextStone.length;
+      const preservedStones = Array.isArray(data.lastGoodPublicStoneItems)
+        ? data.lastGoodPublicStoneItems
+        : [];
+      const resolvedStones = allowEmptyReplace || !preservedStones.length
+        ? nextStone
+        : gameItemDbPublic.preferHigherGroupedStoneSnapshot(nextStone, preservedStones);
+      data.lastGoodPublicStoneItems = resolvedStones;
+      data.lastGoodPublicStoneCount = resolvedStones.length;
     }
     if (nextTotem.length || allowEmptyReplace || !Array.isArray(data.lastGoodPublicTotemItems)) {
       data.lastGoodPublicTotemItems = reEnrichPublicTotemItems(nextTotem, baseUrl || '');
@@ -4400,11 +4406,14 @@ function handleUpdateBackpack(req, res) {
     const playerDataFishItems = usesGameItemDb
       ? gameItemDbPublic.normaliseUploadRows(body.fishItems || [])
       : (usesItemUtility ? body.fishItems.filter(itemUtilityPublic.isPlayerDataItemUtilityRow) : null);
-    const playerDataStoneItems = usesGameItemDb
+    const playerDataStoneItemsRaw = usesGameItemDb
       ? gameItemDbPublic.normaliseUploadRows(body.stoneItems || []).filter((row) => row && row.kind === 'stone')
       : ((usesItemUtility && Array.isArray(body.stoneItems))
         ? body.stoneItems.filter(itemUtilityPublic.isPlayerDataItemUtilityRow)
         : []);
+    const playerDataStoneItems = playerDataStoneItemsRaw.length
+      ? gameItemDbPublic.groupStoneRows(playerDataStoneItemsRaw)
+      : playerDataStoneItemsRaw;
     const playerDataTotemItems = usesGameItemDb
       ? gameItemDbPublic.normaliseUploadRows(body.totemItems || []).filter((row) => row && row.kind === 'totem')
       : ((usesItemUtility && Array.isArray(body.totemItems))
@@ -5904,14 +5913,28 @@ async function handleGetBackpack(req, res) {
   // (offline / waiting / partial / post-restart), keep showing the last valid
   // stone inventory instead of an empty grid.
   const liveStoneCount = Array.isArray(publicFish.stoneItems) ? publicFish.stoneItems.length : 0;
-  if (liveStoneCount === 0 && Array.isArray(data.lastGoodPublicStoneItems) && data.lastGoodPublicStoneItems.length) {
-    publicFish = {
-      ...publicFish,
-      stoneItems: data.lastGoodPublicStoneItems,
-      stoneInventory: data.lastGoodPublicStoneItems,
-      stoneDataStale: true,
-      lastGoodStonePreserved: true,
-    };
+  if (Array.isArray(data.lastGoodPublicStoneItems) && data.lastGoodPublicStoneItems.length) {
+    const resolvedStones = gameItemDbPublic.preferHigherGroupedStoneSnapshot(
+      publicFish.stoneItems || [],
+      data.lastGoodPublicStoneItems,
+    );
+    if (resolvedStones !== publicFish.stoneItems) {
+      publicFish = {
+        ...publicFish,
+        stoneItems: resolvedStones,
+        stoneInventory: resolvedStones,
+        stoneDataStale: true,
+        lastGoodStonePreserved: true,
+      };
+    } else if (liveStoneCount === 0) {
+      publicFish = {
+        ...publicFish,
+        stoneItems: data.lastGoodPublicStoneItems,
+        stoneInventory: data.lastGoodPublicStoneItems,
+        stoneDataStale: true,
+        lastGoodStonePreserved: true,
+      };
+    }
   }
   const liveTotemCount = Array.isArray(publicFish.totemItems) ? publicFish.totemItems.length : 0;
   if (liveTotemCount === 0 && Array.isArray(data.lastGoodPublicTotemItems) && data.lastGoodPublicTotemItems.length) {

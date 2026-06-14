@@ -1,0 +1,14 @@
+{
+  "account": "stokjualanardian",
+  "capturedAt": "2026-06-14T15:55:27.856Z",
+  "rootCause": "FISHIT_MAX_PERSISTED_ITEMS default 500 sliced playerDataStoneItems before quantity aggregation",
+  "layers": {
+    "robloxUploadRowCount": 1541,
+    "storedPlayerDataStoneRows": 500,
+    "storedPlayerDataStoneSum": 500,
+    "groupedFromStored": 500,
+    "lastGoodPublicStoneQuantity": 1541,
+    "bugSymptom": "stored sum and API rebuild showed 500 while lastGoodPublicStoneItems retained 1534 until persist overwrite"
+  },
+  "trackerBuild": "UPLOAD_INTERVAL_60S_AIO_2026_06_14"
+}

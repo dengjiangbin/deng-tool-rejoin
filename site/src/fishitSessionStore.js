@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const playerStatsStore = require('./fishitPlayerStats');
 const snapshotCompleteness = require('./fishitSnapshotCompleteness');
+const gameItemDbPublic = require('./fishitGameItemDbPublic');
 const { getLagMs } = require('./trackerEventLoopMonitor');
 
 function storePath() {
@@ -38,6 +39,33 @@ const MAX_LAG_DEFER_MS = Number(process.env.FISHIT_SESSION_MAX_LAG_DEFER_MS || 3
 
 function _defaultFile() {
   return { updatedAt: null, sessions: {}, uidAliases: {} };
+}
+
+function _trimPlayerDataStoneRows(rows) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+  const grouped = gameItemDbPublic.groupStoneRows(rows);
+  return grouped.slice(0, MAX_ITEMS_PER_SESSION).map((row) => ({
+    kind: row.kind || 'stone',
+    itemId: row.itemId != null ? String(row.itemId) : null,
+    name: row.name || null,
+    stoneType: row.stoneType || null,
+    quantity: row.quantity != null ? row.quantity : row.amount,
+    tier: row.tier != null ? row.tier : null,
+    rarity: row.rarity || null,
+    uuid: row.uuid || null,
+    mutation: row.mutation || null,
+    icon: row.icon || null,
+    iconRaw: row.iconRaw || row.icon || null,
+    iconAssetId: row.iconAssetId != null ? String(row.iconAssetId) : null,
+    iconSource: row.iconSource || null,
+    imageAssetId: row.imageAssetId != null ? String(row.imageAssetId) : null,
+    imageSource: row.imageSource || null,
+    imageUrl: row.imageUrl || null,
+    source: row.source || null,
+    identityVerified: row.identityVerified === true,
+    type: row.type || null,
+    category: row.category || 'stone',
+  }));
 }
 
 function _trimPlayerDataRows(rows) {
@@ -208,7 +236,7 @@ function sanitiseSession(key, data) {
     inventorySource: data.inventorySource || null,
     sourceTruth: data.sourceTruth || null,
     playerDataFishItems: _trimPlayerDataRows(data.playerDataFishItems),
-    playerDataStoneItems: _trimPlayerDataRows(data.playerDataStoneItems),
+    playerDataStoneItems: _trimPlayerDataStoneRows(data.playerDataStoneItems),
     playerDataTotemItems: _trimPlayerDataRows(data.playerDataTotemItems),
     lastUploadReceivedAt: data.lastUploadReceivedAt || null,
     lastUploadAcceptedAt: data.lastUploadAcceptedAt || null,

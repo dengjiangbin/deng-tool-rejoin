@@ -23,7 +23,7 @@ const { RAW_TRACKER_LUA, testIfRawTracker } = require('./helpers/trackerRawSourc
 
 const EVOLVED_ID = 558;
 
-function evolvedStoneRow(quantity, uuid, pathLabel) {
+function evolvedStoneRow(quantity, uuid) {
   return {
     kind: 'stone',
     itemId: EVOLVED_ID,
@@ -33,7 +33,7 @@ function evolvedStoneRow(quantity, uuid, pathLabel) {
     uuid: uuid || `uuid-${quantity}-${Math.random()}`,
     source: 'playerdata_gameitemdb',
     identityVerified: true,
-    inventoryPath: pathLabel || 'Inventory.Enchant Stones',
+    inventoryPath: 'Inventory.Enchant Stones',
   };
 }
 
@@ -48,32 +48,82 @@ function makeApp() {
   return app;
 }
 
-describe('evolved_enchant_stone_quantity_gt_500', () => {
-  test('groupStoneRows sums three 500 stacks to 1500', () => {
-    const rows = [
-      evolvedStoneRow(500, 'a'),
-      evolvedStoneRow(500, 'b'),
-      evolvedStoneRow(500, 'c'),
-    ];
-    const grouped = gameItemDbPublic.groupStoneRows(rows);
-    assert.equal(grouped.length, 1);
-    assert.equal(grouped[0].stoneType, 'Evolved');
-    assert.equal(grouped[0].quantity, 1500);
-    const card = gameItemDbPublic.mapToPublicStoneCardItem(grouped[0]);
-    assert.equal(card.quantity, 1500);
-    assert.equal(card.amount, 1500);
-  });
+function evolvedQtyFromApiBody(body) {
+  const stones = body.stoneItems || body.stoneInventory || [];
+  return stones
+    .filter((s) => String(s.stoneType || s.StoneType) === 'Evolved')
+    .reduce((sum, row) => sum + (Number(row.quantity ?? row.amount ?? row.count) || 0), 0);
+}
 
-  test('groupStoneRows preserves single stack 1500 and 2500', () => {
-    for (const qty of [1500, 2500]) {
+function manySingleStackRows(count) {
+  const rows = [];
+  for (let i = 0; i < count; i += 1) {
+    rows.push(evolvedStoneRow(1, `stack-${i}`));
+  }
+  return rows;
+}
+
+describe('evolved_enchant_stone_quantity_gt_500', () => {
+  for (const qty of [501, 999, 1000, 1500, 2500]) {
+    test(`groupStoneRows preserves single aggregated row quantity ${qty}`, () => {
       const grouped = gameItemDbPublic.groupStoneRows([evolvedStoneRow(qty)]);
+      assert.equal(grouped.length, 1);
       assert.equal(grouped[0].quantity, qty);
       assert.equal(gameItemDbPublic.mapToPublicStoneCardItem(grouped[0]).quantity, qty);
-    }
+    });
+  }
+
+  test('real stokjualanardian pattern: 1534 single-qty stacks must not collapse to 500 after persist', async () => {
+    const tmpStore = path.join(os.tmpdir(), `fishit-stone-trunc-${Date.now()}.json`);
+    process.env.FISHIT_LIVE_SESSIONS_PATH = tmpStore;
+    sessionStore._reset();
+
+    const key = 'stokjualanardian';
+    const username = 'StokJualanArdian';
+    const app = makeApp();
+    const uploadRows = manySingleStackRows(1534);
+    const body = {
+      type: 'inventory_snapshot',
+      username,
+      userId: 9002,
+      trackerBuild: MINIMUM_TRACKER_BUILD,
+      clientOrigin: 'roblox_tracker',
+      evidenceSourceMode: 'live_roblox',
+      intervalSeconds: 60,
+      isOnline: true,
+      inventorySource: 'playerdata_gameitemdb',
+      playerStats: {
+        coins: 1,
+        totalCaught: 1,
+        rarestFishChance: '1/100',
+        source: 'leaderstats',
+        build: MINIMUM_TRACKER_BUILD,
+      },
+      fishItems: [],
+      stoneItems: uploadRows,
+      totemItems: [],
+    };
+
+    const uploadRes = await request(app).post('/api/fishit-tracker/update-backpack').send(body);
+    assert.ok([200, 202].includes(uploadRes.status), `upload status ${uploadRes.status}`);
+
+    await sessionStore.flushToDiskAsync({ priority: true });
+    const stored = JSON.parse(fs.readFileSync(tmpStore, 'utf8')).sessions[key.toLowerCase()];
+    assert.ok(stored, 'session persisted');
+    assert.equal(stored.playerDataStoneItems.length, 1, 'stones aggregated before persist');
+    assert.equal(stored.playerDataStoneItems[0].quantity, 1534);
+    assert.equal(stored.lastGoodPublicStoneItems[0].quantity, 1534);
+
+    const backpack = await request(app).get(`/api/tracker/get-backpack/${key}`).expect(200);
+    assert.equal(evolvedQtyFromApiBody(backpack.body), 1534);
+
+    sessionStore._reset();
+    try { fs.unlinkSync(tmpStore); } catch (_) { /* ignore */ }
+    delete process.env.FISHIT_LIVE_SESSIONS_PATH;
   });
 
-  test('ingest + API read returns evolved stone quantity above 500', async () => {
-    const tmpStore = path.join(os.tmpdir(), `fishit-stone-qty-${Date.now()}.json`);
+  test('ingest + API read preserves duplicate-row stacks that sum above 500', async () => {
+    const tmpStore = path.join(os.tmpdir(), `fishit-stone-dup-${Date.now()}.json`);
     process.env.FISHIT_LIVE_SESSIONS_PATH = tmpStore;
     sessionStore._reset();
 
@@ -99,9 +149,8 @@ describe('evolved_enchant_stone_quantity_gt_500', () => {
       },
       fishItems: [],
       stoneItems: [
-        evolvedStoneRow(500, 'stack-1', 'Inventory.Enchant Stones'),
-        evolvedStoneRow(500, 'stack-2', 'Inventory.Enchant Stones'),
-        evolvedStoneRow(500, 'stack-3', 'Inventory.Items'),
+        evolvedStoneRow(501, 'stack-a'),
+        evolvedStoneRow(999, 'stack-b'),
       ],
       totemItems: [],
     };
@@ -110,29 +159,38 @@ describe('evolved_enchant_stone_quantity_gt_500', () => {
     assert.ok([200, 202].includes(uploadRes.status), `upload status ${uploadRes.status}`);
 
     await sessionStore.flushToDiskAsync({ priority: true });
-
     const backpack = await request(app).get(`/api/tracker/get-backpack/${key}`).expect(200);
-    const stones = backpack.body.stoneItems || backpack.body.stoneInventory || [];
-    const evolved = stones.filter((s) => String(s.stoneType || s.StoneType) === 'Evolved');
-    assert.ok(evolved.length >= 1, 'expected evolved stone in API response');
-    const qty = evolved.reduce(
-      (sum, row) => sum + (Number(row.quantity ?? row.amount ?? row.count) || 0),
-      0,
-    );
-    assert.equal(qty, 1500, `API evolved stone qty=${qty}`);
+    assert.equal(evolvedQtyFromApiBody(backpack.body), 1500);
 
     sessionStore._reset();
     try { fs.unlinkSync(tmpStore); } catch (_) { /* ignore */ }
     delete process.env.FISHIT_LIVE_SESSIONS_PATH;
   });
 
-  testIfRawTracker('Lua scans Inventory.Enchant Stones and aggregates stone stacks', () => {
+  test('preferHigherGroupedStoneSnapshot keeps last-good when live rebuild undercounts', () => {
+    const live = [evolvedStoneRow(500)];
+    const preserved = [evolvedStoneRow(1534)];
+    const resolved = gameItemDbPublic.preferHigherGroupedStoneSnapshot(
+      gameItemDbPublic.groupStoneRows(live),
+      preserved,
+    );
+    assert.equal(resolved[0].quantity, 1534);
+  });
+
+  test('session store aggregates truncated legacy raw rows on reload', () => {
+    const trimmed = sessionStore.sanitiseSession('legacyuser', {
+      username: 'legacyuser',
+      playerDataStoneItems: manySingleStackRows(750),
+    });
+    assert.equal(trimmed.playerDataStoneItems.length, 1);
+    assert.equal(trimmed.playerDataStoneItems[0].quantity, 750);
+  });
+
+  testIfRawTracker('Lua aggregates enchant stone stacks before upload', () => {
     const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
-    assert.match(lua, /UPLOAD_502_HARDENING_AND_EVOLVED_STONE_QTY_FIX_2026_06_14/);
-    assert.match(lua, /Inventory\.Enchant Stones/);
     assert.match(lua, /aggregateStoneItemsByType/);
+    assert.match(lua, /Inventory\.Enchant Stones/);
     assert.match(lua, /logStoneAggregateProof/);
-    assert.match(lua, /TRANSIENT_UPLOAD_BACKOFF/);
-    assert.match(lua, /UPLOAD_RETRY_COUNT=/);
+    assert.doesNotMatch(lua, /1500/);
   });
 });

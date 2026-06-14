@@ -295,6 +295,40 @@ function groupStoneRows(rows) {
   return [...map.values()];
 }
 
+function stoneQuantityByType(items) {
+  const map = new Map();
+  for (const row of items || []) {
+    const type = String(row?.stoneType || row?.StoneType || '').trim() || 'Unknown';
+    const raw = Number(row?.quantity ?? row?.amount ?? row?.count ?? 0);
+    const qty = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+    map.set(type, (map.get(type) || 0) + qty);
+  }
+  return map;
+}
+
+function totalStoneQuantity(items) {
+  let sum = 0;
+  for (const qty of stoneQuantityByType(items).values()) sum += qty;
+  return sum;
+}
+
+/** Keep grouped stone cards when persisted raw rows were truncated below last-good totals. */
+function preferHigherGroupedStoneSnapshot(liveItems, preservedItems) {
+  if (!Array.isArray(preservedItems) || !preservedItems.length) {
+    return Array.isArray(liveItems) ? liveItems : [];
+  }
+  if (!Array.isArray(liveItems) || !liveItems.length) return preservedItems;
+  const liveByType = stoneQuantityByType(liveItems);
+  const preservedByType = stoneQuantityByType(preservedItems);
+  for (const [type, preservedQty] of preservedByType) {
+    if (preservedQty > (liveByType.get(type) || 0)) return preservedItems;
+  }
+  if (totalStoneQuantity(preservedItems) > totalStoneQuantity(liveItems)) {
+    return preservedItems;
+  }
+  return liveItems;
+}
+
 function applyPublicCosmetic(item) {
   const baseName = String(item.baseName || item.baseFishName || item.name || '').trim();
   return {
@@ -738,6 +772,9 @@ module.exports = {
   normaliseUploadRows,
   groupFishRows,
   groupStoneRows,
+  stoneQuantityByType,
+  totalStoneQuantity,
+  preferHigherGroupedStoneSnapshot,
   groupTotemRows,
   buildPublicFromPlayerDataGameItemDb,
   buildWaitingForPlayerDataGameItemDbResponse,
