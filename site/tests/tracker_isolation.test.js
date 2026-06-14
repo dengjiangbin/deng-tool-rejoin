@@ -6,6 +6,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+process.env.FISHIT_SESSION_SYNC_SAVE = '1';
+
 const { isTrackerUploadPath, UPLOAD_POST_PATHS } = require('../src/trackerUploadPaths');
 const { shouldProxyTrackerUpload } = require('../src/trackerUploadProxy');
 const trackerConcurrencyGate = require('../src/trackerConcurrencyGate');
@@ -70,10 +72,12 @@ describe('tracker process isolation', () => {
       isOnline: true,
       lastSeenAt: new Date().toISOString(),
     }, live);
-    const reloaded = fishitSessionStore.reloadIfChanged(live);
+    const target = {};
+    fishitSessionStore._invalidateReloadCursorForTests();
+    const reloaded = fishitSessionStore.reloadIfChanged(target);
     assert.equal(reloaded.reloaded, true);
-    assert.ok(live.demo);
-    assert.equal(live.demo.username, 'Demo');
+    assert.ok(target.demo);
+    assert.equal(target.demo.username, 'Demo');
   });
 
   test('ecosystem.site.json defines site and tracker ingest processes', () => {

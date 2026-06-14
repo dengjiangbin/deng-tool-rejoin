@@ -156,6 +156,12 @@ function scheduleDeferredUploadWork(sessionKey, workFn) {
   const key = String(sessionKey || '').trim().toLowerCase();
   if (!key || typeof workFn !== 'function') return;
 
+  // Fast path already persisted — under load skip net-new deferred enrichment to avoid backlog growth.
+  if (shouldShedWork() && !deferredPendingByKey.has(key) && !deferredInFlight.has(key)) {
+    shedEvents += 1;
+    return;
+  }
+
   const totalQueued = deferredPendingByKey.size + deferredWaitQueue.length + deferredInFlight.size;
   if (totalQueued >= QUEUE_MAX && !deferredPendingByKey.has(key) && !deferredInFlight.has(key)) {
     droppedJobs += 1;

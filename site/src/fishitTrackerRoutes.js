@@ -37,6 +37,7 @@ const { createUserRateLimit } = require('./rateLimitUtils');
 const { uploadLimiter } = require('./trackerUploadRateLimit');
 const trackerConcurrencyGate = require('./trackerConcurrencyGate');
 const { finishTrackerUploadResponse } = require('./trackerUploadResponse');
+const { recordUploadRequest } = require('./trackerUploadRequestMetrics');
 const { buildTrackerAccountSummary } = require('./trackerAccountSummary');
 const {
   ACCOUNT_PRESENCE_GRACE_MS,
@@ -691,6 +692,7 @@ function buildAmbiguousContainerProof(items, sessionData) {
 
 let _globalDbBootstrapped = false;
 async function ensureGlobalDbSeeded() {
+  if (process.env.TRACKER_INGEST_MODE === '1') return;
   if (_globalDbBootstrapped) return;
   _globalDbBootstrapped = true;
   try {
@@ -714,7 +716,7 @@ const CONFIRMED_FISH_IMAGE_ASSET_IDS = [
   '99236757363784',
 ];
 
-if (process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== 'test' && process.env.TRACKER_INGEST_MODE !== '1') {
   robloxThumbnails.warmCacheForAssetIds(CONFIRMED_FISH_IMAGE_ASSET_IDS).catch((err) => {
     console.warn('[fishit] thumbnail warm-cache failed:', err && err.message ? err.message : err);
   });
@@ -736,7 +738,9 @@ const liveTrackDB = {};
 
 if (process.env.NODE_ENV !== 'test' || process.env.FISHIT_SESSION_PERSIST === '1') {
   try {
-    canonicalCatalog.rebuildFromAllSources({ persist: true });
+    if (process.env.TRACKER_INGEST_MODE !== '1') {
+      canonicalCatalog.rebuildFromAllSources({ persist: true });
+    }
     const loaded = sessionStore.loadIntoLiveTrackDB(liveTrackDB);
     console.log('[fishit-tracker] canonical catalog rebuilt; sessions restored:', loaded.loaded || 0);
   } catch (err) {
@@ -3929,6 +3933,33 @@ function ensureSessionBuildCurrent(session) {
 //     items; keeps the last known inventory and only flips flags.
 function handleUpdateBackpack(req, res) {
     const uploadArrivalAt = Date.now();
+    const requestBytes = Number(req.headers['content-length'])
+      || Buffer.byteLength(JSON.stringify(req.body || {}), 'utf8');
+    let responseStatusCode = 200;
+    let responseAccepted = null;
+    let responseRejectReason = null;
+    let responsePayloadType = null;
+    let responseUsernameKey = null;
+    const origStatus = res.status.bind(res);
+    const origJson = res.json.bind(res);
+    res.status = (code) => {
+      responseStatusCode = code;
+      return origStatus(code);
+    };
+    res.json = (body) => {
+      recordUploadRequest({
+        route: req.path,
+        payloadType: responsePayloadType || (req.body && req.body.type) || 'unknown',
+        usernameKey: responseUsernameKey || (req.body?.username ? String(req.body.username).toLowerCase() : '?'),
+        contentLength: requestBytes,
+        durationMs: Date.now() - uploadArrivalAt,
+        statusCode: responseStatusCode,
+        accepted: responseAccepted != null ? responseAccepted : body?.accepted !== false,
+        rejectReason: responseRejectReason || body?.rejectReason || body?.error || null,
+        errorClass: responseStatusCode >= 500 ? 'server' : (responseStatusCode >= 400 ? 'client' : '-'),
+      });
+      return origJson(body);
+    };
     const rawIncomingBody = prepareTrackerRequestBody(req.body || {}, {
       testMode: process.env.NODE_ENV === 'test',
     });
@@ -3938,9 +3969,9 @@ function handleUpdateBackpack(req, res) {
       ? rawIncomingBody
       : compactUpload.stripHeavyUploadFields(rawIncomingBody);
     const parseMs = Date.now() - parseStart;
-    const requestBytes = Number(req.headers['content-length'])
-      || Buffer.byteLength(JSON.stringify(req.body || {}), 'utf8');
     const arrivalType = body.type || 'inventory_snapshot';
+    responsePayloadType = arrivalType;
+    responseUsernameKey = body.username ? String(body.username).toLowerCase() : null;
     if (arrivalType !== 'tracker_status') {
       const auditArrival = extractTotemAuditArrivalMeta(rawIncomingBody);
       console.log(
@@ -3968,6 +3999,8 @@ function handleUpdateBackpack(req, res) {
     const clientGate = validateTrackerClientProof(body);
     if (!clientGate.ok) {
       const rejectKey = body.username ? String(body.username).toLowerCase() : null;
+      responseAccepted = false;
+      responseRejectReason = (clientGate.reasons || [])[0] || clientGate.error || 'client_proof_rejected';
       logTrackerUploadProof('rejected', buildUploadProofLogFields(body, rejectKey ? liveTrackDB[rejectKey] : null, {
         usernameKey: rejectKey,
         payloadType: arrivalType,

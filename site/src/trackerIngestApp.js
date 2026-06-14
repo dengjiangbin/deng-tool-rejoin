@@ -5,7 +5,9 @@ const fishitTrackerRoutes = require('./fishitTrackerRoutes');
 const trackerConcurrencyGate = require('./trackerConcurrencyGate');
 const { getMetrics: getEventLoopMetrics } = require('./trackerEventLoopMonitor');
 const { resolveTrustProxySetting } = require('./rateLimitUtils');
-const { recordIngestRequest } = require('./trackerRouteMetrics');
+const { recordIngestRequest, getTrackerRouteMetrics } = require('./trackerRouteMetrics');
+const { snapshotUploadMetrics } = require('./trackerUploadRequestMetrics');
+const { getSessionStoreFlushMetrics } = require('./fishitSessionStore');
 const stabilityRoutes = require('./stabilityRoutes');
 
 const app = express();
@@ -48,6 +50,9 @@ app.get('/metrics', (_req, res) => {
     queue: trackerConcurrencyGate.stats(),
     eventLoop: getEventLoopMetrics(),
     memory: process.memoryUsage(),
+    trackerRoute: getTrackerRouteMetrics(),
+    uploads: snapshotUploadMetrics(),
+    sessionStore: getSessionStoreFlushMetrics(),
   });
 });
 

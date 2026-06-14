@@ -1,6 +1,7 @@
 'use strict';
 /**
  * BLOCKER10U2 — persist live tracker sessions across PM2 restarts.
+ * Hot uploads use in-memory cache + debounced async flush (no full-file sync read per POST).
  */
 
 const path = require('path');
@@ -14,6 +15,21 @@ const STORE_PATH = process.env.FISHIT_LIVE_SESSIONS_PATH
 const MAX_SESSIONS = Number(process.env.FISHIT_MAX_PERSISTED_SESSIONS || 200);
 const MAX_ITEMS_PER_SESSION = Number(process.env.FISHIT_MAX_PERSISTED_ITEMS || 500);
 const MAX_PUBLIC_FISH = Number(process.env.FISHIT_MAX_PERSISTED_PUBLIC_FISH || 100);
+const FLUSH_DEBOUNCE_MS = Number(process.env.FISHIT_SESSION_FLUSH_MS || 400);
+const SYNC_SAVE = process.env.FISHIT_SESSION_SYNC_SAVE === '1'
+  || process.env.NODE_ENV === 'test';
+
+const RETRYABLE_FS_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT']);
+
+let _fileCache = null;
+let _pendingDirty = false;
+let _flushTimer = null;
+let _flushInFlight = false;
+let _lastStoreMtimeMs = 0;
+let _lastStoreUpdatedAt = null;
+let _lastFlushMs = 0;
+let _flushCount = 0;
+let _flushFailCount = 0;
 
 function _defaultFile() {
   return { updatedAt: null, sessions: {}, uidAliases: {} };
@@ -212,8 +228,161 @@ function sanitiseSession(key, data) {
   return snapshotCompleteness.applyRehydratedCompleteness(base, playerStatsStore);
 }
 
-let _lastStoreMtimeMs = 0;
-let _lastStoreUpdatedAt = null;
+function _readFileFromDisk() {
+  if (!fs.existsSync(STORE_PATH)) return _defaultFile();
+  const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
+  return {
+    updatedAt: raw.updatedAt || null,
+    sessions: raw.sessions && typeof raw.sessions === 'object' ? raw.sessions : {},
+    uidAliases: raw.uidAliases && typeof raw.uidAliases === 'object' ? raw.uidAliases : {},
+  };
+}
+
+function _syncStoreMetaFromDisk() {
+  try {
+    if (!fs.existsSync(STORE_PATH)) {
+      _lastStoreMtimeMs = 0;
+      _lastStoreUpdatedAt = null;
+      return;
+    }
+    const st = fs.statSync(STORE_PATH);
+    _lastStoreMtimeMs = st.mtimeMs;
+    if (_fileCache) {
+      _lastStoreUpdatedAt = _fileCache.updatedAt || null;
+    }
+  } catch (_) { /* ignore */ }
+}
+
+function ensureFileCache(forceReload = false) {
+  if (_fileCache && !forceReload) return _fileCache;
+  _fileCache = _readFileFromDisk();
+  _syncStoreMetaFromDisk();
+  if (!_lastStoreUpdatedAt) _lastStoreUpdatedAt = _fileCache.updatedAt || null;
+  return _fileCache;
+}
+
+function _applyUidAliases(file, liveTrackDB) {
+  if (!liveTrackDB) return;
+  file.uidAliases = {};
+  for (const [k, v] of Object.entries(liveTrackDB)) {
+    if (k.startsWith('uid:') && typeof v === 'string') file.uidAliases[k] = v;
+  }
+}
+
+function _trimSessionMap(sessions) {
+  const keys = Object.keys(sessions).filter((k) => !k.startsWith('uid:'));
+  if (keys.length <= MAX_SESSIONS) return;
+  const sorted = keys.sort((a, b) => {
+    const ta = Date.parse(sessions[a]?.lastSeenAt || 0);
+    const tb = Date.parse(sessions[b]?.lastSeenAt || 0);
+    return tb - ta;
+  });
+  for (const drop of sorted.slice(MAX_SESSIONS)) delete sessions[drop];
+}
+
+function _prepareFlushPayload() {
+  const file = ensureFileCache();
+  return {
+    updatedAt: file.updatedAt,
+    sessions: file.sessions,
+    uidAliases: file.uidAliases,
+  };
+}
+
+async function renameAsyncWithRetry(tmp, target, maxAttempts = 4) {
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      await fs.promises.rename(tmp, target);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (!RETRYABLE_FS_CODES.has(err.code) || attempt >= maxAttempts - 1) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 20 + attempt * 30));
+    }
+  }
+  throw lastErr;
+}
+
+async function flushToDiskAsync() {
+  if (!_pendingDirty || !_fileCache || _flushInFlight) return { flushed: false };
+  _flushInFlight = true;
+  const started = Date.now();
+  try {
+    const payload = _prepareFlushPayload();
+    const dir = path.dirname(STORE_PATH);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const tmp = `${STORE_PATH}.tmp`;
+    await fs.promises.writeFile(tmp, JSON.stringify(payload), 'utf8');
+    await renameAsyncWithRetry(tmp, STORE_PATH);
+    _pendingDirty = false;
+    _flushCount += 1;
+    _lastFlushMs = Date.now() - started;
+    try {
+      const st = await fs.promises.stat(STORE_PATH);
+      _lastStoreMtimeMs = st.mtimeMs;
+    } catch (_) {
+      _lastStoreMtimeMs = Date.now();
+    }
+    _lastStoreUpdatedAt = payload.updatedAt || null;
+    return { flushed: true, durationMs: _lastFlushMs };
+  } catch (err) {
+    _flushFailCount += 1;
+    console.warn('[fishit] session async flush failed:', err && err.message ? err.message : err);
+    return { flushed: false, error: err.message };
+  } finally {
+    _flushInFlight = false;
+    if (_pendingDirty) scheduleFlush();
+  }
+}
+
+function flushToDiskSync() {
+  if (!_fileCache) return { flushed: false };
+  const started = Date.now();
+  try {
+    const payload = _prepareFlushPayload();
+    const dir = path.dirname(STORE_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const tmp = `${STORE_PATH}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(payload), 'utf8');
+    fs.renameSync(tmp, STORE_PATH);
+    _pendingDirty = false;
+    _flushCount += 1;
+    _lastFlushMs = Date.now() - started;
+    _lastStoreMtimeMs = fs.statSync(STORE_PATH).mtimeMs;
+    _lastStoreUpdatedAt = payload.updatedAt || null;
+    return { flushed: true, durationMs: _lastFlushMs };
+  } catch (err) {
+    _flushFailCount += 1;
+    throw err;
+  }
+}
+
+function scheduleFlush() {
+  if (SYNC_SAVE) {
+    flushToDiskSync();
+    return;
+  }
+  if (_flushTimer) return;
+  _flushTimer = setTimeout(() => {
+    _flushTimer = null;
+    flushToDiskAsync().catch(() => {});
+  }, FLUSH_DEBOUNCE_MS);
+  if (typeof _flushTimer.unref === 'function') _flushTimer.unref();
+}
+
+function saveSession(key, data, liveTrackDB) {
+  if (!key || !data) return false;
+  const file = ensureFileCache();
+  file.sessions = file.sessions || {};
+  file.sessions[key] = sanitiseSession(key, data);
+  file.updatedAt = new Date().toISOString();
+  _applyUidAliases(file, liveTrackDB);
+  _trimSessionMap(file.sessions);
+  _pendingDirty = true;
+  scheduleFlush();
+  return true;
+}
 
 function reloadIfChanged(liveTrackDB) {
   if (!liveTrackDB || typeof liveTrackDB !== 'object') return { reloaded: false };
@@ -225,12 +394,17 @@ function reloadIfChanged(liveTrackDB) {
     if (raw.updatedAt === _lastStoreUpdatedAt && st.mtimeMs <= _lastStoreMtimeMs) {
       return { reloaded: false };
     }
-    const sessions = raw.sessions && typeof raw.sessions === 'object' ? raw.sessions : {};
-    const uidAliases = raw.uidAliases && typeof raw.uidAliases === 'object' ? raw.uidAliases : {};
+    _fileCache = {
+      updatedAt: raw.updatedAt || null,
+      sessions: raw.sessions && typeof raw.sessions === 'object' ? raw.sessions : {},
+      uidAliases: raw.uidAliases && typeof raw.uidAliases === 'object' ? raw.uidAliases : {},
+    };
+    const sessions = _fileCache.sessions;
+    const uidAliases = _fileCache.uidAliases;
     let merged = 0;
-    for (const [key, data] of Object.entries(sessions)) {
+    for (const [key, rowData] of Object.entries(sessions)) {
       if (key.startsWith('uid:')) continue;
-      const row = sanitiseSession(key, data);
+      const row = sanitiseSession(key, rowData);
       if (!row) continue;
       row.restoredFromDisk = true;
       liveTrackDB[key] = { ...(liveTrackDB[key] || {}), ...row };
@@ -249,6 +423,20 @@ function reloadIfChanged(liveTrackDB) {
 
 function getSessionFileMetrics() {
   try {
+    if (_fileCache) {
+      const keys = Object.keys(_fileCache.sessions || {}).filter((k) => !k.startsWith('uid:'));
+      return {
+        path: STORE_PATH,
+        exists: true,
+        sessionCount: keys.length,
+        updatedAt: _fileCache.updatedAt || null,
+        mtimeMs: _lastStoreMtimeMs || null,
+        pendingDirty: _pendingDirty,
+        flushCount: _flushCount,
+        flushFailCount: _flushFailCount,
+        lastFlushMs: _lastFlushMs,
+      };
+    }
     if (!fs.existsSync(STORE_PATH)) {
       return { path: STORE_PATH, exists: false, sessionCount: 0 };
     }
@@ -272,10 +460,9 @@ function loadIntoLiveTrackDB(liveTrackDB) {
   if (!liveTrackDB || typeof liveTrackDB !== 'object') return { loaded: 0 };
   let loaded = 0;
   try {
-    if (!fs.existsSync(STORE_PATH)) return { loaded: 0, path: STORE_PATH };
-    const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
-    const sessions = raw.sessions && typeof raw.sessions === 'object' ? raw.sessions : {};
-    const uidAliases = raw.uidAliases && typeof raw.uidAliases === 'object' ? raw.uidAliases : {};
+    _fileCache = _readFileFromDisk();
+    const sessions = _fileCache.sessions;
+    const uidAliases = _fileCache.uidAliases;
     for (const [key, data] of Object.entries(sessions)) {
       if (key.startsWith('uid:')) continue;
       const row = sanitiseSession(key, data);
@@ -287,77 +474,28 @@ function loadIntoLiveTrackDB(liveTrackDB) {
     for (const [alias, usernameKey] of Object.entries(uidAliases)) {
       liveTrackDB[alias] = usernameKey;
     }
-    _lastStoreMtimeMs = fs.existsSync(STORE_PATH) ? fs.statSync(STORE_PATH).mtimeMs : 0;
-    _lastStoreUpdatedAt = raw.updatedAt || null;
-    return { loaded, path: STORE_PATH, updatedAt: raw.updatedAt || null };
+    _syncStoreMetaFromDisk();
+    _lastStoreUpdatedAt = _fileCache.updatedAt || null;
+    return { loaded, path: STORE_PATH, updatedAt: _fileCache.updatedAt || null };
   } catch (err) {
     console.warn('[fishit] session store load failed:', err && err.message ? err.message : err);
     return { loaded: 0, error: err.message };
   }
 }
 
-const RETRYABLE_FS_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT']);
-
-function sleepMs(ms) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { /* sync backoff for hot upload path */ }
-}
-
-function renameWithRetry(tmp, target, maxAttempts = 6) {
-  let lastErr;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    try {
-      fs.renameSync(tmp, target);
-      return;
-    } catch (err) {
-      lastErr = err;
-      if (!RETRYABLE_FS_CODES.has(err.code) || attempt >= maxAttempts - 1) throw err;
-      sleepMs(15 + attempt * 25);
-    }
-  }
-  throw lastErr;
-}
-
-function saveSession(key, data, liveTrackDB) {
-  if (!key || !data) return false;
-  let file = _defaultFile();
-  try {
-    if (fs.existsSync(STORE_PATH)) {
-      file = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
-    }
-  } catch (_) { /* fresh file */ }
-
-  file.sessions = file.sessions || {};
-  file.sessions[key] = sanitiseSession(key, data);
-  file.updatedAt = new Date().toISOString();
-
-  if (liveTrackDB) {
-    file.uidAliases = {};
-    for (const [k, v] of Object.entries(liveTrackDB)) {
-      if (k.startsWith('uid:') && typeof v === 'string') file.uidAliases[k] = v;
-    }
-  }
-
-  const keys = Object.keys(file.sessions).filter((k) => !k.startsWith('uid:'));
-  if (keys.length > MAX_SESSIONS) {
-    const sorted = keys.sort((a, b) => {
-      const ta = Date.parse(file.sessions[a]?.lastSeenAt || 0);
-      const tb = Date.parse(file.sessions[b]?.lastSeenAt || 0);
-      return tb - ta;
-    });
-    for (const drop of sorted.slice(MAX_SESSIONS)) delete file.sessions[drop];
-  }
-
-  const dir = path.dirname(STORE_PATH);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const tmp = `${STORE_PATH}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(file, null, 2), 'utf8');
-  renameWithRetry(tmp, STORE_PATH);
-  return true;
-}
-
 function getStoreMeta() {
   try {
+    if (_fileCache) {
+      const keys = Object.keys(_fileCache.sessions || {}).filter((k) => !k.startsWith('uid:'));
+      return {
+        exists: true,
+        path: STORE_PATH,
+        updatedAt: _fileCache.updatedAt,
+        sessionCount: keys.length,
+        usernames: keys.slice(0, 20),
+        pendingDirty: _pendingDirty,
+      };
+    }
     if (!fs.existsSync(STORE_PATH)) return { exists: false, path: STORE_PATH };
     const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
     const keys = Object.keys(raw.sessions || {}).filter((k) => !k.startsWith('uid:'));
@@ -373,10 +511,36 @@ function getStoreMeta() {
   }
 }
 
+function getSessionStoreFlushMetrics() {
+  return {
+    pendingDirty: _pendingDirty,
+    flushCount: _flushCount,
+    flushFailCount: _flushFailCount,
+    lastFlushMs: _lastFlushMs,
+    debounceMs: FLUSH_DEBOUNCE_MS,
+    syncSave: SYNC_SAVE,
+  };
+}
+
 function _reset() {
+  if (_flushTimer) {
+    clearTimeout(_flushTimer);
+    _flushTimer = null;
+  }
+  _fileCache = null;
+  _pendingDirty = false;
+  _flushInFlight = false;
+  _flushCount = 0;
+  _flushFailCount = 0;
+  _lastFlushMs = 0;
   try {
     if (fs.existsSync(STORE_PATH)) fs.unlinkSync(STORE_PATH);
   } catch (_) { /* test seam */ }
+  _lastStoreMtimeMs = 0;
+  _lastStoreUpdatedAt = null;
+}
+
+function _invalidateReloadCursorForTests() {
   _lastStoreMtimeMs = 0;
   _lastStoreUpdatedAt = null;
 }
@@ -386,8 +550,12 @@ module.exports = {
   loadIntoLiveTrackDB,
   reloadIfChanged,
   saveSession,
+  flushToDiskSync,
+  flushToDiskAsync,
   sanitiseSession,
   getStoreMeta,
   getSessionFileMetrics,
+  getSessionStoreFlushMetrics,
   _reset,
+  _invalidateReloadCursorForTests,
 };

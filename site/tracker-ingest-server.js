@@ -19,14 +19,13 @@ process.env.SKIP_TRACKER_UPLOAD_ROUTES = '0';
 const app = require('./src/trackerIngestApp');
 const { isTrackerUploadPath } = require('./src/trackerUploadPaths');
 const {
-  startStabilitySnapshotLoop,
   getCachedStabilityJson,
 } = require('./src/stabilitySnapshot');
 
 const HOST = process.env.TRACKER_INGEST_HOST || '127.0.0.1';
 const PORT = parseInt(process.env.TRACKER_INGEST_PORT || '8792', 10);
 
-startStabilitySnapshotLoop();
+// Ingest never runs the stability snapshot loop — periodic disk/JSON rebuilds block the upload event loop.
 
 function stabilityAllowed(req) {
   const token = process.env.STABILITY_STATUS_TOKEN || '';
