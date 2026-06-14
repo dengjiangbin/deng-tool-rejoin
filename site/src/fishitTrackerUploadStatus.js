@@ -1,6 +1,6 @@
 'use strict';
 
-const DEFAULT_UPLOAD_INTERVAL_SECONDS = 10;
+const DEFAULT_UPLOAD_INTERVAL_SECONDS = 60;
 
 /** HTTP/proxy failures that must not flip account presence red while last success is fresh. */
 const TRANSIENT_UPLOAD_FAILURE_PREFIXES = [

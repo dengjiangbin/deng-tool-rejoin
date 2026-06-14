@@ -3372,6 +3372,19 @@ router.get('/api/tracker/summary', requireInventoryApiAuth, handleTrackerSummary
 router.get('/api/tracker/account-summary', requireInventoryApiAuth, handleTrackerSummary);
 router.get('/api/inventory/summary', requireInventoryApiAuth, handleTrackerSummary);
 
+function resolveStatusLastSuccessAt(session, presence) {
+  return presence?.lastAccountSeenAt
+    || session?.lastSuccessfulHeartbeatAt
+    || session?.lastHeartbeatAt
+    || null;
+}
+
+function resolveSecondsSinceTimestamp(ts, serverNowMs = Date.now()) {
+  if (!ts) return null;
+  const ageMs = serverNowMs - new Date(ts).getTime();
+  return Number.isFinite(ageMs) && ageMs >= 0 ? Math.floor(ageMs / 1000) : null;
+}
+
 async function handleAccountStatus(req, res) {
   res.set(NO_STORE_HEADERS);
   syncLiveTrackFromDisk();
@@ -3409,8 +3422,11 @@ async function handleAccountStatus(req, res) {
       // Indicator 3 (fish/stone upload) is its own freshness window.
       const presence = deriveAccountPresenceStatus(sessionData);
       const inventoryUpload = deriveInventoryUploadStatus(sessionData);
-      const statsUpload = deriveStatsUploadStatus(sessionData);
+      const statsUpload = deriveStatsUploadStatus(sessionData, { serverNowMs });
       const sessionForStats = session || null;
+      const statusLastSuccessAt = resolveStatusLastSuccessAt(sessionForStats, presence);
+      const leaderstatsLastSuccessAt = statsUpload.lastStatsUploadAt || null;
+      const inventoryLastSuccessAt = inventoryUpload.lastSnapshotUploadAt || null;
       const liveAccountStats = liveTrackerSerializer.serializeLiveTrackerAccountStats(
         sessionForStats ? { ...sessionForStats, ...proof, statusColor: proof.statusColor } : null,
         playerStatsStore,
@@ -3442,6 +3458,15 @@ async function handleAccountStatus(req, res) {
         statsRedSince: statsUpload.statsRedSince || null,
         lastStatsUploadAt: statsUpload.lastStatsUploadAt || null,
         lastStatsChangeAt: (session && session.lastStatsChangeAt) || null,
+        statusLastSuccessAt,
+        leaderstatsLastSuccessAt,
+        inventoryLastSuccessAt,
+        secondsSinceLastStatusSuccess: resolveSecondsSinceTimestamp(statusLastSuccessAt, serverNowMs),
+        secondsSinceLastLeaderstatsSuccess: statsUpload.statsUploadAgeSeconds,
+        secondsSinceLastInventorySuccess: inventoryUpload.inventoryUploadAgeSeconds,
+        uploadIntervalSeconds: Number(sessionData?.intervalSeconds) > 0
+          ? Number(sessionData.intervalSeconds)
+          : UPLOAD_INTERVAL_SECONDS,
         username: proof.username || acct.robloxUsername || acct.roblox_username || acct.displayName || acct.display_name || usernameKey,
         robloxUserId: proof.robloxUserId || (robloxUserId ? String(robloxUserId) : null),
         discordOwnerId: req.inventoryOwnerDiscordId,
@@ -5089,7 +5114,7 @@ function buildToolbarActionProof() {
 
 function buildUploadIntervalProof(data) {
   return {
-    trackerUploadIntervalSeconds: 10,
+    trackerUploadIntervalSeconds: UPLOAD_INTERVAL_SECONDS,
     lastUploadAcceptedAt: data?.lastUploadAcceptedAt || null,
     lastInventoryAt: data?.lastInventoryAt || data?.updatedAt || null,
     playerStatsUpdatedAt: data?.playerStatsUpdatedAt || null,
@@ -5425,8 +5450,8 @@ function deriveStatsUploadStatus(data) {
   return leaderstatsUpload.deriveLeaderstatsUploadStatus(data);
 }
 
-const UPLOAD_INTERVAL_SECONDS = 10;
-const UPLOAD_GRACE_SECONDS = 5;
+const UPLOAD_INTERVAL_SECONDS = 60;
+const UPLOAD_GRACE_SECONDS = 15;
 const LOADER_ERROR_FRESH_MAX_MS = 120000;
 
 function inventoryUploadGraceSeconds(intervalSeconds) {
@@ -5911,6 +5936,10 @@ async function handleGetBackpack(req, res) {
   const uploadStatus = deriveUploadAccountStatus(data);
   const statsUpload = deriveStatsUploadStatus(data);
   const inventoryUpload = deriveInventoryUploadStatus(data);
+  const statusLastSuccessAt = resolveStatusLastSuccessAt(data, presence);
+  const leaderstatsLastSuccessAt = statsUpload.lastStatsUploadAt || null;
+  const inventoryLastSuccessAt = inventoryUpload.lastSnapshotUploadAt || null;
+  const serverNowMs = Date.now();
   const liveAccountStats = liveTrackerSerializer.serializeLiveTrackerAccountStats(
     { ...data, ...uploadStatus, statusColor: uploadStatus.statusColor },
     playerStatsStore,
@@ -6005,6 +6034,12 @@ async function handleGetBackpack(req, res) {
     uploadSyncRedDurationSeconds: connection.redDurationSeconds != null ? connection.redDurationSeconds : null,
     lastStatsUpdatedAt: statsUpload.lastStatsUploadAt || connection.lastStatsUpdatedAt || null,
     lastStatsChangeAt: data.lastStatsChangeAt || null,
+    statusLastSuccessAt,
+    leaderstatsLastSuccessAt,
+    inventoryLastSuccessAt,
+    secondsSinceLastStatusSuccess: resolveSecondsSinceTimestamp(statusLastSuccessAt, serverNowMs),
+    secondsSinceLastLeaderstatsSuccess: statsUpload.statsUploadAgeSeconds,
+    secondsSinceLastInventorySuccess: inventoryUpload.inventoryUploadAgeSeconds,
     statsUploadFresh: statsUpload.statsUploadFresh === true,
     statsUploadStatus: statsUpload.statsUploadStatus,
     statsRedSince: statsUpload.statsRedSince || null,

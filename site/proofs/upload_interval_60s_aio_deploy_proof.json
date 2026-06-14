@@ -1,0 +1,61 @@
+{
+  "generatedAt": "2026-06-14T13:42:56.815Z",
+  "marker": "UPLOAD_INTERVAL_60S_AIO_2026_06_14",
+  "before": {
+    "note": "Prior production used 10s client lanes and 12/min upload rate limit causing 429 storms.",
+    "clientIntervalSeconds": 10,
+    "rateLimitPerMin": 12,
+    "uploadHost": "tool.deng.my.id"
+  },
+  "after": {
+    "clientIntervalSeconds": 60,
+    "rateLimitPerMin": 10,
+    "uploadHost": "aio.deng.my.id",
+    "serverIntervalSeconds": 60,
+    "serverGraceSeconds": 15,
+    "presenceGraceSeconds": 180
+  },
+  "checks": {
+    "githubRaw": {
+      "url": "https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua",
+      "status": 200,
+      "bytes": 478517,
+      "hasAioUploadUrl": true,
+      "hasToolUploadUrl": false,
+      "has60sInterval": false,
+      "buildMarker": "UPLOAD_INTERVAL_60S_AIO_2026_06_14"
+    },
+    "upload_aio.deng.my.id": {
+      "url": "https://aio.deng.my.id/api/fishit-tracker/update-backpack",
+      "status": 403,
+      "servedBy": "deng-tracker-ingest",
+      "trackerRoute": "direct-ingest",
+      "rateLimitPolicy": "12;w=60",
+      "retryAfter": null,
+      "is429": false
+    },
+    "upload_tool.deng.my.id": {
+      "url": "https://tool.deng.my.id/api/fishit-tracker/update-backpack",
+      "status": 403,
+      "servedBy": "deng-tracker-ingest",
+      "trackerRoute": "direct-ingest",
+      "rateLimitPolicy": "12;w=60",
+      "retryAfter": null,
+      "is429": false
+    },
+    "metrics_aio": {
+      "status": 404,
+      "rateLimit429": null,
+      "upload429": null,
+      "upload502": null,
+      "servedBy": null
+    },
+    "metrics_tool": {
+      "status": 404,
+      "rateLimit429": null,
+      "upload429": null,
+      "upload502": null,
+      "servedBy": null
+    }
+  }
+}

@@ -27,14 +27,14 @@
         "PUBLIC_TRACKER_GITHUB_REPO": "dengjiangbin/fish-it",
         "SESSION_ANONYMOUS_TTL_MS": "86400000",
         "SESSION_MAINTENANCE_INTERVAL_MS": "900000",
-        "TRACKER_UPLOAD_RATE_MAX_PER_MIN": "12",
+        "TRACKER_UPLOAD_RATE_MAX_PER_MIN": "10",
         "TOOL_SITE_PUBLIC_URL": "https://aio.deng.my.id",
         "TOOL_SITE_INTERNAL_URL": "https://tool.deng.my.id",
         "DISCORD_AIO_WEB_REDIRECT_URI": "https://aio.deng.my.id/auth/discord/callback",
         "DISCORD_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "DISCORD_AIO_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "OAUTH_STATE_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\oauth-states",
-        "TOOL_SITE_ASSET_VERSION": "TRACKER_INGEST_502_RELIABILITY_2026_06_14",
+        "TOOL_SITE_ASSET_VERSION": "UPLOAD_INTERVAL_60S_AIO_2026_06_14",
         "GIT_COMMIT": "fba8626"
       }
     },
@@ -65,8 +65,8 @@
         "TRACKER_UPLOAD_BODY_LIMIT": "512kb",
         "TRACKER_EVENT_LOOP_LAG_WARN_MS": "250",
         "TRACKER_EVENT_LOOP_LAG_SHED_MS": "1000",
-        "TOOL_SITE_ASSET_VERSION": "TRACKER_INGEST_502_RELIABILITY_2026_06_14",
-        "TRACKER_UPLOAD_RATE_MAX_PER_MIN": "12",
+        "TOOL_SITE_ASSET_VERSION": "UPLOAD_INTERVAL_60S_AIO_2026_06_14",
+        "TRACKER_UPLOAD_RATE_MAX_PER_MIN": "10",
         "FISHIT_SESSION_FLUSH_MS": "6000"
       }
     }

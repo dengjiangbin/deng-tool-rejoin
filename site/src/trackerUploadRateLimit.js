@@ -17,7 +17,7 @@ function trackerUploadKey(req) {
 const uploadLimiter = createUserRateLimit({
   keyPrefix: 'tracker-upload:',
   windowMs: 60 * 1000,
-  max: Number(process.env.TRACKER_UPLOAD_RATE_MAX_PER_MIN || 12),
+  max: Number(process.env.TRACKER_UPLOAD_RATE_MAX_PER_MIN || 10),
   keyGenerator: trackerUploadKey,
   handler: (req, res, _next, options) => {
     recordRateLimit429();
@@ -25,7 +25,7 @@ const uploadLimiter = createUserRateLimit({
     return res.status(429).json({
       ok: false,
       error: 'rate_limited',
-      message: 'Tracker upload rate exceeded. Expected cadence is about one upload every 10 seconds.',
+      message: 'Tracker upload rate exceeded. Expected cadence is about one upload per lane every 60 seconds.',
       windowMs: options.windowMs,
       max: options.max,
     });
