@@ -2,6 +2,16 @@
   "account": "stokjualanardian",
   "capturedAt": "2026-06-14T15:55:27.856Z",
   "rootCause": "FISHIT_MAX_PERSISTED_ITEMS default 500 sliced playerDataStoneItems before quantity aggregation",
+  "fixScope": "all_stone_types",
+  "fixFunctions": [
+    "groupStoneRows",
+    "_trimPlayerDataStoneRows",
+    "preferHigherGroupedStoneSnapshot",
+    "handleUpdateBackpack",
+    "persistSessionState",
+    "handleGetBackpack"
+  ],
+  "groupingKey": "itemId|stoneType via stoneIdentityKey",
   "layers": {
     "robloxUploadRowCount": 1541,
     "storedPlayerDataStoneRows": 500,
@@ -9,6 +19,13 @@
     "groupedFromStored": 500,
     "lastGoodPublicStoneQuantity": 1541,
     "bugSymptom": "stored sum and API rebuild showed 500 while lastGoodPublicStoneItems retained 1534 until persist overwrite"
+  },
+  "postFixProductionSample": {
+    "capturedAt": "2026-06-14T16:28:07.414Z",
+    "playerDataStoneRows": 1,
+    "playerDataStoneSum": 1662,
+    "lastGoodPublicStoneQuantity": 1662,
+    "stoneType": "Evolved"
   },
   "trackerBuild": "UPLOAD_INTERVAL_60S_AIO_2026_06_14"
 }

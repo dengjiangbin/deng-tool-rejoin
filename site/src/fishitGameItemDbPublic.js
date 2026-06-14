@@ -277,12 +277,21 @@ function groupTotemRows(rows) {
   return [...map.values()];
 }
 
+function stoneIdentityKey(row) {
+  const type = String(row?.stoneType || row?.StoneType || row?.stone_type || '').trim();
+  const id = row?.itemId != null ? String(row.itemId).trim() : '';
+  if (id && type) return `${id}|${type}`;
+  if (type) return `type:${type}`;
+  if (id) return `id:${id}`;
+  return 'unknown:stone';
+}
+
 function groupStoneRows(rows) {
   const map = new Map();
   for (const row of rows) {
     const norm = normaliseUploadRow(row);
     if (!norm || norm.kind !== 'stone') continue;
-    const key = norm.stoneType || norm.itemId;
+    const key = stoneIdentityKey(norm);
     const prev = map.get(key);
     if (prev) {
       prev.quantity += norm.quantity;
@@ -298,10 +307,10 @@ function groupStoneRows(rows) {
 function stoneQuantityByType(items) {
   const map = new Map();
   for (const row of items || []) {
-    const type = String(row?.stoneType || row?.StoneType || '').trim() || 'Unknown';
+    const key = stoneIdentityKey(row);
     const raw = Number(row?.quantity ?? row?.amount ?? row?.count ?? 0);
     const qty = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
-    map.set(type, (map.get(type) || 0) + qty);
+    map.set(key, (map.get(key) || 0) + qty);
   }
   return map;
 }
@@ -772,6 +781,7 @@ module.exports = {
   normaliseUploadRows,
   groupFishRows,
   groupStoneRows,
+  stoneIdentityKey,
   stoneQuantityByType,
   totalStoneQuantity,
   preferHigherGroupedStoneSnapshot,
