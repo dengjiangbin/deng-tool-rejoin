@@ -3100,9 +3100,14 @@ router.get('/fishit-tracker', redirectLegacyInventoryRoute);
  * image on the Dashboard as it does in the inventory. Existing valid images are
  * never wiped if the resolver returns nothing.
  */
+function isPlaceholderFishImageUrl(url) {
+  const u = String(url || '');
+  return !u || /fallback/i.test(u) || /placeholder/i.test(u);
+}
+
 function stripPlaceholderFishImageFields(item) {
   if (!item || typeof item !== 'object') return item;
-  if (!fishImageCache.isPlaceholderImageUrl(item.imageUrl)) return item;
+  if (!isPlaceholderFishImageUrl(item.imageUrl)) return item;
   return {
     ...item,
     imageUrl: null,
@@ -3144,7 +3149,7 @@ async function enrichDashboardFishCardImages(cards, baseUrl) {
     baseFishName: card.name,
     displayName: card.name,
     category: 'fish',
-    imageUrl: fishImageCache.isPlaceholderImageUrl(card.imageUrl) ? null : (card.imageUrl || null),
+    imageUrl: isPlaceholderFishImageUrl(card.imageUrl) ? null : (card.imageUrl || null),
     imageAssetId: card.imageAssetId || null,
   }));
   let enriched;
