@@ -2,20 +2,24 @@
 # Token-managed tunnels: apply equivalent path rules in Zero Trust → Networks → Tunnels
 # → [your tunnel] → Public Hostname (path rules must appear BEFORE catch-all hostname rules).
 #
+# IMPORTANT: Only POST upload paths go to ingest (8792). GET reads (get-backpack, images,
+# assets) must stay on web (8791) — see site/src/trackerUploadPaths.js.
+#
 # Validate locally (reference only — does not affect token tunnel until applied in dashboard):
 #   cloudflared tunnel ingress validate --config config/cloudflared-ingress.reference.yml
 #
 # Test routing:
 #   cloudflared tunnel ingress rule --config config/cloudflared-ingress.reference.yml https://aio.deng.my.id/api/fishit-tracker/update-backpack
+#   cloudflared tunnel ingress rule --config config/cloudflared-ingress.reference.yml https://aio.deng.my.id/api/tracker/get-backpack/denghub2
 #   cloudflared tunnel ingress rule --config config/cloudflared-ingress.reference.yml https://aio.deng.my.id/login
 
 ingress:
-  # aio.deng.my.id — tracker uploads first (8792)
+  # aio.deng.my.id — tracker POST uploads only (8792)
   - hostname: aio.deng.my.id
-    path: ^/api/fishit-tracker/.*
+    path: ^/api/fishit-tracker/update-backpack$
     service: http://127.0.0.1:8792
   - hostname: aio.deng.my.id
-    path: ^/api/fish-it-tracker/.*
+    path: ^/api/fish-it-tracker/update-backpack$
     service: http://127.0.0.1:8792
   - hostname: aio.deng.my.id
     path: ^/api/tracker/update-backpack
@@ -26,12 +30,12 @@ ingress:
   - hostname: aio.deng.my.id
     service: http://127.0.0.1:8791
 
-  # tool.deng.my.id — tracker uploads first (8792), rest web (8791)
+  # tool.deng.my.id — tracker POST uploads only (8792), rest web (8791)
   - hostname: tool.deng.my.id
-    path: ^/api/fishit-tracker/.*
+    path: ^/api/fishit-tracker/update-backpack$
     service: http://127.0.0.1:8792
   - hostname: tool.deng.my.id
-    path: ^/api/fish-it-tracker/.*
+    path: ^/api/fish-it-tracker/update-backpack$
     service: http://127.0.0.1:8792
   - hostname: tool.deng.my.id
     path: ^/api/tracker/update-backpack

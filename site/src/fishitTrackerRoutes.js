@@ -6712,6 +6712,26 @@ async function buildAioTrackerDataset(discordOwnerId, opts = {}) {
   return { serverNow, accounts };
 }
 
+// Mirror GET /api/fishit-tracker/* read routes onto /api/tracker/* so aio.deng.my.id
+// can route POST uploads to ingest (8792) while browser polls stay on web (8791).
+(function registerTrackerWebReadAliases() {
+  const aliasPrefix = '/api/tracker/';
+  const sourcePrefix = '/api/fishit-tracker/';
+  const existingPaths = new Set(
+    router.stack.filter((layer) => layer.route).map((layer) => layer.route.path),
+  );
+  for (const layer of router.stack) {
+    if (!layer.route || !layer.route.methods.get) continue;
+    const path = layer.route.path;
+    if (!path.startsWith(sourcePrefix)) continue;
+    const aliasPath = aliasPrefix + path.slice(sourcePrefix.length);
+    if (existingPaths.has(aliasPath)) continue;
+    const handlers = layer.route.stack.map((s) => s.handle);
+    router.get(aliasPath, ...handlers);
+    existingPaths.add(aliasPath);
+  }
+})();
+
 module.exports = router;
 module.exports.uploadRouter = uploadRouter;
 module.exports.liveTrackDB = liveTrackDB;

@@ -1,0 +1,59 @@
+{
+  "capturedAt": "2026-06-14T12:02:15.211Z",
+  "hostname": "aio.deng.my.id",
+  "diagnosis": "Cloudflare tunnel routed all /api/fishit-tracker/* GET reads to ingest (8792), which only mounts upload POST routes. /tracker polled get-backpack on that path and received 502/404 while /api/tracker/get-backpack on web (8791) had hydrated data.",
+  "rootCause": "aio subdomain migration + broad cloudflared path ^/api/fishit-tracker/.* → 8792",
+  "fix": {
+    "frontendPollPath": "/api/tracker/get-backpack/:username",
+    "frontendImagePath": "/api/tracker/image/:assetId (with trackerReadPath rewrite for API-returned asset URLs)",
+    "backend": "registerTrackerWebReadAliases() mirrors GET /api/fishit-tracker/* onto /api/tracker/* on web router",
+    "cloudflaredReference": "config/cloudflared-ingress.reference.yml narrowed to POST upload paths only"
+  },
+  "networkProof": {
+    "before": {
+      "GET /api/fishit-tracker/get-backpack/denghub2?lite=1": { "http": "502/404 timeout via ingest 8792" },
+      "GET /api/tracker/get-backpack/denghub2?lite=1": { "http": 200, "note": "web 8791 always had data" }
+    },
+    "after": {
+      "GET /api/fishit-tracker/get-backpack/denghub2?lite=1": { "http": 404, "note": "still hits ingest until CF dashboard applies narrowed rules" },
+      "GET /api/tracker/get-backpack/denghub2?lite=1": { "http": 200 },
+      "GET /api/tracker/image/9122417298": { "http": 302 },
+      "frontendBundlePoll": "/api/tracker/get-backpack/ (inventory.d4ed0a6c37c5.js)"
+    }
+  },
+  "denghub2AfterFix": {
+    "endpoint": "GET /api/tracker/get-backpack/denghub2?lite=1",
+    "inventoryReady": true,
+    "snapshotComplete": true,
+    "inventoryDisplayState": "ready",
+    "statsProven": true,
+    "coinsText": "32.2M",
+    "totalCaughtText": "123.634",
+    "rarestFishChance": "1/4M",
+    "fishCount": 12,
+    "stoneCount": 1
+  },
+  "homepageCountsUnchanged": {
+    "endpoint": "GET /api/public/tracker-stats",
+    "trackedCount": 267,
+    "onlineCount": 53,
+    "registeredTrackedCount": 267
+  },
+  "bundle": {
+    "marker": "TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14",
+    "css": "inventory.01bd021354d0.css",
+    "js": "inventory.d4ed0a6c37c5.js",
+    "cssHash": "01bd021354d0",
+    "jsHash": "d4ed0a6c37c5",
+    "builtAt": "2026-06-14T11:59:36.029Z",
+    "hasHardcodedToolDomain": false,
+    "hasDisplayWaitingSnapshotInTable": false,
+    "pollUsesTrackerReadApi": true
+  },
+  "uiProof": {
+    "tableCells": "Numbers or em dash (EMPTY_STAT); no 'Waiting for snapshot' in table bundle",
+    "logo": "/public/css/app-sidebar.css constrains sidebar-brand-block__logo img (34px contain)",
+    "accountStatusPoll": "/api/tracker/account-status (unchanged, web 8791)"
+  },
+  "cloudflareActionRequired": "Apply narrowed ingress rules from config/cloudflared-ingress.reference.yml in Zero Trust dashboard so GET /api/fishit-tracker/* also serves from web until legacy clients migrate"
+}

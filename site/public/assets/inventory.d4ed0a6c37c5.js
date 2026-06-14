@@ -222,8 +222,16 @@ const LS_KEY        = 'fishit_tracked_users';
     return true;
   }
   const EMPTY_STAT = '\u2014';
+  const TRACKER_READ_API = '/api/tracker';
   const EN_DASH = '\u2013';
   const EM_DASH = '\u2014';
+  function trackerReadPath(pathOrUrl) {
+    const value = String(pathOrUrl || '');
+    if (value.startsWith('/api/fishit-tracker/')) {
+      return `${TRACKER_READ_API}/${value.slice('/api/fishit-tracker/'.length)}`;
+    }
+    return value;
+  }
   function isEmptyStatValue(value) {
     return value === EMPTY_STAT || value === '-' || value === '\u2014';
   }
@@ -472,6 +480,33 @@ const LS_KEY        = 'fishit_tracked_users';
       if (st) {
         mergeUploadStatusOntoEntry(entry, st, payload.serverNow);
         applyAccountStatusStatsToEntry(entry, st);
+        entry.lastData = {
+          ...(entry.lastData || {}),
+          ...st,
+          liveAccountStats: st.liveAccountStats || {
+            coin: st.coin,
+            coins: st.coins,
+            coinsText: st.coinsText,
+            totalCaught: st.totalCaught,
+            totalCaughtText: st.totalCaughtText,
+            rarestFish: st.rarestFish,
+            rarestFishChance: st.rarestFishChance,
+            statsSource: st.statsSource,
+            statsProven: st.statsProven === true,
+            emptyReason: st.emptyReason || st.statsEmptyReason || null,
+            statsAt: st.statsAt || null,
+            trackerBuild: st.trackerBuild || null,
+            lastSuccessfulUploadAt: st.lastSuccessfulUploadAt || null,
+          },
+          statsProven: st.statsProven === true,
+          playerStatsProven: st.playerStatsProven === true || st.statsProven === true,
+          username: st.username || (entry.lastData && entry.lastData.username) || entry.displayName,
+          inventoryDisplayState: st.inventoryDisplayState
+            || (entry.lastData && entry.lastData.inventoryDisplayState)
+            || null,
+          statsEmptyReason: st.emptyReason || st.statsEmptyReason || null,
+        };
+        applyLiveSnapshotToPublicUi(entry, key, entry.lastData);
       }
     });
     patchAllVisibleAccountStats();
@@ -484,6 +519,10 @@ const LS_KEY        = 'fishit_tracked_users';
     if (!data) return 'waiting';
     if (data.inventoryDisplayState) return data.inventoryDisplayState;
     if (data.snapshotComplete === true) return data.provenEmptyInventory ? 'empty' : 'ready';
+    if (data.inventoryReady === true) return data.provenEmptyInventory ? 'empty' : 'ready';
+    if (data.statsProven === true && (data.lastInventoryAt || data.lastStatsUploadAt)) {
+      return data.provenEmptyInventory ? 'empty' : 'ready';
+    }
     if (data.lastSuccessfulHeartbeatAt || data.lastHeartbeatAt) return 'syncing';
     return 'waiting';
   }
@@ -494,9 +533,12 @@ const LS_KEY        = 'fishit_tracked_users';
     if (!data) return false;
     if (data.hasLeaderstatsSnapshot === true) return true;
     if (data.snapshotComplete === true) return true;
+    if (data.inventoryReady === true) return true;
+    if (data.statsProven === true) return true;
     if (data.liveAccountStats && !data.liveAccountStats.emptyReason) return true;
     if (data.playerStatsProven === true && data.playerStats) return true;
     if (data.lastStatsUploadAt || data.playerStatsUpdatedAt) return true;
+    if (data.lastInventoryAt && (data.lastGoodPublicFishCount > 0 || data.fishItems?.length)) return true;
     return false;
   }
   function inventoryUploadGraceSeconds(intervalSeconds) {
@@ -741,7 +783,8 @@ const LS_KEY        = 'fishit_tracked_users';
   }
   function extractPlayerStatsFromPayload(data) {
     if (!data) return null;
-    const fromLive = liveAccountStatsToPlayerStats(data.liveAccountStats, data);
+    const fromLive = liveAccountStatsToPlayerStats(data.liveAccountStats, data)
+      || (data.statsProven === true ? liveAccountStatsToPlayerStats(data, data) : null);
     if (fromLive) return normalizePollPlayerStats(fromLive);
     if (!statsSnapshotReady(data)) return null;
     const raw = data.playerStats;
@@ -881,13 +924,13 @@ const LS_KEY        = 'fishit_tracked_users';
   function formatStatsSyncAgeSub(entry) {
     return formatCaughtActivitySub(entry);
   }
-  function buildTotalCaughtCellHtml(stats, entry) {
-    const caughtText = displayTotalCaughtStat(stats);
+  function buildTotalCaughtCellHtml(stats, entry, rowData) {
+    const caughtText = displayTotalCaughtStat(stats, rowData, entry);
     const sub = formatCaughtActivitySub(entry);
     return `<span class="accounts-table__stat-stack"><span class="accounts-table__stat-main total-caught-value${caughtText === EMPTY_STAT ? ' is-muted' : ''}">${escHtml(caughtText)}</span><span class="accounts-table__stat-sub" data-stats-sync-sub data-caught-activity-sub>${escHtml(sub)}</span></span>`;
   }
-  function buildMobileCaughtCellHtml(stats, entry) {
-    const caughtText = displayTotalCaughtStat(stats);
+  function buildMobileCaughtCellHtml(stats, entry, rowData) {
+    const caughtText = displayTotalCaughtStat(stats, rowData, entry);
     const sub = formatCaughtActivitySub(entry);
     return `<span class="accounts-mobile-card__row-value-stack"><span class="accounts-mobile-card__row-value total-caught-value${caughtText === EMPTY_STAT ? ' is-muted' : ''}">${escHtml(caughtText)}</span><span class="accounts-mobile-card__stat-sub" data-stats-sync-sub data-caught-activity-sub>${escHtml(sub)}</span></span>`;
   }
@@ -986,51 +1029,53 @@ const LS_KEY        = 'fishit_tracked_users';
   function patchAccountStatsRow(entry, key) {
     if (!entry || !key) return;
     const stats = getEntryPlayerStats(entry);
+    const rowData = entry.lastData || entrySnapshotData(entry) || entry.uploadStatus || null;
+    const waitingStats = statsAwaitingInventorySnapshot(rowData, entry);
     const row = accountsTableBodyEl && accountsTableBodyEl.querySelector(`[data-account-row-key="${CSS.escape(key)}"]`);
     if (row) {
       const coinsEl = row.querySelector('.col-coins');
       const caughtEl = row.querySelector('.col-caught');
       const rareEl = row.querySelector('.col-rare');
-      const coinsText = displayCoinsStat(stats);
-      const caughtText = displayTotalCaughtStat(stats);
-      const rareText = displayRarestFishStat(stats);
+      const coinsText = displayCoinsStat(stats, rowData, entry);
+      const caughtText = displayTotalCaughtStat(stats, rowData, entry);
+      const rareText = displayRarestFishStat(stats, rowData, entry);
       if (coinsEl) {
         coinsEl.textContent = coinsText;
-        coinsEl.classList.toggle('is-muted', coinsText === '—');
+        coinsEl.classList.toggle('is-muted', coinsText === '—' || waitingStats);
       }
       if (caughtEl) {
         const mainEl = caughtEl.querySelector('.total-caught-value') || caughtEl;
         mainEl.textContent = caughtText;
-        mainEl.classList.toggle('is-muted', caughtText === '—');
-        caughtEl.classList.toggle('is-muted', caughtText === '—');
+        mainEl.classList.toggle('is-muted', caughtText === '—' || waitingStats);
+        caughtEl.classList.toggle('is-muted', caughtText === '—' || waitingStats);
         patchAccountStatsSyncSub(row, entry);
       }
       if (rareEl) {
         rareEl.textContent = rareText;
-        rareEl.classList.toggle('is-muted', rareText === '—');
+        rareEl.classList.toggle('is-muted', rareText === '—' || waitingStats);
       }
       refreshEntryTableSyncDisplay(entry, key);
     }
     const mobile = accountsMobileListEl && accountsMobileListEl.querySelector(`[data-account-mobile-key="${CSS.escape(key)}"]`);
     if (mobile) {
-      const coinsText = displayCoinsStat(stats);
-      const caughtText = displayTotalCaughtStat(stats);
-      const rareText = displayRarestFishStat(stats);
+      const coinsText = displayCoinsStat(stats, rowData, entry);
+      const caughtText = displayTotalCaughtStat(stats, rowData, entry);
+      const rareText = displayRarestFishStat(stats, rowData, entry);
       const coinEl = mobile.querySelector('[data-col="coin"] .accounts-mobile-card__row-value');
       const caughtEl = mobile.querySelector('[data-col="total-caught"] .total-caught-value');
       const rareEl = mobile.querySelector('[data-col="rarest-fish"] .accounts-mobile-card__row-value');
       if (coinEl) {
         coinEl.textContent = coinsText;
-        coinEl.classList.toggle('is-muted', coinsText === '—');
+        coinEl.classList.toggle('is-muted', coinsText === '—' || waitingStats);
       }
       if (caughtEl) {
         caughtEl.textContent = caughtText;
-        caughtEl.classList.toggle('is-muted', caughtText === '—');
+        caughtEl.classList.toggle('is-muted', caughtText === '—' || waitingStats);
         patchAccountStatsSyncSub(mobile, entry);
       }
       if (rareEl) {
         rareEl.textContent = rareText;
-        rareEl.classList.toggle('is-muted', rareText === '—');
+        rareEl.classList.toggle('is-muted', rareText === '—' || waitingStats);
       }
       refreshEntryTableSyncDisplay(entry, key);
     }
@@ -1162,7 +1207,19 @@ const LS_KEY        = 'fishit_tracked_users';
       source: resolved ? resolved.source : null,
     });
   }
-  function displayCoinsStat(stats) {
+  function statsAwaitingInventorySnapshot(data, entry) {
+    if (!data) return false;
+    if (data.snapshotComplete === true || data.inventoryReady === true) return false;
+    if (data.statsProven === true || data.playerStatsProven === true) return false;
+    if (statsSnapshotReady(data)) return false;
+    if (data.inventoryDisplayState === 'ready' || data.inventoryDisplayState === 'empty') return false;
+    if (data.statsEmptyReason === 'awaiting_inventory_snapshot') return true;
+    if (data.liveAccountStats && data.liveAccountStats.emptyReason === 'awaiting_inventory_snapshot') return true;
+    if (entry && isAccountPresent(entry) && !statsSnapshotReady(data)) return true;
+    if (data.inventoryDisplayState === 'syncing') return true;
+    return !!(data.lastSuccessfulHeartbeatAt || data.lastHeartbeatAt);
+  }
+  function displayCoinsStat(stats, data, entry) {
     const s = displayableEntryPlayerStats(stats);
     if (!s) return EMPTY_STAT;
     if (s.source === 'missing' && s.coins == null && !s.coinsText) return EMPTY_STAT;
@@ -1173,7 +1230,7 @@ const LS_KEY        = 'fishit_tracked_users';
     if (s.coinsText) return s.coinsText;
     return EMPTY_STAT;
   }
-  function displayTotalCaughtStat(stats) {
+  function displayTotalCaughtStat(stats, data, entry) {
     const s = displayableEntryPlayerStats(stats);
     if (!s) return EMPTY_STAT;
     if (s.source === 'missing' && s.totalCaught == null && !s.totalCaughtText) return EMPTY_STAT;
@@ -1184,7 +1241,7 @@ const LS_KEY        = 'fishit_tracked_users';
     if (s.totalCaughtText) return s.totalCaughtText;
     return EMPTY_STAT;
   }
-  function displayRarestFishStat(stats) {
+  function displayRarestFishStat(stats, data, entry) {
     const s = displayableEntryPlayerStats(stats);
     if (!s || !s.rarestFishChance) return EMPTY_STAT;
     if (s.source === 'missing' && !s.rarestFishChance) return EMPTY_STAT;
@@ -1249,6 +1306,7 @@ const LS_KEY        = 'fishit_tracked_users';
   function buildAccountMobileCardHtml(row) {
     const { key, entry } = row;
     const stats = getEntryPlayerStats(entry);
+    const rowData = entry.lastData || entrySnapshotData(entry) || null;
     const inventoryLabel = `Open inventory for ${entry.displayName}`;
     const username = displayTableUsername(entry);
     return `<article class="accounts-mobile-card" data-account-mobile-key="${escHtml(key)}">
@@ -1263,23 +1321,24 @@ const LS_KEY        = 'fishit_tracked_users';
     </div>
   </div>
   <div class="accounts-mobile-card__grid accounts-mobile-card__grid--stats">
-    <div class="accounts-mobile-card__row col-coin" data-col="coin"><span class="accounts-mobile-card__row-label">Coin</span><span class="accounts-mobile-card__row-value coin-value${displayCoinsStat(stats) === EMPTY_STAT ? ' is-muted' : ''}">${escHtml(displayCoinsStat(stats))}</span></div>
-    <div class="accounts-mobile-card__row col-total-caught" data-col="total-caught"><span class="accounts-mobile-card__row-label">Caught</span>${buildMobileCaughtCellHtml(stats, entry)}</div>
-    <div class="accounts-mobile-card__row col-rarest-fish" data-col="rarest-fish"><span class="accounts-mobile-card__row-label">Rare</span><span class="accounts-mobile-card__row-value rarest-fish-value${displayRarestFishStat(stats) === EMPTY_STAT ? ' is-muted' : ''}">${escHtml(displayRarestFishStat(stats))}</span></div>
+    <div class="accounts-mobile-card__row col-coin" data-col="coin"><span class="accounts-mobile-card__row-label">Coin</span><span class="accounts-mobile-card__row-value coin-value${displayCoinsStat(stats, rowData, entry) === EMPTY_STAT ? ' is-muted' : ''}">${escHtml(displayCoinsStat(stats, rowData, entry))}</span></div>
+    <div class="accounts-mobile-card__row col-total-caught" data-col="total-caught"><span class="accounts-mobile-card__row-label">Caught</span>${buildMobileCaughtCellHtml(stats, entry, rowData)}</div>
+    <div class="accounts-mobile-card__row col-rarest-fish" data-col="rarest-fish"><span class="accounts-mobile-card__row-label">Rare</span><span class="accounts-mobile-card__row-value rarest-fish-value${displayRarestFishStat(stats, rowData, entry) === EMPTY_STAT ? ' is-muted' : ''}">${escHtml(displayRarestFishStat(stats, rowData, entry))}</span></div>
   </div>
 </article>`;
   }
   function buildAccountRowHtml(row, index) {
     const { key, entry } = row;
     const stats = getEntryPlayerStats(entry);
+    const rowData = entry.lastData || entrySnapshotData(entry) || null;
     const inventoryLabel = `Open inventory for ${entry.displayName}`;
     return `<tr data-account-row-key="${escHtml(key)}">
   <td class="accounts-table__index col-index">${index + 1}</td>
   <td class="accounts-table__status col-status">${buildAccountStatusHtml(entry)}</td>
   <td class="accounts-table__username col-username" title="${hideUsernames ? 'Username hidden' : escHtml(entry.displayName)}">${escHtml(displayTableUsername(entry))}</td>
-  <td class="accounts-table__stat col-coins col-coin coin-value${displayCoinsStat(stats) === EMPTY_STAT ? ' is-muted' : ''}" data-col="coin">${escHtml(displayCoinsStat(stats))}</td>
-  <td class="accounts-table__stat col-caught col-total-caught${displayTotalCaughtStat(stats) === EMPTY_STAT ? ' is-muted' : ''}" data-col="total-caught">${buildTotalCaughtCellHtml(stats, entry)}</td>
-  <td class="accounts-table__stat col-rare col-rarest-fish rarest-fish-value${displayRarestFishStat(stats) === EMPTY_STAT ? ' is-muted' : ''}" data-col="rarest-fish">${escHtml(displayRarestFishStat(stats))}</td>
+  <td class="accounts-table__stat col-coins col-coin coin-value${displayCoinsStat(stats, rowData, entry) === EMPTY_STAT ? ' is-muted' : ''}" data-col="coin">${escHtml(displayCoinsStat(stats, rowData, entry))}</td>
+  <td class="accounts-table__stat col-caught col-total-caught${displayTotalCaughtStat(stats, rowData, entry) === EMPTY_STAT ? ' is-muted' : ''}" data-col="total-caught">${buildTotalCaughtCellHtml(stats, entry, rowData)}</td>
+  <td class="accounts-table__stat col-rare col-rarest-fish rarest-fish-value${displayRarestFishStat(stats, rowData, entry) === EMPTY_STAT ? ' is-muted' : ''}" data-col="rarest-fish">${escHtml(displayRarestFishStat(stats, rowData, entry))}</td>
   <td class="col-backpack"><button type="button" class="accounts-table__icon-btn" data-open-backpack="${escHtml(key)}" aria-label="${escHtml(inventoryLabel)}" title="${escHtml(inventoryLabel)}">${BACKPACK_NAV_ICON}</button></td>
   <td class="col-actions"><button type="button" class="accounts-table__icon-btn accounts-table__icon-btn--danger" data-remove-account="${escHtml(key)}" aria-label="Remove ${escHtml(entry.displayName)}" title="Remove account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></button></td>
 </tr>`;
@@ -1578,10 +1637,10 @@ const LS_KEY        = 'fishit_tracked_users';
       return '<div class="card-empty">&#x1F9F3; Inventory is empty.</div>';
     }
     if (state === 'syncing') {
-      return '<div class="card-empty">Inventory syncing...</div>';
+      return '<div class="card-empty">Waiting for inventory snapshot<span class="card-empty-sub">Account is online. Stats, fish, and stones will appear after the first full sync.</span></div>';
     }
     if (state === 'waiting') {
-      return '<div class="card-empty">Waiting for first full data upload...</div>';
+      return '<div class="card-empty">Waiting for inventory snapshot<span class="card-empty-sub">Run the tracker script in-game to start syncing.</span></div>';
     }
     return '<div class="card-empty">&#x1F9F3; Inventory is empty.</div>';
   }
@@ -2524,11 +2583,11 @@ const LS_KEY        = 'fishit_tracked_users';
     return base;
   }
   function itemImageSrc(item) {
-    if (isUsableImageUrl(item.imageUrl)) return item.imageUrl;
-    if (isUsableImageUrl(item.cachedImageUrl)) return item.cachedImageUrl;
-    if (isUsableImageUrl(item.localImageUrl)) return item.localImageUrl;
+    if (isUsableImageUrl(item.imageUrl)) return trackerReadPath(item.imageUrl);
+    if (isUsableImageUrl(item.cachedImageUrl)) return trackerReadPath(item.cachedImageUrl);
+    if (isUsableImageUrl(item.localImageUrl)) return trackerReadPath(item.localImageUrl);
     const assetId = parseIconAssetId(item);
-    if (assetId) return `/api/fishit-tracker/image/${assetId}`;
+    if (assetId) return `${TRACKER_READ_API}/image/${assetId}`;
     return null;
   }
   function publicRarity(item) {
@@ -2572,6 +2631,11 @@ const LS_KEY        = 'fishit_tracked_users';
     if (/^\d{10,22}$/.test(u)) return false;
     if (/thumbnails\.roblox\.com/i.test(u)) return false;
     if (/create\.roblox\.com\/store\/asset\//i.test(u)) return false;
+    if (u.startsWith('/api/tracker/image/')) return true;
+    if (u.startsWith('/api/tracker/assets/fish/')) return true;
+    if (u.startsWith('/api/tracker/assets/stones/')) return true;
+    if (u.startsWith('/api/tracker/assets/totems/')) return true;
+    if (u.startsWith('/api/tracker/assets/')) return true;
     if (u.startsWith('/api/fishit-tracker/image/')) return true;
     if (u.startsWith('/api/fishit-tracker/assets/fish/')) return true;
     if (u.startsWith('/api/fishit-tracker/assets/stones/')) return true;
@@ -2585,13 +2649,14 @@ const LS_KEY        = 'fishit_tracked_users';
   function onFishImageError(img, item) {
     const attempted = img && img.src ? img.src : '';
     const assetId = parseIconAssetId(item) || (img && img.getAttribute('data-asset-id'));
-    if (assetId && !attempted.includes(`/api/fishit-tracker/image/${assetId}`)) {
+    const trackerImagePath = `${TRACKER_READ_API}/image/${assetId}`;
+    if (assetId && !attempted.includes(trackerImagePath)) {
       img.onerror = () => {
         img.onerror = null;
         img.src = ITEM_IMAGES.Default;
         img.setAttribute('data-placeholder', 'true');
       };
-      img.src = `/api/fishit-tracker/image/${assetId}`;
+      img.src = trackerImagePath;
       return;
     }
     console.warn('[fishit-tracker-ui] image load failed', {
@@ -2910,7 +2975,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     if (!entry) return;
     const forceFresh = opts && opts.forceFresh === true;
     try {
-      const res = await fetch(`/api/fishit-tracker/get-backpack/${encodeURIComponent(key)}${backpackQuerySuffix(forceFresh)}`, {
+      const res = await fetch(`${TRACKER_READ_API}/get-backpack/${encodeURIComponent(key)}${backpackQuerySuffix(forceFresh)}`, {
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
       });

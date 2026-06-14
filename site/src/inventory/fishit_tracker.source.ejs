@@ -3722,9 +3722,17 @@
   }
 
   const EMPTY_STAT = '\u2014';
-  const WAITING_SNAPSHOT_STAT = 'Waiting for snapshot';
+  const TRACKER_READ_API = '/api/tracker';
   const EN_DASH = '\u2013';
   const EM_DASH = '\u2014';
+
+  function trackerReadPath(pathOrUrl) {
+    const value = String(pathOrUrl || '');
+    if (value.startsWith('/api/fishit-tracker/')) {
+      return `${TRACKER_READ_API}/${value.slice('/api/fishit-tracker/'.length)}`;
+    }
+    return value;
+  }
 
   function isEmptyStatValue(value) {
     return value === EMPTY_STAT || value === '-' || value === '\u2014';
@@ -6105,11 +6113,11 @@
     return base;
   }
   function itemImageSrc(item) {
-    if (isUsableImageUrl(item.imageUrl)) return item.imageUrl;
-    if (isUsableImageUrl(item.cachedImageUrl)) return item.cachedImageUrl;
-    if (isUsableImageUrl(item.localImageUrl)) return item.localImageUrl;
+    if (isUsableImageUrl(item.imageUrl)) return trackerReadPath(item.imageUrl);
+    if (isUsableImageUrl(item.cachedImageUrl)) return trackerReadPath(item.cachedImageUrl);
+    if (isUsableImageUrl(item.localImageUrl)) return trackerReadPath(item.localImageUrl);
     const assetId = parseIconAssetId(item);
-    if (assetId) return `/api/fishit-tracker/image/${assetId}`;
+    if (assetId) return `${TRACKER_READ_API}/image/${assetId}`;
     return null;
   }
   function publicRarity(item) {
@@ -6157,6 +6165,11 @@
     if (/^\d{10,22}$/.test(u)) return false;
     if (/thumbnails\.roblox\.com/i.test(u)) return false;
     if (/create\.roblox\.com\/store\/asset\//i.test(u)) return false;
+    if (u.startsWith('/api/tracker/image/')) return true;
+    if (u.startsWith('/api/tracker/assets/fish/')) return true;
+    if (u.startsWith('/api/tracker/assets/stones/')) return true;
+    if (u.startsWith('/api/tracker/assets/totems/')) return true;
+    if (u.startsWith('/api/tracker/assets/')) return true;
     if (u.startsWith('/api/fishit-tracker/image/')) return true;
     if (u.startsWith('/api/fishit-tracker/assets/fish/')) return true;
     if (u.startsWith('/api/fishit-tracker/assets/stones/')) return true;
@@ -6172,13 +6185,14 @@
   function onFishImageError(img, item) {
     const attempted = img && img.src ? img.src : '';
     const assetId = parseIconAssetId(item) || (img && img.getAttribute('data-asset-id'));
-    if (assetId && !attempted.includes(`/api/fishit-tracker/image/${assetId}`)) {
+    const trackerImagePath = `${TRACKER_READ_API}/image/${assetId}`;
+    if (assetId && !attempted.includes(trackerImagePath)) {
       img.onerror = () => {
         img.onerror = null;
         img.src = ITEM_IMAGES.Default;
         img.setAttribute('data-placeholder', 'true');
       };
-      img.src = `/api/fishit-tracker/image/${assetId}`;
+      img.src = trackerImagePath;
       return;
     }
     console.warn('[fishit-tracker-ui] image load failed', {
@@ -6511,7 +6525,7 @@ ${DEBUG_INVENTORY ? '<div data-global-db-proof></div>' : ''}
     if (!entry) return;
     const forceFresh = opts && opts.forceFresh === true;
     try {
-      const res = await fetch(`/api/fishit-tracker/get-backpack/${encodeURIComponent(key)}${backpackQuerySuffix(forceFresh)}`, {
+      const res = await fetch(`${TRACKER_READ_API}/get-backpack/${encodeURIComponent(key)}${backpackQuerySuffix(forceFresh)}`, {
         cache: 'no-store',
         headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
       });

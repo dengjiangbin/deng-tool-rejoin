@@ -10,6 +10,10 @@ Write-Host "Reference config: $Ref"
 & $CF --config $Ref tunnel ingress validate
 Write-Host '--- rule: aio tracker upload ---'
 & $CF --config $Ref tunnel ingress rule 'https://aio.deng.my.id/api/fishit-tracker/update-backpack'
+Write-Host '--- rule: aio tracker read (web) ---'
+& $CF --config $Ref tunnel ingress rule 'https://aio.deng.my.id/api/tracker/get-backpack/denghub2'
+Write-Host '--- rule: aio fishit read (web, not ingest) ---'
+& $CF --config $Ref tunnel ingress rule 'https://aio.deng.my.id/api/fishit-tracker/get-backpack/denghub2'
 Write-Host '--- rule: aio login ---'
 & $CF --config $Ref tunnel ingress rule 'https://aio.deng.my.id/login'
 Write-Host '--- rule: tool tracker upload ---'
