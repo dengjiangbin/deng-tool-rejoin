@@ -3,14 +3,10 @@ package my.id.deng.monitor.ui
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.launch
 import my.id.deng.monitor.BuildConfig
+import android.util.Log
 import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.SessionStore
 
@@ -23,22 +19,9 @@ fun LoginWebViewScreen(
     val loginUrl = remember { aioWebUrl("/login") }
     val publicHost = remember { publicWebHost() }
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var handled by remember { mutableStateOf(false) }
-
     fun openExternalOAuth() {
         val customTabs = CustomTabsIntent.Builder().build()
         customTabs.launchUrl(context, Uri.parse(apkOAuthStartUrl(BuildConfig.PUBLIC_WEB_URL)))
-    }
-
-    fun markLoggedIn(url: String) {
-        if (handled) return
-        if (!isAuthenticatedWebUrl(url, publicHost)) return
-        handled = true
-        scope.launch {
-            sessionStore.setWebLoggedIn(true)
-            onLoggedIn()
-        }
     }
 
     AioWebViewScreen(
@@ -46,11 +29,8 @@ fun LoginWebViewScreen(
         onUrlChanged = { url ->
             if (isExternalOAuthUrl(url, publicHost)) {
                 openExternalOAuth()
-                return@AioWebViewScreen
             }
-            markLoggedIn(url)
         },
-        onPageFinished = ::markLoggedIn,
         shouldOverrideUrl = { url ->
             if (isExternalOAuthUrl(url, publicHost)) {
                 openExternalOAuth()
@@ -66,21 +46,36 @@ fun publicWebHost(): String = runCatching {
     Uri.parse(BuildConfig.PUBLIC_WEB_URL).host.orEmpty()
 }.getOrDefault("aio.deng.my.id")
 
+private const val APK_AUTH_LOG_TAG = "DengApkAuth"
+private const val APK_AUTH_HANDOFF_MARKER = "APK_DISCORD_AUTH_HANDOFF_FIX_2026_06_14"
+
 suspend fun completeApkOAuthFromDeepLink(
     api: MonitorApi,
     sessionStore: SessionStore,
     code: String,
 ): Boolean {
     return try {
+        Log.i(APK_AUTH_LOG_TAG, "handoff_start marker=$APK_AUTH_HANDOFF_MARKER")
         val exchange = api.aioAuthExchange(code)
-        if (!exchange.ok || exchange.appSessionToken.isBlank()) return false
+        if (!exchange.ok || exchange.appSessionToken.isBlank()) {
+            Log.w(APK_AUTH_LOG_TAG, "handoff_exchange_failed marker=$APK_AUTH_HANDOFF_MARKER")
+            return false
+        }
         sessionStore.saveSession(exchange.appSessionToken, exchange.user.discordUserId)
         val bootstrap = api.aioWebBootstrap(exchange.appSessionToken)
-        if (!bootstrap.ok || bootstrap.bridgeUrl.isBlank()) return false
+        if (!bootstrap.ok || bootstrap.bridgeUrl.isBlank()) {
+            Log.w(APK_AUTH_LOG_TAG, "handoff_bootstrap_failed marker=$APK_AUTH_HANDOFF_MARKER")
+            return false
+        }
         sessionStore.setPendingWebBootstrapUrl(bootstrap.bridgeUrl)
         sessionStore.setWebLoggedIn(true)
+        Log.i(
+            APK_AUTH_LOG_TAG,
+            "handoff_ok marker=$APK_AUTH_HANDOFF_MARKER bridge=${bootstrap.bridgeUrl.take(80)}",
+        )
         true
-    } catch (_: Exception) {
+    } catch (err: Exception) {
+        Log.w(APK_AUTH_LOG_TAG, "handoff_error marker=$APK_AUTH_HANDOFF_MARKER err=${err.message}")
         false
     }
 }

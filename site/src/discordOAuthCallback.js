@@ -210,7 +210,7 @@ async function handleDiscordOAuthCallback(req, res) {
       const scheme = (process.env.DENG_AIO_APP_SCHEME || 'deng-aio').trim();
       const deepLink = `${scheme}://auth/callback?code=${encodeURIComponent(loginCode)}`;
       res.set('Content-Type', 'text/html; charset=utf-8');
-      console.log('[discord-oauth-callback] ok apk_bridge route=%s ms=%d', routePath, Date.now() - started);
+      console.log('[discord-oauth-callback] category=mobile_handoff_created route=%s ms=%d', routePath, Date.now() - started);
       return res.status(200).send(renderOAuthDeepLinkHtml(deepLink));
     } catch (bridgeErr) {
       console.error('[discord-oauth-callback] category=apk_bridge_failed route=%s error=%s', routePath, bridgeErr.message);

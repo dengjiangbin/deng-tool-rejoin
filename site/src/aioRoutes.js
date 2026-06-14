@@ -252,6 +252,7 @@ router.post('/api/aio/auth/web-bootstrap', requireAioAuth, aioAuthLimiter, (req,
       ok: true,
       bridgeUrl: `${publicBase}/auth/web-bridge?code=${encodeURIComponent(code)}&return=${encodeURIComponent('/tracker?apk=1')}`,
       expiresInSeconds,
+      handoffMarker: 'APK_DISCORD_AUTH_HANDOFF_FIX_2026_06_14',
     });
   } catch (err) {
     console.error('[aio] web-bootstrap failed:', err && err.message ? err.message : err);

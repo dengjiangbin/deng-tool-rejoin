@@ -89,10 +89,32 @@ class OAuthLoginContractTest {
     }
 
     @Test
+    fun `MainActivity does not consume pending web bootstrap URL`() {
+        val main = read("$src/MainActivity.kt")
+        assertFalse(main.contains("consumePendingWebBootstrapUrl"))
+    }
+
+    @Test
+    fun `LiveTrackerWebViewScreen waits for bootstrap URL before WebView load`() {
+        val live = read("$src/ui/LiveTrackerWebViewScreen.kt")
+        assertTrue(live.contains("consumePendingWebBootstrapUrl"))
+        assertTrue(live.contains("if (url != null)"))
+    }
+
+    @Test
+    fun `LoginWebViewScreen uses deep link handoff not URL-only login`() {
+        val login = read("$src/ui/LoginWebViewScreen.kt")
+        val composable = login.substringBefore("fun completeApkOAuthFromDeepLink")
+        assertFalse(composable.contains("setWebLoggedIn(true)"))
+        assertTrue(login.contains("completeApkOAuthFromDeepLink"))
+        assertTrue(login.contains("APK_DISCORD_AUTH_HANDOFF_FIX_2026_06_14"))
+    }
+
+    @Test
     fun `release marker is baked into build config and string resources`() {
         val gradle = read("build.gradle.kts")
-        assertTrue(gradle.contains("APK_SYSTEM_BROWSER_DISCORD_AUTH_AIO_2026_06_14"))
+        assertTrue(gradle.contains("APK_DISCORD_AUTH_LOGIN_LOOP_FIX_2026_06_14"))
         val strings = read("src/main/res/values/strings.xml")
-        assertTrue(strings.contains("APK_SYSTEM_BROWSER_DISCORD_AUTH_AIO_2026_06_14"))
+        assertTrue(strings.contains("APK_DISCORD_AUTH_LOGIN_LOOP_FIX_2026_06_14"))
     }
 }

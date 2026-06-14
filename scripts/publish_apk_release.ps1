@@ -1,9 +1,9 @@
 #!/usr/bin/env pwsh
 # Publish a signed DENG All In One release APK and refresh releases/android/latest.json
 param(
-  [string]$VersionName = "2.2.0",
-  [int]$VersionCode = 17,
-  [string]$BuildMarker = "APK_SYSTEM_BROWSER_DISCORD_AUTH_AIO_2026_06_14"
+  [string]$VersionName = "2.2.1",
+  [int]$VersionCode = 18,
+  [string]$BuildMarker = "APK_DISCORD_AUTH_LOGIN_LOOP_FIX_2026_06_14"
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,10 +41,10 @@ $manifest = [ordered]@{
   min_sdk = 26
   purpose = "Monitoring companion for DENG All In One (aio.deng.my.id)"
   changelog = @(
-    "$BuildMarker - Discord OAuth opens system browser / Custom Tabs, not WebView.",
-    "Default site and API base URL migrated to https://aio.deng.my.id.",
-    "OAuth deep-link handoff (deng-aio://auth/callback) plus web-bootstrap session bridge.",
-    "Branding updated to DENG All In One across APK UI and download page."
+    "$BuildMarker - Fix APK Discord login loop: preserve web-bootstrap URL for WebView session bridge.",
+    "Live Tracker waits for bootstrap bridge before loading; MainActivity no longer discards pending URL.",
+    "Discord OAuth opens system browser / Custom Tabs; deep-link handoff (deng-aio://auth/callback).",
+    "Default site and API base URL: https://aio.deng.my.id."
   )
 }
 

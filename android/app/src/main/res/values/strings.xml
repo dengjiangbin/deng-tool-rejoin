@@ -23,7 +23,7 @@
     <string name="app_launcher_label">DENG AIO</string>
 
     <string name="app_tagline">Monitor your Rejoin packages from Android.</string>
-    <string name="apk_release_marker">APK_SYSTEM_BROWSER_DISCORD_AUTH_AIO_2026_06_14</string>
+    <string name="apk_release_marker">APK_DISCORD_AUTH_LOGIN_LOOP_FIX_2026_06_14</string>
     <string name="pair_title">Pair with DENG Tool</string>
     <string name="pair_help">Get an 8-character pairing code from aio.deng.my.id/download after signing in with Discord.</string>
     <string name="pair_button">Pair</string>

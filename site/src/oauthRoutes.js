@@ -95,11 +95,20 @@ router.get('/auth/web-bridge', authLimiter, async (req, res) => {
       global_name: bridged.username || null,
       avatar: bridged.avatar || null,
     };
-    siteUser = await upsertDiscordUser(discordUser, {}, { allowFallback: false });
+    siteUser = await upsertDiscordUser(discordUser, {}, { allowFallback: true });
   } catch (err) {
-    console.error('[auth/web-bridge] category=site_user_resolve_failed error=%s', err.message);
-    req.session.flash = { ...(req.session.flash || {}), error: 'Discord sign-in failed. Please try again.' };
-    return res.redirect(loginHome);
+    console.warn(
+      '[auth/web-bridge] category=site_user_resolve_fallback discordUserId=%s error=%s',
+      bridged.discordUserId,
+      err.message,
+    );
+    siteUser = {
+      id: bridged.siteUserId || null,
+      discord_user_id: bridged.discordUserId,
+      discord_username: bridged.username || null,
+      discord_avatar: bridged.avatar || null,
+      username: bridged.username || `user_${String(bridged.discordUserId).slice(-4)}`,
+    };
   }
   const sessionUser = toSessionUser(siteUser || {
     id: bridged.siteUserId,
@@ -127,6 +136,11 @@ router.get('/auth/web-bridge', authLimiter, async (req, res) => {
           req.session.flash = { ...(req.session.flash || {}), error: 'Could not save your session. Please try again.' };
           return res.redirect(loginHome);
         }
+        console.log(
+          '[auth/web-bridge] category=mobile_handoff_exchanged return=%s discordUserId=%s',
+          authReturnTo,
+          bridged.discordUserId,
+        );
         res.redirect(authReturnTo);
         resolve();
       });

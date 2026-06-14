@@ -37,13 +37,7 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(pendingCode) {
                 val code = pendingCode ?: return@LaunchedEffect
                 pendingOAuthCode = null
-                val ok = completeApkOAuthFromDeepLink(app.api, app.sessionStore, code)
-                if (ok) {
-                    val bootstrap = app.sessionStore.consumePendingWebBootstrapUrl()
-                    if (!bootstrap.isNullOrBlank()) {
-                        // WebView screens load bootstrap URL on next composition via logged-in state.
-                    }
-                }
+                completeApkOAuthFromDeepLink(app.api, app.sessionStore, code)
             }
 
             val webLoggedIn by app.sessionStore.webLoggedInFlow.collectAsState(
