@@ -1,0 +1,36 @@
+{
+  "marker": "GAMEITEMDB_SNAPSHOT_COMPLETENESS_FIX_2026_06_14",
+  "deployedAt": "2026-06-14T11:27:00.000Z",
+  "commitSha": "6eda278",
+  "rootCause": {
+    "summary": "Legacy detectPartialZeroFishSnapshot treated empty cleanItems as zero-fish partial even when compact playerdata_gameitemdb uploads carried fish/stone in body.fishItems/body.stoneItems.",
+    "stuckUsernames": ["priadivine458", "omengwoi"],
+    "successfulCompare": "stokjualanardian",
+    "logSignatureBefore": "PARTIAL_SNAPSHOT_PRESERVED reason=zero_fish_partial_snapshot_preserved_last_good:zero_fish_in_upload with fishCount>0 in upload_persist",
+    "missingCondition": "partialInfo.isPartial blocked snapshotComplete; scanCompleted also required gameItemDbBuilt proof missing on compact uploads"
+  },
+  "filesChanged": [
+    "site/src/fishitPartialSnapshot.js detectPartialZeroFishSnapshot",
+    "site/src/fishitSnapshotCompleteness.js evaluateSnapshotCompleteness",
+    "site/src/fishitTrackerRoutes.js inventory upload handler",
+    "site/src/fishitTrackerUploadStatus.js evaluateAcceptedSnapshotSync",
+    "site/src/fishitLiveTrackerSerializer.js serializeLiveTrackerAccountStats",
+    "site/src/inventory/fishit_tracker.source.ejs inventoryDisplayState"
+  ],
+  "beforeAfter": {
+    "omengwoi": {
+      "before": "upload_proof ... hasFishSnapshot=1 hasStoneSnapshot=1 snapshotComplete=0 inventoryReady=0 + PARTIAL_SNAPSHOT_PRESERVED zero_fish_in_upload",
+      "after": "upload_proof ... hasFishSnapshot=1 hasStoneSnapshot=1 snapshotComplete=1 inventoryReady=1 fishCount=27 stoneCount=22"
+    },
+    "stokjualanardian": {
+      "after": "still snapshotComplete=1 inventoryReady=1 (unchanged success path)"
+    }
+  },
+  "inventoryBundle": "/public/assets/inventory.5787ba1fe2b0.js",
+  "testsAdded": [
+    "detectPartialZeroFishSnapshot ignores empty cleanItems when playerData rows exist",
+    "fish and stone snapshot without leaderstats marks inventoryReady but not snapshotComplete",
+    "compact gameitemdb upload with fish/stone is not blocked by legacy zero-fish partial path"
+  ],
+  "testsPass": "27/27 regression slice"
+}
