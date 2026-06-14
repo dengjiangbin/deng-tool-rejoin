@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const playerStatsStore = require('./fishitPlayerStats');
 const snapshotCompleteness = require('./fishitSnapshotCompleteness');
+const { getLagMs } = require('./trackerEventLoopMonitor');
 
 const STORE_PATH = process.env.FISHIT_LIVE_SESSIONS_PATH
   || path.join(__dirname, '..', 'data', 'fishit_live_sessions.json');
@@ -306,6 +307,10 @@ async function renameAsyncWithRetry(tmp, target, maxAttempts = 4) {
 
 async function flushToDiskAsync() {
   if (!_pendingDirty || !_fileCache || _flushInFlight) return { flushed: false };
+  if (!SYNC_SAVE && getLagMs() > 400) {
+    scheduleFlushDelay(Math.min(10_000, FLUSH_DEBOUNCE_MS + 2000));
+    return { flushed: false, deferred: true };
+  }
   _flushInFlight = true;
   const started = Date.now();
   try {
@@ -358,17 +363,22 @@ function flushToDiskSync() {
   }
 }
 
+function scheduleFlushDelay(ms) {
+  if (_flushTimer) clearTimeout(_flushTimer);
+  _flushTimer = setTimeout(() => {
+    _flushTimer = null;
+    flushToDiskAsync().catch(() => {});
+  }, ms);
+  if (typeof _flushTimer.unref === 'function') _flushTimer.unref();
+}
+
 function scheduleFlush() {
   if (SYNC_SAVE) {
     flushToDiskSync();
     return;
   }
   if (_flushTimer) return;
-  _flushTimer = setTimeout(() => {
-    _flushTimer = null;
-    flushToDiskAsync().catch(() => {});
-  }, FLUSH_DEBOUNCE_MS);
-  if (typeof _flushTimer.unref === 'function') _flushTimer.unref();
+  scheduleFlushDelay(FLUSH_DEBOUNCE_MS);
 }
 
 function saveSession(key, data, liveTrackDB) {
