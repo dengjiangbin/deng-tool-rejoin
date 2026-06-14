@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { buildStabilityStatus } = require('./stabilityStatus');
+const { getCachedStabilityStatus } = require('./stabilitySnapshot');
 
 const router = express.Router();
 
@@ -14,7 +14,7 @@ router.get('/api/internal/stability', (req, res) => {
     }
   }
   res.set('Cache-Control', 'no-store');
-  return res.json(buildStabilityStatus());
+  return res.json(getCachedStabilityStatus());
 });
 
 module.exports = router;

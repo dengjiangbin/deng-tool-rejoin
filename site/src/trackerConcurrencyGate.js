@@ -7,7 +7,11 @@
  */
 
 const { getLagMs } = require('./trackerEventLoopMonitor');
-const { recordQueue503 } = require('./trackerRouteMetrics');
+const {
+  recordHardFail503,
+  recordCoalescedUpload,
+  recordDroppedOldQueuedWork,
+} = require('./trackerRouteMetrics');
 
 const ENRICHMENT_MAX = Number(process.env.TRACKER_ENRICHMENT_MAX_CONCURRENT || 4);
 const QUEUE_MAX = Number(process.env.TRACKER_QUEUE_MAX || 1000);
@@ -155,6 +159,7 @@ function scheduleDeferredUploadWork(sessionKey, workFn) {
   const totalQueued = deferredPendingByKey.size + deferredWaitQueue.length + deferredInFlight.size;
   if (totalQueued >= QUEUE_MAX && !deferredPendingByKey.has(key) && !deferredInFlight.has(key)) {
     droppedJobs += 1;
+    recordDroppedOldQueuedWork();
     return;
   }
 
@@ -162,6 +167,7 @@ function scheduleDeferredUploadWork(sessionKey, workFn) {
   if (superseded) {
     deferredSuperseded += 1;
     squashedJobs += 1;
+    recordCoalescedUpload();
     console.log(
       '[tracker-gate] heavy_job username=%s waitMs=0 runMs=0 superseded=true',
       key,
@@ -180,8 +186,24 @@ function scheduleDeferredUploadWork(sessionKey, workFn) {
   tryStartDeferredWork();
 }
 
+function getOldestQueueAgeMs() {
+  const now = Date.now();
+  let oldest = 0;
+  for (const job of deferredPendingByKey.values()) {
+    oldest = Math.max(oldest, now - job.enqueuedAt);
+  }
+  return oldest;
+}
+
+function shouldDeferEnrichmentResponse() {
+  if (shouldShedWork()) return true;
+  const pending = deferredPendingByKey.size + deferredWaitQueue.length;
+  return pending >= ENRICHMENT_MAX;
+}
+
 /**
- * Inventory uploads run immediately. tracker_status bypasses all gating.
+ * Inventory uploads run immediately. tracker_status bypasses shed gating.
+ * Under load, defer enrichment — handler returns 202 after persist, not 503.
  */
 function wrapTrackerUpload(label, handler) {
   return function trackerUploadEntry(req, res) {
@@ -190,14 +212,13 @@ function wrapTrackerUpload(label, handler) {
     }
     const key = sessionKeyFromRequest(req);
     const pending = deferredPendingByKey.size + deferredWaitQueue.length;
-    if (pending >= QUEUE_MAX) {
-      recordQueue503();
+    if (pending >= QUEUE_MAX && key && !deferredPendingByKey.has(key) && !deferredInFlight.has(key)) {
+      recordHardFail503();
       return res.status(503).json({ ok: false, error: 'tracker_queue_full' });
     }
-    if (shouldShedWork()) {
+    if (shouldShedWork() || pending >= ENRICHMENT_MAX * 2) {
       shedEvents += 1;
-      recordQueue503();
-      return res.status(503).json({ ok: false, error: 'tracker_backpressure' });
+      req.trackerDeferEnrichment = true;
     }
     if (pending >= ENRICHMENT_MAX * 4) {
       console.warn(
@@ -300,5 +321,8 @@ module.exports = {
   logUploadTiming,
   logHeavyJob,
   logQueueStatus,
+  shouldDeferEnrichmentResponse,
+  getOldestQueueAgeMs,
+  shouldShedWork,
   _resetForTests,
 };

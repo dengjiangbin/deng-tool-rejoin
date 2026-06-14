@@ -1,0 +1,46 @@
+{
+  "timestamp": "2026-06-14T01:48:00.000Z",
+  "deployMarker": "DIRECT_INGEST_P0_FAST_ACCEPT_2026_06_14",
+  "gitCommit": "5e76ddc",
+  "directIngestConfirmed": {
+    "aioPublic": {
+      "status": 403,
+      "xDengTrackerRoute": "direct-ingest",
+      "xDengServedBy": "deng-tracker-ingest",
+      "note": "403 expected for probe without valid tracker build"
+    },
+    "toolPublic": {
+      "status": 403,
+      "xDengTrackerRoute": "direct-ingest",
+      "xDengServedBy": "deng-tracker-ingest"
+    }
+  },
+  "p0Behavior": {
+    "responseBeforeEnrichment": true,
+    "accepted202UnderLoad": true,
+    "webProxyFallbackStillEnabled": true,
+    "stabilitySnapshotPrecomputed": true
+  },
+  "ingest8792Metrics": {
+    "accepted202Count": 3635,
+    "hardFail503Count": 0,
+    "coalescedUploadCount": 3455,
+    "deferredEnrichmentCount": 3635,
+    "responseBeforeEnrichmentCount": 3635,
+    "latestPersistSuccessCount": 3635,
+    "ingestDirectCount": 3784,
+    "ingestViaProxyCount": 1,
+    "shedEvents": 6683,
+    "snapshotSource": "precomputed"
+  },
+  "tests": {
+    "tracker_ingest_p0": "10/10 pass",
+    "stability_followup": "7/7 pass"
+  },
+  "conclusion": {
+    "cloudflareDirectIngestActive": true,
+    "p0FastAcceptDeployed": true,
+    "webProxyFallbackRetained": true,
+    "note": "Keep web proxy fallback enabled 24-48h; monitor webProxyForwardCount and ingestViaProxyCount deltas."
+  }
+}

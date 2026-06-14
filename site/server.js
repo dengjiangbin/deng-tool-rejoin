@@ -25,6 +25,21 @@ if (process.env.NODE_ENV === 'production') {
 const app = require('./src/app');
 const { isStateSecretConfigured } = require('./src/crypto');
 const { createTrackerUploadProxy, shouldProxyTrackerUpload } = require('./src/trackerUploadProxy');
+const {
+  startStabilitySnapshotLoop,
+  getCachedStabilityJson,
+} = require('./src/stabilitySnapshot');
+
+startStabilitySnapshotLoop();
+
+function stabilityAllowed(req) {
+  const token = process.env.STABILITY_STATUS_TOKEN || '';
+  if (!token) return true;
+  const provided = String(req.headers['x-stability-token'] || '');
+  const q = String(req.url || '').split('?')[1] || '';
+  const params = new URLSearchParams(q);
+  return provided === token || params.get('token') === token;
+}
 
 if (!isStateSecretConfigured()) {
   console.error(
@@ -59,6 +74,16 @@ const server = require('http').createServer((req, res) => {
       'Cache-Control': 'no-store',
     });
     res.end(healthPayload());
+    return;
+  }
+  if (req.method === 'GET' && pathOnly === '/api/internal/stability') {
+    if (!stabilityAllowed(req)) {
+      res.writeHead(403, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: false, error: 'forbidden' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(getCachedStabilityJson());
     return;
   }
   if (process.env.TRACKER_UPLOAD_PROXY !== '0' && shouldProxyTrackerUpload(req)) {

@@ -25,7 +25,6 @@
         "FISHIT_DB_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Fish It\\data\\deng-fish-it.sqlite",
         "FISHIT_LIVE_SESSIONS_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_live_sessions.json",
         "PUBLIC_TRACKER_GITHUB_REPO": "dengjiangbin/fish-it",
-        "TOOL_SITE_ASSET_VERSION": "STABILITY_FOLLOWUP_2026_06_13",
         "SESSION_ANONYMOUS_TTL_MS": "86400000",
         "SESSION_MAINTENANCE_INTERVAL_MS": "900000",
         "TRACKER_UPLOAD_RATE_MAX_PER_MIN": "12",
@@ -34,8 +33,8 @@
         "DISCORD_AIO_WEB_REDIRECT_URI": "https://aio.deng.my.id/auth/discord/callback",
         "DISCORD_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "DISCORD_AIO_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
-        "TOOL_SITE_ASSET_VERSION": "OAUTH_AIO_DOMAIN_2026_06_13",
-        "GIT_COMMIT": "ade8556"
+        "TOOL_SITE_ASSET_VERSION": "DIRECT_INGEST_P0_FAST_ACCEPT_2026_06_14",
+        "GIT_COMMIT": "5e76ddc"
       }
     },
     {
@@ -65,7 +64,7 @@
         "TRACKER_UPLOAD_BODY_LIMIT": "512kb",
         "TRACKER_EVENT_LOOP_LAG_WARN_MS": "250",
         "TRACKER_EVENT_LOOP_LAG_SHED_MS": "1000",
-        "TOOL_SITE_ASSET_VERSION": "STABILITY_FOLLOWUP_2026_06_13",
+        "TOOL_SITE_ASSET_VERSION": "DIRECT_INGEST_P0_FAST_ACCEPT_2026_06_14",
         "TRACKER_UPLOAD_RATE_MAX_PER_MIN": "12"
       }
     }

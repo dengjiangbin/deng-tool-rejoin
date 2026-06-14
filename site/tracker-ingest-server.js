@@ -16,9 +16,24 @@ process.env.SKIP_TRACKER_UPLOAD_ROUTES = '0';
 
 const app = require('./src/trackerIngestApp');
 const { isTrackerUploadPath } = require('./src/trackerUploadPaths');
+const {
+  startStabilitySnapshotLoop,
+  getCachedStabilityJson,
+} = require('./src/stabilitySnapshot');
 
 const HOST = process.env.TRACKER_INGEST_HOST || '127.0.0.1';
 const PORT = parseInt(process.env.TRACKER_INGEST_PORT || '8792', 10);
+
+startStabilitySnapshotLoop();
+
+function stabilityAllowed(req) {
+  const token = process.env.STABILITY_STATUS_TOKEN || '';
+  if (!token) return true;
+  const provided = String(req.headers['x-stability-token'] || '');
+  const q = String(req.url || '').split('?')[1] || '';
+  const params = new URLSearchParams(q);
+  return provided === token || params.get('token') === token;
+}
 
 function healthPayload() {
   return JSON.stringify({
@@ -42,6 +57,16 @@ const server = require('http').createServer((req, res) => {
       'Cache-Control': 'no-store',
     });
     res.end(healthPayload());
+    return;
+  }
+  if (req.method === 'GET' && pathOnly === '/api/internal/stability') {
+    if (!stabilityAllowed(req)) {
+      res.writeHead(403, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: false, error: 'forbidden' }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(getCachedStabilityJson());
     return;
   }
   if (req.method === 'POST' && !isTrackerUploadPath(req.method, pathOnly)) {

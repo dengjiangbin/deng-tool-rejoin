@@ -1,0 +1,207 @@
+﻿{
+    "branding":  {
+
+                 },
+    "disk":  {
+                 "raw":  [
+                             "",
+                             "",
+                             "Node,Caption,FreeSpace,Size",
+                             "",
+                             "WIN-5B8H6DHMKDP,C:,8689127424,85256474624",
+                             "",
+                             "WIN-5B8H6DHMKDP,D:,0,4100163584",
+                             ""
+                         ]
+             },
+    "timestamp":  "2026-06-13T17:09:41.6089174Z",
+    "bursts":  {
+                   "homepage":  "10/10",
+                   "login":  "20/20"
+               },
+    "commit":  "a2555ec",
+    "curls":  {
+                  "login_public":  {
+                                       "status":  200,
+                                       "url":  "https://aio.deng.my.id/login",
+                                       "name":  "login_public",
+                                       "headers":  {
+                                                       "Connection":  "keep-alive",
+                                                       "X-Xss-Protection":  "0",
+                                                       "Cross-Origin-Resource-Policy":  "same-origin",
+                                                       "Expires":  "0",
+                                                       "X-Dns-Prefetch-Control":  "off",
+                                                       "Server":  "cloudflare",
+                                                       "Cf-Cache-Status":  "DYNAMIC",
+                                                       "Ratelimit-Reset":  "60",
+                                                       "Date":  "Sat, 13 Jun 2026 17:11:16 GMT",
+                                                       "X-Permitted-Cross-Domain-Policies":  "none",
+                                                       "X-Frame-Options":  "SAMEORIGIN",
+                                                       "X-Download-Options":  "noopen",
+                                                       "Nel":  "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+                                                       "Ratelimit-Limit":  "60",
+                                                       "CF-RAY":  "a0b2b6a59d90ab61-SIN",
+                                                       "Referrer-Policy":  "no-referrer",
+                                                       "Content-Type":  "text/html; charset=utf-8",
+                                                       "alt-svc":  "h3=\":443\"; ma=86400",
+                                                       "Report-To":  "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=IBdA3DWKCHb9UZtdhFyzx26OSvReUcu9fM5Ye10X%2Bti0WT5hipjeLXR2CIHgQVT6ojHvxT15luNFPTQy8B%2Feg8BNvjHD4WH02Z9sQC%2BO9rgbYpmxFzDi%2BIUfGYNo9YSofw%3D%3D\"}]}",
+                                                       "Vary":  "Accept-Encoding",
+                                                       "Pragma":  "no-cache",
+                                                       "Cache-Control":  "no-store, no-cache, must-revalidate, proxy-revalidate",
+                                                       "Origin-Agent-Cluster":  "?1",
+                                                       "Set-Cookie":  "deng_sid=s%3ABxkk0PgOku9_3tL3MA897r2tYWqxX-C7.hUoY%2FohfNOB1np3YdW1f6VhUBAGlyYq4uC%2Fc6%2F9Btr0; Domain=.deng.my.id; Path=/; Expires=Sat, 20 Jun 2026 17:10:15 GMT; HttpOnly; Secure; SameSite=Lax",
+                                                       "Server-Timing":  "cfCacheStatus;desc=\"DYNAMIC\",cfEdge;dur=7,cfOrigin;dur=95",
+                                                       "X-Content-Type-Options":  "nosniff",
+                                                       "Strict-Transport-Security":  "max-age=31536000; includeSubDomains",
+                                                       "Cross-Origin-Opener-Policy":  "same-origin",
+                                                       "Ratelimit-Policy":  "60;w=60",
+                                                       "Ratelimit-Remaining":  "59",
+                                                       "Content-Security-Policy":  "default-src \u0027self\u0027;script-src \u0027self\u0027 \u0027unsafe-inline\u0027 https://publisher.linkvertise.com;style-src \u0027self\u0027 \u0027unsafe-inline\u0027;img-src \u0027self\u0027 data: https://cdn.discordapp.com https://media.discordapp.net https://rbxcdn.com https://tr.rbxcdn.com https://*.rbxcdn.com https://thumbnails.roblox.com https://*.roblox.com;connect-src \u0027self\u0027;frame-src \u0027none\u0027;object-src \u0027none\u0027;base-uri \u0027self\u0027;form-action \u0027self\u0027 https://link-hub.net https://linkvertise.com https://*.linkvertise.com https://lootdest.org https://*.lootlabs.gg;frame-ancestors \u0027none\u0027;upgrade-insecure-requests;font-src \u0027self\u0027 https: data:;script-src-attr \u0027none\u0027",
+                                                       "Transfer-Encoding":  "chunked"
+                                                   },
+                                       "ms":  15764
+                                   },
+                  "health_ingest_local":  {
+                                              "status":  200,
+                                              "url":  "http://127.0.0.1:8792/health",
+                                              "name":  "health_ingest_local",
+                                              "headers":  {
+                                                              "Keep-Alive":  "timeout=5",
+                                                              "Transfer-Encoding":  "chunked",
+                                                              "Content-Type":  "application/json",
+                                                              "Date":  "Sat, 13 Jun 2026 17:10:38 GMT",
+                                                              "Connection":  "keep-alive",
+                                                              "Cache-Control":  "no-store"
+                                                          },
+                                              "ms":  95
+                                          },
+                  "tracker_tool":  {
+                                       "status":  503,
+                                       "url":  "https://tool.deng.my.id/api/fishit-tracker/update-backpack",
+                                       "name":  "tracker_tool",
+                                       "error":  "The remote server returned an error: (503) Server Unavailable."
+                                   },
+                  "tracker_aio":  {
+                                      "status":  503,
+                                      "url":  "https://aio.deng.my.id/api/fishit-tracker/update-backpack",
+                                      "name":  "tracker_aio",
+                                      "error":  "The remote server returned an error: (503) Server Unavailable."
+                                  },
+                  "stability_ingest":  {
+                                           "status":  200,
+                                           "url":  "http://127.0.0.1:8792/api/internal/stability",
+                                           "name":  "stability_ingest",
+                                           "headers":  {
+                                                           "Date":  "Sat, 13 Jun 2026 17:10:42 GMT",
+                                                           "X-DENG-Tracker-Route":  "direct-ingest",
+                                                           "Keep-Alive":  "timeout=5",
+                                                           "Content-Length":  "1615",
+                                                           "Content-Type":  "application/json; charset=utf-8",
+                                                           "ETag":  "W/\"64f-2ztAWONJd9zLsXdDIg2H+0CP45E\"",
+                                                           "X-DENG-Served-By":  "deng-tracker-ingest",
+                                                           "Connection":  "keep-alive",
+                                                           "Cache-Control":  "no-store"
+                                                       },
+                                           "ms":  1915
+                                       },
+                  "oauth_public":  {
+                                       "status":  200,
+                                       "url":  "https://aio.deng.my.id/auth/discord",
+                                       "name":  "oauth_public",
+                                       "headers":  {
+                                                       "alt-svc":  "h3=\":443\"; ma=86400",
+                                                       "Content-Type":  "text/html",
+                                                       "X-Content-Type-Options":  "nosniff",
+                                                       "Reporting-Endpoints":  "csp-sentry=\"https://o64374.ingest.sentry.io/api/5441894/security/?sentry_key=8fbbce30bf5244ec9429546beef21870\u0026sentry_environment=stable\"",
+                                                       "X-XSS-Protection":  "1; mode=block",
+                                                       "Strict-Transport-Security":  "max-age=31536000; includeSubDomains; preload",
+                                                       "X-Build-Id":  "6acb41e5669233d86e38a591f28e35d7af0a0d68",
+                                                       "Last-Modified":  "Fri, 12 Jun 2026 20:05:23 GMT",
+                                                       "Server":  "cloudflare",
+                                                       "Cache-Control":  "private",
+                                                       "X-Robots-Tag":  "noindex, nofollow, noarchive, nocache, noimageindex, noodp",
+                                                       "CF-Ray":  "a0b2b70c5fd5ea86-CGK",
+                                                       "Nel":  "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+                                                       "CF-Cache-Status":  "HIT",
+                                                       "Cross-Origin-Opener-Policy":  "unsafe-none",
+                                                       "Connection":  "keep-alive",
+                                                       "Permissions-Policy":  "interest-cohort=()",
+                                                       "Accept-Ranges":  "bytes",
+                                                       "Transfer-Encoding":  "chunked",
+                                                       "Date":  "Sat, 13 Jun 2026 17:11:32 GMT",
+                                                       "Report-To":  "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=e6X3QQuZ3Uq3jI8%2Fsdb4hNVzeI%2F1WmnIAp5vKXYiRpIEzovW425fjkmXsd71gFAcmjBknH9RzFmRyZ%2BaBnA61cUid0hz54TdJmcpgdnh6kT26NZeh3Y9NLIH2Gs1\"}]}",
+                                                       "Content-Security-Policy":  "default-src \u0027self\u0027; script-src \u0027self\u0027 \u0027unsafe-eval\u0027 \u0027unsafe-inline\u0027 \u0027nonce-MTk3LDM1LDE0NCwxODgsMzksOTIsMTY3LDIzOQ==\u0027 blob: https://cdn.discordapp.com/animations/ https://www.gstatic.com/recaptcha/ https://www.google.com/recaptcha/ https://*.hcaptcha.com https://hcaptcha.com https://challenges.cloudflare.com https://js.stripe.com https://js.braintreegateway.com https://assets.braintreegateway.com https://www.paypalobjects.com https://*.paypal.com https://kit.cash.app https://static.discord.com https://static-edge.discord.com; style-src \u0027self\u0027 \u0027unsafe-inline\u0027 https://cdn.discordapp.com https://*.hcaptcha.com https://hcaptcha.com https://kit.cash.app https://static.discord.com https://static-edge.discord.com; img-src \u0027self\u0027 blob: data: https://*.discordapp.net https://*.discordapp.com https://*.discord.com https://i.scdn.co https://i.ytimg.com https://i.imgur.com https://media.tenor.co https://media.tenor.com https://c.tenor.com https://*.youtube.com https://*.giphy.com https://static.klipy.com https://static-cdn.jtvnw.net https://pbs.twimg.com https://assets.braintreegateway.com https://checkout.paypal.com https://api.cash.app https://*.mux.com; font-src \u0027self\u0027 https://fonts.gstatic.com https://cash-f.squarecdn.com https://static.discord.com https://static-edge.discord.com; connect-src \u0027self\u0027 https://status.discordapp.com https://status.discord.com https://support.discordapp.com https://support.discord.com https://discordapp.com https://discord.com https://discord-attachments-uploads-prd.storage.googleapis.com https://cdn.discordapp.com https://media.discordapp.net https://images-ext-1.discordapp.net https://images-ext-2.discordapp.net https://router.discordapp.net wss://*.discord.gg https://best.discord.media https://latency.discord.media wss://*.discord.media:* https://meticulous-ingest.discord.tools wss://dealer.spotify.com https://api.spotify.com https://music.amazon.com/embed/oembed https://*.sentry.io https://api.twitch.tv https://api.stripe.com https://api.braintreegateway.com https://client-analytics.braintreegateway.com https://*.braintree-api.com https://www.googleapis.com https://*.algolianet.com https://*.hcaptcha.com https://hcaptcha.com https://www.google.com/recaptcha/ https://*.algolia.net https://*.mux.com https://*.litix.io wss://*.shockbyte.host/ping wss://discordvibeapps.com/ws ws://127.0.0.1:* http://127.0.0.1:*; media-src \u0027self\u0027 blob: disclip: https://*.discordapp.net https://*.discord.com https://*.discordapp.com https://*.youtube.com https://streamable.com https://vid.me https://twitter.com https://oddshot.akamaized.net https://*.giphy.com https://i.imgur.com https://media.tenor.co https://media.tenor.com https://c.tenor.com https://static.klipy.com https://*.mux.com; frame-src https://discordapp.com/domain-migration discord: https://www.google.com/recaptcha/ https://recaptcha.google.com/recaptcha/ https://*.hcaptcha.com https://hcaptcha.com https://challenges.cloudflare.com https://js.stripe.com https://hooks.stripe.com https://assets.braintreegateway.com https://*.paypal.com https://checkoutshopper-live.adyen.com https://kit.cash.app https://player.twitch.tv https://clips.twitch.tv/embed https://player.vimeo.com https://www.youtube.com/embed/ https://www.tiktok.com/player/ https://music.amazon.com/embed/ https://music.amazon.co.uk/embed/ https://music.amazon.de/embed/ https://music.amazon.co.jp/embed/ https://music.amazon.es/embed/ https://music.amazon.fr/embed/ https://music.amazon.it/embed/ https://music.amazon.com.au/embed/ https://music.amazon.in/embed/ https://music.amazon.ca/embed/ https://music.amazon.com.mx/embed/ https://music.amazon.com.br/embed/ https://www.youtube.com/s/player/ https://twitter.com/i/videos/ https://www.funimation.com/player/ https://www.redditmedia.com/mediaembed/ https://open.spotify.com/embed/ https://w.soundcloud.com/player/ https://audius.co/embed/ https://*.watchanimeattheoffice.com https://sessionshare.sp-int.playstation.com/ https://session-share.playstation.com/ https://localhost:* https://*.discordsays.com https://discordvibeapps.com/preview/ https://discordappcom.cloudflareaccess.com/ https://family.k-id.com/ https://d3ogqhtsivkon3.cloudfront.net/ https://*.dcams.app https://embed.music.apple.com/; child-src \u0027self\u0027 blob: https://assets.braintreegateway.com https://*.paypal.com; report-uri https://o64374.ingest.sentry.io/api/5441894/security/?sentry_key=8fbbce30bf5244ec9429546beef21870\u0026sentry_environment=stable; report-to csp-sentry;",
+                                                       "X-Frame-Options":  "DENY"
+                                                   },
+                                       "ms":  4193
+                                   },
+                  "health_web_local":  {
+                                           "status":  200,
+                                           "url":  "http://127.0.0.1:8791/health",
+                                           "name":  "health_web_local",
+                                           "headers":  {
+                                                           "Keep-Alive":  "timeout=5",
+                                                           "Transfer-Encoding":  "chunked",
+                                                           "Content-Type":  "application/json",
+                                                           "Date":  "Sat, 13 Jun 2026 17:10:36 GMT",
+                                                           "Connection":  "keep-alive",
+                                                           "Cache-Control":  "no-store"
+                                                       },
+                                           "ms":  2063
+                                       },
+                  "stability_web":  {
+                                        "status":  200,
+                                        "url":  "http://127.0.0.1:8791/api/internal/stability",
+                                        "name":  "stability_web",
+                                        "headers":  {
+                                                        "Cross-Origin-Resource-Policy":  "same-origin",
+                                                        "Content-Type":  "application/json; charset=utf-8",
+                                                        "X-Content-Type-Options":  "nosniff",
+                                                        "Content-Length":  "1712",
+                                                        "X-XSS-Protection":  "0",
+                                                        "Strict-Transport-Security":  "max-age=31536000; includeSubDomains",
+                                                        "Referrer-Policy":  "no-referrer",
+                                                        "Keep-Alive":  "timeout=5",
+                                                        "Cache-Control":  "no-store",
+                                                        "Origin-Agent-Cluster":  "?1",
+                                                        "X-Download-Options":  "noopen",
+                                                        "Cross-Origin-Opener-Policy":  "same-origin",
+                                                        "ETag":  "W/\"6b0-7YlxyvJ8jnGJrtmaDyKtIEr+JeU\"",
+                                                        "Connection":  "keep-alive",
+                                                        "Vary":  "Accept-Encoding",
+                                                        "Date":  "Sat, 13 Jun 2026 17:10:40 GMT",
+                                                        "X-Permitted-Cross-Domain-Policies":  "none",
+                                                        "Content-Security-Policy":  "default-src \u0027self\u0027;script-src \u0027self\u0027 \u0027unsafe-inline\u0027 https://publisher.linkvertise.com;style-src \u0027self\u0027 \u0027unsafe-inline\u0027;img-src \u0027self\u0027 data: https://cdn.discordapp.com https://media.discordapp.net https://rbxcdn.com https://tr.rbxcdn.com https://*.rbxcdn.com https://thumbnails.roblox.com https://*.roblox.com;connect-src \u0027self\u0027;frame-src \u0027none\u0027;object-src \u0027none\u0027;base-uri \u0027self\u0027;form-action \u0027self\u0027 https://link-hub.net https://linkvertise.com https://*.linkvertise.com https://lootdest.org https://*.lootlabs.gg;frame-ancestors \u0027none\u0027;upgrade-insecure-requests;font-src \u0027self\u0027 https: data:;script-src-attr \u0027none\u0027",
+                                                        "X-Frame-Options":  "SAMEORIGIN",
+                                                        "X-DNS-Prefetch-Control":  "off"
+                                                    },
+                                        "ms":  2066
+                                    },
+                  "health_public":  {
+                                        "status":  200,
+                                        "url":  "https://aio.deng.my.id/health",
+                                        "name":  "health_public",
+                                        "headers":  {
+                                                        "Server-Timing":  "cfCacheStatus;desc=\"DYNAMIC\",cfEdge;dur=20,cfOrigin;dur=92",
+                                                        "Report-To":  "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=XDYJ5adxlbGFTIj7%2BWHpRPxOIPhQPDXHn3fIAybsuaYBV206LJrM66nhsRsq6QCXu2jr8OTjxaAAjo%2BqJ%2Fxy1crFbgCLxuUAt0%2Bhow3picgt9Bl3Z7URkVhsD2JhT6Pkvw%3D%3D\"}]}",
+                                                        "Server":  "cloudflare",
+                                                        "Nel":  "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+                                                        "Transfer-Encoding":  "chunked",
+                                                        "Cf-Cache-Status":  "DYNAMIC",
+                                                        "alt-svc":  "h3=\":443\"; ma=86400",
+                                                        "Content-Type":  "application/json",
+                                                        "Date":  "Sat, 13 Jun 2026 17:10:52 GMT",
+                                                        "Connection":  "keep-alive",
+                                                        "CF-RAY":  "a0b2b6123a96ab61-SIN",
+                                                        "Cache-Control":  "no-store"
+                                                    },
+                                        "ms":  24910
+                                    }
+              },
+    "sessions":  {
+                     "tmpCount":  0,
+                     "dir":  "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\site-sessions",
+                     "jsonCount":  3832
+                 },
+    "deployMarker":  "STABILITY_FOLLOWUP_2026_06_13"
+}

@@ -35,8 +35,8 @@ const crypto    = require('crypto');
 const { execFileSync } = require('child_process');
 const { createUserRateLimit } = require('./rateLimitUtils');
 const { uploadLimiter } = require('./trackerUploadRateLimit');
-const { recordQueue503 } = require('./trackerRouteMetrics');
 const trackerConcurrencyGate = require('./trackerConcurrencyGate');
+const { finishTrackerUploadResponse } = require('./trackerUploadResponse');
 
 const catalogStore = require('./fishitCatalogStore');
 const playerStatsStore = require('./fishitPlayerStats');
@@ -4618,7 +4618,7 @@ function handleUpdateBackpack(req, res) {
       ` lastSeenAt=${now} lastInventoryAt=${liveTrackDB[key].lastInventoryAt || 'n/a'} online=true` +
       ` fastPathMs=${totalResponseMs}`
     );
-    return res.status(200).json(responsePayload);
+    return finishTrackerUploadResponse(req, res, responsePayload, key);
 }
 
 const updateBackpackMiddleware = [
