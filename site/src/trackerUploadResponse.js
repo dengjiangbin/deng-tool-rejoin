@@ -1,6 +1,7 @@
 'use strict';
 
 const trackerConcurrencyGate = require('./trackerConcurrencyGate');
+const sessionStore = require('./fishitSessionStore');
 const {
   recordAccepted202,
   recordDeferredEnrichment,
@@ -25,9 +26,18 @@ function finishTrackerUploadResponse(req, res, responsePayload, sessionKey) {
   recordResponseBeforeEnrichment();
   recordLatestPersistSuccess();
 
+  const schedulePostResponseFlush = () => {
+    if (sessionKey && process.env.TRACKER_INGEST_MODE === '1') {
+      res.once('finish', () => {
+        sessionStore.schedulePriorityFlush();
+      });
+    }
+  };
+
   if (shouldReturn202(req, sessionKey)) {
     recordAccepted202();
     recordDeferredEnrichment();
+    schedulePostResponseFlush();
     return res.status(202).json({
       ok: true,
       accepted: responsePayload.accepted !== false,
@@ -41,6 +51,7 @@ function finishTrackerUploadResponse(req, res, responsePayload, sessionKey) {
     });
   }
 
+  schedulePostResponseFlush();
   return res.status(200).json(responsePayload);
 }
 

@@ -3,12 +3,14 @@
 const express = require('express');
 const fishitTrackerRoutes = require('./fishitTrackerRoutes');
 const trackerConcurrencyGate = require('./trackerConcurrencyGate');
-const { getMetrics: getEventLoopMetrics } = require('./trackerEventLoopMonitor');
+const { getMetrics: getEventLoopMetrics, getLagMs } = require('./trackerEventLoopMonitor');
 const { resolveTrustProxySetting } = require('./rateLimitUtils');
 const { recordIngestRequest, getTrackerRouteMetrics } = require('./trackerRouteMetrics');
 const { snapshotUploadMetrics } = require('./trackerUploadRequestMetrics');
 const { getSessionStoreFlushMetrics } = require('./fishitSessionStore');
 const stabilityRoutes = require('./stabilityRoutes');
+
+const UPLOAD_HANDLER_TIMEOUT_MS = Number(process.env.TRACKER_UPLOAD_HANDLER_TIMEOUT_MS || 12000);
 
 const app = express();
 app.disable('x-powered-by');
@@ -57,6 +59,29 @@ app.get('/metrics', (_req, res) => {
 });
 
 app.use('/', stabilityRoutes);
+
+app.use((req, res, next) => {
+  if (req.method !== 'POST') return next();
+  const path = req.path || req.url || '';
+  if (!path.includes('fishit-tracker') && !path.includes('tracker/update')) return next();
+  const started = Date.now();
+  const timer = setTimeout(() => {
+    if (res.headersSent) return;
+    console.warn('[deng-tracker-ingest] upload handler timeout path=%s ms=%d lagMs=%d',
+      path, Date.now() - started, getLagMs());
+    res.status(503).json({
+      ok: false,
+      error: 'tracker_upload_timeout',
+      retryable: true,
+      route: String(req.headers['x-deng-tracker-route'] || 'direct-ingest'),
+    });
+  }, UPLOAD_HANDLER_TIMEOUT_MS);
+  if (typeof timer.unref === 'function') timer.unref();
+  res.once('finish', () => clearTimeout(timer));
+  res.once('close', () => clearTimeout(timer));
+  next();
+});
+
 app.use('/', fishitTrackerRoutes.uploadRouter);
 
 // eslint-disable-next-line no-unused-vars

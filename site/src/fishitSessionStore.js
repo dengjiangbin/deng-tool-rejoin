@@ -10,8 +10,10 @@ const playerStatsStore = require('./fishitPlayerStats');
 const snapshotCompleteness = require('./fishitSnapshotCompleteness');
 const { getLagMs } = require('./trackerEventLoopMonitor');
 
-const STORE_PATH = process.env.FISHIT_LIVE_SESSIONS_PATH
-  || path.join(__dirname, '..', 'data', 'fishit_live_sessions.json');
+function storePath() {
+  return process.env.FISHIT_LIVE_SESSIONS_PATH
+    || path.join(__dirname, '..', 'data', 'fishit_live_sessions.json');
+}
 
 const MAX_SESSIONS = Number(process.env.FISHIT_MAX_PERSISTED_SESSIONS || 200);
 const MAX_ITEMS_PER_SESSION = Number(process.env.FISHIT_MAX_PERSISTED_ITEMS || 500);
@@ -31,6 +33,8 @@ let _lastStoreUpdatedAt = null;
 let _lastFlushMs = 0;
 let _flushCount = 0;
 let _flushFailCount = 0;
+let _dirtySinceMs = 0;
+const MAX_LAG_DEFER_MS = Number(process.env.FISHIT_SESSION_MAX_LAG_DEFER_MS || 3000);
 
 function _defaultFile() {
   return { updatedAt: null, sessions: {}, uidAliases: {} };
@@ -242,8 +246,8 @@ function sanitiseSession(key, data) {
 }
 
 function _readFileFromDisk() {
-  if (!fs.existsSync(STORE_PATH)) return _defaultFile();
-  const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
+  if (!fs.existsSync(storePath())) return _defaultFile();
+  const raw = JSON.parse(fs.readFileSync(storePath(), 'utf8'));
   return {
     updatedAt: raw.updatedAt || null,
     sessions: raw.sessions && typeof raw.sessions === 'object' ? raw.sessions : {},
@@ -253,12 +257,12 @@ function _readFileFromDisk() {
 
 function _syncStoreMetaFromDisk() {
   try {
-    if (!fs.existsSync(STORE_PATH)) {
+    if (!fs.existsSync(storePath())) {
       _lastStoreMtimeMs = 0;
       _lastStoreUpdatedAt = null;
       return;
     }
-    const st = fs.statSync(STORE_PATH);
+    const st = fs.statSync(storePath());
     _lastStoreMtimeMs = st.mtimeMs;
     if (_fileCache) {
       _lastStoreUpdatedAt = _fileCache.updatedAt || null;
@@ -317,32 +321,40 @@ async function renameAsyncWithRetry(tmp, target, maxAttempts = 4) {
   throw lastErr;
 }
 
-async function flushToDiskAsync() {
-  if (!_pendingDirty || !_fileCache || _flushInFlight) return { flushed: false };
-  if (!SYNC_SAVE && getLagMs() > 400) {
+async function flushToDiskAsync(options = {}) {
+  const priority = options.priority === true;
+  if (!_pendingDirty || !_fileCache) return { flushed: false };
+  if (_flushInFlight) {
+    if (priority) scheduleFlushDelay(0);
+    return { flushed: false, inFlight: true };
+  }
+  const lagMs = getLagMs();
+  const dirtyAgeMs = _dirtySinceMs > 0 ? Date.now() - _dirtySinceMs : 0;
+  if (!SYNC_SAVE && !priority && lagMs > 400 && dirtyAgeMs < MAX_LAG_DEFER_MS) {
     scheduleFlushDelay(Math.min(10_000, FLUSH_DEBOUNCE_MS + 2000));
-    return { flushed: false, deferred: true };
+    return { flushed: false, deferred: true, lagMs, dirtyAgeMs };
   }
   _flushInFlight = true;
   const started = Date.now();
   try {
     const payload = _prepareFlushPayload();
-    const dir = path.dirname(STORE_PATH);
+    const dir = path.dirname(storePath());
     await fs.promises.mkdir(dir, { recursive: true });
-    const tmp = `${STORE_PATH}.tmp`;
+    const tmp = `${storePath()}.tmp`;
     await fs.promises.writeFile(tmp, JSON.stringify(payload), 'utf8');
-    await renameAsyncWithRetry(tmp, STORE_PATH);
+    await renameAsyncWithRetry(tmp, storePath());
     _pendingDirty = false;
+    _dirtySinceMs = 0;
     _flushCount += 1;
     _lastFlushMs = Date.now() - started;
     try {
-      const st = await fs.promises.stat(STORE_PATH);
+      const st = await fs.promises.stat(storePath());
       _lastStoreMtimeMs = st.mtimeMs;
     } catch (_) {
       _lastStoreMtimeMs = Date.now();
     }
     _lastStoreUpdatedAt = payload.updatedAt || null;
-    return { flushed: true, durationMs: _lastFlushMs };
+    return { flushed: true, durationMs: _lastFlushMs, priority };
   } catch (err) {
     _flushFailCount += 1;
     console.warn('[fishit] session async flush failed:', err && err.message ? err.message : err);
@@ -358,21 +370,36 @@ function flushToDiskSync() {
   const started = Date.now();
   try {
     const payload = _prepareFlushPayload();
-    const dir = path.dirname(STORE_PATH);
+    const dir = path.dirname(storePath());
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const tmp = `${STORE_PATH}.tmp`;
+    const tmp = `${storePath()}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(payload), 'utf8');
-    fs.renameSync(tmp, STORE_PATH);
+    fs.renameSync(tmp, storePath());
     _pendingDirty = false;
+    _dirtySinceMs = 0;
     _flushCount += 1;
     _lastFlushMs = Date.now() - started;
-    _lastStoreMtimeMs = fs.statSync(STORE_PATH).mtimeMs;
+    _lastStoreMtimeMs = fs.statSync(storePath()).mtimeMs;
     _lastStoreUpdatedAt = payload.updatedAt || null;
     return { flushed: true, durationMs: _lastFlushMs };
   } catch (err) {
     _flushFailCount += 1;
     throw err;
   }
+}
+
+function schedulePriorityFlush() {
+  if (SYNC_SAVE) {
+    flushToDiskSync();
+    return;
+  }
+  if (_flushTimer) {
+    clearTimeout(_flushTimer);
+    _flushTimer = null;
+  }
+  setImmediate(() => {
+    flushToDiskAsync({ priority: true }).catch(() => {});
+  });
 }
 
 function scheduleFlushDelay(ms) {
@@ -402,6 +429,7 @@ function saveSession(key, data, liveTrackDB) {
   _applyUidAliases(file, liveTrackDB);
   _trimSessionMap(file.sessions);
   _pendingDirty = true;
+  if (!_dirtySinceMs) _dirtySinceMs = Date.now();
   scheduleFlush();
   return true;
 }
@@ -409,10 +437,10 @@ function saveSession(key, data, liveTrackDB) {
 function reloadIfChanged(liveTrackDB) {
   if (!liveTrackDB || typeof liveTrackDB !== 'object') return { reloaded: false };
   try {
-    if (!fs.existsSync(STORE_PATH)) return { reloaded: false, path: STORE_PATH };
-    const st = fs.statSync(STORE_PATH);
+    if (!fs.existsSync(storePath())) return { reloaded: false, path: storePath() };
+    const st = fs.statSync(storePath());
     if (st.mtimeMs <= _lastStoreMtimeMs) return { reloaded: false };
-    const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
+    const raw = JSON.parse(fs.readFileSync(storePath(), 'utf8'));
     if (raw.updatedAt === _lastStoreUpdatedAt && st.mtimeMs <= _lastStoreMtimeMs) {
       return { reloaded: false };
     }
@@ -437,7 +465,7 @@ function reloadIfChanged(liveTrackDB) {
     }
     _lastStoreMtimeMs = st.mtimeMs;
     _lastStoreUpdatedAt = raw.updatedAt || null;
-    return { reloaded: true, merged, path: STORE_PATH, updatedAt: raw.updatedAt || null };
+    return { reloaded: true, merged, path: storePath(), updatedAt: raw.updatedAt || null };
   } catch (err) {
     return { reloaded: false, error: err.message };
   }
@@ -448,7 +476,7 @@ function getSessionFileMetrics() {
     if (_fileCache) {
       const keys = Object.keys(_fileCache.sessions || {}).filter((k) => !k.startsWith('uid:'));
       return {
-        path: STORE_PATH,
+        path: storePath(),
         exists: true,
         sessionCount: keys.length,
         updatedAt: _fileCache.updatedAt || null,
@@ -459,14 +487,14 @@ function getSessionFileMetrics() {
         lastFlushMs: _lastFlushMs,
       };
     }
-    if (!fs.existsSync(STORE_PATH)) {
-      return { path: STORE_PATH, exists: false, sessionCount: 0 };
+    if (!fs.existsSync(storePath())) {
+      return { path: storePath(), exists: false, sessionCount: 0 };
     }
-    const st = fs.statSync(STORE_PATH);
-    const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
+    const st = fs.statSync(storePath());
+    const raw = JSON.parse(fs.readFileSync(storePath(), 'utf8'));
     const keys = Object.keys(raw.sessions || {}).filter((k) => !k.startsWith('uid:'));
     return {
-      path: STORE_PATH,
+      path: storePath(),
       exists: true,
       sessionCount: keys.length,
       updatedAt: raw.updatedAt || null,
@@ -474,7 +502,7 @@ function getSessionFileMetrics() {
       oldestMtimeMs: st.mtimeMs,
     };
   } catch (err) {
-    return { path: STORE_PATH, exists: false, error: err.message };
+    return { path: storePath(), exists: false, error: err.message };
   }
 }
 
@@ -498,7 +526,7 @@ function loadIntoLiveTrackDB(liveTrackDB) {
     }
     _syncStoreMetaFromDisk();
     _lastStoreUpdatedAt = _fileCache.updatedAt || null;
-    return { loaded, path: STORE_PATH, updatedAt: _fileCache.updatedAt || null };
+    return { loaded, path: storePath(), updatedAt: _fileCache.updatedAt || null };
   } catch (err) {
     console.warn('[fishit] session store load failed:', err && err.message ? err.message : err);
     return { loaded: 0, error: err.message };
@@ -511,35 +539,37 @@ function getStoreMeta() {
       const keys = Object.keys(_fileCache.sessions || {}).filter((k) => !k.startsWith('uid:'));
       return {
         exists: true,
-        path: STORE_PATH,
+        path: storePath(),
         updatedAt: _fileCache.updatedAt,
         sessionCount: keys.length,
         usernames: keys.slice(0, 20),
         pendingDirty: _pendingDirty,
       };
     }
-    if (!fs.existsSync(STORE_PATH)) return { exists: false, path: STORE_PATH };
-    const raw = JSON.parse(fs.readFileSync(STORE_PATH, 'utf8'));
+    if (!fs.existsSync(storePath())) return { exists: false, path: storePath() };
+    const raw = JSON.parse(fs.readFileSync(storePath(), 'utf8'));
     const keys = Object.keys(raw.sessions || {}).filter((k) => !k.startsWith('uid:'));
     return {
       exists: true,
-      path: STORE_PATH,
+      path: storePath(),
       updatedAt: raw.updatedAt,
       sessionCount: keys.length,
       usernames: keys.slice(0, 20),
     };
   } catch (err) {
-    return { exists: false, path: STORE_PATH, error: err.message };
+    return { exists: false, path: storePath(), error: err.message };
   }
 }
 
 function getSessionStoreFlushMetrics() {
   return {
     pendingDirty: _pendingDirty,
+    dirtyAgeMs: _dirtySinceMs > 0 ? Date.now() - _dirtySinceMs : 0,
     flushCount: _flushCount,
     flushFailCount: _flushFailCount,
     lastFlushMs: _lastFlushMs,
     debounceMs: FLUSH_DEBOUNCE_MS,
+    maxLagDeferMs: MAX_LAG_DEFER_MS,
     syncSave: SYNC_SAVE,
   };
 }
@@ -555,8 +585,9 @@ function _reset() {
   _flushCount = 0;
   _flushFailCount = 0;
   _lastFlushMs = 0;
+  _dirtySinceMs = 0;
   try {
-    if (fs.existsSync(STORE_PATH)) fs.unlinkSync(STORE_PATH);
+    if (fs.existsSync(storePath())) fs.unlinkSync(storePath());
   } catch (_) { /* test seam */ }
   _lastStoreMtimeMs = 0;
   _lastStoreUpdatedAt = null;
@@ -568,12 +599,14 @@ function _invalidateReloadCursorForTests() {
 }
 
 module.exports = {
-  STORE_PATH,
+  storePath,
+  get STORE_PATH() { return storePath(); },
   loadIntoLiveTrackDB,
   reloadIfChanged,
   saveSession,
   flushToDiskSync,
   flushToDiskAsync,
+  schedulePriorityFlush,
   sanitiseSession,
   getStoreMeta,
   getSessionFileMetrics,

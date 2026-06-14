@@ -825,16 +825,13 @@ async function persistSessionState(key, baseUrl) {
   }
 }
 
-/** Persist heartbeat-critical session fields immediately so 8791 web can reload before deferred enrichment. */
+/** Persist heartbeat-critical session fields; non-blocking priority flush for cross-process reads. */
 function persistSessionHeartbeat(key) {
   if (!key || key.startsWith('uid:')) return;
   const data = liveTrackDB[key];
   if (!data) return;
   try {
     sessionStore.saveSession(key, data, liveTrackDB);
-    if (process.env.TRACKER_INGEST_MODE === '1') {
-      sessionStore.flushToDiskSync();
-    }
   } catch (err) {
     console.warn(
       '[fishit-tracker] heartbeat persist failed:',
@@ -842,6 +839,13 @@ function persistSessionHeartbeat(key) {
       err && err.message ? err.message : err,
     );
   }
+}
+
+function scheduleIngestPostResponseFlush(res) {
+  if (process.env.TRACKER_INGEST_MODE !== '1') return;
+  res.once('finish', () => {
+    sessionStore.schedulePriorityFlush();
+  });
 }
 
 // ── Rate limiters ─────────────────────────────────────────────────
@@ -4223,6 +4227,7 @@ function handleUpdateBackpack(req, res) {
       const conn = deriveConnectionStatus(liveTrackDB[key]);
       scheduleAioTrackerCacheRefresh(key);
       persistSessionHeartbeat(key);
+      scheduleIngestPostResponseFlush(res);
       return res.status(200).json({
         ok: true,
         status: 'success',
@@ -4265,6 +4270,7 @@ function handleUpdateBackpack(req, res) {
       }));
       scheduleAioTrackerCacheRefresh(key);
       persistSessionHeartbeat(key);
+      scheduleIngestPostResponseFlush(res);
       return res.status(200).json({ status: 'success', note: 'offline_keep' });
     }
 
