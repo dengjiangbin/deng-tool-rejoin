@@ -1,0 +1,35 @@
+{
+  "capturedAt": "2026-06-14T11:43:35.089Z",
+  "username": "denghub2",
+  "diagnosis": "Roblox upload accepted; site disk session lacked persisted snapshotComplete/inventoryReady flags",
+  "beforeFix": {
+    "snapshotComplete": false,
+    "inventoryReady": false,
+    "inventoryDisplayState": "syncing",
+    "statsProven": true,
+    "coin": "31.5M",
+    "totalCaught": 123387,
+    "rarestFishChance": "1/4M",
+    "tableCellBehavior": "Waiting for snapshot overlapped narrow columns when statsAwaiting=true despite statsProven"
+  },
+  "afterFix": {
+    "snapshotComplete": true,
+    "inventoryReady": true,
+    "inventoryDisplayState": "ready",
+    "statsProven": true,
+    "coin": "31.5M",
+    "coins": 31537748,
+    "totalCaught": 123387,
+    "rarestFishChance": "1/4M",
+    "completenessRehydrated": true,
+    "tableCellBehavior": "Numbers or em dash only; waiting copy reserved for card detail"
+  },
+  "bundle": {
+    "marker": "TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14",
+    "css": "inventory.01bd021354d0.css",
+    "js": "inventory.df69ebbbca63.js",
+    "cssHash": "01bd021354d0",
+    "jsHash": "df69ebbbca63",
+    "builtAt": "2026-06-14T11:43:05.615Z"
+  }
+}

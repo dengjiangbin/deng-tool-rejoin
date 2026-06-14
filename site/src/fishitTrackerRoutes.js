@@ -3368,10 +3368,13 @@ async function handleAccountStatus(req, res) {
           .trim()
           .toLowerCase();
       const robloxUserId = acct.robloxUserId || acct.roblox_user_id || null;
-      const { session } = uploadAccountStatus.resolveLiveSession(liveTrackDB, {
+      const { session: rawSession } = uploadAccountStatus.resolveLiveSession(liveTrackDB, {
         robloxUserId,
         usernameKey,
       });
+      const session = rawSession
+        ? snapshotCompleteness.applyRehydratedCompleteness({ ...rawSession }, playerStatsStore)
+        : null;
       const sessionData = session
         ? { ...session, discordOwnerId: req.inventoryOwnerDiscordId }
         : {
@@ -3398,10 +3401,14 @@ async function handleAccountStatus(req, res) {
       return {
         ...proof,
         ...liveAccountStats,
+        liveAccountStats,
+        statsProven: liveAccountStats.statsProven === true,
+        playerStatsProven: liveAccountStats.statsProven === true,
         ...leaderstatsUpload.publicLeaderstatsFields(sessionForStats),
-        inventoryDisplayState: (session?.snapshotComplete || session?.inventoryReady)
-          ? (session?.provenEmptyInventory ? 'empty' : 'ready')
-          : (proof.lastSuccessfulHeartbeatAt || session?.lastHeartbeatAt ? 'syncing' : 'waiting'),
+        inventoryDisplayState: uploadAccountStatus.resolveInventoryDisplayState({
+          ...sessionData,
+          ...proof,
+        }),
         accountPresenceLive: presence.accountPresenceLive,
         accountOnline: presence.accountPresenceLive,
         accountPresenceStatus: presence.accountPresenceStatus,
@@ -5751,6 +5758,7 @@ async function handleGetBackpack(req, res) {
     return res.status(404).json({ error: 'No tracking session active for this user.' });
   }
   data = ensureSessionBuildCurrent(data);
+  data = snapshotCompleteness.applyRehydratedCompleteness(data, playerStatsStore);
   liveTrackDB[key] = data;
 
   // Enrich from raw tracker payload when available (BLOCKER10I/10S).
@@ -5907,9 +5915,10 @@ async function handleGetBackpack(req, res) {
     lastFullSnapshotAt: uploadStatus.lastFullSnapshotAt || data?.lastFullSnapshotAt || null,
     blankPayloadRejected: uploadStatus.blankPayloadRejected === true,
     payloadType: uploadStatus.payloadType,
-    inventoryDisplayState: (data?.snapshotComplete || data?.inventoryReady)
-      ? (data?.provenEmptyInventory ? 'empty' : 'ready')
-      : (data?.lastSuccessfulHeartbeatAt || data?.lastHeartbeatAt ? 'syncing' : 'waiting'),
+    inventoryDisplayState: uploadAccountStatus.resolveInventoryDisplayState({
+      ...data,
+      ...uploadStatus,
+    }),
     connectionStatus: uploadStatus.status,
     connectionStatusColor: uploadStatus.statusColor,
     connectionStatusReason: uploadStatus.statusDecisionReason,
@@ -6033,6 +6042,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     return res.status(404).json({ ok: false, error: 'not_found', key, knownKeys, serverCommit: resolveServerCommit() });
   }
   data = ensureSessionBuildCurrent(data);
+  data = snapshotCompleteness.applyRehydratedCompleteness(data, playerStatsStore);
   liveTrackDB[key] = data;
 
   const wantFullDebug = trackerPerf.isFullDebugRequest(req);
@@ -6367,9 +6377,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     snapshotCompleteness: snapshotCompleteness.buildSnapshotCompletenessProof(data),
     snapshotComplete: data.snapshotComplete === true,
     inventoryReady: data.inventoryReady === true,
-    inventoryDisplayState: (data.snapshotComplete || data.inventoryReady)
-      ? (data.provenEmptyInventory ? 'empty' : 'ready')
-      : (data.lastSuccessfulHeartbeatAt || data.lastHeartbeatAt ? 'syncing' : 'waiting'),
+    inventoryDisplayState: uploadAccountStatus.resolveInventoryDisplayState(data),
     snapshotCompletenessReason: data.snapshotCompletenessReason || null,
     blankPayloadRejected: data.blankPayloadRejected === true,
     uploadAccountStatus: uploadAccountStatus.deriveTrackerUploadAccountStatus(data, {

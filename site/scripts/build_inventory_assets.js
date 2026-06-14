@@ -115,6 +115,7 @@ function buildShellEjs(beforeStyle, bodyHtml, marker) {
   const cleanedBody = bodyHtml.replace(/^\s*<\/head>\s*/i, '').trim();
   return `${cleanedBefore}
   <link rel="stylesheet" href="/public/css/logoutConfirm.css?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
+  <link rel="stylesheet" href="/public/css/app-sidebar.css?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
   <link rel="stylesheet" href="<%= inventoryAssetCssUrl %>">
 </head>
 ${cleanedBody}

@@ -165,6 +165,14 @@ function markTrackerSyncMissed(session, checkedAt) {
   };
 }
 
+function resolveInventoryDisplayState(data) {
+  if (!data) return 'waiting';
+  if (data.provenEmptyInventory === true) return 'empty';
+  if (data.snapshotComplete === true || data.inventoryReady === true) return 'ready';
+  if (data.lastSuccessfulHeartbeatAt || data.lastHeartbeatAt) return 'syncing';
+  return 'waiting';
+}
+
 function deriveTrackerUploadAccountStatus(data, opts = {}) {
   const serverNowMs = opts.serverNowMs != null ? opts.serverNowMs : Date.now();
   const serverNow = new Date(serverNowMs).toISOString();
@@ -412,6 +420,7 @@ module.exports = {
   markTrackerSyncSuccess,
   markTrackerSyncMissed,
   deriveTrackerUploadAccountStatus,
+  resolveInventoryDisplayState,
   resolveLiveSession,
   extractUploadMeta,
   applyAcceptedUploadMeta,

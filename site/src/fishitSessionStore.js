@@ -6,6 +6,7 @@
 const path = require('path');
 const fs = require('fs');
 const playerStatsStore = require('./fishitPlayerStats');
+const snapshotCompleteness = require('./fishitSnapshotCompleteness');
 
 const STORE_PATH = process.env.FISHIT_LIVE_SESSIONS_PATH
   || path.join(__dirname, '..', 'data', 'fishit_live_sessions.json');
@@ -95,7 +96,7 @@ function sanitiseSession(key, data) {
   const pubStone = Array.isArray(data.lastGoodPublicStoneItems)
     ? data.lastGoodPublicStoneItems.slice(0, MAX_PUBLIC_FISH)
     : null;
-  return {
+  const base = {
     username: data.username || key,
     userId: data.userId || 0,
     discordOwnerId: data.discordOwnerId || null,
@@ -189,8 +190,26 @@ function sanitiseSession(key, data) {
     lastUploadStatusCodeReturned: data.lastUploadStatusCodeReturned != null
       ? data.lastUploadStatusCodeReturned
       : null,
+    firstSeenAt: data.firstSeenAt || null,
+    firstFullSnapshotAt: data.firstFullSnapshotAt || null,
+    lastFullSnapshotAt: data.lastFullSnapshotAt || null,
+    hasLeaderstatsSnapshot: data.hasLeaderstatsSnapshot === true,
+    hasFishSnapshot: data.hasFishSnapshot === true,
+    hasStoneSnapshot: data.hasStoneSnapshot === true,
+    snapshotComplete: data.snapshotComplete === true,
+    inventoryReady: data.inventoryReady === true,
+    snapshotCompletenessReason: data.snapshotCompletenessReason || null,
+    blankPayloadRejected: data.blankPayloadRejected === true,
+    provenEmptyInventory: data.provenEmptyInventory === true,
+    fishItemCount: data.fishItemCount != null ? data.fishItemCount : null,
+    stoneItemCount: data.stoneItemCount != null ? data.stoneItemCount : null,
+    playerDataInventoryCount: data.playerDataInventoryCount != null
+      ? data.playerDataInventoryCount
+      : null,
+    scanCompleted: data.scanCompleted === true,
     restoredFromDisk: false,
   };
+  return snapshotCompleteness.applyRehydratedCompleteness(base, playerStatsStore);
 }
 
 let _lastStoreMtimeMs = 0;

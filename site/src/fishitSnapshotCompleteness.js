@@ -301,6 +301,89 @@ function applyHeartbeatUpdate(session, body, now) {
   }, evaluation, now);
 }
 
+function countSessionRows(rows) {
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+function inferSessionCompletenessFromPersisted(session, playerStatsStore) {
+  if (!session || typeof session !== 'object') return null;
+  if (session.snapshotComplete === true || session.inventoryReady === true) {
+    return {
+      snapshotComplete: session.snapshotComplete === true,
+      inventoryReady: session.inventoryReady === true,
+      hasLeaderstatsSnapshot: session.hasLeaderstatsSnapshot === true,
+      hasFishSnapshot: session.hasFishSnapshot === true,
+      hasStoneSnapshot: session.hasStoneSnapshot === true,
+      snapshotCompletenessReason: session.snapshotCompletenessReason || null,
+      rehydrated: false,
+    };
+  }
+
+  const fishCount = Math.max(
+    countSessionRows(session.playerDataFishItems),
+    countSessionRows(session.lastGoodPublicFishItems),
+    Number(session.lastGoodPublicFishCount) || 0,
+    Number(session.fishItemCount) || 0,
+  );
+  const stoneCount = Math.max(
+    countSessionRows(session.playerDataStoneItems),
+    countSessionRows(session.lastGoodPublicStoneItems),
+    Number(session.lastGoodPublicStoneCount) || 0,
+    Number(session.stoneItemCount) || 0,
+  );
+  const hasStats = playerStatsStore
+    && typeof playerStatsStore.isTrustedPlayerStats === 'function'
+    ? playerStatsStore.isTrustedPlayerStats(session.playerStats)
+    : !!session.playerStats;
+  const hasLeaderstatsSnapshot = session.hasLeaderstatsSnapshot === true
+    || (hasStats && !!(session.lastStatsUploadAt || session.playerStatsUpdatedAt || session.lastUploadAcceptedAt));
+  const hasFishSnapshot = session.hasFishSnapshot === true
+    || fishCount > 0
+    || session.provenEmptyInventory === true;
+  const hasStoneSnapshot = session.hasStoneSnapshot === true
+    || stoneCount > 0
+    || session.provenEmptyInventory === true;
+  const hasAcceptedUpload = !!(session.lastUploadAcceptedAt || session.lastSuccessfulUploadAt);
+  const hasInventoryEvidence = fishCount > 0 || stoneCount > 0 || session.provenEmptyInventory === true;
+  const inventoryReady = hasAcceptedUpload && hasInventoryEvidence && (hasFishSnapshot || hasStoneSnapshot);
+  const snapshotComplete = inventoryReady && hasLeaderstatsSnapshot && session.blankPayloadRejected !== true;
+
+  if (!inventoryReady && !hasLeaderstatsSnapshot) return null;
+
+  let snapshotCompletenessReason = session.snapshotCompletenessReason || null;
+  if (snapshotComplete) snapshotCompletenessReason = 'full_snapshot_verified';
+  else if (inventoryReady && hasLeaderstatsSnapshot) snapshotCompletenessReason = 'inventory_snapshot_verified';
+  else if (inventoryReady) snapshotCompletenessReason = 'inventory_ready_awaiting_leaderstats';
+  else if (hasLeaderstatsSnapshot) snapshotCompletenessReason = 'leaderstats_snapshot';
+
+  return {
+    snapshotComplete,
+    inventoryReady: inventoryReady || snapshotComplete,
+    hasLeaderstatsSnapshot,
+    hasFishSnapshot,
+    hasStoneSnapshot,
+    snapshotCompletenessReason,
+    rehydrated: true,
+  };
+}
+
+function applyRehydratedCompleteness(session, playerStatsStore) {
+  if (!session || typeof session !== 'object') return session;
+  const inferred = inferSessionCompletenessFromPersisted(session, playerStatsStore);
+  if (!inferred) return session;
+  if (!inferred.rehydrated) return session;
+  return {
+    ...session,
+    snapshotComplete: inferred.snapshotComplete === true,
+    inventoryReady: inferred.inventoryReady === true,
+    hasLeaderstatsSnapshot: inferred.hasLeaderstatsSnapshot === true,
+    hasFishSnapshot: inferred.hasFishSnapshot === true,
+    hasStoneSnapshot: inferred.hasStoneSnapshot === true,
+    snapshotCompletenessReason: session.snapshotCompletenessReason || inferred.snapshotCompletenessReason || null,
+    completenessRehydrated: true,
+  };
+}
+
 function buildSnapshotCompletenessProof(session) {
   if (!session) return null;
   return {
@@ -333,4 +416,6 @@ module.exports = {
   preserveInventoryFields,
   applyHeartbeatUpdate,
   buildSnapshotCompletenessProof,
+  inferSessionCompletenessFromPersisted,
+  applyRehydratedCompleteness,
 };

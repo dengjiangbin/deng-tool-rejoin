@@ -9,6 +9,7 @@
   <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
   <title>DENG Tracker &mdash; Fish It</title>
   <link rel="stylesheet" href="/public/css/logoutConfirm.css?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
+  <link rel="stylesheet" href="/public/css/app-sidebar.css?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
   <link rel="stylesheet" href="<%= inventoryAssetCssUrl %>">
 </head>
 <body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11') %>">
