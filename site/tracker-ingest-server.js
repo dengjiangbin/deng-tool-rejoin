@@ -1,5 +1,7 @@
 'use strict';
 
+require('./src/wmicRuntimeGuard');
+
 const path = require('path');
 const dotenv = require('dotenv');
 

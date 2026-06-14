@@ -33,7 +33,7 @@
         "DISCORD_AIO_WEB_REDIRECT_URI": "https://aio.deng.my.id/auth/discord/callback",
         "DISCORD_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "DISCORD_AIO_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
-        "TOOL_SITE_ASSET_VERSION": "DIRECT_INGEST_P0_FAST_ACCEPT_2026_06_14",
+        "TOOL_SITE_ASSET_VERSION": "NO_WMIC_PROCESS_GUARD_2026_06_14",
         "GIT_COMMIT": "5e76ddc"
       }
     },
@@ -64,7 +64,7 @@
         "TRACKER_UPLOAD_BODY_LIMIT": "512kb",
         "TRACKER_EVENT_LOOP_LAG_WARN_MS": "250",
         "TRACKER_EVENT_LOOP_LAG_SHED_MS": "1000",
-        "TOOL_SITE_ASSET_VERSION": "DIRECT_INGEST_P0_FAST_ACCEPT_2026_06_14",
+        "TOOL_SITE_ASSET_VERSION": "NO_WMIC_PROCESS_GUARD_2026_06_14",
         "TRACKER_UPLOAD_RATE_MAX_PER_MIN": "12"
       }
     }

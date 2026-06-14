@@ -1,4 +1,7 @@
 'use strict';
+
+require('./src/wmicRuntimeGuard');
+
 // Load env in priority order (dotenv never overrides already-set vars):
 //   1. process.env (always wins – PM2 / system env)
 //   2. site/.env   (portal-specific overrides)

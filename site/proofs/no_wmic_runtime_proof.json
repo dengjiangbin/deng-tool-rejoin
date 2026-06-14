@@ -1,0 +1,58 @@
+﻿{
+    "wmicProcessCount":  0,
+    "gitCommit":  "529224f38a1f3ed9fc33b5553adcc5a0a4d1b304",
+    "wmicProcesses":  [
+
+                      ],
+    "timestamp":  "2026-06-14T02:24:12.4399515Z",
+    "grepOffenders":  [
+
+                      ],
+    "runtimeGuardTests":  {
+                              "exitCode":  0,
+                              "pass":  true,
+                              "outputSnippet":  "TAP version 13\n# [wmic-guard] WMIC_BLOCKED_RUNTIME_GUARD blocked spawnSync target=wmic.exe\n# Error: WMIC_BLOCKED_RUNTIME_GUARD: spawning wmic.exe is permanently disabled (spawnSync)\n#     at blockIfWmic (C:\\\\Users\\\\Administrator\\\\Desktop\\\\DENG Tool Rejoin\\\\site\\\\src\\\\wmicRuntimeGuard.js:51:15)\n#     at Object.guardedSpawn [as spawnSync] (C:\\\\Users\\\\Administrator\\\\Desktop\\\\DENG Tool Rejoin\\\\site\\\\src\\\\wmicRuntimeGuard.js:60:5)\n#     at C:\\\\Users\\\\Administrator\\\\Desktop\\\\DENG Tool Rejoin\\\\site\\\\te"
+                          },
+    "conclusion":  {
+                       "runtimeGuardTestsPass":  true,
+                       "diskMonitorUsesStatfs":  true,
+                       "wmicRemovedFromProject":  true,
+                       "oauthBrandingLoaderUnchanged":  true,
+                       "noWmicProcesses":  true
+                   },
+    "health":  {
+                   "web8791":  {
+                                   "status":  "ok",
+                                   "service":  "deng-tool-site",
+                                   "port":  8791,
+                                   "timestamp":  "2026-06-14T02:24:04.234Z"
+                               },
+                   "ingest8792":  {
+                                      "status":  "ok",
+                                      "service":  "deng-tracker-ingest",
+                                      "port":  8792,
+                                      "timestamp":  "2026-06-14T02:24:06.367Z"
+                                  }
+               },
+    "scheduledTaskAudit":  [
+
+                           ],
+    "pm2Apps":  [
+
+                ],
+    "stability8792":  {
+                          "snapshotSource":  "precomputed",
+                          "hardFail503Count":  0,
+                          "ingestDirectCount":  3690,
+                          "webProxyForwardCount":  0,
+                          "diskSource":  "statfs",
+                          "deployMarker":  "DIRECT_INGEST_P0_FAST_ACCEPT_2026_06_14"
+                      },
+    "directIngestUnchanged":  {
+                                  "skipTrackerUploadRoutes8791":  "1",
+                                  "trackerUploadProxy":  "1"
+                              },
+    "allowlistedOnly":  true,
+    "buildMarker":  "NO_WMIC_PROCESS_GUARD_2026_06_14",
+    "grepWmicReferenceCount":  0
+}
