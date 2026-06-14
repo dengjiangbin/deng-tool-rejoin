@@ -22,8 +22,10 @@
         "TRACKER_INGEST_HOST": "127.0.0.1",
         "TRACKER_INGEST_PORT": "8792",
         "TOOL_SITE_SESSION_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\site-sessions",
+        "FISHIT_LIVE_SESSIONS_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_live_sessions",
+        "FISHIT_LIVE_SESSIONS_PATH": "",
+        "FISHIT_SESSION_SHARDED": "1",
         "FISHIT_DB_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Fish It\\data\\deng-fish-it.sqlite",
-        "FISHIT_LIVE_SESSIONS_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_live_sessions.json",
         "PUBLIC_TRACKER_GITHUB_REPO": "dengjiangbin/fish-it",
         "SESSION_ANONYMOUS_TTL_MS": "86400000",
         "SESSION_MAINTENANCE_INTERVAL_MS": "900000",
@@ -35,7 +37,7 @@
         "DISCORD_AIO_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "OAUTH_STATE_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\oauth-states",
         "TOOL_SITE_ASSET_VERSION": "UPLOAD_INTERVAL_60S_AIO_2026_06_14",
-        "GIT_COMMIT": "fba8626"
+        "GIT_COMMIT": "2489eec"
       }
     },
     {
@@ -57,14 +59,18 @@
         "TRACKER_INGEST_PORT": "8792",
         "SKIP_TRACKER_UPLOAD_ROUTES": "0",
         "FISHIT_DB_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Fish It\\data\\deng-fish-it.sqlite",
-        "FISHIT_LIVE_SESSIONS_PATH": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_live_sessions.json",
+        "FISHIT_LIVE_SESSIONS_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_live_sessions",
+        "FISHIT_LIVE_SESSIONS_PATH": "",
+        "FISHIT_SESSION_SHARDED": "1",
         "PUBLIC_TRACKER_GITHUB_REPO": "dengjiangbin/fish-it",
         "TRACKER_ENRICHMENT_MAX_CONCURRENT": "4",
         "TRACKER_QUEUE_MAX": "1000",
         "TRACKER_QUEUE_MAX_PER_ACCOUNT": "1",
         "TRACKER_UPLOAD_BODY_LIMIT": "512kb",
+        "TRACKER_UPLOAD_BUSY_LAG_MS": "4000",
         "TRACKER_EVENT_LOOP_LAG_WARN_MS": "250",
-        "TRACKER_EVENT_LOOP_LAG_SHED_MS": "1000",
+        "TRACKER_EVENT_LOOP_LAG_SHED_MS": "1200",
+        "FISHIT_ACCOUNT_FLUSH_MS": "500",
         "TOOL_SITE_ASSET_VERSION": "UPLOAD_INTERVAL_60S_AIO_2026_06_14",
         "TRACKER_UPLOAD_RATE_MAX_PER_MIN": "10",
         "FISHIT_SESSION_FLUSH_MS": "6000"

@@ -3,11 +3,12 @@
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 
+const manualInventoryImages = require('../src/fishitInventoryManualImages');
 const gameItemDbPublic = require('../src/fishitGameItemDbPublic');
 const totemImageAssets = require('../src/fishitTotemImageAssets');
 
 describe('totem image resolver', () => {
-  test('Mutation Totem uses totem catalog path not fish cache', () => {
+  test('Mutation Totem uses manual override when catalog placeholder is stale', () => {
     const rows = totemImageAssets.attachTotemImagesToItems([
       {
         kind: 'totem',
@@ -21,14 +22,14 @@ describe('totem image resolver', () => {
 
     assert.equal(rows.length, 1);
     const row = rows[0];
-    assert.match(row.imageUrl, /\/api\/fishit-tracker\/assets\/totems\/totem_mutation_totem\.webp/);
-    assert.equal(row.imageSource, 'totem_manual_asset');
-    assert.equal(row.imageResolver, 'totem_catalog');
+    assert.match(row.imageUrl, /\/api\/tracker\/assets\/manual\/totems\//);
+    assert.equal(row.imageSource, 'manual_override');
+    assert.equal(row.imageResolver, 'totem_manual_override');
     assert.equal(row.category, 'totem');
     assert.doesNotMatch(String(row.imageUrl), /\/assets\/fish\//);
   });
 
-  test('Shiny Totem resolves via totem catalog by canonical name', () => {
+  test('Shiny Totem falls back to gameDB proxy when catalog placeholder is stale', () => {
     const rows = totemImageAssets.attachTotemImagesToItems([
       {
         kind: 'totem',
@@ -40,9 +41,9 @@ describe('totem image resolver', () => {
       },
     ], 'http://127.0.0.1:8791');
 
-    assert.match(rows[0].imageUrl, /\/api\/fishit-tracker\/assets\/totems\/totem_shiny_totem\.png/);
-    assert.equal(rows[0].imageSource, 'totem_manual_asset');
-    assert.equal(rows[0].imageResolver, 'totem_catalog');
+    assert.match(rows[0].imageUrl, /\/api\/tracker\/image\/1234567890123/);
+    assert.equal(rows[0].imageSource, 'totem_gameitemdb_proxy');
+    assert.equal(rows[0].imageResolver, 'totem_gameitemdb_proxy');
   });
 
   test('buildPublicFromPlayerDataGameItemDb maps totem cards with totem image source', async () => {
@@ -64,9 +65,9 @@ describe('totem image resolver', () => {
     assert.equal(out.totemItems.length, 1);
     const card = out.totemItems[0];
     assert.equal(card.name, 'Mutation Totem');
-    assert.match(card.imageUrl, /\/api\/fishit-tracker\/assets\/totems\//);
-    assert.equal(card.imageSource, 'totem_manual_asset');
-    assert.equal(card.imageResolver, 'totem_catalog');
+    assert.match(card.imageUrl, /\/api\/tracker\/assets\/(manual\/totems\/|totems\/)/);
+    assert.equal(card.imageSource, manualInventoryImages.MANUAL_OVERRIDE_SOURCE);
+    assert.equal(card.imageResolver, 'totem_manual_override');
     assert.ok(out.totemAssetProof);
     assert.equal(out.totemAssetProof.rows[0].usesFishAssetPath, false);
   });
@@ -94,6 +95,6 @@ describe('totem image resolver', () => {
     }, 'https://tool.deng.my.id', { fishImageCache });
 
     assert.match(out.fishItems[0].imageUrl, /\/assets\/fish\//);
-    assert.match(out.totemItems[0].imageUrl, /\/assets\/totems\//);
+    assert.match(out.totemItems[0].imageUrl, /\/api\/tracker\/assets\/(manual\/totems\/|totems\/)/);
   });
 });

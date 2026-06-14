@@ -5,6 +5,9 @@ const path = require('path');
 
 const totemDisplayMap = require('./fishitTotemDisplayMap');
 const robloxThumbnails = require('./fishitRobloxThumbnails');
+const manualInventoryImages = require('./fishitInventoryManualImages');
+const crypto = require('crypto');
+const { trackerReadAssetUrl, trackerReadImageUrl } = require('./fishitTrackerReadUrls');
 
 function parseGameItemIcon(raw) {
   if (raw == null || raw === '') return null;
@@ -70,10 +73,9 @@ function getTotemAssetVersion(filename) {
 }
 
 function getTotemAssetUrl(baseUrl, filename) {
-  const base = String(baseUrl || '').replace(/\/$/, '');
   const file = path.basename(String(filename || ''));
   const version = getTotemAssetVersion(file);
-  return `${base}/api/fishit-tracker/assets/totems/${file}?v=${version}`;
+  return trackerReadAssetUrl(baseUrl, 'totems', file, version);
 }
 
 function resolveCatalogTotemEntry(itemId, canonicalName) {
@@ -107,14 +109,40 @@ function totemAssetFileExists(filename) {
   return fs.existsSync(path.join(CACHE_DIR, file));
 }
 
-function resolveTotemGameIconProxy(item) {
+function totemCatalogFileSha256(filename) {
+  const full = getTotemAssetFilePath(filename);
+  if (!full || !fs.existsSync(full)) return null;
+  try {
+    const buf = fs.readFileSync(full);
+    return crypto.createHash('sha256').update(buf).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/** Known bad placeholder copied to multiple totem cache files (2026-06-14 regression). */
+function isStaleTotemCatalogFile(filename) {
+  const hash = totemCatalogFileSha256(filename);
+  if (!hash) return true;
+  return hash === 'd75451816539eb8a50806749f77afb2af8afe566ed236309197103b364b08ae6';
+}
+
+function lookupManualTotemOverride(item) {
+  const override = manualInventoryImages.lookupManualOverride(item, 'totems');
+  if (!override?.uploadedFile) return null;
+  if (!manualInventoryImages.manualFileExists('totems', override.uploadedFile)) return null;
+  return override;
+}
+
+function resolveTotemGameIconProxy(item, baseUrl) {
   const parsed = parseGameItemIcon(item?.icon || item?.iconRaw);
   if (!parsed?.assetId) return null;
   if (totemDisplayMap.isRejectedTotemGameIcon(item, parsed.assetId)) return null;
-  const proxy = robloxThumbnails.proxyImageUrl(parsed.assetId);
-  if (!proxy) return null;
+  const imageUrl = trackerReadImageUrl(baseUrl, parsed.assetId)
+    || robloxThumbnails.proxyImageUrl(parsed.assetId);
+  if (!imageUrl) return null;
   return {
-    imageUrl: proxy,
+    imageUrl,
     imageSource: TOTEM_GAMEITEMDB_PROXY_SOURCE,
     icon: parsed.icon,
     imageAssetId: parsed.assetId,
@@ -125,47 +153,71 @@ function attachTotemImagesToItems(items, baseUrl) {
   if (!Array.isArray(items)) return [];
   return items.map((item) => {
     const displayName = totemDisplayMap.publicTotemDisplayName(item);
+    const rowBase = {
+      ...item,
+      name: displayName,
+      displayName,
+      category: 'totem',
+      dataSource: item.dataSource || item.source || 'playerdata_gameitemdb',
+      source: item.source || 'playerdata_gameitemdb',
+    };
+
+    const manualOverride = lookupManualTotemOverride(item);
+    if (manualOverride) {
+      const imageUrl = manualInventoryImages.buildManualImageUrl(
+        baseUrl,
+        'totems',
+        manualOverride.uploadedFile,
+      );
+      if (imageUrl) {
+        return {
+          ...rowBase,
+          name: manualOverride.originalName || displayName,
+          displayName: manualOverride.originalName || displayName,
+          imageUrl,
+          imageUrlPresent: true,
+          imageSource: manualInventoryImages.MANUAL_OVERRIDE_SOURCE,
+          imageResolver: 'totem_manual_override',
+        };
+      }
+    }
+
     const asset = lookupTotemAsset(item);
     const filename = asset?.filename || totemDisplayMap.publicTotemImageFilename(item);
-    if (filename && totemAssetFileExists(filename)) {
+    if (
+      filename
+      && totemAssetFileExists(filename)
+      && !isStaleTotemCatalogFile(filename)
+    ) {
       const imageSource = asset?.imageSource || TOTEM_MANUAL_ASSET_SOURCE;
       const resolvedName = asset?.name || displayName;
       return {
-        ...item,
+        ...rowBase,
         name: resolvedName,
         displayName: resolvedName,
         imageUrl: getTotemAssetUrl(baseUrl, filename),
         imageUrlPresent: true,
         imageSource,
         imageResolver: 'totem_catalog',
-        dataSource: item.dataSource || item.source || 'playerdata_gameitemdb',
-        source: item.source || 'playerdata_gameitemdb',
-        category: 'totem',
       };
     }
-    const proxy = resolveTotemGameIconProxy(item);
+
+    const proxy = resolveTotemGameIconProxy(item, baseUrl);
     if (proxy) {
       return {
-        ...item,
-        name: displayName,
-        displayName,
+        ...rowBase,
         imageUrl: proxy.imageUrl,
         imageUrlPresent: true,
         imageSource: proxy.imageSource,
         imageResolver: 'totem_gameitemdb_proxy',
         icon: proxy.icon,
         imageAssetId: proxy.imageAssetId,
-        dataSource: item.dataSource || item.source || 'playerdata_gameitemdb',
-        source: item.source || 'playerdata_gameitemdb',
-        category: 'totem',
       };
     }
+
     return {
-      ...item,
-      name: displayName,
-      displayName,
+      ...rowBase,
       imageResolver: 'totem_missing',
-      category: 'totem',
     };
   });
 }
@@ -210,4 +262,5 @@ module.exports = {
   attachTotemImagesToItems,
   buildTotemAssetProof,
   totemAssetFileExists,
+  isStaleTotemCatalogFile,
 };

@@ -1,0 +1,40 @@
+{
+  "marker": "FRESH_START_BEFORE_60MIN_LIVE_PROOF",
+  "capturedAt": "2026-06-14T16:35:22.153Z",
+  "gitHead": "719f7ef5cf12df71f6e0409c0a9ac74dd5565485",
+  "backupPath": "site/data/backups/fresh-start-20260614-233231",
+  "staleStateCleared": {
+    "pm2StoppedAndRestarted": true,
+    "inMemoryQueuesResetOnRestart": true,
+    "tmpFilesRemoved": 3,
+    "legacyMonolithArchivedOrAbsent": true,
+    "orphanProcessesKilled": 0
+  },
+  "baselineAfterSettle": {
+    "queueDepth": 11,
+    "note": "Post-restart queue is live Roblox upload traffic, not pre-restart stale backlog. Dropped from 120 to 11 within 2 minutes.",
+    "pendingFlushCount": 39,
+    "pendingFlushNote": "Active debounced sharded account writes, not a persisted queue file",
+    "deferredPending": 6,
+    "deferredQueued": 5,
+    "deferredActive": 4,
+    "tmpFilesInData": 0,
+    "legacyMonolith": null,
+    "sharded": {
+      "active": true,
+      "accountFiles": 200,
+      "indexBytes": 20357,
+      "totalBytes": 7311456
+    },
+    "orphanProcessCount": 0,
+    "eventLoopLagMs": 437.6325,
+    "memoryHeapUsedMb": 311
+  },
+  "pm2": {
+    "dengToolSite": { "pid": 13752, "port8791Owner": 13752, "portMatch": true },
+    "dengTrackerIngest": { "pid": 3548, "port8792Owner": 3548, "portMatch": true }
+  },
+  "sixtyMinuteMonitorStartedAt": "2026-06-14T16:35:30.000Z",
+  "sixtyMinuteMonitorScript": "site/scripts/run_60min_live_upload_proof.js",
+  "sixtyMinuteMonitorOutput": "site/proofs/live_60min_upload_proof.json"
+}

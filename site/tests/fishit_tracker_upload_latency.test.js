@@ -77,7 +77,7 @@ describe('tracker upload latency — fast path + coalesced enrichment', () => {
       'utf8',
     );
     assert.doesNotMatch(source, /acquireSlot/);
-    assert.doesNotMatch(source, /server_busy/);
+    assert.match(source, /server_busy/);
     assert.match(source, /scheduleDeferredUploadWork/);
   });
 

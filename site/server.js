@@ -109,12 +109,24 @@ server.on('error', (err) => {
 
 // Graceful shutdown — allow in-flight tracker uploads to finish before PM2 force-kills.
 function shutdown(signal) {
-  console.log(`[deng-tool-site] ${signal} received – shutting down`);
-  server.close(() => {
-    console.log('[deng-tool-site] HTTP server closed');
-    process.exit(0);
-  });
-  setTimeout(() => process.exit(1), 15_000);
+  console.log(`[deng-tool-site] ${signal} received – flushing live sessions then shutting down`);
+  const fishitTrackerRoutes = require('./src/fishitTrackerRoutes');
+  Promise.resolve(fishitTrackerRoutes.flushAllLiveSessionsToDisk())
+    .then((flushResult) => {
+      console.log('[deng-tool-site] shutdown flush saved=%s mode=%s',
+        flushResult?.saved ?? 0,
+        flushResult?.metrics?.mode || '?');
+    })
+    .catch((err) => {
+      console.warn('[deng-tool-site] shutdown flush error:', err?.message || err);
+    })
+    .finally(() => {
+      server.close(() => {
+        console.log('[deng-tool-site] HTTP server closed');
+        process.exit(0);
+      });
+      setTimeout(() => process.exit(1), 15_000);
+    });
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

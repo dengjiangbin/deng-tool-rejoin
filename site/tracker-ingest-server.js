@@ -88,9 +88,21 @@ server.on('error', (err) => {
 });
 
 function shutdown(signal) {
-  console.log(`[deng-tracker-ingest] ${signal} received – shutting down`);
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(1), 15_000);
+  console.log(`[deng-tracker-ingest] ${signal} received – flushing live sessions then shutting down`);
+  const fishitTrackerRoutes = require('./src/fishitTrackerRoutes');
+  Promise.resolve(fishitTrackerRoutes.flushAllLiveSessionsToDisk())
+    .then((flushResult) => {
+      console.log('[deng-tracker-ingest] shutdown flush saved=%s mode=%s',
+        flushResult?.saved ?? 0,
+        flushResult?.metrics?.mode || '?');
+    })
+    .catch((err) => {
+      console.warn('[deng-tracker-ingest] shutdown flush error:', err?.message || err);
+    })
+    .finally(() => {
+      server.close(() => process.exit(0));
+      setTimeout(() => process.exit(1), 15_000);
+    });
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

@@ -16,8 +16,32 @@ describe('trackerConcurrencyGate', () => {
     );
     assert.match(source, /tracker_status/);
     assert.match(source, /isStatusOnlyUpload/);
-    assert.doesNotMatch(source, /server_busy/);
+    assert.match(source, /server_busy/);
+    assert.match(source, /TRACKER_UPLOAD_BUSY_LAG_MS/);
     assert.doesNotMatch(source, /acquireSlot/);
+  });
+
+  test('returns JSON 503 server_busy when event loop lag exceeds threshold', () => {
+    const loopMonitor = require('../src/trackerEventLoopMonitor');
+    loopMonitor._setLagForTests(3000);
+    try {
+      const handler = gate.wrapTrackerUpload('lag-test', (_req, res) => {
+        res.status(200).json({ ok: true });
+      });
+      const res = {
+        statusCode: 200,
+        body: null,
+        status(code) { this.statusCode = code; return this; },
+        json(payload) { this.body = payload; return this; },
+      };
+      handler({ body: { username: 'LagUser', type: 'inventory_snapshot' } }, res);
+      assert.equal(res.statusCode, 503);
+      assert.equal(res.body.error, 'server_busy');
+      assert.equal(res.body.retryable, true);
+      assert.ok(res.body.lagMs >= 2500);
+    } finally {
+      loopMonitor._resetForTests();
+    }
   });
 
   test('stats exposes deferred queue metrics', () => {

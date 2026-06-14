@@ -3,8 +3,9 @@
 const { EXPECTED_CLIENT_TRACKER_BUILD, isAllowedTrackerBuild } = require('./fishitTrackerBuild');
 const { isTransientServerUploadFailure } = require('./fishitTrackerUploadStatus');
 
-/** Live account presence grace — 180s matches ~60s upload interval + network slack. */
-const ACCOUNT_PRESENCE_GRACE_MS = 180_000;
+/** Public status grace — stay green unless uploads fail continuously for 10 minutes. */
+const ACCOUNT_PRESENCE_GRACE_MS = 600_000;
+const STATUS_CONTINUOUS_FAILURE_GRACE_MS = ACCOUNT_PRESENCE_GRACE_MS;
 
 function parseTimestampMs(value) {
   if (!value) return null;
@@ -29,6 +30,7 @@ function resolveLastAccountSeenAt(data) {
   if (!data) return null;
   if (data.lastAccountSeenAt) return data.lastAccountSeenAt;
   const candidates = [
+    data.lastValidStatusAt,
     data.lastSuccessfulUploadAt,
     data.lastSuccessfulHeartbeatAt,
     data.lastHeartbeatAt,
@@ -149,6 +151,7 @@ function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS,
 
 module.exports = {
   ACCOUNT_PRESENCE_GRACE_MS,
+  STATUS_CONTINUOUS_FAILURE_GRACE_MS,
   parseTimestampMs,
   syncAgeSecondsFromTimestamp,
   isTrustedClientBuild,

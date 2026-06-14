@@ -44,8 +44,13 @@ function _resetForTests() {
   samples.length = 0;
 }
 
+function _setLagForTests(ms) {
+  lagMs = Number(ms) || 0;
+}
+
 module.exports = {
   getLagMs,
   getMetrics,
   _resetForTests,
+  _setLagForTests,
 };

@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { trackerReadManualAssetUrl } = require('./fishitTrackerReadUrls');
 
 const MANUAL_OVERRIDE_SOURCE = 'manual_override';
 const MANUAL_IMAGE_RESOLVER = 'manual_inventory_override';
@@ -95,11 +96,7 @@ function getManualAssetFilePath(category, filename) {
 }
 
 function buildManualImageUrl(baseUrl, category, filename) {
-  const cat = normalizeCategory(category);
-  const file = path.basename(String(filename || ''));
-  if (!file) return null;
-  const base = String(baseUrl || '').replace(/\/$/, '');
-  return `${base}/api/fishit-tracker/assets/manual/${cat}/${file}`;
+  return trackerReadManualAssetUrl(baseUrl, category, filename);
 }
 
 function lookupManualOverride(item, category) {

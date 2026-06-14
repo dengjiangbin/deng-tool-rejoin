@@ -91,7 +91,7 @@ describe('account upload status — server proof vs legacy presence fields', () 
     assert.equal(isSessionLive(session), true);
     assert.equal(upload.statusColor, 'yellow');
     assert.equal(presence.accountPresenceLive, true);
-    assert.equal(inventory.inventoryUploadFresh, false);
+    assert.equal(inventory.inventoryUploadFresh, true);
   });
 
   test('stale heartbeat does not turn upload status red when lastSuccessfulUploadAt is fresh', () => {
@@ -118,12 +118,34 @@ describe('account upload status — server proof vs legacy presence fields', () 
     assert.equal(inventory.inventoryUploadFresh, true);
   });
 
-  test('account turns offline when heartbeat grace expires', () => {
+  test('account stays online within 10-minute grace when heartbeat is stale but last success is recent', () => {
     const session = {
       trackerBuild: MINIMUM_TRACKER_BUILD,
       isOnline: true,
       lastSuccessfulHeartbeatAt: iso(120000),
       lastHeartbeatAt: iso(120000),
+      lastSuccessfulUploadAt: iso(8000),
+      lastStatus: 'green',
+      snapshotComplete: true,
+      intervalSeconds: 10,
+      graceSeconds: 5,
+    };
+    const upload = uploadStatus.deriveTrackerUploadAccountStatus(session, {
+      expectedTrackerBuild: MINIMUM_TRACKER_BUILD,
+      isTrustedBuild: isTrusted,
+    });
+    assert.equal(upload.statusColor, 'green');
+    assert.equal(isSessionLive(session), true);
+    assert.equal(deriveAccountPresenceStatus(session).accountPresenceLive, true);
+  });
+
+  test('account turns offline when grace expires beyond 10 minutes', () => {
+    const session = {
+      trackerBuild: MINIMUM_TRACKER_BUILD,
+      isOnline: true,
+      lastSuccessfulHeartbeatAt: iso(620000),
+      lastHeartbeatAt: iso(620000),
+      lastSuccessfulUploadAt: iso(620000),
       snapshotComplete: true,
       intervalSeconds: 10,
       graceSeconds: 5,

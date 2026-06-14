@@ -23,8 +23,20 @@ function shouldReturn202(req, sessionKey) {
 
 function finishTrackerUploadResponse(req, res, responsePayload, sessionKey) {
   const route = trackerRouteLabel(req);
+  const responseStartedAt = Date.now();
   recordResponseBeforeEnrichment();
   recordLatestPersistSuccess();
+
+  const logResponseSent = (statusCode) => {
+    console.log(
+      '[fishit-tracker] upload_response_sent route=%s sessionKey=%s status=%d responseMs=%d lagMs=%d beforeDiskFlush=true',
+      route,
+      sessionKey || '?',
+      statusCode,
+      Date.now() - responseStartedAt,
+      require('./trackerEventLoopMonitor').getLagMs(),
+    );
+  };
 
   const schedulePostResponseFlush = () => {
     if (sessionKey && process.env.TRACKER_INGEST_MODE === '1') {
@@ -38,6 +50,7 @@ function finishTrackerUploadResponse(req, res, responsePayload, sessionKey) {
     recordAccepted202();
     recordDeferredEnrichment();
     schedulePostResponseFlush();
+    logResponseSent(202);
     return res.status(202).json({
       ok: true,
       accepted: responsePayload.accepted !== false,
@@ -52,6 +65,7 @@ function finishTrackerUploadResponse(req, res, responsePayload, sessionKey) {
   }
 
   schedulePostResponseFlush();
+  logResponseSent(200);
   return res.status(200).json(responsePayload);
 }
 

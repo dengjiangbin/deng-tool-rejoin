@@ -9,6 +9,7 @@ const fs = require('fs');
 const playerStatsStore = require('./fishitPlayerStats');
 const snapshotCompleteness = require('./fishitSnapshotCompleteness');
 const gameItemDbPublic = require('./fishitGameItemDbPublic');
+const shardedStore = require('./fishitSessionStoreSharded');
 const { getLagMs } = require('./trackerEventLoopMonitor');
 
 function storePath() {
@@ -36,6 +37,8 @@ let _flushCount = 0;
 let _flushFailCount = 0;
 let _dirtySinceMs = 0;
 const MAX_LAG_DEFER_MS = Number(process.env.FISHIT_SESSION_MAX_LAG_DEFER_MS || 3000);
+const MAX_ERROR_TEXT = Number(process.env.FISHIT_MAX_STORED_ERROR_CHARS || 240);
+const MAX_LANE_ERRORS = Number(process.env.FISHIT_MAX_LANE_ERRORS || 3);
 
 function _defaultFile() {
   return { updatedAt: null, sessions: {}, uidAliases: {} };
@@ -182,6 +185,9 @@ function sanitiseSession(key, data) {
     inventoryChanged: data.inventoryChanged === true,
     lastStatus: data.lastStatus || null,
     lastStatusAt: data.lastStatusAt || null,
+    lastLoaderErrorMessage: data.lastLoaderErrorMessage
+      ? String(data.lastLoaderErrorMessage).slice(0, MAX_ERROR_TEXT)
+      : null,
     redSince: data.redSince || null,
     inventoryRedSince: data.inventoryRedSince || null,
     statsRedSince: data.statsRedSince || null,
@@ -270,7 +276,45 @@ function sanitiseSession(key, data) {
     scanCompleted: data.scanCompleted === true,
     restoredFromDisk: false,
   };
-  return snapshotCompleteness.applyRehydratedCompleteness(base, playerStatsStore);
+  return _compactCurrentSessionState(
+    snapshotCompleteness.applyRehydratedCompleteness(base, playerStatsStore),
+  );
+}
+
+/** Overwrite-only current state — drop legacy duplicates and unbounded debug from hot storage. */
+function _compactCurrentSessionState(session) {
+  if (!session || typeof session !== 'object') return session;
+  const out = { ...session };
+  if (Array.isArray(out.playerDataFishItems) && out.playerDataFishItems.length) {
+    out.items = [];
+    out.rawItems = [];
+    out.inventory = null;
+    out.lastGoodFishItems = null;
+    out.lastGoodRawItems = null;
+    out.lastGoodInventory = null;
+  }
+  delete out.playerStatsDebug;
+  delete out.inventoryItemClassificationDebug;
+  delete out.totemPathAudit;
+  delete out.totemInventoryPathProof;
+  delete out.gameItemDbTotemAudit;
+  out.nonFishNonStoneItemGroups = [];
+  delete out.unresolvedDiagnostics;
+  delete out.lastInventorySnapshotDiagnostics;
+  delete out.playerDataGameItemDbProof;
+  delete out.playerDataUnresolvedItems;
+  delete out.hiddenUnresolvedRows;
+  delete out.discoveredCatalogIngest;
+  if (out.lastLoaderErrorMessage) {
+    out.lastLoaderErrorMessage = String(out.lastLoaderErrorMessage).slice(0, MAX_ERROR_TEXT);
+  }
+  if (out.lastUploadRejectReason) {
+    out.lastUploadRejectReason = String(out.lastUploadRejectReason).slice(0, MAX_ERROR_TEXT);
+  }
+  if (Array.isArray(out.recentLaneErrors)) {
+    out.recentLaneErrors = out.recentLaneErrors.slice(-MAX_LANE_ERRORS);
+  }
+  return out;
 }
 
 function _readFileFromDisk() {
@@ -351,6 +395,9 @@ async function renameAsyncWithRetry(tmp, target, maxAttempts = 4) {
 
 async function flushToDiskAsync(options = {}) {
   const priority = options.priority === true;
+  if (shardedStore.useShardedStorage()) {
+    return shardedStore.flushDirtyAccountsAsync({ priority });
+  }
   if (!_pendingDirty || !_fileCache) return { flushed: false };
   if (_flushInFlight) {
     if (priority) scheduleFlushDelay(0);
@@ -394,6 +441,9 @@ async function flushToDiskAsync(options = {}) {
 }
 
 function flushToDiskSync() {
+  if (shardedStore.useShardedStorage()) {
+    return shardedStore.flushDirtyAccountsAsync({ priority: true });
+  }
   if (!_fileCache) return { flushed: false };
   const started = Date.now();
   try {
@@ -417,6 +467,10 @@ function flushToDiskSync() {
 }
 
 function schedulePriorityFlush() {
+  if (shardedStore.useShardedStorage()) {
+    shardedStore.flushDirtyAccountsAsync({ priority: true }).catch(() => {});
+    return;
+  }
   if (SYNC_SAVE) {
     flushToDiskSync();
     return;
@@ -450,9 +504,14 @@ function scheduleFlush() {
 
 function saveSession(key, data, liveTrackDB) {
   if (!key || !data) return false;
+  const row = sanitiseSession(key, data);
+  if (!row) return false;
+  if (shardedStore.useShardedStorage()) {
+    return shardedStore.saveAccount(key, row, liveTrackDB);
+  }
   const file = ensureFileCache();
   file.sessions = file.sessions || {};
-  file.sessions[key] = sanitiseSession(key, data);
+  file.sessions[key] = row;
   file.updatedAt = new Date().toISOString();
   _applyUidAliases(file, liveTrackDB);
   _trimSessionMap(file.sessions);
@@ -464,6 +523,9 @@ function saveSession(key, data, liveTrackDB) {
 
 function reloadIfChanged(liveTrackDB) {
   if (!liveTrackDB || typeof liveTrackDB !== 'object') return { reloaded: false };
+  if (shardedStore.useShardedStorage()) {
+    return shardedStore.reloadChangedAccounts(liveTrackDB, sanitiseSession);
+  }
   try {
     if (!fs.existsSync(storePath())) return { reloaded: false, path: storePath() };
     const st = fs.statSync(storePath());
@@ -500,6 +562,9 @@ function reloadIfChanged(liveTrackDB) {
 }
 
 function getSessionFileMetrics() {
+  if (shardedStore.useShardedStorage()) {
+    return shardedStore.getShardedMetrics();
+  }
   try {
     if (_fileCache) {
       const keys = Object.keys(_fileCache.sessions || {}).filter((k) => !k.startsWith('uid:'));
@@ -536,6 +601,9 @@ function getSessionFileMetrics() {
 
 function loadIntoLiveTrackDB(liveTrackDB) {
   if (!liveTrackDB || typeof liveTrackDB !== 'object') return { loaded: 0 };
+  if (shardedStore.useShardedStorage()) {
+    return shardedStore.loadAllIntoLiveTrackDB(liveTrackDB, sanitiseSession);
+  }
   let loaded = 0;
   try {
     _fileCache = _readFileFromDisk();
@@ -562,6 +630,9 @@ function loadIntoLiveTrackDB(liveTrackDB) {
 }
 
 function getStoreMeta() {
+  if (shardedStore.useShardedStorage()) {
+    return shardedStore.getShardedMetrics();
+  }
   try {
     if (_fileCache) {
       const keys = Object.keys(_fileCache.sessions || {}).filter((k) => !k.startsWith('uid:'));
@@ -590,7 +661,21 @@ function getStoreMeta() {
 }
 
 function getSessionStoreFlushMetrics() {
+  if (shardedStore.useShardedStorage()) {
+    const m = shardedStore.getShardedMetrics();
+    return {
+      mode: 'sharded',
+      pendingDirty: m.pendingDirtyAccounts > 0,
+      pendingAccountCount: m.pendingDirtyAccounts,
+      flushCount: m.flushCount,
+      flushFailCount: m.flushFailCount,
+      lastFlushMs: m.lastFlushMs,
+      totalBytes: m.totalBytes,
+      accountCount: m.accountCount,
+    };
+  }
   return {
+    mode: 'legacy',
     pendingDirty: _pendingDirty,
     dirtyAgeMs: _dirtySinceMs > 0 ? Date.now() - _dirtySinceMs : 0,
     flushCount: _flushCount,
@@ -603,6 +688,7 @@ function getSessionStoreFlushMetrics() {
 }
 
 function _reset() {
+  shardedStore.resetShardedForTests();
   if (_flushTimer) {
     clearTimeout(_flushTimer);
     _flushTimer = null;
@@ -624,6 +710,12 @@ function _reset() {
 function _invalidateReloadCursorForTests() {
   _lastStoreMtimeMs = 0;
   _lastStoreUpdatedAt = null;
+  shardedStore.invalidateReloadCursorForTests();
+}
+
+function migrateToShardedStorageIfNeeded() {
+  if (!shardedStore.useShardedStorage()) return { migrated: 0, mode: 'legacy' };
+  return shardedStore.migrateLegacyMonolithIfNeeded(sanitiseSession);
 }
 
 module.exports = {
@@ -636,9 +728,11 @@ module.exports = {
   flushToDiskAsync,
   schedulePriorityFlush,
   sanitiseSession,
+  migrateToShardedStorageIfNeeded,
   getStoreMeta,
   getSessionFileMetrics,
   getSessionStoreFlushMetrics,
   _reset,
   _invalidateReloadCursorForTests,
+  _compactCurrentSessionState,
 };

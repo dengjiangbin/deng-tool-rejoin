@@ -5,6 +5,11 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
+process.env.NODE_ENV = 'test';
+process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
+process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'test-service-role-key';
+process.env.FISHIT_DB_PATH = process.env.FISHIT_DB_PATH || '/nonexistent/deng-fish-it.sqlite';
+
 const trackerRarityStyle = require('../src/fishitTrackerRarityStyle');
 const stoneDisplayMap = require('../src/fishitStoneDisplayMap');
 const stoneImageAssets = require('../src/fishitStoneImageAssets');
@@ -110,13 +115,12 @@ describe('BLOCKER10ZP rarity mapping + Transcended Stone image', () => {
     assert.doesNotMatch(epicHtml, /ft-rarity-MYTHIC/);
   });
 
-  test('Double internal stone type displays Transcended Stone and transcended image asset', async () => {
+  test('Double internal stone type displays Transcended Stone and gameDB image asset', async () => {
     assert.equal(stoneDisplayMap.publicStoneDisplayName({ stoneType: 'Double' }), 'Transcended Stone');
     assert.equal(
       stoneDisplayMap.publicStoneImageFilename({ itemId: '246', stoneType: 'Double' }),
       'stone_246_transcended.png',
     );
-    assert.ok(stoneImageAssets.stoneAssetFileExists('stone_246_transcended.png'));
 
     const pub = await buildPublicFishFields([], BASE_URL, {
       sessionData: {
@@ -130,8 +134,10 @@ describe('BLOCKER10ZP rarity mapping + Transcended Stone image', () => {
     assert.ok(stone);
     assert.equal(stone.displayName, 'Transcended Stone');
     assert.equal(stone.name, 'Transcended Stone');
-    assert.match(stone.imageUrl, /\/api\/fishit-tracker\/assets\/stones\/stone_246_transcended\.png\?v=\d+/);
+    assert.equal(stone.imageSource, 'stone_gameitemdb_proxy');
+    assert.match(stone.imageUrl, /\/api\/tracker\/image\/73883190545629/);
     assert.doesNotMatch(stone.imageUrl, /stone_246_double\.png/);
+    assert.doesNotMatch(stone.imageUrl, /stone_246_transcended\.png/);
   });
 
   test('tracker template does not expose old Double Enchant Stone label publicly', () => {

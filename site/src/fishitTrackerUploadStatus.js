@@ -1,6 +1,8 @@
 'use strict';
 
 const DEFAULT_UPLOAD_INTERVAL_SECONDS = 60;
+/** Public UI grace — keep green unless continuous failure exceeds 10 minutes. */
+const PUBLIC_STATUS_GRACE_SECONDS = 600;
 
 /** HTTP/proxy failures that must not flip account presence red while last success is fresh. */
 const TRANSIENT_UPLOAD_FAILURE_PREFIXES = [
@@ -53,12 +55,11 @@ function uploadStatusThresholds(intervalSeconds) {
     1,
     Number(intervalSeconds) > 0 ? Number(intervalSeconds) : DEFAULT_UPLOAD_INTERVAL_SECONDS,
   );
-  const onlineFactor = interval <= 15 ? 3 : 2.5;
-  const offlineFactor = interval <= 15 ? 6 : 5;
+  const graceSeconds = PUBLIC_STATUS_GRACE_SECONDS;
   return {
     uploadIntervalSeconds: interval,
-    onlineThresholdSeconds: Math.ceil(interval * onlineFactor),
-    offlineThresholdSeconds: Math.ceil(interval * offlineFactor),
+    onlineThresholdSeconds: Math.min(Math.ceil(interval * 2.5), graceSeconds),
+    offlineThresholdSeconds: graceSeconds,
   };
 }
 
@@ -176,9 +177,11 @@ function markTrackerSyncSuccess(session, serverReceivedAt, snapshot = {}) {
     lastStatus: 'green',
     lastStatusAt: now,
     lastSuccessfulUploadAt: now,
+    lastValidStatusAt: now,
     redSince: null,
     inventoryRedSince: null,
     statsRedSince: null,
+    continuousFailureSince: null,
     lastSyncReason: snapshot.syncReason || 'accepted_snapshot',
     lastUploadAttemptAt: now,
     lastStatusChangeAt: wasGreen ? (session?.lastStatusChangeAt || now) : now,
@@ -466,6 +469,7 @@ function applyRejectedUploadMeta(session, body, now, rejectReason) {
 function applyTransientUploadFailure(session, now, reason, statusCode) {
   const normalized = normalizeTransientUploadFailureReason(reason, statusCode);
   const base = session || {};
+  const hadContinuous = base.continuousFailureSince;
   return {
     ...base,
     lastUploadAttemptAt: now,
@@ -476,6 +480,7 @@ function applyTransientUploadFailure(session, now, reason, statusCode) {
     rejectReason: normalized,
     lastUploadFailureIsTransient: true,
     lastUploadStatusCodeReturned: Number.isFinite(Number(statusCode)) ? Number(statusCode) : base.lastUploadStatusCodeReturned,
+    continuousFailureSince: hadContinuous || now,
     // Preserve lastStatus / lastSuccessfulUploadAt — transient proxy errors are not account offline.
     lastSyncReason: base.lastStatus === 'green'
       ? (base.lastSyncReason || 'last_success_within_grace')
@@ -485,6 +490,7 @@ function applyTransientUploadFailure(session, now, reason, statusCode) {
 
 module.exports = {
   DEFAULT_UPLOAD_INTERVAL_SECONDS,
+  PUBLIC_STATUS_GRACE_SECONDS,
   TRANSIENT_UPLOAD_FAILURE_PREFIXES,
   normalizeTransientUploadFailureReason,
   isTransientServerUploadFailure,

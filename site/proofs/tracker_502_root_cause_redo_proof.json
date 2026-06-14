@@ -1,0 +1,74 @@
+{
+  "capturedAt": "2026-06-14T16:09:00.000Z",
+  "verdict": "NOT FIXED — prior retry/backoff did not stop real Cloudflare 502; root cause is Node event-loop blockage from monolithic session I/O under load",
+  "whyPreviousFixFailed": {
+    "summary": "Lua retry/backoff and 202 fast-path did not prevent upstream timeout when ingest event loop lag reached 6–8s while still doing full 7.9MB JSON flush work",
+    "evidence": [
+      "Roblox still saw TRANSIENT_UPLOAD_BACKOFF status=502 with marker UPLOAD_502_HARDENING_AND_EVOLVED_STONE_QTY_FIX_2026_06_14 loaded",
+      "Node logs showed statusCode=202 and rawPersistMs=2–90 while eventLoopLagMs=6878–8249",
+      "Cloudflare/tunnel returns HTML 502 when origin does not respond within proxy timeout — not a fake-success path"
+    ]
+  },
+  "productionEvidenceBefore": {
+    "ingestPm2Restarts": 113,
+    "ingestMemoryMb": 1200,
+    "eventLoopLagMsPeak": 8249,
+    "uploadQueueDepth": 28,
+    "deferredEnrichmentBacklog": 14,
+    "shedEvents": 45794,
+    "port8791OwnerPid": 12812,
+    "port8791Pm2Pid": 12812,
+    "port8792OwnerPid": 14252,
+    "port8792Pm2Pm2": 14252,
+    "orphanPortMismatch": false,
+    "diskCFreeBytes": 4861403136,
+    "legacyMonolithBytes": 7935150,
+    "corruptTmpFound": "fishit_live_sessions.json.tmp truncated at 5242880 bytes — monolith atomic write interrupted"
+  },
+  "storageRootCause": {
+    "modeBefore": "legacy_monolith",
+    "fileBytesBefore": 7935150,
+    "accountCount": 200,
+    "avgAccountBytes": 39627,
+    "maxAccountBytes": 383605,
+    "maxAccountKey": "kingree030",
+    "contribution": "Every upload/heartbeat triggered full-file JSON.stringify+write; site reloadIfChanged re-parsed entire file every 2s; PM2 FISHIT_LIVE_SESSIONS_PATH kept legacy mode active even after code deploy"
+  },
+  "deployedMitigations": {
+    "storage": "Per-account sharded overwrite-only store (fishitSessionStoreSharded.js)",
+    "migration": "200 accounts migrated 2026-06-14T16:08:40Z; legacy renamed to .pre-shard-*.bak",
+    "compact": "_compactCurrentSessionState drops debug/proof/duplicate inventory fields",
+    "uploadResponse": "Response sent before disk flush (beforeDiskFlush=true in logs)",
+    "overload": "JSON 503 server_busy when eventLoopLagMs>=2500 (TRACKER_UPLOAD_BUSY_LAG_MS)",
+    "shutdown": "flushAllLiveSessionsToDisk on SIGTERM/SIGINT before PM2 kill",
+    "ecosystem": "FISHIT_LIVE_SESSIONS_PATH cleared; FISHIT_SESSION_SHARDED=1; FISHIT_LIVE_SESSIONS_DIR set"
+  },
+  "measurementsAfterMigration": {
+    "shardedTotalBytes": 7055447,
+    "shardedIndexBytes": 20346,
+    "accountCount": 200,
+    "avgAccountBytes": 35176,
+    "maxAccountBytes": 352015,
+    "maxAccountKey": "kingree030",
+    "eventLoopLagMsAfterRestartSample": 356,
+    "ingestMemoryMbAfterRestart": 72,
+    "note": "Lag dropped from 8249ms to ~356ms immediately after restart; must hold under sustained 60s upload load"
+  },
+  "productionEvidenceAfterRestart": {
+    "port8791OwnerPid": 15096,
+    "port8791Pm2Pid": 15096,
+    "port8792OwnerPid": 12784,
+    "port8792Pm2Pid": 12784,
+    "orphanPortMismatch": false,
+    "ingestPm2Restarts": 115
+  },
+  "stillRequired": [
+    "60-minute real Roblox run with zero Cloudflare 502 / FINAL_UPLOAD_FAIL reason=code-502",
+    "/tracker closed-and-reopened shows latest upload without manual refresh",
+    "Multi-client load test (10–50 accounts) with bounded storage and stable lag",
+    "Git commit and push of storage/502 changes (not yet committed)",
+    "Confirm legacy monolith stops growing now that sharded mode is active"
+  ],
+  "notMixedWith": "Evolved Enchant Stone quantity cap — separate fix commit 7a67fbd (FISHIT_MAX_PERSISTED_ITEMS slice before stone aggregation)",
+  "publicLoaderUrl": "loadstring(game:HttpGet(\"https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua\"))() — unchanged"
+}

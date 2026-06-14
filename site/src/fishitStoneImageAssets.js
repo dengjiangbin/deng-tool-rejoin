@@ -4,8 +4,12 @@ const fs = require('fs');
 const path = require('path');
 
 const stoneDisplayMap = require('./fishitStoneDisplayMap');
+const robloxThumbnails = require('./fishitRobloxThumbnails');
+const manualInventoryImages = require('./fishitInventoryManualImages');
+const { trackerReadAssetUrl, trackerReadImageUrl } = require('./fishitTrackerReadUrls');
 
 const STONE_MANUAL_ASSET_SOURCE = 'stone_manual_asset';
+const STONE_GAMEITEMDB_PROXY_SOURCE = 'stone_gameitemdb_proxy';
 const ADMIN_UPLOADED_STONE_SOURCE = 'admin_uploaded_stone_asset';
 const CACHE_DIR = path.join(__dirname, '..', 'data', 'stone_image_cache');
 const CATALOG_PATH = path.join(__dirname, '..', 'data', 'fishit_stone_image_assets.json');
@@ -51,10 +55,9 @@ function getStoneAssetVersion(filename) {
 }
 
 function getStoneAssetUrl(baseUrl, filename) {
-  const base = String(baseUrl || '').replace(/\/$/, '');
   const file = path.basename(String(filename || ''));
   const version = getStoneAssetVersion(file);
-  return `${base}/api/fishit-tracker/assets/stones/${file}?v=${version}`;
+  return trackerReadAssetUrl(baseUrl, 'stones', file, version);
 }
 
 function localStoneUrl(baseUrl, filename) {
@@ -99,6 +102,57 @@ function stoneAssetFileExists(filename) {
   return fs.existsSync(path.join(CACHE_DIR, file));
 }
 
+function parseGameItemIcon(raw) {
+  if (raw == null || raw === '') return null;
+  if (typeof raw === 'number') {
+    if (raw <= 0) return null;
+    return { icon: `rbxassetid://${raw}`, assetId: String(raw) };
+  }
+  const s = String(raw).trim();
+  if (!s || s === '0' || s.toLowerCase() === 'rbxassetid://0') return null;
+  const prefixed = s.match(/^rbxassetid:\/\/(\d+)$/i);
+  if (prefixed) {
+    if (prefixed[1] === '0') return null;
+    return { icon: s, assetId: prefixed[1] };
+  }
+  if (/^\d+$/.test(s)) {
+    if (s === '0') return null;
+    return { icon: `rbxassetid://${s}`, assetId: s };
+  }
+  return null;
+}
+
+function resolveStoneGameIconProxy(item, meta, baseUrl) {
+  const canonical = meta || stoneDisplayMap.resolvePublicStoneMeta(item);
+  const parsed = parseGameItemIcon(item?.icon || item?.iconRaw);
+  const assetId = parsed?.assetId || canonical?.gameIconAssetId || null;
+  if (!assetId) return null;
+  const imageUrl = trackerReadImageUrl(baseUrl, assetId)
+    || robloxThumbnails.proxyImageUrl(assetId);
+  if (!imageUrl) return null;
+  return {
+    imageUrl,
+    imageUrlPresent: true,
+    imageSource: STONE_GAMEITEMDB_PROXY_SOURCE,
+    imageResolver: 'stone_gameitemdb_proxy',
+    icon: parsed?.icon || `rbxassetid://${assetId}`,
+    imageAssetId: assetId,
+    iconAssetId: assetId,
+  };
+}
+
+function shouldPreferGameDbStone(item) {
+  const meta = stoneDisplayMap.resolvePublicStoneMeta(item);
+  return meta?.preferGameDbIcon === true && Boolean(meta?.gameIconAssetId);
+}
+
+function lookupManualStoneOverride(item) {
+  const override = manualInventoryImages.lookupManualOverride(item, 'stones');
+  if (!override?.uploadedFile) return null;
+  if (!manualInventoryImages.manualFileExists('stones', override.uploadedFile)) return null;
+  return override;
+}
+
 function publicStoneDisplayName(item) {
   return stoneDisplayMap.publicStoneDisplayName(item);
 }
@@ -107,27 +161,77 @@ function attachStoneImagesToItems(items, baseUrl) {
   if (!Array.isArray(items)) return [];
   return items.map((item) => {
     const displayName = publicStoneDisplayName(item);
-    const asset = lookupStoneAsset(item.itemId, item.stoneType);
-    const filename = asset?.filename || stoneDisplayMap.publicStoneImageFilename(item);
-    if (!filename || !stoneAssetFileExists(filename)) {
-      return {
-        ...item,
-        name: displayName,
-        displayName,
-      };
-    }
-    const imageSource = asset?.imageSource || STONE_MANUAL_ASSET_SOURCE;
-    const resolvedName = asset?.name || displayName;
-    return {
+    const meta = stoneDisplayMap.resolvePublicStoneMeta(item);
+    const rowBase = {
       ...item,
-      name: resolvedName,
-      displayName: resolvedName,
-      imageUrl: localStoneUrl(baseUrl, filename),
-      imageUrlPresent: true,
-      imageSource,
+      name: displayName,
+      displayName,
+      category: 'stone',
       dataSource: item.dataSource || item.source || 'playerdata_gameitemdb',
       source: item.source || 'playerdata_gameitemdb',
-      category: 'stone',
+    };
+
+    if (shouldPreferGameDbStone(item)) {
+      const gameDb = resolveStoneGameIconProxy(item, meta, baseUrl);
+      if (gameDb) {
+        const resolvedName = meta?.displayName || displayName;
+        return {
+          ...rowBase,
+          ...gameDb,
+          name: resolvedName,
+          displayName: resolvedName,
+        };
+      }
+    }
+
+    const manualOverride = lookupManualStoneOverride(item);
+    if (manualOverride) {
+      const imageUrl = manualInventoryImages.buildManualImageUrl(
+        baseUrl,
+        'stones',
+        manualOverride.uploadedFile,
+      );
+      if (imageUrl) {
+        return {
+          ...rowBase,
+          name: manualOverride.originalName || displayName,
+          displayName: manualOverride.originalName || displayName,
+          imageUrl,
+          imageUrlPresent: true,
+          imageSource: manualInventoryImages.MANUAL_OVERRIDE_SOURCE,
+          imageResolver: 'stone_manual_override',
+        };
+      }
+    }
+
+    const asset = lookupStoneAsset(item.itemId, item.stoneType);
+    const filename = asset?.filename || stoneDisplayMap.publicStoneImageFilename(item);
+    if (
+      filename
+      && !stoneDisplayMap.isLegacyStoneImageFilename(filename)
+      && stoneAssetFileExists(filename)
+    ) {
+      const imageSource = asset?.imageSource || STONE_MANUAL_ASSET_SOURCE;
+      const resolvedName = asset?.name || displayName;
+      return {
+        ...rowBase,
+        name: resolvedName,
+        displayName: resolvedName,
+        imageUrl: localStoneUrl(baseUrl, filename),
+        imageUrlPresent: true,
+        imageSource,
+        imageResolver: 'stone_catalog',
+      };
+    }
+
+    const gameDbFallback = resolveStoneGameIconProxy(item, meta, baseUrl);
+    if (gameDbFallback) {
+      return { ...rowBase, ...gameDbFallback };
+    }
+
+    return {
+      ...rowBase,
+      imageResolver: 'stone_missing',
     };
   });
 }
@@ -160,6 +264,7 @@ function buildStoneAssetProof(stoneItems = []) {
 
 module.exports = {
   STONE_MANUAL_ASSET_SOURCE,
+  STONE_GAMEITEMDB_PROXY_SOURCE,
   ADMIN_UPLOADED_STONE_SOURCE,
   ENCHANT_STONES,
   publicStoneDisplayName,
@@ -173,4 +278,6 @@ module.exports = {
   buildStoneAssetProof,
   localStoneUrl,
   stoneAssetFileExists,
+  resolveStoneGameIconProxy,
+  shouldPreferGameDbStone,
 };

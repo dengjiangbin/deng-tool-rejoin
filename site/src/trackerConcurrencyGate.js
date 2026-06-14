@@ -213,6 +213,17 @@ function shouldDeferEnrichmentResponse() {
  */
 function wrapTrackerUpload(label, handler) {
   return function trackerUploadEntry(req, res) {
+    const lag = getLagMs();
+    const busyLagMs = Number(process.env.TRACKER_UPLOAD_BUSY_LAG_MS || 2500);
+    if (lag >= busyLagMs) {
+      recordHardFail503();
+      return res.status(503).json({
+        ok: false,
+        retryable: true,
+        error: 'server_busy',
+        lagMs: Math.round(lag),
+      });
+    }
     if (isStatusOnlyUpload(req)) {
       return handler(req, res);
     }

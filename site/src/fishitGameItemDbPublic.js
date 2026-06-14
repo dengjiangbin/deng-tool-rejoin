@@ -1,12 +1,14 @@
 'use strict';
 
 const manualRarity = require('./fishitManualRarityOverrides');
+const manualInventoryImages = require('./fishitInventoryManualImages');
 const stoneImageAssets = require('./fishitStoneImageAssets');
 const totemImageAssets = require('./fishitTotemImageAssets');
 const trackerLuaIcon = require('./fishitTrackerLuaIcon');
 const GAMEITEMDB_ICON_SOURCE = 'gameitemdb_icon';
 const PLAYERDATA_GAMEITEMDB_SOURCE = 'playerdata_gameitemdb';
 const STONE_MANUAL_ASSET_SOURCE = stoneImageAssets.STONE_MANUAL_ASSET_SOURCE;
+const STONE_GAMEITEMDB_PROXY_SOURCE = stoneImageAssets.STONE_GAMEITEMDB_PROXY_SOURCE;
 const TOTEM_MANUAL_ASSET_SOURCE = totemImageAssets.TOTEM_MANUAL_ASSET_SOURCE;
 const TOTEM_GAMEITEMDB_PROXY_SOURCE = totemImageAssets.TOTEM_GAMEITEMDB_PROXY_SOURCE;
 const QUIZ_BOT_FALLBACK_SOURCE = 'quiz_bot_fishit_bank';
@@ -424,14 +426,19 @@ function mapToPublicFishCardItem(item) {
 
 function mapToPublicTotemCardItem(item) {
   const amount = Number(item.quantity) > 0 ? Math.floor(Number(item.quantity)) : 1;
+  const manualOverride = item.imageSource === manualInventoryImages.MANUAL_OVERRIDE_SOURCE && item.imageUrl;
   const manualAsset = item.imageSource === TOTEM_MANUAL_ASSET_SOURCE && item.imageUrl;
   const proxyAsset = item.imageSource === TOTEM_GAMEITEMDB_PROXY_SOURCE && item.imageUrl;
-  const iconParsed = (manualAsset || proxyAsset) ? null : parseGameItemIcon(item.icon || item.iconRaw);
-  const imageSource = manualAsset
-    ? TOTEM_MANUAL_ASSET_SOURCE
-    : (proxyAsset
-      ? TOTEM_GAMEITEMDB_PROXY_SOURCE
-      : (iconParsed ? GAMEITEMDB_ICON_SOURCE : null));
+  const iconParsed = (manualOverride || manualAsset || proxyAsset)
+    ? null
+    : parseGameItemIcon(item.icon || item.iconRaw);
+  const imageSource = manualOverride
+    ? manualInventoryImages.MANUAL_OVERRIDE_SOURCE
+    : (manualAsset
+      ? TOTEM_MANUAL_ASSET_SOURCE
+      : (proxyAsset
+        ? TOTEM_GAMEITEMDB_PROXY_SOURCE
+        : (iconParsed ? GAMEITEMDB_ICON_SOURCE : null)));
   return {
     kind: 'totem',
     category: 'totem',
@@ -461,12 +468,20 @@ function mapToPublicTotemCardItem(item) {
 function mapToPublicStoneCardItem(item) {
   const amount = Number(item.quantity) > 0 ? Math.floor(Number(item.quantity)) : 1;
   const manualAsset = item.imageSource === STONE_MANUAL_ASSET_SOURCE && item.imageUrl;
-  const iconParsed = manualAsset ? null : parseGameItemIcon(item.icon || item.iconRaw);
-  const imageSource = manualAsset
-    ? STONE_MANUAL_ASSET_SOURCE
-    : (iconParsed
-      ? GAMEITEMDB_ICON_SOURCE
-      : (item.imageSource === QUIZ_BOT_FALLBACK_SOURCE ? QUIZ_BOT_FALLBACK_SOURCE : null));
+  const manualOverride = item.imageSource === manualInventoryImages.MANUAL_OVERRIDE_SOURCE && item.imageUrl;
+  const proxyAsset = item.imageSource === STONE_GAMEITEMDB_PROXY_SOURCE && item.imageUrl;
+  const iconParsed = (manualAsset || manualOverride || proxyAsset)
+    ? null
+    : parseGameItemIcon(item.icon || item.iconRaw);
+  const imageSource = manualOverride
+    ? manualInventoryImages.MANUAL_OVERRIDE_SOURCE
+    : (manualAsset
+      ? STONE_MANUAL_ASSET_SOURCE
+      : (proxyAsset
+        ? STONE_GAMEITEMDB_PROXY_SOURCE
+        : (iconParsed
+          ? GAMEITEMDB_ICON_SOURCE
+          : (item.imageSource === QUIZ_BOT_FALLBACK_SOURCE ? QUIZ_BOT_FALLBACK_SOURCE : null))));
   return {
     kind: 'stone',
     category: 'stone',

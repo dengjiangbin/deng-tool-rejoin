@@ -14,7 +14,8 @@ const STONE_PUBLIC_MAP = {
     displayName: 'Transcended Stone',
     imageFilename: 'stone_246_transcended.png',
     gameIconAssetId: '73883190545629',
-    legacyImageFilenames: ['stone_246_double.png'],
+    preferGameDbIcon: true,
+    legacyImageFilenames: ['stone_246_double.png', 'stone_246_double_live.png'],
     legacyDisplayNames: ['Double Enchant Stone'],
   },
   558: {

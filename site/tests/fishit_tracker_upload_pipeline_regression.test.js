@@ -229,7 +229,7 @@ describe('trackerConcurrencyGate — inventory uploads never dropped', () => {
     assert.match(source, /tracker_status/);
     assert.match(source, /isStatusOnlyUpload/);
     assert.doesNotMatch(source, /status:\s*'queued'/);
-    assert.doesNotMatch(source, /server_busy/);
+    assert.match(source, /server_busy/);
   });
 
   test('saturated gate still returns 200 for inventory uploads (never HTTP 202)', async () => {

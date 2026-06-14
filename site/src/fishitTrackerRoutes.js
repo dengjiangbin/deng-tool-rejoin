@@ -741,8 +741,13 @@ if (process.env.NODE_ENV !== 'test' || process.env.FISHIT_SESSION_PERSIST === '1
     if (process.env.TRACKER_INGEST_MODE !== '1') {
       canonicalCatalog.rebuildFromAllSources({ persist: true });
     }
-    const loaded = sessionStore.loadIntoLiveTrackDB(liveTrackDB);
-    console.log('[fishit-tracker] canonical catalog rebuilt; sessions restored:', loaded.loaded || 0);
+    const loaded = sessionStore.migrateToShardedStorageIfNeeded();
+    if (loaded.migrated) {
+      console.log('[fishit-tracker] migrated legacy live sessions to sharded store count=%d backup=%s',
+        loaded.migrated, loaded.backup || 'none');
+    }
+    const loadResult = sessionStore.loadIntoLiveTrackDB(liveTrackDB);
+    console.log('[fishit-tracker] canonical catalog rebuilt; sessions restored:', loadResult.loaded || 0);
   } catch (err) {
     console.warn('[fishit-tracker] boot hydrate failed:', err && err.message ? err.message : err);
   }
@@ -816,8 +821,8 @@ async function persistSessionState(key, baseUrl) {
       const resolvedStones = allowEmptyReplace || !preservedStones.length
         ? nextStone
         : gameItemDbPublic.preferHigherGroupedStoneSnapshot(nextStone, preservedStones);
-      data.lastGoodPublicStoneItems = resolvedStones;
-      data.lastGoodPublicStoneCount = resolvedStones.length;
+      data.lastGoodPublicStoneItems = reEnrichPublicStoneItems(resolvedStones, baseUrl || '');
+      data.lastGoodPublicStoneCount = data.lastGoodPublicStoneItems.length;
     }
     if (nextTotem.length || allowEmptyReplace || !Array.isArray(data.lastGoodPublicTotemItems)) {
       data.lastGoodPublicTotemItems = reEnrichPublicTotemItems(nextTotem, baseUrl || '');
@@ -845,6 +850,28 @@ function persistSessionHeartbeat(key) {
       err && err.message ? err.message : err,
     );
   }
+}
+
+async function flushAllLiveSessionsToDisk() {
+  let saved = 0;
+  for (const [key, data] of Object.entries(liveTrackDB)) {
+    if (key.startsWith('uid:') || !data || typeof data !== 'object') continue;
+    try {
+      if (sessionStore.saveSession(key, data, liveTrackDB)) saved += 1;
+    } catch (err) {
+      console.warn('[fishit-tracker] shutdown persist failed key=%s err=%s', key, err?.message || err);
+    }
+  }
+  try {
+    sessionStore.schedulePriorityFlush();
+    const flushResult = sessionStore.flushToDiskSync();
+    if (flushResult && typeof flushResult.then === 'function') {
+      await flushResult;
+    }
+  } catch (err) {
+    console.warn('[fishit-tracker] shutdown flush failed:', err?.message || err);
+  }
+  return { saved, metrics: sessionStore.getSessionStoreFlushMetrics() };
 }
 
 function scheduleIngestPostResponseFlush(res) {
@@ -3168,6 +3195,17 @@ function reEnrichPublicTotemItems(items, baseUrl) {
   }));
 }
 
+/** Re-apply stone catalog/manual/gameDB images on every public response. */
+function reEnrichPublicStoneItems(items, baseUrl) {
+  if (!Array.isArray(items) || !items.length) return items;
+  const withImages = stoneImageAssets.attachStoneImagesToItems(items, baseUrl);
+  const manualRefreshed = manualInventoryImages.refreshManualImagesOnPublicItems(withImages, 'stones', baseUrl);
+  return manualRefreshed.map((item) => gameItemDbPublic.mapToPublicStoneCardItem({
+    ...item,
+    quantity: item.quantity != null ? item.quantity : (item.amount != null ? item.amount : 1),
+  }));
+}
+
 async function enrichDashboardFishCardImages(cards, baseUrl) {
   if (!Array.isArray(cards) || !cards.length) return;
   const pseudoItems = cards.map((card) => ({
@@ -5470,16 +5508,15 @@ function deriveStatsUploadStatus(data) {
 
 const UPLOAD_INTERVAL_SECONDS = 60;
 const UPLOAD_GRACE_SECONDS = 15;
+const PUBLIC_STATUS_GRACE_SECONDS = uploadAccountStatus.PUBLIC_STATUS_GRACE_SECONDS || 600;
 const LOADER_ERROR_FRESH_MAX_MS = 120000;
 
 function inventoryUploadGraceSeconds(intervalSeconds) {
-  const interval = Number(intervalSeconds) > 0 ? Number(intervalSeconds) : UPLOAD_INTERVAL_SECONDS;
-  return Math.max(20, Math.ceil(interval * 1.5));
+  return PUBLIC_STATUS_GRACE_SECONDS;
 }
 
 function inventoryUploadStaleAfterSeconds(intervalSeconds) {
-  const interval = Number(intervalSeconds) > 0 ? Number(intervalSeconds) : UPLOAD_INTERVAL_SECONDS;
-  return Math.max(interval + inventoryUploadGraceSeconds(interval), interval * 2.5);
+  return PUBLIC_STATUS_GRACE_SECONDS;
 }
 
 function computeUploadPayloadHash(body, itemCount) {
@@ -5921,20 +5958,34 @@ async function handleGetBackpack(req, res) {
     if (resolvedStones !== publicFish.stoneItems) {
       publicFish = {
         ...publicFish,
-        stoneItems: resolvedStones,
-        stoneInventory: resolvedStones,
+        stoneItems: reEnrichPublicStoneItems(resolvedStones, baseUrl),
+        stoneInventory: reEnrichPublicStoneItems(resolvedStones, baseUrl),
         stoneDataStale: true,
         lastGoodStonePreserved: true,
       };
     } else if (liveStoneCount === 0) {
       publicFish = {
         ...publicFish,
-        stoneItems: data.lastGoodPublicStoneItems,
-        stoneInventory: data.lastGoodPublicStoneItems,
+        stoneItems: reEnrichPublicStoneItems(data.lastGoodPublicStoneItems, baseUrl),
+        stoneInventory: reEnrichPublicStoneItems(data.lastGoodPublicStoneItems, baseUrl),
         stoneDataStale: true,
         lastGoodStonePreserved: true,
       };
+    } else if (Array.isArray(publicFish.stoneItems) && publicFish.stoneItems.length) {
+      const refreshedStones = reEnrichPublicStoneItems(publicFish.stoneItems, baseUrl);
+      publicFish = {
+        ...publicFish,
+        stoneItems: refreshedStones,
+        stoneInventory: refreshedStones,
+      };
     }
+  } else if (Array.isArray(publicFish.stoneItems) && publicFish.stoneItems.length) {
+    const refreshedStones = reEnrichPublicStoneItems(publicFish.stoneItems, baseUrl);
+    publicFish = {
+      ...publicFish,
+      stoneItems: refreshedStones,
+      stoneInventory: refreshedStones,
+    };
   }
   const liveTotemCount = Array.isArray(publicFish.totemItems) ? publicFish.totemItems.length : 0;
   if (liveTotemCount === 0 && Array.isArray(data.lastGoodPublicTotemItems) && data.lastGoodPublicTotemItems.length) {
@@ -6977,6 +7028,7 @@ module.exports.globalCatalogService = globalCatalogService;
 module.exports.globalDb = globalDb;
 module.exports.persistSessionState = persistSessionState;
 module.exports.persistSessionHeartbeat = persistSessionHeartbeat;
+module.exports.flushAllLiveSessionsToDisk = flushAllLiveSessionsToDisk;
 module.exports.sessionStore = sessionStore;
 module.exports.canonicalCatalog = canonicalCatalog;
 module.exports.ingestLearnedFishEntry = ingestLearnedFishEntry;

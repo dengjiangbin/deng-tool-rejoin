@@ -1,0 +1,20 @@
+{
+  "capturedAt": "2026-06-14T16:08:59.942Z",
+  "legacy": {
+    "mode": "legacy_monolith",
+    "fileBytes": 7221101,
+    "accountCount": 200,
+    "avgAccountBytes": 36058,
+    "maxAccountBytes": 352046,
+    "maxAccountKey": "kingree030"
+  },
+  "sharded": {
+    "mode": "sharded_current_state",
+    "fileBytes": 7055447,
+    "indexBytes": 20346,
+    "accountCount": 200,
+    "avgAccountBytes": 35176,
+    "maxAccountBytes": 352015,
+    "maxAccountKey": "kingree030"
+  }
+}
