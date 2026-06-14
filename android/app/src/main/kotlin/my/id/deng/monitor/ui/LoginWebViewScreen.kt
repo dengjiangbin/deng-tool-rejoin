@@ -2,80 +2,146 @@ package my.id.deng.monitor.ui
 
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import my.id.deng.monitor.BuildConfig
-import android.util.Log
-import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.SessionStore
+import my.id.deng.monitor.ui.theme.DengColors
+import my.id.deng.monitor.ui.DengGradientButton
+
+private val WebBg = Color(0xFF0D0F14)
 
 @Composable
 fun LoginWebViewScreen(
-    api: MonitorApi,
     sessionStore: SessionStore,
-    onLoggedIn: () -> Unit,
+    authError: String?,
+    onClearAuthError: () -> Unit,
 ) {
     val loginUrl = remember { aioWebUrl("/login") }
     val publicHost = remember { publicWebHost() }
     val context = LocalContext.current
     fun openExternalOAuth() {
+        onClearAuthError()
         val customTabs = CustomTabsIntent.Builder().build()
         customTabs.launchUrl(context, Uri.parse(apkOAuthStartUrl(BuildConfig.PUBLIC_WEB_URL)))
     }
 
-    AioWebViewScreen(
-        startUrl = loginUrl,
-        onUrlChanged = { url ->
-            if (isExternalOAuthUrl(url, publicHost)) {
-                openExternalOAuth()
-            }
-        },
-        shouldOverrideUrl = { url ->
-            if (isExternalOAuthUrl(url, publicHost)) {
-                openExternalOAuth()
-                true
-            } else {
-                false
-            }
-        },
-    )
+    Box(modifier = Modifier.fillMaxSize()) {
+        AioWebViewScreen(
+            startUrl = loginUrl,
+            onUrlChanged = { url ->
+                if (isExternalOAuthUrl(url, publicHost)) {
+                    openExternalOAuth()
+                }
+            },
+            shouldOverrideUrl = { url ->
+                if (isExternalOAuthUrl(url, publicHost)) {
+                    openExternalOAuth()
+                    true
+                } else {
+                    false
+                }
+            },
+        )
+
+        if (!authError.isNullOrBlank()) {
+            AuthErrorOverlay(
+                message = apkAuthFailureMessage(authError),
+                onRetry = {
+                    onClearAuthError()
+                    openExternalOAuth()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+fun ApkAuthBootstrapScreen(
+    bridgeUrl: String,
+    sessionStore: SessionStore,
+    onSuccess: () -> Unit,
+    onFailure: (String) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val publicHost = remember { publicWebHost() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(WebBg),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(color = DengColors.Cyan)
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Finishing Discord sign-in…",
+                color = DengColors.TextPrimary,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+
+        AioWebViewScreen(
+            startUrl = bridgeUrl,
+            modifier = Modifier.fillMaxSize(),
+            onPageFinished = { url ->
+                when {
+                    url.contains("/login", ignoreCase = true) -> {
+                        onFailure("cookie_not_seen_by_webview")
+                    }
+                    isAuthenticatedWebUrl(url, publicHost) -> {
+                        scope.launch {
+                            finalizeApkWebSession(sessionStore, url)
+                            onSuccess()
+                        }
+                    }
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun AuthErrorOverlay(message: String, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xCC0D0F14))
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            message,
+            color = DengColors.TextPrimary,
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Spacer(Modifier.height(16.dp))
+        DengGradientButton(text = "Retry Discord login", onClick = onRetry)
+    }
 }
 
 fun publicWebHost(): String = runCatching {
     Uri.parse(BuildConfig.PUBLIC_WEB_URL).host.orEmpty()
 }.getOrDefault("aio.deng.my.id")
-
-private const val APK_AUTH_LOG_TAG = "DengApkAuth"
-private const val APK_AUTH_HANDOFF_MARKER = "APK_DISCORD_AUTH_HANDOFF_FIX_2026_06_14"
-
-suspend fun completeApkOAuthFromDeepLink(
-    api: MonitorApi,
-    sessionStore: SessionStore,
-    code: String,
-): Boolean {
-    return try {
-        Log.i(APK_AUTH_LOG_TAG, "handoff_start marker=$APK_AUTH_HANDOFF_MARKER")
-        val exchange = api.aioAuthExchange(code)
-        if (!exchange.ok || exchange.appSessionToken.isBlank()) {
-            Log.w(APK_AUTH_LOG_TAG, "handoff_exchange_failed marker=$APK_AUTH_HANDOFF_MARKER")
-            return false
-        }
-        sessionStore.saveSession(exchange.appSessionToken, exchange.user.discordUserId)
-        val bootstrap = api.aioWebBootstrap(exchange.appSessionToken)
-        if (!bootstrap.ok || bootstrap.bridgeUrl.isBlank()) {
-            Log.w(APK_AUTH_LOG_TAG, "handoff_bootstrap_failed marker=$APK_AUTH_HANDOFF_MARKER")
-            return false
-        }
-        sessionStore.setPendingWebBootstrapUrl(bootstrap.bridgeUrl)
-        sessionStore.setWebLoggedIn(true)
-        Log.i(
-            APK_AUTH_LOG_TAG,
-            "handoff_ok marker=$APK_AUTH_HANDOFF_MARKER bridge=${bootstrap.bridgeUrl.take(80)}",
-        )
-        true
-    } catch (err: Exception) {
-        Log.w(APK_AUTH_LOG_TAG, "handoff_error marker=$APK_AUTH_HANDOFF_MARKER err=${err.message}")
-        false
-    }
-}

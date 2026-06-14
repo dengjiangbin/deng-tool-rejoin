@@ -10,8 +10,11 @@ private val OAUTH_SITE_HOSTS = setOf(
 
 fun apkOAuthStartUrl(publicWebUrl: String): String {
     val base = publicWebUrl.trimEnd('/')
-    return "$base/auth/discord?apk=1&public_return=1"
+    return "$base/auth/discord?client=apk&apk=1&public_return=1&return=${encodeURIComponent("/tracker")}"
 }
+
+private fun encodeURIComponent(value: String): String =
+    java.net.URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
 
 fun isExternalOAuthUrl(url: String, publicWebHost: String): Boolean {
     val uri = runCatching { URI(url) }.getOrNull() ?: return false

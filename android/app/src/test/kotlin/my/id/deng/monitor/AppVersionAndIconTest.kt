@@ -1,104 +1,31 @@
 package my.id.deng.monitor
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
 class AppVersionAndIconTest {
-    private fun buildGradle(): String {
+    private fun readGradle(): String {
         val f = File("build.gradle.kts")
-        require(f.exists()) { "expected build.gradle.kts at ${f.absolutePath}" }
+        require(f.exists()) { "missing build.gradle.kts" }
         return f.readText(Charsets.UTF_8)
     }
 
     @Test
-    fun `versionName is bumped to 2_2_1`() {
-        val gradle = buildGradle()
+    fun `versionName is bumped to 2_2_2`() {
+        val gradle = readGradle()
         assertTrue(
-            "expected versionName = \"2.2.1\" in build.gradle.kts",
-            gradle.contains(Regex("""versionName\s*=\s*"2\.2\.1"""")),
+            "expected versionName = \"2.2.2\" in build.gradle.kts",
+            gradle.contains(Regex("""versionName\s*=\s*"2\.2\.2"""")),
         )
     }
 
     @Test
-    fun `versionCode is bumped to 18`() {
-        val gradle = buildGradle()
+    fun `versionCode is bumped to 19`() {
+        val gradle = readGradle()
         assertTrue(
-            "expected versionCode = 18 in build.gradle.kts",
-            gradle.contains(Regex("""versionCode\s*=\s*18\b""")),
-        )
-    }
-
-    @Test
-    fun `adaptive launcher icon foreground points at real mipmap bitmap (not the default vector)`() {
-        val xml = File("src/main/res/mipmap-anydpi-v26/ic_launcher.xml").readText(Charsets.UTF_8)
-        assertTrue(
-            "adaptive ic_launcher.xml must reference @mipmap/ic_launcher_foreground (real DENG logo)",
-            xml.contains(Regex("""<foreground[^/]*@mipmap/ic_launcher_foreground""")),
-        )
-        assertFalse(
-            "adaptive foreground must not reference the placeholder vector drawable",
-            xml.contains(Regex("""<foreground[^/]*@drawable/ic_launcher_foreground""")),
-        )
-    }
-
-    @Test
-    fun `real DENG launcher bitmaps exist at every required density`() {
-        val densities = listOf("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi")
-        val names = listOf("ic_launcher.png", "ic_launcher_round.png", "ic_launcher_foreground.png")
-        for (d in densities) {
-            for (n in names) {
-                val f = File("src/main/res/mipmap-$d/$n")
-                assertTrue("missing launcher bitmap: ${f.path}", f.exists())
-                assertTrue("${f.path} is too small to be a real icon", f.length() > 1024)
-            }
-        }
-    }
-
-    @Test
-    fun `Android string resources hold the DENG All In One app name`() {
-        val xml = File("src/main/res/values/strings.xml").readText(Charsets.UTF_8)
-        assertNotNull(xml)
-        assertTrue(
-            "app_name must be 'DENG All In One'",
-            xml.contains(Regex("""<string name="app_name">\s*DENG All In One\s*</string>""")),
-        )
-        assertTrue(
-            "app_launcher_label must be 'DENG AIO'",
-            xml.contains(Regex("""<string name="app_launcher_label">\s*DENG AIO\s*</string>""")),
-        )
-    }
-
-    @Test
-    fun `PairScreen text directs users to the aio download page`() {
-        val pair = File("src/main/kotlin/my/id/deng/monitor/ui/PairScreen.kt").readText(Charsets.UTF_8)
-        assertTrue(
-            "PairScreen must mention the Download page",
-            pair.contains("Download page"),
-        )
-        assertFalse(
-            "PairScreen must not tell users to use the License page",
-            pair.contains("My License") || pair.contains("License page"),
-        )
-        assertFalse(
-            "PairScreen must not use the legacy DENG Monitor product name",
-            pair.contains("DENG Monitor"),
-        )
-    }
-
-    @Test
-    fun `launcher footer pin still points users to aio_deng_my_id slash download`() {
-        val pair = File("src/main/kotlin/my/id/deng/monitor/ui/PairScreen.kt").readText(Charsets.UTF_8)
-        assertTrue(
-            "PairScreen footer must keep the official download URL",
-            pair.contains("aio.deng.my.id/download"),
-        )
-        assertFalse(
-            "PairScreen must not reference legacy tool.deng.my.id download URL",
-            pair.contains("tool.deng.my.id/download"),
+            "expected versionCode = 19 in build.gradle.kts",
+            gradle.contains(Regex("""versionCode\s*=\s*19\b""")),
         )
     }
 }

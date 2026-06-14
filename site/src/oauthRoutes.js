@@ -16,6 +16,7 @@ const {
   requestHost,
   isCanonicalPublicHost,
 } = require('./publicDomain');
+const { describeSessionCookieConfig } = require('./sessionCookieConfig');
 const { handleDiscordOAuthCallback, requestTransportProof } = require('./discordOAuthCallback');
 
 const router = express.Router();
@@ -40,17 +41,19 @@ router.get('/auth/discord', (req, res) => {
   const started = Date.now();
   const ret = safeReturnPath(req.query.return || req.query.next)
     || safeReturnPath(req.session && req.session.authReturnTo);
-  const oauthApkReturn = req.query.apk === '1' || req.query.apk === 'true';
+  const oauthApkReturn = req.query.apk === '1' || req.query.apk === 'true'
+    || req.query.client === 'apk';
   const returnPublicUrl = isCanonicalPublicHost(requestHost(req))
     || req.query.public_return === '1'
     || req.query.public_return === 'true'
+    || oauthApkReturn
     ? canonicalPublicUrl()
     : '';
 
   let authUrl;
   try {
     authUrl = buildDiscordAuthUrl(req, {
-      authReturnTo: ret || '/dashboard',
+      authReturnTo: ret || (oauthApkReturn ? '/tracker?apk=1' : '/dashboard'),
       returnPublicUrl,
       oauthApkReturn,
     });
@@ -59,6 +62,14 @@ router.get('/auth/discord', (req, res) => {
     req.session.flash = { ...(req.session.flash || {}), error: 'Discord login is not configured.' };
     const publicBase = oauthLoginRedirectHost(req);
     return res.redirect(publicBase ? `${publicBase}${LOGIN_HOME}` : LOGIN_HOME);
+  }
+
+  if (oauthApkReturn) {
+    console.log(
+      '[auth/discord] APK_AUTH_START return=%s host=%s',
+      ret || '/tracker?apk=1',
+      requestHost(req),
+    );
   }
 
   res.redirect(authUrl);
@@ -78,15 +89,21 @@ router.get('/auth/web-bridge', authLimiter, async (req, res) => {
 
   const bridgeCode = typeof req.query.code === 'string' ? req.query.code.trim() : '';
   const authReturnTo = safeReturnPath(req.query.return) || '/dashboard';
+  const apkFlow = req.query.apk === '1' || req.query.apk === 'true';
   if (!bridgeCode) {
+    console.warn('[auth/web-bridge] APK_AUTH_FAIL reason=handoff_missing apk=%s', apkFlow);
     req.session.flash = { ...(req.session.flash || {}), error: 'Invalid sign-in link. Please try again.' };
-    return res.redirect(loginHome);
+    const dest = apkFlow ? `${loginHome}?apk=1&auth_error=handoff_missing` : loginHome;
+    return res.redirect(dest);
   }
   const bridged = aioSessionStore.consumeLoginCode(bridgeCode);
   if (!bridged || !bridged.discordUserId) {
+    console.warn('[auth/web-bridge] APK_AUTH_FAIL reason=handoff_expired apk=%s', apkFlow);
     req.session.flash = { ...(req.session.flash || {}), error: 'Sign-in link expired. Please try Discord login again.' };
-    return res.redirect(loginHome);
+    const dest = apkFlow ? `${loginHome}?apk=1&auth_error=handoff_expired` : loginHome;
+    return res.redirect(dest);
   }
+  console.log('[auth/web-bridge] APK_AUTH_CALLBACK_RECEIVED discordUserId=%s apk=%s', bridged.discordUserId, apkFlow);
   let siteUser = null;
   try {
     const discordUser = {
@@ -136,6 +153,12 @@ router.get('/auth/web-bridge', authLimiter, async (req, res) => {
           req.session.flash = { ...(req.session.flash || {}), error: 'Could not save your session. Please try again.' };
           return res.redirect(loginHome);
         }
+        console.log(
+          '[auth/web-bridge] APK_AUTH_SESSION_CREATED return=%s discordUserId=%s cookie=%j',
+          authReturnTo,
+          bridged.discordUserId,
+          describeSessionCookieConfig(),
+        );
         console.log(
           '[auth/web-bridge] category=mobile_handoff_exchanged return=%s discordUserId=%s',
           authReturnTo,

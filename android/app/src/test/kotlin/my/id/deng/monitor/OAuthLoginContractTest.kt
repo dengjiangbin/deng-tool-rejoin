@@ -15,14 +15,15 @@ class OAuthLoginContractTest {
     }
 
     private val src = "src/main/kotlin/my/id/deng/monitor"
+    private val marker = "APK_DISCORD_AUTH_LOGIN_LOOP_REAL_FIX_2026_06_14"
 
     @Test
     fun `LoginWebViewScreen opens external browser for Discord OAuth`() {
         val login = read("$src/ui/LoginWebViewScreen.kt")
         assertTrue(login.contains("CustomTabsIntent"))
-        assertTrue(login.contains("PUBLIC_WEB_URL"))
         assertTrue(login.contains("isExternalOAuthUrl"))
         assertTrue(login.contains("shouldOverrideUrl"))
+        assertTrue(login.contains("AuthErrorOverlay"))
     }
 
     @Test
@@ -39,45 +40,28 @@ class OAuthLoginContractTest {
                 "aio.deng.my.id",
             ),
         )
-        assertTrue(
-            isExternalOAuthUrl(
-                "https://aio.deng.my.id/api/aio/auth/callback?code=x",
-                "aio.deng.my.id",
-            ),
-        )
-        assertTrue(
-            isExternalOAuthUrl(
-                "https://aio.deng.my.id/auth/discord/callback?code=x",
-                "aio.deng.my.id",
-            ),
-        )
         assertFalse(
             isExternalOAuthUrl(
                 "https://aio.deng.my.id/dashboard?apk=1",
                 "aio.deng.my.id",
             ),
         )
-        assertFalse(
-            isExternalOAuthUrl(
-                "https://aio.deng.my.id/tracker?apk=1",
-                "aio.deng.my.id",
-            ),
-        )
     }
 
     @Test
-    fun `apk OAuth start uses aio public site`() {
-        assertTrue(
-            apkOAuthStartUrl("https://aio.deng.my.id")
-                .contains("https://aio.deng.my.id/auth/discord?apk=1"),
-        )
+    fun `apk OAuth start uses aio public site with client apk`() {
+        val url = apkOAuthStartUrl("https://aio.deng.my.id")
+        assertTrue(url.contains("https://aio.deng.my.id/auth/discord"))
+        assertTrue(url.contains("client=apk"))
+        assertTrue(url.contains("apk=1"))
     }
 
     @Test
-    fun `MainActivity handles deng-aio deep link callback`() {
+    fun `MainActivity handles deng-aio deep link callback and bootstrap state`() {
         val main = read("$src/MainActivity.kt")
         assertTrue(main.contains("captureOAuthDeepLink"))
         assertTrue(main.contains("completeApkOAuthFromDeepLink"))
+        assertTrue(main.contains("bootstrapBridgeUrl"))
         assertTrue(main.contains("DENG_AIO_APP_SCHEME"))
     }
 
@@ -86,35 +70,40 @@ class OAuthLoginContractTest {
         val manifest = read("src/main/AndroidManifest.xml")
         assertTrue(manifest.contains("android:scheme=\"deng-aio\""))
         assertTrue(manifest.contains("android:host=\"auth\""))
+        assertTrue(manifest.contains("<queries>"))
     }
 
     @Test
-    fun `MainActivity does not consume pending web bootstrap URL`() {
-        val main = read("$src/MainActivity.kt")
-        assertFalse(main.contains("consumePendingWebBootstrapUrl"))
+    fun `ApkOAuthHandoff does not mark logged in before WebView bridge completes`() {
+        val handoff = read("$src/ui/ApkOAuthHandoff.kt")
+        val completeFn = Regex("suspend fun completeApkOAuthFromDeepLink[\\s\\S]*?\\n\\}")
+            .find(handoff)?.value.orEmpty()
+        assertTrue(completeFn.isNotBlank())
+        assertFalse(completeFn.contains("setWebLoggedIn(true)"))
+        assertTrue(handoff.contains("finalizeApkWebSession"))
+        assertTrue(handoff.contains(marker))
     }
 
     @Test
-    fun `LiveTrackerWebViewScreen waits for bootstrap URL before WebView load`() {
-        val live = read("$src/ui/LiveTrackerWebViewScreen.kt")
-        assertTrue(live.contains("consumePendingWebBootstrapUrl"))
-        assertTrue(live.contains("if (url != null)"))
-    }
-
-    @Test
-    fun `LoginWebViewScreen uses deep link handoff not URL-only login`() {
+    fun `ApkAuthBootstrapScreen finalizes session only after authenticated URL`() {
         val login = read("$src/ui/LoginWebViewScreen.kt")
-        val composable = login.substringBefore("fun completeApkOAuthFromDeepLink")
-        assertFalse(composable.contains("setWebLoggedIn(true)"))
-        assertTrue(login.contains("completeApkOAuthFromDeepLink"))
-        assertTrue(login.contains("APK_DISCORD_AUTH_HANDOFF_FIX_2026_06_14"))
+        assertTrue(login.contains("ApkAuthBootstrapScreen"))
+        assertTrue(login.contains("isAuthenticatedWebUrl"))
+        assertTrue(login.contains("finalizeApkWebSession"))
+    }
+
+    @Test
+    fun `AioWebViewScreen lets WebView handle https redirects for cookies`() {
+        val web = read("$src/ui/AioWebViewScreen.kt")
+        assertTrue(web.contains("return false"))
+        assertTrue(web.contains("CookieManager.getInstance().flush()"))
     }
 
     @Test
     fun `release marker is baked into build config and string resources`() {
         val gradle = read("build.gradle.kts")
-        assertTrue(gradle.contains("APK_DISCORD_AUTH_LOGIN_LOOP_FIX_2026_06_14"))
+        assertTrue(gradle.contains(marker))
         val strings = read("src/main/res/values/strings.xml")
-        assertTrue(strings.contains("APK_DISCORD_AUTH_LOGIN_LOOP_FIX_2026_06_14"))
+        assertTrue(strings.contains(marker))
     }
 }

@@ -1,18 +1,18 @@
 {
     "app_name":  "DENG All In One",
-    "version_name":  "2.2.1",
-    "version_code":  18,
-    "file_name":  "deng-all-in-one-apk-v2.2.1.apk",
-    "sha256":  "3954b02c83bf2b7df470390c9cd1d72b322e001bc98b6ff2d2858866e4110ede",
-    "size_bytes":  1835820,
-    "released_at":  "2026-06-14T15:38:32.337Z",
-    "build_marker":  "APK_DISCORD_AUTH_LOGIN_LOOP_FIX_2026_06_14",
+    "version_name":  "2.2.2",
+    "version_code":  19,
+    "file_name":  "deng-all-in-one-apk-v2.2.2.apk",
+    "sha256":  "12a93511c173f29e2b8fdbe844d0683745931aa482e6e19b84b640479c082dfb",
+    "size_bytes":  1852312,
+    "released_at":  "2026-06-14T16:23:39.042Z",
+    "build_marker":  "APK_DISCORD_AUTH_LOGIN_LOOP_REAL_FIX_2026_06_14",
     "min_sdk":  26,
     "purpose":  "Monitoring companion for DENG All In One (aio.deng.my.id)",
     "changelog":  [
-                      "APK_DISCORD_AUTH_LOGIN_LOOP_FIX_2026_06_14 - Discord OAuth opens system browser / Custom Tabs, not WebView.",
-                      "Default site and API base URL migrated to https://aio.deng.my.id.",
-                      "OAuth deep-link handoff (deng-aio://auth/callback) plus web-bootstrap session bridge.",
-                      "Branding updated to DENG All In One across APK UI and download page."
+                      "APK_DISCORD_AUTH_LOGIN_LOOP_REAL_FIX_2026_06_14 - Fix APK Discord login loop: preserve web-bootstrap URL for WebView session bridge.",
+                      "Live Tracker waits for bootstrap bridge before loading; MainActivity no longer discards pending URL.",
+                      "Discord OAuth opens system browser / Custom Tabs; deep-link handoff (deng-aio://auth/callback).",
+                      "Default site and API base URL: https://aio.deng.my.id."
                   ]
 }

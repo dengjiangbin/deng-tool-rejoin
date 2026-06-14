@@ -109,9 +109,9 @@ fun AioWebViewScreen(
                                 return true
                             }
                             if (url.startsWith("http://") || url.startsWith("https://")) {
-                                view?.loadUrl(url)
                                 onUrlChanged?.invoke(url)
-                                return true
+                                // false = let WebView handle redirects so Set-Cookie survives.
+                                return false
                             }
                             return false
                         }
@@ -120,6 +120,7 @@ fun AioWebViewScreen(
                             val finished = url.orEmpty()
                             onUrlChanged?.invoke(finished)
                             onPageFinished?.invoke(finished)
+                            CookieManager.getInstance().flush()
                         }
                     }
                     loadUrl(startUrl)

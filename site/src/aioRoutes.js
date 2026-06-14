@@ -250,14 +250,27 @@ router.post('/api/aio/auth/web-bootstrap', requireAioAuth, aioAuthLimiter, (req,
     const publicBase = publicBaseUrl();
     return res.json({
       ok: true,
-      bridgeUrl: `${publicBase}/auth/web-bridge?code=${encodeURIComponent(code)}&return=${encodeURIComponent('/tracker?apk=1')}`,
+      bridgeUrl: `${publicBase}/auth/web-bridge?code=${encodeURIComponent(code)}&return=${encodeURIComponent('/tracker?apk=1')}&apk=1`,
       expiresInSeconds,
-      handoffMarker: 'APK_DISCORD_AUTH_HANDOFF_FIX_2026_06_14',
+      handoffMarker: 'APK_DISCORD_AUTH_LOGIN_LOOP_REAL_FIX_2026_06_14',
     });
   } catch (err) {
     console.error('[aio] web-bootstrap failed:', err && err.message ? err.message : err);
     return res.status(500).json({ ok: false, error: 'bootstrap_failed' });
   }
+});
+
+/** Cookie-session probe for APK WebView after web-bridge (no bearer token). */
+router.get('/api/aio/auth/web-session', (req, res) => {
+  const sessionUser = req.session && req.session.user ? req.session.user : null;
+  res.set('Cache-Control', 'no-store');
+  return res.json({
+    ok: true,
+    authenticated: !!sessionUser,
+    discordUserId: sessionUser?.discord_user_id || req.session?.discord_user_id || null,
+    username: sessionUser?.username || null,
+    handoffMarker: 'APK_DISCORD_AUTH_LOGIN_LOOP_REAL_FIX_2026_06_14',
+  });
 });
 
 router.post('/api/aio/auth/logout', (req, res) => {

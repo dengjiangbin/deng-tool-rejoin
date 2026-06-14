@@ -24,12 +24,21 @@ const aioSessionStore = require('./aioSessionStore');
 
 function renderOAuthDeepLinkHtml(deepLink) {
   const safe = String(deepLink).replace(/"/g, '&quot;');
+  const pkg = String(process.env.APK_ANDROID_PACKAGE || 'my.id.deng.monitor').trim();
+  const intentFallback = `intent://auth/callback${String(deepLink).includes('?') ? String(deepLink).slice(String(deepLink).indexOf('?')) : ''}#Intent;scheme=deng-aio;package=${pkg};end`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="0; url=${safe}">
 <title>Returning to DENG All In One…</title></head>
 <body><p>Signing you in… <a href="${safe}">Tap here if the app does not open</a>.</p>
-<script>location.replace(${JSON.stringify(deepLink)});</script></body></html>`;
+<script>
+(function(){
+  var deep="${safe.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}";
+  var intent="${intentFallback.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}";
+  try { location.replace(deep); } catch (e) {}
+  setTimeout(function(){ try { location.replace(intent); } catch (e2) {} }, 350);
+})();
+</script></body></html>`;
 }
 
 function safeFlash(req, key, value) {
@@ -139,10 +148,11 @@ async function handleDiscordOAuthCallback(req, res) {
     return res.redirect(loginRedirect(req));
   }
   if (!stored) {
-    console.warn('[discord-oauth-callback] category=state_missing_or_expired route=%s code_present=true', routePath);
+    console.warn('[discord-oauth-callback] APK_AUTH_FAIL reason=state_invalid route=%s', routePath);
     safeFlash(req, 'error', 'Login session expired. Please try again.');
     return res.redirect(loginRedirect(req));
   }
+  console.log('[discord-oauth-callback] APK_AUTH_STATE_VALID apk=%s return=%s', stored.oauthApkReturn === true, stored.authReturnTo || '/dashboard');
 
   let tokens;
   try {
@@ -210,6 +220,7 @@ async function handleDiscordOAuthCallback(req, res) {
       const scheme = (process.env.DENG_AIO_APP_SCHEME || 'deng-aio').trim();
       const deepLink = `${scheme}://auth/callback?code=${encodeURIComponent(loginCode)}`;
       res.set('Content-Type', 'text/html; charset=utf-8');
+      console.log('[discord-oauth-callback] APK_AUTH_RETURN_TARGET route=%s scheme=%s', routePath, scheme);
       console.log('[discord-oauth-callback] category=mobile_handoff_created route=%s ms=%d', routePath, Date.now() - started);
       return res.status(200).send(renderOAuthDeepLinkHtml(deepLink));
     } catch (bridgeErr) {

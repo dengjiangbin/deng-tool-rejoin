@@ -18,6 +18,8 @@ process.env.TOOL_SITE_PUBLIC_URL = 'https://aio.deng.my.id';
 process.env.TOOL_SITE_INTERNAL_URL = 'https://aio.deng.my.id';
 process.env.TOOL_SITE_STATE_SECRET = 'apk-handoff-test-state-secret-long!!!';
 
+const MARKER = 'APK_DISCORD_AUTH_LOGIN_LOOP_REAL_FIX_2026_06_14';
+
 const fakeAxios = {
   async post() {
     return { data: { access_token: 'discord-access-token' } };
@@ -30,6 +32,7 @@ const fakeAxios = {
 };
 
 function makeStubQuery() {
+  let pendingInsert = false;
   const q = {
     select() { return q; },
     eq() { return q; },
@@ -37,8 +40,25 @@ function makeStubQuery() {
     order() { return q; },
     limit() { return q; },
     maybeSingle() { return Promise.resolve({ data: null, error: null }); },
-    single() { return Promise.resolve({ data: null, error: { message: 'not found' } }); },
-    insert() { return q; },
+    single() {
+      if (pendingInsert) {
+        pendingInsert = false;
+        return Promise.resolve({
+          data: {
+            id: 1,
+            discord_user_id: 'discord-user-1',
+            discord_username: 'DiscordTester',
+            username: 'DiscordTester',
+          },
+          error: null,
+        });
+      }
+      return Promise.resolve({ data: null, error: { message: 'not found' } });
+    },
+    insert() {
+      pendingInsert = true;
+      return q;
+    },
     update() { return q; },
     upsert() { return q; },
     then(resolve) { return Promise.resolve({ data: [], error: null }).then(resolve); },
@@ -91,11 +111,15 @@ describe('APK Discord auth handoff login loop fix', () => {
     assert.equal(bootstrap.status, 200);
     assert.equal(bootstrap.body.ok, true);
     assert.match(bootstrap.body.bridgeUrl, /^https:\/\/aio\.deng\.my\.id\/auth\/web-bridge\?code=/);
-    assert.equal(bootstrap.body.handoffMarker, 'APK_DISCORD_AUTH_HANDOFF_FIX_2026_06_14');
+    assert.equal(bootstrap.body.handoffMarker, MARKER);
 
     const bridge = await agent.get(bootstrap.body.bridgeUrl.replace('https://aio.deng.my.id', ''));
     assert.equal(bridge.status, 302);
     assert.match(bridge.headers.location, /\/tracker\?apk=1/);
+
+    const webSession = await agent.get('/api/aio/auth/web-session');
+    assert.equal(webSession.status, 200);
+    assert.equal(webSession.body.authenticated, true);
 
     const me = await agent.get('/api/internal/auth-debug');
     assert.equal(me.status, 200);
@@ -117,40 +141,57 @@ describe('APK Discord auth handoff login loop fix', () => {
     await agent.get(bridgePath).expect(302);
     const replay = await agent.get(bridgePath);
     assert.equal(replay.status, 302);
-    assert.match(replay.headers.location, /\/login/);
+    assert.match(replay.headers.location, /auth_error=handoff_expired/);
   });
 
   test('APK OAuth callback issues deep link HTML not web session redirect', async () => {
     const agent = request.agent(app);
-    const start = await agent.get('/auth/discord?apk=1&public_return=1');
+    const start = await agent.get('/auth/discord?client=apk&apk=1&public_return=1');
     assert.equal(start.status, 302);
     const state = new URL(start.headers.location, 'https://discord.com').searchParams.get('state');
     const cb = await agent.get(`/api/aio/auth/callback?code=ok&state=${state}`);
     assert.equal(cb.status, 200);
     assert.match(cb.text, /deng-aio:\/\/auth\/callback\?code=/);
+    assert.match(cb.text, /intent:\/\/auth\/callback/);
     assert.doesNotMatch(cb.text, /\/dashboard/);
+  });
+
+  test('normal browser Discord login still redirects to dashboard', async () => {
+    const agent = request.agent(app);
+    const start = await agent.get('/auth/discord?return=/dashboard');
+    assert.equal(start.status, 302);
+    const state = new URL(start.headers.location, 'https://discord.com').searchParams.get('state');
+    const cb = await agent.get(`/api/aio/auth/callback?code=ok&state=${state}`);
+    assert.equal(cb.status, 302);
+    assert.match(cb.headers.location, /\/dashboard/);
   });
 });
 
 describe('APK auth handoff source contracts', () => {
   const root = path.join(__dirname, '..', '..', 'android', 'app', 'src', 'main', 'kotlin', 'my', 'id', 'deng', 'monitor');
 
-  test('MainActivity does not consume pending web bootstrap URL', () => {
+  test('MainActivity bootstraps WebView before marking logged in', () => {
     const main = fs.readFileSync(path.join(root, 'MainActivity.kt'), 'utf8');
+    assert.match(main, /bootstrapBridgeUrl/);
+    assert.match(main, /ApkOAuthHandoffResult\.Ready/);
     assert.doesNotMatch(main, /consumePendingWebBootstrapUrl/);
   });
 
-  test('LiveTrackerWebViewScreen waits for bootstrap before loading WebView', () => {
-    const live = fs.readFileSync(path.join(root, 'ui', 'LiveTrackerWebViewScreen.kt'), 'utf8');
-    assert.match(live, /consumePendingWebBootstrapUrl/);
-    assert.match(live, /if \(url != null\)/);
+  test('ApkAuthBootstrapScreen loads bridge URL and finalizes session on tracker', () => {
+    const login = fs.readFileSync(path.join(root, 'ui', 'LoginWebViewScreen.kt'), 'utf8');
+    assert.match(login, /ApkAuthBootstrapScreen/);
+    assert.match(login, /finalizeApkWebSession/);
+    const handoff = fs.readFileSync(path.join(root, 'ui', 'ApkOAuthHandoff.kt'), 'utf8');
+    const completeFn = handoff.match(/suspend fun completeApkOAuthFromDeepLink[\s\S]*?\n\}/);
+    assert.ok(completeFn, 'completeApkOAuthFromDeepLink must exist');
+    assert.doesNotMatch(completeFn[0], /setWebLoggedIn\(true\)/);
+    assert.match(handoff, /finalizeApkWebSession[\s\S]*setWebLoggedIn\(true\)/);
+    assert.match(handoff, new RegExp(MARKER));
   });
 
-  test('LoginWebViewScreen does not mark logged in from URL alone', () => {
-    const login = fs.readFileSync(path.join(root, 'ui', 'LoginWebViewScreen.kt'), 'utf8');
-    const composable = login.split('fun completeApkOAuthFromDeepLink')[0];
-    assert.doesNotMatch(composable, /setWebLoggedIn\(true\)/);
-    assert.match(login, /completeApkOAuthFromDeepLink/);
-    assert.match(login, /APK_DISCORD_AUTH_HANDOFF_FIX_2026_06_14/);
+  test('AioWebViewScreen preserves redirect cookies', () => {
+    const web = fs.readFileSync(path.join(root, 'ui', 'AioWebViewScreen.kt'), 'utf8');
+    assert.match(web, /return false/);
+    assert.match(web, /CookieManager\.getInstance\(\)\.flush\(\)/);
   });
 });

@@ -1,9 +1,9 @@
 #!/usr/bin/env pwsh
 # Publish a signed DENG All In One release APK and refresh releases/android/latest.json
 param(
-  [string]$VersionName = "2.2.1",
-  [int]$VersionCode = 18,
-  [string]$BuildMarker = "APK_DISCORD_AUTH_LOGIN_LOOP_FIX_2026_06_14"
+  [string]$VersionName = "2.2.2",
+  [int]$VersionCode = 19,
+  [string]$BuildMarker = "APK_DISCORD_AUTH_LOGIN_LOOP_REAL_FIX_2026_06_14"
 )
 
 $ErrorActionPreference = "Stop"
