@@ -36,8 +36,8 @@
         "DISCORD_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "DISCORD_AIO_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "OAUTH_STATE_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\oauth-states",
-        "TOOL_SITE_ASSET_VERSION": "UPLOAD_INTERVAL_60S_AIO_2026_06_14",
-        "GIT_COMMIT": "2489eec"
+        "TOOL_SITE_ASSET_VERSION": "UPLOAD_STATUS_GRACE_AND_503_RECOVERY_2026_06_15",
+        "GIT_COMMIT": "09e9975"
       }
     },
     {
