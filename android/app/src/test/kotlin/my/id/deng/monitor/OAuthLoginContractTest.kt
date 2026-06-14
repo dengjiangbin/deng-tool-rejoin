@@ -15,7 +15,7 @@ class OAuthLoginContractTest {
     }
 
     private val src = "src/main/kotlin/my/id/deng/monitor"
-    private val marker = "APK_DISCORD_AUTH_LOGIN_LOOP_REAL_FIX_2026_06_14"
+    private val marker = "APK_DISCORD_AUTH_HANDOFF_COMPLETION_FIX_2026_06_14"
 
     @Test
     fun `LoginWebViewScreen opens external browser for Discord OAuth`() {

@@ -125,6 +125,50 @@ class MonitorApi(
         }
     }
 
+    suspend fun aioWebSession(publicWebUrl: String): AioWebSessionResponse {
+        val base = publicWebUrl.trimEnd('/')
+        val cookieHeader = buildWebViewCookieHeader(base)
+        return execJsonWithCookie("/api/aio/auth/web-session", cookieHeader)
+    }
+
+    private fun buildWebViewCookieHeader(siteOrigin: String): String? {
+        val manager = android.webkit.CookieManager.getInstance()
+        manager.flush()
+        val direct = manager.getCookie(siteOrigin)?.trim().orEmpty()
+        if (direct.isNotEmpty()) return direct
+        val host = runCatching {
+            siteOrigin.substringAfter("://").substringBefore('/')
+        }.getOrNull().orEmpty()
+        if (host.isBlank()) return null
+        val https = manager.getCookie("https://$host")?.trim().orEmpty()
+        return https.ifBlank { null }
+    }
+
+    private suspend inline fun <reified T> execJsonWithCookie(
+        path: String,
+        cookieHeader: String?,
+    ): T {
+        val raw = execRawWithCookie(path, cookieHeader)
+        return json.decodeFromString(raw)
+    }
+
+    private suspend fun execRawWithCookie(
+        path: String,
+        cookieHeader: String?,
+    ): String = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url(baseUrl.trimEnd('/') + path)
+            .header("Accept", "application/json")
+        if (!cookieHeader.isNullOrBlank()) {
+            req.header("Cookie", cookieHeader)
+        }
+        client.newCall(req.get().build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) throw ApiException(resp.code, text.ifBlank { "request_failed" })
+            text
+        }
+    }
+
     private suspend inline fun <reified T> execJsonWithToken(
         path: String,
         method: String = "GET",

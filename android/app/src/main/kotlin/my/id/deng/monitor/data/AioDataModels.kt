@@ -119,6 +119,16 @@ data class AioWebBootstrapResponse(
     val ok: Boolean = false,
     @SerialName("bridgeUrl") val bridgeUrl: String = "",
     @SerialName("expiresInSeconds") val expiresInSeconds: Int = 0,
+    @SerialName("handoffMarker") val handoffMarker: String? = null,
+)
+
+@Serializable
+data class AioWebSessionResponse(
+    val ok: Boolean = false,
+    val authenticated: Boolean = false,
+    @SerialName("discordUserId") val discordUserId: String? = null,
+    val username: String? = null,
+    @SerialName("handoffMarker") val handoffMarker: String? = null,
 )
 
 @Serializable

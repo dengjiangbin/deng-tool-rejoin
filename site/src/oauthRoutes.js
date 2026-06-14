@@ -17,7 +17,7 @@ const {
   isCanonicalPublicHost,
 } = require('./publicDomain');
 const { describeSessionCookieConfig } = require('./sessionCookieConfig');
-const { handleDiscordOAuthCallback, requestTransportProof } = require('./discordOAuthCallback');
+const { handleDiscordOAuthCallback, requestTransportProof, renderApkOpenHandoffHtml } = require('./discordOAuthCallback');
 
 const router = express.Router();
 
@@ -81,6 +81,24 @@ router.get('/auth/discord', (req, res) => {
 router.get('/auth/discord/callback', authLimiter, (req, res) => handleDiscordOAuthCallback(req, res));
 router.get('/api/aio/auth/callback', authLimiter, (req, res) => handleDiscordOAuthCallback(req, res));
 
+/** APK OAuth handoff page — intent:// opens the installed app (Custom Tabs safe). */
+router.get('/auth/apk-open', authLimiter, (req, res) => {
+  const code = typeof req.query.code === 'string' ? req.query.code.trim() : '';
+  const manual = req.query.manual === '1' || req.query.manual === 'true';
+  if (!code) {
+    console.warn('[auth/apk-open] APK_AUTH_FAIL_STAGE=handoff_missing');
+    return res.redirect(`${LOGIN_HOME}?apk=1&auth_error=handoff_missing`);
+  }
+  console.log(
+    '[auth/apk-open] APK_AUTH_DEEPLINK_RENDERED codeLen=%d manual=%s',
+    code.length,
+    manual,
+  );
+  res.set('Cache-Control', 'no-store');
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  return res.status(200).send(renderApkOpenHandoffHtml(code));
+});
+
 /** Legacy cross-host session bridge — kept for backward compatibility only. */
 router.get('/auth/web-bridge', authLimiter, async (req, res) => {
   const crypto = require('crypto');
@@ -91,19 +109,19 @@ router.get('/auth/web-bridge', authLimiter, async (req, res) => {
   const authReturnTo = safeReturnPath(req.query.return) || '/dashboard';
   const apkFlow = req.query.apk === '1' || req.query.apk === 'true';
   if (!bridgeCode) {
-    console.warn('[auth/web-bridge] APK_AUTH_FAIL reason=handoff_missing apk=%s', apkFlow);
+    console.warn('[auth/web-bridge] APK_AUTH_FAIL_STAGE=handoff_missing apk=%s', apkFlow);
     req.session.flash = { ...(req.session.flash || {}), error: 'Invalid sign-in link. Please try again.' };
     const dest = apkFlow ? `${loginHome}?apk=1&auth_error=handoff_missing` : loginHome;
     return res.redirect(dest);
   }
   const bridged = aioSessionStore.consumeLoginCode(bridgeCode);
   if (!bridged || !bridged.discordUserId) {
-    console.warn('[auth/web-bridge] APK_AUTH_FAIL reason=handoff_expired apk=%s', apkFlow);
+    console.warn('[auth/web-bridge] APK_AUTH_FAIL_STAGE=handoff_expired apk=%s', apkFlow);
     req.session.flash = { ...(req.session.flash || {}), error: 'Sign-in link expired. Please try Discord login again.' };
     const dest = apkFlow ? `${loginHome}?apk=1&auth_error=handoff_expired` : loginHome;
     return res.redirect(dest);
   }
-  console.log('[auth/web-bridge] APK_AUTH_CALLBACK_RECEIVED discordUserId=%s apk=%s', bridged.discordUserId, apkFlow);
+  console.log('[auth/web-bridge] APK_AUTH_WEB_BRIDGE_LOADED discordUserId=%s apk=%s', bridged.discordUserId, apkFlow);
   let siteUser = null;
   try {
     const discordUser = {
@@ -154,13 +172,13 @@ router.get('/auth/web-bridge', authLimiter, async (req, res) => {
           return res.redirect(loginHome);
         }
         console.log(
-          '[auth/web-bridge] APK_AUTH_SESSION_CREATED return=%s discordUserId=%s cookie=%j',
+          '[auth/web-bridge] APK_AUTH_COOKIE_SET return=%s discordUserId=%s cookie=%j',
           authReturnTo,
           bridged.discordUserId,
           describeSessionCookieConfig(),
         );
         console.log(
-          '[auth/web-bridge] category=mobile_handoff_exchanged return=%s discordUserId=%s',
+          '[auth/web-bridge] APK_AUTH_SESSION_CREATED return=%s discordUserId=%s',
           authReturnTo,
           bridged.discordUserId,
         );

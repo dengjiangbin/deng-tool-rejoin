@@ -218,12 +218,18 @@ router.get('/api/aio/auth/start', aioAuthLimiter, (req, res) => {
 router.post('/api/aio/auth/exchange', aioAuthLimiter, (req, res) => {
   const body = req.body || {};
   const code = typeof body.code === 'string' ? body.code.trim() : '';
-  if (!code) return res.status(400).json({ ok: false, error: 'missing_code' });
+  if (!code) {
+    console.warn('[aio] APK_AUTH_FAIL_STAGE=exchange_missing_code');
+    return res.status(400).json({ ok: false, error: 'missing_code' });
+  }
+  console.log('[aio] APK_AUTH_EXCHANGE_RECEIVED codeLen=%d', code.length);
   const user = aioSessionStore.consumeLoginCode(code);
   if (!user || !user.discordUserId) {
+    console.warn('[aio] APK_AUTH_FAIL_STAGE=exchange_invalid_or_expired codeLen=%d', code.length);
     return res.status(401).json({ ok: false, error: 'invalid_or_expired_code' });
   }
   const session = aioSessionStore.createSession(user, body.device_name || body.deviceName);
+  console.log('[aio] APK_AUTH_EXCHANGE_SUCCESS discordUserId=%s', user.discordUserId);
   return res.json({
     ok: true,
     appSessionToken: session.token,
@@ -248,14 +254,15 @@ router.post('/api/aio/auth/web-bootstrap', requireAioAuth, aioAuthLimiter, (req,
       avatar: user.avatar || null,
     });
     const publicBase = publicBaseUrl();
+    console.log('[aio] APK_AUTH_WEB_BOOTSTRAP_CREATED discordUserId=%s', user.discordUserId);
     return res.json({
       ok: true,
       bridgeUrl: `${publicBase}/auth/web-bridge?code=${encodeURIComponent(code)}&return=${encodeURIComponent('/tracker?apk=1')}&apk=1`,
       expiresInSeconds,
-      handoffMarker: 'APK_DISCORD_AUTH_LOGIN_LOOP_REAL_FIX_2026_06_14',
+      handoffMarker: 'APK_DISCORD_AUTH_HANDOFF_COMPLETION_FIX_2026_06_14',
     });
   } catch (err) {
-    console.error('[aio] web-bootstrap failed:', err && err.message ? err.message : err);
+    console.error('[aio] APK_AUTH_FAIL_STAGE=bootstrap_failed error=%s', err && err.message ? err.message : err);
     return res.status(500).json({ ok: false, error: 'bootstrap_failed' });
   }
 });
@@ -263,14 +270,26 @@ router.post('/api/aio/auth/web-bootstrap', requireAioAuth, aioAuthLimiter, (req,
 /** Cookie-session probe for APK WebView after web-bridge (no bearer token). */
 router.get('/api/aio/auth/web-session', (req, res) => {
   const sessionUser = req.session && req.session.user ? req.session.user : null;
+  if (sessionUser) {
+    console.log(
+      '[aio] APK_AUTH_WEB_SESSION_OK discordUserId=%s',
+      sessionUser.discord_user_id || req.session?.discord_user_id || 'unknown',
+    );
+  }
   res.set('Cache-Control', 'no-store');
   return res.json({
     ok: true,
     authenticated: !!sessionUser,
     discordUserId: sessionUser?.discord_user_id || req.session?.discord_user_id || null,
     username: sessionUser?.username || null,
-    handoffMarker: 'APK_DISCORD_AUTH_LOGIN_LOOP_REAL_FIX_2026_06_14',
+    handoffMarker: 'APK_DISCORD_AUTH_HANDOFF_COMPLETION_FIX_2026_06_14',
   });
+});
+
+router.post('/api/aio/auth/apk-open-attempt', aioAuthLimiter, (_req, res) => {
+  console.log('[aio] APK_AUTH_APP_OPEN_ATTEMPT client=custom_tabs');
+  res.set('Cache-Control', 'no-store');
+  return res.status(204).end();
 });
 
 router.post('/api/aio/auth/logout', (req, res) => {

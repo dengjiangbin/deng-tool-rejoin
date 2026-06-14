@@ -14,16 +14,22 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import my.id.deng.monitor.BuildConfig
+import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.SessionStore
 import my.id.deng.monitor.ui.theme.DengColors
 import my.id.deng.monitor.ui.DengGradientButton
@@ -35,12 +41,14 @@ fun LoginWebViewScreen(
     sessionStore: SessionStore,
     authError: String?,
     onClearAuthError: () -> Unit,
+    onOAuthFlowStarted: () -> Unit = {},
 ) {
     val loginUrl = remember { aioWebUrl("/login") }
     val publicHost = remember { publicWebHost() }
     val context = LocalContext.current
     fun openExternalOAuth() {
         onClearAuthError()
+        onOAuthFlowStarted()
         val customTabs = CustomTabsIntent.Builder().build()
         customTabs.launchUrl(context, Uri.parse(apkOAuthStartUrl(BuildConfig.PUBLIC_WEB_URL)))
     }
@@ -78,12 +86,22 @@ fun LoginWebViewScreen(
 @Composable
 fun ApkAuthBootstrapScreen(
     bridgeUrl: String,
+    api: MonitorApi,
     sessionStore: SessionStore,
     onSuccess: () -> Unit,
     onFailure: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val publicHost = remember { publicWebHost() }
+    val publicWebUrl = remember { BuildConfig.PUBLIC_WEB_URL.trimEnd('/') }
+    var finished by remember(bridgeUrl) { mutableStateOf(false) }
+
+    LaunchedEffect(bridgeUrl) {
+        delay(90_000)
+        if (!finished) {
+            onFailure("bootstrap_timeout")
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -105,12 +123,27 @@ fun ApkAuthBootstrapScreen(
             startUrl = bridgeUrl,
             modifier = Modifier.fillMaxSize(),
             onPageFinished = { url ->
+                if (finished) return@AioWebViewScreen
+                val path = runCatching { Uri.parse(url).path.orEmpty() }.getOrDefault("")
                 when {
-                    url.contains("/login", ignoreCase = true) -> {
-                        onFailure("cookie_not_seen_by_webview")
+                    path.startsWith("/login") -> {
+                        finished = true
+                        onFailure("web_bridge_cookie_missing")
                     }
                     isAuthenticatedWebUrl(url, publicHost) -> {
                         scope.launch {
+                            if (!verifyApkWebSession(api, publicWebUrl)) {
+                                finished = true
+                                onFailure(
+                                    if (webViewHasDengSidCookie(publicWebUrl)) {
+                                        "web_session_not_authenticated"
+                                    } else {
+                                        "web_bridge_cookie_missing"
+                                    },
+                                )
+                                return@launch
+                            }
+                            finished = true
                             finalizeApkWebSession(sessionStore, url)
                             onSuccess()
                         }

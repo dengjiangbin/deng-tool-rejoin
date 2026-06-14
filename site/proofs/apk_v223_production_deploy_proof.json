@@ -1,0 +1,32 @@
+{
+  "generatedAt": "2026-06-14T20:35:00.000Z",
+  "failedStageV222": {
+    "classification": "B+D with secondary E race",
+    "evidence": [
+      "Production PM2: many APK_AUTH_HANDOFF_CREATED / mobile_handoff_created but only one aio.auth.exchange in 5000 log lines",
+      "Zero auth/web-bridge hits for recent APK attempts before fix",
+      "v2.2.2 deep-link HTML fired custom-scheme AND intent:// within 350ms (double app open / code reuse race)",
+      "Generic UI masked ApiException reasons (401: invalid_or_expired_code mapped to else branch)"
+    ]
+  },
+  "fixV223": {
+    "versionName": "2.2.3",
+    "versionCode": 20,
+    "fileName": "deng-all-in-one-apk-v2.2.3.apk",
+    "sha256": "80f14db62db47c6e477bdeb0f91674f7bb064ad35e89d1b0168c8a0f6e6c15a3",
+    "buildMarker": "APK_DISCORD_AUTH_HANDOFF_COMPLETION_FIX_2026_06_14",
+    "publicVersionedUrl": "https://aio.deng.my.id/downloads/deng-all-in-one-apk-v2.2.3.apk",
+    "publicLatestApi": "https://aio.deng.my.id/api/aio/app/latest",
+    "backendHandoffMarker": "APK_DISCORD_AUTH_HANDOFF_COMPLETION_FIX_2026_06_14",
+    "pm2Restart": "deng-tool-site restarted 2026-06-14",
+    "tests": "apk_discord_auth_handoff_fix.test.js + apk_release_aio_2026_06_14.test.js: 15/15 pass"
+  },
+  "realDeviceProof": {
+    "status": "PENDING",
+    "reason": "adb devices empty on production host; public APK deployed and SHA256 verified from https download",
+    "requiredSteps": [
+      "Install public v2.2.3 APK, clear data, Discord login, capture DengApkAuth logcat + APK_AUTH_* backend logs",
+      "Confirm authenticated /tracker or /dashboard"
+    ]
+  }
+}

@@ -12,7 +12,7 @@ const ROOT = path.join(__dirname, '..', '..');
 const MANIFEST_PATH = path.join(ROOT, 'releases', 'android', 'latest.json');
 const RELEASES_DIR = path.join(ROOT, 'releases', 'android');
 const OLD_APK = 'deng-tool-rejoin-apk-v1.0.13.apk';
-const MARKER = 'APK_DISCORD_AUTH_LOGIN_LOOP_REAL_FIX_2026_06_14';
+const MARKER = 'APK_DISCORD_AUTH_HANDOFF_COMPLETION_FIX_2026_06_14';
 
 function loadManifest() {
   const raw = fs.readFileSync(MANIFEST_PATH, 'utf8').replace(/^\uFEFF/, '');
@@ -26,11 +26,11 @@ function sha256File(filePath) {
 }
 
 describe('APK release aio 2026-06-14', () => {
-  test('latest.json points to deng-all-in-one canonical filename and v2.2.2', () => {
+  test('latest.json points to deng-all-in-one canonical filename and v2.2.3', () => {
     const m = loadManifest();
-    assert.match(m.file_name, /^deng-all-in-one-apk-v2\.2\.2\.apk$/);
-    assert.equal(m.version_name, '2.2.2');
-    assert.equal(m.version_code, 19);
+    assert.match(m.file_name, /^deng-all-in-one-apk-v2\.2\.3\.apk$/);
+    assert.equal(m.version_name, '2.2.3');
+    assert.equal(m.version_code, 20);
     assert.match(m.build_marker, new RegExp(MARKER));
     assert.doesNotMatch(m.file_name, /deng-tool-rejoin-apk/);
   });
@@ -66,8 +66,8 @@ describe('APK release aio 2026-06-14', () => {
       path.join(ROOT, 'android', 'app', 'build.gradle.kts'),
       'utf8',
     );
-    assert.match(gradle, /versionCode\s*=\s*19/);
-    assert.match(gradle, /versionName\s*=\s*"2\.2\.2"/);
+    assert.match(gradle, /versionCode\s*=\s*20/);
+    assert.match(gradle, /versionName\s*=\s*"2\.2\.3"/);
     assert.match(gradle, new RegExp(MARKER));
     assert.match(gradle, /"https:\/\/aio\.deng\.my\.id"/);
     assert.doesNotMatch(

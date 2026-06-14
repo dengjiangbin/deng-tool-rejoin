@@ -22,21 +22,37 @@ const { describeSessionCookieConfig } = require('./sessionCookieConfig');
 const oauthStateStore = require('./oauthStateStore');
 const aioSessionStore = require('./aioSessionStore');
 
-function renderOAuthDeepLinkHtml(deepLink) {
-  const safe = String(deepLink).replace(/"/g, '&quot;');
+/** APK handoff page — intent:// only for auto-open (avoid double custom-scheme + intent race). */
+function renderApkOpenHandoffHtml(loginCode) {
+  const code = String(loginCode || '').trim();
+  const scheme = (process.env.DENG_AIO_APP_SCHEME || 'deng-aio').trim();
   const pkg = String(process.env.APK_ANDROID_PACKAGE || 'my.id.deng.monitor').trim();
-  const intentFallback = `intent://auth/callback${String(deepLink).includes('?') ? String(deepLink).slice(String(deepLink).indexOf('?')) : ''}#Intent;scheme=deng-aio;package=${pkg};end`;
+  const publicBase = canonicalPublicUrl() || 'https://aio.deng.my.id';
+  const query = `?code=${encodeURIComponent(code)}`;
+  const deepLink = `${scheme}://auth/callback${query}`;
+  const manualPage = `${publicBase}/auth/apk-open${query}&manual=1`;
+  const intentUrl = `intent://auth/callback${query}#Intent;scheme=${scheme};package=${pkg};S.browser_fallback_url=${encodeURIComponent(manualPage)};end`;
+  const safeDeep = deepLink.replace(/"/g, '&quot;');
+  const safeIntent = intentUrl.replace(/"/g, '&quot;');
+  const jsIntent = intentUrl.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const jsDeep = deepLink.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="0; url=${safe}">
 <title>Returning to DENG All In One…</title></head>
-<body><p>Signing you in… <a href="${safe}">Tap here if the app does not open</a>.</p>
+<body><p>Opening DENG All In One…</p>
+<p><a id="open-app" href="${safeIntent}">Tap here if the app does not open</a></p>
+<p><a href="${safeDeep}">Alternate open link</a></p>
 <script>
 (function(){
-  var deep="${safe.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}";
-  var intent="${intentFallback.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}";
-  try { location.replace(deep); } catch (e) {}
-  setTimeout(function(){ try { location.replace(intent); } catch (e2) {} }, 350);
+  var intent="${jsIntent}";
+  var deep="${jsDeep}";
+  try { fetch("/api/aio/auth/apk-open-attempt",{method:"POST",credentials:"omit"}).catch(function(){}); } catch (e0) {}
+  try { location.replace(intent); } catch (e1) {
+    try { document.getElementById("open-app").click(); } catch (e2) {}
+  }
+  setTimeout(function(){
+    try { if (!document.hidden) location.replace(deep); } catch (e3) {}
+  }, 1200);
 })();
 </script></body></html>`;
 }
@@ -218,11 +234,14 @@ async function handleDiscordOAuthCallback(req, res) {
         avatar: discordUser.avatar || null,
       });
       const scheme = (process.env.DENG_AIO_APP_SCHEME || 'deng-aio').trim();
-      const deepLink = `${scheme}://auth/callback?code=${encodeURIComponent(loginCode)}`;
-      res.set('Content-Type', 'text/html; charset=utf-8');
-      console.log('[discord-oauth-callback] APK_AUTH_RETURN_TARGET route=%s scheme=%s', routePath, scheme);
+      const publicBase = canonicalPublicUrl() || oauthLoginRedirectHost(req) || '';
+      const handoffPath = `/auth/apk-open?code=${encodeURIComponent(loginCode)}`;
+      const handoffUrl = publicBase ? `${publicBase}${handoffPath}` : handoffPath;
+      console.log('[discord-oauth-callback] APK_AUTH_HANDOFF_CREATED route=%s scheme=%s ms=%d', routePath, scheme, Date.now() - started);
+      console.log('[discord-oauth-callback] APK_AUTH_RETURN_TARGET route=%s handoff=%s', routePath, handoffPath);
       console.log('[discord-oauth-callback] category=mobile_handoff_created route=%s ms=%d', routePath, Date.now() - started);
-      return res.status(200).send(renderOAuthDeepLinkHtml(deepLink));
+      res.set('Cache-Control', 'no-store');
+      return res.redirect(302, handoffUrl);
     } catch (bridgeErr) {
       console.error('[discord-oauth-callback] category=apk_bridge_failed route=%s error=%s', routePath, bridgeErr.message);
       safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
@@ -236,4 +255,5 @@ async function handleDiscordOAuthCallback(req, res) {
 module.exports = {
   handleDiscordOAuthCallback,
   requestTransportProof,
+  renderApkOpenHandoffHtml,
 };
