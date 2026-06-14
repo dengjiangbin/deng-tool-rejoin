@@ -15,7 +15,7 @@
     <div class="download-cta-col">
       <p class="download-platform-label">Android</p>
       <% if (manifest && manifest.file_name) { %>
-        <a href="/downloads/deng-all-in-one-apk-latest.apk" class="btn btn-primary" data-apk-download rel="nofollow">
+        <a href="/downloads/<%= encodeURIComponent(manifest.file_name) %>?v=<%= manifest.version_name %>" class="btn btn-primary" data-apk-download rel="nofollow">
           Download DENG All In One APK
         </a>
         <p class="apk-download-count" data-apk-download-count hidden aria-live="polite">

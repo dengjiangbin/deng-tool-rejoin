@@ -1941,7 +1941,7 @@ router.head('/downloads/deng-all-in-one-apk-latest.apk', (_req, res) => {
     return res.status(404).type('text/plain').end();
   }
   const safeName = path.basename(manifest.file_name);
-  return res.redirect(302, `/downloads/${encodeURIComponent(safeName)}`);
+  return res.redirect(302, `/downloads/${encodeURIComponent(safeName)}?release=${encodeURIComponent(manifest.version_name || 'latest')}`);
 });
 
 router.get('/downloads/deng-all-in-one-apk-latest.apk', (_req, res) => {
@@ -1951,7 +1951,7 @@ router.get('/downloads/deng-all-in-one-apk-latest.apk', (_req, res) => {
     return res.status(404).type('text/plain').send('APK not available yet.\n');
   }
   const safeName = path.basename(manifest.file_name);
-  return res.redirect(302, `/downloads/${encodeURIComponent(safeName)}`);
+  return res.redirect(302, `/downloads/${encodeURIComponent(safeName)}?release=${encodeURIComponent(manifest.version_name || 'latest')}`);
 });
 
 router.head('/downloads/deng-all-in-one-latest.apk', (_req, res) => {

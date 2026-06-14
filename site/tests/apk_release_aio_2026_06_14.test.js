@@ -53,9 +53,9 @@ describe('APK release aio 2026-06-14', () => {
     assert.ok(!fs.existsSync(path.join(RELEASES_DIR, OLD_APK)), 'legacy APK file must be removed');
   });
 
-  test('download.ejs uses canonical latest APK link only', () => {
+  test('download.ejs links versioned APK from manifest', () => {
     const ejs = fs.readFileSync(path.join(__dirname, '..', 'views', 'download.ejs'), 'utf8');
-    assert.match(ejs, /\/downloads\/deng-all-in-one-apk-latest\.apk/);
+    assert.match(ejs, /\/downloads\/<%= encodeURIComponent\(manifest\.file_name\) %>/);
     assert.doesNotMatch(ejs, /deng-tool-rejoin-apk-latest/);
     assert.doesNotMatch(ejs, /tool\.deng\.my\.id/);
     assert.match(ejs, /DENG All In One/);
