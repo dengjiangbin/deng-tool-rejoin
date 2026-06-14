@@ -2299,8 +2299,17 @@ function buildRarityColorProof(items, limit = 20) {
   return (items || []).slice(0, limit).map((item) => rarityColorMap.buildRarityColorProofRow(item));
 }
 
+function isResolvedInventoryImageUrl(url) {
+  const u = String(url || '');
+  if (!u || isPlaceholderFishImageUrl(u)) return false;
+  return u.startsWith('/api/fishit-tracker/assets/fish/')
+    || u.startsWith('/api/fishit-tracker/assets/stones/')
+    || u.startsWith('/api/fishit-tracker/image/')
+    || /^https?:\/\//i.test(u);
+}
+
 function isUsablePublicImageUrl(url) {
-  return fishImageCache.isResolvedInventoryImageUrl(url);
+  return isResolvedInventoryImageUrl(url);
 }
 
 function mapToPublicFishCardItem(cleaned) {
@@ -3163,12 +3172,12 @@ async function enrichDashboardFishCardImages(cards, baseUrl) {
   cards.forEach((card, i) => {
     const e = enriched[i];
     if (!e) return;
-    const resolved = e.imageUrl && fishImageCache.isResolvedInventoryImageUrl(e.imageUrl);
+    const resolved = e.imageUrl && isResolvedInventoryImageUrl(e.imageUrl);
     if (resolved) {
       card.imageUrl = e.imageUrl;
       card.imageUrlPresent = true;
       card.imageResolved = true;
-    } else if (fishImageCache.isPlaceholderImageUrl(card.imageUrl)) {
+    } else if (isPlaceholderFishImageUrl(card.imageUrl)) {
       card.imageUrl = null;
       card.imageUrlPresent = false;
     }
