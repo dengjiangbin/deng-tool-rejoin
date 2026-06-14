@@ -16,7 +16,7 @@ const {
   requestHost,
   isCanonicalPublicHost,
 } = require('./publicDomain');
-const { handleDiscordOAuthCallback } = require('./discordOAuthCallback');
+const { handleDiscordOAuthCallback, requestTransportProof } = require('./discordOAuthCallback');
 
 const router = express.Router();
 
@@ -124,11 +124,43 @@ router.get('/auth/web-bridge', authLimiter, async (req, res) => {
       req.session.save((saveErr) => {
         if (saveErr) {
           console.error('[auth/web-bridge] category=session_save_failed error=%s', saveErr.message);
+          req.session.flash = { ...(req.session.flash || {}), error: 'Could not save your session. Please try again.' };
+          return res.redirect(loginHome);
         }
         res.redirect(authReturnTo);
         resolve();
       });
     });
+  });
+});
+
+/** Auth/session transport probe for OAuth callback debugging behind Cloudflare. */
+router.get('/api/internal/auth-probe', (req, res) => {
+  const token = process.env.STABILITY_STATUS_TOKEN || process.env.AUTH_DEBUG_TOKEN || '';
+  if (token) {
+    const provided = String(req.headers['x-stability-token'] || req.headers['x-auth-debug-token'] || req.query.token || '');
+    if (provided !== token) {
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
+  }
+  res.set('Cache-Control', 'no-store');
+  return res.json({
+    ok: true,
+    ...requestTransportProof(req),
+    ip: req.ip,
+    headers: {
+      'x-forwarded-proto': req.headers['x-forwarded-proto'] || null,
+      'x-forwarded-host': req.headers['x-forwarded-host'] || null,
+      'x-forwarded-for': req.headers['x-forwarded-for'] || null,
+      'cf-connecting-ip': req.headers['cf-connecting-ip'] || null,
+    },
+    session: {
+      hasSession: !!req.session,
+      sessionIdPresent: !!(req.session && req.sessionID),
+      authenticated: !!(req.session && req.session.user),
+      discordUserId: req.session?.user?.discord_user_id || req.session?.discord_user_id || null,
+    },
+    trustProxy: req.app?.get('trust proxy'),
   });
 });
 

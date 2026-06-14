@@ -6,7 +6,12 @@
   <% if (typeof metaDescription !== 'undefined' && metaDescription) { %>
   <meta name="description" content="<%= metaDescription %>">
   <% } %>
-  <title><%= typeof title !== 'undefined' ? title : 'DENG Tool' %></title>
+  <% if (!user) { %>
+  <meta name="application-name" content="DENG All In One">
+  <meta property="og:site_name" content="DENG All In One">
+  <link rel="manifest" href="/public/site.webmanifest?v=<%= assetVersion %>">
+  <% } %>
+  <title><%= typeof title !== 'undefined' ? title : 'DENG All In One' %></title>
   <script>
     (function() {
       try {
@@ -34,7 +39,7 @@
       <span class="brand-mark logo-mark" aria-hidden="true">
         <img src="/public/img/deng-logo.png?v=<%= assetVersion %>" alt="">
       </span>
-      <span class="brand-name gradient-brand-text">DENG Tool</span>
+      <span class="brand-name gradient-brand-text">DENG All In One</span>
     </div>
 
     <ul class="nav-list">

@@ -716,7 +716,7 @@ describe('auth and protected pages', () => {
     const res = await request(app).get('/');
     assert.equal(res.status, 200);
     assert.match(res.text, /class="deng-home"/);
-    assert.match(res.text, /DENG Tool - Roblox Automation/);
+    assert.match(res.text, /DENG All In One - Roblox Automation/);
     assert.match(res.text, /href="\/login"/);
     assert.doesNotMatch(res.text, /Sign in with Discord/);
   });
@@ -724,7 +724,7 @@ describe('auth and protected pages', () => {
   test('/login renders the Discord sign-in page', async () => {
     const res = await request(app).get('/login');
     assert.equal(res.status, 200);
-    assert.match(res.text, /Sign In - DENG Tool/);
+    assert.match(res.text, /Sign In - DENG All In One/);
     assert.match(res.text, /Sign in with Discord/);
   });
 
@@ -739,7 +739,8 @@ describe('auth and protected pages', () => {
   test('login page shows Discord-only login with required text and no database login', async () => {
     const res = await request(app).get('/login');
     assert.equal(res.status, 200);
-    assert.match(res.text, /DENG Tool/);
+    assert.match(res.text, /DENG All In One/);
+    assert.doesNotMatch(res.text, /DENG Tool\b/);
     assert.match(res.text, /Sign in with Discord/);
     // Database login must be absent
     assert.doesNotMatch(res.text, /Username or email/);
@@ -1129,7 +1130,7 @@ describe('theme and dashboard UI', () => {
     // Dashboard primary CTA is now "Download APK" → /download (the legacy
     // "Generate Key" CTA moved to the /license page only).
     assert.match(dashboard.text, /href="\/download"[^>]*>\s*Download APK\s*</);
-    assert.match(dashboard.text, /DENG Tool: Rejoin APK/);
+    assert.match(dashboard.text, /Rejoin APK/);
     assert.doesNotMatch(dashboard.text, /DENG Monitor/);
     assert.match(dashboard.text, /News & Updates/);
     assert.match(dashboard.text, /Your Activity/);
@@ -1146,7 +1147,7 @@ describe('theme and dashboard UI', () => {
     assert.doesNotMatch(license.text, /Expired 0/);
     assert.doesNotMatch(license.text, /Expires if unused/);
     assert.doesNotMatch(license.text, /24h/);
-    assert.match(license.text, /Generate DENG Tool: Rejoin Key/);
+    assert.match(license.text, /Generate Rejoin Key/);
     assert.match(license.text, /Generate Key/);
     assert.match(license.text, /Recent Generated Keys/);
     assert.match(license.text, /22 Mei 2026, 2:14:05 PM/);
@@ -1534,7 +1535,7 @@ describe('theme and dashboard UI', () => {
     assert.doesNotMatch(res.text, /Expired 0/);
     assert.doesNotMatch(res.text, /Expires if unused/);
     assert.doesNotMatch(res.text, /24h/);
-    assert.match(res.text, /Generate DENG Tool: Rejoin Key/);
+    assert.match(res.text, /Generate Rejoin Key/);
   });
 
   test('My License action row renders only requested license buttons', async () => {
@@ -1593,16 +1594,16 @@ describe('license WIB formatting helpers', () => {
   test('download filename uses sanitized Discord username and WIB date without time', () => {
     assert.equal(
       licenseExportFilename('deng', '110184213604499456', '2026-05-23T17:00:00.000Z'),
-      'deng - DENG Tool Rejoin License Keys - 24 Mei 2026.txt',
+      'deng - DENG All In One Rejoin License Keys - 24 Mei 2026.txt',
     );
     assert.equal(sanitizeFilenameUsername(' DENG/Test  Name ', '1'), 'DENG Test Name');
     assert.equal(
       licenseExportFilename('DENG/Test', '110184213604499456', '2026-05-23T17:00:00.000Z'),
-      'DENG Test - DENG Tool Rejoin License Keys - 24 Mei 2026.txt',
+      'DENG Test - DENG All In One Rejoin License Keys - 24 Mei 2026.txt',
     );
     assert.equal(
       licenseExportFilename(' /:*?"<>| ', '110184213604499456', '2026-05-23T17:00:00.000Z'),
-      'user-110184213604499456 - DENG Tool Rejoin License Keys - 24 Mei 2026.txt',
+      'user-110184213604499456 - DENG All In One Rejoin License Keys - 24 Mei 2026.txt',
     );
   });
 });
@@ -2535,9 +2536,9 @@ describe('Luarmor-style key flow', () => {
     const result = await agent.get('/key/result');
     assert.equal(result.status, 200);
     assert.match(result.text, /DENG-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}/);
-    assert.match(result.text, /Redeem this key inside DENG Tool: Rejoin to use the tool\./);
+    assert.match(result.text, /Redeem this key inside the Rejoin module to activate your license\./);
     assert.match(result.text, /This key expires if not redeemed within 24 hours\./);
-    assert.match(result.text, /Open DENG Tool: Rejoin, paste this license key, then continue setup\./);
+    assert.match(result.text, /Open Rejoin, paste this license key, then continue setup\./);
     assert.doesNotMatch(result.req.path, /DENG-/);
   });
 
@@ -2785,12 +2786,20 @@ describe('security controls', () => {
   });
 
   test('session cookie and headers are configured for HttpOnly/SameSite/Secure production behavior', async () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.TOOL_SITE_COOKIE_DOMAIN;
+    delete require.cache[require.resolve('../src/sessionCookieConfig')];
+    const { buildSessionCookieOptions } = require('../src/sessionCookieConfig');
+    const cookie = buildSessionCookieOptions();
+    assert.equal(cookie.httpOnly, true);
+    assert.equal(cookie.sameSite, 'lax');
+    assert.equal(cookie.secure, 'auto');
+    assert.equal(cookie.domain, undefined);
     const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
-    assert.match(source, /httpOnly:\s*true/);
-    assert.match(source, /secure:\s*process\.env\.NODE_ENV === 'production'/);
-    assert.match(source, /sameSite:\s*'lax'/);
+    assert.match(source, /buildSessionCookieOptions/);
     assert.match(source, /contentSecurityPolicy/);
     assert.match(source, /frameAncestors/);
+    process.env.NODE_ENV = 'test';
   });
 });
 
@@ -3001,9 +3010,9 @@ describe('My License action APIs', () => {
     assert.equal(res.status, 200);
     const disposition = decodeURIComponent(res.headers['content-disposition']);
     assert.match(disposition, /attachment/);
-    assert.match(disposition, /DiscordTester - DENG Tool Rejoin License Keys - \d{1,2} [A-Za-z]+ 20\d{2}\.txt/);
-    assert.doesNotMatch(disposition, /deng-rejoin-keys|T\d{2}-\d{2}-\d{2}|\.?\d{3}Z/);
-    assert.match(res.text, /DENG Tool: Rejoin Keys/);
+    assert.match(disposition, /DiscordTester - DENG All In One Rejoin License Keys - \d{1,2} [A-Za-z]+ 20\d{2}\.txt/);
+    assert.doesNotMatch(disposition, /T\d{2}-\d{2}-\d{2}|\.?\d{3}Z/);
+    assert.match(res.text, /DENG All In One License Keys/);
     assert.match(res.text, /User: DiscordTester/);
     assert.match(res.text, /Generated: \d{1,2} [A-Za-z]+ 20\d{2}, \d{1,2}:\d{2}:\d{2} (AM|PM)/);
     assert.match(res.text, new RegExp(activeFull));
@@ -4012,7 +4021,7 @@ describe('Fish It website integration', () => {
   test('/login renders the Discord sign-in page', async () => {
     const res = await request(app).get('/login');
     assert.equal(res.status, 200);
-    assert.match(res.text, /Sign In - DENG Tool/);
+    assert.match(res.text, /Sign In - DENG All In One/);
     assert.match(res.text, /Sign in with Discord/);
   });
 

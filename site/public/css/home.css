@@ -218,9 +218,9 @@
   margin-bottom: 22px;
   padding: 7px 14px;
   border-radius: 999px;
-  border: 1px solid rgba(0, 230, 168, 0.22);
-  background: rgba(0, 230, 168, 0.06);
-  color: var(--public-accent);
+  border: 1px solid var(--status-green-border, rgba(0, 230, 168, 0.22));
+  background: var(--status-green-bg, rgba(0, 230, 168, 0.06));
+  color: var(--status-green, var(--public-accent));
   font-size: 0.84rem;
   font-weight: 600;
   white-space: nowrap;
@@ -245,8 +245,8 @@
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: var(--public-accent);
-  box-shadow: 0 0 12px rgba(0, 230, 168, 0.7);
+  background: var(--status-green, var(--public-accent));
+  box-shadow: 0 0 12px var(--status-green-glow, rgba(0, 230, 168, 0.7));
 }
 
 .deng-home-hero__title {
@@ -526,6 +526,11 @@
   color: var(--public-accent);
 }
 
+.deng-home-stat-card--status-green .deng-home-stat-card__value--status-green,
+.deng-home-stat-card__value--status-green {
+  color: var(--status-green, var(--public-accent));
+}
+
 .deng-home-stat-card__value--split-ratio {
   display: flex;
   align-items: baseline;
@@ -536,7 +541,7 @@
 }
 
 .deng-home-stat-ratio-active {
-  color: var(--public-accent);
+  color: var(--status-green, var(--public-accent));
   font-size: clamp(1.55rem, 2.4vw, 2rem);
   font-weight: 800;
   letter-spacing: -0.03em;

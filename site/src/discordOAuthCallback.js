@@ -18,6 +18,7 @@ const {
   requestHost,
   isCanonicalPublicHost,
 } = require('./publicDomain');
+const { describeSessionCookieConfig } = require('./sessionCookieConfig');
 const oauthStateStore = require('./oauthStateStore');
 const aioSessionStore = require('./aioSessionStore');
 
@@ -44,15 +45,27 @@ function loginRedirect(req) {
   return publicBase ? `${publicBase}${LOGIN_HOME}` : LOGIN_HOME;
 }
 
-function completeWebSession(req, res, { sessionUser, siteUser, authReturnTo, started }) {
+function requestTransportProof(req) {
+  return {
+    host: requestHost(req),
+    secure: !!req.secure,
+    protocol: req.protocol,
+    xForwardedProto: req.headers['x-forwarded-proto'] || null,
+    xForwardedHost: req.headers['x-forwarded-host'] || null,
+    cookieConfig: describeSessionCookieConfig(),
+  };
+}
+
+function completeWebSession(req, res, { sessionUser, siteUser, authReturnTo, started, routePath }) {
   return new Promise((resolve) => {
     req.session.regenerate((regenErr) => {
       if (regenErr) {
-        console.error('[discord-oauth-callback] category=session_regenerate_failed error=%s', regenErr.message);
+        console.error('[discord-oauth-callback] category=session_regenerate_failed route=%s error=%s', routePath, regenErr.message);
         safeFlash(req, 'error', 'Session error. Please try again.');
-        res.redirect(LOGIN_HOME);
-        return resolve();
+        res.redirect(loginRedirect(req));
+        return resolve({ ok: false, reason: 'session_regenerate_failed' });
       }
+
       req.session.user = sessionUser;
       req.session.site_user_id = siteUser && siteUser.id ? siteUser.id : null;
       req.session.discord_user_id = sessionUser.discord_user_id
@@ -61,13 +74,39 @@ function completeWebSession(req, res, { sessionUser, siteUser, authReturnTo, sta
       req.session.csrfToken = crypto.randomBytes(32).toString('hex');
       req.session.flash = { success: `Welcome, ${sessionUser.username}!` };
       if (req.session.authReturnTo) delete req.session.authReturnTo;
+
+      const sessionPreview = {
+        userId: sessionUser.id || null,
+        discordUserId: sessionUser.discord_user_id || null,
+        username: sessionUser.username || null,
+        siteUserId: req.session.site_user_id,
+      };
+
       req.session.save((saveErr) => {
         if (saveErr) {
-          console.error('[discord-oauth-callback] category=session_save_failed error=%s', saveErr.message);
+          console.error(
+            '[discord-oauth-callback] category=session_save_failed route=%s error=%s session=%j transport=%j',
+            routePath,
+            saveErr.message,
+            sessionPreview,
+            requestTransportProof(req),
+          );
+          safeFlash(req, 'error', 'Could not save your session. Please try again.');
+          res.redirect(loginRedirect(req));
+          return resolve({ ok: false, reason: 'session_save_failed' });
         }
-        console.log('[discord-oauth-callback] ok web_session_ms=%d return=%s', Date.now() - started, authReturnTo);
+
+        console.log(
+          '[discord-oauth-callback] category=web_session_ok route=%s ms=%d return=%s session=%j transport=%j',
+          routePath,
+          Date.now() - started,
+          authReturnTo,
+          sessionPreview,
+          requestTransportProof(req),
+        );
+
         res.redirect(authReturnTo);
-        resolve();
+        resolve({ ok: true, authReturnTo });
       });
     });
   });
@@ -77,6 +116,15 @@ async function handleDiscordOAuthCallback(req, res) {
   const started = Date.now();
   const routePath = req.path || '/auth/discord/callback';
   const { code, state, error: oauthError } = req.query;
+
+  console.log(
+    '[discord-oauth-callback] category=callback_hit route=%s code=%s state=%s oauthError=%s transport=%j',
+    routePath,
+    code ? 'present' : 'missing',
+    state ? 'present' : 'missing',
+    oauthError ? String(oauthError).slice(0, 64) : null,
+    requestTransportProof(req),
+  );
 
   if (oauthError) {
     console.warn('[discord-oauth-callback] category=oauth_denied route=%s discord_error=%s', routePath, String(oauthError).slice(0, 64));
@@ -99,7 +147,9 @@ async function handleDiscordOAuthCallback(req, res) {
   let tokens;
   try {
     tokens = await exchangeDiscordCode(String(code), stored.redirectUri);
-  } catch (_err) {
+    console.log('[discord-oauth-callback] category=token_exchange_ok route=%s redirect_uri=%s', routePath, stored.redirectUri);
+  } catch (err) {
+    console.error('[discord-oauth-callback] category=token_exchange_failed route=%s redirect_uri=%s error=%s', routePath, stored.redirectUri, err.message);
     safeFlash(req, 'error', 'Discord sign-in failed. Please try again.');
     return res.redirect(loginRedirect(req));
   }
@@ -107,6 +157,12 @@ async function handleDiscordOAuthCallback(req, res) {
   let discordUser;
   try {
     discordUser = await fetchDiscordUser(tokens.access_token);
+    console.log(
+      '[discord-oauth-callback] category=profile_ok route=%s discord_id=%s username=%s',
+      routePath,
+      discordUser.id,
+      discordUser.username || discordUser.global_name || 'unknown',
+    );
   } catch (err) {
     const status = (err.response && err.response.status) || 'unknown';
     console.error('[discord-oauth-callback] category=user_fetch_failed route=%s http_status=%s', routePath, status);
@@ -163,9 +219,10 @@ async function handleDiscordOAuthCallback(req, res) {
     }
   }
 
-  return completeWebSession(req, res, { sessionUser, siteUser, authReturnTo, started });
+  return completeWebSession(req, res, { sessionUser, siteUser, authReturnTo, started, routePath });
 }
 
 module.exports = {
   handleDiscordOAuthCallback,
+  requestTransportProof,
 };

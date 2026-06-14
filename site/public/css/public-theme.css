@@ -12,6 +12,10 @@
   --public-accent: #00e6a8;
   --public-accent-soft: rgba(0, 230, 168, 0.12);
   --public-success: #00e6a8;
+  --status-green: #00e6a8;
+  --status-green-border: rgba(0, 230, 168, 0.28);
+  --status-green-bg: rgba(0, 230, 168, 0.08);
+  --status-green-glow: rgba(0, 230, 168, 0.22);
   --public-warning: #fbbf24;
   --public-danger: #f87171;
 }

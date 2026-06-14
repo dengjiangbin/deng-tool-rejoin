@@ -67,7 +67,7 @@ function sanitizeFilenameUsername(value, fallbackId = '') {
 
 function licenseExportFilename(username, discordUserId, generatedAt = new Date()) {
   const safeUser = sanitizeFilenameUsername(username, discordUserId);
-  return `${safeUser} - DENG Tool Rejoin License Keys - ${formatWibDate(generatedAt)}.txt`;
+  return `${safeUser} - DENG All In One Rejoin License Keys - ${formatWibDate(generatedAt)}.txt`;
 }
 
 module.exports = {

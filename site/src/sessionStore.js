@@ -242,10 +242,11 @@ class FileSessionStore extends session.Store {
       expires_at: this._expiry(sess),
       session: sess,
     });
+    const isAuth = this._isAuthenticatedSessionData(sess);
     fs.writeFile(tmp, wrapped, { encoding: 'utf8', mode: 0o600 }, (writeErr) => {
       if (writeErr) {
-        if (RETRYABLE_FS_CODES.has(writeErr.code)) {
-          console.warn('[sessionStore] write skipped:', writeErr.code);
+        if (RETRYABLE_FS_CODES.has(writeErr.code) && !isAuth) {
+          console.warn('[sessionStore] write skipped (anonymous):', writeErr.code);
           return callback(null);
         }
         return callback(writeErr);
@@ -253,12 +254,13 @@ class FileSessionStore extends session.Store {
       this._renameOrCopyWithRetry(tmp, file)
         .then(() => callback(null))
         .catch((err) => {
-          if (RETRYABLE_FS_CODES.has(err?.code)) {
+          if (RETRYABLE_FS_CODES.has(err?.code) && !isAuth) {
             ebusySwallowCount += 1;
-            console.warn('[sessionStore] set skipped after retries:', err.code);
+            console.warn('[sessionStore] set skipped after retries (anonymous):', err.code);
             return callback(null);
           }
-          callback(err);
+          console.error('[sessionStore] set failed for sid=%s auth=%s code=%s', sid.slice(0, 8), isAuth, err?.code || err?.message);
+          callback(err || new Error('session_store_write_failed'));
         });
     });
   }

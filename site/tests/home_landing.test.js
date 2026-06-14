@@ -104,7 +104,7 @@ describe('public home landing page', () => {
   test('GET / logged out returns landing page, not login', async () => {
     const res = await request(app).get('/');
     assert.equal(res.status, 200);
-    assert.match(res.text, /<title>DENG Tool - Roblox Automation &amp; Stat Tracker<\/title>/);
+    assert.match(res.text, /<title>DENG All In One - Roblox Automation &amp; Stat Tracker<\/title>/);
     assert.match(res.text, /class="deng-home"/);
     assert.match(res.text, /Live Network/);
     assert.match(res.text, /Platform Stats/);
@@ -112,8 +112,8 @@ describe('public home landing page', () => {
     assert.match(res.text, /Tracked Players/);
     assert.doesNotMatch(res.text, /Rejoin Tool Stats/);
     assert.match(res.text, /Active Devices/);
-    assert.match(res.text, /Rejoin Tools Running/);
-    assert.match(res.text, /One platform\. Multiple tools\./);
+    assert.match(res.text, /Rejoin agents active/);
+    assert.match(res.text, /One platform\. Multiple modules\./);
     assert.match(res.text, /deng-home-nav-wrap--fixed/);
     assert.match(res.text, /href="#home"[^>]*>Home<\/a>/);
     assert.match(res.text, /href="#statistic">Statistic<\/a>/);
@@ -128,7 +128,7 @@ describe('public home landing page', () => {
     assert.match(res.text, /data-home-stat-card="caught24Hours"/);
     assert.match(res.text, /data-home-stat-card="ghostfinnRod"/);
     assert.match(res.text, /data-home-stat-meta="onlineNow"/);
-    assert.match(res.text, /Rejoin Tools Running/);
+    assert.match(res.text, /Rejoin agents active/);
     assert.match(res.text, /deng-home-section--tight/);
     assert.match(res.text, /class="[^"]*js-count-up[^"]*"[^>]*data-home-stat-value="trackedPlayers"/);
     assert.match(res.text, /data-home-stat-value="rejoinActiveDevices"/);
@@ -154,7 +154,9 @@ describe('public home landing page', () => {
   test('GET /login logged out returns dedicated login page', async () => {
     const res = await request(app).get('/login');
     assert.equal(res.status, 200);
-    assert.match(res.text, /<title>Sign In - DENG Tool<\/title>/);
+    assert.match(res.text, /<title>Sign In - DENG All In One<\/title>/);
+    assert.match(res.text, /DENG All In One/);
+    assert.doesNotMatch(res.text, /DENG Tool\b/);
     assert.match(res.text, /class="login-page login-page--split"/);
     assert.match(res.text, /Welcome back/);
     assert.match(res.text, /Sign in with Discord/);

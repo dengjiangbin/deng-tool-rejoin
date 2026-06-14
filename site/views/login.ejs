@@ -1,21 +1,41 @@
 <script>document.documentElement.dataset.publicPage = '1'; document.documentElement.dataset.theme = 'dark';</script>
 <link rel="stylesheet" href="/public/css/public-theme.css?v=<%= assetVersion %>">
+<link rel="stylesheet" href="/public/css/hero-wordmark.css?v=<%= assetVersion %>">
 <link rel="stylesheet" href="/public/css/login-page.css?v=<%= assetVersion %>">
 
-<div class="login-page login-page--split" data-hide-username-scope>
+<div class="login-page login-page--split<%= apkEmbed ? ' login-page--apk-embed' : '' %>" data-hide-username-scope>
   <div class="login-page__shell">
-    <aside class="login-page__brand" aria-label="DENG Tool overview">
-      <a class="login-page__brand-row" href="/" aria-label="Go to home">
-        <span class="login-page__brand-mark" aria-hidden="true">
-          <img src="/public/img/deng-logo.png?v=<%= assetVersion %>" alt="">
-        </span>
-        <span class="login-page__brand-name">DENG Tool</span>
-      </a>
+    <aside class="login-page__brand" aria-label="DENG All In One overview">
+      <div class="login-page__brand-row" aria-label="Site header">
+        <a class="login-page__brand-link" href="/" aria-label="Go to home">
+          <span class="login-page__brand-mark" aria-hidden="true">
+            <img src="/public/img/deng-logo.png?v=<%= assetVersion %>" alt="">
+          </span>
+          <span class="login-page__brand-name">DENG All In One</span>
+        </a>
+        <div class="login-page__online-pill login-page__online-pill--offline" data-login-online-pill aria-live="polite" hidden>
+          <span class="login-page__online-count" data-login-online-text>No One Online</span>
+        </div>
+      </div>
 
       <div class="login-page__hero">
-        <h1 class="login-page__hero-title" aria-label="DENG Tool">
-          <span class="login-page__hero-accent">DENG</span>
-          <span class="login-page__hero-main">Tool</span>
+        <h1 class="login-page__hero-title" aria-label="DENG All In One">
+          <span class="hero-wordmark" data-hero-wordmark>
+            <span class="hero-word is-active" data-hero-word="deng" tabindex="0">
+              <span class="hero-corner hero-corner--tl" aria-hidden="true"></span>
+              <span class="hero-corner hero-corner--tr" aria-hidden="true"></span>
+              <span class="hero-corner hero-corner--bl" aria-hidden="true"></span>
+              <span class="hero-corner hero-corner--br" aria-hidden="true"></span>
+              <span class="hero-word__text">DENG</span>
+            </span>
+            <span class="hero-word" data-hero-word="aio" tabindex="0">
+              <span class="hero-corner hero-corner--tl" aria-hidden="true"></span>
+              <span class="hero-corner hero-corner--tr" aria-hidden="true"></span>
+              <span class="hero-corner hero-corner--bl" aria-hidden="true"></span>
+              <span class="hero-corner hero-corner--br" aria-hidden="true"></span>
+              <span class="hero-word__text">All In One</span>
+            </span>
+          </span>
         </h1>
         <p class="login-page__hero-sub">
           Track your Roblox games. Manage sessions. Monitor inventories at scale.
@@ -40,7 +60,7 @@
           <div class="login-page__alert login-page__alert--success" role="alert"><%= flash.success %></div>
         <% } %>
 
-        <a href="/auth/discord" class="login-page__discord-btn">
+        <a href="/auth/discord<%= authReturnTo ? ('?return=' + encodeURIComponent(authReturnTo)) : '' %>" class="login-page__discord-btn">
           <svg class="login-page__discord-icon discord-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <path d="M20.317 4.369A19.8 19.8 0 0 0 15.885 3a13.6 13.6 0 0 0-.617 1.27 18.3 18.3 0 0 0-5.535 0A13 13 0 0 0 9.11 3 19.7 19.7 0 0 0 4.677 4.37C1.86 8.57 1.096 12.66 1.478 16.693a19.9 19.9 0 0 0 6.073 3.078c.49-.668.927-1.377 1.304-2.122a13 13 0 0 1-2.053-.99c.172-.126.34-.257.503-.392a14.2 14.2 0 0 0 12.087 0c.165.14.333.27.503.392-.655.39-1.345.722-2.056.99.377.745.814 1.454 1.304 2.122a19.8 19.8 0 0 0 6.075-3.078c.448-4.67-.766-8.72-3.204-12.324M8.79 14.222c-1.183 0-2.157-1.085-2.157-2.42 0-1.334.955-2.42 2.157-2.42 1.21 0 2.176 1.095 2.157 2.42 0 1.335-.955 2.42-2.157 2.42m7.42 0c-1.183 0-2.157-1.085-2.157-2.42 0-1.334.955-2.42 2.157-2.42 1.21 0 2.176 1.095 2.157 2.42 0 1.335-.946 2.42-2.157 2.42"></path>
           </svg>
@@ -54,3 +74,5 @@
     </section>
   </div>
 </div>
+
+<script src="/public/js/login-page.js?v=<%= assetVersion %>" defer></script>

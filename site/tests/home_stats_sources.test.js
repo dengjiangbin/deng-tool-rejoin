@@ -3,6 +3,7 @@
 const { describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const path = require('path');
 const request = require('supertest');
 
 process.env.NODE_ENV = 'test';
@@ -105,7 +106,7 @@ describe('landing stat sources and layout regression', () => {
     assert.doesNotMatch(res.text, /Rejoin Tool Stats/);
     assert.match(res.text, /Live Network/);
     assert.match(res.text, /data-home-stat-card="rejoinActiveDevices"/);
-    assert.match(res.text, /Rejoin Tools Running/);
+    assert.match(res.text, /Rejoin agents active/);
     assert.doesNotMatch(res.text, /data-home-stat-card="activeAgents"/);
     assert.doesNotMatch(res.text, /Tracker Devices Running/);
     const liveGridMatch = res.text.match(/data-home-live-stats-grid[\s\S]*?<\/div>\s*<p class="deng-home-stats-empty" data-home-live-stats-empty/);
@@ -150,7 +151,7 @@ describe('landing stat sources and layout regression', () => {
     assert.doesNotMatch(res.text, /deng-home-network-panel/);
     assert.doesNotMatch(res.text, /deng-home-node-grid/);
     assert.match(res.text, /id="about"/);
-    assert.match(res.text, /One platform\. Multiple tools\./);
+    assert.match(res.text, /One platform\. Multiple modules\./);
   });
 
   test('mobile homepage keeps Home Statistic About nav links in one row', () => {

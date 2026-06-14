@@ -33,7 +33,8 @@
         "DISCORD_AIO_WEB_REDIRECT_URI": "https://aio.deng.my.id/auth/discord/callback",
         "DISCORD_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "DISCORD_AIO_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
-        "TOOL_SITE_ASSET_VERSION": "TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14",
+        "OAUTH_STATE_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\oauth-states",
+        "TOOL_SITE_ASSET_VERSION": "DENG_AIO_PUBLIC_BRANDING_RESTORE_2026_06_14",
         "GIT_COMMIT": "5e76ddc"
       }
     },

@@ -171,14 +171,23 @@ describe('OAuth aio domain migration', () => {
     assert.notEqual(tracker.headers.location, '/login');
   });
 
-  test('F: production session cookie config is secure on aio domain', () => {
+  test('F: production session cookie config is secure host-only on aio domain', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.TOOL_SITE_COOKIE_DOMAIN;
+    delete require.cache[require.resolve('../src/sessionCookieConfig')];
+    const { describeSessionCookieConfig } = require('../src/sessionCookieConfig');
     const app = require('../src/app');
     assert.ok(app);
+    const cookie = describeSessionCookieConfig();
+    assert.equal(cookie.hostOnly, true);
+    assert.equal(cookie.domain, null);
+    assert.equal(cookie.secure, 'auto');
     assert.equal(preferredOAuthCallbackUri(), 'https://aio.deng.my.id/api/aio/auth/callback');
     assert.equal(alternateOAuthCallbackUri(), 'https://aio.deng.my.id/auth/discord/callback');
     assert.equal(resolveDiscordRedirectUri({ headers: { host: 'aio.deng.my.id' } }), preferredOAuthCallbackUri());
     assert.equal(isOAuthCallbackPath('/api/aio/auth/callback'), true);
     assert.equal(isOAuthCallbackPath('/auth/discord/callback'), true);
+    process.env.NODE_ENV = 'test';
   });
 
   test('G: login page HTML has no visible tool OAuth links', async () => {
