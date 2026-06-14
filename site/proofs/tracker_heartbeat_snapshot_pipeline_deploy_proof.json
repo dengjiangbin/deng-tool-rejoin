@@ -1,0 +1,46 @@
+{
+  "marker": "TRACKER_HEARTBEAT_SNAPSHOT_PIPELINE_DEPLOY_2026_06_14",
+  "deployedAt": "2026-06-14T11:16:00.000Z",
+  "commitSha": "8047a9110563b734a4742781143aeca7d50c4c44",
+  "commitMessage": "Fix tracker heartbeat snapshot pipeline so /tracker shows real data after full snapshot.",
+  "pushStatus": "pushed origin/main (576245c..8047a91)",
+  "pm2Restart": {
+    "deng-tool-site": { "id": 17, "status": "online", "restarts": 7 },
+    "deng-tracker-ingest": { "id": 18, "status": "online", "restarts": 2 },
+    "saved": true
+  },
+  "tests": {
+    "fishit_tracker_heartbeat_snapshot_pipeline.test.js": "pass",
+    "fishit_snapshot_completeness.test.js": "pass",
+    "fishit_account_presence_status.test.js": "pass",
+    "homepage_public_tracker_stats.test.js": "pass",
+    "total": "24/24"
+  },
+  "publicTrackerStats": {
+    "url": "https://aio.deng.my.id/api/public/tracker-stats",
+    "trackedCount": 267,
+    "onlineCount": 80,
+    "currentBuildUniqueUsers": 182,
+    "registeredTrackedCount": 267,
+    "rawSessionRows": 201
+  },
+  "homeNetworkStats": {
+    "url": "https://aio.deng.my.id/api/home/network-stats",
+    "trackedCount": 267,
+    "onlineCount": 76,
+    "currentBuildUniqueUsers": 182
+  },
+  "inventoryBundle": {
+    "js": "/public/assets/inventory.1b05d52de7b3.js",
+    "httpStatus": 200
+  },
+  "uploadProofSamples": {
+    "heartbeat": "[fishit-tracker] upload_proof stage=heartbeat usernameKey=priadivine424 discordOwnerId=441501969769693185 payloadType=tracker_status phase=player_data_selected build=UPLOAD_COMPACT_FAST_PATH_2026_06_13 hasLeaderstatsSnapshot=0 hasFishSnapshot=0 hasStoneSnapshot=0 snapshotComplete=0 inventoryReady=0 accepted=1 rejectReason=none ownerBinding=registered_account_match",
+    "inventory_snapshot_success": "[fishit-tracker] upload_proof stage=inventory_snapshot usernameKey=stokjualanardian discordOwnerId=1444588274327752870 payloadType=inventory_snapshot phase=live build=UPLOAD_COMPACT_FAST_PATH_2026_06_13 hasLeaderstatsSnapshot=1 hasFishSnapshot=1 hasStoneSnapshot=1 snapshotComplete=1 inventoryReady=1 accepted=1 rejectReason=none ownerBinding=registered_account_match"
+  },
+  "trackerLuaUrl": "https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua",
+  "notes": [
+    "ownerBinding value is registered_account_match (not literal resolved) when Discord owner is resolved from registered tracked accounts",
+    "Many live inventory_snapshot uploads still show snapshotComplete=0 when scan proof is partial; full success requires all proof flags + completeness evaluation"
+  ]
+}
