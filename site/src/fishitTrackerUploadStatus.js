@@ -329,17 +329,46 @@ function extractUploadMeta(body) {
   };
 }
 
-function applyAcceptedUploadMeta(session, body, now) {
+function applyAcceptedUploadMeta(session, body, now, opts = {}) {
   const meta = extractUploadMeta(body);
-  return {
+  const heartbeatOnly = opts.heartbeatOnly === true;
+  const online = session?.isOnline !== false;
+  const next = {
     ...(session || {}),
     ...meta,
     latestPayloadAccepted: true,
     lastUploadAcceptedAt: now,
+    lastUploadReceivedAt: now,
     lastUploadRejectedAt: null,
     lastUploadRejectReason: null,
     rejectReason: null,
+    lastAccountSeenAt: now,
+    lastSeenAt: now,
   };
+  if (heartbeatOnly || online) {
+    next.lastHeartbeatAt = now;
+    next.lastSuccessfulHeartbeatAt = now;
+  }
+  if (heartbeatOnly || !session?.lastSuccessfulUploadAt) {
+    next.lastSuccessfulUploadAt = session?.lastSuccessfulUploadAt || now;
+  }
+  return next;
+}
+
+function markTrackerHeartbeatSuccess(session, serverReceivedAt, snapshot = {}) {
+  const now = serverReceivedAt || new Date().toISOString();
+  const intervalSeconds = Number(snapshot.intervalSeconds) > 0
+    ? Number(snapshot.intervalSeconds)
+    : resolveIntervalSeconds(session);
+  return markTrackerSyncSuccess(session, now, {
+    syncReason: snapshot.syncReason || 'heartbeat_accepted',
+    lastStatsUpdatedAt: session?.lastStatsUpdatedAt || now,
+    intervalSeconds,
+    expectedLoaderBuild: snapshot.expectedLoaderBuild || session?.expectedLoaderBuild || null,
+    loaderOutdated: snapshot.loaderOutdated === true,
+    lastInventoryAt: session?.lastInventoryAt || null,
+    lastSnapshotUploadAt: session?.lastSnapshotUploadAt || null,
+  });
 }
 
 function applyRejectedUploadMeta(session, body, now, rejectReason) {
@@ -371,4 +400,5 @@ module.exports = {
   extractUploadMeta,
   applyAcceptedUploadMeta,
   applyRejectedUploadMeta,
+  markTrackerHeartbeatSuccess,
 };

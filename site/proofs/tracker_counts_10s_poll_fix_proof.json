@@ -1,0 +1,52 @@
+﻿{
+    "onlineCountTest":  "see site/tests/tracker_counts_10s_poll.test.js",
+    "pollingIntervalMs":  10000,
+    "deployMarker":  "TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14",
+    "directIngestHeaderValidation":  {
+                                         "servedBy":  "deng-tracker-ingest",
+                                         "validated":  true,
+                                         "route":  "direct-ingest"
+                                     },
+    "noTenMinuteLivePollingGrep":  {
+
+                                   },
+    "timestamp":  "2026-06-14T02:38:08.7364181Z",
+    "p0MetricsUnchanged":  {
+                               "marker":  "DIRECT_INGEST_P0_FAST_ACCEPT_2026_06_14",
+                               "hardFail503CountExpected":  0
+                           },
+    "pollingIntervalDefinedIn":  [
+                                     "site/src/inventory/fishit_tracker.source.ejs",
+                                     "site/public/assets/",
+                                     "inventory.d1d50047f361.js"
+                                 ],
+    "trackedCountTest":  "see site/tests/tracker_counts_10s_poll.test.js",
+    "sampleLiveApiResponse":  null,
+    "buildMarker":  "TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14",
+    "noWmicIntroduced":  {
+                             "confirmed":  true,
+                             "note":  "no wmic.exe usage in this fix"
+                         },
+    "mobileApkRouteValidation":  {
+                                     "samePollConstant":  "TRACKER_POLL_INTERVAL_MS = 10_000 in fishit_tracker.source.ejs",
+                                     "sameSummaryPath":  "/api/tracker/account-status includes trackedCount/onlineCount"
+                                 },
+    "untouchedConstraints":  {
+                                 "cloudflareTunnel":  true,
+                                 "oauth":  true,
+                                 "branding":  true,
+                                 "loaderUrl":  true,
+                                 "directIngest":  true,
+                                 "webProxyFallback":  true
+                             },
+    "commitSha":  "0c3a97c03b03f9c854ddfe7d56adeb90a91ce63a",
+    "pm2ProcessIds":  [
+
+                      ],
+    "liveEndpointCacheHeaders":  {
+                                     "publicNetwork":  {
+                                                           "cacheControl":  null,
+                                                           "status":  404
+                                                       }
+                                 }
+}

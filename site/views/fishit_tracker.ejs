@@ -1,9 +1,9 @@
 ﻿<!DOCTYPE html>
-<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'TRACKER_DASHBOARD_CATCH_DB_2026_06_12' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
+<html lang="en" data-theme="dark" data-tracker-ui-deploy="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14' %>" data-tracker-template-v="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>"<% if (typeof debugInventory !== 'undefined' && debugInventory) { %> data-render-build="<%= typeof renderBuild !== 'undefined' ? renderBuild : '' %>" data-public-api-build="<%= typeof publicApiBuild !== 'undefined' ? publicApiBuild : '' %>"<% } %>>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'TRACKER_DASHBOARD_CATCH_DB_2026_06_12' %>">
+  <meta name="tracker-ui-deploy" content="<%= typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14' %>">
   <link rel="icon" type="image/png" href="/public/img/deng-logo.png?v=<%= typeof assetVersion !== 'undefined' ? assetVersion : '' %>">
   <link rel="canonical" href="<%= typeof canonicalInventoryPath !== 'undefined' ? canonicalInventoryPath : '/tracker' %>">
   <meta name="tracker-template-version" content="<%= typeof trackerTemplateVersion !== 'undefined' ? trackerTemplateVersion : '' %>">
@@ -13,20 +13,22 @@
 </head>
 <body class="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? 'inventory-apk-embed' : '' %>" data-inventory-js="pending" data-apk-embed="<%= (typeof apkEmbed !== 'undefined' && apkEmbed) ? '1' : '0' %>" data-ui-marker="<%= (typeof debugInventory !== 'undefined' && debugInventory) ? (typeof publicApiBuild !== 'undefined' ? publicApiBuild : 'inventory-debug') : (typeof trackerUiDeployMarker !== 'undefined' ? trackerUiDeployMarker : 'BLOCKER10ZTA_INVENTORY_DESKTOP_SIDEBAR_2026_06_11') %>">
 <div class="inventory-shell">
-  <aside class="inventory-sidebar" aria-label="Tracker setup">
+  <aside class="inventory-sidebar sidebar deng-app-sidebar" aria-label="Main navigation">
     <div class="inventory-sidebar__top">
-    <div class="inventory-sidebar__brand">
-      <span class="inventory-sidebar__logo" aria-hidden="true">
+    <div class="sidebar-brand-block">
+      <span class="sidebar-brand-block__logo" aria-hidden="true">
         <img src="/public/img/deng-logo.png" alt="">
       </span>
-      <div class="inventory-sidebar__titles">
-        <div class="inventory-sidebar__title">DENG Tracker</div>
-        <div class="inventory-sidebar__subtitle">Fish It</div>
+      <div class="sidebar-brand-block__text">
+        <div class="sidebar-brand-block__title">DENG Tracker</div>
+        <div class="sidebar-brand-block__subtitle">Fish It</div>
       </div>
     </div>
-    <nav class="inventory-main-nav" aria-label="Main sections">
-      <button type="button" class="inventory-main-nav__tab is-active" data-inventory-section="dashboard">Dashboard</button>
-      <button type="button" class="inventory-main-nav__tab" data-inventory-section="accounts">Live Tracker</button>
+    <div class="sidebar-divider" aria-hidden="true"></div>
+    <%- include('partials/deng-sidebar-nav', { sidebarNavMode: 'tracker' }) %>
+    <nav class="inventory-main-nav inventory-main-nav--mobile" aria-label="Main sections">
+      <button type="button" class="inventory-main-nav__tab" data-inventory-section="dashboard">Dashboard</button>
+      <button type="button" class="inventory-main-nav__tab is-active" data-inventory-section="accounts">Live Tracker</button>
     </nav>
     </div>
     <div class="inventory-sidebar__spacer" aria-hidden="true"></div>
@@ -99,7 +101,7 @@
       </p>
     </header>
 
-    <section id="inventoryDashboardPanel" class="inventory-panel inventory-panel--dashboard" aria-label="Dashboard">
+    <section id="inventoryDashboardPanel" class="inventory-panel inventory-panel--dashboard" hidden aria-label="Dashboard">
       <div class="dashboard-toolbar">
         <div class="dashboard-period-filter" role="tablist" aria-label="Dashboard period">
           <button type="button" class="dashboard-period-filter__btn is-active" data-dashboard-period="all">ALL TIME</button>
@@ -152,7 +154,7 @@
       </div>
     </section>
 
-    <section id="inventoryAccountsPanel" class="inventory-panel inventory-panel--accounts" hidden aria-label="Live Tracker">
+    <section id="inventoryAccountsPanel" class="inventory-panel inventory-panel--accounts" aria-label="Live Tracker">
 
     <div class="inventory-stats" id="inventoryStats" aria-label="Inventory summary">
       <div class="stat-card stat-card--online">
@@ -240,7 +242,7 @@
                 </svg>
               </span>
             </button>
-            <button type="button" class="accounts-icon-btn accounts-view-btn" id="viewStoneGridBtn" title="Stone grid" aria-label="Stone grid">
+            <button type="button" class="accounts-icon-btn accounts-view-btn" id="viewStoneGridBtn" title="Item grid" aria-label="Item grid">
               <span class="accounts-view-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" focusable="false">
                   <path d="M12 3 20 8v8l-8 5-8-5V8l8-5Z"></path>

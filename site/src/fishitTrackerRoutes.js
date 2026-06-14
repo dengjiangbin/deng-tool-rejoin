@@ -37,6 +37,12 @@ const { createUserRateLimit } = require('./rateLimitUtils');
 const { uploadLimiter } = require('./trackerUploadRateLimit');
 const trackerConcurrencyGate = require('./trackerConcurrencyGate');
 const { finishTrackerUploadResponse } = require('./trackerUploadResponse');
+const { buildTrackerAccountSummary } = require('./trackerAccountSummary');
+const {
+  ACCOUNT_PRESENCE_GRACE_MS,
+  deriveAccountPresenceStatus,
+  resolveLastAccountSeenAt,
+} = require('./trackerAccountPresence');
 
 const catalogStore = require('./fishitCatalogStore');
 const playerStatsStore = require('./fishitPlayerStats');
@@ -80,7 +86,6 @@ const {
   validateTrackerClientProof,
   prepareTrackerRequestBody,
   MINIMUM_TRACKER_BUILD,
-  isAllowedTrackerBuild,
   ALLOWED_TRACKER_CHANNEL,
   ALLOWED_TRACKER_RAW_URL,
 } = require('./fishitTrackerChannelEnforcement');
@@ -135,7 +140,11 @@ function resolvePlayerStatsForApi(raw) {
 }
 
 function isTrustedClientBuild(build) {
-  return isAllowedTrackerBuild(build);
+  if (!build) return false;
+  const s = String(build);
+  return s === EXPECTED_CLIENT_TRACKER_BUILD
+    || s === MINIMUM_TRACKER_BUILD
+    || s.includes('LOADER_REGISTER_LIMIT_FIX');
 }
 
 function buildPlayerStatsProof(raw, data, nowFallback) {
@@ -746,6 +755,22 @@ async function persistSessionState(key, baseUrl) {
     sessionStore.saveSession(key, data, liveTrackDB);
   } catch (err) {
     console.warn('[fishit-tracker] session persist failed:', key, err && err.message ? err.message : err);
+  }
+}
+
+/** Persist heartbeat-critical session fields immediately so 8791 web can reload before deferred enrichment. */
+function persistSessionHeartbeat(key) {
+  if (!key || key.startsWith('uid:')) return;
+  const data = liveTrackDB[key];
+  if (!data) return;
+  try {
+    sessionStore.saveSession(key, data, liveTrackDB);
+  } catch (err) {
+    console.warn(
+      '[fishit-tracker] heartbeat persist failed:',
+      key,
+      err && err.message ? err.message : err,
+    );
   }
 }
 
@@ -3240,7 +3265,34 @@ async function handleTrackerDashboard(req, res) {
 router.get('/api/tracker/dashboard', requireInventoryApiAuth, handleTrackerDashboard);
 router.get('/api/inventory/dashboard', requireInventoryApiAuth, handleTrackerDashboard);
 
+async function handleTrackerSummary(req, res) {
+  res.set(NO_STORE_HEADERS);
+  syncLiveTrackFromDisk();
+  try {
+    const trackedAccounts = await inventoryTrackedAccounts.listTrackedAccounts(req.inventoryOwnerDiscordId);
+    const summary = buildTrackerAccountSummary(trackedAccounts, liveTrackDB, {
+      serverNowMs: Date.now(),
+      expectedTrackerBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+      isTrustedBuild: isTrustedClientBuild,
+      discordOwnerId: req.inventoryOwnerDiscordId,
+    });
+    return res.status(200).json(summary);
+  } catch (err) {
+    console.error('[fishit-tracker] summary failed:', err && err.message ? err.message : err);
+    return res.status(500).json({
+      ok: false,
+      error: 'tracker_summary_failed',
+      message: 'Could not load tracker account summary.',
+    });
+  }
+}
+
+router.get('/api/tracker/summary', requireInventoryApiAuth, handleTrackerSummary);
+router.get('/api/tracker/account-summary', requireInventoryApiAuth, handleTrackerSummary);
+router.get('/api/inventory/summary', requireInventoryApiAuth, handleTrackerSummary);
+
 async function handleAccountStatus(req, res) {
+  res.set(NO_STORE_HEADERS);
   syncLiveTrackFromDisk();
   try {
     const serverNowMs = Date.now();
@@ -3304,7 +3356,13 @@ async function handleAccountStatus(req, res) {
         canonicalKey: robloxUserId ? String(robloxUserId) : usernameKey,
       };
     });
-    return res.status(200).json({ serverNow, accounts });
+    const summary = buildTrackerAccountSummary(trackedAccounts, liveTrackDB, {
+      serverNowMs,
+      expectedTrackerBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+      isTrustedBuild: isTrustedClientBuild,
+      discordOwnerId: req.inventoryOwnerDiscordId,
+    });
+    return res.status(200).json({ serverNow, accounts, ...summary });
   } catch (err) {
     console.error('[fishit-tracker] account-status failed:', err && err.message ? err.message : err);
     return res.status(500).json({
@@ -3975,6 +4033,7 @@ function handleUpdateBackpack(req, res) {
       });
       const conn = deriveConnectionStatus(liveTrackDB[key]);
       scheduleAioTrackerCacheRefresh(key);
+      persistSessionHeartbeat(key);
       return res.status(200).json({
         ok: true,
         status: 'success',
@@ -4016,6 +4075,7 @@ function handleUpdateBackpack(req, res) {
         statusCode: 200,
       }));
       scheduleAioTrackerCacheRefresh(key);
+      persistSessionHeartbeat(key);
       return res.status(200).json({ status: 'success', note: 'offline_keep' });
     }
 
@@ -4400,6 +4460,13 @@ function handleUpdateBackpack(req, res) {
     ) {
       liveTrackDB[key] = uploadAccountStatus.markTrackerSyncMissed(liveTrackDB[key], now);
       leaderstatsUpload.logLeaderstatsUploadProof(cleanUser, leaderstatsEval, now);
+    } else if (online) {
+      liveTrackDB[key] = uploadAccountStatus.markTrackerHeartbeatSuccess(liveTrackDB[key], now, {
+        syncReason: 'upload_received_pending_enrichment',
+        intervalSeconds: body.intervalSeconds || body.syncIntervalSeconds,
+        expectedLoaderBuild: EXPECTED_CLIENT_TRACKER_BUILD,
+        loaderOutdated: !!(incomingBuild && incomingBuild !== EXPECTED_CLIENT_TRACKER_BUILD),
+      });
     }
 
     const rawPersistMs = Date.now() - rawPersistStart;
@@ -4618,6 +4685,7 @@ function handleUpdateBackpack(req, res) {
       ` lastSeenAt=${now} lastInventoryAt=${liveTrackDB[key].lastInventoryAt || 'n/a'} online=true` +
       ` fastPathMs=${totalResponseMs}`
     );
+    persistSessionHeartbeat(key);
     return finishTrackerUploadResponse(req, res, responsePayload, key);
 }
 
@@ -5231,31 +5299,7 @@ function applyUploadSyncFailure(session, now, reason) {
 }
 
 const STATS_FRESH_MAX_MS = (UPLOAD_INTERVAL_SECONDS + UPLOAD_GRACE_SECONDS) * 1000;
-/** Grace before account presence turns offline (loader heartbeat / any alive contact). */
-const ACCOUNT_PRESENCE_GRACE_MS = 120000;
 const HEARTBEAT_FRESH_MAX_MS = ACCOUNT_PRESENCE_GRACE_MS;
-
-function resolveLastAccountSeenAt(data) {
-  if (!data) return null;
-  if (data.lastAccountSeenAt) return data.lastAccountSeenAt;
-  const candidates = [
-    data.lastHeartbeatAt,
-    data.lastSeenAt,
-    data.lastSnapshotUploadAt,
-    data.lastInventoryAt,
-  ].filter(Boolean);
-  if (!candidates.length) return null;
-  let best = candidates[0];
-  let bestMs = new Date(best).getTime();
-  for (let i = 1; i < candidates.length; i += 1) {
-    const ms = new Date(candidates[i]).getTime();
-    if (Number.isFinite(ms) && ms > bestMs) {
-      best = candidates[i];
-      bestMs = ms;
-    }
-  }
-  return best;
-}
 
 function deriveConnectionStatus(data) {
   /** Upload/stats sync freshness only — never use for main account online/offline indicator. */
@@ -5380,91 +5424,6 @@ function deriveUploadAccountStatus(data, serverNowMs) {
 
 function deriveUploadSyncStatus(data) {
   return deriveConnectionStatus(data);
-}
-
-function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS) {
-  const lastAccountSeenAt = resolveLastAccountSeenAt(data);
-  const seenAgeSeconds = syncAgeSecondsFromTimestamp(lastAccountSeenAt);
-  const loaderBuild = data?.trackerBuild || data?.lastUploadTrackerBuild || null;
-  const base = {
-    lastAccountSeenAt,
-    lastHeartbeatAt: data?.lastHeartbeatAt || null,
-    heartbeatAgeSeconds: seenAgeSeconds,
-    isOnlineFlag: data?.isOnline === true,
-    loaderOutdated: !!(loaderBuild && !isTrustedClientBuild(loaderBuild)),
-    accountPresenceGraceSeconds: Math.floor(maxAgeMs / 1000),
-  };
-  if (!data) {
-    return {
-      ...base,
-      accountPresenceLive: false,
-      accountOnline: false,
-      accountPresenceStatus: 'offline',
-      accountPresenceReason: 'no_session',
-      accountStatusReason: 'no_session',
-    };
-  }
-  if (base.loaderOutdated) {
-    return {
-      ...base,
-      accountPresenceLive: false,
-      accountOnline: false,
-      accountPresenceStatus: 'error',
-      accountPresenceReason: 'outdated_loader',
-      accountStatusReason: 'outdated_loader',
-    };
-  }
-  if (!lastAccountSeenAt) {
-    return {
-      ...base,
-      accountPresenceLive: false,
-      accountOnline: false,
-      accountPresenceStatus: 'offline',
-      accountPresenceReason: 'no_session',
-      accountStatusReason: 'no_session',
-    };
-  }
-  const recentSeen = seenAgeSeconds != null && seenAgeSeconds * 1000 < maxAgeMs;
-  const loaderOnline = data.isOnline === true;
-  const loaderOffline = data.isOnline === false;
-  if (recentSeen) {
-    if (loaderOffline) {
-      return {
-        ...base,
-        accountPresenceLive: false,
-        accountOnline: false,
-        accountPresenceStatus: 'offline',
-        accountPresenceReason: 'client_offline',
-        accountStatusReason: 'client_offline',
-      };
-    }
-    return {
-      ...base,
-      accountPresenceLive: true,
-      accountOnline: true,
-      accountPresenceStatus: 'online',
-      accountPresenceReason: loaderOnline ? 'heartbeat' : 'loader_contact',
-      accountStatusReason: loaderOnline ? 'heartbeat' : 'loader_contact',
-    };
-  }
-  if (loaderOffline) {
-    return {
-      ...base,
-      accountPresenceLive: false,
-      accountOnline: false,
-      accountPresenceStatus: 'offline',
-      accountPresenceReason: 'client_offline',
-      accountStatusReason: 'client_offline',
-    };
-  }
-  return {
-    ...base,
-    accountPresenceLive: false,
-    accountOnline: false,
-    accountPresenceStatus: 'offline',
-    accountPresenceReason: 'stale_heartbeat',
-    accountStatusReason: 'stale_heartbeat',
-  };
 }
 
 function deriveInventoryUploadStatus(data) {
@@ -6710,6 +6669,7 @@ module.exports.BLOCKER10N_BUILD = PUBLIC_API_BUILD;
 module.exports.globalCatalogService = globalCatalogService;
 module.exports.globalDb = globalDb;
 module.exports.persistSessionState = persistSessionState;
+module.exports.persistSessionHeartbeat = persistSessionHeartbeat;
 module.exports.sessionStore = sessionStore;
 module.exports.canonicalCatalog = canonicalCatalog;
 module.exports.ingestLearnedFishEntry = ingestLearnedFishEntry;

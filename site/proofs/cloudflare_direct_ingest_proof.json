@@ -4,15 +4,15 @@
                   "startStatus":  302,
                   "usesToolCallback":  false
               },
-    "gitCommit":  "ade8556",
+    "gitCommit":  "5e76ddc",
     "disk":  {
                  "drives":  [
                                 {
                                     "drive":  "C:",
-                                    "freeBytes":  8170139648,
+                                    "freeBytes":  8010760192,
                                     "sizeBytes":  85256474624,
-                                    "freeGb":  7.61,
-                                    "usedGb":  71.79,
+                                    "freeGb":  7.46,
+                                    "usedGb":  71.94,
                                     "level":  "ok"
                                 },
                                 {
@@ -24,46 +24,57 @@
                                     "level":  "critical"
                                 }
                             ],
-                 "source":  "wmic",
+                 "source":  "statfs",
                  "appWritesToD":  false,
                  "dIsInstallMedia":  true
              },
-    "timestamp":  "2026-06-14T01:25:17.3292875Z",
+    "timestamp":  "2026-06-14T02:37:45.3814999Z",
     "bursts":  {
                    "homepage":  "10/10",
-                   "login":  "2/10"
+                   "login":  "10/10"
                },
     "metricsAfter":  {
                          "web8791":  {
                                          "status":  "ok",
                                          "service":  "deng-tool-site",
-                                         "timestamp":  "2026-06-14T01:27:18.193Z",
-                                         "deployMarker":  "OAUTH_AIO_DOMAIN_2026_06_13",
-                                         "gitCommit":  "ade8556",
+                                         "timestamp":  "2026-06-14T02:37:49.909Z",
+                                         "deployMarker":  "NO_WMIC_PROCESS_GUARD_2026_06_14",
+                                         "gitCommit":  "5e76ddc",
                                          "ports":  {
                                                        "web":  8791,
                                                        "ingest":  8792,
                                                        "controlPanel":  3099
                                                    },
                                          "process":  {
-                                                         "pid":  13776,
-                                                         "uptimeSec":  28374,
-                                                         "heapUsedPct":  82.9,
-                                                         "rssMb":  792,
+                                                         "pid":  20648,
+                                                         "uptimeSec":  765,
+                                                         "heapUsedPct":  72.5,
+                                                         "rssMb":  192,
                                                          "eventLoop":  {
-                                                                           "lagMs":  0.0477,
-                                                                           "lagMax":  24032.4897,
-                                                                           "p50":  0.069,
-                                                                           "p95":  13.2906,
+                                                                           "lagMs":  0.0694,
+                                                                           "lagMax":  10432.1429,
+                                                                           "p50":  0.1855,
+                                                                           "p95":  2670.4748,
                                                                            "sampleCount":  240
                                                                        }
                                                      },
                                          "trackerRoute":  {
-                                                              "webProxyForwardCount":  336915,
+                                                              "webProxyForwardCount":  1,
                                                               "ingestDirectCount":  0,
                                                               "ingestViaProxyCount":  0,
+                                                              "directIngestPublicCount":  0,
+                                                              "proxyFallbackCount":  0,
                                                               "rateLimit429Count":  0,
-                                                              "queue503Count":  0
+                                                              "rateLimited429Count":  0,
+                                                              "queue503Count":  0,
+                                                              "hardFail503Count":  0,
+                                                              "accepted202Count":  0,
+                                                              "coalescedUploadCount":  0,
+                                                              "deferredEnrichmentCount":  0,
+                                                              "droppedOldQueuedWorkCount":  0,
+                                                              "latestPersistSuccessCount":  0,
+                                                              "latestPersistFailureCount":  0,
+                                                              "responseBeforeEnrichmentCount":  0
                                                           },
                                          "trackerQueue":  {
                                                               "active":  0,
@@ -80,41 +91,38 @@
                                                               "squashedJobs":  0,
                                                               "shedEvents":  0,
                                                               "effectiveMax":  4,
-                                                              "eventLoopLagMs":  0.0477
+                                                              "eventLoopLagMs":  0.0694
                                                           },
                                          "sessions":  {
                                                           "browser":  {
                                                                           "dir":  "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\site-sessions",
-                                                                          "jsonCount":  5019,
+                                                                          "jsonCount":  5205,
                                                                           "tmpCount":  0,
                                                                           "oldestMtime":  1781173820855.0952,
-                                                                          "ebusyRetryCount":  6,
+                                                                          "ebusyRetryCount":  0,
                                                                           "ebusySwallowCount":  0,
                                                                           "lastMaintenanceStats":  {
-                                                                                                       "tmpRemoved":  0,
+                                                                                                       "tmpRemoved":  1,
                                                                                                        "pruned":  0,
                                                                                                        "anonymousPruned":  0,
-                                                                                                       "durationMs":  18092,
-                                                                                                       "finishedAt":  "2026-06-14T01:19:56.136Z"
+                                                                                                       "durationMs":  2890,
+                                                                                                       "finishedAt":  "2026-06-14T02:25:20.072Z"
                                                                                                    }
                                                                       },
                                                           "fishitLive":  {
                                                                              "path":  "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_live_sessions.json",
-                                                                             "exists":  true,
-                                                                             "sessionCount":  200,
-                                                                             "updatedAt":  "2026-06-14T01:27:14.283Z",
-                                                                             "mtimeMs":  1781400434848.1355,
-                                                                             "oldestMtimeMs":  1781400434848.1355
+                                                                             "exists":  false,
+                                                                             "sessionCount":  0
                                                                          }
                                                       },
                                          "disk":  {
                                                       "drives":  [
                                                                      {
                                                                          "drive":  "C:",
-                                                                         "freeBytes":  8170139648,
+                                                                         "freeBytes":  8010760192,
                                                                          "sizeBytes":  85256474624,
-                                                                         "freeGb":  7.61,
-                                                                         "usedGb":  71.79,
+                                                                         "freeGb":  7.46,
+                                                                         "usedGb":  71.94,
                                                                          "level":  "ok"
                                                                      },
                                                                      {
@@ -126,7 +134,7 @@
                                                                          "level":  "critical"
                                                                      }
                                                                  ],
-                                                      "source":  "wmic",
+                                                      "source":  "statfs",
                                                       "appWritesToD":  false,
                                                       "dIsInstallMedia":  true
                                                   },
@@ -137,24 +145,135 @@
                                                                       0,
                                                                       0
                                                                   ],
-                                                      "freeMemMb":  17517
-                                                  }
+                                                      "freeMemMb":  17099
+                                                  },
+                                         "snapshotCachedAt":  "2026-06-14T02:37:49.909Z",
+                                         "snapshotSource":  "precomputed"
                                      },
-                         "ingest8792":  null
+                         "ingest8792":  {
+                                            "status":  "ok",
+                                            "service":  "deng-tracker-ingest",
+                                            "timestamp":  "2026-06-14T02:37:49.836Z",
+                                            "deployMarker":  "NO_WMIC_PROCESS_GUARD_2026_06_14",
+                                            "gitCommit":  null,
+                                            "ports":  {
+                                                          "web":  8791,
+                                                          "ingest":  8792,
+                                                          "controlPanel":  3099
+                                                      },
+                                            "process":  {
+                                                            "pid":  1292,
+                                                            "uptimeSec":  765,
+                                                            "heapUsedPct":  83.5,
+                                                            "rssMb":  217,
+                                                            "eventLoop":  {
+                                                                              "lagMs":  0.0554,
+                                                                              "lagMax":  9797.3388,
+                                                                              "p50":  0.1097,
+                                                                              "p95":  1428.7033,
+                                                                              "sampleCount":  240
+                                                                          }
+                                                        },
+                                            "trackerRoute":  {
+                                                                 "webProxyForwardCount":  0,
+                                                                 "ingestDirectCount":  5763,
+                                                                 "ingestViaProxyCount":  1,
+                                                                 "directIngestPublicCount":  5763,
+                                                                 "proxyFallbackCount":  1,
+                                                                 "rateLimit429Count":  10,
+                                                                 "rateLimited429Count":  10,
+                                                                 "queue503Count":  0,
+                                                                 "hardFail503Count":  0,
+                                                                 "accepted202Count":  0,
+                                                                 "coalescedUploadCount":  0,
+                                                                 "deferredEnrichmentCount":  0,
+                                                                 "droppedOldQueuedWorkCount":  0,
+                                                                 "latestPersistSuccessCount":  0,
+                                                                 "latestPersistFailureCount":  0,
+                                                                 "responseBeforeEnrichmentCount":  0
+                                                             },
+                                            "trackerQueue":  {
+                                                                 "active":  0,
+                                                                 "queued":  0,
+                                                                 "max":  4,
+                                                                 "queueMax":  1000,
+                                                                 "deferredPending":  0,
+                                                                 "deferredQueued":  0,
+                                                                 "deferredActive":  0,
+                                                                 "deferredSuperseded":  0,
+                                                                 "deferredCompleted":  0,
+                                                                 "perAccountPending":  0,
+                                                                 "droppedJobs":  0,
+                                                                 "squashedJobs":  0,
+                                                                 "shedEvents":  1647,
+                                                                 "effectiveMax":  4,
+                                                                 "eventLoopLagMs":  0.0554
+                                                             },
+                                            "sessions":  {
+                                                             "browser":  {
+                                                                             "dir":  "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\deng-tool-site-sessions",
+                                                                             "jsonCount":  4435,
+                                                                             "tmpCount":  0,
+                                                                             "oldestMtime":  1781340310204.9124,
+                                                                             "ebusyRetryCount":  0,
+                                                                             "ebusySwallowCount":  0,
+                                                                             "lastMaintenanceStats":  null
+                                                                         },
+                                                             "fishitLive":  {
+                                                                                "path":  "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_live_sessions.json",
+                                                                                "exists":  false,
+                                                                                "sessionCount":  0
+                                                                            }
+                                                         },
+                                            "disk":  {
+                                                         "drives":  [
+                                                                        {
+                                                                            "drive":  "C:",
+                                                                            "freeBytes":  8011776000,
+                                                                            "sizeBytes":  85256474624,
+                                                                            "freeGb":  7.46,
+                                                                            "usedGb":  71.94,
+                                                                            "level":  "ok"
+                                                                        },
+                                                                        {
+                                                                            "drive":  "D:",
+                                                                            "freeBytes":  0,
+                                                                            "sizeBytes":  4100163584,
+                                                                            "freeGb":  0,
+                                                                            "usedGb":  3.82,
+                                                                            "level":  "critical"
+                                                                        }
+                                                                    ],
+                                                         "source":  "statfs",
+                                                         "appWritesToD":  false,
+                                                         "dIsInstallMedia":  true
+                                                     },
+                                            "host":  {
+                                                         "platform":  "win32",
+                                                         "loadAvg":  [
+                                                                         0,
+                                                                         0,
+                                                                         0
+                                                                     ],
+                                                         "freeMemMb":  17100
+                                                     },
+                                            "snapshotCachedAt":  "2026-06-14T02:37:49.836Z",
+                                            "snapshotSource":  "precomputed"
+                                        }
                      },
     "sessions":  {
                      "dir":  "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\site-sessions",
-                     "jsonCount":  5019,
+                     "jsonCount":  5205,
                      "tmpCount":  0,
                      "oldestMtime":  1781173820855.0952,
-                     "ebusyRetryCount":  6,
+                     "ebusyRetryCount":  0,
                      "ebusySwallowCount":  0,
                      "lastMaintenanceStats":  {
-                                                  "tmpRemoved":  0,
+                                                  "tmpRemoved":  1,
                                                   "pruned":  0,
                                                   "anonymousPruned":  0,
-                                                  "durationMs":  18092,
-                                                  "finishedAt":  "2026-06-14T01:19:56.136Z"
+                                                  "durationMs":  2890,
+                                                  "finishedAt":  "2026-06-14T02:25:20.072Z"
                                               }
                  },
     "health":  {
@@ -164,10 +283,10 @@
                                                 "status":  "ok",
                                                 "service":  "deng-tool-site",
                                                 "port":  8791,
-                                                "timestamp":  "2026-06-14T01:28:14.613Z"
+                                                "timestamp":  "2026-06-14T02:37:50.406Z"
                                             },
                                    "status":  200,
-                                   "ms":  35584
+                                   "ms":  29
                                },
                    "ingest8792":  {
                                       "ok":  true,
@@ -175,10 +294,10 @@
                                                    "status":  "ok",
                                                    "service":  "deng-tracker-ingest",
                                                    "port":  8792,
-                                                   "timestamp":  "2026-06-14T01:28:53.641Z"
+                                                   "timestamp":  "2026-06-14T02:37:50.442Z"
                                                },
                                       "status":  200,
-                                      "ms":  3519
+                                      "ms":  63
                                   },
                    "aioPublic":  {
                                      "ok":  true,
@@ -186,37 +305,37 @@
                                                   "status":  "ok",
                                                   "service":  "deng-tool-site",
                                                   "port":  8791,
-                                                  "timestamp":  "2026-06-14T01:28:53.809Z"
+                                                  "timestamp":  "2026-06-14T02:37:50.639Z"
                                               },
                                      "status":  200,
-                                     "ms":  180
+                                     "ms":  190
                                  }
                },
     "cloudflaredIngressValidate":  "pending",
     "conclusion":  {
                        "publicHeadersShowDirectIngest":  true,
-                       "loginBurst":  "2/10",
+                       "loginBurst":  "10/10",
                        "oauthUsesAioNotTool":  true,
                        "directRoutingLikelyActive":  true,
                        "webProxyForwardCountUnchangedDuringProbe":  false,
                        "homepageBurst":  "10/10",
-                       "ingestDirectCountIncreased":  false,
+                       "ingestDirectCountIncreased":  true,
                        "publicHeadersAvoidWebProxyFallback":  true,
                        "note":  null
                    },
     "routeMetricDelta":  {
                              "webProxyForwardDelta":  1,
-                             "ingestDirectDelta":  0,
-                             "ingestViaProxyDelta":  0
+                             "ingestDirectDelta":  41,
+                             "ingestViaProxyDelta":  1
                          },
     "uploads":  {
                     "local8792":  {
                                       "url":  "http://127.0.0.1:8792/api/fishit-tracker/update-backpack",
-                                      "headersPreview":  "HTTP/1.1 403 Forbidden\r; X-DENG-Served-By: deng-tracker-ingest\r; X-DENG-Tracker-Route: direct-ingest\r; RateLimit-Policy: 12;w=60\r; RateLimit-Limit: 12\r; RateLimit-Remaining: 9\r; RateLimit-Reset: 53\r; Content-Type: application/json; charset=utf-8\r; Content-Length: 504\r; ETag: W/\"1f8-ULbHJDMmX/wZRTGYk/G8XzLxCug\"\r; Date: Sun, 14 Jun 2026 01:27:01 GMT\r; Connection: keep-alive\r; Keep-Alive: timeout=5\r; \r; ",
-                                      "bodyPreview":  "{\"error\":\"tracker_client_rejected\",\"reasons\":[\"missing_tracker_build\",\"missing_tracker_channel\",\"missing_script_source\"],\"required\":{\"trackerBuild\":\"UPLOAD_COMPACT_FAST_PATH_2026_06_13\",\"trackerChanne",
+                                      "headersPreview":  "HTTP/1.1 403 Forbidden\r; X-DENG-Served-By: deng-tracker-ingest\r; X-DENG-Tracker-Route: direct-ingest\r; RateLimit-Policy: 12;w=60\r; RateLimit-Limit: 12\r; RateLimit-Remaining: 9\r; RateLimit-Reset: 60\r; Content-Type: application/json; charset=utf-8\r; Content-Length: 506\r; ETag: W/\"1fa-3c2M4cgp39PjbC0aMYgUzCaX2a4\"\r; Date: Sun, 14 Jun 2026 02:37:47 GMT\r; Connection: keep-alive\r; Keep-Alive: timeout=5\r; \r; ",
+                                      "bodyPreview":  "{\"error\":\"tracker_client_rejected\",\"reasons\":[\"missing_tracker_build\",\"missing_tracker_channel\",\"missing_script_source\"],\"required\":{\"trackerBuild\":\"LOADER_REGISTER_LIMIT_FIX_2026_06_11\",\"trackerChann",
                                       "directIngest":  true,
                                       "name":  "local_8792",
-                                      "ms":  5589,
+                                      "ms":  38,
                                       "xDengViaWebProxy":  null,
                                       "xDengServedBy":  "deng-tracker-ingest",
                                       "status":  403,
@@ -225,11 +344,11 @@
                                   },
                     "toolPublic":  {
                                        "url":  "https://tool.deng.my.id/api/fishit-tracker/update-backpack",
-                                       "headersPreview":  "HTTP/1.1 403 Forbidden\r; Date: Sun, 14 Jun 2026 01:27:56 GMT\r; Content-Type: application/json; charset=utf-8\r; Content-Length: 504\r; Connection: keep-alive\r; Etag: W/\"1f8-ULbHJDMmX/wZRTGYk/G8XzLxCug\"\r; Ratelimit-Limit: 12\r; Ratelimit-Policy: 12;w=60\r; Ratelimit-Remaining: 10\r; Ratelimit-Reset: 58\r; X-Deng-Served-By: deng-tracker-ingest\r; X-Deng-Tracker-Route: direct-ingest\r; Cf-Cache-Status: DYNAMIC\r; Nel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r; Report-To: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=HAj5R4FD11kVETDFUB%2BYA3a7bXA44rRc%2FpEn6MJX3KAvLF4j04nFh0auC5nTLZRDysd%2FLDAIcu94RuysrozHySvregq%2FvZir%2BP4OPqbO0YSCLQiUFUSKyqGPg7Bcc21G0Fw%3D\"}]}\r",
-                                       "bodyPreview":  "{\"error\":\"tracker_client_rejected\",\"reasons\":[\"missing_tracker_build\",\"missing_tracker_channel\",\"missing_script_source\"],\"required\":{\"trackerBuild\":\"UPLOAD_COMPACT_FAST_PATH_2026_06_13\",\"trackerChanne",
+                                       "headersPreview":  "HTTP/1.1 403 Forbidden\r; Date: Sun, 14 Jun 2026 02:38:47 GMT\r; Content-Type: application/json; charset=utf-8\r; Content-Length: 506\r; Connection: keep-alive\r; Etag: W/\"1fa-3c2M4cgp39PjbC0aMYgUzCaX2a4\"\r; Ratelimit-Limit: 12\r; Ratelimit-Policy: 12;w=60\r; Ratelimit-Remaining: 10\r; Ratelimit-Reset: 60\r; X-Deng-Served-By: deng-tracker-ingest\r; X-Deng-Tracker-Route: direct-ingest\r; Cf-Cache-Status: DYNAMIC\r; Nel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r; Report-To: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=tQksPW44e3V1xmNQ2k8oeU7Huyw23qJapsxMsKiehq6%2B6K4nHYI3KmtcB14PSJXspCAE5mpSsMRhk0482DY7oWnSTShQ4KTQ2JJXsF45U069UvYhmy6PhTkAfibzJrP2ZKc%3D\"}]}\r",
+                                       "bodyPreview":  "{\"error\":\"tracker_client_rejected\",\"reasons\":[\"missing_tracker_build\",\"missing_tracker_channel\",\"missing_script_source\"],\"required\":{\"trackerBuild\":\"LOADER_REGISTER_LIMIT_FIX_2026_06_11\",\"trackerChann",
                                        "directIngest":  true,
                                        "name":  "tool_public",
-                                       "ms":  2123,
+                                       "ms":  271,
                                        "xDengViaWebProxy":  null,
                                        "xDengServedBy":  "deng-tracker-ingest",
                                        "status":  403,
@@ -238,11 +357,11 @@
                                    },
                     "local8791Proxy":  {
                                            "url":  "http://127.0.0.1:8791/api/fishit-tracker/update-backpack",
-                                           "headersPreview":  "HTTP/1.1 403 Forbidden\r; x-deng-served-by: deng-tracker-ingest\r; x-deng-tracker-route: web-proxy-fallback\r; ratelimit-policy: 12;w=60\r; ratelimit-limit: 12\r; ratelimit-remaining: 8\r; ratelimit-reset: 48\r; content-type: application/json; charset=utf-8\r; content-length: 504\r; etag: W/\"1f8-ULbHJDMmX/wZRTGYk/G8XzLxCug\"\r; date: Sun, 14 Jun 2026 01:27:06 GMT\r; connection: close\r; \r; ",
-                                           "bodyPreview":  "{\"error\":\"tracker_client_rejected\",\"reasons\":[\"missing_tracker_build\",\"missing_tracker_channel\",\"missing_script_source\"],\"required\":{\"trackerBuild\":\"UPLOAD_COMPACT_FAST_PATH_2026_06_13\",\"trackerChanne",
+                                           "headersPreview":  "HTTP/1.1 403 Forbidden\r; x-deng-served-by: deng-tracker-ingest\r; x-deng-tracker-route: web-proxy-fallback\r; ratelimit-policy: 12;w=60\r; ratelimit-limit: 12\r; ratelimit-remaining: 8\r; ratelimit-reset: 60\r; content-type: application/json; charset=utf-8\r; content-length: 506\r; etag: W/\"1fa-3c2M4cgp39PjbC0aMYgUzCaX2a4\"\r; date: Sun, 14 Jun 2026 02:37:47 GMT\r; connection: close\r; \r; ",
+                                           "bodyPreview":  "{\"error\":\"tracker_client_rejected\",\"reasons\":[\"missing_tracker_build\",\"missing_tracker_channel\",\"missing_script_source\"],\"required\":{\"trackerBuild\":\"LOADER_REGISTER_LIMIT_FIX_2026_06_11\",\"trackerChann",
                                            "directIngest":  false,
                                            "name":  "local_8791_proxy",
-                                           "ms":  4828,
+                                           "ms":  39,
                                            "xDengViaWebProxy":  null,
                                            "xDengServedBy":  "deng-tracker-ingest",
                                            "status":  403,
@@ -251,11 +370,11 @@
                                        },
                     "aioPublic":  {
                                       "url":  "https://aio.deng.my.id/api/fishit-tracker/update-backpack",
-                                      "headersPreview":  "HTTP/1.1 403 Forbidden\r; Date: Sun, 14 Jun 2026 01:27:54 GMT\r; Content-Type: application/json; charset=utf-8\r; Content-Length: 504\r; Connection: keep-alive\r; Etag: W/\"1f8-ULbHJDMmX/wZRTGYk/G8XzLxCug\"\r; Ratelimit-Limit: 12\r; Ratelimit-Policy: 12;w=60\r; Ratelimit-Remaining: 11\r; Ratelimit-Reset: 60\r; X-Deng-Served-By: deng-tracker-ingest\r; X-Deng-Tracker-Route: direct-ingest\r; Cf-Cache-Status: DYNAMIC\r; Nel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r; Report-To: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=J5uwxfl1Dc3BE4zG9Oq1Bp9f%2Fn%2B4Cl0GeD%2Byv2FgUFqMLv7BgSGl8bpz3zjBF7tY8TiD3W3RWSJfnBizQHOoqD5solVD%2FP%2BuhmcH0eRPRNDHUDyHdnNK6b4QTjaS%2BwXEWw%3D%3D\"}]}\r",
-                                      "bodyPreview":  "{\"error\":\"tracker_client_rejected\",\"reasons\":[\"missing_tracker_build\",\"missing_tracker_channel\",\"missing_script_source\"],\"required\":{\"trackerBuild\":\"UPLOAD_COMPACT_FAST_PATH_2026_06_13\",\"trackerChanne",
+                                      "headersPreview":  "HTTP/1.1 403 Forbidden\r; Date: Sun, 14 Jun 2026 02:38:47 GMT\r; Content-Type: application/json; charset=utf-8\r; Content-Length: 506\r; Connection: keep-alive\r; Etag: W/\"1fa-3c2M4cgp39PjbC0aMYgUzCaX2a4\"\r; Ratelimit-Limit: 12\r; Ratelimit-Policy: 12;w=60\r; Ratelimit-Remaining: 11\r; Ratelimit-Reset: 60\r; X-Deng-Served-By: deng-tracker-ingest\r; X-Deng-Tracker-Route: direct-ingest\r; Cf-Cache-Status: DYNAMIC\r; Nel: {\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}\r; Report-To: {\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=kfnz%2FlMOmeb5oynjhRWHVGcMaYB1mP7h69qtaY4Vjw0y6TRrEEWS4j30%2B2EiqLcvybgegahyddCTlHLga0vjY%2FTx%2F6%2Bg3qhcD%2BwbwP9%2FCYIRS01zP9vC4eMnv8DJQHakAQ%3D%3D\"}]}\r",
+                                      "bodyPreview":  "{\"error\":\"tracker_client_rejected\",\"reasons\":[\"missing_tracker_build\",\"missing_tracker_channel\",\"missing_script_source\"],\"required\":{\"trackerBuild\":\"LOADER_REGISTER_LIMIT_FIX_2026_06_11\",\"trackerChann",
                                       "directIngest":  true,
                                       "name":  "aio_public",
-                                      "ms":  7889,
+                                      "ms":  1164,
                                       "xDengViaWebProxy":  null,
                                       "xDengServedBy":  "deng-tracker-ingest",
                                       "status":  403,
@@ -263,39 +382,50 @@
                                       "webProxyFallback":  false
                                   }
                 },
-    "deployMarker":  "OAUTH_AIO_DOMAIN_2026_06_13",
+    "deployMarker":  "TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14",
     "fallbackStillEnabled":  true,
     "metricsBefore":  {
                           "web8791":  {
                                           "status":  "ok",
                                           "service":  "deng-tool-site",
-                                          "timestamp":  "2026-06-14T01:25:26.717Z",
-                                          "deployMarker":  "OAUTH_AIO_DOMAIN_2026_06_13",
-                                          "gitCommit":  "ade8556",
+                                          "timestamp":  "2026-06-14T02:37:43.310Z",
+                                          "deployMarker":  "NO_WMIC_PROCESS_GUARD_2026_06_14",
+                                          "gitCommit":  "5e76ddc",
                                           "ports":  {
                                                         "web":  8791,
                                                         "ingest":  8792,
                                                         "controlPanel":  3099
                                                     },
                                           "process":  {
-                                                          "pid":  13776,
-                                                          "uptimeSec":  28263,
-                                                          "heapUsedPct":  90.6,
-                                                          "rssMb":  838,
+                                                          "pid":  20648,
+                                                          "uptimeSec":  759,
+                                                          "heapUsedPct":  72.3,
+                                                          "rssMb":  192,
                                                           "eventLoop":  {
-                                                                            "lagMs":  0.1102,
-                                                                            "lagMax":  24032.4897,
-                                                                            "p50":  0.0668,
-                                                                            "p95":  71.8846,
+                                                                            "lagMs":  0.1099,
+                                                                            "lagMax":  10432.1429,
+                                                                            "p50":  0.2057,
+                                                                            "p95":  2670.4748,
                                                                             "sampleCount":  240
                                                                         }
                                                       },
                                           "trackerRoute":  {
-                                                               "webProxyForwardCount":  336914,
+                                                               "webProxyForwardCount":  0,
                                                                "ingestDirectCount":  0,
                                                                "ingestViaProxyCount":  0,
+                                                               "directIngestPublicCount":  0,
+                                                               "proxyFallbackCount":  0,
                                                                "rateLimit429Count":  0,
-                                                               "queue503Count":  0
+                                                               "rateLimited429Count":  0,
+                                                               "queue503Count":  0,
+                                                               "hardFail503Count":  0,
+                                                               "accepted202Count":  0,
+                                                               "coalescedUploadCount":  0,
+                                                               "deferredEnrichmentCount":  0,
+                                                               "droppedOldQueuedWorkCount":  0,
+                                                               "latestPersistSuccessCount":  0,
+                                                               "latestPersistFailureCount":  0,
+                                                               "responseBeforeEnrichmentCount":  0
                                                            },
                                           "trackerQueue":  {
                                                                "active":  0,
@@ -311,42 +441,39 @@
                                                                "droppedJobs":  0,
                                                                "squashedJobs":  0,
                                                                "shedEvents":  0,
-                                                               "effectiveMax":  2,
-                                                               "eventLoopLagMs":  0.1102
+                                                               "effectiveMax":  4,
+                                                               "eventLoopLagMs":  0.1099
                                                            },
                                           "sessions":  {
                                                            "browser":  {
                                                                            "dir":  "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\site-sessions",
-                                                                           "jsonCount":  5015,
+                                                                           "jsonCount":  5205,
                                                                            "tmpCount":  0,
                                                                            "oldestMtime":  1781173820855.0952,
-                                                                           "ebusyRetryCount":  6,
+                                                                           "ebusyRetryCount":  0,
                                                                            "ebusySwallowCount":  0,
                                                                            "lastMaintenanceStats":  {
-                                                                                                        "tmpRemoved":  0,
+                                                                                                        "tmpRemoved":  1,
                                                                                                         "pruned":  0,
                                                                                                         "anonymousPruned":  0,
-                                                                                                        "durationMs":  18092,
-                                                                                                        "finishedAt":  "2026-06-14T01:19:56.136Z"
+                                                                                                        "durationMs":  2890,
+                                                                                                        "finishedAt":  "2026-06-14T02:25:20.072Z"
                                                                                                     }
                                                                        },
                                                            "fishitLive":  {
                                                                               "path":  "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_live_sessions.json",
-                                                                              "exists":  true,
-                                                                              "sessionCount":  200,
-                                                                              "updatedAt":  "2026-06-14T01:25:25.179Z",
-                                                                              "mtimeMs":  1781400325655.058,
-                                                                              "oldestMtimeMs":  1781400325655.058
+                                                                              "exists":  false,
+                                                                              "sessionCount":  0
                                                                           }
                                                        },
                                           "disk":  {
                                                        "drives":  [
                                                                       {
                                                                           "drive":  "C:",
-                                                                          "freeBytes":  8148066304,
+                                                                          "freeBytes":  8010760192,
                                                                           "sizeBytes":  85256474624,
-                                                                          "freeGb":  7.59,
-                                                                          "usedGb":  71.81,
+                                                                          "freeGb":  7.46,
+                                                                          "usedGb":  71.94,
                                                                           "level":  "ok"
                                                                       },
                                                                       {
@@ -358,7 +485,7 @@
                                                                           "level":  "critical"
                                                                       }
                                                                   ],
-                                                       "source":  "wmic",
+                                                       "source":  "statfs",
                                                        "appWritesToD":  false,
                                                        "dIsInstallMedia":  true
                                                    },
@@ -369,9 +496,120 @@
                                                                        0,
                                                                        0
                                                                    ],
-                                                       "freeMemMb":  17594
-                                                   }
+                                                       "freeMemMb":  17174
+                                                   },
+                                          "snapshotCachedAt":  "2026-06-14T02:37:43.310Z",
+                                          "snapshotSource":  "precomputed"
                                       },
-                          "ingest8792":  null
+                          "ingest8792":  {
+                                             "status":  "ok",
+                                             "service":  "deng-tracker-ingest",
+                                             "timestamp":  "2026-06-14T02:37:44.170Z",
+                                             "deployMarker":  "NO_WMIC_PROCESS_GUARD_2026_06_14",
+                                             "gitCommit":  null,
+                                             "ports":  {
+                                                           "web":  8791,
+                                                           "ingest":  8792,
+                                                           "controlPanel":  3099
+                                                       },
+                                             "process":  {
+                                                             "pid":  1292,
+                                                             "uptimeSec":  760,
+                                                             "heapUsedPct":  77.1,
+                                                             "rssMb":  216,
+                                                             "eventLoop":  {
+                                                                               "lagMs":  0.1182,
+                                                                               "lagMax":  9797.3388,
+                                                                               "p50":  0.1134,
+                                                                               "p95":  3596.8336,
+                                                                               "sampleCount":  240
+                                                                           }
+                                                         },
+                                             "trackerRoute":  {
+                                                                  "webProxyForwardCount":  0,
+                                                                  "ingestDirectCount":  5722,
+                                                                  "ingestViaProxyCount":  0,
+                                                                  "directIngestPublicCount":  5722,
+                                                                  "proxyFallbackCount":  0,
+                                                                  "rateLimit429Count":  9,
+                                                                  "rateLimited429Count":  9,
+                                                                  "queue503Count":  0,
+                                                                  "hardFail503Count":  0,
+                                                                  "accepted202Count":  0,
+                                                                  "coalescedUploadCount":  0,
+                                                                  "deferredEnrichmentCount":  0,
+                                                                  "droppedOldQueuedWorkCount":  0,
+                                                                  "latestPersistSuccessCount":  0,
+                                                                  "latestPersistFailureCount":  0,
+                                                                  "responseBeforeEnrichmentCount":  0
+                                                              },
+                                             "trackerQueue":  {
+                                                                  "active":  0,
+                                                                  "queued":  0,
+                                                                  "max":  4,
+                                                                  "queueMax":  1000,
+                                                                  "deferredPending":  0,
+                                                                  "deferredQueued":  0,
+                                                                  "deferredActive":  0,
+                                                                  "deferredSuperseded":  0,
+                                                                  "deferredCompleted":  0,
+                                                                  "perAccountPending":  0,
+                                                                  "droppedJobs":  0,
+                                                                  "squashedJobs":  0,
+                                                                  "shedEvents":  1647,
+                                                                  "effectiveMax":  4,
+                                                                  "eventLoopLagMs":  0.1182
+                                                              },
+                                             "sessions":  {
+                                                              "browser":  {
+                                                                              "dir":  "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\deng-tool-site-sessions",
+                                                                              "jsonCount":  4435,
+                                                                              "tmpCount":  0,
+                                                                              "oldestMtime":  1781340310204.9124,
+                                                                              "ebusyRetryCount":  0,
+                                                                              "ebusySwallowCount":  0,
+                                                                              "lastMaintenanceStats":  null
+                                                                          },
+                                                              "fishitLive":  {
+                                                                                 "path":  "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\data\\fishit_live_sessions.json",
+                                                                                 "exists":  false,
+                                                                                 "sessionCount":  0
+                                                                             }
+                                                          },
+                                             "disk":  {
+                                                          "drives":  [
+                                                                         {
+                                                                             "drive":  "C:",
+                                                                             "freeBytes":  8011776000,
+                                                                             "sizeBytes":  85256474624,
+                                                                             "freeGb":  7.46,
+                                                                             "usedGb":  71.94,
+                                                                             "level":  "ok"
+                                                                         },
+                                                                         {
+                                                                             "drive":  "D:",
+                                                                             "freeBytes":  0,
+                                                                             "sizeBytes":  4100163584,
+                                                                             "freeGb":  0,
+                                                                             "usedGb":  3.82,
+                                                                             "level":  "critical"
+                                                                         }
+                                                                     ],
+                                                          "source":  "statfs",
+                                                          "appWritesToD":  false,
+                                                          "dIsInstallMedia":  true
+                                                      },
+                                             "host":  {
+                                                          "platform":  "win32",
+                                                          "loadAvg":  [
+                                                                          0,
+                                                                          0,
+                                                                          0
+                                                                      ],
+                                                          "freeMemMb":  17166
+                                                      },
+                                             "snapshotCachedAt":  "2026-06-14T02:37:44.170Z",
+                                             "snapshotSource":  "precomputed"
+                                         }
                       }
 }

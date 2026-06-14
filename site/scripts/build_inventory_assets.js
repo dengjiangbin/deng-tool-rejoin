@@ -9,7 +9,7 @@ const EJS_PATH = path.join(ROOT, 'views', 'fishit_tracker.ejs');
 const SOURCE_PATH = path.join(ROOT, 'src', 'inventory', 'fishit_tracker.source.ejs');
 const OUT_DIR = path.join(ROOT, 'public', 'assets');
 const MANIFEST_PATH = path.join(ROOT, 'src', 'inventoryAssetManifest.json');
-const MARKER = 'TRACKER_DASHBOARD_CATCH_DB_2026_06_12';
+const MARKER = 'TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14';
 
 const trackerRarityStyle = require('../src/fishitTrackerRarityStyle');
 const fishitStoneDisplayMap = require('../src/fishitStoneDisplayMap');

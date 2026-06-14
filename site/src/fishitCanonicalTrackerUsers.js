@@ -3,7 +3,7 @@
 const { EXPECTED_CLIENT_TRACKER_BUILD } = require('./fishitTrackerBuild');
 
 const USERNAME_KEY_RE = /^[a-z0-9_]{3,20}$/;
-const ACCOUNT_PRESENCE_GRACE_MS = 120000;
+const { ACCOUNT_PRESENCE_GRACE_MS } = require('./trackerAccountPresence');
 
 function normaliseUsername(value) {
   const raw = String(value || '').trim();
@@ -34,7 +34,11 @@ function resolveLastAccountSeenAt(data) {
   if (!data) return null;
   if (data.lastAccountSeenAt) return data.lastAccountSeenAt;
   const candidates = [
+    data.lastSuccessfulUploadAt,
+    data.lastSuccessfulHeartbeatAt,
     data.lastHeartbeatAt,
+    data.lastUploadReceivedAt,
+    data.lastUploadAcceptedAt,
     data.lastSeenAt,
     data.lastSnapshotUploadAt,
     data.lastInventoryAt,
@@ -88,6 +92,7 @@ function resolveUniqueKey(data) {
 
 function resolveLatestSuccessfulUploadAt(data) {
   return data?.lastSuccessfulUploadAt
+    || data?.lastSuccessfulHeartbeatAt
     || data?.lastUploadAcceptedAt
     || data?.lastInventoryAt
     || data?.lastSnapshotUploadAt
