@@ -40,11 +40,11 @@ function iso(msAgo) {
 }
 
 describe('tracker upload interval 60s + aio domain regression', () => {
-  test('server upload interval constants are 60 seconds', () => {
+  test('server upload interval constants are 60 seconds with 10 minute public grace', () => {
     assert.equal(UPLOAD_INTERVAL_SECONDS, 60);
     assert.equal(UPLOAD_GRACE_SECONDS, 15);
-    assert.equal(inventoryUploadGraceSeconds(60), 90);
-    assert.equal(inventoryUploadStaleAfterSeconds(60), 150);
+    assert.equal(inventoryUploadGraceSeconds(60), 600);
+    assert.equal(inventoryUploadStaleAfterSeconds(60), 600);
   });
 
   testIfRawTracker('private tracker uses 60s light sync and aio upload domain', () => {
@@ -53,7 +53,7 @@ describe('tracker upload interval 60s + aio domain regression', () => {
     assert.match(lua, new RegExp(AIO_UPLOAD_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.doesNotMatch(lua, /https:\/\/tool\.deng\.my\.id\/api\/fishit-tracker\/update-backpack/);
     assert.match(lua, /intervalSeconds = LiveSafe\.lightSyncIntervalSeconds or 60/);
-    assert.match(lua, /UPLOAD_INTERVAL_60S_AIO_2026_06_14/);
+    assert.match(lua, /UPLOAD_STATUS_GRACE_AND_503_RECOVERY_2026_06_15/);
   });
 
   test('upload rate limit allows normal 60s three-lane cadence', async () => {
@@ -211,10 +211,12 @@ describe('tracker upload interval 60s + aio domain regression', () => {
     assert.match(js, /DEFAULT_UPLOAD_INTERVAL_SEC = 60/);
   });
 
-  test('upload limiter message documents 60 second cadence', () => {
+  test('upload coalesce replaces hard 429 rate limiter', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'trackerUploadRateLimit.js'), 'utf8');
-    assert.match(src, /every 60 seconds/);
-    assert.match(src, /TRACKER_UPLOAD_RATE_MAX_PER_MIN \|\| 10/);
-    assert.equal(uploadRateLimit.uploadLimiter, uploadRateLimit.uploadLimiter);
+    assert.match(src, /deprecated/i);
+    assert.match(src, /next\(\)/);
+    const coalesceSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'trackerUploadCoalesce.js'), 'utf8');
+    assert.match(coalesceSrc, /duplicate_lane_upload_coalesced/);
+    assert.doesNotMatch(coalesceSrc, /status\(429\)/);
   });
 });

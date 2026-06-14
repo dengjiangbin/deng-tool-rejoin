@@ -15,17 +15,18 @@ describe('trackerConcurrencyGate', () => {
       'utf8',
     );
     assert.match(source, /tracker_status/);
-    assert.match(source, /isStatusOnlyUpload/);
-    assert.match(source, /server_busy/);
+    assert.match(source, /isFastLaneUpload/);
+    assert.match(source, /trackerDeferEnrichment/);
     assert.match(source, /TRACKER_UPLOAD_BUSY_LAG_MS/);
     assert.doesNotMatch(source, /acquireSlot/);
   });
 
-  test('returns JSON 503 server_busy when event loop lag exceeds threshold', () => {
+  test('defers enrichment under event loop lag instead of 503', () => {
     const loopMonitor = require('../src/trackerEventLoopMonitor');
-    loopMonitor._setLagForTests(3000);
+    loopMonitor._setLagForTests(9000);
     try {
-      const handler = gate.wrapTrackerUpload('lag-test', (_req, res) => {
+      const handler = gate.wrapTrackerUpload('lag-test', (req, res) => {
+        assert.equal(req.trackerDeferEnrichment, true);
         res.status(200).json({ ok: true });
       });
       const res = {
@@ -35,10 +36,8 @@ describe('trackerConcurrencyGate', () => {
         json(payload) { this.body = payload; return this; },
       };
       handler({ body: { username: 'LagUser', type: 'inventory_snapshot' } }, res);
-      assert.equal(res.statusCode, 503);
-      assert.equal(res.body.error, 'server_busy');
-      assert.equal(res.body.retryable, true);
-      assert.ok(res.body.lagMs >= 2500);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.body.ok, true);
     } finally {
       loopMonitor._resetForTests();
     }

@@ -702,6 +702,7 @@ function buildWaitingForPlayerDataGameItemDbResponse(sessionData = {}) {
 async function buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, deps = {}) {
   const fishImageCache = deps.fishImageCache;
   const { rawFish, rawStones, rawTotems, unresolvedItems } = extractSessionRows(sessionData);
+  const safeUnresolved = Array.isArray(unresolvedItems) ? unresolvedItems : [];
   const groupedFish = groupFishRows(rawFish);
   const groupedStones = groupStoneRows(rawStones);
   const groupedTotems = groupTotemRows(rawTotems);
@@ -738,13 +739,13 @@ async function buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, deps = 
   const manualRarityProof = manualRarity.buildManualRarityProof(fishItems);
   const stoneAssetProof = stoneImageAssets.buildStoneAssetProof(stoneItems);
   const totemAssetProof = totemImageAssets.buildTotemAssetProof(totemItems);
-  const fishCounts = buildFishCounts(fishItems, stoneItems, unresolvedItems.length, totemItems);
+  const fishCounts = buildFishCounts(fishItems, stoneItems, safeUnresolved.length, totemItems);
   const publicCounts = buildPublicCounts(fishItems, stoneItems, totemItems);
   const storedProof = sessionData?.playerDataGameItemDbProof || {};
   const playerDataGameItemDbProof = buildPlayerDataGameItemDbProof(
     fishItems,
     stoneItems,
-    unresolvedItems,
+    safeUnresolved,
     { ...storedProof, totemItems },
   );
 
@@ -765,7 +766,7 @@ async function buildPublicFromPlayerDataGameItemDb(sessionData, baseUrl, deps = 
     playerDataItemUtilityProof: null,
     hiddenPublicRows: {
       ambiguousContainerUnresolved: 0,
-      hiddenItemIds: unresolvedItems.map((r) => r.itemId).filter(Boolean),
+      hiddenItemIds: safeUnresolved.map((r) => r && r.itemId).filter(Boolean),
       reason: 'gameitemdb_unresolved',
     },
     globalDbUiProof: null,

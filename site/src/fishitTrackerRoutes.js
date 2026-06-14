@@ -34,7 +34,9 @@ const fs        = require('fs');
 const crypto    = require('crypto');
 const { execFileSync } = require('child_process');
 const { createUserRateLimit } = require('./rateLimitUtils');
-const { uploadLimiter } = require('./trackerUploadRateLimit');
+const { trackerUploadCoalesceMiddleware } = require('./trackerUploadCoalesce');
+const { safeTrackerUploadHandler } = require('./trackerUploadSafeHandler');
+const { safeOptionalWeight, isUsableUploadRow } = require('./fishitUploadRowSafety');
 const trackerConcurrencyGate = require('./trackerConcurrencyGate');
 const { finishTrackerUploadResponse } = require('./trackerUploadResponse');
 const { recordUploadRequest } = require('./trackerUploadRequestMetrics');
@@ -1056,15 +1058,15 @@ function sanitiseItems(raw) {
   if (!Array.isArray(raw)) return [];
   const out = [];
   for (const item of raw.slice(0, 300)) {
+    if (!isUsableUploadRow(item)) continue;
     const name = typeof item.name === 'string'
       ? item.name
       : (typeof item.Name === 'string' ? item.Name : '');
     // Drop stat/UI labels (e.g. "Caught", "Rarest Fish") on the way in.
     if (!name || catalogStore.isStatLabel(name)) continue;
 
-    const rawWeight = item.weight ?? item.maxWeight ?? item.totalWeight ?? item.Weight;
+    const weight = safeOptionalWeight(item);
     const amountHit = extractReplionAmount(item);
-    const weight = Number(rawWeight);
     const identity = extractReplionIdentityFields(item);
 
     const rarity = typeof item.rarity === 'string'
@@ -4951,10 +4953,12 @@ function handleUpdateBackpack(req, res) {
 }
 
 const updateBackpackMiddleware = [
-  postLimiter,
   express.json({ limit: process.env.TRACKER_UPLOAD_BODY_LIMIT || '512kb' }),
-  uploadLimiter,
-  trackerConcurrencyGate.wrapTrackerUpload('update-backpack', handleUpdateBackpack),
+  trackerUploadCoalesceMiddleware,
+  safeTrackerUploadHandler(
+    'update-backpack',
+    trackerConcurrencyGate.wrapTrackerUpload('update-backpack', handleUpdateBackpack),
+  ),
 ];
 
 function handleUpdateCatalog(req, res) {
@@ -4979,10 +4983,9 @@ function handleUpdateCatalog(req, res) {
 }
 
 const updateCatalogMiddleware = [
-  postLimiter,
   express.json({ limit: process.env.TRACKER_UPLOAD_BODY_LIMIT || '512kb' }),
-  uploadLimiter,
-  handleUpdateCatalog,
+  trackerUploadCoalesceMiddleware,
+  safeTrackerUploadHandler('update-catalog', handleUpdateCatalog),
 ];
 
 const uploadRouter = express.Router();

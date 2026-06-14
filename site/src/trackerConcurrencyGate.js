@@ -8,7 +8,6 @@
 
 const { getLagMs } = require('./trackerEventLoopMonitor');
 const {
-  recordHardFail503,
   recordCoalescedUpload,
   recordDroppedOldQueuedWork,
 } = require('./trackerRouteMetrics');
@@ -35,6 +34,18 @@ let shedEvents = 0;
 function isStatusOnlyUpload(req) {
   const body = req && req.body;
   return body && body.type === 'tracker_status';
+}
+
+function isLeaderstatsOnlyUpload(req) {
+  const body = req && req.body;
+  if (!body || typeof body !== 'object') return false;
+  if (body.leaderstatsOnlyUpload === true) return true;
+  if (body.uploadPath === 'playerdata_leaderstats_only') return true;
+  return false;
+}
+
+function isFastLaneUpload(req) {
+  return isStatusOnlyUpload(req) || isLeaderstatsOnlyUpload(req);
 }
 
 function sessionKeyFromRequest(req) {
@@ -214,24 +225,19 @@ function shouldDeferEnrichmentResponse() {
 function wrapTrackerUpload(label, handler) {
   return function trackerUploadEntry(req, res) {
     const lag = getLagMs();
-    const busyLagMs = Number(process.env.TRACKER_UPLOAD_BUSY_LAG_MS || 2500);
-    if (lag >= busyLagMs) {
-      recordHardFail503();
-      return res.status(503).json({
-        ok: false,
-        retryable: true,
-        error: 'server_busy',
-        lagMs: Math.round(lag),
-      });
-    }
-    if (isStatusOnlyUpload(req)) {
+    const busyLagMs = Number(process.env.TRACKER_UPLOAD_BUSY_LAG_MS || 8000);
+    if (isFastLaneUpload(req)) {
       return handler(req, res);
+    }
+    if (lag >= busyLagMs) {
+      req.trackerDeferEnrichment = true;
+      req.trackerBusyDefer = true;
     }
     const key = sessionKeyFromRequest(req);
     const pending = deferredPendingByKey.size + deferredWaitQueue.length;
     if (pending >= QUEUE_MAX && key && !deferredPendingByKey.has(key) && !deferredInFlight.has(key)) {
-      recordHardFail503();
-      return res.status(503).json({ ok: false, error: 'tracker_queue_full' });
+      req.trackerDeferEnrichment = true;
+      req.trackerQueueDefer = true;
     }
     if (shouldShedWork() || pending >= ENRICHMENT_MAX * 2) {
       shedEvents += 1;

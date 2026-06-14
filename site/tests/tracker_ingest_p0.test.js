@@ -86,7 +86,7 @@ describe('tracker ingest P0 latency hardening', () => {
     delete require.cache[require.resolve('../src/trackerConcurrencyGate')];
   });
 
-  test('E: wrapTrackerUpload returns 503 only when queue is full for new account', () => {
+  test('E: wrapTrackerUpload defers when queue is full for new account', () => {
     process.env.TRACKER_QUEUE_MAX = '2';
     process.env.TRACKER_ENRICHMENT_MAX_CONCURRENT = '1';
     delete require.cache[require.resolve('../src/trackerConcurrencyGate')];
@@ -96,13 +96,15 @@ describe('tracker ingest P0 latency hardening', () => {
     gate.scheduleDeferredUploadWork('held', () => new Promise(() => {}));
     gate.scheduleDeferredUploadWork('queued', () => new Promise(() => {}));
     assert.ok(gate.stats().queued >= 2, `expected queued backlog, got ${gate.stats().queued}`);
-    const handler = gate.wrapTrackerUpload('test', (req, res) => res.status(200).json({ ok: true }));
+    const handler = gate.wrapTrackerUpload('test', (req, res) => {
+      assert.equal(req.trackerDeferEnrichment, true);
+      res.status(200).json({ ok: true });
+    });
     const req = { body: { username: 'NewUser', type: 'inventory_snapshot' }, headers: {} };
     const res = mockRes();
     handler(req, res);
-    assert.equal(res.statusCode, 503);
-    assert.equal(res.body.error, 'tracker_queue_full');
-    assert.equal(trackerRouteMetrics.getTrackerRouteMetrics().hardFail503Count, 1);
+    assert.equal(res.statusCode, 200);
+    assert.equal(trackerRouteMetrics.getTrackerRouteMetrics().hardFail503Count, 0);
     process.env.TRACKER_QUEUE_MAX = '1000';
     process.env.TRACKER_ENRICHMENT_MAX_CONCURRENT = '4';
     delete require.cache[require.resolve('../src/trackerConcurrencyGate')];
