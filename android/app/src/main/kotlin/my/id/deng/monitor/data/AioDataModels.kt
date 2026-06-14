@@ -120,3 +120,23 @@ data class AioWebBootstrapResponse(
     @SerialName("bridgeUrl") val bridgeUrl: String = "",
     @SerialName("expiresInSeconds") val expiresInSeconds: Int = 0,
 )
+
+@Serializable
+data class ApkLatestInfo(
+    val ok: Boolean = false,
+    val available: Boolean = false,
+    @SerialName("versionName") val versionName: String? = null,
+    @SerialName("versionCode") val versionCode: Int? = null,
+    @SerialName("apkUrl") val apkUrl: String? = null,
+    @SerialName("versionedApkUrl") val versionedApkUrl: String? = null,
+    val sha256: String? = null,
+    @SerialName("sizeBytes") val sizeBytes: Long? = null,
+    @SerialName("releasedAt") val releasedAt: String? = null,
+    val changelog: List<String> = emptyList(),
+)
+
+@Serializable
+data class AioSyncFullResponse(
+    val ok: Boolean = false,
+    val data: AioTrackerPayload? = null,
+)

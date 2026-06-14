@@ -22,14 +22,16 @@ class FishItContractTest {
     private val src = "src/main/kotlin/my/id/deng/monitor"
 
     // ── Navigation / screens ─────────────────────────────────────────────────
-    @Test fun `app has Fish It stats and inventory nav tabs and routes`() {
+    @Test fun `app has live tracker dashboard inventory and settings nav`() {
         val appRoot = read("$src/ui/AppRoot.kt")
-        assertTrue("fishit NavItem must exist", appRoot.contains(Regex(""""fishit",\s*"Stats"""")))
+        assertTrue("live_tracker NavItem must exist", appRoot.contains(Regex(""""live_tracker",\s*"Live Tracker"""")))
+        assertTrue("dashboard NavItem must exist", appRoot.contains(Regex(""""dashboard",\s*"Dashboard"""")))
         assertTrue("inventory NavItem must exist", appRoot.contains(Regex(""""inventory",\s*"Inventory"""")))
-        assertTrue("fishit composable route must exist", appRoot.contains("composable(\"fishit\")"))
+        assertTrue("live tracker composable route must exist", appRoot.contains("composable(\"live_tracker\")"))
         assertTrue("inventory composable route must exist", appRoot.contains("composable(\"inventory\")"))
-        assertTrue("FishItScreen must be wired", appRoot.contains("FishItScreen("))
+        assertTrue("LiveTrackerWebViewScreen must be wired", appRoot.contains("LiveTrackerWebViewScreen("))
         assertTrue("InventoryScreen must be wired", appRoot.contains("InventoryScreen("))
+        assertTrue("LoginWebViewScreen must be wired for signed-out users", appRoot.contains("LoginWebViewScreen("))
     }
 
     @Test fun `FishItScreen has Daily, Stats and Fish sub-tabs`() {

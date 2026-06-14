@@ -1,16 +1,18 @@
 {
-  "app_name": "DENG Tool: Rejoin APK",
-  "version_name": "1.0.13",
-  "version_code": 13,
-  "file_name": "deng-tool-rejoin-apk-v1.0.13.apk",
-  "sha256": "db7fec0f420704d46636c3b4b3b2a4d22a75fbdfb185498057248ab329a3b6c2",
-  "size_bytes": 2077153,
-  "released_at": "2026-06-09",
+  "app_name": "DENG All In One",
+  "version_name": "2.2.0",
+  "version_code": 17,
+  "file_name": "deng-all-in-one-apk-v2.2.0.apk",
+  "sha256": "80679f5699d36213ab7d51e6ef0b9a930e3bb5950f2b9aed2b73af3823a2c748",
+  "size_bytes": 1835824,
+  "released_at": "2026-06-14T15:16:04Z",
+  "build_marker": "APK_SYSTEM_BROWSER_DISCORD_AUTH_AIO_2026_06_14",
   "min_sdk": 26,
-  "purpose": "Monitoring companion app for DENG Tool: Rejoin",
+  "purpose": "Monitoring companion for DENG All In One (aio.deng.my.id)",
   "changelog": [
-    "Monitor APK v1.0.13 / versionCode 13: mobile-first Inventory with skeleton loading.",
-    "Inventory WebView loads /tracker?apk=1 with branded background (no black flash).",
-    "Website Inventory: Individual/Bulk tabs, compact mobile cards, public UI cleanup."
+    "APK_SYSTEM_BROWSER_DISCORD_AUTH_AIO_2026_06_14 - Discord OAuth opens system browser / Custom Tabs, not WebView.",
+    "Default site and API base URL migrated to https://aio.deng.my.id.",
+    "OAuth deep-link handoff (deng-aio://auth/callback) plus web-bootstrap session bridge.",
+    "Branding updated to DENG All In One across APK UI and download page."
   ]
 }

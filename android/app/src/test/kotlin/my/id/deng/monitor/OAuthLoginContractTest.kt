@@ -1,5 +1,8 @@
 package my.id.deng.monitor
 
+import my.id.deng.monitor.ui.apkOAuthStartUrl
+import my.id.deng.monitor.ui.isExternalOAuthUrl
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -17,9 +20,57 @@ class OAuthLoginContractTest {
     fun `LoginWebViewScreen opens external browser for Discord OAuth`() {
         val login = read("$src/ui/LoginWebViewScreen.kt")
         assertTrue(login.contains("CustomTabsIntent"))
-        assertTrue(login.contains("BRIDGE_URL"))
-        assertTrue(login.contains("/auth/discord?apk=1"))
+        assertTrue(login.contains("PUBLIC_WEB_URL"))
+        assertTrue(login.contains("isExternalOAuthUrl"))
         assertTrue(login.contains("shouldOverrideUrl"))
+    }
+
+    @Test
+    fun `OAuth helper covers Discord authorize and site auth paths`() {
+        assertTrue(
+            isExternalOAuthUrl(
+                "https://discord.com/oauth2/authorize?client_id=1",
+                "aio.deng.my.id",
+            ),
+        )
+        assertTrue(
+            isExternalOAuthUrl(
+                "https://aio.deng.my.id/auth/discord?apk=1",
+                "aio.deng.my.id",
+            ),
+        )
+        assertTrue(
+            isExternalOAuthUrl(
+                "https://aio.deng.my.id/api/aio/auth/callback?code=x",
+                "aio.deng.my.id",
+            ),
+        )
+        assertTrue(
+            isExternalOAuthUrl(
+                "https://aio.deng.my.id/auth/discord/callback?code=x",
+                "aio.deng.my.id",
+            ),
+        )
+        assertFalse(
+            isExternalOAuthUrl(
+                "https://aio.deng.my.id/dashboard?apk=1",
+                "aio.deng.my.id",
+            ),
+        )
+        assertFalse(
+            isExternalOAuthUrl(
+                "https://aio.deng.my.id/tracker?apk=1",
+                "aio.deng.my.id",
+            ),
+        )
+    }
+
+    @Test
+    fun `apk OAuth start uses aio public site`() {
+        assertTrue(
+            apkOAuthStartUrl("https://aio.deng.my.id")
+                .contains("https://aio.deng.my.id/auth/discord?apk=1"),
+        )
     }
 
     @Test
@@ -35,5 +86,13 @@ class OAuthLoginContractTest {
         val manifest = read("src/main/AndroidManifest.xml")
         assertTrue(manifest.contains("android:scheme=\"deng-aio\""))
         assertTrue(manifest.contains("android:host=\"auth\""))
+    }
+
+    @Test
+    fun `release marker is baked into build config and string resources`() {
+        val gradle = read("build.gradle.kts")
+        assertTrue(gradle.contains("APK_SYSTEM_BROWSER_DISCORD_AUTH_AIO_2026_06_14"))
+        val strings = read("src/main/res/values/strings.xml")
+        assertTrue(strings.contains("APK_SYSTEM_BROWSER_DISCORD_AUTH_AIO_2026_06_14"))
     }
 }

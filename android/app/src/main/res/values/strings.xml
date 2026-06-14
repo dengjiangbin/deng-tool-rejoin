@@ -11,7 +11,7 @@
         "DENG Tool: Rejoin APK" because that phrase refers to the .apk
         artifact, not the installed application.
     -->
-    <string name="app_name">DENG Tool: Rejoin</string>
+    <string name="app_name">DENG All In One</string>
 
     <!--
         Shorter label used only by the launcher icon, which has limited
@@ -20,11 +20,12 @@
         the icon makes the product family obvious at a glance.
         The activity declares android:label="@string/app_launcher_label".
     -->
-    <string name="app_launcher_label">DENG Rejoin</string>
+    <string name="app_launcher_label">DENG AIO</string>
 
     <string name="app_tagline">Monitor your Rejoin packages from Android.</string>
+    <string name="apk_release_marker">APK_SYSTEM_BROWSER_DISCORD_AUTH_AIO_2026_06_14</string>
     <string name="pair_title">Pair with DENG Tool</string>
-    <string name="pair_help">Get an 8-character pairing code from your DENG Tool dashboard at tool.deng.my.id/license.</string>
+    <string name="pair_help">Get an 8-character pairing code from aio.deng.my.id/download after signing in with Discord.</string>
     <string name="pair_button">Pair</string>
     <string name="pair_code_label">Pairing code</string>
     <string name="logout">Log out</string>

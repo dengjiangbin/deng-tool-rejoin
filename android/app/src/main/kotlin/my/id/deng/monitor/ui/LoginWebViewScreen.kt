@@ -1,6 +1,5 @@
 package my.id.deng.monitor.ui
 
-import android.content.Intent
 import android.net.Uri
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.runtime.Composable
@@ -15,17 +14,6 @@ import my.id.deng.monitor.BuildConfig
 import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.SessionStore
 
-private fun apkOAuthStartUrl(): String {
-    val bridge = BuildConfig.BRIDGE_URL.trimEnd('/')
-    return "$bridge/auth/discord?apk=1&public_return=1"
-}
-
-private fun isDiscordOAuthUrl(url: String): Boolean {
-    val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
-    val path = uri.path.orEmpty()
-    return path.startsWith("/auth/discord")
-}
-
 @Composable
 fun LoginWebViewScreen(
     api: MonitorApi,
@@ -33,18 +21,19 @@ fun LoginWebViewScreen(
     onLoggedIn: () -> Unit,
 ) {
     val loginUrl = remember { aioWebUrl("/login") }
+    val publicHost = remember { publicWebHost() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var handled by remember { mutableStateOf(false) }
 
     fun openExternalOAuth() {
         val customTabs = CustomTabsIntent.Builder().build()
-        customTabs.launchUrl(context, Uri.parse(apkOAuthStartUrl()))
+        customTabs.launchUrl(context, Uri.parse(apkOAuthStartUrl(BuildConfig.PUBLIC_WEB_URL)))
     }
 
     fun markLoggedIn(url: String) {
         if (handled) return
-        if (!isAuthenticatedWebUrl(url, publicWebHost())) return
+        if (!isAuthenticatedWebUrl(url, publicHost)) return
         handled = true
         scope.launch {
             sessionStore.setWebLoggedIn(true)
@@ -55,7 +44,7 @@ fun LoginWebViewScreen(
     AioWebViewScreen(
         startUrl = loginUrl,
         onUrlChanged = { url ->
-            if (isDiscordOAuthUrl(url)) {
+            if (isExternalOAuthUrl(url, publicHost)) {
                 openExternalOAuth()
                 return@AioWebViewScreen
             }
@@ -63,7 +52,7 @@ fun LoginWebViewScreen(
         },
         onPageFinished = ::markLoggedIn,
         shouldOverrideUrl = { url ->
-            if (isDiscordOAuthUrl(url)) {
+            if (isExternalOAuthUrl(url, publicHost)) {
                 openExternalOAuth()
                 true
             } else {

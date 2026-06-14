@@ -40,7 +40,7 @@ fun PairScreen(api: MonitorApi, sessionStore: SessionStore) {
             // match the new app_name. "DENG Tool: Rejoin APK" still
             // appears in the website download footer (line below) because
             // there it refers to the literal .apk artifact you install.
-            "DENG Tool: Rejoin",
+            "DENG All In One",
             style = MaterialTheme.typography.headlineLarge,
             color = DengColors.Cyan,
             fontWeight = FontWeight.Bold,
@@ -59,7 +59,7 @@ fun PairScreen(api: MonitorApi, sessionStore: SessionStore) {
             Text("Pair Device", style = MaterialTheme.typography.titleLarge, color = DengColors.TextPrimary)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Log in at tool.deng.my.id, open the Download APK page, " +
+                "Log in at aio.deng.my.id, open the Download page, " +
                 "generate a pairing code, then enter it here.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = DengColors.TextMuted,
@@ -114,7 +114,7 @@ fun PairScreen(api: MonitorApi, sessionStore: SessionStore) {
 
         Spacer(Modifier.weight(1f))
         Text(
-            "Only install DENG Tool: Rejoin APK from tool.deng.my.id/download.",
+            "Only install DENG All In One APK from aio.deng.my.id/download.",
             style = MaterialTheme.typography.bodySmall,
             color = DengColors.TextDim,
             textAlign = TextAlign.Center,

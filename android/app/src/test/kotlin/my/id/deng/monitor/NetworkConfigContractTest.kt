@@ -6,15 +6,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * v1.0.5 network-diagnostic contract.
- *
- * These pure-JVM tests scan the actual build script + source so a future
- * change can never silently reintroduce the v1.0.4 connectivity class of
- * bugs: wrong/empty backend host, a cryptic "UnknownHostException" with no
- * recovery path, a missing INTERNET permission, or a hidden backend host.
- *
- * Test working dir is the :app module root (same convention as
- * AppVersionAndIconTest, which reads build.gradle.kts from here).
+ * v2.2 network + public-site contract for DENG All In One APK.
  */
 class NetworkConfigContractTest {
     private fun read(path: String): String {
@@ -27,18 +19,24 @@ class NetworkConfigContractTest {
     private fun manifest() = read("src/main/AndroidManifest.xml")
 
     @Test
-    fun `default backend base URL is exactly https tool_deng_my_id`() {
+    fun `default backend base URL is exactly https aio_deng_my_id`() {
         assertTrue(
-            "build.gradle.kts default bridgeUrl must be https://tool.deng.my.id",
-            gradle().contains(Regex("""\?:\s*"https://tool\.deng\.my\.id"""")),
+            "build.gradle.kts default bridgeUrl must be https://aio.deng.my.id",
+            gradle().contains(Regex("""\?:\s*"https://aio\.deng\.my\.id"""")),
         )
     }
 
     @Test
+    fun `default public web URL is aio_deng_my_id`() {
+        val matches = Regex("""publicWebUrl[\s\S]*?\?:\s*"(https?://[^"]+)"""")
+            .findAll(gradle())
+            .map { it.groupValues[1] }
+            .toList()
+        assertTrue(matches.any { it == "https://aio.deng.my.id" })
+    }
+
+    @Test
     fun `default backend URL is not staging localhost or 127_0_0_1`() {
-        // Only inspect the default-fallback expression, NOT comments (which
-        // legitimately reference -PbridgeUrl=https://staging.example.com as an
-        // override example).
         val fallback = Regex("""\?:\s*"(https?://[^"]+)"""").find(gradle())?.groupValues?.get(1)
         requireNotNull(fallback) { "could not locate the default bridgeUrl fallback" }
         assertFalse("default URL must not be staging", fallback.contains("staging.example.com"))
@@ -49,8 +47,6 @@ class NetworkConfigContractTest {
 
     @Test
     fun `monitor API never points at rejoin_deng_my_id`() {
-        // The APK monitor API must use tool.deng.my.id. rejoin.deng.my.id is
-        // the Rejoin *installer* host and must not be baked in as the API base.
         val gradleSrc = gradle()
         assertFalse(
             "default bridgeUrl must not be rejoin.deng.my.id",
@@ -134,7 +130,6 @@ class NetworkConfigContractTest {
             "Settings/About must display the API host",
             settings.contains("API host: \${api.host}"),
         )
-        // The host display must never leak the session token.
         assertFalse(
             "Settings/About must not display any token",
             settings.contains("cachedToken") || settings.contains("appSessionToken"),

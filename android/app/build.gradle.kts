@@ -17,17 +17,22 @@ android {
         // Termux / package version. Bump versionCode whenever the
         // APK is rebuilt and republished, even for branding-only
         // changes, so Android sees it as a real upgrade.
-        versionCode = 16
-        versionName = "2.1.1"
+        versionCode = 17
+        versionName = "2.2.0"
 
         val bridgeUrl = (project.findProperty("bridgeUrl") as String?)
-            ?: "https://tool.deng.my.id"
+            ?: "https://aio.deng.my.id"
         buildConfigField("String", "BRIDGE_URL", "\"$bridgeUrl\"")
 
         val publicWebUrl = (project.findProperty("publicWebUrl") as String?)
             ?: "https://aio.deng.my.id"
         buildConfigField("String", "PUBLIC_WEB_URL", "\"$publicWebUrl\"")
         buildConfigField("String", "DENG_AIO_APP_SCHEME", "\"deng-aio\"")
+        buildConfigField(
+            "String",
+            "APK_RELEASE_MARKER",
+            "\"APK_SYSTEM_BROWSER_DISCORD_AUTH_AIO_2026_06_14\"",
+        )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

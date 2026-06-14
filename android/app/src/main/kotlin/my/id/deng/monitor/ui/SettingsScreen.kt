@@ -8,10 +8,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import my.id.deng.monitor.BuildConfig
+import my.id.deng.monitor.R
 import my.id.deng.monitor.data.ApiException
 import my.id.deng.monitor.data.AppPreferences
 import my.id.deng.monitor.data.MonitorApi
@@ -40,6 +42,7 @@ fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore, appPreferences: 
     val handle = rememberDeviceStatusHandle(api, sessionStore)
     val state by handle.state
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -178,12 +181,11 @@ fun SettingsScreen(api: MonitorApi, sessionStore: SessionStore, appPreferences: 
         DengCard {
             Text("About", style = MaterialTheme.typography.titleMedium, color = DengColors.TextPrimary)
             Spacer(Modifier.height(6.dp))
-            Text("DENG Tool: Rejoin · App v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+            Text("DENG All In One · App v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
                 color = DengColors.TextMuted, style = MaterialTheme.typography.bodySmall)
-            // v1.0.5: show the API host prominently so anyone debugging a
-            // connectivity issue can confirm in one glance that the APK was
-            // built against the correct backend (tool.deng.my.id) — no token
-            // or secret is ever shown, just the public host + base URL.
+            Text("Release: ${context.getString(R.string.apk_release_marker)}",
+                color = DengColors.TextDim, style = MaterialTheme.typography.bodySmall)
+            // Show the API host so connectivity issues are easy to diagnose.
             Spacer(Modifier.height(4.dp))
             Text("API host: ${api.host}",
                 color = DengColors.Cyan, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)

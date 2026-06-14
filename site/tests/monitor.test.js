@@ -598,8 +598,8 @@ describe('APK download page', () => {
     await login(agent);
     const res = await agent.get('/download');
     assert.equal(res.status, 200);
-    assert.match(res.text, /DENG Tool: Rejoin APK/);
-    assert.match(res.text, />Download APK</);
+    assert.match(res.text, /DENG All In One/);
+    assert.match(res.text, /Download DENG All In One APK/);
     assert.match(res.text, /Install Instructions/);
   });
 
@@ -625,14 +625,14 @@ describe('APK download page', () => {
 
   test('canonical latest alias either serves APK (when published) or 404s cleanly', async () => {
     const res = await request(app)
-      .get('/downloads/deng-tool-rejoin-apk-latest.apk')
+      .get('/downloads/deng-all-in-one-apk-latest.apk')
       .redirects(0);
     // When an APK is published, the alias 302-redirects to the versioned filename.
     // When no APK is published, the route returns 404 with a friendly message.
     if (res.status === 302) {
       assert.match(
         String(res.headers.location || ''),
-        /^\/downloads\/deng-tool-rejoin-apk-v[\d.]+\.apk$/,
+        /^\/downloads\/deng-all-in-one-apk-v[\d.]+\.apk$/,
         'latest alias must redirect to a versioned filename when an APK is published',
       );
     } else {
@@ -653,7 +653,7 @@ describe('APK download page', () => {
       const ds = require('../src/downloadStats');
       const beforeCount = ds.getApkStats().latest?.downloads || 0;
       const res = await request(app)
-        .head('/downloads/deng-tool-rejoin-apk-latest.apk')
+        .head('/downloads/deng-all-in-one-apk-latest.apk')
         .redirects(1);
       if (res.status === 200) {
         assert.match(
@@ -680,19 +680,35 @@ describe('APK download page', () => {
       .get('/downloads/deng-monitor-latest.apk')
       .redirects(0);
     assert.equal(res.status, 301);
-    assert.equal(res.headers.location, '/downloads/deng-tool-rejoin-apk-latest.apk');
+    assert.equal(res.headers.location, '/downloads/deng-all-in-one-apk-latest.apk');
   });
 
-  test('legacy versioned filename redirects to new pattern when missing on disk', async () => {
+  test('legacy rejoin latest alias permanently redirects to canonical latest', async () => {
+    const res = await request(app)
+      .get('/downloads/deng-tool-rejoin-apk-latest.apk')
+      .redirects(0);
+    assert.equal(res.status, 301);
+    assert.equal(res.headers.location, '/downloads/deng-all-in-one-apk-latest.apk');
+  });
+
+  test('legacy versioned filename redirects to deng-all-in-one pattern when missing on disk', async () => {
     const res = await request(app)
       .get('/downloads/deng-monitor-v1.0.0.apk')
       .redirects(0);
     assert.equal(res.status, 301);
-    assert.equal(res.headers.location, '/downloads/deng-tool-rejoin-apk-v1.0.0.apk');
+    assert.equal(res.headers.location, '/downloads/deng-all-in-one-apk-v1.0.0.apk');
   });
 
-  test('new versioned filename serves real APK when published, 404 otherwise', async () => {
-    const res = await request(app).get('/downloads/deng-tool-rejoin-apk-v1.0.0.apk');
+  test('legacy rejoin versioned filename redirects to deng-all-in-one pattern when missing on disk', async () => {
+    const res = await request(app)
+      .get('/downloads/deng-tool-rejoin-apk-v1.0.0.apk')
+      .redirects(0);
+    assert.equal(res.status, 301);
+    assert.equal(res.headers.location, '/downloads/deng-all-in-one-apk-v1.0.0.apk');
+  });
+
+  test('canonical versioned filename serves real APK when published, 404 otherwise', async () => {
+    const res = await request(app).get('/downloads/deng-all-in-one-apk-v1.0.0.apk');
     // Either the APK has been published (200 + APK content-type) or it's
     // missing and the route 404s cleanly. Both are valid security postures;
     // what must NEVER happen is leaking another file.
@@ -722,7 +738,7 @@ describe('APK download page', () => {
     assert.match(res.text, /id="pair-android-app"/);
     assert.match(
       res.text,
-      /After installing DENG Tool: Rejoin APK, open the app and enter this/,
+      /After installing DENG All In One, open the app and sign in with Discord/,
     );
   });
 

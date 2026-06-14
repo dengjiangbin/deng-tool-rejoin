@@ -7,13 +7,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * Locks down APK app-version and launcher-icon invariants so the app
- * can never quietly regress to the default Android icon or skip a
- * version bump on a republish.
- *
- * Pure JVM test — reads the actual build script and icon resources.
- */
 class AppVersionAndIconTest {
     private fun buildGradle(): String {
         val f = File("build.gradle.kts")
@@ -22,20 +15,20 @@ class AppVersionAndIconTest {
     }
 
     @Test
-    fun `versionName is bumped to 2_0`() {
+    fun `versionName is bumped to 2_2_0`() {
         val gradle = buildGradle()
         assertTrue(
-            "expected versionName = \"2.0\" in build.gradle.kts",
-            gradle.contains(Regex("""versionName\s*=\s*"2\.0"""")),
+            "expected versionName = \"2.2.0\" in build.gradle.kts",
+            gradle.contains(Regex("""versionName\s*=\s*"2\.2\.0"""")),
         )
     }
 
     @Test
-    fun `versionCode is bumped to 14`() {
+    fun `versionCode is bumped to 17`() {
         val gradle = buildGradle()
         assertTrue(
-            "expected versionCode = 14 in build.gradle.kts",
-            gradle.contains(Regex("""versionCode\s*=\s*14\b""")),
+            "expected versionCode = 17 in build.gradle.kts",
+            gradle.contains(Regex("""versionCode\s*=\s*17\b""")),
         )
     }
 
@@ -46,8 +39,6 @@ class AppVersionAndIconTest {
             "adaptive ic_launcher.xml must reference @mipmap/ic_launcher_foreground (real DENG logo)",
             xml.contains(Regex("""<foreground[^/]*@mipmap/ic_launcher_foreground""")),
         )
-        // Must NOT still reference the old default "@drawable/ic_launcher_foreground"
-        // vector for the foreground layer (that was the placeholder D monogram).
         assertFalse(
             "adaptive foreground must not reference the placeholder vector drawable",
             xml.contains(Regex("""<foreground[^/]*@drawable/ic_launcher_foreground""")),
@@ -62,32 +53,31 @@ class AppVersionAndIconTest {
             for (n in names) {
                 val f = File("src/main/res/mipmap-$d/$n")
                 assertTrue("missing launcher bitmap: ${f.path}", f.exists())
-                // Sanity: a non-trivial PNG, not an empty placeholder.
                 assertTrue("${f.path} is too small to be a real icon", f.length() > 1024)
             }
         }
     }
 
     @Test
-    fun `Android string resources hold the v1_0_4 app name and launcher label`() {
+    fun `Android string resources hold the DENG All In One app name`() {
         val xml = File("src/main/res/values/strings.xml").readText(Charsets.UTF_8)
         assertNotNull(xml)
         assertTrue(
-            "app_name must be 'DENG Tool: Rejoin' (since v1.0.3 dropped the APK suffix)",
-            xml.contains(Regex("""<string name="app_name">\s*DENG Tool: Rejoin\s*</string>""")),
+            "app_name must be 'DENG All In One'",
+            xml.contains(Regex("""<string name="app_name">\s*DENG All In One\s*</string>""")),
         )
         assertTrue(
-            "app_launcher_label must be 'DENG Rejoin' (since v1.0.3 family branding)",
-            xml.contains(Regex("""<string name="app_launcher_label">\s*DENG Rejoin\s*</string>""")),
+            "app_launcher_label must be 'DENG AIO'",
+            xml.contains(Regex("""<string name="app_launcher_label">\s*DENG AIO\s*</string>""")),
         )
     }
 
     @Test
-    fun `PairScreen text directs users to the Download APK page, never the License page`() {
+    fun `PairScreen text directs users to the aio download page`() {
         val pair = File("src/main/kotlin/my/id/deng/monitor/ui/PairScreen.kt").readText(Charsets.UTF_8)
         assertTrue(
-            "PairScreen must mention the Download APK flow",
-            pair.contains("Download APK page"),
+            "PairScreen must mention the Download page",
+            pair.contains("Download page"),
         )
         assertFalse(
             "PairScreen must not tell users to use the License page",
@@ -100,10 +90,14 @@ class AppVersionAndIconTest {
     }
 
     @Test
-    fun `launcher footer pin still points users to tool_deng_my_id slash download`() {
+    fun `launcher footer pin still points users to aio_deng_my_id slash download`() {
         val pair = File("src/main/kotlin/my/id/deng/monitor/ui/PairScreen.kt").readText(Charsets.UTF_8)
         assertTrue(
             "PairScreen footer must keep the official download URL",
+            pair.contains("aio.deng.my.id/download"),
+        )
+        assertFalse(
+            "PairScreen must not reference legacy tool.deng.my.id download URL",
             pair.contains("tool.deng.my.id/download"),
         )
     }

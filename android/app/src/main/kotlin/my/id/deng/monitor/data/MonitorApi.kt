@@ -27,7 +27,7 @@ class MonitorApi(
     private val tokenProvider: () -> String?,
 ) {
     /**
-     * Bare host of [baseUrl] (e.g. "tool.deng.my.id") for display in the
+     * Bare host of [baseUrl] (e.g. "aio.deng.my.id") for display in the
      * Settings/About card and in user-facing network-error messages. Falls
      * back to the raw baseUrl if it can't be parsed — never throws.
      */
@@ -104,6 +104,11 @@ class MonitorApi(
     // ── APK update manifest (public, no auth) ───────────────────────────────
     suspend fun fetchApkLatest(): ApkLatestInfo =
         execJson("/api/aio/app/latest", auth = false)
+
+    suspend fun fetchTrackerSync(): AioTrackerPayload {
+        val response: AioSyncFullResponse = execJson("/api/aio/sync/full?dataset=tracker", auth = true)
+        return response.data ?: AioTrackerPayload()
+    }
 
     suspend fun aioAuthExchange(code: String): AioAuthExchangeResponse {
         val body = """{"code":${json.encodeToString(code)}}"""
