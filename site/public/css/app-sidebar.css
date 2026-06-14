@@ -137,6 +137,18 @@
   border-radius: 10px;
 }
 
+.inventory-apk-embed .inventory-sidebar .sidebar-body--desktop {
+  display: none;
+}
+
+@media (min-width: 769px) {
+  .inventory-sidebar .inventory-main-nav--mobile,
+  .inventory-sidebar.deng-app-sidebar [data-mobile-tracker-tabs],
+  .deng-app-sidebar .inventory-main-nav--mobile {
+    display: none !important;
+  }
+}
+
 @media (max-width: 768px) {
   .inventory-sidebar .sidebar-body--desktop {
     display: none;

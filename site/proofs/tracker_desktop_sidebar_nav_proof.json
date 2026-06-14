@@ -1,0 +1,11 @@
+{
+  "capturedAt": "2026-06-14T13:06:20.255Z",
+  "inventoryCss": "inventory.2e959f9ba128.css",
+  "inventoryJs": "inventory.413eecfb8d53.js",
+  "desktopDashboardCount": 1,
+  "desktopLiveTrackerCount": 1,
+  "mobileNavPresentInDom": true,
+  "mobileNavHasDataAttr": true,
+  "cssHidesMobileNavOnDesktop": true,
+  "proofHtml": "tracker_desktop_sidebar_nav_proof.html"
+}

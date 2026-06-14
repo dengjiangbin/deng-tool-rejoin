@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tracker desktop sidebar nav proof</title>
+  <link rel="stylesheet" href="/public/css/app-sidebar.css">
+  <link rel="stylesheet" href="/public/assets/inventory.2e959f9ba128.css">
+  <style>
+    body { margin:0; background:#0d0f14; }
+    .proof-wrap { width:268px; min-height:100vh; }
+    .proof-note { color:#94a3b8; font:14px/1.5 Segoe UI,sans-serif; padding:12px; }
+  </style>
+</head>
+<body>
+  <p class="proof-note">Desktop proof (1280px): segmented mobile switcher must be hidden; only sidebar-link Dashboard + Live Tracker visible.</p>
+  <div class="proof-wrap"><aside class="inventory-sidebar sidebar deng-app-sidebar" aria-label="Main navigation">
+    <div class="inventory-sidebar__top">
+    <div class="sidebar-brand-block">
+      <span class="sidebar-brand-block__logo" aria-hidden="true">
+        <img src="/public/img/deng-logo.png" alt="">
+      </span>
+      <div class="sidebar-brand-block__text">
+        <div class="sidebar-brand-block__title">DENG Tracker</div>
+        <div class="sidebar-brand-block__subtitle">Fish It</div>
+      </div>
+    </div>
+    <div class="sidebar-divider" aria-hidden="true"></div>
+    
+
+<div class="sidebar-body sidebar-body--desktop">
+  <div class="sidebar-section">
+    <p class="sidebar-section-label">MAIN</p>
+    <ul class="sidebar-menu">
+      <li>
+        
+        <button type="button" class="sidebar-link" data-inventory-section="dashboard">
+        
+          <span class="sidebar-link__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <rect x="3" y="3" width="7" height="8" rx="2"></rect>
+              <rect x="14" y="3" width="7" height="5" rx="2"></rect>
+              <rect x="14" y="12" width="7" height="9" rx="2"></rect>
+              <rect x="3" y="15" width="7" height="6" rx="2"></rect>
+            </svg>
+          </span>
+          <span class="sidebar-link__label">Dashboard</span>
+        
+        </button>
+        
+      </li>
+      <li>
+        
+        <button type="button" class="sidebar-link is-active" data-inventory-section="accounts">
+        
+          <span class="sidebar-link__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+            </svg>
+          </span>
+          <span class="sidebar-link__label">Live Tracker</span>
+        
+        </button>
+        
+      </li>
+    </ul>
+  </div>
+
+  
+  
+</div>
+
+    <nav class="inventory-main-nav inventory-main-nav--mobile" data-mobile-tracker-tabs aria-label="Main sections">
+      <button type="button" class="inventory-main-nav__tab" data-inventory-section="dashboard">Dashboard</button>
+      <button type="button" class="inventory-main-nav__tab is-active" data-inventory-section="accounts">Live Tracker</button>
+    </nav>
+    </div>
+    <div class="inventory-sidebar__spacer" aria-hidden="true"></div>
+    <div class="inventory-sidebar__bottom">
+      <div class="inventory-sidebar__controls profile-control-row">
+      <div class="inventory-profile-card discord-profile-pill">
+        
+          <div class="inventory-profile-card__avatar-placeholder">P</div>
+        
+        <div class="inventory-profile-card__meta">
+          <div class="inventory-profile-card__name">ProofUser</div>
+          <div class="inventory-profile-card__sub">Discord account</div>
+        </div>
+      </div>
+      <button type="button" class="inventory-privacy-toggle inventory-sidebar__privacy hide-username-toggle-btn" id="hideUsernamesBtn" title="Hide usernames" aria-label="Hide usernames" aria-pressed="false">
+        <span class="inventory-privacy-toggle__label">
+          <span class="inventory-privacy-toggle__icon" id="hideUsernameIcon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </span>
+          <span class="inventory-privacy-toggle__text inventory-privacy-toggle__text--full">Hide Username</span>
+          <span class="inventory-privacy-toggle__text inventory-privacy-toggle__text--short">Hide</span>
+        </span>
+        <span class="hide-username-toggle" aria-hidden="true"></span>
+      </button>
+      <button type="button" class="inventory-action-btn inventory-action-btn--script script-button" id="sidebarScriptBtn" title="Copy tracker script" aria-label="Copy tracker script">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M15 12h-5"></path>
+          <path d="M15 8h-5"></path>
+          <path d="M19 17V5a2 2 0 0 0-2-2H8"></path>
+          <path d="M5 21h12a2 2 0 0 0 2-2v-1H7a2 2 0 0 1-2-2V5a2 2 0 0 1-2 2v14a2 2 0 0 0 2 2Z"></path>
+        </svg>
+        <span>Script</span>
+      </button>
+      <form method="POST" action="/auth/logout" class="profile-control-row__logout">
+        <input type="hidden" name="_csrf" value="proof-csrf">
+        <button type="button" class="inventory-action-btn inventory-action-btn--logout logout-button" data-logout-confirm title="Logout" aria-label="Logout">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <path d="M16 17l5-5-5-5"></path>
+            <path d="M21 12H9"></path>
+          </svg>
+          <span>Logout</span>
+        </button>
+      </form>
+      </div>
+    </div>
+  </aside></div>
+</body>
+</html>
