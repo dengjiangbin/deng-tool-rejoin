@@ -1,6 +1,7 @@
 'use strict';
 
 const { EXPECTED_CLIENT_TRACKER_BUILD, isAllowedTrackerBuild } = require('./fishitTrackerBuild');
+const { isTransientServerUploadFailure } = require('./fishitTrackerUploadStatus');
 
 /** Live account presence grace — 45s matches ~10s upload interval + network slack. */
 const ACCOUNT_PRESENCE_GRACE_MS = 45_000;
@@ -95,6 +96,10 @@ function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS,
   const recentSeen = seenAgeSeconds != null && seenAgeSeconds * 1000 < maxAgeMs;
   const loaderOnline = data.isOnline === true;
   const loaderOffline = data.isOnline === false;
+  const transientUploadFailure = isTransientServerUploadFailure(
+    data?.lastFailureReason || data?.lastUploadRejectReason || data?.rejectReason,
+    data?.lastUploadStatusCodeReturned || data?.lastUploadHttpStatus,
+  );
   if (recentSeen) {
     if (loaderOffline) {
       return {
@@ -111,8 +116,15 @@ function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS,
       accountPresenceLive: true,
       accountOnline: true,
       accountPresenceStatus: 'online',
-      accountPresenceReason: loaderOnline ? 'heartbeat' : 'loader_contact',
-      accountStatusReason: loaderOnline ? 'heartbeat' : 'loader_contact',
+      accountPresenceReason: transientUploadFailure
+        ? 'last_success_within_grace'
+        : (loaderOnline ? 'heartbeat' : 'loader_contact'),
+      accountStatusReason: transientUploadFailure
+        ? 'server_502_upload_retrying'
+        : (loaderOnline ? 'heartbeat' : 'loader_contact'),
+      uploadWarningReason: transientUploadFailure
+        ? (data?.lastFailureReason || data?.lastUploadRejectReason || 'server_502_upload_retrying')
+        : null,
     };
   }
   if (loaderOffline) {
@@ -130,8 +142,8 @@ function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS,
     accountPresenceLive: false,
     accountOnline: false,
     accountPresenceStatus: 'offline',
-    accountPresenceReason: 'stale_heartbeat',
-    accountStatusReason: 'stale_heartbeat',
+    accountPresenceReason: 'account_offline_timeout',
+    accountStatusReason: 'account_offline_timeout',
   };
 }
 

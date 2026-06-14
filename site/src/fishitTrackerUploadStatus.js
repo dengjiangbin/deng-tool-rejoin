@@ -2,6 +2,52 @@
 
 const DEFAULT_UPLOAD_INTERVAL_SECONDS = 10;
 
+/** HTTP/proxy failures that must not flip account presence red while last success is fresh. */
+const TRANSIENT_UPLOAD_FAILURE_PREFIXES = [
+  'server_502',
+  'code=502',
+  'code=503',
+  'code=504',
+  'http_502',
+  'http_503',
+  'http_504',
+  'gateway',
+  'bad gateway',
+  'cloudflare',
+  'ingest_unavailable',
+  'upstream',
+  'proxy',
+  'throttle',
+  '429',
+];
+
+function normalizeTransientUploadFailureReason(reason, statusCode) {
+  const code = Number(statusCode);
+  if (Number.isFinite(code) && code >= 500 && code < 600) {
+    return `server_${code}_upload_retrying`;
+  }
+  const raw = String(reason || '').trim().toLowerCase();
+  if (!raw) return 'server_502_upload_retrying';
+  if (raw.startsWith('server_') && raw.includes('_upload_retrying')) return raw;
+  const codeMatch = raw.match(/code=(\d{3})/);
+  if (codeMatch && Number(codeMatch[1]) >= 500) {
+    return `server_${codeMatch[1]}_upload_retrying`;
+  }
+  if (raw.includes('502')) return 'server_502_upload_retrying';
+  if (raw.includes('503')) return 'server_503_upload_retrying';
+  if (raw.includes('504')) return 'server_504_upload_retrying';
+  return 'server_502_upload_retrying';
+}
+
+function isTransientServerUploadFailure(reason, statusCode) {
+  const code = Number(statusCode);
+  if (Number.isFinite(code) && code >= 500 && code < 600) return true;
+  const raw = String(reason || '').trim().toLowerCase();
+  if (!raw) return false;
+  if (raw.startsWith('server_') && raw.includes('_upload_retrying')) return true;
+  return TRANSIENT_UPLOAD_FAILURE_PREFIXES.some((needle) => raw.includes(needle));
+}
+
 function uploadStatusThresholds(intervalSeconds) {
   const interval = Math.max(
     1,
@@ -229,41 +275,49 @@ function deriveTrackerUploadAccountStatus(data, opts = {}) {
     statusDecisionReason = 'upload_interval_missed';
   } else if (
     secondsSinceLastSuccess != null
-    && secondsSinceLastSuccess > thresholds.offlineThresholdSeconds
-  ) {
-    statusDecisionReason = 'upload_interval_missed';
-  } else if (
-    secondsSinceLastSuccess != null
     && secondsSinceLastSuccess <= thresholds.offlineThresholdSeconds
   ) {
     const withinOnline = secondsSinceLastSuccess <= thresholds.onlineThresholdSeconds;
+    const transientFailure = isTransientServerUploadFailure(
+      data?.lastFailureReason || data?.lastUploadRejectReason || data?.rejectReason,
+      data?.lastUploadStatusCodeReturned || data?.lastUploadHttpStatus,
+    );
+    const hasAcceptedSnapshot = latestPayloadAccepted && (
+      data?.hasFishSnapshot || data?.hasStoneSnapshot || data?.hasLeaderstatsSnapshot || inventoryReady
+    );
+
     if (lastStatus === 'green') {
       status = withinOnline ? 'online' : 'syncing';
       statusColor = withinOnline ? 'green' : 'yellow';
-      statusDecisionReason = data?.lastSyncReason || (withinOnline
-        ? 'fresh_accepted_snapshot'
-        : 'accepted_snapshot_late_within_grace');
+      statusDecisionReason = transientFailure
+        ? (withinOnline ? 'server_502_upload_retrying' : 'last_success_within_grace')
+        : (data?.lastSyncReason || (withinOnline
+          ? 'fresh_accepted_snapshot'
+          : 'accepted_snapshot_late_within_grace'));
+    } else if (
+      lastStatus === 'red'
+      && transientFailure
+      && (data?.lastSuccessfulUploadAt || hasAcceptedSnapshot)
+    ) {
+      status = withinOnline ? 'online' : 'syncing';
+      statusColor = withinOnline ? 'green' : 'yellow';
+      statusDecisionReason = withinOnline ? 'server_502_upload_retrying' : 'last_success_within_grace';
     } else if (lastStatus === 'red') {
       statusDecisionReason = data?.lastSyncReason || 'sync_missed';
+    } else if (withinOnline && hasAcceptedSnapshot) {
+      status = 'online';
+      statusColor = 'green';
+      statusDecisionReason = 'fresh_accepted_snapshot';
+    } else if (withinOnline) {
+      status = 'syncing';
+      statusColor = 'yellow';
+      statusDecisionReason = 'fresh_contact_awaiting_snapshot';
     } else {
-      const hasAcceptedSnapshot = latestPayloadAccepted && (
-        data?.hasFishSnapshot || data?.hasStoneSnapshot || data?.hasLeaderstatsSnapshot || inventoryReady
-      );
-      if (withinOnline && hasAcceptedSnapshot) {
-        status = 'online';
-        statusColor = 'green';
-        statusDecisionReason = 'fresh_accepted_snapshot';
-      } else if (withinOnline) {
-        status = 'syncing';
-        statusColor = 'yellow';
-        statusDecisionReason = 'fresh_contact_awaiting_snapshot';
-      } else {
-        status = 'syncing';
-        statusColor = 'yellow';
-        statusDecisionReason = hasAcceptedSnapshot
-          ? 'accepted_snapshot_late_within_grace'
-          : 'contact_late_awaiting_snapshot';
-      }
+      status = 'syncing';
+      statusColor = 'yellow';
+      statusDecisionReason = hasAcceptedSnapshot
+        ? 'accepted_snapshot_late_within_grace'
+        : 'contact_late_awaiting_snapshot';
     }
   }
 
@@ -409,8 +463,31 @@ function applyRejectedUploadMeta(session, body, now, rejectReason) {
   };
 }
 
+function applyTransientUploadFailure(session, now, reason, statusCode) {
+  const normalized = normalizeTransientUploadFailureReason(reason, statusCode);
+  const base = session || {};
+  return {
+    ...base,
+    lastUploadAttemptAt: now,
+    lastFailedUploadAt: now,
+    lastUploadFailedAt: now,
+    lastFailureReason: normalized,
+    lastUploadRejectReason: normalized,
+    rejectReason: normalized,
+    lastUploadFailureIsTransient: true,
+    lastUploadStatusCodeReturned: Number.isFinite(Number(statusCode)) ? Number(statusCode) : base.lastUploadStatusCodeReturned,
+    // Preserve lastStatus / lastSuccessfulUploadAt — transient proxy errors are not account offline.
+    lastSyncReason: base.lastStatus === 'green'
+      ? (base.lastSyncReason || 'last_success_within_grace')
+      : base.lastSyncReason,
+  };
+}
+
 module.exports = {
   DEFAULT_UPLOAD_INTERVAL_SECONDS,
+  TRANSIENT_UPLOAD_FAILURE_PREFIXES,
+  normalizeTransientUploadFailureReason,
+  isTransientServerUploadFailure,
   uploadStatusThresholds,
   resolveIntervalSeconds,
   resolveHeartbeatTimestamp,
@@ -425,5 +502,6 @@ module.exports = {
   extractUploadMeta,
   applyAcceptedUploadMeta,
   applyRejectedUploadMeta,
+  applyTransientUploadFailure,
   markTrackerHeartbeatSuccess,
 };

@@ -1,0 +1,30 @@
+{
+  "generatedAt": "2026-06-14T12:27:00.000Z",
+  "task": "502 status grace + Enchant Stones/Totems white labels",
+  "rootCause": "Transient upload/proxy 502 on tracker_status called applyUploadSyncFailure (markTrackerSyncMissed), flipping lastStatus red. deriveTrackerUploadAccountStatus then kept statusColor red even when lastSuccessfulUploadAt/heartbeat remained inside the offline grace window. get-backpack also exposed accountOnline/currentStatus from upload statusColor instead of account presence.",
+  "fixSummary": {
+    "server502Handling": "Transient 502/5xx failures use applyTransientUploadFailure — preserve lastStatus, record server_502_upload_retrying, refresh heartbeat timestamps.",
+    "statusDerivation": "Within grace, recover green/yellow from transient red when prior snapshot success exists; beyond grace use upload_interval_missed / account_offline_timeout (presence).",
+    "apiFields": "get-backpack/account-status use accountPresenceLive for accountOnline/currentStatus; uploadWarningReason surfaces server 502 separately.",
+    "cssLabels": ".items-subsection__title.stones-section__title and .totems-section__title now color:#fff (overrides purple .items-subsection__title)."
+  },
+  "graceBehavior": {
+    "uploadIntervalSeconds": 10,
+    "onlineThresholdSeconds": 30,
+    "offlineThresholdSeconds": 60,
+    "accountPresenceGraceSeconds": 45,
+    "transient502WhileFresh": "account stays online/green; statusDecisionReason=server_502_upload_retrying",
+    "transient502LateInGrace": "account stays syncing/yellow; statusDecisionReason=last_success_within_grace",
+    "pastGraceNoSuccess": "account offline/red; presence reason=account_offline_timeout"
+  },
+  "labelColorProof": {
+    "selector": ".items-subsection__title.stones-section__title, .items-subsection__title.totems-section__title",
+    "color": "#fff",
+    "labels": ["Enchant Stones (n)", "Totems (n)"]
+  },
+  "tests": [
+    "site/tests/fishit_tracker_502_status.test.js"
+  ],
+  "liveBundleJs": "inventory.632bc3148b47.js",
+  "liveBundleCss": "inventory.0d99847e2fe1.css"
+}

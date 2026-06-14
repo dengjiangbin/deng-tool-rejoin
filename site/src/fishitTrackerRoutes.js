@@ -3428,6 +3428,7 @@ async function handleAccountStatus(req, res) {
         accountPresenceStatus: presence.accountPresenceStatus,
         accountPresenceReason: presence.accountPresenceReason,
         accountPresenceGraceSeconds: presence.accountPresenceGraceSeconds,
+        uploadWarningReason: presence.uploadWarningReason || null,
         inventoryUploadFresh: inventoryUpload.inventoryUploadFresh === true,
         inventoryUploadStatus: inventoryUpload.inventoryUploadStatus,
         inventoryRedSince: inventoryUpload.inventoryRedSince || null,
@@ -4093,20 +4094,41 @@ function handleUpdateBackpack(req, res) {
       const rejectReason = loaderErr
         ? (loaderErr.errorMessage || 'loader_error')
         : (body.failureReason || body.failReason || body.lastFailureReason || 'upload_failed');
+      const rejectStatusCode = Number(body.lastUploadStatusCode || body.statusCode || body.httpStatus || 0);
+      const transientUploadFailure = !loaderErr
+        && uploadAccountStatus.isTransientServerUploadFailure(rejectReason, rejectStatusCode);
       if (uploadRejected) {
-        liveTrackDB[key] = uploadAccountStatus.applyRejectedUploadMeta(
-          liveTrackDB[key],
-          body,
-          now,
-          rejectReason,
-        );
-        liveTrackDB[key] = applyUploadSyncFailure(liveTrackDB[key], now, rejectReason);
-        liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
-          ...uploadDebugBase,
-          rejected: true,
-          rejectReason,
-          statusCode: 200,
-        });
+        if (transientUploadFailure) {
+          liveTrackDB[key] = applyTransientUploadFailure(
+            liveTrackDB[key],
+            now,
+            rejectReason,
+            rejectStatusCode,
+          );
+          liveTrackDB[key] = uploadAccountStatus.applyAcceptedUploadMeta(liveTrackDB[key], body, now, {
+            heartbeatOnly: true,
+          });
+          liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
+            ...uploadDebugBase,
+            rejected: true,
+            rejectReason: liveTrackDB[key].lastFailureReason || rejectReason,
+            statusCode: Number.isFinite(rejectStatusCode) && rejectStatusCode > 0 ? rejectStatusCode : 502,
+          });
+        } else {
+          liveTrackDB[key] = uploadAccountStatus.applyRejectedUploadMeta(
+            liveTrackDB[key],
+            body,
+            now,
+            rejectReason,
+          );
+          liveTrackDB[key] = applyUploadSyncFailure(liveTrackDB[key], now, rejectReason);
+          liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
+            ...uploadDebugBase,
+            rejected: true,
+            rejectReason,
+            statusCode: 200,
+          });
+        }
       } else {
         liveTrackDB[key] = uploadAccountStatus.applyAcceptedUploadMeta(liveTrackDB[key], body, now, {
           heartbeatOnly: true,
@@ -5420,7 +5442,12 @@ function applyUploadSyncFailure(session, now, reason) {
     ...uploadAccountStatus.markTrackerSyncMissed(session, now),
     lastUploadAttemptAt: now,
     lastFailureReason: String(reason || 'upload_failed').slice(0, 240),
+    lastUploadFailureIsTransient: false,
   };
+}
+
+function applyTransientUploadFailure(session, now, reason, statusCode) {
+  return uploadAccountStatus.applyTransientUploadFailure(session, now, reason, statusCode);
 }
 
 const STATS_FRESH_MAX_MS = (UPLOAD_INTERVAL_SECONDS + UPLOAD_GRACE_SECONDS) * 1000;
@@ -5895,12 +5922,15 @@ async function handleGetBackpack(req, res) {
     accountPresenceLive: presence.accountPresenceLive,
     accountPresenceStatus: presence.accountPresenceStatus,
     accountPresenceReason: presence.accountPresenceReason,
-    accountOnline: uploadStatus.statusColor !== 'red',
-    accountOnlineStatus: uploadStatus.status,
-    accountStatusReason: uploadStatus.statusDecisionReason,
+    accountOnline: presence.accountPresenceLive,
+    accountOnlineStatus: presence.accountPresenceLive ? uploadStatus.status : 'offline',
+    accountStatusReason: presence.accountStatusReason || uploadStatus.statusDecisionReason,
     accountPresenceGraceSeconds: presence.accountPresenceGraceSeconds,
-    inGameStatus: uploadStatus.statusColor !== 'red',
-    currentStatus: uploadStatus.statusColor,
+    uploadWarningReason: presence.uploadWarningReason || null,
+    inGameStatus: presence.accountPresenceLive,
+    currentStatus: presence.accountPresenceLive
+      ? (uploadStatus.statusColor === 'yellow' ? 'yellow' : 'green')
+      : 'red',
     status: uploadStatus.status,
     statusColor: uploadStatus.statusColor,
     lastStatus: uploadStatus.lastStatus || data.lastStatus || null,
@@ -6757,6 +6787,7 @@ module.exports.deriveStatsUploadStatus = deriveStatsUploadStatus;
 module.exports.deriveInventoryUploadStatus = deriveInventoryUploadStatus;
 module.exports.applyUploadSyncSuccess = applyUploadSyncSuccess;
 module.exports.applyUploadSyncFailure = applyUploadSyncFailure;
+module.exports.applyTransientUploadFailure = applyTransientUploadFailure;
 module.exports.deriveUploadAccountStatus = deriveUploadAccountStatus;
 module.exports.uploadAccountStatus = uploadAccountStatus;
 module.exports.snapshotCompleteness = snapshotCompleteness;
