@@ -34,8 +34,8 @@
         "DISCORD_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "DISCORD_AIO_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "OAUTH_STATE_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\oauth-states",
-        "TOOL_SITE_ASSET_VERSION": "DENG_AIO_HOMEPAGE_BODY_LAYOUT_FIX_2026_06_14",
-        "GIT_COMMIT": "5e76ddc"
+        "TOOL_SITE_ASSET_VERSION": "TRACKER_INGEST_502_RELIABILITY_2026_06_14",
+        "GIT_COMMIT": "fba8626"
       }
     },
     {
@@ -65,7 +65,7 @@
         "TRACKER_UPLOAD_BODY_LIMIT": "512kb",
         "TRACKER_EVENT_LOOP_LAG_WARN_MS": "250",
         "TRACKER_EVENT_LOOP_LAG_SHED_MS": "1000",
-        "TOOL_SITE_ASSET_VERSION": "TRACKER_COUNTS_AND_10S_POLL_FIX_2026_06_14",
+        "TOOL_SITE_ASSET_VERSION": "TRACKER_INGEST_502_RELIABILITY_2026_06_14",
         "TRACKER_UPLOAD_RATE_MAX_PER_MIN": "12"
       }
     }
