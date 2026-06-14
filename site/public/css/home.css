@@ -1,12 +1,3 @@
-.deng-home {
-  min-height: 100vh;
-  width: 100%;
-  color: var(--public-text);
-  background: var(--public-bg);
-  position: relative;
-  --deng-home-nav-offset: 108px;
-}
-
 /* Homepage must not inherit login-style auth-layout centering from layout.ejs */
 body.public-home-layout {
   display: block;
@@ -14,10 +5,71 @@ body.public-home-layout {
   padding: 0;
   margin: 0;
   overflow-x: hidden;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(96, 165, 250, 0.28), transparent 32%),
+    radial-gradient(circle at 85% 10%, rgba(249, 168, 212, 0.32), transparent 34%),
+    linear-gradient(135deg, #dbeafe 0%, #fce7f3 100%);
+  background-attachment: fixed;
+  color: #1e293b;
+}
+
+body.public-home-layout::before {
+  display: none;
 }
 
 html[data-public-page="1"] body.public-home-layout {
-  background: var(--public-bg, #070b12);
+  background:
+    radial-gradient(circle at 15% 20%, rgba(96, 165, 250, 0.28), transparent 32%),
+    radial-gradient(circle at 85% 10%, rgba(249, 168, 212, 0.32), transparent 34%),
+    linear-gradient(135deg, #dbeafe 0%, #fce7f3 100%);
+}
+
+.deng-home {
+  /* Homepage-only brand tokens (does not affect login/other public pages) */
+  --public-bg: #eff6ff;
+  --public-surface: rgba(255, 255, 255, 0.72);
+  --public-surface-soft: rgba(255, 255, 255, 0.55);
+  --public-border: rgba(96, 165, 250, 0.22);
+  --public-border-strong: rgba(96, 165, 250, 0.32);
+  --public-text: #1e293b;
+  --public-muted: #64748b;
+  --public-muted-2: #64748b;
+  --public-accent: #60a5fa;
+  --public-accent-soft: rgba(96, 165, 250, 0.12);
+  --public-success: var(--status-green, #22c55e);
+  --status-green: #22c55e;
+  --status-green-border: rgba(34, 197, 94, 0.35);
+  --status-green-bg: rgba(34, 197, 94, 0.1);
+  --status-green-glow: rgba(34, 197, 94, 0.28);
+  /* Homepage live stat cards — true green (not cyan/teal status-green) */
+  --home-stat-online-green: #22c55e;
+  --home-stat-online-green-deep: #16a34a;
+  --home-stat-online-green-border: rgba(34, 197, 94, 0.42);
+  --home-stat-online-green-bg: rgba(34, 197, 94, 0.12);
+  --home-stat-online-green-glow: rgba(34, 197, 94, 0.24);
+  --home-stat-online-green-label: #15803d;
+  --home-stat-online-green-meta: #16a34a;
+  --status-offline: #ef4444;
+  --status-offline-border: rgba(239, 68, 68, 0.35);
+  --status-offline-bg: rgba(239, 68, 68, 0.08);
+  --status-offline-glow: rgba(239, 68, 68, 0.28);
+  --deng-neon-blue: #60a5fa;
+  --deng-neon-blue-bright: #60a5fa;
+  --deng-neon-pink: #f9a8d4;
+  --deng-neon-pink-bright: #f9a8d4;
+  --deng-gradient-primary: linear-gradient(135deg, #60a5fa 0%, #f9a8d4 100%);
+  --deng-gradient-border: linear-gradient(135deg, rgba(96, 165, 250, 0.45), rgba(249, 168, 212, 0.35));
+  --deng-glow-blue: rgba(96, 165, 250, 0.28);
+  --deng-glow-pink: rgba(249, 168, 212, 0.32);
+
+  min-height: 100vh;
+  color: var(--public-text);
+  background:
+    radial-gradient(circle at 15% 20%, rgba(96, 165, 250, 0.28), transparent 32%),
+    radial-gradient(circle at 85% 10%, rgba(249, 168, 212, 0.32), transparent 34%),
+    linear-gradient(135deg, #dbeafe 0%, #fce7f3 100%);
+  position: relative;
+  --deng-home-nav-offset: 108px;
 }
 
 .deng-home::before {
@@ -27,20 +79,22 @@ html[data-public-page="1"] body.public-home-layout {
   z-index: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+    linear-gradient(rgba(96, 165, 250, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(96, 165, 250, 0.04) 1px, transparent 1px);
   background-size: 56px 56px;
 }
 
 .deng-home::after {
   content: "";
   position: fixed;
-  top: -10%;
-  left: -8%;
-  width: 640px;
-  height: 640px;
+  top: -12%;
+  left: -10%;
+  width: 680px;
+  height: 680px;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(0, 230, 168, 0.07) 0%, transparent 68%);
+  background:
+    radial-gradient(circle at 32% 34%, rgba(96, 165, 250, 0.18) 0%, transparent 58%),
+    radial-gradient(circle at 68% 66%, rgba(249, 168, 212, 0.16) 0%, transparent 58%);
   pointer-events: none;
   z-index: 0;
 }
@@ -58,6 +112,20 @@ html[data-public-page="1"] body.public-home-layout {
 
 .deng-home-main {
   padding-top: var(--deng-home-nav-offset);
+}
+
+.deng-home-main::before {
+  content: "";
+  position: fixed;
+  bottom: -8%;
+  right: -6%;
+  width: 560px;
+  height: 560px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle, rgba(249, 168, 212, 0.18) 0%, rgba(96, 165, 250, 0.08) 42%, transparent 72%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 .deng-home-anchor {
@@ -100,12 +168,17 @@ html[data-public-page="1"] body.public-home-layout {
   min-height: 58px;
   padding: 8px 10px 8px 16px;
   border-radius: 999px;
-  border: 1px solid var(--public-border);
-  background: rgba(8, 10, 14, 0.88);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid transparent;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.72)) padding-box,
+    var(--deng-gradient-border) border-box;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   pointer-events: auto;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28);
+  box-shadow:
+    0 20px 60px rgba(96, 165, 250, 0.16),
+    0 8px 32px rgba(249, 168, 212, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
 .deng-home-brand {
@@ -124,8 +197,8 @@ html[data-public-page="1"] body.public-home-layout {
 .deng-home-brand:hover,
 .deng-home-brand:focus-visible {
   color: var(--public-text);
-  background: rgba(0, 230, 168, 0.06);
-  box-shadow: 0 0 0 1px rgba(0, 230, 168, 0.14);
+  background: rgba(96, 165, 250, 0.08);
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.18);
 }
 
 .deng-home-brand:focus-visible {
@@ -140,11 +213,14 @@ html[data-public-page="1"] body.public-home-layout {
   overflow: hidden;
   flex-shrink: 0;
   transition: box-shadow 0.2s ease, transform 0.2s ease;
+  box-shadow: 0 0 14px rgba(96, 165, 250, 0.18), 0 0 24px rgba(249, 168, 212, 0.12);
 }
 
 .deng-home-brand:hover .deng-home-brand__mark,
 .deng-home-brand:focus-visible .deng-home-brand__mark {
-  box-shadow: 0 0 18px rgba(0, 230, 168, 0.35);
+  box-shadow:
+    0 0 16px rgba(96, 165, 250, 0.32),
+    0 0 28px rgba(249, 168, 212, 0.18);
   transform: scale(1.04);
 }
 
@@ -185,9 +261,11 @@ html[data-public-page="1"] body.public-home-layout {
 }
 
 .deng-home-nav__link.is-active {
-  color: var(--public-accent);
-  background: rgba(0, 230, 168, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(0, 230, 168, 0.18);
+  color: var(--deng-neon-blue);
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.14), rgba(249, 168, 212, 0.1));
+  box-shadow:
+    inset 0 0 0 1px rgba(96, 165, 250, 0.22),
+    inset 0 -1px 0 rgba(249, 168, 212, 0.16);
 }
 
 .deng-home-nav__link:focus-visible {
@@ -202,8 +280,8 @@ html[data-public-page="1"] body.public-home-layout {
   min-height: 40px;
   padding: 0 20px;
   border-radius: 999px;
-  background: #f8fafc;
-  color: #050607;
+  background: var(--deng-gradient-primary);
+  color: #ffffff;
   font-size: 0.92rem;
   font-weight: 700;
   text-decoration: none;
@@ -212,7 +290,7 @@ html[data-public-page="1"] body.public-home-layout {
 
 .deng-home-nav__signin:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 24px rgba(248, 250, 252, 0.12);
+  box-shadow: 0 8px 24px rgba(96, 165, 250, 0.28), 0 4px 16px rgba(249, 168, 212, 0.18);
 }
 
 .deng-home-nav__signin:focus-visible {
@@ -222,7 +300,24 @@ html[data-public-page="1"] body.public-home-layout {
 
 /* ── Hero ── */
 .deng-home-hero {
+  position: relative;
   padding: clamp(48px, 8vw, 96px) 0 clamp(40px, 6vw, 72px);
+}
+
+.deng-home-hero::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(900px, 120%);
+  height: clamp(280px, 45vw, 420px);
+  background:
+    radial-gradient(ellipse at 35% 40%, rgba(96, 165, 250, 0.22) 0%, transparent 55%),
+    radial-gradient(ellipse at 65% 55%, rgba(249, 168, 212, 0.18) 0%, transparent 50%);
+  filter: blur(40px);
+  pointer-events: none;
+  z-index: -1;
 }
 
 .deng-home-hero__pill {
@@ -232,23 +327,27 @@ html[data-public-page="1"] body.public-home-layout {
   margin-bottom: 22px;
   padding: 7px 14px;
   border-radius: 999px;
-  border: 1px solid var(--status-green-border, rgba(0, 230, 168, 0.22));
-  background: var(--status-green-bg, rgba(0, 230, 168, 0.06));
-  color: var(--status-green, var(--public-accent));
+  border: 1px solid var(--status-green-border);
+  background: var(--status-green-bg);
+  color: var(--status-green);
   font-size: 0.84rem;
   font-weight: 600;
   white-space: nowrap;
+  box-shadow:
+    0 0 18px var(--status-green-glow),
+    inset 0 0 12px rgba(34, 197, 94, 0.06);
 }
 
 .deng-home-hero__pill--offline {
-  border-color: rgba(239, 68, 68, 0.28);
-  background: rgba(239, 68, 68, 0.08);
-  color: #f87171;
+  border-color: var(--status-offline-border);
+  background: var(--status-offline-bg);
+  color: var(--status-offline);
+  box-shadow: 0 0 18px var(--status-offline-glow);
 }
 
 .deng-home-hero__pill--offline .deng-home-hero__dot {
   background: #ef4444;
-  box-shadow: 0 0 12px rgba(239, 68, 68, 0.55);
+  box-shadow: 0 0 12px var(--status-offline-glow);
 }
 
 .deng-home-hero__online-count {
@@ -259,8 +358,8 @@ html[data-public-page="1"] body.public-home-layout {
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: var(--status-green, var(--public-accent));
-  box-shadow: 0 0 12px var(--status-green-glow, rgba(0, 230, 168, 0.7));
+  background: var(--status-green);
+  box-shadow: 0 0 12px var(--status-green);
 }
 
 .deng-home-hero__title {
@@ -270,80 +369,6 @@ html[data-public-page="1"] body.public-home-layout {
   font-weight: 900;
   letter-spacing: -0.04em;
   color: var(--public-text);
-}
-
-.hero-wordmark {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.14em;
-}
-
-.hero-word {
-  position: relative;
-  display: inline-block;
-  padding: 10px 14px;
-  cursor: default;
-  outline: none;
-  transition: filter 0.5s ease;
-}
-
-.hero-word__text {
-  display: inline-block;
-  transition: filter 0.5s ease, color 0.5s ease, text-shadow 0.5s ease;
-}
-
-.hero-word.is-active .hero-word__text {
-  filter: blur(0);
-  color: var(--public-text);
-  text-shadow: 0 0 24px rgba(248, 250, 252, 0.08);
-}
-
-.hero-word:not(.is-active) .hero-word__text {
-  filter: blur(5px);
-  color: var(--public-muted-2);
-}
-
-.hero-corner {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  opacity: 0;
-  transition: opacity 0.5s ease, box-shadow 0.5s ease;
-  pointer-events: none;
-}
-
-.hero-word.is-active .hero-corner {
-  opacity: 1;
-  box-shadow: 0 0 10px rgba(99, 102, 241, 0.55);
-}
-
-.hero-corner--tl {
-  top: 0;
-  left: 0;
-  border-top: 2px solid rgb(99, 102, 241);
-  border-left: 2px solid rgb(99, 102, 241);
-}
-
-.hero-corner--tr {
-  top: 0;
-  right: 0;
-  border-top: 2px solid rgb(99, 102, 241);
-  border-right: 2px solid rgb(99, 102, 241);
-}
-
-.hero-corner--bl {
-  bottom: 0;
-  left: 0;
-  border-bottom: 2px solid rgb(99, 102, 241);
-  border-left: 2px solid rgb(99, 102, 241);
-}
-
-.hero-corner--br {
-  bottom: 0;
-  right: 0;
-  border-bottom: 2px solid rgb(99, 102, 241);
-  border-right: 2px solid rgb(99, 102, 241);
 }
 
 .deng-home-hero__subtitle {
@@ -385,24 +410,38 @@ html[data-public-page="1"] body.public-home-layout {
 }
 
 .deng-home-btn--primary {
-  background: #f8fafc;
-  color: #050607;
+  background: var(--deng-gradient-primary);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow:
+    0 4px 20px rgba(96, 165, 250, 0.28),
+    0 2px 12px rgba(249, 168, 212, 0.18);
 }
 
 .deng-home-btn--primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 10px 28px rgba(248, 250, 252, 0.14);
+  box-shadow:
+    0 8px 28px rgba(96, 165, 250, 0.36),
+    0 4px 18px rgba(249, 168, 212, 0.24);
 }
 
 .deng-home-btn--secondary {
-  border: 1px solid var(--public-border-strong);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(96, 165, 250, 0.28);
+  background: rgba(255, 255, 255, 0.72);
   color: var(--public-text);
+  box-shadow:
+    0 12px 32px rgba(96, 165, 250, 0.1),
+    inset 0 0 0 1px rgba(249, 168, 212, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .deng-home-btn--secondary:hover {
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(249, 168, 212, 0.38);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    0 0 20px rgba(96, 165, 250, 0.14),
+    inset 0 0 0 1px rgba(249, 168, 212, 0.12);
 }
 
 .deng-home-btn__discord {
@@ -419,6 +458,7 @@ html[data-public-page="1"] body.public-home-layout {
 
 /* ── Sections ── */
 .deng-home-section {
+  position: relative;
   padding: clamp(28px, 4vw, 48px) 0;
 }
 
@@ -427,9 +467,31 @@ html[data-public-page="1"] body.public-home-layout {
   padding-bottom: 28px;
 }
 
+.deng-home-section--stats::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 70% 80% at 18% 0%, rgba(96, 165, 250, 0.1), transparent 65%),
+    radial-gradient(ellipse 60% 70% at 88% 18%, rgba(249, 168, 212, 0.08), transparent 62%);
+  z-index: -1;
+}
+
 .deng-home-section--tight {
   padding-top: 18px;
   padding-bottom: 24px;
+}
+
+.deng-home-section[data-home-section="about"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 55% 65% at 85% 70%, rgba(249, 168, 212, 0.12), transparent 62%),
+    radial-gradient(ellipse 45% 50% at 12% 55%, rgba(96, 165, 250, 0.08), transparent 58%);
+  z-index: -1;
 }
 
 .deng-home-eyebrow {
@@ -450,7 +512,11 @@ html[data-public-page="1"] body.public-home-layout {
   font-size: clamp(1.8rem, 4vw, 2.6rem);
   font-weight: 800;
   letter-spacing: -0.03em;
-  color: var(--public-text);
+  background: linear-gradient(135deg, #1e293b 55%, #60a5fa 78%, #f9a8d4 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .deng-home-section__lead {
@@ -485,18 +551,100 @@ html[data-public-page="1"] body.public-home-layout {
   min-width: 0;
   min-height: 128px;
   max-height: 140px;
-  border-radius: 16px;
-  border: 1px solid var(--public-border);
-  background: rgba(255, 255, 255, 0.025);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 20px 60px rgba(96, 165, 250, 0.16);
+}
+
+.deng-home-stat-card:not(.deng-home-stat-card--status-green):not([data-home-stat-card="onlineNow"]):not([data-home-stat-card="rejoinActiveDevices"]):hover {
+  border-color: rgba(96, 165, 250, 0.32);
+  box-shadow:
+    0 0 0 1px rgba(96, 165, 250, 0.12),
+    0 20px 60px rgba(96, 165, 250, 0.2),
+    0 0 24px rgba(249, 168, 212, 0.1);
 }
 
 .deng-home-stat-card--compact {
   min-height: 128px;
+}
+
+/* Online / active status cards — green success palette (not global blue accent) */
+.deng-home-stat-card--status-green,
+.deng-home-stat-card[data-home-stat-card="onlineNow"],
+.deng-home-stat-card[data-home-stat-card="rejoinActiveDevices"] {
+  position: relative;
+  overflow: hidden;
+  border-color: var(--home-stat-online-green-border);
+  background:
+    linear-gradient(165deg, var(--home-stat-online-green-bg) 0%, rgba(34, 197, 94, 0.06) 38%, rgba(255, 255, 255, 0.72) 100%),
+    rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 0 0 1px rgba(34, 197, 94, 0.18),
+    0 20px 60px rgba(34, 197, 94, 0.12),
+    inset 0 1px 0 rgba(74, 222, 128, 0.16);
+}
+
+.deng-home-stat-card--status-green::before,
+.deng-home-stat-card[data-home-stat-card="onlineNow"]::before,
+.deng-home-stat-card[data-home-stat-card="rejoinActiveDevices"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 2px;
+  border-radius: 0 0 6px 6px;
+  background: linear-gradient(90deg, transparent, var(--home-stat-online-green) 20%, var(--home-stat-online-green-deep) 50%, var(--home-stat-online-green) 80%, transparent);
+  box-shadow: 0 0 14px var(--home-stat-online-green-glow);
+  pointer-events: none;
+}
+
+.deng-home-stat-card--status-green:hover,
+.deng-home-stat-card[data-home-stat-card="onlineNow"]:hover,
+.deng-home-stat-card[data-home-stat-card="rejoinActiveDevices"]:hover {
+  border-color: rgba(74, 222, 128, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(74, 222, 128, 0.32),
+    0 0 36px rgba(74, 222, 128, 0.52),
+    inset 0 1px 0 rgba(74, 222, 128, 0.3);
+}
+
+.deng-home-stat-card--status-green .deng-home-stat-card__label,
+.deng-home-stat-card[data-home-stat-card="onlineNow"] .deng-home-stat-card__label,
+.deng-home-stat-card[data-home-stat-card="rejoinActiveDevices"] .deng-home-stat-card__label {
+  color: var(--home-stat-online-green-label);
+}
+
+.deng-home-stat-card--status-green .deng-home-stat-card__icon svg,
+.deng-home-stat-card[data-home-stat-card="onlineNow"] .deng-home-stat-card__icon svg,
+.deng-home-stat-card[data-home-stat-card="rejoinActiveDevices"] .deng-home-stat-card__icon svg {
+  stroke: var(--home-stat-online-green);
+  filter: drop-shadow(0 0 8px var(--home-stat-online-green-glow));
+}
+
+.deng-home-stat-card__value--status-green,
+.deng-home-stat-card--status-green .deng-home-stat-ratio-active,
+.deng-home-stat-card[data-home-stat-card="onlineNow"] .deng-home-stat-card__value,
+.deng-home-stat-card[data-home-stat-card="rejoinActiveDevices"] .deng-home-stat-ratio-active {
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  -webkit-text-fill-color: var(--home-stat-online-green);
+  color: var(--home-stat-online-green);
+  text-shadow: 0 0 20px var(--home-stat-online-green-glow);
+}
+
+.deng-home-stat-card--status-green .deng-home-stat-card__meta,
+.deng-home-stat-card[data-home-stat-card="onlineNow"] .deng-home-stat-card__meta,
+.deng-home-stat-card[data-home-stat-card="rejoinActiveDevices"] .deng-home-stat-card__meta {
+  color: var(--home-stat-online-green-meta);
 }
 
 .deng-home-stat-card__top {
@@ -537,12 +685,11 @@ html[data-public-page="1"] body.public-home-layout {
 }
 
 .deng-home-stat-card__value--accent {
-  color: var(--public-accent);
-}
-
-.deng-home-stat-card--status-green .deng-home-stat-card__value--status-green,
-.deng-home-stat-card__value--status-green {
-  color: var(--status-green, var(--public-accent));
+  background: linear-gradient(135deg, var(--deng-neon-blue-bright) 0%, #7dd3fc 55%, var(--deng-neon-pink) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 .deng-home-stat-card__value--split-ratio {
@@ -555,7 +702,7 @@ html[data-public-page="1"] body.public-home-layout {
 }
 
 .deng-home-stat-ratio-active {
-  color: var(--status-green, var(--public-accent));
+  color: var(--deng-neon-blue-bright);
   font-size: clamp(1.55rem, 2.4vw, 2rem);
   font-weight: 800;
   letter-spacing: -0.03em;
@@ -598,19 +745,28 @@ html[data-public-page="1"] body.public-home-layout {
 
 .deng-home-eco-card {
   padding: 24px;
-  border-radius: 20px;
-  border: 1px solid var(--public-border);
-  background: var(--public-surface);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 20px 60px rgba(96, 165, 250, 0.16);
 }
 
 .deng-home-eco-card:hover {
-  border-color: rgba(0, 230, 168, 0.24);
-  box-shadow: 0 0 0 1px rgba(0, 230, 168, 0.08);
+  border-color: rgba(96, 165, 250, 0.32);
+  box-shadow:
+    0 0 0 1px rgba(96, 165, 250, 0.12),
+    0 20px 60px rgba(96, 165, 250, 0.2),
+    0 0 28px rgba(249, 168, 212, 0.12);
 }
 
 .deng-home-eco-card--featured {
-  border-color: rgba(0, 230, 168, 0.2);
+  border-color: rgba(96, 165, 250, 0.28);
+  box-shadow:
+    0 20px 60px rgba(96, 165, 250, 0.18),
+    inset 0 1px 0 rgba(249, 168, 212, 0.12);
 }
 
 .deng-home-eco-card__head {
@@ -623,7 +779,7 @@ html[data-public-page="1"] body.public-home-layout {
 .deng-home-eco-card__icon svg {
   width: 22px;
   height: 22px;
-  stroke: var(--public-accent);
+  stroke: var(--deng-neon-blue);
   fill: none;
   stroke-width: 2;
   stroke-linecap: round;
@@ -633,12 +789,13 @@ html[data-public-page="1"] body.public-home-layout {
 .deng-home-eco-card__badge {
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(0, 230, 168, 0.1);
-  color: var(--public-accent);
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.16), rgba(249, 168, 212, 0.12));
+  color: #2563eb;
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  box-shadow: inset 0 0 0 1px rgba(249, 168, 212, 0.12);
 }
 
 .deng-home-eco-card h3 {
@@ -666,15 +823,16 @@ html[data-public-page="1"] body.public-home-layout {
 }
 
 .deng-home-eco-link:hover {
-  color: var(--public-accent);
+  color: #2563eb;
+  text-shadow: 0 0 18px rgba(249, 168, 212, 0.18);
 }
 
 .deng-home-eco-link--muted {
-  color: #8ea1ff;
+  color: #60a5fa;
 }
 
 .deng-home-eco-link--muted:hover {
-  color: #b4c3ff;
+  color: #2563eb;
 }
 
 .deng-home-eco-grid .deng-home-eco-card:last-child {
@@ -684,7 +842,10 @@ html[data-public-page="1"] body.public-home-layout {
 /* ── Footer ── */
 .deng-home-footer {
   padding: 28px 0 40px;
-  border-top: 1px solid var(--public-border);
+  border-top: 1px solid rgba(96, 165, 250, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(249, 168, 212, 0.12),
+    0 -8px 32px rgba(249, 168, 212, 0.06);
   margin-top: 24px;
 }
 
@@ -792,6 +953,15 @@ html[data-public-page="1"] body.public-home-layout {
     --deng-home-nav-offset: 92px;
   }
 
+  .deng-home-hero__title {
+    font-size: clamp(2.35rem, 10.5vw, 5.6rem);
+  }
+
+  .deng-home-hero__title .hero-word[data-hero-word="aio"] {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
   .deng-home-nav-wrap.deng-home-nav-wrap--fixed {
     padding: 12px 12px 0;
   }
@@ -814,12 +984,29 @@ html[data-public-page="1"] body.public-home-layout {
   }
 
   .deng-home-hero__actions {
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+    width: 100%;
     align-items: stretch;
   }
 
   .deng-home-btn {
     width: 100%;
+    min-width: 0;
+    min-height: 52px;
+    height: 52px;
+    padding-left: 10px;
+    padding-right: 10px;
+    justify-content: center;
+    white-space: nowrap;
+    font-size: 0.875rem;
+  }
+}
+
+@media (max-width: 360px) {
+  .deng-home-hero__actions {
+    grid-template-columns: 1fr;
   }
 }
 

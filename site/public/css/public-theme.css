@@ -20,6 +20,19 @@
   --public-danger: #f87171;
 }
 
+html[data-public-page="1"]:has(body.public-home-layout) {
+  color-scheme: light;
+}
+
+html[data-public-page="1"]:has(body.public-home-layout),
+html[data-public-page="1"]:has(body.public-home-layout)[data-theme="dark"],
+html[data-public-page="1"]:has(body.public-home-layout)[data-theme="light"] {
+  background:
+    radial-gradient(circle at 15% 20%, rgba(96, 165, 250, 0.28), transparent 32%),
+    radial-gradient(circle at 85% 10%, rgba(249, 168, 212, 0.32), transparent 34%),
+    linear-gradient(135deg, #dbeafe 0%, #fce7f3 100%);
+}
+
 html[data-public-page="1"] {
   color-scheme: dark;
 }
