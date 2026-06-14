@@ -136,6 +136,13 @@ router.get('/auth/web-bridge', authLimiter, async (req, res) => {
 
 /** Auth/session transport probe for OAuth callback debugging behind Cloudflare. */
 router.get('/api/internal/auth-probe', (req, res) => {
+  return sendAuthDebugPayload(req, res, { probe: true });
+});
+
+/** Guarded auth debug — session file path, cookie receipt, failure reasons. */
+router.get('/api/internal/auth-debug', (req, res) => sendAuthDebugPayload(req, res));
+
+function sendAuthDebugPayload(req, res, extra = {}) {
   const token = process.env.STABILITY_STATUS_TOKEN || process.env.AUTH_DEBUG_TOKEN || '';
   if (token) {
     const provided = String(req.headers['x-stability-token'] || req.headers['x-auth-debug-token'] || req.query.token || '');
@@ -143,9 +150,18 @@ router.get('/api/internal/auth-probe', (req, res) => {
       return res.status(403).json({ ok: false, error: 'forbidden' });
     }
   }
+  const { getSessionStoreMetrics } = require('./sessionStore');
+  const sessionMetrics = getSessionStoreMetrics(process.env.TOOL_SITE_SESSION_DIR);
+  const cookieHeader = String(req.headers.cookie || '');
+  const hasDengSid = /(?:^|;\s*)deng_sid=/.test(cookieHeader);
+  const sessionUser = req.session && req.session.user ? req.session.user : null;
+  let authFailureReason = null;
+  if (!req.session) authFailureReason = 'session_middleware_skipped_or_no_cookie';
+  else if (!sessionUser) authFailureReason = hasDengSid ? 'cookie_present_but_session_empty' : 'missing_deng_sid_cookie';
   res.set('Cache-Control', 'no-store');
   return res.json({
     ok: true,
+    ...extra,
     ...requestTransportProof(req),
     ip: req.ip,
     headers: {
@@ -154,14 +170,23 @@ router.get('/api/internal/auth-probe', (req, res) => {
       'x-forwarded-for': req.headers['x-forwarded-for'] || null,
       'cf-connecting-ip': req.headers['cf-connecting-ip'] || null,
     },
+    cookie: {
+      received: hasDengSid,
+      headerPresent: !!cookieHeader,
+    },
     session: {
       hasSession: !!req.session,
       sessionIdPresent: !!(req.session && req.sessionID),
-      authenticated: !!(req.session && req.session.user),
-      discordUserId: req.session?.user?.discord_user_id || req.session?.discord_user_id || null,
+      sessionIdPrefix: req.session && req.sessionID ? String(req.sessionID).slice(0, 8) : null,
+      authenticated: !!sessionUser,
+      discordUserId: sessionUser?.discord_user_id || req.session?.discord_user_id || null,
+      siteUserId: req.session?.site_user_id || sessionUser?.id || null,
+      sessionKeys: req.session ? Object.keys(req.session).filter((k) => !k.startsWith('cookie')) : [],
+      authFailureReason,
     },
+    sessionStore: sessionMetrics,
     trustProxy: req.app?.get('trust proxy'),
   });
-});
+}
 
 module.exports = router;

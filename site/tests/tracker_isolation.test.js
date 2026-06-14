@@ -32,7 +32,8 @@ describe('tracker process isolation', () => {
   });
 
   test('isSessionlessPath includes tracker upload APIs', () => {
-    assert.equal(isSessionlessPath('/api/fishit-tracker/update-backpack'), true);
+    assert.equal(isSessionlessPath('/api/fishit-tracker/update-backpack', 'POST'), true);
+    assert.equal(isSessionlessPath('/api/tracker/summary', 'GET'), false);
     assert.equal(isSessionlessPath('/login'), false);
     assert.equal(isSessionlessPath('/auth/discord'), false);
   });

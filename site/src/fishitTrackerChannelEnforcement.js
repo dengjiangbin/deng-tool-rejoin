@@ -4,7 +4,12 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-const { MINIMUM_TRACKER_BUILD } = require('./fishitTrackerBuild');
+const {
+  MINIMUM_TRACKER_BUILD,
+  PRODUCTION_TRACKER_BUILD,
+  isAllowedTrackerBuild,
+  isProductionTrackerBuild,
+} = require('./fishitTrackerBuild');
 const ALLOWED_TRACKER_CHANNEL = 'fish-it-main';
 const ALLOWED_TRACKER_RAW_URL = 'https://raw.githubusercontent.com/dengjiangbin/fish-it/main/tracker.lua';
 
@@ -70,8 +75,8 @@ function isLegacyScriptSource(scriptSource) {
 function isLegacyTrackerBuild(build) {
   if (!build) return true;
   const s = String(build);
-  if (s === MINIMUM_TRACKER_BUILD) return false;
-  if (s.includes('LOADER_REGISTER_LIMIT_FIX')) return false;
+  if (isAllowedTrackerBuild(s)) return false;
+  if (s.includes('LOADER_REGISTER_LIMIT_FIX')) return true;
   if (s.includes('LOADER_FIX_REGISTER_LIMIT')) return true;
   if (s.includes('NEW_FISH_IT_ONLY')) return true;
   return LEGACY_TRACKER_BUILD_PATTERNS.some((re) => re.test(s));
@@ -82,8 +87,35 @@ function validateTrackerClientProof(body) {
   const reasons = [];
 
   if (!proof.trackerBuild) reasons.push('missing_tracker_build');
-  else if (isLegacyTrackerBuild(proof.trackerBuild)) reasons.push('old_tracker_build');
-  else if (proof.trackerBuild !== MINIMUM_TRACKER_BUILD) reasons.push('tracker_build_not_allowed');
+  else if (isLegacyTrackerBuild(proof.trackerBuild)) {
+    reasons.push('outdated_tracker_build');
+    return {
+      ok: false,
+      status: 403,
+      error: 'OUTDATED_TRACKER_BUILD',
+      reasons,
+      required: {
+        trackerBuild: PRODUCTION_TRACKER_BUILD,
+        trackerChannel: ALLOWED_TRACKER_CHANNEL,
+        scriptSource: ALLOWED_TRACKER_RAW_URL,
+      },
+      proof,
+    };
+  } else if (!isAllowedTrackerBuild(proof.trackerBuild)) {
+    reasons.push('outdated_tracker_build');
+    return {
+      ok: false,
+      status: 403,
+      error: 'OUTDATED_TRACKER_BUILD',
+      reasons,
+      required: {
+        trackerBuild: PRODUCTION_TRACKER_BUILD,
+        trackerChannel: ALLOWED_TRACKER_CHANNEL,
+        scriptSource: ALLOWED_TRACKER_RAW_URL,
+      },
+      proof,
+    };
+  }
 
   if (!proof.trackerChannel) reasons.push('missing_tracker_channel');
   else if (proof.trackerChannel !== ALLOWED_TRACKER_CHANNEL) reasons.push('tracker_channel_not_allowed');
@@ -106,7 +138,7 @@ function validateTrackerClientProof(body) {
       error: 'tracker_client_rejected',
       reasons,
       required: {
-        trackerBuild: MINIMUM_TRACKER_BUILD,
+        trackerBuild: PRODUCTION_TRACKER_BUILD,
         trackerChannel: ALLOWED_TRACKER_CHANNEL,
         scriptSource: ALLOWED_TRACKER_RAW_URL,
       },

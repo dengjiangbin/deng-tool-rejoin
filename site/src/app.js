@@ -159,7 +159,7 @@ const sessionMiddleware = session({
 });
 
 app.use((req, res, next) => {
-  if (isSessionlessPath(req.path)) return next();
+  if (isSessionlessPath(req.path, req.method)) return next();
   return sessionMiddleware(req, res, next);
 });
 
@@ -167,7 +167,7 @@ app.use((req, res, next) => {
 app.use('/', require('./oauthRoutes'));
 
 app.use((req, _res, next) => {
-  if (isSessionlessPath(req.path) || !req.session) return next();
+  if (isSessionlessPath(req.path, req.method) || !req.session) return next();
   if (!req.session.csrfToken) {
     req.session.csrfToken = require('crypto').randomBytes(32).toString('hex');
   }

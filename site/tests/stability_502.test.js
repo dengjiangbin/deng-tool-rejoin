@@ -21,8 +21,9 @@ const { FileSessionStore } = require('../src/sessionStore');
 describe('502 stability fixes', () => {
   test('isSessionlessPath skips tracker uploads and health only', () => {
     assert.equal(isSessionlessPath('/health'), true);
-    assert.equal(isSessionlessPath('/api/fishit-tracker/update-backpack'), true);
-    assert.equal(isSessionlessPath('/api/tracker/upload'), true);
+    assert.equal(isSessionlessPath('/api/fishit-tracker/update-backpack', 'POST'), true);
+    assert.equal(isSessionlessPath('/api/tracker/update-backpack', 'POST'), true);
+    assert.equal(isSessionlessPath('/api/tracker/summary', 'GET'), false);
     assert.equal(isSessionlessPath('/login'), false);
     assert.equal(isSessionlessPath('/auth/discord'), false);
     assert.equal(isSessionlessPath('/tracker'), false);

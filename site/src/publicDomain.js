@@ -59,9 +59,16 @@ function alternateOAuthCallbackUri() {
   );
 }
 
-/** APK OAuth callback (defaults to preferred public callback). */
+/** APK OAuth callback (defaults to preferred public callback). Rejects legacy tool host override. */
 function aioApkOAuthCallbackUri() {
-  return cleanEnv('DISCORD_AIO_REDIRECT_URI', preferredOAuthCallbackUri());
+  const preferred = preferredOAuthCallbackUri();
+  const raw = cleanEnv('DISCORD_AIO_REDIRECT_URI', preferred);
+  try {
+    if (isLegacyPublicHost(new URL(raw).hostname)) return preferred;
+  } catch (_) {
+    return preferred;
+  }
+  return raw;
 }
 
 function oauthDiscordCallbackUri() {
@@ -108,13 +115,13 @@ function isApiOrInternalPath(pathname) {
   return false;
 }
 
-/** High-volume tracker upload APIs — skip express-session to avoid file-store churn. */
-function isSessionlessPath(pathname) {
+const { isTrackerUploadPath } = require('./trackerUploadPaths');
+
+/** High-volume tracker upload POST only — skip express-session to avoid file-store churn. */
+function isSessionlessPath(pathname, method) {
   const path = String(pathname || '');
   if (path === '/health') return true;
-  if (path.startsWith('/api/fishit-tracker/')) return true;
-  if (path.startsWith('/api/tracker/')) return true;
-  return false;
+  return isTrackerUploadPath(method, path);
 }
 
 function legacyPublicPageRedirectTarget(req) {

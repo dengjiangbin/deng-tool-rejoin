@@ -276,6 +276,28 @@ function loadIntoLiveTrackDB(liveTrackDB) {
   }
 }
 
+const RETRYABLE_FS_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT']);
+
+function sleepMs(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { /* sync backoff for hot upload path */ }
+}
+
+function renameWithRetry(tmp, target, maxAttempts = 6) {
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      fs.renameSync(tmp, target);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (!RETRYABLE_FS_CODES.has(err.code) || attempt >= maxAttempts - 1) throw err;
+      sleepMs(15 + attempt * 25);
+    }
+  }
+  throw lastErr;
+}
+
 function saveSession(key, data, liveTrackDB) {
   if (!key || !data) return false;
   let file = _defaultFile();
@@ -310,7 +332,7 @@ function saveSession(key, data, liveTrackDB) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const tmp = `${STORE_PATH}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(file, null, 2), 'utf8');
-  fs.renameSync(tmp, STORE_PATH);
+  renameWithRetry(tmp, STORE_PATH);
   return true;
 }
 

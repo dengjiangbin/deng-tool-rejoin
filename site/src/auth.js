@@ -142,6 +142,20 @@ function consumeAuthReturnTo(req) {
  */
 function requireLogin(req, res, next) {
   if (req.session && req.session.user) return next();
+  const reason = !req.session
+    ? 'no_session_middleware_or_cookie'
+    : !req.session.user
+      ? 'session_missing_user'
+      : 'unknown';
+  console.warn(
+    '[auth] requireLogin redirect route=%s reason=%s sessionId=%s cookie=%s host=%s secure=%s',
+    req.originalUrl || req.path,
+    reason,
+    req.session && req.sessionID ? String(req.sessionID).slice(0, 8) : 'none',
+    req.headers.cookie ? 'present' : 'missing',
+    req.headers.host || req.hostname,
+    !!req.secure,
+  );
   req.session.flash = { error: 'Please login with Discord first.' };
   const returnPath = safeReturnPath(req.originalUrl || req.path);
   if (returnPath) req.session.authReturnTo = returnPath;
