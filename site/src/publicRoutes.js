@@ -14,16 +14,30 @@ const PUBLIC_NO_STORE = {
   Expires: '0',
 };
 
-function sendPublicPage(res, view, locals) {
+function sendPublicPage(res, view, locals = {}) {
   res.set(PUBLIC_NO_STORE);
-  return res.render(view, locals);
+  const bodyClass = locals.bodyClass || (view === 'home' ? 'public-home-layout' : 'auth-layout');
+  return res.render(view, { ...locals, bodyClass });
 }
 
 router.get('/', (req, res) => {
   if (req.session.user) return res.redirect('/dashboard');
+  let initialHomeStats = { trackedCount: 0, onlineCount: 0 };
+  try {
+    const fishitTrackerRoutes = require('./fishitTrackerRoutes');
+    if (typeof fishitTrackerRoutes.buildPublicTrackerStatsPayload === 'function') {
+      const payload = fishitTrackerRoutes.buildPublicTrackerStatsPayload();
+      initialHomeStats = {
+        trackedCount: Number(payload.trackedCount) || 0,
+        onlineCount: Number(payload.onlineCount) || 0,
+      };
+    }
+  } catch (_) { /* non-blocking */ }
   return sendPublicPage(res, 'home', {
     title: 'DENG All In One - Roblox Automation & Stat Tracker',
     metaDescription: 'DENG All In One is a Roblox automation and stat-tracking suite with live Fish It inventory, Rejoin agents, licenses, and monitoring in one dashboard.',
+    bodyClass: 'public-home-layout',
+    initialHomeStats,
   });
 });
 
@@ -39,6 +53,7 @@ router.get('/login', (req, res) => {
     title: 'Sign In - DENG All In One',
     authReturnTo: returnPath || '',
     apkEmbed,
+    bodyClass: 'auth-layout',
   });
 });
 

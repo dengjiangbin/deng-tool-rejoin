@@ -1,9 +1,23 @@
 .deng-home {
   min-height: 100vh;
+  width: 100%;
   color: var(--public-text);
   background: var(--public-bg);
   position: relative;
   --deng-home-nav-offset: 108px;
+}
+
+/* Homepage must not inherit login-style auth-layout centering from layout.ejs */
+body.public-home-layout {
+  display: block;
+  min-height: 100vh;
+  padding: 0;
+  margin: 0;
+  overflow-x: hidden;
+}
+
+html[data-public-page="1"] body.public-home-layout {
+  background: var(--public-bg, #070b12);
 }
 
 .deng-home::before {

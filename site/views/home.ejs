@@ -1,8 +1,9 @@
 <script>document.documentElement.dataset.publicPage = '1'; document.documentElement.dataset.theme = 'dark';</script>
 <link rel="stylesheet" href="/public/css/public-theme.css?v=<%= assetVersion %>">
+<link rel="stylesheet" href="/public/css/hero-wordmark.css?v=<%= assetVersion %>">
 <link rel="stylesheet" href="/public/css/home.css?v=<%= assetVersion %>">
 
-<div class="deng-home" id="top">
+<div class="deng-home" id="top"<% if (typeof initialHomeStats !== 'undefined' && initialHomeStats) { %> data-home-initial-tracked="<%= initialHomeStats.trackedCount || 0 %>" data-home-initial-online="<%= initialHomeStats.onlineCount || 0 %>"<% } %>>
   <header class="deng-home-nav-wrap deng-home-nav-wrap--fixed" aria-label="Site navigation">
     <div class="deng-home-nav">
       <div class="deng-home-nav__inner">
@@ -273,5 +274,4 @@
   </footer>
 </div>
 
-<script src="/public/js/count-up-stats.js?v=<%= assetVersion %>" defer></script>
 <script src="/public/js/home.js?v=<%= assetVersion %>" defer></script>

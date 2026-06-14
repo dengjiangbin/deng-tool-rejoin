@@ -6596,6 +6596,7 @@ module.exports.liveTrackDB = liveTrackDB;
 module.exports.syncLiveTrackFromDisk = syncLiveTrackFromDisk;
 module.exports.collectPublicTrackerNetworkStats = collectPublicTrackerNetworkStats;
 module.exports.collectPublicTrackerNetworkProof = collectPublicTrackerNetworkProof;
+module.exports.buildPublicTrackerStatsPayload = buildPublicTrackerStatsPayload;
 module.exports.collectPublicFishItTrackerStats = collectPublicFishItTrackerStats;
 module.exports.mergeItemsNoDowngradeFromCatalog = mergeItemsNoDowngradeFromCatalog;
 module.exports.enrichItemsFromCatalog = enrichItemsFromCatalog;

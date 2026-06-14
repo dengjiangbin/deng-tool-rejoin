@@ -31,7 +31,7 @@
   <link rel="stylesheet" href="/public/css/logoutConfirm.css?v=<%= assetVersion %>">
   <% } %>
 </head>
-<body class="<%= user ? 'app-layout' : 'auth-layout' %>">
+<body class="<%= user ? 'app-layout' : (typeof bodyClass !== 'undefined' ? bodyClass : 'auth-layout') %>">
 
 <% if (user) { %>
   <nav class="sidebar" aria-label="Main navigation">
@@ -188,7 +188,9 @@
 <% if (user) { %>
 <script src="/public/js/logoutConfirm.js?v=<%= assetVersion %>" defer></script>
 <% } %>
+<% if (typeof bodyClass === 'undefined' || bodyClass !== 'public-home-layout') { %>
 <script src="/public/js/app.js?v=<%= assetVersion %>" defer></script>
+<% } %>
 <%- typeof script !== 'undefined' ? script : '' %>
 </body>
 </html>

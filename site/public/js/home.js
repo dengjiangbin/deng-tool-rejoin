@@ -272,6 +272,19 @@
   bindNavScrollSpy();
   bindWordmark();
 
+  function readInitialHomeStats() {
+    var root = document.getElementById('top');
+    if (!root) return null;
+    var tracked = Number(root.getAttribute('data-home-initial-tracked'));
+    var online = Number(root.getAttribute('data-home-initial-online'));
+    if (!Number.isFinite(tracked) && !Number.isFinite(online)) return null;
+    return {
+      available: true,
+      trackedUsernames: Number.isFinite(tracked) ? tracked : 0,
+      onlineUsernames: Number.isFinite(online) ? online : 0,
+    };
+  }
+
   function refreshHomeStats() {
     Promise.all([loadPublicStats(), loadTrackerNetwork(), loadFishitSummary()])
       .then(function(results) {
@@ -285,6 +298,10 @@
       });
   }
 
+  var initialStats = readInitialHomeStats();
+  if (initialStats) {
+    applyStats(null, initialStats, null);
+  }
   refreshHomeStats();
   window.setInterval(refreshHomeStats, 10000);
 }());
