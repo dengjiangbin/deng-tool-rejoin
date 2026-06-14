@@ -40,9 +40,15 @@ function serializeLiveTrackerAccountStats(data, playerStatsStore, resolvePlayerS
 
   if (!normalized) {
     const connected = data.statusColor === 'green' || data.currentStatus === 'green'
-      || data.accountOnline === true;
+      || data.statusColor === 'yellow'
+      || data.accountOnline === true
+      || data.accountPresenceLive === true;
+    const heartbeatOnly = data.snapshotComplete !== true
+      && !!(data.lastSuccessfulHeartbeatAt || data.lastHeartbeatAt || data.statusColor === 'yellow');
     let emptyReason = 'stats_not_in_latest_upload';
-    if (!data.playerStats) emptyReason = 'player_stats_missing_from_session';
+    if (heartbeatOnly && !data.hasLeaderstatsSnapshot && !data.playerStats) {
+      emptyReason = 'awaiting_inventory_snapshot';
+    } else if (!data.playerStats) emptyReason = 'player_stats_missing_from_session';
     else if (data.playerStats && !playerStatsStore.isTrustedPlayerStats(data.playerStats)) {
       emptyReason = 'player_stats_untrusted_build_or_source';
     } else if (!playerStatsStore.hasPlayerStatValues(data.playerStats)) {

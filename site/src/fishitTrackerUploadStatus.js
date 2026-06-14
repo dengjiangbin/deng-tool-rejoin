@@ -70,37 +70,49 @@ function evaluateAcceptedSnapshotSync(ctx = {}) {
     now,
   } = ctx;
 
-  if (uploadRejected) return { accepted: false, reason: 'rejected' };
-  if (completenessEval?.rejectBlankInventory || completenessEval?.blankPayloadRejected) {
-    return { accepted: false, reason: 'blank_rejected' };
-  }
-  if (completenessEval?.snapshotComplete) return { accepted: true, reason: 'full_snapshot' };
-  if (Number(acceptedCount) > 0) return { accepted: true, reason: 'inventory_items' };
-
   const incomingFish = countRows(body?.fishItems);
   const incomingStone = countRows(body?.stoneItems);
   const incomingTotem = countRows(body?.totemItems);
   const parsedFish = countRows(playerDataFishItems);
   const parsedStone = countRows(playerDataStoneItems);
   const parsedTotem = countRows(playerDataTotemItems);
+  const hasInventoryContent = completenessEval?.snapshotComplete === true
+    || Number(acceptedCount) > 0
+    || incomingFish > 0
+    || incomingStone > 0
+    || incomingTotem > 0
+    || (parsedFish > 0 && !completenessEval?.preserveExistingInventory)
+    || (parsedStone > 0 && !completenessEval?.preserveExistingInventory)
+    || (parsedTotem > 0 && !completenessEval?.preserveExistingInventory);
+
+  if (uploadRejected) return { accepted: false, reason: 'rejected', hasInventory: false };
+  if (completenessEval?.rejectBlankInventory || completenessEval?.blankPayloadRejected) {
+    return { accepted: false, reason: 'blank_rejected', hasInventory: false };
+  }
+  if (completenessEval?.snapshotComplete) {
+    return { accepted: true, reason: 'full_snapshot', hasInventory: true };
+  }
+  if (Number(acceptedCount) > 0) {
+    return { accepted: true, reason: 'inventory_items', hasInventory: true };
+  }
 
   if (incomingFish > 0 || (parsedFish > 0 && !completenessEval?.preserveExistingInventory)) {
-    return { accepted: true, reason: 'fish_snapshot' };
+    return { accepted: true, reason: 'fish_snapshot', hasInventory: true };
   }
   if (incomingStone > 0 || (parsedStone > 0 && !completenessEval?.preserveExistingInventory)) {
-    return { accepted: true, reason: 'stone_snapshot' };
+    return { accepted: true, reason: 'stone_snapshot', hasInventory: true };
   }
   if (incomingTotem > 0 || (parsedTotem > 0 && !completenessEval?.preserveExistingInventory)) {
-    return { accepted: true, reason: 'totem_snapshot' };
+    return { accepted: true, reason: 'totem_snapshot', hasInventory: true };
   }
   if (nextPlayerStatsFields?.lastStatsUploadAt === now && nextPlayerStatsFields?.playerStats) {
-    return { accepted: true, reason: 'leaderstats_snapshot' };
+    return { accepted: true, reason: 'leaderstats_snapshot', hasInventory: hasInventoryContent };
   }
   if (completenessEval?.hasLeaderstatsSnapshot && nextPlayerStatsFields?.lastStatsUploadAt === now) {
-    return { accepted: true, reason: 'leaderstats_snapshot' };
+    return { accepted: true, reason: 'leaderstats_snapshot', hasInventory: hasInventoryContent };
   }
 
-  return { accepted: false, reason: 'no_accepted_content' };
+  return { accepted: false, reason: 'no_accepted_content', hasInventory: false };
 }
 
 function markTrackerSyncSuccess(session, serverReceivedAt, snapshot = {}) {

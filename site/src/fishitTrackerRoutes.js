@@ -145,9 +145,69 @@ function isTrustedClientBuild(build) {
 
 function applySessionOwnerMapping(key) {
   const ownerId = inventoryTrackedAccounts.resolveOwnerDiscordIdForUsernameSync(key);
-  if (!ownerId || !liveTrackDB[key]) return ownerId || null;
+  if (!liveTrackDB[key]) {
+    return {
+      bound: false,
+      ownerId: ownerId || null,
+      reason: ownerId ? 'session_missing' : 'owner_not_registered',
+    };
+  }
+  if (!ownerId) {
+    return { bound: false, ownerId: null, reason: 'owner_not_registered' };
+  }
   liveTrackDB[key].discordOwnerId = ownerId;
-  return ownerId;
+  return { bound: true, ownerId, reason: 'registered_account_match' };
+}
+
+function buildUploadProofLogFields(body, session, ctx = {}) {
+  const proof = snapshotCompleteness.extractClientSnapshotProof(body || {});
+  const completeness = ctx.completenessEval || null;
+  const sessionSnap = session && typeof session === 'object' ? session : {};
+  const bool = (value) => value === true;
+  return {
+    usernameKey: ctx.usernameKey || sessionSnap.username || body?.username || null,
+    discordOwnerId: sessionSnap.discordOwnerId || body?.discordOwnerId || null,
+    payloadType: body?.type || body?.payloadType || ctx.payloadType || 'inventory_snapshot',
+    phase: body?.phase || sessionSnap.phase || null,
+    build: sanitiseTrackerBuild(body?.trackerBuild) || sessionSnap.trackerBuild || null,
+    hasLeaderstatsSnapshot: bool(completeness?.hasLeaderstatsSnapshot)
+      || bool(sessionSnap.hasLeaderstatsSnapshot)
+      || bool(proof.leaderstatsReady),
+    hasFishSnapshot: bool(completeness?.hasFishSnapshot)
+      || bool(sessionSnap.hasFishSnapshot)
+      || bool(proof.fishScanReady),
+    hasStoneSnapshot: bool(completeness?.hasStoneSnapshot)
+      || bool(sessionSnap.hasStoneSnapshot)
+      || bool(proof.stoneScanReady),
+    snapshotComplete: bool(completeness?.snapshotComplete) || bool(sessionSnap.snapshotComplete),
+    inventoryReady: bool(completeness?.inventoryReady) || bool(sessionSnap.inventoryReady),
+    accepted: ctx.accepted === true,
+    rejectReason: ctx.rejectReason || sessionSnap.lastUploadRejectReason || null,
+    ownerBinding: ctx.ownerBinding || null,
+  };
+}
+
+function logTrackerUploadProof(stage, fields) {
+  if (!fields || typeof fields !== 'object') return;
+  console.log(
+    '[fishit-tracker] upload_proof stage=%s usernameKey=%s discordOwnerId=%s payloadType=%s phase=%s build=%s' +
+    ' hasLeaderstatsSnapshot=%s hasFishSnapshot=%s hasStoneSnapshot=%s snapshotComplete=%s inventoryReady=%s' +
+    ' accepted=%s rejectReason=%s ownerBinding=%s',
+    stage,
+    fields.usernameKey || '?',
+    fields.discordOwnerId || 'null',
+    fields.payloadType || '?',
+    fields.phase || 'n/a',
+    fields.build || 'n/a',
+    fields.hasLeaderstatsSnapshot ? 1 : 0,
+    fields.hasFishSnapshot ? 1 : 0,
+    fields.hasStoneSnapshot ? 1 : 0,
+    fields.snapshotComplete ? 1 : 0,
+    fields.inventoryReady ? 1 : 0,
+    fields.accepted ? 1 : 0,
+    fields.rejectReason || 'none',
+    fields.ownerBinding || 'none',
+  );
 }
 
 function buildPlayerStatsProof(raw, data, nowFallback) {
@@ -3339,6 +3399,9 @@ async function handleAccountStatus(req, res) {
         ...proof,
         ...liveAccountStats,
         ...leaderstatsUpload.publicLeaderstatsFields(sessionForStats),
+        inventoryDisplayState: session?.snapshotComplete
+          ? (session?.provenEmptyInventory ? 'empty' : 'ready')
+          : (proof.lastSuccessfulHeartbeatAt || session?.lastHeartbeatAt ? 'syncing' : 'waiting'),
         accountPresenceLive: presence.accountPresenceLive,
         accountOnline: presence.accountPresenceLive,
         accountPresenceStatus: presence.accountPresenceStatus,
@@ -3882,6 +3945,18 @@ function handleUpdateBackpack(req, res) {
     }
     const clientGate = validateTrackerClientProof(body);
     if (!clientGate.ok) {
+      const rejectKey = body.username ? String(body.username).toLowerCase() : null;
+      logTrackerUploadProof('rejected', buildUploadProofLogFields(body, rejectKey ? liveTrackDB[rejectKey] : null, {
+        usernameKey: rejectKey,
+        payloadType: arrivalType,
+        accepted: false,
+        rejectReason: (clientGate.reasons || [])[0] || clientGate.error || 'client_proof_rejected',
+        ownerBinding: rejectKey
+          ? (inventoryTrackedAccounts.resolveOwnerDiscordIdForUsernameSync(rejectKey)
+            ? 'registered_account_match'
+            : 'owner_not_registered')
+          : 'no_session_key',
+      }));
       console.warn(
         '[fishit-tracker] tracker client rejected route=%s reasons=%s build=%s channel=%s source=%s',
         req.path,
@@ -3890,7 +3965,6 @@ function handleUpdateBackpack(req, res) {
         clientGate.proof?.trackerChannel || 'n/a',
         clientGate.proof?.scriptSource || 'n/a',
       );
-      const rejectKey = body.username ? String(body.username).toLowerCase() : null;
       const nowRejected = new Date().toISOString();
       if (rejectKey) {
         const existingRejected = liveTrackDB[rejectKey] || {
@@ -3991,7 +4065,7 @@ function handleUpdateBackpack(req, res) {
       }
       // Store userId→key alias so GET can resolve by userId if needed.
       if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
-      applySessionOwnerMapping(key);
+      const ownerBinding = applySessionOwnerMapping(key);
       const uploadRejected = loaderErr
         || body.uploadFailed === true
         || body.syncFailed === true;
@@ -4024,10 +4098,17 @@ function handleUpdateBackpack(req, res) {
         });
         liveTrackDB[key].lastHeartbeatDiagnostics = buildHeartbeatDiagnostics(body, liveTrackDB[key], now);
       }
+      logTrackerUploadProof('heartbeat', buildUploadProofLogFields(body, liveTrackDB[key], {
+        usernameKey: key,
+        payloadType: 'tracker_status',
+        accepted: !uploadRejected,
+        rejectReason: uploadRejected ? rejectReason : null,
+        ownerBinding: ownerBinding.reason,
+      }));
       // Server-side log.
       console.log(
         `[fishit-tracker] POST hit route=${req.path} user=${cleanUser} sessionKey=${key}` +
-        ` userId=${cleanUserId} payloadType=tracker_status accepted=0 ok=true` +
+        ` userId=${cleanUserId} payloadType=tracker_status accepted=${uploadRejected ? 0 : 1} ok=true` +
         ` lastSeenAt=${now} lastInventoryAt=${liveTrackDB[key].lastInventoryAt || 'n/a'} online=${online}`
       );
       const uploadStatus = uploadAccountStatus.deriveTrackerUploadAccountStatus(liveTrackDB[key], {
@@ -4431,6 +4512,7 @@ function handleUpdateBackpack(req, res) {
     }
     liveTrackDB[key].lastItemCounts = catchDelta.buildItemCountsFromItems(rawItems);
     if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
+    const ownerBinding = applySessionOwnerMapping(key);
     liveTrackDB[key] = uploadAccountStatus.applyAcceptedUploadMeta(liveTrackDB[key], body, now);
     liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
       ...uploadDebugBase,
@@ -4506,6 +4588,14 @@ function handleUpdateBackpack(req, res) {
       trackerConcurrencyGate.stats(),
       rawPersistMs,
     );
+    logTrackerUploadProof('inventory_snapshot', buildUploadProofLogFields(body, liveTrackDB[key], {
+      usernameKey: key,
+      payloadType: payloadType,
+      completenessEval,
+      accepted: syncEval.accepted === true,
+      rejectReason: syncEval.accepted ? null : syncEval.reason,
+      ownerBinding: ownerBinding.reason,
+    }));
     const responsePayload = {
       ok: true,
       status: 'success',
