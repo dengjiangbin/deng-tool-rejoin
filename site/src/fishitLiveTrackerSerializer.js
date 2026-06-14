@@ -44,6 +44,7 @@ function serializeLiveTrackerAccountStats(data, playerStatsStore, resolvePlayerS
       || data.accountOnline === true
       || data.accountPresenceLive === true;
     const heartbeatOnly = data.snapshotComplete !== true
+      && data.inventoryReady !== true
       && !!(data.lastSuccessfulHeartbeatAt || data.lastHeartbeatAt || data.statusColor === 'yellow');
     let emptyReason = 'stats_not_in_latest_upload';
     if (heartbeatOnly && !data.hasLeaderstatsSnapshot && !data.playerStats) {

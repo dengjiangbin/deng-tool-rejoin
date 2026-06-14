@@ -3399,7 +3399,7 @@ async function handleAccountStatus(req, res) {
         ...proof,
         ...liveAccountStats,
         ...leaderstatsUpload.publicLeaderstatsFields(sessionForStats),
-        inventoryDisplayState: session?.snapshotComplete
+        inventoryDisplayState: (session?.snapshotComplete || session?.inventoryReady)
           ? (session?.provenEmptyInventory ? 'empty' : 'ready')
           : (proof.lastSuccessfulHeartbeatAt || session?.lastHeartbeatAt ? 'syncing' : 'waiting'),
         accountPresenceLive: presence.accountPresenceLive,
@@ -4222,12 +4222,24 @@ function handleUpdateBackpack(req, res) {
     }
     let inventory  = buildInventoryGroups(cleanItems);
 
+    const usesGameItemDb = gameItemDbPublic.detectGameItemDbUpload(body)
+      && (Array.isArray(body.fishItems) || Array.isArray(body.stoneItems) || Array.isArray(body.totemItems));
+    const earlyPlayerDataFishCount = usesGameItemDb && Array.isArray(body.fishItems)
+      ? body.fishItems.length
+      : 0;
+    const earlyPlayerDataStoneCount = usesGameItemDb && Array.isArray(body.stoneItems)
+      ? body.stoneItems.length
+      : 0;
+
     const priorPublicFishCount = existing?.lastGoodPublicFishCount || 0;
     let partialInfo = partialSnapshot.detectPartialZeroFishSnapshot({
       ps,
       cleanItems,
       existing,
       priorPublicFishCount,
+      playerDataFishCount: earlyPlayerDataFishCount,
+      playerDataStoneCount: earlyPlayerDataStoneCount,
+      usesPlayerDataGameItemDb: usesGameItemDb,
     });
     if (partialInfo.isPartial) {
       const preserved = partialSnapshot.applyPartialSnapshotPreservation({
@@ -4272,8 +4284,6 @@ function handleUpdateBackpack(req, res) {
 
     const acceptedCount = cleanItems.length || (ps && ps.accepted) || 0;
 
-    const usesGameItemDb = gameItemDbPublic.detectGameItemDbUpload(body)
-      && (Array.isArray(body.fishItems) || Array.isArray(body.stoneItems) || Array.isArray(body.totemItems));
     const usesItemUtility = !usesGameItemDb
       && body.inventorySource === itemUtilityPublic.PLAYERDATA_ITEMUTILITY_SOURCE
       && Array.isArray(body.fishItems);
@@ -5897,7 +5907,7 @@ async function handleGetBackpack(req, res) {
     lastFullSnapshotAt: uploadStatus.lastFullSnapshotAt || data?.lastFullSnapshotAt || null,
     blankPayloadRejected: uploadStatus.blankPayloadRejected === true,
     payloadType: uploadStatus.payloadType,
-    inventoryDisplayState: data?.snapshotComplete
+    inventoryDisplayState: (data?.snapshotComplete || data?.inventoryReady)
       ? (data?.provenEmptyInventory ? 'empty' : 'ready')
       : (data?.lastSuccessfulHeartbeatAt || data?.lastHeartbeatAt ? 'syncing' : 'waiting'),
     connectionStatus: uploadStatus.status,
@@ -6357,7 +6367,7 @@ router.get('/api/fishit-tracker/debug/:username', getLimiter, async (req, res) =
     snapshotCompleteness: snapshotCompleteness.buildSnapshotCompletenessProof(data),
     snapshotComplete: data.snapshotComplete === true,
     inventoryReady: data.inventoryReady === true,
-    inventoryDisplayState: data.snapshotComplete
+    inventoryDisplayState: (data.snapshotComplete || data.inventoryReady)
       ? (data.provenEmptyInventory ? 'empty' : 'ready')
       : (data.lastSuccessfulHeartbeatAt || data.lastHeartbeatAt ? 'syncing' : 'waiting'),
     snapshotCompletenessReason: data.snapshotCompletenessReason || null,

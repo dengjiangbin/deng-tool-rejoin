@@ -116,13 +116,17 @@ function evaluateSnapshotCompleteness(ctx) {
 
   const hasIdentity = !!(body?.username && Number(body?.userId) > 0);
   const leaderstats = resolveLeaderstatsState(body, existing);
+  const usesGameItemDbPath = body?.inventorySource === 'playerdata_gameitemdb'
+    || body?.playerDataGameItemDbProof?.uploadPath === 'playerdata_gameitemdb'
+    || body?.playerDataGameItemDbProof?.compact === true;
   const replionReady = proof.replionReady
-    || body?.inventorySource === 'playerdata_gameitemdb'
+    || usesGameItemDbPath
     || !!existing?.inventorySource;
   const scanCompleted = proof.scanCompleted
-    || (body?.inventorySource === 'playerdata_gameitemdb'
+    || (usesGameItemDbPath
       && body?.playerDataGameItemDbProof?.gameItemDbBuilt === true
-      && inventoryCount != null);
+      && inventoryCount != null)
+    || (usesGameItemDbPath && (uploadedFishCount > 0 || uploadedStoneCount > 0));
   const fishScanReady = proof.fishScanReady || scanCompleted || uploadedFishCount > 0;
   const stoneScanReady = proof.stoneScanReady || scanCompleted || uploadedStoneCount > 0;
 
@@ -167,23 +171,26 @@ function evaluateSnapshotCompleteness(ctx) {
     && (inventoryCount == null || inventoryCount === 0)
     && !unresolvedInventoryItems;
 
-  let snapshotComplete = hasIdentity
+  const inventorySnapshotReady = hasIdentity
     && replionReady
-    && hasLeaderstatsSnapshot
     && hasFishSnapshot
     && hasStoneSnapshot
     && scanCompleted
-    && !preserveExistingInventory
+    && !rejectBlankInventory
     && !partialInfo?.isPartial;
+
+  let snapshotComplete = inventorySnapshotReady
+    && hasLeaderstatsSnapshot
+    && !preserveExistingInventory;
 
   let payloadType = 'partial';
   if (snapshotComplete) payloadType = 'full_snapshot';
+  else if (inventorySnapshotReady) payloadType = 'inventory_snapshot';
   else if (rejectBlankInventory || quarantineBlankInventory) payloadType = 'partial';
 
   let snapshotCompletenessReason = 'awaiting_full_snapshot';
   if (!hasIdentity) snapshotCompletenessReason = 'missing_identity';
   else if (!replionReady) snapshotCompletenessReason = 'replion_not_ready';
-  else if (!leaderstats.ready) snapshotCompletenessReason = leaderstats.reason;
   else if (!fishScanReady) snapshotCompletenessReason = 'fish_scan_not_ready';
   else if (!stoneScanReady) snapshotCompletenessReason = 'stone_scan_not_ready';
   else if (!scanCompleted) snapshotCompletenessReason = 'scan_not_completed';
@@ -191,8 +198,12 @@ function evaluateSnapshotCompleteness(ctx) {
   else if (rejectBlankInventory) snapshotCompletenessReason = 'blank_payload_rejected';
   else if (quarantineBlankInventory) snapshotCompletenessReason = 'blank_payload_quarantined';
   else if (partialInfo?.isPartial) snapshotCompletenessReason = partialInfo.partialSnapshotReason || 'partial_snapshot';
-  else if (provenEmptyInventory) snapshotCompletenessReason = 'verified_empty_inventory';
   else if (snapshotComplete) snapshotCompletenessReason = 'full_snapshot_verified';
+  else if (inventorySnapshotReady && !hasLeaderstatsSnapshot) {
+    snapshotCompletenessReason = 'inventory_ready_awaiting_leaderstats';
+  } else if (inventorySnapshotReady) snapshotCompletenessReason = 'inventory_snapshot_verified';
+  else if (!leaderstats.ready) snapshotCompletenessReason = leaderstats.reason;
+  else if (provenEmptyInventory) snapshotCompletenessReason = 'verified_empty_inventory';
 
   if (snapshotComplete) {
     baseFields.firstFullSnapshotAt = existing?.firstFullSnapshotAt || now;
@@ -212,7 +223,7 @@ function evaluateSnapshotCompleteness(ctx) {
     quarantineBlankInventory,
     preserveExistingInventory,
     provenEmptyInventory,
-    inventoryReady: snapshotComplete,
+    inventoryReady: inventorySnapshotReady || provenEmptyInventory,
     rejectBlankInventory,
     leaderstatsPreserved: leaderstats.preserved === true,
   };

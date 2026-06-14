@@ -89,8 +89,12 @@ function evaluateAcceptedSnapshotSync(ctx = {}) {
   if (completenessEval?.rejectBlankInventory || completenessEval?.blankPayloadRejected) {
     return { accepted: false, reason: 'blank_rejected', hasInventory: false };
   }
-  if (completenessEval?.snapshotComplete) {
-    return { accepted: true, reason: 'full_snapshot', hasInventory: true };
+  if (completenessEval?.inventoryReady) {
+    return {
+      accepted: true,
+      reason: completenessEval.snapshotComplete ? 'full_snapshot' : 'inventory_snapshot_ready',
+      hasInventory: true,
+    };
   }
   if (Number(acceptedCount) > 0) {
     return { accepted: true, reason: 'inventory_items', hasInventory: true };

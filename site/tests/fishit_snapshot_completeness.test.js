@@ -244,4 +244,99 @@ describe('snapshot completeness — blank first payload handling', () => {
     assert.equal(verifiedEmpty.snapshotComplete, true);
     assert.equal(verifiedEmpty.provenEmptyInventory, true);
   });
+
+  test('detectPartialZeroFishSnapshot ignores empty cleanItems when playerData rows exist', () => {
+    const partialSnapshot = require('../src/fishitPartialSnapshot');
+    const info = partialSnapshot.detectPartialZeroFishSnapshot({
+      ps: null,
+      cleanItems: [],
+      existing: { lastGoodFishItems: [{ name: 'Old' }], lastGoodPublicFishCount: 5 },
+      priorPublicFishCount: 5,
+      playerDataFishCount: 44,
+      playerDataStoneCount: 22,
+      usesPlayerDataGameItemDb: true,
+    });
+    assert.equal(info.isPartial, false);
+    assert.equal(info.partialSnapshotDetected, false);
+  });
+
+  test('fish and stone snapshot without leaderstats marks inventoryReady but not snapshotComplete', () => {
+    const now = new Date().toISOString();
+    const result = snapshotCompleteness.evaluateSnapshotCompleteness({
+      body: {
+        username: 'nostats',
+        userId: 1,
+        inventorySource: 'playerdata_gameitemdb',
+        fishItems: [{ itemId: '1', name: 'Clownfish', quantity: 1, type: 'Fish', source: 'playerdata_gameitemdb' }],
+        stoneItems: [{ itemId: '2', name: 'Stone', quantity: 1, type: 'Stone', source: 'playerdata_gameitemdb' }],
+        playerStats: { source: 'missing', build: MINIMUM_TRACKER_BUILD },
+        playerDataGameItemDbProof: { compact: true, uploadPath: 'playerdata_gameitemdb' },
+      },
+      existing: null,
+      cleanItems: [],
+      playerDataFishItems: [{ itemId: '1', name: 'Clownfish', quantity: 1, type: 'Fish' }],
+      playerDataStoneItems: [{ itemId: '2', name: 'Stone', quantity: 1, kind: 'stone' }],
+      parseStats: null,
+      partialInfo: { isPartial: false },
+      isHeartbeat: false,
+      now,
+    });
+    assert.equal(result.inventoryReady, true);
+    assert.equal(result.snapshotComplete, false);
+    assert.equal(result.hasFishSnapshot, true);
+    assert.equal(result.hasStoneSnapshot, true);
+    assert.equal(result.snapshotCompletenessReason, 'inventory_ready_awaiting_leaderstats');
+  });
+
+  test('compact gameitemdb upload with fish/stone is not blocked by legacy zero-fish partial path', async () => {
+    const app = makeApp();
+    const username = 'CompactNotPartial';
+    const key = username.toLowerCase();
+    await request(app).post('/api/tracker/update-backpack').send({
+      type: 'inventory_snapshot',
+      username,
+      userId: 991201,
+      isOnline: true,
+      clientOrigin: 'roblox_tracker',
+      trackerBuild: MINIMUM_TRACKER_BUILD,
+      inventorySource: 'playerdata_gameitemdb',
+      scanCompleted: true,
+      replionReady: true,
+      leaderstatsReady: true,
+      fishScanReady: true,
+      stoneScanReady: true,
+      hasLeaderstatsSnapshot: true,
+      hasFishSnapshot: true,
+      hasStoneSnapshot: true,
+      fishItems: [{ itemId: '1', name: 'Seed Fish', type: 'Fish', quantity: 2, source: 'playerdata_gameitemdb' }],
+      stoneItems: [],
+      playerDataGameItemDbProof: { playerDataInventoryCount: 1, gameItemDbBuilt: true },
+      playerStats: { coins: 10, totalCaught: 1, source: 'leaderstats', build: MINIMUM_TRACKER_BUILD },
+    }).expect(expectUploadOk());
+    assert.equal(liveTrackDB[key].snapshotComplete, true);
+
+    await request(app).post('/api/tracker/update-backpack').send({
+      type: 'inventory_snapshot',
+      username,
+      userId: 991201,
+      isOnline: true,
+      clientOrigin: 'roblox_tracker',
+      trackerBuild: MINIMUM_TRACKER_BUILD,
+      inventorySource: 'playerdata_gameitemdb',
+      hasLeaderstatsSnapshot: true,
+      hasFishSnapshot: true,
+      hasStoneSnapshot: true,
+      fishItems: [{ itemId: '1', name: 'Seed Fish', type: 'Fish', quantity: 2, source: 'playerdata_gameitemdb' }],
+      stoneItems: [{ itemId: '9', name: 'Luck Stone', type: 'Stone', quantity: 1, kind: 'stone', source: 'playerdata_gameitemdb' }],
+      playerStats: { coins: 10, totalCaught: 1, source: 'leaderstats', build: MINIMUM_TRACKER_BUILD },
+      playerDataGameItemDbProof: { compact: true, uploadPath: 'playerdata_gameitemdb' },
+    }).expect(expectUploadOk());
+
+    assert.equal(liveTrackDB[key].inventoryReady, true);
+    assert.equal(liveTrackDB[key].snapshotComplete, true);
+    assert.ok(Array.isArray(liveTrackDB[key].playerDataFishItems));
+    assert.ok(liveTrackDB[key].playerDataFishItems.length >= 1);
+    assert.ok(Array.isArray(liveTrackDB[key].playerDataStoneItems));
+    assert.ok(liveTrackDB[key].playerDataStoneItems.length >= 1);
+  });
 });

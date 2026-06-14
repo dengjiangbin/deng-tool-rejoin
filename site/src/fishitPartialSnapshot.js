@@ -20,8 +20,42 @@ function countFishCategory(items) {
   return n;
 }
 
-function detectPartialZeroFishSnapshot({ ps, cleanItems, existing, priorPublicFishCount }) {
-  const fishCount = countFishCategory(cleanItems);
+function detectPartialZeroFishSnapshot({
+  ps,
+  cleanItems,
+  existing,
+  priorPublicFishCount,
+  playerDataFishCount = 0,
+  playerDataStoneCount = 0,
+  usesPlayerDataGameItemDb = false,
+}) {
+  const legacyFishCount = countFishCategory(cleanItems);
+  const pdFish = Number(playerDataFishCount) > 0 ? Number(playerDataFishCount) : 0;
+  const pdStone = Number(playerDataStoneCount) > 0 ? Number(playerDataStoneCount) : 0;
+  const playerDataInventoryPresent = usesPlayerDataGameItemDb && (pdFish > 0 || pdStone > 0);
+
+  // Compact/playerdata uploads never use legacy flat cleanItems — do not treat empty
+  // cleanItems as a zero-fish partial when fish/stone rows arrived on the gameitemdb path.
+  if (playerDataInventoryPresent) {
+    return {
+      isPartial: false,
+      partialSnapshotDetected: false,
+      partialSnapshotReason: null,
+      lastGoodFishPreserved: false,
+      currentRawAccepted: ps?.accepted || pdFish + pdStone || legacyFishCount,
+      currentAcceptedInstances: ps?.acceptedInstances || ps?.accepted || pdFish + pdStone || legacyFishCount,
+      currentFishCount: pdFish,
+      previousGoodFishCount: existing?.lastGoodFishItems?.length
+        || existing?.lastGoodPublicFishCount
+        || priorPublicFishCount
+        || 0,
+      selectedPath: ps?.selectedPath || ps?.selectedGeneralPath || null,
+      selectedFishPath: ps?.selectedFishPath || null,
+      reasons: [],
+    };
+  }
+
+  const fishCount = legacyFishCount;
   const prevGood = existing?.lastGoodFishItems?.length
     || existing?.lastGoodPublicFishCount
     || priorPublicFishCount
