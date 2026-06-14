@@ -4,6 +4,13 @@ const playerStatsStore = require('./fishitPlayerStats');
 
 const DEFAULT_INTERVAL_SECONDS = 60;
 const DEFAULT_GRACE_SECONDS = 15;
+const MIN_NEXT_UPLOAD_SECONDS = 60;
+
+function isLeaderstatsOnlyBody(body) {
+  if (!body || typeof body !== 'object') return false;
+  return body.leaderstatsOnlyUpload === true
+    || body.uploadPath === 'playerdata_leaderstats_only';
+}
 
 function clampText(value, max = 120) {
   if (value == null) return null;
@@ -297,6 +304,8 @@ function publicLeaderstatsFields(data) {
 module.exports = {
   DEFAULT_INTERVAL_SECONDS,
   DEFAULT_GRACE_SECONDS,
+  MIN_NEXT_UPLOAD_SECONDS,
+  isLeaderstatsOnlyBody,
   extractLeaderstatsProof,
   evaluateIncomingLeaderstats,
   applyLeaderstatsUploadFields,

@@ -10,7 +10,7 @@ const { snapshotUploadMetrics } = require('./trackerUploadRequestMetrics');
 const { getSessionStoreFlushMetrics } = require('./fishitSessionStore');
 const stabilityRoutes = require('./stabilityRoutes');
 
-const UPLOAD_HANDLER_TIMEOUT_MS = Number(process.env.TRACKER_UPLOAD_HANDLER_TIMEOUT_MS || 12000);
+const UPLOAD_HANDLER_TIMEOUT_MS = Number(process.env.TRACKER_UPLOAD_HANDLER_TIMEOUT_MS || 0);
 
 const app = express();
 app.disable('x-powered-by');
@@ -62,6 +62,7 @@ app.use('/', stabilityRoutes);
 
 app.use((req, res, next) => {
   if (req.method !== 'POST') return next();
+  if (!UPLOAD_HANDLER_TIMEOUT_MS || UPLOAD_HANDLER_TIMEOUT_MS <= 0) return next();
   const path = req.path || req.url || '';
   if (!path.includes('fishit-tracker') && !path.includes('tracker/update')) return next();
   const started = Date.now();

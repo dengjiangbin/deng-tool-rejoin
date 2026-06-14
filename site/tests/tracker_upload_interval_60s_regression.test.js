@@ -53,7 +53,9 @@ describe('tracker upload interval 60s + aio domain regression', () => {
     assert.match(lua, new RegExp(AIO_UPLOAD_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.doesNotMatch(lua, /https:\/\/tool\.deng\.my\.id\/api\/fishit-tracker\/update-backpack/);
     assert.match(lua, /intervalSeconds = LiveSafe\.lightSyncIntervalSeconds or 60/);
-    assert.match(lua, /UPLOAD_STATUS_GRACE_AND_503_RECOVERY_2026_06_15/);
+    assert.match(lua, /UPLOAD_502_INTERVAL_SINGLETON_FIX_2026_06_15/);
+    assert.match(lua, /DENG_TRACKER_RUNNING/);
+    assert.match(lua, /UPLOAD_SKIP_COOLDOWN/);
   });
 
   test('upload rate limit allows normal 60s three-lane cadence', async () => {

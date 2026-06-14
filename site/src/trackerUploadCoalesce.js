@@ -93,6 +93,7 @@ function trackerUploadCoalesceMiddleware(req, res, next) {
         coalesced: true,
         note: 'duplicate_lane_upload_coalesced',
         lane: laneKey.split(':').slice(-1)[0],
+        minNextUploadSeconds: 60,
       });
     }
     return undefined;

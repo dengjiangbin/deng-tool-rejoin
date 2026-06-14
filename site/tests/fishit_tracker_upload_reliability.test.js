@@ -65,11 +65,15 @@ describe('upload reliability — missing weight + no 429 storms', () => {
           totalCaught: 42,
           rarestFishChance: '1/500',
           source: 'leaderstats',
+          build: BUILD,
         },
       }));
     assert.notEqual(res.status, 500, res.body?.message || res.body?.error);
     assert.notEqual(res.status, 429, res.body?.message || res.body?.error);
     assert.ok(res.status === 200 || res.status === 202, `status=${res.status}`);
+    assert.equal(res.body.lane, 'required_leaderstats');
+    assert.equal(res.body.minNextUploadSeconds, 60);
+    assert.equal(res.body.leaderstatsUploadOk, true);
   });
 
   test('inventory_snapshot accepts rows missing weight and null holes', async () => {

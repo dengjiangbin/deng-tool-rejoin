@@ -4050,7 +4050,8 @@ function handleUpdateBackpack(req, res) {
     const arrivalType = body.type || 'inventory_snapshot';
     responsePayloadType = arrivalType;
     responseUsernameKey = body.username ? String(body.username).toLowerCase() : null;
-    if (arrivalType !== 'tracker_status') {
+    if (arrivalType !== 'tracker_status'
+      && !leaderstatsUpload.isLeaderstatsOnlyBody(body)) {
       const auditArrival = extractTotemAuditArrivalMeta(rawIncomingBody);
       console.log(
         '[fishit-tracker] upload_arrival route=%s type=%s user=%s sessionKey=%s build=%s' +
@@ -4292,6 +4293,61 @@ function handleUpdateBackpack(req, res) {
         serverTime: now,
         heartbeatAccepted: true,
         ...uploadStatus,
+      });
+    }
+
+    // ── required_leaderstats only (tiny fast path — no inventory work) ──
+    if (leaderstatsUpload.isLeaderstatsOnlyBody(body)) {
+      const base = existing || { username: cleanUser, userId: cleanUserId, items: [], inventory: null };
+      const leaderFields = leaderstatsUpload.applyLeaderstatsUploadFields(base, body, now);
+      liveTrackDB[key] = withUploadCount({
+        ...base,
+        username: cleanUser,
+        userId: cleanUserId || base.userId || 0,
+        source: source !== 'unknown' ? source : (base.source || source),
+        items: base.items || [],
+        inventory: base.inventory || null,
+        isOnline: online,
+        phase: effectivePhase(phase || base.phase, base.parseStats, (base.items || []).length > 0),
+        trackerBuild: incomingBuild || base.trackerBuild || null,
+        lastPayloadType: 'required_leaderstats',
+        lastSeenAt: now,
+        lastAccountSeenAt: now,
+        updatedAt: now,
+        lastInventoryAt: base.lastInventoryAt || base.updatedAt || null,
+        ...leaderFields,
+      });
+      liveTrackDB[key] = applyUploadDebugFields(liveTrackDB[key], {
+        ...uploadDebugBase,
+        accepted: liveTrackDB[key].leaderstatsUploadOk === true,
+        statusCode: 202,
+      });
+      if (cleanUserId) liveTrackDB['uid:' + cleanUserId] = key;
+      applySessionOwnerMapping(key);
+      scheduleAioTrackerCacheRefresh(key);
+      persistSessionHeartbeat(key);
+      scheduleIngestPostResponseFlush(res);
+      responseAccepted = liveTrackDB[key].leaderstatsUploadOk === true;
+      const coalesced = req.trackerUploadCoalesced === true;
+      console.log(
+        '[fishit-tracker] leaderstats_fast_path user=%s sessionKey=%s accepted=%d coalesced=%s responseMs=%d',
+        cleanUser,
+        key,
+        responseAccepted ? 1 : 0,
+        coalesced ? '1' : '0',
+        Date.now() - uploadArrivalAt,
+      );
+      return res.status(202).json({
+        ok: true,
+        accepted: true,
+        coalesced,
+        lane: 'required_leaderstats',
+        minNextUploadSeconds: leaderstatsUpload.MIN_NEXT_UPLOAD_SECONDS,
+        leaderstatsUploadOk: liveTrackDB[key].leaderstatsUploadOk === true,
+        lastValidLeaderstatsAt: liveTrackDB[key].lastValidLeaderstatsAt || null,
+        lastSeenAt: now,
+        serverTime: now,
+        note: 'leaderstats_only_fast_path',
       });
     }
 

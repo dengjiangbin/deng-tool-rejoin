@@ -56,6 +56,7 @@ function finishTrackerUploadResponse(req, res, responsePayload, sessionKey) {
       accepted: responsePayload.accepted !== false,
       deferred: true,
       route,
+      minNextUploadSeconds: 60,
       status: responsePayload.status || 'success',
       acceptedCount: responsePayload.acceptedCount,
       snapshotComplete: responsePayload.snapshotComplete,

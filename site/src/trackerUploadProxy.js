@@ -7,7 +7,7 @@ const { recordWebProxyForward } = require('./trackerRouteMetrics');
 function createTrackerUploadProxy(options = {}) {
   const host = options.host || process.env.TRACKER_INGEST_HOST || '127.0.0.1';
   const port = Number(options.port || process.env.TRACKER_INGEST_PORT || 8792);
-  const timeoutMs = Number(options.timeoutMs || process.env.TRACKER_UPLOAD_PROXY_TIMEOUT_MS || 8000);
+  const timeoutMs = Number(options.timeoutMs || process.env.TRACKER_UPLOAD_PROXY_TIMEOUT_MS || 30000);
 
   return function proxyTrackerUpload(req, res) {
     const started = Date.now();

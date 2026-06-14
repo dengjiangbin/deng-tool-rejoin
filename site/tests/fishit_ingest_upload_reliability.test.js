@@ -58,6 +58,7 @@ describe('tracker ingest upload reliability', () => {
       phase: 'ready',
     };
     const durations = [];
+    let coalesced = 0;
     for (let i = 0; i < 5; i += 1) {
       const start = Date.now();
       const res = await request(app)
@@ -65,10 +66,12 @@ describe('tracker ingest upload reliability', () => {
         .send(body);
       durations.push(Date.now() - start);
       assert.ok([200, 202].includes(res.status), `unexpected status ${res.status} body=${JSON.stringify(res.body)}`);
+      if (res.body.coalesced) coalesced += 1;
     }
     const p95 = durations.sort((a, b) => a - b)[Math.floor(durations.length * 0.95)] || 0;
     assert.ok(p95 < 2000, `p95 heartbeat duration ${p95}ms too high`);
+    assert.ok(coalesced >= 4, 'duplicate heartbeats should coalesce instead of hammering ingest');
     const metrics = uploadMetrics.snapshotUploadMetrics();
-    assert.ok((metrics.byPayloadType.tracker_status || {}).count >= 5);
+    assert.ok((metrics.byPayloadType.tracker_status || {}).count >= 1);
   });
 });
