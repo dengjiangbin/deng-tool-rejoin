@@ -32,6 +32,12 @@ function bulkGroupKey(category, item) {
     const rarity = normalizeRarityLabel(item);
     return `${cat}:${name.toLowerCase()}:${stoneType.toLowerCase() || rarity.toLowerCase()}`;
   }
+  if (cat === 'totem') {
+    // Group by canonical totem identity (name + type itemId). Never key on the
+    // per-instance uuid — that produced a duplicate totem card per username.
+    const stable = String(item?.itemId || item?.itemID || '').trim().toLowerCase();
+    return stable ? `${cat}:${name.toLowerCase()}:${stable}` : `${cat}:${name.toLowerCase()}`;
+  }
   const rarity = normalizeRarityLabel(item);
   return `${cat}:${name.toLowerCase()}:${rarity.toLowerCase()}`;
 }
@@ -49,9 +55,18 @@ function pickImageUrl(existing, candidate) {
 
 function mergeBulkItem(existing, item, username, category) {
   const amount = resolveItemAmount(item);
-  const owners = new Set(existing.owners || []);
-  if (username) owners.add(username);
   const imageUrl = pickImageUrl(existing.imageUrl, item.imageUrl || item.image || null);
+  // Track a representative quantity PER distinct owner. A username that re-sends
+  // the same backpack item (duplicate rows) must not inflate the total or the
+  // contributor count — we keep the largest amount seen for that owner and sum
+  // once per owner. Different usernames each contribute their own amount.
+  const ownerAmounts = Object.assign({}, existing.ownerAmounts);
+  const ownerKey = String(username || '').trim().toLowerCase();
+  if (ownerKey) {
+    ownerAmounts[ownerKey] = Math.max(Number(ownerAmounts[ownerKey]) || 0, amount);
+  }
+  const owners = Object.keys(ownerAmounts);
+  const totalAmount = owners.reduce((sum, k) => sum + (Number(ownerAmounts[k]) || 0), 0);
   return {
     ...existing,
     name: existing.name || canonicalBulkName(item),
@@ -61,9 +76,10 @@ function mergeBulkItem(existing, item, username, category) {
     itemId: existing.itemId || itemStableId(item) || null,
     imageUrl,
     imageAssetId: existing.imageAssetId || item.imageAssetId || null,
-    amount: (existing.amount || 0) + amount,
-    accountCount: owners.size,
-    owners: [...owners],
+    amount: totalAmount,
+    accountCount: owners.length,
+    owners,
+    ownerAmounts,
     dataSource: 'bulk_playerdata_gameitemdb',
     groupKey: existing.groupKey,
   };
@@ -72,6 +88,7 @@ function mergeBulkItem(existing, item, username, category) {
 function aggregateBulkInventory(sessions) {
   const fishMap = new Map();
   const stoneMap = new Map();
+  const totemMap = new Map();
   const accountSet = new Set();
 
   for (const session of sessions || []) {
@@ -106,14 +123,30 @@ function aggregateBulkInventory(sessions) {
         imageUrl: null,
       }, item, username, 'stone'));
     }
+    for (const item of session?.totemList || []) {
+      const key = bulkGroupKey('totem', item);
+      const prev = totemMap.get(key);
+      totemMap.set(key, mergeBulkItem(prev || {
+        groupKey: key,
+        name: canonicalBulkName(item),
+        category: 'totem',
+        rarity: normalizeRarityLabel(item),
+        amount: 0,
+        accountCount: 0,
+        owners: [],
+        imageUrl: null,
+      }, item, username, 'totem'));
+    }
   }
 
   return {
     fish: sortInventoryFish([...fishMap.values()]),
     stones: sortInventoryStones([...stoneMap.values()]),
+    totems: [...totemMap.values()],
     accountCount: accountSet.size,
     fishTypeCount: fishMap.size,
     stoneTypeCount: stoneMap.size,
+    totemTypeCount: totemMap.size,
   };
 }
 
