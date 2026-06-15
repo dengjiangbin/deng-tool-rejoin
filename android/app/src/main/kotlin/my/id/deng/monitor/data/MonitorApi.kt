@@ -131,6 +131,35 @@ class MonitorApi(
         return execJsonWithCookie("/api/aio/auth/web-session", cookieHeader)
     }
 
+    /**
+     * Start a mobile-auth transaction. Returns the Discord OAuth URL to open in
+     * the system browser plus the {transactionId, state} the app threads through
+     * the deep-link/polling handoff. No bearer/cookie needed.
+     */
+    suspend fun mobileAuthStart(target: String = "/tracker"): AioMobileAuthStartResponse {
+        val body = """{"target":${json.encodeToString(target)}}"""
+        return execJson("/api/aio/mobile-auth/start", method = "POST", body = body, auth = false)
+    }
+
+    /**
+     * Poll a mobile-auth transaction. When complete, [AioMobileAuthStatusResponse.consumeUrl]
+     * is the first-party /mobile-auth/consume URL the WebView must load.
+     */
+    suspend fun mobileAuthStatus(transactionId: String, state: String): AioMobileAuthStatusResponse {
+        val path = "/api/aio/mobile-auth/status?transactionId=${urlEncode(transactionId)}&state=${urlEncode(state)}"
+        return execJson(path, auth = false)
+    }
+
+    /**
+     * First-party identity check used by the WebView after /mobile-auth/consume.
+     * Reads the `deng_sid` web session cookie (not a bearer token).
+     */
+    suspend fun aioAuthMe(publicWebUrl: String): AioAuthMeResponse {
+        val base = publicWebUrl.trimEnd('/')
+        val cookieHeader = buildWebViewCookieHeader(base)
+        return execJsonWithCookie("/api/aio/auth/me", cookieHeader)
+    }
+
     private fun buildWebViewCookieHeader(siteOrigin: String): String? {
         val manager = android.webkit.CookieManager.getInstance()
         manager.flush()

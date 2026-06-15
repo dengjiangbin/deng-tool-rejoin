@@ -110,6 +110,7 @@ function createOAuthState(payload) {
     returnPublicUrl: String(payload.returnPublicUrl || '').replace(/\/+$/, ''),
     oauthApkReturn: payload.oauthApkReturn === true,
     authReturnTo: payload.authReturnTo || '/dashboard',
+    mobileTransactionId: payload.mobileTransactionId ? String(payload.mobileTransactionId) : null,
     expiresAtMs: Date.now() + TTL_MS,
   };
   if (MEMORY_ONLY) {

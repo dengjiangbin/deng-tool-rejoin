@@ -42,15 +42,25 @@ fun LoginWebViewScreen(
     authError: String?,
     onClearAuthError: () -> Unit,
     onOAuthFlowStarted: () -> Unit = {},
+    onResolveOAuthStartUrl: suspend () -> String = { apkOAuthStartUrl(BuildConfig.PUBLIC_WEB_URL) },
 ) {
     val loginUrl = remember { aioWebUrl("/login") }
     val publicHost = remember { publicWebHost() }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     fun openExternalOAuth() {
         onClearAuthError()
         onOAuthFlowStarted()
-        val customTabs = CustomTabsIntent.Builder().build()
-        customTabs.launchUrl(context, Uri.parse(apkOAuthStartUrl(BuildConfig.PUBLIC_WEB_URL)))
+        scope.launch {
+            // Resolve the start URL first: this begins a mobile-auth transaction
+            // (so the WebView can later load /mobile-auth/consume) and only then
+            // hands Discord OAuth to the system browser / Custom Tabs.
+            val startUrl = runCatching { onResolveOAuthStartUrl() }
+                .getOrDefault(apkOAuthStartUrl(BuildConfig.PUBLIC_WEB_URL))
+                .ifBlank { apkOAuthStartUrl(BuildConfig.PUBLIC_WEB_URL) }
+            val customTabs = CustomTabsIntent.Builder().build()
+            customTabs.launchUrl(context, Uri.parse(startUrl))
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

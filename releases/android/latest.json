@@ -1,18 +1,20 @@
 {
     "app_name":  "DENG All In One",
-    "version_name":  "2.2.4",
-    "version_code":  21,
-    "file_name":  "deng-all-in-one-apk-v2.2.4.apk",
-    "sha256":  "c3247137aa845dd9366bf11f23ff6b290e4be98d981ea9e34ac3c9bde62a6bbe",
-    "size_bytes":  1852412,
-    "released_at":  "2026-06-15T03:19:54.371Z",
-    "build_marker":  "APK_LOGIN_COOKIE_INTERSTITIAL_LIVE_TRACKER_DEFAULT_2026_06_15",
+    "version_name":  "2.2.5",
+    "version_code":  22,
+    "file_name":  "deng-all-in-one-apk-v2.2.5.apk",
+    "sha256":  "b6629ca66cbca0d2481b44395d4b66c2e94539b96ffe81600c47429ad506a727",
+    "size_bytes":  1868788,
+    "released_at":  "2026-06-15T04:17:33.693Z",
+    "build_marker":  "APK_MOBILE_AUTH_WEBVIEW_BOOTSTRAP_2026_06_15",
     "min_sdk":  26,
     "purpose":  "Monitoring companion for DENG All In One (aio.deng.my.id)",
     "changelog":  [
-                      "APK_LOGIN_COOKIE_INTERSTITIAL_LIVE_TRACKER_DEFAULT_2026_06_15 - Fix APK login/auth loop: /auth/web-bridge now sets the deng_sid cookie on a 200 HTML interstitial (not a 302) so the WebView reliably stores the session before loading the tracker.",
-                      "Default landing after login changed to Live Tracker (first tab); Dashboard is now the second tab.",
-                      "Tracker account-status false-red fixed: account stays green for the full 10-minute grace after a valid contact; only a confirmed offline (or grace expiry) turns it red.",
+                      "APK_MOBILE_AUTH_WEBVIEW_BOOTSTRAP_2026_06_15 - Fixed the APK Discord login loop.",
+                      "Replaced the broken native cookie-injection handoff with a first-party WebView session bootstrap: after Discord OAuth the app loads https://aio.deng.my.id/mobile-auth/consume inside the WebView, which sets the real deng_sid session cookie on its own response and redirects to the tracker.",
+                      "Login now uses a short-lived single-use mobile auth code bound to a transaction/state; no Discord token or long-lived token is ever stored in the app.",
+                      "Deep-link return plus status polling fallback so login completes even if the app deep link is not delivered.",
+                      "Default landing after login is Live Tracker (first tab); Dashboard is the second tab.",
                       "Default site and API base URL: https://aio.deng.my.id."
                   ]
 }

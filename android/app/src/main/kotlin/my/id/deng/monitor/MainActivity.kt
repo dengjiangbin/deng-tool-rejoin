@@ -16,26 +16,39 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import my.id.deng.monitor.data.ThemeMode
 import my.id.deng.monitor.ui.AioWebViewNavigator
 import my.id.deng.monitor.ui.APK_AUTH_LOG_TAG
+import my.id.deng.monitor.ui.APK_MOBILE_AUTH_MARKER
 import my.id.deng.monitor.ui.AppRoot
 import my.id.deng.monitor.ui.ApkOAuthHandoffResult
 import my.id.deng.monitor.ui.LocalHideUsername
+import my.id.deng.monitor.ui.apkOAuthStartUrl
 import my.id.deng.monitor.ui.completeApkOAuthFromDeepLink
 import my.id.deng.monitor.ui.extractApkOAuthCode
+import my.id.deng.monitor.ui.extractApkOAuthState
 import my.id.deng.monitor.ui.publicWebHost
 import my.id.deng.monitor.ui.theme.DengMonitorTheme
 
 class MainActivity : ComponentActivity() {
     private var pendingOAuthCode by mutableStateOf<String?>(null)
+    private var pendingOAuthState by mutableStateOf<String?>(null)
     private var bootstrapBridgeUrl by mutableStateOf<String?>(null)
     private var authError by mutableStateOf<String?>(null)
     private var oauthWaitingDeepLink by mutableStateOf(false)
     private val processedOAuthCodes = LinkedHashSet<String>()
     private val handoffMutex = Mutex()
+
+    // Mobile-auth transaction (first-party WebView session bootstrap).
+    @Volatile private var mobileTxnId: String? = null
+    @Volatile private var mobileState: String? = null
+    private var pollJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,7 +62,9 @@ class MainActivity : ComponentActivity() {
             val pendingCode = pendingOAuthCode
             LaunchedEffect(pendingCode) {
                 val code = pendingCode ?: return@LaunchedEffect
+                val stateNonce = pendingOAuthState.orEmpty()
                 pendingOAuthCode = null
+                pendingOAuthState = null
                 if (processedOAuthCodes.contains(code)) {
                     Log.i(APK_AUTH_LOG_TAG, "APK_AUTH_DEDUP codeLen=${code.length}")
                     return@LaunchedEffect
@@ -63,8 +78,9 @@ class MainActivity : ComponentActivity() {
                 oauthWaitingDeepLink = false
                 handoffMutex.withLock {
                     authError = null
-                    when (val result = completeApkOAuthFromDeepLink(app.api, app.sessionStore, code)) {
+                    when (val result = completeApkOAuthFromDeepLink(app.api, app.sessionStore, code, stateNonce)) {
                         is ApkOAuthHandoffResult.Ready -> {
+                            pollJob?.cancel()
                             bootstrapBridgeUrl = result.bridgeUrl
                         }
                         is ApkOAuthHandoffResult.Failed -> {
@@ -97,12 +113,16 @@ class MainActivity : ComponentActivity() {
                         bootstrapBridgeUrl = bootstrapBridgeUrl,
                         authError = authError,
                         onBootstrapSuccess = {
+                            pollJob?.cancel()
+                            mobileTxnId = null
+                            mobileState = null
                             bootstrapBridgeUrl = null
                             authError = null
                             oauthWaitingDeepLink = false
                         },
                         onBootstrapFailure = { reason ->
                             Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_FAIL_STAGE=$reason")
+                            pollJob?.cancel()
                             bootstrapBridgeUrl = null
                             authError = reason
                             oauthWaitingDeepLink = false
@@ -112,6 +132,7 @@ class MainActivity : ComponentActivity() {
                             oauthWaitingDeepLink = true
                             authError = null
                         },
+                        onResolveOAuthStartUrl = { resolveOAuthStartUrl(app) },
                     )
                 }
             }
@@ -142,10 +163,14 @@ class MainActivity : ComponentActivity() {
             oauthWaitingDeepLink = false
             return
         }
+        // With an active mobile-auth transaction, status polling drives the
+        // login even when the deep link is never delivered — never false-fail.
+        if (mobileTxnId != null) return
         window.decorView.postDelayed({
             if (oauthWaitingDeepLink
                 && pendingOAuthCode == null
                 && bootstrapBridgeUrl == null
+                && mobileTxnId == null
                 && !app.sessionStore.isWebLoggedInBlocking()
             ) {
                 oauthWaitingDeepLink = false
@@ -155,14 +180,73 @@ class MainActivity : ComponentActivity() {
         }, 2500)
     }
 
+    /**
+     * Begin a mobile-auth transaction and return the Discord OAuth URL to open
+     * in the system browser. Stores {transactionId, state} and starts polling so
+     * login completes via the first-party /mobile-auth/consume URL even if the
+     * deep link is not delivered. Falls back to the legacy start URL on error.
+     */
+    private suspend fun resolveOAuthStartUrl(app: MonitorApp): String {
+        return try {
+            val started = app.api.mobileAuthStart("/tracker?apk=1")
+            if (started.ok && started.authUrl.isNotBlank() && started.transactionId.isNotBlank()) {
+                mobileTxnId = started.transactionId
+                mobileState = started.state
+                Log.i(
+                    APK_AUTH_LOG_TAG,
+                    "APK_AUTH_MOBILE_START marker=$APK_MOBILE_AUTH_MARKER txn=${started.transactionId.take(8)}",
+                )
+                startStatusPolling(app, started.transactionId, started.state)
+                started.authUrl
+            } else {
+                mobileTxnId = null
+                mobileState = null
+                apkOAuthStartUrl(BuildConfig.PUBLIC_WEB_URL)
+            }
+        } catch (err: Exception) {
+            Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_MOBILE_START_FALLBACK err=${err.message}")
+            mobileTxnId = null
+            mobileState = null
+            apkOAuthStartUrl(BuildConfig.PUBLIC_WEB_URL)
+        }
+    }
+
+    private fun startStatusPolling(app: MonitorApp, txnId: String, state: String) {
+        pollJob?.cancel()
+        pollJob = lifecycleScope.launch {
+            var attempts = 0
+            while (attempts < 60) {
+                attempts++
+                delay(2_500)
+                if (bootstrapBridgeUrl != null || app.sessionStore.isWebLoggedInBlocking()) return@launch
+                val status = try {
+                    app.api.mobileAuthStatus(txnId, state)
+                } catch (_: Exception) {
+                    null
+                }
+                if (status != null && status.status == "complete" && !status.consumeUrl.isNullOrBlank()) {
+                    if (bootstrapBridgeUrl == null) {
+                        Log.i(APK_AUTH_LOG_TAG, "APK_AUTH_MOBILE_POLL_COMPLETE marker=$APK_MOBILE_AUTH_MARKER")
+                        oauthWaitingDeepLink = false
+                        bootstrapBridgeUrl = status.consumeUrl
+                    }
+                    return@launch
+                }
+                if (status != null && status.status == "consumed") return@launch
+            }
+        }
+    }
+
     private fun captureOAuthDeepLink(intent: Intent?) {
         val uri = intent?.data ?: return
         val code = extractApkOAuthCode(uri, publicWebHost()) ?: return
+        val stateNonce = extractApkOAuthState(uri, publicWebHost()).orEmpty()
         Log.i(
             APK_AUTH_LOG_TAG,
-            "APK_AUTH_CALLBACK_RECEIVED codeLen=${code.length} scheme=${uri.scheme} host=${uri.host} path=${uri.path}",
+            "APK_AUTH_CALLBACK_RECEIVED codeLen=${code.length} hasState=${stateNonce.isNotBlank()} scheme=${uri.scheme} host=${uri.host} path=${uri.path}",
         )
         oauthWaitingDeepLink = false
+        pendingOAuthState = stateNonce
         pendingOAuthCode = code
     }
 }

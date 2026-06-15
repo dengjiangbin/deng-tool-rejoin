@@ -210,6 +210,7 @@ function buildDiscordAuthUrl(req, options = {}) {
     returnPublicUrl,
     oauthApkReturn,
     authReturnTo,
+    mobileTransactionId: options.mobileTransactionId || null,
   });
 
   const params = new URLSearchParams({

@@ -17,8 +17,8 @@ android {
         // Termux / package version. Bump versionCode whenever the
         // APK is rebuilt and republished, even for branding-only
         // changes, so Android sees it as a real upgrade.
-        versionCode = 21
-        versionName = "2.2.4"
+        versionCode = 22
+        versionName = "2.2.5"
 
         val bridgeUrl = (project.findProperty("bridgeUrl") as String?)
             ?: "https://aio.deng.my.id"
@@ -31,7 +31,7 @@ android {
         buildConfigField(
             "String",
             "APK_RELEASE_MARKER",
-            "\"APK_LOGIN_COOKIE_INTERSTITIAL_LIVE_TRACKER_DEFAULT_2026_06_15\"",
+            "\"APK_MOBILE_AUTH_WEBVIEW_BOOTSTRAP_2026_06_15\"",
         )
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

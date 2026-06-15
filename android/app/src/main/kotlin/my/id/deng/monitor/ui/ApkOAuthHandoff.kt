@@ -10,14 +10,14 @@ import my.id.deng.monitor.data.SessionStore
 
 const val APK_AUTH_LOG_TAG = "DengApkAuth"
 const val APK_AUTH_HANDOFF_MARKER = "APK_DISCORD_AUTH_HANDOFF_COMPLETION_FIX_2026_06_14"
+const val APK_MOBILE_AUTH_MARKER = "APK_MOBILE_AUTH_WEBVIEW_BOOTSTRAP_2026_06_15"
 
 sealed class ApkOAuthHandoffResult {
     data class Ready(val bridgeUrl: String) : ApkOAuthHandoffResult()
     data class Failed(val reason: String) : ApkOAuthHandoffResult()
 }
 
-fun extractApkOAuthCode(uri: Uri?, publicWebHost: String): String? {
-    if (uri == null) return null
+private fun matchesApkCallbackUri(uri: Uri, publicWebHost: String): Boolean {
     val scheme = uri.scheme?.lowercase().orEmpty()
     val host = uri.host?.lowercase().orEmpty()
     val path = uri.path.orEmpty()
@@ -27,8 +27,36 @@ fun extractApkOAuthCode(uri: Uri?, publicWebHost: String): String? {
     val matchesHttpsHandoff = (scheme == "http" || scheme == "https")
         && host == publicWebHost.lowercase()
         && path.startsWith("/auth/apk-open")
-    if (!matchesCustomScheme && !matchesHttpsHandoff) return null
+    return matchesCustomScheme || matchesHttpsHandoff
+}
+
+fun extractApkOAuthCode(uri: Uri?, publicWebHost: String): String? {
+    if (uri == null || !matchesApkCallbackUri(uri, publicWebHost)) return null
     return uri.getQueryParameter("code")?.trim()?.takeIf { it.isNotBlank() }
+}
+
+/** The transaction state nonce that binds a consume code to its mobile-auth transaction. */
+fun extractApkOAuthState(uri: Uri?, publicWebHost: String): String? {
+    if (uri == null || !matchesApkCallbackUri(uri, publicWebHost)) return null
+    return uri.getQueryParameter("state")?.trim()?.takeIf { it.isNotBlank() }
+}
+
+private fun encode(value: String): String =
+    java.net.URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
+
+/**
+ * Build the first-party WebView session-bootstrap URL. Loading this in the
+ * WebView lets aio.deng.my.id set the real `deng_sid` cookie via its own HTTP
+ * response (303 -> target), instead of the app injecting a cookie natively.
+ */
+fun buildMobileConsumeUrl(
+    publicWebUrl: String,
+    code: String,
+    state: String,
+    target: String = "/tracker",
+): String {
+    val base = publicWebUrl.trimEnd('/')
+    return "$base/mobile-auth/consume?code=${encode(code)}&state=${encode(state)}&target=${encode(target)}"
 }
 
 fun mapApkHandoffFailure(err: Throwable): String = when (err) {
@@ -44,7 +72,33 @@ fun mapApkHandoffFailure(err: Throwable): String = when (err) {
     else -> "handoff_error"
 }
 
+/**
+ * Resolve the WebView bootstrap URL from a Discord deep-link callback.
+ *
+ * New first-party lane: when the callback carries a transaction `state`, build
+ * the /mobile-auth/consume URL directly — the WebView loads it and the backend
+ * sets the session cookie on its own 303 response (no native cookie injection,
+ * no native token exchange). Falls back to the legacy exchange+bootstrap lane
+ * for older backends that do not return a state.
+ */
 suspend fun completeApkOAuthFromDeepLink(
+    api: MonitorApi,
+    sessionStore: SessionStore,
+    code: String,
+    state: String,
+): ApkOAuthHandoffResult {
+    if (state.isNotBlank()) {
+        val consumeUrl = buildMobileConsumeUrl(BuildConfig.PUBLIC_WEB_URL, code, state)
+        Log.i(
+            APK_AUTH_LOG_TAG,
+            "APK_AUTH_MOBILE_CONSUME_READY marker=$APK_MOBILE_AUTH_MARKER codeLen=${code.length}",
+        )
+        return ApkOAuthHandoffResult.Ready(consumeUrl)
+    }
+    return completeApkOAuthLegacy(api, sessionStore, code)
+}
+
+private suspend fun completeApkOAuthLegacy(
     api: MonitorApi,
     sessionStore: SessionStore,
     code: String,
@@ -90,14 +144,20 @@ suspend fun verifyApkWebSession(api: MonitorApi, publicWebUrl: String): Boolean 
         Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_FAIL_STAGE=web_bridge_cookie_missing")
         return false
     }
-    val probe = api.aioWebSession(publicWebUrl)
-    if (!probe.ok || !probe.authenticated) {
+    // Authoritative first-party identity check inside the WebView cookie jar.
+    val me = try {
+        api.aioAuthMe(publicWebUrl)
+    } catch (err: Exception) {
+        Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_FAIL_STAGE=auth_me_error err=${err.message}")
+        null
+    }
+    if (me == null || !me.ok || !me.authenticated) {
         Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_FAIL_STAGE=web_session_not_authenticated")
         return false
     }
     Log.i(
         APK_AUTH_LOG_TAG,
-        "APK_AUTH_WEB_SESSION_OK marker=${probe.handoffMarker ?: APK_AUTH_HANDOFF_MARKER} discordUserId=${probe.discordUserId ?: "?"}",
+        "APK_AUTH_WEB_SESSION_OK marker=$APK_MOBILE_AUTH_MARKER discordUserId=${me.user?.discordUserId ?: "?"}",
     )
     return true
 }

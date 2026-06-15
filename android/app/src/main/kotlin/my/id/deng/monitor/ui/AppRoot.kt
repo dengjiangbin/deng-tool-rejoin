@@ -52,6 +52,7 @@ fun AppRoot(
     onBootstrapFailure: (String) -> Unit,
     onClearAuthError: () -> Unit,
     onOAuthFlowStarted: () -> Unit = {},
+    onResolveOAuthStartUrl: suspend () -> String = { "" },
 ) {
     when {
         !bootstrapBridgeUrl.isNullOrBlank() -> {
@@ -69,6 +70,7 @@ fun AppRoot(
                 authError = authError,
                 onClearAuthError = onClearAuthError,
                 onOAuthFlowStarted = onOAuthFlowStarted,
+                onResolveOAuthStartUrl = onResolveOAuthStartUrl,
             )
         }
         else -> AuthenticatedAppShell(api = api, sessionStore = sessionStore, appPreferences = appPreferences)

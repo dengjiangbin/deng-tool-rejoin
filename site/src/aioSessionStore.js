@@ -34,8 +34,14 @@ const LOGIN_CODE_TTL_SEC = Number(process.env.DENG_AIO_LOGIN_CODE_TTL_SEC || 120
 const SESSION_TTL_SEC = Number(process.env.DENG_AIO_SESSION_TTL_SEC || 30 * 24 * 60 * 60);
 const MAX_SESSIONS = Number(process.env.DENG_AIO_MAX_SESSIONS || 5000);
 
+// Mobile-auth transaction: window for the user to finish Discord OAuth.
+const MOBILE_TXN_TTL_SEC = Number(process.env.DENG_AIO_MOBILE_TXN_TTL_SEC || 15 * 60);
+// Mobile-auth one-time consume code (loaded by the WebView /mobile-auth/consume).
+const MOBILE_CODE_TTL_SEC = Number(process.env.DENG_AIO_MOBILE_CODE_TTL_SEC || 120);
+const MAX_MOBILE_TXNS = Number(process.env.DENG_AIO_MAX_MOBILE_TXNS || 5000);
+
 function _defaultFile() {
-  return { updatedAt: null, codes: {}, sessions: {}, acks: {} };
+  return { updatedAt: null, codes: {}, sessions: {}, acks: {}, txns: {} };
 }
 
 let state = _defaultFile();
@@ -73,6 +79,7 @@ function _load() {
       codes: parsed.codes && typeof parsed.codes === 'object' ? parsed.codes : {},
       sessions: parsed.sessions && typeof parsed.sessions === 'object' ? parsed.sessions : {},
       acks: parsed.acks && typeof parsed.acks === 'object' ? parsed.acks : {},
+      txns: parsed.txns && typeof parsed.txns === 'object' ? parsed.txns : {},
     };
   } catch {
     state = _defaultFile();
@@ -108,6 +115,12 @@ function _pruneExpired() {
       changed = true;
     }
   }
+  for (const [k, v] of Object.entries(state.txns)) {
+    if (!v || (v.expiresAtMs && v.expiresAtMs < t)) {
+      delete state.txns[k];
+      changed = true;
+    }
+  }
   // Bound session table size (drop oldest by lastUsed/created).
   const sessionKeys = Object.keys(state.sessions);
   if (sessionKeys.length > MAX_SESSIONS) {
@@ -117,7 +130,37 @@ function _pruneExpired() {
       .slice(0, sessionKeys.length - MAX_SESSIONS)
       .forEach(({ k }) => { delete state.sessions[k]; changed = true; });
   }
+  // Bound transaction table size (drop oldest by created).
+  const txnKeys = Object.keys(state.txns);
+  if (txnKeys.length > MAX_MOBILE_TXNS) {
+    txnKeys
+      .map((k) => ({ k, ts: state.txns[k].createdAtMs || 0 }))
+      .sort((a, b) => a.ts - b.ts)
+      .slice(0, txnKeys.length - MAX_MOBILE_TXNS)
+      .forEach(({ k }) => { delete state.txns[k]; changed = true; });
+  }
   return changed;
+}
+
+/**
+ * Sanitize a post-login target path. Only same-origin app paths are allowed;
+ * /login and /auth/* are rejected to avoid loops/open-redirects. Defaults to
+ * the Live Tracker, which is the required mobile landing page.
+ */
+function _safeTarget(target) {
+  const t = String(target || '').trim();
+  if (t.startsWith('/') && !t.startsWith('//') && !t.startsWith('/login') && !t.startsWith('/auth/')) {
+    return t;
+  }
+  return '/tracker';
+}
+
+function randomTransactionId() {
+  return crypto.randomBytes(18).toString('base64url');
+}
+
+function randomMobileState() {
+  return crypto.randomBytes(24).toString('base64url');
 }
 
 function _normalizeUser(user) {
@@ -252,6 +295,141 @@ function getAck(discordUserId, dataset) {
   return (state.acks[uid] && state.acks[uid][String(dataset)]) || null;
 }
 
+/**
+ * Mobile-auth transaction (WebView first-party session bootstrap).
+ *
+ * Flow: APK POST /api/aio/mobile-auth/start -> {transactionId, state, authUrl}.
+ * The transactionId is threaded through the Discord OAuth `state` round-trip so
+ * the callback can bind the resolved Discord user back to this transaction. The
+ * APK then either receives the consume code via deep link OR polls status; both
+ * yield a /mobile-auth/consume URL that the WebView loads first-party to receive
+ * the real `deng_sid` Set-Cookie. The transaction `state` nonce is validated on
+ * every consume/status call so a leaked code alone cannot redeem a session.
+ */
+function createMobileAuthTransaction({ target } = {}) {
+  _load();
+  const transactionId = randomTransactionId();
+  const mobileState = randomMobileState();
+  state.txns[transactionId] = {
+    mobileState,
+    target: _safeTarget(target),
+    status: 'pending',
+    code: null,
+    user: null,
+    createdAtMs: nowMs(),
+    expiresAtMs: nowMs() + MOBILE_TXN_TTL_SEC * 1000,
+    authenticatedAtMs: null,
+    codeExpiresAtMs: null,
+    consumedAtMs: null,
+  };
+  _pruneExpired();
+  _persist();
+  return {
+    transactionId,
+    state: mobileState,
+    target: state.txns[transactionId].target,
+    expiresInSeconds: MOBILE_TXN_TTL_SEC,
+  };
+}
+
+function _liveTxn(transactionId) {
+  if (!transactionId) return null;
+  const row = state.txns[transactionId];
+  if (!row) return null;
+  if (row.expiresAtMs && row.expiresAtMs < nowMs()) {
+    delete state.txns[transactionId];
+    _persist();
+    return null;
+  }
+  return row;
+}
+
+/**
+ * Bind a resolved Discord user to a pending transaction and mint a single-use
+ * consume code. Called by the Discord OAuth callback. Returns the plaintext
+ * code + bound state/target, or null if the transaction is missing/expired.
+ */
+function authenticateMobileAuthTransaction(transactionId, user) {
+  _load();
+  const row = _liveTxn(transactionId);
+  if (!row) return null;
+  const code = randomLoginCode();
+  row.code = code;
+  row.user = _normalizeUser(user);
+  row.status = 'authenticated';
+  row.authenticatedAtMs = nowMs();
+  row.codeExpiresAtMs = nowMs() + MOBILE_CODE_TTL_SEC * 1000;
+  row.consumedAtMs = null;
+  _persist();
+  return {
+    code,
+    state: row.mobileState,
+    target: row.target,
+    expiresInSeconds: MOBILE_CODE_TTL_SEC,
+  };
+}
+
+/**
+ * Poll a transaction. `providedState` must match the transaction state nonce.
+ * Returns { status, code?, state?, target? }. The plaintext consume code is
+ * only exposed while the code is unconsumed and unexpired.
+ */
+function getMobileAuthStatus(transactionId, providedState) {
+  _load();
+  const row = _liveTxn(transactionId);
+  if (!row) return { status: 'not_found' };
+  if (!providedState || providedState !== row.mobileState) return { status: 'state_invalid' };
+  if (row.consumedAtMs) return { status: 'consumed', target: row.target };
+  const codeLive = row.code && (!row.codeExpiresAtMs || row.codeExpiresAtMs >= nowMs());
+  if (row.status === 'authenticated' && codeLive) {
+    return { status: 'authenticated', code: row.code, state: row.mobileState, target: row.target };
+  }
+  if (row.status === 'authenticated' && !codeLive) {
+    return { status: 'expired', target: row.target };
+  }
+  return { status: 'pending', target: row.target };
+}
+
+/**
+ * Redeem a one-time consume code. Validates the bound state nonce and
+ * single-use/expiry. Returns the bound user + target once, then invalidates
+ * the code. Returns { ok:false, reason } on any failure.
+ */
+function consumeMobileAuthCode(code, providedState) {
+  _load();
+  if (!code) return { ok: false, reason: 'missing_code' };
+  const entry = Object.entries(state.txns).find(
+    ([, r]) => r && r.code && r.code === String(code),
+  );
+  if (!entry) return { ok: false, reason: 'invalid_or_used' };
+  const [txnId, row] = entry;
+  if (row.consumedAtMs) return { ok: false, reason: 'already_used' };
+  if (row.codeExpiresAtMs && row.codeExpiresAtMs < nowMs()) {
+    row.code = null;
+    row.status = 'expired';
+    _persist();
+    return { ok: false, reason: 'expired' };
+  }
+  if (!providedState || providedState !== row.mobileState) {
+    return { ok: false, reason: 'state_invalid' };
+  }
+  row.consumedAtMs = nowMs();
+  row.status = 'consumed';
+  row.code = null;
+  _persist();
+  return {
+    ok: true,
+    transactionId: txnId,
+    target: _safeTarget(row.target),
+    user: {
+      discordUserId: row.user && row.user.discordUserId,
+      siteUserId: row.user && row.user.siteUserId,
+      username: row.user && row.user.username,
+      avatar: row.user && row.user.avatar,
+    },
+  };
+}
+
 function _reset() {
   state = _defaultFile();
   loaded = true;
@@ -261,11 +439,17 @@ module.exports = {
   STORE_PATH,
   LOGIN_CODE_TTL_SEC,
   SESSION_TTL_SEC,
+  MOBILE_TXN_TTL_SEC,
+  MOBILE_CODE_TTL_SEC,
   createLoginCode,
   consumeLoginCode,
   createSession,
   resolveSession,
   revokeSession,
+  createMobileAuthTransaction,
+  authenticateMobileAuthTransaction,
+  getMobileAuthStatus,
+  consumeMobileAuthCode,
   setAck,
   getAck,
   sha256,

@@ -179,12 +179,13 @@ function aioRedirectUri() {
   return aioApkOAuthCallbackUri();
 }
 
-function buildAioAuthUrl(req) {
+function buildAioAuthUrl(req, opts = {}) {
   return buildDiscordAuthUrl(req, {
-    authReturnTo: '/tracker',
+    authReturnTo: opts.target || '/tracker',
     returnPublicUrl: publicBaseUrl(),
     oauthApkReturn: true,
     callbackUri: aioRedirectUri(),
+    mobileTransactionId: opts.mobileTransactionId || null,
   });
 }
 
@@ -211,6 +212,80 @@ router.get('/api/aio/auth/start', aioAuthLimiter, (req, res) => {
     console.error('[aio] auth start failed:', err && err.message ? err.message : err);
     return res.status(500).send('Discord sign-in is not configured.');
   }
+});
+
+/**
+ * Mobile-auth start — create a transaction and return the Discord OAuth URL
+ * plus the {transactionId, state} the APK threads through deep-link/polling.
+ * Default post-login target is Live Tracker.
+ */
+router.post('/api/aio/mobile-auth/start', aioAuthLimiter, (req, res) => {
+  const body = req.body || {};
+  const rawTarget = typeof body.target === 'string' ? body.target : '/tracker';
+  try {
+    const txn = aioSessionStore.createMobileAuthTransaction({ target: rawTarget });
+    const authUrl = buildAioAuthUrl(req, {
+      mobileTransactionId: txn.transactionId,
+      target: txn.target,
+    });
+    console.log('[aio] APK_AUTH_MOBILE_START txn=%s target=%s', String(txn.transactionId).slice(0, 8), txn.target);
+    res.set('Cache-Control', 'no-store');
+    return res.json({
+      ok: true,
+      transactionId: txn.transactionId,
+      state: txn.state,
+      target: txn.target,
+      authUrl,
+      expiresInSeconds: txn.expiresInSeconds,
+    });
+  } catch (err) {
+    console.error('[aio] APK_AUTH_FAIL_STAGE=mobile_start_failed error=%s', err && err.message ? err.message : err);
+    return res.status(500).json({ ok: false, error: 'mobile_start_failed' });
+  }
+});
+
+/**
+ * Mobile-auth status — APK polling fallback when deep-link delivery is
+ * unreliable. When the transaction is authenticated it returns the first-party
+ * /mobile-auth/consume URL the WebView must load. State nonce is required.
+ */
+router.get('/api/aio/mobile-auth/status', aioAuthLimiter, (req, res) => {
+  const transactionId = typeof req.query.transactionId === 'string' ? req.query.transactionId.trim() : '';
+  const stateNonce = typeof req.query.state === 'string' ? req.query.state.trim() : '';
+  res.set('Cache-Control', 'no-store');
+  if (!transactionId || !stateNonce) {
+    return res.status(400).json({ ok: false, status: 'bad_request' });
+  }
+  const st = aioSessionStore.getMobileAuthStatus(transactionId, stateNonce);
+  if (st.status === 'authenticated' && st.code) {
+    const base = publicBaseUrl();
+    const consumeUrl = `${base}/mobile-auth/consume?code=${encodeURIComponent(st.code)}`
+      + `&state=${encodeURIComponent(st.state)}&target=${encodeURIComponent(st.target || '/tracker')}`;
+    return res.json({ ok: true, status: 'complete', consumeUrl, target: st.target || '/tracker' });
+  }
+  return res.json({ ok: true, status: st.status, target: st.target || null });
+});
+
+/**
+ * Cookie-session identity probe used by the WebView after /mobile-auth/consume.
+ * Returns the authenticated user from the first-party web session (no bearer).
+ */
+router.get('/api/aio/auth/me', (req, res) => {
+  const sessionUser = req.session && req.session.user ? req.session.user : null;
+  res.set('Cache-Control', 'no-store');
+  if (!sessionUser) {
+    return res.status(401).json({ ok: false, authenticated: false });
+  }
+  return res.json({
+    ok: true,
+    authenticated: true,
+    user: {
+      discordUserId: sessionUser.discord_user_id || req.session?.discord_user_id || null,
+      siteUserId: sessionUser.id || req.session?.site_user_id || null,
+      username: sessionUser.username || null,
+      avatar: sessionUser.discord_avatar || null,
+    },
+  });
 });
 
 // OAuth callback is handled by oauthRoutes (shared handler at /api/aio/auth/callback).

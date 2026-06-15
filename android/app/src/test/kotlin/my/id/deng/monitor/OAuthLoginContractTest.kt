@@ -15,7 +15,7 @@ class OAuthLoginContractTest {
     }
 
     private val src = "src/main/kotlin/my/id/deng/monitor"
-    private val marker = "APK_DISCORD_AUTH_HANDOFF_COMPLETION_FIX_2026_06_14"
+    private val marker = "APK_MOBILE_AUTH_WEBVIEW_BOOTSTRAP_2026_06_15"
 
     @Test
     fun `LoginWebViewScreen opens external browser for Discord OAuth`() {
@@ -57,12 +57,28 @@ class OAuthLoginContractTest {
     }
 
     @Test
-    fun `MainActivity handles deng-aio deep link callback and bootstrap state`() {
+    fun `MainActivity handles deep link callback and mobile-auth transaction`() {
         val main = read("$src/MainActivity.kt")
         assertTrue(main.contains("captureOAuthDeepLink"))
         assertTrue(main.contains("completeApkOAuthFromDeepLink"))
         assertTrue(main.contains("bootstrapBridgeUrl"))
-        assertTrue(main.contains("DENG_AIO_APP_SCHEME"))
+        // New first-party mobile-auth lane: starts a transaction, captures the
+        // state nonce from the deep link, and polls status as a fallback.
+        assertTrue(main.contains("extractApkOAuthState"))
+        assertTrue(main.contains("mobileAuthStart"))
+        assertTrue(main.contains("startStatusPolling"))
+    }
+
+    @Test
+    fun `ApkOAuthHandoff builds first-party consume URL from code and state`() {
+        val handoff = read("$src/ui/ApkOAuthHandoff.kt")
+        assertTrue(handoff.contains("fun buildMobileConsumeUrl"))
+        assertTrue(handoff.contains("/mobile-auth/consume"))
+        assertTrue(handoff.contains("extractApkOAuthState"))
+        // The deep-link completer takes a state nonce and verifies via auth/me.
+        assertTrue(handoff.contains("code: String,\n    state: String,"))
+        assertTrue(handoff.contains("aioAuthMe"))
+        assertTrue(handoff.contains(marker))
     }
 
     @Test

@@ -23,12 +23,14 @@ const oauthStateStore = require('./oauthStateStore');
 const aioSessionStore = require('./aioSessionStore');
 
 /** APK handoff page — intent:// only for auto-open (avoid double custom-scheme + intent race). */
-function renderApkOpenHandoffHtml(loginCode) {
+function renderApkOpenHandoffHtml(loginCode, mobileState) {
   const code = String(loginCode || '').trim();
+  const stateNonce = String(mobileState || '').trim();
   const scheme = (process.env.DENG_AIO_APP_SCHEME || 'deng-aio').trim();
   const pkg = String(process.env.APK_ANDROID_PACKAGE || 'my.id.deng.monitor').trim();
   const publicBase = canonicalPublicUrl() || 'https://aio.deng.my.id';
-  const query = `?code=${encodeURIComponent(code)}`;
+  const stateQuery = stateNonce ? `&state=${encodeURIComponent(stateNonce)}` : '';
+  const query = `?code=${encodeURIComponent(code)}${stateQuery}`;
   const deepLink = `${scheme}://auth/callback${query}`;
   const manualPage = `${publicBase}/auth/apk-open${query}&manual=1`;
   const intentUrl = `intent://auth/callback${query}#Intent;scheme=${scheme};package=${pkg};S.browser_fallback_url=${encodeURIComponent(manualPage)};end`;
@@ -227,14 +229,39 @@ async function handleDiscordOAuthCallback(req, res) {
 
   if (oauthApkReturn) {
     try {
-      const { code: loginCode } = aioSessionStore.createLoginCode({
+      const mobileTransactionId = stored.mobileTransactionId || null;
+      const userForCode = {
         discordUserId: discordUser.id,
         siteUserId: siteUser && siteUser.id ? siteUser.id : null,
         username: sessionUser.username || discordUser.username || null,
         avatar: discordUser.avatar || null,
-      });
+      };
       const scheme = (process.env.DENG_AIO_APP_SCHEME || 'deng-aio').trim();
       const publicBase = canonicalPublicUrl() || oauthLoginRedirectHost(req) || '';
+
+      // New first-party WebView bootstrap lane: bind the resolved user to the
+      // mobile-auth transaction, mint a single-use consume code + state nonce,
+      // and hand them to the APK (deep link now, polling as fallback). The APK
+      // loads /mobile-auth/consume?code&state INSIDE the WebView so the real
+      // session cookie is set by a first-party aio.deng.my.id response.
+      if (mobileTransactionId) {
+        const bound = aioSessionStore.authenticateMobileAuthTransaction(mobileTransactionId, userForCode);
+        if (!bound || !bound.code) {
+          console.warn('[discord-oauth-callback] APK_AUTH_FAIL reason=txn_expired route=%s', routePath);
+          safeFlash(req, 'error', 'Sign-in link expired. Please try Discord login again.');
+          return res.redirect(loginRedirect(req));
+        }
+        const handoffPath = `/auth/apk-open?code=${encodeURIComponent(bound.code)}&state=${encodeURIComponent(bound.state)}`;
+        const handoffUrl = publicBase ? `${publicBase}${handoffPath}` : handoffPath;
+        console.log('[discord-oauth-callback] APK_AUTH_MOBILE_TXN_BOUND route=%s txn=%s ms=%d', routePath, String(mobileTransactionId).slice(0, 8), Date.now() - started);
+        console.log('[discord-oauth-callback] category=mobile_consume_handoff_created route=%s', routePath);
+        res.set('Cache-Control', 'no-store');
+        return res.redirect(302, handoffUrl);
+      }
+
+      // Legacy lane (older APK builds with no transaction): mint a login code
+      // for the native exchange + web-bridge handoff.
+      const { code: loginCode } = aioSessionStore.createLoginCode(userForCode);
       const handoffPath = `/auth/apk-open?code=${encodeURIComponent(loginCode)}`;
       const handoffUrl = publicBase ? `${publicBase}${handoffPath}` : handoffPath;
       console.log('[discord-oauth-callback] APK_AUTH_HANDOFF_CREATED route=%s scheme=%s ms=%d', routePath, scheme, Date.now() - started);

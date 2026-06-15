@@ -123,6 +123,39 @@ data class AioWebBootstrapResponse(
 )
 
 @Serializable
+data class AioMobileAuthStartResponse(
+    val ok: Boolean = false,
+    @SerialName("transactionId") val transactionId: String = "",
+    val state: String = "",
+    val target: String? = null,
+    @SerialName("authUrl") val authUrl: String = "",
+    @SerialName("expiresInSeconds") val expiresInSeconds: Int = 0,
+)
+
+@Serializable
+data class AioMobileAuthStatusResponse(
+    val ok: Boolean = false,
+    val status: String = "",
+    @SerialName("consumeUrl") val consumeUrl: String? = null,
+    val target: String? = null,
+)
+
+@Serializable
+data class AioAuthMeResponse(
+    val ok: Boolean = false,
+    val authenticated: Boolean = false,
+    val user: AioAuthMeUser? = null,
+)
+
+@Serializable
+data class AioAuthMeUser(
+    @SerialName("discordUserId") val discordUserId: String? = null,
+    @SerialName("siteUserId") val siteUserId: String? = null,
+    val username: String? = null,
+    val avatar: String? = null,
+)
+
+@Serializable
 data class AioWebSessionResponse(
     val ok: Boolean = false,
     val authenticated: Boolean = false,
