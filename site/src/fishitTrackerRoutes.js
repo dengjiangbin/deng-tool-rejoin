@@ -3642,6 +3642,22 @@ router.post('/api/inventory/accounts', inventoryWriteLimiter, inventoryAccountsJ
   }
 });
 
+router.delete('/api/inventory/accounts', inventoryWriteLimiter, requireInventoryApiAuth, requireInventoryApiCsrf, async (req, res) => {
+  try {
+    const result = await inventoryTrackedAccounts.removeAllTrackedAccounts(
+      req.inventoryOwnerDiscordId,
+    );
+    return res.status(200).json({ ok: true, ...result });
+  } catch (err) {
+    if (err && err.code === 'invalid_account') {
+      return res.status(400).json({ ok: false, error: 'invalid_account', message: 'Invalid account owner.' });
+    }
+    console.error('[inventory-accounts] delete-all failed:', err && err.message ? err.message : err);
+    const fail = inventoryAccountsErrorResponse(err, 'Could not remove all tracked accounts.');
+    return res.status(fail.status).json(fail.body);
+  }
+});
+
 router.delete('/api/inventory/accounts/:usernameKey', inventoryWriteLimiter, requireInventoryApiAuth, requireInventoryApiCsrf, async (req, res) => {
   try {
     const result = await inventoryTrackedAccounts.removeTrackedAccount(

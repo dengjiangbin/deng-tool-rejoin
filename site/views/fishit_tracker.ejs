@@ -174,6 +174,10 @@
         <div class="stat-card__label">Forgotten Fish</div>
         <div class="stat-card__value js-count-up" id="statForgottenFish" data-count-format="integer" data-count-duration="1200">0</div>
       </div>
+      <div class="stat-card stat-card--ruby">
+        <div class="stat-card__label"><span class="stat-card__icon stat-card__icon--ruby" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 3h10l4 6-9 12L3 9l4-6zm.7 2L5.3 8.3h13.4L16.3 5H7.7zM5.6 10l6.4 8.6L18.4 10H5.6z"/></svg></span>Ruby Gemstone</div>
+        <div class="stat-card__value js-count-up" id="statRubyGemstone" data-count-format="integer" data-count-duration="1200">0</div>
+      </div>
     </div>
 
     <div class="player-control-bar">
@@ -204,6 +208,18 @@
         <div class="modal-actions">
           <button type="button" class="btn-modal-cancel" id="multipleAddCancel">Cancel</button>
           <button type="button" class="btn-modal-submit" id="multipleAddSubmit">Add Accounts</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="removeAllModal" class="modal-overlay" hidden aria-hidden="true">
+      <div class="modal-dialog" role="dialog" aria-labelledby="removeAllModalTitle" aria-modal="true">
+        <h2 id="removeAllModalTitle" class="modal-title">Remove all usernames?</h2>
+        <p class="modal-helper">This will remove every username from your tracker list. This will not delete your Discord account.</p>
+        <p class="modal-error" id="removeAllError" role="alert" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="btn-modal-cancel" id="removeAllCancel">Cancel</button>
+          <button type="button" class="btn-modal-submit btn-modal-submit--danger" id="removeAllConfirm">Remove All</button>
         </div>
       </div>
     </div>

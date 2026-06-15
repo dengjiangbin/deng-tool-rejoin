@@ -333,6 +333,51 @@ async function removeTrackedAccount(discordUserId, usernameKey) {
   return { ok: true, accounts: await listTrackedAccounts(ownerId), storage: 'supabase' };
 }
 
+/**
+ * Remove EVERY tracked Roblox username for one Discord owner. Scoped strictly to
+ * the owner's inventory_tracked_accounts rows — it never touches the Discord
+ * account/user record or any unrelated data. Returns the (now empty) list.
+ */
+async function removeAllTrackedAccounts(discordUserId) {
+  const ownerId = normalizeDiscordUserId(discordUserId);
+  if (!ownerId) {
+    const err = new Error('invalid_account');
+    err.code = 'invalid_account';
+    throw err;
+  }
+
+  if (useMemoryStore()) {
+    const bucket = memoryBucket(ownerId);
+    const removed = bucket.size;
+    bucket.clear();
+    return { ok: true, removed, accounts: [], storage: 'memory' };
+  }
+
+  if (activeStorage() === 'file') {
+    const store = loadFileStoreRaw();
+    const bucket = fileBucket(store, ownerId);
+    const removed = Object.keys(bucket).length;
+    store[ownerId] = {};
+    saveFileStoreRaw(store);
+    return { ok: true, removed, accounts: [], storage: 'file' };
+  }
+
+  const { data, error } = await supabase
+    .from('inventory_tracked_accounts')
+    .delete()
+    .eq('discord_user_id', ownerId)
+    .select('id');
+  if (error) {
+    if (shouldUseFileStoreFallback(error)) {
+      activateFileStore('delete_all_failed', error);
+      return removeAllTrackedAccounts(ownerId);
+    }
+    throw new Error(supabaseErrorText(error) || 'delete_all_failed');
+  }
+  storageMode = 'supabase';
+  return { ok: true, removed: Array.isArray(data) ? data.length : 0, accounts: [], storage: 'supabase' };
+}
+
 async function migrateTrackedAccounts(discordUserId, usernames, opts = {}) {
   return addTrackedAccounts(discordUserId, usernames, opts);
 }
@@ -398,6 +443,7 @@ module.exports = {
   listTrackedAccounts,
   addTrackedAccounts,
   removeTrackedAccount,
+  removeAllTrackedAccounts,
   migrateTrackedAccounts,
   countRegisteredTrackedUsernamesSync,
   resolveOwnerDiscordIdForUsernameSync,
