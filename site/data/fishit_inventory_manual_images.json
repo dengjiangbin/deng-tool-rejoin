@@ -51,11 +51,11 @@
       "itemId": null,
       "normalizedName": "runic stone",
       "originalName": "Runic Stone",
-      "uploadedFile": "runic_stone_2026_06_15.png",
-      "imageUrl": "/api/fishit-tracker/assets/manual/stones/runic_stone_2026_06_15.png",
+      "uploadedFile": "runic_stone_2026_06_15_v2.png",
+      "imageUrl": "/api/fishit-tracker/assets/manual/stones/runic_stone_2026_06_15_v2.png",
       "sha256": "a21dbe70e781910ee52b0953676fea831cbf51d45e0ad565de08e0da4562146d",
-      "uploadedAt": "2026-06-15T05:40:00.000Z",
-      "updatedAt": "2026-06-15T05:40:00.000Z"
+      "uploadedAt": "2026-06-15T09:10:00.000Z",
+      "updatedAt": "2026-06-15T09:10:00.000Z"
     }
   }
 }

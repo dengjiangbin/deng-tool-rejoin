@@ -134,22 +134,24 @@ describe('STRICT /tracker polish — remove all usernames (D)', () => {
 });
 
 describe('STRICT /tracker polish — clickable detail view (E/G)', () => {
-  test('compiled CSS has detail modal styling', () => {
+  test('compiled CSS has inline detail panel styling (modal removed)', () => {
     const css = readCss();
-    assert.match(css, /\.ft-detail-overlay/);
+    assert.match(css, /\.ft-detail-panel/);
     assert.match(css, /\.ft-detail-tag/);
     assert.match(css, /\.ft-detail-name/);
     assert.match(css, /\.ft-detail-owner/);
     assert.match(css, /\.ft-card--interactive/);
+    assert.doesNotMatch(css, /\.ft-detail-overlay/);
   });
 
-  test('compiled JS exposes detail open/build with mutation-above-name + clean name', () => {
+  test('compiled JS exposes inline detail open/build with mutation-above-name + clean name', () => {
     const js = readJs();
-    assert.match(js, /function openFtDetailModal/);
+    assert.match(js, /function openFtDetail\b/);
     assert.match(js, /function ftDetailMeta/);
     assert.match(js, /function ftCleanDetailName/);
     assert.match(js, /function attachFtCardItem/);
-    assert.match(js, /function bindFtDetailModal/);
+    assert.match(js, /function bindFtDetail\b/);
+    assert.doesNotMatch(js, /openFtDetailModal/);
   });
 
   test('detail owner rows sort by username ascending, case-insensitive', () => {

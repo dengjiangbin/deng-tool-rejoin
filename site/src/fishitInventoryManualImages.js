@@ -333,7 +333,10 @@ const SEED_FILE_BY_KEY = {
   // (2026-06-15). Keyed by name only so they match regardless of itemId.
   'totems||love totem': 'love_totem_2026_06_15.png',
   'totems||shiny totem': 'shiny_totem_2026_06_15.png',
-  'stones||runic stone': 'runic_stone_2026_06_15.png',
+  // v2: the original runic_stone_2026_06_15.png seed was a Roblox log
+  // screenshot. v2 is the correct uploaded Runic Stone art; the new filename
+  // forces a fresh copy into the served cache dir and busts client caches.
+  'stones||runic stone': 'runic_stone_2026_06_15_v2.png',
 };
 
 // Emit IMAGE_OVERRIDE_MATCH once per item-name per process so the override is
