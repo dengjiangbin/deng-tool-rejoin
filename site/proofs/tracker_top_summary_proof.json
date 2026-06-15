@@ -1,0 +1,106 @@
+{
+  "resolvedIcons": {
+    "online": {
+      "url": "/public/img/tracker/online_avatar.png",
+      "source": "user_uploaded_asset"
+    },
+    "evolved": {
+      "name": "Evolved Enchant Stone",
+      "filename": "stone_558_evolved.png",
+      "url": "/api/fishit-tracker/assets/stones/stone_558_evolved.png?v=1781002834229"
+    },
+    "secret": {
+      "name": "Ancient Lochness Monster",
+      "assetId": "122849883484708",
+      "url": "/api/fishit-tracker/assets/fish/91e1358b93bd8d98.png"
+    },
+    "forgotten": {
+      "name": "Cerulean Dragon",
+      "assetId": "134510300238125",
+      "url": "/api/fishit-tracker/assets/fish/a159de70c6ad8f23.png"
+    },
+    "ruby": {
+      "name": "Ruby",
+      "assetId": "91295888272023",
+      "url": "/api/fishit-tracker/assets/fish/d37e2459b06930b8.png"
+    }
+  },
+  "desktop": {
+    "cols": "469px 469px",
+    "cardCount": 5,
+    "images": [
+      {
+        "alt": "Online accounts",
+        "src": "/public/img/tracker/online_avatar.png",
+        "nw": 485,
+        "complete": true
+      },
+      {
+        "alt": "Evolved Enchant Stone",
+        "src": "/api/fishit-tracker/assets/stones/stone_558_evolved.png?v=1781002834229",
+        "nw": 420,
+        "complete": true
+      },
+      {
+        "alt": "Secret fish",
+        "src": "/api/fishit-tracker/assets/fish/91e1358b93bd8d98.png",
+        "nw": 150,
+        "complete": true
+      },
+      {
+        "alt": "Forgotten fish",
+        "src": "/api/fishit-tracker/assets/fish/a159de70c6ad8f23.png",
+        "nw": 150,
+        "complete": true
+      },
+      {
+        "alt": "Ruby",
+        "src": "/api/fishit-tracker/assets/fish/d37e2459b06930b8.png",
+        "nw": 150,
+        "complete": true
+      }
+    ],
+    "onlineColor": "rgb(98, 230, 138)"
+  },
+  "mobile": {
+    "cols": "370px",
+    "cardCount": 5,
+    "images": [
+      {
+        "alt": "Online accounts",
+        "src": "/public/img/tracker/online_avatar.png",
+        "nw": 485,
+        "complete": true
+      },
+      {
+        "alt": "Evolved Enchant Stone",
+        "src": "/api/fishit-tracker/assets/stones/stone_558_evolved.png?v=1781002834229",
+        "nw": 420,
+        "complete": true
+      },
+      {
+        "alt": "Secret fish",
+        "src": "/api/fishit-tracker/assets/fish/91e1358b93bd8d98.png",
+        "nw": 150,
+        "complete": true
+      },
+      {
+        "alt": "Forgotten fish",
+        "src": "/api/fishit-tracker/assets/fish/a159de70c6ad8f23.png",
+        "nw": 150,
+        "complete": true
+      },
+      {
+        "alt": "Ruby",
+        "src": "/api/fishit-tracker/assets/fish/d37e2459b06930b8.png",
+        "nw": 150,
+        "complete": true
+      }
+    ],
+    "onlineColor": "rgb(98, 230, 138)"
+  },
+  "files": {
+    "desktop": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\proofs\\tracker_top_summary_desktop_1280.png",
+    "mobile": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\site\\proofs\\tracker_top_summary_mobile_390.png"
+  }
+}

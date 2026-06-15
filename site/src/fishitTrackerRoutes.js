@@ -103,6 +103,7 @@ const {
 } = require('./fishitTrackerChannelEnforcement');
 const itemUtilityPublic = require('./fishitItemUtilityPublic');
 const gameItemDbPublic = require('./fishitGameItemDbPublic');
+const trackerTopSummaryIcons = require('./fishitTrackerTopSummaryIcons');
 const quizBotImageCatalog = require('./fishitQuizBotImageCatalog');
 const globalCatalogService = require('./fishitGlobalCatalogService');
 const globalDb = require('./fishitGlobalDb');
@@ -3044,12 +3045,23 @@ function buildTrackerPageLocals(req) {
   const sessionUser = session && session.user ? session.user : null;
   const viewer = buildInventoryViewer(sessionUser);
   const assetUrls = inventoryAssets.inventoryAssetUrls();
+  // Top summary card icons resolved from REAL DB assets only (no fallbacks).
+  let topSummaryIcons = { online: trackerTopSummaryIcons.ONLINE_AVATAR_URL, evolved: null, secret: null, forgotten: null, ruby: null };
+  try {
+    topSummaryIcons = trackerTopSummaryIcons.resolveTopSummaryIcons();
+    for (const [k, v] of Object.entries(topSummaryIcons)) {
+      if (k !== 'proof' && !v) console.error(`[fishit-tracker] top summary icon missing real DB asset: ${k}`);
+    }
+  } catch (err) {
+    console.error('[fishit-tracker] top summary icon resolve failed:', err && err.message ? err.message : err);
+  }
   const locals = {
     layout: false,
     title: 'Live Tracker — DENG All In One',
     renderBuild: PUBLIC_RENDER_BUILD,
     publicApiBuild: PUBLIC_API_BUILD,
     trackerUiDeployMarker: BLOCKER10ZB_LIVE_TRACKER_UI_DEPLOY_MARKER,
+    trackerTopSummaryIcons: topSummaryIcons,
     inventoryAssetCssUrl: assetUrls.cssUrl,
     inventoryAssetJsUrl: assetUrls.jsUrl,
     inventoryRuntimeConfig: {
