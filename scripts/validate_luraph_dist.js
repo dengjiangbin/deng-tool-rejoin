@@ -46,8 +46,19 @@ if (dist) {
   if (!audit.ok && !audit.missing) {
     errors.push(`secret audit failed: ${audit.hits.join(', ')}`);
   }
-  if (!dist.includes('BLOCKER10ZT5') && !dist.includes('BLOCKER10ZT4') && !dist.includes('BLOCKER10ZT3')) {
-    errors.push('dist header must contain BLOCKER10ZT5, BLOCKER10ZT4, or BLOCKER10ZT3 build marker');
+  let productionTrackerBuild = null;
+  try {
+    productionTrackerBuild = require('../site/src/fishitTrackerBuild').PRODUCTION_TRACKER_BUILD;
+  } catch (_) { productionTrackerBuild = null; }
+  const legacyMarkerOk = dist.includes('BLOCKER10ZT5')
+    || dist.includes('BLOCKER10ZT4')
+    || dist.includes('BLOCKER10ZT3');
+  const productionMarkerOk = !!productionTrackerBuild && dist.includes(productionTrackerBuild);
+  if (!legacyMarkerOk && !productionMarkerOk) {
+    errors.push(
+      `dist header must contain the current production build marker (${productionTrackerBuild || 'unknown'})`
+      + ' or a legacy BLOCKER10ZT3/ZT4/ZT5 marker',
+    );
   }
 }
 

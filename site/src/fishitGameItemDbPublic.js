@@ -151,7 +151,7 @@ function defaultSourceTruth() {
 function parseWeightKg(row) {
   if (!row || typeof row !== 'object') return null;
   const candidates = [
-    row.weightKg, row.weight, row.Weight, row.WeightKg,
+    row.weightKg, row.metadataWeightKg, row.weight, row.Weight, row.WeightKg,
     row.maxWeight, row.MaxWeight, row.kg, row.Kg,
   ];
   if (row.Metadata && typeof row.Metadata === 'object') {
@@ -178,7 +178,7 @@ function realInstanceMutation(row) {
   const md = (row.Metadata && typeof row.Metadata === 'object') ? row.Metadata : {};
   const fd = (row.FishData && typeof row.FishData === 'object') ? row.FishData : {};
   const candidates = [
-    row.mutation, row.Mutation,
+    row.mutationName, row.metadataMutation, row.mutation, row.Mutation,
     md.Mutation, md.mutation, md.MutationName, md.Modifier,
     fd.Mutation, (fd.Metadata && fd.Metadata.Mutation),
   ];
@@ -218,6 +218,8 @@ function normaliseUploadRow(row) {
     instanceMutation: realInstanceMutation(row)
       || (row.Metadata && row.Metadata.VariantId ? String(row.Metadata.VariantId).slice(0, 40) : null),
     weightKg: parseWeightKg(row),
+    mutationSourcePath: row.mutationSourcePath ? String(row.mutationSourcePath).slice(0, 64) : null,
+    weightSourcePath: row.weightSourcePath ? String(row.weightSourcePath).slice(0, 64) : null,
     source: PLAYERDATA_GAMEITEMDB_SOURCE,
     identityVerified: true,
     icon: iconFields.icon,
@@ -290,7 +292,10 @@ function fishInstanceFromNorm(norm) {
     uuid: norm.uuid || null,
     baseFishName: norm.baseFishName || norm.baseName || norm.name || null,
     mutation: norm.instanceMutation || null,
+    mutationName: norm.instanceMutation || null,
     weightKg: (norm.weightKg != null && Number(norm.weightKg) > 0) ? Number(norm.weightKg) : null,
+    mutationSourcePath: norm.mutationSourcePath || null,
+    weightSourcePath: norm.weightSourcePath || null,
     quantity: Math.max(1, Math.floor(Number(norm.quantity) || 1)),
   };
 }
@@ -440,11 +445,18 @@ function buildPublicOwnedInstances(cleaned) {
   const out = [];
   for (const inst of src) {
     if (out.length >= MAX_FISH_INSTANCES_PER_GROUP) break;
+    const mutation = inst.mutation || inst.mutationName || null;
+    const weightKg = (inst.weightKg != null && Number(inst.weightKg) > 0) ? Number(inst.weightKg) : null;
     out.push({
       uuid: inst.uuid || null,
       baseFishName: cleaned.baseFishName,
-      mutation: inst.mutation || null,
-      weightKg: (inst.weightKg != null && Number(inst.weightKg) > 0) ? Number(inst.weightKg) : null,
+      name: cleaned.baseFishName,
+      cleanName: cleaned.baseFishName,
+      mutation,
+      mutationName: mutation,
+      weightKg,
+      mutationSourcePath: inst.mutationSourcePath || null,
+      weightSourcePath: inst.weightSourcePath || null,
       quantity: Math.max(1, Math.floor(Number(inst.quantity) || 1)),
     });
   }

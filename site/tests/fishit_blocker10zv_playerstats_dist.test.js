@@ -7,16 +7,18 @@ const path = require('path');
 const { execFileSync } = require('node:child_process');
 const { resolveRawTrackerSourcePath } = require('../../scripts/trackerRawSourcePath');
 
+const { PRODUCTION_TRACKER_BUILD } = require('../src/fishitTrackerBuild');
+
 const ROOT = path.join(__dirname, '..', '..');
 const DIST_LUA = path.join(ROOT, 'dist', 'tracker.lua');
-const BUILD = 'BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10';
+const BUILD = PRODUCTION_TRACKER_BUILD;
 
 describe('BLOCKER10ZV playerStats in real tracker source and dist', () => {
   test('private raw source contains buildPlayerStatsPayload and always uploads playerStats', () => {
     const rawPath = resolveRawTrackerSourcePath({ root: ROOT });
     assert.ok(rawPath, 'private raw tracker source must exist for release');
     const raw = fs.readFileSync(rawPath, 'utf8');
-    assert.match(raw, /TRACKER_BUILD = "BLOCKER10ZT4_CONNECTION_FISH_PLAYERSTATS_PROOF_2026_06_10"/);
+    assert.match(raw, new RegExp(`TRACKER_BUILD = "${PRODUCTION_TRACKER_BUILD}"`));
     assert.match(raw, /buildPlayerStatsPayload/);
     assert.match(raw, /buildPlayerStatsDebugPayload/);
     assert.match(raw, /coinProbe/);

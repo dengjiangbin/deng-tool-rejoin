@@ -170,7 +170,7 @@ describe('public dist Lua marker + endpoints', () => {
     const m = d.match(/TRACKER_BUILD\s*=\s*"([^"]+)"/);
     assert.ok(m, 'TRACKER_BUILD present');
     assert.equal(m[1], PRODUCTION_TRACKER_BUILD);
-    assert.equal(PRODUCTION_TRACKER_BUILD, 'INVENTORY_SNAPSHOT_NIL_FIX_METADATA_SCAN_2026_06_15');
+    assert.equal(PRODUCTION_TRACKER_BUILD, 'METADATA_PROBE_DEEP_SCAN_2026_06_15');
   });
   test('compact fish upload emits per-instance mutation + weight', () => {
     const d = decoded();

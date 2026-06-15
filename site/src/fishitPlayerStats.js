@@ -1,11 +1,24 @@
 'use strict';
 
+let trackerBuildAllow = null;
+try {
+  // Auto-trust any build on the canonical tracker allowlist so leaderstats from
+  // the current/future public build are never rejected as "untrusted" (this
+  // gate silently dropped leaderstats when the build marker was bumped).
+  trackerBuildAllow = require('./fishitTrackerBuild');
+} catch (_) {
+  trackerBuildAllow = null;
+}
+
 const TRUSTED_PLAYERSTATS_BUILD_MARKS = [
   'UPLOAD_DEBUG_OFF',
   'UPLOAD_502_INTERVAL',
   'UPLOAD_STATUS_GRACE',
   'UPLOAD_INTERVAL_60S_AIO',
   'UPLOAD_COMPACT_FAST_PATH',
+  'INSTANCE_MUTATION_WEIGHT_DETAIL',
+  'INVENTORY_SNAPSHOT_NIL_FIX_METADATA_SCAN',
+  'METADATA_PROBE_DEEP_SCAN',
   'BLOCKER10ZT5',
   'BLOCKER10ZT4',
   'BLOCKER10ZT3',
@@ -240,7 +253,11 @@ function hasPlayerStatValues(stats) {
 function isTrustedPlayerStatsBuild(build) {
   if (typeof build !== 'string' || !build) return false;
   if (build.includes('LOADER_REGISTER_LIMIT_FIX')) return true;
-  return TRUSTED_PLAYERSTATS_BUILD_MARKS.some((mark) => build.includes(mark));
+  if (TRUSTED_PLAYERSTATS_BUILD_MARKS.some((mark) => build.includes(mark))) return true;
+  if (trackerBuildAllow && typeof trackerBuildAllow.isAllowedTrackerBuild === 'function') {
+    try { if (trackerBuildAllow.isAllowedTrackerBuild(build)) return true; } catch (_) { /* ignore */ }
+  }
+  return false;
 }
 
 function isTrustedPlayerStatsSource(source) {

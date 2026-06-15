@@ -31,6 +31,29 @@ function isProductionDebugUploadAllowed() {
   return v === '1' || v === 'true' || v === 'yes';
 }
 
+// Carry every per-instance mutation/weight alias the tracker may emit so the
+// production fast-path compactor NEVER strips the data the detail view needs.
+// (Root cause of "mutation/Weight unknown": this compactor previously dropped
+// mutation + weightKg for fish.)
+function carryMutationWeight(out, row) {
+  const mutation = row.mutation || row.Mutation || row.mutationName || row.metadataMutation;
+  if (mutation != null && String(mutation).trim() !== '' && String(mutation).trim() !== 'None') {
+    out.mutation = mutation;
+  }
+  if (row.mutationName != null && row.mutationName !== '') out.mutationName = row.mutationName;
+  if (row.metadataMutation != null && row.metadataMutation !== '') out.metadataMutation = row.metadataMutation;
+  if (row.mutationSourcePath) out.mutationSourcePath = row.mutationSourcePath;
+  const weightCandidates = [row.weightKg, row.metadataWeightKg, row.weight, row.Weight, row.WeightKg];
+  for (const w of weightCandidates) {
+    if (w == null) continue;
+    const n = typeof w === 'number' ? w : parseFloat(String(w).match(/[\d.]+/)?.[0] || '');
+    if (Number.isFinite(n) && n > 0) { out.weightKg = n; break; }
+  }
+  if (row.weight != null && row.weight !== '' && out.weight == null) out.weight = row.weight;
+  if (row.metadataWeightKg != null && out.metadataWeightKg == null) out.metadataWeightKg = row.metadataWeightKg;
+  if (row.weightSourcePath) out.weightSourcePath = row.weightSourcePath;
+}
+
 function compactInventoryRow(row, kind) {
   if (!row || typeof row !== 'object') return null;
   const qty = Number(row.quantity) > 0 ? Math.floor(Number(row.quantity)) : 1;
@@ -53,12 +76,14 @@ function compactInventoryRow(row, kind) {
     if (row.kind) out.kind = row.kind;
     if (row.type) out.type = row.type;
     if (row.identityVerified === true) out.identityVerified = true;
+    carryMutationWeight(out, row);
   } else if (kind === 'stone') {
     if (row.stoneType) out.stoneType = row.stoneType;
     if (row.icon) out.icon = row.icon;
     if (row.uuid) out.uuid = String(row.uuid);
     if (row.kind) out.kind = row.kind;
     if (row.identityVerified === true) out.identityVerified = true;
+    carryMutationWeight(out, row);
   } else if (kind === 'totem') {
     if (row.type) out.type = row.type;
     if (row.icon) out.icon = row.icon;
@@ -66,6 +91,7 @@ function compactInventoryRow(row, kind) {
     if (row.kind) out.kind = row.kind;
     if (row.resolveSource) out.resolveSource = row.resolveSource;
     if (row.identityVerified === true) out.identityVerified = true;
+    carryMutationWeight(out, row);
   }
   return out;
 }

@@ -22,7 +22,7 @@ const {
 
 describe('tracker build allowlist', () => {
   test('production build matches current public raw marker', () => {
-    assert.equal(PRODUCTION_TRACKER_BUILD, 'INVENTORY_SNAPSHOT_NIL_FIX_METADATA_SCAN_2026_06_15');
+    assert.equal(PRODUCTION_TRACKER_BUILD, 'METADATA_PROBE_DEEP_SCAN_2026_06_15');
     assert.equal(MINIMUM_TRACKER_BUILD, PRODUCTION_TRACKER_BUILD);
     assert.ok(ALLOWED_TRACKER_BUILD_EXACT.includes(PRODUCTION_TRACKER_BUILD));
     // Previous public builds stay accepted during client rollout.
