@@ -87,10 +87,16 @@ const cards = [
   { owner: 'denghub2', mutation: 'Shiny', name: 'King Crab', weight: '6 kg', imgSrc: img },
   { owner: 'denghub2', mutation: '', name: 'King Crab', weight: '5.2 kg', imgSrc: img },
   { owner: 'denghub2', mutation: '', name: 'King Crab', weight: '4.1 kg', imgSrc: img },
+  { owner: 'denghub2', mutation: '', name: 'King Crab', weight: '3.7 kg', imgSrc: img },
   { owner: 'denghub2', mutation: '', name: 'King Crab', weight: '', imgSrc: img },
 ];
 
-function panelHtml(list, query) {
+// Long-name fish to prove the widened cards no longer wrap badly (BLOCKER D).
+const elsharkCards = [
+  { owner: 'denghub2', mutation: 'Galaxy', name: 'Elshark Gran Maja', weight: '1980.1 kg', imgSrc: img },
+];
+
+function panelHtml(title, list, query) {
   const filtered = ftFilterInstanceCards(list, query);
   const body = filtered.length
     ? filtered.map(renderFishInstanceCard).join('')
@@ -99,9 +105,9 @@ function panelHtml(list, query) {
 <section class="ft-detail-panel">
   <div class="ft-detail-panel__head">
     <button type="button" class="ft-detail-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="15 18 9 12 15 6"></polyline></svg>Back</button>
-    <div class="ft-detail-icon">${img ? `<img src="${img}" alt="King Crab">` : '<span class="ft-detail-icon__fallback">&#x1F980;</span>'}</div>
+    <div class="ft-detail-icon">${img ? `<img src="${img}" alt="${escHtml(title)}">` : '<span class="ft-detail-icon__fallback">&#x1F980;</span>'}</div>
     <div class="ft-detail-headtext">
-      <div class="ft-detail-name">King Crab</div>
+      <div class="ft-detail-name">${escHtml(title)}</div>
       <div class="ft-detail-count">${list.length} fish</div>
     </div>
   </div>
@@ -131,27 +137,41 @@ const log = (m) => process.stdout.write(`[stage] ${m}\n`);
   });
   try {
     log('launched');
-    const context = await browser.newContext({ viewport: { width: 1100, height: 760 }, deviceScaleFactor: 2 });
+    const context = await browser.newContext({ viewport: { width: 1100, height: 800 }, deviceScaleFactor: 2 });
     const page = await context.newPage();
     page.setDefaultTimeout(15000);
     log('newPage');
 
-    await page.setContent(pageHtml(panelHtml(cards, '')), { waitUntil: 'domcontentloaded' });
-    log('setContent full');
+    await page.setContent(pageHtml(panelHtml('King Crab', cards, '')), { waitUntil: 'domcontentloaded' });
     const full = path.join(OUT_DIR, 'instance-detail-full.png');
     await page.screenshot({ path: full, fullPage: true });
-    log('screenshot full');
+    log('screenshot full (7 King Crab)');
 
-    await page.setContent(pageHtml(panelHtml(cards, 'Gold')), { waitUntil: 'domcontentloaded' });
+    await page.setContent(pageHtml(panelHtml('King Crab', cards, 'Gold')), { waitUntil: 'domcontentloaded' });
     const search = path.join(OUT_DIR, 'instance-detail-search-gold.png');
     await page.screenshot({ path: search, fullPage: true });
-    log('screenshot search');
+    log('screenshot search (Gold -> 2)');
+
+    await page.setContent(pageHtml(panelHtml('Elshark Gran Maja', elsharkCards, '')), { waitUntil: 'domcontentloaded' });
+    const elshark = path.join(OUT_DIR, 'instance-detail-elshark.png');
+    await page.screenshot({ path: elshark, fullPage: true });
+    log('screenshot elshark (long name)');
+
+    // Mobile width sanity (single column, long names readable).
+    const mobile = await context.newPage();
+    await mobile.setViewportSize({ width: 390, height: 760 });
+    await mobile.setContent(pageHtml(panelHtml('King Crab', cards, '')), { waitUntil: 'domcontentloaded' });
+    const mobilePng = path.join(OUT_DIR, 'instance-detail-mobile.png');
+    await mobile.screenshot({ path: mobilePng, fullPage: true });
+    log('screenshot mobile (390px)');
     clearTimeout(hardTimeout);
 
     console.log('INSTANCE_DETAIL_PROOF OK');
     console.log('  image_used:', picked.kind);
     console.log('  full:', full);
     console.log('  search:', search);
+    console.log('  elshark:', elshark);
+    console.log('  mobile:', mobilePng);
   } finally {
     await browser.close();
   }

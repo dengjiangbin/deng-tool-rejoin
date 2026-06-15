@@ -170,13 +170,30 @@ describe('public dist Lua marker + endpoints', () => {
     const m = d.match(/TRACKER_BUILD\s*=\s*"([^"]+)"/);
     assert.ok(m, 'TRACKER_BUILD present');
     assert.equal(m[1], PRODUCTION_TRACKER_BUILD);
-    assert.equal(PRODUCTION_TRACKER_BUILD, 'INSTANCE_MUTATION_WEIGHT_DETAIL_2026_06_15');
+    assert.equal(PRODUCTION_TRACKER_BUILD, 'INVENTORY_SNAPSHOT_NIL_FIX_METADATA_SCAN_2026_06_15');
   });
   test('compact fish upload emits per-instance mutation + weight', () => {
     const d = decoded();
     assert.ok(d.includes('out.weightKg = w'), 'weightKg emitted in compact fish row');
     assert.ok(d.includes('out.mutation = row.mutation'), 'mutation emitted in compact row');
     assert.ok(d.includes('LiveSafe.readItemWeightKg'), 'weight extraction helper present');
+  });
+  test('metadata scan is nil-safe (BLOCKER A: no bare parseWeight nil-call in readItemWeightKg)', () => {
+    const d = decoded();
+    assert.ok(d.includes('function LiveSafe.readItemWeightKg'), 'readItemWeightKg helper present');
+    assert.ok(d.includes('function LiveSafe.readItemMutation'), 'readItemMutation helper present');
+    assert.ok(d.includes('function LiveSafe.safeGetNested'), 'safeGetNested helper present');
+    assert.ok(d.includes('function LiveSafe.normalizeWeightKg'), 'normalizeWeightKg helper present');
+    // readItemWeightKg must use the self-contained normalizer, never the
+    // later-declared local parseWeight (the INVENTORY_SNAPSHOT_ERROR cause).
+    const body = d.slice(d.indexOf('function LiveSafe.readItemWeightKg'));
+    const fnBody = body.slice(0, body.indexOf('\nend'));
+    assert.ok(fnBody.includes('LiveSafe.normalizeWeightKg'), 'uses normalizeWeightKg');
+    assert.ok(!/[^.]parseWeight\(/.test(fnBody), 'no bare parseWeight() call inside readItemWeightKg');
+    // Mutation read from real Metadata.Mutation (not only VariantId).
+    assert.ok(d.includes('"Metadata", "Mutation"') || d.includes('"Mutation"'), 'scans Metadata.Mutation');
+    // Per-row guard so one malformed item cannot abort the snapshot.
+    assert.ok(d.includes('INVENTORY_ROW_SKIPPED'), 'per-row pcall guard present');
   });
   test('permanent loader endpoints unchanged (no versioned URL, correct ingest paths)', () => {
     const d = decoded();

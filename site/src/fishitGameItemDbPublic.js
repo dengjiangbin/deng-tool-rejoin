@@ -171,11 +171,24 @@ function parseWeightKg(row) {
 }
 
 // Real mutation name for an instance, or null when the game reported no
-// mutation (None/Normal/etc). Never defaults to a placeholder.
+// mutation (None/Normal/etc). Never defaults to a placeholder. Scans the flat
+// field first (compact upload), then nested metadata shapes as a safety net.
 function realInstanceMutation(row) {
-  const raw = String((row && (row.mutation || row.Mutation)) || '').trim();
-  if (!raw || /^(none|normal|default|no\s*mutation)$/i.test(raw)) return null;
-  return raw.slice(0, 40);
+  if (!row || typeof row !== 'object') return null;
+  const md = (row.Metadata && typeof row.Metadata === 'object') ? row.Metadata : {};
+  const fd = (row.FishData && typeof row.FishData === 'object') ? row.FishData : {};
+  const candidates = [
+    row.mutation, row.Mutation,
+    md.Mutation, md.mutation, md.MutationName, md.Modifier,
+    fd.Mutation, (fd.Metadata && fd.Metadata.Mutation),
+  ];
+  for (const c of candidates) {
+    const raw = String(c || '').trim();
+    if (!raw) continue;
+    if (/^(none|normal|default|no\s*mutation)$/i.test(raw)) continue;
+    return raw.slice(0, 40);
+  }
+  return null;
 }
 
 function normaliseUploadRow(row) {
