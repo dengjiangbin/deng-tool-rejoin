@@ -85,7 +85,10 @@ function compileWithLuau(filePath) {
   ];
   for (const bin of luauCandidates) {
     try {
-      execFileSync(bin, [filePath], { stdio: 'pipe', encoding: 'utf8' });
+      // `--binary` emits bytecode and returns non-zero only on real compile
+      // errors (older luau-compile defaulted to a text disassembly that newer
+      // releases exit non-zero on). This keeps the gate a true syntax check.
+      execFileSync(bin, ['--binary', filePath], { stdio: 'pipe', encoding: 'buffer' });
       return bin;
     } catch (e) {
       const msg = (e.stderr || e.stdout || e.message || '').toString();

@@ -145,6 +145,39 @@ function defaultSourceTruth() {
   };
 }
 
+// Per-instance weight (kg) from an uploaded row. Reads the compact `weightKg`
+// the tracker now emits plus legacy / metadata weight shapes. Returns a
+// positive number or null (weight genuinely absent for this instance).
+function parseWeightKg(row) {
+  if (!row || typeof row !== 'object') return null;
+  const candidates = [
+    row.weightKg, row.weight, row.Weight, row.WeightKg,
+    row.maxWeight, row.MaxWeight, row.kg, row.Kg,
+  ];
+  if (row.Metadata && typeof row.Metadata === 'object') {
+    candidates.push(row.Metadata.Weight, row.Metadata.weight, row.Metadata.WeightKg, row.Metadata.MaxWeight);
+  }
+  for (const c of candidates) {
+    if (c == null) continue;
+    let n = null;
+    if (typeof c === 'number') n = c;
+    else {
+      const m = String(c).match(/[\d.]+/);
+      if (m) n = parseFloat(m[0]);
+    }
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+// Real mutation name for an instance, or null when the game reported no
+// mutation (None/Normal/etc). Never defaults to a placeholder.
+function realInstanceMutation(row) {
+  const raw = String((row && (row.mutation || row.Mutation)) || '').trim();
+  if (!raw || /^(none|normal|default|no\s*mutation)$/i.test(raw)) return null;
+  return raw.slice(0, 40);
+}
+
 function normaliseUploadRow(row) {
   if (!row || typeof row !== 'object') return null;
   const itemId = rowItemId(row);
@@ -169,6 +202,9 @@ function normaliseUploadRow(row) {
     uuid: row.uuid || row.UUID || row.replionUuid || null,
     mutation: row.mutation || row.Mutation
       || (row.Metadata && row.Metadata.VariantId) || 'None',
+    instanceMutation: realInstanceMutation(row)
+      || (row.Metadata && row.Metadata.VariantId ? String(row.Metadata.VariantId).slice(0, 40) : null),
+    weightKg: parseWeightKg(row),
     source: PLAYERDATA_GAMEITEMDB_SOURCE,
     identityVerified: true,
     icon: iconFields.icon,
@@ -232,6 +268,26 @@ function normaliseUploadRows(rows) {
   return rows.map(normaliseUploadRow).filter(Boolean);
 }
 
+const MAX_FISH_INSTANCES_PER_GROUP = 1000;
+
+// Per-instance descriptor preserved before aggregation so the inline detail
+// view can render one card per owned fish with its OWN mutation + weight.
+function fishInstanceFromNorm(norm) {
+  return {
+    uuid: norm.uuid || null,
+    baseFishName: norm.baseFishName || norm.baseName || norm.name || null,
+    mutation: norm.instanceMutation || null,
+    weightKg: (norm.weightKg != null && Number(norm.weightKg) > 0) ? Number(norm.weightKg) : null,
+    quantity: Math.max(1, Math.floor(Number(norm.quantity) || 1)),
+  };
+}
+
+function pushFishInstance(target, norm) {
+  if (!Array.isArray(target.instances)) target.instances = [];
+  if (target.instances.length >= MAX_FISH_INSTANCES_PER_GROUP) return;
+  target.instances.push(fishInstanceFromNorm(norm));
+}
+
 function groupFishRows(rows) {
   const map = new Map();
   for (const row of rows) {
@@ -250,8 +306,11 @@ function groupFishRows(rows) {
       if (!prev.iconSource && norm.iconSource) prev.iconSource = norm.iconSource;
       if (!prev.imageSource && norm.imageSource) prev.imageSource = norm.imageSource;
       if (!prev.imageUrl && norm.imageUrl) prev.imageUrl = norm.imageUrl;
+      pushFishInstance(prev, norm);
     } else {
-      map.set(key, { ...norm });
+      const entry = { ...norm, instances: [] };
+      pushFishInstance(entry, norm);
+      map.set(key, entry);
     }
   }
   return [...map.values()];
@@ -360,9 +419,29 @@ function applyPublicCosmetic(item) {
   };
 }
 
+// Public per-instance rows for the inline detail view. Mutation + weight are
+// intentionally exposed here (the aggregate card still hides them), so the
+// detail panel can render one card per owned fish with its real attributes.
+function buildPublicOwnedInstances(cleaned) {
+  const src = Array.isArray(cleaned.instances) ? cleaned.instances : [];
+  const out = [];
+  for (const inst of src) {
+    if (out.length >= MAX_FISH_INSTANCES_PER_GROUP) break;
+    out.push({
+      uuid: inst.uuid || null,
+      baseFishName: cleaned.baseFishName,
+      mutation: inst.mutation || null,
+      weightKg: (inst.weightKg != null && Number(inst.weightKg) > 0) ? Number(inst.weightKg) : null,
+      quantity: Math.max(1, Math.floor(Number(inst.quantity) || 1)),
+    });
+  }
+  return out;
+}
+
 function mapToPublicFishCardItem(item) {
   const cleaned = applyPublicCosmetic(item);
   const amount = Number(cleaned.quantity) > 0 ? Math.floor(Number(cleaned.quantity)) : 1;
+  const ownedInstances = buildPublicOwnedInstances(cleaned);
   const rarityResolved = manualRarity.resolvePublicFishRarity(cleaned, tierToRarity);
   const rarity = rarityResolved.rarity;
   const tier = rarityResolved.tier;
@@ -421,6 +500,8 @@ function mapToPublicFishCardItem(item) {
     debugIcon: cleaned.iconRaw || cleaned.icon || null,
     publicWeightHidden: true,
     publicRarityHidden: true,
+    ownedInstances,
+    ownedInstanceCount: ownedInstances.reduce((s, i) => s + (i.quantity || 1), 0),
   };
 }
 
