@@ -1,4 +1,24 @@
 'use strict';
+
+// Throttle the repeated "no bot DB user" warning. Under upload bursts the aio
+// cache refresh recomputes the owner dashboard per upload, and this warn was
+// flooding the ingest log (500k+ lines) — heavy disk I/O that amplifies event
+// loop lag. Log at most once per 60s per Discord ID.
+const NO_BOT_USER_WARN_WINDOW_MS = 60_000;
+const _noBotUserWarnAt = new Map();
+function shouldLogNoBotUserWarning(discordId) {
+  const id = String(discordId || 'unknown');
+  const now = Date.now();
+  const last = _noBotUserWarnAt.get(id) || 0;
+  if (now - last < NO_BOT_USER_WARN_WINDOW_MS) return false;
+  _noBotUserWarnAt.set(id, now);
+  if (_noBotUserWarnAt.size > 5000) {
+    for (const [k, ts] of _noBotUserWarnAt) {
+      if (now - ts > NO_BOT_USER_WARN_WINDOW_MS) _noBotUserWarnAt.delete(k);
+    }
+  }
+  return true;
+}
 /**
  * Read-only bridge to the DENG Fish It bot's SQLite database.
  *
@@ -792,7 +812,7 @@ function getOwnerDashboard(discordUserId, trackedAccounts, periodInput = 'all', 
     'no_catch_records_in_bot_db',
     'date_range_filtered_all_rows',
   ]);
-  if (ctx.emptyReason === 'no_bot_user_for_discord_id') {
+  if (ctx.emptyReason === 'no_bot_user_for_discord_id' && shouldLogNoBotUserWarning(authDiscordId)) {
     console.warn('[fishit] getOwnerDashboard: no bot DB user for Discord ID (returning zero stats)', {
       authDiscordId,
       authDiscordUsername,

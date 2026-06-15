@@ -77,7 +77,8 @@ describe('tracker upload latency — fast path + coalesced enrichment', () => {
       'utf8',
     );
     assert.doesNotMatch(source, /acquireSlot/);
-    assert.match(source, /server_busy/);
+    // Fast-ack: no 503 server_busy rejection — overloaded uploads defer to 202.
+    assert.doesNotMatch(source, /server_busy/);
     assert.match(source, /scheduleDeferredUploadWork/);
   });
 

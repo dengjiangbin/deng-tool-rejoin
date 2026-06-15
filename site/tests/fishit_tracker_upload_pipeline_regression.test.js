@@ -229,7 +229,10 @@ describe('trackerConcurrencyGate — inventory uploads never dropped', () => {
     assert.match(source, /tracker_status/);
     assert.match(source, /isStatusOnlyUpload/);
     assert.doesNotMatch(source, /status:\s*'queued'/);
-    assert.match(source, /server_busy/);
+    // Fast-ack design: overloaded uploads are deferred/coalesced and answered
+    // with 202, never rejected with a 503 server_busy body.
+    assert.doesNotMatch(source, /server_busy/);
+    assert.match(source, /scheduleDeferredUploadWork/);
   });
 
   test('saturated gate still returns 200 for inventory uploads (never HTTP 202)', async () => {

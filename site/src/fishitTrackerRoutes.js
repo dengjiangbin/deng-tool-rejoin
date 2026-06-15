@@ -38,7 +38,16 @@ const { trackerUploadCoalesceMiddleware } = require('./trackerUploadCoalesce');
 const { safeTrackerUploadHandler } = require('./trackerUploadSafeHandler');
 const { safeOptionalWeight, isUsableUploadRow } = require('./fishitUploadRowSafety');
 const trackerConcurrencyGate = require('./trackerConcurrencyGate');
+const { getLagMs: _uploadLagMs } = require('./trackerEventLoopMonitor');
 const { finishTrackerUploadResponse } = require('./trackerUploadResponse');
+
+// Under burst, per-upload console.log lines (string build + disk I/O) measurably
+// add event-loop lag. Suppress the verbose per-inventory diagnostics when the
+// loop is already lagging; counters/proof logs that matter still run.
+const UPLOAD_VERBOSE_LOG_LAG_MS = Number(process.env.TRACKER_VERBOSE_LOG_LAG_MS || 1000);
+function uploadVerboseLogAllowed() {
+  return _uploadLagMs() < UPLOAD_VERBOSE_LOG_LAG_MS;
+}
 const { recordUploadRequest } = require('./trackerUploadRequestMetrics');
 const { buildTrackerAccountSummary } = require('./trackerAccountSummary');
 const {
@@ -4498,26 +4507,29 @@ function handleUpdateBackpack(req, res) {
     }
 
     // Server-side log — counts and first 3 samples (never full dump).
-    const ownedFishLen  = Array.isArray(body.owned && body.owned.fish)  ? body.owned.fish.length  : 0;
-    const ownedRodsLen  = Array.isArray(body.owned && body.owned.rods)  ? body.owned.rods.length  : 0;
-    const ownedItemsLen = Array.isArray(body.owned && body.owned.items) ? body.owned.items.length : 0;
-    console.log(
-      `[fishit-tracker] POST hit route=${req.path} user=${cleanUser} sessionKey=${key}` +
-      ` userId=${cleanUserId} payloadType=${payloadType} flatItems=${rawFlatLen}` +
-      ` ownedFish=${ownedFishLen} ownedRods=${ownedRodsLen} ownedItems=${ownedItemsLen}` +
-      (ps ? ` parseStats.accepted=${ps.accepted}` : '')
-    );
-    console.log(
-      `[fishit-tracker] stored key=${key}` +
-      ` items=${cleanItems.length} fish=${inventory.fish.length} rods=${inventory.rods.length}` +
-      ` phase=${cleanItems.length ? 'live' : (phase || 'live')}` +
-      (ps ? ` parseStats.raw=${ps.raw} accepted=${ps.accepted}` : '')
-    );
-    if (cleanItems.length > 0) {
-      const samples = cleanItems.slice(0, 3).map(
-        (it) => `${it.name}(x${it.amount},tier=${it.rarity || '-'},img=${!!it.imageUrl},cat=${it.category || '-'})`
-      ).join(' | ');
-      console.log(`[fishit-tracker] first 3 items: ${samples}`);
+    // Suppressed when the event loop is lagging to protect burst throughput.
+    if (uploadVerboseLogAllowed()) {
+      const ownedFishLen  = Array.isArray(body.owned && body.owned.fish)  ? body.owned.fish.length  : 0;
+      const ownedRodsLen  = Array.isArray(body.owned && body.owned.rods)  ? body.owned.rods.length  : 0;
+      const ownedItemsLen = Array.isArray(body.owned && body.owned.items) ? body.owned.items.length : 0;
+      console.log(
+        `[fishit-tracker] POST hit route=${req.path} user=${cleanUser} sessionKey=${key}` +
+        ` userId=${cleanUserId} payloadType=${payloadType} flatItems=${rawFlatLen}` +
+        ` ownedFish=${ownedFishLen} ownedRods=${ownedRodsLen} ownedItems=${ownedItemsLen}` +
+        (ps ? ` parseStats.accepted=${ps.accepted}` : '')
+      );
+      console.log(
+        `[fishit-tracker] stored key=${key}` +
+        ` items=${cleanItems.length} fish=${inventory.fish.length} rods=${inventory.rods.length}` +
+        ` phase=${cleanItems.length ? 'live' : (phase || 'live')}` +
+        (ps ? ` parseStats.raw=${ps.raw} accepted=${ps.accepted}` : '')
+      );
+      if (cleanItems.length > 0) {
+        const samples = cleanItems.slice(0, 3).map(
+          (it) => `${it.name}(x${it.amount},tier=${it.rarity || '-'},img=${!!it.imageUrl},cat=${it.category || '-'})`
+        ).join(' | ');
+        console.log(`[fishit-tracker] first 3 items: ${samples}`);
+      }
     }
 
     const acceptedCount = cleanItems.length || (ps && ps.accepted) || 0;
@@ -4863,30 +4875,32 @@ function handleUpdateBackpack(req, res) {
       heartbeatAccepted: true,
     };
     const totalResponseMs = Date.now() - uploadArrivalAt;
-    trackerConcurrencyGate.logUploadTiming({
-      upload_arrival_at: new Date(uploadArrivalAt).toISOString(),
-      username: cleanUser,
-      sessionKey: key,
-      userId: cleanUserId,
-      gate_wait_ms: gateWaitMs,
-      raw_persist_ms: rawPersistMs,
-      cache_refresh_ms: cacheRefreshMs,
-      enrichment_queue_ms: 0,
-      enrichment_ms: 0,
-      total_response_ms: totalResponseMs,
-      pending_queue: trackerConcurrencyGate.stats().queued,
-      per_account_pending: trackerConcurrencyGate.perAccountPendingCount(key),
-    });
-    console.log(
-      '[fishit-tracker] upload_fast_path username=%s requestBytes=%d parseMs=%d persistMs=%d responseMs=%d debugUpload=%s',
-      cleanUser,
-      requestBytes,
-      parseMs,
-      rawPersistMs,
-      totalResponseMs,
-      isDebugUpload,
-    );
-    trackerConcurrencyGate.logQueueStatus();
+    if (uploadVerboseLogAllowed()) {
+      trackerConcurrencyGate.logUploadTiming({
+        upload_arrival_at: new Date(uploadArrivalAt).toISOString(),
+        username: cleanUser,
+        sessionKey: key,
+        userId: cleanUserId,
+        gate_wait_ms: gateWaitMs,
+        raw_persist_ms: rawPersistMs,
+        cache_refresh_ms: cacheRefreshMs,
+        enrichment_queue_ms: 0,
+        enrichment_ms: 0,
+        total_response_ms: totalResponseMs,
+        pending_queue: trackerConcurrencyGate.stats().queued,
+        per_account_pending: trackerConcurrencyGate.perAccountPendingCount(key),
+      });
+      console.log(
+        '[fishit-tracker] upload_fast_path username=%s requestBytes=%d parseMs=%d persistMs=%d responseMs=%d debugUpload=%s',
+        cleanUser,
+        requestBytes,
+        parseMs,
+        rawPersistMs,
+        totalResponseMs,
+        isDebugUpload,
+      );
+      trackerConcurrencyGate.logQueueStatus();
+    }
 
     const deferredBody = body;
     const deferredRawItems = rawItems;
@@ -5024,12 +5038,14 @@ function handleUpdateBackpack(req, res) {
       return persistSessionState(key, persistBase).catch(() => {});
     });
 
-    console.log(
-      `[fishit-tracker] POST ok=true user=${cleanUser} sessionKey=${key}` +
-      ` accepted=${deferredAcceptedCount} snapshotComplete=${completenessEval.snapshotComplete === true}` +
-      ` lastSeenAt=${now} lastInventoryAt=${liveTrackDB[key].lastInventoryAt || 'n/a'} online=true` +
-      ` fastPathMs=${totalResponseMs}`
-    );
+    if (uploadVerboseLogAllowed()) {
+      console.log(
+        `[fishit-tracker] POST ok=true user=${cleanUser} sessionKey=${key}` +
+        ` accepted=${deferredAcceptedCount} snapshotComplete=${completenessEval.snapshotComplete === true}` +
+        ` lastSeenAt=${now} lastInventoryAt=${liveTrackDB[key].lastInventoryAt || 'n/a'} online=true` +
+        ` fastPathMs=${totalResponseMs}`
+      );
+    }
     persistSessionHeartbeat(key);
     return finishTrackerUploadResponse(req, res, responsePayload, key);
 }

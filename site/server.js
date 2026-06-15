@@ -95,21 +95,56 @@ const server = require('http').createServer((req, res) => {
   app(req, res);
 });
 
-server.listen(PORT, HOST, () => {
+if (typeof server.setMaxListeners === 'function') server.setMaxListeners(0);
+
+// EADDRINUSE retry — keep the window shorter than PM2's listen_timeout so a
+// restarted instance racing the previous process's port release retries and
+// binds, instead of exiting and leaving an orphan PID holding 8791.
+const SITE_LISTEN_RETRY_MAX_MS = parseInt(process.env.TOOL_SITE_LISTEN_RETRY_MAX_MS || '8000', 10);
+const SITE_LISTEN_RETRY_DELAY_MS = parseInt(process.env.TOOL_SITE_LISTEN_RETRY_DELAY_MS || '500', 10);
+let siteListenRetryStartedAt = 0;
+
+function startSiteListening() {
+  server.listen(PORT, HOST);
+}
+
+server.on('listening', () => {
+  siteListenRetryStartedAt = 0;
   console.log(`[deng-tool-site] Listening on http://${HOST}:${PORT}`);
 });
 
 server.on('error', (err) => {
-  console.error('[deng-tool-site] Listen error:', err);
   if (err && err.code === 'EADDRINUSE') {
-    console.error(`[deng-tool-site] Port ${PORT} already in use — PM2 should retry after kill_timeout`);
+    const nowMs = Date.now();
+    if (!siteListenRetryStartedAt) siteListenRetryStartedAt = nowMs;
+    const waitedMs = nowMs - siteListenRetryStartedAt;
+    if (waitedMs <= SITE_LISTEN_RETRY_MAX_MS) {
+      console.warn('[deng-tool-site] %s busy, retrying bind in %dms (waited %dms)',
+        PORT, SITE_LISTEN_RETRY_DELAY_MS, waitedMs);
+      setTimeout(() => {
+        try { server.close(); } catch (_) { /* not yet listening */ }
+        startSiteListening();
+      }, SITE_LISTEN_RETRY_DELAY_MS);
+      return;
+    }
+    console.error('[deng-tool-site] %s still busy after %dms — exiting for clean PM2 restart', PORT, waitedMs);
+  } else {
+    console.error('[deng-tool-site] Listen error:', err);
   }
   process.exit(1);
 });
 
-// Graceful shutdown — allow in-flight tracker uploads to finish before PM2 force-kills.
+startSiteListening();
+
+// Graceful shutdown — release the listening socket first so a restarted PM2
+// instance can bind 8791 immediately (prevents the orphan-PID/EADDRINUSE loop),
+// then flush live sessions before exiting.
+let siteShuttingDown = false;
 function shutdown(signal) {
-  console.log(`[deng-tool-site] ${signal} received – flushing live sessions then shutting down`);
+  if (siteShuttingDown) return;
+  siteShuttingDown = true;
+  console.log(`[deng-tool-site] ${signal} received – releasing port then flushing live sessions`);
+  try { server.close(() => console.log('[deng-tool-site] HTTP server closed')); } catch (_) { /* ignore */ }
   const fishitTrackerRoutes = require('./src/fishitTrackerRoutes');
   Promise.resolve(fishitTrackerRoutes.flushAllLiveSessionsToDisk())
     .then((flushResult) => {
@@ -121,12 +156,9 @@ function shutdown(signal) {
       console.warn('[deng-tool-site] shutdown flush error:', err?.message || err);
     })
     .finally(() => {
-      server.close(() => {
-        console.log('[deng-tool-site] HTTP server closed');
-        process.exit(0);
-      });
-      setTimeout(() => process.exit(1), 15_000);
+      process.exit(0);
     });
+  setTimeout(() => process.exit(0), 8_000).unref();
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

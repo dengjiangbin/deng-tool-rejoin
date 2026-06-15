@@ -7,10 +7,10 @@
       "interpreter": "node",
       "watch": false,
       "autorestart": true,
-      "max_restarts": 10,
-      "restart_delay": 2000,
-      "kill_timeout": 15000,
-      "listen_timeout": 10000,
+      "max_restarts": 15,
+      "restart_delay": 3000,
+      "kill_timeout": 8000,
+      "listen_timeout": 12000,
       "max_memory_restart": "1536M",
       "env": {
         "NODE_ENV": "production",
@@ -49,10 +49,10 @@
       "interpreter": "node",
       "watch": false,
       "autorestart": true,
-      "max_restarts": 10,
-      "restart_delay": 2000,
-      "kill_timeout": 15000,
-      "listen_timeout": 10000,
+      "max_restarts": 15,
+      "restart_delay": 3000,
+      "kill_timeout": 8000,
+      "listen_timeout": 12000,
       "max_memory_restart": "2048M",
       "env": {
         "NODE_ENV": "production",
@@ -76,7 +76,7 @@
         "TRACKER_EVENT_LOOP_LAG_SHED_MS": "1200",
         "FISHIT_ACCOUNT_FLUSH_MS": "500",
         "TOOL_SITE_ASSET_VERSION": "UPLOAD_DEBUG_OFF_NO_SYNC_DEBUG_2026_06_15",
-        "TRACKER_UPLOAD_HANDLER_TIMEOUT_MS": "0",
+        "TRACKER_UPLOAD_HANDLER_TIMEOUT_MS": "0"
       }
     }
   ]

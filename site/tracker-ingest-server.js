@@ -78,17 +78,69 @@ const server = require('http').createServer((req, res) => {
   app(req, res);
 });
 
-server.listen(PORT, HOST, () => {
+// Keep upstream sockets healthy under burst — Cloudflare/origin reuse connections.
+server.keepAliveTimeout = parseInt(process.env.TRACKER_INGEST_KEEPALIVE_MS || '61000', 10);
+server.headersTimeout = parseInt(process.env.TRACKER_INGEST_HEADERS_TIMEOUT_MS || '65000', 10);
+server.maxRequestsPerSocket = 0;
+if (typeof server.setMaxListeners === 'function') server.setMaxListeners(0);
+
+// EADDRINUSE retry — on Windows a restarted process can race the previous
+// instance that has not yet released 8792. Retry the bind with backoff
+// instead of exiting; exiting here is what produced the 500+ PM2 restart loop
+// and an orphan PID permanently holding the port.
+// Keep the retry window SHORTER than PM2's listen_timeout (10s). If we retry
+// longer than PM2 is willing to wait, PM2 spawns a second child while the first
+// is still retrying — overlapping children, one of which binds and detaches
+// from PM2's tracked process (the orphan-on-restart symptom). Bounded < 10s,
+// a child either binds during a normal restart race or exits for one clean respawn.
+const LISTEN_RETRY_MAX_MS = parseInt(process.env.TRACKER_INGEST_LISTEN_RETRY_MAX_MS || '8000', 10);
+const LISTEN_RETRY_DELAY_MS = parseInt(process.env.TRACKER_INGEST_LISTEN_RETRY_DELAY_MS || '500', 10);
+let listenRetryStartedAt = 0;
+
+function startListening() {
+  server.listen(PORT, HOST);
+}
+
+server.on('listening', () => {
+  listenRetryStartedAt = 0;
   console.log(`[deng-tracker-ingest] Listening on http://${HOST}:${PORT}`);
 });
 
 server.on('error', (err) => {
-  console.error('[deng-tracker-ingest] Listen error:', err);
+  if (err && err.code === 'EADDRINUSE') {
+    const nowMs = Date.now();
+    if (!listenRetryStartedAt) listenRetryStartedAt = nowMs;
+    const waitedMs = nowMs - listenRetryStartedAt;
+    if (waitedMs <= LISTEN_RETRY_MAX_MS) {
+      console.warn(
+        '[deng-tracker-ingest] %s busy, retrying bind in %dms (waited %dms)',
+        PORT,
+        LISTEN_RETRY_DELAY_MS,
+        waitedMs,
+      );
+      setTimeout(() => {
+        try { server.close(); } catch (_) { /* not yet listening */ }
+        startListening();
+      }, LISTEN_RETRY_DELAY_MS);
+      return;
+    }
+    console.error('[deng-tracker-ingest] %s still busy after %dms — exiting for clean PM2 restart', PORT, waitedMs);
+  } else {
+    console.error('[deng-tracker-ingest] Listen error:', err);
+  }
   process.exit(1);
 });
 
+startListening();
+
+let shuttingDown = false;
 function shutdown(signal) {
-  console.log(`[deng-tracker-ingest] ${signal} received – flushing live sessions then shutting down`);
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[deng-tracker-ingest] ${signal} received – releasing port then flushing live sessions`);
+  // Close the listening socket FIRST so a restarted PM2 instance can bind 8792
+  // immediately instead of racing this process (the orphan-PID/EADDRINUSE cause).
+  try { server.close(); } catch (_) { /* ignore */ }
   const fishitTrackerRoutes = require('./src/fishitTrackerRoutes');
   Promise.resolve(fishitTrackerRoutes.flushAllLiveSessionsToDisk())
     .then((flushResult) => {
@@ -100,9 +152,9 @@ function shutdown(signal) {
       console.warn('[deng-tracker-ingest] shutdown flush error:', err?.message || err);
     })
     .finally(() => {
-      server.close(() => process.exit(0));
-      setTimeout(() => process.exit(1), 15_000);
+      process.exit(0);
     });
+  setTimeout(() => process.exit(0), 8_000).unref();
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

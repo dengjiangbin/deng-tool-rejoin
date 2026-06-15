@@ -180,14 +180,34 @@ function invalidateTrackerForOwners(ownerIds) {
   }
 }
 
-/** After a live upload, refresh owner datasets immediately (fast build). */
+// Coalesce post-upload refreshes per owner+dataset. Under burst, many uploads
+// for the same owner arrive within a few seconds; without this, force+immediate
+// rebuilds fired a fresh SQLite-backed owner-dashboard build per upload and
+// saturated the event loop. Collapse them into one rebuild per debounce window.
+const REFRESH_DEBOUNCE_MS = Number(process.env.AIO_REFRESH_DEBOUNCE_MS || 4000);
+const _refreshTimers = new Map();
+
+/** After a live upload, refresh owner datasets (debounced, coalesced, non-blocking). */
 function refreshOwnersAfterUpload(ownerIds, builders = {}) {
   const ids = Array.isArray(ownerIds) ? ownerIds : [ownerIds];
   for (const ownerId of ids) {
     if (!ownerId) continue;
     markStale(ownerId, ['tracker', 'dashboard']);
     for (const [name, buildFn] of Object.entries(builders)) {
-      scheduleBuild(ownerId, name, buildFn, { force: true, immediate: true });
+      const timerKey = cacheKey(ownerId, name);
+      if (_refreshTimers.has(timerKey)) {
+        // A rebuild for this owner+dataset is already pending — latest builder wins.
+        _refreshTimers.get(timerKey).buildFn = buildFn;
+        continue;
+      }
+      const slot = { buildFn };
+      const timer = setTimeout(() => {
+        _refreshTimers.delete(timerKey);
+        scheduleBuild(ownerId, name, slot.buildFn, { force: true });
+      }, REFRESH_DEBOUNCE_MS);
+      if (typeof timer.unref === 'function') timer.unref();
+      slot.timer = timer;
+      _refreshTimers.set(timerKey, slot);
     }
   }
 }
@@ -195,6 +215,10 @@ function refreshOwnersAfterUpload(ownerIds, builders = {}) {
 function _resetForTests() {
   cache.clear();
   pendingBuilds.clear();
+  for (const slot of _refreshTimers.values()) {
+    if (slot && slot.timer) clearTimeout(slot.timer);
+  }
+  _refreshTimers.clear();
 }
 
 module.exports = {
