@@ -44,6 +44,34 @@ fun extractApkOAuthState(uri: Uri?, publicWebHost: String): String? {
 private fun encode(value: String): String =
     java.net.URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
 
+/** host+path only — never log query strings (they carry code/state secrets). */
+fun redactUrl(url: String): String = runCatching {
+    val u = Uri.parse(url)
+    val host = u.host.orEmpty()
+    val path = u.path.orEmpty()
+    if (host.isBlank() && path.isBlank()) "(none)" else "$host$path"
+}.getOrDefault("(unparseable)")
+
+/**
+ * Log the WebView cookie state for the public origin without leaking values:
+ * only cookie NAMES and whether deng_sid is present.
+ */
+fun logWebViewCookieState(marker: String, publicWebUrl: String) {
+    CookieManager.getInstance().flush()
+    val base = publicWebUrl.trimEnd('/')
+    val raw = CookieManager.getInstance().getCookie(base)
+        ?: CookieManager.getInstance().getCookie(publicWebUrl).orEmpty()
+    val names = raw.split(';')
+        .mapNotNull { it.substringBefore('=').trim().takeIf { n -> n.isNotEmpty() } }
+        .joinToString(",")
+    val hasDengSid = raw.contains("deng_sid=")
+    val host = runCatching { Uri.parse(base).host }.getOrNull().orEmpty()
+    Log.i(
+        APK_AUTH_LOG_TAG,
+        "$marker cookieNames=[$names] hasDengSid=$hasDengSid domain=$host",
+    )
+}
+
 /**
  * Build the first-party WebView session-bootstrap URL. Loading this in the
  * WebView lets aio.deng.my.id set the real `deng_sid` cookie via its own HTTP
@@ -91,7 +119,7 @@ suspend fun completeApkOAuthFromDeepLink(
         val consumeUrl = buildMobileConsumeUrl(BuildConfig.PUBLIC_WEB_URL, code, state)
         Log.i(
             APK_AUTH_LOG_TAG,
-            "APK_AUTH_MOBILE_CONSUME_READY marker=$APK_MOBILE_AUTH_MARKER codeLen=${code.length}",
+            "APK_AUTH_CONSUME_URL_BUILT marker=$APK_MOBILE_AUTH_MARKER ${redactUrl(consumeUrl)} codeLen=${code.length}",
         )
         return ApkOAuthHandoffResult.Ready(consumeUrl)
     }
@@ -148,16 +176,19 @@ suspend fun verifyApkWebSession(api: MonitorApi, publicWebUrl: String): Boolean 
     val me = try {
         api.aioAuthMe(publicWebUrl)
     } catch (err: Exception) {
-        Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_FAIL_STAGE=auth_me_error err=${err.message}")
+        Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_ME_RESULT status=error err=${err.message}")
         null
     }
     if (me == null || !me.ok || !me.authenticated) {
-        Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_FAIL_STAGE=web_session_not_authenticated")
+        Log.w(
+            APK_AUTH_LOG_TAG,
+            "APK_AUTH_ME_RESULT status=unauthenticated ok=${me?.ok ?: false} authenticated=${me?.authenticated ?: false}",
+        )
         return false
     }
     Log.i(
         APK_AUTH_LOG_TAG,
-        "APK_AUTH_WEB_SESSION_OK marker=$APK_MOBILE_AUTH_MARKER discordUserId=${me.user?.discordUserId ?: "?"}",
+        "APK_AUTH_ME_RESULT status=200 marker=$APK_MOBILE_AUTH_MARKER discordUserId=${me.user?.discordUserId ?: "?"}",
     )
     return true
 }

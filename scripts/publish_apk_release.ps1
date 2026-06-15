@@ -1,8 +1,8 @@
 #!/usr/bin/env pwsh
 # Publish a signed DENG All In One release APK and refresh releases/android/latest.json
 param(
-  [string]$VersionName = "2.2.5",
-  [int]$VersionCode = 22,
+  [string]$VersionName = "2.2.6",
+  [int]$VersionCode = 23,
   [string]$BuildMarker = "APK_MOBILE_AUTH_WEBVIEW_BOOTSTRAP_2026_06_15"
 )
 
@@ -41,12 +41,12 @@ $manifest = [ordered]@{
   min_sdk = 26
   purpose = "Monitoring companion for DENG All In One (aio.deng.my.id)"
   changelog = @(
-    "$BuildMarker - Fixed the APK Discord login loop.",
-    "Replaced the broken native cookie-injection handoff with a first-party WebView session bootstrap: after Discord OAuth the app loads https://aio.deng.my.id/mobile-auth/consume inside the WebView, which sets the real deng_sid session cookie on its own response and redirects to the tracker.",
-    "Login now uses a short-lived single-use mobile auth code bound to a transaction/state; no Discord token or long-lived token is ever stored in the app.",
-    "Deep-link return plus status polling fallback so login completes even if the app deep link is not delivered.",
-    "Default landing after login is Live Tracker (first tab); Dashboard is the second tab.",
-    "Default site and API base URL: https://aio.deng.my.id."
+    "$BuildMarker (v2.2.6) - Hardened the APK Discord login handoff and added full runtime auth diagnostics.",
+    "After Discord OAuth the app loads https://aio.deng.my.id/mobile-auth/consume inside the persistent app WebView; the server sets the real deng_sid session cookie on its own response.",
+    "Consume now returns a 'Signing you in...' bridge page that verifies /api/aio/auth/me == 200 in the same WebView BEFORE opening /tracker, eliminating the 303 race that bounced users back to login.",
+    "Added APK_AUTH_* logcat markers for every step (start, custom tab, deep link, consume URL, page started/finished, cookie state, auth/me, final tracker URL, fail reason) plus non-secret server debug headers.",
+    "Login uses a short-lived single-use mobile auth code bound to a transaction/state; deep-link return plus status polling fallback. No Discord/long-lived token is stored in the app.",
+    "Default landing after login is Live Tracker (first tab); Dashboard is the second tab. Base URL: https://aio.deng.my.id."
   )
 }
 

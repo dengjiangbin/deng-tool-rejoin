@@ -138,7 +138,7 @@ describe('mobile-auth WebView first-party bootstrap', () => {
     assert.match(status.body.consumeUrl, /target=%2Ftracker/);
   });
 
-  test('consume sets deng_sid first-party and 303-redirects to /tracker', async () => {
+  test('consume sets deng_sid first-party and serves the auth/me bridge page', async () => {
     const agent = request.agent(app);
     const { start } = await runHappyPath(agent);
     const status = await agent.get(
@@ -146,17 +146,30 @@ describe('mobile-auth WebView first-party bootstrap', () => {
     );
     const consumePath = status.body.consumeUrl.replace('https://aio.deng.my.id', '');
     const consume = await agent.get(consumePath);
-    assert.equal(consume.status, 303, 'consume must 303-redirect');
-    assert.equal(consume.headers.location, '/tracker');
+    // HTML bridge (NOT a blind 303) that gates /tracker on /api/aio/auth/me.
+    assert.equal(consume.status, 200, 'consume serves the bridge page');
+    assert.match(consume.headers['content-type'] || '', /text\/html/);
+    assert.match(consume.text, /Signing you in/);
+    assert.match(consume.text, /\/api\/aio\/auth\/me/);
+    assert.match(consume.text, /location\.replace/);
     const cookies = consume.headers['set-cookie'] || [];
     assert.ok(cookies.some((c) => c.startsWith('deng_sid=')), 'consume sets deng_sid on the first-party response');
     assert.match(consume.headers['cache-control'] || '', /no-store/);
+    // Non-secret debug headers expose the exact consume outcome.
+    assert.equal(consume.headers['x-consume-code-valid'], 'yes');
+    assert.equal(consume.headers['x-consume-state-valid'], 'yes');
+    assert.equal(consume.headers['x-consume-user-resolved'], 'yes');
+    assert.equal(consume.headers['x-consume-session-created'], 'yes');
+    assert.equal(consume.headers['x-consume-set-cookie'], 'yes');
+    assert.equal(consume.headers['x-consume-redirect-target'], '/tracker');
 
-    // /api/aio/auth/me succeeds from the same (cookie) agent.
+    // /api/aio/auth/me succeeds from the same (cookie) agent, with debug headers.
     const me = await agent.get('/api/aio/auth/me');
     assert.equal(me.status, 200);
     assert.equal(me.body.authenticated, true);
     assert.equal(me.body.user.discordUserId, 'discord-user-77');
+    assert.equal(me.headers['x-auth-cookie-present'], 'yes');
+    assert.equal(me.headers['x-auth-user-found'], 'yes');
   });
 
   test('/tracker no longer redirects to /login after consume', async () => {
@@ -165,9 +178,24 @@ describe('mobile-auth WebView first-party bootstrap', () => {
     const status = await agent.get(
       `/api/aio/mobile-auth/status?transactionId=${encodeURIComponent(start.body.transactionId)}&state=${encodeURIComponent(start.body.state)}`,
     );
-    await agent.get(status.body.consumeUrl.replace('https://aio.deng.my.id', '')).expect(303);
+    await agent.get(status.body.consumeUrl.replace('https://aio.deng.my.id', '')).expect(200);
     const tracker = await agent.get('/tracker').redirects(0);
     assert.notEqual(tracker.status, 302, '/tracker must not bounce to login once authenticated');
+  });
+
+  test('consume by transactionId (polling fallback) also creates the session', async () => {
+    const agent = request.agent(app);
+    const { start } = await runHappyPath(agent);
+    const consume = await agent.get(
+      `/mobile-auth/consume?transactionId=${encodeURIComponent(start.body.transactionId)}`
+      + `&state=${encodeURIComponent(start.body.state)}&target=${encodeURIComponent('/tracker')}`,
+    );
+    assert.equal(consume.status, 200);
+    const cookies = consume.headers['set-cookie'] || [];
+    assert.ok(cookies.some((c) => c.startsWith('deng_sid=')), 'transactionId consume sets deng_sid');
+    const me = await agent.get('/api/aio/auth/me');
+    assert.equal(me.status, 200);
+    assert.equal(me.body.authenticated, true);
   });
 
   test('consume code is single-use (replay fails to /login)', async () => {
@@ -177,7 +205,7 @@ describe('mobile-auth WebView first-party bootstrap', () => {
       `/api/aio/mobile-auth/status?transactionId=${encodeURIComponent(start.body.transactionId)}&state=${encodeURIComponent(start.body.state)}`,
     );
     const consumePath = status.body.consumeUrl.replace('https://aio.deng.my.id', '');
-    await agent.get(consumePath).expect(303);
+    await agent.get(consumePath).expect(200);
     const replay = await request.agent(app).get(consumePath);
     assert.equal(replay.status, 302);
     assert.match(replay.headers.location, /auth_error=/);
@@ -223,8 +251,10 @@ describe('mobile-auth WebView first-party bootstrap', () => {
     const consume = await request.agent(app).get(
       `/mobile-auth/consume?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}&target=${encodeURIComponent('/tracker')}`,
     );
-    assert.equal(consume.status, 303);
-    assert.equal(consume.headers.location, '/tracker');
+    assert.equal(consume.status, 200);
+    assert.match(consume.text, /Signing you in/);
+    const cookies = consume.headers['set-cookie'] || [];
+    assert.ok(cookies.some((c) => c.startsWith('deng_sid=')), 'deep-link consume sets deng_sid');
   });
 
   test('auth/me is unauthenticated without a session cookie', async () => {

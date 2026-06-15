@@ -430,6 +430,42 @@ function consumeMobileAuthCode(code, providedState) {
   };
 }
 
+/**
+ * Redeem a transaction's consume code by transactionId (polling/fallback lane).
+ * Same single-use/expiry/state guarantees as consumeMobileAuthCode.
+ */
+function consumeMobileAuthByTransaction(transactionId, providedState) {
+  _load();
+  const row = _liveTxn(transactionId);
+  if (!row) return { ok: false, reason: 'not_found' };
+  if (row.consumedAtMs) return { ok: false, reason: 'already_used' };
+  if (!row.code) return { ok: false, reason: 'invalid_or_used' };
+  if (row.codeExpiresAtMs && row.codeExpiresAtMs < nowMs()) {
+    row.code = null;
+    row.status = 'expired';
+    _persist();
+    return { ok: false, reason: 'expired' };
+  }
+  if (!providedState || providedState !== row.mobileState) {
+    return { ok: false, reason: 'state_invalid' };
+  }
+  row.consumedAtMs = nowMs();
+  row.status = 'consumed';
+  row.code = null;
+  _persist();
+  return {
+    ok: true,
+    transactionId,
+    target: _safeTarget(row.target),
+    user: {
+      discordUserId: row.user && row.user.discordUserId,
+      siteUserId: row.user && row.user.siteUserId,
+      username: row.user && row.user.username,
+      avatar: row.user && row.user.avatar,
+    },
+  };
+}
+
 function _reset() {
   state = _defaultFile();
   loaded = true;
@@ -450,6 +486,7 @@ module.exports = {
   authenticateMobileAuthTransaction,
   getMobileAuthStatus,
   consumeMobileAuthCode,
+  consumeMobileAuthByTransaction,
   setAck,
   getAck,
   sha256,

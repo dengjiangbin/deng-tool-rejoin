@@ -1,6 +1,7 @@
 package my.id.deng.monitor
 
 import my.id.deng.monitor.ui.apkOAuthStartUrl
+import my.id.deng.monitor.ui.buildMobileConsumeUrl
 import my.id.deng.monitor.ui.isExternalOAuthUrl
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -121,5 +122,58 @@ class OAuthLoginContractTest {
         assertTrue(gradle.contains(marker))
         val strings = read("src/main/res/values/strings.xml")
         assertTrue(strings.contains(marker))
+    }
+
+    @Test
+    fun `deep link code and state build first-party consume URL`() {
+        val url = buildMobileConsumeUrl("https://aio.deng.my.id", "CODE_123", "STATE_456", "/tracker?apk=1")
+        assertTrue(url.startsWith("https://aio.deng.my.id/mobile-auth/consume?"))
+        assertTrue(url.contains("code=CODE_123"))
+        assertTrue(url.contains("state=STATE_456"))
+        assertTrue(url.contains("target="))
+        assertFalse(url.contains("tool.deng.my.id"))
+    }
+
+    @Test
+    fun `bootstrap does not open tracker until auth me verifies`() {
+        val login = read("$src/ui/LoginWebViewScreen.kt")
+        // onSuccess() (unlocks the app) must come AFTER verifyApkWebSession in the
+        // authenticated branch — never navigate to /tracker before auth/me == 200.
+        val idxVerify = login.indexOf("verifyApkWebSession")
+        val idxSuccess = login.indexOf("onSuccess()")
+        assertTrue("verifyApkWebSession must precede onSuccess()", idxVerify in 0 until idxSuccess)
+    }
+
+    @Test
+    fun `every required APK auth log marker exists in the flow`() {
+        val main = read("$src/MainActivity.kt")
+        val login = read("$src/ui/LoginWebViewScreen.kt")
+        val handoff = read("$src/ui/ApkOAuthHandoff.kt")
+        val all = main + "\n" + login + "\n" + handoff
+        listOf(
+            "APK_AUTH_START",
+            "APK_AUTH_CUSTOM_TAB_OPENED",
+            "APK_AUTH_DEEPLINK_RECEIVED",
+            "APK_AUTH_DEEPLINK_PARSED",
+            "APK_AUTH_CONSUME_URL_BUILT",
+            "APK_AUTH_WEBVIEW_LOAD_CONSUME",
+            "APK_AUTH_WEBVIEW_PAGE_STARTED",
+            "APK_AUTH_WEBVIEW_PAGE_FINISHED",
+            "APK_AUTH_COOKIE_AFTER_CONSUME",
+            "APK_AUTH_ME_RESULT",
+            "APK_AUTH_FINAL_TRACKER_URL",
+            "APK_AUTH_FAIL_REASON",
+        ).forEach { m -> assertTrue("missing log marker $m", all.contains(m)) }
+    }
+
+    @Test
+    fun `consume bridge loads in same persistent webview not custom tab`() {
+        val login = read("$src/ui/LoginWebViewScreen.kt")
+        // The consume URL (bridgeUrl) is loaded via the in-app AioWebViewScreen
+        // (persistent WebView). CustomTab is only the external Discord OAuth step
+        // and must never carry the bridge/consume URL.
+        assertTrue(login.contains("startUrl = bridgeUrl"))
+        assertTrue(login.contains("AioWebViewScreen("))
+        assertFalse(login.contains("launchUrl(context, Uri.parse(bridgeUrl"))
     }
 }

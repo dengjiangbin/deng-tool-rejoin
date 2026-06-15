@@ -132,15 +132,78 @@ router.get('/auth/apk-open', authLimiter, (req, res) => {
 });
 
 /**
- * Establish the normal web session for a resolved user and 303-redirect to the
- * post-login target. Shared by /mobile-auth/consume — the cookie is set by this
- * first-party aio.deng.my.id response so the WebView commits `deng_sid` before
- * it follows the redirect to the (auth-guarded) target page.
+ * Consume bridge page. Instead of a blind 303 (which lets the Android WebView
+ * race to the auth-guarded target before it has committed/can read the freshly
+ * set `deng_sid` cookie), the consume response is a tiny first-party HTML page
+ * that:
+ *   1. is served WITH the Set-Cookie header (cookie committed by this load),
+ *   2. polls /api/aio/auth/me same-origin until it returns 200 (proves the
+ *      session cookie is readable inside this exact WebView context), and only
+ *   3. then location.replace(target) — so we never open /tracker un-authed.
+ * On persistent failure it shows the exact reason + a single retry instead of
+ * silently bouncing to /login.
  */
-function establishWebSessionFromUser(req, res, { user, target, logTag }) {
+function renderConsumeBridgeHtml(target) {
+  const safe = String(target || '/tracker');
+  const jsTarget = JSON.stringify(safe);
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Signing you in…</title>
+<style>html,body{margin:0;height:100%;background:#0D0F14;color:#e8eef9;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
+.wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center}
+.spinner{width:36px;height:36px;border-radius:50%;border:3px solid rgba(255,255,255,.18);border-top-color:#4f8cff;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#err{display:none;color:#ffb4b4;max-width:30rem}
+button{margin-top:8px;background:#4f8cff;color:#06101f;border:0;border-radius:8px;padding:10px 18px;font-size:15px;font-weight:600}</style></head>
+<body><div class="wrap">
+<div class="spinner" id="sp" aria-hidden="true"></div>
+<div id="msg" data-apk-auth="consume-bridge">Signing you in…</div>
+<div id="err"></div>
+<button id="retry" style="display:none" onclick="location.reload()">Retry</button>
+</div>
+<script>(function(){
+  var target=${jsTarget};
+  var tries=0, max=12;
+  function fail(reason){
+    try{document.getElementById('sp').style.display='none';}catch(e){}
+    var m=document.getElementById('msg'); if(m)m.textContent='Sign-in did not finish.';
+    var er=document.getElementById('err'); if(er){er.style.display='block';er.textContent='APK_AUTH_FAIL_REASON='+reason;}
+    var b=document.getElementById('retry'); if(b)b.style.display='inline-block';
+    try{console.log('APK_AUTH_BRIDGE_FAIL reason='+reason);}catch(e){}
+  }
+  function check(){
+    tries++;
+    fetch('/api/aio/auth/me',{credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json'}})
+      .then(function(r){
+        try{console.log('APK_AUTH_BRIDGE_ME status='+r.status+' try='+tries);}catch(e){}
+        if(r.ok){ try{console.log('APK_AUTH_BRIDGE_OK -> '+target);}catch(e){} location.replace(target); return; }
+        if(tries>=max){ fail('auth_me_'+r.status); return; }
+        setTimeout(check, 350);
+      })
+      .catch(function(e){
+        if(tries>=max){ fail('auth_me_network'); return; }
+        setTimeout(check, 350);
+      });
+  }
+  check();
+})();</script></body></html>`;
+}
+
+/**
+ * Establish the normal web session for a resolved user. The cookie is set by
+ * this first-party aio.deng.my.id response; the consume bridge page then gates
+ * navigation to the target on /api/aio/auth/me returning 200 in this WebView.
+ * Emits non-secret X-Consume-* debug headers so the exact failure point is
+ * visible from the device (logcat / response headers).
+ */
+function establishWebSessionFromUser(req, res, { user, target, logTag, debug = {} }) {
   const crypto = require('crypto');
   const { upsertDiscordUser, toSessionUser, LOGIN_HOME: loginHome, safeReturnPath: safeRet } = require('./auth');
   const authReturnTo = safeRet(target) || '/tracker';
+  res.set('X-Consume-Code-Valid', debug.codeValid ? 'yes' : 'no');
+  res.set('X-Consume-State-Valid', debug.stateValid ? 'yes' : 'no');
+  res.set('X-Consume-Redirect-Target', authReturnTo);
   return new Promise((resolve) => {
     (async () => {
       let siteUser = null;
@@ -172,9 +235,11 @@ function establishWebSessionFromUser(req, res, { user, target, logTag }) {
         discord_avatar: user.avatar,
         username: user.username,
       });
+      res.set('X-Consume-User-Resolved', sessionUser && sessionUser.discord_user_id ? 'yes' : 'no');
       req.session.regenerate((regenErr) => {
         if (regenErr) {
           console.error('[%s] category=session_regenerate_failed error=%s', logTag, regenErr.message);
+          res.set('X-Consume-Session-Created', 'no');
           req.session.flash = { ...(req.session.flash || {}), error: 'Session error. Please try again.' };
           res.redirect(loginHome);
           return resolve();
@@ -187,22 +252,30 @@ function establishWebSessionFromUser(req, res, { user, target, logTag }) {
         req.session.save((saveErr) => {
           if (saveErr) {
             console.error('[%s] category=session_save_failed error=%s', logTag, saveErr.message);
+            res.set('X-Consume-Session-Created', 'no');
             req.session.flash = { ...(req.session.flash || {}), error: 'Could not save your session. Please try again.' };
             res.redirect(loginHome);
             return resolve();
           }
+          const cookieCfg = describeSessionCookieConfig();
           console.log(
-            '[%s] APK_AUTH_SESSION_CREATED return=%s discordUserId=%s cookie=%j',
+            '[%s] APK_AUTH_SESSION_CREATED return=%s discordUserId=%s sid=%s cookie=%j',
             logTag,
             authReturnTo,
             user.discordUserId,
-            describeSessionCookieConfig(),
+            req.sessionID ? String(req.sessionID).slice(0, 8) : 'none',
+            cookieCfg,
           );
-          // 303 so the WebView re-issues a GET to the target carrying the freshly
-          // committed first-party session cookie.
+          res.set('X-Consume-Session-Created', 'yes');
+          res.set('X-Consume-Session-Id', req.sessionID ? String(req.sessionID).slice(0, 8) : 'none');
+          res.set('X-Consume-Set-Cookie', 'yes');
+          res.set('X-Consume-Cookie-SameSite', String(cookieCfg.sameSite || ''));
+          res.set('X-Consume-Cookie-HostOnly', cookieCfg.hostOnly ? 'yes' : 'no');
           res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
           res.set('Pragma', 'no-cache');
-          res.redirect(303, authReturnTo);
+          // HTML bridge (NOT a blind 303): the cookie is committed by this load,
+          // then JS gates the /tracker navigation on /api/aio/auth/me == 200.
+          res.status(200).type('html').send(renderConsumeBridgeHtml(authReturnTo));
           resolve();
         });
       });
@@ -217,34 +290,54 @@ function establishWebSessionFromUser(req, res, { user, target, logTag }) {
 
 /**
  * First-party WebView session bootstrap. The APK WebView loads this URL after
- * Discord OAuth completes:
+ * Discord OAuth completes, with EITHER a one-time code or a transactionId
+ * (polling fallback), both bound to a state nonce:
  *   /mobile-auth/consume?code=ONE_TIME_CODE&state=STATE&target=/tracker
- * It validates the single-use code + bound state, creates the normal web
- * session (sets `deng_sid`), and 303-redirects to the target (Live Tracker).
+ *   /mobile-auth/consume?transactionId=TXN&state=STATE&target=/tracker
+ * It validates single-use + bound state, creates the normal web session (sets
+ * `deng_sid`), and serves the consume bridge page that opens the target only
+ * after /api/aio/auth/me succeeds in this exact WebView.
  */
 router.get('/mobile-auth/consume', authLimiter, (req, res) => {
+  const aioSessionStore = require('./aioSessionStore');
   const code = typeof req.query.code === 'string' ? req.query.code.trim() : '';
+  const transactionId = typeof req.query.transactionId === 'string' ? req.query.transactionId.trim() : '';
   const stateNonce = typeof req.query.state === 'string' ? req.query.state.trim() : '';
   const target = typeof req.query.target === 'string' ? req.query.target.trim() : '/tracker';
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.set('Pragma', 'no-cache');
-  if (!code || !stateNonce) {
-    console.warn('[mobile-auth/consume] APK_AUTH_FAIL_STAGE=consume_missing_params hasCode=%s hasState=%s', !!code, !!stateNonce);
+  if ((!code && !transactionId) || !stateNonce) {
+    console.warn(
+      '[mobile-auth/consume] APK_AUTH_FAIL_STAGE=consume_missing_params hasCode=%s hasTxn=%s hasState=%s',
+      !!code, !!transactionId, !!stateNonce,
+    );
+    res.set('X-Consume-Code-Valid', 'no');
+    res.set('X-Consume-State-Valid', 'no');
     req.session.flash = { ...(req.session.flash || {}), error: 'Invalid sign-in link. Please try again.' };
     return res.redirect(`${LOGIN_HOME}?apk=1&auth_error=consume_missing`);
   }
-  const redeemed = require('./aioSessionStore').consumeMobileAuthCode(code, stateNonce);
+  const redeemed = code
+    ? aioSessionStore.consumeMobileAuthCode(code, stateNonce)
+    : aioSessionStore.consumeMobileAuthByTransaction(transactionId, stateNonce);
   if (!redeemed || !redeemed.ok || !redeemed.user || !redeemed.user.discordUserId) {
     const reason = redeemed && redeemed.reason ? redeemed.reason : 'invalid_or_used';
-    console.warn('[mobile-auth/consume] APK_AUTH_FAIL_STAGE=consume_rejected reason=%s', reason);
+    console.warn('[mobile-auth/consume] APK_AUTH_FAIL_STAGE=consume_rejected reason=%s via=%s', reason, code ? 'code' : 'txn');
+    res.set('X-Consume-Code-Valid', reason === 'state_invalid' ? 'yes' : 'no');
+    res.set('X-Consume-State-Valid', reason === 'state_invalid' ? 'no' : 'unknown');
     req.session.flash = { ...(req.session.flash || {}), error: 'Sign-in link expired. Please try Discord login again.' };
     return res.redirect(`${LOGIN_HOME}?apk=1&auth_error=${encodeURIComponent(reason)}`);
   }
-  console.log('[mobile-auth/consume] APK_AUTH_CONSUME_OK discordUserId=%s target=%s', redeemed.user.discordUserId, redeemed.target);
+  console.log(
+    '[mobile-auth/consume] APK_AUTH_CONSUME_OK via=%s discordUserId=%s target=%s',
+    code ? 'code' : 'txn',
+    redeemed.user.discordUserId,
+    redeemed.target,
+  );
   return establishWebSessionFromUser(req, res, {
     user: redeemed.user,
     target: redeemed.target || target,
     logTag: 'mobile-auth/consume',
+    debug: { codeValid: true, stateValid: true },
   });
 });
 

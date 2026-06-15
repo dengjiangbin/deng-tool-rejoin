@@ -192,9 +192,10 @@ class MainActivity : ComponentActivity() {
             if (started.ok && started.authUrl.isNotBlank() && started.transactionId.isNotBlank()) {
                 mobileTxnId = started.transactionId
                 mobileState = started.state
+                val authHost = runCatching { Uri.parse(started.authUrl).host }.getOrNull().orEmpty()
                 Log.i(
                     APK_AUTH_LOG_TAG,
-                    "APK_AUTH_MOBILE_START marker=$APK_MOBILE_AUTH_MARKER txn=${started.transactionId.take(8)}",
+                    "APK_AUTH_START marker=$APK_MOBILE_AUTH_MARKER txn=${started.transactionId.take(8)} stateLen=${started.state.length} authUrlHost=$authHost",
                 )
                 startStatusPolling(app, started.transactionId, started.state)
                 started.authUrl
@@ -239,12 +240,19 @@ class MainActivity : ComponentActivity() {
 
     private fun captureOAuthDeepLink(intent: Intent?) {
         val uri = intent?.data ?: return
-        val code = extractApkOAuthCode(uri, publicWebHost()) ?: return
-        val stateNonce = extractApkOAuthState(uri, publicWebHost()).orEmpty()
+        // Log receipt for ANY incoming intent data (redacted) before parsing.
         Log.i(
             APK_AUTH_LOG_TAG,
-            "APK_AUTH_CALLBACK_RECEIVED codeLen=${code.length} hasState=${stateNonce.isNotBlank()} scheme=${uri.scheme} host=${uri.host} path=${uri.path}",
+            "APK_AUTH_DEEPLINK_RECEIVED action=${intent.action} scheme=${uri.scheme} host=${uri.host} path=${uri.path}",
         )
+        val code = extractApkOAuthCode(uri, publicWebHost())
+        val stateNonce = extractApkOAuthState(uri, publicWebHost()).orEmpty()
+        val stateMatches = stateNonce.isNotBlank() && stateNonce == mobileState
+        Log.i(
+            APK_AUTH_LOG_TAG,
+            "APK_AUTH_DEEPLINK_PARSED hasCode=${code != null} hasState=${stateNonce.isNotBlank()} stateMatches=$stateMatches",
+        )
+        if (code == null) return
         oauthWaitingDeepLink = false
         pendingOAuthState = stateNonce
         pendingOAuthCode = code

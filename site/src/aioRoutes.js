@@ -272,7 +272,13 @@ router.get('/api/aio/mobile-auth/status', aioAuthLimiter, (req, res) => {
  */
 router.get('/api/aio/auth/me', (req, res) => {
   const sessionUser = req.session && req.session.user ? req.session.user : null;
+  const cookieHeader = String(req.headers.cookie || '');
+  const hasDengSid = /(?:^|;\s*)deng_sid=/.test(cookieHeader);
   res.set('Cache-Control', 'no-store');
+  // Non-secret debug headers so the device can pinpoint where auth breaks.
+  res.set('X-Auth-Cookie-Present', hasDengSid ? 'yes' : 'no');
+  res.set('X-Auth-Session-Found', req.session ? 'yes' : 'no');
+  res.set('X-Auth-User-Found', sessionUser ? 'yes' : 'no');
   if (!sessionUser) {
     return res.status(401).json({ ok: false, authenticated: false });
   }

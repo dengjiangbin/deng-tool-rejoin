@@ -60,6 +60,10 @@ fun LoginWebViewScreen(
                 .ifBlank { apkOAuthStartUrl(BuildConfig.PUBLIC_WEB_URL) }
             val customTabs = CustomTabsIntent.Builder().build()
             customTabs.launchUrl(context, Uri.parse(startUrl))
+            android.util.Log.i(
+                APK_AUTH_LOG_TAG,
+                "APK_AUTH_CUSTOM_TAB_OPENED host=${runCatching { Uri.parse(startUrl).host }.getOrNull().orEmpty()}",
+            )
         }
     }
 
@@ -107,8 +111,13 @@ fun ApkAuthBootstrapScreen(
     var finished by remember(bridgeUrl) { mutableStateOf(false) }
 
     LaunchedEffect(bridgeUrl) {
+        android.util.Log.i(
+            APK_AUTH_LOG_TAG,
+            "APK_AUTH_WEBVIEW_LOAD_CONSUME marker=$APK_MOBILE_AUTH_MARKER ${redactUrl(bridgeUrl)}",
+        )
         delay(90_000)
         if (!finished) {
+            android.util.Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_FAIL_REASON=bootstrap_timeout")
             onFailure("bootstrap_timeout")
         }
     }
@@ -132,28 +141,38 @@ fun ApkAuthBootstrapScreen(
         AioWebViewScreen(
             startUrl = bridgeUrl,
             modifier = Modifier.fillMaxSize(),
+            onPageStarted = { url ->
+                android.util.Log.i(APK_AUTH_LOG_TAG, "APK_AUTH_WEBVIEW_PAGE_STARTED ${redactUrl(url)}")
+            },
             onPageFinished = { url ->
                 if (finished) return@AioWebViewScreen
+                android.util.Log.i(APK_AUTH_LOG_TAG, "APK_AUTH_WEBVIEW_PAGE_FINISHED ${redactUrl(url)}")
                 val path = runCatching { Uri.parse(url).path.orEmpty() }.getOrDefault("")
                 when {
                     path.startsWith("/login") -> {
                         finished = true
+                        logWebViewCookieState("APK_AUTH_COOKIE_AFTER_CONSUME", publicWebUrl)
+                        android.util.Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_FAIL_REASON=web_bridge_cookie_missing (landed on /login)")
                         onFailure("web_bridge_cookie_missing")
                     }
                     isAuthenticatedWebUrl(url, publicHost) -> {
+                        // The consume bridge has already verified /api/aio/auth/me and
+                        // redirected here; double-check from native before unlocking.
                         scope.launch {
+                            logWebViewCookieState("APK_AUTH_COOKIE_AFTER_CONSUME", publicWebUrl)
                             if (!verifyApkWebSession(api, publicWebUrl)) {
                                 finished = true
-                                onFailure(
-                                    if (webViewHasDengSidCookie(publicWebUrl)) {
-                                        "web_session_not_authenticated"
-                                    } else {
-                                        "web_bridge_cookie_missing"
-                                    },
-                                )
+                                val reason = if (webViewHasDengSidCookie(publicWebUrl)) {
+                                    "web_session_not_authenticated"
+                                } else {
+                                    "web_bridge_cookie_missing"
+                                }
+                                android.util.Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_FAIL_REASON=$reason")
+                                onFailure(reason)
                                 return@launch
                             }
                             finished = true
+                            android.util.Log.i(APK_AUTH_LOG_TAG, "APK_AUTH_FINAL_TRACKER_URL ${redactUrl(url)}")
                             finalizeApkWebSession(sessionStore, url)
                             onSuccess()
                         }

@@ -56,6 +56,7 @@ fun AioWebViewScreen(
     startUrl: String,
     modifier: Modifier = Modifier,
     onUrlChanged: ((String) -> Unit)? = null,
+    onPageStarted: ((String) -> Unit)? = null,
     onPageFinished: ((String) -> Unit)? = null,
     shouldOverrideUrl: ((String) -> Boolean)? = null,
 ) {
@@ -98,6 +99,9 @@ fun AioWebViewScreen(
                     settings.domStorageEnabled = true
                     settings.loadsImagesAutomatically = true
                     settings.databaseEnabled = true
+                    // First-party aio.deng.my.id session; enable own-cookie storage.
+                    // Accept third-party too (harmless here) but the flow does not depend on it.
+                    CookieManager.getInstance().setAcceptCookie(true)
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(
@@ -114,6 +118,14 @@ fun AioWebViewScreen(
                                 return false
                             }
                             return false
+                        }
+
+                        override fun onPageStarted(
+                            view: WebView?,
+                            url: String?,
+                            favicon: android.graphics.Bitmap?,
+                        ) {
+                            onPageStarted?.invoke(url.orEmpty())
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {

@@ -17,8 +17,8 @@ android {
         // Termux / package version. Bump versionCode whenever the
         // APK is rebuilt and republished, even for branding-only
         // changes, so Android sees it as a real upgrade.
-        versionCode = 22
-        versionName = "2.2.5"
+        versionCode = 23
+        versionName = "2.2.6"
 
         val bridgeUrl = (project.findProperty("bridgeUrl") as String?)
             ?: "https://aio.deng.my.id"
