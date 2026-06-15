@@ -130,7 +130,7 @@ test('BLOCKER6 full leaderstats upload stored; partial heartbeat preserves it', 
 
 testIfRaw('BLOCKER1+2+3 Lua ships bounded probe + deep search + alias emit + new marker', () => {
   const lua = fs.readFileSync(RAW_TRACKER_LUA, 'utf8');
-  assert.match(lua, /TRACKER_BUILD = "METADATA_PROBE_DEEP_SCAN_2026_06_15"/);
+  assert.match(lua, /TRACKER_BUILD = "UPLOAD_HTML_530_GATEWAY_DIAG_2026_06_15"/);
   assert.match(lua, /function LiveSafe\.describeKeys/);
   assert.match(lua, /function LiveSafe\.findFirstKeyDeep/);
   assert.match(lua, /function LiveSafe\.debugMetadataProbe/);
