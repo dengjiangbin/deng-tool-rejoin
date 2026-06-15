@@ -1657,21 +1657,58 @@ const LS_KEY        = 'fishit_tracked_users';
     }
     if (accountsOverviewEl) accountsOverviewEl.addEventListener('click', handleAccountsActionClick);
     setAccountViewMode('table');
-  }
+  }
   const FT_MUTATION_COLORS = {
     gold: '#fbbf24', golden: '#fbbf24',
+    albino: '#ffffff',
+    gemstone: '#34d399',
+    stone: '#c8a06b',
+    sandy: '#e3c879', sand: '#e3c879',
     ruby: '#f87171', diamond: '#7dd3fc', emerald: '#34d399', sapphire: '#60a5fa',
     shiny: '#fde68a', glowing: '#fde68a', radiant: '#fde68a',
+    big: '#a3e635', 'big shiny': '#d9f99d',
+    ghost: '#d8d8ff', spectral: '#d8d8ff',
+    holographic: '#a5f3fc', holo: '#a5f3fc',
+    darkened: '#7c83a3',
+    electric: '#38bdf8', shocked: '#38bdf8',
+    mythic: '#c084fc', mythical: '#c084fc',
+    celestial: '#93c5fd', heavenly: '#93c5fd',
     frozen: '#67e8f9', ice: '#67e8f9', icy: '#67e8f9', glacial: '#67e8f9',
     corrupt: '#c084fc', corrupted: '#c084fc', void: '#c084fc', dark: '#c084fc',
     rainbow: '#f0abfc', galaxy: '#a78bfa', cosmic: '#a78bfa',
     fire: '#fb923c', molten: '#fb923c', lava: '#fb923c',
     normal: '#94a3b8',
-  };
+  };
+  function ftMutationHashColor(name) {
+    const s = String(name || '');
+    let h = 0;
+    for (let i = 0; i < s.length; i += 1) { h = (h * 31 + s.charCodeAt(i)) >>> 0; }
+    const hue = h % 360;
+    const sat = 60 + (h >> 9) % 22;   // 60-81%
+    const light = 62 + (h >> 17) % 10; // 62-71% — readable on dark neutral card
+    return `hsl(${hue},${sat}%,${light}%)`;
+  }
   function ftMutationColor(mut) {
     const key = String(mut || '').toLowerCase().trim();
     if (!key) return '';
-    return FT_MUTATION_COLORS[key] || '#cbd5e1';
+    if (FT_MUTATION_COLORS[key]) return FT_MUTATION_COLORS[key];
+    for (const k in FT_MUTATION_COLORS) {
+      if (k.indexOf(' ') === -1 && key.indexOf(k) !== -1) return FT_MUTATION_COLORS[k];
+    }
+    return ftMutationHashColor(key);
+  }
+  function ftMutationStyle(mut) {
+    const key = String(mut || '').toLowerCase().trim();
+    if (!key) return '';
+    if (key.indexOf('gemstone') !== -1) {
+      return 'color:#34d399;background:linear-gradient(90deg,#34d399 0%,#f87171 100%);'
+        + '-webkit-background-clip:text;background-clip:text;'
+        + '-webkit-text-fill-color:transparent;';
+    }
+    if (key === 'albino') {
+      return 'color:#ffffff;text-shadow:0 0 4px rgba(255,255,255,.55),0 1px 2px rgba(0,0,0,.65);';
+    }
+    return `color:${ftMutationColor(key)};`;
   }
   function ftNormalizeNonNil(value) {
     if (value == null) return '';
@@ -3116,9 +3153,9 @@ const LS_KEY        = 'fishit_tracked_users';
   }
   function renderFishInstanceCard(card) {
     const realMut = ftNormalizeNonNil(card.mutation);
-    const mutColor = ftMutationColor(realMut);
+    const mutStyle = ftMutationStyle(realMut);
     const mut = realMut
-      ? `<div class="ft-inst-card__mut" style="color:${escHtml(mutColor)}">${escHtml(realMut)}</div>`
+      ? `<div class="ft-inst-card__mut" style="${escHtml(mutStyle)}">${escHtml(realMut)}</div>`
       : '<div class="ft-inst-card__mut" aria-hidden="true"></div>';
     const img = card.imgSrc
       ? `<div class="ft-inst-card__img"><img src="${escHtml(card.imgSrc)}" alt="${escHtml(card.name)}" decoding="async" loading="lazy"></div>`
@@ -3126,8 +3163,7 @@ const LS_KEY        = 'fishit_tracked_users';
     const weight = card.weight
       ? `<div class="ft-inst-card__weight">Weight: ${escHtml(card.weight)}</div>`
       : '<div class="ft-inst-card__weight ft-inst-card__weight--unknown">Weight unknown</div>';
-    const rarity = String(card.rarity || 'common').toLowerCase();
-    return `<div class="ft-inst-card" data-rarity="${escHtml(rarity)}">${img}<div class="ft-inst-card__body">${mut}<div class="ft-inst-card__name">${escHtml(card.name)}</div><div class="ft-inst-card__owner">${escHtml(card.owner || '-')}</div>${weight}</div></div>`;
+    return `<div class="ft-inst-card">${img}<div class="ft-inst-card__body">${mut}<div class="ft-inst-card__name">${escHtml(card.name)}</div><div class="ft-inst-card__owner">${escHtml(card.owner || '-')}</div>${weight}</div></div>`;
   }
   function ftBreakdownRows(instances, item) {
     const map = new Map();
@@ -3152,8 +3188,9 @@ const LS_KEY        = 'fishit_tracked_users';
     });
   }
   function renderBreakdownRow(row) {
-    const mut = row.mutation
-      ? `<span class="ft-detail-owner__mut" style="color:${escHtml(ftMutationColor(row.mutation))}">${escHtml(row.mutation)}</span>`
+    const realMut = ftNormalizeNonNil(row.mutation);
+    const mut = realMut
+      ? `<span class="ft-detail-owner__mut" style="${escHtml(ftMutationStyle(realMut))}">${escHtml(realMut)}</span>`
       : '';
     return `<div class="ft-detail-owner"><span class="ft-detail-owner__main">${mut}<span class="ft-detail-owner__name">${escHtml(row.owner || '-')}</span></span><span class="ft-detail-owner__qty">x${formatQuantity(row.amount)}</span></div>`;
   }

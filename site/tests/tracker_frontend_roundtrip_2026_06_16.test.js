@@ -155,12 +155,13 @@ describe('frontend detail layout + rarity + nil filter (BLOCKER I/J/D)', () => {
     assert.match(src, /\.inventory-apk-embed\s+\.ft-detail-instances\s*\{\s*grid-template-columns:repeat\(auto-fill,minmax\(/);
     assert.doesNotMatch(src, /\.inventory-apk-embed\s+\.ft-detail-instances\s*\{\s*grid-template-columns:1fr/);
   });
-  test('fish detail card carries rarity color rules', () => {
-    assert.match(src, /\.ft-inst-card\[data-rarity="secret"\]/);
-    assert.match(src, /\.ft-inst-card\[data-rarity="legendary"\]/);
+  test('detail/instance cards no longer carry rarity background rules', () => {
+    // 2026-06-16 polish: detail cards use the neutral surface only.
+    assert.doesNotMatch(src, /\.ft-inst-card\[data-rarity="secret"\]/);
+    assert.doesNotMatch(src, /\.ft-inst-card\[data-rarity="legendary"\]/);
   });
-  test('renderFishInstanceCard sets data-rarity', () => {
-    assert.match(src, /data-rarity="\$\{escHtml\(rarity\)\}"/);
+  test('renderFishInstanceCard renders neutral card (no data-rarity)', () => {
+    assert.doesNotMatch(src, /data-rarity="\$\{escHtml\(rarity\)\}"/);
   });
   test('frontend normalizeNonNil rejects nil/null/none', () => {
     assert.match(src, /function ftNormalizeNonNil/);
