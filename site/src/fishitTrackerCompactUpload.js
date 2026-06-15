@@ -25,6 +25,12 @@ function isDebugUploadBody(body) {
   return false;
 }
 
+/** Debug/proof uploads are opt-in only — never normal production traffic. */
+function isProductionDebugUploadAllowed() {
+  const v = String(process.env.TRACKER_DEBUG_UPLOAD_ALLOWED || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
 function compactInventoryRow(row, kind) {
   if (!row || typeof row !== 'object') return null;
   const qty = Number(row.quantity) > 0 ? Math.floor(Number(row.quantity)) : 1;
@@ -191,6 +197,7 @@ function shouldLogUnresolvedDebug(opts = {}) {
 module.exports = {
   HEAVY_UPLOAD_KEYS,
   isDebugUploadBody,
+  isProductionDebugUploadAllowed,
   stripHeavyUploadFields,
   compactPlayerStatsDebug,
   compactInventoryRow,

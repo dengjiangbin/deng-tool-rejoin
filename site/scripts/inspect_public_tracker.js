@@ -16,6 +16,8 @@ const crypto = require('crypto');
     hasSingleton: /DENG_TRACKER_UPLOAD_SINGLETON|DENG_TRACKER_RUNNING/.test(dec),
     has502Backoff: /502|503/.test(dec),
     hasUploadSkipCooldown: dec.includes('UPLOAD_SKIP_COOLDOWN'),
+    hasDebugDisabled: dec.includes('DEBUG_UPLOAD_DISABLED_PRODUCTION'),
+    hasUploadFailTransient: dec.includes('UPLOAD_FAIL_TRANSIENT'),
     throttleLeaderstats: (dec.match(/required_leaderstats\s*=\s*(\d+)/) || [])[1],
   }, null, 2));
 })().catch((e) => { console.error(e); process.exit(1); });

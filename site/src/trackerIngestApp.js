@@ -34,12 +34,6 @@ app.get('/health', (_req, res) => {
     service: 'deng-tracker-ingest',
     port: PORT,
     timestamp: new Date().toISOString(),
-    queue: trackerConcurrencyGate.stats(),
-    eventLoop: getEventLoopMetrics(),
-    memory: {
-      heapUsed: process.memoryUsage().heapUsed,
-      heapTotal: process.memoryUsage().heapTotal,
-    },
   });
 });
 

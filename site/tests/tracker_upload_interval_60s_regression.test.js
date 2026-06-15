@@ -53,7 +53,8 @@ describe('tracker upload interval 60s + aio domain regression', () => {
     assert.match(lua, new RegExp(AIO_UPLOAD_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.doesNotMatch(lua, /https:\/\/tool\.deng\.my\.id\/api\/fishit-tracker\/update-backpack/);
     assert.match(lua, /intervalSeconds = LiveSafe\.lightSyncIntervalSeconds or 60/);
-    assert.match(lua, /UPLOAD_502_INTERVAL_SINGLETON_FIX_2026_06_15/);
+    assert.match(lua, /UPLOAD_DEBUG_OFF_NO_SYNC_DEBUG_2026_06_15/);
+    assert.match(lua, /DEBUG_UPLOAD_DISABLED_PRODUCTION/);
     assert.match(lua, /DENG_TRACKER_RUNNING/);
     assert.match(lua, /UPLOAD_SKIP_COOLDOWN/);
   });

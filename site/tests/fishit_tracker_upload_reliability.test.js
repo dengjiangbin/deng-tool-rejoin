@@ -118,6 +118,30 @@ describe('upload reliability — missing weight + no 429 storms', () => {
     }
   });
 
+  test('debug upload flagged in production returns 202 skipped without 502', async () => {
+    const app = makeApp();
+    const res = await request(app)
+      .post('/api/fishit-tracker/update-backpack')
+      .send(baseBody('DebugSkipUser', {
+        type: 'inventory_snapshot',
+        debugUpload: true,
+        uploadMode: 'debug',
+        unresolvedItems: [{ huge: 'x'.repeat(5000) }],
+        sourceTruth: { dump: 'x'.repeat(5000) },
+        playerStats: {
+          coins: 1,
+          totalCaught: 1,
+          source: 'leaderstats',
+          build: BUILD,
+        },
+      }));
+    assert.notEqual(res.status, 502);
+    assert.notEqual(res.status, 503);
+    assert.equal(res.status, 202);
+    assert.equal(res.body.skipped, true);
+    assert.equal(res.body.note, 'debug_upload_disabled_production');
+  });
+
   test('many distinct usernames upload concurrently without 429', async () => {
     const app = makeApp();
     const results = await Promise.all(

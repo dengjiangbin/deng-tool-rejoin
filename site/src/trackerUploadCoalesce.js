@@ -21,6 +21,9 @@ function uploadLaneKey(req) {
   if (body.leaderstatsOnlyUpload === true || body.uploadPath === 'playerdata_leaderstats_only') {
     return `${account}:required_leaderstats`;
   }
+  if (body.debugUpload === true || body.uploadPath === 'debug_upload' || body.uploadMode === 'debug') {
+    return `${account}:debug_upload`;
+  }
   if (type === 'tracker_status' || body.uploadPath === 'required_status') {
     return `${account}:tracker_status`;
   }

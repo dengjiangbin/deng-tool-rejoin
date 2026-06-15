@@ -31,14 +31,14 @@
         "SESSION_MAINTENANCE_INTERVAL_MS": "900000",
         "TRACKER_UPLOAD_BUSY_LAG_MS": "8000",
         "TRACKER_UPLOAD_COALESCE_MS": "55000",
-        "TRACKER_UPLOAD_PROXY_TIMEOUT_MS": "30000",
+        "TRACKER_UPLOAD_PROXY_TIMEOUT_MS": "45000",
         "TOOL_SITE_PUBLIC_URL": "https://aio.deng.my.id",
         "TOOL_SITE_INTERNAL_URL": "https://tool.deng.my.id",
         "DISCORD_AIO_WEB_REDIRECT_URI": "https://aio.deng.my.id/auth/discord/callback",
         "DISCORD_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "DISCORD_AIO_REDIRECT_URI": "https://aio.deng.my.id/api/aio/auth/callback",
         "OAUTH_STATE_DIR": "C:\\Users\\Administrator\\Desktop\\DENG Tool Rejoin\\data\\oauth-states",
-        "TOOL_SITE_ASSET_VERSION": "UPLOAD_502_INTERVAL_SINGLETON_FIX_2026_06_15",
+        "TOOL_SITE_ASSET_VERSION": "UPLOAD_DEBUG_OFF_NO_SYNC_DEBUG_2026_06_15",
         "GIT_COMMIT": "09e9975"
       }
     },
@@ -71,11 +71,11 @@
         "TRACKER_UPLOAD_BODY_LIMIT": "512kb",
         "TRACKER_UPLOAD_BUSY_LAG_MS": "8000",
         "TRACKER_UPLOAD_COALESCE_MS": "55000",
-        "TRACKER_UPLOAD_PROXY_TIMEOUT_MS": "30000",
+        "TRACKER_UPLOAD_PROXY_TIMEOUT_MS": "45000",
         "TRACKER_EVENT_LOOP_LAG_WARN_MS": "250",
         "TRACKER_EVENT_LOOP_LAG_SHED_MS": "1200",
         "FISHIT_ACCOUNT_FLUSH_MS": "500",
-        "TOOL_SITE_ASSET_VERSION": "UPLOAD_502_INTERVAL_SINGLETON_FIX_2026_06_15",
+        "TOOL_SITE_ASSET_VERSION": "UPLOAD_DEBUG_OFF_NO_SYNC_DEBUG_2026_06_15",
         "TRACKER_UPLOAD_HANDLER_TIMEOUT_MS": "0",
       }
     }

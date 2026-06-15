@@ -22,7 +22,7 @@ const {
 
 describe('tracker build allowlist', () => {
   test('production build matches current public raw marker', () => {
-    assert.equal(PRODUCTION_TRACKER_BUILD, 'UPLOAD_502_INTERVAL_SINGLETON_FIX_2026_06_15');
+    assert.equal(PRODUCTION_TRACKER_BUILD, 'UPLOAD_DEBUG_OFF_NO_SYNC_DEBUG_2026_06_15');
     assert.equal(MINIMUM_TRACKER_BUILD, PRODUCTION_TRACKER_BUILD);
     assert.ok(ALLOWED_TRACKER_BUILD_EXACT.includes(PRODUCTION_TRACKER_BUILD));
     assert.ok(ALLOWED_TRACKER_BUILD_EXACT.includes('UPLOAD_INTERVAL_60S_AIO_2026_06_14'));

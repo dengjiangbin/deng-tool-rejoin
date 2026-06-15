@@ -739,19 +739,26 @@ router.use((req, res, next) => {
 const liveTrackDB = {};
 
 if (process.env.NODE_ENV !== 'test' || process.env.FISHIT_SESSION_PERSIST === '1') {
-  try {
-    if (process.env.TRACKER_INGEST_MODE !== '1') {
-      canonicalCatalog.rebuildFromAllSources({ persist: true });
+  const hydrateLiveSessions = () => {
+    try {
+      if (process.env.TRACKER_INGEST_MODE !== '1') {
+        canonicalCatalog.rebuildFromAllSources({ persist: true });
+      }
+      const loaded = sessionStore.migrateToShardedStorageIfNeeded();
+      if (loaded.migrated) {
+        console.log('[fishit-tracker] migrated legacy live sessions to sharded store count=%d backup=%s',
+          loaded.migrated, loaded.backup || 'none');
+      }
+      const loadResult = sessionStore.loadIntoLiveTrackDB(liveTrackDB);
+      console.log('[fishit-tracker] canonical catalog rebuilt; sessions restored:', loadResult.loaded || 0);
+    } catch (err) {
+      console.warn('[fishit-tracker] boot hydrate failed:', err && err.message ? err.message : err);
     }
-    const loaded = sessionStore.migrateToShardedStorageIfNeeded();
-    if (loaded.migrated) {
-      console.log('[fishit-tracker] migrated legacy live sessions to sharded store count=%d backup=%s',
-        loaded.migrated, loaded.backup || 'none');
-    }
-    const loadResult = sessionStore.loadIntoLiveTrackDB(liveTrackDB);
-    console.log('[fishit-tracker] canonical catalog rebuilt; sessions restored:', loadResult.loaded || 0);
-  } catch (err) {
-    console.warn('[fishit-tracker] boot hydrate failed:', err && err.message ? err.message : err);
+  };
+  if (process.env.TRACKER_INGEST_MODE === '1') {
+    setImmediate(hydrateLiveSessions);
+  } else {
+    hydrateLiveSessions();
   }
 }
 
@@ -4041,39 +4048,37 @@ function handleUpdateBackpack(req, res) {
     const rawIncomingBody = prepareTrackerRequestBody(req.body || {}, {
       testMode: process.env.NODE_ENV === 'test',
     });
-    const isDebugUpload = compactUpload.isDebugUploadBody(rawIncomingBody);
+    const debugFlagged = compactUpload.isDebugUploadBody(rawIncomingBody);
+    const debugAllowed = compactUpload.isProductionDebugUploadAllowed();
+    const isDebugUpload = debugFlagged && debugAllowed;
     const parseStart = Date.now();
-    const body = isDebugUpload
-      ? rawIncomingBody
-      : compactUpload.stripHeavyUploadFields(rawIncomingBody);
+    const body = compactUpload.stripHeavyUploadFields(rawIncomingBody, { isDebug: isDebugUpload });
     const parseMs = Date.now() - parseStart;
     const arrivalType = body.type || 'inventory_snapshot';
     responsePayloadType = arrivalType;
     responseUsernameKey = body.username ? String(body.username).toLowerCase() : null;
     if (arrivalType !== 'tracker_status'
       && !leaderstatsUpload.isLeaderstatsOnlyBody(body)) {
-      const auditArrival = extractTotemAuditArrivalMeta(rawIncomingBody);
-      console.log(
-        '[fishit-tracker] upload_arrival route=%s type=%s user=%s sessionKey=%s build=%s' +
-        ' debugUpload=%s compact=%s hasTotemPathAudit=%s hasTotemInventoryPathProof=%s hasClassificationDebug=%s hasGameItemDbTotemAudit=%s' +
-        ' nonFishGroups=%d totemCount=%d unresolvedCount=%s requestBytes=%d gate=%j',
-        req.path,
-        arrivalType,
-        body.username || '?',
-        body.username ? String(body.username).toLowerCase() : '?',
-        body.trackerBuild || body.trackerClientProof?.trackerBuild || 'n/a',
-        isDebugUpload,
-        !isDebugUpload,
-        auditArrival.hasTotemPathAudit,
-        auditArrival.hasTotemInventoryPathProof,
-        auditArrival.hasClassificationDebug,
-        auditArrival.hasGameItemDbTotemAudit,
-        auditArrival.nonFishGroups,
-        auditArrival.totemCount,
-        auditArrival.unresolvedCount == null ? 'n/a' : String(auditArrival.unresolvedCount),
-        requestBytes,
-        trackerConcurrencyGate.stats(),
-      );
+      const gateStats = trackerConcurrencyGate.stats();
+      const lagMs = Number(gateStats?.eventLoopLagMs) || 0;
+      if (lagMs < 2500) {
+        const auditArrival = extractTotemAuditArrivalMeta(rawIncomingBody);
+        console.log(
+          '[fishit-tracker] upload_arrival route=%s type=%s user=%s sessionKey=%s build=%s' +
+          ' debugUpload=%s debugFlagged=%s compact=%s requestBytes=%d lagMs=%d queue=%d',
+          req.path,
+          arrivalType,
+          body.username || '?',
+          body.username ? String(body.username).toLowerCase() : '?',
+          body.trackerBuild || body.trackerClientProof?.trackerBuild || 'n/a',
+          isDebugUpload,
+          debugFlagged,
+          !isDebugUpload,
+          requestBytes,
+          Math.round(lagMs),
+          Number(gateStats?.queued) || 0,
+        );
+      }
     }
     const clientGate = validateTrackerClientProof(body);
     if (!clientGate.ok) {
@@ -4125,6 +4130,27 @@ function handleUpdateBackpack(req, res) {
         allowedTrackerChannel: ALLOWED_TRACKER_CHANNEL,
         allowedTrackerRawUrl: ALLOWED_TRACKER_RAW_URL,
         minimumTrackerBuild: MINIMUM_TRACKER_BUILD,
+      });
+    }
+
+    if (debugFlagged && !debugAllowed) {
+      responseAccepted = true;
+      responsePayloadType = 'debug_upload_skipped';
+      console.log(
+        '[fishit-tracker] debug_upload_skipped user=%s sessionKey=%s requestBytes=%d note=production_debug_disabled',
+        body.username || '?',
+        body.username ? String(body.username).toLowerCase() : '?',
+        requestBytes,
+      );
+      scheduleIngestPostResponseFlush(res);
+      return res.status(202).json({
+        ok: true,
+        accepted: true,
+        coalesced: true,
+        skipped: true,
+        lane: 'debug_upload',
+        note: 'debug_upload_disabled_production',
+        minNextUploadSeconds: 60,
       });
     }
 
