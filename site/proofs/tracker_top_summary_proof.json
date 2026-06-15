@@ -4,11 +4,6 @@
       "url": "/public/img/tracker/online_avatar.png",
       "source": "user_uploaded_asset"
     },
-    "evolved": {
-      "name": "Evolved Enchant Stone",
-      "filename": "stone_558_evolved.png",
-      "url": "/api/fishit-tracker/assets/stones/stone_558_evolved.png?v=1781002834229"
-    },
     "secret": {
       "name": "Ancient Lochness Monster",
       "assetId": "122849883484708",
@@ -19,82 +14,112 @@
       "assetId": "134510300238125",
       "url": "/api/fishit-tracker/assets/fish/a159de70c6ad8f23.png"
     },
-    "ruby": {
-      "name": "Ruby",
-      "assetId": "91295888272023",
-      "url": "/api/fishit-tracker/assets/fish/d37e2459b06930b8.png"
+    "evolved": {
+      "name": "Evolved Enchant Stone",
+      "filename": "stone_558_evolved.png",
+      "url": "/api/fishit-tracker/assets/stones/stone_558_evolved.png?v=1781002834229"
+    },
+    "runic": {
+      "name": "Runic Stone",
+      "source": "manual_override",
+      "file": "runic_stone_2026_06_15_v2.png",
+      "url": "/api/fishit-tracker/assets/manual/stones/runic_stone_2026_06_15_v2.png"
     }
   },
   "desktop": {
-    "cols": "469px 469px",
+    "cols": "310.656px 310.672px 310.656px",
     "cardCount": 5,
+    "order": [
+      "Online / Accounts",
+      "Secret Fish",
+      "Forgotten Fish",
+      "Evolved Enchant Stone",
+      "Runic Stone"
+    ],
     "images": [
       {
         "alt": "Online accounts",
-        "src": "/public/img/tracker/online_avatar.png",
-        "nw": 485,
-        "complete": true
-      },
-      {
-        "alt": "Evolved Enchant Stone",
-        "src": "/api/fishit-tracker/assets/stones/stone_558_evolved.png?v=1781002834229",
-        "nw": 420,
-        "complete": true
+        "src": "http://127.0.0.1:58729/public/img/tracker/online_avatar.png",
+        "complete": true,
+        "naturalWidth": 485,
+        "naturalHeight": 514
       },
       {
         "alt": "Secret fish",
-        "src": "/api/fishit-tracker/assets/fish/91e1358b93bd8d98.png",
-        "nw": 150,
-        "complete": true
+        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/fish/91e1358b93bd8d98.png",
+        "complete": true,
+        "naturalWidth": 150,
+        "naturalHeight": 150
       },
       {
         "alt": "Forgotten fish",
-        "src": "/api/fishit-tracker/assets/fish/a159de70c6ad8f23.png",
-        "nw": 150,
-        "complete": true
+        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/fish/a159de70c6ad8f23.png",
+        "complete": true,
+        "naturalWidth": 150,
+        "naturalHeight": 150
       },
       {
-        "alt": "Ruby",
-        "src": "/api/fishit-tracker/assets/fish/d37e2459b06930b8.png",
-        "nw": 150,
-        "complete": true
+        "alt": "Evolved Enchant Stone",
+        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/stones/stone_558_evolved.png?v=1781002834229",
+        "complete": true,
+        "naturalWidth": 420,
+        "naturalHeight": 420
+      },
+      {
+        "alt": "Runic Stone",
+        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/manual/stones/runic_stone_2026_06_15_v2.png",
+        "complete": true,
+        "naturalWidth": 420,
+        "naturalHeight": 420
       }
     ],
     "onlineColor": "rgb(98, 230, 138)"
   },
   "mobile": {
-    "cols": "370px",
+    "cols": "118px 118px 118px",
     "cardCount": 5,
+    "order": [
+      "Online / Accounts",
+      "Secret Fish",
+      "Forgotten Fish",
+      "Evolved Enchant Stone",
+      "Runic Stone"
+    ],
     "images": [
       {
         "alt": "Online accounts",
-        "src": "/public/img/tracker/online_avatar.png",
-        "nw": 485,
-        "complete": true
-      },
-      {
-        "alt": "Evolved Enchant Stone",
-        "src": "/api/fishit-tracker/assets/stones/stone_558_evolved.png?v=1781002834229",
-        "nw": 420,
-        "complete": true
+        "src": "http://127.0.0.1:58729/public/img/tracker/online_avatar.png",
+        "complete": true,
+        "naturalWidth": 485,
+        "naturalHeight": 514
       },
       {
         "alt": "Secret fish",
-        "src": "/api/fishit-tracker/assets/fish/91e1358b93bd8d98.png",
-        "nw": 150,
-        "complete": true
+        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/fish/91e1358b93bd8d98.png",
+        "complete": true,
+        "naturalWidth": 150,
+        "naturalHeight": 150
       },
       {
         "alt": "Forgotten fish",
-        "src": "/api/fishit-tracker/assets/fish/a159de70c6ad8f23.png",
-        "nw": 150,
-        "complete": true
+        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/fish/a159de70c6ad8f23.png",
+        "complete": true,
+        "naturalWidth": 150,
+        "naturalHeight": 150
       },
       {
-        "alt": "Ruby",
-        "src": "/api/fishit-tracker/assets/fish/d37e2459b06930b8.png",
-        "nw": 150,
-        "complete": true
+        "alt": "Evolved Enchant Stone",
+        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/stones/stone_558_evolved.png?v=1781002834229",
+        "complete": true,
+        "naturalWidth": 420,
+        "naturalHeight": 420
+      },
+      {
+        "alt": "Runic Stone",
+        "src": "http://127.0.0.1:58729/api/fishit-tracker/assets/manual/stones/runic_stone_2026_06_15_v2.png",
+        "complete": true,
+        "naturalWidth": 420,
+        "naturalHeight": 420
       }
     ],
     "onlineColor": "rgb(98, 230, 138)"

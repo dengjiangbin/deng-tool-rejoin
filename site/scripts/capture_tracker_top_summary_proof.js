@@ -22,6 +22,7 @@ const topIcons = require('../src/fishitTrackerTopSummaryIcons');
 
 const FISH_DIR = path.join(ROOT, 'data', 'fish_image_cache');
 const STONE_DIR = path.join(ROOT, 'data', 'stone_image_cache');
+const MANUAL_DIR = path.join(ROOT, 'data', 'manual_image_cache');
 
 function renderPage() {
   const icons = topIcons.resolveTopSummaryIcons();
@@ -52,12 +53,14 @@ async function shoot(page, label, width, height) {
   await page.waitForTimeout(600);
   const info = await page.evaluate(() => {
     const grid = document.getElementById('inventoryStats');
-    const imgs = Array.from(document.querySelectorAll('.tracker-top-summary-icon .tracker-top-summary-img'));
+    const imgs = Array.from(document.querySelectorAll('.tracker-top-summary-card img'));
     const onlineCount = document.querySelector('.tracker-online-value .online-count');
+    const order = Array.from(document.querySelectorAll('.tracker-top-summary-card .tracker-top-summary-label')).map((el) => el.textContent.trim());
     return {
       cols: grid ? getComputedStyle(grid).gridTemplateColumns : null,
       cardCount: grid ? grid.children.length : 0,
-      images: imgs.map((i) => ({ alt: i.alt, src: i.getAttribute('src'), nw: i.naturalWidth, complete: i.complete })),
+      order,
+      images: imgs.map((i) => ({ alt: i.alt, src: i.currentSrc || i.src, complete: i.complete, naturalWidth: i.naturalWidth, naturalHeight: i.naturalHeight })),
       onlineColor: onlineCount ? getComputedStyle(onlineCount).color : null,
     };
   });
@@ -83,6 +86,13 @@ async function main() {
   };
   app.get('/api/fishit-tracker/assets/fish/:filename', serveFrom(FISH_DIR));
   app.get('/api/fishit-tracker/assets/stones/:filename', serveFrom(STONE_DIR));
+  app.get('/api/fishit-tracker/assets/manual/:category/:filename', (req, res) => {
+    const cat = path.basename(String(req.params.category || ''));
+    const file = path.basename(String(req.params.filename || ''));
+    const full = path.join(MANUAL_DIR, cat, file);
+    if (file && fs.existsSync(full)) return res.sendFile(full);
+    return res.status(404).end();
+  });
   const server = http.createServer(app);
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   PORT = server.address().port;
@@ -104,14 +114,22 @@ async function main() {
   console.log(JSON.stringify(report, null, 2));
 
   const allImgs = [...desktop.info.images, ...mobile.info.images];
-  const broken = allImgs.filter((i) => !i.src || i.nw === 0);
+  const broken = allImgs.filter((i) => !i.src || !i.complete || i.naturalWidth === 0 || i.naturalHeight === 0);
   if (broken.length) {
     console.error('BROKEN_IMAGES', JSON.stringify(broken));
     process.exit(2);
   }
-  if (!/^repeat|,/.test(desktop.info.cols) && desktop.info.cols.split(' ').length !== 2) {
-    console.error('DESKTOP_NOT_TWO_COLUMNS', desktop.info.cols);
-    process.exit(3);
+  const expectedOrder = ['Online / Accounts', 'Secret Fish', 'Forgotten Fish', 'Evolved Enchant Stone', 'Runic Stone'];
+  if (JSON.stringify(desktop.info.order) !== JSON.stringify(expectedOrder)) {
+    console.error('WRONG_CARD_ORDER', JSON.stringify(desktop.info.order));
+    process.exit(4);
+  }
+  for (const v of [desktop.info, mobile.info]) {
+    const cols = String(v.cols || '').trim().split(/\s+/).filter(Boolean);
+    if (cols.length !== 3) {
+      console.error('NOT_THREE_COLUMNS', v.cols);
+      process.exit(3);
+    }
   }
   console.log('TRACKER_TOP_SUMMARY_PROOF_OK');
 }

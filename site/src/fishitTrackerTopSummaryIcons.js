@@ -24,6 +24,8 @@ let fishImageCache = null;
 try { fishImageCache = require('./fishitFishImageCache'); } catch (_) { fishImageCache = null; }
 let stoneImageAssets = null;
 try { stoneImageAssets = require('./fishitStoneImageAssets'); } catch (_) { stoneImageAssets = null; }
+let manualInventoryImages = null;
+try { manualInventoryImages = require('./fishitInventoryManualImages'); } catch (_) { manualInventoryImages = null; }
 
 const ONLINE_AVATAR_URL = '/public/img/tracker/online_avatar.png';
 
@@ -87,25 +89,47 @@ function evolvedStoneIcon() {
   };
 }
 
+// Runic Stone must use the user's existing manual override image only — never
+// gameDB/fallback/generated. Returns null if the override or file is missing.
+function runicStoneIcon() {
+  if (!manualInventoryImages) return null;
+  let override = null;
+  try {
+    override = manualInventoryImages.lookupManualOverride(
+      { name: 'Runic Stone', category: 'stones', stoneType: 'Runic' },
+      'stones',
+    );
+  } catch (_) { override = null; }
+  if (!override || !override.uploadedFile) return null;
+  if (!manualInventoryImages.manualFileExists('stones', override.uploadedFile)) return null;
+  const url = override.imageUrl || `/api/fishit-tracker/assets/manual/stones/${override.uploadedFile}`;
+  return {
+    name: override.originalName || 'Runic Stone',
+    source: 'manual_override',
+    file: override.uploadedFile,
+    url,
+  };
+}
+
 // Full resolution + a machine-readable proof block (chosen names/paths) so the
 // selections can be logged/verified without faking anything.
 function resolveTopSummaryIcons() {
   const secret = representativeFishByRarity('Secret');
   const forgotten = representativeFishByRarity('Forgotten');
-  const ruby = rubyIcon();
   const evolved = evolvedStoneIcon();
+  const runic = runicStoneIcon();
   return {
     online: ONLINE_AVATAR_URL,
-    evolved: evolved ? evolved.url : null,
     secret: secret ? secret.url : null,
     forgotten: forgotten ? forgotten.url : null,
-    ruby: ruby ? ruby.url : null,
+    evolved: evolved ? evolved.url : null,
+    runic: runic ? runic.url : null,
     proof: {
       online: { url: ONLINE_AVATAR_URL, source: 'user_uploaded_asset' },
-      evolved: evolved || { missing: true },
       secret: secret || { missing: true, rarity: 'Secret' },
       forgotten: forgotten || { missing: true, rarity: 'Forgotten' },
-      ruby: ruby || { missing: true, name: 'Ruby' },
+      evolved: evolved || { missing: true },
+      runic: runic || { missing: true, name: 'Runic Stone' },
     },
   };
 }
@@ -116,5 +140,6 @@ module.exports = {
   representativeFishByRarity,
   rubyIcon,
   evolvedStoneIcon,
+  runicStoneIcon,
   resolveTopSummaryIcons,
 };
