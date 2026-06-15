@@ -553,7 +553,7 @@ async function login(agent) {
   const state = new URL(start.headers.location).searchParams.get('state');
   const res = await agent.get(`/auth/discord/callback?code=ok&state=${state}`);
   assert.equal(res.status, 302);
-  assert.equal(res.headers.location, '/dashboard');
+  assert.equal(res.headers.location, '/tracker');
 }
 
 async function startChallenge(agent) {
@@ -728,12 +728,12 @@ describe('auth and protected pages', () => {
     assert.match(res.text, /Sign in with Discord/);
   });
 
-  test('signed-in users visiting / are sent to dashboard', async () => {
+  test('signed-in users visiting / are sent to live tracker', async () => {
     const agent = request.agent(app);
     await login(agent);
     const res = await agent.get('/');
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/dashboard');
+    assert.equal(res.headers.location, '/tracker');
   });
 
   test('login page shows Discord-only login with required text and no database login', async () => {
@@ -769,7 +769,7 @@ describe('auth and protected pages', () => {
     const state = new URL(start.headers.location).searchParams.get('state');
     const res = await agent.get(`/auth/discord/callback?code=ok&state=${state}`);
     assert.equal(res.status, 302);
-    assert.equal(res.headers.location, '/dashboard');
+    assert.equal(res.headers.location, '/tracker');
     assert.ok(memoryDb.site_users.some((row) => row.discord_user_id === 'discord-user-1'));
   });
 
@@ -837,8 +837,8 @@ describe('auth and protected pages', () => {
       const state = new URL(start.headers.location).searchParams.get('state');
       const res = await agent.get(`/auth/discord/callback?code=ok&state=${state}`);
       assert.equal(res.status, 302);
-      assert.equal(res.headers.location, '/dashboard');
-      // Dashboard must be accessible
+      assert.equal(res.headers.location, '/tracker');
+      // Dashboard must still be accessible directly
       const dash = await agent.get('/dashboard');
       assert.equal(dash.status, 200);
     } finally {

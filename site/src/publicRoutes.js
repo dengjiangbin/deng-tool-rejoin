@@ -21,7 +21,7 @@ function sendPublicPage(res, view, locals = {}) {
 }
 
 router.get('/', (req, res) => {
-  if (req.session.user) return res.redirect('/dashboard');
+  if (req.session.user) return res.redirect('/tracker');
   let initialHomeStats = { trackedCount: 0, onlineCount: 0 };
   try {
     const fishitTrackerRoutes = require('./fishitTrackerRoutes');
@@ -45,7 +45,7 @@ router.get('/login', (req, res) => {
   const returnPath = safeReturnPath(req.query.return || req.query.next);
   const apkEmbed = req.query.apk === '1' || req.query.apk === 'true';
   if (req.session.user) {
-    const dest = apkEmbed ? '/tracker?apk=1' : (returnPath || '/dashboard');
+    const dest = apkEmbed ? '/tracker?apk=1' : (returnPath || '/tracker');
     return res.redirect(dest);
   }
   if (returnPath) req.session.authReturnTo = returnPath;

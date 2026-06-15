@@ -37,6 +37,36 @@ function oauthLoginRedirectHost(req) {
   return isCanonicalPublicHost(requestHost(req)) ? canonicalPublicUrl() : '';
 }
 
+/**
+ * APK WebView cookie-priming interstitial.
+ *
+ * Android WebView frequently fails to persist/send a Set-Cookie that arrives on
+ * a 302 redirect response before it follows the redirect to an auth-guarded
+ * page — the request to /tracker then arrives without `deng_sid` and bounces to
+ * /login ("web_bridge_cookie_missing"). Returning the cookie on a 200 HTML page
+ * and navigating via JS after a short tick guarantees the WebView commits the
+ * session cookie first, so the subsequent /tracker load is authenticated.
+ */
+function renderWebBridgeRedirectHtml(returnTo) {
+  const safe = String(returnTo || '/tracker');
+  const jsTarget = JSON.stringify(safe);
+  const attr = safe
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="1;url=${attr}">
+<title>Signing you in…</title>
+<style>html,body{margin:0;height:100%;background:#0D0F14;color:#e8eef9;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
+.wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+.spinner{width:36px;height:36px;border-radius:50%;border:3px solid rgba(255,255,255,.18);border-top-color:#4f8cff;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}</style></head>
+<body><div class="wrap"><div class="spinner" aria-hidden="true"></div><div>Signing you in…</div></div>
+<script>(function(){var t=${jsTarget};function go(){try{window.location.replace(t);}catch(e){window.location.href=t;}}setTimeout(go,120);})();</script></body></html>`;
+}
+
 router.get('/auth/discord', (req, res) => {
   const started = Date.now();
   const ret = safeReturnPath(req.query.return || req.query.next)
@@ -53,7 +83,7 @@ router.get('/auth/discord', (req, res) => {
   let authUrl;
   try {
     authUrl = buildDiscordAuthUrl(req, {
-      authReturnTo: ret || (oauthApkReturn ? '/tracker?apk=1' : '/dashboard'),
+      authReturnTo: ret || (oauthApkReturn ? '/tracker?apk=1' : '/tracker'),
       returnPublicUrl,
       oauthApkReturn,
     });
@@ -106,7 +136,7 @@ router.get('/auth/web-bridge', authLimiter, async (req, res) => {
   const { upsertDiscordUser, toSessionUser, LOGIN_HOME: loginHome } = require('./auth');
 
   const bridgeCode = typeof req.query.code === 'string' ? req.query.code.trim() : '';
-  const authReturnTo = safeReturnPath(req.query.return) || '/dashboard';
+  const authReturnTo = safeReturnPath(req.query.return) || '/tracker';
   const apkFlow = req.query.apk === '1' || req.query.apk === 'true';
   if (!bridgeCode) {
     console.warn('[auth/web-bridge] APK_AUTH_FAIL_STAGE=handoff_missing apk=%s', apkFlow);
@@ -182,7 +212,10 @@ router.get('/auth/web-bridge', authLimiter, async (req, res) => {
           authReturnTo,
           bridged.discordUserId,
         );
-        res.redirect(authReturnTo);
+        // Prime the session cookie on a 200 HTML page (not a 302) so the WebView
+        // reliably stores `deng_sid` before navigating to the guarded page.
+        res.set('Cache-Control', 'no-store');
+        res.status(200).type('html').send(renderWebBridgeRedirectHtml(authReturnTo));
         resolve();
       });
     });

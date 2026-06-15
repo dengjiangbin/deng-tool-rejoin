@@ -1,9 +1,9 @@
 #!/usr/bin/env pwsh
 # Publish a signed DENG All In One release APK and refresh releases/android/latest.json
 param(
-  [string]$VersionName = "2.2.2",
-  [int]$VersionCode = 19,
-  [string]$BuildMarker = "APK_DISCORD_AUTH_LOGIN_LOOP_REAL_FIX_2026_06_14"
+  [string]$VersionName = "2.2.4",
+  [int]$VersionCode = 21,
+  [string]$BuildMarker = "APK_LOGIN_COOKIE_INTERSTITIAL_LIVE_TRACKER_DEFAULT_2026_06_15"
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,9 +41,9 @@ $manifest = [ordered]@{
   min_sdk = 26
   purpose = "Monitoring companion for DENG All In One (aio.deng.my.id)"
   changelog = @(
-    "$BuildMarker - Fix APK Discord login loop: preserve web-bootstrap URL for WebView session bridge.",
-    "Live Tracker waits for bootstrap bridge before loading; MainActivity no longer discards pending URL.",
-    "Discord OAuth opens system browser / Custom Tabs; deep-link handoff (deng-aio://auth/callback).",
+    "$BuildMarker - Fix APK login/auth loop: /auth/web-bridge now sets the deng_sid cookie on a 200 HTML interstitial (not a 302) so the WebView reliably stores the session before loading the tracker.",
+    "Default landing after login changed to Live Tracker (first tab); Dashboard is now the second tab.",
+    "Tracker account-status false-red fixed: account stays green for the full 10-minute grace after a valid contact; only a confirmed offline (or grace expiry) turns it red.",
     "Default site and API base URL: https://aio.deng.my.id."
   )
 }

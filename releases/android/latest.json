@@ -1,18 +1,18 @@
 {
     "app_name":  "DENG All In One",
-    "version_name":  "2.2.3",
-    "version_code":  20,
-    "file_name":  "deng-all-in-one-apk-v2.2.3.apk",
-    "sha256":  "80f14db62db47c6e477bdeb0f91674f7bb064ad35e89d1b0168c8a0f6e6c15a3",
-    "size_bytes":  1852416,
-    "released_at":  "2026-06-14T20:30:00.000Z",
-    "build_marker":  "APK_DISCORD_AUTH_HANDOFF_COMPLETION_FIX_2026_06_14",
+    "version_name":  "2.2.4",
+    "version_code":  21,
+    "file_name":  "deng-all-in-one-apk-v2.2.4.apk",
+    "sha256":  "c3247137aa845dd9366bf11f23ff6b290e4be98d981ea9e34ac3c9bde62a6bbe",
+    "size_bytes":  1852412,
+    "released_at":  "2026-06-15T03:19:54.371Z",
+    "build_marker":  "APK_LOGIN_COOKIE_INTERSTITIAL_LIVE_TRACKER_DEFAULT_2026_06_15",
     "min_sdk":  26,
     "purpose":  "Monitoring companion for DENG All In One (aio.deng.my.id)",
     "changelog":  [
-                      "APK_DISCORD_AUTH_HANDOFF_COMPLETION_FIX_2026_06_14 - Fix Custom Tabs handoff: intent-first apk-open page, dedupe deep links, web-session verify before login.",
-                      "Detect deep_link_not_received when browser completes OAuth but app never opens.",
-                      "Verify deng_sid cookie + /api/aio/auth/web-session before marking WebView logged in.",
+                      "APK_LOGIN_COOKIE_INTERSTITIAL_LIVE_TRACKER_DEFAULT_2026_06_15 - Fix APK login/auth loop: /auth/web-bridge now sets the deng_sid cookie on a 200 HTML interstitial (not a 302) so the WebView reliably stores the session before loading the tracker.",
+                      "Default landing after login changed to Live Tracker (first tab); Dashboard is now the second tab.",
+                      "Tracker account-status false-red fixed: account stays green for the full 10-minute grace after a valid contact; only a confirmed offline (or grace expiry) turns it red.",
                       "Default site and API base URL: https://aio.deng.my.id."
                   ]
 }

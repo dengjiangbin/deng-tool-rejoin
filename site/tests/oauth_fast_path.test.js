@@ -135,7 +135,7 @@ describe('Discord OAuth fast path', () => {
       .get(`/api/aio/auth/callback?code=ok&state=${state}`)
       .set('Host', 'aio.deng.my.id');
     assert.equal(callback.status, 302);
-    assert.match(callback.headers.location, /\/dashboard/);
+    assert.match(callback.headers.location, /\/tracker/);
     assert.doesNotMatch(callback.headers.location, /\/login/);
   });
 

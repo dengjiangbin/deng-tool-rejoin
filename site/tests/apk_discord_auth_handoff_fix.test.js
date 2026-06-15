@@ -113,9 +113,15 @@ describe('APK Discord auth handoff login loop fix', () => {
     assert.match(bootstrap.body.bridgeUrl, /^https:\/\/aio\.deng\.my\.id\/auth\/web-bridge\?code=/);
     assert.equal(bootstrap.body.handoffMarker, MARKER);
 
+    // The web-bridge now returns a 200 HTML cookie-priming interstitial (not a
+    // 302) so the Android WebView reliably stores `deng_sid` before navigating
+    // to the auth-guarded page. The redirect target is carried in the page body.
     const bridge = await agent.get(bootstrap.body.bridgeUrl.replace('https://aio.deng.my.id', ''));
-    assert.equal(bridge.status, 302);
-    assert.match(bridge.headers.location, /\/tracker\?apk=1/);
+    assert.equal(bridge.status, 200);
+    assert.match(bridge.headers['content-type'] || '', /text\/html/);
+    assert.match(bridge.text, /\/tracker\?apk=1/);
+    const bridgeCookies = bridge.headers['set-cookie'] || [];
+    assert.ok(bridgeCookies.some((c) => c.startsWith('deng_sid=')), 'web-bridge must Set-Cookie deng_sid on the 200 interstitial');
 
     const webSession = await agent.get('/api/aio/auth/web-session');
     assert.equal(webSession.status, 200);
@@ -138,7 +144,7 @@ describe('APK Discord auth handoff login loop fix', () => {
       .set('Authorization', `Bearer ${ex.body.appSessionToken}`)
       .send({});
     const bridgePath = bootstrap.body.bridgeUrl.replace('https://aio.deng.my.id', '');
-    await agent.get(bridgePath).expect(302);
+    await agent.get(bridgePath).expect(200);
     const replay = await agent.get(bridgePath);
     assert.equal(replay.status, 302);
     assert.match(replay.headers.location, /auth_error=handoff_expired/);

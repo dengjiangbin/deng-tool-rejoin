@@ -10,8 +10,8 @@ const PARTIAL_PATH = path.join(__dirname, '..', 'views', 'partials', 'deng-sideb
 const SIDEBAR_CSS_PATH = path.join(__dirname, '..', 'public', 'css', 'app-sidebar.css');
 
 const MENU = [
-  { label: 'Dashboard', href: '/dashboard', activePage: 'dashboard' },
   { label: 'Live Tracker', href: '/tracker', activePage: 'tracker' },
+  { label: 'Dashboard', href: '/dashboard', activePage: 'dashboard' },
   { label: 'My License', href: '/license', activePage: 'license' },
   { label: 'Download', href: '/download', activePage: 'download' },
 ];
@@ -34,7 +34,7 @@ describe('WinterHUB desktop app sidebar', () => {
     assert.match(trackerSource, /class="inventory-sidebar sidebar deng-app-sidebar"/);
   });
 
-  test('sidebar menu order is MAIN Dashboard, Live Tracker; TOOLS My License, Download (no Fish It)', () => {
+  test('sidebar menu order is MAIN Live Tracker, Dashboard; TOOLS My License, Download (no Fish It)', () => {
     const partial = fs.readFileSync(PARTIAL_PATH, 'utf8');
     const labels = [...partial.matchAll(/class="sidebar-link__label">([^<]+)</g)].map((m) => m[1]);
     assert.deepEqual(labels, MENU.map((m) => m.label));

@@ -222,7 +222,7 @@ async function handleDiscordOAuthCallback(req, res) {
   }
 
   const oauthApkReturn = stored.oauthApkReturn === true;
-  const authReturnTo = safeReturnPath(stored.authReturnTo) || '/dashboard';
+  const authReturnTo = safeReturnPath(stored.authReturnTo) || '/tracker';
   const sessionUser = toSessionUser(siteUser);
 
   if (oauthApkReturn) {

@@ -140,7 +140,7 @@ describe('OAuth aio domain migration', () => {
     const start = await agent.get('/auth/discord').set('Host', 'aio.deng.my.id');
     const preferredCb = await completeOAuth(agent, '/api/aio/auth/callback', start.headers.location);
     assert.equal(preferredCb.status, 302);
-    assert.match(preferredCb.headers.location, /\/dashboard/);
+    assert.match(preferredCb.headers.location, /\/tracker/);
     assert.doesNotMatch(preferredCb.headers.location, /\/login/);
 
     clearAppCache();

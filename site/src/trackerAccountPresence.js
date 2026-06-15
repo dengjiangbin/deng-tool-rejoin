@@ -98,12 +98,23 @@ function deriveAccountPresenceStatus(data, maxAgeMs = ACCOUNT_PRESENCE_GRACE_MS,
   const recentSeen = seenAgeSeconds != null && seenAgeSeconds * 1000 < maxAgeMs;
   const loaderOnline = data.isOnline === true;
   const loaderOffline = data.isOnline === false;
+  // A *confirmed* offline is an explicit offline snapshot (lastOfflineAt) that is
+  // the most recent successful contact — i.e. no newer online/leaderstats/inventory
+  // lane has reported in since. Non-status lanes (leaderstats fast-path, inventory)
+  // that omit isOnline:true must NOT redline the account inside the grace window;
+  // they refresh lastAccountSeenAt but never stamp lastOfflineAt, so they cannot
+  // forge a confirmed-offline. This is what prevents the ~interval false-red.
+  const lastOfflineAtMs = parseTimestampMs(data.lastOfflineAt);
+  const lastSeenMs = parseTimestampMs(lastAccountSeenAt);
+  const confirmedOffline = loaderOffline
+    && lastOfflineAtMs != null
+    && (lastSeenMs == null || lastOfflineAtMs >= lastSeenMs - 1000);
   const transientUploadFailure = isTransientServerUploadFailure(
     data?.lastFailureReason || data?.lastUploadRejectReason || data?.rejectReason,
     data?.lastUploadStatusCodeReturned || data?.lastUploadHttpStatus,
   );
   if (recentSeen) {
-    if (loaderOffline) {
+    if (confirmedOffline) {
       return {
         ...base,
         accountPresenceLive: false,

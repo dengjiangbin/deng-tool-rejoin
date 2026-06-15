@@ -6,6 +6,24 @@
     <ul class="sidebar-menu">
       <li>
         <% if (trackerMode) { %>
+        <button type="button" class="sidebar-link is-active" data-inventory-section="accounts">
+        <% } else { %>
+        <a href="/tracker" class="sidebar-link <%= page === 'tracker' ? 'is-active' : '' %>">
+        <% } %>
+          <span class="sidebar-link__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+            </svg>
+          </span>
+          <span class="sidebar-link__label">Live Tracker</span>
+        <% if (trackerMode) { %>
+        </button>
+        <% } else { %>
+        </a>
+        <% } %>
+      </li>
+      <li>
+        <% if (trackerMode) { %>
         <button type="button" class="sidebar-link" data-inventory-section="dashboard">
         <% } else { %>
         <a href="/dashboard" class="sidebar-link <%= page === 'dashboard' ? 'is-active' : '' %>">
@@ -19,24 +37,6 @@
             </svg>
           </span>
           <span class="sidebar-link__label">Dashboard</span>
-        <% if (trackerMode) { %>
-        </button>
-        <% } else { %>
-        </a>
-        <% } %>
-      </li>
-      <li>
-        <% if (trackerMode) { %>
-        <button type="button" class="sidebar-link is-active" data-inventory-section="accounts">
-        <% } else { %>
-        <a href="/tracker" class="sidebar-link <%= page === 'tracker' ? 'is-active' : '' %>">
-        <% } %>
-          <span class="sidebar-link__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false">
-              <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
-            </svg>
-          </span>
-          <span class="sidebar-link__label">Live Tracker</span>
         <% if (trackerMode) { %>
         </button>
         <% } else { %>

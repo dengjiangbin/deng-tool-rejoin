@@ -182,7 +182,7 @@ describe('public domain migration', () => {
       .get(`/api/aio/auth/callback?code=ok&state=${state}`)
       .set('Host', 'aio.deng.my.id');
     assert.equal(callback.status, 302);
-    assert.match(callback.headers.location, /\/dashboard/);
+    assert.match(callback.headers.location, /\/tracker/);
     const download = await agent.get('/download').set('Host', 'aio.deng.my.id');
     assert.equal(download.status, 200);
     assert.match(download.text, /Only download from https:\/\/aio\.deng\.my\.id\/download/);

@@ -97,7 +97,7 @@ async function login(agent) {
   const state = new URL(start.headers.location).searchParams.get('state');
   const res = await agent.get(`/auth/discord/callback?code=ok&state=${state}`);
   assert.equal(res.status, 302);
-  assert.equal(res.headers.location, '/dashboard');
+  assert.equal(res.headers.location, '/tracker');
 }
 
 describe('public home landing page', () => {
