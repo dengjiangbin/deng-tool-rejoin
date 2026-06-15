@@ -2,7 +2,10 @@ package my.id.deng.monitor.ui
 
 import android.annotation.SuppressLint
 import android.net.Uri
+import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -33,6 +36,48 @@ object AioWebViewNavigator {
 }
 
 private val WebBg = Color(0xFF0D0F14)
+
+const val APK_TRACKER_IMAGES_LOG_TAG = "DengTrackerImages"
+
+// Injected on tracker/inventory pages: surfaces manual image overrides to the
+// WebView console as IMAGE_OVERRIDE_MATCH <name>, which the WebChromeClient below
+// forwards to logcat (tag DengTrackerImages) for on-device proof.
+private const val OVERRIDE_PROBE_JS = """
+(function(){
+  try {
+    var seen = window.__dengOverrideSeen || (window.__dengOverrideSeen = {});
+    function scan(){
+      var imgs = document.querySelectorAll('img');
+      for (var i=0;i<imgs.length;i++){
+        var img = imgs[i];
+        var s = img.currentSrc || img.getAttribute('src') || '';
+        if (s.indexOf('/assets/manual/') >= 0){
+          var name = (img.alt || img.title || '').trim();
+          if (!name){ try { name = decodeURIComponent(s.split('/').pop()); } catch(e){ name = s.split('/').pop(); } }
+          var key = 'IMAGE_OVERRIDE_MATCH ' + name;
+          if (!seen[key]){ seen[key] = 1; try { console.log(key); } catch(e){} }
+        }
+      }
+    }
+    scan(); setTimeout(scan, 1500); setTimeout(scan, 4000);
+  } catch (e) {}
+})();
+"""
+
+// Injected on tracker pages: hides the website's in-page "Live Tracker /
+// Dashboard" mobile section tabs so the APK doesn't show duplicate browser-style
+// nav (the native bottom nav owns navigation; Dashboard is intentionally gone).
+private const val APK_SHELL_CSS_JS = """
+(function(){
+  try {
+    if (document.getElementById('deng-apk-shell-css')) return;
+    var st = document.createElement('style');
+    st.id = 'deng-apk-shell-css';
+    st.textContent = '.inventory-main-nav--mobile,[data-mobile-tracker-tabs]{display:none !important;}';
+    (document.head || document.documentElement).appendChild(st);
+  } catch (e) {}
+})();
+"""
 
 fun isAuthenticatedWebUrl(url: String, publicWebHost: String): Boolean {
     val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
@@ -103,6 +148,15 @@ fun AioWebViewScreen(
                     // Accept third-party too (harmless here) but the flow does not depend on it.
                     CookieManager.getInstance().setAcceptCookie(true)
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onConsoleMessage(message: ConsoleMessage?): Boolean {
+                            val text = message?.message().orEmpty()
+                            if (text.contains("IMAGE_OVERRIDE")) {
+                                Log.i(APK_TRACKER_IMAGES_LOG_TAG, text)
+                            }
+                            return super.onConsoleMessage(message)
+                        }
+                    }
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(
                             view: WebView?,
@@ -133,6 +187,10 @@ fun AioWebViewScreen(
                             onUrlChanged?.invoke(finished)
                             onPageFinished?.invoke(finished)
                             CookieManager.getInstance().flush()
+                            if (finished.contains("/tracker") || finished.contains("/inventory")) {
+                                view?.evaluateJavascript(APK_SHELL_CSS_JS, null)
+                                view?.evaluateJavascript(OVERRIDE_PROBE_JS, null)
+                            }
                         }
                     }
                     loadUrl(startUrl)

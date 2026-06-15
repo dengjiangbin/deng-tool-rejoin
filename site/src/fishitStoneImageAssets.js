@@ -171,6 +171,33 @@ function attachStoneImagesToItems(items, baseUrl) {
       source: item.source || 'playerdata_gameitemdb',
     };
 
+    // Manual override wins over EVERY other source (incl. preferGameDbIcon) so
+    // explicitly-uploaded art (e.g. Runic Stone) always beats broken catalog/
+    // gameDB images.
+    const manualOverride = lookupManualStoneOverride(item);
+    if (manualOverride) {
+      const imageUrl = manualInventoryImages.buildManualImageUrl(
+        baseUrl,
+        'stones',
+        manualOverride.uploadedFile,
+      );
+      if (imageUrl) {
+        manualInventoryImages.logImageOverrideMatch(
+          manualOverride.originalName,
+          manualOverride.normalizedName,
+        );
+        return {
+          ...rowBase,
+          name: manualOverride.originalName || displayName,
+          displayName: manualOverride.originalName || displayName,
+          imageUrl,
+          imageUrlPresent: true,
+          imageSource: manualInventoryImages.MANUAL_OVERRIDE_SOURCE,
+          imageResolver: 'stone_manual_override',
+        };
+      }
+    }
+
     if (shouldPreferGameDbStone(item)) {
       const gameDb = resolveStoneGameIconProxy(item, meta, baseUrl);
       if (gameDb) {
@@ -180,26 +207,6 @@ function attachStoneImagesToItems(items, baseUrl) {
           ...gameDb,
           name: resolvedName,
           displayName: resolvedName,
-        };
-      }
-    }
-
-    const manualOverride = lookupManualStoneOverride(item);
-    if (manualOverride) {
-      const imageUrl = manualInventoryImages.buildManualImageUrl(
-        baseUrl,
-        'stones',
-        manualOverride.uploadedFile,
-      );
-      if (imageUrl) {
-        return {
-          ...rowBase,
-          name: manualOverride.originalName || displayName,
-          displayName: manualOverride.originalName || displayName,
-          imageUrl,
-          imageUrlPresent: true,
-          imageSource: manualInventoryImages.MANUAL_OVERRIDE_SOURCE,
-          imageResolver: 'stone_manual_override',
         };
       }
     }

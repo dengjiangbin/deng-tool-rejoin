@@ -136,6 +136,7 @@ function attachManualImagesToItems(items, category, baseUrl) {
     if (!override?.uploadedFile) return item;
     if (!manualFileExists(cat, override.uploadedFile)) return item;
     const imageUrl = buildManualImageUrl(baseUrl, cat, override.uploadedFile);
+    logImageOverrideMatch(override.originalName, override.normalizedName);
     return {
       ...item,
       name: override.originalName || item.name || item.displayName,
@@ -328,7 +329,26 @@ function _resetCatalogForTests() {
 const SEED_FILE_BY_KEY = {
   'totems|2|mutation totem': 'mutation_totem.png',
   'totems|1|luck totem': 'luck_totem.png',
+  // Manual overrides for broken Runic Stone / Love Totem / Shiny Totem art
+  // (2026-06-15). Keyed by name only so they match regardless of itemId.
+  'totems||love totem': 'love_totem_2026_06_15.png',
+  'totems||shiny totem': 'shiny_totem_2026_06_15.png',
+  'stones||runic stone': 'runic_stone_2026_06_15.png',
 };
+
+// Emit IMAGE_OVERRIDE_MATCH once per item-name per process so the override is
+// provable from server logs (and WebView console via the APK forwarder) without
+// flooding the log on every poll.
+const _loggedOverrideMatches = new Set();
+function logImageOverrideMatch(originalName, normalizedName) {
+  const label = String(originalName || normalizedName || '').trim();
+  if (!label) return;
+  const key = String(normalizedName || label).toLowerCase();
+  if (_loggedOverrideMatches.has(key)) return;
+  _loggedOverrideMatches.add(key);
+  // eslint-disable-next-line no-console
+  console.log('[DengTrackerImages] IMAGE_OVERRIDE_MATCH %s', label);
+}
 
 function ensureOverrideFilesFromSeed() {
   const catalog = loadCatalog();
@@ -378,5 +398,6 @@ module.exports = {
   buildManualImageProof,
   decodeImagePayload,
   ensureOverrideFilesFromSeed,
+  logImageOverrideMatch,
   _resetCatalogForTests,
 };

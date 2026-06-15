@@ -167,6 +167,38 @@ class OAuthLoginContractTest {
     }
 
     @Test
+    fun `success locks the attempt and suppresses later failure UI`() {
+        val main = read("$src/MainActivity.kt")
+        assertTrue("must track a success-locked flag", main.contains("authSucceeded"))
+        assertTrue("must log APK_AUTH_SUCCESS_LOCKED on success", main.contains("APK_AUTH_SUCCESS_LOCKED"))
+        assertTrue(
+            "must log suppression when a failure tries to fire after success",
+            main.contains("APK_AUTH_FAILURE_SUPPRESSED_AFTER_SUCCESS"),
+        )
+        // reportAuthFailure must short-circuit when already succeeded.
+        assertTrue(
+            "reportAuthFailure must guard on authSucceeded",
+            Regex("""fun reportAuthFailure[\s\S]{0,160}if \(authSucceeded\)""").containsMatchIn(main),
+        )
+        // The delayed deep-link-not-received failure must route through reportAuthFailure.
+        assertTrue(main.contains("reportAuthFailure(\"deep_link_not_received\")"))
+        // onResume must bail out entirely once success is locked.
+        assertTrue(
+            "onResume must return early when authSucceeded",
+            Regex("""fun onResume\(\)[\s\S]{0,120}if \(authSucceeded\) return""").containsMatchIn(main),
+        )
+    }
+
+    @Test
+    fun `app pulls itself to foreground so the user need not close the browser`() {
+        val main = read("$src/MainActivity.kt")
+        assertTrue("must define a bring-to-foreground helper", main.contains("fun bringAppToForeground"))
+        assertTrue("must reorder our task to front", main.contains("FLAG_ACTIVITY_REORDER_TO_FRONT"))
+        // Called on BOTH the deep-link Ready path and the polling-complete path.
+        assertTrue("polling completion must pull the app forward", main.contains("bringAppToForeground()"))
+    }
+
+    @Test
     fun `consume bridge loads in same persistent webview not custom tab`() {
         val login = read("$src/ui/LoginWebViewScreen.kt")
         // The consume URL (bridgeUrl) is loaded via the in-app AioWebViewScreen

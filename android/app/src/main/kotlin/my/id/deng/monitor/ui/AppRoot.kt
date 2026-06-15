@@ -1,11 +1,13 @@
 package my.id.deng.monitor.ui
 
+import android.util.Log
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Apps
-import androidx.compose.material.icons.outlined.Backpack
-import androidx.compose.material.icons.outlined.Dashboard
+import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Icon
@@ -26,18 +28,24 @@ import my.id.deng.monitor.data.AppPreferences
 import my.id.deng.monitor.data.MonitorApi
 import my.id.deng.monitor.data.SessionStore
 
+const val APK_UI_LOG_TAG = "DengApkUi"
+
 private data class NavItem(
     val route: String,
     val label: String,
     val icon: @Composable () -> Unit,
 )
 
+/**
+ * APK bottom navigation — EXACTLY four items, Live Tracker first/default.
+ * Dashboard is intentionally NOT present in the APK (useless on mobile); the
+ * website keeps it but the native shell must not show it.
+ */
 private val NAV_ITEMS = listOf(
     NavItem("live_tracker", "Live Tracker") { Icon(Icons.Outlined.Visibility, contentDescription = null) },
-    NavItem("dashboard",    "Dashboard")   { Icon(Icons.Outlined.Dashboard, contentDescription = null) },
-    NavItem("packages",     "Packages")    { Icon(Icons.Outlined.Apps, contentDescription = null) },
-    NavItem("inventory",    "Inventory")   { Icon(Icons.Outlined.Backpack, contentDescription = null) },
-    NavItem("settings",     "Settings")    { Icon(Icons.Outlined.Settings, contentDescription = null) },
+    NavItem("rejoin",       "Rejoin")       { Icon(Icons.Outlined.Autorenew, contentDescription = null) },
+    NavItem("packages",     "Packages")     { Icon(Icons.Outlined.Apps, contentDescription = null) },
+    NavItem("settings",     "Settings")     { Icon(Icons.Outlined.Settings, contentDescription = null) },
 )
 
 @Composable
@@ -87,8 +95,14 @@ private fun AuthenticatedAppShell(
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route ?: "live_tracker"
 
+    Log.i(APK_UI_LOG_TAG, "APK_UI_BOTTOM_NAV items=${NAV_ITEMS.size} routes=${NAV_ITEMS.joinToString(",") { it.route }}")
+
     Scaffold(
-        containerColor = Color.Transparent,
+        // Apply the top status-bar inset to content so the WebView never draws
+        // under the notification/status bar. The NavigationBar applies its own
+        // gesture/navigation-bar inset, so it stays visible above the system bar.
+        contentWindowInsets = WindowInsets.statusBars,
+        containerColor = my.id.deng.monitor.ui.theme.DengColors.BgA,
         bottomBar = {
             NavigationBar(
                 containerColor = my.id.deng.monitor.ui.theme.DengColors.NavBar,
@@ -119,9 +133,8 @@ private fun AuthenticatedAppShell(
             modifier = Modifier.fillMaxSize().padding(inner),
         ) {
             composable("live_tracker") { LiveTrackerWebViewScreen(sessionStore = sessionStore) }
-            composable("dashboard")    { DashboardWebViewScreen() }
+            composable("rejoin")       { RejoinWebViewScreen() }
             composable("packages")     { PackagesScreen(api = api, sessionStore = sessionStore) }
-            composable("inventory")      { InventoryScreen(api = api) }
             composable("settings")     {
                 SettingsScreen(
                     api = api,
@@ -132,4 +145,9 @@ private fun AuthenticatedAppShell(
         }
     }
 }
-
+
+/** Rejoin tab — first-party WebView onto the license / rejoin-keys console. */
+@Composable
+private fun RejoinWebViewScreen() {
+    AioWebViewScreen(startUrl = aioWebUrl("/license"))
+}

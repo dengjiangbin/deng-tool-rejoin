@@ -23,6 +23,39 @@
       "sha256": "7f0b523ba05304fa95cc34a5e25ff331a9a116077a07d8328a13940b34c82e03",
       "uploadedAt": "2026-06-13T09:34:01.225Z",
       "updatedAt": "2026-06-13T10:47:14.465Z"
+    },
+    "totems||love totem": {
+      "category": "totems",
+      "itemId": null,
+      "normalizedName": "love totem",
+      "originalName": "Love Totem",
+      "uploadedFile": "love_totem_2026_06_15.png",
+      "imageUrl": "/api/fishit-tracker/assets/manual/totems/love_totem_2026_06_15.png",
+      "sha256": "ce24607393955039ba5c61dea9ad4369aee0f834cbc5bc8863768982da6c7c9b",
+      "uploadedAt": "2026-06-15T05:40:00.000Z",
+      "updatedAt": "2026-06-15T05:40:00.000Z"
+    },
+    "totems||shiny totem": {
+      "category": "totems",
+      "itemId": null,
+      "normalizedName": "shiny totem",
+      "originalName": "Shiny Totem",
+      "uploadedFile": "shiny_totem_2026_06_15.png",
+      "imageUrl": "/api/fishit-tracker/assets/manual/totems/shiny_totem_2026_06_15.png",
+      "sha256": "d8ef7f195df7d5e3bb5720cbbdc910a12b3beb4784bb3a4e5603ec581daeb693",
+      "uploadedAt": "2026-06-15T05:40:00.000Z",
+      "updatedAt": "2026-06-15T05:40:00.000Z"
+    },
+    "stones||runic stone": {
+      "category": "stones",
+      "itemId": null,
+      "normalizedName": "runic stone",
+      "originalName": "Runic Stone",
+      "uploadedFile": "runic_stone_2026_06_15.png",
+      "imageUrl": "/api/fishit-tracker/assets/manual/stones/runic_stone_2026_06_15.png",
+      "sha256": "a21dbe70e781910ee52b0953676fea831cbf51d45e0ad565de08e0da4562146d",
+      "uploadedAt": "2026-06-15T05:40:00.000Z",
+      "updatedAt": "2026-06-15T05:40:00.000Z"
     }
   }
 }

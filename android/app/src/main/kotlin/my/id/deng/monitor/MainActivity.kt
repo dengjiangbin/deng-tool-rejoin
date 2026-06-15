@@ -50,6 +50,42 @@ class MainActivity : ComponentActivity() {
     @Volatile private var mobileState: String? = null
     private var pollJob: Job? = null
 
+    // Success/failure are mutually exclusive. Once /api/aio/auth/me=200 verifies
+    // the WebView session, the current login attempt is LOCKED as success and no
+    // later timeout/poll/deeplink/failure handler may flip it to a failure UI.
+    @Volatile private var authSucceeded = false
+
+    /** Set a login failure ONLY when this attempt has not already succeeded. */
+    private fun reportAuthFailure(reason: String) {
+        if (authSucceeded) {
+            Log.i(APK_AUTH_LOG_TAG, "APK_AUTH_FAILURE_SUPPRESSED_AFTER_SUCCESS reason=$reason")
+            return
+        }
+        authError = reason
+    }
+
+    /** Cancel every pending job/timer that could still emit a failure. */
+    private fun cancelAuthFollowups() {
+        pollJob?.cancel()
+        pollJob = null
+    }
+
+    /** Reorder our (singleTask) task above the Chrome Custom Tab so the user
+     *  returns to the app automatically — no manual browser closing. */
+    private fun bringAppToForeground() {
+        runCatching {
+            val intent = Intent(this, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                        or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        or Intent.FLAG_ACTIVITY_NEW_TASK,
+                )
+            }
+            startActivity(intent)
+            Log.i(APK_AUTH_LOG_TAG, "APK_AUTH_BRING_TO_FOREGROUND")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -77,14 +113,16 @@ class MainActivity : ComponentActivity() {
 
                 oauthWaitingDeepLink = false
                 handoffMutex.withLock {
-                    authError = null
+                    if (!authSucceeded) authError = null
                     when (val result = completeApkOAuthFromDeepLink(app.api, app.sessionStore, code, stateNonce)) {
                         is ApkOAuthHandoffResult.Ready -> {
-                            pollJob?.cancel()
+                            cancelAuthFollowups()
+                            // Deep link path: ensure the app is on top of the Custom Tab.
+                            bringAppToForeground()
                             bootstrapBridgeUrl = result.bridgeUrl
                         }
                         is ApkOAuthHandoffResult.Failed -> {
-                            authError = result.reason
+                            reportAuthFailure(result.reason)
                         }
                     }
                 }
@@ -113,7 +151,11 @@ class MainActivity : ComponentActivity() {
                         bootstrapBridgeUrl = bootstrapBridgeUrl,
                         authError = authError,
                         onBootstrapSuccess = {
-                            pollJob?.cancel()
+                            // LOCK success: auth/me verified in the WebView. From here
+                            // no failure UI may appear for this attempt.
+                            authSucceeded = true
+                            Log.i(APK_AUTH_LOG_TAG, "APK_AUTH_SUCCESS_LOCKED")
+                            cancelAuthFollowups()
                             mobileTxnId = null
                             mobileState = null
                             bootstrapBridgeUrl = null
@@ -121,14 +163,20 @@ class MainActivity : ComponentActivity() {
                             oauthWaitingDeepLink = false
                         },
                         onBootstrapFailure = { reason ->
-                            Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_FAIL_STAGE=$reason")
-                            pollJob?.cancel()
+                            cancelAuthFollowups()
                             bootstrapBridgeUrl = null
-                            authError = reason
                             oauthWaitingDeepLink = false
+                            if (authSucceeded) {
+                                Log.i(APK_AUTH_LOG_TAG, "APK_AUTH_FAILURE_SUPPRESSED_AFTER_SUCCESS reason=$reason")
+                            } else {
+                                Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_FAIL_STAGE=$reason")
+                                authError = reason
+                            }
                         },
                         onClearAuthError = { authError = null },
                         onOAuthFlowStarted = {
+                            // Fresh attempt — re-arm so logout/login works repeatedly.
+                            authSucceeded = false
                             oauthWaitingDeepLink = true
                             authError = null
                         },
@@ -157,6 +205,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (authSucceeded) return
         if (!oauthWaitingDeepLink || pendingOAuthCode != null || bootstrapBridgeUrl != null) return
         val app = application as MonitorApp
         if (app.sessionStore.isWebLoggedInBlocking()) {
@@ -167,14 +216,15 @@ class MainActivity : ComponentActivity() {
         // login even when the deep link is never delivered — never false-fail.
         if (mobileTxnId != null) return
         window.decorView.postDelayed({
-            if (oauthWaitingDeepLink
+            if (!authSucceeded
+                && oauthWaitingDeepLink
                 && pendingOAuthCode == null
                 && bootstrapBridgeUrl == null
                 && mobileTxnId == null
                 && !app.sessionStore.isWebLoggedInBlocking()
             ) {
                 oauthWaitingDeepLink = false
-                authError = "deep_link_not_received"
+                reportAuthFailure("deep_link_not_received")
                 Log.w(APK_AUTH_LOG_TAG, "APK_AUTH_FAIL_STAGE=deep_link_not_received")
             }
         }, 2500)
@@ -216,9 +266,12 @@ class MainActivity : ComponentActivity() {
         pollJob?.cancel()
         pollJob = lifecycleScope.launch {
             var attempts = 0
-            while (attempts < 60) {
+            while (attempts < 90) {
                 attempts++
-                delay(2_500)
+                // Faster cadence early so login feels instant if the deep link
+                // never arrives; back off slightly after the first ~15s.
+                delay(if (attempts <= 12) 1_200 else 2_500)
+                if (authSucceeded) return@launch
                 if (bootstrapBridgeUrl != null || app.sessionStore.isWebLoggedInBlocking()) return@launch
                 val status = try {
                     app.api.mobileAuthStatus(txnId, state)
@@ -226,9 +279,13 @@ class MainActivity : ComponentActivity() {
                     null
                 }
                 if (status != null && status.status == "complete" && !status.consumeUrl.isNullOrBlank()) {
-                    if (bootstrapBridgeUrl == null) {
+                    if (bootstrapBridgeUrl == null && !authSucceeded) {
                         Log.i(APK_AUTH_LOG_TAG, "APK_AUTH_MOBILE_POLL_COMPLETE marker=$APK_MOBILE_AUTH_MARKER")
                         oauthWaitingDeepLink = false
+                        // Polling path: the Custom Tab is still in front — pull the
+                        // app forward so the bootstrap WebView + Live Tracker show
+                        // without the user having to close the browser.
+                        bringAppToForeground()
                         bootstrapBridgeUrl = status.consumeUrl
                     }
                     return@launch

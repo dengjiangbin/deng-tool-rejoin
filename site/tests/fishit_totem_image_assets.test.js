@@ -29,7 +29,7 @@ describe('totem image resolver', () => {
     assert.doesNotMatch(String(row.imageUrl), /\/assets\/fish\//);
   });
 
-  test('Shiny Totem falls back to gameDB proxy when catalog placeholder is stale', () => {
+  test('Shiny Totem uses the 2026-06-15 manual override (wins over gameDB proxy)', () => {
     const rows = totemImageAssets.attachTotemImagesToItems([
       {
         kind: 'totem',
@@ -41,9 +41,26 @@ describe('totem image resolver', () => {
       },
     ], 'http://127.0.0.1:8791');
 
-    assert.match(rows[0].imageUrl, /\/api\/tracker\/image\/1234567890123/);
-    assert.equal(rows[0].imageSource, 'totem_gameitemdb_proxy');
-    assert.equal(rows[0].imageResolver, 'totem_gameitemdb_proxy');
+    assert.match(rows[0].imageUrl, /\/api\/(fishit-)?tracker\/assets\/manual\/totems\/shiny_totem_2026_06_15\.png/);
+    assert.equal(rows[0].imageSource, 'manual_override');
+    assert.equal(rows[0].imageResolver, 'totem_manual_override');
+    assert.equal(rows[0].name, 'Shiny Totem');
+  });
+
+  test('Love Totem and Runic Stone resolve to their 2026-06-15 manual overrides', () => {
+    const totemRows = totemImageAssets.attachTotemImagesToItems([
+      { kind: 'totem', itemId: '777', name: 'Love Totem', quantity: 2, icon: 'rbxassetid://999', source: 'playerdata_gameitemdb' },
+    ], 'http://127.0.0.1:8791');
+    assert.match(totemRows[0].imageUrl, /manual\/totems\/love_totem_2026_06_15\.png/);
+    assert.equal(totemRows[0].imageSource, 'manual_override');
+
+    const stoneImageAssets = require('../src/fishitStoneImageAssets');
+    const stoneRows = stoneImageAssets.attachStoneImagesToItems([
+      { kind: 'stone', itemId: '900', name: 'Runic Stone', stoneType: 'Runic', quantity: 1, icon: 'rbxassetid://888', source: 'playerdata_gameitemdb' },
+    ], 'http://127.0.0.1:8791');
+    assert.match(stoneRows[0].imageUrl, /manual\/stones\/runic_stone_2026_06_15\.png/);
+    assert.equal(stoneRows[0].imageSource, 'manual_override');
+    assert.equal(stoneRows[0].imageResolver, 'stone_manual_override');
   });
 
   test('buildPublicFromPlayerDataGameItemDb maps totem cards with totem image source', async () => {

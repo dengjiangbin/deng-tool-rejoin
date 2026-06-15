@@ -170,6 +170,10 @@ function attachTotemImagesToItems(items, baseUrl) {
         manualOverride.uploadedFile,
       );
       if (imageUrl) {
+        manualInventoryImages.logImageOverrideMatch(
+          manualOverride.originalName,
+          manualOverride.normalizedName,
+        );
         return {
           ...rowBase,
           name: manualOverride.originalName || displayName,

@@ -22,16 +22,19 @@ class FishItContractTest {
     private val src = "src/main/kotlin/my/id/deng/monitor"
 
     // ── Navigation / screens ─────────────────────────────────────────────────
-    @Test fun `app has live tracker dashboard inventory and settings nav`() {
+    @Test fun `app has exactly live tracker rejoin packages and settings nav`() {
         val appRoot = read("$src/ui/AppRoot.kt")
         assertTrue("live_tracker NavItem must exist", appRoot.contains(Regex(""""live_tracker",\s*"Live Tracker"""")))
-        assertTrue("dashboard NavItem must exist", appRoot.contains(Regex(""""dashboard",\s*"Dashboard"""")))
-        assertTrue("inventory NavItem must exist", appRoot.contains(Regex(""""inventory",\s*"Inventory"""")))
+        assertTrue("rejoin NavItem must exist", appRoot.contains(Regex(""""rejoin",\s*"Rejoin"""")))
+        assertTrue("packages NavItem must exist", appRoot.contains(Regex(""""packages",\s*"Packages"""")))
+        assertTrue("settings NavItem must exist", appRoot.contains(Regex(""""settings",\s*"Settings"""")))
         assertTrue("live tracker composable route must exist", appRoot.contains("composable(\"live_tracker\")"))
-        assertTrue("inventory composable route must exist", appRoot.contains("composable(\"inventory\")"))
+        assertTrue("rejoin composable route must exist", appRoot.contains("composable(\"rejoin\")"))
         assertTrue("LiveTrackerWebViewScreen must be wired", appRoot.contains("LiveTrackerWebViewScreen("))
-        assertTrue("InventoryScreen must be wired", appRoot.contains("InventoryScreen("))
         assertTrue("LoginWebViewScreen must be wired for signed-out users", appRoot.contains("LoginWebViewScreen("))
+        // Dashboard / Inventory tabs are removed from the APK bottom nav.
+        assertTrue("APK nav must not contain a Dashboard tab", !appRoot.contains("\"Dashboard\""))
+        assertTrue("APK nav must not contain an inventory route", !appRoot.contains("composable(\"inventory\")"))
     }
 
     @Test fun `FishItScreen has Daily, Stats and Fish sub-tabs`() {

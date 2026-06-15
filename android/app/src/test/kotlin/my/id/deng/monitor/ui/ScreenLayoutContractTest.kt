@@ -81,23 +81,43 @@ class ScreenLayoutContractTest {
     }
 
     @Test
-    fun `AppRoot nav uses Inventory instead of Snapshot`() {
+    fun `AppRoot bottom nav has exactly four items - Live Tracker, Rejoin, Packages, Settings`() {
+        val src = ui("AppRoot.kt")
+        val items = Regex("""NavItem\("([a-z_]+)",\s*"([^"]+)"""").findAll(src)
+            .map { it.groupValues[1] to it.groupValues[2] }
+            .toList()
+        assertTrue("expected exactly 4 nav items, got $items", items.size == 4)
+        assertTrue("Live Tracker must be first/default", items[0] == ("live_tracker" to "Live Tracker"))
+        val routes = items.map { it.first }
+        assertTrue("nav must contain rejoin", routes.contains("rejoin"))
+        assertTrue("nav must contain packages", routes.contains("packages"))
+        assertTrue("nav must contain settings", routes.contains("settings"))
+        // Dashboard and Inventory are removed from the APK bottom nav entirely.
+        assertFalse("APK nav must not contain Dashboard", src.contains("\"Dashboard\""))
+        assertFalse("APK nav must not contain a dashboard route", src.contains("composable(\"dashboard\")"))
+        assertFalse("APK nav must not contain an inventory route", src.contains("composable(\"inventory\")"))
+        assertFalse("APK nav must not expose Snapshot", src.contains("\"Snapshot\""))
+    }
+
+    @Test
+    fun `AppRoot applies status bar inset so content does not overlap the system bar`() {
         val src = ui("AppRoot.kt")
         assertTrue(
-            "AppRoot must expose an Inventory nav item",
-            src.contains("NavItem(\"inventory\"") && src.contains("\"Inventory\""),
+            "AuthenticatedAppShell Scaffold must apply the status-bar inset to content",
+            src.contains("contentWindowInsets = WindowInsets.statusBars"),
         )
         assertTrue(
-            "AppRoot must route to InventoryScreen",
-            src.contains("composable(\"inventory\")") && src.contains("InventoryScreen("),
+            "AppRoot must keep a bottom NavigationBar",
+            src.contains("NavigationBar(") && src.contains("bottomBar ="),
         )
-        assertFalse(
-            "AppRoot must not expose Snapshot in bottom nav",
-            Regex("""NavItem\("snapshot"""").containsMatchIn(src),
-        )
-        assertFalse(
-            "AppRoot must not show Snapshot label in nav",
-            src.contains("NavItem(") && src.contains("\"Snapshot\""),
+    }
+
+    @Test
+    fun `LoginWebView and bootstrap screens apply statusBarsPadding`() {
+        val src = ui("LoginWebViewScreen.kt")
+        assertTrue(
+            "login/bootstrap WebView must apply .statusBarsPadding() so web content clears the status bar",
+            src.contains(".statusBarsPadding()"),
         )
     }
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env pwsh
 # Publish a signed DENG All In One release APK and refresh releases/android/latest.json
 param(
-  [string]$VersionName = "2.2.6",
-  [int]$VersionCode = 23,
-  [string]$BuildMarker = "APK_MOBILE_AUTH_WEBVIEW_BOOTSTRAP_2026_06_15"
+  [string]$VersionName = "2.2.7",
+  [int]$VersionCode = 24,
+  [string]$BuildMarker = "APK_SHELL_AUTH_IMAGES_2026_06_15"
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,12 +41,12 @@ $manifest = [ordered]@{
   min_sdk = 26
   purpose = "Monitoring companion for DENG All In One (aio.deng.my.id)"
   changelog = @(
-    "$BuildMarker (v2.2.6) - Hardened the APK Discord login handoff and added full runtime auth diagnostics.",
-    "After Discord OAuth the app loads https://aio.deng.my.id/mobile-auth/consume inside the persistent app WebView; the server sets the real deng_sid session cookie on its own response.",
-    "Consume now returns a 'Signing you in...' bridge page that verifies /api/aio/auth/me == 200 in the same WebView BEFORE opening /tracker, eliminating the 303 race that bounced users back to login.",
-    "Added APK_AUTH_* logcat markers for every step (start, custom tab, deep link, consume URL, page started/finished, cookie state, auth/me, final tracker URL, fail reason) plus non-secret server debug headers.",
-    "Login uses a short-lived single-use mobile auth code bound to a transaction/state; deep-link return plus status polling fallback. No Discord/long-lived token is stored in the app.",
-    "Default landing after login is Live Tracker (first tab); Dashboard is the second tab. Base URL: https://aio.deng.my.id."
+    "$BuildMarker (v2.2.7) - Discord login no longer shows a false 'login failed' after success: once /api/aio/auth/me == 200 the attempt is locked (APK_AUTH_SUCCESS_LOCKED) and every later timeout/poll/failure handler is cancelled/suppressed (APK_AUTH_FAILURE_SUPPRESSED_AFTER_SUCCESS).",
+    "App now pulls itself to the foreground over the Chrome Custom Tab after the deep link / status poll completes, so users no longer have to close the browser manually; faster status polling makes sign-in feel quicker.",
+    "App shell respects Android system bars: WebView content is inset below the status bar and the bottom navigation is always visible above the gesture bar (no more raw mobile-browser look).",
+    "Bottom navigation is exactly four tabs - Live Tracker (default), Rejoin, Packages, Settings. Dashboard and Inventory tabs are removed from the APK; duplicate in-page website mobile tabs are hidden in APK mode.",
+    "Manual image overrides for Runic Stone, Love Totem and Shiny Totem (override wins over broken catalog/gameDB art); IMAGE_OVERRIDE_MATCH is logged server-side and via the WebView console (logcat tag DengTrackerImages).",
+    "Base URL: https://aio.deng.my.id. No username/password login and no long-lived token stored in the app."
   )
 }
 

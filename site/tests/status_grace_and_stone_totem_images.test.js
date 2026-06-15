@@ -86,6 +86,9 @@ describe('status grace + stone/totem image URLs', () => {
       icon: 'rbxassetid://9876543210987',
       source: 'playerdata_gameitemdb',
     }], BASE_URL)[0];
-    assert.match(shiny.imageUrl, /\/api\/tracker\/image\/9876543210987/);
+    // 2026-06-15: Shiny Totem now ships an explicit manual override image,
+    // which must win over the gameDB icon proxy.
+    assert.match(shiny.imageUrl, /\/api\/tracker\/assets\/manual\/totems\/shiny_totem_2026_06_15\.png/);
+    assert.equal(shiny.imageSource, 'manual_override');
   });
 });
