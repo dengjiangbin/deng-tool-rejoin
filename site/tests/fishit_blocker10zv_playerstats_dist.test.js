@@ -24,8 +24,8 @@ describe('BLOCKER10ZV playerStats in real tracker source and dist', () => {
     assert.match(raw, /coinProbe/);
     assert.match(raw, /resolveReplionStatData/);
     assert.match(raw, /pickCoinFromReplionPaths/);
-    assert.match(raw, /payload\.playerStats = buildPlayerStatsPayload\(\)/);
-    assert.match(raw, /payload\.playerStatsDebug = buildPlayerStatsDebugPayload\(\)/);
+    assert.match(raw, /pcall\(buildPlayerStatsPayload\)/);
+    assert.match(raw, /payload\.playerStatsDebug = playerStatsDebug/);
     assert.match(raw, /parseCompactNumber/);
     assert.match(raw, /rarestFishChance/);
     assert.match(raw, /source = "missing"/);
