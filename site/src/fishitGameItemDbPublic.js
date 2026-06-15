@@ -178,6 +178,9 @@ function realInstanceMutation(row) {
   const md = (row.Metadata && typeof row.Metadata === 'object') ? row.Metadata : {};
   const fd = (row.FishData && typeof row.FishData === 'object') ? row.FishData : {};
   const candidates = [
+    // instanceMutation is the already-resolved value from a previous
+    // normalise pass (survives persistence/regrouping round-trips).
+    row.instanceMutation,
     row.mutationName, row.metadataMutation, row.mutation, row.Mutation,
     md.Mutation, md.mutation, md.MutationName, md.Modifier,
     fd.Mutation, (fd.Metadata && fd.Metadata.Mutation),
@@ -185,10 +188,21 @@ function realInstanceMutation(row) {
   for (const c of candidates) {
     const raw = String(c || '').trim();
     if (!raw) continue;
-    if (/^(none|normal|default|no\s*mutation)$/i.test(raw)) continue;
+    if (/^(none|normal|default|no\s*mutation|nil|null|undefined|n\/a)$/i.test(raw)) continue;
     return raw.slice(0, 40);
   }
   return null;
+}
+
+// Shared non-nil normaliser used wherever mutation values are surfaced. Rejects
+// the placeholder strings Lua/Luau can emit so the detail view never shows
+// `nil`/`null`/`None` as a real mutation.
+function normalizeNonNilMutation(value) {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^(none|normal|default|no\s*mutation|nil|null|undefined|n\/a)$/i.test(raw)) return null;
+  return raw.slice(0, 40);
 }
 
 function normaliseUploadRow(row) {
@@ -445,7 +459,7 @@ function buildPublicOwnedInstances(cleaned) {
   const out = [];
   for (const inst of src) {
     if (out.length >= MAX_FISH_INSTANCES_PER_GROUP) break;
-    const mutation = inst.mutation || inst.mutationName || null;
+    const mutation = normalizeNonNilMutation(inst.mutation || inst.mutationName || inst.metadataMutation);
     const weightKg = (inst.weightKg != null && Number(inst.weightKg) > 0) ? Number(inst.weightKg) : null;
     out.push({
       uuid: inst.uuid || null,
@@ -466,7 +480,26 @@ function buildPublicOwnedInstances(cleaned) {
 function mapToPublicFishCardItem(item) {
   const cleaned = applyPublicCosmetic(item);
   const amount = Number(cleaned.quantity) > 0 ? Math.floor(Number(cleaned.quantity)) : 1;
-  const ownedInstances = buildPublicOwnedInstances(cleaned);
+  // Per-instance detail comes from the grouped `.instances`. When re-mapping an
+  // ALREADY-public card (e.g. image re-enrich on every get-backpack), `.instances`
+  // is gone but `.ownedInstances` is already built — preserve it instead of
+  // wiping the per-instance mutation/weight that the detail view needs.
+  let ownedInstances = buildPublicOwnedInstances(cleaned);
+  if ((!ownedInstances || !ownedInstances.length)
+      && Array.isArray(item.ownedInstances) && item.ownedInstances.length) {
+    ownedInstances = item.ownedInstances.map((inst) => ({
+      uuid: inst.uuid || null,
+      baseFishName: inst.baseFishName || cleaned.baseFishName,
+      name: inst.name || cleaned.baseFishName,
+      cleanName: inst.cleanName || cleaned.baseFishName,
+      mutation: normalizeNonNilMutation(inst.mutation || inst.mutationName || inst.metadataMutation),
+      mutationName: normalizeNonNilMutation(inst.mutation || inst.mutationName || inst.metadataMutation),
+      weightKg: (inst.weightKg != null && Number(inst.weightKg) > 0) ? Number(inst.weightKg) : null,
+      mutationSourcePath: inst.mutationSourcePath || null,
+      weightSourcePath: inst.weightSourcePath || null,
+      quantity: Math.max(1, Math.floor(Number(inst.quantity) || 1)),
+    }));
+  }
   const rarityResolved = manualRarity.resolvePublicFishRarity(cleaned, tierToRarity);
   const rarity = rarityResolved.rarity;
   const tier = rarityResolved.tier;
@@ -599,7 +632,15 @@ function mapToPublicStoneCardItem(item) {
     quantity: amount,
     count: amount,
     uuid: item.uuid || null,
-    mutation: item.mutation && item.mutation !== 'None' ? item.mutation : null,
+    // Ruby Gemstone (and other gems/stones) carry mutation through the same
+    // metadata contract — resolve via every alias and reject placeholder strings.
+    mutation: normalizeNonNilMutation(
+      item.instanceMutation || item.mutationName || item.metadataMutation || item.mutation,
+    ),
+    mutationName: normalizeNonNilMutation(
+      item.instanceMutation || item.mutationName || item.metadataMutation || item.mutation,
+    ),
+    mutationSourcePath: item.mutationSourcePath || null,
     icon: iconParsed?.icon || item.icon || null,
     imageUrl: item.imageUrl || null,
     imageUrlPresent: Boolean(item.imageUrl),
@@ -901,6 +942,9 @@ module.exports = {
   expectsPlayerDataGameItemDbPayload,
   normaliseUploadRow,
   normaliseUploadRows,
+  normalizeNonNilMutation,
+  parseWeightKg,
+  realInstanceMutation,
   groupFishRows,
   groupStoneRows,
   stoneIdentityKey,

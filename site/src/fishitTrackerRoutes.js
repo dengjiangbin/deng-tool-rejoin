@@ -3200,7 +3200,21 @@ async function reEnrichPublicFishItems(items, baseUrl) {
     return items;
   }
   if (!Array.isArray(enriched)) return items;
-  return enriched.map((item) => mapToPublicFishCardItem(applyPublicCosmeticCleanup(item)));
+  return enriched.map((item) => {
+    const card = mapToPublicFishCardItem(applyPublicCosmeticCleanup(item));
+    // Image re-enrich must NOT drop per-instance detail. The local card mapper
+    // rebuilds from grouping fields that no longer exist on an already-public
+    // card, so carry the source ownedInstances (per-instance mutation/weight)
+    // through unchanged. Without this the inline detail view shows no instances.
+    if ((!Array.isArray(card.ownedInstances) || !card.ownedInstances.length)
+        && Array.isArray(item.ownedInstances) && item.ownedInstances.length) {
+      card.ownedInstances = item.ownedInstances;
+      card.ownedInstanceCount = item.ownedInstanceCount != null
+        ? item.ownedInstanceCount
+        : item.ownedInstances.reduce((s, i) => s + (Number(i.quantity) || 1), 0);
+    }
+    return card;
+  });
 }
 
 /** Re-apply uploaded manual totem images on every public response (never serve stale auto icons). */
@@ -6327,7 +6341,66 @@ async function handleGetBackpack(req, res) {
     res.set('X-Backpack-Mode', body.responseMode || 'full');
     res.set('X-Tracker-Query-Ms', String(Date.now() - queryStartedAt));
   }
+  // BLOCKER G — explicit ?debug=metadata contract: counts + per-instance
+  // mutation/weight health + lane state + data source. Never attached on the
+  // normal page (only when ?debug=metadata is requested).
+  if (String(req.query.debug || '').toLowerCase() === 'metadata') {
+    body.metadataDebug = buildMetadataDebugBlock(data, publicFish, key);
+  }
   return res.status(200).json(body);
+}
+
+// Per-instance mutation/weight health for ?debug=metadata. Pure counting; safe
+// to expose (no raw inventory dump).
+function buildMetadataDebugBlock(data, publicFish, key) {
+  const fishCards = Array.isArray(publicFish.fishItems) ? publicFish.fishItems : [];
+  const stoneCards = Array.isArray(publicFish.stoneItems) ? publicFish.stoneItems : [];
+  const totemCards = Array.isArray(publicFish.totemItems) ? publicFish.totemItems : [];
+  let instancesWithMutation = 0;
+  let instancesWithWeight = 0;
+  let instancesWithNilMutationString = 0;
+  let instancesMissingWeight = 0;
+  let totalInstances = 0;
+  for (const card of fishCards) {
+    const insts = Array.isArray(card.ownedInstances) ? card.ownedInstances : [];
+    for (const it of insts) {
+      totalInstances += 1;
+      const mut = it.mutationName || it.mutation || it.metadataMutation;
+      const mutStr = mut == null ? '' : String(mut).trim().toLowerCase();
+      if (mutStr && !['nil', 'null', 'none', 'normal', 'undefined'].includes(mutStr)) instancesWithMutation += 1;
+      if (['nil', 'null', 'undefined'].includes(mutStr)) instancesWithNilMutationString += 1;
+      const w = it.weightKg != null ? it.weightKg : (it.metadataWeightKg != null ? it.metadataWeightKg : it.weight);
+      if (w != null && Number(w) > 0) instancesWithWeight += 1; else instancesMissingWeight += 1;
+    }
+  }
+  let dataSourcePath = null;
+  try { dataSourcePath = sessionStore.STORE_PATH; } catch (_) { dataSourcePath = null; }
+  return {
+    sessionKey: key,
+    rawFishRowCount: Array.isArray(data.playerDataFishItems) ? data.playerDataFishItems.length : 0,
+    rawStoneRowCount: Array.isArray(data.playerDataStoneItems) ? data.playerDataStoneItems.length : 0,
+    rawTotemRowCount: Array.isArray(data.playerDataTotemItems) ? data.playerDataTotemItems.length : 0,
+    publicFishCount: fishCards.length,
+    publicStoneCount: stoneCards.length,
+    publicTotemCount: totemCards.length,
+    ownedInstanceCount: totalInstances,
+    instancesWithMutation,
+    instancesWithWeight,
+    instancesWithNilMutationString,
+    instancesMissingWeight,
+    laneMergeState: {
+      lastPayloadType: data.lastPayloadType || data.lastUploadPayloadType || null,
+      snapshotComplete: data.snapshotComplete === true,
+      inventoryReady: data.inventoryReady === true,
+      leaderstatsReady: data.leaderstatsUploadOk === true,
+      hasInventoryRows: (Array.isArray(data.playerDataFishItems) && data.playerDataFishItems.length > 0)
+        || (Array.isArray(data.playerDataStoneItems) && data.playerDataStoneItems.length > 0),
+      hasLeaderstatsValues: !!(data.playerStats || data.lastValidLeaderstats),
+    },
+    hasLeaderstats: !!(data.playerStats || data.lastValidLeaderstats),
+    trackerBuild: data.trackerBuild || null,
+    dataSourcePath,
+  };
 }
 
 router.get('/api/fishit-tracker/get-backpack/:username', getLimiter, handleGetBackpack);

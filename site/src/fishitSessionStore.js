@@ -17,7 +17,7 @@ function storePath() {
     || path.join(__dirname, '..', 'data', 'fishit_live_sessions.json');
 }
 
-const MAX_SESSIONS = Number(process.env.FISHIT_MAX_PERSISTED_SESSIONS || 200);
+const MAX_SESSIONS = Number(process.env.FISHIT_MAX_PERSISTED_SESSIONS || 2000);
 const MAX_ITEMS_PER_SESSION = Number(process.env.FISHIT_MAX_PERSISTED_ITEMS || 500);
 const MAX_PUBLIC_FISH = Number(process.env.FISHIT_MAX_PERSISTED_PUBLIC_FISH || 100);
 const FLUSH_DEBOUNCE_MS = Number(process.env.FISHIT_SESSION_FLUSH_MS || 400);
@@ -56,7 +56,16 @@ function _trimPlayerDataStoneRows(rows) {
     tier: row.tier != null ? row.tier : null,
     rarity: row.rarity || null,
     uuid: row.uuid || null,
+    // Stone/gem mutation contract (Ruby Gemstone depends on this surviving).
     mutation: row.mutation || null,
+    mutationName: row.mutationName || null,
+    metadataMutation: row.metadataMutation || null,
+    instanceMutation: row.instanceMutation || null,
+    mutationSourcePath: row.mutationSourcePath || null,
+    weightKg: row.weightKg != null ? row.weightKg : null,
+    metadataWeightKg: row.metadataWeightKg != null ? row.metadataWeightKg : null,
+    weight: row.weight != null ? row.weight : null,
+    weightSourcePath: row.weightSourcePath || null,
     icon: row.icon || null,
     iconRaw: row.iconRaw || row.icon || null,
     iconAssetId: row.iconAssetId != null ? String(row.iconAssetId) : null,
@@ -79,13 +88,27 @@ function _trimPlayerDataRows(rows) {
       kind: row.kind || null,
       itemId: row.itemId != null ? String(row.itemId) : null,
       name: row.name || null,
+      cleanName: row.cleanName || null,
       baseName: row.baseName || row.baseFishName || null,
       baseFishName: row.baseFishName || row.baseName || null,
       quantity: row.quantity != null ? row.quantity : row.amount,
       tier: row.tier != null ? row.tier : null,
       rarity: row.rarity || null,
       uuid: row.uuid || null,
+      // Per-instance mutation contract — keep every alias so the detail view
+      // can resolve the real mutation after a save→reload cycle. (Dropping
+      // these aliases is what previously made the detail card show `nil`.)
       mutation: row.mutation || null,
+      mutationName: row.mutationName || null,
+      metadataMutation: row.metadataMutation || null,
+      instanceMutation: row.instanceMutation || null,
+      mutationSourcePath: row.mutationSourcePath || null,
+      // Per-instance weight contract — must survive persistence for EVERY row,
+      // independent of mutation, so non-mutated fish still show their weight.
+      weightKg: row.weightKg != null ? row.weightKg : null,
+      metadataWeightKg: row.metadataWeightKg != null ? row.metadataWeightKg : null,
+      weight: row.weight != null ? row.weight : null,
+      weightSourcePath: row.weightSourcePath || null,
       icon: row.icon || null,
       iconRaw: row.iconRaw || row.icon || null,
       iconAssetId: row.iconAssetId != null ? String(row.iconAssetId) : null,
@@ -111,6 +134,10 @@ function _trimItems(items) {
       displayName: it.displayName,
       baseFishName: it.baseFishName,
       mutation: it.mutation,
+      mutationName: it.mutationName || null,
+      metadataMutation: it.metadataMutation || null,
+      instanceMutation: it.instanceMutation || null,
+      mutationSourcePath: it.mutationSourcePath || null,
       amount: it.amount,
       category: it.category,
       itemId: it.itemId,
@@ -118,6 +145,8 @@ function _trimItems(items) {
       tier: it.tier,
       weight: it.weight,
       weightKg: it.weightKg,
+      metadataWeightKg: it.metadataWeightKg != null ? it.metadataWeightKg : null,
+      weightSourcePath: it.weightSourcePath || null,
       imageUrl: it.imageUrl,
       imageAssetId: it.imageAssetId,
       imageStatus: it.imageStatus,

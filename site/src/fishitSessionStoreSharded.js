@@ -13,7 +13,11 @@ const RETRYABLE_FS_CODES = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOENT']);
 const ACCOUNT_FLUSH_DEBOUNCE_MS = Number(process.env.FISHIT_ACCOUNT_FLUSH_MS || 300);
 const MAX_ACCOUNT_BYTES = Number(process.env.FISHIT_MAX_ACCOUNT_BYTES || 512000);
 const MAX_FILE_BYTES_ALERT = Number(process.env.FISHIT_LIVE_JSON_MAX_BYTES || 25_000_000);
-const MAX_ACCOUNTS = Number(process.env.FISHIT_MAX_PERSISTED_SESSIONS || 200);
+// Must comfortably exceed the live concurrent player count. When the cap was
+// 200 and >200 accounts were active, trimAccountIndex + reloadChangedAccounts
+// constantly evicted/re-added accounts, so get-backpack flapped 404 and the
+// frontend intermittently showed nothing. Keep this well above peak players.
+const MAX_ACCOUNTS = Number(process.env.FISHIT_MAX_PERSISTED_SESSIONS || 2000);
 
 function shardedRoot() {
   return process.env.FISHIT_LIVE_SESSIONS_DIR
@@ -309,8 +313,15 @@ function reloadChangedAccounts(liveTrackDB, sanitiseSessionFn) {
       _accountCache.set(key, row);
       merged += 1;
     }
+    // Only evict from the in-memory DB when the shard file is genuinely gone.
+    // A cross-process index that momentarily omits an account (e.g. another
+    // writer mid-flush, or trim churn) must NOT erase a still-persisted account
+    // and make the frontend show empty.
     for (const key of prevKeys) {
-      if (!_index.accounts[key]) delete liveTrackDB[key];
+      if (_index.accounts[key]) continue;
+      let fileStillExists = false;
+      try { fileStillExists = fs.existsSync(accountFilePath(key)); } catch (_) { fileStillExists = false; }
+      if (!fileStillExists) delete liveTrackDB[key];
     }
     for (const [alias, usernameKey] of Object.entries(_index.uidAliases || {})) {
       liveTrackDB[alias] = usernameKey;
