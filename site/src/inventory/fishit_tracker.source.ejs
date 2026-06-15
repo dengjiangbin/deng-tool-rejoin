@@ -14,7 +14,7 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:        #0d0f14;
+      --bg:        #090910;
       --surface:   #161a22;
       --surface2:  #1e2430;
       --border:    #2a3040;
@@ -340,14 +340,15 @@
     .header h1 { font-size:clamp(1.5rem,4vw,2.2rem); font-weight:700; background:linear-gradient(135deg,#3b82f6,#60a5fa,#93c5fd); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; letter-spacing:-.5px; margin-bottom:6px; }
     .header p { color:var(--muted); font-size:.9rem; }
 
-    .inventory-stats {
+    /* Dashboard catch summary keeps the compact legacy stat tiles. */
+    .dashboard-stats {
       display:grid;
-      grid-template-columns:repeat(4,minmax(0,1fr));
+      grid-template-columns:repeat(2,minmax(0,1fr));
       gap:12px;
       margin-bottom:18px;
       align-items:stretch;
     }
-    .stat-card {
+    .dashboard-stats .stat-card {
       background:linear-gradient(160deg,var(--surface2) 0%,var(--surface) 100%);
       border:1.5px solid var(--border);
       border-radius:var(--radius-lg);
@@ -359,7 +360,7 @@
       justify-content:flex-start;
       box-shadow:0 8px 24px rgba(0,0,0,.18);
     }
-    .stat-card__label {
+    .dashboard-stats .stat-card__label {
       font-size:.78rem;
       font-weight:600;
       letter-spacing:.02em;
@@ -369,8 +370,9 @@
       line-height:1.05;
       display:flex;
       align-items:flex-start;
+      gap:6px;
     }
-    .stat-card__value {
+    .dashboard-stats .stat-card__value {
       margin-top:auto;
       font-size:clamp(1.35rem,3vw,1.85rem);
       font-weight:800;
@@ -381,17 +383,113 @@
       display:flex;
       align-items:flex-end;
     }
-    .stat-card--online .stat-card__value { color:#4ade80; }
-    .stat-card--stones .stat-card__value { color:#fbbf24; }
-    .stat-card--secret .stat-card__value { color:#00ff7f; }
-    .stat-card--forgotten .stat-card__value { color:#e5e7eb; }
-    .stat-card--ruby .stat-card__value { color:#f87171; }
-    .stat-card__label { gap:6px; }
-    .stat-card__icon { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
-    .stat-card__icon svg { width:14px; height:14px; }
-    .stat-card__icon--ruby { color:#ef4444; filter:drop-shadow(0 0 3px rgba(239,68,68,.45)); }
-    @media (min-width:901px) {
-      #inventoryStats { grid-template-columns:repeat(5,minmax(0,1fr)); }
+    .dashboard-stats .stat-card--secret .stat-card__value { color:#00ff7f; }
+    .dashboard-stats .stat-card--forgotten .stat-card__value { color:#e5e7eb; }
+
+    /* /tracker top summary cards — screenshot layout (centered icon/label/value). */
+    #inventoryStats.tracker-top-summary-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+      gap:26px;
+      margin:18px 0 28px;
+      align-items:stretch;
+    }
+    .tracker-top-summary-card {
+      min-height:170px;
+      padding:26px 28px;
+      border-radius:26px;
+      background:#17171d;
+      border:1px solid rgba(255,255,255,0.08);
+      box-shadow:
+        0 12px 32px rgba(0,0,0,0.32),
+        inset 0 1px 0 rgba(255,255,255,0.04);
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      text-align:center;
+      min-width:0;
+    }
+    .tracker-top-summary-icon {
+      width:54px;
+      height:54px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      margin:0 auto 18px;
+      flex-shrink:0;
+    }
+    .tracker-top-summary-icon img,
+    .tracker-top-summary-icon svg {
+      width:54px;
+      height:54px;
+      object-fit:contain;
+      display:block;
+    }
+    .tracker-top-summary-icon--avatar img {
+      width:48px;
+      height:48px;
+      border-radius:10px;
+    }
+    .tracker-top-summary-label {
+      color:rgba(255,255,255,0.48);
+      font-size:18px;
+      font-weight:600;
+      line-height:1.25;
+      margin-bottom:10px;
+      text-transform:none;
+      letter-spacing:0;
+    }
+    .tracker-top-summary-value {
+      color:#fff;
+      font-size:31px;
+      font-weight:900;
+      line-height:1.05;
+      letter-spacing:-0.02em;
+      white-space:nowrap;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      flex-wrap:nowrap;
+    }
+    .tracker-top-summary-value .online-count {
+      color:#62e68a;
+    }
+    .tracker-top-summary-value .separator,
+    .tracker-top-summary-value .total-count {
+      color:#fff;
+    }
+    @media (max-width:520px) {
+      #inventoryStats.tracker-top-summary-grid,
+      .inventory-apk-embed #inventoryStats.tracker-top-summary-grid {
+        grid-template-columns:1fr;
+        gap:16px;
+      }
+      .tracker-top-summary-card {
+        min-height:150px;
+        padding:22px 20px;
+        border-radius:22px;
+      }
+      .tracker-top-summary-icon {
+        width:46px;
+        height:46px;
+        margin-bottom:15px;
+      }
+      .tracker-top-summary-icon img,
+      .tracker-top-summary-icon svg {
+        width:46px;
+        height:46px;
+      }
+      .tracker-top-summary-icon--avatar img {
+        width:42px;
+        height:42px;
+      }
+      .tracker-top-summary-label {
+        font-size:16px;
+      }
+      .tracker-top-summary-value {
+        font-size:28px;
+      }
     }
 
     .inventory-main-nav {
@@ -2013,12 +2111,12 @@
       width:14px;
       height:14px;
     }
-    .inventory-apk-embed .inventory-stats {
-      grid-template-columns:repeat(4,minmax(0,1fr));
+    .inventory-apk-embed .dashboard-stats {
+      grid-template-columns:repeat(2,minmax(0,1fr));
       gap:8px;
       margin-bottom:12px;
     }
-    .inventory-apk-embed .stat-card {
+    .inventory-apk-embed .dashboard-stats .stat-card {
       min-width:0;
       min-height:64px;
       height:100%;
@@ -2026,7 +2124,7 @@
       border-radius:14px;
       justify-content:flex-start;
     }
-    .inventory-apk-embed .stat-card__label {
+    .inventory-apk-embed .dashboard-stats .stat-card__label {
       font-size:9px;
       letter-spacing:.03em;
       line-height:1.05;
@@ -2035,7 +2133,7 @@
       align-items:flex-start;
       white-space:normal;
     }
-    .inventory-apk-embed .stat-card__value {
+    .inventory-apk-embed .dashboard-stats .stat-card__value {
       margin-top:auto;
       font-size:14px;
       font-weight:700;
@@ -3008,12 +3106,12 @@
         width:14px;
         height:14px;
       }
-      .inventory-stats {
-        grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+      .dashboard-stats {
+        grid-template-columns:repeat(2,minmax(0,1fr)) !important;
         gap:8px;
         margin-bottom:14px;
       }
-      .stat-card {
+      .dashboard-stats .stat-card {
         min-width:0;
         min-height:64px;
         height:100%;
@@ -3021,7 +3119,7 @@
         border-radius:14px;
         justify-content:flex-start;
       }
-      .stat-card__label {
+      .dashboard-stats .stat-card__label {
         font-size:9px;
         letter-spacing:.03em;
         line-height:1.05;
@@ -3030,7 +3128,7 @@
         align-items:flex-start;
         white-space:normal;
       }
-      .stat-card__value {
+      .dashboard-stats .stat-card__value {
         margin-top:auto;
         font-size:14px;
         font-weight:700;
@@ -3288,17 +3386,17 @@
       .dashboard-period-filter__btn { padding:7px 9px; font-size:.64rem; }
     }
     @media (max-width:430px) {
-      .inventory-stats { gap:6px; }
-      .stat-card {
+      .dashboard-stats { gap:6px; }
+      .dashboard-stats .stat-card {
         padding:9px 6px;
         border-radius:12px;
         min-height:60px;
       }
-      .stat-card__label { font-size:8px; line-height:1.05; min-height:26px; }
-      .stat-card__value { font-size:13px; line-height:1; white-space:nowrap; }
-      .inventory-apk-embed .stat-card { padding:9px 6px; min-height:60px; }
-      .inventory-apk-embed .stat-card__label { font-size:8px; line-height:1.05; min-height:26px; }
-      .inventory-apk-embed .stat-card__value { font-size:13px; line-height:1; white-space:nowrap; }
+      .dashboard-stats .stat-card__label { font-size:8px; line-height:1.05; min-height:26px; }
+      .dashboard-stats .stat-card__value { font-size:13px; line-height:1; white-space:nowrap; }
+      .inventory-apk-embed .dashboard-stats .stat-card { padding:9px 6px; min-height:60px; }
+      .inventory-apk-embed .dashboard-stats .stat-card__label { font-size:8px; line-height:1.05; min-height:26px; }
+      .inventory-apk-embed .dashboard-stats .stat-card__value { font-size:13px; line-height:1; white-space:nowrap; }
     }
     @media (max-width:280px) {
       .inventory-grid,
@@ -3326,10 +3424,10 @@
       }
     }
     @media (max-width:900px) {
-      .inventory-stats { grid-template-columns:repeat(4,minmax(0,1fr)); }
+      .dashboard-stats { grid-template-columns:repeat(2,minmax(0,1fr)); }
     }
     @media (max-width:560px) {
-      .inventory-stats { grid-template-columns:repeat(4,minmax(0,1fr)) !important; }
+      .dashboard-stats { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
       .code-row { flex-direction:column; }
       .btn-copy { padding:10px; }
     }
@@ -3480,26 +3578,50 @@
 
     <section id="inventoryAccountsPanel" class="inventory-panel inventory-panel--accounts" aria-label="Live Tracker">
 
-    <div class="inventory-stats" id="inventoryStats" aria-label="Inventory summary">
-      <div class="stat-card stat-card--online">
-        <div class="stat-card__label">Online / Accounts</div>
-        <div class="stat-card__value js-count-up" id="statOnlineAccounts" data-count-format="ratio" data-count-duration="1200">0 / 0</div>
+    <div class="inventory-stats tracker-top-summary-grid" id="inventoryStats" aria-label="Inventory summary">
+      <div class="tracker-top-summary-card tracker-top-summary-card--online">
+        <div class="tracker-top-summary-icon tracker-top-summary-icon--avatar" aria-hidden="true">
+          <svg viewBox="0 0 64 64" focusable="false" aria-hidden="true">
+            <rect x="18" y="8" width="28" height="24" rx="6" fill="#8b5a2b"/>
+            <rect x="14" y="30" width="36" height="26" rx="8" fill="#facc15"/>
+            <rect x="22" y="14" width="6" height="6" rx="1" fill="#111827"/>
+            <rect x="36" y="14" width="6" height="6" rx="1" fill="#111827"/>
+          </svg>
+        </div>
+        <div class="tracker-top-summary-label">Online / Accounts</div>
+        <div class="tracker-top-summary-value js-count-up" id="statOnlineAccounts" data-count-format="ratio" data-count-ratio-styled data-count-duration="1200">0 / 0</div>
       </div>
-      <div class="stat-card stat-card--stones">
-        <div class="stat-card__label">Evolved Enchant Stone</div>
-        <div class="stat-card__value js-count-up" id="statEvolvedStones" data-count-format="integer" data-count-duration="1200">0</div>
+      <div class="tracker-top-summary-card tracker-top-summary-card--stones">
+        <div class="tracker-top-summary-icon" aria-hidden="true">
+          <img src="/api/fishit-tracker/assets/stones/stone_558_evolved.png" alt="" decoding="async" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+          <svg viewBox="0 0 64 64" focusable="false" aria-hidden="true" style="display:none">
+            <path d="M32 6l18 18-18 34L14 24 32 6z" fill="#a855f7"/>
+            <path d="M32 12l12 12-12 22L20 24 32 12z" fill="#c084fc"/>
+          </svg>
+        </div>
+        <div class="tracker-top-summary-label">Evolved Enchant Stone</div>
+        <div class="tracker-top-summary-value js-count-up" id="statEvolvedStones" data-count-format="integer" data-count-duration="1200">0</div>
       </div>
-      <div class="stat-card stat-card--secret">
-        <div class="stat-card__label">Secret Fish</div>
-        <div class="stat-card__value js-count-up" id="statSecretFish" data-count-format="integer" data-count-duration="1200">0</div>
+      <div class="tracker-top-summary-card tracker-top-summary-card--secret">
+        <div class="tracker-top-summary-icon" aria-hidden="true">
+          <img src="/assets/img/fishit/fallback-secret.svg" alt="" decoding="async" loading="lazy">
+        </div>
+        <div class="tracker-top-summary-label">Secret Fish</div>
+        <div class="tracker-top-summary-value js-count-up" id="statSecretFish" data-count-format="integer" data-count-duration="1200">0</div>
       </div>
-      <div class="stat-card stat-card--forgotten">
-        <div class="stat-card__label">Forgotten Fish</div>
-        <div class="stat-card__value js-count-up" id="statForgottenFish" data-count-format="integer" data-count-duration="1200">0</div>
+      <div class="tracker-top-summary-card tracker-top-summary-card--forgotten">
+        <div class="tracker-top-summary-icon" aria-hidden="true">
+          <img src="/assets/img/fishit/fallback-forgotten.svg" alt="" decoding="async" loading="lazy">
+        </div>
+        <div class="tracker-top-summary-label">Forgotten Fish</div>
+        <div class="tracker-top-summary-value js-count-up" id="statForgottenFish" data-count-format="integer" data-count-duration="1200">0</div>
       </div>
-      <div class="stat-card stat-card--ruby">
-        <div class="stat-card__label"><span class="stat-card__icon stat-card__icon--ruby" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 3h10l4 6-9 12L3 9l4-6zm.7 2L5.3 8.3h13.4L16.3 5H7.7zM5.6 10l6.4 8.6L18.4 10H5.6z"/></svg></span>Ruby Gemstone</div>
-        <div class="stat-card__value js-count-up" id="statRubyGemstone" data-count-format="integer" data-count-duration="1200">0</div>
+      <div class="tracker-top-summary-card tracker-top-summary-card--ruby">
+        <div class="tracker-top-summary-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="#ef4444" focusable="false" aria-hidden="true"><path d="M7 3h10l4 6-9 12L3 9l4-6zm.7 2L5.3 8.3h13.4L16.3 5H7.7zM5.6 10l6.4 8.6L18.4 10H5.6z"/></svg>
+        </div>
+        <div class="tracker-top-summary-label">Ruby Gemstone</div>
+        <div class="tracker-top-summary-value js-count-up" id="statRubyGemstone" data-count-format="integer" data-count-duration="1200">0</div>
       </div>
     </div>
 
@@ -5633,7 +5755,7 @@
       if (countUp) {
         countUp.set(statOnlineAccountsEl, { to: stats.onlineCount, total: stats.totalAccounts, format: 'ratio' });
       } else {
-        statOnlineAccountsEl.textContent = `${formatQuantity(stats.onlineCount)} / ${formatQuantity(stats.totalAccounts)}`;
+        statOnlineAccountsEl.innerHTML = `<span class="online-count">${escHtml(formatQuantity(stats.onlineCount))}</span><span class="separator"> / </span><span class="total-count">${escHtml(formatQuantity(stats.totalAccounts))}</span>`;
       }
     }
     if (statEvolvedStonesEl) {

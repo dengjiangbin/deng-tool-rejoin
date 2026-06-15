@@ -157,26 +157,50 @@
 
     <section id="inventoryAccountsPanel" class="inventory-panel inventory-panel--accounts" aria-label="Live Tracker">
 
-    <div class="inventory-stats" id="inventoryStats" aria-label="Inventory summary">
-      <div class="stat-card stat-card--online">
-        <div class="stat-card__label">Online / Accounts</div>
-        <div class="stat-card__value js-count-up" id="statOnlineAccounts" data-count-format="ratio" data-count-duration="1200">0 / 0</div>
+    <div class="inventory-stats tracker-top-summary-grid" id="inventoryStats" aria-label="Inventory summary">
+      <div class="tracker-top-summary-card tracker-top-summary-card--online">
+        <div class="tracker-top-summary-icon tracker-top-summary-icon--avatar" aria-hidden="true">
+          <svg viewBox="0 0 64 64" focusable="false" aria-hidden="true">
+            <rect x="18" y="8" width="28" height="24" rx="6" fill="#8b5a2b"/>
+            <rect x="14" y="30" width="36" height="26" rx="8" fill="#facc15"/>
+            <rect x="22" y="14" width="6" height="6" rx="1" fill="#111827"/>
+            <rect x="36" y="14" width="6" height="6" rx="1" fill="#111827"/>
+          </svg>
+        </div>
+        <div class="tracker-top-summary-label">Online / Accounts</div>
+        <div class="tracker-top-summary-value js-count-up" id="statOnlineAccounts" data-count-format="ratio" data-count-ratio-styled data-count-duration="1200">0 / 0</div>
       </div>
-      <div class="stat-card stat-card--stones">
-        <div class="stat-card__label">Evolved Enchant Stone</div>
-        <div class="stat-card__value js-count-up" id="statEvolvedStones" data-count-format="integer" data-count-duration="1200">0</div>
+      <div class="tracker-top-summary-card tracker-top-summary-card--stones">
+        <div class="tracker-top-summary-icon" aria-hidden="true">
+          <img src="/api/fishit-tracker/assets/stones/stone_558_evolved.png" alt="" decoding="async" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+          <svg viewBox="0 0 64 64" focusable="false" aria-hidden="true" style="display:none">
+            <path d="M32 6l18 18-18 34L14 24 32 6z" fill="#a855f7"/>
+            <path d="M32 12l12 12-12 22L20 24 32 12z" fill="#c084fc"/>
+          </svg>
+        </div>
+        <div class="tracker-top-summary-label">Evolved Enchant Stone</div>
+        <div class="tracker-top-summary-value js-count-up" id="statEvolvedStones" data-count-format="integer" data-count-duration="1200">0</div>
       </div>
-      <div class="stat-card stat-card--secret">
-        <div class="stat-card__label">Secret Fish</div>
-        <div class="stat-card__value js-count-up" id="statSecretFish" data-count-format="integer" data-count-duration="1200">0</div>
+      <div class="tracker-top-summary-card tracker-top-summary-card--secret">
+        <div class="tracker-top-summary-icon" aria-hidden="true">
+          <img src="/assets/img/fishit/fallback-secret.svg" alt="" decoding="async" loading="lazy">
+        </div>
+        <div class="tracker-top-summary-label">Secret Fish</div>
+        <div class="tracker-top-summary-value js-count-up" id="statSecretFish" data-count-format="integer" data-count-duration="1200">0</div>
       </div>
-      <div class="stat-card stat-card--forgotten">
-        <div class="stat-card__label">Forgotten Fish</div>
-        <div class="stat-card__value js-count-up" id="statForgottenFish" data-count-format="integer" data-count-duration="1200">0</div>
+      <div class="tracker-top-summary-card tracker-top-summary-card--forgotten">
+        <div class="tracker-top-summary-icon" aria-hidden="true">
+          <img src="/assets/img/fishit/fallback-forgotten.svg" alt="" decoding="async" loading="lazy">
+        </div>
+        <div class="tracker-top-summary-label">Forgotten Fish</div>
+        <div class="tracker-top-summary-value js-count-up" id="statForgottenFish" data-count-format="integer" data-count-duration="1200">0</div>
       </div>
-      <div class="stat-card stat-card--ruby">
-        <div class="stat-card__label"><span class="stat-card__icon stat-card__icon--ruby" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 3h10l4 6-9 12L3 9l4-6zm.7 2L5.3 8.3h13.4L16.3 5H7.7zM5.6 10l6.4 8.6L18.4 10H5.6z"/></svg></span>Ruby Gemstone</div>
-        <div class="stat-card__value js-count-up" id="statRubyGemstone" data-count-format="integer" data-count-duration="1200">0</div>
+      <div class="tracker-top-summary-card tracker-top-summary-card--ruby">
+        <div class="tracker-top-summary-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="#ef4444" focusable="false" aria-hidden="true"><path d="M7 3h10l4 6-9 12L3 9l4-6zm.7 2L5.3 8.3h13.4L16.3 5H7.7zM5.6 10l6.4 8.6L18.4 10H5.6z"/></svg>
+        </div>
+        <div class="tracker-top-summary-label">Ruby Gemstone</div>
+        <div class="tracker-top-summary-value js-count-up" id="statRubyGemstone" data-count-format="integer" data-count-duration="1200">0</div>
       </div>
     </div>
 

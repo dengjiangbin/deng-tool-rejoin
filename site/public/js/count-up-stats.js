@@ -52,6 +52,17 @@ function createCountUpStats() {
     return formatDecimal(value, d) + '%';
   }
 
+  function formatRatioHtml(numerator, denominator, opts) {
+    opts = opts || {};
+    var num = parseRawNumber(numerator);
+    var den = parseRawNumber(denominator);
+    if (num == null) num = 0;
+    if (den == null) den = 0;
+    var left = opts.compact ? formatCompact(num) : formatInteger(num);
+    var right = opts.compact ? formatCompact(den) : formatInteger(den);
+    return '<span class="online-count">' + left + '</span><span class="separator"> / </span><span class="total-count">' + right + '</span>';
+  }
+
   function formatRatio(numerator, denominator, opts) {
     opts = opts || {};
     var num = parseRawNumber(numerator);
@@ -178,6 +189,10 @@ function createCountUpStats() {
     var state = getState(el);
     state.current = value;
     state.currentTotal = total;
+    if (format === 'ratio' && el.hasAttribute('data-count-ratio-styled')) {
+      el.innerHTML = formatRatioHtml(value, total, { compact: el.hasAttribute('data-count-compact') });
+      return;
+    }
     el.textContent = composeText(el, value, total, format, decimals);
   }
 

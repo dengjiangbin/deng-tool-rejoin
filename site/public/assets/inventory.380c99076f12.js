@@ -1837,7 +1837,7 @@ const LS_KEY        = 'fishit_tracked_users';
       if (countUp) {
         countUp.set(statOnlineAccountsEl, { to: stats.onlineCount, total: stats.totalAccounts, format: 'ratio' });
       } else {
-        statOnlineAccountsEl.textContent = `${formatQuantity(stats.onlineCount)} / ${formatQuantity(stats.totalAccounts)}`;
+        statOnlineAccountsEl.innerHTML = `<span class="online-count">${escHtml(formatQuantity(stats.onlineCount))}</span><span class="separator"> / </span><span class="total-count">${escHtml(formatQuantity(stats.totalAccounts))}</span>`;
       }
     }
     if (statEvolvedStonesEl) {
