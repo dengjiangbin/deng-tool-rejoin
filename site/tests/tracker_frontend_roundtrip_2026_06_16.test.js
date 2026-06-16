@@ -156,12 +156,12 @@ describe('frontend detail layout + rarity + nil filter (BLOCKER I/J/D)', () => {
     assert.doesNotMatch(src, /\.inventory-apk-embed\s+\.ft-detail-instances\s*\{\s*grid-template-columns:1fr/);
   });
   test('detail/instance cards no longer carry rarity background rules', () => {
-    // 2026-06-16 polish: detail cards use the neutral surface only.
-    assert.doesNotMatch(src, /\.ft-inst-card\[data-rarity="secret"\]/);
-    assert.doesNotMatch(src, /\.ft-inst-card\[data-rarity="legendary"\]/);
+    assert.doesNotMatch(src, /\.tracker-detail-fish-card\[data-rarity=/);
   });
-  test('renderFishInstanceCard renders neutral card (no data-rarity)', () => {
+  test('renderFishInstanceCard renders mutation-themed card (no data-rarity)', () => {
     assert.doesNotMatch(src, /data-rarity="\$\{escHtml\(rarity\)\}"/);
+    assert.match(src, /classes\.push\('has-mutation'\)/);
+    assert.match(src, /mutation-\$\{slug\}/);
   });
   test('frontend normalizeNonNil rejects nil/null/none', () => {
     assert.match(src, /function ftNormalizeNonNil/);

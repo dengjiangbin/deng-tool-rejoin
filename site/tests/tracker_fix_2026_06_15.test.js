@@ -40,13 +40,14 @@ function loadScanHelpers() {
   const src = readSource();
   const parts = [
     sliceBalanced(src, 'const FT_MUTATION_COLORS = {', '{', '}') + ';',
+    sliceBalanced(src, 'function ftMutationHashColor(', '{', '}'),
     sliceBalanced(src, 'function ftMutationColor(', '{', '}'),
     sliceBalanced(src, 'function ftBracketToken(', '{', '}'),
     sliceBalanced(src, 'function ftExtractMutation(', '{', '}'),
     sliceBalanced(src, 'function ftExtractBaseName(', '{', '}'),
     sliceBalanced(src, 'function isRubyGemstoneItem(', '{', '}'),
   ];
-  const factory = new Function(`${parts.join('\n')}\n return { ftMutationColor, ftBracketToken, ftExtractMutation, ftExtractBaseName, isRubyGemstoneItem };`);
+  const factory = new Function(`${parts.join('\n')}\n return { ftMutationColor, ftMutationHashColor, ftBracketToken, ftExtractMutation, ftExtractBaseName, isRubyGemstoneItem };`);
   return factory();
 }
 
@@ -89,7 +90,7 @@ describe('STRICT tracker fix — mutation extraction (C)', () => {
   });
 
   test('unknown mutation -> safe non-empty default; empty -> blank', () => {
-    assert.equal(scan.ftMutationColor('Quantum'), '#cbd5e1');
+    assert.match(scan.ftMutationColor('Quantum'), /^hsl\(\d+,\d+%,\d+%\)$/);
     assert.equal(scan.ftMutationColor(''), '');
   });
 });
@@ -147,8 +148,8 @@ describe('STRICT tracker fix — inline detail panel, no modal (A/B/G)', () => {
     const src = readSource();
     assert.match(src, /function ftFishInstanceCards\(/);
     assert.match(src, /function collectGroupInstances\(/);
-    assert.match(src, /ft-inst-card__weight/);
-    assert.match(src, /Weight: /);
+    assert.match(src, /tracker-detail-fish-weight/);
+    assert.match(src, /function formatFishWeight/);
     // The individual fish card renderer must not emit price/chance.
     const renderer = sliceBalanced(src, 'function renderFishInstanceCard(', '{', '}');
     assert.doesNotMatch(renderer, /price/i);
@@ -158,10 +159,14 @@ describe('STRICT tracker fix — inline detail panel, no modal (A/B/G)', () => {
   test('fish instance cards expand a stacked amount into individual cards (20 -> 20)', () => {
     const src = readSource();
     const factory = new Function(
-      'resolveItemAmount, ftExtractMutation, ftExtractBaseName, ftItemWeightText',
+      'resolveItemAmount, ftExtractMutation, ftExtractBaseName, ftItemWeightText, ftRarityKey, formatFishWeight',
       'const FT_MAX_INSTANCE_CARDS = 800;\n'
-      + `${sliceBalanced(src, 'function ftWeightNum(', '{', '}')}\n`
-      + `${sliceBalanced(src, 'function ftSortFishCards(', '{', '}')}\n`
+      + `${sliceBalanced(src, 'function ftNormalizeNonNil(value) {', '{', '}')}\n`
+      + `${sliceBalanced(src, 'function parseFishWeight(rawWeight) {', '{', '}')}\n`
+      + `${sliceBalanced(src, 'function formatFishWeight(rawWeight) {', '{', '}')}\n`
+      + `${sliceBalanced(src, 'function normalizeMutation(value) {', '{', '}')}\n`
+      + `${sliceBalanced(src, 'function getMutationSortRank(mutation) {', '{', '}')}\n`
+      + `${sliceBalanced(src, 'function sortFishDetailInstances(a, b) {', '{', '}')}\n`
       + `${sliceBalanced(src, 'function ftFishInstanceCards(', '{', '}')}\n`
       + ' return ftFishInstanceCards;',
     );
@@ -170,6 +175,8 @@ describe('STRICT tracker fix — inline detail panel, no modal (A/B/G)', () => {
       () => '',
       (row) => (row && row.name) || 'Fish',
       (row) => (row && row.weight) || '',
+      () => 'common',
+      (w) => (w ? String(w) : ''),
     );
     const instances = [{ owner: 'alice', row: { name: 'Tuna', amount: 20, weight: '5 kg' } }];
     const cards = ftFishInstanceCards(instances);

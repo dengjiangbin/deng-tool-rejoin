@@ -1,0 +1,38 @@
+{
+  "task": "tracker_detail_fish_mutation_card_polish_2026_06_16",
+  "bundle": {
+    "js": "inventory.027b417b4756.js",
+    "css": "inventory.1c1ce492092b.css"
+  },
+  "tests": {
+    "files": [
+      "tests/tracker_detail_fish_mutation_sort_2026_06_16.test.js",
+      "tests/tracker_detail_polish_2026_06_16.test.js",
+      "tests/tracker_fix_2026_06_15.test.js",
+      "tests/tracker_frontend_roundtrip_2026_06_16.test.js"
+    ],
+    "passed": 82,
+    "failed": 0
+  },
+  "sortOrder": ["Gold", "Gemstone", "Albino", "Stone", "Sandy", "other alpha"],
+  "weightExamples": {
+    "999": "999 kg",
+    "1000": "1,000 kg",
+    "12345.67": "12,345.67 kg",
+    "1234567.89": "1,234,567.89 kg",
+    "1.31K": "1,310 kg"
+  },
+  "sampleSortedTopToBottom": [
+    { "mutation": "Gold", "weight": "12,345.67 kg", "name": "Ruby Gemstone Fish" },
+    { "mutation": "Gold", "weight": "100 kg", "name": "Ruby Gemstone Fish" },
+    { "mutation": "Gemstone", "weight": "50 kg", "name": "Ruby Gemstone Fish" },
+    { "mutation": "Albino", "weight": "2,000 kg", "name": "Ruby Gemstone Fish" },
+    { "mutation": "", "weight": "500 kg", "name": "Plain A" }
+  ],
+  "scope": {
+    "changed": ["fish detail instance cards only (.tracker-detail-fish-card*)"],
+    "unchanged": ["overview grid", "item/stone/totem breakdown (.ft-detail-owner)", "sidebar", "login", "Lua", "backend"]
+  },
+  "proofHtml": "site/proofs/tracker_detail_fish_mutation_card_proof.html",
+  "generatedAt": "2026-06-16T12:00:00.000Z"
+}

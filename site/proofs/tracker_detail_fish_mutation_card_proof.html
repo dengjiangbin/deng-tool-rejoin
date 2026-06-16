@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tracker detail fish mutation cards — proof</title>
+  <style>
+    body { background:#090910; color:#e2e8f0; font-family:'Segoe UI',system-ui,sans-serif; padding:24px; }
+    h1 { font-size:1.1rem; margin-bottom:8px; }
+    p { color:#8a94a6; font-size:.85rem; margin-bottom:20px; max-width:720px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; max-width:960px; }
+    .tracker-detail-fish-card { box-sizing:border-box; border-radius:22px; padding:18px 20px; background:#17171d; border:1px solid rgba(255,255,255,0.08); box-shadow:0 12px 32px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04); display:flex; align-items:flex-start; gap:14px; min-width:0; color:#fff; }
+    .tracker-detail-fish-card__img { flex:0 0 auto; width:54px; height:54px; border-radius:12px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,0.10); display:flex; align-items:center; justify-content:center; font-size:22px; }
+    .tracker-detail-fish-card__body { min-width:0; flex:1 1 auto; display:flex; flex-direction:column; }
+    .tracker-detail-fish-weight { font-size:18px; font-weight:900; line-height:1.1; margin-bottom:8px; }
+    .tracker-detail-fish-mutation { display:inline-flex; padding:5px 10px; border-radius:999px; font-size:13px; font-weight:900; margin-bottom:8px; text-transform:uppercase; }
+    .tracker-detail-fish-name { font-size:16px; font-weight:800; margin-bottom:4px; }
+    .tracker-detail-fish-owner { font-size:11px; color:#93c5fd; font-weight:700; }
+    .tracker-detail-fish-card.has-mutation { border-width:1px; border-style:solid; }
+    .tracker-detail-fish-card.mutation-gold { background:linear-gradient(145deg,#4a3410,#19130a); border-color:rgba(255,204,72,0.65); color:#fff7e6; }
+    .tracker-detail-fish-card.mutation-gold .tracker-detail-fish-mutation { background:#ffd166; color:#1a1200; }
+    .tracker-detail-fish-card.mutation-gemstone { background:linear-gradient(145deg,#123c2c,#3b1020); border-color:rgba(76,255,170,0.55); color:#eafff5; }
+    .tracker-detail-fish-card.mutation-gemstone .tracker-detail-fish-mutation { background:#d7ffe8; color:#102018; }
+    .tracker-detail-fish-card.mutation-albino { background:linear-gradient(145deg,#f5f3e8,#b8b8b8); border-color:rgba(255,255,255,0.85); color:#111827; }
+    .tracker-detail-fish-card.mutation-albino .tracker-detail-fish-mutation { background:#111827; color:#fff; }
+    .tracker-detail-fish-card.mutation-albino .tracker-detail-fish-owner { color:#1e3a8a; }
+    .tracker-detail-fish-card.mutation-stone { background:linear-gradient(145deg,#5a3a24,#21150e); border-color:rgba(210,154,96,0.62); color:#fff4e8; }
+    .tracker-detail-fish-card.mutation-stone .tracker-detail-fish-mutation { background:#f0c08c; color:#241205; }
+    .tracker-detail-fish-card.mutation-sandy { background:linear-gradient(145deg,#6f5a2f,#241d10); border-color:rgba(242,210,128,0.65); color:#fff8e8; }
+    .tracker-detail-fish-card.mutation-sandy .tracker-detail-fish-mutation { background:#ffe3a3; color:#221700; }
+    .ft-detail-owner { display:flex; justify-content:space-between; padding:10px 12px; border-radius:10px; background:#161a22; border:1px solid #2a3040; margin-top:24px; max-width:480px; }
+    .ft-detail-owner__mut { font-size:.68rem; font-weight:800; color:#34d399; text-transform:uppercase; }
+  </style>
+</head>
+<body>
+  <h1>/tracker fish detail — mutation-colored instance cards (sorted sample)</h1>
+  <p>Top card: heaviest Gold (12,345.67 kg). Mutated cards first; non-mutated last. Item breakdown row below is unchanged (.ft-detail-owner).</p>
+  <div class="grid">
+    <div class="tracker-detail-fish-card has-mutation mutation-gold">
+      <div class="tracker-detail-fish-card__img">🐟</div>
+      <div class="tracker-detail-fish-card__body">
+        <div class="tracker-detail-fish-weight">12,345.67 kg</div>
+        <div class="tracker-detail-fish-mutation">Gold</div>
+        <div class="tracker-detail-fish-name">Ruby Gemstone Fish</div>
+        <div class="tracker-detail-fish-owner">geptzy392</div>
+      </div>
+    </div>
+    <div class="tracker-detail-fish-card has-mutation mutation-gold">
+      <div class="tracker-detail-fish-card__img">🐟</div>
+      <div class="tracker-detail-fish-card__body">
+        <div class="tracker-detail-fish-weight">100 kg</div>
+        <div class="tracker-detail-fish-mutation">Gold</div>
+        <div class="tracker-detail-fish-name">Ruby Gemstone Fish</div>
+        <div class="tracker-detail-fish-owner">geptzy392</div>
+      </div>
+    </div>
+    <div class="tracker-detail-fish-card has-mutation mutation-gemstone">
+      <div class="tracker-detail-fish-card__img">🐟</div>
+      <div class="tracker-detail-fish-card__body">
+        <div class="tracker-detail-fish-weight">50 kg</div>
+        <div class="tracker-detail-fish-mutation">Gemstone</div>
+        <div class="tracker-detail-fish-name">Ruby Gemstone Fish</div>
+        <div class="tracker-detail-fish-owner">geptzy392</div>
+      </div>
+    </div>
+    <div class="tracker-detail-fish-card has-mutation mutation-albino">
+      <div class="tracker-detail-fish-card__img">🐟</div>
+      <div class="tracker-detail-fish-card__body">
+        <div class="tracker-detail-fish-weight">2,000 kg</div>
+        <div class="tracker-detail-fish-mutation">Albino</div>
+        <div class="tracker-detail-fish-name">Ruby Gemstone Fish</div>
+        <div class="tracker-detail-fish-owner">geptzy392</div>
+      </div>
+    </div>
+    <div class="tracker-detail-fish-card">
+      <div class="tracker-detail-fish-card__img">🐟</div>
+      <div class="tracker-detail-fish-card__body">
+        <div class="tracker-detail-fish-weight">500 kg</div>
+        <div class="tracker-detail-fish-name">Plain Fish</div>
+        <div class="tracker-detail-fish-owner">geptzy392</div>
+      </div>
+    </div>
+  </div>
+  <div class="ft-detail-owner"><span><span class="ft-detail-owner__mut">Gemstone</span> geptzy392</span><span>x3</span></div>
+</body>
+</html>
