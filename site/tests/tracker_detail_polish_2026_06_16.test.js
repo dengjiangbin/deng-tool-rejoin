@@ -69,9 +69,10 @@ describe('fish detail cards use mutation theme, not rarity background', () => {
     assert.doesNotMatch(src, /\.tracker-detail-fish-card\[data-rarity=/);
     assert.doesNotMatch(src, /data-rarity="\$\{escHtml\(rarity\)\}"/);
   });
-  test('mutated fish detail cards get mutation-* classes', () => {
+  test('mutated fish detail cards get mutation-* classes and CSS vars', () => {
     assert.match(src, /mutation-\$\{slug\}/);
-    assert.match(src, /\.tracker-detail-fish-card\.mutation-gold/);
+    assert.match(src, /--tdf-bg:/);
+    assert.match(src, /function ftDetailMutationSemanticPalette/);
   });
   test('overview grid rarity colors are still generated elsewhere', () => {
     const rarityStyle = fs.readFileSync(path.join(__dirname, '..', 'src', 'fishitTrackerRarityStyle.js'), 'utf8');
@@ -80,12 +81,13 @@ describe('fish detail cards use mutation theme, not rarity background', () => {
   });
 });
 
-describe('fish detail typography + weight at top', () => {
-  test('weight uses tracker-detail-fish-weight at 18px/900', () => {
-    assert.match(src, /\.tracker-detail-fish-weight\s*\{[^}]*font-size:18px;[^}]*font-weight:900;/);
+describe('fish detail typography + weight formatting', () => {
+  test('weight is normal metadata size, not oversized title', () => {
+    assert.doesNotMatch(src, /\.tracker-detail-fish-weight\s*\{[^}]*font-size:18px/);
+    assert.match(src, /\.tracker-detail-fish-weight\s*\{[^}]*font-size:12px/);
   });
-  test('renderFishInstanceCard puts weight before mutation and name', () => {
-    assert.match(src, /\$\{weight\}\$\{mut\}<div class="tracker-detail-fish-name"/);
+  test('renderFishInstanceCard puts name before weight', () => {
+    assert.match(src, /tracker-detail-fish-name">\$\{escHtml\(card\.name\)\}<\/div>\$\{weight\}/);
   });
   test('formatFishWeight uses Intl thousand separators', () => {
     assert.match(src, /function formatFishWeight/);
